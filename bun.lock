@@ -50,7 +50,7 @@
     },
     "packages/core": {
       "name": "@pascal-app/core",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "dedent": "^1.7.1",
         "idb-keyval": "^6.2.2",
@@ -75,7 +75,7 @@
     },
     "packages/editor": {
       "name": "@pascal-app/editor",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
@@ -150,7 +150,7 @@
     },
     "packages/mcp": {
       "name": "@pascal-app/mcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "bin": {
         "pascal-mcp": "./dist/bin/pascal-mcp.js",
       },
@@ -191,7 +191,7 @@
     },
     "packages/viewer": {
       "name": "@pascal-app/viewer",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "polygon-clipping": "^0.15.7",
         "three-bvh-csg": "^0.0.18",
