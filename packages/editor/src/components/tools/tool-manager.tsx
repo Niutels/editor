@@ -127,7 +127,7 @@ export const ToolManager: React.FC = () => {
   const showBuildTool = mode === 'build' && tool !== null
 
   const BuildToolComponent = showBuildTool ? tools[phase]?.[tool] : null
-  const handleSpawnSelected = (nodeId: `spawn_${string}`) => {
+  const handlePlacedNodeSelected = (nodeId: AnyNodeId) => {
     setSelection({ selectedIds: [nodeId] })
   }
 
@@ -135,7 +135,7 @@ export const ToolManager: React.FC = () => {
     <>
       {showSiteBoundaryEditor && <SiteBoundaryEditor />}
       {/* World-space tools: site boundary and building movement operate in world coordinates */}
-      {movingNode?.type === 'building' && <MoveTool onSpawnMoved={handleSpawnSelected} />}
+      {movingNode?.type === 'building' && <MoveTool onSpawnMoved={handlePlacedNodeSelected} />}
 
       {/* Building-local group: all other tools are relative to the selected building.
           Cursor visuals set positions in building-local space; this group applies the
@@ -160,13 +160,13 @@ export const ToolManager: React.FC = () => {
         {curvingWall && <CurveWallTool node={curvingWall} />}
         {curvingFence && <CurveFenceTool node={curvingFence} />}
         {movingNode && movingNode.type !== 'building' && (
-          <MoveTool onSpawnMoved={handleSpawnSelected} />
+          <MoveTool onSpawnMoved={handlePlacedNodeSelected} />
         )}
         {!movingNode && showBuildTool && tool === 'spawn' && (
-          <SpawnTool currentLevelId={selectedLevelId} onPlaced={handleSpawnSelected} />
+          <SpawnTool currentLevelId={selectedLevelId} onPlaced={handlePlacedNodeSelected} />
         )}
         {!movingNode && showBuildTool && tool === 'column' && (
-          <ColumnTool currentLevelId={selectedLevelId} />
+          <ColumnTool currentLevelId={selectedLevelId} onPlaced={handlePlacedNodeSelected} />
         )}
         {!movingNode && BuildToolComponent && tool !== 'column' && <BuildToolComponent />}
       </group>

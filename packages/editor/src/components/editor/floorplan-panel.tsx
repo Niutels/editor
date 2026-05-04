@@ -64,6 +64,7 @@ import {
   rotatePlanVector as rotateSharedPlanVector,
   type FloorplanNodeTransform as SharedFloorplanNodeTransform,
 } from '../../lib/floorplan'
+import { guideEmitter } from '../../lib/guide-events'
 import { duplicateRoofSubtree } from '../../lib/roof-duplication'
 import { sfxEmitter } from '../../lib/sfx-bus'
 import { duplicateStairSubtree } from '../../lib/stair-duplication'
@@ -9131,9 +9132,9 @@ export function FloorplanPanel() {
       }
     }
 
-    emitter.on('guide:set-reference-scale', handleSetReferenceScale)
+    guideEmitter.on('guide:set-reference-scale', handleSetReferenceScale)
     return () => {
-      emitter.off('guide:set-reference-scale', handleSetReferenceScale)
+      guideEmitter.off('guide:set-reference-scale', handleSetReferenceScale)
     }
   }, [startReferenceScaleForGuide])
 
@@ -9143,9 +9144,9 @@ export function FloorplanPanel() {
       setPendingReferenceScale(null)
     }
 
-    emitter.on('guide:cancel-reference-scale', handleCancel)
+    guideEmitter.on('guide:cancel-reference-scale', handleCancel)
     return () => {
-      emitter.off('guide:cancel-reference-scale', handleCancel)
+      guideEmitter.off('guide:cancel-reference-scale', handleCancel)
     }
   }, [])
 
@@ -9160,9 +9161,9 @@ export function FloorplanPanel() {
       clearGuideUi(payload.guideId)
     }
 
-    emitter.on('guide:deleted', handleDeleted)
+    guideEmitter.on('guide:deleted', handleDeleted)
     return () => {
-      emitter.off('guide:deleted', handleDeleted)
+      guideEmitter.off('guide:deleted', handleDeleted)
     }
   }, [clearGuideUi])
 

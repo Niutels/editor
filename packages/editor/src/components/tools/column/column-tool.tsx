@@ -1,16 +1,15 @@
 import '../../../three-types'
 
 import {
-  type AnyNode,
   COLUMN_PRESETS,
   ColumnNode,
+  type ColumnNode as ColumnNodeType,
   type ColumnPresetId,
   emitter,
   type GridEvent,
   type LevelNode,
   useScene,
 } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useRef, useState } from 'react'
 import type { Group } from 'three'
 import { sfxEmitter } from '../../../lib/sfx-bus'
@@ -41,9 +40,10 @@ function createColumnFromPreset(presetId: ColumnPresetId, position: [number, num
 
 type ColumnToolProps = {
   currentLevelId: LevelNode['id'] | null
+  onPlaced?: (nodeId: ColumnNodeType['id']) => void
 }
 
-export const ColumnTool: React.FC<ColumnToolProps> = ({ currentLevelId }) => {
+export const ColumnTool: React.FC<ColumnToolProps> = ({ currentLevelId, onPlaced }) => {
   const [, setCursorPosition] = useState<[number, number, number] | null>(null)
   const cursorRef = useRef<Group>(null)
 
@@ -68,7 +68,7 @@ export const ColumnTool: React.FC<ColumnToolProps> = ({ currentLevelId }) => {
       ]
       const column = createColumnFromPreset(DEFAULT_COLUMN_PRESET_ID, position)
       useScene.getState().createNode(column, currentLevelId)
-      useViewer.getState().setSelection({ selectedIds: [column.id as AnyNode['id']] })
+      onPlaced?.(column.id)
       sfxEmitter.emit('sfx:structure-build')
       useEditor.getState().setTool(null)
       useEditor.getState().setMode('select')
@@ -81,7 +81,7 @@ export const ColumnTool: React.FC<ColumnToolProps> = ({ currentLevelId }) => {
       emitter.off('grid:move', onGridMove)
       emitter.off('grid:click', onGridClick)
     }
-  }, [currentLevelId])
+  }, [currentLevelId, onPlaced])
 
   if (!currentLevelId) return null
 
