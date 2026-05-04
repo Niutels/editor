@@ -11,7 +11,6 @@ import { FenceSystem } from '../../systems/fence/fence-system'
 import { GuideSystem } from '../../systems/guide/guide-system'
 import { ItemSystem } from '../../systems/item/item-system'
 import { ItemLightSystem } from '../../systems/item-light/item-light-system'
-import { ItemMeshMetadataSystem } from '../../systems/item-mesh-metadata/item-mesh-metadata-system'
 import { LevelSystem } from '../../systems/level/level-system'
 import { RoofSystem } from '../../systems/roof/roof-system'
 import { ScanSystem } from '../../systems/scan/scan-system'
@@ -239,7 +238,6 @@ const Viewer: React.FC<ViewerProps> = ({
         {/* <DebugRenderer /> */}
 
         <ItemLightSystem />
-        <ItemMeshMetadataSystem />
         {selectionManager === 'default' && <SelectionManager />}
         {perf && <PerfMonitor />}
         {children}

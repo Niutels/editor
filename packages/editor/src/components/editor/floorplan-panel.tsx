@@ -5181,7 +5181,7 @@ function FloorplanItemImage({
 }) {
   const resolvedUrl = useResolvedAssetUrl(url)
   if (!resolvedUrl) return null
-  const rotationDeg = (-rotation * 180) / Math.PI
+  const rotationDeg = (-rotation * 180) / Math.PI + 180
   return (
     <g
       pointerEvents="none"
@@ -9706,6 +9706,21 @@ export function FloorplanPanel() {
       emitter.off('item:move', refreshFloorplanItemPreview as any)
       emitter.off('item:leave', refreshFloorplanItemPreview as any)
     }
+  }, [isItemPlacementPreviewActive, scheduleMovingFloorplanNodeRefresh])
+
+  // Subscribe to the live-transforms store so rotation/position changes that
+  // *don't* go through pointer events still refresh the floorplan — e.g. R/T
+  // keyboard rotation during placement updates `useLiveTransforms` but emits
+  // no grid:move, so without this the floorplan was stale until the user
+  // moved the cursor.
+  useEffect(() => {
+    if (!isItemPlacementPreviewActive) return
+    const unsubscribe = useLiveTransforms.subscribe((state, prev) => {
+      if (state.transforms !== prev.transforms) {
+        scheduleMovingFloorplanNodeRefresh()
+      }
+    })
+    return unsubscribe
   }, [isItemPlacementPreviewActive, scheduleMovingFloorplanNodeRefresh])
 
   useEffect(() => {

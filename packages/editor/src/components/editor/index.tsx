@@ -584,9 +584,9 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   return (
     <>
       {!isFirstPersonMode && <SelectionManager />}
-      {!isVersionPreviewMode && !isFirstPersonMode && <BoxSelectTool />}
-      {!isVersionPreviewMode && !isFirstPersonMode && <FloatingActionMenu />}
-      {!isVersionPreviewMode && !isFirstPersonMode && <FloatingBuildingActionMenu />}
+      {!(isVersionPreviewMode || isFirstPersonMode) && <BoxSelectTool />}
+      {!(isVersionPreviewMode || isFirstPersonMode) && <FloatingActionMenu />}
+      {!(isVersionPreviewMode || isFirstPersonMode) && <FloatingBuildingActionMenu />}
       {!isFirstPersonMode && <WallMeasurementLabel />}
       <ExportManager />
       {isFirstPersonMode ? <ViewerZoneSystem /> : <ZoneSystem />}
@@ -594,10 +594,10 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       <CeilingSelectionAffordanceSystem />
       <RoofEditSystem />
       <StairEditSystem />
-      {!isLoading && !isFirstPersonMode && (
+      {!(isLoading || isFirstPersonMode) && (
         <Grid cellColor="#aaa" fadeDistance={500} sectionColor="#ccc" />
       )}
-      {!(isLoading || isVersionPreviewMode) && !isFirstPersonMode && <ToolManager />}
+      {!(isLoading || isVersionPreviewMode || isFirstPersonMode) && <ToolManager />}
       {isFirstPersonMode && <FirstPersonControls />}
       <CustomCameraControls />
       <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
@@ -1161,7 +1161,7 @@ export default function Editor({
             />
             {/* First-person overlay — rendered on top of normal layout */}
             {isFirstPersonMode && (
-              <div className="fixed inset-0 z-50 pointer-events-none">
+              <div className="pointer-events-none fixed inset-0 z-50">
                 <FirstPersonOverlay onExit={() => useEditor.getState().setFirstPersonMode(false)} />
               </div>
             )}

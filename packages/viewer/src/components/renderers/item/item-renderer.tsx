@@ -21,10 +21,6 @@ import { useNodeEvents } from '../../../hooks/use-node-events'
 import { resolveCdnUrl } from '../../../lib/asset-url'
 import { baseMaterial, glassMaterial } from '../../../lib/materials'
 import { useItemLightPool } from '../../../store/use-item-light-pool'
-import {
-  requestItemMeshMetadataSync,
-  setItemMeshMetadataSourceRoot,
-} from '../../../systems/item-mesh-metadata/sync-request'
 import { ErrorBoundary } from '../../error-boundary'
 import { NodeRenderer } from '../node-renderer'
 
@@ -109,19 +105,6 @@ const ModelRenderer = ({ node }: { node: ItemNode }) => {
     if (!node.parentId) return
     useScene.getState().dirtyNodes.add(node.parentId as AnyNodeId)
   }, [node.parentId])
-
-  // Re-sync when GLTF `scene` or external `metadata` edits should invalidate cached footprint/bounds.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — asset load and metadata drive mesh-metadata sync
-  useEffect(() => {
-    const cloneRoot = ref.current
-    if (!cloneRoot) return
-
-    setItemMeshMetadataSourceRoot(node.id, cloneRoot)
-    requestItemMeshMetadataSync(node.id)
-    return () => {
-      setItemMeshMetadataSourceRoot(node.id, null)
-    }
-  }, [node.id, node.metadata, scene])
 
   useEffect(() => {
     const interactive = interactiveRef.current
