@@ -10,6 +10,7 @@ import useEditor, { type Phase, type Tool } from '../../store/use-editor'
 import { CeilingBoundaryEditor } from './ceiling/ceiling-boundary-editor'
 import { CeilingHoleEditor } from './ceiling/ceiling-hole-editor'
 import { CeilingTool } from './ceiling/ceiling-tool'
+import { ColumnTool } from './column/column-tool'
 import { DoorTool } from './door/door-tool'
 import { CurveFenceTool } from './fence/curve-fence-tool'
 import { FenceTool } from './fence/fence-tool'
@@ -164,7 +165,10 @@ export const ToolManager: React.FC = () => {
         {!movingNode && showBuildTool && tool === 'spawn' && (
           <SpawnTool currentLevelId={selectedLevelId} onPlaced={handleSpawnSelected} />
         )}
-        {!movingNode && BuildToolComponent && <BuildToolComponent />}
+        {!movingNode && showBuildTool && tool === 'column' && (
+          <ColumnTool currentLevelId={selectedLevelId} />
+        )}
+        {!movingNode && BuildToolComponent && tool !== 'column' && <BuildToolComponent />}
       </group>
     </>
   )

@@ -5,6 +5,7 @@ import {
   type AnyNodeId,
   type BuildingNode,
   type CeilingNode,
+  type ColumnNode,
   type DoorNode,
   type FenceNode,
   type ItemNode,
@@ -23,6 +24,7 @@ import { useIsMobile } from '../../../hooks/use-mobile'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
 import { CeilingPanel } from './ceiling-panel'
+import { ColumnPanel } from './column-panel'
 import { DoorPanel } from './door-panel'
 import { FencePanel } from './fence-panel'
 import { ItemPanel } from './item-panel'
@@ -45,6 +47,7 @@ type MovableNode =
   | WindowNode
   | DoorNode
   | CeilingNode
+  | ColumnNode
   | SlabNode
   | WallNode
   | FenceNode
@@ -59,6 +62,7 @@ const MOVABLE_TYPES = new Set<string>([
   'window',
   'door',
   'ceiling',
+  'column',
   'slab',
   'wall',
   'fence',
@@ -90,6 +94,8 @@ function panelForType(type: string | null) {
       return <SlabPanel />
     case 'ceiling':
       return <CeilingPanel />
+    case 'column':
+      return <ColumnPanel />
     case 'wall':
       return <WallPanel />
     case 'fence':
@@ -250,6 +256,8 @@ export function PanelManager() {
         return <SpawnPanel />
       case 'ceiling':
         return <CeilingPanel />
+      case 'column':
+        return <ColumnPanel />
       case 'wall':
         return <WallPanel />
       case 'fence':
