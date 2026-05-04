@@ -155,6 +155,7 @@ function shaftProfileUpdates(shaftProfile: ColumnNode['shaftProfile']): Partial<
     shaftStartScale: 0.72,
     shaftEndScale: 0.72,
     shaftSegmentCount: 1,
+    shaftTwistStep: 0,
   }
 }
 
@@ -405,6 +406,34 @@ export function ColumnPanel() {
               value={node.shaftBulge ?? 0.12}
             />
           </>
+        )}
+        <SliderControl
+          label="Segment Twist"
+          max={90}
+          min={-90}
+          onChange={(value) =>
+            handleUpdate({
+              shaftTwistStep: value,
+              ...(Math.abs(value) > 0.001 && (node.shaftSegmentCount ?? 1) < 8
+                ? { shaftSegmentCount: 12 }
+                : {}),
+            })
+          }
+          precision={0}
+          step={5}
+          unit="°"
+          value={node.shaftTwistStep ?? 0}
+        />
+        {Math.abs(node.shaftTwistStep ?? 0) > 0.001 && (
+          <SliderControl
+            label="Twist Segments"
+            max={48}
+            min={4}
+            onChange={(value) => handleUpdate({ shaftSegmentCount: Math.round(value) })}
+            precision={0}
+            step={1}
+            value={node.shaftSegmentCount ?? 12}
+          />
         )}
         <SliderControl
           label="Ring Pairs"

@@ -86,6 +86,7 @@ export const ColumnNode = BaseNode.extend({
   shaftStartScale: z.number().min(0.2).max(2).default(0.72),
   shaftEndScale: z.number().min(0.2).max(2).default(0.72),
   shaftSegmentCount: z.number().int().min(1).max(64).default(24),
+  shaftTwistStep: z.number().min(-90).max(90).default(0),
   shaftCornerRadius: z.number().min(0).max(0.3).default(0.035),
   shaftDetail: ColumnShaftDetail.default('none'),
   baseStyle: ColumnBaseStyle.default('round-rings'),
@@ -144,6 +145,7 @@ export const ColumnNode = BaseNode.extend({
   - height/radius/width/depth: primary dimensions in meters
   - edgeSoftness: bevel radius for square/plinth/block edges
   - shaftProfile/shaftDetail: profile and surface treatment of the shaft
+  - shaftTwistStep: per-segment shaft rotation in degrees
   - shaftCornerRadius: rounded-corner radius for square/rectangular shaft cross-sections
   - baseStyle/capitalStyle: procedural base and top treatment with tier/detail controls
   - baseHeight/capitalHeight: bottom and top block proportions
@@ -168,6 +170,7 @@ export const COLUMN_PRESETS = {
     shaftStartScale: 0.72,
     shaftEndScale: 0.72,
     shaftSegmentCount: 1,
+    shaftTwistStep: 0,
     shaftCornerRadius: 0.035,
     shaftDetail: 'none',
     baseStyle: 'square-plinth',
@@ -217,6 +220,7 @@ export const COLUMN_PRESETS = {
     shaftStartScale: 0.72,
     shaftEndScale: 0.72,
     shaftSegmentCount: 1,
+    shaftTwistStep: 0,
     shaftCornerRadius: 0.045,
     shaftDetail: 'none',
     baseStyle: 'simple-square',
@@ -266,6 +270,7 @@ export const COLUMN_PRESETS = {
     shaftStartScale: 0.82,
     shaftEndScale: 0.72,
     shaftSegmentCount: 32,
+    shaftTwistStep: 0,
     shaftCornerRadius: 0.035,
     shaftDetail: 'none',
     baseStyle: 'square-plinth',
@@ -315,6 +320,7 @@ export const COLUMN_PRESETS = {
     shaftStartScale: 0.68,
     shaftEndScale: 0.68,
     shaftSegmentCount: 32,
+    shaftTwistStep: 0,
     shaftCornerRadius: 0.035,
     shaftDetail: 'none',
     baseStyle: 'square-plinth',
@@ -364,6 +370,7 @@ export const COLUMN_PRESETS = {
     shaftStartScale: 0.84,
     shaftEndScale: 0.84,
     shaftSegmentCount: 32,
+    shaftTwistStep: 0,
     shaftCornerRadius: 0.035,
     shaftDetail: 'none',
     baseStyle: 'square-plinth',

@@ -1,16 +1,196 @@
 import { type ColumnNode, useLiveTransforms, useRegistry } from '@pascal-app/core'
 import { createContext, useContext, useMemo, useRef } from 'react'
-import type { Group, Material } from 'three'
+import {
+  BoxGeometry,
+  type BufferGeometry,
+  CylinderGeometry,
+  Float32BufferAttribute,
+  type Group,
+  type Material,
+  SphereGeometry,
+  TorusGeometry,
+} from 'three'
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { useNodeEvents } from '../../../hooks/use-node-events'
 import { baseMaterial, createMaterial, createMaterialFromPresetRef } from '../../../lib/materials'
 
 const ColumnMaterialContext = createContext<Material>(baseMaterial as Material)
 const ColumnEdgeSoftnessContext = createContext(0.025)
+const COLUMN_UV_SCALE = 1
 
 function ColumnMaterial() {
   const material = useContext(ColumnMaterialContext)
   return <primitive attach="material" object={material} />
+}
+
+function setUvAttributes(geometry: BufferGeometry, uvs: number[]) {
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+  geometry.setAttribute('uv2', new Float32BufferAttribute(uvs.slice(), 2))
+  return geometry
+}
+
+function toUvReadyGeometry(geometry: BufferGeometry) {
+  return geometry.index ? geometry.toNonIndexed() : geometry
+}
+
+function applyPlanarColumnUvs(geometry: BufferGeometry) {
+  const mappedGeometry = toUvReadyGeometry(geometry)
+  const positions = mappedGeometry.getAttribute('position')
+  const normals = mappedGeometry.getAttribute('normal')
+  const uvs: number[] = []
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index)
+    const y = positions.getY(index)
+    const z = positions.getZ(index)
+    const normalX = normals ? Math.abs(normals.getX(index)) : 0
+    const normalY = normals ? Math.abs(normals.getY(index)) : 1
+    const normalZ = normals ? Math.abs(normals.getZ(index)) : 0
+
+    if (normalY >= normalX && normalY >= normalZ) {
+      uvs.push(x * COLUMN_UV_SCALE, z * COLUMN_UV_SCALE)
+    } else if (normalX >= normalZ) {
+      uvs.push(z * COLUMN_UV_SCALE, y * COLUMN_UV_SCALE)
+    } else {
+      uvs.push(x * COLUMN_UV_SCALE, y * COLUMN_UV_SCALE)
+    }
+  }
+
+  return setUvAttributes(mappedGeometry, uvs)
+}
+
+function ellipseCircumference(radiusX: number, radiusZ: number) {
+  const a = Math.max(0.001, Math.abs(radiusX))
+  const b = Math.max(0.001, Math.abs(radiusZ))
+  return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)))
+}
+
+function applyCylindricalColumnUvs(
+  geometry: BufferGeometry,
+  sideCircumference: number,
+  height: number,
+) {
+  const mappedGeometry = toUvReadyGeometry(geometry)
+  const positions = mappedGeometry.getAttribute('position')
+  const normals = mappedGeometry.getAttribute('normal')
+  const defaultUvs = mappedGeometry.getAttribute('uv')
+  const halfHeight = height / 2
+  const uvs: number[] = []
+
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index)
+    const y = positions.getY(index)
+    const z = positions.getZ(index)
+    const normalY = normals ? Math.abs(normals.getY(index)) : 0
+
+    if (normalY > 0.65) {
+      uvs.push(x * COLUMN_UV_SCALE, z * COLUMN_UV_SCALE)
+    } else {
+      const defaultU = defaultUvs ? defaultUvs.getX(index) : 0
+      uvs.push(defaultU * sideCircumference * COLUMN_UV_SCALE, (y + halfHeight) * COLUMN_UV_SCALE)
+    }
+  }
+
+  return setUvAttributes(mappedGeometry, uvs)
+}
+
+function applySphericalColumnUvs(geometry: BufferGeometry, radius: number) {
+  const mappedGeometry = toUvReadyGeometry(geometry)
+  const defaultUvs = mappedGeometry.getAttribute('uv')
+  if (!defaultUvs) return mappedGeometry
+
+  const uvs: number[] = []
+  const circumference = Math.PI * 2 * radius
+  const arcHeight = Math.PI * radius
+
+  for (let index = 0; index < defaultUvs.count; index += 1) {
+    uvs.push(
+      defaultUvs.getX(index) * circumference * COLUMN_UV_SCALE,
+      defaultUvs.getY(index) * arcHeight * COLUMN_UV_SCALE,
+    )
+  }
+
+  return setUvAttributes(mappedGeometry, uvs)
+}
+
+function applyTorusColumnUvs(geometry: BufferGeometry, ringRadius: number, tubeRadius: number) {
+  const mappedGeometry = toUvReadyGeometry(geometry)
+  const defaultUvs = mappedGeometry.getAttribute('uv')
+  if (!defaultUvs) return mappedGeometry
+
+  const uvs: number[] = []
+  const ringLength = Math.PI * 2 * Math.max(0.001, ringRadius)
+  const tubeLength = Math.PI * 2 * Math.max(0.001, tubeRadius)
+
+  for (let index = 0; index < defaultUvs.count; index += 1) {
+    uvs.push(
+      defaultUvs.getX(index) * ringLength * COLUMN_UV_SCALE,
+      defaultUvs.getY(index) * tubeLength * COLUMN_UV_SCALE,
+    )
+  }
+
+  return setUvAttributes(mappedGeometry, uvs)
+}
+
+function createColumnBoxGeometry(width: number, height: number, depth: number, bevelRadius = 0) {
+  const geometry =
+    bevelRadius > 0.001
+      ? new RoundedBoxGeometry(width, height, depth, 3, bevelRadius)
+      : new BoxGeometry(width, height, depth)
+  return applyPlanarColumnUvs(geometry)
+}
+
+function createColumnCylinderGeometry({
+  height,
+  radiusBottom,
+  radiusTop = radiusBottom,
+  radiusX = 1,
+  radiusZ = 1,
+  segments = 32,
+}: {
+  height: number
+  radiusBottom: number
+  radiusTop?: number
+  radiusX?: number
+  radiusZ?: number
+  segments?: number
+}) {
+  const geometry = new CylinderGeometry(radiusTop, radiusBottom, height, segments)
+  geometry.scale(radiusX, 1, radiusZ)
+  const sideRadius = Math.max(radiusTop, radiusBottom)
+  return applyCylindricalColumnUvs(
+    geometry,
+    ellipseCircumference(sideRadius * radiusX, sideRadius * radiusZ),
+    height,
+  )
+}
+
+function createColumnSphereGeometry(radius: number, widthSegments = 10, heightSegments = 8) {
+  return applySphericalColumnUvs(new SphereGeometry(radius, widthSegments, heightSegments), radius)
+}
+
+function createColumnTorusGeometry({
+  arc = Math.PI * 2,
+  radialSegments = 10,
+  ringRadius,
+  scaleX = ringRadius,
+  scaleY = ringRadius,
+  scaleZ = 1,
+  tubeRadius,
+  tubularSegments = 24,
+}: {
+  arc?: number
+  radialSegments?: number
+  ringRadius: number
+  scaleX?: number
+  scaleY?: number
+  scaleZ?: number
+  tubeRadius: number
+  tubularSegments?: number
+}) {
+  const geometry = new TorusGeometry(1, 0.18, radialSegments, tubularSegments, arc)
+  geometry.scale(scaleX, scaleY, scaleZ)
+  return applyTorusColumnUvs(geometry, ringRadius, tubeRadius)
 }
 
 function createColumnMaterial({
@@ -36,10 +216,17 @@ function getShaftProfile(node: ColumnNode) {
 function getShaftSegmentCount(node: ColumnNode) {
   const shaftProfile = getShaftProfile(node)
   const shaftTaper = node.shaftTaper ?? 0
+  const hasTwist = Math.abs(node.shaftTwistStep ?? 0) > 0.001
   return Math.max(
-    1,
-    shaftProfile === 'straight' && shaftTaper <= 0 ? 1 : (node.shaftSegmentCount ?? 24),
+    hasTwist ? 4 : 1,
+    shaftProfile === 'straight' && shaftTaper <= 0 && !hasTwist
+      ? 1
+      : (node.shaftSegmentCount ?? (hasTwist ? 12 : 24)),
   )
+}
+
+function getShaftTwistRadians(node: ColumnNode, index: number) {
+  return ((node.shaftTwistStep ?? 0) * Math.PI * index) / 180
 }
 
 function getShaftScaleAt(node: ColumnNode, t: number) {
@@ -70,6 +257,181 @@ function getShaftScaleAt(node: ColumnNode, t: number) {
   return Math.max(0.1, profileScale)
 }
 
+type VectorTuple = [number, number, number]
+
+function MappedBox({
+  depth,
+  height,
+  position,
+  rotation,
+  softenEdges = true,
+  width,
+}: {
+  depth: number
+  height: number
+  position: VectorTuple
+  rotation?: VectorTuple
+  softenEdges?: boolean
+  width: number
+}) {
+  const edgeSoftness = useContext(ColumnEdgeSoftnessContext)
+  const minDimension = Math.max(0, Math.min(width, height, depth))
+  const bevelRadius = softenEdges ? Math.min(Math.max(0, edgeSoftness), minDimension * 0.35) : 0
+  const geometry = useMemo(() => {
+    if (height <= 0 || width <= 0 || depth <= 0) return null
+    return createColumnBoxGeometry(width, height, depth, bevelRadius)
+  }, [bevelRadius, depth, height, width])
+
+  if (!geometry) return null
+
+  return (
+    <mesh dispose={null} position={position} rotation={rotation}>
+      <primitive attach="geometry" dispose={null} object={geometry} />
+      <ColumnMaterial />
+    </mesh>
+  )
+}
+
+function MappedCylinder({
+  height,
+  position,
+  radius,
+  radiusBottom = radius,
+  radiusTop = radius,
+  radiusX = 1,
+  radiusZ = 1,
+  rotation,
+  segments = 32,
+}: {
+  height: number
+  position: VectorTuple
+  radius: number
+  radiusBottom?: number
+  radiusTop?: number
+  radiusX?: number
+  radiusZ?: number
+  rotation?: VectorTuple
+  segments?: number
+}) {
+  const geometry = useMemo(() => {
+    if (height <= 0 || radius <= 0 || radiusBottom < 0 || radiusTop < 0) return null
+    return createColumnCylinderGeometry({
+      height,
+      radiusBottom,
+      radiusTop,
+      radiusX,
+      radiusZ,
+      segments,
+    })
+  }, [height, radius, radiusBottom, radiusTop, radiusX, radiusZ, segments])
+
+  if (!geometry) return null
+
+  return (
+    <mesh dispose={null} position={position} rotation={rotation}>
+      <primitive attach="geometry" dispose={null} object={geometry} />
+      <ColumnMaterial />
+    </mesh>
+  )
+}
+
+function MappedCone({
+  height,
+  position,
+  radiusX,
+  radiusZ = radiusX,
+  rotation,
+  segments = 6,
+}: {
+  height: number
+  position: VectorTuple
+  radiusX: number
+  radiusZ?: number
+  rotation?: VectorTuple
+  segments?: number
+}) {
+  const geometry = useMemo(() => {
+    if (height <= 0 || radiusX <= 0 || radiusZ <= 0) return null
+    return createColumnCylinderGeometry({
+      height,
+      radiusBottom: 1,
+      radiusTop: 0,
+      radiusX,
+      radiusZ,
+      segments,
+    })
+  }, [height, radiusX, radiusZ, segments])
+
+  if (!geometry) return null
+
+  return (
+    <mesh dispose={null} position={position} rotation={rotation}>
+      <primitive attach="geometry" dispose={null} object={geometry} />
+      <ColumnMaterial />
+    </mesh>
+  )
+}
+
+function MappedSphere({
+  position,
+  radius,
+  segments = 10,
+  verticalSegments = 8,
+}: {
+  position: VectorTuple
+  radius: number
+  segments?: number
+  verticalSegments?: number
+}) {
+  const geometry = useMemo(() => {
+    if (radius <= 0) return null
+    return createColumnSphereGeometry(radius, segments, verticalSegments)
+  }, [radius, segments, verticalSegments])
+
+  if (!geometry) return null
+
+  return (
+    <mesh dispose={null} position={position}>
+      <primitive attach="geometry" dispose={null} object={geometry} />
+      <ColumnMaterial />
+    </mesh>
+  )
+}
+
+function MappedTorus({
+  arc,
+  position,
+  ringRadius,
+  rotation,
+  scaleX,
+  scaleY,
+  scaleZ,
+  tubeRadius,
+}: {
+  arc?: number
+  position: VectorTuple
+  ringRadius: number
+  rotation?: VectorTuple
+  scaleX?: number
+  scaleY?: number
+  scaleZ?: number
+  tubeRadius: number
+}) {
+  const geometry = useMemo(() => {
+    if (ringRadius <= 0 || tubeRadius <= 0) return null
+    return createColumnTorusGeometry({ arc, ringRadius, scaleX, scaleY, scaleZ, tubeRadius })
+  }, [arc, ringRadius, scaleX, scaleY, scaleZ, tubeRadius])
+
+  if (!geometry) return null
+
+  return (
+    <mesh dispose={null} position={position} rotation={rotation}>
+      <primitive attach="geometry" dispose={null} object={geometry} />
+      <ColumnMaterial />
+    </mesh>
+  )
+}
+
 function SquareBlock({
   y,
   height,
@@ -83,31 +445,14 @@ function SquareBlock({
   depth: number
   softenEdges?: boolean
 }) {
-  const edgeSoftness = useContext(ColumnEdgeSoftnessContext)
-  const minDimension = Math.max(0, Math.min(width, height, depth))
-  const bevelRadius = softenEdges ? Math.min(Math.max(0, edgeSoftness), minDimension * 0.35) : 0
-  const roundedGeometry = useMemo(() => {
-    if (bevelRadius <= 0.001) return null
-    return new RoundedBoxGeometry(width, height, depth, 3, bevelRadius)
-  }, [bevelRadius, depth, height, width])
-
-  if (height <= 0) return null
-
-  const position = [0, y + height / 2, 0] as const
-
   return (
-    <mesh
-      dispose={null}
-      position={position}
-      scale={roundedGeometry ? undefined : [width, height, depth]}
-    >
-      {roundedGeometry ? (
-        <primitive attach="geometry" dispose={null} object={roundedGeometry} />
-      ) : (
-        <boxGeometry args={[1, 1, 1]} dispose={null} />
-      )}
-      <ColumnMaterial />
-    </mesh>
+    <MappedBox
+      depth={depth}
+      height={height}
+      position={[0, y + height / 2, 0]}
+      softenEdges={softenEdges}
+      width={width}
+    />
   )
 }
 
@@ -126,13 +471,13 @@ function RoundBlock({
   radius: number
   segments?: number
 }) {
-  if (height <= 0) return null
-
   return (
-    <mesh position={[x, y + height / 2, z]} scale={[radius, height, radius]}>
-      <cylinderGeometry args={[1, 1, 1, segments]} />
-      <ColumnMaterial />
-    </mesh>
+    <MappedCylinder
+      height={height}
+      position={[x, y + height / 2, z]}
+      radius={radius}
+      segments={segments}
+    />
   )
 }
 
@@ -196,13 +541,15 @@ function OvalBlock({
   depth: number
   segments?: number
 }) {
-  if (height <= 0) return null
-
   return (
-    <mesh position={[0, y + height / 2, 0]} scale={[width / 2, height, depth / 2]}>
-      <cylinderGeometry args={[1, 1, 1, segments]} />
-      <ColumnMaterial />
-    </mesh>
+    <MappedCylinder
+      height={height}
+      position={[0, y + height / 2, 0]}
+      radius={1}
+      radiusX={width / 2}
+      radiusZ={depth / 2}
+      segments={segments}
+    />
   )
 }
 
@@ -240,13 +587,14 @@ function TaperedRoundShaft({ node, y, height }: { node: ColumnNode; y: number; h
         const t = (index + 0.5) / segmentCount
         const profileScale = getShaftScaleAt(node, t)
         return (
-          <RoundBlock
-            height={segmentHeight * 1.015}
-            key={index}
-            radius={node.radius * profileScale}
-            segments={getSegments(node)}
-            y={y + index * segmentHeight}
-          />
+          <group key={index} rotation={[0, getShaftTwistRadians(node, index), 0]}>
+            <RoundBlock
+              height={segmentHeight * 1.015}
+              radius={node.radius * profileScale}
+              segments={getSegments(node)}
+              y={y + index * segmentHeight}
+            />
+          </group>
         )
       })}
     </group>
@@ -263,14 +611,15 @@ function TaperedSquareShaft({ node, y, height }: { node: ColumnNode; y: number; 
         const t = (index + 0.5) / segmentCount
         const profileScale = getShaftScaleAt(node, t)
         return (
-          <RoundedRectangleShaftSegment
-            cornerRadius={(node.shaftCornerRadius ?? 0.035) * profileScale}
-            depth={node.depth * profileScale}
-            height={segmentHeight * 1.015}
-            key={index}
-            width={node.width * profileScale}
-            y={y + index * segmentHeight}
-          />
+          <group key={index} rotation={[0, getShaftTwistRadians(node, index), 0]}>
+            <RoundedRectangleShaftSegment
+              cornerRadius={(node.shaftCornerRadius ?? 0.035) * profileScale}
+              depth={node.depth * profileScale}
+              height={segmentHeight * 1.015}
+              width={node.width * profileScale}
+              y={y + index * segmentHeight}
+            />
+          </group>
         )
       })}
     </group>
@@ -285,13 +634,7 @@ function Shaft({ node, y, height }: { node: ColumnNode; y: number; height: numbe
     const offset = Math.max(node.radius * 0.78, node.width * 0.22)
     return (
       <group>
-        <mesh
-          position={[0, y + height / 2, 0]}
-          scale={[node.radius * 0.62, height, node.radius * 0.62]}
-        >
-          <cylinderGeometry args={[1, 1, 1, 24]} />
-          <ColumnMaterial />
-        </mesh>
+        <RoundBlock height={height} radius={node.radius * 0.62} segments={24} y={y} />
         {(
           [
             [offset, 0],
@@ -300,14 +643,15 @@ function Shaft({ node, y, height }: { node: ColumnNode; y: number; height: numbe
             [0, -offset],
           ] satisfies [number, number][]
         ).map(([x, z], index) => (
-          <mesh
+          <RoundBlock
+            height={height}
             key={`${x}-${z}-${index}`}
-            position={[x, y + height / 2, z]}
-            scale={[sideRadius, height, sideRadius]}
-          >
-            <cylinderGeometry args={[1, 1, 1, 16]} />
-            <ColumnMaterial />
-          </mesh>
+            radius={sideRadius}
+            segments={16}
+            x={x}
+            y={y}
+            z={z}
+          />
         ))}
       </group>
     )
@@ -439,19 +783,18 @@ function Base({ node, height }: { node: ColumnNode; height: number }) {
         {Array.from({ length: ribCount }, (_, index) => {
           const angle = (index / ribCount) * Math.PI * 2
           return (
-            <mesh
+            <MappedCylinder
+              height={height * 0.38}
               key={index}
               position={[
                 Math.cos(angle) * baseRadius * 0.86,
                 height * 0.58,
                 Math.sin(angle) * baseRadius * 0.86,
               ]}
+              radius={ribRadius}
               rotation={[0, -angle, 0]}
-              scale={[ribRadius, height * 0.38, ribRadius]}
-            >
-              <cylinderGeometry args={[1, 1, 1, 6]} />
-              <ColumnMaterial />
-            </mesh>
+              segments={6}
+            />
           )
         })}
         <RoundBlock
@@ -482,15 +825,15 @@ function Base({ node, height }: { node: ColumnNode; height: number }) {
             [-node.width * widthScale * 0.51, 0, Math.PI / 2],
           ] satisfies [number, number, number][]
         ).map(([x, z, rotation], index) => (
-          <mesh
+          <MappedBox
+            depth={inset}
+            height={height * 0.42}
             key={index}
             position={[x, height * 0.5, z]}
             rotation={[0, rotation, 0]}
-            scale={[node.width * 0.36, height * 0.42, inset]}
-          >
-            <boxGeometry args={[1, 1, 1]} />
-            <ColumnMaterial />
-          </mesh>
+            softenEdges={false}
+            width={node.width * 0.36}
+          />
         ))}
       </group>
     )
@@ -515,15 +858,15 @@ function BaseCarvings({ node, height }: { node: ColumnNode; height: number }) {
       {Array.from({ length: count }, (_, index) => {
         const angle = (index / count) * Math.PI * 2
         return (
-          <mesh
+          <MappedCone
+            height={height * 0.28}
             key={index}
             position={[Math.cos(angle) * radius, y, Math.sin(angle) * radius]}
+            radiusX={0.014}
+            radiusZ={0.01}
             rotation={[0.36, -angle, 0]}
-            scale={[0.014, height * 0.28, 0.01]}
-          >
-            <coneGeometry args={[1, 1, 5]} />
-            <ColumnMaterial />
-          </mesh>
+            segments={5}
+          />
         )
       })}
     </group>
@@ -653,14 +996,13 @@ function Flutes({
         const x = Math.cos(angle) * shaftRadius
         const z = Math.sin(angle) * shaftRadius
         return (
-          <mesh
+          <MappedCylinder
+            height={shaftHeight * 0.92}
             key={index}
             position={[x, shaftY + shaftHeight / 2, z]}
-            scale={[fluteRadius, shaftHeight * 0.92, fluteRadius]}
-          >
-            <cylinderGeometry args={[1, 1, 1, 8]} />
-            <ColumnMaterial />
-          </mesh>
+            radius={fluteRadius}
+            segments={8}
+          />
         )
       })}
     </group>
@@ -699,33 +1041,54 @@ function DravidianShaftPanels({
     rotation?: number
   }) => (
     <group position={position} rotation={[0, rotation, 0]}>
-      <mesh position={[0, panelHeight / 2, 0]} scale={[panelWidth, rail, reliefDepth]}>
-        <boxGeometry args={[1, 1, 1]} />
-        <ColumnMaterial />
-      </mesh>
-      <mesh position={[0, -panelHeight / 2, 0]} scale={[panelWidth, rail, reliefDepth]}>
-        <boxGeometry args={[1, 1, 1]} />
-        <ColumnMaterial />
-      </mesh>
-      <mesh position={[panelWidth / 2, 0, 0]} scale={[rail, panelHeight, reliefDepth]}>
-        <boxGeometry args={[1, 1, 1]} />
-        <ColumnMaterial />
-      </mesh>
-      <mesh position={[-panelWidth / 2, 0, 0]} scale={[rail, panelHeight, reliefDepth]}>
-        <boxGeometry args={[1, 1, 1]} />
-        <ColumnMaterial />
-      </mesh>
+      <MappedBox
+        depth={reliefDepth}
+        height={rail}
+        position={[0, panelHeight / 2, 0]}
+        softenEdges={false}
+        width={panelWidth}
+      />
+      <MappedBox
+        depth={reliefDepth}
+        height={rail}
+        position={[0, -panelHeight / 2, 0]}
+        softenEdges={false}
+        width={panelWidth}
+      />
+      <MappedBox
+        depth={reliefDepth}
+        height={panelHeight}
+        position={[panelWidth / 2, 0, 0]}
+        softenEdges={false}
+        width={rail}
+      />
+      <MappedBox
+        depth={reliefDepth}
+        height={panelHeight}
+        position={[-panelWidth / 2, 0, 0]}
+        softenEdges={false}
+        width={rail}
+      />
       {panelShape === 'diamond' && (
-        <mesh rotation={[0, 0, Math.PI / 4]} scale={[rail * 1.2, panelHeight * 0.42, reliefDepth]}>
-          <boxGeometry args={[1, 1, 1]} />
-          <ColumnMaterial />
-        </mesh>
+        <MappedBox
+          depth={reliefDepth}
+          height={panelHeight * 0.42}
+          position={[0, 0, 0]}
+          rotation={[0, 0, Math.PI / 4]}
+          softenEdges={false}
+          width={rail * 1.2}
+        />
       )}
       {panelShape === 'arched' && (
-        <mesh position={[0, panelHeight * 0.28, 0]} scale={[panelWidth * 0.42, rail, reliefDepth]}>
-          <torusGeometry args={[1, 0.18, 8, 16, Math.PI]} />
-          <ColumnMaterial />
-        </mesh>
+        <MappedTorus
+          arc={Math.PI}
+          position={[0, panelHeight * 0.28, 0]}
+          ringRadius={panelWidth * 0.42}
+          scaleX={panelWidth * 0.42}
+          scaleY={rail}
+          scaleZ={reliefDepth}
+          tubeRadius={Math.max(rail, reliefDepth) * 0.18}
+        />
       )}
     </group>
   )
@@ -781,19 +1144,18 @@ function SpiralRibs({
         const angle = (ribIndex / ribCount) * Math.PI * 2 + t * spiralTwist * Math.PI * 2
         const taperScale = 1 - Math.min(shaftTaper, 0.85) * t
         return (
-          <mesh
+          <MappedCylinder
+            height={segmentHeight}
             key={index}
             position={[
               Math.cos(angle) * ribDistance * taperScale,
               shaftY + shaftHeight * t,
               Math.sin(angle) * ribDistance * taperScale,
             ]}
+            radius={ribWidth}
             rotation={[0, -angle, lean]}
-            scale={[ribWidth, segmentHeight, ribWidth]}
-          >
-            <cylinderGeometry args={[1, 1, 1, 8]} />
-            <ColumnMaterial />
-          </mesh>
+            segments={8}
+          />
         )
       })}
     </group>
@@ -830,19 +1192,18 @@ function LowerCarvedBand({
       {Array.from({ length: count }, (_, index) => {
         const angle = (index / count) * Math.PI * 2
         return (
-          <mesh
+          <MappedCylinder
+            height={bandHeight * 0.62}
             key={index}
             position={[
               Math.cos(angle) * distance,
               y + bandHeight * 0.5,
               Math.sin(angle) * distance,
             ]}
+            radius={0.012}
             rotation={[0, -angle, 0]}
-            scale={[0.012, bandHeight * 0.62, 0.012]}
-          >
-            <cylinderGeometry args={[1, 1, 1, 5]} />
-            <ColumnMaterial />
-          </mesh>
+            segments={5}
+          />
         )
       })}
     </group>
@@ -907,26 +1268,38 @@ function CapitalCarvings({
         ))}
         {xPositions.map((x, index) => (
           <group key={`front-back-dentil-${index}`}>
-            <mesh position={[x, y, halfDepth]} scale={[dentilWidth, dentilHeight, dentilDepth]}>
-              <boxGeometry args={[1, 1, 1]} />
-              <ColumnMaterial />
-            </mesh>
-            <mesh position={[x, y, -halfDepth]} scale={[dentilWidth, dentilHeight, dentilDepth]}>
-              <boxGeometry args={[1, 1, 1]} />
-              <ColumnMaterial />
-            </mesh>
+            <MappedBox
+              depth={dentilDepth}
+              height={dentilHeight}
+              position={[x, y, halfDepth]}
+              softenEdges={false}
+              width={dentilWidth}
+            />
+            <MappedBox
+              depth={dentilDepth}
+              height={dentilHeight}
+              position={[x, y, -halfDepth]}
+              softenEdges={false}
+              width={dentilWidth}
+            />
           </group>
         ))}
         {zPositions.map((z, index) => (
           <group key={`side-dentil-${index}`}>
-            <mesh position={[halfWidth, y, z]} scale={[dentilDepth, dentilHeight, dentilWidth]}>
-              <boxGeometry args={[1, 1, 1]} />
-              <ColumnMaterial />
-            </mesh>
-            <mesh position={[-halfWidth, y, z]} scale={[dentilDepth, dentilHeight, dentilWidth]}>
-              <boxGeometry args={[1, 1, 1]} />
-              <ColumnMaterial />
-            </mesh>
+            <MappedBox
+              depth={dentilWidth}
+              height={dentilHeight}
+              position={[halfWidth, y, z]}
+              softenEdges={false}
+              width={dentilDepth}
+            />
+            <MappedBox
+              depth={dentilWidth}
+              height={dentilHeight}
+              position={[-halfWidth, y, z]}
+              softenEdges={false}
+              width={dentilDepth}
+            />
           </group>
         ))}
       </group>
@@ -946,14 +1319,11 @@ function CapitalCarvings({
       {Array.from({ length: beadCount }, (_, index) => {
         const angle = (index / beadCount) * Math.PI * 2
         return (
-          <mesh
+          <MappedSphere
             key={`bead-${index}`}
             position={[Math.cos(angle) * beadDistance, beadY, Math.sin(angle) * beadDistance]}
-            scale={[beadRadius, beadRadius, beadRadius]}
-          >
-            <sphereGeometry args={[1, 10, 8]} />
-            <ColumnMaterial />
-          </mesh>
+            radius={beadRadius}
+          />
         )
       })}
     </group>
@@ -1015,15 +1385,14 @@ function Volutes({
   return (
     <group>
       {volutes.map((volute, index) => (
-        <mesh
+        <MappedTorus
           key={index}
           position={volute.position}
+          ringRadius={radius}
           rotation={volute.rotation}
-          scale={[radius, radius, radius * 0.28]}
-        >
-          <torusGeometry args={[1, 0.18, 10, 24]} />
-          <ColumnMaterial />
-        </mesh>
+          scaleZ={radius * 0.28}
+          tubeRadius={radius * 0.18}
+        />
       ))}
     </group>
   )
@@ -1060,15 +1429,15 @@ function LeafCarvings({
         Array.from({ length: leafCount }, (_, index) => {
           const angle = (index / leafCount) * Math.PI * 2 + row.offset
           return (
-            <mesh
+            <MappedCone
+              height={capitalHeight * row.scale}
               key={`${rowIndex}-${index}`}
               position={[Math.cos(angle) * distance, row.y, Math.sin(angle) * distance]}
+              radiusX={0.018}
+              radiusZ={0.01}
               rotation={[0.48, -angle, 0]}
-              scale={[0.018, capitalHeight * row.scale, 0.01]}
-            >
-              <coneGeometry args={[1, 1, 6]} />
-              <ColumnMaterial />
-            </mesh>
+              segments={6}
+            />
           )
         }),
       )}
@@ -1106,14 +1475,14 @@ function Capital({ node, y, height }: { node: ColumnNode; y: number; height: num
           const angle = (index / count) * Math.PI * 2
           const distance = Math.max(node.width, node.depth) * 0.56
           return (
-            <mesh
+            <MappedCone
+              height={height * 0.28}
               key={index}
               position={[Math.cos(angle) * distance, y - height * 0.1, Math.sin(angle) * distance]}
-              scale={[0.035, height * 0.28, 0.035]}
-            >
-              <coneGeometry args={[1, 1, 6]} />
-              <ColumnMaterial />
-            </mesh>
+              radiusX={0.035}
+              rotation={[0, 0, 0]}
+              segments={6}
+            />
           )
         })}
       </group>

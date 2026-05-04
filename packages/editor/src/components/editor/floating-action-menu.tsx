@@ -4,6 +4,7 @@ import {
   type AnyNode,
   type AnyNodeId,
   type CeilingNode,
+  ColumnNode,
   DoorNode,
   FenceNode,
   generateId,
@@ -262,6 +263,8 @@ export function FloatingActionMenu() {
           duplicate = WindowNode.parse(duplicateInfo)
         } else if (node.type === 'item') {
           duplicate = ItemNode.parse(duplicateInfo)
+        } else if (node.type === 'column') {
+          duplicate = ColumnNode.parse(duplicateInfo)
         } else if (node.type === 'wall') {
           duplicate = WallNode.parse(duplicateInfo)
         } else if (node.type === 'fence') {
@@ -322,6 +325,7 @@ export function FloatingActionMenu() {
         }
         if (
           duplicate.type === 'item' ||
+          duplicate.type === 'column' ||
           duplicate.type === 'wall' ||
           duplicate.type === 'fence' ||
           duplicate.type === 'window' ||
@@ -425,7 +429,6 @@ export function FloatingActionMenu() {
             onDuplicate={
               node &&
               node.type !== 'spawn' &&
-              node.type !== 'column' &&
               !DELETE_ONLY_TYPES.includes(node.type) &&
               !HOLE_TYPES.includes(node.type)
                 ? handleDuplicate
