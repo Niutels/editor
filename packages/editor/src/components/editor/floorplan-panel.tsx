@@ -4679,6 +4679,275 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
             x: (svgP2.x + svgP3.x) / 2,
             y: (svgP2.y + svgP3.y) / 2,
           }
+          const isFoldingDoor = opening.doorType === 'folding'
+          const foldingPanelCount = opening.leafCount === 2 ? 2 : 4
+          const foldingAmount = Math.max(0, Math.min(1, opening.operationState ?? 0))
+          const foldingSpan = Math.max(1e-6, Math.hypot(svgP2.x - svgP1.x, svgP2.y - svgP1.y))
+          const foldingPanelLength = foldingSpan / foldingPanelCount
+          const foldingAngle = Math.PI * 0.44 * foldingAmount
+          const foldingPoints = isFoldingDoor
+            ? Array.from({ length: foldingPanelCount + 1 }).reduce<Point2D[]>(
+                (points, _, index) => {
+                  if (index === 0) return [{ x: svgP1.x, y: svgP1.y }]
+
+                  const previous = points[index - 1]!
+                  const direction = (index - 1) % 2 === 0 ? -1 : 1
+                  const angle = direction * foldingAngle
+                  const along = Math.cos(angle) * foldingPanelLength
+                  const out = Math.sin(angle) * foldingPanelLength * swingSign
+                  points.push({
+                    x: previous.x + nx * along + px * out,
+                    y: previous.y + ny * along + py * out,
+                  })
+                  return points
+                },
+                [],
+              )
+            : []
+          const foldingPath =
+            foldingPoints.length > 0
+              ? foldingPoints
+                  .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+                  .join(' ')
+              : null
+          const isPocketDoor = opening.doorType === 'pocket'
+          const pocketAmount = Math.max(0, Math.min(1, opening.operationState ?? 0))
+          const pocketSign = opening.slideDirection === 'right' ? 1 : -1
+          const pocketShift = pocketSign * foldingSpan * pocketAmount
+          const pocketTrackStart =
+            pocketSign > 0
+              ? svgP1
+              : { x: svgP1.x - nx * foldingSpan, y: svgP1.y - ny * foldingSpan }
+          const pocketTrackEnd =
+            pocketSign > 0
+              ? { x: svgP2.x + nx * foldingSpan, y: svgP2.y + ny * foldingSpan }
+              : svgP2
+          const pocketLeafStart = {
+            x: svgP1.x + nx * pocketShift + px * swingSign * doorCubeSize * 0.5,
+            y: svgP1.y + ny * pocketShift + py * swingSign * doorCubeSize * 0.5,
+          }
+          const pocketLeafEnd = {
+            x: svgP2.x + nx * pocketShift + px * swingSign * doorCubeSize * 0.5,
+            y: svgP2.y + ny * pocketShift + py * swingSign * doorCubeSize * 0.5,
+          }
+          const pocketLeafPoints = [
+            {
+              x: pocketLeafStart.x - px * leafHalfThickness,
+              y: pocketLeafStart.y - py * leafHalfThickness,
+            },
+            {
+              x: pocketLeafEnd.x - px * leafHalfThickness,
+              y: pocketLeafEnd.y - py * leafHalfThickness,
+            },
+            {
+              x: pocketLeafEnd.x + px * leafHalfThickness,
+              y: pocketLeafEnd.y + py * leafHalfThickness,
+            },
+            {
+              x: pocketLeafStart.x + px * leafHalfThickness,
+              y: pocketLeafStart.y + py * leafHalfThickness,
+            },
+          ]
+            .map((point) => `${point.x},${point.y}`)
+            .join(' ')
+          const isBarnDoor = opening.doorType === 'barn'
+          const barnLeafStart = {
+            x: pocketLeafStart.x + px * swingSign * doorCubeSize * 0.75,
+            y: pocketLeafStart.y + py * swingSign * doorCubeSize * 0.75,
+          }
+          const barnLeafEnd = {
+            x: pocketLeafEnd.x + px * swingSign * doorCubeSize * 0.75,
+            y: pocketLeafEnd.y + py * swingSign * doorCubeSize * 0.75,
+          }
+          const barnLeafPoints = [
+            {
+              x: barnLeafStart.x - px * leafHalfThickness,
+              y: barnLeafStart.y - py * leafHalfThickness,
+            },
+            {
+              x: barnLeafEnd.x - px * leafHalfThickness,
+              y: barnLeafEnd.y - py * leafHalfThickness,
+            },
+            {
+              x: barnLeafEnd.x + px * leafHalfThickness,
+              y: barnLeafEnd.y + py * leafHalfThickness,
+            },
+            {
+              x: barnLeafStart.x + px * leafHalfThickness,
+              y: barnLeafStart.y + py * leafHalfThickness,
+            },
+          ]
+            .map((point) => `${point.x},${point.y}`)
+            .join(' ')
+          const isSlidingDoor = opening.doorType === 'sliding'
+          const slidingPanelSpan = foldingSpan * 0.54
+          const slidingActiveOnRight = opening.slideDirection !== 'right'
+          const slidingFixedSign = slidingActiveOnRight ? -1 : 1
+          const slidingActiveSign = slidingActiveOnRight ? 1 : -1
+          const slidingFixedCenter = slidingFixedSign * foldingSpan * 0.23
+          const slidingActiveCenter =
+            slidingActiveSign * foldingSpan * 0.23 -
+            slidingActiveSign * foldingSpan * 0.44 * pocketAmount
+          const slidingPanelPoints = (centerOffset: number, faceOffset: number) => {
+            const start = {
+              x:
+                svgP1.x +
+                nx * (centerOffset + (foldingSpan - slidingPanelSpan) / 2) +
+                px * swingSign * faceOffset,
+              y:
+                svgP1.y +
+                ny * (centerOffset + (foldingSpan - slidingPanelSpan) / 2) +
+                py * swingSign * faceOffset,
+            }
+            const end = {
+              x:
+                svgP1.x +
+                nx * (centerOffset + (foldingSpan + slidingPanelSpan) / 2) +
+                px * swingSign * faceOffset,
+              y:
+                svgP1.y +
+                ny * (centerOffset + (foldingSpan + slidingPanelSpan) / 2) +
+                py * swingSign * faceOffset,
+            }
+            return [
+              { x: start.x - px * leafHalfThickness, y: start.y - py * leafHalfThickness },
+              { x: end.x - px * leafHalfThickness, y: end.y - py * leafHalfThickness },
+              { x: end.x + px * leafHalfThickness, y: end.y + py * leafHalfThickness },
+              { x: start.x + px * leafHalfThickness, y: start.y + py * leafHalfThickness },
+            ]
+              .map((point) => `${point.x},${point.y}`)
+              .join(' ')
+          }
+          const slidingFixedPoints = slidingPanelPoints(slidingFixedCenter, doorCubeSize * 0.34)
+          const slidingActivePoints = slidingPanelPoints(slidingActiveCenter, doorCubeSize * 0.68)
+          const isDoubleSwingDoor = opening.doorType === 'double' || opening.doorType === 'french'
+          const doubleLeafPlans = isDoubleSwingDoor
+            ? (
+                [
+                  {
+                    key: 'left',
+                    hingePoint: { x: cx - nx * (width / 2), y: cy - ny * (width / 2) },
+                    strikePoint: { x: cx, y: cy },
+                  },
+                  {
+                    key: 'right',
+                    hingePoint: { x: cx + nx * (width / 2), y: cy + ny * (width / 2) },
+                    strikePoint: { x: cx, y: cy },
+                  },
+                ] as const
+              ).map(({ key, hingePoint, strikePoint }) => {
+                const tangentSign = key === 'left' ? 1 : -1
+                const planHingeCubeCenter = {
+                  x: hingePoint.x + nx * tangentSign * doorCubeInset,
+                  y: hingePoint.y + ny * tangentSign * doorCubeInset,
+                }
+                const planStrikeCubeCenter = {
+                  x: strikePoint.x - nx * tangentSign * doorCubeInset,
+                  y: strikePoint.y - ny * tangentSign * doorCubeInset,
+                }
+                const planLeafStart = {
+                  x:
+                    planHingeCubeCenter.x +
+                    px * swingSign * (doorCubeSize / 2) +
+                    nx * tangentSign * (doorCubeSize / 2 + leafHalfThickness),
+                  y:
+                    planHingeCubeCenter.y +
+                    py * swingSign * (doorCubeSize / 2) +
+                    ny * tangentSign * (doorCubeSize / 2 + leafHalfThickness),
+                }
+                const planArcEnd = {
+                  x:
+                    planStrikeCubeCenter.x +
+                    px * swingSign * (doorCubeSize / 2) -
+                    nx * tangentSign * (doorCubeSize / 2),
+                  y:
+                    planStrikeCubeCenter.y +
+                    py * swingSign * (doorCubeSize / 2) -
+                    ny * tangentSign * (doorCubeSize / 2),
+                }
+                const planSwingRadius = Math.hypot(
+                  planArcEnd.x - planLeafStart.x,
+                  planArcEnd.y - planLeafStart.y,
+                )
+                const planClosedLeafVector = {
+                  x: planArcEnd.x - planLeafStart.x,
+                  y: planArcEnd.y - planLeafStart.y,
+                }
+                const planOpenAngle = swingAngle * swingSign * tangentSign
+                const planOpenCos = Math.cos(planOpenAngle)
+                const planOpenSin = Math.sin(planOpenAngle)
+                const planLeafEnd = {
+                  x:
+                    planLeafStart.x +
+                    planClosedLeafVector.x * planOpenCos -
+                    planClosedLeafVector.y * planOpenSin,
+                  y:
+                    planLeafStart.y +
+                    planClosedLeafVector.x * planOpenSin +
+                    planClosedLeafVector.y * planOpenCos,
+                }
+                const planSweepFlag =
+                  key === 'left'
+                    ? swingDirection === 'inward'
+                      ? 0
+                      : 1
+                    : swingDirection === 'inward'
+                      ? 1
+                      : 0
+
+                return {
+                  key,
+                  hingeCubeCenter: planHingeCubeCenter,
+                  strikeCubeCenter: planStrikeCubeCenter,
+                  hingeMarkerX: planHingeCubeCenter.x,
+                  hingeMarkerY: planHingeCubeCenter.y,
+                  swingRadius: planSwingRadius,
+                  sweepFlag: planSweepFlag,
+                  arcEnd: planArcEnd,
+                  leafEnd: planLeafEnd,
+                  leafPolygonPoints: [
+                    {
+                      x: planLeafStart.x - nx * leafHalfThickness,
+                      y: planLeafStart.y - ny * leafHalfThickness,
+                    },
+                    {
+                      x: planLeafEnd.x - nx * leafHalfThickness,
+                      y: planLeafEnd.y - ny * leafHalfThickness,
+                    },
+                    {
+                      x: planLeafEnd.x + nx * leafHalfThickness,
+                      y: planLeafEnd.y + ny * leafHalfThickness,
+                    },
+                    {
+                      x: planLeafStart.x + nx * leafHalfThickness,
+                      y: planLeafStart.y + ny * leafHalfThickness,
+                    },
+                  ]
+                    .map((point) => `${point.x},${point.y}`)
+                    .join(' '),
+                  closedLeafHintPoints: [
+                    {
+                      x: planLeafStart.x - nx * leafHalfThickness * 0.7,
+                      y: planLeafStart.y - ny * leafHalfThickness * 0.7,
+                    },
+                    {
+                      x: planArcEnd.x - nx * leafHalfThickness * 0.7,
+                      y: planArcEnd.y - ny * leafHalfThickness * 0.7,
+                    },
+                    {
+                      x: planArcEnd.x + nx * leafHalfThickness * 0.7,
+                      y: planArcEnd.y + ny * leafHalfThickness * 0.7,
+                    },
+                    {
+                      x: planLeafStart.x + nx * leafHalfThickness * 0.7,
+                      y: planLeafStart.y + ny * leafHalfThickness * 0.7,
+                    },
+                  ]
+                    .map((point) => `${point.x},${point.y}`)
+                    .join(' '),
+                }
+              })
+            : []
 
           return (
             <g
@@ -4779,72 +5048,307 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                     points={doorBackgroundPoints}
                     stroke="none"
                   />
-                  {swingSweepPath && (
-                    <path
-                      d={swingSweepPath}
-                      fill={doorSwingFill}
-                      stroke="none"
-                      vectorEffect="non-scaling-stroke"
-                    />
+                  {isFoldingDoor ? (
+                    <>
+                      <path
+                        d={`M ${svgP1.x} ${svgP1.y} L ${svgP2.x} ${svgP2.y}`}
+                        fill="none"
+                        stroke={doorSoftStroke}
+                        strokeLinecap="round"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {foldingPath && (
+                        <path
+                          d={foldingPath}
+                          fill="none"
+                          stroke={doorStroke}
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                          strokeWidth={isSelected || isSelectionHighlighted ? '1.8' : '1.25'}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {foldingPoints.map((point, index) => (
+                        <circle
+                          cx={point.x}
+                          cy={point.y}
+                          fill={
+                            index === 0 || index === foldingPoints.length - 1
+                              ? doorStroke
+                              : doorLeafFill
+                          }
+                          key={`${opening.id}:folding-node:${index}`}
+                          r={
+                            index === 0 || index === foldingPoints.length - 1
+                              ? hingeMarkerRadius
+                              : hingeMarkerRadius * 0.72
+                          }
+                          stroke={doorStroke}
+                          strokeWidth="0.8"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                    </>
+                  ) : isPocketDoor ? (
+                    <>
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeDasharray="0.09 0.06"
+                        strokeLinecap="round"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                        x1={pocketTrackStart.x}
+                        x2={pocketTrackEnd.x}
+                        y1={pocketTrackStart.y}
+                        y2={pocketTrackEnd.y}
+                      />
+                      <line
+                        stroke={doorStroke}
+                        strokeLinecap="round"
+                        strokeWidth="1.1"
+                        vectorEffect="non-scaling-stroke"
+                        x1={svgP1.x}
+                        x2={svgP2.x}
+                        y1={svgP1.y}
+                        y2={svgP2.y}
+                      />
+                      <polygon
+                        fill={doorLeafFill}
+                        points={pocketLeafPoints}
+                        stroke={doorStroke}
+                        strokeLinejoin="round"
+                        strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <circle
+                        cx={pocketLeafEnd.x}
+                        cy={pocketLeafEnd.y}
+                        fill={doorStroke}
+                        r={hingeMarkerRadius * 0.72}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </>
+                  ) : isBarnDoor ? (
+                    <>
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeLinecap="round"
+                        strokeWidth="1.2"
+                        vectorEffect="non-scaling-stroke"
+                        x1={pocketTrackStart.x}
+                        x2={pocketTrackEnd.x}
+                        y1={pocketTrackStart.y + py * swingSign * doorCubeSize * 1.15}
+                        y2={pocketTrackEnd.y + py * swingSign * doorCubeSize * 1.15}
+                      />
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeLinecap="round"
+                        strokeWidth="0.9"
+                        vectorEffect="non-scaling-stroke"
+                        x1={svgP1.x}
+                        x2={svgP2.x}
+                        y1={svgP1.y}
+                        y2={svgP2.y}
+                      />
+                      <polygon
+                        fill={doorLeafFill}
+                        points={barnLeafPoints}
+                        stroke={doorStroke}
+                        strokeLinejoin="round"
+                        strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      {[0.28, 0.72].map((ratio) => {
+                        const wheel = {
+                          x: barnLeafStart.x + (barnLeafEnd.x - barnLeafStart.x) * ratio,
+                          y: barnLeafStart.y + (barnLeafEnd.y - barnLeafStart.y) * ratio,
+                        }
+                        return (
+                          <circle
+                            cx={wheel.x}
+                            cy={wheel.y}
+                            fill={doorStroke}
+                            key={`${opening.id}:barn-wheel:${ratio}`}
+                            r={hingeMarkerRadius * 0.62}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        )
+                      })}
+                    </>
+                  ) : isSlidingDoor ? (
+                    <>
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeLinecap="round"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                        x1={svgP1.x}
+                        x2={svgP2.x}
+                        y1={svgP1.y + py * swingSign * doorCubeSize * 0.34}
+                        y2={svgP2.y + py * swingSign * doorCubeSize * 0.34}
+                      />
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeLinecap="round"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                        x1={svgP1.x}
+                        x2={svgP2.x}
+                        y1={svgP1.y + py * swingSign * doorCubeSize * 0.68}
+                        y2={svgP2.y + py * swingSign * doorCubeSize * 0.68}
+                      />
+                      <polygon
+                        fill="rgba(224, 242, 254, 0.7)"
+                        points={slidingFixedPoints}
+                        stroke={doorSoftStroke}
+                        strokeLinejoin="round"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <polygon
+                        fill={doorLeafFill}
+                        points={slidingActivePoints}
+                        stroke={doorStroke}
+                        strokeLinejoin="round"
+                        strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </>
+                  ) : isDoubleSwingDoor ? (
+                    <>
+                      {doubleLeafPlans.map((leaf) =>
+                        leaf.swingRadius > 1e-6 ? (
+                          <path
+                            d={`M ${leaf.arcEnd.x} ${leaf.arcEnd.y} A ${leaf.swingRadius} ${leaf.swingRadius} 0 0 ${leaf.sweepFlag} ${leaf.leafEnd.x} ${leaf.leafEnd.y}`}
+                            fill="none"
+                            key={`${opening.id}:double-sweep:${leaf.key}`}
+                            stroke={doorSoftStroke}
+                            strokeLinecap="round"
+                            strokeWidth="0.9"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        ) : null,
+                      )}
+                      {swingAngle > 0.03 &&
+                        doubleLeafPlans.map((leaf) => (
+                          <polygon
+                            fill="none"
+                            key={`${opening.id}:double-hint:${leaf.key}`}
+                            points={leaf.closedLeafHintPoints}
+                            stroke={doorSoftStroke}
+                            strokeDasharray="0.08 0.06"
+                            strokeLinecap="round"
+                            strokeWidth="0.8"
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        ))}
+                      {doubleLeafPlans.map((leaf) => (
+                        <rect
+                          fill={doorLeafFill}
+                          height={doorCubeSize}
+                          key={`${opening.id}:double-hinge:${leaf.key}`}
+                          rx={doorCubeSize * 0.12}
+                          stroke={doorStroke}
+                          strokeWidth="1.35"
+                          vectorEffect="non-scaling-stroke"
+                          width={doorCubeSize}
+                          x={leaf.hingeCubeCenter.x - doorCubeSize / 2}
+                          y={leaf.hingeCubeCenter.y - doorCubeSize / 2}
+                        />
+                      ))}
+                      {doubleLeafPlans.map((leaf) => (
+                        <circle
+                          cx={leaf.hingeMarkerX}
+                          cy={leaf.hingeMarkerY}
+                          fill={doorStroke}
+                          key={`${opening.id}:double-hinge-marker:${leaf.key}`}
+                          r={hingeMarkerRadius}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                      {doubleLeafPlans.map((leaf) => (
+                        <polygon
+                          fill={doorLeafFill}
+                          key={`${opening.id}:double-leaf:${leaf.key}`}
+                          points={leaf.leafPolygonPoints}
+                          stroke={doorStroke}
+                          strokeLinejoin="round"
+                          strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      {swingSweepPath && (
+                        <path
+                          d={swingSweepPath}
+                          fill={doorSwingFill}
+                          stroke="none"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {swingAngle > 0.03 && (
+                        <polygon
+                          fill="none"
+                          points={closedLeafHintPoints}
+                          stroke={doorSoftStroke}
+                          strokeDasharray="0.08 0.06"
+                          strokeLinecap="round"
+                          strokeWidth="0.8"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {[hingeCubeCenter, strikeCubeCenter].map((point, index) => (
+                        <rect
+                          fill={index === 0 ? doorLeafFill : '#ffffff'}
+                          height={doorCubeSize}
+                          key={`${opening.id}:door-cube:${index}`}
+                          rx={doorCubeSize * 0.12}
+                          stroke={index === 0 ? doorStroke : doorSoftStroke}
+                          strokeWidth={index === 0 ? '1.35' : '1'}
+                          vectorEffect="non-scaling-stroke"
+                          width={doorCubeSize}
+                          x={point.x - doorCubeSize / 2}
+                          y={point.y - doorCubeSize / 2}
+                        />
+                      ))}
+                      <circle
+                        cx={hingeCubeCenter.x}
+                        cy={hingeCubeCenter.y}
+                        fill={doorStroke}
+                        r={hingeMarkerRadius}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeLinecap="round"
+                        strokeWidth="1.1"
+                        vectorEffect="non-scaling-stroke"
+                        x1={strikeTickStart.x}
+                        x2={strikeTickEnd.x}
+                        y1={strikeTickStart.y}
+                        y2={strikeTickEnd.y}
+                      />
+                      <polygon
+                        fill={doorLeafFill}
+                        points={leafPolygonPoints}
+                        stroke={doorStroke}
+                        strokeLinejoin="round"
+                        strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <path
+                        d={`M ${leafEnd.x} ${leafEnd.y} A ${swingRadius} ${swingRadius} 0 0 ${sweepFlag} ${arcEnd.x} ${arcEnd.y}`}
+                        fill="none"
+                        stroke={doorStroke}
+                        strokeLinecap="round"
+                        strokeWidth={arcStrokeWidth}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </>
                   )}
-                  {swingAngle > 0.03 && (
-                    <polygon
-                      fill="none"
-                      points={closedLeafHintPoints}
-                      stroke={doorSoftStroke}
-                      strokeDasharray="0.08 0.06"
-                      strokeLinecap="round"
-                      strokeWidth="0.8"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  )}
-                  {[hingeCubeCenter, strikeCubeCenter].map((point, index) => (
-                    <rect
-                      fill={index === 0 ? doorLeafFill : '#ffffff'}
-                      height={doorCubeSize}
-                      key={`${opening.id}:door-cube:${index}`}
-                      rx={doorCubeSize * 0.12}
-                      stroke={index === 0 ? doorStroke : doorSoftStroke}
-                      strokeWidth={index === 0 ? '1.35' : '1'}
-                      vectorEffect="non-scaling-stroke"
-                      width={doorCubeSize}
-                      x={point.x - doorCubeSize / 2}
-                      y={point.y - doorCubeSize / 2}
-                    />
-                  ))}
-                  <circle
-                    cx={hingeCubeCenter.x}
-                    cy={hingeCubeCenter.y}
-                    fill={doorStroke}
-                    r={hingeMarkerRadius}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <line
-                    stroke={doorSoftStroke}
-                    strokeLinecap="round"
-                    strokeWidth="1.1"
-                    vectorEffect="non-scaling-stroke"
-                    x1={strikeTickStart.x}
-                    x2={strikeTickEnd.x}
-                    y1={strikeTickStart.y}
-                    y2={strikeTickEnd.y}
-                  />
-                  <polygon
-                    fill={doorLeafFill}
-                    points={leafPolygonPoints}
-                    stroke={doorStroke}
-                    strokeLinejoin="round"
-                    strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <path
-                    d={`M ${leafEnd.x} ${leafEnd.y} A ${swingRadius} ${swingRadius} 0 0 ${sweepFlag} ${arcEnd.x} ${arcEnd.y}`}
-                    fill="none"
-                    stroke={doorStroke}
-                    strokeLinecap="round"
-                    strokeWidth={arcStrokeWidth}
-                    vectorEffect="non-scaling-stroke"
-                  />
                 </>
               )}
               {isSelected ? (

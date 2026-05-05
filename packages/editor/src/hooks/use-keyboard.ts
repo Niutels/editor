@@ -7,6 +7,17 @@ import useEditor from '../store/use-editor'
 
 const DOOR_SWING_OPEN_ANGLE = Math.PI / 2
 
+function updateDoorOpenState(
+  doorId: AnyNodeId,
+  data: { operationState?: number; swingAngle?: number },
+) {
+  const scene = useScene.getState()
+  const node = scene.nodes[doorId]
+  scene.updateNode(doorId, data)
+  scene.dirtyNodes.add(doorId)
+  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
+}
+
 // Tools call this in their onCancel handler when they have an active mid-action to cancel,
 // so that the global Escape handler knows not to also switch to select mode.
 let _toolCancelConsumed = false
@@ -154,11 +165,23 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              const currentSwingAngle = node.swingAngle ?? 0
-              useScene.getState().updateNode(node.id, {
-                swingAngle:
-                  currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
-              })
+              if (
+                node.doorType === 'folding' ||
+                node.doorType === 'pocket' ||
+                node.doorType === 'barn' ||
+                node.doorType === 'sliding'
+              ) {
+                const currentOpenAmount = node.operationState ?? 0
+                updateDoorOpenState(node.id, {
+                  operationState: currentOpenAmount >= 0.5 ? 0 : 1,
+                })
+              } else {
+                const currentSwingAngle = node.swingAngle ?? 0
+                updateDoorOpenState(node.id, {
+                  swingAngle:
+                    currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
+                })
+              }
               sfxEmitter.emit('sfx:item-rotate')
             }
           } else if (node && 'rotation' in node) {
@@ -184,7 +207,15 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              useScene.getState().updateNode(node.id, { swingAngle: 0 })
+              updateDoorOpenState(
+                node.id,
+                node.doorType === 'folding' ||
+                  node.doorType === 'pocket' ||
+                  node.doorType === 'barn' ||
+                  node.doorType === 'sliding'
+                  ? { operationState: 0 }
+                  : { swingAngle: 0 },
+              )
               sfxEmitter.emit('sfx:item-rotate')
             }
           } else if (node && 'rotation' in node) {

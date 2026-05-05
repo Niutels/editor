@@ -8,9 +8,10 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { BookMarked, Copy, FlipHorizontal2, Move, Trash2 } from 'lucide-react'
+import { BookMarked, Copy, DoorOpen, FlipHorizontal2, Move, Trash2 } from 'lucide-react'
 import { useCallback, useRef } from 'react'
 import { usePresetsAdapter } from '../../../contexts/presets-context'
+import { cn } from '../../../lib/utils'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
 import { ActionButton, ActionGroup } from '../controls/action-button'
@@ -21,6 +22,63 @@ import { SliderControl } from '../controls/slider-control'
 import { ToggleControl } from '../controls/toggle-control'
 import { PanelWrapper } from './panel-wrapper'
 import { PresetsPopover } from './presets/presets-popover'
+
+const doorTypeOptions = [
+  { label: 'Hinged', value: 'hinged', available: true },
+  { label: 'Double', value: 'double', available: true },
+  { label: 'French', value: 'french', available: true },
+  { label: 'Folding', value: 'folding', available: true },
+  { label: 'Pocket', value: 'pocket', available: true },
+  { label: 'Barn', value: 'barn', available: true },
+  { label: 'Sliding', value: 'sliding', available: true },
+] satisfies {
+  label: string
+  value: DoorNode['doorType']
+  available: boolean
+}[]
+
+const frenchDoorSegments: DoorNode['segments'] = [
+  {
+    type: 'glass',
+    heightRatio: 0.76,
+    columnRatios: [1, 1],
+    dividerThickness: 0.025,
+    panelDepth: 0.01,
+    panelInset: 0.04,
+  },
+  {
+    type: 'panel',
+    heightRatio: 0.24,
+    columnRatios: [1],
+    dividerThickness: 0.03,
+    panelDepth: 0.012,
+    panelInset: 0.035,
+  },
+]
+
+const foldingDoorSegments: DoorNode['segments'] = [
+  {
+    type: 'panel',
+    heightRatio: 1,
+    columnRatios: [1],
+    dividerThickness: 0.02,
+    panelDepth: 0.008,
+    panelInset: 0.025,
+  },
+]
+
+const defaultDoorDimensions: Record<DoorNode['doorType'], { width: number; height: number }> = {
+  hinged: { width: 0.9, height: 2.1 },
+  double: { width: 1.5, height: 2.1 },
+  french: { width: 1.5, height: 2.1 },
+  folding: { width: 1.8, height: 2.1 },
+  pocket: { width: 0.9, height: 2.1 },
+  barn: { width: 1, height: 2.1 },
+  sliding: { width: 1.5, height: 2.1 },
+  'garage-sectional': { width: 2.7, height: 2.4 },
+  'garage-rollup': { width: 2.7, height: 2.4 },
+  'garage-tiltup': { width: 2.7, height: 2.4 },
+}
 
 function isSameDoorValue(current: unknown, next: unknown): boolean {
   if (typeof current === 'number' && typeof next === 'number') {
@@ -195,6 +253,13 @@ export function DoorPanel() {
   const getDoorPresetData = useCallback(() => {
     if (!node) return null
     return {
+      doorCategory: node.doorCategory,
+      doorType: node.doorType,
+      leafCount: node.leafCount,
+      operationState: node.operationState,
+      slideDirection: node.slideDirection,
+      trackStyle: node.trackStyle,
+      garagePanelCount: node.garagePanelCount,
       width: node.width,
       height: node.height,
       frameThickness: node.frameThickness,
@@ -260,6 +325,10 @@ export function DoorPanel() {
   const archHeight = node.archHeight ?? 0.45
   const openingRevealRadius = node.openingRevealRadius ?? 0.025
   const maxRoundedRadius = Math.max(0.01, Math.min(node.width / 2, node.height))
+  const doorType = node.doorType ?? 'hinged'
+  const isSwingDoor = doorType === 'hinged' || doorType === 'double' || doorType === 'french'
+  const isSlidingDoor = doorType === 'pocket' || doorType === 'barn' || doorType === 'sliding'
+  const supportsHandleSide = isSwingDoor
 
   const setOpeningTopRadius = (index: number, value: number, commit = false) => {
     const next = [...openingTopRadii] as [number, number]
@@ -268,6 +337,101 @@ export function DoorPanel() {
       commitDoorPreview('openingTopRadii', next)
     } else {
       previewDoorUpdate('openingTopRadii', next)
+    }
+  }
+
+  const getDoorTypeUpdates = (nextDoorType: DoorNode['doorType']): Partial<DoorNode> => {
+    const dimensions = defaultDoorDimensions[nextDoorType]
+    const dimensionUpdates = {
+      width: dimensions.width,
+      height: dimensions.height,
+      position: [node.position[0], dimensions.height / 2, node.position[2]] as DoorNode['position'],
+    }
+
+    if (nextDoorType === 'double' || nextDoorType === 'french') {
+      return {
+        doorCategory: 'interior',
+        doorType: nextDoorType,
+        leafCount: 2,
+        ...dimensionUpdates,
+        handleSide: 'right',
+        ...(nextDoorType === 'french'
+          ? {
+              contentPadding: [0.045, 0.055],
+              segments: frenchDoorSegments,
+            }
+          : {}),
+      }
+    }
+
+    if (nextDoorType === 'folding') {
+      return {
+        doorCategory: 'interior',
+        doorType: nextDoorType,
+        leafCount: 4,
+        ...dimensionUpdates,
+        handle: true,
+        handleSide: 'right',
+        trackStyle: 'visible',
+        operationState: Math.max(node.operationState ?? 0, 0.65),
+        contentPadding: [0.03, 0.04],
+        segments: foldingDoorSegments,
+      }
+    }
+
+    if (nextDoorType === 'pocket') {
+      return {
+        doorCategory: 'interior',
+        doorType: nextDoorType,
+        leafCount: 1,
+        ...dimensionUpdates,
+        handle: true,
+        handleSide: 'right',
+        trackStyle: 'pocket',
+        slideDirection: node.slideDirection ?? 'left',
+        operationState: node.operationState ?? 0,
+        contentPadding: [0.035, 0.045],
+        segments: foldingDoorSegments,
+      }
+    }
+
+    if (nextDoorType === 'barn') {
+      return {
+        doorCategory: 'interior',
+        doorType: nextDoorType,
+        leafCount: 1,
+        ...dimensionUpdates,
+        handle: true,
+        handleSide: 'right',
+        trackStyle: 'visible',
+        slideDirection: node.slideDirection ?? 'left',
+        operationState: node.operationState ?? 0,
+        contentPadding: [0.035, 0.045],
+        segments: foldingDoorSegments,
+      }
+    }
+
+    if (nextDoorType === 'sliding') {
+      return {
+        doorCategory: 'interior',
+        doorType: nextDoorType,
+        leafCount: 2,
+        ...dimensionUpdates,
+        handle: true,
+        handleSide: 'right',
+        trackStyle: 'visible',
+        slideDirection: node.slideDirection ?? 'left',
+        operationState: node.operationState ?? 0,
+        contentPadding: [0.03, 0.04],
+        segments: frenchDoorSegments,
+      }
+    }
+
+    return {
+      doorCategory: 'interior',
+      doorType: nextDoorType,
+      leafCount: 1,
+      ...dimensionUpdates,
     }
   }
 
@@ -324,6 +488,31 @@ export function DoorPanel() {
             value={node.openingKind}
           />
         </div>
+        {!isOpening && (
+          <div className="grid grid-cols-2 gap-1.5 px-1 pt-1">
+            {doorTypeOptions.map((option) => {
+              const isSelected = doorType === option.value
+              return (
+                <button
+                  className={cn(
+                    'flex min-h-12 items-center gap-2 rounded-lg border px-2.5 text-left text-xs transition-colors',
+                    isSelected
+                      ? 'border-orange-400/60 bg-orange-400/10 text-foreground'
+                      : 'border-border/50 bg-[#2C2C2E] text-muted-foreground hover:bg-[#3e3e3e] hover:text-foreground',
+                    !option.available && 'cursor-not-allowed opacity-45 hover:bg-[#2C2C2E] hover:text-muted-foreground',
+                  )}
+                  disabled={!option.available}
+                  key={option.value}
+                  onClick={() => handleUpdate(getDoorTypeUpdates(option.value))}
+                  type="button"
+                >
+                  <DoorOpen className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate font-medium">{option.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </PanelSection>
 
       <PanelSection title="Position">
@@ -352,6 +541,68 @@ export function DoorPanel() {
           </div>
         )}
       </PanelSection>
+
+      {doorType === 'folding' && !isOpening && (
+        <PanelSection title="Fold">
+          <div className="flex flex-col gap-2 px-1 pb-1">
+            <div className="space-y-1">
+              <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
+                Panels
+              </span>
+              <SegmentedControl
+                onChange={(v) => handleUpdate({ leafCount: v === '2' ? 2 : 4 })}
+                options={[
+                  { label: '2', value: '2' },
+                  { label: '4', value: '4' },
+                ]}
+                value={node.leafCount === 2 ? '2' : '4'}
+              />
+            </div>
+          </div>
+          <SliderControl
+            label="Open"
+            max={100}
+            min={0}
+            onChange={(v) => handleUpdate({ operationState: v / 100 })}
+            precision={0}
+            restoreOnCommit={false}
+            step={5}
+            unit="%"
+            value={Math.round((node.operationState ?? 0) * 100)}
+          />
+        </PanelSection>
+      )}
+
+      {isSlidingDoor && !isOpening && (
+        <PanelSection title="Slide">
+          <div className="flex flex-col gap-2 px-1 pb-1">
+            <div className="space-y-1">
+              <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
+                {doorType === 'pocket' ? 'Pocket' : doorType === 'barn' ? 'Rail' : 'Panel'}
+              </span>
+              <SegmentedControl
+                onChange={(v) => handleUpdate({ slideDirection: v })}
+                options={[
+                  { label: 'Left', value: 'left' },
+                  { label: 'Right', value: 'right' },
+                ]}
+                value={node.slideDirection ?? 'left'}
+              />
+            </div>
+          </div>
+          <SliderControl
+            label="Open"
+            max={100}
+            min={0}
+            onChange={(v) => handleUpdate({ operationState: v / 100 })}
+            precision={0}
+            restoreOnCommit={false}
+            step={5}
+            unit="%"
+            value={Math.round((node.operationState ?? 0) * 100)}
+          />
+        </PanelSection>
+      )}
 
       <PanelSection title="Dimensions">
         <SliderControl
@@ -524,66 +775,72 @@ export function DoorPanel() {
         />
       </PanelSection>
 
-      <PanelSection title="Swing">
-        <div className="flex flex-col gap-2 px-1 pb-1">
-          <div className="space-y-1">
-            <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
-              Hinges Side
-            </span>
-            <SegmentedControl
-              onChange={(v) => handleUpdate({ hingesSide: v })}
-              options={[
-                { label: 'Left', value: 'left' },
-                { label: 'Right', value: 'right' },
-              ]}
-              value={node.hingesSide}
-            />
+      {isSwingDoor && (
+        <PanelSection title="Swing">
+          <div className="flex flex-col gap-2 px-1 pb-1">
+            <div className="space-y-1">
+              <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
+                Hinges Side
+              </span>
+              <SegmentedControl
+                onChange={(v) => handleUpdate({ hingesSide: v })}
+                options={[
+                  { label: 'Left', value: 'left' },
+                  { label: 'Right', value: 'right' },
+                ]}
+                value={node.hingesSide}
+              />
+            </div>
+            <div className="space-y-1">
+              <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
+                Direction
+              </span>
+              <SegmentedControl
+                onChange={(v) => handleUpdate({ swingDirection: v })}
+                options={[
+                  { label: 'Inward', value: 'inward' },
+                  { label: 'Outward', value: 'outward' },
+                ]}
+                value={node.swingDirection}
+              />
+            </div>
           </div>
-          <div className="space-y-1">
-            <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
-              Direction
-            </span>
-            <SegmentedControl
-              onChange={(v) => handleUpdate({ swingDirection: v })}
-              options={[
-                { label: 'Inward', value: 'inward' },
-                { label: 'Outward', value: 'outward' },
-              ]}
-              value={node.swingDirection}
-            />
-          </div>
-        </div>
-      </PanelSection>
+        </PanelSection>
+      )}
 
-      <PanelSection title="Threshold">
-        <ToggleControl
-          checked={node.threshold}
-          label="Enable Threshold"
-          onChange={(checked) => handleUpdate({ threshold: checked })}
-        />
-        {node.threshold && (
-          <div className="mt-1 flex flex-col gap-1">
-            <SliderControl
-              label="Height"
-              max={0.1}
-              min={0.005}
-              onChange={(v) => handleUpdate({ thresholdHeight: v })}
-              precision={3}
-              step={0.005}
-              unit="m"
-              value={Math.round(node.thresholdHeight * 1000) / 1000}
-            />
-          </div>
-        )}
-      </PanelSection>
+      {isSwingDoor && (
+        <PanelSection title="Threshold">
+          <ToggleControl
+            checked={node.threshold}
+            label="Enable Threshold"
+            onChange={(checked) => handleUpdate({ threshold: checked })}
+          />
+          {node.threshold && (
+            <div className="mt-1 flex flex-col gap-1">
+              <SliderControl
+                label="Height"
+                max={0.1}
+                min={0.005}
+                onChange={(v) => handleUpdate({ thresholdHeight: v })}
+                precision={3}
+                step={0.005}
+                unit="m"
+                value={Math.round(node.thresholdHeight * 1000) / 1000}
+              />
+            </div>
+          )}
+        </PanelSection>
+      )}
 
       <PanelSection title="Handle">
-        <ToggleControl
-          checked={node.handle}
-          label="Enable Handle"
-          onChange={(checked) => handleUpdate({ handle: checked })}
-        />
-        {node.handle && (
+        {isSwingDoor && (
+          <ToggleControl
+            checked={node.handle}
+            label="Enable Handle"
+            onChange={(checked) => handleUpdate({ handle: checked })}
+          />
+        )}
+        {(node.handle || !isSwingDoor) && (
           <div className="mt-1 flex flex-col gap-1">
             <SliderControl
               label="Height"
@@ -595,49 +852,53 @@ export function DoorPanel() {
               unit="m"
               value={Math.round(node.handleHeight * 100) / 100}
             />
-            <div className="space-y-1">
-              <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
-                Handle Side
-              </span>
-              <SegmentedControl
-                onChange={(v) => handleUpdate({ handleSide: v })}
-                options={[
-                  { label: 'Left', value: 'left' },
-                  { label: 'Right', value: 'right' },
-                ]}
-                value={node.handleSide}
-              />
-            </div>
+            {supportsHandleSide && (
+              <div className="space-y-1">
+                <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
+                  Handle Side
+                </span>
+                <SegmentedControl
+                  onChange={(v) => handleUpdate({ handleSide: v })}
+                  options={[
+                    { label: 'Left', value: 'left' },
+                    { label: 'Right', value: 'right' },
+                  ]}
+                  value={node.handleSide}
+                />
+              </div>
+            )}
           </div>
         )}
       </PanelSection>
 
-      <PanelSection title="Hardware">
-        <ToggleControl
-          checked={node.doorCloser}
-          label="Door Closer"
-          onChange={(checked) => handleUpdate({ doorCloser: checked })}
-        />
-        <ToggleControl
-          checked={node.panicBar}
-          label="Panic Bar"
-          onChange={(checked) => handleUpdate({ panicBar: checked })}
-        />
-        {node.panicBar && (
-          <div className="mt-1 flex flex-col gap-1">
-            <SliderControl
-              label="Bar Height"
-              max={node.height - 0.1}
-              min={0.5}
-              onChange={(v) => handleUpdate({ panicBarHeight: v })}
-              precision={2}
-              step={0.05}
-              unit="m"
-              value={Math.round(node.panicBarHeight * 100) / 100}
-            />
-          </div>
-        )}
-      </PanelSection>
+      {isSwingDoor && (
+        <PanelSection title="Hardware">
+          <ToggleControl
+            checked={node.doorCloser}
+            label="Door Closer"
+            onChange={(checked) => handleUpdate({ doorCloser: checked })}
+          />
+          <ToggleControl
+            checked={node.panicBar}
+            label="Panic Bar"
+            onChange={(checked) => handleUpdate({ panicBar: checked })}
+          />
+          {node.panicBar && (
+            <div className="mt-1 flex flex-col gap-1">
+              <SliderControl
+                label="Bar Height"
+                max={node.height - 0.1}
+                min={0.5}
+                onChange={(v) => handleUpdate({ panicBarHeight: v })}
+                precision={2}
+                step={0.05}
+                unit="m"
+                value={Math.round(node.panicBarHeight * 100) / 100}
+              />
+            </div>
+          )}
+        </PanelSection>
+      )}
 
       <PanelSection title="Segments">
         {node.segments.map((seg, i) => {

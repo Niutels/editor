@@ -56,6 +56,17 @@ const resolvePlacedSpawnNode = (
   return [...candidates].sort((a, b) => a.id.localeCompare(b.id))[0] ?? null
 }
 
+function updateDoorOpenState(
+  doorId: AnyNodeId,
+  data: { operationState?: number; swingAngle?: number },
+) {
+  const scene = useScene.getState()
+  const node = scene.nodes[doorId]
+  scene.updateNode(doorId, data)
+  scene.dirtyNodes.add(doorId)
+  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
+}
+
 export const FirstPersonControls = () => {
   const { camera, gl } = useThree()
   const selectedLevelId = useViewer((state) => state.selection.levelId)
@@ -151,10 +162,22 @@ export const FirstPersonControls = () => {
     const node = useScene.getState().nodes[doorId]
     if (node?.type !== 'door' || node.openingKind === 'opening') return
 
-    const currentSwingAngle = node.swingAngle ?? 0
-    useScene.getState().updateNode(doorId, {
-      swingAngle: currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
-    })
+    if (
+      node.doorType === 'folding' ||
+      node.doorType === 'pocket' ||
+      node.doorType === 'barn' ||
+      node.doorType === 'sliding'
+    ) {
+      const currentOpenAmount = node.operationState ?? 0
+      updateDoorOpenState(doorId, {
+        operationState: currentOpenAmount >= 0.5 ? 0 : 1,
+      })
+    } else {
+      const currentSwingAngle = node.swingAngle ?? 0
+      updateDoorOpenState(doorId, {
+        swingAngle: currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
+      })
+    }
 
     requestAnimationFrame(rebuildColliderWorld)
   }, [rebuildColliderWorld, resolveInteractableDoorId])
@@ -260,7 +283,7 @@ export const FirstPersonControls = () => {
           document.exitPointerLock()
         }
         useEditor.getState().setFirstPersonMode(false)
-      } else if (event.code === 'KeyE') {
+      } else if (event.code === 'KeyE' || event.code === 'KeyR') {
         event.preventDefault()
         event.stopPropagation()
         toggleInteractableDoor()
