@@ -5156,15 +5156,6 @@ const FloorplanFenceLayer = memo(function FloorplanFenceLayer({
 // Renders an item's 2D floor-plan image (top-down view, object-fit:contain)
 // inside its footprint rectangle. Placed at the same scene position/rotation
 // as the polygon so it lines up exactly.
-const FLOORPLAN_ITEM_ICON_OVERRIDES: Record<string, string> = {
-  'office-chair': '/items/office-chair/floor-plan.svg',
-  sofa: '/items/sofa/floor-plan.svg',
-}
-const FLOORPLAN_ITEMS_WITH_SELF_OUTLINED_ICON = new Set(['office-chair', 'sofa'])
-
-function getFloorplanItemIconUrl(item: ItemNode) {
-  return FLOORPLAN_ITEM_ICON_OVERRIDES[item.asset.id] ?? item.asset.floorPlanUrl
-}
 
 function FloorplanItemImage({
   url,
@@ -5283,8 +5274,7 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
         : isHovered
           ? 0.58
           : 0.52
-    const floorPlanUrl = getFloorplanItemIconUrl(item)
-    const shouldDrawFootprintBorder = !FLOORPLAN_ITEMS_WITH_SELF_OUTLINED_ICON.has(item.asset.id)
+    const floorPlanUrl = item.asset.floorPlanUrl
     const diagonalAStart = polygon[0]
     const diagonalAEnd = polygon[2]
     const diagonalBStart = polygon[1]
@@ -5368,14 +5358,9 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
                     : 0.015
           }
           points={points}
-          stroke={shouldDrawFootprintBorder ? stroke : 'none'}
-          strokeOpacity={shouldDrawFootprintBorder ? 1 : 0}
+          stroke={stroke}
           strokeWidth={
-            shouldDrawFootprintBorder
-              ? isSelectionActive
-                ? FLOORPLAN_SELECTED_WALL_STROKE_WIDTH
-                : FLOORPLAN_WALL_STROKE_WIDTH
-              : 0
+            isSelectionActive ? FLOORPLAN_SELECTED_WALL_STROKE_WIDTH : FLOORPLAN_WALL_STROKE_WIDTH
           }
           vectorEffect="non-scaling-stroke"
         />
