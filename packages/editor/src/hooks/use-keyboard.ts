@@ -1,54 +1,15 @@
 import { type AnyNodeId, emitter, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
+import {
+  animateDoorOpenState,
+  DOOR_SWING_OPEN_ANGLE,
+  isOperationDoorType,
+  updateDoorOpenState,
+} from '../lib/door-interaction'
 import { runRedo, runUndo } from '../lib/history'
 import { sfxEmitter } from '../lib/sfx-bus'
 import useEditor from '../store/use-editor'
-
-const DOOR_SWING_OPEN_ANGLE = Math.PI / 2
-const DOOR_TOGGLE_ANIMATION_MS = 520
-const activeDoorAnimations = new Map<AnyNodeId, number>()
-
-function updateDoorOpenState(
-  doorId: AnyNodeId,
-  data: { operationState?: number; swingAngle?: number },
-) {
-  const scene = useScene.getState()
-  const node = scene.nodes[doorId]
-  scene.updateNode(doorId, data)
-  scene.dirtyNodes.add(doorId)
-  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
-}
-
-function animateDoorOpenState(
-  doorId: AnyNodeId,
-  field: 'operationState' | 'swingAngle',
-  from: number,
-  to: number,
-) {
-  const existingFrame = activeDoorAnimations.get(doorId)
-  if (existingFrame !== undefined) {
-    window.cancelAnimationFrame(existingFrame)
-  }
-
-  const startedAt = performance.now()
-  const ease = (value: number) => value * value * (3 - 2 * value)
-
-  const tick = (now: number) => {
-    const progress = Math.min(1, (now - startedAt) / DOOR_TOGGLE_ANIMATION_MS)
-    const value = from + (to - from) * ease(progress)
-    updateDoorOpenState(doorId, { [field]: value })
-
-    if (progress < 1) {
-      activeDoorAnimations.set(doorId, window.requestAnimationFrame(tick))
-    } else {
-      activeDoorAnimations.delete(doorId)
-      updateDoorOpenState(doorId, { [field]: to })
-    }
-  }
-
-  activeDoorAnimations.set(doorId, window.requestAnimationFrame(tick))
-}
 
 // Tools call this in their onCancel handler when they have an active mid-action to cancel,
 // so that the global Escape handler knows not to also switch to select mode.
@@ -197,15 +158,7 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              if (
-                node.doorType === 'folding' ||
-                node.doorType === 'pocket' ||
-                node.doorType === 'barn' ||
-                node.doorType === 'sliding' ||
-                node.doorType === 'garage-sectional' ||
-                node.doorType === 'garage-rollup' ||
-                node.doorType === 'garage-tiltup'
-              ) {
+              if (isOperationDoorType(node.doorType)) {
                 const currentOpenAmount = node.operationState ?? 0
                 animateDoorOpenState(
                   node.id,
@@ -249,15 +202,7 @@ export const useKeyboard = ({
             if (node.openingKind !== 'opening') {
               updateDoorOpenState(
                 node.id,
-                node.doorType === 'folding' ||
-                  node.doorType === 'pocket' ||
-                  node.doorType === 'barn' ||
-                  node.doorType === 'sliding' ||
-                  node.doorType === 'garage-sectional' ||
-                  node.doorType === 'garage-rollup' ||
-                  node.doorType === 'garage-tiltup'
-                  ? { operationState: 0 }
-                  : { swingAngle: 0 },
+                isOperationDoorType(node.doorType) ? { operationState: 0 } : { swingAngle: 0 },
               )
               sfxEmitter.emit('sfx:item-rotate')
             }

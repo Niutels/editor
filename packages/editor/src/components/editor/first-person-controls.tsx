@@ -7,6 +7,11 @@ import { KeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box3, Euler, Matrix4, Ray, Raycaster, Vector2, Vector3 } from 'three'
+import {
+  animateDoorOpenState,
+  DOOR_SWING_OPEN_ANGLE,
+  isOperationDoorType,
+} from '../../lib/door-interaction'
 import useEditor from '../../store/use-editor'
 import {
   buildFirstPersonColliderWorldFromRegistry,
@@ -22,7 +27,6 @@ const CAMERA_EYE_OFFSET = 0.45
 const LOOK_SENSITIVITY = 0.002
 const CONTROLLER_CENTER_FROM_EYE = 0.85
 const DOOR_INTERACTION_DISTANCE = 2.5
-const DOOR_SWING_OPEN_ANGLE = Math.PI / 2
 const DOOR_LEAF_INTERACTION_DEPTH = 0.08
 const keyboardMap = [
   { name: 'forward', keys: ['ArrowUp', 'KeyW'] },
@@ -43,6 +47,12 @@ const doorLeafLocalHit = new Vector3()
 const doorLeafLocalRay = new Ray()
 const doorLeafMatrix = new Matrix4()
 const doorLeafWorldHit = new Vector3()
+const doorOpeningBox = new Box3()
+const doorOpeningInverseMatrix = new Matrix4()
+const doorOpeningLocalHit = new Vector3()
+const doorOpeningLocalRay = new Ray()
+const doorOpeningMatrix = new Matrix4()
+const doorOpeningWorldHit = new Vector3()
 const spawnWorldPosition = new Vector3()
 const spawnWorldEuler = new Euler(0, 0, 0, 'YXZ')
 
@@ -54,17 +64,6 @@ const resolvePlacedSpawnNode = (
   if (candidates.length === 0) return null
 
   return [...candidates].sort((a, b) => a.id.localeCompare(b.id))[0] ?? null
-}
-
-function updateDoorOpenState(
-  doorId: AnyNodeId,
-  data: { operationState?: number; swingAngle?: number },
-) {
-  const scene = useScene.getState()
-  const node = scene.nodes[doorId]
-  scene.updateNode(doorId, data)
-  scene.dirtyNodes.add(doorId)
-  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
 }
 
 export const FirstPersonControls = () => {
@@ -124,6 +123,39 @@ export const FirstPersonControls = () => {
       if (leafW <= 0 || leafH <= 0) continue
 
       const leafCenterY = -node.frameThickness / 2
+
+      if (isOperationDoorType(node.doorType)) {
+        doorOpeningMatrix
+          .copy(object.matrixWorld)
+          .multiply(new Matrix4().makeTranslation(0, leafCenterY, 0))
+        doorOpeningInverseMatrix.copy(doorOpeningMatrix).invert()
+        doorOpeningBox.min.set(-leafW / 2, -leafH / 2, -DOOR_LEAF_INTERACTION_DEPTH / 2)
+        doorOpeningBox.max.set(leafW / 2, leafH / 2, DOOR_LEAF_INTERACTION_DEPTH / 2)
+        doorOpeningLocalRay
+          .copy(doorInteractionRaycaster.ray)
+          .applyMatrix4(doorOpeningInverseMatrix)
+
+        const localOpeningHit = doorOpeningLocalRay.intersectBox(
+          doorOpeningBox,
+          doorOpeningLocalHit,
+        )
+        if (!localOpeningHit) continue
+
+        doorOpeningWorldHit.copy(localOpeningHit).applyMatrix4(doorOpeningMatrix)
+        const openingHitDistance = doorOpeningWorldHit.distanceTo(
+          doorInteractionRaycaster.ray.origin,
+        )
+
+        if (
+          openingHitDistance <= DOOR_INTERACTION_DISTANCE &&
+          openingHitDistance < closestDistance
+        ) {
+          closestDoorId = doorId as AnyNodeId
+          closestDistance = openingHitDistance
+        }
+        continue
+      }
+
       const hingeX = node.hingesSide === 'right' ? leafW / 2 : -leafW / 2
       const swingDirectionSign = node.swingDirection === 'inward' ? 1 : -1
       const hingeDirectionSign = node.hingesSide === 'right' ? 1 : -1
@@ -162,27 +194,25 @@ export const FirstPersonControls = () => {
     const node = useScene.getState().nodes[doorId]
     if (node?.type !== 'door' || node.openingKind === 'opening') return
 
-    if (
-      node.doorType === 'folding' ||
-      node.doorType === 'pocket' ||
-      node.doorType === 'barn' ||
-      node.doorType === 'sliding' ||
-      node.doorType === 'garage-sectional' ||
-      node.doorType === 'garage-rollup' ||
-      node.doorType === 'garage-tiltup'
-    ) {
+    if (isOperationDoorType(node.doorType)) {
       const currentOpenAmount = node.operationState ?? 0
-      updateDoorOpenState(doorId, {
-        operationState: currentOpenAmount >= 0.5 ? 0 : 1,
-      })
+      animateDoorOpenState(
+        doorId,
+        'operationState',
+        currentOpenAmount,
+        currentOpenAmount >= 0.5 ? 0 : 1,
+        rebuildColliderWorld,
+      )
     } else {
       const currentSwingAngle = node.swingAngle ?? 0
-      updateDoorOpenState(doorId, {
-        swingAngle: currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
-      })
+      animateDoorOpenState(
+        doorId,
+        'swingAngle',
+        currentSwingAngle,
+        currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
+        rebuildColliderWorld,
+      )
     }
-
-    requestAnimationFrame(rebuildColliderWorld)
   }, [rebuildColliderWorld, resolveInteractableDoorId])
 
   const placedSpawn = useMemo<FirstPersonSpawn | null>(() => {

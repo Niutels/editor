@@ -23,6 +23,7 @@ const UP = new THREE.Vector3(0, 1, 0)
 const SPAWN_EYE_HEIGHT = 1.65
 const RAYCAST_CLEARANCE = 25
 const DOOR_LEAF_COLLIDER_DEPTH = 0.06
+const OPERATION_DOOR_COLLIDER_OPEN_THRESHOLD = 0.85
 
 export const FIRST_PERSON_SPAWN_EYE_HEIGHT = SPAWN_EYE_HEIGHT
 
@@ -99,18 +100,55 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   const hasLeafContent = node.segments.some((segment) => segment.type !== 'empty')
   if (!hasLeafContent) return null
 
+  const isOperationDoor =
+    node.doorType === 'folding' ||
+    node.doorType === 'pocket' ||
+    node.doorType === 'barn' ||
+    node.doorType === 'sliding' ||
+    node.doorType === 'garage-sectional' ||
+    node.doorType === 'garage-rollup' ||
+    node.doorType === 'garage-tiltup'
   const leafW = node.width - 2 * node.frameThickness
   const leafH = node.height - node.frameThickness
   if (leafW <= 0 || leafH <= 0) return null
 
   const leafCenterY = -node.frameThickness / 2
+
+  root.updateWorldMatrix(true, false)
+
+  if (node.doorType === 'garage-sectional' || node.doorType === 'garage-rollup') {
+    const openAmount =
+      node.doorType === 'garage-sectional'
+        ? Math.min(1, (node.operationState ?? 0) / 0.88)
+        : Math.max(0, Math.min(1, node.operationState ?? 0))
+    const visibleHeight = leafH * (1 - openAmount)
+    if (visibleHeight <= 0.12) return null
+
+    const sourceGeometry = new THREE.BoxGeometry(
+      leafW,
+      visibleHeight,
+      DOOR_LEAF_COLLIDER_DEPTH,
+    ).toNonIndexed()
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', sourceGeometry.getAttribute('position').clone())
+    geometry.setAttribute('normal', sourceGeometry.getAttribute('normal').clone())
+    sourceGeometry.dispose()
+    const visibleCenterY = leafCenterY - leafH / 2 + visibleHeight / 2
+    geometry.applyMatrix4(
+      root.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(0, visibleCenterY, 0)),
+    )
+    return geometry
+  }
+
+  if (isOperationDoor && (node.operationState ?? 0) >= OPERATION_DOOR_COLLIDER_OPEN_THRESHOLD) {
+    return null
+  }
+
   const hingeX = node.hingesSide === 'right' ? leafW / 2 : -leafW / 2
   const swingDirectionSign = node.swingDirection === 'inward' ? 1 : -1
   const hingeDirectionSign = node.hingesSide === 'right' ? 1 : -1
   const clampedSwingAngle = Math.max(0, Math.min(Math.PI / 2, node.swingAngle ?? 0))
   const leafSwingRotation = clampedSwingAngle * swingDirectionSign * hingeDirectionSign
-
-  root.updateWorldMatrix(true, false)
 
   const sourceGeometry = new THREE.BoxGeometry(
     leafW,
