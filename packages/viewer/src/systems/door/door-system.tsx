@@ -68,6 +68,23 @@ function addRotatedBox(
   parent.add(m)
 }
 
+function addBoxWithRotation(
+  parent: THREE.Object3D,
+  material: THREE.Material,
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  rotation: [number, number, number],
+) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material)
+  m.position.set(x, y, z)
+  m.rotation.set(rotation[0], rotation[1], rotation[2])
+  parent.add(m)
+}
+
 function disposeObject(object: THREE.Object3D) {
   object.traverse((child) => {
     if (child instanceof THREE.Mesh) child.geometry.dispose()
@@ -484,7 +501,7 @@ function addPocketDoor(
     contentPadding: DoorNode['contentPadding']
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState))
+  const openAmount = Math.max(0, Math.min(1, operationState)) * 0.88
   const slideSign = slideDirection === 'right' ? 1 : -1
   const leafWidth = insideWidth
   const leafCenterX = slideSign * insideWidth * openAmount
@@ -775,6 +792,293 @@ function addSlidingDoor(
   )
 }
 
+function addGarageSectionalDoor(
+  mesh: THREE.Mesh,
+  {
+    insideWidth,
+    leafHeight,
+    leafCenterY,
+    leafDepth,
+    frameThickness,
+    frameDepth,
+    operationState,
+    garagePanelCount,
+  }: {
+    insideWidth: number
+    leafHeight: number
+    leafCenterY: number
+    leafDepth: number
+    frameThickness: number
+    frameDepth: number
+    operationState: number
+    garagePanelCount: number
+  },
+) {
+  const openAmount = Math.max(0, Math.min(1, operationState))
+  const panelCount = Math.max(3, Math.min(12, Math.round(garagePanelCount)))
+  const panelHeight = leafHeight / panelCount
+  const panelGap = Math.min(0.012, panelHeight * 0.08)
+  const travelDepth = Math.max(leafHeight, 1.4)
+  const curveRadius = panelHeight * 0.58
+  const curveLength = (Math.PI / 2) * curveRadius
+  const travel = openAmount * ((panelCount - 1) * panelHeight + curveLength + panelHeight * 0.65)
+  const overheadY = leafCenterY + leafHeight / 2 - panelHeight / 2
+  const railY = leafCenterY + leafHeight / 2 - 0.04
+  const railZ = -travelDepth / 2
+
+  addBox(
+    mesh,
+    revealMaterial,
+    0.035,
+    Math.max(0.04, frameThickness * 0.75),
+    travelDepth,
+    -insideWidth / 2 + 0.035,
+    railY,
+    railZ,
+  )
+  addBox(
+    mesh,
+    revealMaterial,
+    0.035,
+    Math.max(0.04, frameThickness * 0.75),
+    travelDepth,
+    insideWidth / 2 - 0.035,
+    railY,
+    railZ,
+  )
+
+  for (let index = 0; index < panelCount; index++) {
+    const orderFromTop = panelCount - 1 - index
+    const pathPosition = travel - orderFromTop * panelHeight
+    let y = overheadY + pathPosition
+    let z = 0
+    let rotationX = 0
+
+    if (pathPosition > 0 && pathPosition <= curveLength) {
+      const theta = pathPosition / curveRadius
+      rotationX = -theta
+      y = overheadY + curveRadius * Math.sin(theta)
+      z = -curveRadius * (1 - Math.cos(theta))
+    } else if (pathPosition > curveLength) {
+      rotationX = -Math.PI / 2
+      y = overheadY + curveRadius
+      z = -(curveRadius + pathPosition - curveLength)
+    }
+
+    const revealOffset = (panelHeight - panelGap) * 0.22
+    const trimDepth = 0.01
+    const trimFaceOffset = leafDepth / 2 + trimDepth + 0.006
+    const addSectionalTrim = (localY: number) => {
+      addBoxWithRotation(
+        mesh,
+        revealMaterial,
+        insideWidth - 0.16,
+        0.012,
+        trimDepth,
+        0,
+        y + localY * Math.cos(rotationX) - trimFaceOffset * Math.sin(rotationX),
+        z + localY * Math.sin(rotationX) + trimFaceOffset * Math.cos(rotationX),
+        [rotationX, 0, 0],
+      )
+    }
+
+    addBoxWithRotation(
+      mesh,
+      baseMaterial,
+      insideWidth,
+      Math.max(0.04, panelHeight - panelGap),
+      leafDepth,
+      0,
+      y,
+      z,
+      [rotationX, 0, 0],
+    )
+    addSectionalTrim(revealOffset)
+    addSectionalTrim(-revealOffset)
+  }
+
+  addBox(mesh, revealMaterial, insideWidth, 0.032, Math.max(frameDepth * 0.36, 0.03), 0, railY, 0)
+}
+
+function addGarageRollupDoor(
+  mesh: THREE.Mesh,
+  {
+    insideWidth,
+    leafHeight,
+    leafCenterY,
+    leafDepth,
+    frameThickness,
+    frameDepth,
+    operationState,
+  }: {
+    insideWidth: number
+    leafHeight: number
+    leafCenterY: number
+    leafDepth: number
+    frameThickness: number
+    frameDepth: number
+    operationState: number
+  },
+) {
+  const openAmount = Math.max(0, Math.min(1, operationState))
+  const slatHeight = Math.max(0.055, Math.min(0.11, leafHeight / 22))
+  const visibleHeight = leafHeight * (1 - openAmount)
+  const visibleSlatCount = Math.ceil(visibleHeight / slatHeight)
+  const topY = leafCenterY + leafHeight / 2
+  const curtainCenterY = topY - visibleHeight / 2
+  const drumMaxRadius = Math.max(0.12, Math.min(0.22, leafHeight * 0.075))
+  const drumY = topY + drumMaxRadius * 0.12
+  const drumZ = -frameDepth / 2 - drumMaxRadius * 0.72
+
+  addBox(
+    mesh,
+    revealMaterial,
+    0.032,
+    leafHeight,
+    Math.max(frameDepth * 0.48, 0.035),
+    -insideWidth / 2 + 0.03,
+    leafCenterY,
+    0,
+  )
+  addBox(
+    mesh,
+    revealMaterial,
+    0.032,
+    leafHeight,
+    Math.max(frameDepth * 0.48, 0.035),
+    insideWidth / 2 - 0.03,
+    leafCenterY,
+    0,
+  )
+
+  if (visibleHeight > 0.01) {
+    addBox(mesh, baseMaterial, insideWidth, visibleHeight, leafDepth, 0, curtainCenterY, 0)
+
+    for (let index = 0; index < visibleSlatCount; index++) {
+      const y = topY - Math.min(visibleHeight, index * slatHeight)
+      addBox(mesh, revealMaterial, insideWidth - 0.08, 0.01, 0.012, 0, y, leafDepth / 2 + 0.012)
+    }
+
+    addBox(
+      mesh,
+      revealMaterial,
+      insideWidth - 0.04,
+      0.028,
+      leafDepth + 0.018,
+      0,
+      topY - visibleHeight,
+      leafDepth / 2 + 0.004,
+    )
+  }
+
+  const drum = new THREE.Mesh(
+    new THREE.CylinderGeometry(drumMaxRadius, drumMaxRadius, insideWidth + frameThickness, 36),
+    baseMaterial,
+  )
+  drum.position.set(0, drumY, drumZ)
+  drum.rotation.z = Math.PI / 2
+  mesh.add(drum)
+
+  addBox(
+    mesh,
+    revealMaterial,
+    insideWidth + frameThickness,
+    0.026,
+    Math.max(frameDepth * 0.52, 0.04),
+    0,
+    topY + 0.02,
+    0,
+  )
+}
+
+function addGarageTiltupDoor(
+  mesh: THREE.Mesh,
+  {
+    insideWidth,
+    leafHeight,
+    leafCenterY,
+    leafDepth,
+    frameThickness,
+    frameDepth,
+    operationState,
+  }: {
+    insideWidth: number
+    leafHeight: number
+    leafCenterY: number
+    leafDepth: number
+    frameThickness: number
+    frameDepth: number
+    operationState: number
+  },
+) {
+  const openAmount = Math.max(0, Math.min(1, operationState))
+  const angle = (Math.PI / 2) * openAmount
+  const hingeY = leafCenterY + leafHeight / 2
+  const panelCenterY = hingeY - Math.cos(angle) * (leafHeight / 2)
+  const panelCenterZ = -Math.sin(angle) * (leafHeight / 2)
+  const railLength = Math.max(leafHeight * 0.72, 1.2)
+  const railY = hingeY - frameThickness * 0.35
+  const railZ = -railLength / 2
+
+  addBox(
+    mesh,
+    revealMaterial,
+    0.03,
+    Math.max(frameThickness * 0.7, 0.035),
+    railLength,
+    -insideWidth / 2 + 0.04,
+    railY,
+    railZ,
+  )
+  addBox(
+    mesh,
+    revealMaterial,
+    0.03,
+    Math.max(frameThickness * 0.7, 0.035),
+    railLength,
+    insideWidth / 2 - 0.04,
+    railY,
+    railZ,
+  )
+
+  addBoxWithRotation(
+    mesh,
+    baseMaterial,
+    insideWidth,
+    leafHeight,
+    leafDepth,
+    0,
+    panelCenterY,
+    panelCenterZ,
+    [-angle, 0, 0],
+  )
+
+  const insetWidth = Math.max(0.1, insideWidth - 0.22)
+  const insetHeight = Math.max(0.1, leafHeight - 0.28)
+  const trimDepth = 0.012
+  const trimFaceOffset = leafDepth / 2 + trimDepth + 0.006
+  const addTiltupTrim = (localX: number, localY: number, trimWidth: number, trimHeight: number) => {
+    addBoxWithRotation(
+      mesh,
+      revealMaterial,
+      trimWidth,
+      trimHeight,
+      trimDepth,
+      localX,
+      panelCenterY + localY * Math.cos(angle) + trimFaceOffset * Math.sin(angle),
+      panelCenterZ - localY * Math.sin(angle) + trimFaceOffset * Math.cos(angle),
+      [-angle, 0, 0],
+    )
+  }
+
+  addTiltupTrim(0, insetHeight / 2, insetWidth, 0.018)
+  addTiltupTrim(0, -insetHeight / 2, insetWidth, 0.018)
+  addTiltupTrim(-insetWidth / 2, 0, 0.018, insetHeight)
+  addTiltupTrim(insetWidth / 2, 0, 0.018, insetHeight)
+
+  addBox(mesh, revealMaterial, insideWidth, 0.026, Math.max(frameDepth * 0.4, 0.035), 0, hingeY, 0)
+}
+
 function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
   // Root mesh is an invisible hitbox; all visuals live in child meshes
   mesh.geometry.dispose()
@@ -815,6 +1119,7 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
     operationState = 0,
     leafCount = 1,
     slideDirection = 'left',
+    garagePanelCount = 4,
   } = node
   const clampedSwingAngle = Math.max(0, Math.min(Math.PI / 2, swingAngle))
 
@@ -878,7 +1183,38 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
     )
   }
 
-  if (doorType === 'folding') {
+  if (doorType === 'garage-sectional') {
+    addGarageSectionalDoor(mesh, {
+      insideWidth,
+      leafHeight: leafH,
+      leafCenterY,
+      leafDepth,
+      frameThickness,
+      frameDepth,
+      operationState,
+      garagePanelCount,
+    })
+  } else if (doorType === 'garage-rollup') {
+    addGarageRollupDoor(mesh, {
+      insideWidth,
+      leafHeight: leafH,
+      leafCenterY,
+      leafDepth,
+      frameThickness,
+      frameDepth,
+      operationState,
+    })
+  } else if (doorType === 'garage-tiltup') {
+    addGarageTiltupDoor(mesh, {
+      insideWidth,
+      leafHeight: leafH,
+      leafCenterY,
+      leafDepth,
+      frameThickness,
+      frameDepth,
+      operationState,
+    })
+  } else if (doorType === 'folding') {
     addFoldingDoor(mesh, {
       insideWidth,
       leafHeight: leafH,

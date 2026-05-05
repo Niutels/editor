@@ -166,7 +166,10 @@ export const FirstPersonControls = () => {
       node.doorType === 'folding' ||
       node.doorType === 'pocket' ||
       node.doorType === 'barn' ||
-      node.doorType === 'sliding'
+      node.doorType === 'sliding' ||
+      node.doorType === 'garage-sectional' ||
+      node.doorType === 'garage-rollup' ||
+      node.doorType === 'garage-tiltup'
     ) {
       const currentOpenAmount = node.operationState ?? 0
       updateDoorOpenState(doorId, {

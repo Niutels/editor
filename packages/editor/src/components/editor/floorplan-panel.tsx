@@ -4820,6 +4820,23 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
           }
           const slidingFixedPoints = slidingPanelPoints(slidingFixedCenter, doorCubeSize * 0.34)
           const slidingActivePoints = slidingPanelPoints(slidingActiveCenter, doorCubeSize * 0.68)
+          const isGarageSectionalDoor = opening.doorType === 'garage-sectional'
+          const isGarageRollupDoor = opening.doorType === 'garage-rollup'
+          const isGarageTiltupDoor = opening.doorType === 'garage-tiltup'
+          const garagePanelCount = Math.max(3, Math.min(12, opening.garagePanelCount ?? 4))
+          const garagePanelLines = Array.from({ length: garagePanelCount - 1 }, (_, index) => {
+            const t = (index + 1) / garagePanelCount
+            return {
+              start: {
+                x: svgP1.x + (svgP2.x - svgP1.x) * t,
+                y: svgP1.y + (svgP2.y - svgP1.y) * t,
+              },
+              end: {
+                x: svgP1.x + (svgP2.x - svgP1.x) * t + px * swingSign * doorCubeSize * 0.78,
+                y: svgP1.y + (svgP2.y - svgP1.y) * t + py * swingSign * doorCubeSize * 0.78,
+              },
+            }
+          })
           const isDoubleSwingDoor = opening.doorType === 'double' || opening.doorType === 'french'
           const doubleLeafPlans = isDoubleSwingDoor
             ? (
@@ -5214,6 +5231,66 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                         strokeWidth={isSelected || isSelectionHighlighted ? '1.7' : '1.25'}
                         vectorEffect="non-scaling-stroke"
                       />
+                    </>
+                  ) : isGarageSectionalDoor || isGarageRollupDoor || isGarageTiltupDoor ? (
+                    <>
+                      <line
+                        stroke={doorStroke}
+                        strokeLinecap="round"
+                        strokeWidth={isSelected || isSelectionHighlighted ? '1.8' : '1.25'}
+                        vectorEffect="non-scaling-stroke"
+                        x1={svgP1.x}
+                        x2={svgP2.x}
+                        y1={svgP1.y}
+                        y2={svgP2.y}
+                      />
+                      <line
+                        stroke={doorSoftStroke}
+                        strokeDasharray="0.12 0.08"
+                        strokeLinecap="round"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                        x1={svgP1.x + px * swingSign * doorCubeSize * 0.78}
+                        x2={svgP2.x + px * swingSign * doorCubeSize * 0.78}
+                        y1={svgP1.y + py * swingSign * doorCubeSize * 0.78}
+                        y2={svgP2.y + py * swingSign * doorCubeSize * 0.78}
+                      />
+                      {isGarageRollupDoor ? (
+                        <circle
+                          cx={(svgP1.x + svgP2.x) / 2 + px * swingSign * doorCubeSize * 0.78}
+                          cy={(svgP1.y + svgP2.y) / 2 + py * swingSign * doorCubeSize * 0.78}
+                          fill="none"
+                          r={doorCubeSize * 0.22}
+                          stroke={doorSoftStroke}
+                          strokeWidth="0.9"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ) : isGarageTiltupDoor ? (
+                        <line
+                          stroke={doorSoftStroke}
+                          strokeLinecap="round"
+                          strokeWidth="1"
+                          vectorEffect="non-scaling-stroke"
+                          x1={svgP1.x + px * swingSign * doorCubeSize * 0.18}
+                          x2={svgP2.x + px * swingSign * doorCubeSize * 0.78}
+                          y1={svgP1.y + py * swingSign * doorCubeSize * 0.18}
+                          y2={svgP2.y + py * swingSign * doorCubeSize * 0.78}
+                        />
+                      ) : (
+                        garagePanelLines.map((line, index) => (
+                          <line
+                            key={`${opening.id}:garage-section:${index}`}
+                            stroke={doorSoftStroke}
+                            strokeLinecap="round"
+                            strokeWidth="0.8"
+                            vectorEffect="non-scaling-stroke"
+                            x1={line.start.x}
+                            x2={line.end.x}
+                            y1={line.start.y}
+                            y2={line.end.y}
+                          />
+                        ))
+                      )}
                     </>
                   ) : isDoubleSwingDoor ? (
                     <>
