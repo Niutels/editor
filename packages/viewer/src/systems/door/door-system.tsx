@@ -1,5 +1,13 @@
 import { useFrame } from '@react-three/fiber'
-import { type AnyNodeId, type DoorNode, sceneRegistry, useScene } from '@pascal-app/core'
+import {
+  clampDoorOperationState,
+  type AnyNodeId,
+  type DoorNode,
+  getDoorRenderOpenAmount,
+  sceneRegistry,
+  useInteractive,
+  useScene,
+} from '@pascal-app/core'
 import * as THREE from 'three'
 import { baseMaterial, glassMaterial } from '../../lib/materials'
 
@@ -370,7 +378,7 @@ function addFoldingDoor(
   },
 ) {
   const panelCount = leafCount === 2 ? 2 : 4
-  const foldAmount = Math.max(0, Math.min(1, operationState))
+  const foldAmount = clampDoorOperationState(operationState)
   const panelLength = insideWidth / panelCount
   const foldAngle = Math.PI * 0.44 * foldAmount
 
@@ -501,7 +509,7 @@ function addPocketDoor(
     contentPadding: DoorNode['contentPadding']
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState)) * 0.88
+  const openAmount = clampDoorOperationState(operationState)
   const slideSign = slideDirection === 'right' ? 1 : -1
   const leafWidth = insideWidth
   const leafCenterX = slideSign * insideWidth * openAmount
@@ -594,7 +602,7 @@ function addBarnDoor(
     contentPadding: DoorNode['contentPadding']
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState))
+  const openAmount = clampDoorOperationState(operationState)
   const slideSign = slideDirection === 'right' ? 1 : -1
   const leafWidth = insideWidth * 1.06
   const leafCenterX = slideSign * insideWidth * openAmount
@@ -711,7 +719,7 @@ function addSlidingDoor(
     contentPadding: DoorNode['contentPadding']
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState))
+  const openAmount = clampDoorOperationState(operationState)
   const activeOnRight = slideDirection === 'left'
   const fixedSign = activeOnRight ? -1 : 1
   const activeSign = activeOnRight ? 1 : -1
@@ -814,7 +822,7 @@ function addGarageSectionalDoor(
     garagePanelCount: number
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState))
+  const openAmount = getDoorRenderOpenAmount('garage-sectional', operationState)
   const panelCount = Math.max(3, Math.min(12, Math.round(garagePanelCount)))
   const panelHeight = leafHeight / panelCount
   const panelGap = Math.min(0.012, panelHeight * 0.08)
@@ -920,7 +928,7 @@ function addGarageRollupDoor(
     operationState: number
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState))
+  const openAmount = clampDoorOperationState(operationState)
   const slatHeight = Math.max(0.055, Math.min(0.11, leafHeight / 22))
   const visibleHeight = leafHeight * (1 - openAmount)
   const visibleSlatCount = Math.ceil(visibleHeight / slatHeight)
@@ -1011,7 +1019,7 @@ function addGarageTiltupDoor(
     operationState: number
   },
 ) {
-  const openAmount = Math.max(0, Math.min(1, operationState))
+  const openAmount = clampDoorOperationState(operationState)
   const angle = (Math.PI / 2) * openAmount
   const hingeY = leafCenterY + leafHeight / 2
   const panelCenterY = hingeY - Math.cos(angle) * (leafHeight / 2)
@@ -1114,13 +1122,16 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
     contentPadding,
     hingesSide,
     swingDirection,
-    swingAngle = 0,
+    swingAngle: nodeSwingAngle = 0,
     doorType = 'hinged',
-    operationState = 0,
+    operationState: nodeOperationState = 0,
     leafCount = 1,
     slideDirection = 'left',
     garagePanelCount = 4,
   } = node
+  const runtimeDoorState = useInteractive.getState().doors[node.id]
+  const swingAngle = runtimeDoorState?.swingAngle ?? nodeSwingAngle
+  const operationState = runtimeDoorState?.operationState ?? nodeOperationState
   const clampedSwingAngle = Math.max(0, Math.min(Math.PI / 2, swingAngle))
 
   if (openingKind === 'opening') {

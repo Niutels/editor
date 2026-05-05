@@ -12,8 +12,14 @@ export type ItemInteractiveState = {
   controlValues: ControlValue[]
 }
 
+export type DoorInteractiveState = {
+  operationState?: number
+  swingAngle?: number
+}
+
 type InteractiveStore = {
   items: Record<AnyNodeId, ItemInteractiveState>
+  doors: Record<AnyNodeId, DoorInteractiveState>
 
   /** Initialize a node's interactive state from its asset definition (idempotent) */
   initItem: (itemId: AnyNodeId, interactive: Interactive) => void
@@ -23,6 +29,12 @@ type InteractiveStore = {
 
   /** Remove a node's state (e.g. on unmount) */
   removeItem: (itemId: AnyNodeId) => void
+
+  /** Set transient door open state without committing it to the scene node */
+  setDoorOpenState: (doorId: AnyNodeId, value: DoorInteractiveState) => void
+
+  /** Clear transient door open state */
+  removeDoorOpenState: (doorId: AnyNodeId) => void
 }
 
 const defaultControlValue = (interactive: Interactive, index: number): ControlValue => {
@@ -40,6 +52,7 @@ const defaultControlValue = (interactive: Interactive, index: number): ControlVa
 
 export const useInteractive = create<InteractiveStore>((set, get) => ({
   items: {},
+  doors: {},
 
   initItem: (itemId, interactive) => {
     const { controls } = interactive
@@ -72,6 +85,25 @@ export const useInteractive = create<InteractiveStore>((set, get) => ({
     set((state) => {
       const { [itemId]: _, ...rest } = state.items
       return { items: rest }
+    })
+  },
+
+  setDoorOpenState: (doorId, value) => {
+    set((state) => ({
+      doors: {
+        ...state.doors,
+        [doorId]: {
+          ...state.doors[doorId],
+          ...value,
+        },
+      },
+    }))
+  },
+
+  removeDoorOpenState: (doorId) => {
+    set((state) => {
+      const { [doorId]: _, ...rest } = state.doors
+      return { doors: rest }
     })
   },
 }))

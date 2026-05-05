@@ -1,21 +1,11 @@
-import { type AnyNodeId, useScene } from '@pascal-app/core'
+import { type AnyNodeId, isOperationDoorType, useInteractive, useScene } from '@pascal-app/core'
 
 export const DOOR_SWING_OPEN_ANGLE = Math.PI / 2
 
 const DOOR_TOGGLE_ANIMATION_MS = 520
 const activeDoorAnimations = new Map<AnyNodeId, number>()
 
-export function isOperationDoorType(doorType: string | undefined) {
-  return (
-    doorType === 'folding' ||
-    doorType === 'pocket' ||
-    doorType === 'barn' ||
-    doorType === 'sliding' ||
-    doorType === 'garage-sectional' ||
-    doorType === 'garage-rollup' ||
-    doorType === 'garage-tiltup'
-  )
-}
+export { isOperationDoorType }
 
 export function updateDoorOpenState(
   doorId: AnyNodeId,
@@ -24,6 +14,25 @@ export function updateDoorOpenState(
   const scene = useScene.getState()
   const node = scene.nodes[doorId]
   scene.updateNode(doorId, data)
+  scene.dirtyNodes.add(doorId)
+  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
+}
+
+function setRuntimeDoorOpenState(
+  doorId: AnyNodeId,
+  data: { operationState?: number; swingAngle?: number },
+) {
+  const scene = useScene.getState()
+  const node = scene.nodes[doorId]
+  useInteractive.getState().setDoorOpenState(doorId, data)
+  scene.dirtyNodes.add(doorId)
+  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
+}
+
+function clearRuntimeDoorOpenState(doorId: AnyNodeId) {
+  const scene = useScene.getState()
+  const node = scene.nodes[doorId]
+  useInteractive.getState().removeDoorOpenState(doorId)
   scene.dirtyNodes.add(doorId)
   if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
 }
@@ -46,13 +55,14 @@ export function animateDoorOpenState(
   const tick = (now: number) => {
     const progress = Math.min(1, (now - startedAt) / DOOR_TOGGLE_ANIMATION_MS)
     const value = from + (to - from) * ease(progress)
-    updateDoorOpenState(doorId, { [field]: value })
+    setRuntimeDoorOpenState(doorId, { [field]: value })
 
     if (progress < 1) {
       activeDoorAnimations.set(doorId, window.requestAnimationFrame(tick))
     } else {
       activeDoorAnimations.delete(doorId)
       updateDoorOpenState(doorId, { [field]: to })
+      clearRuntimeDoorOpenState(doorId)
       onComplete?.()
     }
   }

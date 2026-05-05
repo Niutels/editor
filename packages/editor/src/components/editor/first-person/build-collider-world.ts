@@ -1,4 +1,11 @@
-import { type AnyNodeId, type DoorNode, sceneRegistry, useScene } from '@pascal-app/core'
+import {
+  getGarageVisibleOpeningRatio,
+  type AnyNodeId,
+  type DoorNode,
+  isOperationDoorType,
+  sceneRegistry,
+  useScene,
+} from '@pascal-app/core'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh'
@@ -100,14 +107,6 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   const hasLeafContent = node.segments.some((segment) => segment.type !== 'empty')
   if (!hasLeafContent) return null
 
-  const isOperationDoor =
-    node.doorType === 'folding' ||
-    node.doorType === 'pocket' ||
-    node.doorType === 'barn' ||
-    node.doorType === 'sliding' ||
-    node.doorType === 'garage-sectional' ||
-    node.doorType === 'garage-rollup' ||
-    node.doorType === 'garage-tiltup'
   const leafW = node.width - 2 * node.frameThickness
   const leafH = node.height - node.frameThickness
   if (leafW <= 0 || leafH <= 0) return null
@@ -117,10 +116,7 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   root.updateWorldMatrix(true, false)
 
   if (node.doorType === 'garage-sectional' || node.doorType === 'garage-rollup') {
-    const openAmount =
-      node.doorType === 'garage-sectional'
-        ? Math.min(1, (node.operationState ?? 0) / 0.88)
-        : Math.max(0, Math.min(1, node.operationState ?? 0))
+    const openAmount = getGarageVisibleOpeningRatio(node.doorType, node.operationState)
     const visibleHeight = leafH * (1 - openAmount)
     if (visibleHeight <= 0.12) return null
 
@@ -140,7 +136,10 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
     return geometry
   }
 
-  if (isOperationDoor && (node.operationState ?? 0) >= OPERATION_DOOR_COLLIDER_OPEN_THRESHOLD) {
+  if (
+    isOperationDoorType(node.doorType) &&
+    (node.operationState ?? 0) >= OPERATION_DOOR_COLLIDER_OPEN_THRESHOLD
+  ) {
     return null
   }
 
