@@ -355,6 +355,8 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
   if (displayPolygon.length < minVertices) return null
 
   const canDelete = displayPolygon.length > minVertices
+  const handleHeight = Math.max(MIN_HANDLE_HEIGHT, surfaceHeight + 0.02)
+  const edgeHandleY = editY + handleHeight - EDGE_HANDLE_HEIGHT / 2
 
   const editorContent = (
     <group>
@@ -383,7 +385,7 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
         const isHovered = hoveredVertex === index
         const isDragging = dragState?.mode === 'vertex' && dragState.vertexIndex === index
         const radius = 0.1
-        const height = Math.max(MIN_HANDLE_HEIGHT, surfaceHeight + 0.02)
+        const height = handleHeight
 
         return (
           <mesh
@@ -453,11 +455,7 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
               pointerId: e.pointerId,
             })
           }}
-          position={[
-            polygonCenter[0],
-            editY + Math.max(MIN_HANDLE_HEIGHT, surfaceHeight + 0.02) + 0.08,
-            polygonCenter[1],
-          ]}
+          position={[polygonCenter[0], editY + handleHeight + 0.08, polygonCenter[1]]}
         >
           <sphereGeometry args={[0.09, 20, 20]} />
           <meshStandardMaterial color={dragState?.mode === 'polygon' ? '#22c55e' : '#f59e0b'} />
@@ -507,7 +505,7 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
                 e.stopPropagation()
                 setHoveredEdge(null)
               }}
-              position={[midpoint[0], editY + EDGE_HANDLE_HEIGHT / 2, midpoint[1]]}
+              position={[midpoint[0], edgeHandleY, midpoint[1]]}
               rotation={[0, rotationY, 0]}
             >
               <boxGeometry args={[length, EDGE_HANDLE_HEIGHT, EDGE_HANDLE_THICKNESS]} />
@@ -525,7 +523,7 @@ export const PolygonEditor: React.FC<PolygonEditorProps> = ({
         midpoints.map(([x, z], index) => {
           const isHovered = hoveredMidpoint === index
           const radius = 0.06
-          const height = Math.max(MIN_HANDLE_HEIGHT, surfaceHeight + 0.02)
+          const height = handleHeight
 
           return (
             <mesh

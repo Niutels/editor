@@ -152,6 +152,9 @@ const FLOORPLAN_POLYGON_VERTEX_ACTIVE_DOT_RADIUS_PX = 3
 const FLOORPLAN_POLYGON_MIDPOINT_RADIUS_PX = 4
 const FLOORPLAN_POLYGON_MIDPOINT_HOVER_RADIUS_PX = 4.6
 const FLOORPLAN_POLYGON_MIDPOINT_DOT_RADIUS_PX = 1.8
+const FLOORPLAN_POLYGON_EDGE_HIT_STROKE_WIDTH_PX = 30
+const FLOORPLAN_POLYGON_EDGE_HOVER_GLOW_STROKE_WIDTH_PX = 12
+const FLOORPLAN_POLYGON_EDGE_VISIBLE_STROKE_WIDTH_PX = 4
 const FLOORPLAN_MARQUEE_OUTLINE_WIDTH = 0.055
 const FLOORPLAN_MARQUEE_GLOW_WIDTH = 0.14
 const FLOORPLAN_HOVER_TRANSITION = 'opacity 180ms cubic-bezier(0.2, 0, 0, 1)'
@@ -416,15 +419,25 @@ type SlabHoleBoundaryDraft = {
 type SlabVertexDragState = {
   pointerId: number
   slabId: SlabNode['id']
+  mode?: 'vertex' | 'edge'
   vertexIndex: number
   visualOffset: Point2D
+  edgeIndex?: number
+  edgeNormal?: WallPlanPoint
+  initialPlanPoint?: WallPlanPoint
+  initialPolygon?: WallPlanPoint[]
 }
 
 type SlabHoleVertexDragState = {
   pointerId: number
   slabId: SlabNode['id']
   holeIndex: number
+  mode?: 'vertex' | 'edge'
   vertexIndex: number
+  edgeIndex?: number
+  edgeNormal?: WallPlanPoint
+  initialPlanPoint?: WallPlanPoint
+  initialPolygon?: WallPlanPoint[]
 }
 
 type SlabHoleMoveDraft = {
@@ -443,7 +456,12 @@ type CeilingBoundaryDraft = {
 type CeilingVertexDragState = {
   pointerId: number
   ceilingId: CeilingNode['id']
+  mode?: 'vertex' | 'edge'
   vertexIndex: number
+  edgeIndex?: number
+  edgeNormal?: WallPlanPoint
+  initialPlanPoint?: WallPlanPoint
+  initialPolygon?: WallPlanPoint[]
 }
 
 type CeilingHoleBoundaryDraft = {
@@ -456,7 +474,12 @@ type CeilingHoleVertexDragState = {
   pointerId: number
   ceilingId: CeilingNode['id']
   holeIndex: number
+  mode?: 'vertex' | 'edge'
   vertexIndex: number
+  edgeIndex?: number
+  edgeNormal?: WallPlanPoint
+  initialPlanPoint?: WallPlanPoint
+  initialPolygon?: WallPlanPoint[]
 }
 
 type CeilingHoleMoveDraft = {
@@ -783,6 +806,41 @@ function toPoint2D(point: WallPlanPoint): Point2D {
 
 function toWallPlanPoint(point: Point2D): WallPlanPoint {
   return [point.x, point.y]
+}
+
+function getFloorplanEdgeNormal(start: WallPlanPoint, end: WallPlanPoint): WallPlanPoint | null {
+  const dx = end[0] - start[0]
+  const dy = end[1] - start[1]
+  const length = Math.hypot(dx, dy)
+  if (length < 1e-6) {
+    return null
+  }
+
+  return [-dy / length, dx / length]
+}
+
+function moveFloorplanPolygonEdge(
+  polygon: WallPlanPoint[],
+  edgeIndex: number,
+  edgeNormal: WallPlanPoint,
+  initialPlanPoint: WallPlanPoint,
+  nextPlanPoint: WallPlanPoint,
+): WallPlanPoint[] {
+  if (polygon.length < 2) {
+    return polygon
+  }
+
+  const edgeStartIndex = edgeIndex
+  const edgeEndIndex = (edgeStartIndex + 1) % polygon.length
+  const deltaX = nextPlanPoint[0] - initialPlanPoint[0]
+  const deltaY = nextPlanPoint[1] - initialPlanPoint[1]
+  const normalDistance = deltaX * edgeNormal[0] + deltaY * edgeNormal[1]
+
+  return polygon.map((point, index) =>
+    index === edgeStartIndex || index === edgeEndIndex
+      ? [point[0] + edgeNormal[0] * normalDistance, point[1] + edgeNormal[1] * normalDistance]
+      : point,
+  )
 }
 
 function toSvgX(value: number): number {
@@ -1580,10 +1638,52 @@ function getPolygonBounds(points: Point2D[]) {
   }
 }
 
+function rotateSvgPoint(point: SvgPoint, rotationDegrees: number): SvgPoint {
+  if (rotationDegrees === 0) {
+    return point
+  }
+
+  const radians = (rotationDegrees * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+
+  return {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  }
+}
+
+function projectSvgPointToSurface(
+  svgPoint: SvgPoint,
+  viewBox: { minX: number; minY: number; width: number; height: number },
+  surfaceSize: { width: number; height: number },
+): SvgPoint | null {
+  if (
+    !(surfaceSize.width > 0 && surfaceSize.height > 0 && viewBox.width > 0 && viewBox.height > 0)
+  ) {
+    return null
+  }
+
+  if (
+    svgPoint.x < viewBox.minX ||
+    svgPoint.x > viewBox.minX + viewBox.width ||
+    svgPoint.y < viewBox.minY ||
+    svgPoint.y > viewBox.minY + viewBox.height
+  ) {
+    return null
+  }
+
+  return {
+    x: ((svgPoint.x - viewBox.minX) / viewBox.width) * surfaceSize.width,
+    y: ((svgPoint.y - viewBox.minY) / viewBox.height) * surfaceSize.height,
+  }
+}
+
 function getFloorplanActionMenuPosition(
   points: Point2D[],
   viewBox: { minX: number; minY: number; width: number; height: number },
   surfaceSize: { width: number; height: number },
+  rotationDegrees = 0,
 ) {
   if (points.length === 0) {
     return null
@@ -1595,7 +1695,7 @@ function getFloorplanActionMenuPosition(
   let maxY = Number.NEGATIVE_INFINITY
 
   for (const point of points) {
-    const svgPoint = toSvgPoint(point)
+    const svgPoint = rotateSvgPoint(toSvgPoint(point), rotationDegrees)
     minX = Math.min(minX, svgPoint.x)
     maxX = Math.max(maxX, svgPoint.x)
     minY = Math.min(minY, svgPoint.y)
@@ -6371,9 +6471,11 @@ const FloorplanWallCurveHandleLayer = memo(function FloorplanWallCurveHandleLaye
 })
 
 const FloorplanPolygonHandleLayer = memo(function FloorplanPolygonHandleLayer({
+  edgeHandles = [],
   hoveredHandleId,
   midpointStyle = 'default',
   midpointHandles,
+  onEdgePointerDown,
   onHandleHoverChange,
   onMidpointPointerDown,
   onVertexDoubleClick,
@@ -6382,6 +6484,13 @@ const FloorplanPolygonHandleLayer = memo(function FloorplanPolygonHandleLayer({
   unitsPerPixel,
   vertexHandles,
 }: {
+  edgeHandles?: Array<{
+    nodeId: string
+    edgeIndex: number
+    start: WallPlanPoint
+    end: WallPlanPoint
+    isActive?: boolean
+  }>
   vertexHandles: Array<{
     nodeId: string
     vertexIndex: number
@@ -6411,11 +6520,85 @@ const FloorplanPolygonHandleLayer = memo(function FloorplanPolygonHandleLayer({
     edgeIndex: number,
     event: ReactPointerEvent<SVGCircleElement>,
   ) => void
+  onEdgePointerDown?: (
+    nodeId: string,
+    edgeIndex: number,
+    event: ReactPointerEvent<SVGLineElement>,
+  ) => void
   palette: FloorplanPalette
   unitsPerPixel: number
 }) {
   return (
     <>
+      {edgeHandles.map(({ nodeId, edgeIndex, start, end, isActive }) => {
+        const handleId = `${nodeId}:edge:${edgeIndex}`
+        const isHovered = hoveredHandleId === handleId
+        const startSvg = toSvgPlanPoint(start)
+        const endSvg = toSvgPlanPoint(end)
+        const visibleStroke = isActive ? palette.endpointHandleActiveStroke : palette.selectedStroke
+
+        return (
+          <g
+            key={handleId}
+            onClick={(event) => {
+              event.stopPropagation()
+            }}
+            onPointerEnter={() => onHandleHoverChange(handleId)}
+            onPointerLeave={() => onHandleHoverChange(null)}
+          >
+            <line
+              pointerEvents="none"
+              stroke={visibleStroke}
+              strokeLinecap="round"
+              strokeOpacity={0.18}
+              strokeWidth={FLOORPLAN_POLYGON_EDGE_HOVER_GLOW_STROKE_WIDTH_PX}
+              style={{
+                opacity: isHovered || isActive ? 1 : 0,
+                transition: FLOORPLAN_HOVER_TRANSITION,
+              }}
+              vectorEffect="non-scaling-stroke"
+              x1={startSvg.x}
+              x2={endSvg.x}
+              y1={startSvg.y}
+              y2={endSvg.y}
+            />
+            <line
+              pointerEvents="none"
+              stroke={visibleStroke}
+              strokeLinecap="round"
+              strokeOpacity={isActive ? 0.95 : 0.82}
+              strokeWidth={FLOORPLAN_POLYGON_EDGE_VISIBLE_STROKE_WIDTH_PX}
+              style={{
+                opacity: isHovered || isActive ? 1 : 0,
+                transition: FLOORPLAN_HOVER_TRANSITION,
+              }}
+              vectorEffect="non-scaling-stroke"
+              x1={startSvg.x}
+              x2={endSvg.x}
+              y1={startSvg.y}
+              y2={endSvg.y}
+            />
+            <line
+              pointerEvents="stroke"
+              stroke="transparent"
+              strokeLinecap="round"
+              strokeWidth={FLOORPLAN_POLYGON_EDGE_HIT_STROKE_WIDTH_PX}
+              style={{ cursor: EDITOR_CURSOR }}
+              vectorEffect="non-scaling-stroke"
+              x1={startSvg.x}
+              x2={endSvg.x}
+              y1={startSvg.y}
+              y2={endSvg.y}
+              onPointerDown={
+                onEdgePointerDown
+                  ? (event) => onEdgePointerDown(nodeId, edgeIndex, event)
+                  : undefined
+              }
+            />
+          </g>
+        )
+      })}
+
       {vertexHandles.map(({ nodeId, vertexIndex, point, isActive }) => {
         const handleId = `${nodeId}:vertex:${vertexIndex}`
         const isHovered = hoveredHandleId === handleId
@@ -8429,6 +8612,33 @@ export function FloorplanPanel() {
       }
     })
   }, [selectedSlabEntry, shouldShowSlabBoundaryHandles, slabVertexDragState])
+  const slabEdgeHandles = useMemo(() => {
+    if (!shouldShowSlabBoundaryHandles) {
+      return []
+    }
+
+    const handlePolygon = getSlabHandlePolygon(selectedSlabEntry).map(toWallPlanPoint)
+
+    return handlePolygon.flatMap((start, edgeIndex, polygon) => {
+      const end = polygon[(edgeIndex + 1) % polygon.length]
+      if (!end) {
+        return []
+      }
+
+      return [
+        {
+          nodeId: selectedSlabEntry.slab.id,
+          edgeIndex,
+          start,
+          end,
+          isActive:
+            slabVertexDragState?.slabId === selectedSlabEntry.slab.id &&
+            slabVertexDragState.mode === 'edge' &&
+            slabVertexDragState.edgeIndex === edgeIndex,
+        },
+      ]
+    })
+  }, [selectedSlabEntry, shouldShowSlabBoundaryHandles, slabVertexDragState])
   const ceilingVertexHandles = useMemo(() => {
     if (!shouldShowCeilingBoundaryHandles) {
       return []
@@ -8459,6 +8669,31 @@ export function FloorplanPanel() {
           (point.y + (nextPoint?.y ?? point.y)) / 2,
         ] as WallPlanPoint,
       }
+    })
+  }, [ceilingVertexDragState, selectedCeilingEntry, shouldShowCeilingBoundaryHandles])
+  const ceilingEdgeHandles = useMemo(() => {
+    if (!shouldShowCeilingBoundaryHandles) {
+      return []
+    }
+
+    return selectedCeilingEntry.polygon.flatMap((point, edgeIndex, polygon) => {
+      const nextPoint = polygon[(edgeIndex + 1) % polygon.length]
+      if (!nextPoint) {
+        return []
+      }
+
+      return [
+        {
+          nodeId: selectedCeilingEntry.ceiling.id,
+          edgeIndex,
+          start: toWallPlanPoint(point),
+          end: toWallPlanPoint(nextPoint),
+          isActive:
+            ceilingVertexDragState?.ceilingId === selectedCeilingEntry.ceiling.id &&
+            ceilingVertexDragState.mode === 'edge' &&
+            ceilingVertexDragState.edgeIndex === edgeIndex,
+        },
+      ]
     })
   }, [ceilingVertexDragState, selectedCeilingEntry, shouldShowCeilingBoundaryHandles])
   const slabHoleVertexHandles = useMemo(() => {
@@ -8519,6 +8754,36 @@ export function FloorplanPanel() {
     shouldShowSlabHoleBoundaryHandles,
     slabHoleVertexDragState,
   ])
+  const slabHoleEdgeHandles = useMemo(() => {
+    if (!(shouldShowSlabHoleBoundaryHandles && selectedSlabEntry && selectedSlabEditingHole)) {
+      return []
+    }
+
+    return selectedSlabEditingHole.flatMap((point, edgeIndex, polygon) => {
+      const nextPoint = polygon[(edgeIndex + 1) % polygon.length]
+      if (!nextPoint) {
+        return []
+      }
+
+      return [
+        {
+          nodeId: selectedSlabEntry.slab.id,
+          edgeIndex,
+          start: toWallPlanPoint(point),
+          end: toWallPlanPoint(nextPoint),
+          isActive:
+            slabHoleVertexDragState?.slabId === selectedSlabEntry.slab.id &&
+            slabHoleVertexDragState.mode === 'edge' &&
+            slabHoleVertexDragState.edgeIndex === edgeIndex,
+        },
+      ]
+    })
+  }, [
+    selectedSlabEditingHole,
+    selectedSlabEntry,
+    shouldShowSlabHoleBoundaryHandles,
+    slabHoleVertexDragState,
+  ])
   const ceilingHoleVertexHandles = useMemo(() => {
     if (
       !(
@@ -8570,6 +8835,38 @@ export function FloorplanPanel() {
           (point.y + (nextPoint?.y ?? point.y)) / 2,
         ] as WallPlanPoint,
       }
+    })
+  }, [
+    ceilingHoleVertexDragState,
+    selectedCeilingEditingHole,
+    selectedCeilingEntry,
+    shouldShowCeilingHoleBoundaryHandles,
+  ])
+  const ceilingHoleEdgeHandles = useMemo(() => {
+    if (
+      !(shouldShowCeilingHoleBoundaryHandles && selectedCeilingEntry && selectedCeilingEditingHole)
+    ) {
+      return []
+    }
+
+    return selectedCeilingEditingHole.flatMap((point, edgeIndex, polygon) => {
+      const nextPoint = polygon[(edgeIndex + 1) % polygon.length]
+      if (!nextPoint) {
+        return []
+      }
+
+      return [
+        {
+          nodeId: selectedCeilingEntry.ceiling.id,
+          edgeIndex,
+          start: toWallPlanPoint(point),
+          end: toWallPlanPoint(nextPoint),
+          isActive:
+            ceilingHoleVertexDragState?.ceilingId === selectedCeilingEntry.ceiling.id &&
+            ceilingHoleVertexDragState.mode === 'edge' &&
+            ceilingHoleVertexDragState.edgeIndex === edgeIndex,
+        },
+      ]
     })
   }, [
     ceilingHoleVertexDragState,
@@ -8944,16 +9241,26 @@ export function FloorplanPanel() {
   const selectedOpeningActionMenuPosition = useMemo(
     () =>
       selectedOpeningEntry
-        ? getFloorplanActionMenuPosition(selectedOpeningEntry.polygon, viewBox, surfaceSize)
+        ? getFloorplanActionMenuPosition(
+            selectedOpeningEntry.polygon,
+            viewBox,
+            surfaceSize,
+            floorplanSceneRotationDeg,
+          )
         : null,
-    [selectedOpeningEntry, surfaceSize, viewBox],
+    [floorplanSceneRotationDeg, selectedOpeningEntry, surfaceSize, viewBox],
   )
   const selectedItemActionMenuPosition = useMemo(
     () =>
       selectedItemEntry
-        ? getFloorplanActionMenuPosition(selectedItemEntry.polygon, viewBox, surfaceSize)
+        ? getFloorplanActionMenuPosition(
+            selectedItemEntry.polygon,
+            viewBox,
+            surfaceSize,
+            floorplanSceneRotationDeg,
+          )
         : null,
-    [selectedItemEntry, surfaceSize, viewBox],
+    [floorplanSceneRotationDeg, selectedItemEntry, surfaceSize, viewBox],
   )
   const selectedSpawnActionMenuPosition = useMemo(() => {
     if (!selectedSpawnEntry) {
@@ -8994,6 +9301,7 @@ export function FloorplanPanel() {
       ],
       viewBox,
       surfaceSize,
+      floorplanSceneRotationDeg,
     )
   }, [floorplanSceneRotationDeg, selectedSpawnEntry, surfaceSize, viewBox])
   const selectedSlabActionMenuPosition = useMemo(() => {
@@ -9002,7 +9310,12 @@ export function FloorplanPanel() {
     }
 
     if (selectedSlabEditingHole) {
-      return getFloorplanActionMenuPosition(selectedSlabEditingHole, viewBox, surfaceSize)
+      return getFloorplanActionMenuPosition(
+        selectedSlabEditingHole,
+        viewBox,
+        surfaceSize,
+        floorplanSceneRotationDeg,
+      )
     }
 
     return selectedSlabEntry
@@ -9010,35 +9323,70 @@ export function FloorplanPanel() {
           getSlabHandlePolygon(selectedSlabEntry),
           viewBox,
           surfaceSize,
+          floorplanSceneRotationDeg,
         )
       : null
-  }, [selectedSlabEditingHole, selectedSlabEntry, slabHoleMoveDraft, surfaceSize, viewBox])
+  }, [
+    floorplanSceneRotationDeg,
+    selectedSlabEditingHole,
+    selectedSlabEntry,
+    slabHoleMoveDraft,
+    surfaceSize,
+    viewBox,
+  ])
   const selectedCeilingActionMenuPosition = useMemo(() => {
     if (ceilingHoleMoveDraft) {
       return null
     }
 
     if (selectedCeilingEditingHole) {
-      return getFloorplanActionMenuPosition(selectedCeilingEditingHole, viewBox, surfaceSize)
+      return getFloorplanActionMenuPosition(
+        selectedCeilingEditingHole,
+        viewBox,
+        surfaceSize,
+        floorplanSceneRotationDeg,
+      )
     }
 
     return selectedCeilingEntry
-      ? getFloorplanActionMenuPosition(selectedCeilingEntry.polygon, viewBox, surfaceSize)
+      ? getFloorplanActionMenuPosition(
+          selectedCeilingEntry.polygon,
+          viewBox,
+          surfaceSize,
+          floorplanSceneRotationDeg,
+        )
       : null
-  }, [ceilingHoleMoveDraft, selectedCeilingEditingHole, selectedCeilingEntry, surfaceSize, viewBox])
+  }, [
+    ceilingHoleMoveDraft,
+    floorplanSceneRotationDeg,
+    selectedCeilingEditingHole,
+    selectedCeilingEntry,
+    surfaceSize,
+    viewBox,
+  ])
   const selectedWallActionMenuPosition = useMemo(
     () =>
       selectedWallEntry
-        ? getFloorplanActionMenuPosition(selectedWallEntry.polygon, viewBox, surfaceSize)
+        ? getFloorplanActionMenuPosition(
+            selectedWallEntry.polygon,
+            viewBox,
+            surfaceSize,
+            floorplanSceneRotationDeg,
+          )
         : null,
-    [selectedWallEntry, surfaceSize, viewBox],
+    [floorplanSceneRotationDeg, selectedWallEntry, surfaceSize, viewBox],
   )
   const selectedFenceActionMenuPosition = useMemo(
     () =>
       selectedFenceEntry
-        ? getFloorplanActionMenuPosition(selectedFenceEntry.centerline, viewBox, surfaceSize)
+        ? getFloorplanActionMenuPosition(
+            selectedFenceEntry.centerline,
+            viewBox,
+            surfaceSize,
+            floorplanSceneRotationDeg,
+          )
         : null,
-    [selectedFenceEntry, surfaceSize, viewBox],
+    [floorplanSceneRotationDeg, selectedFenceEntry, surfaceSize, viewBox],
   )
   const selectedStairActionMenuPosition = useMemo(
     () =>
@@ -9047,9 +9395,10 @@ export function FloorplanPanel() {
             selectedStairEntry.hitPolygons.flat(),
             viewBox,
             surfaceSize,
+            floorplanSceneRotationDeg,
           )
         : null,
-    [selectedStairEntry, surfaceSize, viewBox],
+    [floorplanSceneRotationDeg, selectedStairEntry, surfaceSize, viewBox],
   )
   const selectedRoofActionMenuPosition = useMemo(
     () =>
@@ -9058,9 +9407,10 @@ export function FloorplanPanel() {
             selectedRoofEntry.segments.flatMap(({ polygon }) => polygon),
             viewBox,
             surfaceSize,
+            floorplanSceneRotationDeg,
           )
         : null,
-    [selectedRoofEntry, surfaceSize, viewBox],
+    [floorplanSceneRotationDeg, selectedRoofEntry, surfaceSize, viewBox],
   )
   const floorplanCursorAnchorPosition = useMemo(() => {
     if (
@@ -9070,23 +9420,23 @@ export function FloorplanPanel() {
       viewBox.width > 0 &&
       viewBox.height > 0
     ) {
-      const svgPoint = toSvgPlanPoint(cursorPoint)
-
-      if (
-        svgPoint.x >= viewBox.minX &&
-        svgPoint.x <= viewBox.minX + viewBox.width &&
-        svgPoint.y >= viewBox.minY &&
-        svgPoint.y <= viewBox.minY + viewBox.height
-      ) {
-        return {
-          x: ((svgPoint.x - viewBox.minX) / viewBox.width) * surfaceSize.width,
-          y: ((svgPoint.y - viewBox.minY) / viewBox.height) * surfaceSize.height,
-        }
-      }
+      return projectSvgPointToSurface(
+        rotateSvgPoint(toSvgPlanPoint(cursorPoint), floorplanSceneRotationDeg),
+        viewBox,
+        surfaceSize,
+      )
     }
 
     return floorplanCursorPosition
-  }, [cursorPoint, floorplanCursorPosition, surfaceSize.height, surfaceSize.width, viewBox])
+  }, [
+    cursorPoint,
+    floorplanCursorPosition,
+    floorplanSceneRotationDeg,
+    surfaceSize,
+    surfaceSize.height,
+    surfaceSize.width,
+    viewBox,
+  ])
 
   useEffect(() => {
     setHoveredGuideCorner(null)
@@ -9129,19 +9479,25 @@ export function FloorplanPanel() {
       hoveredGuideCorner,
     )
 
-    if (
-      handleSvg.x < viewBox.minX ||
-      handleSvg.x > viewBox.minX + viewBox.width ||
-      handleSvg.y < viewBox.minY ||
-      handleSvg.y > viewBox.minY + viewBox.height
-    ) {
+    const centerPosition = projectSvgPointToSurface(
+      rotateSvgPoint(centerSvg, floorplanSceneRotationDeg),
+      viewBox,
+      surfaceSize,
+    )
+    const handlePosition = projectSvgPointToSurface(
+      rotateSvgPoint(handleSvg, floorplanSceneRotationDeg),
+      viewBox,
+      surfaceSize,
+    )
+
+    if (!(centerPosition && handlePosition)) {
       return null
     }
 
-    const centerX = ((centerSvg.x - viewBox.minX) / viewBox.width) * surfaceSize.width
-    const centerY = ((centerSvg.y - viewBox.minY) / viewBox.height) * surfaceSize.height
-    const handleX = ((handleSvg.x - viewBox.minX) / viewBox.width) * surfaceSize.width
-    const handleY = ((handleSvg.y - viewBox.minY) / viewBox.height) * surfaceSize.height
+    const centerX = centerPosition.x
+    const centerY = centerPosition.y
+    const handleX = handlePosition.x
+    const handleY = handlePosition.y
 
     let directionX = handleX - centerX
     let directionY = handleY - centerY
@@ -9168,8 +9524,10 @@ export function FloorplanPanel() {
     }
   }, [
     hoveredGuideCorner,
+    floorplanSceneRotationDeg,
     selectedGuide,
     selectedGuideDimensions,
+    surfaceSize,
     surfaceSize.height,
     surfaceSize.width,
     viewBox,
@@ -10684,6 +11042,32 @@ export function FloorplanPanel() {
           return currentDraft
         }
 
+        if (
+          dragState.mode === 'edge' &&
+          dragState.edgeIndex !== undefined &&
+          dragState.edgeNormal &&
+          dragState.initialPlanPoint &&
+          dragState.initialPolygon
+        ) {
+          const nextPolygon = moveFloorplanPolygonEdge(
+            dragState.initialPolygon,
+            dragState.edgeIndex,
+            dragState.edgeNormal,
+            dragState.initialPlanPoint,
+            snappedPoint,
+          )
+
+          if (polygonsEqual(currentDraft.polygon, nextPolygon)) {
+            return currentDraft
+          }
+
+          sfxEmitter.emit('sfx:grid-snap')
+          return {
+            ...currentDraft,
+            polygon: nextPolygon,
+          }
+        }
+
         const currentPoint = currentDraft.polygon[dragState.vertexIndex]
         if (currentPoint && pointsEqual(currentPoint, snappedPoint)) {
           return currentDraft
@@ -10779,6 +11163,32 @@ export function FloorplanPanel() {
       setCeilingBoundaryDraft((currentDraft) => {
         if (!currentDraft || currentDraft.ceilingId !== dragState.ceilingId) {
           return currentDraft
+        }
+
+        if (
+          dragState.mode === 'edge' &&
+          dragState.edgeIndex !== undefined &&
+          dragState.edgeNormal &&
+          dragState.initialPlanPoint &&
+          dragState.initialPolygon
+        ) {
+          const nextPolygon = moveFloorplanPolygonEdge(
+            dragState.initialPolygon,
+            dragState.edgeIndex,
+            dragState.edgeNormal,
+            dragState.initialPlanPoint,
+            snappedPoint,
+          )
+
+          if (polygonsEqual(currentDraft.polygon, nextPolygon)) {
+            return currentDraft
+          }
+
+          sfxEmitter.emit('sfx:grid-snap')
+          return {
+            ...currentDraft,
+            polygon: nextPolygon,
+          }
         }
 
         const currentPoint = currentDraft.polygon[dragState.vertexIndex]
@@ -10880,6 +11290,32 @@ export function FloorplanPanel() {
           currentDraft.holeIndex !== dragState.holeIndex
         ) {
           return currentDraft
+        }
+
+        if (
+          dragState.mode === 'edge' &&
+          dragState.edgeIndex !== undefined &&
+          dragState.edgeNormal &&
+          dragState.initialPlanPoint &&
+          dragState.initialPolygon
+        ) {
+          const nextPolygon = moveFloorplanPolygonEdge(
+            dragState.initialPolygon,
+            dragState.edgeIndex,
+            dragState.edgeNormal,
+            dragState.initialPlanPoint,
+            snappedPoint,
+          )
+
+          if (polygonsEqual(currentDraft.polygon, nextPolygon)) {
+            return currentDraft
+          }
+
+          sfxEmitter.emit('sfx:grid-snap')
+          return {
+            ...currentDraft,
+            polygon: nextPolygon,
+          }
         }
 
         const currentPoint = currentDraft.polygon[dragState.vertexIndex]
@@ -11064,6 +11500,32 @@ export function FloorplanPanel() {
           currentDraft.holeIndex !== dragState.holeIndex
         ) {
           return currentDraft
+        }
+
+        if (
+          dragState.mode === 'edge' &&
+          dragState.edgeIndex !== undefined &&
+          dragState.edgeNormal &&
+          dragState.initialPlanPoint &&
+          dragState.initialPolygon
+        ) {
+          const nextPolygon = moveFloorplanPolygonEdge(
+            dragState.initialPolygon,
+            dragState.edgeIndex,
+            dragState.edgeNormal,
+            dragState.initialPlanPoint,
+            snappedPoint,
+          )
+
+          if (polygonsEqual(currentDraft.polygon, nextPolygon)) {
+            return currentDraft
+          }
+
+          sfxEmitter.emit('sfx:grid-snap')
+          return {
+            ...currentDraft,
+            polygon: nextPolygon,
+          }
         }
 
         const currentPoint = currentDraft.polygon[dragState.vertexIndex]
@@ -13640,6 +14102,69 @@ export function FloorplanPanel() {
     },
     [displaySlabPolygons],
   )
+  const handleSlabEdgePointerDown = useCallback(
+    (slabId: SlabNode['id'], handleEdgeIndex: number, event: ReactPointerEvent<SVGLineElement>) => {
+      if (event.button !== 0) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setHoveredSlabHandleId(null)
+
+      const slabEntry = displaySlabPolygons.find(({ slab }) => slab.id === slabId)
+      if (!slabEntry) {
+        return
+      }
+
+      const basePolygon = slabEntry.polygon.map(toWallPlanPoint)
+      const handlePolygon = getSlabHandlePolygon(slabEntry)
+      const handleStartPoint = handlePolygon[handleEdgeIndex]
+      const handleEndPoint = handlePolygon[(handleEdgeIndex + 1) % handlePolygon.length]
+      if (!(handleStartPoint && handleEndPoint)) {
+        return
+      }
+
+      const handleMidpoint = {
+        x: (handleStartPoint.x + handleEndPoint.x) / 2,
+        y: (handleStartPoint.y + handleEndPoint.y) / 2,
+      }
+      const edgeIndex = getClosestPolygonEdgeIndex(handleMidpoint, slabEntry.polygon)
+      const startPoint = basePolygon[edgeIndex]
+      const endPoint = basePolygon[(edgeIndex + 1) % basePolygon.length]
+      if (!(startPoint && endPoint)) {
+        return
+      }
+
+      const edgeNormal = getFloorplanEdgeNormal(startPoint, endPoint)
+      if (!edgeNormal) {
+        return
+      }
+
+      const initialPlanPoint =
+        getPlanPointFromClientPoint(event.clientX, event.clientY) ??
+        ([(startPoint[0] + endPoint[0]) / 2, (startPoint[1] + endPoint[1]) / 2] as WallPlanPoint)
+
+      setSlabBoundaryDraft({
+        slabId,
+        polygon: basePolygon,
+        visualOffsets: getSlabVisualOffsets(slabEntry),
+      })
+      setSlabVertexDragState({
+        pointerId: event.pointerId,
+        slabId,
+        mode: 'edge',
+        vertexIndex: edgeIndex,
+        visualOffset: { x: 0, y: 0 },
+        edgeIndex,
+        edgeNormal,
+        initialPlanPoint,
+        initialPolygon: basePolygon,
+      })
+      setCursorPoint(initialPlanPoint)
+    },
+    [displaySlabPolygons, getPlanPointFromClientPoint],
+  )
   const handleCeilingVertexPointerDown = useCallback(
     (
       ceilingId: CeilingNode['id'],
@@ -13750,6 +14275,55 @@ export function FloorplanPanel() {
     },
     [displayCeilingPolygons],
   )
+  const handleCeilingEdgePointerDown = useCallback(
+    (ceilingId: CeilingNode['id'], edgeIndex: number, event: ReactPointerEvent<SVGLineElement>) => {
+      if (event.button !== 0) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setHoveredCeilingHandleId(null)
+
+      const ceilingEntry = displayCeilingPolygons.find(({ ceiling }) => ceiling.id === ceilingId)
+      if (!ceilingEntry) {
+        return
+      }
+
+      const basePolygon = ceilingEntry.polygon.map(toWallPlanPoint)
+      const startPoint = basePolygon[edgeIndex]
+      const endPoint = basePolygon[(edgeIndex + 1) % basePolygon.length]
+      if (!(startPoint && endPoint)) {
+        return
+      }
+
+      const edgeNormal = getFloorplanEdgeNormal(startPoint, endPoint)
+      if (!edgeNormal) {
+        return
+      }
+
+      const initialPlanPoint =
+        getPlanPointFromClientPoint(event.clientX, event.clientY) ??
+        ([(startPoint[0] + endPoint[0]) / 2, (startPoint[1] + endPoint[1]) / 2] as WallPlanPoint)
+
+      setCeilingBoundaryDraft({
+        ceilingId,
+        polygon: basePolygon,
+      })
+      setCeilingVertexDragState({
+        pointerId: event.pointerId,
+        ceilingId,
+        mode: 'edge',
+        vertexIndex: edgeIndex,
+        edgeIndex,
+        edgeNormal,
+        initialPlanPoint,
+        initialPolygon: basePolygon,
+      })
+      setCursorPoint(initialPlanPoint)
+    },
+    [displayCeilingPolygons, getPlanPointFromClientPoint],
+  )
   const handleSlabHoleVertexPointerDown = useCallback(
     (slabId: SlabNode['id'], vertexIndex: number, event: ReactPointerEvent<SVGCircleElement>) => {
       if (event.button !== 0) {
@@ -13859,6 +14433,59 @@ export function FloorplanPanel() {
       setCursorPoint(insertedPoint)
     },
     [displaySlabPolygons, editingHole],
+  )
+  const handleSlabHoleEdgePointerDown = useCallback(
+    (slabId: SlabNode['id'], edgeIndex: number, event: ReactPointerEvent<SVGLineElement>) => {
+      if (event.button !== 0) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setHoveredSlabHandleId(null)
+
+      const slabEntry = displaySlabPolygons.find(({ slab }) => slab.id === slabId)
+      const holeIndex = editingHole?.nodeId === slabId ? editingHole.holeIndex : null
+      const hole = holeIndex !== null ? slabEntry?.holes[holeIndex] : null
+      if (!(slabEntry && holeIndex !== null && hole)) {
+        return
+      }
+
+      const basePolygon = hole.map(toWallPlanPoint)
+      const startPoint = basePolygon[edgeIndex]
+      const endPoint = basePolygon[(edgeIndex + 1) % basePolygon.length]
+      if (!(startPoint && endPoint)) {
+        return
+      }
+
+      const edgeNormal = getFloorplanEdgeNormal(startPoint, endPoint)
+      if (!edgeNormal) {
+        return
+      }
+
+      const initialPlanPoint =
+        getPlanPointFromClientPoint(event.clientX, event.clientY) ??
+        ([(startPoint[0] + endPoint[0]) / 2, (startPoint[1] + endPoint[1]) / 2] as WallPlanPoint)
+
+      setSlabHoleBoundaryDraft({
+        slabId,
+        holeIndex,
+        polygon: basePolygon,
+      })
+      setSlabHoleVertexDragState({
+        pointerId: event.pointerId,
+        slabId,
+        holeIndex,
+        mode: 'edge',
+        vertexIndex: edgeIndex,
+        edgeIndex,
+        edgeNormal,
+        initialPlanPoint,
+        initialPolygon: basePolygon,
+      })
+      setCursorPoint(initialPlanPoint)
+    },
+    [displaySlabPolygons, editingHole, getPlanPointFromClientPoint],
   )
   const handleCeilingHoleVertexPointerDown = useCallback(
     (
@@ -13981,6 +14608,59 @@ export function FloorplanPanel() {
       setCursorPoint(insertedPoint)
     },
     [displayCeilingPolygons, editingHole],
+  )
+  const handleCeilingHoleEdgePointerDown = useCallback(
+    (ceilingId: CeilingNode['id'], edgeIndex: number, event: ReactPointerEvent<SVGLineElement>) => {
+      if (event.button !== 0) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      setHoveredCeilingHandleId(null)
+
+      const ceilingEntry = displayCeilingPolygons.find(({ ceiling }) => ceiling.id === ceilingId)
+      const holeIndex = editingHole?.nodeId === ceilingId ? editingHole.holeIndex : null
+      const hole = holeIndex !== null ? ceilingEntry?.holes[holeIndex] : null
+      if (!(ceilingEntry && holeIndex !== null && hole)) {
+        return
+      }
+
+      const basePolygon = hole.map(toWallPlanPoint)
+      const startPoint = basePolygon[edgeIndex]
+      const endPoint = basePolygon[(edgeIndex + 1) % basePolygon.length]
+      if (!(startPoint && endPoint)) {
+        return
+      }
+
+      const edgeNormal = getFloorplanEdgeNormal(startPoint, endPoint)
+      if (!edgeNormal) {
+        return
+      }
+
+      const initialPlanPoint =
+        getPlanPointFromClientPoint(event.clientX, event.clientY) ??
+        ([(startPoint[0] + endPoint[0]) / 2, (startPoint[1] + endPoint[1]) / 2] as WallPlanPoint)
+
+      setCeilingHoleBoundaryDraft({
+        ceilingId,
+        holeIndex,
+        polygon: basePolygon,
+      })
+      setCeilingHoleVertexDragState({
+        pointerId: event.pointerId,
+        ceilingId,
+        holeIndex,
+        mode: 'edge',
+        vertexIndex: edgeIndex,
+        edgeIndex,
+        edgeNormal,
+        initialPlanPoint,
+        initialPolygon: basePolygon,
+      })
+      setCursorPoint(initialPlanPoint)
+    },
+    [displayCeilingPolygons, editingHole, getPlanPointFromClientPoint],
   )
   const handleSiteVertexPointerDown = useCallback(
     (siteId: SiteNode['id'], vertexIndex: number, event: ReactPointerEvent<SVGCircleElement>) => {
@@ -15282,9 +15962,13 @@ export function FloorplanPanel() {
               />
 
               <FloorplanPolygonHandleLayer
+                edgeHandles={slabEdgeHandles}
                 hoveredHandleId={hoveredSlabHandleId}
                 midpointHandles={slabMidpointHandles}
                 midpointStyle="add"
+                onEdgePointerDown={(nodeId, edgeIndex, event) =>
+                  handleSlabEdgePointerDown(nodeId as SlabNode['id'], edgeIndex, event)
+                }
                 onHandleHoverChange={setHoveredSlabHandleId}
                 onMidpointPointerDown={(nodeId, edgeIndex, event) =>
                   handleSlabMidpointPointerDown(nodeId as SlabNode['id'], edgeIndex, event)
@@ -15301,9 +15985,13 @@ export function FloorplanPanel() {
               />
 
               <FloorplanPolygonHandleLayer
+                edgeHandles={slabHoleEdgeHandles}
                 hoveredHandleId={hoveredSlabHandleId}
                 midpointHandles={slabHoleMidpointHandles}
                 midpointStyle="add"
+                onEdgePointerDown={(nodeId, edgeIndex, event) =>
+                  handleSlabHoleEdgePointerDown(nodeId as SlabNode['id'], edgeIndex, event)
+                }
                 onHandleHoverChange={setHoveredSlabHandleId}
                 onMidpointPointerDown={(nodeId, edgeIndex, event) =>
                   handleSlabHoleMidpointPointerDown(nodeId as SlabNode['id'], edgeIndex, event)
@@ -15320,9 +16008,13 @@ export function FloorplanPanel() {
               />
 
               <FloorplanPolygonHandleLayer
+                edgeHandles={ceilingEdgeHandles}
                 hoveredHandleId={hoveredCeilingHandleId}
                 midpointHandles={ceilingMidpointHandles}
                 midpointStyle="add"
+                onEdgePointerDown={(nodeId, edgeIndex, event) =>
+                  handleCeilingEdgePointerDown(nodeId as CeilingNode['id'], edgeIndex, event)
+                }
                 onHandleHoverChange={setHoveredCeilingHandleId}
                 onMidpointPointerDown={(nodeId, edgeIndex, event) =>
                   handleCeilingMidpointPointerDown(nodeId as CeilingNode['id'], edgeIndex, event)
@@ -15339,9 +16031,13 @@ export function FloorplanPanel() {
               />
 
               <FloorplanPolygonHandleLayer
+                edgeHandles={ceilingHoleEdgeHandles}
                 hoveredHandleId={hoveredCeilingHandleId}
                 midpointHandles={ceilingHoleMidpointHandles}
                 midpointStyle="add"
+                onEdgePointerDown={(nodeId, edgeIndex, event) =>
+                  handleCeilingHoleEdgePointerDown(nodeId as CeilingNode['id'], edgeIndex, event)
+                }
                 onHandleHoverChange={setHoveredCeilingHandleId}
                 onMidpointPointerDown={(nodeId, edgeIndex, event) =>
                   handleCeilingHoleMidpointPointerDown(
