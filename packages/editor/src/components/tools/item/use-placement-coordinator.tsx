@@ -514,6 +514,10 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       ceilingId: null,
       surfaceItemId: null,
     }
+    if (!asset.attachTo && placementState.current.surface === 'floor') {
+      gridPosition.current.y = 0
+      cursorGroupRef.current.position.y = 0
+    }
 
     // ---- Helpers ----
 
@@ -641,9 +645,11 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
       previousGridPos = [...result.gridPosition]
       gridPosition.current.set(...result.gridPosition)
-      // Only update X and Z for cursor - useFrame will handle Y (slab elevation)
-      cursorGroupRef.current.position.x = result.cursorPosition[0]
-      cursorGroupRef.current.position.z = result.cursorPosition[2]
+      cursorGroupRef.current.position.set(
+        result.cursorPosition[0],
+        result.cursorPosition[1],
+        result.cursorPosition[2],
+      )
 
       const draft = draftNode.current
       if (draft) draft.position = result.gridPosition

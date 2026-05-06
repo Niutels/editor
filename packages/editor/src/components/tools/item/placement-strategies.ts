@@ -33,7 +33,6 @@ import type {
 const DEFAULT_DIMENSIONS: [number, number, number] = [1, 1, 1]
 const LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT = 0.1
 const UPWARD_SURFACE_NORMAL_MIN_Y = 0.75
-const AUTO_SURFACE_MIN_LOCAL_Y = 0.1
 
 function isLowProfileItemSurface(item: ItemNode): boolean {
   if (item.asset.attachTo) return false
@@ -64,7 +63,7 @@ function getSurfacePlacementHeight(surfaceItem: ItemNode, event: ItemEvent, loca
     return surfaceItem.asset.surface.height * surfaceItem.scale[1]
   }
 
-  if (localPos.y < AUTO_SURFACE_MIN_LOCAL_Y) return null
+  if (!Number.isFinite(localPos.y)) return null
   return localPos.y
 }
 
