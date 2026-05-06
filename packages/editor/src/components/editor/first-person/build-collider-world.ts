@@ -4,6 +4,7 @@ import {
   type DoorNode,
   isOperationDoorType,
   sceneRegistry,
+  useInteractive,
   useScene,
 } from '@pascal-app/core'
 import * as THREE from 'three'
@@ -112,11 +113,14 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   if (leafW <= 0 || leafH <= 0) return null
 
   const leafCenterY = -node.frameThickness / 2
+  const runtimeDoorState = useInteractive.getState().doors[node.id]
+  const operationState = runtimeDoorState?.operationState ?? node.operationState
+  const swingAngle = runtimeDoorState?.swingAngle ?? node.swingAngle
 
   root.updateWorldMatrix(true, false)
 
   if (node.doorType === 'garage-sectional' || node.doorType === 'garage-rollup') {
-    const openAmount = getGarageVisibleOpeningRatio(node.doorType, node.operationState)
+    const openAmount = getGarageVisibleOpeningRatio(node.doorType, operationState)
     const visibleHeight = leafH * (1 - openAmount)
     if (visibleHeight <= 0.12) return null
 
@@ -138,7 +142,7 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
 
   if (
     isOperationDoorType(node.doorType) &&
-    (node.operationState ?? 0) >= OPERATION_DOOR_COLLIDER_OPEN_THRESHOLD
+    (operationState ?? 0) >= OPERATION_DOOR_COLLIDER_OPEN_THRESHOLD
   ) {
     return null
   }
@@ -146,7 +150,7 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   const hingeX = node.hingesSide === 'right' ? leafW / 2 : -leafW / 2
   const swingDirectionSign = node.swingDirection === 'inward' ? 1 : -1
   const hingeDirectionSign = node.hingesSide === 'right' ? 1 : -1
-  const clampedSwingAngle = Math.max(0, Math.min(Math.PI / 2, node.swingAngle ?? 0))
+  const clampedSwingAngle = Math.max(0, Math.min(Math.PI / 2, swingAngle ?? 0))
   const leafSwingRotation = clampedSwingAngle * swingDirectionSign * hingeDirectionSign
 
   const sourceGeometry = new THREE.BoxGeometry(

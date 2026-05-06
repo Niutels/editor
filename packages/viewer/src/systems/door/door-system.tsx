@@ -250,6 +250,7 @@ function addDoorLeaf(
     segments,
     contentPadding,
     handle,
+    handleBothSides = false,
     handleHeight,
     handleSide,
     doorCloser,
@@ -268,6 +269,7 @@ function addDoorLeaf(
     segments: DoorNode['segments']
     contentPadding: DoorNode['contentPadding']
     handle: boolean
+    handleBothSides?: boolean
     handleHeight: number
     handleSide: DoorNode['handleSide']
     doorCloser: boolean
@@ -313,6 +315,11 @@ function addDoorLeaf(
 
     addLeafBox(baseMaterial, 0.028, 0.14, 0.01, handleX, handleY, faceZ + 0.005)
     addLeafBox(baseMaterial, 0.022, 0.1, 0.035, handleX, handleY, faceZ + 0.025)
+
+    if (handleBothSides) {
+      addLeafBox(baseMaterial, 0.028, 0.14, 0.01, handleX, handleY, -faceZ - 0.005)
+      addLeafBox(baseMaterial, 0.022, 0.1, 0.035, handleX, handleY, -faceZ - 0.025)
+    }
   }
 
   if (hasLeafContent && doorCloser) {
@@ -477,6 +484,16 @@ function addFoldingDoor(
     handleY,
     handlePoint.z + 0.045,
   )
+  addBox(
+    mesh,
+    baseMaterial,
+    0.035,
+    0.16,
+    leafDepth + 0.035,
+    handlePoint.x - 0.035,
+    handleY,
+    handlePoint.z - 0.045,
+  )
 }
 
 function addPocketDoor(
@@ -570,6 +587,7 @@ function addPocketDoor(
     contentPadding,
   })
   addBox(mesh, baseMaterial, 0.03, 0.18, leafDepth + 0.03, handleX, handleY, leafDepth / 2 + 0.02)
+  addBox(mesh, baseMaterial, 0.03, 0.18, leafDepth + 0.03, handleX, handleY, -leafDepth / 2 - 0.02)
 }
 
 function addBarnDoor(
@@ -687,6 +705,16 @@ function addBarnDoor(
     handleY,
     faceZ + leafDepth / 2 + 0.02,
   )
+  addBox(
+    mesh,
+    baseMaterial,
+    0.032,
+    0.22,
+    leafDepth + 0.034,
+    handleX,
+    handleY,
+    faceZ - leafDepth / 2 - 0.02,
+  )
 }
 
 function addSlidingDoor(
@@ -732,7 +760,7 @@ function addSlidingDoor(
   const backZ = -leafDepth / 2 - 0.006
   const railY = leafCenterY + panelHeight / 2 - Math.min(frameThickness * 0.35, 0.02)
   const handleY = handleHeight - doorHeight / 2
-  const handleX = activeX - activeSign * (panelWidth / 2 - 0.06)
+  const handleX = activeX + activeSign * (panelWidth / 2 - 0.06)
 
   addBox(mesh, revealMaterial, insideWidth, 0.024, Math.max(frameDepth * 0.32, 0.026), 0, railY, 0)
   addBox(
@@ -788,16 +816,8 @@ function addSlidingDoor(
     contentPadding,
     keepFrameWhenEmpty: true,
   })
-  addBox(
-    mesh,
-    baseMaterial,
-    0.028,
-    0.18,
-    leafDepth + 0.03,
-    handleX,
-    handleY,
-    frontZ + leafDepth / 2 + 0.018,
-  )
+  addBox(mesh, baseMaterial, 0.032, 0.24, 0.016, handleX, handleY, frontZ + leafDepth / 2 + 0.01)
+  addBox(mesh, baseMaterial, 0.032, 0.24, 0.016, handleX, handleY, frontZ - leafDepth / 2 - 0.01)
 }
 
 function addGarageSectionalDoor(
@@ -1299,6 +1319,7 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
       segments,
       contentPadding,
       handle,
+      handleBothSides: doorType === 'double' || doorType === 'french',
       handleHeight,
       handleSide: 'right',
       doorCloser,
@@ -1318,6 +1339,7 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
       segments,
       contentPadding,
       handle,
+      handleBothSides: doorType === 'double' || doorType === 'french',
       handleHeight,
       handleSide: 'left',
       doorCloser: false,
@@ -1340,6 +1362,7 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
       segments,
       contentPadding,
       handle,
+      handleBothSides: doorType === 'hinged',
       handleHeight,
       handleSide,
       doorCloser,

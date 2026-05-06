@@ -5,6 +5,7 @@ import {
   type AnyNodeId,
   DoorNode,
   emitter,
+  useInteractive,
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
@@ -132,6 +133,9 @@ export function DoorPanel() {
       })
       if (!hasChange) return
 
+      if ('operationState' in updates || 'swingAngle' in updates || 'doorType' in updates) {
+        useInteractive.getState().removeDoorOpenState(selectedId as AnyNodeId)
+      }
       updateNode(selectedId as AnyNode['id'], updates)
       useScene.getState().dirtyNodes.add(selectedId as AnyNodeId)
     },

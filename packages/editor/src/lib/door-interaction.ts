@@ -7,6 +7,10 @@ const activeDoorAnimations = new Map<AnyNodeId, number>()
 
 export { isOperationDoorType }
 
+type DoorOpenAnimationOptions = {
+  persist?: boolean
+}
+
 export function updateDoorOpenState(
   doorId: AnyNodeId,
   data: { operationState?: number; swingAngle?: number },
@@ -43,6 +47,7 @@ export function animateDoorOpenState(
   from: number,
   to: number,
   onComplete?: () => void,
+  options?: DoorOpenAnimationOptions,
 ) {
   const existingFrame = activeDoorAnimations.get(doorId)
   if (existingFrame !== undefined) {
@@ -61,8 +66,12 @@ export function animateDoorOpenState(
       activeDoorAnimations.set(doorId, window.requestAnimationFrame(tick))
     } else {
       activeDoorAnimations.delete(doorId)
-      updateDoorOpenState(doorId, { [field]: to })
-      clearRuntimeDoorOpenState(doorId)
+      if (options?.persist ?? true) {
+        updateDoorOpenState(doorId, { [field]: to })
+        clearRuntimeDoorOpenState(doorId)
+      } else {
+        setRuntimeDoorOpenState(doorId, { [field]: to })
+      }
       onComplete?.()
     }
   }

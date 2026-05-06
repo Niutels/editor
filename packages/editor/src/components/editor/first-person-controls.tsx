@@ -1,7 +1,7 @@
 'use client'
 
 import '../../three-types'
-import { type AnyNodeId, sceneRegistry, useScene } from '@pascal-app/core'
+import { type AnyNodeId, sceneRegistry, useInteractive, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { KeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
@@ -195,22 +195,26 @@ export const FirstPersonControls = () => {
     if (node?.type !== 'door' || node.openingKind === 'opening') return
 
     if (isOperationDoorType(node.doorType)) {
-      const currentOpenAmount = node.operationState ?? 0
+      const currentOpenAmount =
+        useInteractive.getState().doors[doorId]?.operationState ?? node.operationState ?? 0
       animateDoorOpenState(
         doorId,
         'operationState',
         currentOpenAmount,
         currentOpenAmount >= 0.5 ? 0 : 1,
         rebuildColliderWorld,
+        { persist: false },
       )
     } else {
-      const currentSwingAngle = node.swingAngle ?? 0
+      const currentSwingAngle =
+        useInteractive.getState().doors[doorId]?.swingAngle ?? node.swingAngle ?? 0
       animateDoorOpenState(
         doorId,
         'swingAngle',
         currentSwingAngle,
         currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
         rebuildColliderWorld,
+        { persist: false },
       )
     }
   }, [rebuildColliderWorld, resolveInteractableDoorId])
