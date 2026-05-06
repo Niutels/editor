@@ -10,7 +10,7 @@ import type {
   WallNode,
 } from '@pascal-app/core'
 import { getScaledDimensions, sceneRegistry, useScene } from '@pascal-app/core'
-import { Euler, Quaternion, Vector3 } from 'three'
+import { Euler, Matrix3, Quaternion, Vector3 } from 'three'
 import {
   calculateCursorRotation,
   calculateItemRotation,
@@ -31,6 +31,56 @@ import type {
 } from './placement-types'
 
 const DEFAULT_DIMENSIONS: [number, number, number] = [1, 1, 1]
+const LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT = 0.1
+const UPWARD_SURFACE_NORMAL_MIN_Y = 0.75
+const AUTO_SURFACE_MIN_LOCAL_Y = 0.1
+
+function isLowProfileItemSurface(item: ItemNode): boolean {
+  if (item.asset.attachTo) return false
+  const surfaceHeight = item.asset.surface
+    ? item.asset.surface.height * item.scale[1]
+    : getScaledDimensions(item)[1]
+  return surfaceHeight <= LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT
+}
+
+function getWorldNormalY(event: ItemEvent): number | null {
+  if (!event.normal) return null
+
+  const normal = new Vector3(event.normal[0], event.normal[1], event.normal[2])
+  normal.applyNormalMatrix(new Matrix3().getNormalMatrix(event.object.matrixWorld)).normalize()
+  return normal.y
+}
+
+function isUpwardItemSurfaceHit(event: ItemEvent): boolean {
+  const normalY = getWorldNormalY(event)
+  return normalY !== null && normalY >= UPWARD_SURFACE_NORMAL_MIN_Y
+}
+
+function getSurfacePlacementHeight(surfaceItem: ItemNode, event: ItemEvent, localPos: Vector3) {
+  if (isLowProfileItemSurface(surfaceItem)) return null
+  if (!isUpwardItemSurfaceHit(event)) return null
+
+  if (surfaceItem.asset.surface) {
+    return surfaceItem.asset.surface.height * surfaceItem.scale[1]
+  }
+
+  if (localPos.y < AUTO_SURFACE_MIN_LOCAL_Y) return null
+  return localPos.y
+}
+
+function isDescendantOfItem(
+  candidate: ItemNode,
+  ancestor: ItemNode,
+  nodes: Record<string, AnyNode>,
+): boolean {
+  let parentId = candidate.parentId
+  while (parentId) {
+    if (parentId === ancestor.id) return true
+    const parent = nodes[parentId as AnyNodeId]
+    parentId = parent?.parentId ?? null
+  }
+  return false
+}
 
 // ============================================================================
 // FLOOR STRATEGY
@@ -434,8 +484,11 @@ export const itemSurfaceStrategy = {
     const surfaceItem = event.node as ItemNode
     // Don't surface-place on the draft itself
     if (surfaceItem.id === ctx.draftItem?.id) return null
-    // Surface item must declare a surface
-    if (!surfaceItem.asset.surface) return null
+    if (ctx.state.surface === 'item-surface' && ctx.state.surfaceItemId === surfaceItem.id) {
+      return null
+    }
+    const nodes = useScene.getState().nodes
+    if (ctx.draftItem && isDescendantOfItem(surfaceItem, ctx.draftItem, nodes)) return null
 
     // Size check: our footprint must fit on surface item's footprint
     const ourDims = ctx.draftItem
@@ -449,10 +502,12 @@ export const itemSurfaceStrategy = {
 
     const worldPos = new Vector3(event.position[0], event.position[1], event.position[2])
     const localPos = surfaceMesh.worldToLocal(worldPos)
+    const surfaceHeight = getSurfacePlacementHeight(surfaceItem, event, localPos)
+    if (surfaceHeight === null) return null
 
     const x = snapToGrid(localPos.x, ourDims[0])
     const z = snapToGrid(localPos.z, ourDims[2])
-    const y = surfaceItem.asset.surface.height * surfaceItem.scale[1]
+    const y = surfaceHeight
 
     const worldSnapped = surfaceMesh.localToWorld(new Vector3(x, y, z))
 
@@ -485,10 +540,11 @@ export const itemSurfaceStrategy = {
   move(ctx: PlacementContext, event: ItemEvent): PlacementResult | null {
     if (ctx.state.surface !== 'item-surface') return null
     if (!(ctx.state.surfaceItemId && ctx.draftItem)) return null
+    if (event.node.id !== ctx.state.surfaceItemId) return null
 
     const nodes = useScene.getState().nodes
     const surfaceItem = nodes[ctx.state.surfaceItemId as AnyNodeId] as ItemNode | undefined
-    if (!surfaceItem?.asset.surface) return null
+    if (!surfaceItem) return null
 
     const surfaceMesh = sceneRegistry.nodes.get(ctx.state.surfaceItemId)
     if (!surfaceMesh) return null
@@ -496,10 +552,12 @@ export const itemSurfaceStrategy = {
     const ourDims = getScaledDimensions(ctx.draftItem)
     const worldPos = new Vector3(event.position[0], event.position[1], event.position[2])
     const localPos = surfaceMesh.worldToLocal(worldPos)
+    const surfaceHeight = getSurfacePlacementHeight(surfaceItem, event, localPos)
+    if (surfaceHeight === null) return null
 
     const x = snapToGrid(localPos.x, ourDims[0])
     const z = snapToGrid(localPos.z, ourDims[2])
-    const y = surfaceItem.asset.surface.height * surfaceItem.scale[1]
+    const y = surfaceHeight
 
     const worldSnapped = surfaceMesh.localToWorld(new Vector3(x, y, z))
 
@@ -519,6 +577,7 @@ export const itemSurfaceStrategy = {
   click(ctx: PlacementContext, _event: ItemEvent): CommitResult | null {
     if (ctx.state.surface !== 'item-surface') return null
     if (!(ctx.draftItem && ctx.state.surfaceItemId)) return null
+    if (_event.node.id !== ctx.state.surfaceItemId) return null
 
     return {
       nodeUpdate: {
