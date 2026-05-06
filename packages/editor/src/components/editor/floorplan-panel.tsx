@@ -29,6 +29,7 @@ import {
   type RoofSegmentNode,
   type SiteNode,
   SlabNode,
+  type SpawnNode,
   type StairNode,
   StairNode as StairNodeSchema,
   type StairSegmentNode,
@@ -215,6 +216,13 @@ const FLOORPLAN_TRACE_STRUCTURE_SELECTED_FILL_OPACITY = 0.34
 const FLOORPLAN_SITE_COLOR = '#10b981'
 const FLOORPLAN_NODE_FOOTPRINT_STROKE_WIDTH = FLOORPLAN_OPENING_STROKE_WIDTH / 2
 const FLOORPLAN_NODE_FOOTPRINT_CROSS_STROKE_WIDTH = FLOORPLAN_NODE_FOOTPRINT_STROKE_WIDTH * 0.7
+const FLOORPLAN_SPAWN_RING_RADIUS = 0.34
+const FLOORPLAN_SPAWN_RING_STROKE_WIDTH = 0.08
+const FLOORPLAN_SPAWN_HIT_RADIUS = 0.62
+const FLOORPLAN_SPAWN_ARROW_POINTS = '0,-0.62 -0.19,-0.2 0.19,-0.2'
+const FLOORPLAN_SPAWN_BODY_WIDTH = 0.3
+const FLOORPLAN_SPAWN_BODY_HEIGHT = 0.46
+const FLOORPLAN_VIEW_ROTATION_DEG = 90
 type FloorplanViewport = {
   centerX: number
   centerY: number
@@ -587,6 +595,12 @@ type FloorplanItemEntry = {
   depth: number
 }
 
+type FloorplanSpawnEntry = {
+  spawn: SpawnNode
+  position: Point2D
+  rotation: number
+}
+
 type ReferenceFloorData = {
   ceilingPolygons: CeilingPolygonEntry[]
   fenceEntries: FloorplanFenceEntry[]
@@ -772,11 +786,11 @@ function toWallPlanPoint(point: Point2D): WallPlanPoint {
 }
 
 function toSvgX(value: number): number {
-  return -value
+  return value
 }
 
 function toSvgY(value: number): number {
-  return -value
+  return value
 }
 
 function toSvgPoint(point: Point2D): SvgPoint {
@@ -915,11 +929,11 @@ function getGuideRotateCursor(isDarkMode: boolean) {
 }
 
 function getGuideSvgRotation(rotationY: number) {
-  return normalizeAngle(Math.PI - rotationY)
+  return normalizeAngle(-rotationY)
 }
 
 function getGuideSceneRotationFromSvgRotation(rotationSvg: number) {
-  return normalizeAngle(Math.PI - rotationSvg)
+  return normalizeAngle(-rotationSvg)
 }
 
 function buildGuideTranslateDraft(
@@ -2938,6 +2952,37 @@ function buildGridPath(
   return commands.join(' ')
 }
 
+function getRotatedViewBoxBounds(
+  viewBox: { minX: number; minY: number; width: number; height: number },
+  rotationDegrees: number,
+) {
+  const radians = (-rotationDegrees * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  const corners = [
+    { x: viewBox.minX, y: viewBox.minY },
+    { x: viewBox.minX + viewBox.width, y: viewBox.minY },
+    { x: viewBox.minX + viewBox.width, y: viewBox.minY + viewBox.height },
+    { x: viewBox.minX, y: viewBox.minY + viewBox.height },
+  ]
+
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+
+  for (const corner of corners) {
+    const x = corner.x * cos - corner.y * sin
+    const y = corner.x * sin + corner.y * cos
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+
+  return { minX, maxX, minY, maxY }
+}
+
 function findClosestWallPoint(
   point: WallPlanPoint,
   walls: WallNode[],
@@ -3264,20 +3309,20 @@ const FloorplanGridLayer = memo(function FloorplanGridLayer({
       <path
         d={minorGridPath}
         fill="none"
-        opacity={palette.minorGridOpacity}
+        opacity={palette.majorGridOpacity}
         shapeRendering="crispEdges"
-        stroke={palette.minorGrid}
-        strokeWidth={FLOORPLAN_MINOR_GRID_STROKE_WIDTH}
+        stroke={palette.majorGrid}
+        strokeWidth={FLOORPLAN_MAJOR_GRID_STROKE_WIDTH}
         vectorEffect="non-scaling-stroke"
       />
 
       <path
         d={majorGridPath}
         fill="none"
-        opacity={palette.majorGridOpacity}
+        opacity={palette.minorGridOpacity}
         shapeRendering="crispEdges"
-        stroke={palette.majorGrid}
-        strokeWidth={FLOORPLAN_MAJOR_GRID_STROKE_WIDTH}
+        stroke={palette.minorGrid}
+        strokeWidth={FLOORPLAN_MINOR_GRID_STROKE_WIDTH}
         vectorEffect="non-scaling-stroke"
       />
     </>
@@ -5193,11 +5238,14 @@ function FloorplanItemImage({
 
 const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
   canFocusItems,
+  canFocusSpawns,
   canFocusStairs,
   canSelectItems,
+  canSelectSpawns,
   canSelectStairs,
   highlightedIdSet,
   hoveredItemId,
+  hoveredSpawnId,
   hoveredStairId,
   isDeleteMode,
   isFurnishContextActive,
@@ -5207,6 +5255,11 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
   onItemHoverEnter,
   onItemPointerDown,
   onItemSelect,
+  onSpawnDoubleClick,
+  onSpawnHoverChange,
+  onSpawnHoverEnter,
+  onSpawnPointerDown,
+  onSpawnSelect,
   onStairDoubleClick,
   onStairHoverChange,
   onStairHoverEnter,
@@ -5214,16 +5267,20 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
   onStairSelect,
   palette,
   selectedIdSet,
+  spawnEntries,
   stairEntries,
   unit,
   wallSelectionHatchId,
 }: {
   canFocusItems: boolean
+  canFocusSpawns: boolean
   canFocusStairs: boolean
   canSelectItems: boolean
+  canSelectSpawns: boolean
   canSelectStairs: boolean
   highlightedIdSet: ReadonlySet<string>
   hoveredItemId: ItemNode['id'] | null
+  hoveredSpawnId: SpawnNode['id'] | null
   hoveredStairId: StairNode['id'] | null
   isDeleteMode: boolean
   isFurnishContextActive: boolean
@@ -5233,6 +5290,11 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
   onItemHoverEnter: (itemId: ItemNode['id']) => void
   onItemPointerDown: (itemId: ItemNode['id'], event: ReactPointerEvent<SVGElement>) => void
   onItemSelect: (itemId: ItemNode['id'], event: ReactMouseEvent<SVGElement>) => void
+  onSpawnDoubleClick: (spawn: SpawnNode, event: ReactMouseEvent<SVGElement>) => void
+  onSpawnHoverChange: (spawnId: SpawnNode['id'] | null) => void
+  onSpawnHoverEnter: (spawnId: SpawnNode['id']) => void
+  onSpawnPointerDown: (spawnId: SpawnNode['id'], event: ReactPointerEvent<SVGElement>) => void
+  onSpawnSelect: (spawnId: SpawnNode['id'], event: ReactMouseEvent<SVGElement>) => void
   onStairDoubleClick: (stair: StairNode, event: ReactMouseEvent<SVGElement>) => void
   onStairHoverChange: (stairId: StairNode['id'] | null) => void
   onStairHoverEnter: (stairId: StairNode['id']) => void
@@ -5240,11 +5302,12 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
   onStairSelect: (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => void
   palette: FloorplanPalette
   selectedIdSet: ReadonlySet<string>
+  spawnEntries: FloorplanSpawnEntry[]
   stairEntries: FloorplanStairEntry[]
   unit: 'metric' | 'imperial'
   wallSelectionHatchId: string
 }) {
-  if (itemEntries.length === 0 && stairEntries.length === 0) {
+  if (itemEntries.length === 0 && stairEntries.length === 0 && spawnEntries.length === 0) {
     return null
   }
 
@@ -5424,6 +5487,120 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
     )
   })
 
+  const spawnNodes = spawnEntries.map(({ spawn, position, rotation }) => {
+    const isSelected = selectedIdSet.has(spawn.id)
+    const isHighlighted = highlightedIdSet.has(spawn.id)
+    const isHovered = hoveredSpawnId === spawn.id
+    const isDeleteHovered = isDeleteMode && isHovered
+    const isSelectionActive = isSelected || isHighlighted
+    const showHighlight = isDeleteHovered || (isHovered && !isSelectionActive)
+    const stroke = isDeleteHovered
+      ? palette.deleteStroke
+      : isSelectionActive
+        ? palette.selectedStroke
+        : '#16a34a'
+    const fill = isDeleteHovered ? palette.deleteFill : '#22c55e'
+    const rotationDeg = (-rotation * 180) / Math.PI
+
+    return (
+      <g
+        key={spawn.id}
+        onClick={
+          canSelectSpawns
+            ? (event) => {
+                event.stopPropagation()
+                onSpawnSelect(spawn.id, event)
+              }
+            : undefined
+        }
+        onDoubleClick={
+          canFocusSpawns
+            ? (event) => {
+                event.stopPropagation()
+                onSpawnDoubleClick(spawn, event)
+              }
+            : undefined
+        }
+        onPointerDown={
+          canFocusSpawns && isSelected
+            ? (event) => {
+                if (event.button === 0) {
+                  onSpawnPointerDown(spawn.id, event)
+                }
+              }
+            : undefined
+        }
+        onPointerEnter={canSelectSpawns ? () => onSpawnHoverEnter(spawn.id) : undefined}
+        onPointerLeave={canSelectSpawns ? () => onSpawnHoverChange(null) : undefined}
+        pointerEvents={canSelectSpawns ? undefined : 'none'}
+        style={canSelectSpawns ? { cursor: EDITOR_CURSOR } : undefined}
+        transform={`translate(${toSvgX(position.x)} ${toSvgY(position.y)}) rotate(${rotationDeg})`}
+      >
+        <title>{spawn.name || 'Spawn Point'}</title>
+        <circle
+          fill="none"
+          pointerEvents="none"
+          r={FLOORPLAN_SPAWN_HIT_RADIUS}
+          stroke={isDeleteHovered ? palette.deleteStroke : '#22c55e'}
+          strokeOpacity={isDeleteHovered || isSelectionActive ? 0.2 : 0.14}
+          strokeWidth={0.18}
+          style={{
+            opacity: showHighlight || isSelectionActive ? 1 : 0,
+            transition: FLOORPLAN_HOVER_TRANSITION,
+          }}
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle
+          fill={fill}
+          fillOpacity={isDeleteHovered ? 0.18 : isSelectionActive ? 0.18 : 0.1}
+          pointerEvents="none"
+          r={FLOORPLAN_SPAWN_RING_RADIUS}
+          stroke={stroke}
+          strokeOpacity={isSelectionActive || isHovered ? 0.95 : 0.82}
+          strokeWidth={FLOORPLAN_SPAWN_RING_STROKE_WIDTH}
+          vectorEffect="non-scaling-stroke"
+        />
+        <polygon
+          fill={fill}
+          fillOpacity={isDeleteHovered ? 0.82 : 0.92}
+          points={FLOORPLAN_SPAWN_ARROW_POINTS}
+          pointerEvents="none"
+          stroke={stroke}
+          strokeLinejoin="round"
+          strokeWidth={0.055}
+          vectorEffect="non-scaling-stroke"
+        />
+        <rect
+          fill={fill}
+          fillOpacity={isDeleteHovered ? 0.78 : 0.88}
+          height={FLOORPLAN_SPAWN_BODY_HEIGHT}
+          pointerEvents="none"
+          rx={0.045}
+          stroke={stroke}
+          strokeWidth={0.045}
+          vectorEffect="non-scaling-stroke"
+          width={FLOORPLAN_SPAWN_BODY_WIDTH}
+          x={-FLOORPLAN_SPAWN_BODY_WIDTH / 2}
+          y={-FLOORPLAN_SPAWN_BODY_HEIGHT / 2}
+        />
+        <circle
+          fill={isDeleteHovered ? palette.deleteStroke : '#dcfce7'}
+          pointerEvents="none"
+          r={0.09}
+          stroke={stroke}
+          strokeWidth={0.035}
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle
+          fill="transparent"
+          pointerEvents="all"
+          r={FLOORPLAN_SPAWN_HIT_RADIUS}
+          stroke="transparent"
+        />
+      </g>
+    )
+  })
+
   return (
     <>
       {isFurnishContextActive ? (
@@ -5446,10 +5623,12 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
             stairEntries={stairEntries}
           />
           {itemNodes}
+          {spawnNodes}
         </>
       ) : (
         <>
           {itemNodes}
+          {spawnNodes}
           <FloorplanStairLayer
             canFocusStairs={canFocusStairs}
             canSelectStairs={canSelectStairs}
@@ -6501,10 +6680,12 @@ export function FloorplanPanel() {
     roofs,
     site,
     slabs,
+    spawns,
     walls,
     zones,
   } = useFloorplanSceneData({ buildingId, levelId })
   const buildingRotationDeg = (buildingRotationY * 180) / Math.PI
+  const floorplanSceneRotationDeg = FLOORPLAN_VIEW_ROTATION_DEG - buildingRotationDeg
 
   const [draftStart, setDraftStart] = useState<WallPlanPoint | null>(null)
   const [draftEnd, setDraftEnd] = useState<WallPlanPoint | null>(null)
@@ -6558,6 +6739,7 @@ export function FloorplanPanel() {
   const [hoveredSlabId, setHoveredSlabId] = useState<SlabNode['id'] | null>(null)
   const [hoveredCeilingId, setHoveredCeilingId] = useState<CeilingNode['id'] | null>(null)
   const [hoveredItemId, setHoveredItemId] = useState<ItemNode['id'] | null>(null)
+  const [hoveredSpawnId, setHoveredSpawnId] = useState<SpawnNode['id'] | null>(null)
   const [hoveredStairId, setHoveredStairId] = useState<StairNode['id'] | null>(null)
   const [hoveredZoneId, setHoveredZoneId] = useState<ZoneNodeType['id'] | null>(null)
   const [hoveredEndpointId, setHoveredEndpointId] = useState<string | null>(null)
@@ -7145,6 +7327,24 @@ export function FloorplanPanel() {
       ),
     [levelDescendantNodes],
   )
+  const floorplanSpawnEntries = useMemo<FloorplanSpawnEntry[]>(
+    () =>
+      spawns
+        .filter((spawn) => spawn.visible !== false)
+        .map((spawn) => {
+          const live = useLiveTransforms.getState().get(spawn.id)
+
+          return {
+            spawn,
+            position: {
+              x: live?.position[0] ?? spawn.position[0],
+              y: live?.position[2] ?? spawn.position[2],
+            },
+            rotation: live?.rotation ?? spawn.rotation,
+          }
+        }),
+    [movingFloorplanNodeRevision, spawns],
+  )
   const floorplanItemEntries = useMemo(() => {
     const transformCache = new Map<string, SharedFloorplanNodeTransform | null>()
 
@@ -7504,6 +7704,13 @@ export function FloorplanPanel() {
 
     return floorplanItemEntries.find(({ item }) => item.id === selectedIds[0]) ?? null
   }, [floorplanItemEntries, selectedIds])
+  const selectedSpawnEntry = useMemo(() => {
+    if (selectedIds.length !== 1) {
+      return null
+    }
+
+    return floorplanSpawnEntries.find(({ spawn }) => spawn.id === selectedIds[0]) ?? null
+  }, [floorplanSpawnEntries, selectedIds])
   const selectedItemClearanceMeasurements = useMemo(() => {
     if (!selectedItemEntry) {
       return [] as LinearMeasurementOverlay[]
@@ -7837,6 +8044,7 @@ export function FloorplanPanel() {
   const isCeilingMoveActive = movingNode?.type === 'ceiling'
   const isFenceMoveActive = movingNode?.type === 'fence'
   const isWallMoveActive = movingNode?.type === 'wall'
+  const isSpawnMoveActive = movingNode?.type === 'spawn'
   const isWallCurveActive = curvingWall?.type === 'wall'
   const isFenceCurveActive = curvingFence?.type === 'fence'
   const isFenceEndpointMoveActive = movingFenceEndpoint !== null
@@ -7855,6 +8063,7 @@ export function FloorplanPanel() {
     isCeilingMoveActive ||
     isFenceMoveActive ||
     isWallMoveActive ||
+    isSpawnMoveActive ||
     isWallCurveActive ||
     isFenceCurveActive ||
     isFenceEndpointMoveActive ||
@@ -7976,6 +8185,7 @@ export function FloorplanPanel() {
       !movingFenceEndpoint &&
       isFloorplanStructureContextActive) ||
     isDeleteMode
+  const canSelectFloorplanSpawns = canSelectFloorplanStairs
   const canSelectFloorplanItems =
     (mode === 'select' &&
       floorplanSelectionTool === 'click' &&
@@ -7989,6 +8199,7 @@ export function FloorplanPanel() {
     !movingNode &&
     !movingFenceEndpoint &&
     isFloorplanStructureContextActive
+  const canFocusFloorplanSpawns = canFocusFloorplanStairs
   const canFocusFloorplanItems =
     mode === 'select' &&
     floorplanSelectionTool === 'click' &&
@@ -8744,6 +8955,47 @@ export function FloorplanPanel() {
         : null,
     [selectedItemEntry, surfaceSize, viewBox],
   )
+  const selectedSpawnActionMenuPosition = useMemo(() => {
+    if (!selectedSpawnEntry) {
+      return null
+    }
+
+    const { position } = selectedSpawnEntry
+    const svg = svgRef.current
+    const scene = floorplanSceneRef.current
+    const sceneCtm = scene?.getScreenCTM()
+    const hasResolvedSceneRotation = Number.isFinite(floorplanSceneRotationDeg)
+
+    if (svg && scene && sceneCtm && hasResolvedSceneRotation) {
+      const svgRect = svg.getBoundingClientRect()
+      const svgPoint = svg.createSVGPoint()
+      svgPoint.x = toSvgX(position.x)
+      svgPoint.y = toSvgY(position.y) - FLOORPLAN_SPAWN_HIT_RADIUS
+
+      const screenPoint = svgPoint.matrixTransform(sceneCtm)
+      const anchorX = screenPoint.x - svgRect.left
+      const anchorY = screenPoint.y - svgRect.top
+
+      return {
+        x: Math.min(
+          Math.max(anchorX, FLOORPLAN_ACTION_MENU_HORIZONTAL_PADDING),
+          surfaceSize.width - FLOORPLAN_ACTION_MENU_HORIZONTAL_PADDING,
+        ),
+        y: Math.max(anchorY, FLOORPLAN_ACTION_MENU_MIN_ANCHOR_Y),
+      }
+    }
+
+    return getFloorplanActionMenuPosition(
+      [
+        { x: position.x - FLOORPLAN_SPAWN_HIT_RADIUS, y: position.y - FLOORPLAN_SPAWN_HIT_RADIUS },
+        { x: position.x + FLOORPLAN_SPAWN_HIT_RADIUS, y: position.y - FLOORPLAN_SPAWN_HIT_RADIUS },
+        { x: position.x + FLOORPLAN_SPAWN_HIT_RADIUS, y: position.y + FLOORPLAN_SPAWN_HIT_RADIUS },
+        { x: position.x - FLOORPLAN_SPAWN_HIT_RADIUS, y: position.y + FLOORPLAN_SPAWN_HIT_RADIUS },
+      ],
+      viewBox,
+      surfaceSize,
+    )
+  }, [floorplanSceneRotationDeg, selectedSpawnEntry, surfaceSize, viewBox])
   const selectedSlabActionMenuPosition = useMemo(() => {
     if (slabHoleMoveDraft) {
       return null
@@ -9049,31 +9301,35 @@ export function FloorplanPanel() {
     () => getVisibleGridSteps(viewBox.width, surfaceSize.width),
     [surfaceSize.width, viewBox.width],
   )
+  const gridBounds = useMemo(
+    () => getRotatedViewBoxBounds(viewBox, floorplanSceneRotationDeg),
+    [floorplanSceneRotationDeg, viewBox],
+  )
 
   const minorGridPath = useMemo(
     () =>
       buildGridPath(
-        viewBox.minX,
-        viewBox.minX + viewBox.width,
-        viewBox.minY,
-        viewBox.minY + viewBox.height,
+        gridBounds.minX,
+        gridBounds.maxX,
+        gridBounds.minY,
+        gridBounds.maxY,
         gridSteps.minorStep,
         {
           excludeStep: gridSteps.majorStep,
         },
       ),
-    [gridSteps.majorStep, gridSteps.minorStep, viewBox],
+    [gridBounds, gridSteps.majorStep, gridSteps.minorStep],
   )
   const majorGridPath = useMemo(
     () =>
       buildGridPath(
-        viewBox.minX,
-        viewBox.minX + viewBox.width,
-        viewBox.minY,
-        viewBox.minY + viewBox.height,
+        gridBounds.minX,
+        gridBounds.maxX,
+        gridBounds.minY,
+        gridBounds.maxY,
         gridSteps.majorStep,
       ),
-    [gridSteps.majorStep, viewBox],
+    [gridBounds, gridSteps.majorStep],
   )
   const floorplanUnitsPerPixel = viewBox.width / Math.max(surfaceSize.width, 1)
 
@@ -9809,6 +10065,30 @@ export function FloorplanPanel() {
   }, [movingNode, scheduleMovingFloorplanNodeRefresh])
 
   useEffect(() => {
+    if (movingNode?.type !== 'spawn') {
+      return
+    }
+
+    const movingSpawnId = movingNode.id
+    const refreshSpawnPreview = () => {
+      scheduleMovingFloorplanNodeRefresh()
+    }
+
+    refreshSpawnPreview()
+
+    const unsubscribe = useLiveTransforms.subscribe((state, previousState) => {
+      const nextTransform = state.transforms.get(movingSpawnId)
+      const previousTransform = previousState.transforms.get(movingSpawnId)
+
+      if (nextTransform !== previousTransform) {
+        refreshSpawnPreview()
+      }
+    })
+
+    return unsubscribe
+  }, [movingNode, scheduleMovingFloorplanNodeRefresh])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const isEditableTarget =
@@ -9831,7 +10111,9 @@ export function FloorplanPanel() {
       }
 
       if (
-        (movingNode?.type === 'stair' || movingNode?.type === 'item') &&
+        (movingNode?.type === 'stair' ||
+          movingNode?.type === 'item' ||
+          movingNode?.type === 'spawn') &&
         (event.key === 'r' || event.key === 'R' || event.key === 't' || event.key === 'T')
       ) {
         setMovingFloorplanNodeRevision((current) => current + 1)
@@ -11070,7 +11352,7 @@ export function FloorplanPanel() {
 
   const hoveredWallIdRef = useRef<string | null>(null)
   const floorplanGridLocalY = useMemo(() => {
-    if (movingNode?.type === 'item') {
+    if (movingNode?.type === 'item' || movingNode?.type === 'spawn') {
       return movingNode.position[1]
     }
 
@@ -11107,8 +11389,8 @@ export function FloorplanPanel() {
       const snappedPoint = getSnappedFloorplanPoint(planPoint)
       const cos = Math.cos(buildingRotationY)
       const sin = Math.sin(buildingRotationY)
-      const worldX = buildingPosition[0] + snappedPoint[0] * cos - snappedPoint[1] * sin
-      const worldZ = buildingPosition[2] + snappedPoint[0] * sin + snappedPoint[1] * cos
+      const worldX = buildingPosition[0] + snappedPoint[0] * cos + snappedPoint[1] * sin
+      const worldZ = buildingPosition[2] - snappedPoint[0] * sin + snappedPoint[1] * cos
 
       emitter.emit(`grid:${eventType}` as any, {
         nativeEvent: nativeEvent.nativeEvent as any,
@@ -11918,6 +12200,14 @@ export function FloorplanPanel() {
     [syncDeleteHoveredId],
   )
 
+  const handleSpawnHoverChange = useCallback(
+    (spawnId: SpawnNode['id'] | null) => {
+      setHoveredSpawnId(spawnId)
+      syncDeleteHoveredId(spawnId)
+    },
+    [syncDeleteHoveredId],
+  )
+
   const handleStairHoverChange = useCallback(
     (stairId: StairNode['id'] | null) => {
       setHoveredStairId(stairId)
@@ -11941,6 +12231,7 @@ export function FloorplanPanel() {
       handleSlabHoverChange(null)
       handleCeilingHoverChange(null)
       handleStairHoverChange(null)
+      handleSpawnHoverChange(null)
       handleZoneHoverChange(null)
       handleItemHoverChange(itemId)
     },
@@ -11950,6 +12241,7 @@ export function FloorplanPanel() {
       handleOpeningHoverChange,
       handleCeilingHoverChange,
       handleSlabHoverChange,
+      handleSpawnHoverChange,
       handleStairHoverChange,
       handleWallHoverChange,
       handleZoneHoverChange,
@@ -11963,6 +12255,7 @@ export function FloorplanPanel() {
       handleSlabHoverChange(null)
       handleCeilingHoverChange(null)
       handleStairHoverChange(null)
+      handleSpawnHoverChange(null)
       handleZoneHoverChange(null)
       handleFenceHoverChange(fenceId)
     },
@@ -11972,6 +12265,7 @@ export function FloorplanPanel() {
       handleOpeningHoverChange,
       handleCeilingHoverChange,
       handleSlabHoverChange,
+      handleSpawnHoverChange,
       handleStairHoverChange,
       handleWallHoverChange,
       handleZoneHoverChange,
@@ -11985,6 +12279,7 @@ export function FloorplanPanel() {
       handleSlabHoverChange(null)
       handleCeilingHoverChange(null)
       handleWallHoverChange(null)
+      handleSpawnHoverChange(null)
       handleZoneHoverChange(null)
       handleStairHoverChange(stairId)
     },
@@ -11994,6 +12289,31 @@ export function FloorplanPanel() {
       handleOpeningHoverChange,
       handleCeilingHoverChange,
       handleSlabHoverChange,
+      handleSpawnHoverChange,
+      handleStairHoverChange,
+      handleWallHoverChange,
+      handleZoneHoverChange,
+    ],
+  )
+  const handleFloorplanSpawnHoverEnter = useCallback(
+    (spawnId: SpawnNode['id']) => {
+      handleItemHoverChange(null)
+      handleFenceHoverChange(null)
+      handleOpeningHoverChange(null)
+      handleSlabHoverChange(null)
+      handleCeilingHoverChange(null)
+      handleWallHoverChange(null)
+      handleStairHoverChange(null)
+      handleZoneHoverChange(null)
+      handleSpawnHoverChange(spawnId)
+    },
+    [
+      handleCeilingHoverChange,
+      handleFenceHoverChange,
+      handleItemHoverChange,
+      handleOpeningHoverChange,
+      handleSlabHoverChange,
+      handleSpawnHoverChange,
       handleStairHoverChange,
       handleWallHoverChange,
       handleZoneHoverChange,
@@ -12086,6 +12406,7 @@ export function FloorplanPanel() {
         | OpeningNode['id']
         | SlabNode['id']
         | CeilingNode['id']
+        | SpawnNode['id']
         | StairNode['id']
         | ZoneNodeType['id'],
       eventType: 'click' | 'double-click',
@@ -12100,6 +12421,7 @@ export function FloorplanPanel() {
             node.type === 'door' ||
             node.type === 'window' ||
             node.type === 'item' ||
+            node.type === 'spawn' ||
             node.type === 'stair' ||
             node.type === 'zone')
         )
@@ -12309,6 +12631,12 @@ export function FloorplanPanel() {
     },
     [emitFloorplanNodeClick],
   )
+  const handleSpawnSelect = useCallback(
+    (spawnId: SpawnNode['id'], event: ReactMouseEvent<SVGElement>) => {
+      emitFloorplanNodeClick(spawnId, 'click', event)
+    },
+    [emitFloorplanNodeClick],
+  )
   const handleStairSelect = useCallback(
     (stairId: StairNode['id'], event: ReactMouseEvent<SVGElement>) => {
       emitFloorplanNodeClick(stairId, 'click', event)
@@ -12346,6 +12674,73 @@ export function FloorplanPanel() {
       emitter.emit('camera-controls:focus', { nodeId: item.id })
     },
     [emitFloorplanNodeClick],
+  )
+  const handleSpawnDoubleClick = useCallback(
+    (spawn: SpawnNode, event: ReactMouseEvent<SVGElement>) => {
+      emitFloorplanNodeClick(spawn.id, 'double-click', event)
+      emitter.emit('camera-controls:focus', { nodeId: spawn.id })
+    },
+    [emitFloorplanNodeClick],
+  )
+  const handleSpawnPointerDown = useCallback(
+    (spawnId: SpawnNode['id'], event: ReactPointerEvent<SVGElement>) => {
+      if (event.button !== 0) {
+        return
+      }
+
+      const spawn = selectedSpawnEntry?.spawn
+      if (!spawn || spawn.id !== spawnId) {
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      const suppressClick = (clickEvent: MouseEvent) => {
+        clickEvent.stopImmediatePropagation()
+        clickEvent.preventDefault()
+        window.removeEventListener('click', suppressClick, true)
+      }
+      window.addEventListener('click', suppressClick, true)
+      requestAnimationFrame(() => {
+        window.removeEventListener('click', suppressClick, true)
+      })
+
+      sfxEmitter.emit('sfx:item-pick')
+      setMovingNode(spawn)
+      setSelection({ selectedIds: [] })
+    },
+    [selectedSpawnEntry, setMovingNode, setSelection],
+  )
+  const handleSelectedSpawnMove = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+
+      const spawn = selectedSpawnEntry?.spawn
+      if (!spawn) {
+        return
+      }
+
+      sfxEmitter.emit('sfx:item-pick')
+      setMovingNode(spawn)
+      setSelection({ selectedIds: [] })
+    },
+    [selectedSpawnEntry, setMovingNode, setSelection],
+  )
+  const handleSelectedSpawnDelete = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+
+      const spawn = selectedSpawnEntry?.spawn
+      if (!spawn) {
+        return
+      }
+
+      sfxEmitter.emit('sfx:item-delete')
+      deleteNode(spawn.id as AnyNodeId)
+      setSelection({ selectedIds: [] })
+    },
+    [deleteNode, selectedSpawnEntry, setSelection],
   )
   const handleItemPointerDown = useCallback(
     (itemId: ItemNode['id'], event: ReactPointerEvent<SVGElement>) => {
@@ -13818,6 +14213,7 @@ export function FloorplanPanel() {
     handleWallHoverChange(null)
     handleSlabHoverChange(null)
     handleCeilingHoverChange(null)
+    handleSpawnHoverChange(null)
     handleStairHoverChange(null)
     handleZoneHoverChange(null)
     setHoveredEndpointId(null)
@@ -13835,6 +14231,7 @@ export function FloorplanPanel() {
     handleItemHoverChange,
     handleOpeningHoverChange,
     handleSlabHoverChange,
+    handleSpawnHoverChange,
     handleStairHoverChange,
     handleWallHoverChange,
     handleZoneHoverChange,
@@ -13940,6 +14337,7 @@ export function FloorplanPanel() {
       handleOpeningHoverChange(null)
       handleWallHoverChange(null)
       handleSlabHoverChange(null)
+      handleSpawnHoverChange(null)
       handleStairHoverChange(null)
       handleZoneHoverChange(null)
       setHoveredEndpointId(null)
@@ -13960,6 +14358,7 @@ export function FloorplanPanel() {
       handleItemHoverChange,
       handleOpeningHoverChange,
       handleSlabHoverChange,
+      handleSpawnHoverChange,
       handleStairHoverChange,
       handleWallHoverChange,
       handleZoneHoverChange,
@@ -14397,6 +14796,11 @@ export function FloorplanPanel() {
             onDuplicate: handleSelectedOpeningDuplicate,
             onMove: handleSelectedOpeningMove,
           }}
+          spawn={{
+            position: selectedSpawnActionMenuPosition,
+            onDelete: handleSelectedSpawnDelete,
+            onMove: handleSelectedSpawnMove,
+          }}
           roof={{
             position: selectedRoofActionMenuPosition,
             onDelete: handleSelectedRoofDelete,
@@ -14598,7 +15002,9 @@ export function FloorplanPanel() {
 
             <g
               ref={floorplanSceneRef}
-              transform={buildingRotationDeg !== 0 ? `rotate(${buildingRotationDeg})` : undefined}
+              transform={
+                floorplanSceneRotationDeg !== 0 ? `rotate(${floorplanSceneRotationDeg})` : undefined
+              }
             >
               <FloorplanGridLayer
                 majorGridPath={majorGridPath}
@@ -14691,11 +15097,14 @@ export function FloorplanPanel() {
 
               <FloorplanNodeLayer
                 canFocusItems={canFocusFloorplanItems}
+                canFocusSpawns={canFocusFloorplanSpawns}
                 canFocusStairs={canFocusFloorplanStairs}
                 canSelectItems={canSelectFloorplanItems}
+                canSelectSpawns={canSelectFloorplanSpawns}
                 canSelectStairs={canSelectFloorplanStairs}
                 highlightedIdSet={highlightedFloorplanIdSet}
                 hoveredItemId={hoveredItemId}
+                hoveredSpawnId={hoveredSpawnId}
                 hoveredStairId={hoveredStairId}
                 isDeleteMode={isDeleteMode}
                 isFurnishContextActive={isFloorplanFurnishContextActive}
@@ -14705,6 +15114,11 @@ export function FloorplanPanel() {
                 onItemHoverEnter={handleFloorplanItemHoverEnter}
                 onItemPointerDown={handleItemPointerDown}
                 onItemSelect={handleItemSelect}
+                onSpawnDoubleClick={handleSpawnDoubleClick}
+                onSpawnHoverChange={handleSpawnHoverChange}
+                onSpawnHoverEnter={handleFloorplanSpawnHoverEnter}
+                onSpawnPointerDown={handleSpawnPointerDown}
+                onSpawnSelect={handleSpawnSelect}
                 onStairDoubleClick={handleStairDoubleClick}
                 onStairHoverChange={handleStairHoverChange}
                 onStairHoverEnter={handleFloorplanStairHoverEnter}
@@ -14712,6 +15126,7 @@ export function FloorplanPanel() {
                 onStairSelect={handleStairSelect}
                 palette={palette}
                 selectedIdSet={selectedIdSet}
+                spawnEntries={floorplanSpawnEntries}
                 stairEntries={renderedFloorplanStairEntries}
                 unit={unit}
                 wallSelectionHatchId={wallSelectionHatchId}
