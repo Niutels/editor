@@ -146,6 +146,13 @@ type DoorAnimationEvents = {
   }
 }
 
+type WindowAnimationEvents = {
+  'window:animation-completed': {
+    windowId: WindowNode['id']
+    field: 'operationState'
+  }
+}
+
 type PresetEvents = {
   'preset:generate-thumbnail': { presetId: string; nodeId: string }
   'preset:thumbnail-updated': { presetId: string; thumbnailUrl: string }
@@ -189,6 +196,7 @@ type EditorEvents = GridEvents &
   ToolEvents &
   GuideEvents &
   DoorAnimationEvents &
+  WindowAnimationEvents &
   PresetEvents &
   ThumbnailEvents &
   SnapshotEvents &

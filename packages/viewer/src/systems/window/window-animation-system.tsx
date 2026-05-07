@@ -1,4 +1,11 @@
-import { type AnyNodeId, sceneRegistry, useInteractive, useScene } from '@pascal-app/core'
+import {
+  type AnyNodeId,
+  emitter,
+  sceneRegistry,
+  useInteractive,
+  useScene,
+  type WindowNode,
+} from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
 import {
   AWNING_WINDOW_SASH_NAME,
@@ -101,6 +108,10 @@ export const WindowAnimationSystem = () => {
       } else {
         interactive.setWindowOpenState(typedWindowId, { [animation.field]: animation.to })
       }
+      emitter.emit('window:animation-completed', {
+        windowId: typedWindowId as WindowNode['id'],
+        field: animation.field,
+      })
     }
   }, 2)
 

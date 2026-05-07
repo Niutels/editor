@@ -11,7 +11,7 @@ type WindowOpenAnimationOptions = {
   persist?: boolean
 }
 
-function isOperableWindowType(windowType: string | undefined) {
+export function isOperableWindowType(windowType: string | undefined) {
   return (
     windowType === 'sliding' ||
     windowType === 'casement' ||
