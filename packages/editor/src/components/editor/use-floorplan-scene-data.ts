@@ -11,6 +11,7 @@ import {
   type RoofNode,
   type SiteNode,
   type SlabNode,
+  type SpawnNode,
   useScene,
   type WallNode,
   type WindowNode,
@@ -113,6 +114,7 @@ export function useFloorplanSceneData({
   )
   const levelGuides = useLevelChildren(levelId, (node): node is GuideNode => node?.type === 'guide')
   const zones = useLevelChildren(levelId, (node): node is ZoneNodeType => node?.type === 'zone')
+  const spawns = useLevelChildren(levelId, (node): node is SpawnNode => node?.type === 'spawn')
   const roofs = useScene(
     useShallow((state) => {
       if (!levelId) {
@@ -180,6 +182,7 @@ export function useFloorplanSceneData({
     roofs,
     site,
     slabs,
+    spawns,
     walls,
     zones,
   }
