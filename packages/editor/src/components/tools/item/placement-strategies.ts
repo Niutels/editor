@@ -9,7 +9,12 @@ import type {
   WallEvent,
   WallNode,
 } from '@pascal-app/core'
-import { getScaledDimensions, sceneRegistry, useScene } from '@pascal-app/core'
+import {
+  getScaledDimensions,
+  isLowProfileItemSurface,
+  sceneRegistry,
+  useScene,
+} from '@pascal-app/core'
 import { Euler, Matrix3, Quaternion, Vector3 } from 'three'
 import {
   calculateCursorRotation,
@@ -31,16 +36,7 @@ import type {
 } from './placement-types'
 
 const DEFAULT_DIMENSIONS: [number, number, number] = [1, 1, 1]
-const LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT = 0.1
 const UPWARD_SURFACE_NORMAL_MIN_Y = 0.75
-
-function isLowProfileItemSurface(item: ItemNode): boolean {
-  if (item.asset.attachTo) return false
-  const surfaceHeight = item.asset.surface
-    ? item.asset.surface.height * item.scale[1]
-    : getScaledDimensions(item)[1]
-  return surfaceHeight <= LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT
-}
 
 function getWorldNormalY(event: ItemEvent): number | null {
   if (!event.normal) return null
