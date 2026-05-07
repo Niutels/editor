@@ -1,16 +1,16 @@
 'use client'
 
 import '../../three-types'
-import { type AnyNodeId, sceneRegistry, useInteractive, useScene } from '@pascal-app/core'
+import { type AnyNodeId, emitter, sceneRegistry, useInteractive, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { KeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box3, Euler, Matrix4, Ray, Raycaster, Vector2, Vector3 } from 'three'
 import {
-  animateDoorOpenState,
   DOOR_SWING_OPEN_ANGLE,
   isOperationDoorType,
+  toggleDoorOpenState,
 } from '../../lib/door-interaction'
 import useEditor from '../../store/use-editor'
 import {
@@ -159,7 +159,9 @@ export const FirstPersonControls = () => {
       const hingeX = node.hingesSide === 'right' ? leafW / 2 : -leafW / 2
       const swingDirectionSign = node.swingDirection === 'inward' ? 1 : -1
       const hingeDirectionSign = node.hingesSide === 'right' ? 1 : -1
-      const clampedSwingAngle = Math.max(0, Math.min(DOOR_SWING_OPEN_ANGLE, node.swingAngle ?? 0))
+      const currentSwingAngle =
+        useInteractive.getState().doors[doorId as AnyNodeId]?.swingAngle ?? node.swingAngle ?? 0
+      const clampedSwingAngle = Math.max(0, Math.min(DOOR_SWING_OPEN_ANGLE, currentSwingAngle))
       const leafSwingRotation = clampedSwingAngle * swingDirectionSign * hingeDirectionSign
 
       doorLeafMatrix
@@ -194,30 +196,8 @@ export const FirstPersonControls = () => {
     const node = useScene.getState().nodes[doorId]
     if (node?.type !== 'door' || node.openingKind === 'opening') return
 
-    if (isOperationDoorType(node.doorType)) {
-      const currentOpenAmount =
-        useInteractive.getState().doors[doorId]?.operationState ?? node.operationState ?? 0
-      animateDoorOpenState(
-        doorId,
-        'operationState',
-        currentOpenAmount,
-        currentOpenAmount >= 0.5 ? 0 : 1,
-        rebuildColliderWorld,
-        { persist: false },
-      )
-    } else {
-      const currentSwingAngle =
-        useInteractive.getState().doors[doorId]?.swingAngle ?? node.swingAngle ?? 0
-      animateDoorOpenState(
-        doorId,
-        'swingAngle',
-        currentSwingAngle,
-        currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
-        rebuildColliderWorld,
-        { persist: false },
-      )
-    }
-  }, [rebuildColliderWorld, resolveInteractableDoorId])
+    toggleDoorOpenState(doorId, { persist: false })
+  }, [resolveInteractableDoorId])
 
   const placedSpawn = useMemo<FirstPersonSpawn | null>(() => {
     if (!(placedSpawnNode && placedSpawnNode.type === 'spawn')) return null
@@ -256,6 +236,11 @@ export const FirstPersonControls = () => {
       worldRef.current = null
       setWorld(null)
     }
+  }, [rebuildColliderWorld])
+
+  useEffect(() => {
+    emitter.on('door:animation-completed', rebuildColliderWorld)
+    return () => emitter.off('door:animation-completed', rebuildColliderWorld)
   }, [rebuildColliderWorld])
 
   useEffect(() => {

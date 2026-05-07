@@ -137,6 +137,13 @@ type GuideEvents = {
   'guide:deleted': { guideId: GuideNode['id'] }
 }
 
+type DoorAnimationEvents = {
+  'door:animation-completed': {
+    doorId: DoorNode['id']
+    field: 'operationState' | 'swingAngle'
+  }
+}
+
 type PresetEvents = {
   'preset:generate-thumbnail': { presetId: string; nodeId: string }
   'preset:thumbnail-updated': { presetId: string; thumbnailUrl: string }
@@ -178,6 +185,7 @@ type EditorEvents = GridEvents &
   CameraControlEvents &
   ToolEvents &
   GuideEvents &
+  DoorAnimationEvents &
   PresetEvents &
   ThumbnailEvents &
   SnapshotEvents &

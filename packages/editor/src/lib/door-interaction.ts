@@ -1,9 +1,13 @@
-import { type AnyNodeId, isOperationDoorType, useInteractive, useScene } from '@pascal-app/core'
+import {
+  type AnyNodeId,
+  type DoorInteractiveState,
+  isOperationDoorType,
+  useInteractive,
+  useScene,
+} from '@pascal-app/core'
 
 export const DOOR_SWING_OPEN_ANGLE = Math.PI / 2
-
-const DOOR_TOGGLE_ANIMATION_MS = 520
-const activeDoorAnimations = new Map<AnyNodeId, number>()
+export const DOOR_TOGGLE_ANIMATION_MS = 520
 
 export { isOperationDoorType }
 
@@ -11,70 +15,74 @@ type DoorOpenAnimationOptions = {
   persist?: boolean
 }
 
-export function updateDoorOpenState(
+function getDisplayedDoorValue(
   doorId: AnyNodeId,
-  data: { operationState?: number; swingAngle?: number },
+  field: keyof DoorInteractiveState,
+  nodeValue: number | undefined,
 ) {
-  const scene = useScene.getState()
-  const node = scene.nodes[doorId]
-  scene.updateNode(doorId, data)
-  scene.dirtyNodes.add(doorId)
-  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
+  const interactive = useInteractive.getState()
+  const runtimeValue = interactive.doors[doorId]?.[field]
+  if (runtimeValue !== undefined) return runtimeValue
+
+  const queuedValue = interactive.doorAnimations[doorId]?.from
+  if (queuedValue !== undefined) return queuedValue
+
+  return nodeValue ?? 0
 }
 
-function setRuntimeDoorOpenState(
+function startDoorOpenAnimation(
   doorId: AnyNodeId,
-  data: { operationState?: number; swingAngle?: number },
-) {
-  const scene = useScene.getState()
-  const node = scene.nodes[doorId]
-  useInteractive.getState().setDoorOpenState(doorId, data)
-  scene.dirtyNodes.add(doorId)
-  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
-}
-
-function clearRuntimeDoorOpenState(doorId: AnyNodeId) {
-  const scene = useScene.getState()
-  const node = scene.nodes[doorId]
-  useInteractive.getState().removeDoorOpenState(doorId)
-  scene.dirtyNodes.add(doorId)
-  if (node?.parentId) scene.dirtyNodes.add(node.parentId as AnyNodeId)
-}
-
-export function animateDoorOpenState(
-  doorId: AnyNodeId,
-  field: 'operationState' | 'swingAngle',
+  field: keyof DoorInteractiveState,
   from: number,
   to: number,
-  onComplete?: () => void,
   options?: DoorOpenAnimationOptions,
 ) {
-  const existingFrame = activeDoorAnimations.get(doorId)
-  if (existingFrame !== undefined) {
-    window.cancelAnimationFrame(existingFrame)
+  useInteractive.getState().startDoorAnimation(doorId, {
+    field,
+    from,
+    to,
+    startedAt: null,
+    durationMs: DOOR_TOGGLE_ANIMATION_MS,
+    persist: options?.persist ?? true,
+  })
+}
+
+export function toggleDoorOpenState(doorId: AnyNodeId, options?: DoorOpenAnimationOptions) {
+  const node = useScene.getState().nodes[doorId]
+  if (node?.type !== 'door' || node.openingKind === 'opening') return
+
+  if (isOperationDoorType(node.doorType)) {
+    const currentOpenAmount = getDisplayedDoorValue(doorId, 'operationState', node.operationState)
+    startDoorOpenAnimation(
+      doorId,
+      'operationState',
+      currentOpenAmount,
+      currentOpenAmount >= 0.5 ? 0 : 1,
+      options,
+    )
+    return
   }
 
-  const startedAt = performance.now()
-  const ease = (value: number) => value * value * (3 - 2 * value)
+  const currentSwingAngle = getDisplayedDoorValue(doorId, 'swingAngle', node.swingAngle)
+  startDoorOpenAnimation(
+    doorId,
+    'swingAngle',
+    currentSwingAngle,
+    currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
+    options,
+  )
+}
 
-  const tick = (now: number) => {
-    const progress = Math.min(1, (now - startedAt) / DOOR_TOGGLE_ANIMATION_MS)
-    const value = from + (to - from) * ease(progress)
-    setRuntimeDoorOpenState(doorId, { [field]: value })
+export function closeDoorOpenState(doorId: AnyNodeId, options?: DoorOpenAnimationOptions) {
+  const node = useScene.getState().nodes[doorId]
+  if (node?.type !== 'door' || node.openingKind === 'opening') return
 
-    if (progress < 1) {
-      activeDoorAnimations.set(doorId, window.requestAnimationFrame(tick))
-    } else {
-      activeDoorAnimations.delete(doorId)
-      if (options?.persist ?? true) {
-        updateDoorOpenState(doorId, { [field]: to })
-        clearRuntimeDoorOpenState(doorId)
-      } else {
-        setRuntimeDoorOpenState(doorId, { [field]: to })
-      }
-      onComplete?.()
-    }
+  if (isOperationDoorType(node.doorType)) {
+    const currentOpenAmount = getDisplayedDoorValue(doorId, 'operationState', node.operationState)
+    startDoorOpenAnimation(doorId, 'operationState', currentOpenAmount, 0, options)
+    return
   }
 
-  activeDoorAnimations.set(doorId, window.requestAnimationFrame(tick))
+  const currentSwingAngle = getDisplayedDoorValue(doorId, 'swingAngle', node.swingAngle)
+  startDoorOpenAnimation(doorId, 'swingAngle', currentSwingAngle, 0, options)
 }

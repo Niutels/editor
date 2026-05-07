@@ -17,9 +17,19 @@ export type DoorInteractiveState = {
   swingAngle?: number
 }
 
+export type DoorAnimationState = {
+  field: keyof DoorInteractiveState
+  from: number
+  to: number
+  startedAt: number | null
+  durationMs: number
+  persist: boolean
+}
+
 type InteractiveStore = {
   items: Record<AnyNodeId, ItemInteractiveState>
   doors: Record<AnyNodeId, DoorInteractiveState>
+  doorAnimations: Record<AnyNodeId, DoorAnimationState>
 
   /** Initialize a node's interactive state from its asset definition (idempotent) */
   initItem: (itemId: AnyNodeId, interactive: Interactive) => void
@@ -35,6 +45,12 @@ type InteractiveStore = {
 
   /** Clear transient door open state */
   removeDoorOpenState: (doorId: AnyNodeId) => void
+
+  /** Queue a door animation for the viewer frame loop */
+  startDoorAnimation: (doorId: AnyNodeId, value: DoorAnimationState) => void
+
+  /** Cancel a queued door animation */
+  cancelDoorAnimation: (doorId: AnyNodeId) => void
 }
 
 const defaultControlValue = (interactive: Interactive, index: number): ControlValue => {
@@ -53,6 +69,7 @@ const defaultControlValue = (interactive: Interactive, index: number): ControlVa
 export const useInteractive = create<InteractiveStore>((set, get) => ({
   items: {},
   doors: {},
+  doorAnimations: {},
 
   initItem: (itemId, interactive) => {
     const { controls } = interactive
@@ -104,6 +121,22 @@ export const useInteractive = create<InteractiveStore>((set, get) => ({
     set((state) => {
       const { [doorId]: _, ...rest } = state.doors
       return { doors: rest }
+    })
+  },
+
+  startDoorAnimation: (doorId, value) => {
+    set((state) => ({
+      doorAnimations: {
+        ...state.doorAnimations,
+        [doorId]: value,
+      },
+    }))
+  },
+
+  cancelDoorAnimation: (doorId) => {
+    set((state) => {
+      const { [doorId]: _, ...rest } = state.doorAnimations
+      return { doorAnimations: rest }
     })
   },
 }))

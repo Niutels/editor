@@ -68,6 +68,7 @@ export {
 } from './store/history-control'
 export {
   type ControlValue,
+  type DoorAnimationState,
   type DoorInteractiveState,
   type ItemInteractiveState,
   useInteractive,

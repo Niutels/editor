@@ -1,12 +1,7 @@
 import { type AnyNodeId, emitter, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
-import {
-  animateDoorOpenState,
-  DOOR_SWING_OPEN_ANGLE,
-  isOperationDoorType,
-  updateDoorOpenState,
-} from '../lib/door-interaction'
+import { closeDoorOpenState, toggleDoorOpenState } from '../lib/door-interaction'
 import { runRedo, runUndo } from '../lib/history'
 import { sfxEmitter } from '../lib/sfx-bus'
 import useEditor from '../store/use-editor'
@@ -158,23 +153,7 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              if (isOperationDoorType(node.doorType)) {
-                const currentOpenAmount = node.operationState ?? 0
-                animateDoorOpenState(
-                  node.id,
-                  'operationState',
-                  currentOpenAmount,
-                  currentOpenAmount >= 0.5 ? 0 : 1,
-                )
-              } else {
-                const currentSwingAngle = node.swingAngle ?? 0
-                animateDoorOpenState(
-                  node.id,
-                  'swingAngle',
-                  currentSwingAngle,
-                  currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
-                )
-              }
+              toggleDoorOpenState(node.id)
               sfxEmitter.emit('sfx:item-rotate')
             }
           } else if (node && 'rotation' in node) {
@@ -200,10 +179,7 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              updateDoorOpenState(
-                node.id,
-                isOperationDoorType(node.doorType) ? { operationState: 0 } : { swingAngle: 0 },
-              )
+              closeDoorOpenState(node.id)
               sfxEmitter.emit('sfx:item-rotate')
             }
           } else if (node && 'rotation' in node) {
