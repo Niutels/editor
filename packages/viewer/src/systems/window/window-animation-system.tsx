@@ -10,9 +10,14 @@ import { useFrame } from '@react-three/fiber'
 import {
   AWNING_WINDOW_SASH_NAME,
   CASEMENT_WINDOW_SASH_NAME,
+  DOUBLE_HUNG_BOTTOM_SASH_NAME,
+  DOUBLE_HUNG_TOP_SASH_NAME,
   FRENCH_CASEMENT_LEFT_SASH_NAME,
   FRENCH_CASEMENT_RIGHT_SASH_NAME,
   HOPPER_WINDOW_SASH_NAME,
+  LOUVERED_WINDOW_SLATS_NAME,
+  SINGLE_HUNG_ACTIVE_SASH_NAME,
+  SLIDING_WINDOW_ACTIVE_PANEL_NAME,
 } from './window-system'
 
 const easeWindowAnimation = (value: number) => value * value * (3 - 2 * value)
@@ -28,6 +33,52 @@ function applyDirectWindowAnimation(windowId: AnyNodeId, value: number) {
   if (node?.type !== 'window') return false
 
   const mesh = sceneRegistry.nodes.get(windowId)
+
+  if (node.windowType === 'sliding') {
+    const activePanel = mesh?.getObjectByName(SLIDING_WINDOW_ACTIVE_PANEL_NAME)
+    if (!activePanel) return false
+
+    const innerW = node.width - 2 * node.frameThickness
+    const panelOverlap = Math.min(Math.max(node.frameThickness * 0.9, 0.04), innerW * 0.12)
+    const travel = Math.max(innerW / 2 - panelOverlap, 0) * value
+    activePanel.position.x = -innerW / 4 - panelOverlap / 4 + travel
+    return true
+  }
+
+  if (node.windowType === 'single-hung') {
+    const activeSash = mesh?.getObjectByName(SINGLE_HUNG_ACTIVE_SASH_NAME)
+    if (!activeSash) return false
+
+    const innerH = node.height - 2 * node.frameThickness
+    const panelOverlap = Math.min(Math.max(node.frameThickness * 0.9, 0.04), innerH * 0.12)
+    const travel = Math.max(innerH / 2 - panelOverlap, 0) * value
+    activeSash.position.y = -innerH / 4 - panelOverlap / 4 + travel
+    return true
+  }
+
+  if (node.windowType === 'double-hung') {
+    const topSash = mesh?.getObjectByName(DOUBLE_HUNG_TOP_SASH_NAME)
+    const bottomSash = mesh?.getObjectByName(DOUBLE_HUNG_BOTTOM_SASH_NAME)
+    if (!(topSash && bottomSash)) return false
+
+    const innerH = node.height - 2 * node.frameThickness
+    const panelOverlap = Math.min(Math.max(node.frameThickness * 0.9, 0.04), innerH * 0.12)
+    const travel = Math.max(innerH / 2 - panelOverlap, 0) * value
+    topSash.position.y = innerH / 4 + panelOverlap / 4 - travel
+    bottomSash.position.y = -innerH / 4 - panelOverlap / 4 + travel
+    return true
+  }
+
+  if (node.windowType === 'louvered') {
+    const slats = mesh?.getObjectByName(LOUVERED_WINDOW_SLATS_NAME)
+    if (!slats) return false
+
+    const slatAngle = -value * (Math.PI / 3)
+    for (const slat of slats.children) {
+      slat.rotation.x = slatAngle
+    }
+    return true
+  }
 
   if (node.windowType === 'casement') {
     if ((node.casementStyle ?? 'single') === 'french') {

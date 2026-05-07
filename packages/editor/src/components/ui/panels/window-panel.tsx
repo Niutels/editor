@@ -467,6 +467,7 @@ export function WindowPanel() {
                       ...(rectangleOnlyWindowTypes.has(option.value)
                         ? { openingShape: 'rectangle' }
                         : {}),
+                      ...(option.value === 'bay' || option.value === 'bow' ? { sill: false } : {}),
                     })
                   }
                   type="button"

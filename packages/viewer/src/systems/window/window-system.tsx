@@ -14,6 +14,11 @@ const hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false })
 export const CASEMENT_WINDOW_SASH_NAME = 'casement-window-sash'
 export const FRENCH_CASEMENT_LEFT_SASH_NAME = 'french-casement-left-sash'
 export const FRENCH_CASEMENT_RIGHT_SASH_NAME = 'french-casement-right-sash'
+export const SLIDING_WINDOW_ACTIVE_PANEL_NAME = 'sliding-window-active-panel'
+export const SINGLE_HUNG_ACTIVE_SASH_NAME = 'single-hung-active-sash'
+export const DOUBLE_HUNG_TOP_SASH_NAME = 'double-hung-top-sash'
+export const DOUBLE_HUNG_BOTTOM_SASH_NAME = 'double-hung-bottom-sash'
+export const LOUVERED_WINDOW_SLATS_NAME = 'louvered-window-slats'
 export const AWNING_WINDOW_SASH_NAME = 'awning-window-sash'
 export const HOPPER_WINDOW_SASH_NAME = 'hopper-window-sash'
 
@@ -681,11 +686,17 @@ function addSlidingWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     const openAmount = getWindowRenderOpenAmount(node)
     const travel = Math.max(innerW / 2 - panelOverlap, 0) * openAmount
     const panelWidth = (innerW + panelOverlap) / 2
-    const leftPanelX = -innerW / 4 - panelOverlap / 4 + travel
+    const leftPanelBaseX = -innerW / 4 - panelOverlap / 4
+    const leftPanelX = leftPanelBaseX + travel
     const rightPanelX = innerW / 4 + panelOverlap / 4
     const leftZ = frameDepth * 0.16
     const rightZ = -frameDepth * 0.12
     const panelH = Math.max(innerH - trackThickness * 2, 0.01)
+    const activePanel = new THREE.Group()
+
+    activePanel.name = SLIDING_WINDOW_ACTIVE_PANEL_NAME
+    activePanel.position.set(leftPanelX, 0, leftZ)
+    mesh.add(activePanel)
 
     // Twin tracks signal the sliding operation without adding editor-only state.
     addBox(
@@ -709,19 +720,19 @@ function addSlidingWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       0,
     )
 
-    addBox(mesh, glassMaterial, panelWidth, panelH, glassDepth, leftPanelX, 0, leftZ)
+    addBox(activePanel, glassMaterial, panelWidth, panelH, glassDepth, 0, 0, 0)
     addBox(mesh, glassMaterial, panelWidth, panelH, glassDepth, rightPanelX, 0, rightZ)
 
     // The right sash stays fixed. The left sash is the active panel that slides across it.
     addBox(
-      mesh,
+      activePanel,
       baseMaterial,
       railThickness,
       panelH,
       frameDepth * 0.72,
-      leftPanelX - panelWidth / 2 + railThickness / 2,
+      -panelWidth / 2 + railThickness / 2,
       0,
-      leftZ,
+      0,
     )
     addBox(
       mesh,
@@ -734,14 +745,14 @@ function addSlidingWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       rightZ,
     )
     addBox(
-      mesh,
+      activePanel,
       baseMaterial,
       railThickness,
       panelH,
       frameDepth * 0.78,
-      leftPanelX + panelWidth / 2 - railThickness / 2,
+      panelWidth / 2 - railThickness / 2,
       0,
-      leftZ,
+      0,
     )
     addBox(
       mesh,
@@ -2073,6 +2084,59 @@ function addShapedHopperWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
   }
 }
 
+function addHungSash(
+  parent: THREE.Object3D,
+  panelW: number,
+  panelHeight: number,
+  sashFrameThickness: number,
+  frameDepth: number,
+  glassDepth: number,
+  glassW: number,
+  glassH: number,
+) {
+  addBox(
+    parent,
+    baseMaterial,
+    panelW,
+    sashFrameThickness,
+    frameDepth * 0.72,
+    0,
+    panelHeight / 2 - sashFrameThickness / 2,
+    0,
+  )
+  addBox(
+    parent,
+    baseMaterial,
+    panelW,
+    sashFrameThickness,
+    frameDepth * 0.72,
+    0,
+    -panelHeight / 2 + sashFrameThickness / 2,
+    0,
+  )
+  addBox(
+    parent,
+    baseMaterial,
+    sashFrameThickness,
+    panelHeight,
+    frameDepth * 0.72,
+    -panelW / 2 + sashFrameThickness / 2,
+    0,
+    0,
+  )
+  addBox(
+    parent,
+    baseMaterial,
+    sashFrameThickness,
+    panelHeight,
+    frameDepth * 0.72,
+    panelW / 2 - sashFrameThickness / 2,
+    0,
+    0,
+  )
+  addBox(parent, glassMaterial, glassW, glassH, glassDepth, 0, 0, 0)
+}
+
 function addSingleHungWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
   const { width, height, frameDepth, frameThickness, sill, sillDepth, sillThickness } = node
 
@@ -2137,6 +2201,11 @@ function addSingleHungWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     const panelW = Math.max(innerW - trackThickness * 2, 0.01)
     const glassW = Math.max(panelW - 2 * sashFrameThickness, 0.01)
     const glassH = Math.max(panelHeight - 2 * sashFrameThickness, 0.01)
+    const activeSash = new THREE.Group()
+
+    activeSash.name = SINGLE_HUNG_ACTIVE_SASH_NAME
+    activeSash.position.set(0, bottomPanelY, bottomZ)
+    mesh.add(activeSash)
 
     // Side tracks show the lower sash is the moving element.
     addBox(
@@ -2160,52 +2229,29 @@ function addSingleHungWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       0,
     )
 
-    const addSash = (centerY: number, z: number) => {
-      addBox(
-        mesh,
-        baseMaterial,
-        panelW,
-        sashFrameThickness,
-        frameDepth * 0.72,
-        0,
-        centerY + panelHeight / 2 - sashFrameThickness / 2,
-        z,
-      )
-      addBox(
-        mesh,
-        baseMaterial,
-        panelW,
-        sashFrameThickness,
-        frameDepth * 0.72,
-        0,
-        centerY - panelHeight / 2 + sashFrameThickness / 2,
-        z,
-      )
-      addBox(
-        mesh,
-        baseMaterial,
-        sashFrameThickness,
-        panelHeight,
-        frameDepth * 0.72,
-        -panelW / 2 + sashFrameThickness / 2,
-        centerY,
-        z,
-      )
-      addBox(
-        mesh,
-        baseMaterial,
-        sashFrameThickness,
-        panelHeight,
-        frameDepth * 0.72,
-        panelW / 2 - sashFrameThickness / 2,
-        centerY,
-        z,
-      )
-      addBox(mesh, glassMaterial, glassW, glassH, glassDepth, 0, centerY, z)
-    }
-
-    addSash(topPanelY, topZ)
-    addSash(bottomPanelY, bottomZ)
+    const topSash = new THREE.Group()
+    topSash.position.set(0, topPanelY, topZ)
+    mesh.add(topSash)
+    addHungSash(
+      topSash,
+      panelW,
+      panelHeight,
+      sashFrameThickness,
+      frameDepth,
+      glassDepth,
+      glassW,
+      glassH,
+    )
+    addHungSash(
+      activeSash,
+      panelW,
+      panelHeight,
+      sashFrameThickness,
+      frameDepth,
+      glassDepth,
+      glassW,
+      glassH,
+    )
 
     // Meeting rails: top sash fixed, bottom sash moves upward over it.
     addBox(
@@ -2219,14 +2265,14 @@ function addSingleHungWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       topZ,
     )
     addBox(
-      mesh,
+      activeSash,
       baseMaterial,
       panelW,
       railThickness,
       frameDepth * 0.78,
       0,
-      bottomPanelY + panelHeight / 2 - railThickness / 2,
-      bottomZ,
+      panelHeight / 2 - railThickness / 2,
+      0,
     )
   }
 
@@ -2310,6 +2356,15 @@ function addDoubleHungWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     const panelW = Math.max(innerW - trackThickness * 2, 0.01)
     const glassW = Math.max(panelW - 2 * sashFrameThickness, 0.01)
     const glassH = Math.max(panelHeight - 2 * sashFrameThickness, 0.01)
+    const topSash = new THREE.Group()
+    const bottomSash = new THREE.Group()
+
+    topSash.name = DOUBLE_HUNG_TOP_SASH_NAME
+    topSash.position.set(0, topPanelY, topZ)
+    mesh.add(topSash)
+    bottomSash.name = DOUBLE_HUNG_BOTTOM_SASH_NAME
+    bottomSash.position.set(0, bottomPanelY, bottomZ)
+    mesh.add(bottomSash)
 
     // Side tracks show both sashes move vertically.
     addBox(
@@ -2333,73 +2388,47 @@ function addDoubleHungWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       0,
     )
 
-    const addSash = (centerY: number, z: number) => {
-      addBox(
-        mesh,
-        baseMaterial,
-        panelW,
-        sashFrameThickness,
-        frameDepth * 0.72,
-        0,
-        centerY + panelHeight / 2 - sashFrameThickness / 2,
-        z,
-      )
-      addBox(
-        mesh,
-        baseMaterial,
-        panelW,
-        sashFrameThickness,
-        frameDepth * 0.72,
-        0,
-        centerY - panelHeight / 2 + sashFrameThickness / 2,
-        z,
-      )
-      addBox(
-        mesh,
-        baseMaterial,
-        sashFrameThickness,
-        panelHeight,
-        frameDepth * 0.72,
-        -panelW / 2 + sashFrameThickness / 2,
-        centerY,
-        z,
-      )
-      addBox(
-        mesh,
-        baseMaterial,
-        sashFrameThickness,
-        panelHeight,
-        frameDepth * 0.72,
-        panelW / 2 - sashFrameThickness / 2,
-        centerY,
-        z,
-      )
-      addBox(mesh, glassMaterial, glassW, glassH, glassDepth, 0, centerY, z)
-    }
-
-    addSash(topPanelY, topZ)
-    addSash(bottomPanelY, bottomZ)
+    addHungSash(
+      topSash,
+      panelW,
+      panelHeight,
+      sashFrameThickness,
+      frameDepth,
+      glassDepth,
+      glassW,
+      glassH,
+    )
+    addHungSash(
+      bottomSash,
+      panelW,
+      panelHeight,
+      sashFrameThickness,
+      frameDepth,
+      glassDepth,
+      glassW,
+      glassH,
+    )
 
     // Opposing meeting rails: top sash descends while bottom sash rises.
     addBox(
-      mesh,
+      topSash,
       baseMaterial,
       panelW,
       railThickness,
       frameDepth * 0.78,
       0,
-      topPanelY - panelHeight / 2 + railThickness / 2,
-      topZ,
+      -panelHeight / 2 + railThickness / 2,
+      0,
     )
     addBox(
-      mesh,
+      bottomSash,
       baseMaterial,
       panelW,
       railThickness,
       frameDepth * 0.78,
       0,
-      bottomPanelY + panelHeight / 2 - railThickness / 2,
-      bottomZ,
+      panelHeight / 2 - railThickness / 2,
+      0,
     )
   }
 
@@ -2474,6 +2503,12 @@ function addBayWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     const panelDepth = Math.max(frameDepth * 0.72, 0.04)
     const sashFrameThickness = Math.max(frameThickness * 0.72, 0.032)
     const glassDepth = Math.max(0.004, frameDepth * 0.08)
+    const bayFootprint: Array<[number, number]> = [
+      [-innerW / 2, 0],
+      [-centerW / 2, projectionDepth],
+      [centerW / 2, projectionDepth],
+      [innerW / 2, 0],
+    ]
 
     const addBayPanel = (parent: THREE.Object3D, panelW: number) => {
       const glassW = Math.max(panelW - 2 * sashFrameThickness, 0.01)
@@ -2521,6 +2556,64 @@ function addBayWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       addBox(parent, glassMaterial, glassW, glassH, glassDepth, 0, 0, panelDepth * 0.08)
     }
 
+    const addBayCap = (centerY: number) => {
+      const halfThickness = frameThickness / 2
+      const vertices: number[] = []
+      const indices: number[] = []
+
+      for (const [x, z] of bayFootprint) {
+        vertices.push(x, centerY - halfThickness, z)
+      }
+      for (const [x, z] of bayFootprint) {
+        vertices.push(x, centerY + halfThickness, z)
+      }
+
+      indices.push(
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,
+        4,
+        6,
+        5,
+        4,
+        7,
+        6,
+        0,
+        4,
+        5,
+        0,
+        5,
+        1,
+        1,
+        5,
+        6,
+        1,
+        6,
+        2,
+        2,
+        6,
+        7,
+        2,
+        7,
+        3,
+        3,
+        7,
+        4,
+        3,
+        4,
+        0,
+      )
+
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
+      geometry.setIndex(indices)
+      geometry.computeVertexNormals()
+      mesh.add(new THREE.Mesh(geometry, baseMaterial))
+    }
+
     const center = new THREE.Group()
     center.position.set(0, 0, projectionDepth)
     mesh.add(center)
@@ -2538,26 +2631,8 @@ function addBayWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     mesh.add(right)
     addBayPanel(right, sideW)
 
-    addBox(
-      mesh,
-      baseMaterial,
-      innerW,
-      frameThickness,
-      projectionDepth,
-      0,
-      innerH / 2,
-      projectionDepth / 2,
-    )
-    addBox(
-      mesh,
-      baseMaterial,
-      innerW,
-      frameThickness,
-      projectionDepth,
-      0,
-      -innerH / 2,
-      projectionDepth / 2,
-    )
+    addBayCap(innerH / 2)
+    addBayCap(-innerH / 2)
   }
 
   if (sill) {
@@ -2798,6 +2873,10 @@ function addLouveredWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     const slatDepth = Math.max(frameDepth * 0.16, 0.012)
     const slatAngle = -openAmount * (Math.PI / 3)
     const railThickness = Math.max(frameThickness * 0.45, 0.022)
+    const slats = new THREE.Group()
+
+    slats.name = LOUVERED_WINDOW_SLATS_NAME
+    mesh.add(slats)
 
     addBox(
       mesh,
@@ -2825,7 +2904,7 @@ function addLouveredWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       const slat = new THREE.Group()
       slat.position.set(0, y, 0)
       slat.rotation.x = slatAngle
-      mesh.add(slat)
+      slats.add(slat)
       addBox(
         slat,
         glassMaterial,
@@ -2903,6 +2982,10 @@ function addShapedLouveredWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
     const slatAngle = -openAmount * (Math.PI / 3)
     const railThickness = Math.max(frameThickness * 0.45, 0.022)
     const slatInset = railThickness + 0.004
+    const slats = new THREE.Group()
+
+    slats.name = LOUVERED_WINDOW_SLATS_NAME
+    mesh.add(slats)
 
     const getBoundsAtY =
       node.openingShape === 'arch'
@@ -2972,7 +3055,7 @@ function addShapedLouveredWindowVisuals(node: WindowNode, mesh: THREE.Mesh) {
       const slat = new THREE.Group()
       slat.position.set((minX + maxX) / 2, y, 0)
       slat.rotation.x = slatAngle
-      mesh.add(slat)
+      slats.add(slat)
       addBox(slat, glassMaterial, slatW, slatHeight, slatDepth, 0, 0, 0)
     }
   }
