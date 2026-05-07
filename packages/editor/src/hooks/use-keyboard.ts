@@ -1,11 +1,10 @@
 import { type AnyNodeId, emitter, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
+import { closeDoorOpenState, toggleDoorOpenState } from '../lib/door-interaction'
 import { runRedo, runUndo } from '../lib/history'
 import { sfxEmitter } from '../lib/sfx-bus'
 import useEditor from '../store/use-editor'
-
-const DOOR_SWING_OPEN_ANGLE = Math.PI / 2
 
 // Tools call this in their onCancel handler when they have an active mid-action to cancel,
 // so that the global Escape handler knows not to also switch to select mode.
@@ -154,11 +153,7 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              const currentSwingAngle = node.swingAngle ?? 0
-              useScene.getState().updateNode(node.id, {
-                swingAngle:
-                  currentSwingAngle >= DOOR_SWING_OPEN_ANGLE / 2 ? 0 : DOOR_SWING_OPEN_ANGLE,
-              })
+              toggleDoorOpenState(node.id)
               sfxEmitter.emit('sfx:item-rotate')
             }
           } else if (node && 'rotation' in node) {
@@ -184,7 +179,7 @@ export const useKeyboard = ({
           if (node?.type === 'door') {
             e.preventDefault()
             if (node.openingKind !== 'opening') {
-              useScene.getState().updateNode(node.id, { swingAngle: 0 })
+              closeDoorOpenState(node.id)
               sfxEmitter.emit('sfx:item-rotate')
             }
           } else if (node && 'rotation' in node) {
