@@ -4,6 +4,7 @@ import type { Object3D } from 'three'
 import type {
   BuildingNode,
   CeilingNode,
+  ColumnNode,
   DoorNode,
   FenceNode,
   GuideNode,
@@ -57,6 +58,7 @@ export type ZoneEvent = NodeEvent<ZoneNode>
 export type SlabEvent = NodeEvent<SlabNode>
 export type SpawnEvent = NodeEvent<SpawnNode>
 export type CeilingEvent = NodeEvent<CeilingNode>
+export type ColumnEvent = NodeEvent<ColumnNode>
 export type RoofEvent = NodeEvent<RoofNode>
 export type RoofSegmentEvent = NodeEvent<RoofSegmentNode>
 export type StairEvent = NodeEvent<StairNode>
@@ -176,6 +178,7 @@ type EditorEvents = GridEvents &
   NodeEvents<'slab', SlabEvent> &
   NodeEvents<'spawn', SpawnEvent> &
   NodeEvents<'ceiling', CeilingEvent> &
+  NodeEvents<'column', ColumnEvent> &
   NodeEvents<'roof', RoofEvent> &
   NodeEvents<'roof-segment', RoofSegmentEvent> &
   NodeEvents<'stair', StairEvent> &

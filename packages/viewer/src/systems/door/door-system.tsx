@@ -1,4 +1,3 @@
-import { useFrame } from '@react-three/fiber'
 import {
   clampDoorOperationState,
   type AnyNodeId,
@@ -8,6 +7,7 @@ import {
   useInteractive,
   useScene,
 } from '@pascal-app/core'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { baseMaterial, glassMaterial } from '../../lib/materials'
 
@@ -91,6 +91,300 @@ function addBoxWithRotation(
   m.position.set(x, y, z)
   m.rotation.set(rotation[0], rotation[1], rotation[2])
   parent.add(m)
+}
+
+function addShape(
+  parent: THREE.Object3D,
+  material: THREE.Material,
+  shape: THREE.Shape,
+  depth: number,
+) {
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: false,
+    curveSegments: 24,
+  })
+  geometry.translate(0, 0, -depth / 2)
+  const mesh = new THREE.Mesh(geometry, material)
+  parent.add(mesh)
+}
+
+function getClampedArchHeight(width: number, height: number, archHeight: number | undefined) {
+  return Math.min(Math.max(archHeight ?? width / 2, 0.01), Math.max(height, 0.01))
+}
+
+function createArchShape(
+  left: number,
+  right: number,
+  bottom: number,
+  top: number,
+  archHeight: number,
+) {
+  const centerX = (left + right) / 2
+  const halfWidth = (right - left) / 2
+  const clampedArchHeight = getClampedArchHeight(right - left, top - bottom, archHeight)
+  const springY = top - clampedArchHeight
+  const shape = new THREE.Shape()
+  const segments = 32
+
+  shape.moveTo(left, bottom)
+  shape.lineTo(right, bottom)
+  shape.lineTo(right, springY)
+  for (let index = 1; index <= segments; index += 1) {
+    const x = right + (left - right) * (index / segments)
+    shape.lineTo(x, getArchBoundaryY(x - centerX, halfWidth, springY, clampedArchHeight))
+  }
+  shape.lineTo(left, bottom)
+  shape.closePath()
+  return shape
+}
+
+function getArchBoundaryY(x: number, halfWidth: number, springY: number, archHeight: number) {
+  if (halfWidth <= 1e-6) return springY
+  const t = Math.min(Math.abs(x) / halfWidth, 1)
+  return springY + archHeight * Math.sqrt(Math.max(1 - t * t, 0))
+}
+
+function createArchBandShape(
+  width: number,
+  outerSpringY: number,
+  outerTopY: number,
+  innerSpringY: number,
+  innerTopY: number,
+  insetX: number,
+) {
+  const halfWidth = width / 2
+  const innerHalfWidth = Math.max(halfWidth - insetX, 0)
+  const outerArchHeight = Math.max(outerTopY - outerSpringY, 0)
+  const safeInnerTopY = Math.min(innerTopY, outerTopY - 0.001)
+  const safeInnerSpringY = Math.min(innerSpringY, safeInnerTopY - 0.001)
+  const innerArchHeight = Math.max(safeInnerTopY - safeInnerSpringY, 0)
+  const shape = new THREE.Shape()
+  const segments = 32
+  const getSafeInnerBoundaryY = (x: number) =>
+    Math.min(
+      getArchBoundaryY(x, innerHalfWidth, safeInnerSpringY, innerArchHeight),
+      getArchBoundaryY(x, halfWidth, outerSpringY, outerArchHeight) - 0.001,
+    )
+
+  shape.moveTo(-halfWidth, outerSpringY)
+  for (let index = 1; index <= segments; index += 1) {
+    const x = -halfWidth + width * (index / segments)
+    shape.lineTo(x, getArchBoundaryY(x, halfWidth, outerSpringY, outerArchHeight))
+  }
+
+  if (innerHalfWidth <= 0.001 || safeInnerTopY <= safeInnerSpringY + 0.001) {
+    shape.lineTo(halfWidth, outerSpringY)
+    shape.closePath()
+    return shape
+  }
+
+  shape.lineTo(innerHalfWidth, outerSpringY)
+  shape.lineTo(innerHalfWidth, getSafeInnerBoundaryY(innerHalfWidth))
+  for (let index = segments - 1; index >= 0; index -= 1) {
+    const x = -innerHalfWidth + innerHalfWidth * 2 * (index / segments)
+    shape.lineTo(x, getSafeInnerBoundaryY(x))
+  }
+  shape.lineTo(-innerHalfWidth, outerSpringY)
+  shape.lineTo(-halfWidth, outerSpringY)
+  shape.closePath()
+
+  return shape
+}
+
+function createArchHeadBarShape(width: number, bottomY: number, springY: number, topY: number) {
+  const halfWidth = width / 2
+  const archHeight = Math.max(topY - springY, 0)
+  const shape = new THREE.Shape()
+  const segments = 32
+
+  shape.moveTo(-halfWidth, bottomY)
+  shape.lineTo(halfWidth, bottomY)
+  shape.lineTo(halfWidth, springY)
+  for (let index = 1; index <= segments; index += 1) {
+    const x = halfWidth - width * (index / segments)
+    shape.lineTo(x, getArchBoundaryY(x, halfWidth, springY, archHeight))
+  }
+  shape.lineTo(-halfWidth, bottomY)
+  shape.closePath()
+
+  return shape
+}
+
+type TopCornerRadii = {
+  topLeft: number
+  topRight: number
+}
+
+function normalizeTopCornerRadii(
+  radii: TopCornerRadii,
+  width: number,
+  height: number,
+): TopCornerRadii {
+  const next = { ...radii }
+  const scale = Math.min(
+    1,
+    width / Math.max(next.topLeft + next.topRight, 1e-6),
+    height / Math.max(next.topLeft, 1e-6),
+    height / Math.max(next.topRight, 1e-6),
+  )
+
+  if (scale < 1) {
+    next.topLeft *= scale
+    next.topRight *= scale
+  }
+
+  return next
+}
+
+function getDoorTopRadii(node: DoorNode, width: number, height: number): TopCornerRadii {
+  if (node.openingRadiusMode === 'individual') {
+    const [topLeft = 0, topRight = 0] = node.openingTopRadii ?? [0.15, 0.15]
+    return normalizeTopCornerRadii(
+      {
+        topLeft: Math.max(topLeft, 0),
+        topRight: Math.max(topRight, 0),
+      },
+      width,
+      height,
+    )
+  }
+
+  const maxRadius = Math.min(width / 2, height)
+  const radius = Math.min(Math.max(node.cornerRadius ?? 0.15, 0), maxRadius)
+  return { topLeft: radius, topRight: radius }
+}
+
+function createRoundedTopShape(
+  left: number,
+  right: number,
+  bottom: number,
+  top: number,
+  radii: TopCornerRadii,
+) {
+  const shape = new THREE.Shape()
+  const { topLeft, topRight } = normalizeTopCornerRadii(radii, right - left, top - bottom)
+
+  shape.moveTo(left, bottom)
+  shape.lineTo(right, bottom)
+  shape.lineTo(right, top - topRight)
+  if (topRight > 1e-6) {
+    shape.absarc(right - topRight, top - topRight, topRight, 0, Math.PI / 2, false)
+  } else {
+    shape.lineTo(right, top)
+  }
+
+  shape.lineTo(left + topLeft, top)
+  if (topLeft > 1e-6) {
+    shape.absarc(left + topLeft, top - topLeft, topLeft, Math.PI / 2, Math.PI, false)
+  } else {
+    shape.lineTo(left, top)
+  }
+
+  shape.lineTo(left, bottom)
+  shape.closePath()
+  return shape
+}
+
+function createRoundedDoorFrameShape(
+  width: number,
+  height: number,
+  frameThickness: number,
+  radii: TopCornerRadii,
+) {
+  const halfWidth = width / 2
+  const bottom = -height / 2
+  const top = height / 2
+  const outerRadii = normalizeTopCornerRadii(radii, width, height)
+  const outer = createRoundedTopShape(-halfWidth, halfWidth, bottom, top, outerRadii)
+  const inset = Math.min(frameThickness, width / 2 - 0.005, height - 0.005)
+
+  if (inset <= 0.001) return outer
+
+  const innerLeft = -halfWidth + inset
+  const innerRight = halfWidth - inset
+  const innerTop = top - inset
+  const innerRadii = normalizeTopCornerRadii(
+    {
+      topLeft: Math.max(outerRadii.topLeft - inset, 0),
+      topRight: Math.max(outerRadii.topRight - inset, 0),
+    },
+    innerRight - innerLeft,
+    innerTop - bottom,
+  )
+  const holeShape = createRoundedTopShape(innerLeft, innerRight, bottom, innerTop, innerRadii)
+  const hole = new THREE.Path(holeShape.getPoints(32).reverse())
+  outer.holes.push(hole)
+
+  return outer
+}
+
+function shapeToReversedPath(shape: THREE.Shape) {
+  return new THREE.Path(shape.getPoints(40).reverse())
+}
+
+function createRoundedLeafFrameShape(
+  width: number,
+  bottom: number,
+  top: number,
+  radii: TopCornerRadii,
+  insetX: number,
+  insetY: number,
+) {
+  const halfWidth = width / 2
+  const outerRadii = normalizeTopCornerRadii(radii, width, top - bottom)
+  const outer = createRoundedTopShape(-halfWidth, halfWidth, bottom, top, outerRadii)
+  const innerLeft = -halfWidth + insetX
+  const innerRight = halfWidth - insetX
+  const innerBottom = bottom + insetY
+  const innerTop = top - insetY
+
+  if (innerRight <= innerLeft + 0.01 || innerTop <= innerBottom + 0.01) return outer
+
+  const innerRadii = normalizeTopCornerRadii(
+    {
+      topLeft: Math.max(outerRadii.topLeft - Math.max(insetX, insetY), 0),
+      topRight: Math.max(outerRadii.topRight - Math.max(insetX, insetY), 0),
+    },
+    innerRight - innerLeft,
+    innerTop - innerBottom,
+  )
+  outer.holes.push(
+    shapeToReversedPath(
+      createRoundedTopShape(innerLeft, innerRight, innerBottom, innerTop, innerRadii),
+    ),
+  )
+
+  return outer
+}
+
+function createTopClippedRectShape(
+  left: number,
+  right: number,
+  bottom: number,
+  top: number,
+  getBoundaryY: (x: number) => number,
+) {
+  const segments = 20
+  const points: { x: number; y: number }[] = []
+
+  for (let index = 0; index <= segments; index += 1) {
+    const t = index / segments
+    const x = right + (left - right) * t
+    const y = Math.min(top, getBoundaryY(x))
+    if (y > bottom + 0.001) points.push({ x, y })
+  }
+
+  if (points.length < 2) return null
+
+  const shape = new THREE.Shape()
+  shape.moveTo(left, bottom)
+  shape.lineTo(right, bottom)
+  for (const point of points) {
+    shape.lineTo(point.x, point.y)
+  }
+  shape.closePath()
+  return shape
 }
 
 function disposeObject(object: THREE.Object3D) {
@@ -1128,6 +1422,7 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
     width,
     height,
     openingKind,
+    openingShape,
     frameThickness,
     frameDepth,
     threshold,
@@ -1166,39 +1461,99 @@ function updateDoorMesh(node: DoorNode, mesh: THREE.Mesh) {
   const swingDirectionSign = swingDirection === 'inward' ? 1 : -1
 
   // ── Frame members ──
-  // Left post — full height
-  addBox(
-    mesh,
-    baseMaterial,
-    frameThickness,
-    height,
-    frameDepth,
-    -width / 2 + frameThickness / 2,
-    0,
-    0,
-  )
-  // Right post — full height
-  addBox(
-    mesh,
-    baseMaterial,
-    frameThickness,
-    height,
-    frameDepth,
-    width / 2 - frameThickness / 2,
-    0,
-    0,
-  )
-  // Head (top bar) — full width
-  addBox(
-    mesh,
-    baseMaterial,
-    width,
-    frameThickness,
-    frameDepth,
-    0,
-    height / 2 - frameThickness / 2,
-    0,
-  )
+  if (openingShape === 'arch') {
+    const frameBottom = -height / 2
+    const frameTop = height / 2
+    const frameArchHeight = getClampedArchHeight(width, height, node.archHeight)
+    const frameSpringY = frameTop - frameArchHeight
+    const frameInnerTopY = frameTop - frameThickness
+    const frameInnerSpringY = Math.min(frameSpringY + frameThickness, frameInnerTopY)
+    const useShallowHeadBar = frameArchHeight <= frameThickness * 2
+    const frameHeadBottomY = useShallowHeadBar ? frameSpringY - frameThickness : frameSpringY
+    const postHeight = Math.max(frameHeadBottomY - frameBottom, 0.01)
+
+    addBox(
+      mesh,
+      baseMaterial,
+      frameThickness,
+      postHeight,
+      frameDepth,
+      -width / 2 + frameThickness / 2,
+      frameBottom + postHeight / 2,
+      0,
+    )
+    addBox(
+      mesh,
+      baseMaterial,
+      frameThickness,
+      postHeight,
+      frameDepth,
+      width / 2 - frameThickness / 2,
+      frameBottom + postHeight / 2,
+      0,
+    )
+    addShape(
+      mesh,
+      baseMaterial,
+      useShallowHeadBar
+        ? createArchHeadBarShape(width, frameHeadBottomY, frameSpringY, frameTop)
+        : createArchBandShape(
+            width,
+            frameSpringY,
+            frameTop,
+            frameInnerSpringY,
+            frameInnerTopY,
+            frameThickness,
+          ),
+      frameDepth,
+    )
+  } else if (openingShape === 'rounded') {
+    addShape(
+      mesh,
+      baseMaterial,
+      createRoundedDoorFrameShape(
+        width,
+        height,
+        frameThickness,
+        getDoorTopRadii(node, width, height),
+      ),
+      frameDepth,
+    )
+  } else {
+    // Left post — full height
+    addBox(
+      mesh,
+      baseMaterial,
+      frameThickness,
+      height,
+      frameDepth,
+      -width / 2 + frameThickness / 2,
+      0,
+      0,
+    )
+    // Right post — full height
+    addBox(
+      mesh,
+      baseMaterial,
+      frameThickness,
+      height,
+      frameDepth,
+      width / 2 - frameThickness / 2,
+      0,
+      0,
+    )
+    // Head (top bar) — full width
+    addBox(
+      mesh,
+      baseMaterial,
+      width,
+      frameThickness,
+      frameDepth,
+      0,
+      height / 2 - frameThickness / 2,
+      0,
+    )
+  }
 
   // ── Threshold (inside the frame) ──
   if (threshold) {
@@ -1384,6 +1739,40 @@ function syncDoorCutout(node: DoorNode, mesh: THREE.Mesh) {
     mesh.add(cutout)
   }
   cutout.geometry.dispose()
-  cutout.geometry = new THREE.BoxGeometry(node.width, node.height, 1.0)
+  if (node.openingShape === 'arch') {
+    cutout.geometry = new THREE.ExtrudeGeometry(
+      createArchShape(
+        -node.width / 2,
+        node.width / 2,
+        -node.height / 2,
+        node.height / 2,
+        getClampedArchHeight(node.width, node.height, node.archHeight),
+      ),
+      {
+        depth: 1,
+        bevelEnabled: false,
+        curveSegments: 24,
+      },
+    )
+    cutout.geometry.translate(0, 0, -0.5)
+  } else if (node.openingShape === 'rounded') {
+    cutout.geometry = new THREE.ExtrudeGeometry(
+      createRoundedTopShape(
+        -node.width / 2,
+        node.width / 2,
+        -node.height / 2,
+        node.height / 2,
+        getDoorTopRadii(node, node.width, node.height),
+      ),
+      {
+        depth: 1,
+        bevelEnabled: false,
+        curveSegments: 24,
+      },
+    )
+    cutout.geometry.translate(0, 0, -0.5)
+  } else {
+    cutout.geometry = new THREE.BoxGeometry(node.width, node.height, 1.0)
+  }
   cutout.visible = false
 }
