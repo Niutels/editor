@@ -73,6 +73,8 @@ export {
   type DoorInteractiveState,
   type ItemInteractiveState,
   useInteractive,
+  type WindowAnimationState,
+  type WindowInteractiveState,
 } from './store/use-interactive'
 export { default as useLiveTransforms, type LiveTransform } from './store/use-live-transforms'
 export { clearSceneHistory, default as useScene } from './store/use-scene'

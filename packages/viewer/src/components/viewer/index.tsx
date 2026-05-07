@@ -19,6 +19,7 @@ import { SlabSystem } from '../../systems/slab/slab-system'
 import { StairSystem } from '../../systems/stair/stair-system'
 import { WallCutout } from '../../systems/wall/wall-cutout'
 import { WallSystem } from '../../systems/wall/wall-system'
+import { WindowAnimationSystem } from '../../systems/window/window-animation-system'
 import { WindowSystem } from '../../systems/window/window-system'
 import { ZoneSystem } from '../../systems/zone/zone-system'
 import { ErrorBoundary } from '../error-boundary'
@@ -227,6 +228,7 @@ const Viewer: React.FC<ViewerProps> = ({
         {/* Core systems */}
         <CeilingSystem />
         <DoorAnimationSystem />
+        <WindowAnimationSystem />
         <DoorSystem />
         <FenceSystem />
         <ItemSystem />

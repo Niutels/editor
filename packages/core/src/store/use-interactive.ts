@@ -26,10 +26,25 @@ export type DoorAnimationState = {
   persist: boolean
 }
 
+export type WindowInteractiveState = {
+  operationState?: number
+}
+
+export type WindowAnimationState = {
+  field: keyof WindowInteractiveState
+  from: number
+  to: number
+  startedAt: number | null
+  durationMs: number
+  persist: boolean
+}
+
 type InteractiveStore = {
   items: Record<AnyNodeId, ItemInteractiveState>
   doors: Record<AnyNodeId, DoorInteractiveState>
   doorAnimations: Record<AnyNodeId, DoorAnimationState>
+  windows: Record<AnyNodeId, WindowInteractiveState>
+  windowAnimations: Record<AnyNodeId, WindowAnimationState>
 
   /** Initialize a node's interactive state from its asset definition (idempotent) */
   initItem: (itemId: AnyNodeId, interactive: Interactive) => void
@@ -51,6 +66,18 @@ type InteractiveStore = {
 
   /** Cancel a queued door animation */
   cancelDoorAnimation: (doorId: AnyNodeId) => void
+
+  /** Set transient window open state without committing it to the scene node */
+  setWindowOpenState: (windowId: AnyNodeId, value: WindowInteractiveState) => void
+
+  /** Clear transient window open state */
+  removeWindowOpenState: (windowId: AnyNodeId) => void
+
+  /** Queue a window animation for the viewer frame loop */
+  startWindowAnimation: (windowId: AnyNodeId, value: WindowAnimationState) => void
+
+  /** Cancel a queued window animation */
+  cancelWindowAnimation: (windowId: AnyNodeId) => void
 }
 
 const defaultControlValue = (interactive: Interactive, index: number): ControlValue => {
@@ -70,6 +97,8 @@ export const useInteractive = create<InteractiveStore>((set, get) => ({
   items: {},
   doors: {},
   doorAnimations: {},
+  windows: {},
+  windowAnimations: {},
 
   initItem: (itemId, interactive) => {
     const { controls } = interactive
@@ -137,6 +166,41 @@ export const useInteractive = create<InteractiveStore>((set, get) => ({
     set((state) => {
       const { [doorId]: _, ...rest } = state.doorAnimations
       return { doorAnimations: rest }
+    })
+  },
+
+  setWindowOpenState: (windowId, value) => {
+    set((state) => ({
+      windows: {
+        ...state.windows,
+        [windowId]: {
+          ...state.windows[windowId],
+          ...value,
+        },
+      },
+    }))
+  },
+
+  removeWindowOpenState: (windowId) => {
+    set((state) => {
+      const { [windowId]: _, ...rest } = state.windows
+      return { windows: rest }
+    })
+  },
+
+  startWindowAnimation: (windowId, value) => {
+    set((state) => ({
+      windowAnimations: {
+        ...state.windowAnimations,
+        [windowId]: value,
+      },
+    }))
+  },
+
+  cancelWindowAnimation: (windowId) => {
+    set((state) => {
+      const { [windowId]: _, ...rest } = state.windowAnimations
+      return { windowAnimations: rest }
     })
   },
 }))

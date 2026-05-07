@@ -6,6 +6,7 @@ import {
   type AnyNodeId,
   type BuildingNode,
   type CeilingNode,
+  type ColumnNode,
   calculateLevelMiters,
   DoorNode,
   emitter,
@@ -589,11 +590,18 @@ type FloorplanItemEntry = {
 
 type ReferenceFloorData = {
   ceilingPolygons: CeilingPolygonEntry[]
+  columnEntries: ReferenceFloorColumnEntry[]
   fenceEntries: FloorplanFenceEntry[]
   itemEntries: FloorplanItemEntry[]
   openingPolygons: OpeningPolygonEntry[]
   slabPolygons: SlabPolygonEntry[]
   wallPolygons: WallPolygonEntry[]
+}
+
+type ReferenceFloorColumnEntry = {
+  column: ColumnNode
+  points: string
+  polygon: Point2D[]
 }
 
 type FloorplanStairSegmentEntry = {
@@ -1637,6 +1645,51 @@ function getRotatedRectanglePolygon(
 
   return corners.map(([localX, localY]) => {
     const [offsetX, offsetY] = rotatePlanVector(localX, localY, rotation)
+    return {
+      x: center.x + offsetX,
+      y: center.y + offsetY,
+    }
+  })
+}
+
+function getColumnPlanFootprint(column: ColumnNode): Point2D[] {
+  const center = { x: column.position[0], y: column.position[2] }
+  const shaftWidth =
+    column.crossSection === 'round' ||
+    column.crossSection === 'octagonal' ||
+    column.crossSection === 'sixteen-sided'
+      ? column.radius * 2
+      : column.width
+  const shaftDepth =
+    column.crossSection === 'round' ||
+    column.crossSection === 'octagonal' ||
+    column.crossSection === 'sixteen-sided'
+      ? column.radius * 2
+      : column.depth
+  const width = Math.max(
+    shaftWidth,
+    column.width * column.baseWidthScale,
+    column.width * column.capitalWidthScale,
+  )
+  const depth = Math.max(
+    shaftDepth,
+    column.depth * column.baseDepthScale,
+    column.depth * column.capitalDepthScale,
+  )
+
+  if (column.crossSection === 'square' || column.crossSection === 'rectangular') {
+    return getRotatedRectanglePolygon(center, width, depth, column.rotation)
+  }
+
+  const segmentCount =
+    column.crossSection === 'octagonal' ? 8 : column.crossSection === 'sixteen-sided' ? 16 : 32
+
+  return Array.from({ length: segmentCount }, (_, index) => {
+    const angle = (index / segmentCount) * Math.PI * 2
+    const localX = Math.cos(angle) * (width / 2)
+    const localY = Math.sin(angle) * (depth / 2)
+    const [offsetX, offsetY] = rotatePlanVector(localX, localY, column.rotation)
+
     return {
       x: center.x + offsetX,
       y: center.y + offsetY,
@@ -3707,6 +3760,17 @@ const FloorplanReferenceFloorLayer = memo(function FloorplanReferenceFloorLayer(
           strokeDasharray="5 4"
           strokeLinecap="round"
           strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+
+      {data.columnEntries.map(({ column, points }) => (
+        <polygon
+          fill="rgba(124, 58, 237, 0.12)"
+          key={column.id}
+          points={points}
+          stroke="rgba(88, 28, 135, 0.55)"
+          strokeWidth={1.1}
           vectorEffect="non-scaling-stroke"
         />
       ))}
@@ -7783,6 +7847,7 @@ export function FloorplanPanel() {
     )
     const referenceWalls = children.filter((node): node is WallNode => node.type === 'wall')
     const referenceFences = children.filter((node): node is FenceNode => node.type === 'fence')
+    const referenceColumns = children.filter((node): node is ColumnNode => node.type === 'column')
     const referenceSlabs = children.filter((node): node is SlabNode => node.type === 'slab')
     const referenceCeilings = children.filter(
       (node): node is CeilingNode => node.type === 'ceiling',
@@ -7886,6 +7951,21 @@ export function FloorplanPanel() {
       return [{ fence, centerline, markerFrames: [], path }]
     })
 
+    const columnEntries = referenceColumns.flatMap((column) => {
+      const polygon = getColumnPlanFootprint(column)
+      if (polygon.length < 3) {
+        return []
+      }
+
+      return [
+        {
+          column,
+          points: formatPolygonPoints(polygon),
+          polygon,
+        },
+      ]
+    })
+
     const transformCache = new Map<string, SharedFloorplanNodeTransform | null>()
     const itemEntries = referenceDescendants.flatMap((node) => {
       if (
@@ -7920,6 +8000,7 @@ export function FloorplanPanel() {
 
     return {
       ceilingPolygons,
+      columnEntries,
       fenceEntries,
       itemEntries,
       openingPolygons,
