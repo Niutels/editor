@@ -625,6 +625,12 @@ type FloorplanSpawnEntry = {
   rotation: number
 }
 
+type FloorplanColumnEntry = {
+  column: ColumnNode
+  points: string
+  polygon: Point2D[]
+}
+
 type ReferenceFloorData = {
   ceilingPolygons: CeilingPolygonEntry[]
   columnEntries: ReferenceFloorColumnEntry[]
@@ -8189,6 +8195,28 @@ export function FloorplanPanel() {
         : entry,
     )
   }, [zoneBoundaryDraft, zonePolygons])
+  const floorplanColumnEntries = useMemo<FloorplanColumnEntry[]>(
+    () =>
+      levelDescendantNodes.flatMap((node) => {
+        if (!(node.type === 'column' && node.visible !== false)) {
+          return []
+        }
+
+        const polygon = getColumnPlanFootprint(node)
+        if (polygon.length < 3) {
+          return []
+        }
+
+        return [
+          {
+            column: node,
+            points: formatPolygonPoints(polygon),
+            polygon,
+          },
+        ]
+      }),
+    [levelDescendantNodes],
+  )
   const levelDescendantNodeById = useMemo(
     () => new Map(levelDescendantNodes.map((node) => [node.id, node] as const)),
     [levelDescendantNodes],
@@ -13016,6 +13044,7 @@ export function FloorplanPanel() {
   )
   const { getFloorplanHitIdAtPoint, getFloorplanSelectionIdsInBounds } = useFloorplanHitTesting({
     ceilingPolygons: displayCeilingPolygons,
+    columnPolygons: floorplanColumnEntries,
     displaySlabPolygons,
     displayWallPolygons,
     floorplanItemEntries,

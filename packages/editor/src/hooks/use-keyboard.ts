@@ -3,6 +3,10 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
 import { closeDoorOpenState, toggleDoorOpenState } from '../lib/door-interaction'
 import { runRedo, runUndo } from '../lib/history'
+import {
+  copySelectedNodesToEditorClipboard,
+  pasteEditorClipboardToLevel,
+} from '../lib/scene-clipboard'
 import { sfxEmitter } from '../lib/sfx-bus'
 import { closeWindowOpenState, toggleWindowOpenState } from '../lib/window-interaction'
 import useEditor from '../store/use-editor'
@@ -105,6 +109,17 @@ export const useKeyboard = ({
         useEditor.getState().setPhase('structure')
         useEditor.getState().setStructureLayer('elements')
         useEditor.getState().setMode('material-paint')
+      } else if (e.key === 'c' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        if (isVersionPreviewMode) return
+        e.preventDefault()
+        copySelectedNodesToEditorClipboard()
+      } else if (e.key === 'v' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        if (isVersionPreviewMode) return
+        e.preventDefault()
+        const result = pasteEditorClipboardToLevel()
+        if (result?.pastedIds.length) {
+          sfxEmitter.emit('sfx:item-place')
+        }
       } else if (e.key === 'z' && (e.metaKey || e.ctrlKey)) {
         if (isVersionPreviewMode) return
         e.preventDefault()

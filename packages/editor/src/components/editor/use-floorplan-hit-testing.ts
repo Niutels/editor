@@ -3,6 +3,7 @@
 import type {
   AnyNode,
   CeilingNode,
+  ColumnNode,
   DoorNode,
   ItemNode,
   Point2D,
@@ -46,6 +47,11 @@ type CeilingPolygonEntry = {
   holes: Point2D[][]
 }
 
+type ColumnPolygonEntry = {
+  column: ColumnNode
+  polygon: Point2D[]
+}
+
 type FloorplanRoofEntry = {
   roof: RoofNode
   segments: Array<{
@@ -72,6 +78,7 @@ type FloorplanStairEntry = {
 
 type UseFloorplanHitTestingArgs = {
   ceilingPolygons: CeilingPolygonEntry[]
+  columnPolygons: ColumnPolygonEntry[]
   displaySlabPolygons: SlabPolygonEntry[]
   displayWallPolygons: WallPolygonEntry[]
   floorplanItemEntries: FloorplanItemEntry[]
@@ -88,6 +95,7 @@ type UseFloorplanHitTestingArgs = {
 
 export function useFloorplanHitTesting({
   ceilingPolygons,
+  columnPolygons,
   displaySlabPolygons,
   displayWallPolygons,
   floorplanItemEntries,
@@ -117,11 +125,13 @@ export function useFloorplanHitTesting({
         slabs: displaySlabPolygons,
         openingHitTolerance: floorplanOpeningHitTolerance,
         wallHitTolerance: floorplanWallHitTolerance,
+        columns: columnPolygons,
         getOpeningCenterLine,
       })
     },
     [
       ceilingPolygons,
+      columnPolygons,
       displaySlabPolygons,
       displayWallPolygons,
       floorplanItemEntries,
@@ -149,10 +159,12 @@ export function useFloorplanHitTesting({
         openings: openingsPolygons,
         roofs: floorplanRoofEntries,
         slabs: displaySlabPolygons,
+        columns: columnPolygons,
         stairs: floorplanStairEntries,
       }),
     [
       ceilingPolygons,
+      columnPolygons,
       displaySlabPolygons,
       displayWallPolygons,
       floorplanItemEntries,

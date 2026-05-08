@@ -181,23 +181,55 @@ function FlatEndedBeam({
       [3, 7, 4, 0],
     ];
     const positions: number[] = [];
-    const pushTriangle = (a: number, b: number, c: number) => {
+    const uvs: number[] = [];
+    const pushVertex = (vertexIndex: number, uv: [number, number]) => {
+      const vertex = vertices[vertexIndex];
+      if (!vertex) return false;
+      positions.push(...vertex);
+      uvs.push(...uv);
+      return true;
+    };
+    const pushTriangle = (
+      a: number,
+      b: number,
+      c: number,
+      uvA: [number, number],
+      uvB: [number, number],
+      uvC: [number, number],
+    ) => {
       const va = vertices[a];
       const vb = vertices[b];
       const vc = vertices[c];
       if (!va || !vb || !vc) return;
-      positions.push(...va, ...vb, ...vc);
+      pushVertex(a, uvA);
+      pushVertex(b, uvB);
+      pushVertex(c, uvC);
     };
 
     for (const [a, b, c, d] of faceQuads) {
-      pushTriangle(a, b, c);
-      pushTriangle(a, c, d);
-      pushTriangle(a, c, b);
-      pushTriangle(a, d, c);
+      const va = vertices[a];
+      const vb = vertices[b];
+      const vc = vertices[c];
+      const vd = vertices[d];
+      if (!va || !vb || !vc || !vd) continue;
+
+      const edgeU = Math.hypot(vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]);
+      const edgeV = Math.hypot(vd[0] - va[0], vd[1] - va[1], vd[2] - va[2]);
+      const uvA: [number, number] = [0, 0];
+      const uvB: [number, number] = [edgeU, 0];
+      const uvC: [number, number] = [edgeU, edgeV];
+      const uvD: [number, number] = [0, edgeV];
+
+      pushTriangle(a, b, c, uvA, uvB, uvC);
+      pushTriangle(a, c, d, uvA, uvC, uvD);
+      pushTriangle(a, c, b, uvA, uvC, uvB);
+      pushTriangle(a, d, c, uvA, uvD, uvC);
     }
 
     const geometry = new BufferGeometry();
     geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+    geometry.setAttribute("uv2", new Float32BufferAttribute(uvs.slice(), 2));
     geometry.computeVertexNormals();
     return geometry;
   }, [depth, length, start, end, width]);
