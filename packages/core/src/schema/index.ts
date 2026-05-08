@@ -39,6 +39,7 @@ export {
   ColumnShaftDetail,
   ColumnShaftProfile,
   ColumnStyle,
+  ColumnSupportStyle,
 } from './nodes/column'
 export { DoorNode, DoorSegment } from './nodes/door'
 export { FenceBaseStyle, FenceNode, FenceStyle } from './nodes/fence'

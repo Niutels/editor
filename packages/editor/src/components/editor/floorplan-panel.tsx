@@ -1768,6 +1768,56 @@ function getRotatedRectanglePolygon(
 
 function getColumnPlanFootprint(column: ColumnNode): Point2D[] {
   const center = { x: column.position[0], y: column.position[2] }
+
+  if (
+    column.supportStyle === 'a-frame' ||
+    column.supportStyle === 'y-frame' ||
+    column.supportStyle === 'v-frame' ||
+    column.supportStyle === 'x-brace' ||
+    column.supportStyle === 'k-brace' ||
+    column.supportStyle === 'single-strut' ||
+    column.supportStyle === 'tripod' ||
+    column.supportStyle === 'trestle' ||
+    column.supportStyle === 'portal-frame' ||
+    column.supportStyle === 'box-frame'
+  ) {
+    const width = Math.max(
+      column.supportStyle === 'a-frame' ||
+        column.supportStyle === 'x-brace' ||
+        column.supportStyle === 'k-brace' ||
+        column.supportStyle === 'single-strut' ||
+        column.supportStyle === 'tripod' ||
+        column.supportStyle === 'trestle' ||
+        column.supportStyle === 'portal-frame' ||
+        column.supportStyle === 'box-frame'
+        ? (column.braceBottomSpread ?? 1.2)
+        : 0,
+      column.braceTopSpread ??
+        (column.supportStyle === 'y-frame' ||
+        column.supportStyle === 'v-frame' ||
+        column.supportStyle === 'x-brace' ||
+        column.supportStyle === 'k-brace' ||
+        column.supportStyle === 'single-strut' ||
+        column.supportStyle === 'tripod' ||
+        column.supportStyle === 'trestle' ||
+        column.supportStyle === 'portal-frame' ||
+        column.supportStyle === 'box-frame'
+          ? 1
+          : 0),
+      (column.braceWidth ?? column.width) * 2,
+    )
+    const depth = Math.max(
+      column.supportStyle === 'tripod' ||
+        column.supportStyle === 'trestle' ||
+        column.supportStyle === 'box-frame'
+        ? (column.braceTopSpread ?? 1)
+        : 0,
+      column.braceDepth ?? column.depth,
+      0.08,
+    )
+    return getRotatedRectanglePolygon(center, width, depth, column.rotation)
+  }
+
   const shaftWidth =
     column.crossSection === 'round' ||
     column.crossSection === 'octagonal' ||
@@ -5742,6 +5792,12 @@ const FloorplanFenceLayer = memo(function FloorplanFenceLayer({
         const fenceGlowOpacity = isDeleteHovered ? 0.18 : isActive ? 0.22 : isHovered ? 0.14 : 0
         const fenceUnderlayWidth = isActive ? '6.5' : isHovered ? '6' : '5.2'
         const fenceStrokeWidth = isActive ? '2.6' : isHovered ? '2.35' : '2.05'
+        const showFenceInfill = fence.showInfill ?? true
+        const visibleMarkerFrames = showFenceInfill
+          ? markerFrames
+          : markerFrames.filter(
+              (_, markerIndex) => markerIndex === 0 || markerIndex === markerFrames.length - 1,
+            )
         const privacyMarkerWidth = clamp(fence.postSize * 0.58, 0.038, 0.068)
         const privacyMarkerHeight = clamp(
           Math.max(fence.baseHeight * 0.5, fence.postSize * 1.4),
@@ -5792,7 +5848,7 @@ const FloorplanFenceLayer = memo(function FloorplanFenceLayer({
               strokeWidth={fenceStrokeWidth}
               vectorEffect="non-scaling-stroke"
             />
-            {markerFrames.map(({ angleDeg, point }, markerIndex) => {
+            {visibleMarkerFrames.map(({ angleDeg, point }, markerIndex) => {
               const svgPoint = toSvgPoint(point)
 
               if (fence.style === 'privacy') {

@@ -1,4 +1,3 @@
-import { useFrame } from '@react-three/fiber'
 import {
   type AnyNodeId,
   type FenceNode,
@@ -7,6 +6,7 @@ import {
   sceneRegistry,
   useScene,
 } from '@pascal-app/core'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
@@ -69,7 +69,9 @@ function createFenceCurveSpanParts(
   const parts: FencePart[] = []
   const frameCount = Math.max(
     1,
-    Math.ceil((getWallCurveLength(fence) * Math.max(1e-4, endT - startT)) / MIN_CURVE_SEGMENT_LENGTH),
+    Math.ceil(
+      (getWallCurveLength(fence) * Math.max(1e-4, endT - startT)) / MIN_CURVE_SEGMENT_LENGTH,
+    ),
   )
 
   let previous = getFencePointAt(fence, startT)
@@ -164,6 +166,7 @@ function createFenceParts(fence: FenceNode): FencePart[] {
   const spacing = Math.max(fence.postSpacing * styleDefaults.spacingFactor, postWidth * 1.2)
   const edgeInset = Math.max(fence.edgeInset ?? 0.015, 0.005)
   const isFloating = fence.baseStyle === 'floating'
+  const showInfill = fence.showInfill ?? true
   const baseY = isFloating ? clearance : 0
   const effectiveBaseHeight = baseHeight
   const startInsetT = Math.min(0.499, edgeInset / length)
@@ -192,18 +195,18 @@ function createFenceParts(fence: FenceNode): FencePart[] {
     )
   }
 
-  const count = Math.max(2, Math.floor((length - edgeInset * 2) / spacing) + 1)
+  const count = showInfill ? Math.max(2, Math.floor((length - edgeInset * 2) / spacing) + 1) : 2
   const verticalY = baseY + effectiveBaseHeight + verticalHeight / 2
 
   for (let index = 0; index < count; index += 1) {
     const t = count === 1 ? 0.5 : startInsetT + (endInsetT - startInsetT) * (index / (count - 1))
     const frame = getFencePointAt(fence, t)
     const isEdgePost = index === 0 || index === count - 1
-    const postHeight =
-      isFloating && isEdgePost
-        ? effectiveBaseHeight + verticalHeight + topRailHeight + clearance
-        : verticalHeight
-    const postY = isFloating && isEdgePost ? postHeight / 2 : verticalY
+    const fullHeightPost = !showInfill || (isFloating && isEdgePost)
+    const postHeight = fullHeightPost
+      ? effectiveBaseHeight + verticalHeight + topRailHeight + clearance
+      : verticalHeight
+    const postY = fullHeightPost ? postHeight / 2 : verticalY
 
     parts.push({
       position: [frame.point.x, postY, frame.point.y],
@@ -244,7 +247,9 @@ function generateFenceGeometry(fence: FenceNode) {
   const geometries = parts.map(createFencePartGeometry)
 
   const merged = mergeGeometries(geometries, false) ?? new THREE.BufferGeometry()
-  geometries.forEach((geometry) => geometry.dispose())
+  geometries.forEach((geometry) => {
+    geometry.dispose()
+  })
   const mergedUv = merged.getAttribute('uv')
   if (mergedUv) {
     merged.setAttribute('uv2', new THREE.Float32BufferAttribute(Array.from(mergedUv.array), 2))
