@@ -1,11 +1,11 @@
-import { useFrame } from '@react-three/fiber'
 import {
   type AnyNodeId,
   getRenderableSlabPolygon,
-  sceneRegistry,
   type SlabNode,
+  sceneRegistry,
   useScene,
 } from '@pascal-app/core'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 function ensureUv2Attribute(geometry: THREE.BufferGeometry) {
