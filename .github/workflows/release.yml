@@ -67,12 +67,19 @@ jobs:
             echo "$MAJ.$MIN.$PAT"
           }
 
+          # Track new versions in shell-local vars.
+          # NOTE: $GITHUB_ENV writes don't surface within the same step, so the
+          # peerDeps sync below must use shell vars, not env indirection.
+          declare -A NEW_VERSIONS
+
           for pkg in core viewer editor mcp; do
             if [ "$TARGET" = "$pkg" ] || [ "$TARGET" = "all" ]; then
               CUR=$(jq -r '.version' packages/$pkg/package.json)
               NEW=$(bump_version "$CUR")
               jq --arg v "$NEW" '.version = $v' packages/$pkg/package.json > tmp.json && mv tmp.json packages/$pkg/package.json
+              NEW_VERSIONS[$pkg]=$NEW
               UPPER=$(echo "$pkg" | tr '[:lower:]' '[:upper:]')
+              # Also export for the publish/commit/tag steps that follow.
               echo "${UPPER}_VERSION=$NEW" >> $GITHUB_ENV
               echo "Bumped @pascal-app/$pkg: $CUR → $NEW"
             fi
@@ -83,15 +90,19 @@ jobs:
           for pkg in core viewer editor mcp; do
             FILE=packages/$pkg/package.json
             for dep in core viewer editor mcp; do
-              UPPER=$(echo "$dep" | tr '[:lower:]' '[:upper:]')
-              VAR="${UPPER}_VERSION"
-              VAL="${!VAR}"
+              VAL="${NEW_VERSIONS[$dep]}"
               [ -z "$VAL" ] && continue
               jq --arg name "@pascal-app/$dep" --arg v "^$VAL" '
                 if .peerDependencies[$name] then .peerDependencies[$name] = $v else . end
                 | if .devDependencies[$name] then .devDependencies[$name] = $v else . end
               ' "$FILE" > tmp.json && mv tmp.json "$FILE"
             done
+          done
+
+          echo "=== @pascal-app/* refs after sync ==="
+          for pkg in core viewer editor mcp; do
+            echo "--- packages/$pkg/package.json ---"
+            jq '{ peerDependencies: (.peerDependencies // {} | with_entries(select(.key | startswith("@pascal-app/")))), devDependencies: (.devDependencies // {} | with_entries(select(.key | startswith("@pascal-app/")))) }' packages/$pkg/package.json
           done
 
       - name: Build & publish core
