@@ -107,6 +107,15 @@ export {
   type WallMiterBoundaryPoints,
   type WallMiterData,
 } from './systems/wall/wall-mitering'
+export {
+  constrainWallMoveDeltaToAxis,
+  getPerpendicularWallMoveAxis,
+  planWallMoveJunctions,
+  type WallMoveBridgePlan,
+  type WallMoveAxis,
+  type WallMoveJunctionPlan,
+  type WallPlanPoint,
+} from './systems/wall/wall-move'
 export type { SceneGraph } from './utils/clone-scene-graph'
 export { cloneLevelSubtree, cloneSceneGraph, forkSceneGraph } from './utils/clone-scene-graph'
 export { isObject } from './utils/types'
