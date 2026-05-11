@@ -1,6 +1,5 @@
 'use client'
 
-import { Bvh } from '@react-three/drei'
 import { Canvas, extend, type ThreeToJSXElements, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three/webgpu'
@@ -28,6 +27,7 @@ import FrameLimiter from './frame-limiter'
 import { Lights } from './lights'
 import { PerfMonitor } from './perf-monitor'
 import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
+import { SceneBvh } from './scene-bvh'
 import { SelectionManager } from './selection-manager'
 import { ViewerCamera } from './viewer-camera'
 
@@ -216,9 +216,9 @@ const Viewer: React.FC<ViewerProps> = ({
         {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
           /> */}
         <Lights />
-        <Bvh>
+        <SceneBvh>
           <SceneRenderer />
-        </Bvh>
+        </SceneBvh>
 
         {/* Default Systems */}
         <LevelSystem />
