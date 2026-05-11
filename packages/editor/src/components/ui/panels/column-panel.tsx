@@ -72,10 +72,12 @@ const COLUMN_PROPORTION_PRESETS = {
 
 type ColumnProportionPresetId = keyof typeof COLUMN_PROPORTION_PRESETS
 
-const COLUMN_PROPORTION_OPTIONS = Object.entries(COLUMN_PROPORTION_PRESETS).map(([value, preset]) => ({
-  value: value as ColumnProportionPresetId,
-  label: preset.label,
-}))
+const COLUMN_PROPORTION_OPTIONS = Object.entries(COLUMN_PROPORTION_PRESETS).map(
+  ([value, preset]) => ({
+    value: value as ColumnProportionPresetId,
+    label: preset.label,
+  }),
+)
 
 const SUPPORT_STYLE_OPTIONS: Array<{ label: string; value: ColumnNode['supportStyle'] }> = [
   { label: 'Vertical', value: 'vertical' },
@@ -230,7 +232,12 @@ export function ColumnPanel() {
     supportStyle === 'box-frame'
 
   return (
-    <PanelWrapper icon="/icons/column.png" onClose={handleClose} title={node.name || 'Column'} width={300}>
+    <PanelWrapper
+      icon="/icons/column.png"
+      onClose={handleClose}
+      title={node.name || 'Column'}
+      width={300}
+    >
       <PanelSection title="Preset">
         <select
           className={SELECT_CLASS}
@@ -653,7 +660,7 @@ export function ColumnPanel() {
       )}
 
       {!isBraceSupport && (
-      <PanelSection title="Ends">
+        <PanelSection title="Ends">
         <select
           className={SELECT_CLASS}
           onChange={(event) => {
@@ -664,10 +671,22 @@ export function ColumnPanel() {
                 ? {}
                 : {
                     capitalHeight: Math.max(node.capitalHeight, 0.12),
-                    capitalTierCount: capitalStyle === 'stepped' ? Math.max(node.capitalTierCount ?? 3, 3) : node.capitalTierCount,
-                    capitalWidthScale: Math.max(node.capitalWidthScale ?? 1.3, capitalStyle === 'stepped' ? 1.42 : 1.28),
-                    capitalDepthScale: Math.max(node.capitalDepthScale ?? 1.3, capitalStyle === 'stepped' ? 1.42 : 1.28),
-                    capitalStepSpread: capitalStyle === 'stepped' ? Math.max(node.capitalStepSpread ?? 0.34, 0.34) : node.capitalStepSpread,
+                    capitalTierCount:
+                      capitalStyle === 'stepped'
+                        ? Math.max(node.capitalTierCount ?? 3, 3)
+                        : node.capitalTierCount,
+                    capitalWidthScale: Math.max(
+                      node.capitalWidthScale ?? 1.3,
+                      capitalStyle === 'stepped' ? 1.42 : 1.28,
+                    ),
+                    capitalDepthScale: Math.max(
+                      node.capitalDepthScale ?? 1.3,
+                      capitalStyle === 'stepped' ? 1.42 : 1.28,
+                    ),
+                    capitalStepSpread:
+                      capitalStyle === 'stepped'
+                        ? Math.max(node.capitalStepSpread ?? 0.34, 0.34)
+                        : node.capitalStepSpread,
                   }),
             })
           }}
@@ -749,13 +768,34 @@ export function ColumnPanel() {
                 ? {}
                 : {
                     baseHeight: Math.max(node.baseHeight, 0.12),
-                    baseTierCount: baseStyle === 'stepped-square' ? Math.max(node.baseTierCount ?? 3, 3) : node.baseTierCount,
-                    baseWidthScale: Math.max(node.baseWidthScale ?? 1.24, baseStyle === 'stepped-square' ? 1.42 : 1.24),
-                    baseDepthScale: Math.max(node.baseDepthScale ?? 1.24, baseStyle === 'stepped-square' ? 1.42 : 1.24),
-                    baseStepSpread: baseStyle === 'stepped-square' ? Math.max(node.baseStepSpread ?? 0.34, 0.34) : node.baseStepSpread,
-                    basePlinthHeightRatio: baseStyle === 'round-rings' ? (node.basePlinthHeightRatio ?? 0.44) : node.basePlinthHeightRatio,
-                    baseRoundBandScale: baseStyle === 'round-rings' ? (node.baseRoundBandScale ?? 0.92) : node.baseRoundBandScale,
-                    baseNeckScale: baseStyle === 'round-rings' ? (node.baseNeckScale ?? 0.72) : node.baseNeckScale,
+                    baseTierCount:
+                      baseStyle === 'stepped-square'
+                        ? Math.max(node.baseTierCount ?? 3, 3)
+                        : node.baseTierCount,
+                    baseWidthScale: Math.max(
+                      node.baseWidthScale ?? 1.24,
+                      baseStyle === 'stepped-square' ? 1.42 : 1.24,
+                    ),
+                    baseDepthScale: Math.max(
+                      node.baseDepthScale ?? 1.24,
+                      baseStyle === 'stepped-square' ? 1.42 : 1.24,
+                    ),
+                    baseStepSpread:
+                      baseStyle === 'stepped-square'
+                        ? Math.max(node.baseStepSpread ?? 0.34, 0.34)
+                        : node.baseStepSpread,
+                    basePlinthHeightRatio:
+                      baseStyle === 'round-rings'
+                        ? (node.basePlinthHeightRatio ?? 0.44)
+                        : node.basePlinthHeightRatio,
+                    baseRoundBandScale:
+                      baseStyle === 'round-rings'
+                        ? (node.baseRoundBandScale ?? 0.92)
+                        : node.baseRoundBandScale,
+                    baseNeckScale:
+                      baseStyle === 'round-rings'
+                        ? (node.baseNeckScale ?? 0.72)
+                        : node.baseNeckScale,
                   }),
             })
           }}
@@ -861,7 +901,7 @@ export function ColumnPanel() {
             value={node.baseStepSpread ?? 0.34}
           />
         )}
-      </PanelSection>
+        </PanelSection>
       )}
 
       <PanelSection title="Transform">

@@ -4,14 +4,14 @@ import {
   type AnyNodeId,
   constrainWallMoveDeltaToAxis,
   emitter,
-  getPerpendicularWallMoveAxis,
   type GridEvent,
+  getPerpendicularWallMoveAxis,
   pauseSceneHistory,
   planWallMoveJunctions,
   resumeSceneHistory,
   useScene,
-  type WallMoveBridgePlan,
   type WallMoveAxis,
+  type WallMoveBridgePlan,
   type WallMoveJunctionPlan,
   type WallNode,
   WallNode as WallSchema,
@@ -80,10 +80,7 @@ function getLinkedWallSnapshots(args: {
   const seenWallIds = new Set<WallNode['id']>()
 
   for (const node of walls) {
-    if (
-      !contextPoints.has(pointKey(node.start)) &&
-      !contextPoints.has(pointKey(node.end))
-    ) {
+    if (!contextPoints.has(pointKey(node.start)) && !contextPoints.has(pointKey(node.end))) {
       continue
     }
 
@@ -417,14 +414,12 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
         preview.start,
         preview.end,
       )
-      const collapsedLinkedWallIds = new Set(
-        [
-          ...linkedWallUpdates
-            .filter((entry) => !isWallLongEnough(entry.start, entry.end))
-            .map((entry) => entry.id as AnyNodeId),
-          ...commitPlan.wallsToDelete.map((wall) => wall.id as AnyNodeId),
-        ],
-      )
+      const collapsedLinkedWallIds = new Set([
+        ...linkedWallUpdates
+          .filter((entry) => !isWallLongEnough(entry.start, entry.end))
+          .map((entry) => entry.id as AnyNodeId),
+        ...commitPlan.wallsToDelete.map((wall) => wall.id as AnyNodeId),
+      ])
 
       const commitUpdates = [
         {
@@ -453,8 +448,7 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
         nextStart: preview.start,
         nextEnd: preview.end,
         existingWalls,
-        wallCount: Object.values(sceneState.nodes).filter((entry) => entry?.type === 'wall')
-          .length,
+        wallCount: Object.values(sceneState.nodes).filter((entry) => entry?.type === 'wall').length,
       })
       sceneState.applyNodeChanges({
         update: commitUpdates,

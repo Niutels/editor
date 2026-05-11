@@ -4148,7 +4148,6 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               d={path}
               fill={isDeleteHovered ? palette.deleteFill : palette.slabFill}
               fillRule="evenodd"
-              opacity={slabFillOpacity}
               onClick={
                 canSelectSlabs
                   ? (event) => {
@@ -4167,9 +4166,10 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               }
               onPointerEnter={canSelectSlabs ? () => onSlabHoverChange(slab.id) : undefined}
               onPointerLeave={canSelectSlabs ? () => onSlabHoverChange(null) : undefined}
+              opacity={slabFillOpacity}
               pointerEvents={canSelectSlabs ? undefined : 'none'}
-              style={canSelectSlabs ? { cursor: EDITOR_CURSOR } : undefined}
               stroke="none"
+              style={canSelectSlabs ? { cursor: EDITOR_CURSOR } : undefined}
             />
             {isSelected && !isDeleteHovered ? (
               <path
@@ -4224,7 +4224,6 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               d={path}
               fill={isDeleteHovered ? palette.deleteFill : palette.ceilingFill}
               fillRule="evenodd"
-              opacity={ceilingFillOpacity}
               onClick={
                 canSelectCeilings
                   ? (event) => {
@@ -4245,9 +4244,10 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 canSelectCeilings ? () => onCeilingHoverChange(ceiling.id) : undefined
               }
               onPointerLeave={canSelectCeilings ? () => onCeilingHoverChange(null) : undefined}
+              opacity={ceilingFillOpacity}
               pointerEvents={canSelectCeilings ? undefined : 'none'}
-              style={canSelectCeilings ? { cursor: EDITOR_CURSOR } : undefined}
               stroke="none"
+              style={canSelectCeilings ? { cursor: EDITOR_CURSOR } : undefined}
             />
             {isSelected && !isDeleteHovered ? (
               <path
@@ -4354,8 +4354,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               <polygon
                 fill={`url(#${wallSelectionHatchId})`}
                 opacity={1}
-                points={points}
                 pointerEvents="none"
+                points={points}
               />
             ) : null}
           </g>
@@ -4483,8 +4483,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                 {canSelectGeometry && (
                   <polygon
                     fill="transparent"
-                    points={points}
                     pointerEvents="all"
+                    points={points}
                     stroke="transparent"
                     strokeWidth={FLOORPLAN_OPENING_HIT_STROKE_WIDTH}
                     vectorEffect="non-scaling-stroke"
@@ -4594,8 +4594,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               {canSelectGeometry && (
                 <polygon
                   fill="transparent"
-                  points={points}
                   pointerEvents="all"
+                  points={points}
                   stroke="transparent"
                   strokeWidth={FLOORPLAN_OPENING_HIT_STROKE_WIDTH}
                   vectorEffect="non-scaling-stroke"
@@ -5274,8 +5274,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
               {canSelectGeometry && (
                 <polygon
                   fill="transparent"
-                  points={points}
                   pointerEvents="all"
+                  points={points}
                   stroke="transparent"
                   strokeWidth={FLOORPLAN_OPENING_HIT_STROKE_WIDTH}
                   vectorEffect="non-scaling-stroke"
@@ -5346,8 +5346,8 @@ const FloorplanGeometryLayer = memo(function FloorplanGeometryLayer({
                           d={foldingPath}
                           fill="none"
                           stroke={doorStroke}
-                          strokeLinejoin="round"
                           strokeLinecap="round"
+                          strokeLinejoin="round"
                           strokeWidth={isSelected || isSelectionHighlighted ? '1.8' : '1.25'}
                           vectorEffect="non-scaling-stroke"
                         />
@@ -6025,6 +6025,12 @@ function FloorplanItemImage({
 }) {
   const resolvedUrl = useResolvedAssetUrl(url)
   if (!resolvedUrl) return null
+  // The PNG is captured with the modal's top-down camera (default up = +Y),
+  // so its pixel-right is world +X and pixel-up is world -Z. The plan SVG
+  // negates both axes (`toSvgX(v) = -v`, `toSvgY(v) = -v`), which together
+  // are a 180° rotation — so the captured image lands upside-down /
+  // mirrored when overlaid as-is. Bake that 180° into the image transform
+  // here; the panel / modal previews use the PNG directly and stay correct.
   const rotationDeg = (-rotation * 180) / Math.PI + 180
   return (
     <g
@@ -6230,6 +6236,7 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
           }
           points={points}
           stroke={stroke}
+          strokeOpacity={1}
           strokeWidth={
             isSelectionActive ? FLOORPLAN_SELECTED_WALL_STROKE_WIDTH : FLOORPLAN_WALL_STROKE_WIDTH
           }
@@ -6279,8 +6286,8 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
           <polygon
             fill={`url(#${wallSelectionHatchId})`}
             opacity={1}
-            points={points}
             pointerEvents="none"
+            points={points}
           />
         ) : null}
         {itemDimensionMeasurements.length > 0 ? (
@@ -6370,8 +6377,8 @@ const FloorplanNodeLayer = memo(function FloorplanNodeLayer({
         <polygon
           fill={fill}
           fillOpacity={isDeleteHovered ? 0.82 : 0.92}
-          points={FLOORPLAN_SPAWN_ARROW_POINTS}
           pointerEvents="none"
+          points={FLOORPLAN_SPAWN_ARROW_POINTS}
           stroke={stroke}
           strokeLinejoin="round"
           strokeWidth={0.055}
@@ -7286,6 +7293,11 @@ const FloorplanPolygonHandleLayer = memo(function FloorplanPolygonHandleLayer({
               y2={endSvg.y}
             />
             <line
+              onPointerDown={
+                onEdgePointerDown
+                  ? (event) => onEdgePointerDown(nodeId, edgeIndex, event)
+                  : undefined
+              }
               pointerEvents="stroke"
               stroke="transparent"
               strokeLinecap="round"
@@ -7296,11 +7308,6 @@ const FloorplanPolygonHandleLayer = memo(function FloorplanPolygonHandleLayer({
               x2={endSvg.x}
               y1={startSvg.y}
               y2={endSvg.y}
-              onPointerDown={
-                onEdgePointerDown
-                  ? (event) => onEdgePointerDown(nodeId, edgeIndex, event)
-                  : undefined
-              }
             />
           </g>
         )
@@ -9922,7 +9929,7 @@ export function FloorplanPanel() {
       zoneVertexDragState != null ||
       isPolygonDraftBuildActive
 
-    if (!hasUserAdjustedViewportRef.current && !transientFloorplanFit) {
+    if (!(hasUserAdjustedViewportRef.current || transientFloorplanFit)) {
       setViewport((current) =>
         floorplanViewportEquals(current, fittedViewport) ? current : fittedViewport,
       )
@@ -11054,6 +11061,14 @@ export function FloorplanPanel() {
     }
   }, [isItemPlacementPreviewActive, scheduleMovingFloorplanNodeRefresh])
 
+  useEffect(() => {
+    if (!hasPendingItemMeshFootprints) {
+      return
+    }
+
+    scheduleMovingFloorplanNodeRefresh()
+  }, [hasPendingItemMeshFootprints, scheduleMovingFloorplanNodeRefresh])
+
   // Subscribe to the live-transforms store so rotation/position changes that
   // *don't* go through pointer events still refresh the floorplan — e.g. R/T
   // keyboard rotation during placement updates `useLiveTransforms` but emits
@@ -11068,14 +11083,6 @@ export function FloorplanPanel() {
     })
     return unsubscribe
   }, [isItemPlacementPreviewActive, scheduleMovingFloorplanNodeRefresh])
-
-  useEffect(() => {
-    if (!hasPendingItemMeshFootprints) {
-      return
-    }
-
-    scheduleMovingFloorplanNodeRefresh()
-  }, [hasPendingItemMeshFootprints, scheduleMovingFloorplanNodeRefresh])
 
   useEffect(() => {
     if (!(movingNode?.type === 'door' || movingNode?.type === 'window')) {
@@ -16217,16 +16224,12 @@ export function FloorplanPanel() {
             onDuplicate: handleSelectedItemDuplicate,
             onMove: handleSelectedItemMove,
           }}
+          offsetY={FLOORPLAN_ACTION_MENU_OFFSET_Y}
           opening={{
             position: selectedOpeningActionMenuPosition,
             onDelete: handleSelectedOpeningDelete,
             onDuplicate: handleSelectedOpeningDuplicate,
             onMove: handleSelectedOpeningMove,
-          }}
-          spawn={{
-            position: selectedSpawnActionMenuPosition,
-            onDelete: handleSelectedSpawnDelete,
-            onMove: handleSelectedSpawnMove,
           }}
           roof={{
             position: selectedRoofActionMenuPosition,
@@ -16242,6 +16245,11 @@ export function FloorplanPanel() {
               : handleSelectedSlabDelete,
             onMove: selectedSlabEditingHole ? handleSelectedSlabHoleMove : handleSelectedSlabMove,
           }}
+          spawn={{
+            position: selectedSpawnActionMenuPosition,
+            onDelete: handleSelectedSpawnDelete,
+            onMove: handleSelectedSpawnMove,
+          }}
           stair={{
             position: selectedStairActionMenuPosition,
             onDelete: handleSelectedStairDelete,
@@ -16253,7 +16261,6 @@ export function FloorplanPanel() {
             onDelete: handleSelectedWallDelete,
             onMove: handleSelectedWallMove,
           }}
-          offsetY={FLOORPLAN_ACTION_MENU_OFFSET_Y}
         />
 
         {referenceScaleDraft && (
@@ -16286,7 +16293,7 @@ export function FloorplanPanel() {
             </div>
 
             <div className="mb-3 rounded-xl border border-border/70 bg-white/5 px-3 py-2">
-              <div className="text-muted-foreground text-[11px] uppercase tracking-wide">
+              <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
                 Drawn line
               </div>
               <div className="mt-1 font-medium text-sm">
@@ -16448,8 +16455,8 @@ export function FloorplanPanel() {
               <FloorplanGuideLayer
                 activeGuideInteractionGuideId={activeGuideInteractionGuideId}
                 activeGuideInteractionMode={activeGuideInteractionMode}
-                guideUi={guideUi}
                 guides={displayGuides}
+                guideUi={guideUi}
                 isInteractive={canInteractWithGuides}
                 onGuideSelect={handleGuideSelect}
                 onGuideTranslateStart={handleGuideTranslateStart}
@@ -16470,6 +16477,8 @@ export function FloorplanPanel() {
                 hoveredSlabId={hoveredSlabId}
                 hoveredWallId={hoveredWallId}
                 isDeleteMode={isDeleteMode}
+                isGuideTraceVisible={isGuideTraceVisible}
+                metersPerUnit={calibratedMetersPerUnit}
                 onCeilingDoubleClick={handleCeilingDoubleClick}
                 onCeilingHoverChange={handleCeilingHoverChange}
                 onCeilingSelect={handleCeilingSelect}
@@ -16486,11 +16495,9 @@ export function FloorplanPanel() {
                 openingsPolygons={openingsPolygons}
                 palette={palette}
                 selectedIdSet={selectedIdSet}
-                slabSelectionHatchId={slabSelectionHatchId}
                 slabPolygons={displaySlabPolygons}
+                slabSelectionHatchId={slabSelectionHatchId}
                 unit={unit}
-                metersPerUnit={calibratedMetersPerUnit}
-                isGuideTraceVisible={isGuideTraceVisible}
                 wallPolygons={displayWallPolygons}
                 wallSelectionHatchId={wallSelectionHatchId}
               />
@@ -16568,8 +16575,8 @@ export function FloorplanPanel() {
 
               <FloorplanReferenceScaleLayer
                 draft={referenceScaleDraft}
-                guideUi={guideUi}
                 guides={displayGuides}
+                guideUi={guideUi}
                 palette={palette}
                 unit={unit}
                 unitsPerPixel={floorplanUnitsPerPixel}

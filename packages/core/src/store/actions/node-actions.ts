@@ -125,7 +125,7 @@ function buildMergedWallAttachmentUpdates(
   const wallChildren = [...(primary.children ?? []), ...(secondary.children ?? [])] as AnyNodeId[]
   for (const childId of wallChildren) {
     const child = nodes[childId]
-    if (!child || !('position' in child) || !Array.isArray(child.position)) {
+    if (!(child && 'position' in child && Array.isArray(child.position))) {
       continue
     }
 
@@ -193,10 +193,12 @@ function buildWallMergePlans(
       })
       const [primary, secondary] = sortedCandidates
       if (
-        !primary ||
-        !secondary ||
-        !areWallStylesCompatible(primary, secondary) ||
-        !areWallsCollinearAcrossPoint(primary, secondary, junction)
+        !(
+          primary &&
+          secondary &&
+          areWallStylesCompatible(primary, secondary) &&
+          areWallsCollinearAcrossPoint(primary, secondary, junction)
+        )
       ) {
         continue
       }
@@ -278,6 +280,7 @@ export const createNodesAction = (
   ops.forEach(({ node, parentId }) => {
     get().markDirty(node.id)
     if (parentId) get().markDirty(parentId)
+    else if (node.parentId) get().markDirty(node.parentId as AnyNodeId)
   })
 }
 
