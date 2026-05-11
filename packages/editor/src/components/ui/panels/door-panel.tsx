@@ -127,8 +127,11 @@ export function DoorPanel() {
   const handleUpdate = useCallback(
     (updates: Partial<DoorNode>) => {
       if (!(selectedId && node)) return
+      const liveNode = useScene.getState().nodes[selectedId as AnyNodeId]
+      if (liveNode?.type !== 'door') return
+
       const hasChange = Object.entries(updates).some(([key, value]) => {
-        const currentValue = node[key as keyof DoorNode]
+        const currentValue = liveNode[key as keyof DoorNode]
         return !isSameDoorValue(currentValue, value)
       })
       if (!hasChange) return
@@ -137,7 +140,9 @@ export function DoorPanel() {
         useInteractive.getState().removeDoorOpenState(selectedId as AnyNodeId)
       }
       updateNode(selectedId as AnyNode['id'], updates)
-      useScene.getState().dirtyNodes.add(selectedId as AnyNodeId)
+      const scene = useScene.getState()
+      scene.dirtyNodes.add(selectedId as AnyNodeId)
+      if (liveNode.parentId) scene.dirtyNodes.add(liveNode.parentId as AnyNodeId)
     },
     [selectedId, node, updateNode],
   )
@@ -348,7 +353,9 @@ export function DoorPanel() {
   const isRollupGarageDoor = doorType === 'garage-rollup'
   const isTiltupGarageDoor = doorType === 'garage-tiltup'
   const typeMode = isOpening ? 'opening' : isGarageDoor ? 'garage' : 'door'
-  const supportsHandleSide = isSwingDoor
+  const supportsHingeSide = doorType === 'hinged'
+  const supportsHandleSide = doorType === 'hinged'
+  const supportsTopShape = !isGarageDoor
   const maxDoorWidth = isGarageDoor ? 6 : 3
 
   const setOpeningTopRadius = (index: number, value: number, commit = false) => {
@@ -395,6 +402,7 @@ export function DoorPanel() {
         handleSide: 'right',
         trackStyle: 'visible',
         operationState: Math.max(node.operationState ?? 0, 0.65),
+        threshold: false,
         contentPadding: [0.03, 0.04],
         segments: foldingDoorSegments,
       }
@@ -411,6 +419,7 @@ export function DoorPanel() {
         trackStyle: 'pocket',
         slideDirection: node.slideDirection ?? 'left',
         operationState: node.operationState ?? 0,
+        threshold: false,
         contentPadding: [0.035, 0.045],
         segments: foldingDoorSegments,
       }
@@ -427,6 +436,7 @@ export function DoorPanel() {
         trackStyle: 'visible',
         slideDirection: node.slideDirection ?? 'left',
         operationState: node.operationState ?? 0,
+        threshold: false,
         contentPadding: [0.035, 0.045],
         segments: foldingDoorSegments,
       }
@@ -443,6 +453,7 @@ export function DoorPanel() {
         trackStyle: 'visible',
         slideDirection: node.slideDirection ?? 'left',
         operationState: node.operationState ?? 0,
+        threshold: false,
         contentPadding: [0.03, 0.04],
         segments: frenchDoorSegments,
       }
@@ -456,6 +467,7 @@ export function DoorPanel() {
         ...dimensionUpdates,
         handle: false,
         threshold: false,
+        openingShape: 'rectangle',
         trackStyle: 'overhead',
         operationState: 0,
         garagePanelCount: Math.max(3, Math.min(8, node.garagePanelCount ?? 4)),
@@ -472,6 +484,7 @@ export function DoorPanel() {
         ...dimensionUpdates,
         handle: false,
         threshold: false,
+        openingShape: 'rectangle',
         trackStyle: 'overhead',
         operationState: 0,
         garagePanelCount: 4,
@@ -488,6 +501,7 @@ export function DoorPanel() {
         ...dimensionUpdates,
         handle: false,
         threshold: false,
+        openingShape: 'rectangle',
         trackStyle: 'overhead',
         operationState: 0,
         garagePanelCount: 4,
@@ -738,7 +752,7 @@ export function DoorPanel() {
         />
       </PanelSection>
 
-      {!isOpening && (
+      {!isOpening && supportsTopShape && (
         <PanelSection title="Top Shape">
           <div className="flex flex-col gap-2 px-1 pb-1">
             <SegmentedControl
@@ -990,19 +1004,21 @@ export function DoorPanel() {
       {isSwingDoor && (
         <PanelSection title="Swing">
           <div className="flex flex-col gap-2 px-1 pb-1">
-            <div className="space-y-1">
-              <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
-                Hinges Side
-              </span>
-              <SegmentedControl
-                onChange={(v) => handleUpdate({ hingesSide: v })}
-                options={[
-                  { label: 'Left', value: 'left' },
-                  { label: 'Right', value: 'right' },
-                ]}
-                value={node.hingesSide}
-              />
-            </div>
+            {supportsHingeSide && (
+              <div className="space-y-1">
+                <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
+                  Hinges Side
+                </span>
+                <SegmentedControl
+                  onChange={(v) => handleUpdate({ hingesSide: v })}
+                  options={[
+                    { label: 'Left', value: 'left' },
+                    { label: 'Right', value: 'right' },
+                  ]}
+                  value={node.hingesSide}
+                />
+              </div>
+            )}
             <div className="space-y-1">
               <span className="font-medium text-[10px] text-muted-foreground/80 uppercase tracking-wider">
                 Direction
