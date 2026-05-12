@@ -26,11 +26,13 @@
       "name": "editor",
       "version": "0.1.0",
       "dependencies": {
+        "@iconify/react": "^6.0.2",
         "@number-flow/react": "^0.5.14",
         "@pascal-app/core": "*",
         "@pascal-app/editor": "*",
         "@pascal-app/mcp": "*",
         "@pascal-app/viewer": "*",
+        "@radix-ui/react-tooltip": "^1.2.8",
         "@react-three/drei": "^10.7.7",
         "@react-three/fiber": "^9.5.0",
         "@tailwindcss/postcss": "^4.2.1",
