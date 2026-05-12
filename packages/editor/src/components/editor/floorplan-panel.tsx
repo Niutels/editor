@@ -39,6 +39,7 @@ import {
   sceneRegistry,
   useLiveTransforms,
   useScene,
+  WallNode as WallNodeSchema,
   type WallNode,
   WindowNode,
   ZoneNode as ZoneNodeSchema,
@@ -623,6 +624,12 @@ type FloorplanSpawnEntry = {
   spawn: SpawnNode
   position: Point2D
   rotation: number
+}
+
+type FloorplanColumnEntry = {
+  column: ColumnNode
+  points: string
+  polygon: Point2D[]
 }
 
 type ReferenceFloorData = {
@@ -1768,6 +1775,56 @@ function getRotatedRectanglePolygon(
 
 function getColumnPlanFootprint(column: ColumnNode): Point2D[] {
   const center = { x: column.position[0], y: column.position[2] }
+
+  if (
+    column.supportStyle === 'a-frame' ||
+    column.supportStyle === 'y-frame' ||
+    column.supportStyle === 'v-frame' ||
+    column.supportStyle === 'x-brace' ||
+    column.supportStyle === 'k-brace' ||
+    column.supportStyle === 'single-strut' ||
+    column.supportStyle === 'tripod' ||
+    column.supportStyle === 'trestle' ||
+    column.supportStyle === 'portal-frame' ||
+    column.supportStyle === 'box-frame'
+  ) {
+    const width = Math.max(
+      column.supportStyle === 'a-frame' ||
+        column.supportStyle === 'x-brace' ||
+        column.supportStyle === 'k-brace' ||
+        column.supportStyle === 'single-strut' ||
+        column.supportStyle === 'tripod' ||
+        column.supportStyle === 'trestle' ||
+        column.supportStyle === 'portal-frame' ||
+        column.supportStyle === 'box-frame'
+        ? (column.braceBottomSpread ?? 1.2)
+        : 0,
+      column.braceTopSpread ??
+        (column.supportStyle === 'y-frame' ||
+        column.supportStyle === 'v-frame' ||
+        column.supportStyle === 'x-brace' ||
+        column.supportStyle === 'k-brace' ||
+        column.supportStyle === 'single-strut' ||
+        column.supportStyle === 'tripod' ||
+        column.supportStyle === 'trestle' ||
+        column.supportStyle === 'portal-frame' ||
+        column.supportStyle === 'box-frame'
+          ? 1
+          : 0),
+      (column.braceWidth ?? column.width) * 2,
+    )
+    const depth = Math.max(
+      column.supportStyle === 'tripod' ||
+        column.supportStyle === 'trestle' ||
+        column.supportStyle === 'box-frame'
+        ? (column.braceTopSpread ?? 1)
+        : 0,
+      column.braceDepth ?? column.depth,
+      0.08,
+    )
+    return getRotatedRectanglePolygon(center, width, depth, column.rotation)
+  }
+
   const shaftWidth =
     column.crossSection === 'round' ||
     column.crossSection === 'octagonal' ||
@@ -5742,6 +5799,12 @@ const FloorplanFenceLayer = memo(function FloorplanFenceLayer({
         const fenceGlowOpacity = isDeleteHovered ? 0.18 : isActive ? 0.22 : isHovered ? 0.14 : 0
         const fenceUnderlayWidth = isActive ? '6.5' : isHovered ? '6' : '5.2'
         const fenceStrokeWidth = isActive ? '2.6' : isHovered ? '2.35' : '2.05'
+        const showFenceInfill = fence.showInfill ?? true
+        const visibleMarkerFrames = showFenceInfill
+          ? markerFrames
+          : markerFrames.filter(
+              (_, markerIndex) => markerIndex === 0 || markerIndex === markerFrames.length - 1,
+            )
         const privacyMarkerWidth = clamp(fence.postSize * 0.58, 0.038, 0.068)
         const privacyMarkerHeight = clamp(
           Math.max(fence.baseHeight * 0.5, fence.postSize * 1.4),
@@ -5792,7 +5855,7 @@ const FloorplanFenceLayer = memo(function FloorplanFenceLayer({
               strokeWidth={fenceStrokeWidth}
               vectorEffect="non-scaling-stroke"
             />
-            {markerFrames.map(({ angleDeg, point }, markerIndex) => {
+            {visibleMarkerFrames.map(({ angleDeg, point }, markerIndex) => {
               const svgPoint = toSvgPoint(point)
 
               if (fence.style === 'privacy') {
@@ -7492,6 +7555,7 @@ export function FloorplanPanel() {
   const setPhase = useEditor((state) => state.setPhase)
   const setMovingFenceEndpoint = useEditor((state) => state.setMovingFenceEndpoint)
   const setMovingNode = useEditor((state) => state.setMovingNode)
+  const setCurvingWall = useEditor((state) => state.setCurvingWall)
   const movingFenceEndpoint = useEditor((state) => state.movingFenceEndpoint)
   const structureLayer = useEditor((state) => state.structureLayer)
   const setStructureLayer = useEditor((state) => state.setStructureLayer)
@@ -8140,6 +8204,28 @@ export function FloorplanPanel() {
         : entry,
     )
   }, [zoneBoundaryDraft, zonePolygons])
+  const floorplanColumnEntries = useMemo<FloorplanColumnEntry[]>(
+    () =>
+      levelDescendantNodes.flatMap((node) => {
+        if (!(node.type === 'column' && node.visible !== false)) {
+          return []
+        }
+
+        const polygon = getColumnPlanFootprint(node)
+        if (polygon.length < 3) {
+          return []
+        }
+
+        return [
+          {
+            column: node,
+            points: formatPolygonPoints(polygon),
+            polygon,
+          },
+        ]
+      }),
+    [levelDescendantNodes],
+  )
   const levelDescendantNodeById = useMemo(
     () => new Map(levelDescendantNodes.map((node) => [node.id, node] as const)),
     [levelDescendantNodes],
@@ -9240,6 +9326,7 @@ export function FloorplanPanel() {
     selectedWallEntry,
     wallCurveDraft,
   ])
+  const canCurveSelectedWall = wallCurveHandles.length > 0
   const slabVertexHandles = useMemo(() => {
     if (!shouldShowSlabBoundaryHandles) {
       return []
@@ -12967,6 +13054,7 @@ export function FloorplanPanel() {
   )
   const { getFloorplanHitIdAtPoint, getFloorplanSelectionIdsInBounds } = useFloorplanHitTesting({
     ceilingPolygons: displayCeilingPolygons,
+    columnPolygons: floorplanColumnEntries,
     displaySlabPolygons,
     displayWallPolygons,
     floorplanItemEntries,
@@ -13980,6 +14068,57 @@ export function FloorplanPanel() {
       setSelection({ selectedIds: [] })
     },
     [selectedWallEntry, setMovingNode, setSelection],
+  )
+  const duplicateSelectedWall = useCallback(() => {
+    const wall = selectedWallEntry?.wall
+    if (!wall?.parentId) {
+      return
+    }
+
+    sfxEmitter.emit('sfx:item-pick')
+
+    const cloned = structuredClone(wall) as Record<string, unknown>
+    delete cloned.id
+    cloned.children = []
+    cloned.metadata = {
+      ...(typeof cloned.metadata === 'object' && cloned.metadata !== null ? cloned.metadata : {}),
+      isNew: true,
+    }
+
+    const temporal = useScene.temporal.getState()
+    temporal.pause()
+    try {
+      const duplicate = WallNodeSchema.parse(cloned)
+      useScene.getState().createNode(duplicate, duplicate.parentId as AnyNodeId)
+      setMovingNode(duplicate)
+      setSelection({ selectedIds: [] })
+    } catch (error) {
+      console.error('Failed to duplicate wall', error)
+    } finally {
+      temporal.resume()
+    }
+  }, [selectedWallEntry, setMovingNode, setSelection])
+  const handleSelectedWallDuplicate = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+      duplicateSelectedWall()
+    },
+    [duplicateSelectedWall],
+  )
+  const handleSelectedWallCurve = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+
+      const wall = selectedWallEntry?.wall
+      if (!(wall && canCurveSelectedWall)) {
+        return
+      }
+
+      sfxEmitter.emit('sfx:item-pick')
+      setCurvingWall(wall)
+      setSelection({ selectedIds: [] })
+    },
+    [canCurveSelectedWall, selectedWallEntry, setCurvingWall, setSelection],
   )
   const handleSelectedWallDelete = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -16020,9 +16159,17 @@ export function FloorplanPanel() {
     site,
   ])
   const hasDuplicatableFloorplanSelection = Boolean(
-    selectedItemEntry || selectedOpeningEntry || selectedStairEntry || selectedRoofEntry,
+    selectedItemEntry ||
+      selectedOpeningEntry ||
+      selectedStairEntry ||
+      selectedRoofEntry ||
+      selectedWallEntry,
   )
   const handleDuplicateFloorplanSelection = useCallback(() => {
+    if (selectedWallEntry) {
+      duplicateSelectedWall()
+      return
+    }
     if (selectedOpeningEntry) {
       duplicateSelectedOpening()
       return
@@ -16039,6 +16186,7 @@ export function FloorplanPanel() {
       duplicateSelectedRoof()
     }
   }, [
+    duplicateSelectedWall,
     duplicateSelectedItem,
     duplicateSelectedOpening,
     duplicateSelectedRoof,
@@ -16047,6 +16195,7 @@ export function FloorplanPanel() {
     selectedOpeningEntry,
     selectedRoofEntry,
     selectedStairEntry,
+    selectedWallEntry,
   ])
   const activeDraftAnchorPoint =
     referenceScaleDraft?.start ??
@@ -16173,7 +16322,9 @@ export function FloorplanPanel() {
           }}
           wall={{
             position: selectedWallActionMenuPosition,
+            onCurve: canCurveSelectedWall ? handleSelectedWallCurve : undefined,
             onDelete: handleSelectedWallDelete,
+            onDuplicate: handleSelectedWallDuplicate,
             onMove: handleSelectedWallMove,
           }}
         />

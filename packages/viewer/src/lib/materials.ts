@@ -282,16 +282,18 @@ export function createMaterial(material?: MaterialSchema): THREE.MeshStandardMat
   }
 
   const map = getTexture(material)
-
-  const threeMaterial = new THREE.MeshStandardMaterial({
+  const materialParams: THREE.MeshStandardMaterialParameters = {
     color: props.color,
     roughness: props.roughness,
     metalness: props.metalness,
     opacity: props.opacity,
     transparent: props.transparent,
     side: sideMap[props.side],
-    map,
-  })
+  }
+
+  if (map) materialParams.map = map
+
+  const threeMaterial = new THREE.MeshStandardMaterial(materialParams)
 
   materialCache.set(cacheKey, threeMaterial)
   return threeMaterial

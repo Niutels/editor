@@ -6,6 +6,7 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
+import { useEffect } from 'react'
 import * as THREE from 'three'
 
 function ensureUv2Attribute(geometry: THREE.BufferGeometry) {
@@ -22,6 +23,16 @@ function ensureUv2Attribute(geometry: THREE.BufferGeometry) {
 export const SlabSystem = () => {
   const dirtyNodes = useScene((state) => state.dirtyNodes)
   const clearDirty = useScene((state) => state.clearDirty)
+  const markDirty = useScene((state) => state.markDirty)
+
+  useEffect(() => {
+    const nodes = useScene.getState().nodes
+    for (const node of Object.values(nodes)) {
+      if (node.type === 'slab') {
+        markDirty(node.id)
+      }
+    }
+  }, [markDirty])
 
   useFrame(() => {
     if (dirtyNodes.size === 0) return

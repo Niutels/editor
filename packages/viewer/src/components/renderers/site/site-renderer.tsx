@@ -1,5 +1,4 @@
 import { type SiteNode, type SlabNode, useRegistry, useScene } from '@pascal-app/core'
-import polygonClipping from 'polygon-clipping'
 import { useMemo, useRef } from 'react'
 import { BufferGeometry, Float32BufferAttribute, type Group, Path, Shape } from 'three'
 import { useNodeEvents } from '../../../hooks/use-node-events'
@@ -88,24 +87,16 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
     for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i]![0], -pts[i]![1])
     shape.closePath()
 
-    if (slabPolygons.length > 0) {
-      const multiPolygons = slabPolygons.map((p) => [
-        p.map((pt) => [pt[0], -pt[1]] as [number, number]),
-      ])
-      const unioned = polygonClipping.union(
-        multiPolygons[0] as polygonClipping.Polygon,
-        ...(multiPolygons.slice(1) as polygonClipping.Polygon[]),
-      )
-      for (const geom of unioned) {
-        const ring = geom[0]
-        if (ring && ring.length > 0) {
-          const hole = new Path()
-          hole.moveTo(ring[0]![0], ring[0]![1])
-          for (let i = 1; i < ring.length; i++) hole.lineTo(ring[i]![0], ring[i]![1])
-          hole.closePath()
-          shape.holes.push(hole)
-        }
+    for (const polygon of slabPolygons) {
+      if (polygon.length < 3) continue
+
+      const hole = new Path()
+      hole.moveTo(polygon[0]![0], -polygon[0]![1])
+      for (let i = 1; i < polygon.length; i++) {
+        hole.lineTo(polygon[i]![0], -polygon[i]![1])
       }
+      hole.closePath()
+      shape.holes.push(hole)
     }
 
     return shape

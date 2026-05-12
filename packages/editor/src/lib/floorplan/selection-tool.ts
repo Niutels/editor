@@ -1,5 +1,6 @@
 import type {
   CeilingNode,
+  ColumnNode,
   DoorNode,
   ItemNode,
   Point2D,
@@ -53,6 +54,11 @@ type CeilingEntry = {
   holes: Point2D[][]
 }
 
+type ColumnEntry = {
+  column: ColumnNode
+  polygon: Point2D[]
+}
+
 type RoofEntry = {
   roof: RoofNode
   segments: Array<{
@@ -71,6 +77,7 @@ type FloorplanSelectionToolContext = {
   walls: WallEntry[]
   slabs: SlabEntry[]
   ceilings: CeilingEntry[]
+  columns: ColumnEntry[]
   roofs: RoofEntry[]
   openingHitTolerance: number
   wallHitTolerance: number
@@ -123,6 +130,13 @@ export function getFloorplanHitNodeId(context: FloorplanSelectionToolContext) {
       return stairHit.stair.id
     }
 
+    const columnHit = context.columns.find(({ polygon }) =>
+      isPointInsidePolygon(context.point, polygon),
+    )
+    if (columnHit) {
+      return columnHit.column.id
+    }
+
     const wallHit = context.walls.find(
       ({ wall, polygon }) =>
         isPointInsidePolygon(context.point, polygon) ||
@@ -166,6 +180,7 @@ type FloorplanSelectionBoundsContext = {
   openings: OpeningPolygonEntry[]
   slabs: SlabEntry[]
   ceilings: CeilingEntry[]
+  columns: ColumnEntry[]
   stairs: StairEntry[]
   roofs: RoofEntry[]
 }
@@ -179,6 +194,7 @@ export function getFloorplanSelectionIdsInBounds({
   openings,
   slabs,
   ceilings,
+  columns,
   stairs,
   roofs,
 }: FloorplanSelectionBoundsContext) {
@@ -204,6 +220,9 @@ export function getFloorplanSelectionIdsInBounds({
   const ceilingIds = ceilings
     .filter(({ polygon }) => doesPolygonIntersectSelectionBounds(polygon, bounds))
     .map(({ ceiling }) => ceiling.id)
+  const columnIds = columns
+    .filter(({ polygon }) => doesPolygonIntersectSelectionBounds(polygon, bounds))
+    .map(({ column }) => column.id)
   const stairIds = stairs
     .filter((stair) =>
       getStairHitPolygons(stair).some((polygon) =>
@@ -224,6 +243,7 @@ export function getFloorplanSelectionIdsInBounds({
       ...openingIds,
       ...slabIds,
       ...ceilingIds,
+      ...columnIds,
       ...stairIds,
       ...roofIds,
     ]),

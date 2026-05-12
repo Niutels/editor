@@ -1636,6 +1636,7 @@ const EditorOutlinerSync = () => {
   const previewSelectedIds = useViewer((s) => s.previewSelectedIds)
   const hoveredId = useViewer((s) => s.hoveredId)
   const outliner = useViewer((s) => s.outliner)
+  const nodes = useScene((s) => s.nodes)
 
   useEffect(() => {
     let idsToHighlight: string[] = []
@@ -1672,16 +1673,21 @@ const EditorOutlinerSync = () => {
     // 2. Sync with the imperative outliner arrays (mutate in place to keep references)
     outliner.selectedObjects.length = 0
     for (const id of idsToHighlight) {
+      if (!nodes[id as AnyNodeId]) continue
       const obj = sceneRegistry.nodes.get(id)
       if (obj?.parent) outliner.selectedObjects.push(obj)
     }
 
     outliner.hoveredObjects.length = 0
     if (hoveredId) {
-      const obj = sceneRegistry.nodes.get(hoveredId)
-      if (obj?.parent) outliner.hoveredObjects.push(obj)
+      if (!nodes[hoveredId as AnyNodeId]) {
+        useViewer.setState({ hoveredId: null })
+      } else {
+        const obj = sceneRegistry.nodes.get(hoveredId)
+        if (obj?.parent) outliner.hoveredObjects.push(obj)
+      }
     }
-  }, [phase, previewSelectedIds, selection, hoveredId, outliner])
+  }, [phase, previewSelectedIds, selection, hoveredId, outliner, nodes])
 
   return null
 }
