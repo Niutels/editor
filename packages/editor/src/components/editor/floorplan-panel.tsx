@@ -39,6 +39,7 @@ import {
   sceneRegistry,
   useLiveTransforms,
   useScene,
+  WallNode as WallNodeSchema,
   type WallNode,
   WindowNode,
   ZoneNode as ZoneNodeSchema,
@@ -7554,6 +7555,7 @@ export function FloorplanPanel() {
   const setPhase = useEditor((state) => state.setPhase)
   const setMovingFenceEndpoint = useEditor((state) => state.setMovingFenceEndpoint)
   const setMovingNode = useEditor((state) => state.setMovingNode)
+  const setCurvingWall = useEditor((state) => state.setCurvingWall)
   const movingFenceEndpoint = useEditor((state) => state.movingFenceEndpoint)
   const structureLayer = useEditor((state) => state.structureLayer)
   const setStructureLayer = useEditor((state) => state.setStructureLayer)
@@ -9324,6 +9326,7 @@ export function FloorplanPanel() {
     selectedWallEntry,
     wallCurveDraft,
   ])
+  const canCurveSelectedWall = wallCurveHandles.length > 0
   const slabVertexHandles = useMemo(() => {
     if (!shouldShowSlabBoundaryHandles) {
       return []
@@ -14066,6 +14069,57 @@ export function FloorplanPanel() {
     },
     [selectedWallEntry, setMovingNode, setSelection],
   )
+  const duplicateSelectedWall = useCallback(() => {
+    const wall = selectedWallEntry?.wall
+    if (!wall?.parentId) {
+      return
+    }
+
+    sfxEmitter.emit('sfx:item-pick')
+
+    const cloned = structuredClone(wall) as Record<string, unknown>
+    delete cloned.id
+    cloned.children = []
+    cloned.metadata = {
+      ...(typeof cloned.metadata === 'object' && cloned.metadata !== null ? cloned.metadata : {}),
+      isNew: true,
+    }
+
+    const temporal = useScene.temporal.getState()
+    temporal.pause()
+    try {
+      const duplicate = WallNodeSchema.parse(cloned)
+      useScene.getState().createNode(duplicate, duplicate.parentId as AnyNodeId)
+      setMovingNode(duplicate)
+      setSelection({ selectedIds: [] })
+    } catch (error) {
+      console.error('Failed to duplicate wall', error)
+    } finally {
+      temporal.resume()
+    }
+  }, [selectedWallEntry, setMovingNode, setSelection])
+  const handleSelectedWallDuplicate = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+      duplicateSelectedWall()
+    },
+    [duplicateSelectedWall],
+  )
+  const handleSelectedWallCurve = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation()
+
+      const wall = selectedWallEntry?.wall
+      if (!(wall && canCurveSelectedWall)) {
+        return
+      }
+
+      sfxEmitter.emit('sfx:item-pick')
+      setCurvingWall(wall)
+      setSelection({ selectedIds: [] })
+    },
+    [canCurveSelectedWall, selectedWallEntry, setCurvingWall, setSelection],
+  )
   const handleSelectedWallDelete = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       event.stopPropagation()
@@ -16105,9 +16159,17 @@ export function FloorplanPanel() {
     site,
   ])
   const hasDuplicatableFloorplanSelection = Boolean(
-    selectedItemEntry || selectedOpeningEntry || selectedStairEntry || selectedRoofEntry,
+    selectedItemEntry ||
+      selectedOpeningEntry ||
+      selectedStairEntry ||
+      selectedRoofEntry ||
+      selectedWallEntry,
   )
   const handleDuplicateFloorplanSelection = useCallback(() => {
+    if (selectedWallEntry) {
+      duplicateSelectedWall()
+      return
+    }
     if (selectedOpeningEntry) {
       duplicateSelectedOpening()
       return
@@ -16124,6 +16186,7 @@ export function FloorplanPanel() {
       duplicateSelectedRoof()
     }
   }, [
+    duplicateSelectedWall,
     duplicateSelectedItem,
     duplicateSelectedOpening,
     duplicateSelectedRoof,
@@ -16132,6 +16195,7 @@ export function FloorplanPanel() {
     selectedOpeningEntry,
     selectedRoofEntry,
     selectedStairEntry,
+    selectedWallEntry,
   ])
   const activeDraftAnchorPoint =
     referenceScaleDraft?.start ??
@@ -16258,7 +16322,9 @@ export function FloorplanPanel() {
           }}
           wall={{
             position: selectedWallActionMenuPosition,
+            onCurve: canCurveSelectedWall ? handleSelectedWallCurve : undefined,
             onDelete: handleSelectedWallDelete,
+            onDuplicate: handleSelectedWallDuplicate,
             onMove: handleSelectedWallMove,
           }}
         />

@@ -9,13 +9,12 @@ import {
   type GridEvent,
   getMaterialPresetByRef,
   getPerpendicularWallMoveAxis,
-  getRenderableSlabPolygon,
   pauseSceneHistory,
+  planAutoSlabsForLevel,
   planWallMoveJunctions,
   resolveMaterial,
   resumeSceneHistory,
   type SlabNode,
-  SlabNode as SlabSchema,
   useScene,
   type WallMoveAxis,
   type WallMoveBridgePlan,
@@ -25,16 +24,13 @@ import {
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BufferGeometry, DoubleSide, Float32BufferAttribute, ShapeUtils, Vector2 } from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
 import { markToolCancelConsumed } from '../../../hooks/use-keyboard'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
 import { CursorSphere } from '../shared/cursor-sphere'
 import { getWallGridStep, isWallLongEnough, snapScalarToGrid } from './wall-drafting'
-
-const AUTO_SLAB_PREVIEW_ELEVATION = 0.05
-const AUTO_SLAB_PREVIEW_Y = AUTO_SLAB_PREVIEW_ELEVATION + 0.025
 
 function rotateVector([x, z]: [number, number], angle: number): [number, number] {
   const cos = Math.cos(angle)
@@ -68,11 +64,6 @@ type GhostWallPreview = {
   end: [number, number]
   color: string
   height: number
-}
-
-type GhostSlabPreview = {
-  id: string
-  polygon: Array<[number, number]>
 }
 
 function getLinkedWallSnapshots(args: {
@@ -222,27 +213,6 @@ function getWallGhostColor(wall: WallNode) {
   return resolveMaterial(wall.material ?? wall.interiorMaterial ?? wall.exteriorMaterial).color
 }
 
-function getMinRotatedKey(values: string[]) {
-  if (values.length === 0) return ''
-
-  let best = ''
-  for (let index = 0; index < values.length; index += 1) {
-    const value = [...values.slice(index), ...values.slice(0, index)].join('|')
-    if (!best || value < best) {
-      best = value
-    }
-  }
-
-  return best
-}
-
-function getPolygonPreviewKey(polygon: Array<[number, number]>) {
-  const values = polygon.map(([x, z]) => `${x.toFixed(3)}:${z.toFixed(3)}`)
-  const forward = getMinRotatedKey(values)
-  const reversed = getMinRotatedKey([...values].reverse())
-  return forward < reversed ? forward : reversed
-}
-
 function getWallsAfterUpdates(
   nodes: ReturnType<typeof useScene.getState>['nodes'],
   updates: Array<{ id: AnyNodeId; data: Partial<WallNode> }>,
@@ -255,6 +225,32 @@ function getWallsAfterUpdates(
       const update = updateById.get(wall.id as AnyNodeId)
       return update ? ({ ...wall, ...update } as WallNode) : wall
     })
+}
+
+function cloneSlabSnapshot(slab: SlabNode): SlabNode {
+  return {
+    ...slab,
+    polygon: slab.polygon.map(([x, z]) => [x, z] as [number, number]),
+    holes: slab.holes.map((hole) => hole.map(([x, z]) => [x, z] as [number, number])),
+    holeMetadata: slab.holeMetadata.map((metadata) => ({ ...metadata })),
+  }
+}
+
+function getLevelSlabs(levelId: string, nodes: ReturnType<typeof useScene.getState>['nodes']) {
+  return Object.values(nodes).filter(
+    (entry): entry is SlabNode => entry?.type === 'slab' && (entry.parentId ?? null) === levelId,
+  )
+}
+
+function getLevelAutoSlabs(
+  levelId: string,
+  nodes: ReturnType<typeof useScene.getState>['nodes'],
+) {
+  return getLevelSlabs(levelId, nodes).filter((slab) => slab.autoFromWalls)
+}
+
+function getLevelAutoSlabSnapshots(levelId: string) {
+  return getLevelAutoSlabs(levelId, useScene.getState().nodes).map(cloneSlabSnapshot)
 }
 
 function buildBridgeWallCreates(args: {
@@ -343,68 +339,6 @@ function buildBridgeWallPreviews(args: {
   return previews
 }
 
-function buildAutoSlabGhostPreviews(args: {
-  levelId: string
-  walls: WallNode[]
-  existingSlabs: SlabNode[]
-}): GhostSlabPreview[] {
-  const { levelId, walls, existingSlabs } = args
-  const levelWalls = walls.filter((wall) => (wall.parentId ?? null) === levelId)
-
-  if (levelWalls.length < 3) {
-    return []
-  }
-
-  const manualSlabKeys = new Set(
-    existingSlabs
-      .filter((slab) => !slab.autoFromWalls)
-      .map((slab) => getPolygonPreviewKey(slab.polygon)),
-  )
-  const existingAutoKeys = new Set(
-    existingSlabs
-      .filter((slab) => slab.autoFromWalls)
-      .map((slab) => getPolygonPreviewKey(getRenderableSlabPolygon(slab))),
-  )
-  const seenPreviewKeys = new Set<string>()
-  const { roomPolygons } = detectSpacesForLevel(levelId, levelWalls)
-  const previews: GhostSlabPreview[] = []
-
-  for (let index = 0; index < roomPolygons.length; index += 1) {
-    const polygon = roomPolygons[index]
-    if (!polygon || polygon.length < 3) continue
-
-    const rawPolygon = polygon.map((point) => [point.x, point.y] as [number, number])
-    if (manualSlabKeys.has(getPolygonPreviewKey(rawPolygon))) {
-      continue
-    }
-
-    const previewSlab = SlabSchema.parse({
-      polygon: rawPolygon,
-      holes: [],
-      elevation: AUTO_SLAB_PREVIEW_ELEVATION,
-      autoFromWalls: true,
-    })
-    const renderablePolygon = getRenderableSlabPolygon(previewSlab)
-    const previewKey = getPolygonPreviewKey(renderablePolygon)
-
-    if (
-      renderablePolygon.length < 3 ||
-      existingAutoKeys.has(previewKey) ||
-      seenPreviewKeys.has(previewKey)
-    ) {
-      continue
-    }
-
-    seenPreviewKeys.add(previewKey)
-    previews.push({
-      id: `auto-slab:${index}:${previewKey}`,
-      polygon: renderablePolygon,
-    })
-  }
-
-  return previews
-}
-
 function setPreviewGeometryAttributes(
   geometry: BufferGeometry,
   positions: number[],
@@ -426,48 +360,6 @@ function createWallPreviewGeometry(length: number, height: number) {
     [0, 0, 1, 0, 1, 1, 0, 1],
   )
   geometry.setIndex([0, 1, 2, 0, 2, 3])
-  geometry.computeBoundingSphere()
-  return geometry
-}
-
-function createSlabPreviewGeometry(polygon: Array<[number, number]>) {
-  if (polygon.length < 3) {
-    return null
-  }
-
-  const contour = polygon.map(([x, z]) => new Vector2(x, z))
-  const triangles = ShapeUtils.triangulateShape(contour, [])
-  if (triangles.length === 0) {
-    return null
-  }
-
-  let minX = Number.POSITIVE_INFINITY
-  let minZ = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxZ = Number.NEGATIVE_INFINITY
-
-  for (const [x, z] of polygon) {
-    minX = Math.min(minX, x)
-    minZ = Math.min(minZ, z)
-    maxX = Math.max(maxX, x)
-    maxZ = Math.max(maxZ, z)
-  }
-
-  const width = Math.max(maxX - minX, 0.001)
-  const depth = Math.max(maxZ - minZ, 0.001)
-  const positions: number[] = []
-  const normals: number[] = []
-  const uvs: number[] = []
-
-  for (const [x, z] of polygon) {
-    positions.push(x, 0, z)
-    normals.push(0, 1, 0)
-    uvs.push((x - minX) / width, (z - minZ) / depth)
-  }
-
-  const geometry = new BufferGeometry()
-  setPreviewGeometryAttributes(geometry, positions, normals, uvs)
-  geometry.setIndex(triangles.flat())
   geometry.computeBoundingSphere()
   return geometry
 }
@@ -504,35 +396,6 @@ function GhostWallPreviewMesh({ preview }: { preview: GhostWallPreview }) {
   )
 }
 
-function GhostSlabPreviewMesh({ preview }: { preview: GhostSlabPreview }) {
-  const geometry = useMemo(() => createSlabPreviewGeometry(preview.polygon), [preview.polygon])
-
-  useEffect(() => () => geometry?.dispose(), [geometry])
-
-  if (!geometry) {
-    return null
-  }
-
-  return (
-    <mesh
-      frustumCulled={false}
-      layers={EDITOR_LAYER}
-      position={[0, AUTO_SLAB_PREVIEW_Y, 0]}
-      renderOrder={1}
-    >
-      <primitive attach="geometry" object={geometry} />
-      <meshBasicMaterial
-        color="#38bdf8"
-        depthTest={false}
-        depthWrite={false}
-        opacity={0.2}
-        side={DoubleSide}
-        transparent
-      />
-    </mesh>
-  )
-}
-
 export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
   const meta =
     typeof node.metadata === 'object' && node.metadata !== null && !Array.isArray(node.metadata)
@@ -564,6 +427,9 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
           originalEnd: node.end,
         }),
   )
+  const originalAutoSlabsRef = useRef<SlabNode[]>(
+    node.parentId ? getLevelAutoSlabSnapshots(node.parentId) : [],
+  )
   const dragAnchorRef = useRef<[number, number] | null>(null)
   const nodeIdRef = useRef(node.id)
   const previewRef = useRef<{ start: [number, number]; end: [number, number] } | null>(null)
@@ -576,7 +442,6 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
     return [centerX, 0, centerZ]
   })
   const [ghostWallPreviews, setGhostWallPreviews] = useState<GhostWallPreview[]>([])
-  const [ghostSlabPreviews, setGhostSlabPreviews] = useState<GhostSlabPreview[]>([])
 
   const exitMoveMode = useCallback(() => {
     useEditor.getState().setMovingNode(null)
@@ -588,9 +453,11 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
     const originalEnd = originalEndRef.current
     const originalCenter = originalCenterRef.current
     const originalHalfVector = originalHalfVectorRef.current
+    const levelId = node.parentId ?? null
+    const originalAutoSlabs = originalAutoSlabsRef.current
 
     pauseSceneHistory(useScene)
-    let wasCommitted = false
+    let shouldRestoreOnCleanup = true
 
     const applyNodePreview = (
       updates: Array<{ id: WallNode['id']; start: [number, number]; end: [number, number] }>,
@@ -604,6 +471,72 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
       for (const entry of updates) {
         useScene.getState().markDirty(entry.id as AnyNodeId)
       }
+    }
+
+    const applyLiveAutoSlabPreview = (walls: WallNode[]) => {
+      if (!levelId) {
+        return
+      }
+
+      const levelWalls = walls.filter((wall) => (wall.parentId ?? null) === levelId)
+      const sceneState = useScene.getState()
+      const { roomPolygons } = detectSpacesForLevel(levelId, levelWalls)
+      const slabPlan = planAutoSlabsForLevel(roomPolygons, getLevelSlabs(levelId, sceneState.nodes))
+
+      if (
+        slabPlan.create.length === 0 &&
+        slabPlan.update.length === 0 &&
+        slabPlan.delete.length === 0
+      ) {
+        return
+      }
+
+      sceneState.applyNodeChanges({
+        update: slabPlan.update.map((entry) => ({
+          id: entry.id as AnyNodeId,
+          data: entry.data,
+        })),
+        create: slabPlan.create.map((slab) => ({
+          node: slab,
+          parentId: levelId as AnyNodeId,
+        })),
+        delete: slabPlan.delete.map((id) => id as AnyNodeId),
+      })
+    }
+
+    const restoreAutoSlabPreview = () => {
+      if (!levelId) {
+        return
+      }
+
+      const sceneState = useScene.getState()
+      const originalIds = new Set(originalAutoSlabs.map((slab) => slab.id))
+      const currentAutoSlabs = getLevelAutoSlabs(levelId, sceneState.nodes)
+      const update = originalAutoSlabs
+        .filter((slab) => sceneState.nodes[slab.id as AnyNodeId])
+        .map((slab) => ({
+          id: slab.id as AnyNodeId,
+          data: cloneSlabSnapshot(slab),
+        }))
+      const create = originalAutoSlabs
+        .filter((slab) => !sceneState.nodes[slab.id as AnyNodeId])
+        .map((slab) => ({
+          node: cloneSlabSnapshot(slab),
+          parentId: levelId as AnyNodeId,
+        }))
+      const deleteIds = currentAutoSlabs
+        .filter((slab) => !originalIds.has(slab.id))
+        .map((slab) => slab.id as AnyNodeId)
+
+      if (update.length === 0 && create.length === 0 && deleteIds.length === 0) {
+        return
+      }
+
+      sceneState.applyNodeChanges({
+        update,
+        create,
+        delete: deleteIds,
+      })
     }
 
     const buildWallFromCenter = (center: [number, number]) => {
@@ -672,31 +605,18 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
       })
       const nextGhostWalls = bridgePreviews.map((preview) => preview.ghost)
       const virtualBridgeWalls = bridgePreviews.map((preview) => preview.wall)
-      const sceneNodes = useScene.getState().nodes
-      const levelId = node.parentId ?? null
       setGhostWallPreviews(nextGhostWalls)
-      setGhostSlabPreviews(
-        levelId
-          ? buildAutoSlabGhostPreviews({
-              levelId,
-              walls: [...previewSceneWalls, ...virtualBridgeWalls],
-              existingSlabs: Object.values(sceneNodes).filter(
-                (entry): entry is SlabNode =>
-                  entry?.type === 'slab' && (entry.parentId ?? null) === levelId,
-              ),
-            })
-          : [],
-      )
       applyNodePreview(previewUpdates)
+      applyLiveAutoSlabPreview([...previewSceneWalls, ...virtualBridgeWalls])
     }
 
     const restoreOriginal = () => {
       setGhostWallPreviews([])
-      setGhostSlabPreviews([])
       applyNodePreview([
         { id: nodeId, start: originalStart, end: originalEnd },
         ...linkedOriginalsRef.current,
       ])
+      restoreAutoSlabPreview()
     }
 
     const onGridMove = (event: GridEvent) => {
@@ -738,16 +658,16 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
 
       const preview = previewRef.current ?? { start: originalStart, end: originalEnd }
 
-      wasCommitted = true
+      shouldRestoreOnCleanup = false
 
       // Restore original baseline while paused so the next resume+update
       // registers as a single tracked change (undo reverts to original).
       setGhostWallPreviews([])
-      setGhostSlabPreviews([])
       applyNodePreview([
         { id: nodeId, start: originalStart, end: originalEnd },
         ...linkedOriginalsRef.current,
       ])
+      restoreAutoSlabPreview()
 
       resumeSceneHistory(useScene)
       const commitPlan = getMovePlan(preview.start, preview.end)
@@ -848,6 +768,7 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
     }
 
     const onCancel = () => {
+      shouldRestoreOnCleanup = false
       restoreOriginal()
       useViewer.getState().setSelection({ selectedIds: [nodeId] })
       resumeSceneHistory(useScene)
@@ -862,7 +783,7 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
     window.addEventListener('keyup', onKeyUp)
 
     return () => {
-      if (!wasCommitted) {
+      if (shouldRestoreOnCleanup) {
         restoreOriginal()
       }
       shiftPressedRef.current = false
@@ -873,14 +794,11 @@ export const MoveWallTool: React.FC<{ node: WallNode }> = ({ node }) => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [exitMoveMode, isNew, node.metadata])
+  }, [exitMoveMode, isNew, node.metadata, node.parentId])
 
   return (
     <group>
       <CursorSphere position={cursorLocalPos} showTooltip={false} />
-      {ghostSlabPreviews.map((preview) => (
-        <GhostSlabPreviewMesh key={preview.id} preview={preview} />
-      ))}
       {ghostWallPreviews.map((preview) => (
         <GhostWallPreviewMesh key={preview.id} preview={preview} />
       ))}

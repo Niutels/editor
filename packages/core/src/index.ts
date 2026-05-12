@@ -45,6 +45,8 @@ export { getRenderableSlabPolygon } from './lib/slab-polygon'
 export {
   detectSpacesForLevel,
   initSpaceDetectionSync,
+  planAutoSlabsForLevel,
+  type AutoSlabSyncPlan,
   type Space,
   wallTouchesOthers,
 } from './lib/space-detection'
