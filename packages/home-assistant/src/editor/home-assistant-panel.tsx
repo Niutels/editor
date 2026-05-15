@@ -2493,12 +2493,6 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
                     {panelError}
                   </div>
                 )}
-                {isExportOnlyMode && (
-                  <div className="rounded-xl border border-cyan-700/18 bg-cyan-50/80 px-3 py-2.5 text-sm text-cyan-950">
-                    This page saves in this browser and exports a Lovelace card config without
-                    connecting to a Home Assistant API.
-                  </div>
-                )}
                 {([
                   { key: 'devices' as const, label: 'Devices', resources: deviceImports },
                   { key: 'groups' as const, label: 'Groups', resources: groupImports },
