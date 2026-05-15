@@ -153,6 +153,7 @@ type ActivePanel =
   | null
 
 export type HomeAssistantPanelProps = {
+  apiEnabled?: boolean
 }
 
 type ImportSectionKey = 'actions' | 'devices' | 'groups'
@@ -302,7 +303,7 @@ function getDeviceCategoryIcon(category: DeviceCategoryKey) {
   return <Link2 className="h-4 w-4" />
 }
 
-export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
+export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProps = {}) {
   const homeAssistantPairingResourceId = useHomeAssistantEditorStore(
     (state) => state.pairingResourceId,
   )
@@ -346,6 +347,7 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   const setPairingResourceId = setHomeAssistantPairingResourceId
   const setPairingTargetItemId = setHomeAssistantPairingTargetItemId
 
+  const isExportOnlyMode = !apiEnabled
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
   const [connectionState, setConnectionState] = useState<HomeAssistantConnectionResponse | null>(null)
   const [imports, setImports] = useState<HomeAssistantImportedResource[]>([])
@@ -415,9 +417,11 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
 
   useEffect(() => {
     if (isSmartHomePanelOpen && !activePanel) {
-      setActivePanel({ kind: 'chooser' })
+      setActivePanel(
+        isExportOnlyMode ? { kind: 'config', providerId: 'home-assistant' } : { kind: 'chooser' },
+      )
     }
-  }, [activePanel, isSmartHomePanelOpen])
+  }, [activePanel, isExportOnlyMode, isSmartHomePanelOpen])
 
   const sceneNodes = nodes as Record<AnyNodeId, AnyNode>
   const homeAssistantBindings = useMemo(
@@ -600,6 +604,10 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   }, [activePanel, openSections.devices])
 
   async function refreshConnectionStatus(options?: { silent?: boolean }) {
+    if (isExportOnlyMode) {
+      return null
+    }
+
     setIsRefreshingConnection(true)
     if (!options?.silent) {
       setPanelError('')
@@ -629,6 +637,10 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   }
 
   async function refreshImports(options?: { silent?: boolean }) {
+    if (isExportOnlyMode) {
+      return []
+    }
+
     setIsRefreshingImports(true)
     if (!options?.silent) {
       setPanelError('')
@@ -665,6 +677,10 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   }
 
   async function refreshDiscoveredInstances() {
+    if (isExportOnlyMode) {
+      return []
+    }
+
     setIsDiscoveringInstances(true)
     setPanelError('')
 
@@ -695,6 +711,11 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   }
 
   async function startHomeAssistantOauth(instanceUrlOverride?: string) {
+    if (isExportOnlyMode) {
+      setPanelError('Home Assistant connection is disabled in the browser-only export build.')
+      return
+    }
+
     setIsStartingOauth(true)
     setPanelError('')
 
@@ -724,6 +745,13 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   }
 
   async function logOutHomeAssistant() {
+    if (isExportOnlyMode) {
+      setConnectionState(null)
+      setImports([])
+      setActivePanel({ kind: 'config', providerId: 'home-assistant' })
+      return
+    }
+
     setIsLoggingOut(true)
     setPanelError('')
 
@@ -1696,23 +1724,35 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
   }, [positioningResource])
 
   useEffect(() => {
+    if (isExportOnlyMode) {
+      return
+    }
+
     void refreshConnectionStatus({ silent: true }).then((payload) => {
       if (hasLinkedHomeAssistantSession(payload)) {
         void refreshImports({ silent: true })
       }
     })
-  }, [])
+  }, [isExportOnlyMode])
 
   useEffect(() => {
+    if (isExportOnlyMode) {
+      return
+    }
+
     if (activePanel?.kind !== 'connect' || activePanel.providerId !== 'home-assistant') {
       return
     }
 
     void refreshConnectionStatus({ silent: true })
     void refreshDiscoveredInstances()
-  }, [activePanel])
+  }, [activePanel, isExportOnlyMode])
 
   useEffect(() => {
+    if (isExportOnlyMode) {
+      return
+    }
+
     if (activePanel?.kind !== 'config' || activePanel.providerId !== 'home-assistant') {
       return
     }
@@ -1724,7 +1764,7 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
         setActivePanel({ kind: 'connect', providerId: 'home-assistant' })
       }
     })
-  }, [activePanel])
+  }, [activePanel, isExportOnlyMode])
 
   useEffect(() => {
     if (!pairingResourceId || !pairingTargetItemId) {
@@ -1758,6 +1798,11 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
 
   const handleProviderChoice = (providerId: ProviderId) => {
     if (providerId !== 'home-assistant') {
+      return
+    }
+
+    if (isExportOnlyMode) {
+      setActivePanel({ kind: 'config', providerId: 'home-assistant' })
       return
     }
 
@@ -2215,14 +2260,19 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
             <div className="flex min-w-0 items-center gap-2">
               {selectedPanelProvider && SelectedPanelProviderIcon ? (
                 <button
-                  aria-label="Back to smart home providers"
+                  aria-label={
+                    isExportOnlyMode ? 'Lovelace export panel' : 'Back to smart home providers'
+                  }
                   className="flex min-w-0 items-center gap-1.5 rounded-xl border border-black/10 bg-white/62 px-2 py-1.5 text-zinc-950 shadow-[0_6px_14px_rgba(0,0,0,0.08)] transition hover:bg-white/82"
+                  disabled={isExportOnlyMode}
                   onClick={() => setActivePanel({ kind: 'chooser' })}
                   type="button"
                 >
-                  <ChevronLeft className="h-3.5 w-3.5 shrink-0 text-zinc-700" />
+                  {!isExportOnlyMode && (
+                    <ChevronLeft className="h-3.5 w-3.5 shrink-0 text-zinc-700" />
+                  )}
                   <span className="truncate text-[0.72rem] font-bold uppercase tracking-[0.14em]">
-                    SMART HOME
+                    {isExportOnlyMode ? 'LOVELACE EXPORT' : 'SMART HOME'}
                   </span>
                   <SelectedPanelProviderIcon
                     className={cn(
@@ -2254,18 +2304,20 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
                       <Download className="h-3.5 w-3.5" />
                     )}
                   </button>
-                  <button
-                    aria-label="Refresh imported devices"
-                    className="flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
-                    onClick={() => void refreshImports()}
-                    type="button"
-                  >
-                    {isRefreshingImports ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                  </button>
+                  {apiEnabled && (
+                    <button
+                      aria-label="Refresh imported devices"
+                      className="flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
+                      onClick={() => void refreshImports()}
+                      type="button"
+                    >
+                      {isRefreshingImports ? (
+                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -2439,6 +2491,12 @@ export function HomeAssistantPanel(_props: HomeAssistantPanelProps = {}) {
                 {panelError && (
                   <div className="rounded-xl border border-rose-700/22 bg-rose-500/12 px-3 py-2.5 text-sm text-rose-950">
                     {panelError}
+                  </div>
+                )}
+                {isExportOnlyMode && (
+                  <div className="rounded-xl border border-cyan-700/18 bg-cyan-50/80 px-3 py-2.5 text-sm text-cyan-950">
+                    This page saves in this browser and exports a Lovelace card config without
+                    connecting to a Home Assistant API.
                   </div>
                 )}
                 {([

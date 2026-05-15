@@ -161,6 +161,9 @@ export interface EditorProps {
 
   // Command palette fallback when no commands match
   commandPaletteEmptyAction?: CommandPaletteEmptyAction
+
+  // Home Assistant editor behavior
+  homeAssistantApiEnabled?: boolean
 }
 
 function EditorSceneCrashFallback() {
@@ -580,11 +583,13 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isLoading,
   isFirstPersonMode,
   onThumbnailCapture,
+  homeAssistantApiEnabled,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
+  homeAssistantApiEnabled: boolean
 }) {
   return (
     <>
@@ -608,7 +613,11 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
       <PresetThumbnailGenerator />
       {!isFirstPersonMode && <SiteEdgeLabels />}
-      <HomeAssistantEditorSystems onDeviceAction={dispatchHomeAssistantEditorDeviceAction} />
+      <HomeAssistantEditorSystems
+        onDeviceAction={
+          homeAssistantApiEnabled ? dispatchHomeAssistantEditorDeviceAction : () => {}
+        }
+      />
     </>
   )
 })
@@ -795,6 +804,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   showLoader,
   isFirstPersonMode,
   onThumbnailCapture,
+  homeAssistantApiEnabled,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
@@ -802,6 +812,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   showLoader: boolean
   isFirstPersonMode: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
+  homeAssistantApiEnabled: boolean
 }) {
   const viewMode = useEditor((s) => s.viewMode)
   const floorplanPaneRatio = useEditor((s) => s.floorplanPaneRatio)
@@ -906,6 +917,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
             selectionManager={isFirstPersonMode ? 'default' : 'custom'}
           >
             <ViewerSceneContent
+              homeAssistantApiEnabled={homeAssistantApiEnabled}
               isFirstPersonMode={isFirstPersonMode}
               isLoading={isLoading}
               isVersionPreviewMode={isVersionPreviewMode}
@@ -943,6 +955,7 @@ export default function Editor({
   extraSidebarPanels,
   presetsAdapter,
   commandPaletteEmptyAction,
+  homeAssistantApiEnabled = true,
 }: EditorProps) {
   const isFirstPersonMode = useEditor((s) => s.isFirstPersonMode)
   useKeyboard({ isVersionPreviewMode, disabled: isFirstPersonMode })
@@ -1081,7 +1094,9 @@ export default function Editor({
       <PresetThumbnailGenerator />
       <HomeAssistantEditorSystems
         firstPerson
-        onDeviceAction={dispatchHomeAssistantEditorDeviceAction}
+        onDeviceAction={
+          homeAssistantApiEnabled ? dispatchHomeAssistantEditorDeviceAction : () => {}
+        }
       />
     </Viewer>
   )
@@ -1089,6 +1104,7 @@ export default function Editor({
   const viewerCanvas = (
     <ViewerCanvas
       hasLoadedInitialScene={hasLoadedInitialScene}
+      homeAssistantApiEnabled={homeAssistantApiEnabled}
       isFirstPersonMode={isFirstPersonMode}
       isLoading={isLoading}
       isVersionPreviewMode={isVersionPreviewMode}
@@ -1156,7 +1172,7 @@ export default function Editor({
                   )}
                   {!isVersionPreviewMode && (
                     <div className="pointer-events-auto">
-                      <HomeAssistantPanel />
+                      <HomeAssistantPanel apiEnabled={homeAssistantApiEnabled} />
                     </div>
                   )}
                   <div className="pointer-events-auto">
@@ -1232,7 +1248,7 @@ export default function Editor({
                 <PanelManager />
               </div>
               <div className="pointer-events-auto">
-                <HomeAssistantPanel />
+                <HomeAssistantPanel apiEnabled={homeAssistantApiEnabled} />
               </div>
               <div className="pointer-events-auto">
                 <HelperManager />
