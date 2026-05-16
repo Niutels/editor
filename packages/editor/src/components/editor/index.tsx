@@ -8,8 +8,10 @@ import {
   useScene,
 } from '@pascal-app/core'
 import {
+  dispatchBrowserHomeAssistantEditorDeviceAction,
   dispatchHomeAssistantEditorDeviceAction,
   HomeAssistantEditorSystems,
+  type HomeAssistantConnectionMode,
 } from '@pascal-app/home-assistant/editor'
 import { type HoverStyles, useViewer, Viewer } from '@pascal-app/viewer'
 import {
@@ -164,6 +166,7 @@ export interface EditorProps {
 
   // Home Assistant editor behavior
   homeAssistantApiEnabled?: boolean
+  homeAssistantConnectionMode?: HomeAssistantConnectionMode
 }
 
 function EditorSceneCrashFallback() {
@@ -578,18 +581,30 @@ function PaintCursorBadge({
 
 // ── Viewer scene content: memoized so <Viewer> doesn't re-render on mode/viewMode changes ──
 
+function getHomeAssistantDeviceActionDispatcher(connectionMode: HomeAssistantConnectionMode) {
+  if (connectionMode === 'browser') {
+    return dispatchBrowserHomeAssistantEditorDeviceAction
+  }
+
+  if (connectionMode === 'server') {
+    return dispatchHomeAssistantEditorDeviceAction
+  }
+
+  return () => {}
+}
+
 const ViewerSceneContent = memo(function ViewerSceneContent({
   isVersionPreviewMode,
   isLoading,
   isFirstPersonMode,
   onThumbnailCapture,
-  homeAssistantApiEnabled,
+  homeAssistantConnectionMode,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
-  homeAssistantApiEnabled: boolean
+  homeAssistantConnectionMode: HomeAssistantConnectionMode
 }) {
   return (
     <>
@@ -614,9 +629,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       <PresetThumbnailGenerator />
       {!isFirstPersonMode && <SiteEdgeLabels />}
       <HomeAssistantEditorSystems
-        onDeviceAction={
-          homeAssistantApiEnabled ? dispatchHomeAssistantEditorDeviceAction : () => {}
-        }
+        onDeviceAction={getHomeAssistantDeviceActionDispatcher(homeAssistantConnectionMode)}
       />
     </>
   )
@@ -804,7 +817,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   showLoader,
   isFirstPersonMode,
   onThumbnailCapture,
-  homeAssistantApiEnabled,
+  homeAssistantConnectionMode,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
@@ -812,7 +825,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   showLoader: boolean
   isFirstPersonMode: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
-  homeAssistantApiEnabled: boolean
+  homeAssistantConnectionMode: HomeAssistantConnectionMode
 }) {
   const viewMode = useEditor((s) => s.viewMode)
   const floorplanPaneRatio = useEditor((s) => s.floorplanPaneRatio)
@@ -917,7 +930,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
             selectionManager={isFirstPersonMode ? 'default' : 'custom'}
           >
             <ViewerSceneContent
-              homeAssistantApiEnabled={homeAssistantApiEnabled}
+              homeAssistantConnectionMode={homeAssistantConnectionMode}
               isFirstPersonMode={isFirstPersonMode}
               isLoading={isLoading}
               isVersionPreviewMode={isVersionPreviewMode}
@@ -956,8 +969,11 @@ export default function Editor({
   presetsAdapter,
   commandPaletteEmptyAction,
   homeAssistantApiEnabled = true,
+  homeAssistantConnectionMode,
 }: EditorProps) {
   const isFirstPersonMode = useEditor((s) => s.isFirstPersonMode)
+  const resolvedHomeAssistantConnectionMode: HomeAssistantConnectionMode =
+    homeAssistantConnectionMode ?? (homeAssistantApiEnabled ? 'server' : 'export')
   useKeyboard({ isVersionPreviewMode, disabled: isFirstPersonMode })
   const { isLoadingSceneRef } = useAutoSave({
     onSave,
@@ -1094,9 +1110,7 @@ export default function Editor({
       <PresetThumbnailGenerator />
       <HomeAssistantEditorSystems
         firstPerson
-        onDeviceAction={
-          homeAssistantApiEnabled ? dispatchHomeAssistantEditorDeviceAction : () => {}
-        }
+        onDeviceAction={getHomeAssistantDeviceActionDispatcher(resolvedHomeAssistantConnectionMode)}
       />
     </Viewer>
   )
@@ -1104,7 +1118,7 @@ export default function Editor({
   const viewerCanvas = (
     <ViewerCanvas
       hasLoadedInitialScene={hasLoadedInitialScene}
-      homeAssistantApiEnabled={homeAssistantApiEnabled}
+      homeAssistantConnectionMode={resolvedHomeAssistantConnectionMode}
       isFirstPersonMode={isFirstPersonMode}
       isLoading={isLoading}
       isVersionPreviewMode={isVersionPreviewMode}
@@ -1172,7 +1186,10 @@ export default function Editor({
                   )}
                   {!isVersionPreviewMode && (
                     <div className="pointer-events-auto">
-                      <HomeAssistantPanel apiEnabled={homeAssistantApiEnabled} />
+                      <HomeAssistantPanel
+                        apiEnabled={homeAssistantApiEnabled}
+                        connectionMode={resolvedHomeAssistantConnectionMode}
+                      />
                     </div>
                   )}
                   <div className="pointer-events-auto">
@@ -1248,7 +1265,10 @@ export default function Editor({
                 <PanelManager />
               </div>
               <div className="pointer-events-auto">
-                <HomeAssistantPanel apiEnabled={homeAssistantApiEnabled} />
+                <HomeAssistantPanel
+                  apiEnabled={homeAssistantApiEnabled}
+                  connectionMode={resolvedHomeAssistantConnectionMode}
+                />
               </div>
               <div className="pointer-events-auto">
                 <HelperManager />

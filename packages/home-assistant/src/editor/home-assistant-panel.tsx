@@ -108,6 +108,12 @@ import {
   createPascalLovelaceCardConfigText,
   downloadPascalLovelaceCardConfig,
 } from '../home-assistant-lovelace-export'
+import {
+  clearBrowserHomeAssistantConnection,
+  connectBrowserHomeAssistant,
+  getBrowserHomeAssistantConnectionStatus,
+  listBrowserHomeAssistantResources,
+} from '../client/home-assistant-browser-client'
 import { requestSceneImmediateSave } from './editor-panel-adapter'
 import { buildHomeAssistantSmartHomeGraph } from './home-assistant-smart-home-graph'
 import { useHomeAssistantEditorStore } from './home-assistant-editor-store'
@@ -152,8 +158,11 @@ type ActivePanel =
   | { kind: 'config'; providerId: ProviderId }
   | null
 
+export type HomeAssistantConnectionMode = 'browser' | 'export' | 'server'
+
 export type HomeAssistantPanelProps = {
   apiEnabled?: boolean
+  connectionMode?: HomeAssistantConnectionMode
 }
 
 type ImportSectionKey = 'actions' | 'devices' | 'groups'
@@ -183,12 +192,15 @@ type HomeAssistantConnectionResponse = {
   instanceUrl: string | null
   linked: boolean
   message: string
-  mode?: 'linked-session' | 'local-env' | 'unlinked'
+  mode?: 'browser-local' | 'linked-session' | 'local-env' | 'unlinked'
   success: boolean
 }
 
 function hasLinkedHomeAssistantSession(connectionState: HomeAssistantConnectionResponse | null) {
-  return connectionState?.linked === true && connectionState.mode === 'linked-session'
+  return (
+    connectionState?.linked === true &&
+    (connectionState.mode === 'linked-session' || connectionState.mode === 'browser-local')
+  )
 }
 
 type HomeAssistantDiscoveredInstance = {
@@ -209,11 +221,7 @@ type ProviderDefinition = {
 function HomeAssistantMark({ className }: IconProps) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24">
-      <path
-        d="M12 4.1 5.2 8v8.2L12 20.1l6.8-3.9V8z"
-        fill="currentColor"
-        opacity="0.16"
-      />
+      <path d="M12 4.1 5.2 8v8.2L12 20.1l6.8-3.9V8z" fill="currentColor" opacity="0.16" />
       <path
         d="M12 4.1 5.2 8v8.2L12 20.1l6.8-3.9V8z"
         stroke="currentColor"
@@ -303,7 +311,10 @@ function getDeviceCategoryIcon(category: DeviceCategoryKey) {
   return <Link2 className="h-4 w-4" />
 }
 
-export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProps = {}) {
+export function HomeAssistantPanel({
+  apiEnabled = true,
+  connectionMode,
+}: HomeAssistantPanelProps = {}) {
   const homeAssistantPairingResourceId = useHomeAssistantEditorStore(
     (state) => state.pairingResourceId,
   )
@@ -321,9 +332,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     (state) => state.setOverlaySectionVisible,
   )
   const setSmartHomePanelOpen = useHomeAssistantEditorStore((state) => state.setPanelOpen)
-  const smartHomeOverlayVisibility = useHomeAssistantEditorStore(
-    (state) => state.overlayVisibility,
-  )
+  const smartHomeOverlayVisibility = useHomeAssistantEditorStore((state) => state.overlayVisibility)
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null)
   const selectedIds = useViewer((state) => state.selection.selectedIds)
   const theme = useViewer((state) => state.theme)
@@ -347,12 +356,21 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
   const setPairingResourceId = setHomeAssistantPairingResourceId
   const setPairingTargetItemId = setHomeAssistantPairingTargetItemId
 
-  const isExportOnlyMode = !apiEnabled
+  const resolvedConnectionMode: HomeAssistantConnectionMode =
+    connectionMode ?? (apiEnabled ? 'server' : 'export')
+  const isBrowserConnectionMode = resolvedConnectionMode === 'browser'
+  const isExportOnlyMode = resolvedConnectionMode === 'export'
+  const isServerConnectionMode = resolvedConnectionMode === 'server'
   const [activePanel, setActivePanel] = useState<ActivePanel>(null)
-  const [connectionState, setConnectionState] = useState<HomeAssistantConnectionResponse | null>(null)
+  const [connectionState, setConnectionState] = useState<HomeAssistantConnectionResponse | null>(
+    null,
+  )
   const [imports, setImports] = useState<HomeAssistantImportedResource[]>([])
-  const [discoveredInstances, setDiscoveredInstances] = useState<HomeAssistantDiscoveredInstance[]>([])
+  const [discoveredInstances, setDiscoveredInstances] = useState<HomeAssistantDiscoveredInstance[]>(
+    [],
+  )
   const [instanceUrlInput, setInstanceUrlInput] = useState('')
+  const [accessTokenInput, setAccessTokenInput] = useState('')
   const [isRefreshingConnection, setIsRefreshingConnection] = useState(false)
   const [isRefreshingImports, setIsRefreshingImports] = useState(false)
   const [isDiscoveringInstances, setIsDiscoveringInstances] = useState(false)
@@ -405,9 +423,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
 
   useEffect(() => {
     const handleWindowResize = () => {
-      setPanelSize((currentValue) =>
-        clampSmartHomePanelSize(currentValue, smartHomePanelMinHeight),
-      )
+      setPanelSize((currentValue) => clampSmartHomePanelSize(currentValue, smartHomePanelMinHeight))
     }
 
     handleWindowResize()
@@ -614,8 +630,22 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     }
 
     try {
+      if (isBrowserConnectionMode) {
+        const payload = await getBrowserHomeAssistantConnectionStatus()
+        setConnectionState(payload)
+        if (payload.instanceUrl) {
+          setInstanceUrlInput(payload.instanceUrl)
+        }
+        if (!payload.success && !options?.silent) {
+          throw new Error(payload.message || 'Failed to connect to Home Assistant.')
+        }
+        return payload
+      }
+
       const response = await fetch('/api/home-assistant/connection-status', { cache: 'no-store' })
-      const payload = (await response.json()) as HomeAssistantConnectionResponse & { error?: string }
+      const payload = (await response.json()) as HomeAssistantConnectionResponse & {
+        error?: string
+      }
 
       setConnectionState(payload)
       if (payload.instanceUrl) {
@@ -628,7 +658,8 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
 
       return payload
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to connect to Home Assistant.'
+      const message =
+        error instanceof Error ? error.message : 'Failed to connect to Home Assistant.'
       setPanelError(message)
       return null
     } finally {
@@ -647,6 +678,15 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     }
 
     try {
+      if (isBrowserConnectionMode) {
+        const resources = await listBrowserHomeAssistantResources()
+        const visibleResources = resources.filter(
+          (resource) => !isHiddenHomeAssistantGroupResourceId(resource.id),
+        )
+        setImports(visibleResources)
+        return visibleResources
+      }
+
       const response = await fetch('/api/home-assistant/import-resources', {
         cache: 'no-store',
       })
@@ -660,9 +700,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
       }
 
       const resources = Array.isArray(payload.resources)
-        ? payload.resources.filter(
-            (resource) => !isHiddenHomeAssistantGroupResourceId(resource.id),
-          )
+        ? payload.resources.filter((resource) => !isHiddenHomeAssistantGroupResourceId(resource.id))
         : []
       setImports(resources)
       return resources
@@ -677,7 +715,8 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
   }
 
   async function refreshDiscoveredInstances() {
-    if (isExportOnlyMode) {
+    if (isExportOnlyMode || isBrowserConnectionMode) {
+      setDiscoveredInstances([])
       return []
     }
 
@@ -720,6 +759,21 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     setPanelError('')
 
     try {
+      if (isBrowserConnectionMode) {
+        const payload = await connectBrowserHomeAssistant(
+          instanceUrlOverride ?? instanceUrlInput,
+          accessTokenInput,
+        )
+        setConnectionState(payload)
+        if (payload.instanceUrl) {
+          setInstanceUrlInput(payload.instanceUrl)
+        }
+        setAccessTokenInput('')
+        setActivePanel({ kind: 'config', providerId: 'home-assistant' })
+        await refreshImports({ silent: true })
+        return
+      }
+
       const response = await fetch('/api/home-assistant/oauth/start', {
         body: JSON.stringify({
           instanceUrl: instanceUrlOverride ?? (instanceUrlInput.trim() || undefined),
@@ -756,6 +810,14 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     setPanelError('')
 
     try {
+      if (isBrowserConnectionMode) {
+        clearBrowserHomeAssistantConnection()
+        setConnectionState(null)
+        setImports([])
+        setActivePanel({ kind: 'chooser' })
+        return
+      }
+
       const response = await fetch('/api/home-assistant/unlink', {
         method: 'DELETE',
       })
@@ -1011,16 +1073,15 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
 
       const nextBinding = normalizeHomeAssistantCollectionBinding({
         ...toCollectionBinding(bindingNode),
-        aggregation:
-          nextResources.some((entry) => entry.kind !== 'entity')
-            ? 'trigger_only'
-            : nextResources.length > 1 || collection.nodeIds.length > 1
-              ? 'all'
-              : 'single',
+        aggregation: nextResources.some((entry) => entry.kind !== 'entity')
+          ? 'trigger_only'
+          : nextResources.length > 1 || collection.nodeIds.length > 1
+            ? 'all'
+            : 'single',
         primaryResourceId:
           bindingNode.primaryResourceId === resource.id
-            ? nextResources[0]?.id ?? null
-            : bindingNode.primaryResourceId ?? nextResources[0]?.id ?? null,
+            ? (nextResources[0]?.id ?? null)
+            : (bindingNode.primaryResourceId ?? nextResources[0]?.id ?? null),
         presentation: nextPresentation,
         resources: nextResources,
       })
@@ -1072,14 +1133,16 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
 
   const unbindResourceFromCollection = (collection: Collection, resourceId: string) => {
     const existingBindingNode =
-      getHomeAssistantBindingNodeMap(
-        useScene.getState().nodes as Record<AnyNodeId, AnyNode>,
-      )[collection.id] ?? homeAssistantBindings[collection.id]
+      getHomeAssistantBindingNodeMap(useScene.getState().nodes as Record<AnyNodeId, AnyNode>)[
+        collection.id
+      ] ?? homeAssistantBindings[collection.id]
     if (!existingBindingNode) {
       return
     }
 
-    const nextResources = existingBindingNode.resources.filter((resource) => resource.id !== resourceId)
+    const nextResources = existingBindingNode.resources.filter(
+      (resource) => resource.id !== resourceId,
+    )
     const nextPresentation = getPresentationAfterResourceRemoval(
       existingBindingNode.presentation,
       existingBindingNode.collectionId,
@@ -1093,17 +1156,16 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     }
 
     const nextBinding = normalizeHomeAssistantCollectionBinding({
-      aggregation:
-        nextResources.some((resource) => resource.kind !== 'entity')
-          ? 'trigger_only'
-          : nextResources.length > 1 || collection.nodeIds.length > 1
-            ? 'all'
-            : 'single',
+      aggregation: nextResources.some((resource) => resource.kind !== 'entity')
+        ? 'trigger_only'
+        : nextResources.length > 1 || collection.nodeIds.length > 1
+          ? 'all'
+          : 'single',
       collectionId: existingBindingNode.collectionId,
       primaryResourceId:
         existingBindingNode.primaryResourceId === resourceId
-          ? nextResources[0]?.id ?? null
-          : existingBindingNode.primaryResourceId ?? nextResources[0]?.id ?? null,
+          ? (nextResources[0]?.id ?? null)
+          : (existingBindingNode.primaryResourceId ?? nextResources[0]?.id ?? null),
       presentation: nextPresentation,
       resources: nextResources,
     })
@@ -1235,10 +1297,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     setPairingResourceId(resourceId)
   }
 
-  const placeGroupResource = (
-    resource: HomeAssistantImportedResource,
-    anchor: PlacementAnchor,
-  ) => {
+  const placeGroupResource = (resource: HomeAssistantImportedResource, anchor: PlacementAnchor) => {
     if (!(anchor.worldPosition || anchor.screenPosition)) {
       return
     }
@@ -1349,9 +1408,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
       if (smartHomeBindingNeedsPascalGroupResource(bindingNode)) {
         const nextBinding = promoteSmartHomeBindingToPascalGroupResource({
           binding: bindingNode,
-          label:
-            bindingLabel ||
-            'Pascal group',
+          label: bindingLabel || 'Pascal group',
         })
 
         if (!homeAssistantBindingsAreEqual(nextBinding, bindingNode)) {
@@ -1418,19 +1475,18 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
 
       const nextBinding = normalizeHomeAssistantCollectionBinding({
         ...toCollectionBinding(bindingNode),
-        aggregation:
-          nextResources.some((resource) => resource.kind !== 'entity')
-            ? 'trigger_only'
-            : nextResources.length > 1
-              ? 'all'
-              : 'single',
+        aggregation: nextResources.some((resource) => resource.kind !== 'entity')
+          ? 'trigger_only'
+          : nextResources.length > 1
+            ? 'all'
+            : 'single',
         primaryResourceId: nextResources.some(
           (resource) => resource.id === bindingNode.primaryResourceId,
         )
           ? bindingNode.primaryResourceId
-          : nextResources.find((resource) => !isBindingGroupResource(resource))?.id ??
+          : (nextResources.find((resource) => !isBindingGroupResource(resource))?.id ??
             nextResources[0]?.id ??
-            null,
+            null),
         resources: nextResources,
       })
 
@@ -1465,8 +1521,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
         imports
           .filter(
             (resource) =>
-              memberEntityIds.has(resource.id) ||
-              memberEntityIds.has(resource.entityId ?? ''),
+              memberEntityIds.has(resource.id) || memberEntityIds.has(resource.entityId ?? ''),
           )
           .map((resource) => resource.label.trim().toLowerCase())
           .filter(Boolean),
@@ -1523,9 +1578,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
         continue
       }
 
-      const existingBinding = existingBindingNode
-        ? toCollectionBinding(existingBindingNode)
-        : null
+      const existingBinding = existingBindingNode ? toCollectionBinding(existingBindingNode) : null
       const detachedResourceIds = new Set(
         getSmartHomeExcludedResourceIds(existingBinding?.presentation),
       )
@@ -1612,7 +1665,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
       const primaryResourceId =
         existingPrimaryResourceId && existingPrimaryResourceId !== groupResource.id
           ? existingPrimaryResourceId
-          : memberResources[0]?.id ?? existingPrimaryResourceId ?? groupResource.id
+          : (memberResources[0]?.id ?? existingPrimaryResourceId ?? groupResource.id)
       const nextBinding = normalizeHomeAssistantCollectionBinding({
         aggregation: nextResources.some((resource) => resource.kind !== 'entity')
           ? 'trigger_only'
@@ -1687,7 +1740,8 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
       event.stopImmediatePropagation()
       const preview = resolveHomeAssistantPlacementPreview(event.clientX, event.clientY)
       setPositioningPreview(preview)
-      const worldPosition = preview?.groundPosition ?? resolveHomeAssistantGroundPoint(event.clientX, event.clientY)
+      const worldPosition =
+        preview?.groundPosition ?? resolveHomeAssistantGroundPoint(event.clientX, event.clientY)
       if (!worldPosition) {
         return
       }
@@ -1733,7 +1787,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
         void refreshImports({ silent: true })
       }
     })
-  }, [isExportOnlyMode])
+  }, [isBrowserConnectionMode, isExportOnlyMode])
 
   useEffect(() => {
     if (isExportOnlyMode) {
@@ -1745,8 +1799,10 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     }
 
     void refreshConnectionStatus({ silent: true })
-    void refreshDiscoveredInstances()
-  }, [activePanel, isExportOnlyMode])
+    if (isServerConnectionMode) {
+      void refreshDiscoveredInstances()
+    }
+  }, [activePanel, isBrowserConnectionMode, isExportOnlyMode, isServerConnectionMode])
 
   useEffect(() => {
     if (isExportOnlyMode) {
@@ -1764,7 +1820,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
         setActivePanel({ kind: 'connect', providerId: 'home-assistant' })
       }
     })
-  }, [activePanel, isExportOnlyMode])
+  }, [activePanel, isBrowserConnectionMode, isExportOnlyMode])
 
   useEffect(() => {
     if (!pairingResourceId || !pairingTargetItemId) {
@@ -1941,8 +1997,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
   const placementGroundPoint = positioningPreview?.visible
     ? positioningPreview.groundScreenPosition
     : null
-  const placementPillTop =
-    placementPillPoint.y - PLACEMENT_PILL_HEIGHT - PLACEMENT_PILL_GAP
+  const placementPillTop = placementPillPoint.y - PLACEMENT_PILL_HEIGHT - PLACEMENT_PILL_GAP
   const placementLineTop = placementPillTop + PLACEMENT_PILL_HEIGHT + PLACEMENT_LINE_GAP
   const placementLineHeight = placementGroundPoint
     ? Math.max(placementGroundPoint.y - placementLineTop, 0)
@@ -1958,10 +2013,8 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
     membershipDots: DeviceGroupMembershipDot[] = [],
   ) => {
     const owner = resourceOwners.get(resource.id)
-    const isBoundToCurrent =
-      Boolean(owner) && owner?.collectionId === selectedCollection?.id
-    const isBoundElsewhere =
-      Boolean(owner) && owner?.collectionId !== selectedCollection?.id
+    const isBoundToCurrent = Boolean(owner) && owner?.collectionId === selectedCollection?.id
+    const isBoundElsewhere = Boolean(owner) && owner?.collectionId !== selectedCollection?.id
     const isPairing = pairingResourceId === resource.id
     const canBind = sectionKey === 'devices'
     const canPosition = sectionKey === 'groups'
@@ -2201,10 +2254,7 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
         <div className="pointer-events-none fixed inset-0 z-50">
           {placementGroundPoint && placementLineHeight > 0 && (
             <div
-              className={cn(
-                'absolute top-0 left-0 w-0.5 rounded-full',
-                placementGuideClassName,
-              )}
+              className={cn('absolute top-0 left-0 w-0.5 rounded-full', placementGuideClassName)}
               style={{
                 height: placementLineHeight,
                 left: placementPillPoint.x,
@@ -2248,759 +2298,792 @@ export function HomeAssistantPanel({ apiEnabled = true }: HomeAssistantPanelProp
         style={{ right: '1rem', top: '4rem', zIndex: 320 }}
       >
         {isSmartHomePanelOpen && activePanel && (
-        <section
-          className="pointer-events-auto relative flex max-h-[calc(100vh-5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-black/8 bg-[rgba(226,228,232,0.97)] p-3 text-zinc-900 shadow-[0_18px_50px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[height,width] duration-200 ease-out"
-          ref={smartHomePanelRef}
-          style={{
-            height: panelUsesFixedHeight ? panelHeightStyle : undefined,
-            width: panelWidthStyle,
-          }}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              {selectedPanelProvider && SelectedPanelProviderIcon ? (
-                <button
+          <section
+            className="pointer-events-auto relative flex max-h-[calc(100vh-5rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-black/8 bg-[rgba(226,228,232,0.97)] p-3 text-zinc-900 shadow-[0_18px_50px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[height,width] duration-200 ease-out"
+            ref={smartHomePanelRef}
+            style={{
+              height: panelUsesFixedHeight ? panelHeightStyle : undefined,
+              width: panelWidthStyle,
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                {selectedPanelProvider && SelectedPanelProviderIcon ? (
+                  <button
                   aria-label={
-                    isExportOnlyMode ? 'Lovelace export panel' : 'Back to smart home providers'
+                    isExportOnlyMode ? 'Smart home panel' : 'Back to smart home providers'
                   }
-                  className="flex min-w-0 items-center gap-1.5 rounded-xl border border-black/10 bg-white/62 px-2 py-1.5 text-zinc-950 shadow-[0_6px_14px_rgba(0,0,0,0.08)] transition hover:bg-white/82"
-                  disabled={isExportOnlyMode}
-                  onClick={() => setActivePanel({ kind: 'chooser' })}
-                  type="button"
-                >
+                    className="flex min-w-0 items-center gap-1.5 rounded-xl border border-black/10 bg-white/62 px-2 py-1.5 text-zinc-950 shadow-[0_6px_14px_rgba(0,0,0,0.08)] transition hover:bg-white/82"
+                    disabled={isExportOnlyMode}
+                    onClick={() => setActivePanel({ kind: 'chooser' })}
+                    type="button"
+                  >
                   {!isExportOnlyMode && (
                     <ChevronLeft className="h-3.5 w-3.5 shrink-0 text-zinc-700" />
                   )}
                   <span className="truncate text-[0.72rem] font-bold uppercase tracking-[0.14em]">
-                    {isExportOnlyMode ? 'LOVELACE EXPORT' : 'SMART HOME'}
+                    SMART HOME
                   </span>
-                  <SelectedPanelProviderIcon
-                    className={cn(
-                      'h-5 w-5 shrink-0',
-                      selectedPanelProvider.id === 'home-assistant'
-                        ? 'text-[#18BCF2]'
-                        : selectedPanelProvider.accentClassName,
-                    )}
-                  />
-                </button>
-              ) : (
-                <p className="truncate text-[0.72rem] font-bold uppercase tracking-[0.14em] text-zinc-950">
-                  SMART HOME
-                </p>
-              )}
-              {activePanel.kind === 'config' && (
-                <>
-                  <button
-                    aria-label="Export current Pascal scene for Lovelace"
-                    className="flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-cyan-700/18 bg-cyan-50/80 text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-70"
-                    disabled={isPublishingLovelace}
-                    onClick={() => void exportLovelaceScene()}
-                    title="Export Lovelace card config"
-                    type="button"
-                  >
-                    {isPublishingLovelace ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5" />
-                    )}
+                    <SelectedPanelProviderIcon
+                      className={cn(
+                        'h-5 w-5 shrink-0',
+                        selectedPanelProvider.id === 'home-assistant'
+                          ? 'text-[#18BCF2]'
+                          : selectedPanelProvider.accentClassName,
+                      )}
+                    />
                   </button>
-                  {apiEnabled && (
+                ) : (
+                  <p className="truncate text-[0.72rem] font-bold uppercase tracking-[0.14em] text-zinc-950">
+                    SMART HOME
+                  </p>
+                )}
+                {activePanel.kind === 'config' && (
+                  <>
                     <button
-                      aria-label="Refresh imported devices"
-                      className="flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
-                      onClick={() => void refreshImports()}
+                      aria-label="Export current Pascal scene for Lovelace"
+                      className="flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-cyan-700/18 bg-cyan-50/80 text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-70"
+                      disabled={isPublishingLovelace}
+                      onClick={() => void exportLovelaceScene()}
+                      title="Export Lovelace card config"
                       type="button"
                     >
-                      {isRefreshingImports ? (
+                      {isPublishingLovelace ? (
                         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
+                        <Download className="h-3.5 w-3.5" />
                       )}
                     </button>
-                  )}
-                </>
-              )}
-            </div>
-            <button
-              aria-label="Close smart home panel"
-              className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
-              onClick={() => setSmartHomePanelOpen(false)}
-              type="button"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          {activePanel.kind === 'chooser' && (
-            <div className="mt-3 grid gap-1.5">
-              {PROVIDERS.map((provider) => {
-                const ProviderIcon = provider.icon
-                const isConnected = connectedProviderIds.includes(provider.id)
-
-                return (
-                  <div
-                    className={cn(
-                      'flex items-center justify-between rounded-xl border px-3 py-2.5 text-left transition',
-                      provider.connectable
-                        ? 'border-black/8 bg-[rgba(244,245,247,0.9)] text-zinc-950 hover:bg-white'
-                        : 'cursor-default border-black/6 bg-[rgba(236,238,241,0.74)] text-zinc-500',
+                    {!isExportOnlyMode && (
+                      <button
+                        aria-label="Refresh imported devices"
+                        className="flex h-7.5 w-7.5 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
+                        onClick={() => void refreshImports()}
+                        type="button"
+                      >
+                        {isRefreshingImports ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        )}
+                      </button>
                     )}
-                    key={provider.id}
-                  >
-                    <button
+                  </>
+                )}
+              </div>
+              <button
+                aria-label="Close smart home panel"
+                className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
+                onClick={() => setSmartHomePanelOpen(false)}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {activePanel.kind === 'chooser' && (
+              <div className="mt-3 grid gap-1.5">
+                {PROVIDERS.map((provider) => {
+                  const ProviderIcon = provider.icon
+                  const isConnected = connectedProviderIds.includes(provider.id)
+
+                  return (
+                    <div
                       className={cn(
-                        'flex min-w-0 flex-1 items-center gap-3 text-left',
-                        !provider.connectable && 'cursor-default',
+                        'flex items-center justify-between rounded-xl border px-3 py-2.5 text-left transition',
+                        provider.connectable
+                          ? 'border-black/8 bg-[rgba(244,245,247,0.9)] text-zinc-950 hover:bg-white'
+                          : 'cursor-default border-black/6 bg-[rgba(236,238,241,0.74)] text-zinc-500',
                       )}
-                      disabled={!provider.connectable}
-                      onClick={() => handleProviderChoice(provider.id)}
+                      key={provider.id}
+                    >
+                      <button
+                        className={cn(
+                          'flex min-w-0 flex-1 items-center gap-3 text-left',
+                          !provider.connectable && 'cursor-default',
+                        )}
+                        disabled={!provider.connectable}
+                        onClick={() => handleProviderChoice(provider.id)}
+                        type="button"
+                      >
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-950/8">
+                          <ProviderIcon className={cn('h-6.5 w-6.5', provider.accentClassName)} />
+                        </div>
+                        <span className="truncate text-sm font-medium">{provider.name}</span>
+                      </button>
+                      <div className="flex items-center gap-2">
+                        {isConnected && provider.id === 'home-assistant' ? (
+                          <button
+                            aria-label="Log out of Home Assistant"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-700/18 bg-cyan-50/80 text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-70"
+                            disabled={isLoggingOut}
+                            onClick={logOutHomeAssistant}
+                            title="Log out"
+                            type="button"
+                          >
+                            {isLoggingOut ? (
+                              <LoaderCircle className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <LogOut className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        ) : null}
+                        {provider.connectable && !isConnected && (
+                          <Wifi className="h-4 w-4 text-zinc-600" />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {activePanel.kind === 'connect' && activePanel.providerId === 'home-assistant' && (
+              <div className="mt-3 grid gap-2.5">
+                <div className="rounded-xl border border-black/8 bg-white/45 p-3">
+                  <div className="grid gap-1.5">
+                    <input
+                      aria-label="Home Assistant URL"
+                      className="rounded-xl border border-black/8 bg-white/62 px-3 py-2.5 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-500 focus:border-cyan-600/45"
+                      onChange={(event) => setInstanceUrlInput(event.target.value)}
+                      placeholder="Home Assistant URL"
+                      value={instanceUrlInput}
+                    />
+                    {isBrowserConnectionMode && (
+                      <input
+                        aria-label="Home Assistant token"
+                        className="rounded-xl border border-black/8 bg-white/62 px-3 py-2.5 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-500 focus:border-cyan-600/45"
+                        onChange={(event) => setAccessTokenInput(event.target.value)}
+                        placeholder="Home Assistant token"
+                        type="password"
+                        value={accessTokenInput}
+                      />
+                    )}
+                    <button
+                      className="flex items-center justify-center gap-2 rounded-xl border border-cyan-700/20 bg-cyan-600/12 px-3 py-2.5 text-sm font-medium text-cyan-950 transition hover:bg-cyan-600/18"
+                      disabled={isStartingOauth}
+                      onClick={() => void startHomeAssistantOauth()}
                       type="button"
                     >
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-zinc-950/8"
-                      >
-                        <ProviderIcon className={cn('h-6.5 w-6.5', provider.accentClassName)} />
-                      </div>
-                      <span className="truncate text-sm font-medium">{provider.name}</span>
+                      {isStartingOauth ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Link2 className="h-4 w-4" />
+                      )}
+                      Connect Home Assistant
                     </button>
-                    <div className="flex items-center gap-2">
-                      {isConnected && provider.id === 'home-assistant' ? (
+                  </div>
+                </div>
+
+                {isServerConnectionMode && (
+                  <div className="rounded-xl border border-black/8 bg-white/45 p-3">
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-zinc-800">
+                        <Wifi className="h-4 w-4 text-cyan-700" />
+                        <span>Discovered</span>
+                      </div>
+                      <button
+                        aria-label="Rescan Home Assistant instances"
+                        className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
+                        onClick={() => void refreshDiscoveredInstances()}
+                        type="button"
+                      >
+                        {isDiscoveringInstances ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="grid gap-1.5">
+                      {discoveredInstances.map((instance) => (
                         <button
-                          aria-label="Log out of Home Assistant"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-700/18 bg-cyan-50/80 text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-70"
-                          disabled={isLoggingOut}
-                          onClick={logOutHomeAssistant}
-                          title="Log out"
+                          className="flex w-full items-center justify-between rounded-xl border border-black/8 bg-white/62 px-3 py-2.5 text-left transition hover:bg-white"
+                          key={instance.id}
+                          onClick={() => void startHomeAssistantOauth(instance.instanceUrl)}
                           type="button"
                         >
-                          {isLoggingOut ? (
-                            <LoaderCircle className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <LogOut className="h-3.5 w-3.5" />
-                          )}
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-zinc-950">
+                              {instance.label}
+                            </p>
+                            <p className="truncate text-xs text-zinc-600">{instance.instanceUrl}</p>
+                          </div>
+                          <Wifi className="h-4 w-4 shrink-0 text-cyan-700" />
                         </button>
-                      ) : null}
-                      {provider.connectable && !isConnected && (
-                        <Wifi className="h-4 w-4 text-zinc-600" />
+                      ))}
+
+                      {!isDiscoveringInstances && discoveredInstances.length === 0 && (
+                        <div className="rounded-xl border border-dashed border-black/8 bg-white/42 px-3 py-3.5 text-center text-xs text-zinc-500">
+                          No network instances found
+                        </div>
                       )}
                     </div>
                   </div>
-                )
-              })}
-            </div>
-          )}
-
-          {activePanel.kind === 'connect' && activePanel.providerId === 'home-assistant' && (
-            <div className="mt-3 grid gap-2.5">
-              <div className="rounded-xl border border-black/8 bg-white/45 p-3">
-                <div className="grid gap-1.5">
-                  <input
-                    aria-label="Home Assistant URL"
-                    className="rounded-xl border border-black/8 bg-white/62 px-3 py-2.5 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-500 focus:border-cyan-600/45"
-                    onChange={(event) => setInstanceUrlInput(event.target.value)}
-                    placeholder="Home Assistant URL"
-                    value={instanceUrlInput}
-                  />
-                  <button
-                    className="flex items-center justify-center gap-2 rounded-xl border border-cyan-700/20 bg-cyan-600/12 px-3 py-2.5 text-sm font-medium text-cyan-950 transition hover:bg-cyan-600/18"
-                    disabled={isStartingOauth}
-                    onClick={() => void startHomeAssistantOauth()}
-                    type="button"
-                  >
-                    {isStartingOauth ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Link2 className="h-4 w-4" />
-                    )}
-                    Connect Home Assistant
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-black/8 bg-white/45 p-3">
-                <div className="mb-2.5 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm text-zinc-800">
-                    <Wifi className="h-4 w-4 text-cyan-700" />
-                    <span>Discovered</span>
-                  </div>
-                  <button
-                    aria-label="Rescan Home Assistant instances"
-                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/8 bg-white/55 text-zinc-700 transition hover:bg-white/80 hover:text-zinc-950"
-                    onClick={() => void refreshDiscoveredInstances()}
-                    type="button"
-                  >
-                  {isDiscoveringInstances ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-
-                <div className="grid gap-1.5">
-                  {discoveredInstances.map((instance) => (
-                    <button
-                      className="flex w-full items-center justify-between rounded-xl border border-black/8 bg-white/62 px-3 py-2.5 text-left transition hover:bg-white"
-                      key={instance.id}
-                      onClick={() => void startHomeAssistantOauth(instance.instanceUrl)}
-                      type="button"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-zinc-950">{instance.label}</p>
-                        <p className="truncate text-xs text-zinc-600">{instance.instanceUrl}</p>
-                      </div>
-                      <Wifi className="h-4 w-4 shrink-0 text-cyan-700" />
-                    </button>
-                  ))}
-
-                  {!isDiscoveringInstances && discoveredInstances.length === 0 && (
-                    <div className="rounded-xl border border-dashed border-black/8 bg-white/42 px-3 py-3.5 text-center text-xs text-zinc-500">
-                      No network instances found
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {panelError && (
-                <div className="rounded-xl border border-rose-700/22 bg-rose-500/12 px-3 py-2.5 text-sm text-rose-950">
-                  {panelError}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activePanel.kind === 'config' && activePanel.providerId === 'home-assistant' && (
-            <div
-              className={cn(
-                'mt-3 min-h-0',
-                hasOpenFlexibleImportSection ? 'flex-1 overflow-hidden' : 'shrink-0',
-              )}
-            >
-              <div
-                className={cn(
-                  'flex min-h-0 flex-col gap-2 overflow-hidden pr-1',
-                  hasOpenFlexibleImportSection ? 'h-full max-h-full' : '',
                 )}
-                ref={configContentRef}
-              >
-                {lovelacePublishStatus && (
-                  <div className="rounded-xl border border-cyan-700/18 bg-cyan-50/80 px-3 py-2.5 text-sm text-cyan-950">
-                    {lovelacePublishStatus}
-                  </div>
-                )}
+
                 {panelError && (
                   <div className="rounded-xl border border-rose-700/22 bg-rose-500/12 px-3 py-2.5 text-sm text-rose-950">
                     {panelError}
                   </div>
                 )}
-                {([
-                  { key: 'devices' as const, label: 'Devices', resources: deviceImports },
-                  { key: 'groups' as const, label: 'Groups', resources: groupImports },
-                ] as const).map((section) => {
-                  const isOpen = openSections[section.key]
-                  const SectionChevron = isOpen ? ChevronDown : ChevronRight
-                  const isRenderVisible = smartHomeOverlayVisibility[section.key]
-                  const SectionVisibilityIcon = isRenderVisible ? Eye : EyeOff
+              </div>
+            )}
 
-                  return (
-                    <div
-                      className={cn(
-                        'rounded-xl bg-[rgba(228,231,236,0.94)] transition',
-                        isOpen
-                          ? cn(
-                              'flex min-h-0 flex-col overflow-hidden shadow-[0_10px_24px_rgba(0,0,0,0.14)]',
-                              'shrink-0',
-                            )
-                          : 'shrink-0 overflow-hidden',
-                      )}
-                      data-smart-home-section
-                      key={section.key}
-                    >
+            {activePanel.kind === 'config' && activePanel.providerId === 'home-assistant' && (
+              <div
+                className={cn(
+                  'mt-3 min-h-0',
+                  hasOpenFlexibleImportSection ? 'flex-1 overflow-hidden' : 'shrink-0',
+                )}
+              >
+                <div
+                  className={cn(
+                    'flex min-h-0 flex-col gap-2 overflow-hidden pr-1',
+                    hasOpenFlexibleImportSection ? 'h-full max-h-full' : '',
+                  )}
+                  ref={configContentRef}
+                >
+                  {lovelacePublishStatus && (
+                    <div className="rounded-xl border border-cyan-700/18 bg-cyan-50/80 px-3 py-2.5 text-sm text-cyan-950">
+                      {lovelacePublishStatus}
+                    </div>
+                  )}
+                  {panelError && (
+                    <div className="rounded-xl border border-rose-700/22 bg-rose-500/12 px-3 py-2.5 text-sm text-rose-950">
+                      {panelError}
+                    </div>
+                  )}
+                  {(
+                    [
+                      { key: 'devices' as const, label: 'Devices', resources: deviceImports },
+                      { key: 'groups' as const, label: 'Groups', resources: groupImports },
+                    ] as const
+                  ).map((section) => {
+                    const isOpen = openSections[section.key]
+                    const SectionChevron = isOpen ? ChevronDown : ChevronRight
+                    const isRenderVisible = smartHomeOverlayVisibility[section.key]
+                    const SectionVisibilityIcon = isRenderVisible ? Eye : EyeOff
+
+                    return (
                       <div
                         className={cn(
-                          'flex w-full shrink-0 items-center transition',
+                          'rounded-xl bg-[rgba(228,231,236,0.94)] transition',
                           isOpen
-                            ? 'bg-white text-zinc-950'
-                            : 'bg-[rgba(241,243,246,0.95)] text-zinc-950 hover:bg-white',
+                            ? cn(
+                                'flex min-h-0 flex-col overflow-hidden shadow-[0_10px_24px_rgba(0,0,0,0.14)]',
+                                'shrink-0',
+                              )
+                            : 'shrink-0 overflow-hidden',
                         )}
-                        data-smart-home-section-header
+                        data-smart-home-section
+                        key={section.key}
                       >
-                        <button
-                          className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2.5 text-left transition"
-                          onClick={() => toggleSection(section.key)}
-                          type="button"
-                        >
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div
-                              className={cn(
-                                'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl',
-                                isOpen
-                                  ? 'bg-zinc-950/6 text-zinc-700'
-                                  : 'bg-zinc-950/8 text-zinc-700',
-                              )}
-                            >
-                              {section.key === 'devices' ? (
-                                <Link2 className="h-4 w-4" />
-                              ) : section.key === 'groups' ? (
-                                <Layers className="h-4 w-4" />
-                              ) : (
-                                <Sparkles className="h-4 w-4" />
-                              )}
-                            </div>
-                            <span className="truncate text-sm font-medium">
-                              {section.label}
-                            </span>
-                          </div>
-                          <SectionChevron className="h-4 w-4 shrink-0 text-zinc-500" />
-                        </button>
-                        <button
-                          aria-label={`${isRenderVisible ? 'Hide' : 'Show'} ${section.label.toLowerCase()} in render`}
-                          aria-pressed={isRenderVisible}
-                          className={cn(
-                            'mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition',
-                            isRenderVisible
-                              ? 'border-black/8 bg-zinc-950/6 text-zinc-700 hover:bg-zinc-950/10'
-                              : 'border-rose-500/25 bg-rose-500/14 text-rose-900 hover:bg-rose-500/20',
-                          )}
-                          onClick={() =>
-                            setSmartHomeOverlaySectionVisible(
-                              section.key,
-                              !isRenderVisible,
-                            )
-                          }
-                          title={`${isRenderVisible ? 'Hide' : 'Show'} ${section.label.toLowerCase()} in render`}
-                          type="button"
-                        >
-                          <SectionVisibilityIcon className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      {isOpen && (
                         <div
                           className={cn(
-                            'min-h-0 overflow-y-auto overscroll-contain border-t border-black/6 px-3 py-2.5 pr-1 [scrollbar-gutter:stable]',
-                            section.key === 'devices'
-                              ? 'flex max-h-[calc(100vh-12rem)] flex-col gap-1.5'
-                              : section.key === 'groups'
-                                ? 'grid content-start grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-1.5'
-                                : 'grid content-start gap-1.5 grid-cols-[repeat(auto-fit,minmax(13.5rem,1fr))]',
+                            'flex w-full shrink-0 items-center transition',
+                            isOpen
+                              ? 'bg-white text-zinc-950'
+                              : 'bg-[rgba(241,243,246,0.95)] text-zinc-950 hover:bg-white',
                           )}
-                          data-smart-home-section-body
-                          ref={section.key === 'devices' ? deviceSectionRef : undefined}
+                          data-smart-home-section-header
                         >
-                          {section.key === 'devices' &&
-                            deviceCategoryGroups.map(({ category, resources }) => {
-                              const isCategoryOpen = openDeviceCategories[category]
-                              const CategoryChevron = isCategoryOpen ? ChevronDown : ChevronRight
-
-                              return (
-                                <div
-                                  className={cn(
-                                    'rounded-xl bg-white/42',
-                                    isCategoryOpen
-                                      ? 'flex min-h-0 shrink-0 flex-col overflow-hidden'
-                                      : 'shrink-0 overflow-hidden',
-                                  )}
-                                  key={category}
-                                >
-                                  <button
-                                    className="flex h-10 w-full shrink-0 items-center justify-between gap-3 px-2.5 text-left text-zinc-950 transition hover:bg-white/55"
-                                    onClick={() => toggleDeviceCategory(category)}
-                                    type="button"
-                                  >
-                                    <div className="flex min-w-0 items-center gap-2.5">
-                                      <div
-                                        className={cn(
-                                          'flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg',
-                                          getDeviceCategoryTone(category),
-                                        )}
-                                      >
-                                        {getDeviceCategoryIcon(category)}
-                                      </div>
-                                      <span className="truncate text-sm font-semibold">
-                                        {DEVICE_CATEGORY_LABELS[category]} ({resources.length})
-                                      </span>
-                                    </div>
-                                    <CategoryChevron className="h-4 w-4 shrink-0 text-zinc-500" />
-                                  </button>
-
-                                  {isCategoryOpen && (
-                                    <div
-                                      className="grid min-h-0 grid-cols-[repeat(auto-fill,112px)] content-start gap-1.5 overflow-y-auto overscroll-contain border-black/6 border-t bg-white/28 px-2 py-2 [scrollbar-gutter:stable]"
-                                      data-smart-home-scroll-body
-                                    >
-                                      {resources.map((resource) =>
-                                        renderResourceRow('devices', resource),
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-
-                          {section.key !== 'devices' &&
-                            section.resources.map((resource) => renderResourceRow(section.key, resource))}
-
-                          {false && section.key === 'devices' && (
-                            <div
-                              className="relative"
-                              style={{
-                                height: packedDeviceLayout.height,
-                                minWidth: packedDeviceLayout.width,
-                                width: '100%',
-                              }}
-                            >
-                              <svg
-                                aria-hidden="true"
-                                className="pointer-events-none absolute top-0 left-0 overflow-visible"
-                                height={packedDeviceLayout.contentHeight}
-                                viewBox={`0 0 ${packedDeviceLayout.width} ${packedDeviceLayout.contentHeight}`}
-                                width={packedDeviceLayout.width}
-                              >
-                                {packedDeviceLayout.groups.flatMap((deviceGroup) =>
-                                  deviceGroup.coordinates.map((coordinate) => (
-                                    <rect
-                                      fill={deviceGroup.color.background}
-                                      height={DEVICE_GROUP_CELL_HEIGHT}
-                                      key={`${deviceGroup.group?.id ?? UNGROUPED_DEVICE_GROUP_KEY}:${coordinate.x}:${coordinate.y}`}
-                                      width={DEVICE_GROUP_CELL_WIDTH}
-                                      x={coordinate.x * DEVICE_GROUP_CELL_WIDTH}
-                                      y={coordinate.y * DEVICE_GROUP_CELL_HEIGHT}
-                                    />
-                                  )),
-                                )}
-                                {packedDeviceLayout.groups.map((deviceGroup) => (
-                                  <path
-                                    d={deviceGroup.borderPath}
-                                    fill="none"
-                                    key={deviceGroup.group?.id ?? UNGROUPED_DEVICE_GROUP_KEY}
-                                    stroke={deviceGroup.color.border}
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth="1.4"
-                                  />
-                                ))}
-                              </svg>
-                              {packedDeviceLayout.groups.map((deviceGroup) => {
-                                const primaryGroupId = deviceGroup.group?.id ?? null
-                                const labelCoordinate = deviceGroup.coordinates[0]
-
-                                if (!labelCoordinate) {
-                                  return null
-                                }
-
-                                return (
-                                  <Fragment
-                                    key={deviceGroup.group?.id ?? UNGROUPED_DEVICE_GROUP_KEY}
-                                  >
-                                  <div
-                                    className="absolute flex h-10 items-center gap-1.5 rounded-xl px-2.5 py-2.5 text-[0.68rem] font-semibold tracking-[0.08em] text-zinc-700 uppercase"
-                                    style={{
-                                      left:
-                                        labelCoordinate.x * DEVICE_GROUP_CELL_WIDTH +
-                                        (DEVICE_GROUP_CELL_WIDTH - DEVICE_GROUP_CHIP_WIDTH) / 2,
-                                      top:
-                                        labelCoordinate.y * DEVICE_GROUP_CELL_HEIGHT +
-                                        (DEVICE_GROUP_CELL_HEIGHT - DEVICE_GROUP_CHIP_HEIGHT) / 2,
-                                      width: DEVICE_GROUP_CHIP_WIDTH,
-                                    }}
-                                  >
-                                    <span
-                                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                                      style={{ backgroundColor: deviceGroup.color.dot }}
-                                    />
-                                    <span className="truncate">
-                                      {deviceGroup.group?.label ?? 'Other'}
-                                    </span>
-                                  </div>
-                                  {deviceGroup.resources.map((resource, resourceIndex) => {
-                                    const coordinate =
-                                      deviceGroup.coordinates[resourceIndex + 1]
-                                    const membershipDots = (
-                                      deviceGroupMemberships.get(resource.id) ?? []
-                                    )
-                                      .filter((group) => group.id !== primaryGroupId)
-                                      .map((group) => ({
-                                        color: groupColorById.get(group.id)?.dot ?? '#71717a',
-                                        id: group.id,
-                                        label: group.label,
-                                      }))
-
-                                    if (!coordinate) {
-                                      return null
-                                    }
-
-                                    return (
-                                      <div
-                                        className="absolute"
-                                        key={resource.id}
-                                        style={{
-                                          left:
-                                            coordinate.x * DEVICE_GROUP_CELL_WIDTH +
-                                            (DEVICE_GROUP_CELL_WIDTH - DEVICE_GROUP_CHIP_WIDTH) / 2,
-                                          top:
-                                            coordinate.y * DEVICE_GROUP_CELL_HEIGHT +
-                                            (DEVICE_GROUP_CELL_HEIGHT - DEVICE_GROUP_CHIP_HEIGHT) / 2,
-                                        }}
-                                      >
-                                        {renderResourceRow('devices', resource, membershipDots)}
-                                      </div>
-                                    )
-                                  })}
-                                  </Fragment>
-                                )
-                              })}
-                            </div>
-                          )}
-
-                          {false && section.key !== 'devices' && section.resources.map((resource) => {
-                            const owner = resourceOwners.get(resource.id)
-                            const isBoundToCurrent =
-                              Boolean(owner) && owner?.collectionId === selectedCollection?.id
-                            const isBoundElsewhere =
-                              Boolean(owner) && owner?.collectionId !== selectedCollection?.id
-                            const isPairing = pairingResourceId === resource.id
-                            const canBind = false
-                            const canPosition = section.key === 'groups'
-                            const ownerCollection = owner ? collections[owner.collectionId] : null
-                            const canPreview = Boolean(ownerCollection) && canBind
-                            const isClickable =
-                              canPreview || (canBind && !isBoundElsewhere && !isBoundToCurrent)
-                            const rowIsActive = isBoundToCurrent || (canPosition && Boolean(owner))
-                            const isRenaming = renamingResourceId === resource.id
-
-                            return (
+                          <button
+                            className="flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-2.5 text-left transition"
+                            onClick={() => toggleSection(section.key)}
+                            type="button"
+                          >
+                            <div className="flex min-w-0 items-center gap-3">
                               <div
                                 className={cn(
-                                  'flex min-h-10 w-full items-center gap-2 rounded-xl px-3 py-2.5 transition',
-                                  isPairing
-                                    ? 'bg-amber-300/42 text-zinc-950 hover:bg-amber-300/58'
-                                    : rowIsActive
-                                      ? 'bg-cyan-300/42 text-zinc-950 hover:bg-cyan-300/58'
-                                      : isBoundElsewhere
-                                        ? 'bg-emerald-300/38 text-zinc-950 hover:bg-emerald-300/54'
-                                        : 'bg-white/68 text-zinc-950 hover:bg-white',
+                                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl',
+                                  isOpen
+                                    ? 'bg-zinc-950/6 text-zinc-700'
+                                    : 'bg-zinc-950/8 text-zinc-700',
                                 )}
-                                key={resource.id}
                               >
-                                {isRenaming ? (
-                                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                                    <div className={cn('shrink-0', getResourceAccentClasses(resource))}>
-                                      {getResourceTypeIcon(resource)}
-                                    </div>
-                                    <input
-                                      aria-label={`New name for ${resource.label}`}
-                                      className="min-w-0 flex-1 rounded-lg border border-cyan-700/24 bg-white/78 px-2 py-1.5 text-sm font-medium text-zinc-950 outline-none transition focus:border-cyan-700/45"
-                                      onChange={(event) => setRenameDraft(event.target.value)}
-                                      onClick={(event) => event.stopPropagation()}
-                                      onKeyDown={(event) => {
-                                        if (event.key === 'Enter') {
-                                          event.preventDefault()
-                                          applyGroupRename(resource)
-                                          return
-                                        }
-                                        if (event.key === 'Escape') {
-                                          event.preventDefault()
-                                          cancelGroupRename()
-                                        }
-                                      }}
-                                      ref={renameInputRef}
-                                      value={renameDraft}
-                                    />
-                                  </div>
+                                {section.key === 'devices' ? (
+                                  <Link2 className="h-4 w-4" />
+                                ) : section.key === 'groups' ? (
+                                  <Layers className="h-4 w-4" />
                                 ) : (
-                                  <button
-                                    className={cn(
-                                      'flex min-w-0 flex-1 items-center justify-between gap-3 text-left outline-none transition focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
-                                      isClickable
-                                        ? 'cursor-pointer hover:opacity-100'
-                                        : 'cursor-default opacity-90',
-                                    )}
-                                  disabled={!isClickable}
-                                  onMouseEnter={() => {
-                                    if (ownerCollection && canBind) {
-                                      const targetNodeIds = ownerCollection.nodeIds.filter((nodeId) =>
-                                        Boolean(sceneNodes[nodeId as AnyNodeId]),
-                                      )
-                                      if (targetNodeIds.length > 0) {
-                                        const focusNodeId =
-                                          ownerCollection.controlNodeId ?? targetNodeIds[0]
-                                        setHoveredId((focusNodeId as AnyNodeId | undefined) ?? null)
-                                        setPreviewSelectedIds(targetNodeIds as AnyNodeId[])
-                                      }
-                                    }
-                                  }}
-                                  onMouseLeave={clearPreviewedCollection}
-                                  onClick={() => {
-                                    if (ownerCollection && canBind) {
-                                      previewCollection(ownerCollection)
-                                      return
-                                    }
-                                    if (!canBind) {
-                                      return
-                                    }
-                                    if (selectedItems.length > 0) {
-                                      bindResourceToItems(resource, selectedItems)
-                                      return
-                                    }
-
-                                    startPairing(resource.id)
-                                  }}
-                                  type="button"
-                                >
-                                  <div className="flex min-w-0 items-center gap-3">
-                                    <div className={cn('shrink-0', getResourceAccentClasses(resource))}>
-                                      {getResourceTypeIcon(resource)}
-                                    </div>
-                                      <span className="truncate text-sm font-medium text-zinc-950">
-                                      {resource.label}
-                                    </span>
-                                  </div>
-                                  {isPairing && (
-                                    <Sparkles className="h-4 w-4 shrink-0 text-amber-200" />
-                                  )}
-                                  </button>
-                                )}
-
-                                {owner && ownerCollection && canBind && (
-                                  <button
-                                    aria-label={`Unbind ${resource.label} from ${owner.collectionName}`}
-                                    className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-rose-500/16 text-rose-900 outline-none transition hover:bg-rose-500/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                                    onClick={() => {
-                                      unbindResourceFromCollection(ownerCollection, resource.id)
-                                    }}
-                                    type="button"
-                                  >
-                                    <Unlink className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
-
-                                {!owner && !isPairing && canBind && (
-                                  <button
-                                    aria-label={`Bind ${resource.label}`}
-                                    className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-emerald-500/16 text-emerald-900 outline-none transition hover:bg-emerald-500/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                                    onClick={() => {
-                                      if (selectedItems.length > 0) {
-                                        bindResourceToItems(resource, selectedItems)
-                                        return
-                                      }
-
-                                      startPairing(resource.id)
-                                    }}
-                                    type="button"
-                                  >
-                                    <Link2 className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
-
-                                {canPosition && (
-                                  <>
-                                    <button
-                                      aria-label={`${owner ? 'Reposition' : 'Position'} ${resource.label}`}
-                                      className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-cyan-600/14 text-cyan-950 outline-none transition hover:bg-cyan-600/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                                      onClick={() => startGroupPositioning(resource)}
-                                      type="button"
-                                    >
-                                      <MapPin className="h-3.5 w-3.5" />
-                                    </button>
-                                    {isRenaming ? (
-                                      <>
-                                        <button
-                                          aria-label={`Save ${resource.label} name`}
-                                          className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-emerald-500/16 text-emerald-900 outline-none transition hover:bg-emerald-500/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                                          onClick={() => applyGroupRename(resource)}
-                                          type="button"
-                                        >
-                                          <Check className="h-3.5 w-3.5" />
-                                        </button>
-                                        <button
-                                          aria-label={`Cancel renaming ${resource.label}`}
-                                          className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-zinc-950/8 text-zinc-800 outline-none transition hover:bg-zinc-950/14 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                                          onClick={cancelGroupRename}
-                                          type="button"
-                                        >
-                                          <X className="h-3.5 w-3.5" />
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <button
-                                        aria-label={`Rename ${resource.label}`}
-                                        className={cn(
-                                          'flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-zinc-950/8 text-zinc-800 outline-none transition focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
-                                          owner
-                                            ? 'hover:bg-zinc-950/14'
-                                            : 'cursor-not-allowed opacity-35',
-                                        )}
-                                        disabled={!owner}
-                                        onClick={() => startGroupRename(resource)}
-                                        type="button"
-                                      >
-                                        <Pencil className="h-3.5 w-3.5" />
-                                      </button>
-                                    )}
-                                    <button
-                                      aria-label={`Delete ${resource.label}`}
-                                      className={cn(
-                                        'flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-rose-500/14 text-rose-900 outline-none transition focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
-                                        owner
-                                          ? 'hover:bg-rose-500/24'
-                                          : 'cursor-not-allowed opacity-35',
-                                      )}
-                                      disabled={!owner}
-                                      onClick={() => deleteGroupResource(resource)}
-                                      type="button"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </>
+                                  <Sparkles className="h-4 w-4" />
                                 )}
                               </div>
-                            )
-                          })}
-
-                          {!isRefreshingImports && section.resources.length === 0 && (
-                            <div className="col-span-full rounded-xl border border-dashed border-black/8 bg-white/42 px-3 py-3.5 text-center text-xs text-zinc-500">
-                              {section.key === 'devices'
-                                ? 'No devices found'
-                                : section.key === 'groups'
-                                  ? 'No groups found'
-                                  : 'No actions found'}
+                              <span className="truncate text-sm font-medium">{section.label}</span>
                             </div>
-                          )}
-
-                          {section.key === 'groups' && (
-                            <button
-                              aria-label="Create Pascal group"
-                              className="flex h-10 w-full items-center justify-center rounded-xl bg-white/68 text-zinc-800 outline-none transition hover:bg-white focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
-                              onClick={createNewPascalGroup}
-                              type="button"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
-                          )}
+                            <SectionChevron className="h-4 w-4 shrink-0 text-zinc-500" />
+                          </button>
+                          <button
+                            aria-label={`${isRenderVisible ? 'Hide' : 'Show'} ${section.label.toLowerCase()} in render`}
+                            aria-pressed={isRenderVisible}
+                            className={cn(
+                              'mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition',
+                              isRenderVisible
+                                ? 'border-black/8 bg-zinc-950/6 text-zinc-700 hover:bg-zinc-950/10'
+                                : 'border-rose-500/25 bg-rose-500/14 text-rose-900 hover:bg-rose-500/20',
+                            )}
+                            onClick={() =>
+                              setSmartHomeOverlaySectionVisible(section.key, !isRenderVisible)
+                            }
+                            title={`${isRenderVisible ? 'Hide' : 'Show'} ${section.label.toLowerCase()} in render`}
+                            type="button"
+                          >
+                            <SectionVisibilityIcon className="h-4 w-4" />
+                          </button>
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
+
+                        {isOpen && (
+                          <div
+                            className={cn(
+                              'min-h-0 overflow-y-auto overscroll-contain border-t border-black/6 px-3 py-2.5 pr-1 [scrollbar-gutter:stable]',
+                              section.key === 'devices'
+                                ? 'flex max-h-[calc(100vh-12rem)] flex-col gap-1.5'
+                                : section.key === 'groups'
+                                  ? 'grid content-start grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-1.5'
+                                  : 'grid content-start gap-1.5 grid-cols-[repeat(auto-fit,minmax(13.5rem,1fr))]',
+                            )}
+                            data-smart-home-section-body
+                            ref={section.key === 'devices' ? deviceSectionRef : undefined}
+                          >
+                            {section.key === 'devices' &&
+                              deviceCategoryGroups.map(({ category, resources }) => {
+                                const isCategoryOpen = openDeviceCategories[category]
+                                const CategoryChevron = isCategoryOpen ? ChevronDown : ChevronRight
+
+                                return (
+                                  <div
+                                    className={cn(
+                                      'rounded-xl bg-white/42',
+                                      isCategoryOpen
+                                        ? 'flex min-h-0 shrink-0 flex-col overflow-hidden'
+                                        : 'shrink-0 overflow-hidden',
+                                    )}
+                                    key={category}
+                                  >
+                                    <button
+                                      className="flex h-10 w-full shrink-0 items-center justify-between gap-3 px-2.5 text-left text-zinc-950 transition hover:bg-white/55"
+                                      onClick={() => toggleDeviceCategory(category)}
+                                      type="button"
+                                    >
+                                      <div className="flex min-w-0 items-center gap-2.5">
+                                        <div
+                                          className={cn(
+                                            'flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg',
+                                            getDeviceCategoryTone(category),
+                                          )}
+                                        >
+                                          {getDeviceCategoryIcon(category)}
+                                        </div>
+                                        <span className="truncate text-sm font-semibold">
+                                          {DEVICE_CATEGORY_LABELS[category]} ({resources.length})
+                                        </span>
+                                      </div>
+                                      <CategoryChevron className="h-4 w-4 shrink-0 text-zinc-500" />
+                                    </button>
+
+                                    {isCategoryOpen && (
+                                      <div
+                                        className="grid min-h-0 grid-cols-[repeat(auto-fill,112px)] content-start gap-1.5 overflow-y-auto overscroll-contain border-black/6 border-t bg-white/28 px-2 py-2 [scrollbar-gutter:stable]"
+                                        data-smart-home-scroll-body
+                                      >
+                                        {resources.map((resource) =>
+                                          renderResourceRow('devices', resource),
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+
+                            {section.key !== 'devices' &&
+                              section.resources.map((resource) =>
+                                renderResourceRow(section.key, resource),
+                              )}
+
+                            {false && section.key === 'devices' && (
+                              <div
+                                className="relative"
+                                style={{
+                                  height: packedDeviceLayout.height,
+                                  minWidth: packedDeviceLayout.width,
+                                  width: '100%',
+                                }}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  className="pointer-events-none absolute top-0 left-0 overflow-visible"
+                                  height={packedDeviceLayout.contentHeight}
+                                  viewBox={`0 0 ${packedDeviceLayout.width} ${packedDeviceLayout.contentHeight}`}
+                                  width={packedDeviceLayout.width}
+                                >
+                                  {packedDeviceLayout.groups.flatMap((deviceGroup) =>
+                                    deviceGroup.coordinates.map((coordinate) => (
+                                      <rect
+                                        fill={deviceGroup.color.background}
+                                        height={DEVICE_GROUP_CELL_HEIGHT}
+                                        key={`${deviceGroup.group?.id ?? UNGROUPED_DEVICE_GROUP_KEY}:${coordinate.x}:${coordinate.y}`}
+                                        width={DEVICE_GROUP_CELL_WIDTH}
+                                        x={coordinate.x * DEVICE_GROUP_CELL_WIDTH}
+                                        y={coordinate.y * DEVICE_GROUP_CELL_HEIGHT}
+                                      />
+                                    )),
+                                  )}
+                                  {packedDeviceLayout.groups.map((deviceGroup) => (
+                                    <path
+                                      d={deviceGroup.borderPath}
+                                      fill="none"
+                                      key={deviceGroup.group?.id ?? UNGROUPED_DEVICE_GROUP_KEY}
+                                      stroke={deviceGroup.color.border}
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth="1.4"
+                                    />
+                                  ))}
+                                </svg>
+                                {packedDeviceLayout.groups.map((deviceGroup) => {
+                                  const primaryGroupId = deviceGroup.group?.id ?? null
+                                  const labelCoordinate = deviceGroup.coordinates[0]
+
+                                  if (!labelCoordinate) {
+                                    return null
+                                  }
+
+                                  return (
+                                    <Fragment
+                                      key={deviceGroup.group?.id ?? UNGROUPED_DEVICE_GROUP_KEY}
+                                    >
+                                      <div
+                                        className="absolute flex h-10 items-center gap-1.5 rounded-xl px-2.5 py-2.5 text-[0.68rem] font-semibold tracking-[0.08em] text-zinc-700 uppercase"
+                                        style={{
+                                          left:
+                                            labelCoordinate.x * DEVICE_GROUP_CELL_WIDTH +
+                                            (DEVICE_GROUP_CELL_WIDTH - DEVICE_GROUP_CHIP_WIDTH) / 2,
+                                          top:
+                                            labelCoordinate.y * DEVICE_GROUP_CELL_HEIGHT +
+                                            (DEVICE_GROUP_CELL_HEIGHT - DEVICE_GROUP_CHIP_HEIGHT) /
+                                              2,
+                                          width: DEVICE_GROUP_CHIP_WIDTH,
+                                        }}
+                                      >
+                                        <span
+                                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                                          style={{ backgroundColor: deviceGroup.color.dot }}
+                                        />
+                                        <span className="truncate">
+                                          {deviceGroup.group?.label ?? 'Other'}
+                                        </span>
+                                      </div>
+                                      {deviceGroup.resources.map((resource, resourceIndex) => {
+                                        const coordinate =
+                                          deviceGroup.coordinates[resourceIndex + 1]
+                                        const membershipDots = (
+                                          deviceGroupMemberships.get(resource.id) ?? []
+                                        )
+                                          .filter((group) => group.id !== primaryGroupId)
+                                          .map((group) => ({
+                                            color: groupColorById.get(group.id)?.dot ?? '#71717a',
+                                            id: group.id,
+                                            label: group.label,
+                                          }))
+
+                                        if (!coordinate) {
+                                          return null
+                                        }
+
+                                        return (
+                                          <div
+                                            className="absolute"
+                                            key={resource.id}
+                                            style={{
+                                              left:
+                                                coordinate.x * DEVICE_GROUP_CELL_WIDTH +
+                                                (DEVICE_GROUP_CELL_WIDTH -
+                                                  DEVICE_GROUP_CHIP_WIDTH) /
+                                                  2,
+                                              top:
+                                                coordinate.y * DEVICE_GROUP_CELL_HEIGHT +
+                                                (DEVICE_GROUP_CELL_HEIGHT -
+                                                  DEVICE_GROUP_CHIP_HEIGHT) /
+                                                  2,
+                                            }}
+                                          >
+                                            {renderResourceRow('devices', resource, membershipDots)}
+                                          </div>
+                                        )
+                                      })}
+                                    </Fragment>
+                                  )
+                                })}
+                              </div>
+                            )}
+
+                            {false &&
+                              section.key !== 'devices' &&
+                              section.resources.map((resource) => {
+                                const owner = resourceOwners.get(resource.id)
+                                const isBoundToCurrent =
+                                  Boolean(owner) && owner?.collectionId === selectedCollection?.id
+                                const isBoundElsewhere =
+                                  Boolean(owner) && owner?.collectionId !== selectedCollection?.id
+                                const isPairing = pairingResourceId === resource.id
+                                const canBind = false
+                                const canPosition = section.key === 'groups'
+                                const ownerCollection = owner
+                                  ? collections[owner.collectionId]
+                                  : null
+                                const canPreview = Boolean(ownerCollection) && canBind
+                                const isClickable =
+                                  canPreview || (canBind && !isBoundElsewhere && !isBoundToCurrent)
+                                const rowIsActive =
+                                  isBoundToCurrent || (canPosition && Boolean(owner))
+                                const isRenaming = renamingResourceId === resource.id
+
+                                return (
+                                  <div
+                                    className={cn(
+                                      'flex min-h-10 w-full items-center gap-2 rounded-xl px-3 py-2.5 transition',
+                                      isPairing
+                                        ? 'bg-amber-300/42 text-zinc-950 hover:bg-amber-300/58'
+                                        : rowIsActive
+                                          ? 'bg-cyan-300/42 text-zinc-950 hover:bg-cyan-300/58'
+                                          : isBoundElsewhere
+                                            ? 'bg-emerald-300/38 text-zinc-950 hover:bg-emerald-300/54'
+                                            : 'bg-white/68 text-zinc-950 hover:bg-white',
+                                    )}
+                                    key={resource.id}
+                                  >
+                                    {isRenaming ? (
+                                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                                        <div
+                                          className={cn(
+                                            'shrink-0',
+                                            getResourceAccentClasses(resource),
+                                          )}
+                                        >
+                                          {getResourceTypeIcon(resource)}
+                                        </div>
+                                        <input
+                                          aria-label={`New name for ${resource.label}`}
+                                          className="min-w-0 flex-1 rounded-lg border border-cyan-700/24 bg-white/78 px-2 py-1.5 text-sm font-medium text-zinc-950 outline-none transition focus:border-cyan-700/45"
+                                          onChange={(event) => setRenameDraft(event.target.value)}
+                                          onClick={(event) => event.stopPropagation()}
+                                          onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                              event.preventDefault()
+                                              applyGroupRename(resource)
+                                              return
+                                            }
+                                            if (event.key === 'Escape') {
+                                              event.preventDefault()
+                                              cancelGroupRename()
+                                            }
+                                          }}
+                                          ref={renameInputRef}
+                                          value={renameDraft}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <button
+                                        className={cn(
+                                          'flex min-w-0 flex-1 items-center justify-between gap-3 text-left outline-none transition focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                                          isClickable
+                                            ? 'cursor-pointer hover:opacity-100'
+                                            : 'cursor-default opacity-90',
+                                        )}
+                                        disabled={!isClickable}
+                                        onMouseEnter={() => {
+                                          if (ownerCollection && canBind) {
+                                            const targetNodeIds = ownerCollection.nodeIds.filter(
+                                              (nodeId) => Boolean(sceneNodes[nodeId as AnyNodeId]),
+                                            )
+                                            if (targetNodeIds.length > 0) {
+                                              const focusNodeId =
+                                                ownerCollection.controlNodeId ?? targetNodeIds[0]
+                                              setHoveredId(
+                                                (focusNodeId as AnyNodeId | undefined) ?? null,
+                                              )
+                                              setPreviewSelectedIds(targetNodeIds as AnyNodeId[])
+                                            }
+                                          }
+                                        }}
+                                        onMouseLeave={clearPreviewedCollection}
+                                        onClick={() => {
+                                          if (ownerCollection && canBind) {
+                                            previewCollection(ownerCollection)
+                                            return
+                                          }
+                                          if (!canBind) {
+                                            return
+                                          }
+                                          if (selectedItems.length > 0) {
+                                            bindResourceToItems(resource, selectedItems)
+                                            return
+                                          }
+
+                                          startPairing(resource.id)
+                                        }}
+                                        type="button"
+                                      >
+                                        <div className="flex min-w-0 items-center gap-3">
+                                          <div
+                                            className={cn(
+                                              'shrink-0',
+                                              getResourceAccentClasses(resource),
+                                            )}
+                                          >
+                                            {getResourceTypeIcon(resource)}
+                                          </div>
+                                          <span className="truncate text-sm font-medium text-zinc-950">
+                                            {resource.label}
+                                          </span>
+                                        </div>
+                                        {isPairing && (
+                                          <Sparkles className="h-4 w-4 shrink-0 text-amber-200" />
+                                        )}
+                                      </button>
+                                    )}
+
+                                    {owner && ownerCollection && canBind && (
+                                      <button
+                                        aria-label={`Unbind ${resource.label} from ${owner.collectionName}`}
+                                        className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-rose-500/16 text-rose-900 outline-none transition hover:bg-rose-500/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                        onClick={() => {
+                                          unbindResourceFromCollection(ownerCollection, resource.id)
+                                        }}
+                                        type="button"
+                                      >
+                                        <Unlink className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+
+                                    {!owner && !isPairing && canBind && (
+                                      <button
+                                        aria-label={`Bind ${resource.label}`}
+                                        className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-emerald-500/16 text-emerald-900 outline-none transition hover:bg-emerald-500/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                        onClick={() => {
+                                          if (selectedItems.length > 0) {
+                                            bindResourceToItems(resource, selectedItems)
+                                            return
+                                          }
+
+                                          startPairing(resource.id)
+                                        }}
+                                        type="button"
+                                      >
+                                        <Link2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+
+                                    {canPosition && (
+                                      <>
+                                        <button
+                                          aria-label={`${owner ? 'Reposition' : 'Position'} ${resource.label}`}
+                                          className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-cyan-600/14 text-cyan-950 outline-none transition hover:bg-cyan-600/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                          onClick={() => startGroupPositioning(resource)}
+                                          type="button"
+                                        >
+                                          <MapPin className="h-3.5 w-3.5" />
+                                        </button>
+                                        {isRenaming ? (
+                                          <>
+                                            <button
+                                              aria-label={`Save ${resource.label} name`}
+                                              className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-emerald-500/16 text-emerald-900 outline-none transition hover:bg-emerald-500/24 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                              onClick={() => applyGroupRename(resource)}
+                                              type="button"
+                                            >
+                                              <Check className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button
+                                              aria-label={`Cancel renaming ${resource.label}`}
+                                              className="flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-zinc-950/8 text-zinc-800 outline-none transition hover:bg-zinc-950/14 focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                              onClick={cancelGroupRename}
+                                              type="button"
+                                            >
+                                              <X className="h-3.5 w-3.5" />
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <button
+                                            aria-label={`Rename ${resource.label}`}
+                                            className={cn(
+                                              'flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-zinc-950/8 text-zinc-800 outline-none transition focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                                              owner
+                                                ? 'hover:bg-zinc-950/14'
+                                                : 'cursor-not-allowed opacity-35',
+                                            )}
+                                            disabled={!owner}
+                                            onClick={() => startGroupRename(resource)}
+                                            type="button"
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" />
+                                          </button>
+                                        )}
+                                        <button
+                                          aria-label={`Delete ${resource.label}`}
+                                          className={cn(
+                                            'flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-lg bg-rose-500/14 text-rose-900 outline-none transition focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0',
+                                            owner
+                                              ? 'hover:bg-rose-500/24'
+                                              : 'cursor-not-allowed opacity-35',
+                                          )}
+                                          disabled={!owner}
+                                          onClick={() => deleteGroupResource(resource)}
+                                          type="button"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                )
+                              })}
+
+                            {!isRefreshingImports && section.resources.length === 0 && (
+                              <div className="col-span-full rounded-xl border border-dashed border-black/8 bg-white/42 px-3 py-3.5 text-center text-xs text-zinc-500">
+                                {section.key === 'devices'
+                                  ? 'No devices found'
+                                  : section.key === 'groups'
+                                    ? 'No groups found'
+                                    : 'No actions found'}
+                              </div>
+                            )}
+
+                            {section.key === 'groups' && (
+                              <button
+                                aria-label="Create Pascal group"
+                                className="flex h-10 w-full items-center justify-center rounded-xl bg-white/68 text-zinc-800 outline-none transition hover:bg-white focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                                onClick={createNewPascalGroup}
+                                type="button"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-          {activePanel.kind === 'config' && (
-            <button
-              aria-label="Resize smart home panel"
-              className="absolute bottom-0 left-0 z-10 flex h-8 w-8 cursor-nesw-resize touch-none items-end justify-start rounded-tr-xl border-black/8 bg-white/50 p-1.5 text-zinc-600 transition hover:bg-white/80"
-              onPointerDown={handlePanelResizePointerDown}
-              type="button"
-            >
-              <span
-                aria-hidden="true"
-                className="h-3 w-3 rounded-bl-[3px] border-zinc-500/70 border-b-2 border-l-2"
-              />
-            </button>
-          )}
-        </section>
-      )}
+            )}
+            {activePanel.kind === 'config' && (
+              <button
+                aria-label="Resize smart home panel"
+                className="absolute bottom-0 left-0 z-10 flex h-8 w-8 cursor-nesw-resize touch-none items-end justify-start rounded-tr-xl border-black/8 bg-white/50 p-1.5 text-zinc-600 transition hover:bg-white/80"
+                onPointerDown={handlePanelResizePointerDown}
+                type="button"
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-3 w-3 rounded-bl-[3px] border-zinc-500/70 border-b-2 border-l-2"
+                />
+              </button>
+            )}
+          </section>
+        )}
       </div>
     </>
   )

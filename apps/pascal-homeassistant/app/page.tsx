@@ -16,7 +16,7 @@ export default function HomeAssistantAuthoringPage() {
   return (
     <main className="relative h-screen w-screen overflow-hidden">
       <Editor
-        homeAssistantApiEnabled={false}
+        homeAssistantConnectionMode="browser"
         layoutVersion="v2"
         projectId={PROJECT_ID}
         sidebarTabs={SIDEBAR_TABS}
