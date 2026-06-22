@@ -10,6 +10,7 @@ import { elevatorDefinition } from './elevator'
 import { fenceDefinition } from './fence'
 import { guideDefinition } from './guide'
 import { itemDefinition } from './item'
+import { landrushWorldDefinition } from './landrush-world'
 import { levelDefinition } from './level'
 import { ridgeVentDefinition } from './ridge-vent'
 import { roofDefinition } from './roof'
@@ -71,6 +72,7 @@ export const builtinPlugin: Plugin = {
     levelDefinition as unknown as AnyNodeDefinition,
     guideDefinition as unknown as AnyNodeDefinition,
     scanDefinition as unknown as AnyNodeDefinition,
+    landrushWorldDefinition as unknown as AnyNodeDefinition,
     // Roof-mounted accessories (custom renderer + bespoke roof-event tool).
     boxVentDefinition as unknown as AnyNodeDefinition,
     ridgeVentDefinition as unknown as AnyNodeDefinition,
@@ -92,6 +94,16 @@ export { elevatorDefinition } from './elevator'
 export { fenceDefinition } from './fence'
 export { guideDefinition } from './guide'
 export { itemDefinition } from './item'
+export { landrushWorldDefinition } from './landrush-world'
+export {
+  createLandrushWaterMaterial,
+  LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION,
+  LANDRUSH_WATER_SURFACE_ELEVATION,
+  LANDRUSH_WATER_SURFACE_PARAMETERS,
+  LANDRUSH_WATER_SURFACE_THICKNESS,
+  type LandrushWaterSurfaceMaterial,
+  type LandrushWaterSurfaceParameters,
+} from './landrush-world/water-surface'
 export { levelDefinition } from './level'
 export { ridgeVentDefinition } from './ridge-vent'
 export { roofDefinition } from './roof'

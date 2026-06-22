@@ -83,6 +83,7 @@ export {
   isLowProfileItemSurface,
   LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT,
 } from './nodes/item'
+export { LandrushWorldNode } from './nodes/landrush-world'
 export { LevelNode } from './nodes/level'
 // Nodes
 export { RidgeVentNode } from './nodes/ridge-vent'
