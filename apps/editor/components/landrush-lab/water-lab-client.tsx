@@ -11,9 +11,13 @@ import {
   X,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { generateLandrushIsland } from '@/components/landrush/generator'
-import type { WaterFieldParameters } from './water-field-texture'
+import {
+  WATER_FIELD_PREVIEW_RESOLUTION,
+  WATER_FIELD_RESOLUTION,
+  type WaterFieldParameters,
+} from './water-field-texture'
 import {
   LANDRUSH_WATER_EFFECT_PARAMETERS,
   type LandrushWaterEffectParameters,
@@ -66,6 +70,8 @@ const WATER_LAB_DEFAULT_ISLAND_PARAMETERS = {
   variant: 0,
 } satisfies IslandGeneratorParameters
 
+const ISLAND_PREVIEW_SETTLE_MS = 180
+
 export function WaterLabClient() {
   const searchParams = useSearchParams()
   const preset = getWaterViewPreset(searchParams.get('view'))
@@ -76,6 +82,7 @@ export function WaterLabClient() {
   const [frameP95, setFrameP95] = useState<number | null>(null)
   const [showDepthReference, setShowDepthReference] = useState(false)
   const [showTunePanel, setShowTunePanel] = useState(true)
+  const [isIslandPreviewing, setIsIslandPreviewing] = useState(false)
   const [islandParameters, setIslandParameters] = useState<IslandGeneratorParameters>(() => ({
     ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
   }))
@@ -87,6 +94,10 @@ export function WaterLabClient() {
       ...LANDRUSH_WATER_EFFECT_PARAMETERS,
     }),
   )
+  const islandPreviewTimeoutRef = useRef<number | null>(null)
+  const terrainFieldResolution = isIslandPreviewing
+    ? WATER_FIELD_PREVIEW_RESOLUTION
+    : WATER_FIELD_RESOLUTION
   const island = useMemo(
     () =>
       generateLandrushIsland({
@@ -113,9 +124,27 @@ export function WaterLabClient() {
   const gates = useMemo(() => waterMetricGates(metrics), [metrics])
 
   const resetParameters = () => {
+    if (islandPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(islandPreviewTimeoutRef.current)
+      islandPreviewTimeoutRef.current = null
+    }
+    setIsIslandPreviewing(false)
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
     setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
     setMaterialParameters({ ...LANDRUSH_WATER_EFFECT_PARAMETERS })
+  }
+
+  const changeIslandParameter = (key: IslandSliderKey, value: number) => {
+    setIsIslandPreviewing(true)
+    setIslandParameters((current) => ({ ...current, [key]: value }))
+
+    if (islandPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(islandPreviewTimeoutRef.current)
+    }
+    islandPreviewTimeoutRef.current = window.setTimeout(() => {
+      setIsIslandPreviewing(false)
+      islandPreviewTimeoutRef.current = null
+    }, ISLAND_PREVIEW_SETTLE_MS)
   }
 
   const copyParameters = async () => {
@@ -163,6 +192,14 @@ export function WaterLabClient() {
   }, [])
 
   useEffect(() => {
+    return () => {
+      if (islandPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(islandPreviewTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
     if (!debug) return
     window.__LANDRUSH_WATER_LAB__ = {
       frameP95,
@@ -172,6 +209,7 @@ export function WaterLabClient() {
         field: fieldParameters,
         island: islandParameters,
         material: materialParameters,
+        terrainFieldResolution,
       },
       preset: preset.id,
       reference: WATER_REFERENCE,
@@ -187,6 +225,7 @@ export function WaterLabClient() {
     frameP95,
     gates,
     islandParameters,
+    terrainFieldResolution,
     materialParameters,
     metrics,
     preset.id,
@@ -200,6 +239,7 @@ export function WaterLabClient() {
         island={island}
         materialParameters={materialParameters}
         preset={preset}
+        terrainFieldResolution={terrainFieldResolution}
         showDepthReference={showDepthReference}
       />
       {!clean ? (
@@ -241,9 +281,7 @@ export function WaterLabClient() {
           onFieldChange={(key, value) =>
             setFieldParameters((current) => ({ ...current, [key]: value }))
           }
-          onIslandChange={(key, value) =>
-            setIslandParameters((current) => ({ ...current, [key]: value }))
-          }
+          onIslandChange={changeIslandParameter}
           onMaterialChange={(key, value) =>
             setMaterialParameters(
               (current) => ({ ...current, [key]: value }) as LandrushWaterEffectParameters,

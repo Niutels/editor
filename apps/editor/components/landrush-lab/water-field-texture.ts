@@ -2,6 +2,7 @@ import { ClampToEdgeWrapping, DataTexture, LinearFilter, RGBAFormat } from 'thre
 import type { LandrushPoint2 } from '@/components/landrush/types'
 
 export const WATER_FIELD_RESOLUTION = 1024
+export const WATER_FIELD_PREVIEW_RESOLUTION = 384
 const BRUNO_DEPTH_FIELD_SCALE = 6.4
 const TAU = Math.PI * 2
 
@@ -43,11 +44,18 @@ type WaterFieldOptions = {
   parameters?: Partial<WaterFieldParameters>
   perimeter: readonly LandrushPoint2[]
   planeSize: number
+  resolution?: number
 }
 
-export function createWaterFieldTexture({ parameters, perimeter, planeSize }: WaterFieldOptions) {
+export function createWaterFieldTexture({
+  parameters,
+  perimeter,
+  planeSize,
+  resolution = WATER_FIELD_RESOLUTION,
+}: WaterFieldOptions) {
   const params = { ...WATER_FIELD_DEFAULT_PARAMETERS, ...parameters }
-  const data = new Uint8Array(WATER_FIELD_RESOLUTION * WATER_FIELD_RESOLUTION * 4)
+  const textureResolution = clampResolution(resolution)
+  const data = new Uint8Array(textureResolution * textureResolution * 4)
   const half = planeSize / 2
   const openPerimeter = openRing(perimeter)
   const perimeterBounds = boundsFor(openPerimeter)
@@ -60,13 +68,13 @@ export function createWaterFieldTexture({ parameters, perimeter, planeSize }: Wa
   const distanceIndex = createDistanceIndex(openPerimeter, maxUsefulDistance)
   const depthDistanceIndex = createDistanceIndex(depthPerimeter, maxUsefulDistance)
 
-  for (let y = 0; y < WATER_FIELD_RESOLUTION; y += 1) {
-    for (let x = 0; x < WATER_FIELD_RESOLUTION; x += 1) {
+  for (let y = 0; y < textureResolution; y += 1) {
+    for (let x = 0; x < textureResolution; x += 1) {
       const world = {
-        x: (x / (WATER_FIELD_RESOLUTION - 1) - 0.5) * planeSize,
-        z: (y / (WATER_FIELD_RESOLUTION - 1) - 0.5) * planeSize,
+        x: (x / (textureResolution - 1) - 0.5) * planeSize,
+        z: (y / (textureResolution - 1) - 0.5) * planeSize,
       }
-      const index = (y * WATER_FIELD_RESOLUTION + x) * 4
+      const index = (y * textureResolution + x) * 4
       const boundsDistance = distanceToBounds(world, perimeterBounds)
       const depthBoundsDistance = distanceToBounds(world, depthBounds)
       const outsideUsefulDistance = boundsDistance > maxUsefulDistance
@@ -111,7 +119,7 @@ export function createWaterFieldTexture({ parameters, perimeter, planeSize }: Wa
     }
   }
 
-  const texture = new DataTexture(data, WATER_FIELD_RESOLUTION, WATER_FIELD_RESOLUTION, RGBAFormat)
+  const texture = new DataTexture(data, textureResolution, textureResolution, RGBAFormat)
   texture.flipY = false
   texture.magFilter = LinearFilter
   texture.minFilter = LinearFilter
@@ -405,6 +413,10 @@ function byte(value: number) {
 
 function clamp(value: number) {
   return Math.max(0, Math.min(1, value))
+}
+
+function clampResolution(value: number) {
+  return Math.max(128, Math.min(WATER_FIELD_RESOLUTION, Math.round(value)))
 }
 
 function clampRange(value: number, min: number, max: number) {

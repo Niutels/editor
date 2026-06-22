@@ -35,6 +35,7 @@ type WaterSceneProps = {
   island: LandrushIsland
   materialParameters: LandrushWaterSurfaceParameters
   preset: WaterViewPreset
+  terrainFieldResolution: number
   showDepthReference: boolean
 }
 
@@ -65,6 +66,7 @@ export function WaterScene({
   island,
   materialParameters,
   preset,
+  terrainFieldResolution,
   showDepthReference,
 }: WaterSceneProps) {
   const controlsTarget = useMemo(() => new Vector3(...preset.camera.target), [preset.camera.target])
@@ -103,6 +105,7 @@ export function WaterScene({
         fieldParameters={fieldParameters}
         island={island}
         materialParameters={materialParameters}
+        terrainFieldResolution={terrainFieldResolution}
         showDepthReference={showDepthReference}
       />
     </Canvas>
@@ -126,12 +129,14 @@ function WaterMeshes({
   fieldParameters,
   island,
   materialParameters,
+  terrainFieldResolution,
   showDepthReference,
 }: {
   debugLayer: 'shoreline' | null
   fieldParameters: WaterFieldParameters
   island: LandrushIsland
   materialParameters: LandrushWaterSurfaceParameters
+  terrainFieldResolution: number
   showDepthReference: boolean
 }) {
   const renderer = useThree((state) => state.gl)
@@ -168,8 +173,9 @@ function WaterMeshes({
         parameters: fieldParameters,
         perimeter: shorelinePoints,
         planeSize: WATER_PLANE_SIZE,
+        resolution: terrainFieldResolution,
       }),
-    [fieldParameters, shorelinePoints],
+    [fieldParameters, shorelinePoints, terrainFieldResolution],
   )
   const waterBounds = useMemo(() => createWaterBounds(WATER_PLANE_SIZE), [])
   const effectiveMaterialParameters = useMemo(
