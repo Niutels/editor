@@ -13,6 +13,7 @@ import type {
   FenceNode,
   GuideNode,
   ItemNode,
+  LandrushWorldNode,
   LevelNode,
   RidgeVentNode,
   RoofNode,
@@ -86,6 +87,7 @@ export type DoorEvent = NodeEvent<DoorNode>
 export type ElevatorEvent = NodeEvent<ElevatorNode>
 export type ScanEvent = NodeEvent<ScanNode>
 export type GuideEvent = NodeEvent<GuideNode>
+export type LandrushWorldEvent = NodeEvent<LandrushWorldNode>
 export type BoxVentEvent = NodeEvent<BoxVentNode>
 export type RidgeVentEvent = NodeEvent<RidgeVentNode>
 export type ChimneyEvent = NodeEvent<ChimneyNode>
@@ -227,6 +229,7 @@ type EditorEvents = GridEvents &
   NodeEvents<'door', DoorEvent> &
   NodeEvents<'scan', ScanEvent> &
   NodeEvents<'guide', GuideEvent> &
+  NodeEvents<'landrush-world', LandrushWorldEvent> &
   NodeEvents<'box-vent', BoxVentEvent> &
   NodeEvents<'ridge-vent', RidgeVentEvent> &
   NodeEvents<'chimney', ChimneyEvent> &
