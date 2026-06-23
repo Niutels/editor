@@ -1,29 +1,19 @@
-import { ClampToEdgeWrapping, DataTexture, LinearFilter, RGBAFormat } from 'three'
-import type { LandrushPoint2 } from '@/components/landrush/types'
+self.onmessage = (event) => {
+  const data = createWaterFieldData(event.data)
+  self.postMessage(
+    {
+      bytes: data.bytes.buffer,
+      resolution: data.resolution,
+    },
+    [data.bytes.buffer],
+  )
+}
 
-export const WATER_FIELD_RESOLUTION = 1024
-export const WATER_FIELD_PREVIEW_RESOLUTION = 384
+const WATER_FIELD_RESOLUTION = 1024
 const BRUNO_DEPTH_FIELD_SCALE = 6.4
 const TAU = Math.PI * 2
 
-export type WaterFieldParameters = {
-  depthContourCollapseMeters: number
-  depthContourCollapseScale: number
-  depthContourNoiseFrequency: number
-  depthContourOffsetMeters: number
-  depthContourVariationMeters: number
-  depthExponent: number
-  depthNoiseFrequency: number
-  depthNoiseStrength: number
-  depthReach: number
-  edgeFadeDistance: number
-  shoreBandMeters: number
-  shoreFeatherMeters: number
-  shoreNoiseFrequency: number
-  shoreVariationMeters: number
-}
-
-export const WATER_FIELD_DEFAULT_PARAMETERS = {
+const WATER_FIELD_DEFAULT_PARAMETERS = {
   depthContourCollapseMeters: 10.3,
   depthContourCollapseScale: 1.25,
   depthContourNoiseFrequency: 0.1,
@@ -38,31 +28,18 @@ export const WATER_FIELD_DEFAULT_PARAMETERS = {
   shoreFeatherMeters: 0.45,
   shoreNoiseFrequency: 0.075,
   shoreVariationMeters: 0.85,
-} satisfies WaterFieldParameters
+}
 
-export const WATER_FIELD_DEPTH_REFERENCE_REACH = 70
-
+const WATER_FIELD_DEPTH_REFERENCE_REACH = 70
 const WATER_FIELD_DEPTH_DISTANCE_MAX_METERS =
   WATER_FIELD_DEPTH_REFERENCE_REACH * BRUNO_DEPTH_FIELD_SCALE
 const WATER_FIELD_DEPTH_EXACT_DISTANCE_METERS =
   WATER_FIELD_DEFAULT_PARAMETERS.depthReach * BRUNO_DEPTH_FIELD_SCALE
 
-type WaterFieldOptions = {
-  parameters?: Partial<WaterFieldParameters>
-  perimeter: readonly LandrushPoint2[]
-  planeSize: number
-  resolution?: number
-}
-
-export function createWaterFieldTexture({
-  parameters,
-  perimeter,
-  planeSize,
-  resolution = WATER_FIELD_RESOLUTION,
-}: WaterFieldOptions) {
+function createWaterFieldData({ parameters, perimeter, planeSize, resolution }) {
   const params = { ...WATER_FIELD_DEFAULT_PARAMETERS, ...parameters }
   const textureResolution = clampResolution(resolution)
-  const data = new Uint8Array(textureResolution * textureResolution * 4)
+  const bytes = new Uint8Array(textureResolution * textureResolution * 4)
   const half = planeSize / 2
   const openPerimeter = openRing(perimeter)
   const perimeterBounds = boundsFor(openPerimeter)
@@ -119,88 +96,20 @@ export function createWaterFieldTexture({
         smoothstep(
           shoreThickness,
           shoreThickness + params.shoreFeatherMeters,
-          Math.abs(signedShoreDistance),
-        )
+        Math.abs(signedShoreDistance),
+      )
 
-      data[index] = packedDepthDistance[0]
-      data[index + 1] = packedDepthDistance[1]
-      data[index + 2] = byte(edgeDistance / WATER_FIELD_DEPTH_REFERENCE_REACH)
-      data[index + 3] = byte(shore)
+      bytes[index] = packedDepthDistance[0]
+      bytes[index + 1] = packedDepthDistance[1]
+      bytes[index + 2] = byte(edgeDistance / WATER_FIELD_DEPTH_REFERENCE_REACH)
+      bytes[index + 3] = byte(shore)
     }
   }
 
-  const texture = new DataTexture(data, textureResolution, textureResolution, RGBAFormat)
-  texture.flipY = false
-  texture.magFilter = LinearFilter
-  texture.minFilter = LinearFilter
-  texture.wrapS = ClampToEdgeWrapping
-  texture.wrapT = ClampToEdgeWrapping
-  texture.needsUpdate = true
-  return texture
+  return { bytes, resolution: textureResolution }
 }
 
-export function createSmoothedWaterPerimeter(
-  perimeter: readonly LandrushPoint2[],
-  samplesPerSegment = 2,
-) {
-  const ring = openRing(perimeter)
-  if (ring.length < 4) return ring
-
-  const smoothed: LandrushPoint2[] = []
-  for (let index = 0; index < ring.length; index += 1) {
-    const p0 = ring[(index - 1 + ring.length) % ring.length]!
-    const p1 = ring[index]!
-    const p2 = ring[(index + 1) % ring.length]!
-    const p3 = ring[(index + 2) % ring.length]!
-
-    for (let step = 0; step < samplesPerSegment; step += 1) {
-      const t = step / samplesPerSegment
-      smoothed.push({
-        x: catmullRom(p0.x, p1.x, p2.x, p3.x, t),
-        z: catmullRom(p0.z, p1.z, p2.z, p3.z, t),
-      })
-    }
-  }
-
-  return smoothed
-}
-
-type WaterFieldBounds = {
-  depth: number
-  maxX: number
-  maxZ: number
-  minX: number
-  minZ: number
-  width: number
-}
-
-type WaterFieldSegment = {
-  end: LandrushPoint2
-  maxX: number
-  maxZ: number
-  minX: number
-  minZ: number
-  start: LandrushPoint2
-}
-
-type DistanceIndex = {
-  cells: Map<string, WaterFieldSegment[]>
-  cellSize: number
-  maxDistance: number
-}
-
-function catmullRom(a: number, b: number, c: number, d: number, t: number) {
-  const t2 = t * t
-  const t3 = t2 * t
-  return (
-    0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3)
-  )
-}
-
-export function createDepthReferencePerimeter(
-  points: readonly LandrushPoint2[],
-  parameters?: Partial<WaterFieldParameters>,
-) {
+function createDepthReferencePerimeter(points, parameters) {
   if (points.length < 3) return [...points]
   const params = { ...WATER_FIELD_DEFAULT_PARAMETERS, ...parameters }
   const center = points.reduce((total, point) => ({ x: total.x + point.x, z: total.z + point.z }), {
@@ -249,7 +158,7 @@ export function createDepthReferencePerimeter(
   })
 }
 
-function collapsePocketField(angle: number, scale: number) {
+function collapsePocketField(angle, scale) {
   let value = 0
   const widthMultiplier = Math.max(0.2, scale)
 
@@ -265,17 +174,14 @@ function collapsePocketField(angle: number, scale: number) {
   return Math.min(1, value)
 }
 
-function angularDistance(a: number, b: number) {
+function angularDistance(a, b) {
   const delta = Math.abs(((((a - b + Math.PI) % TAU) + TAU) % TAU) - Math.PI)
   return Math.min(delta, TAU - delta)
 }
 
-function createDistanceIndex(
-  points: readonly LandrushPoint2[],
-  maxDistance: number,
-): DistanceIndex {
+function createDistanceIndex(points, maxDistance) {
   const cellSize = Math.max(8, Math.min(24, maxDistance / 3))
-  const cells = new Map<string, WaterFieldSegment[]>()
+  const cells = new Map()
 
   for (let index = 0; index < points.length; index += 1) {
     const start = points[index]
@@ -299,11 +205,8 @@ function createDistanceIndex(
       for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
         const key = gridKey(cellX, cellZ)
         const bucket = cells.get(key)
-        if (bucket) {
-          bucket.push(segment)
-        } else {
-          cells.set(key, [segment])
-        }
+        if (bucket) bucket.push(segment)
+        else cells.set(key, [segment])
       }
     }
   }
@@ -311,7 +214,7 @@ function createDistanceIndex(
   return { cells, cellSize, maxDistance }
 }
 
-function distanceToIndexedPolyline(point: LandrushPoint2, index: DistanceIndex) {
+function distanceToIndexedPolyline(point, index) {
   const candidates = index.cells.get(
     gridKey(gridCell(point.x, index.cellSize), gridCell(point.z, index.cellSize)),
   )
@@ -324,15 +227,15 @@ function distanceToIndexedPolyline(point: LandrushPoint2, index: DistanceIndex) 
   return best
 }
 
-function gridCell(value: number, cellSize: number) {
+function gridCell(value, cellSize) {
   return Math.floor(value / cellSize)
 }
 
-function gridKey(cellX: number, cellZ: number) {
+function gridKey(cellX, cellZ) {
   return `${cellX}:${cellZ}`
 }
 
-function boundsFor(points: readonly LandrushPoint2[]): WaterFieldBounds {
+function boundsFor(points) {
   let minX = Number.POSITIVE_INFINITY
   let minZ = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -352,24 +255,22 @@ function boundsFor(points: readonly LandrushPoint2[]): WaterFieldBounds {
   return { depth: maxZ - minZ, maxX, maxZ, minX, minZ, width: maxX - minX }
 }
 
-function distanceToBounds(point: LandrushPoint2, bounds: WaterFieldBounds) {
+function distanceToBounds(point, bounds) {
   const dx = point.x < bounds.minX ? bounds.minX - point.x : Math.max(0, point.x - bounds.maxX)
   const dz = point.z < bounds.minZ ? bounds.minZ - point.z : Math.max(0, point.z - bounds.maxZ)
   return Math.hypot(dx, dz)
 }
 
-function approximateDepthDistance(
-  point: LandrushPoint2,
-  center: LandrushPoint2,
-  radius: number,
-  exactDistance: number,
-) {
+function approximateDepthDistance(point, center, radius, exactDistance) {
   const radialDistance = Math.max(0, Math.hypot(point.x - center.x, point.z - center.z) - radius)
 
-  return Math.min(WATER_FIELD_DEPTH_DISTANCE_MAX_METERS, Math.max(exactDistance, radialDistance))
+  return Math.min(
+    WATER_FIELD_DEPTH_DISTANCE_MAX_METERS,
+    Math.max(exactDistance, radialDistance),
+  )
 }
 
-function centerFor(points: readonly LandrushPoint2[]) {
+function centerFor(points) {
   if (points.length === 0) return { x: 0, z: 0 }
   let x = 0
   let z = 0
@@ -380,7 +281,7 @@ function centerFor(points: readonly LandrushPoint2[]) {
   return { x: x / points.length, z: z / points.length }
 }
 
-function averageRadiusFor(points: readonly LandrushPoint2[], center: LandrushPoint2) {
+function averageRadiusFor(points, center) {
   if (points.length === 0) return 0
   let radius = 0
   for (const point of points) {
@@ -389,15 +290,15 @@ function averageRadiusFor(points: readonly LandrushPoint2[], center: LandrushPoi
   return radius / points.length
 }
 
-function openRing(points: readonly LandrushPoint2[]) {
+function openRing(points) {
   if (points.length < 2) return [...points]
-  const first = points[0]!
-  const last = points[points.length - 1]!
+  const first = points[0]
+  const last = points[points.length - 1]
   if (Math.hypot(first.x - last.x, first.z - last.z) <= 0.001) return points.slice(0, -1)
   return [...points]
 }
 
-function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+function pointInPolygon(point, polygon) {
   let inside = false
   for (let index = 0, previousIndex = polygon.length - 1; index < polygon.length; index += 1) {
     const current = polygon[index]
@@ -414,7 +315,7 @@ function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[
   return inside
 }
 
-function distanceToSegment(point: LandrushPoint2, start: LandrushPoint2, end: LandrushPoint2) {
+function distanceToSegment(point, start, end) {
   const dx = end.x - start.x
   const dz = end.z - start.z
   const lengthSquared = dx * dx + dz * dz || 0.000001
@@ -427,29 +328,29 @@ function distanceToSegment(point: LandrushPoint2, start: LandrushPoint2, end: La
   return Math.hypot(point.x - closestX, point.z - closestZ)
 }
 
-function smoothstep(edge0: number, edge1: number, value: number) {
+function smoothstep(edge0, edge1, value) {
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0 || 0.000001)))
   return t * t * (3 - 2 * t)
 }
 
-function byte(value: number) {
+function byte(value) {
   return Math.max(0, Math.min(255, Math.round(value * 255)))
 }
 
-function packUnit16(value: number): [number, number] {
+function packUnit16(value) {
   const encoded = Math.max(0, Math.min(65535, Math.round(value * 65535)))
   return [Math.floor(encoded / 256), encoded % 256]
 }
 
-function clampResolution(value: number) {
+function clampResolution(value) {
   return Math.max(64, Math.min(WATER_FIELD_RESOLUTION, Math.round(value)))
 }
 
-function clampRange(value: number, min: number, max: number) {
+function clampRange(value, min, max) {
   return Math.max(min, Math.min(max, value))
 }
 
-function fbm(x: number, y: number, seed: number) {
+function fbm(x, y, seed) {
   let value = 0
   let amplitude = 0.55
   let frequency = 1
@@ -463,7 +364,7 @@ function fbm(x: number, y: number, seed: number) {
   return value
 }
 
-function valueNoise(x: number, y: number, seed: number) {
+function valueNoise(x, y, seed) {
   const ix = Math.floor(x)
   const iy = Math.floor(y)
   const fx = x - ix
@@ -477,11 +378,11 @@ function valueNoise(x: number, y: number, seed: number) {
   )
 }
 
-function gridHash(x: number, y: number, seed: number) {
+function gridHash(x, y, seed) {
   const value = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123
   return value - Math.floor(value)
 }
 
-function lerp(a: number, b: number, t: number) {
+function lerp(a, b, t) {
   return a + (b - a) * t
 }

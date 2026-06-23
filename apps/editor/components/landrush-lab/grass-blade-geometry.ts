@@ -1,4 +1,4 @@
-import { BufferGeometry, Float32BufferAttribute, type Texture } from 'three'
+import { BufferGeometry, Float32BufferAttribute, Sphere, type Texture, Vector3 } from 'three'
 
 export const GRASS_BLADE_SUBDIVISIONS = 280
 export const GRASS_BLADE_PATCHES_PER_AXIS = 3
@@ -17,8 +17,7 @@ export function resolveGrassWebGpuBladeSubdivisions(density: number) {
   const densityScale = normalizedDensity * normalizedDensity * normalizedDensity
   return Math.round(
     GRASS_WEBGPU_BLADE_PREVIEW_SUBDIVISIONS +
-      (GRASS_WEBGPU_BLADE_SUBDIVISIONS - GRASS_WEBGPU_BLADE_PREVIEW_SUBDIVISIONS) *
-        densityScale,
+      (GRASS_WEBGPU_BLADE_SUBDIVISIONS - GRASS_WEBGPU_BLADE_PREVIEW_SUBDIVISIONS) * densityScale,
   )
 }
 
@@ -37,10 +36,14 @@ type GrassBladeColorGeometryOptions = {
   fieldSize: number
   fieldTexture: Texture
   height: number
+  profileMeasure?: GrassBladeProfileMeasure
+  profileScope?: string
   rootShadow: number
   width: number
   wind: number
 }
+
+type GrassBladeProfileMeasure = <T>(id: string, callback: () => T) => T
 
 export function createGrassBladeGeometry({ center, planeSize }: GrassBladeGeometryOptions) {
   const geometry = new BufferGeometry()
@@ -99,29 +102,54 @@ export function createGrassBladeColorGeometry({
   fieldSize,
   fieldTexture,
   height,
+  profileMeasure,
+  profileScope = 'setup.grass.blade-color-geometry',
   rootShadow,
   width,
   wind,
 }: GrassBladeColorGeometryOptions) {
-  const geometry = new BufferGeometry()
-  const image = fieldTexture.image as
-    | { data?: Uint8Array; height?: number; width?: number }
-    | undefined
-  const data = image?.data
-  const resolution = image?.width ?? 0
-  if (!data || resolution <= 1 || image?.height !== resolution) return geometry
-  const colorImage = colorTexture?.image as
-    | { data?: Uint8Array; height?: number; width?: number }
-    | undefined
-  const colorData = colorImage?.data
-  const colorResolution =
-    colorData && colorImage?.height === colorImage?.width ? (colorImage.width ?? 0) : 0
+  const geometry = measure(
+    profileMeasure,
+    `${profileScope}.create-buffer-geometry`,
+    () => new BufferGeometry(),
+  )
+  const { data, resolution, validFieldTexture } = measure(
+    profileMeasure,
+    `${profileScope}.read-field-texture`,
+    () => {
+      const image = fieldTexture.image as
+        | { data?: Uint8Array; height?: number; width?: number }
+        | undefined
+      return {
+        data: image?.data,
+        resolution: image?.width ?? 0,
+        validFieldTexture: Boolean(image?.data && image?.width && image.height === image.width),
+      }
+    },
+  )
+  if (!data || resolution <= 1 || !validFieldTexture) return geometry
+  const { colorData, colorResolution } = measure(
+    profileMeasure,
+    `${profileScope}.read-color-texture`,
+    () => {
+      const colorImage = colorTexture?.image as
+        | { data?: Uint8Array; height?: number; width?: number }
+        | undefined
+      const colorData = colorImage?.data
+      return {
+        colorData,
+        colorResolution:
+          colorData && colorImage?.height === colorImage?.width ? (colorImage.width ?? 0) : 0,
+      }
+    },
+  )
 
-  const positions: number[] = []
-  const colors: number[] = []
-  const subdivisions = Math.max(
-    48,
-    Math.round(bladeSubdivisions ?? GRASS_WEBGPU_BLADE_SUBDIVISIONS),
+  const { colors, positions } = measure(profileMeasure, `${profileScope}.allocate-arrays`, () => ({
+    colors: [] as number[],
+    positions: [] as number[],
+  }))
+  const subdivisions = measure(profileMeasure, `${profileScope}.resolve-subdivisions`, () =>
+    Math.max(48, Math.round(bladeSubdivisions ?? GRASS_WEBGPU_BLADE_SUBDIVISIONS)),
   )
   const patchSize = fieldSize / GRASS_BLADE_PATCHES_PER_AXIS
   const fragmentSize = patchSize / subdivisions
@@ -178,50 +206,77 @@ export function createGrassBladeColorGeometry({
     return true
   }
 
-  for (let patchX = 0; patchX < GRASS_BLADE_PATCHES_PER_AXIS; patchX += 1) {
-    const patchCenterX = (patchX / GRASS_BLADE_PATCHES_PER_AXIS - 0.5) * fieldSize + patchSize * 0.5
+  measure(profileMeasure, `${profileScope}.sample-blades`, () => {
+    const rowBlockSize = 4
+    for (let patchX = 0; patchX < GRASS_BLADE_PATCHES_PER_AXIS; patchX += 1) {
+      const patchCenterX =
+        (patchX / GRASS_BLADE_PATCHES_PER_AXIS - 0.5) * fieldSize + patchSize * 0.5
 
-    for (let patchZ = 0; patchZ < GRASS_BLADE_PATCHES_PER_AXIS; patchZ += 1) {
-      const patchCenterZ =
-        (patchZ / GRASS_BLADE_PATCHES_PER_AXIS - 0.5) * fieldSize + patchSize * 0.5
+      for (let patchZ = 0; patchZ < GRASS_BLADE_PATCHES_PER_AXIS; patchZ += 1) {
+        const patchCenterZ =
+          (patchZ / GRASS_BLADE_PATCHES_PER_AXIS - 0.5) * fieldSize + patchSize * 0.5
 
-      for (let xIndex = 0; xIndex < subdivisions; xIndex += 1) {
-        const cellX = patchCenterX + (xIndex / subdivisions - 0.5) * patchSize + fragmentSize * 0.5
+        for (let rowStart = 0; rowStart < subdivisions; rowStart += rowBlockSize) {
+          const rowEnd = Math.min(subdivisions, rowStart + rowBlockSize)
+          measure(profileMeasure, `${profileScope}.sample-row-block`, () => {
+            for (let xIndex = rowStart; xIndex < rowEnd; xIndex += 1) {
+              const cellX =
+                patchCenterX + (xIndex / subdivisions - 0.5) * patchSize + fragmentSize * 0.5
 
-        for (let zIndex = 0; zIndex < subdivisions; zIndex += 1) {
-          const cellZ =
-            patchCenterZ + (zIndex / subdivisions - 0.5) * patchSize + fragmentSize * 0.5
-          const seed = patchX * 928.13 + patchZ * 379.41 + xIndex * 19.17 + zIndex * 7.31
-          const jitterX = (hashUnit(seed, 1.7) - 0.5) * fragmentSize * 0.35
-          const jitterZ = (hashUnit(seed, 9.3) - 0.5) * fragmentSize * 0.35
-          const centerX = cellX + jitterX
-          const centerZ = cellZ + jitterZ
-          const sample = sampleGrassTexture(data, resolution, fieldSize, centerX, centerZ)
-          if (!sample) continue
+              for (let zIndex = 0; zIndex < subdivisions; zIndex += 1) {
+                const cellZ =
+                  patchCenterZ + (zIndex / subdivisions - 0.5) * patchSize + fragmentSize * 0.5
+                const seed = patchX * 928.13 + patchZ * 379.41 + xIndex * 19.17 + zIndex * 7.31
+                const jitterX = (hashUnit(seed, 1.7) - 0.5) * fragmentSize * 0.35
+                const jitterZ = (hashUnit(seed, 9.3) - 0.5) * fragmentSize * 0.35
+                const centerX = cellX + jitterX
+                const centerZ = cellZ + jitterZ
+                const sample = sampleGrassTexture(data, resolution, fieldSize, centerX, centerZ)
+                if (!sample) continue
 
-          const alpha = sample.a / 255
-          if (alpha < GRASS_MIN_SPAWN_ALPHA) continue
+                const alpha = sample.a / 255
+                if (alpha < GRASS_MIN_SPAWN_ALPHA) continue
 
-          const colorSample =
-            colorData && colorResolution > 1
-              ? sampleGrassTexture(colorData, colorResolution, fieldSize, centerX, centerZ)
-              : null
-          addBlade(
-            centerX,
-            centerZ,
-            colorSample
-              ? { ...sample, b: colorSample.b, g: colorSample.g, r: colorSample.r }
-              : sample,
-            seed,
-          )
+                const colorSample =
+                  colorData && colorResolution > 1
+                    ? sampleGrassTexture(colorData, colorResolution, fieldSize, centerX, centerZ)
+                    : null
+                addBlade(
+                  centerX,
+                  centerZ,
+                  colorSample
+                    ? { ...sample, b: colorSample.b, g: colorSample.g, r: colorSample.r }
+                    : sample,
+                  seed,
+                )
+              }
+            }
+          })
         }
       }
     }
-  }
+  })
 
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
-  geometry.computeBoundingSphere()
+  const positionAttribute = measure(
+    profileMeasure,
+    `${profileScope}.build-position-attribute`,
+    () => new Float32BufferAttribute(positions, 3),
+  )
+  const colorAttribute = measure(
+    profileMeasure,
+    `${profileScope}.build-color-attribute`,
+    () => new Float32BufferAttribute(colors, 3),
+  )
+  measure(profileMeasure, `${profileScope}.set-attributes`, () => {
+    geometry.setAttribute('position', positionAttribute)
+    geometry.setAttribute('color', colorAttribute)
+  })
+  measure(profileMeasure, `${profileScope}.set-bounding-sphere`, () => {
+    geometry.boundingSphere = new Sphere(
+      new Vector3(0, Math.max(0, height) * 0.5, 0),
+      Math.hypot(fieldSize, fieldSize) * 0.5 + Math.max(0, height),
+    )
+  })
   return geometry
 }
 
@@ -328,4 +383,12 @@ function clamp01(value: number) {
 function hashUnit(x: number, y: number) {
   const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123
   return value - Math.floor(value)
+}
+
+function measure<T>(
+  profileMeasure: GrassBladeProfileMeasure | undefined,
+  id: string,
+  callback: () => T,
+) {
+  return profileMeasure ? profileMeasure(id, callback) : callback()
 }

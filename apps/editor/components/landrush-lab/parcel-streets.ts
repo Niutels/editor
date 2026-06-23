@@ -105,6 +105,36 @@ export function generateParcelStreets(
   }
 }
 
+export function generateParcelEdgeStreets(
+  allocation: ParcelAllocationResult,
+  options: ParcelStreetOptions,
+): ParcelStreetNetwork {
+  const parcelIds = allocation.parcels.map((parcel) => parcel.id)
+  if (parcelIds.length === 0) {
+    return {
+      connectedParcelCount: 0,
+      connectedParcelIds: [],
+      graphConnected: true,
+      roadConnected: true,
+      segments: [],
+      totalLength: 0,
+    }
+  }
+
+  const roadWidthMeters = normalizedRoadWidth(options.roadWidthMeters)
+  const segments = buildParcelEdgeStreetSegments(allocation, roadWidthMeters)
+  const connectedParcelIds = coveredStreetParcelIds(parcelIds, segments)
+
+  return {
+    connectedParcelCount: connectedParcelIds.length,
+    connectedParcelIds,
+    graphConnected: connectedParcelIds.length === parcelIds.length,
+    roadConnected: streetSegmentsConnected(segments),
+    segments,
+    totalLength: segments.reduce((total, segment) => total + segment.length, 0),
+  }
+}
+
 function normalizedRoadWidth(width: number) {
   return Number.isFinite(width) ? Math.max(0.1, width) : DEFAULT_PARCEL_STREET_WIDTH_METERS
 }
@@ -216,12 +246,69 @@ function buildSafeStreetSegments(
   return segments
 }
 
+function buildParcelEdgeStreetSegments(allocation: ParcelAllocationResult, roadWidth: number) {
+  const rawEdges = allocation.parcels.flatMap((parcel) => parcelEdges(parcel.id, parcel.points))
+  const nodes = new Map<string, LandrushPoint2>()
+  const edgeMap = new Map<
+    string,
+    { end: LandrushPoint2; parcelIds: Set<string>; start: LandrushPoint2 }
+  >()
+
+  for (const rawEdge of rawEdges) {
+    const splitPoints = splitPointsForRawEdge(rawEdge, rawEdges)
+    for (let index = 0; index < splitPoints.length - 1; index += 1) {
+      const start = splitPoints[index]
+      const end = splitPoints[index + 1]
+      if (!(start && end) || distance2(start, end) < MIN_SAFE_STREET_LENGTH) continue
+      addEdgeSpan(nodes, edgeMap, start, end, [rawEdge.parcelId])
+    }
+  }
+
+  for (const [first, second] of neighborParcelPairs(allocation)) {
+    for (const firstEdge of parcelEdges(first.id, first.points)) {
+      for (const secondEdge of parcelEdges(second.id, second.points)) {
+        const overlap = segmentOverlap(
+          firstEdge.start,
+          firstEdge.end,
+          secondEdge.start,
+          secondEdge.end,
+        )
+        if (!overlap || overlap.length < MIN_SAFE_STREET_LENGTH) continue
+        addEdgeSpan(nodes, edgeMap, overlap.start, overlap.end, [first.id, second.id])
+      }
+    }
+  }
+
+  return [...edgeMap.entries()]
+    .map<ParcelStreetSegment>(([key, edge], edgeIndex) => {
+      const length = distance2(edge.start, edge.end)
+      return {
+        id: `street-${String(edgeIndex + 1).padStart(2, '0')}-${key.replaceAll(':', '_')}`,
+        length,
+        parcelIds: [...edge.parcelIds].sort(),
+        points: [edge.start, edge.end],
+        width: roadWidth,
+      }
+    })
+    .filter((segment) => segment.length >= MIN_SAFE_STREET_LENGTH)
+    .sort((first, second) => first.length - second.length || first.id.localeCompare(second.id))
+}
+
 function connectedStreetParcelIds(
   parcelIds: readonly string[],
   segments: readonly ParcelStreetSegment[],
 ) {
   return parcelIds.filter((parcelId) =>
     segments.some((segment) => renderedServiceParcelIds(segment).includes(parcelId)),
+  )
+}
+
+function coveredStreetParcelIds(
+  parcelIds: readonly string[],
+  segments: readonly ParcelStreetSegment[],
+) {
+  return parcelIds.filter((parcelId) =>
+    segments.some((segment) => segment.parcelIds.includes(parcelId)),
   )
 }
 

@@ -64,10 +64,13 @@ type ParcelLabParameters = {
 type ParcelOverlayParameters = ParcelOverlayOptions
 
 type StreetLabParameters = {
+  filletRadiusScale: number
   loopiness: number
   roadWidthMeters: number
 }
 
+type WorldLabVariant = 'classic' | 'dirt-copy'
+type WorldStreetAppearance = 'dirt' | 'paved'
 type CopyStatus = 'copied' | 'failed' | 'idle'
 type ElevationSliderKey = keyof IslandElevationParameters
 type FieldSliderKey = keyof WaterFieldParameters
@@ -129,9 +132,22 @@ const DEFAULT_PARCEL_HINT_PARAMETERS = {
   minTransparency: 0.58,
 } satisfies ParcelOverlayParameters
 
+const WORLD_DIRT_ROAD_WIDTH_METERS = DEFAULT_PARCEL_STREET_WIDTH_METERS / 3
+const WORLD_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
+const WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 32
+const WORLD_PROGRESSIVE_MAX_PARCELS = 12
+const WORLD_PROGRESSIVE_WATER_FIELD_RESOLUTION = 96
+
 const DEFAULT_STREET_PARAMETERS = {
+  filletRadiusScale: 0.72,
   loopiness: 0,
   roadWidthMeters: DEFAULT_PARCEL_STREET_WIDTH_METERS,
+} satisfies StreetLabParameters
+
+const DIRT_COPY_STREET_PARAMETERS = {
+  filletRadiusScale: 0.72,
+  loopiness: 0,
+  roadWidthMeters: WORLD_DIRT_ROAD_WIDTH_METERS,
 } satisfies StreetLabParameters
 
 const PARCEL_SLIDERS = [
@@ -155,6 +171,11 @@ const PARCEL_HINT_SLIDERS = [
 const STREET_SLIDERS = [
   { key: 'roadWidthMeters', label: 'road size', max: 5, min: 0.8, step: 0.05 },
   { key: 'loopiness', label: 'extra links', max: 0.8, min: 0, step: 0.02 },
+] satisfies readonly LabSliderConfig<keyof StreetLabParameters>[]
+
+const DIRT_COPY_STREET_SLIDERS = [
+  { key: 'roadWidthMeters', label: 'path size', max: 5, min: 0.8, step: 0.05 },
+  { key: 'filletRadiusScale', label: 'fillet radius', max: 15, min: 0, step: 0.02 },
 ] satisfies readonly LabSliderConfig<keyof StreetLabParameters>[]
 
 const FIELD_SLIDERS = [
@@ -236,14 +257,21 @@ type LabSliderConfig<Key extends string> = {
   step: number
 }
 
-export function WorldLabClient() {
+export function WorldLabClient({ variant = 'classic' }: { variant?: WorldLabVariant }) {
+  const isDirtCopy = variant === 'dirt-copy'
+  const defaultStreetParameters = isDirtCopy
+    ? DIRT_COPY_STREET_PARAMETERS
+    : DEFAULT_STREET_PARAMETERS
+  const streetSliders = isDirtCopy ? DIRT_COPY_STREET_SLIDERS : STREET_SLIDERS
   const searchParams = useSearchParams()
   const preset = getWaterViewPreset(searchParams.get('view'))
   const debug = searchParams.get('debugLandrush') === '1'
   const debugWaterLayer = searchParams.get('debugWaterLayer') === 'shoreline' ? 'shoreline' : null
   const frameProfile = searchParams.get('frameProfile') === '1'
   const [showTunePanel, setShowTunePanel] = useState(() => searchParams.get('v') !== 'clean')
-  const [showParcelHints, setShowParcelHints] = useState(() => searchParams.get('parcels') !== '0')
+  const [showParcelHints, setShowParcelHints] = useState(() =>
+    isDirtCopy ? false : searchParams.get('parcels') !== '0',
+  )
   const [showStreets, setShowStreets] = useState(() => searchParams.get('streets') !== '0')
   const [showDepthReference, setShowDepthReference] = useState(false)
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
@@ -275,27 +303,66 @@ export function WorldLabClient() {
     ...DEFAULT_PARCEL_HINT_PARAMETERS,
   }))
   const [streetParameters, setStreetParameters] = useState<StreetLabParameters>(() => ({
-    ...DEFAULT_STREET_PARAMETERS,
+    ...defaultStreetParameters,
   }))
   const resolvedGrassTuning = useMemo(
     () => ({ ...WORLD_GRASS_TUNING, ...grassTuning }),
     [grassTuning],
   )
-  const renderIslandParameters = useSettledRenderValue(islandParameters, 320)
-  const renderFieldParameters = useSettledRenderValue(fieldParameters, 160)
-  const renderElevationParameters = useSettledRenderValue(elevationParameters, 160)
-  const renderMaterialParameters = useSettledRenderValue(materialParameters, 120)
-  const renderGrassTuning = useSettledRenderValue(resolvedGrassTuning, 260)
-  const renderParcelParameters = useSettledRenderValue(parcelParameters, 160)
-  const renderParcelHintParameters = useSettledRenderValue(parcelHintParameters, 120)
-  const renderStreetParameters = useSettledRenderValue(streetParameters, 160)
+  const islandRender = useProgressiveRenderValue(islandParameters, 320)
+  const fieldRender = useProgressiveRenderValue(fieldParameters, 160)
+  const elevationRender = useProgressiveRenderValue(elevationParameters, 160)
+  const grassRender = useProgressiveRenderValue(resolvedGrassTuning, 260)
+  const parcelRender = useProgressiveRenderValue(parcelParameters, 160)
+  const parcelHintRender = useProgressiveRenderValue(parcelHintParameters, 120)
+  const streetRender = useProgressiveRenderValue(streetParameters, 160)
+  const terrainFieldResolutionRender = useProgressiveRenderValue(terrainFieldResolution, 160)
+  const isWorldPreviewing =
+    islandRender.isSettling ||
+    fieldRender.isSettling ||
+    elevationRender.isSettling ||
+    grassRender.isSettling ||
+    parcelRender.isSettling ||
+    parcelHintRender.isSettling ||
+    streetRender.isSettling ||
+    terrainFieldResolutionRender.isSettling
+  const isParcelPreviewing =
+    islandRender.isSettling ||
+    elevationRender.isSettling ||
+    parcelRender.isSettling ||
+    streetRender.isSettling
+  const isGrassFieldPreviewing =
+    islandRender.isSettling ||
+    elevationRender.isSettling ||
+    grassRender.isSettling ||
+    parcelRender.isSettling ||
+    streetRender.isSettling
+  const isWaterFieldPreviewing =
+    islandRender.isSettling || fieldRender.isSettling || terrainFieldResolutionRender.isSettling
+  const renderIslandParameters = progressiveRenderValue(islandRender)
+  const renderFieldParameters = progressiveRenderValue(fieldRender)
+  const renderElevationParameters = progressiveRenderValue(elevationRender)
+  const renderMaterialParameters = materialParameters
+  const renderGrassTuning = progressiveRenderValue(grassRender)
+  const renderParcelParameters = isParcelPreviewing
+    ? previewParcelParameters(parcelRender.previewValue)
+    : parcelRender.finalValue
+  const renderParcelHintParameters = progressiveRenderValue(parcelHintRender)
+  const renderStreetParameters = progressiveRenderValue(streetRender)
+  const renderTerrainFieldResolution = terrainFieldResolutionRender.finalValue
   const island = useMemo(
     () => generateWaterLabIsland(renderIslandParameters),
     [renderIslandParameters],
   )
   const bladeSubdivisions = useMemo(
-    () => resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
-    [renderGrassTuning.density],
+    () =>
+      isGrassFieldPreviewing
+        ? Math.min(
+            WORLD_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS,
+            resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
+          )
+        : resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
+    [isGrassFieldPreviewing, renderGrassTuning.density],
   )
   const parcelOptions = useMemo<ParcelAllocationOptions>(
     () => ({
@@ -318,17 +385,12 @@ export function WorldLabClient() {
     [island.seed, renderParcelParameters.parcelCount, renderStreetParameters],
   )
   const grassRoads = useMemo(
-    () => grassRoadSegmentsFromStreetNetwork(streetNetwork),
-    [streetNetwork],
+    () => grassRoadSegmentsFromStreetNetwork(streetNetwork, isDirtCopy ? 'dirt' : 'paved'),
+    [isDirtCopy, streetNetwork],
   )
   const waterMetrics = useMemo(
     () =>
-      measureWaterLab(
-        island,
-        WATER_PLANE_SIZE,
-        renderMaterialParameters,
-        renderFieldParameters,
-      ),
+      measureWaterLab(island, WATER_PLANE_SIZE, renderMaterialParameters, renderFieldParameters),
     [island, renderFieldParameters, renderMaterialParameters],
   )
   const parcelMetrics = useMemo(
@@ -345,20 +407,34 @@ export function WorldLabClient() {
       <group>
         <GrassWaterLandLayers
           bladeSubdivisions={bladeSubdivisions}
-          fieldResolution={GRASS_FIELD_RESOLUTION}
+          fieldResolution={WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+          finalFieldResolution={
+            isGrassFieldPreviewing
+              ? WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+              : GRASS_FIELD_RESOLUTION
+          }
+          finalSpawnResolution={
+            isGrassFieldPreviewing
+              ? WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+              : GRASS_SPAWN_FIELD_RESOLUTION
+          }
           roads={grassRoads}
-          spawnResolution={GRASS_SPAWN_FIELD_RESOLUTION}
+          showBlades={!isDirtCopy}
+          spawnResolution={WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
           surface={surface}
           tuning={renderGrassTuning}
         />
         <ParcelsLandLayers
+          dirtPathFilletRadiusScale={renderStreetParameters.filletRadiusScale}
           onAllocationChange={setAllocation}
           onStreetNetworkChange={setStreetNetwork}
           options={parcelOptions}
           parcelOverlayOptions={renderParcelHintParameters}
-          showParcels={showParcelHints}
+          showParcels={!isDirtCopy && showParcelHints}
           showStreets={showStreets}
+          streetAppearance={isDirtCopy ? 'dirt' : 'paved'}
           streetOptions={streetOptions}
+          streetPathMode={isDirtCopy ? 'parcel-edges' : 'connected'}
           surface={surface}
         />
       </group>
@@ -366,9 +442,12 @@ export function WorldLabClient() {
     [
       bladeSubdivisions,
       grassRoads,
+      isGrassFieldPreviewing,
+      isDirtCopy,
       parcelOptions,
       renderGrassTuning,
       renderParcelHintParameters,
+      renderStreetParameters.filletRadiusScale,
       showParcelHints,
       showStreets,
       streetOptions,
@@ -413,9 +492,15 @@ export function WorldLabClient() {
         : null,
       frameP95,
       grass: {
-        groundTextureResolution: GRASS_FIELD_RESOLUTION,
+        finalGroundTextureResolution: GRASS_FIELD_RESOLUTION,
+        finalSpawnTextureResolution: GRASS_SPAWN_FIELD_RESOLUTION,
+        groundTextureResolution: isGrassFieldPreviewing
+          ? WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+          : GRASS_FIELD_RESOLUTION,
         roadMaskSegments: grassRoads.length,
-        spawnTextureResolution: GRASS_SPAWN_FIELD_RESOLUTION,
+        spawnTextureResolution: isGrassFieldPreviewing
+          ? WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+          : GRASS_SPAWN_FIELD_RESOLUTION,
         tuning: resolvedGrassTuning,
       },
       island: {
@@ -430,6 +515,16 @@ export function WorldLabClient() {
         parameters: parcelParameters,
       },
       preset: preset.id,
+      progressive: {
+        grassPreviewResolution: WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION,
+        grassPreviewing: isGrassFieldPreviewing,
+        parcelsPreviewing: isParcelPreviewing,
+        parcelPreviewLimit: WORLD_PROGRESSIVE_MAX_PARCELS,
+        previewing: isWorldPreviewing,
+        waterFieldPreviewing: isWaterFieldPreviewing,
+        waterPreviewResolution: WORLD_PROGRESSIVE_WATER_FIELD_RESOLUTION,
+      },
+      variant,
       streets: streetNetwork
         ? {
             connectedParcelCount: streetNetwork.connectedParcelCount,
@@ -441,8 +536,9 @@ export function WorldLabClient() {
             totalLength: streetNetwork.totalLength,
           }
         : null,
-      summary:
-        'Integrated Landrush debug lab: water, grass and Bruno trees with procedural parcels and edge roads.',
+      summary: isDirtCopy
+        ? 'Integrated Landrush copy lab: water, ground grass texture, Bruno trees, procedural parcels and smooth dirt edge paths.'
+        : 'Integrated Landrush debug lab: water, grass and Bruno trees with procedural parcels and edge roads.',
       water: {
         elevation: elevationParameters,
         field: fieldParameters,
@@ -464,6 +560,11 @@ export function WorldLabClient() {
     grassRoads.length,
     island,
     islandParameters,
+    isGrassFieldPreviewing,
+    isParcelPreviewing,
+    isWaterFieldPreviewing,
+    isWorldPreviewing,
+    isDirtCopy,
     materialParameters,
     parcelMetrics,
     parcelParameters,
@@ -475,6 +576,7 @@ export function WorldLabClient() {
     streetNetwork,
     streetParameters,
     terrainFieldResolution,
+    variant,
     waterGates,
     waterMetrics,
   ])
@@ -489,8 +591,8 @@ export function WorldLabClient() {
     setGrassTuning({ ...WORLD_GRASS_TUNING })
     setParcelParameters({ ...DEFAULT_PARCEL_PARAMETERS })
     setParcelHintParameters({ ...DEFAULT_PARCEL_HINT_PARAMETERS })
-    setStreetParameters({ ...DEFAULT_STREET_PARAMETERS })
-    setShowParcelHints(true)
+    setStreetParameters({ ...defaultStreetParameters })
+    setShowParcelHints(!isDirtCopy)
     setShowStreets(true)
   }
 
@@ -518,7 +620,7 @@ export function WorldLabClient() {
       parcelHint: Object.fromEntries(
         PARCEL_HINT_SLIDERS.map(({ key }) => [key, parcelHintParameters[key]]),
       ),
-      streets: Object.fromEntries(STREET_SLIDERS.map(({ key }) => [key, streetParameters[key]])),
+      streets: Object.fromEntries(streetSliders.map(({ key }) => [key, streetParameters[key]])),
     }
 
     try {
@@ -536,13 +638,16 @@ export function WorldLabClient() {
         debugLayer={debugWaterLayer}
         elevationParameters={renderElevationParameters}
         fieldParameters={renderFieldParameters}
+        finalFieldEnabled={!isWaterFieldPreviewing}
         frameProfile={frameProfile}
         island={island}
         materialParameters={renderMaterialParameters}
         preset={preset}
+        previewTerrainFieldResolution={WORLD_PROGRESSIVE_WATER_FIELD_RESOLUTION}
+        progressiveField
         renderLandOverlay={renderLandOverlay}
         showDepthReference={showDepthReference}
-        terrainFieldResolution={terrainFieldResolution}
+        terrainFieldResolution={renderTerrainFieldResolution}
         waterFieldIsland={island}
       />
       {showTunePanel ? (
@@ -585,15 +690,16 @@ export function WorldLabClient() {
           onToggleParcelHints={() => setShowParcelHints((current) => !current)}
           onToggleDepthReference={() => setShowDepthReference((current) => !current)}
           onToggleStreets={() => setShowStreets((current) => !current)}
-          onTerrainFieldResolutionChange={(value) =>
-            setTerrainFieldResolution(Math.round(value))
-          }
+          onTerrainFieldResolutionChange={(value) => setTerrainFieldResolution(Math.round(value))}
           parcelHintParameters={parcelHintParameters}
           parcelParameters={parcelParameters}
           showDepthReference={showDepthReference}
           showParcelHints={showParcelHints}
           showStreets={showStreets}
+          streetGroupTitle={isDirtCopy ? 'Dirt paths' : 'Streets'}
           streetParameters={streetParameters}
+          streetSliders={streetSliders}
+          streetToggleActiveLabel={isDirtCopy ? 'paths' : 'roads'}
           terrainFieldResolution={terrainFieldResolution}
         />
       ) : (
@@ -637,7 +743,10 @@ function WorldTunePanel({
   showDepthReference,
   showParcelHints,
   showStreets,
+  streetGroupTitle,
   streetParameters,
+  streetSliders,
+  streetToggleActiveLabel,
   terrainFieldResolution,
 }: {
   copyStatus: CopyStatus
@@ -666,7 +775,10 @@ function WorldTunePanel({
   showDepthReference: boolean
   showParcelHints: boolean
   showStreets: boolean
+  streetGroupTitle: string
   streetParameters: StreetLabParameters
+  streetSliders: readonly LabSliderConfig<keyof StreetLabParameters>[]
+  streetToggleActiveLabel: string
   terrainFieldResolution: number
 }) {
   const CopyIcon = copyStatus === 'copied' ? Check : Copy
@@ -742,7 +854,7 @@ function WorldTunePanel({
           onClick={onToggleStreets}
           type="button"
         >
-          {showStreets ? 'roads' : 'lots'}
+          {showStreets ? streetToggleActiveLabel : 'lots'}
         </button>
       </div>
       <div className="mt-4 grid gap-3">
@@ -855,9 +967,9 @@ function WorldTunePanel({
         <TuningGroup
           collapsed={collapsedGroups.streets}
           onToggle={() => toggleGroup('streets')}
-          title="Streets"
+          title={streetGroupTitle}
         >
-          {STREET_SLIDERS.map(({ key, ...slider }) => (
+          {streetSliders.map(({ key, ...slider }) => (
             <TuneSlider
               key={key}
               {...slider}
@@ -946,16 +1058,19 @@ function TuneSlider({
 
 function grassRoadSegmentsFromStreetNetwork(
   network: ParcelStreetNetwork | null,
+  appearance: WorldStreetAppearance,
 ): readonly LandrushRoadSegment[] {
   if (!network) return []
 
   return network.segments.map((segment) => {
     const start = segment.points[0] ?? { x: 0, z: 0 }
     const end = segment.points.at(-1) ?? start
-    const fullPavedWidth =
-      segment.width +
-      PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS +
-      PARCEL_STREET_CURB_EXTRA_WIDTH_METERS
+    const width =
+      appearance === 'dirt'
+        ? segment.width
+        : segment.width +
+          PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS +
+          PARCEL_STREET_CURB_EXTRA_WIDTH_METERS
     return {
       connectsParcelIds: segment.parcelIds,
       fromNodeId: `world-road-start-${nodeId(start)}`,
@@ -964,7 +1079,7 @@ function grassRoadSegmentsFromStreetNetwork(
       points: segment.points,
       r3fPoints: segment.points.map((point) => [point.x, 0, point.z] satisfies LandrushVec3),
       toNodeId: `world-road-end-${nodeId(end)}`,
-      width: fullPavedWidth,
+      width,
     }
   })
 }
@@ -981,8 +1096,26 @@ function formatTuningValue(value: number, step = 0.01) {
   return String(Math.round(value))
 }
 
-function useSettledRenderValue<T>(value: T, settleMs: number) {
-  const [renderValue, setRenderValue] = useState(value)
+type ProgressiveRenderValue<T> = {
+  finalValue: T
+  isSettling: boolean
+  previewValue: T
+}
+
+function progressiveRenderValue<T>(renderValue: ProgressiveRenderValue<T>) {
+  return renderValue.isSettling ? renderValue.previewValue : renderValue.finalValue
+}
+
+function previewParcelParameters(parameters: ParcelLabParameters): ParcelLabParameters {
+  return {
+    ...parameters,
+    parcelCount: Math.min(parameters.parcelCount, WORLD_PROGRESSIVE_MAX_PARCELS),
+  }
+}
+
+function useProgressiveRenderValue<T>(value: T, settleMs: number): ProgressiveRenderValue<T> {
+  const [finalValue, setFinalValue] = useState(value)
+  const [isSettling, setIsSettling] = useState(false)
   const latestValueRef = useRef(value)
   const didMountRef = useRef(false)
   const settleTimerRef = useRef<number | null>(null)
@@ -991,15 +1124,18 @@ function useSettledRenderValue<T>(value: T, settleMs: number) {
     latestValueRef.current = value
     if (!didMountRef.current) {
       didMountRef.current = true
-      setRenderValue(value)
+      setFinalValue(value)
+      setIsSettling(false)
       return
     }
 
+    setIsSettling(true)
     if (settleTimerRef.current !== null) {
       window.clearTimeout(settleTimerRef.current)
     }
     settleTimerRef.current = window.setTimeout(() => {
-      setRenderValue(latestValueRef.current)
+      setFinalValue(latestValueRef.current)
+      setIsSettling(false)
       settleTimerRef.current = null
     }, settleMs)
   }, [settleMs, value])
@@ -1011,5 +1147,5 @@ function useSettledRenderValue<T>(value: T, settleMs: number) {
     [],
   )
 
-  return renderValue
+  return { finalValue, isSettling, previewValue: value }
 }

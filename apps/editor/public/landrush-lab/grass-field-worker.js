@@ -16,6 +16,7 @@ const GRASS_ROAD_EDGE_PADDING_METERS = 0.08
 const GRASS_ROAD_FEATHER_METERS = 0.46
 
 function createGrassFieldData({
+  alphaMode = 'density',
   density,
   edgeFadeMeters,
   patchSize,
@@ -32,6 +33,7 @@ function createGrassFieldData({
   let insideCount = 0
   let interiorDensity = 0
   let interiorSamples = 0
+  let roadClearanceFailures = 0
   let shoreDensity = 0
   let shoreSamples = 0
   const openPerimeter = openRing(perimeter)
@@ -54,10 +56,12 @@ function createGrassFieldData({
       bytes[index] = byte(sample.color[0] / 255)
       bytes[index + 1] = byte(sample.color[1] / 255)
       bytes[index + 2] = byte(sample.color[2] / 255)
-      bytes[index + 3] = byte(smoothstep(0.08, 0.7, sample.density))
+      bytes[index + 3] =
+        alphaMode === 'surface' ? 255 : byte(smoothstep(0.08, 0.7, sample.density))
       counts[sample.colorIndex] = (counts[sample.colorIndex] ?? 0) + 1
       insideCount += 1
       if (sample.density > 0.48) dense += 1
+      if (sample.roadDistance < 0.02 && sample.density > 0.08) roadClearanceFailures += 1
       if (sample.shoreDistance < 5) {
         shoreDensity += sample.density
         shoreSamples += 1
@@ -76,7 +80,7 @@ function createGrassFieldData({
       activeColorCount: shares.filter((share) => share > 0.02).length,
       densityCoverage: round(insideCount > 0 ? dense / insideCount : 0, 3),
       regionBalanceMin: round(Math.min(...shares), 3),
-      roadClearancePass: true,
+      roadClearancePass: roadClearanceFailures === 0,
       shoreFadePass:
         shoreSamples > 0 &&
         interiorSamples > 0 &&

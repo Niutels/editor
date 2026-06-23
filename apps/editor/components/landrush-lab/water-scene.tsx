@@ -7,28 +7,42 @@ import {
   type LandrushWaterSurfaceParameters,
 } from '@pascal-app/nodes'
 import { OrbitControls, OrthographicCamera } from '@react-three/drei'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { type ReactNode, useEffect, useMemo, useRef } from 'react'
+import { Canvas, useThree } from '@react-three/fiber'
+import {
+  type MutableRefObject,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   BufferGeometry,
+  ClampToEdgeWrapping,
+  DataTexture,
   DoubleSide,
   Float32BufferAttribute,
+  LinearFilter,
   LineBasicMaterial,
+  RGBAFormat,
   Shape,
   ShapeUtils,
+  type Texture,
   Line as ThreeLine,
   Vector2,
   Vector3,
 } from 'three'
 import * as THREE from 'three/webgpu'
 import type { LandrushIsland, LandrushPoint2 } from '@/components/landrush/types'
+import { FrameLoadProfilerProbe, measureLandrushFrameSlice } from './frame-load-profiler'
 import {
   createDepthReferencePerimeter,
   createSmoothedWaterPerimeter,
   createWaterFieldTexture,
+  WATER_FIELD_DEPTH_REFERENCE_REACH,
   type WaterFieldParameters,
 } from './water-field-texture'
-import { FrameLoadProfilerProbe, measureLandrushFrameSlice } from './frame-load-profiler'
 import type { IslandElevationParameters } from './water-lab-parameters'
 import { WATER_PLANE_SIZE } from './water-material'
 import type { WaterViewPreset } from './water-view-presets'
@@ -36,15 +50,20 @@ import type { WaterViewPreset } from './water-view-presets'
 type WaterSceneProps = {
   debugLayer: 'shoreline' | null
   elevationParameters: IslandElevationParameters
+  fieldRevisionKey?: string
   fieldParameters: WaterFieldParameters
   frameProfile?: boolean
+  finalFieldEnabled?: boolean
   island: LandrushIsland
   materialParameters: LandrushWaterSurfaceParameters
   preset: WaterViewPreset
+  previewTerrainFieldResolution?: number
+  progressiveField?: boolean
   renderLandOverlay?: (surface: WaterLandSurface) => ReactNode
   terrainFieldResolution: number
   showDepthReference: boolean
   waterFieldIsland: LandrushIsland
+  waterMaterialFactory?: WaterMaterialFactory
 }
 
 export type WaterLandSurface = {
@@ -57,6 +76,8 @@ export type WaterLandSurface = {
   slopeStartPoints: readonly LandrushPoint2[]
   waterPlaneSize: number
 }
+
+export type WaterMaterialFactory = typeof createLandrushWaterMaterial
 
 const WATER_LAB_RENDERER_CACHE = new WeakMap<HTMLCanvasElement, Promise<THREE.WebGPURenderer>>()
 const WATER_LAB_MIN_DISTANCE = 2
@@ -86,15 +107,20 @@ function createWaterLabRenderer(props: { canvas?: HTMLCanvasElement }) {
 export function WaterScene({
   debugLayer,
   elevationParameters,
+  fieldRevisionKey,
   fieldParameters,
   frameProfile = false,
+  finalFieldEnabled = true,
   island,
   materialParameters,
   preset,
+  previewTerrainFieldResolution,
+  progressiveField = false,
   renderLandOverlay,
   terrainFieldResolution,
   showDepthReference,
   waterFieldIsland,
+  waterMaterialFactory = createLandrushWaterMaterial,
 }: WaterSceneProps) {
   const controlsTarget = useMemo(() => new Vector3(...preset.camera.target), [preset.camera.target])
 
@@ -102,7 +128,7 @@ export function WaterScene({
     <Canvas
       className="h-full w-full"
       dpr={[1, 1.5]}
-      frameloop="always"
+      frameloop="never"
       gl={createWaterLabRenderer as never}
       shadows={false}
     >
@@ -129,15 +155,20 @@ export function WaterScene({
       <ambientLight intensity={1.25} />
       <directionalLight intensity={1.9} position={[46, 72, 34]} />
       <WaterMeshes
+        key={fieldRevisionKey}
         debugLayer={debugLayer}
         elevationParameters={elevationParameters}
         fieldParameters={fieldParameters}
+        finalFieldEnabled={finalFieldEnabled}
         island={island}
         materialParameters={materialParameters}
+        previewTerrainFieldResolution={previewTerrainFieldResolution}
+        progressiveField={progressiveField}
         renderLandOverlay={renderLandOverlay}
         terrainFieldResolution={terrainFieldResolution}
         showDepthReference={showDepthReference}
         waterFieldIsland={waterFieldIsland}
+        waterMaterialFactory={waterMaterialFactory}
       />
     </Canvas>
   )
@@ -159,22 +190,30 @@ function WaterMeshes({
   debugLayer,
   elevationParameters,
   fieldParameters,
+  finalFieldEnabled,
   island,
   materialParameters,
+  previewTerrainFieldResolution,
+  progressiveField,
   renderLandOverlay,
   terrainFieldResolution,
   showDepthReference,
   waterFieldIsland,
+  waterMaterialFactory,
 }: {
   debugLayer: 'shoreline' | null
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
+  finalFieldEnabled: boolean
   island: LandrushIsland
   materialParameters: LandrushWaterSurfaceParameters
+  previewTerrainFieldResolution?: number
+  progressiveField: boolean
   renderLandOverlay?: (surface: WaterLandSurface) => ReactNode
   terrainFieldResolution: number
   showDepthReference: boolean
   waterFieldIsland: LandrushIsland
+  waterMaterialFactory: WaterMaterialFactory
 }) {
   const renderer = useThree((state) => state.gl)
   const shorelinePoints = useMemo(
@@ -253,56 +292,149 @@ function WaterMeshes({
     line.renderOrder = 30
     return line
   }, [depthReferenceGeometry])
-  const waterField = useMemo(
+  const waterFieldTextureParameters = useMemo(
+    () => ({
+      depthContourCollapseMeters: fieldParameters.depthContourCollapseMeters,
+      depthContourCollapseScale: fieldParameters.depthContourCollapseScale,
+      depthContourNoiseFrequency: fieldParameters.depthContourNoiseFrequency,
+      depthContourOffsetMeters: fieldParameters.depthContourOffsetMeters,
+      depthContourVariationMeters: fieldParameters.depthContourVariationMeters,
+      shoreBandMeters: fieldParameters.shoreBandMeters,
+      shoreFeatherMeters: fieldParameters.shoreFeatherMeters,
+      shoreNoiseFrequency: fieldParameters.shoreNoiseFrequency,
+      shoreVariationMeters: fieldParameters.shoreVariationMeters,
+    }),
+    [
+      fieldParameters.depthContourCollapseMeters,
+      fieldParameters.depthContourCollapseScale,
+      fieldParameters.depthContourNoiseFrequency,
+      fieldParameters.depthContourOffsetMeters,
+      fieldParameters.depthContourVariationMeters,
+      fieldParameters.shoreBandMeters,
+      fieldParameters.shoreFeatherMeters,
+      fieldParameters.shoreNoiseFrequency,
+      fieldParameters.shoreVariationMeters,
+    ],
+  )
+  const renderedTerrainFieldResolution =
+    progressiveField && typeof previewTerrainFieldResolution === 'number'
+      ? Math.min(terrainFieldResolution, previewTerrainFieldResolution)
+      : terrainFieldResolution
+  const previewWaterField = useMemo(
     () =>
       createWaterFieldTexture({
-        parameters: fieldParameters,
+        parameters: waterFieldTextureParameters,
         perimeter: waterFieldShorelinePoints,
         planeSize: WATER_PLANE_SIZE,
-        resolution: terrainFieldResolution,
+        resolution: renderedTerrainFieldResolution,
       }),
-    [fieldParameters, terrainFieldResolution, waterFieldShorelinePoints],
+    [renderedTerrainFieldResolution, waterFieldShorelinePoints, waterFieldTextureParameters],
   )
+  const asyncWaterField = useAsyncWaterFieldTexture({
+    parameters: waterFieldTextureParameters,
+    perimeter: waterFieldShorelinePoints,
+    planeSize: WATER_PLANE_SIZE,
+    resolution: terrainFieldResolution,
+    shouldGenerate:
+      progressiveField &&
+      finalFieldEnabled &&
+      terrainFieldResolution !== renderedTerrainFieldResolution,
+  })
+  const stableWaterFieldRef = useRef<Texture | null>(null)
+  if (stableWaterFieldRef.current === null) {
+    stableWaterFieldRef.current = previewWaterField
+  }
+  const waterField = stableWaterFieldRef.current
   const waterBounds = useMemo(() => createWaterBounds(WATER_PLANE_SIZE), [])
+  const liveDepthMaterialParameters = useMemo(
+    () => ({
+      ...materialParameters,
+      depthExponent: fieldParameters.depthExponent,
+      depthNoiseFrequency: fieldParameters.depthNoiseFrequency,
+      depthNoiseStrength: fieldParameters.depthNoiseStrength,
+      depthReach: fieldParameters.depthReach,
+      depthReferenceReach: WATER_FIELD_DEPTH_REFERENCE_REACH,
+      edgeFadeDistance: fieldParameters.edgeFadeDistance,
+    }),
+    [
+      fieldParameters.depthExponent,
+      fieldParameters.depthNoiseFrequency,
+      fieldParameters.depthNoiseStrength,
+      fieldParameters.depthReach,
+      fieldParameters.edgeFadeDistance,
+      materialParameters,
+    ],
+  )
   const effectiveMaterialParameters = useMemo(
     () =>
       debugLayer === 'shoreline'
         ? {
-            ...materialParameters,
+            ...liveDepthMaterialParameters,
             iceRatio: 0,
             ripplesRatio: 0,
             splashesRatio: 0,
           }
-        : materialParameters,
-    [debugLayer, materialParameters],
+        : liveDepthMaterialParameters,
+    [debugLayer, liveDepthMaterialParameters],
   )
-  const material = useMemo(
-    () =>
-      createLandrushWaterMaterial(
-        renderer as unknown as THREE.WebGPURenderer,
-        waterField,
-        waterBounds,
-        effectiveMaterialParameters,
-      ),
-    [effectiveMaterialParameters, renderer, waterBounds, waterField],
-  )
+  const liveDepthMaterialParametersRef = useRef(liveDepthMaterialParameters)
+  liveDepthMaterialParametersRef.current = liveDepthMaterialParameters
+  const preservedWindTimeRef = useRef(0)
+  const material = useMemo(() => {
+    const nextMaterial = waterMaterialFactory(
+      renderer as unknown as THREE.WebGPURenderer,
+      waterField,
+      waterBounds,
+      liveDepthMaterialParametersRef.current,
+    )
+    nextMaterial.userData.landrushWater.wind.localTime.value = preservedWindTimeRef.current
+    return nextMaterial
+  }, [renderer, waterBounds, waterField, waterMaterialFactory])
   const materialRef = useRef<LandrushWaterSurfaceMaterial>(material)
+  const appliedMaterialRef = useRef<LandrushWaterSurfaceMaterial | null>(null)
+  const appliedMaterialParametersRef = useRef<LandrushWaterSurfaceParameters | null>(null)
 
   useEffect(() => {
     materialRef.current = material
     return () => material.dispose()
   }, [material])
 
+  useEffect(() => {
+    const waterControls = material.userData
+      .landrushWater as typeof material.userData.landrushWater & {
+      setParameters?: (parameters: Partial<LandrushWaterSurfaceParameters>) => void
+    }
+    const previousParameters = appliedMaterialParametersRef.current
+    if (appliedMaterialRef.current !== material || !previousParameters) {
+      appliedMaterialRef.current = material
+      appliedMaterialParametersRef.current = effectiveMaterialParameters
+      return
+    }
+
+    const patch = diffWaterMaterialParameters(previousParameters, effectiveMaterialParameters)
+    if (Object.keys(patch).length > 0) {
+      waterControls.setParameters?.(patch)
+    }
+    appliedMaterialRef.current = material
+    appliedMaterialParametersRef.current = effectiveMaterialParameters
+  }, [effectiveMaterialParameters, material])
+
+  useEffect(() => {
+    if (previewWaterField === waterField) return
+    copyWaterFieldTextureData(waterField, previewWaterField)
+  }, [previewWaterField, waterField])
+
+  useEffect(() => {
+    if (!asyncWaterField) return
+    copyWaterFieldTextureData(waterField, asyncWaterField)
+  }, [asyncWaterField, waterField])
+
   useEffect(() => () => waterField.dispose(), [waterField])
   useEffect(() => () => depthReferenceGeometry.dispose(), [depthReferenceGeometry])
   useEffect(() => () => depthReferenceLine.material.dispose(), [depthReferenceLine])
   useEffect(() => () => cliffGeometry.dispose(), [cliffGeometry])
 
-  useFrame((_, delta) => {
-    measureLandrushFrameSlice('scene.water.material-update', () => {
-      materialRef.current.userData.landrushWater.update(delta)
-    })
-  })
+  useWaterMaterialAnimation(materialRef, preservedWindTimeRef)
 
   return (
     <group>
@@ -347,6 +479,129 @@ function WaterMeshes({
       {showDepthReference ? <primitive object={depthReferenceLine} /> : null}
     </group>
   )
+}
+
+function useAsyncWaterFieldTexture({
+  parameters,
+  perimeter,
+  planeSize,
+  resolution,
+  shouldGenerate,
+}: {
+  parameters: Partial<WaterFieldParameters>
+  perimeter: readonly LandrushPoint2[]
+  planeSize: number
+  resolution: number
+  shouldGenerate: boolean
+}) {
+  const [texture, setTexture] = useState<Texture | null>(null)
+
+  useEffect(() => {
+    setTexture(null)
+    if (!shouldGenerate || typeof Worker === 'undefined') return
+
+    let cancelled = false
+    const worker = new Worker('/landrush-lab/water-field-worker.js')
+    worker.onmessage = (event: MessageEvent) => {
+      if (cancelled) return
+      const payload = event.data as { bytes: ArrayBuffer; resolution: number }
+      setTexture(createWaterFieldTextureFromData(new Uint8Array(payload.bytes), payload.resolution))
+    }
+    worker.postMessage({
+      parameters,
+      perimeter: perimeter.map((point) => ({ x: point.x, z: point.z })),
+      planeSize,
+      resolution,
+    })
+
+    return () => {
+      cancelled = true
+      worker.terminate()
+    }
+  }, [parameters, perimeter, planeSize, resolution, shouldGenerate])
+
+  useEffect(() => () => texture?.dispose(), [texture])
+
+  return texture
+}
+
+function createWaterFieldTextureFromData(bytes: Uint8Array, resolution: number) {
+  const texture = new DataTexture(bytes, resolution, resolution, RGBAFormat)
+  texture.flipY = false
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
+  texture.needsUpdate = true
+  return texture
+}
+
+function copyWaterFieldTextureData(target: Texture, source: Texture) {
+  const targetTexture = target as DataTexture
+  const sourceTexture = source as DataTexture
+  const targetData = targetTexture.image.data as Uint8Array | null
+  const sourceData = sourceTexture.image.data as Uint8Array | null
+  if (!targetData || !sourceData) return
+
+  if (
+    targetTexture.image.width === sourceTexture.image.width &&
+    targetTexture.image.height === sourceTexture.image.height &&
+    targetData.length === sourceData.length
+  ) {
+    targetData.set(sourceData)
+  } else {
+    targetTexture.image = {
+      data: sourceData.slice(),
+      height: sourceTexture.image.height,
+      width: sourceTexture.image.width,
+    }
+  }
+  targetTexture.needsUpdate = true
+}
+
+function diffWaterMaterialParameters(
+  previousParameters: LandrushWaterSurfaceParameters,
+  nextParameters: LandrushWaterSurfaceParameters,
+) {
+  const patch: Partial<LandrushWaterSurfaceParameters> = {}
+  const keys = Object.keys(nextParameters) as Array<keyof LandrushWaterSurfaceParameters>
+  for (const key of keys) {
+    if (previousParameters[key] !== nextParameters[key]) {
+      patch[key] = nextParameters[key] as never
+    }
+  }
+  return patch
+}
+
+function useWaterMaterialAnimation(
+  materialRef: RefObject<LandrushWaterSurfaceMaterial>,
+  preservedWindTimeRef: MutableRefObject<number>,
+) {
+  const advance = useThree((state) => state.advance)
+
+  useEffect(() => {
+    let animationFrame = 0
+    let previousTime = window.performance.now()
+
+    const update = (time: number) => {
+      const deltaSeconds = Math.min(Math.max((time - previousTime) / 1000, 0), 0.08)
+      previousTime = time
+
+      measureLandrushFrameSlice('scene.water.material-update', () => {
+        const water = materialRef.current?.userData.landrushWater
+        if (!water) return
+
+        water.update(deltaSeconds)
+        preservedWindTimeRef.current = water.wind.localTime.value
+      })
+
+      advance(time)
+      animationFrame = window.requestAnimationFrame(update)
+    }
+
+    animationFrame = window.requestAnimationFrame(update)
+    return () => window.cancelAnimationFrame(animationFrame)
+  }, [advance, materialRef, preservedWindTimeRef])
 }
 
 function shapeFromPoints(points: readonly LandrushPoint2[]) {

@@ -1,14 +1,19 @@
 'use client'
 
+import { useTexture } from '@react-three/drei'
 import { useEffect, useMemo } from 'react'
 import {
-  AdditiveBlending,
   BufferGeometry,
+  ClampToEdgeWrapping,
   Color,
+  DataTexture,
   DoubleSide,
   Float32BufferAttribute,
-  ShapeUtils,
-  Vector2,
+  LinearFilter,
+  RepeatWrapping,
+  RGBAFormat,
+  SRGBColorSpace,
+  type Texture,
 } from 'three'
 import type { LandrushPoint2 } from '@/components/landrush/types'
 import {
@@ -19,6 +24,7 @@ import {
 } from './parcel-allocation'
 import {
   DEFAULT_PARCEL_STREET_WIDTH_METERS,
+  generateParcelEdgeStreets,
   generateParcelStreets,
   PARCEL_STREET_CURB_EXTRA_WIDTH_METERS,
   PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS,
@@ -29,15 +35,21 @@ import {
 import type { WaterLandSurface } from './water-scene'
 
 type ParcelsLandLayersProps = {
+  dirtPathFilletRadiusScale?: number
   onAllocationChange?: (allocation: ParcelAllocationResult) => void
   onStreetNetworkChange?: (network: ParcelStreetNetwork) => void
   options: ParcelAllocationOptions
   parcelOverlayOptions: ParcelOverlayOptions
   showParcels?: boolean
   showStreets: boolean
+  streetAppearance?: StreetAppearance
   streetOptions: ParcelStreetOptions
+  streetPathMode?: StreetPathMode
   surface: WaterLandSurface
 }
+
+type StreetAppearance = 'dirt' | 'paved'
+type StreetPathMode = 'connected' | 'parcel-edges'
 
 export type ParcelOverlayOptions = {
   contourWidthMeters: number
@@ -60,21 +72,35 @@ type NormalizedParcelOverlayOptions = {
 const STREET_ROAD_COLOR = '#626e75'
 const STREET_CURB_COLOR = '#b8ad96'
 const STREET_SHOULDER_COLOR = '#e7dfc8'
-const PARCEL_CENTER_FILL_MIN_OPACITY = 0.02
-const PARCEL_GLOW_MIN_OPACITY = 0.08
-const PARCEL_GRADIENT_BAND_COUNT = 1
+const DIRT_PATH_TEXTURE_BASE = '/landrush-lab/stylized-scene/ground_texture/ground_07_4k'
+const DIRT_PATH_TEXTURE_REPEAT = 8
+const DIRT_PATH_TEXTURE_WORLD_SIZE_METERS = 40
+const DEFAULT_DIRT_PATH_FILLET_RADIUS_SCALE = 0.72
+const DIRT_PATH_FILLET_RADIUS_MAX_METERS = 15
+const DIRT_PATH_FILLET_STEPS = 8
+const DIRT_PATH_MAX_FILLET_ANGLE = Math.PI - Math.PI / 96
+const DIRT_PATH_MIN_FILLET_ANGLE = Math.PI / 48
+const DIRT_PATH_SMOOTH_UNION_METERS = 0.18
+const DIRT_ROAD_WIDTH_SCALE = 1.08
+const PARCEL_BOUNDARY_EDGE_THRESHOLD_METERS = 0.48
+const PARCEL_FILL_TEXTURE_RESOLUTION = 512
+const PARCEL_OVERLAY_COLOR = '#e0a35a'
+const PARCEL_OVERLAY_PATH_PADDING_METERS = 0.06
+const PARCEL_OVERLAY_RGB = colorToRgb(PARCEL_OVERLAY_COLOR)
 const STREET_RENDER_NODE_PRECISION = 100
 
-type ParcelGradientBand = {
-  geometry: BufferGeometry
-  opacity: number
+const DIRT_PATH_TEXTURE_PATHS = {
+  color: `${DIRT_PATH_TEXTURE_BASE}/ground_07__basecolor_1k.webp`,
+} as const
+
+type ParcelFillTexture = {
+  hasVisiblePixels: boolean
+  texture: DataTexture
 }
 
-type ParcelOverlayGeometries = {
-  centerGeometry: BufferGeometry
-  contourGeometry: BufferGeometry
-  glowGeometry: BufferGeometry
-  gradientBands: readonly ParcelGradientBand[]
+type ParcelFillEdge = {
+  end: LandrushPoint2
+  start: LandrushPoint2
 }
 
 type StreetIncident = {
@@ -87,14 +113,61 @@ type StreetJunction = {
   point: LandrushPoint2
 }
 
+type DirtPathJunction = {
+  incidents: readonly DirtPathIncident[]
+  point: LandrushPoint2
+  radius: number
+}
+
+type DirtPathSpan = {
+  end: LandrushPoint2
+  halfWidth: number
+  parcelIds: readonly string[]
+  start: LandrushPoint2
+}
+
+type DirtPathIncident = {
+  direction: LandrushPoint2
+  halfWidth: number
+  length: number
+  parcelIds: readonly string[]
+}
+
+type DirtPathField = {
+  junctions: readonly DirtPathJunction[]
+  spans: readonly DirtPathSpan[]
+}
+
+type DirtPathFillet = {
+  arc: readonly LandrushPoint2[]
+  corner: LandrushPoint2
+  endTangent: LandrushPoint2
+  startTangent: LandrushPoint2
+}
+
+type DirtPathBendJoin = {
+  arc: readonly LandrushPoint2[]
+  center: LandrushPoint2
+}
+
+type DirtPathJunctionPatches = {
+  bendJoins: readonly DirtPathBendJoin[]
+  fillets: readonly DirtPathFillet[]
+}
+
+type DirtPathJunctionPatchMap = ReadonlyMap<string, DirtPathJunctionPatches>
+
 export function ParcelsLandLayers({
+  dirtPathFilletRadiusScale = DEFAULT_DIRT_PATH_FILLET_RADIUS_SCALE,
   onAllocationChange,
   onStreetNetworkChange,
   options,
   parcelOverlayOptions,
   showParcels = true,
   showStreets,
+  streetAppearance = 'paved',
   streetOptions,
+  streetPathMode = 'connected',
   surface,
 }: ParcelsLandLayersProps) {
   const allocation = useMemo(
@@ -102,9 +175,20 @@ export function ParcelsLandLayers({
     [options, surface.grassSurfacePoints],
   )
   const streetNetwork = useMemo(
-    () => generateParcelStreets(allocation, streetOptions),
-    [allocation, streetOptions],
+    () =>
+      streetPathMode === 'parcel-edges'
+        ? generateParcelEdgeStreets(allocation, streetOptions)
+        : generateParcelStreets(allocation, streetOptions),
+    [allocation, streetOptions, streetPathMode],
   )
+  const dirtPathField = useMemo(
+    () =>
+      showStreets && streetAppearance === 'dirt'
+        ? createDirtPathField(streetNetwork.segments, DIRT_ROAD_WIDTH_SCALE)
+        : null,
+    [showStreets, streetAppearance, streetNetwork.segments],
+  )
+  const parcelOverlayPathInsetMeters = dirtPathField ? PARCEL_OVERLAY_PATH_PADDING_METERS : 0
 
   useEffect(() => {
     onAllocationChange?.(allocation)
@@ -118,97 +202,75 @@ export function ParcelsLandLayers({
     <group>
       {showParcels ? (
         <ParcelOverlayLayer
+          boundary={allocation.boundary}
+          dirtPathField={dirtPathField}
           elevation={surface.grassSurfaceElevation}
+          fieldSize={surface.waterPlaneSize}
+          pathInsetMeters={parcelOverlayPathInsetMeters}
           parcels={allocation.parcels}
           style={parcelOverlayOptions}
         />
       ) : null}
       {showStreets ? (
-        <StreetNetworkLayer
-          elevation={surface.grassSurfaceElevation + 0.18}
-          network={streetNetwork}
-        />
+        streetAppearance === 'dirt' ? (
+          dirtPathField ? (
+            <DirtStreetNetworkLayer
+              elevation={surface.grassSurfaceElevation + 0.18}
+              filletRadiusScale={dirtPathFilletRadiusScale}
+              pathField={dirtPathField}
+            />
+          ) : null
+        ) : (
+          <StreetNetworkLayer
+            elevation={surface.grassSurfaceElevation + 0.18}
+            network={streetNetwork}
+          />
+        )
       ) : null}
     </group>
   )
 }
 
 function ParcelOverlayLayer({
+  boundary,
+  dirtPathField,
   elevation,
+  fieldSize,
+  pathInsetMeters,
   parcels,
   style,
 }: {
+  boundary: readonly LandrushPoint2[]
+  dirtPathField: DirtPathField | null
   elevation: number
+  fieldSize: number
+  pathInsetMeters: number
   parcels: readonly ParcelAllocationParcel[]
   style: ParcelOverlayOptions
 }) {
   const overlay = useMemo(() => normalizeParcelOverlayOptions(style), [style])
-  const geometries = useMemo(
-    () => createParcelOverlayGeometries(parcels, overlay, elevation),
-    [elevation, overlay, parcels],
+  const edgeInset = Math.max(0, finiteNumber(pathInsetMeters, 0))
+  const fill = useMemo(
+    () => createParcelFillTexture(parcels, boundary, overlay, fieldSize, edgeInset, dirtPathField),
+    [boundary, dirtPathField, edgeInset, fieldSize, overlay, parcels],
   )
 
-  useEffect(
-    () => () => {
-      geometries.centerGeometry.dispose()
-      geometries.glowGeometry.dispose()
-      geometries.contourGeometry.dispose()
-      for (const band of geometries.gradientBands) band.geometry.dispose()
-    },
-    [geometries],
-  )
+  useEffect(() => () => fill.texture.dispose(), [fill.texture])
 
   return (
     <group>
-      {overlay.centerOpacity > PARCEL_CENTER_FILL_MIN_OPACITY &&
-      geometryHasVertices(geometries.centerGeometry) ? (
-        <mesh geometry={geometries.centerGeometry} renderOrder={18}>
+      {fill.hasVisiblePixels ? (
+        <mesh position={[0, elevation + 0.058, 0]} renderOrder={27} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[fieldSize, fieldSize, 1, 1]} />
           <meshBasicMaterial
             depthWrite={false}
-            opacity={overlay.centerOpacity}
+            map={fill.texture}
             side={DoubleSide}
             toneMapped={false}
             transparent
-            vertexColors
           />
         </mesh>
       ) : null}
-      {overlay.glowOpacity > PARCEL_GLOW_MIN_OPACITY &&
-      geometryHasVertices(geometries.glowGeometry) ? (
-        <mesh geometry={geometries.glowGeometry} renderOrder={19}>
-          <meshBasicMaterial
-            blending={AdditiveBlending}
-            depthWrite={false}
-            opacity={overlay.glowOpacity}
-            side={DoubleSide}
-            toneMapped={false}
-            transparent
-            vertexColors
-          />
-        </mesh>
-      ) : null}
-      {geometries.gradientBands.map((band, index) => (
-        <mesh geometry={band.geometry} key={`parcel-gradient-${index}`} renderOrder={20 + index}>
-          <meshBasicMaterial
-            depthWrite={false}
-            opacity={band.opacity}
-            side={DoubleSide}
-            toneMapped={false}
-            transparent
-            vertexColors
-          />
-        </mesh>
-      ))}
-      <mesh geometry={geometries.contourGeometry} renderOrder={27}>
-        <meshBasicMaterial
-          depthWrite={false}
-          opacity={overlay.edgeOpacity}
-          side={DoubleSide}
-          toneMapped={false}
-          transparent
-          vertexColors
-        />
-      </mesh>
     </group>
   )
 }
@@ -240,152 +302,83 @@ function normalizeParcelOverlayOptions(
   }
 }
 
-function createParcelOverlayGeometries(
+function createParcelFillTexture(
   parcels: readonly ParcelAllocationParcel[],
+  boundary: readonly LandrushPoint2[],
   style: NormalizedParcelOverlayOptions,
-  elevation: number,
-): ParcelOverlayGeometries {
-  const centerPositions: number[] = []
-  const centerColors: number[] = []
-  const glowPositions: number[] = []
-  const glowColors: number[] = []
-  const contourPositions: number[] = []
-  const contourColors: number[] = []
-  const startDistance = style.contourWidthMeters
-  const distance = Math.max(0, style.gradientDistanceMeters - startDistance)
-  const gradientPositions = Array.from({ length: PARCEL_GRADIENT_BAND_COUNT }, () => [] as number[])
-  const gradientColors = Array.from({ length: PARCEL_GRADIENT_BAND_COUNT }, () => [] as number[])
-  const gradientOpacities: number[] = []
+  fieldSize: number,
+  edgeInset: number,
+  dirtPathField: DirtPathField | null,
+): ParcelFillTexture {
+  const resolution = PARCEL_FILL_TEXTURE_RESOLUTION
+  const bytes = new Uint8Array(resolution * resolution * 4)
+  const preparedParcels = parcels.map((parcel) => ({
+    bounds: boundsForPoints(parcel.points),
+    edges: parcelFillEdges(parcel.points, boundary, Boolean(dirtPathField)),
+    points: parcel.points,
+  }))
+  const red = byte(PARCEL_OVERLAY_RGB.r)
+  const green = byte(PARCEL_OVERLAY_RGB.g)
+  const blue = byte(PARCEL_OVERLAY_RGB.b)
+  const edgeFillOpacity = style.edgeOpacity * 0.72
+  const contourFeather = Math.max(fieldSize / resolution, 0.035)
+  const fadeDistance = Math.max(0.1, style.gradientDistanceMeters - style.contourWidthMeters)
+  let hasVisiblePixels = false
 
-  for (let index = 0; index < PARCEL_GRADIENT_BAND_COUNT; index += 1) {
-    const startT = index / PARCEL_GRADIENT_BAND_COUNT
-    const endT = (index + 1) / PARCEL_GRADIENT_BAND_COUNT
-    const opacityT = (index + 0.5) / PARCEL_GRADIENT_BAND_COUNT
-    gradientOpacities[index] = lerp(style.edgeOpacity * 0.72, style.centerOpacity, opacityT)
-  }
-
-  parcels.forEach((parcel, parcelIndex) => {
-    const color = colorToRgb(parcel.color)
-    const parcelLift = parcelIndex * 0.0002
-    const centerPoints = insetPointsTowardCentroid(
-      parcel.points,
-      parcel.centroid,
-      style.gradientDistanceMeters,
-    )
-
-    if (style.centerOpacity > PARCEL_CENTER_FILL_MIN_OPACITY) {
-      appendFilledPolygonGeometry(
-        centerPositions,
-        centerColors,
-        centerPoints,
-        elevation + 0.052 + parcelLift,
-        color,
-      )
-    }
-
-    if (style.glowOpacity > PARCEL_GLOW_MIN_OPACITY) {
-      appendRingBandGeometry(
-        glowPositions,
-        glowColors,
-        parcel.points,
-        parcel.centroid,
-        0,
-        style.glowWidthMeters,
-        elevation + 0.056 + parcelLift,
-        color,
-      )
-    }
-
-    if (distance > 0.02) {
-      for (let index = 0; index < PARCEL_GRADIENT_BAND_COUNT; index += 1) {
-        const opacity = gradientOpacities[index] ?? 0
-        if (opacity <= 0.001) continue
-        const startT = index / PARCEL_GRADIENT_BAND_COUNT
-        const endT = (index + 1) / PARCEL_GRADIENT_BAND_COUNT
-        appendRingBandGeometry(
-          gradientPositions[index]!,
-          gradientColors[index]!,
-          parcel.points,
-          parcel.centroid,
-          startDistance + distance * startT,
-          startDistance + distance * endT,
-          elevation + 0.064 + index * 0.001 + parcelLift,
-          color,
-        )
+  for (let y = 0; y < resolution; y += 1) {
+    for (let x = 0; x < resolution; x += 1) {
+      const point = {
+        x: (x / (resolution - 1) - 0.5) * fieldSize,
+        z: (y / (resolution - 1) - 0.5) * fieldSize,
       }
+      const parcel = containingPreparedParcel(preparedParcels, point)
+      const index = (y * resolution + x) * 4
+      let alpha = 0
+
+      if (parcel) {
+        const edgeDistance = distanceToEdges(point, parcel.edges)
+        const insetEdgeDistance = dirtPathField
+          ? signedDistanceToDirtPath(point, dirtPathField) - edgeInset
+          : edgeDistance - edgeInset
+        if (Number.isFinite(insetEdgeDistance) && insetEdgeDistance >= 0) {
+          const contourMask =
+            1 -
+            smoothstep(
+              style.contourWidthMeters - contourFeather,
+              style.contourWidthMeters + contourFeather,
+              insetEdgeDistance,
+            )
+          const fillFade = smoothstep(
+            0,
+            fadeDistance,
+            Math.max(0, insetEdgeDistance - style.contourWidthMeters),
+          )
+          const glowFade = 1 - smoothstep(0, style.glowWidthMeters, insetEdgeDistance)
+          const fillAlpha = clamp01(
+            lerp(edgeFillOpacity, style.centerOpacity, fillFade) + style.glowOpacity * glowFade,
+          )
+          alpha = Math.max(fillAlpha, style.edgeOpacity * contourMask)
+        } else if (!Number.isFinite(edgeDistance)) {
+          alpha = style.centerOpacity
+        }
+      }
+
+      if (alpha > 0.002) hasVisiblePixels = true
+      bytes[index] = red
+      bytes[index + 1] = green
+      bytes[index + 2] = blue
+      bytes[index + 3] = byte(alpha)
     }
-
-    appendRingBandGeometry(
-      contourPositions,
-      contourColors,
-      parcel.points,
-      parcel.centroid,
-      0,
-      style.contourWidthMeters,
-      elevation + 0.084 + parcelLift,
-      color,
-    )
-  })
-
-  return {
-    centerGeometry: coloredTriangleGeometry(centerPositions, centerColors),
-    contourGeometry: coloredTriangleGeometry(contourPositions, contourColors),
-    glowGeometry: coloredTriangleGeometry(glowPositions, glowColors),
-    gradientBands: gradientPositions
-      .map((positions, index) => ({
-        geometry: coloredTriangleGeometry(positions, gradientColors[index]!),
-        opacity: gradientOpacities[index] ?? 0,
-      }))
-      .filter((band) => band.opacity > 0.001 && geometryHasVertices(band.geometry)),
   }
-}
 
-function appendRingBandGeometry(
-  positions: number[],
-  colors: number[],
-  points: readonly LandrushPoint2[],
-  centroid: LandrushPoint2,
-  outerInset: number,
-  innerInset: number,
-  y: number,
-  color: RgbColor,
-) {
-  if (points.length < 3 || innerInset <= outerInset + 0.001) return
-  const outer = insetPointsTowardCentroid(points, centroid, outerInset)
-  const inner = insetPointsTowardCentroid(points, centroid, innerInset)
-
-  for (let index = 0; index < points.length; index += 1) {
-    const outerA = outer[index]
-    const outerB = outer[(index + 1) % outer.length]
-    const innerA = inner[index]
-    const innerB = inner[(index + 1) % inner.length]
-    if (!(outerA && outerB && innerA && innerB)) continue
-
-    pushColoredTriangle(positions, colors, outerA, outerB, innerA, y, color)
-    pushColoredTriangle(positions, colors, outerB, innerB, innerA, y, color)
-  }
-}
-
-function appendFilledPolygonGeometry(
-  positions: number[],
-  colors: number[],
-  points: readonly LandrushPoint2[],
-  y: number,
-  color: RgbColor,
-) {
-  if (points.length < 3) return
-  const triangles = ShapeUtils.triangulateShape(
-    points.map((point) => new Vector2(point.x, point.z)),
-    [],
-  )
-
-  for (const triangle of triangles) {
-    const first = points[triangle[0]]
-    const second = points[triangle[1]]
-    const third = points[triangle[2]]
-    if (!(first && second && third)) continue
-    pushColoredTriangle(positions, colors, first, second, third, y, color)
-  }
+  const texture = new DataTexture(bytes, resolution, resolution, RGBAFormat)
+  texture.flipY = true
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
+  texture.needsUpdate = true
+  return { hasVisiblePixels, texture }
 }
 
 type RgbColor = { b: number; g: number; r: number }
@@ -395,60 +388,140 @@ function colorToRgb(value: string): RgbColor {
   return { b: color.b, g: color.g, r: color.r }
 }
 
-function pushColoredTriangle(
-  positions: number[],
-  colors: number[],
-  first: LandrushPoint2,
-  second: LandrushPoint2,
-  third: LandrushPoint2,
-  y: number,
-  color: RgbColor,
-) {
-  pushColoredVertex(positions, colors, first, y, color)
-  pushColoredVertex(positions, colors, second, y, color)
-  pushColoredVertex(positions, colors, third, y, color)
+type PreparedParcelFill = {
+  bounds: ParcelFillBounds
+  edges: readonly ParcelFillEdge[]
+  points: readonly LandrushPoint2[]
 }
 
-function pushColoredVertex(
-  positions: number[],
-  colors: number[],
+type ParcelFillBounds = {
+  maxX: number
+  maxZ: number
+  minX: number
+  minZ: number
+}
+
+function containingPreparedParcel(
+  parcels: readonly PreparedParcelFill[],
   point: LandrushPoint2,
-  y: number,
-  color: RgbColor,
-) {
-  positions.push(point.x, y, point.z)
-  colors.push(color.r, color.g, color.b)
+): PreparedParcelFill | null {
+  for (const parcel of parcels) {
+    if (
+      point.x < parcel.bounds.minX ||
+      point.x > parcel.bounds.maxX ||
+      point.z < parcel.bounds.minZ ||
+      point.z > parcel.bounds.maxZ
+    ) {
+      continue
+    }
+    if (pointInPolygon(point, parcel.points)) return parcel
+  }
+
+  return null
 }
 
-function coloredTriangleGeometry(positions: readonly number[], colors: readonly number[]) {
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
-  return geometry
+function boundsForPoints(points: readonly LandrushPoint2[]): ParcelFillBounds {
+  let minX = Number.POSITIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+
+  for (const point of points) {
+    minX = Math.min(minX, point.x)
+    minZ = Math.min(minZ, point.z)
+    maxX = Math.max(maxX, point.x)
+    maxZ = Math.max(maxZ, point.z)
+  }
+
+  return Number.isFinite(minX) ? { maxX, maxZ, minX, minZ } : { maxX: 0, maxZ: 0, minX: 0, minZ: 0 }
+}
+
+function parcelFillEdges(
+  points: readonly LandrushPoint2[],
+  boundary: readonly LandrushPoint2[],
+  includeBoundaryEdges: boolean,
+): readonly ParcelFillEdge[] {
+  const edges: ParcelFillEdge[] = []
+
+  for (let index = 0; index < points.length; index += 1) {
+    const start = points[index]
+    const end = points[(index + 1) % points.length]
+    if (!(start && end)) continue
+    if (!includeBoundaryEdges && edgeRunsAlongBoundary(start, end, boundary)) continue
+    edges.push({ end, start })
+  }
+
+  return edges
+}
+
+function edgeRunsAlongBoundary(
+  start: LandrushPoint2,
+  end: LandrushPoint2,
+  boundary: readonly LandrushPoint2[],
+) {
+  const midpoint = midpoint2(start, end)
+  return distanceToPolygonEdges(midpoint, boundary) <= PARCEL_BOUNDARY_EDGE_THRESHOLD_METERS
+}
+
+function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+  let inside = false
+  for (let index = 0, previousIndex = polygon.length - 1; index < polygon.length; index += 1) {
+    const current = polygon[index]
+    const previous = polygon[previousIndex]
+    if (!(current && previous)) continue
+    const crossesScanline = current.z > point.z !== previous.z > point.z
+    const boundaryX =
+      ((previous.x - current.x) * (point.z - current.z)) / (previous.z - current.z || 0.000001) +
+      current.x
+    if (crossesScanline && point.x < boundaryX) inside = !inside
+    previousIndex = index
+  }
+  return inside
+}
+
+function distanceToPolygonEdges(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+  let distance = Number.POSITIVE_INFINITY
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = polygon[index]
+    const end = polygon[(index + 1) % polygon.length]
+    if (!(start && end)) continue
+    distance = Math.min(distance, distanceToSegment(point, start, end))
+  }
+  return Number.isFinite(distance) ? distance : 0
+}
+
+function distanceToEdges(point: LandrushPoint2, edges: readonly ParcelFillEdge[]) {
+  let distance = Number.POSITIVE_INFINITY
+  for (const edge of edges) {
+    distance = Math.min(distance, distanceToSegment(point, edge.start, edge.end))
+  }
+  return distance
+}
+
+function distanceToSegment(point: LandrushPoint2, start: LandrushPoint2, end: LandrushPoint2) {
+  const dx = end.x - start.x
+  const dz = end.z - start.z
+  const lengthSquared = dx * dx + dz * dz || 0.000001
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * dx + (point.z - start.z) * dz) / lengthSquared),
+  )
+  return Math.hypot(point.x - (start.x + dx * t), point.z - (start.z + dz * t))
+}
+
+function midpoint2(first: LandrushPoint2, second: LandrushPoint2): LandrushPoint2 {
+  return {
+    x: (first.x + second.x) / 2,
+    z: (first.z + second.z) / 2,
+  }
+}
+
+function byte(value: number) {
+  return Math.max(0, Math.min(255, Math.round(value * 255)))
 }
 
 function geometryHasVertices(geometry: BufferGeometry) {
   return (geometry.getAttribute('position')?.count ?? 0) > 0
-}
-
-function insetPointsTowardCentroid(
-  points: readonly LandrushPoint2[],
-  centroid: LandrushPoint2,
-  distance: number,
-) {
-  if (distance <= 0) return points.map((point) => ({ x: point.x, z: point.z }))
-
-  return points.map((point) => {
-    const dx = centroid.x - point.x
-    const dz = centroid.z - point.z
-    const length = Math.hypot(dx, dz)
-    if (length <= 0.000001) return { x: point.x, z: point.z }
-    const inset = Math.min(distance, length * 0.86)
-    return {
-      x: point.x + (dx / length) * inset,
-      z: point.z + (dz / length) * inset,
-    }
-  })
 }
 
 function StreetNetworkLayer({
@@ -527,6 +600,475 @@ function StreetNetworkLayer({
       </mesh>
     </group>
   )
+}
+
+function DirtStreetNetworkLayer({
+  elevation,
+  filletRadiusScale,
+  pathField,
+}: {
+  elevation: number
+  filletRadiusScale: number
+  pathField: DirtPathField
+}) {
+  const texture = useDirtPathTexture()
+  const geometry = useMemo(
+    () => dirtStreetNetworkGeometry(pathField, filletRadiusScale, elevation + 0.018),
+    [elevation, filletRadiusScale, pathField],
+  )
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  if (!geometryHasVertices(geometry)) return null
+
+  return (
+    <mesh geometry={geometry} renderOrder={35}>
+      <meshBasicMaterial
+        color="#ffffff"
+        depthTest={true}
+        depthWrite={false}
+        map={texture}
+        polygonOffset={true}
+        polygonOffsetFactor={-1}
+        polygonOffsetUnits={-2}
+        side={DoubleSide}
+        toneMapped={false}
+        transparent
+      />
+    </mesh>
+  )
+}
+
+function useDirtPathTexture(): Texture {
+  const texture = useTexture(DIRT_PATH_TEXTURE_PATHS.color) as Texture
+  return useMemo(() => {
+    configureDirtPathTexture(texture)
+    return texture
+  }, [texture])
+}
+
+function configureDirtPathTexture(texture: Texture) {
+  texture.colorSpace = SRGBColorSpace
+  texture.wrapS = RepeatWrapping
+  texture.wrapT = RepeatWrapping
+  texture.repeat.set(DIRT_PATH_TEXTURE_REPEAT, DIRT_PATH_TEXTURE_REPEAT)
+  texture.needsUpdate = true
+}
+
+function createDirtPathField(
+  segments: readonly ParcelStreetSegment[],
+  widthScale: number,
+): DirtPathField {
+  const spans = dirtPathSpans(segments, widthScale)
+  return {
+    junctions: dirtPathJunctions(spans),
+    spans,
+  }
+}
+
+function dirtStreetNetworkGeometry(pathField: DirtPathField, filletRadiusScale: number, y: number) {
+  const geometry = new BufferGeometry()
+  const positions: number[] = []
+  const patchesByJunction = dirtPathJunctionPatchesByJunction(
+    pathField.junctions,
+    filletRadiusScale,
+  )
+
+  for (const span of pathField.spans) {
+    addDirtPathSpanGeometry(positions, span, y)
+  }
+
+  for (const junction of pathField.junctions) {
+    const patches = patchesByJunction.get(streetRenderNodeId(junction.point))
+    addDirtPathBendJoinGeometry(positions, patches?.bendJoins ?? [], y)
+    addDirtPathJunctionGeometry(positions, patches?.fillets ?? [], y)
+  }
+
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('uv', new Float32BufferAttribute(dirtPathUvsForPositions(positions), 2))
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function dirtPathUvsForPositions(positions: readonly number[]) {
+  const uvs: number[] = []
+  for (let index = 0; index < positions.length; index += 3) {
+    const x = positions[index] ?? 0
+    const z = positions[index + 2] ?? 0
+    uvs.push(
+      x / DIRT_PATH_TEXTURE_WORLD_SIZE_METERS + 0.5,
+      z / DIRT_PATH_TEXTURE_WORLD_SIZE_METERS + 0.5,
+    )
+  }
+  return uvs
+}
+
+function addDirtPathSpanGeometry(positions: number[], span: DirtPathSpan, y: number) {
+  if (distance2(span.start, span.end) <= 0.001) return
+
+  const normal = normalForSegment(span.start, span.end)
+  const firstLeft = {
+    x: span.start.x + normal.x * span.halfWidth,
+    z: span.start.z + normal.z * span.halfWidth,
+  }
+  const firstRight = {
+    x: span.start.x - normal.x * span.halfWidth,
+    z: span.start.z - normal.z * span.halfWidth,
+  }
+  const secondLeft = {
+    x: span.end.x + normal.x * span.halfWidth,
+    z: span.end.z + normal.z * span.halfWidth,
+  }
+  const secondRight = {
+    x: span.end.x - normal.x * span.halfWidth,
+    z: span.end.z - normal.z * span.halfWidth,
+  }
+
+  pushTriangle(positions, firstLeft, firstRight, secondLeft, y)
+  pushTriangle(positions, firstRight, secondRight, secondLeft, y)
+}
+
+function addDirtPathJunctionGeometry(
+  positions: number[],
+  fillets: readonly DirtPathFillet[],
+  y: number,
+) {
+  for (const fillet of fillets) {
+    for (let index = 0; index < fillet.arc.length - 1; index += 1) {
+      const current = fillet.arc[index]
+      const next = fillet.arc[index + 1]
+      if (current && next) pushTriangle(positions, fillet.corner, current, next, y)
+    }
+  }
+}
+
+function dirtPathJunctionPatchesByJunction(
+  junctions: readonly DirtPathJunction[],
+  filletRadiusScale: number,
+): DirtPathJunctionPatchMap {
+  return new Map(
+    junctions.map((junction) => [
+      streetRenderNodeId(junction.point),
+      dirtPathJunctionPatches(junction, filletRadiusScale),
+    ]),
+  )
+}
+
+function dirtPathJunctionPatches(
+  junction: DirtPathJunction,
+  filletRadiusScale: number,
+): DirtPathJunctionPatches {
+  const incidents = junction.incidents
+    .map((incident) => ({
+      ...incident,
+      angle: normalizedAngle(Math.atan2(incident.direction.z, incident.direction.x)),
+    }))
+    .sort((first, second) => first.angle - second.angle)
+  const fillets: DirtPathFillet[] = []
+  const bendJoins: DirtPathBendJoin[] = []
+  const patchedPairs = new Set<string>()
+
+  for (let index = 0; index < incidents.length; index += 1) {
+    const current = incidents[index]
+    const nextIndex = (index + 1) % incidents.length
+    const next = incidents[nextIndex]
+    if (!(current && next)) continue
+
+    const nextAngle = next.angle + (next.angle <= current.angle ? Math.PI * 2 : 0)
+    const gap = nextAngle - current.angle
+    if (gap <= DIRT_PATH_MIN_FILLET_ANGLE || gap >= DIRT_PATH_MAX_FILLET_ANGLE) continue
+
+    const fillet =
+      incidents.length > 2
+        ? dirtPathFilletForIncidentPair(junction.point, current, next, gap, filletRadiusScale)
+        : null
+    if (fillet) {
+      fillets.push(fillet)
+      patchedPairs.add(incidentPairKey(index, nextIndex))
+      continue
+    }
+
+    const bendJoin = dirtPathBendJoinForIncidentPair(junction.point, current, next)
+    if (bendJoin) {
+      bendJoins.push(bendJoin)
+      patchedPairs.add(incidentPairKey(index, nextIndex))
+    }
+  }
+
+  if (incidents.length > 2) {
+    for (let firstIndex = 0; firstIndex < incidents.length - 1; firstIndex += 1) {
+      const first = incidents[firstIndex]
+      if (!first) continue
+
+      for (let secondIndex = firstIndex + 1; secondIndex < incidents.length; secondIndex += 1) {
+        const second = incidents[secondIndex]
+        if (!second) continue
+        if (patchedPairs.has(incidentPairKey(firstIndex, secondIndex))) continue
+        if (areAngularNeighborIndexes(firstIndex, secondIndex, incidents.length)) continue
+        if (!dirtPathIncidentsShareParcel(first, second)) continue
+
+        const forwardGap = second.angle - first.angle
+        const smallerGap = Math.min(forwardGap, Math.PI * 2 - forwardGap)
+        if (
+          smallerGap <= DIRT_PATH_MIN_FILLET_ANGLE ||
+          smallerGap >= Math.PI - DIRT_PATH_MIN_FILLET_ANGLE
+        ) {
+          continue
+        }
+
+        const current = forwardGap <= Math.PI ? first : second
+        const next = forwardGap <= Math.PI ? second : first
+        const bendJoin = dirtPathBendJoinForIncidentPair(junction.point, current, next)
+        if (bendJoin) bendJoins.push(bendJoin)
+      }
+    }
+  }
+
+  return { bendJoins, fillets }
+}
+
+function dirtPathFilletForIncidentPair(
+  point: LandrushPoint2,
+  current: DirtPathIncident,
+  next: DirtPathIncident,
+  gap: number,
+  filletRadiusScale: number,
+): DirtPathFillet | null {
+  const currentNormal = { x: -current.direction.z, z: current.direction.x }
+  const nextNormal = { x: -next.direction.z, z: next.direction.x }
+  const currentSidePoint = {
+    x: point.x + currentNormal.x * current.halfWidth,
+    z: point.z + currentNormal.z * current.halfWidth,
+  }
+  const nextSidePoint = {
+    x: point.x - nextNormal.x * next.halfWidth,
+    z: point.z - nextNormal.z * next.halfWidth,
+  }
+  const intersection = lineIntersection2(
+    currentSidePoint,
+    current.direction,
+    nextSidePoint,
+    next.direction,
+  )
+  if (!intersection || intersection.firstT <= 0.001 || intersection.secondT <= 0.001) return null
+
+  const halfAngleTangent = Math.tan(gap / 2)
+  if (Math.abs(halfAngleTangent) <= 0.000001) return null
+
+  const requestedRadius = Math.min(
+    Math.max(0, finiteNumber(filletRadiusScale, DEFAULT_DIRT_PATH_FILLET_RADIUS_SCALE)),
+    DIRT_PATH_FILLET_RADIUS_MAX_METERS,
+  )
+  const edgeLimitedRadius =
+    Math.min(current.length - intersection.firstT, next.length - intersection.secondT) *
+    halfAngleTangent
+  const radius = Math.min(requestedRadius, Math.max(0, edgeLimitedRadius))
+  if (radius <= 0.025) return null
+
+  const tangentDistance = radius / halfAngleTangent
+  const insideStartTangent = {
+    x: intersection.point.x - current.direction.x * tangentDistance,
+    z: intersection.point.z - current.direction.z * tangentDistance,
+  }
+  const insideEndTangent = {
+    x: intersection.point.x - next.direction.x * tangentDistance,
+    z: intersection.point.z - next.direction.z * tangentDistance,
+  }
+  const centerDirection = normalize2({
+    x: -current.direction.x - next.direction.x,
+    z: -current.direction.z - next.direction.z,
+  })
+  const centerDistance = radius / Math.max(Math.sin(gap / 2), 0.000001)
+  const insideCenter = {
+    x: intersection.point.x + centerDirection.x * centerDistance,
+    z: intersection.point.z + centerDirection.z * centerDistance,
+  }
+  const startTangent = rotateHalfTurnAround(insideStartTangent, intersection.point)
+  const endTangent = rotateHalfTurnAround(insideEndTangent, intersection.point)
+  const center = rotateHalfTurnAround(insideCenter, intersection.point)
+
+  return {
+    arc: clockwiseArcPoints(center, startTangent, endTangent, DIRT_PATH_FILLET_STEPS),
+    corner: intersection.point,
+    endTangent,
+    startTangent,
+  }
+}
+
+function dirtPathBendJoinForIncidentPair(
+  point: LandrushPoint2,
+  current: DirtPathIncident,
+  next: DirtPathIncident,
+): DirtPathBendJoin | null {
+  const currentNormal = { x: -current.direction.z, z: current.direction.x }
+  const nextNormal = { x: -next.direction.z, z: next.direction.x }
+  const start = {
+    x: point.x - currentNormal.x * current.halfWidth,
+    z: point.z - currentNormal.z * current.halfWidth,
+  }
+  const end = {
+    x: point.x + nextNormal.x * next.halfWidth,
+    z: point.z + nextNormal.z * next.halfWidth,
+  }
+  const arc = clockwiseInterpolatedArcPoints(point, start, end, DIRT_PATH_FILLET_STEPS)
+
+  return arc.length > 1 ? { arc, center: point } : null
+}
+
+function addDirtPathBendJoinGeometry(
+  positions: number[],
+  bendJoins: readonly DirtPathBendJoin[],
+  y: number,
+) {
+  for (const bendJoin of bendJoins) {
+    for (let index = 0; index < bendJoin.arc.length - 1; index += 1) {
+      const currentPoint = bendJoin.arc[index]
+      const nextPoint = bendJoin.arc[index + 1]
+      if (currentPoint && nextPoint)
+        pushTriangle(positions, bendJoin.center, currentPoint, nextPoint, y)
+    }
+  }
+}
+
+function incidentPairKey(firstIndex: number, secondIndex: number) {
+  return firstIndex < secondIndex ? `${firstIndex}:${secondIndex}` : `${secondIndex}:${firstIndex}`
+}
+
+function areAngularNeighborIndexes(firstIndex: number, secondIndex: number, count: number) {
+  return (
+    Math.abs(firstIndex - secondIndex) === 1 || Math.abs(firstIndex - secondIndex) === count - 1
+  )
+}
+
+function dirtPathIncidentsShareParcel(first: DirtPathIncident, second: DirtPathIncident) {
+  return first.parcelIds.some((parcelId) => second.parcelIds.includes(parcelId))
+}
+
+function mergeParcelIds(first: readonly string[], second: readonly string[]) {
+  return [...new Set([...first, ...second])].sort()
+}
+
+function dirtPathSpans(
+  segments: readonly ParcelStreetSegment[],
+  widthScale: number,
+): readonly DirtPathSpan[] {
+  const spans: DirtPathSpan[] = []
+
+  for (const segment of segments) {
+    const halfWidth = (normalizedStreetWidth(segment.width) * widthScale) / 2
+    for (let index = 0; index < segment.points.length - 1; index += 1) {
+      const start = segment.points[index]
+      const end = segment.points[index + 1]
+      if (!(start && end) || distance2(start, end) <= 0.001) continue
+      spans.push({
+        end,
+        halfWidth,
+        parcelIds: segment.parcelIds,
+        start,
+      })
+    }
+  }
+
+  return spans
+}
+
+function dirtPathJunctions(spans: readonly DirtPathSpan[]): readonly DirtPathJunction[] {
+  const nodes = new Map<
+    string,
+    { incidents: DirtPathIncident[]; maxHalfWidth: number; point: LandrushPoint2 }
+  >()
+
+  for (const span of spans) {
+    const direction = normalize2({ x: span.end.x - span.start.x, z: span.end.z - span.start.z })
+    const length = distance2(span.start, span.end)
+    addDirtPathIncident(nodes, span.start, direction, span.halfWidth, length, span.parcelIds)
+    addDirtPathIncident(
+      nodes,
+      span.end,
+      { x: -direction.x, z: -direction.z },
+      span.halfWidth,
+      length,
+      span.parcelIds,
+    )
+  }
+
+  return [...nodes.values()]
+    .filter((node) => node.incidents.length > 1)
+    .map((node) => {
+      return {
+        incidents: node.incidents,
+        point: node.point,
+        radius: node.maxHalfWidth,
+      }
+    })
+}
+
+function addDirtPathIncident(
+  nodes: Map<
+    string,
+    { incidents: DirtPathIncident[]; maxHalfWidth: number; point: LandrushPoint2 }
+  >,
+  point: LandrushPoint2,
+  direction: LandrushPoint2,
+  halfWidth: number,
+  length: number,
+  parcelIds: readonly string[],
+) {
+  const id = streetRenderNodeId(point)
+  const node = nodes.get(id) ?? { incidents: [], maxHalfWidth: 0, point }
+  const existing = node.incidents.find((incident) => dot2(incident.direction, direction) > 0.998)
+  if (existing) {
+    existing.halfWidth = Math.max(existing.halfWidth, halfWidth)
+    existing.length = Math.max(existing.length, length)
+    existing.parcelIds = mergeParcelIds(existing.parcelIds, parcelIds)
+  } else {
+    node.incidents.push({ direction, halfWidth, length, parcelIds: [...parcelIds].sort() })
+  }
+  node.maxHalfWidth = Math.max(node.maxHalfWidth, halfWidth)
+  nodes.set(id, node)
+}
+
+function signedDistanceToPathSpan(point: LandrushPoint2, span: DirtPathSpan) {
+  const dx = span.end.x - span.start.x
+  const dz = span.end.z - span.start.z
+  const length = Math.max(Math.hypot(dx, dz), 0.000001)
+  const ux = dx / length
+  const uz = dz / length
+  const localX = (point.x - span.start.x) * ux + (point.z - span.start.z) * uz - length / 2
+  const localZ = Math.abs((point.x - span.start.x) * -uz + (point.z - span.start.z) * ux)
+  const qx = Math.abs(localX) - length / 2
+  const qz = localZ - span.halfWidth
+  const outsideDistance = Math.hypot(Math.max(qx, 0), Math.max(qz, 0))
+  const insideDistance = Math.min(Math.max(qx, qz), 0)
+  return outsideDistance + insideDistance
+}
+
+function signedDistanceToDirtPath(point: LandrushPoint2, pathField: DirtPathField) {
+  let signedDistance = Number.POSITIVE_INFINITY
+
+  for (const span of pathField.spans) {
+    signedDistance = smoothMinDistance(
+      signedDistance,
+      signedDistanceToPathSpan(point, span),
+      DIRT_PATH_SMOOTH_UNION_METERS,
+    )
+  }
+  for (const junction of pathField.junctions) {
+    signedDistance = smoothMinDistance(
+      signedDistance,
+      distance2(point, junction.point) - junction.radius,
+      DIRT_PATH_SMOOTH_UNION_METERS,
+    )
+  }
+
+  return signedDistance
+}
+
+function smoothMinDistance(first: number, second: number, amount: number) {
+  if (!Number.isFinite(first)) return second
+  if (!Number.isFinite(second)) return first
+  const h = clamp01(0.5 + (0.5 * (second - first)) / Math.max(amount, 0.000001))
+  return lerp(second, first, h) - amount * h * (1 - h)
 }
 
 function streetNetworkGeometry(
@@ -699,6 +1241,83 @@ function pushTriangle(
   positions.push(first.x, y, first.z, second.x, y, second.z, third.x, y, third.z)
 }
 
+function clockwiseArcPoints(
+  center: LandrushPoint2,
+  start: LandrushPoint2,
+  end: LandrushPoint2,
+  steps: number,
+) {
+  const startAngle = Math.atan2(start.z - center.z, start.x - center.x)
+  let endAngle = Math.atan2(end.z - center.z, end.x - center.x)
+  while (endAngle > startAngle) endAngle -= Math.PI * 2
+
+  const points: LandrushPoint2[] = []
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps
+    const angle = lerp(startAngle, endAngle, t)
+    const radius = distance2(center, start)
+    points.push({
+      x: center.x + Math.cos(angle) * radius,
+      z: center.z + Math.sin(angle) * radius,
+    })
+  }
+  return points
+}
+
+function clockwiseInterpolatedArcPoints(
+  center: LandrushPoint2,
+  start: LandrushPoint2,
+  end: LandrushPoint2,
+  steps: number,
+) {
+  const startAngle = Math.atan2(start.z - center.z, start.x - center.x)
+  let endAngle = Math.atan2(end.z - center.z, end.x - center.x)
+  while (endAngle > startAngle) endAngle -= Math.PI * 2
+
+  const startRadius = distance2(center, start)
+  const endRadius = distance2(center, end)
+  const points: LandrushPoint2[] = []
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps
+    const angle = lerp(startAngle, endAngle, t)
+    const radius = lerp(startRadius, endRadius, t)
+    points.push({
+      x: center.x + Math.cos(angle) * radius,
+      z: center.z + Math.sin(angle) * radius,
+    })
+  }
+  return points
+}
+
+function lineIntersection2(
+  firstPoint: LandrushPoint2,
+  firstDirection: LandrushPoint2,
+  secondPoint: LandrushPoint2,
+  secondDirection: LandrushPoint2,
+) {
+  const denominator = crossVector2(firstDirection, secondDirection)
+  if (Math.abs(denominator) <= 0.000001) return null
+
+  const delta = { x: secondPoint.x - firstPoint.x, z: secondPoint.z - firstPoint.z }
+  const firstT = crossVector2(delta, secondDirection) / denominator
+  const secondT = crossVector2(delta, firstDirection) / denominator
+  return {
+    firstT,
+    point: {
+      x: firstPoint.x + firstDirection.x * firstT,
+      z: firstPoint.z + firstDirection.z * firstT,
+    },
+    secondT,
+  }
+}
+
+function rotateHalfTurnAround(point: LandrushPoint2, center: LandrushPoint2) {
+  return {
+    x: center.x * 2 - point.x,
+    z: center.z * 2 - point.z,
+  }
+}
+
 function streetRenderNodeId(point: LandrushPoint2) {
   return `${Math.round(point.x * STREET_RENDER_NODE_PRECISION)}:${Math.round(point.z * STREET_RENDER_NODE_PRECISION)}`
 }
@@ -723,8 +1342,17 @@ function dot2(first: LandrushPoint2, second: LandrushPoint2) {
   return first.x * second.x + first.z * second.z
 }
 
+function crossVector2(first: LandrushPoint2, second: LandrushPoint2) {
+  return first.x * second.z - first.z * second.x
+}
+
 function cross2(origin: LandrushPoint2, first: LandrushPoint2, second: LandrushPoint2) {
   return (first.x - origin.x) * (second.z - origin.z) - (first.z - origin.z) * (second.x - origin.x)
+}
+
+function normalizedAngle(angle: number) {
+  const tau = Math.PI * 2
+  return ((angle % tau) + tau) % tau
 }
 
 function distance2(first: LandrushPoint2, second: LandrushPoint2) {
@@ -737,6 +1365,11 @@ function finiteNumber(value: number, fallback: number) {
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value))
+}
+
+function smoothstep(edge0: number, edge1: number, value: number) {
+  const t = clamp01((value - edge0) / (edge1 - edge0 || 0.000001))
+  return t * t * (3 - 2 * t)
 }
 
 function lerp(start: number, end: number, t: number) {

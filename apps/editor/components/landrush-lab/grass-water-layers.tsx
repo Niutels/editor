@@ -16,7 +16,12 @@ import type { WaterLandSurface } from './water-scene'
 type GrassWaterLandLayersProps = {
   bladeSubdivisions?: number
   fieldResolution?: number
+  finalFieldResolution?: number
+  finalSpawnResolution?: number
+  profileMeasure?: ProfileMeasure
   roads?: readonly LandrushRoadSegment[]
+  showBlades?: boolean
+  showTrees?: boolean
   spawnResolution?: number
   surface: WaterLandSurface
   tuning: GrassBladeTuning
@@ -32,39 +37,56 @@ type GrassBladeLayerWebGPUProps = {
   colorTexture?: Texture
   elevation: number
   fieldTexture: Texture
+  profileMeasure?: ProfileMeasure
   tuning: GrassBladeTuning
 }
+
+type ProfileMeasure = <T>(id: string, callback: () => T) => T
 
 const GRASS_WATER_EDGE_FADE_METERS = 0
 const GRASS_TREE_CELL_METERS = 5.8
 const GRASS_TREE_MIN_ALPHA = 0.12
 const GRASS_TREE_MIN_COUNT = 7
 const GRASS_TREE_MAX_COUNT = 34
+const EMPTY_GRASS_ROADS: readonly LandrushRoadSegment[] = []
 
 export function GrassWaterLandLayers({
   bladeSubdivisions,
   fieldResolution,
-  roads = [],
+  finalFieldResolution,
+  finalSpawnResolution,
+  profileMeasure,
+  roads = EMPTY_GRASS_ROADS,
+  showBlades = true,
+  showTrees = true,
   spawnResolution,
   surface,
   tuning,
 }: GrassWaterLandLayersProps) {
-  const densityResolution = spawnResolution ?? fieldResolution
+  const groundResolution = fieldResolution
+  const groundFinalResolution = finalFieldResolution ?? fieldResolution
+  const spawnPreviewResolution = spawnResolution ?? fieldResolution
+  const spawnFinalResolution = finalSpawnResolution ?? spawnPreviewResolution
   const groundField = useMemo(
     () =>
-      createGrassFieldTexture({
-        alphaMode: 'surface',
-        density: tuning.density,
-        edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
-        patchSize: tuning.patchSize,
-        patchSoftness: tuning.patchSoftness,
-        perimeter: surface.grassSurfacePoints,
-        planeSize: GRASS_FIELD_PLANE_SIZE,
-        resolution: fieldResolution,
-        roads,
-      }),
+      measure(profileMeasure, 'setup.grass.ground-field-texture', () =>
+        createGrassFieldTexture({
+          alphaMode: 'surface',
+          density: tuning.density,
+          edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
+          patchSize: tuning.patchSize,
+          patchSoftness: tuning.patchSoftness,
+          perimeter: surface.grassSurfacePoints,
+          planeSize: GRASS_FIELD_PLANE_SIZE,
+          profileMeasure,
+          profileScope: 'setup.grass.ground-field-texture',
+          resolution: groundResolution,
+          roads,
+        }),
+      ),
     [
-      fieldResolution,
+      groundResolution,
+      profileMeasure,
       roads,
       surface.grassSurfacePoints,
       tuning.density,
@@ -72,20 +94,39 @@ export function GrassWaterLandLayers({
       tuning.patchSoftness,
     ],
   )
+  const asyncGroundField = useAsyncGrassFieldTexture({
+    alphaMode: 'surface',
+    density: tuning.density,
+    edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
+    patchSize: tuning.patchSize,
+    patchSoftness: tuning.patchSoftness,
+    perimeter: surface.grassSurfacePoints,
+    profileMeasure,
+    resolution: groundFinalResolution,
+    roads,
+    shouldGenerate:
+      typeof groundFinalResolution === 'number' && groundFinalResolution !== groundResolution,
+  })
+  const renderedGroundField = asyncGroundField ?? groundField
   const spawnPreviewField = useMemo(
     () =>
-      createGrassFieldTexture({
-        density: tuning.density,
-        edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
-        patchSize: tuning.patchSize,
-        patchSoftness: tuning.patchSoftness,
-        perimeter: surface.grassSurfacePoints,
-        planeSize: GRASS_FIELD_PLANE_SIZE,
-        resolution: fieldResolution,
-        roads,
-      }),
+      measure(profileMeasure, 'setup.grass.spawn-field-texture', () =>
+        createGrassFieldTexture({
+          density: tuning.density,
+          edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
+          patchSize: tuning.patchSize,
+          patchSoftness: tuning.patchSoftness,
+          perimeter: surface.grassSurfacePoints,
+          planeSize: GRASS_FIELD_PLANE_SIZE,
+          profileMeasure,
+          profileScope: 'setup.grass.spawn-field-texture',
+          resolution: spawnPreviewResolution,
+          roads,
+        }),
+      ),
     [
-      fieldResolution,
+      spawnPreviewResolution,
+      profileMeasure,
       roads,
       surface.grassSurfacePoints,
       tuning.density,
@@ -94,48 +135,60 @@ export function GrassWaterLandLayers({
     ],
   )
   const asyncSpawnField = useAsyncGrassFieldTexture({
+    alphaMode: 'density',
     density: tuning.density,
     edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
     patchSize: tuning.patchSize,
     patchSoftness: tuning.patchSoftness,
     perimeter: surface.grassSurfacePoints,
-    resolution: densityResolution,
+    profileMeasure,
+    resolution: spawnFinalResolution,
     roads,
-    shouldGenerate: densityResolution !== fieldResolution,
+    shouldGenerate:
+      typeof spawnFinalResolution === 'number' && spawnFinalResolution !== spawnPreviewResolution,
   })
   const spawnField = asyncSpawnField ?? spawnPreviewField
-  const treeReferences = useMemo(
-    () =>
+  const treeReferences = useMemo(() => {
+    if (!showTrees) return []
+    return measure(profileMeasure, 'setup.grass.tree-references', () =>
       createGrassTextureTreeReferences({
         density: tuning.density,
         elevation: surface.grassSurfaceElevation,
         fieldSize: GRASS_FIELD_PLANE_SIZE,
         fieldTexture: spawnField.texture,
       }),
-    [spawnField.texture, surface.grassSurfaceElevation, tuning.density],
-  )
+    )
+  }, [profileMeasure, showTrees, spawnField.texture, surface.grassSurfaceElevation, tuning.density])
 
   useEffect(() => () => groundField.texture.dispose(), [groundField.texture])
   useEffect(() => () => spawnPreviewField.texture.dispose(), [spawnPreviewField.texture])
 
   return (
     <>
-      <GrassGroundLayer elevation={surface.grassSurfaceElevation} texture={groundField.texture} />
-      <GrassBladeLayerWebGPU
-        bladeSubdivisions={bladeSubdivisions}
-        colorTexture={groundField.texture}
+      <GrassGroundLayer
         elevation={surface.grassSurfaceElevation}
-        fieldTexture={spawnField.texture}
-        tuning={tuning}
+        texture={renderedGroundField.texture}
       />
-      <Suspense fallback={null}>
-        <BrunoTreeLayer
-          colorTexture={groundField.texture}
-          fieldSize={GRASS_FIELD_PLANE_SIZE}
-          references={treeReferences}
+      {showBlades ? (
+        <GrassBladeLayerWebGPU
+          bladeSubdivisions={bladeSubdivisions}
+          colorTexture={renderedGroundField.texture}
+          elevation={surface.grassSurfaceElevation}
+          fieldTexture={spawnField.texture}
+          profileMeasure={profileMeasure}
           tuning={tuning}
         />
-      </Suspense>
+      ) : null}
+      {showTrees ? (
+        <Suspense fallback={null}>
+          <BrunoTreeLayer
+            colorTexture={renderedGroundField.texture}
+            fieldSize={GRASS_FIELD_PLANE_SIZE}
+            references={treeReferences}
+            tuning={tuning}
+          />
+        </Suspense>
+      ) : null}
     </>
   )
 }
@@ -143,20 +196,24 @@ export function GrassWaterLandLayers({
 type GrassFieldTextureResult = ReturnType<typeof createGrassFieldTexture>
 
 function useAsyncGrassFieldTexture({
+  alphaMode,
   density,
   edgeFadeMeters,
   patchSize,
   patchSoftness,
   perimeter,
+  profileMeasure,
   resolution,
   roads,
   shouldGenerate,
 }: {
+  alphaMode: 'density' | 'surface'
   density: number
   edgeFadeMeters: number
   patchSize: number
   patchSoftness: number
   perimeter: WaterLandSurface['grassSurfacePoints']
+  profileMeasure?: ProfileMeasure
   resolution?: number
   roads: readonly LandrushRoadSegment[]
   shouldGenerate: boolean
@@ -176,15 +233,23 @@ function useAsyncGrassFieldTexture({
         resolution: number
         stats: GrassFieldTextureResult['stats']
       }
+      const commitScope = `setup.grass.async-${alphaMode}-field-texture-commit`
       setField(
-        createGrassFieldTextureFromData({
-          bytes: new Uint8Array(payload.bytes),
-          resolution: payload.resolution,
-          stats: payload.stats,
-        }),
+        measure(profileMeasure, commitScope, () =>
+          createGrassFieldTextureFromData(
+            {
+              bytes: new Uint8Array(payload.bytes),
+              resolution: payload.resolution,
+              stats: payload.stats,
+            },
+            profileMeasure,
+            commitScope,
+          ),
+        ),
       )
     }
     worker.postMessage({
+      alphaMode,
       density,
       edgeFadeMeters,
       patchSize,
@@ -203,11 +268,13 @@ function useAsyncGrassFieldTexture({
       worker.terminate()
     }
   }, [
+    alphaMode,
     density,
     edgeFadeMeters,
     patchSize,
     patchSoftness,
     perimeter,
+    profileMeasure,
     resolution,
     roads,
     shouldGenerate,
@@ -354,25 +421,31 @@ export function GrassBladeLayerWebGPU({
   colorTexture,
   elevation,
   fieldTexture,
+  profileMeasure,
   tuning,
 }: GrassBladeLayerWebGPUProps) {
   const bladeGeometry = useMemo(
     () =>
-      createGrassBladeColorGeometry({
-        bladeSubdivisions,
-        brightness: tuning.brightness,
-        colorTexture,
-        fieldSize: GRASS_FIELD_PLANE_SIZE,
-        fieldTexture,
-        height: tuning.height,
-        rootShadow: tuning.rootShadow,
-        width: tuning.width,
-        wind: tuning.wind,
-      }),
+      measure(profileMeasure, 'setup.grass.blade-color-geometry', () =>
+        createGrassBladeColorGeometry({
+          bladeSubdivisions,
+          brightness: tuning.brightness,
+          colorTexture,
+          fieldSize: GRASS_FIELD_PLANE_SIZE,
+          fieldTexture,
+          height: tuning.height,
+          profileMeasure,
+          profileScope: 'setup.grass.blade-color-geometry',
+          rootShadow: tuning.rootShadow,
+          width: tuning.width,
+          wind: tuning.wind,
+        }),
+      ),
     [
       bladeSubdivisions,
       colorTexture,
       fieldTexture,
+      profileMeasure,
       tuning.brightness,
       tuning.height,
       tuning.rootShadow,
@@ -400,4 +473,8 @@ export function GrassBladeLayerWebGPU({
       />
     </mesh>
   )
+}
+
+function measure<T>(profileMeasure: ProfileMeasure | undefined, id: string, callback: () => T) {
+  return profileMeasure ? profileMeasure(id, callback) : callback()
 }

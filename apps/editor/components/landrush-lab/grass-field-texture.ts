@@ -25,9 +25,13 @@ type GrassFieldOptions = {
   patchSoftness?: number
   perimeter: readonly LandrushPoint2[]
   planeSize: number
+  profileMeasure?: GrassFieldProfileMeasure
+  profileScope?: string
   resolution?: number
   roads: readonly LandrushRoadSegment[]
 }
+
+type GrassFieldProfileMeasure = <T>(id: string, callback: () => T) => T
 
 export type GrassFieldSample = {
   color: readonly [number, number, number]
@@ -54,18 +58,28 @@ export type GrassFieldTextureData = {
 }
 
 export function createGrassFieldTexture(options: GrassFieldOptions) {
-  return createGrassFieldTextureFromData(createGrassFieldData(options))
+  const profileScope = options.profileScope ?? 'setup.grass.field-texture'
+  const data = measure(options.profileMeasure, `${profileScope}.data.total`, () =>
+    createGrassFieldData(options, profileScope),
+  )
+  return createGrassFieldTextureFromData(data, options.profileMeasure, profileScope)
 }
 
-export function createGrassFieldTextureFromData(data: GrassFieldTextureData) {
-  const texture = new DataTexture(data.bytes, data.resolution, data.resolution, RGBAFormat)
-  texture.flipY = true
-  texture.magFilter = LinearFilter
-  texture.minFilter = LinearFilter
-  texture.wrapS = ClampToEdgeWrapping
-  texture.wrapT = ClampToEdgeWrapping
-  texture.needsUpdate = true
-  return { stats: data.stats, texture }
+export function createGrassFieldTextureFromData(
+  data: GrassFieldTextureData,
+  profileMeasure?: GrassFieldProfileMeasure,
+  profileScope = 'setup.grass.field-texture',
+) {
+  return measure(profileMeasure, `${profileScope}.texture.create-data-texture`, () => {
+    const texture = new DataTexture(data.bytes, data.resolution, data.resolution, RGBAFormat)
+    texture.flipY = true
+    texture.magFilter = LinearFilter
+    texture.minFilter = LinearFilter
+    texture.wrapS = ClampToEdgeWrapping
+    texture.wrapT = ClampToEdgeWrapping
+    texture.needsUpdate = true
+    return { stats: data.stats, texture }
+  })
 }
 
 export function measureGrassFieldDistribution(
@@ -76,19 +90,27 @@ export function measureGrassFieldDistribution(
   return createGrassFieldData({ perimeter, planeSize, roads }).stats
 }
 
-function createGrassFieldData({
-  alphaMode = 'density',
-  density,
-  edgeFadeMeters,
-  patchSize,
-  patchSoftness,
-  perimeter,
-  planeSize,
-  resolution,
-  roads,
-}: GrassFieldOptions) {
+function createGrassFieldData(
+  {
+    alphaMode = 'density',
+    density,
+    edgeFadeMeters,
+    patchSize,
+    patchSoftness,
+    perimeter,
+    planeSize,
+    profileMeasure,
+    resolution,
+    roads,
+  }: GrassFieldOptions,
+  profileScope = 'setup.grass.field-texture',
+) {
   const fieldResolution = resolution ?? GRASS_FIELD_RESOLUTION
-  const bytes = new Uint8Array(fieldResolution * fieldResolution * 4)
+  const bytes = measure(
+    profileMeasure,
+    `${profileScope}.data.allocate-bytes`,
+    () => new Uint8Array(fieldResolution * fieldResolution * 4),
+  )
   const counts = [0, 0, 0, 0]
   let dense = 0
   let insideCount = 0
@@ -97,56 +119,74 @@ function createGrassFieldData({
   let roadClearanceFailures = 0
   let shoreDensity = 0
   let shoreSamples = 0
-  const openPerimeter = openRing(perimeter)
+  const openPerimeter = measure(profileMeasure, `${profileScope}.data.open-perimeter`, () =>
+    openRing(perimeter),
+  )
+  const patchOptions = measure(
+    profileMeasure,
+    `${profileScope}.data.resolve-patch-options`,
+    () => ({
+      density: density ?? 0.82,
+      edgeFadeMeters: edgeFadeMeters ?? 8.4,
+      patchSize: patchSize ?? 24,
+      patchSoftness: patchSoftness ?? 0.18,
+    }),
+  )
+  const rowBlockSize = 1
 
-  for (let y = 0; y < fieldResolution; y += 1) {
-    for (let x = 0; x < fieldResolution; x += 1) {
-      const world = {
-        x: (x / (fieldResolution - 1) - 0.5) * planeSize,
-        z: (y / (fieldResolution - 1) - 0.5) * planeSize,
-      }
-      const index = (y * fieldResolution + x) * 4
-      const sample = sampleGrassFieldPoint(world, openPerimeter, roads, {
-        density: density ?? 0.82,
-        edgeFadeMeters: edgeFadeMeters ?? 8.4,
-        patchSize: patchSize ?? 24,
-        patchSoftness: patchSoftness ?? 0.18,
+  measure(profileMeasure, `${profileScope}.data.sample-pixels`, () => {
+    for (let rowStart = 0; rowStart < fieldResolution; rowStart += rowBlockSize) {
+      const rowEnd = Math.min(fieldResolution, rowStart + rowBlockSize)
+      measure(profileMeasure, `${profileScope}.data.sample-row-block`, () => {
+        for (let y = rowStart; y < rowEnd; y += 1) {
+          for (let x = 0; x < fieldResolution; x += 1) {
+            const world = {
+              x: (x / (fieldResolution - 1) - 0.5) * planeSize,
+              z: (y / (fieldResolution - 1) - 0.5) * planeSize,
+            }
+            const index = (y * fieldResolution + x) * 4
+            const sample = sampleGrassFieldPoint(world, openPerimeter, roads, patchOptions)
+            if (!sample) continue
+
+            bytes[index] = byte(sample.color[0] / 255)
+            bytes[index + 1] = byte(sample.color[1] / 255)
+            bytes[index + 2] = byte(sample.color[2] / 255)
+            bytes[index + 3] =
+              alphaMode === 'surface' ? 255 : byte(smoothstep(0.08, 0.7, sample.density))
+            counts[sample.colorIndex] = (counts[sample.colorIndex] ?? 0) + 1
+            insideCount += 1
+            if (sample.density > 0.48) dense += 1
+            if (sample.roadDistance < 0.02 && sample.density > 0.08) roadClearanceFailures += 1
+            if (sample.shoreDistance < 5) {
+              shoreDensity += sample.density
+              shoreSamples += 1
+            } else if (sample.shoreDistance > 15) {
+              interiorDensity += sample.density
+              interiorSamples += 1
+            }
+          }
+        }
       })
-      if (!sample) continue
-
-      bytes[index] = byte(sample.color[0] / 255)
-      bytes[index + 1] = byte(sample.color[1] / 255)
-      bytes[index + 2] = byte(sample.color[2] / 255)
-      bytes[index + 3] = alphaMode === 'surface' ? 255 : byte(smoothstep(0.08, 0.7, sample.density))
-      counts[sample.colorIndex] = (counts[sample.colorIndex] ?? 0) + 1
-      insideCount += 1
-      if (sample.density > 0.48) dense += 1
-      if (sample.roadDistance < 0.02 && sample.density > 0.08) roadClearanceFailures += 1
-      if (sample.shoreDistance < 5) {
-        shoreDensity += sample.density
-        shoreSamples += 1
-      } else if (sample.shoreDistance > 15) {
-        interiorDensity += sample.density
-        interiorSamples += 1
-      }
     }
-  }
+  })
 
-  const shares = counts.map((count) => (insideCount > 0 ? count / insideCount : 0))
-  return {
-    bytes,
-    resolution: fieldResolution,
-    stats: {
-      activeColorCount: shares.filter((share) => share > 0.02).length,
-      densityCoverage: round(insideCount > 0 ? dense / insideCount : 0, 3),
-      regionBalanceMin: round(Math.min(...shares), 3),
-      roadClearancePass: roadClearanceFailures === 0,
-      shoreFadePass:
-        shoreSamples > 0 &&
-        interiorSamples > 0 &&
-        shoreDensity / shoreSamples < (interiorDensity / interiorSamples) * 0.72,
-    },
-  }
+  return measure(profileMeasure, `${profileScope}.data.finalize-stats`, () => {
+    const shares = counts.map((count) => (insideCount > 0 ? count / insideCount : 0))
+    return {
+      bytes,
+      resolution: fieldResolution,
+      stats: {
+        activeColorCount: shares.filter((share) => share > 0.02).length,
+        densityCoverage: round(insideCount > 0 ? dense / insideCount : 0, 3),
+        regionBalanceMin: round(Math.min(...shares), 3),
+        roadClearancePass: roadClearanceFailures === 0,
+        shoreFadePass:
+          shoreSamples > 0 &&
+          interiorSamples > 0 &&
+          shoreDensity / shoreSamples < (interiorDensity / interiorSamples) * 0.72,
+      },
+    }
+  })
 }
 
 export function sampleGrassFieldPoint(
@@ -425,4 +465,12 @@ function byte(value: number) {
 function round(value: number, digits = 2) {
   const scale = 10 ** digits
   return Math.round(value * scale) / scale
+}
+
+function measure<T>(
+  profileMeasure: GrassFieldProfileMeasure | undefined,
+  id: string,
+  callback: () => T,
+): T {
+  return profileMeasure ? profileMeasure(id, callback) : callback()
 }
