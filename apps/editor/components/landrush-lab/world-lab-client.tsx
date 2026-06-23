@@ -1,6 +1,6 @@
 'use client'
 
-import { RotateCcw, SlidersHorizontal, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
@@ -19,10 +19,11 @@ import {
 } from './parcel-streets'
 import { type ParcelOverlayOptions, ParcelsLandLayers } from './parcels-layers'
 import { measureParcelsLab, parcelsMetricGates } from './parcels-metrics'
-import { WATER_FIELD_RESOLUTION } from './water-field-texture'
+import { WATER_FIELD_RESOLUTION, type WaterFieldParameters } from './water-field-texture'
 import {
   generateWaterLabIsland,
   WATER_LAB_ISLAND_SLIDERS as ISLAND_SLIDERS,
+  type IslandElevationParameters,
   WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
   WATER_LAB_DEFAULT_FIELD_PARAMETERS,
   WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
@@ -58,6 +59,34 @@ type StreetLabParameters = {
   loopiness: number
   roadWidthMeters: number
 }
+
+type ElevationSliderKey = keyof IslandElevationParameters
+type FieldSliderKey = keyof WaterFieldParameters
+type MaterialSliderKey =
+  | 'ripplesRatio'
+  | 'ripplesSlopeFrequency'
+  | 'ripplesBreakupEnd'
+  | 'ripplesBreakupFrequency'
+  | 'ripplesBreakupSize'
+  | 'ripplesBreakupStart'
+  | 'ripplesNoiseFrequency'
+  | 'ripplesNoiseOffset'
+  | 'ripplesNoiseStrength'
+  | 'ripplesReachEnd'
+  | 'ripplesReachStart'
+  | 'shoreEdge'
+  | 'windStrength'
+  | 'windTimeFrequency'
+
+type WorldTuningGroupId =
+  | 'grass'
+  | 'island'
+  | 'parcelHint'
+  | 'parcels'
+  | 'streets'
+  | 'waterAreas'
+  | 'waterEdge'
+  | 'waterRipples'
 
 const WORLD_GRASS_TUNING = {
   ...DEFAULT_GRASS_BLADE_TUNING,
@@ -118,6 +147,77 @@ const STREET_SLIDERS = [
   { key: 'loopiness', label: 'extra links', max: 0.8, min: 0, step: 0.02 },
 ] satisfies readonly LabSliderConfig<keyof StreetLabParameters>[]
 
+const FIELD_SLIDERS = [
+  { key: 'depthContourOffsetMeters', label: 'depth contour offset', max: 12, min: -6, step: 0.1 },
+  {
+    key: 'depthContourVariationMeters',
+    label: 'depth contour variation',
+    max: 14,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'depthContourNoiseFrequency',
+    label: 'depth contour scale',
+    max: 0.18,
+    min: 0.005,
+    step: 0.005,
+  },
+  {
+    key: 'depthContourCollapseMeters',
+    label: 'depth contour collapse',
+    max: 12,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'depthContourCollapseScale',
+    label: 'collapse pocket size',
+    max: 1.4,
+    min: 0.15,
+    step: 0.05,
+  },
+  { key: 'depthReach', label: 'depth reach', max: 70, min: 4, step: 1 },
+  { key: 'depthExponent', label: 'depth curve', max: 2, min: 0.45, step: 0.01 },
+  { key: 'depthNoiseStrength', label: 'field noise', max: 0.14, min: 0, step: 0.001 },
+  { key: 'depthNoiseFrequency', label: 'field noise size', max: 0.16, min: 0.001, step: 0.001 },
+  { key: 'shoreBandMeters', label: 'shore width', max: 10, min: 0, step: 0.05 },
+  { key: 'shoreFeatherMeters', label: 'shore feather', max: 4, min: 0.02, step: 0.02 },
+  { key: 'shoreVariationMeters', label: 'shore variation', max: 5, min: 0, step: 0.05 },
+  { key: 'shoreNoiseFrequency', label: 'shore variation size', max: 0.35, min: 0.002, step: 0.002 },
+] satisfies readonly LabSliderConfig<FieldSliderKey>[]
+
+const ELEVATION_SLIDERS = [
+  { key: 'edgeLiftMeters', label: 'edge lift', max: 6, min: 0, step: 0.05 },
+  { key: 'outerContourMeters', label: 'outside edge', max: 14, min: 0, step: 0.25 },
+  { key: 'innerContourMeters', label: 'inside edge', max: 32, min: 1, step: 0.25 },
+  { key: 'contourVariationMeters', label: 'edge variation', max: 10, min: 0, step: 0.25 },
+  { key: 'contourNoiseFrequency', label: 'edge variation size', max: 0.2, min: 0.005, step: 0.005 },
+  { key: 'cliffBandMergeThresholdMeters', label: 'band merge', max: 32, min: 0, step: 0.01 },
+  { key: 'cliffBlockDepthMinMeters', label: 'depth out min', max: 18, min: 0, step: 0.05 },
+  { key: 'cliffBlockDepthMaxMeters', label: 'depth out max', max: 18, min: 0, step: 0.05 },
+  { key: 'cliffContrast', label: 'cliff contrast', max: 1, min: 0, step: 0.01 },
+  { key: 'cliffToneVariation', label: 'tone variation', max: 1, min: 0, step: 0.01 },
+  { key: 'cliffColorAverageRatio', label: 'color average', max: 1, min: 0, step: 0.01 },
+] satisfies readonly LabSliderConfig<ElevationSliderKey>[]
+
+const MATERIAL_SLIDERS = [
+  { key: 'ripplesRatio', label: 'ripple amount', max: 1, min: 0, step: 0.01 },
+  { key: 'ripplesSlopeFrequency', label: 'ripple count', max: 40, min: 1, step: 0.1 },
+  { key: 'ripplesNoiseStrength', label: 'ripple noise amount', max: 1, min: 0, step: 0.01 },
+  { key: 'ripplesNoiseFrequency', label: 'ripple noise size', max: 0.7, min: 0, step: 0.005 },
+  { key: 'ripplesNoiseOffset', label: 'ripple breakup', max: 1.5, min: 0.04, step: 0.005 },
+  { key: 'ripplesBreakupStart', label: 'breakup start', max: 1, min: 0, step: 0.01 },
+  { key: 'ripplesBreakupEnd', label: 'breakup full', max: 1, min: 0.05, step: 0.01 },
+  { key: 'ripplesBreakupFrequency', label: 'break spacing', max: 0.45, min: 0.005, step: 0.005 },
+  { key: 'ripplesBreakupSize', label: 'break size', max: 0.95, min: 0, step: 0.01 },
+  { key: 'ripplesReachStart', label: 'ripple near', max: 0.6, min: 0, step: 0.01 },
+  { key: 'ripplesReachEnd', label: 'ripple far', max: 1, min: 0.05, step: 0.01 },
+  { key: 'shoreEdge', label: 'shore line', max: 0.55, min: 0.005, step: 0.005 },
+  { key: 'windStrength', label: 'wind strength', max: 1.6, min: 0, step: 0.01 },
+  { key: 'windTimeFrequency', label: 'wind speed', max: 0.6, min: 0, step: 0.005 },
+] satisfies readonly LabSliderConfig<MaterialSliderKey>[]
+
 type LabSliderConfig<Key extends string> = {
   key: Key
   label: string
@@ -129,18 +229,30 @@ type LabSliderConfig<Key extends string> = {
 export function WorldLabClient() {
   const searchParams = useSearchParams()
   const preset = getWaterViewPreset(searchParams.get('view'))
-  const clean = searchParams.get('clean') === '1'
   const debug = searchParams.get('debugLandrush') === '1'
   const debugWaterLayer = searchParams.get('debugWaterLayer') === 'shoreline' ? 'shoreline' : null
   const [showTunePanel, setShowTunePanel] = useState(() => searchParams.get('v') !== 'clean')
   const [showParcelHints, setShowParcelHints] = useState(() => searchParams.get('parcels') !== '0')
   const [showStreets, setShowStreets] = useState(() => searchParams.get('streets') !== '0')
+  const [showDepthReference, setShowDepthReference] = useState(false)
   const [frameP95, setFrameP95] = useState<number | null>(null)
   const [allocation, setAllocation] = useState<ParcelAllocationResult | null>(null)
   const [streetNetwork, setStreetNetwork] = useState<ParcelStreetNetwork | null>(null)
+  const [terrainFieldResolution, setTerrainFieldResolution] = useState(WATER_FIELD_RESOLUTION)
   const [islandParameters, setIslandParameters] = useState<WaterLabIslandParameters>(() => ({
     ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
   }))
+  const [fieldParameters, setFieldParameters] = useState<WaterFieldParameters>(() => ({
+    ...WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+  }))
+  const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
+    ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
+  }))
+  const [materialParameters, setMaterialParameters] = useState<LandrushWaterEffectParameters>(
+    () => ({
+      ...LANDRUSH_WATER_EFFECT_PARAMETERS,
+    }),
+  )
   const [grassTuning, setGrassTuning] = useState<GrassBladeTuning>(() => ({
     ...WORLD_GRASS_TUNING,
   }))
@@ -158,6 +270,9 @@ export function WorldLabClient() {
     [grassTuning],
   )
   const renderIslandParameters = useSettledRenderValue(islandParameters, 320)
+  const renderFieldParameters = useSettledRenderValue(fieldParameters, 160)
+  const renderElevationParameters = useSettledRenderValue(elevationParameters, 160)
+  const renderMaterialParameters = useSettledRenderValue(materialParameters, 120)
   const renderGrassTuning = useSettledRenderValue(resolvedGrassTuning, 260)
   const renderParcelParameters = useSettledRenderValue(parcelParameters, 160)
   const renderParcelHintParameters = useSettledRenderValue(parcelHintParameters, 120)
@@ -199,10 +314,10 @@ export function WorldLabClient() {
       measureWaterLab(
         island,
         WATER_PLANE_SIZE,
-        LANDRUSH_WATER_EFFECT_PARAMETERS,
-        WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+        renderMaterialParameters,
+        renderFieldParameters,
       ),
-    [island],
+    [island, renderFieldParameters, renderMaterialParameters],
   )
   const parcelMetrics = useMemo(
     () => measureParcelsLab(allocation, parcelOptions),
@@ -297,6 +412,7 @@ export function WorldLabClient() {
         seed: island.seed,
       },
       parcels: {
+        gates: parcelGates,
         hints: showParcelHints,
         metrics: parcelMetrics,
         parameters: parcelParameters,
@@ -316,11 +432,12 @@ export function WorldLabClient() {
       summary:
         'Integrated Landrush debug lab: water, grass and Bruno trees with procedural parcels and edge roads.',
       water: {
-        elevation: WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
-        field: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
-        material: LANDRUSH_WATER_EFFECT_PARAMETERS,
+        elevation: elevationParameters,
+        field: fieldParameters,
+        gates: waterGates,
+        material: materialParameters,
         metrics: waterMetrics,
-        terrainFieldResolution: WATER_FIELD_RESOLUTION,
+        terrainFieldResolution,
       },
     }
     return () => {
@@ -329,23 +446,34 @@ export function WorldLabClient() {
   }, [
     allocation,
     debug,
+    elevationParameters,
+    fieldParameters,
     frameP95,
     grassRoads.length,
     island,
     islandParameters,
+    materialParameters,
     parcelMetrics,
     parcelParameters,
+    parcelGates,
     preset.id,
     resolvedGrassTuning,
     showParcelHints,
     showStreets,
     streetNetwork,
     streetParameters,
+    terrainFieldResolution,
+    waterGates,
     waterMetrics,
   ])
 
   const resetParameters = () => {
+    setShowDepthReference(false)
+    setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
+    setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
+    setElevationParameters({ ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS })
+    setMaterialParameters({ ...LANDRUSH_WATER_EFFECT_PARAMETERS })
     setGrassTuning({ ...WORLD_GRASS_TUNING })
     setParcelParameters({ ...DEFAULT_PARCEL_PARAMETERS })
     setParcelHintParameters({ ...DEFAULT_PARCEL_HINT_PARAMETERS })
@@ -358,62 +486,40 @@ export function WorldLabClient() {
     <main className="relative h-screen w-screen overflow-hidden bg-[#164a77]">
       <WaterScene
         debugLayer={debugWaterLayer}
-        elevationParameters={WATER_LAB_DEFAULT_ELEVATION_PARAMETERS}
-        fieldParameters={WATER_LAB_DEFAULT_FIELD_PARAMETERS}
+        elevationParameters={renderElevationParameters}
+        fieldParameters={renderFieldParameters}
         island={island}
-        materialParameters={LANDRUSH_WATER_EFFECT_PARAMETERS as LandrushWaterEffectParameters}
+        materialParameters={renderMaterialParameters}
         preset={preset}
         renderLandOverlay={renderLandOverlay}
-        showDepthReference={false}
-        terrainFieldResolution={WATER_FIELD_RESOLUTION}
+        showDepthReference={showDepthReference}
+        terrainFieldResolution={terrainFieldResolution}
         waterFieldIsland={island}
       />
-      {!clean ? (
-        <section className="pointer-events-none absolute left-5 top-5 max-w-[420px] rounded-md border border-white/25 bg-slate-950/72 p-4 text-white shadow-xl backdrop-blur">
-          <div className="text-sm font-semibold tracking-wide">Landrush world lab</div>
-          <div className="mt-1 text-xs text-white/72">{preset.label}</div>
-          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <dt className="text-white/58">water ratio</dt>
-            <dd>{waterMetrics.waterPlaneRatio}</dd>
-            <dt className="text-white/58">grass density</dt>
-            <dd>{resolvedGrassTuning.density.toFixed(2)}</dd>
-            <dt className="text-white/58">trees</dt>
-            <dd>field driven</dd>
-            <dt className="text-white/58">parcels</dt>
-            <dd>{parcelMetrics.parcelCount}</dd>
-            <dt className="text-white/58">streets</dt>
-            <dd>{streetNetwork?.segments.length ?? 0}</dd>
-            <dt className="text-white/58">street access</dt>
-            <dd>
-              {streetNetwork?.connectedParcelCount ?? 0}/{parcelMetrics.parcelCount}
-            </dd>
-            <dt className="text-white/58">road graph</dt>
-            <dd>{streetNetwork?.roadConnected ? 'yes' : 'no'}</dd>
-            <dt className="text-white/58">frame p95</dt>
-            <dd>{frameP95 ?? 'measuring'}ms</dd>
-          </dl>
-          <div className="mt-3 grid gap-1 text-xs">
-            {[...waterGates.slice(0, 3), ...parcelGates.slice(0, 4)].map((gate) => (
-              <div className="flex items-center justify-between gap-3" key={gate.label}>
-                <span className="text-white/70">{gate.label}</span>
-                <span className={gate.pass ? 'text-emerald-300' : 'text-rose-300'}>
-                  {gate.value}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
       {showTunePanel ? (
         <WorldTunePanel
+          elevationParameters={elevationParameters}
+          fieldParameters={fieldParameters}
           grassTuning={resolvedGrassTuning}
           islandParameters={islandParameters}
+          materialParameters={materialParameters}
           onClose={() => setShowTunePanel(false)}
+          onElevationChange={(key, value) =>
+            setElevationParameters((current) => ({ ...current, [key]: value }))
+          }
+          onFieldChange={(key, value) =>
+            setFieldParameters((current) => ({ ...current, [key]: value }))
+          }
           onGrassChange={(key, value) =>
             setGrassTuning((current) => ({ ...current, [key]: value }))
           }
           onIslandChange={(key, value) =>
             setIslandParameters((current) => ({ ...current, [key]: value }))
+          }
+          onMaterialChange={(key, value) =>
+            setMaterialParameters(
+              (current) => ({ ...current, [key]: value }) as LandrushWaterEffectParameters,
+            )
           }
           onParcelChange={(key, value) =>
             setParcelParameters((current) => ({ ...current, [key]: value }))
@@ -426,12 +532,18 @@ export function WorldLabClient() {
             setStreetParameters((current) => ({ ...current, [key]: value }))
           }
           onToggleParcelHints={() => setShowParcelHints((current) => !current)}
+          onToggleDepthReference={() => setShowDepthReference((current) => !current)}
           onToggleStreets={() => setShowStreets((current) => !current)}
+          onTerrainFieldResolutionChange={(value) =>
+            setTerrainFieldResolution(Math.round(value))
+          }
           parcelHintParameters={parcelHintParameters}
           parcelParameters={parcelParameters}
+          showDepthReference={showDepthReference}
           showParcelHints={showParcelHints}
           showStreets={showStreets}
           streetParameters={streetParameters}
+          terrainFieldResolution={terrainFieldResolution}
         />
       ) : (
         <button
@@ -448,48 +560,91 @@ export function WorldLabClient() {
 }
 
 function WorldTunePanel({
+  elevationParameters,
+  fieldParameters,
   grassTuning,
   islandParameters,
+  materialParameters,
   onClose,
+  onElevationChange,
+  onFieldChange,
   onGrassChange,
   onIslandChange,
+  onMaterialChange,
   onParcelChange,
   onParcelHintChange,
   onReset,
   onStreetChange,
+  onTerrainFieldResolutionChange,
+  onToggleDepthReference,
   onToggleParcelHints,
   onToggleStreets,
   parcelHintParameters,
   parcelParameters,
+  showDepthReference,
   showParcelHints,
   showStreets,
   streetParameters,
+  terrainFieldResolution,
 }: {
+  elevationParameters: IslandElevationParameters
+  fieldParameters: WaterFieldParameters
   grassTuning: GrassBladeTuning
   islandParameters: WaterLabIslandParameters
+  materialParameters: LandrushWaterEffectParameters
   onClose: () => void
+  onElevationChange: (key: ElevationSliderKey, value: number) => void
+  onFieldChange: (key: FieldSliderKey, value: number) => void
   onGrassChange: (key: keyof GrassBladeTuning, value: number) => void
   onIslandChange: (key: keyof WaterLabIslandParameters, value: number) => void
+  onMaterialChange: (key: MaterialSliderKey, value: number) => void
   onParcelChange: (key: keyof ParcelLabParameters, value: number) => void
   onParcelHintChange: (key: keyof ParcelOverlayParameters, value: number) => void
   onReset: () => void
   onStreetChange: (key: keyof StreetLabParameters, value: number) => void
+  onTerrainFieldResolutionChange: (value: number) => void
+  onToggleDepthReference: () => void
   onToggleParcelHints: () => void
   onToggleStreets: () => void
   parcelHintParameters: ParcelOverlayParameters
   parcelParameters: ParcelLabParameters
+  showDepthReference: boolean
   showParcelHints: boolean
   showStreets: boolean
   streetParameters: StreetLabParameters
+  terrainFieldResolution: number
 }) {
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<WorldTuningGroupId, boolean>>({
+    grass: true,
+    island: true,
+    parcelHint: true,
+    parcels: true,
+    streets: true,
+    waterAreas: true,
+    waterEdge: true,
+    waterRipples: true,
+  })
+
+  const toggleGroup = (group: WorldTuningGroupId) => {
+    setCollapsedGroups((current) => ({ ...current, [group]: !current[group] }))
+  }
+
   return (
-    <section className="absolute right-5 top-5 max-h-[calc(100vh-2.5rem)] w-[min(360px,calc(100vw-2.5rem))] overflow-y-auto rounded-md border border-white/25 bg-slate-950/78 p-4 text-white shadow-xl backdrop-blur">
-      <div className="flex items-center justify-between gap-3">
+    <section className="absolute right-5 top-5 max-h-[calc(100vh-2.5rem)] w-[min(390px,calc(100vw-2.5rem))] overflow-y-auto rounded-md border border-white/25 bg-slate-950/78 p-4 text-white shadow-xl backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold tracking-wide">World tune</div>
           <div className="mt-0.5 text-[11px] text-white/54">water + grass + roads + parcels</div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            aria-pressed={showDepthReference}
+            className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
+            onClick={onToggleDepthReference}
+            type="button"
+          >
+            {showDepthReference ? 'hide contour' : 'contour'}
+          </button>
           <button
             aria-label="Toggle parcel hints"
             className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
@@ -524,67 +679,159 @@ function WorldTunePanel({
           </button>
         </div>
       </div>
-      <TuningGroup title="Island">
-        {ISLAND_SLIDERS.map(({ key, ...slider }) => (
+      <div className="mt-4 grid gap-3">
+        <TuningGroup
+          collapsed={collapsedGroups.island}
+          onToggle={() => toggleGroup('island')}
+          title="Water island"
+        >
+          {ISLAND_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onIslandChange(key, value)}
+              value={islandParameters[key]}
+            />
+          ))}
           <TuneSlider
-            key={key}
-            {...slider}
-            onChange={(value) => onIslandChange(key, value)}
-            value={islandParameters[key]}
+            label="field resolution"
+            max={WATER_FIELD_RESOLUTION}
+            min={128}
+            onChange={onTerrainFieldResolutionChange}
+            step={64}
+            value={terrainFieldResolution}
           />
-        ))}
-      </TuningGroup>
-      <TuningGroup title="Grass and trees">
-        {GRASS_SLIDERS.map(({ key, ...slider }) => (
-          <TuneSlider
-            key={key}
-            {...slider}
-            onChange={(value) => onGrassChange(key, value)}
-            value={grassTuning[key]}
-          />
-        ))}
-      </TuningGroup>
-      <TuningGroup title="Parcels">
-        {PARCEL_SLIDERS.map(({ key, ...slider }) => (
-          <TuneSlider
-            key={key}
-            {...slider}
-            onChange={(value) => onParcelChange(key, value)}
-            value={parcelParameters[key]}
-          />
-        ))}
-      </TuningGroup>
-      <TuningGroup title="Parcel hint">
-        {PARCEL_HINT_SLIDERS.map(({ key, ...slider }) => (
-          <TuneSlider
-            key={key}
-            {...slider}
-            onChange={(value) => onParcelHintChange(key, value)}
-            value={parcelHintParameters[key]}
-          />
-        ))}
-      </TuningGroup>
-      <TuningGroup title="Streets">
-        {STREET_SLIDERS.map(({ key, ...slider }) => (
-          <TuneSlider
-            key={key}
-            {...slider}
-            onChange={(value) => onStreetChange(key, value)}
-            value={streetParameters[key]}
-          />
-        ))}
-      </TuningGroup>
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.waterAreas}
+          onToggle={() => toggleGroup('waterAreas')}
+          title="Water areas"
+        >
+          {FIELD_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onFieldChange(key, value)}
+              value={fieldParameters[key]}
+            />
+          ))}
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.waterEdge}
+          onToggle={() => toggleGroup('waterEdge')}
+          title="Raised edge"
+        >
+          {ELEVATION_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onElevationChange(key, value)}
+              value={elevationParameters[key]}
+            />
+          ))}
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.waterRipples}
+          onToggle={() => toggleGroup('waterRipples')}
+          title="Water ripples"
+        >
+          {MATERIAL_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onMaterialChange(key, value)}
+              value={materialParameters[key]}
+            />
+          ))}
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.grass}
+          onToggle={() => toggleGroup('grass')}
+          title="Grass and trees"
+        >
+          {GRASS_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onGrassChange(key, value)}
+              value={grassTuning[key]}
+            />
+          ))}
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.parcels}
+          onToggle={() => toggleGroup('parcels')}
+          title="Parcels"
+        >
+          {PARCEL_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onParcelChange(key, value)}
+              value={parcelParameters[key]}
+            />
+          ))}
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.parcelHint}
+          onToggle={() => toggleGroup('parcelHint')}
+          title="Parcel hint"
+        >
+          {PARCEL_HINT_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onParcelHintChange(key, value)}
+              value={parcelHintParameters[key]}
+            />
+          ))}
+        </TuningGroup>
+        <TuningGroup
+          collapsed={collapsedGroups.streets}
+          onToggle={() => toggleGroup('streets')}
+          title="Streets"
+        >
+          {STREET_SLIDERS.map(({ key, ...slider }) => (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onStreetChange(key, value)}
+              value={streetParameters[key]}
+            />
+          ))}
+        </TuningGroup>
+      </div>
     </section>
   )
 }
 
-function TuningGroup({ children, title }: { children: React.ReactNode; title: string }) {
+function TuningGroup({
+  children,
+  collapsed,
+  onToggle,
+  title,
+}: {
+  children: React.ReactNode
+  collapsed: boolean
+  onToggle: () => void
+  title: string
+}) {
+  const ToggleIcon = collapsed ? ChevronRight : ChevronDown
+
   return (
-    <div className="mt-4 grid gap-2.5">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/46">
-        {title}
+    <div className="rounded border border-white/12 bg-white/[0.025]">
+      <button
+        aria-expanded={!collapsed}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-white/64 transition hover:text-white"
+        onClick={onToggle}
+        type="button"
+      >
+        <span>{title}</span>
+        <ToggleIcon aria-hidden className="size-3.5 shrink-0" />
+      </button>
+      <div className={collapsed ? 'hidden' : 'grid gap-3 border-white/10 border-t px-3 py-3'}>
+        {children}
       </div>
-      <div className="grid gap-3">{children}</div>
     </div>
   )
 }
@@ -608,7 +855,15 @@ function TuneSlider({
     <label className="grid gap-1 text-xs">
       <span className="flex items-center justify-between gap-3">
         <span className="text-white/70">{label}</span>
-        <span className="tabular-nums text-white/90">{formatTuningValue(value)}</span>
+        <input
+          className="h-6 w-20 rounded border border-white/18 bg-white/8 px-1.5 text-right font-mono text-[11px] text-white outline-none focus:border-lime-300/70"
+          max={max}
+          min={min}
+          onChange={(event) => onChange(Number(event.currentTarget.value))}
+          step={step}
+          type="number"
+          value={formatTuningValue(value, step)}
+        />
       </span>
       <input
         className="h-5 w-full accent-lime-300"
@@ -652,10 +907,12 @@ function nodeId(point: { x: number; z: number }) {
   return `${Math.round(point.x * 100)}-${Math.round(point.z * 100)}`
 }
 
-function formatTuningValue(value: number) {
+function formatTuningValue(value: number, step = 0.01) {
   if (!Number.isFinite(value)) return '--'
+  if (step < 0.005) return value.toFixed(3)
+  if (step < 1) return value.toFixed(2)
   if (Math.abs(value - Math.round(value)) < 0.001) return String(Math.round(value))
-  return value < 0.2 ? value.toFixed(3) : value.toFixed(2)
+  return String(Math.round(value))
 }
 
 function useSettledRenderValue<T>(value: T, settleMs: number) {
