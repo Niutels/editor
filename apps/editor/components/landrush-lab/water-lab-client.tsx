@@ -11,13 +11,21 @@ import {
   X,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { generateLandrushIsland } from '@/components/landrush/generator'
+import { useEffect, useMemo, useState } from 'react'
 import {
   WATER_FIELD_PREVIEW_RESOLUTION,
   WATER_FIELD_RESOLUTION,
   type WaterFieldParameters,
 } from './water-field-texture'
+import {
+  generateWaterLabIsland,
+  WATER_LAB_ISLAND_SLIDERS as ISLAND_SLIDERS,
+  type IslandElevationParameters,
+  WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
+  WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+  WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+  type WaterLabIslandParameters,
+} from './water-lab-parameters'
 import {
   LANDRUSH_WATER_EFFECT_PARAMETERS,
   type LandrushWaterEffectParameters,
@@ -33,44 +41,7 @@ declare global {
   }
 }
 
-const WATER_LAB_DEFAULT_FIELD_PARAMETERS = {
-  depthContourCollapseMeters: 10.3,
-  depthContourCollapseScale: 1.25,
-  depthContourNoiseFrequency: 0.1,
-  depthContourOffsetMeters: 3.2,
-  depthContourVariationMeters: 8.6,
-  depthExponent: 0.52,
-  depthNoiseFrequency: 0.03,
-  depthNoiseStrength: 0,
-  depthReach: 10,
-  edgeFadeDistance: 18,
-  shoreBandMeters: 0,
-  shoreFeatherMeters: 0.45,
-  shoreNoiseFrequency: 0.075,
-  shoreVariationMeters: 0.85,
-} satisfies WaterFieldParameters
-
 type CopyStatus = 'copied' | 'failed' | 'idle'
-
-type IslandGeneratorParameters = {
-  coast: number
-  detail: number
-  lobes: number
-  naturalness: number
-  size: number
-  variant: number
-}
-
-const WATER_LAB_DEFAULT_ISLAND_PARAMETERS = {
-  coast: 1,
-  detail: 128,
-  lobes: 1,
-  naturalness: 1,
-  size: 1,
-  variant: 0,
-} satisfies IslandGeneratorParameters
-
-const ISLAND_PREVIEW_SETTLE_MS = 180
 
 export function WaterLabClient() {
   const searchParams = useSearchParams()
@@ -82,40 +53,39 @@ export function WaterLabClient() {
   const [frameP95, setFrameP95] = useState<number | null>(null)
   const [showDepthReference, setShowDepthReference] = useState(false)
   const [showTunePanel, setShowTunePanel] = useState(true)
-  const [isIslandPreviewing, setIsIslandPreviewing] = useState(false)
-  const [islandParameters, setIslandParameters] = useState<IslandGeneratorParameters>(() => ({
+  const [hasUnappliedIslandChanges, setHasUnappliedIslandChanges] = useState(false)
+  const [previewResolution, setPreviewResolution] = useState(WATER_FIELD_PREVIEW_RESOLUTION)
+  const [islandParameters, setIslandParameters] = useState<WaterLabIslandParameters>(() => ({
     ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
   }))
+  const [visibleIslandParameters, setVisibleIslandParameters] = useState<WaterLabIslandParameters>(
+    () => ({
+      ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+    }),
+  )
+  const [waterFieldIslandParameters, setWaterFieldIslandParameters] =
+    useState<WaterLabIslandParameters>(() => ({
+      ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+    }))
+  const [terrainFieldResolution, setTerrainFieldResolution] = useState(WATER_FIELD_RESOLUTION)
   const [fieldParameters, setFieldParameters] = useState<WaterFieldParameters>(() => ({
     ...WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+  }))
+  const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
+    ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
   }))
   const [materialParameters, setMaterialParameters] = useState<LandrushWaterEffectParameters>(
     () => ({
       ...LANDRUSH_WATER_EFFECT_PARAMETERS,
     }),
   )
-  const islandPreviewTimeoutRef = useRef<number | null>(null)
-  const terrainFieldResolution = isIslandPreviewing
-    ? WATER_FIELD_PREVIEW_RESOLUTION
-    : WATER_FIELD_RESOLUTION
   const island = useMemo(
-    () =>
-      generateLandrushIsland({
-        seed:
-          islandParameters.variant === 0
-            ? 'mvp-loop-1-295'
-            : `mvp-loop-1-295:${islandParameters.variant}`,
-        shape: {
-          asymmetry: islandParameters.naturalness,
-          coast: islandParameters.coast,
-          lobes: islandParameters.lobes,
-          roughness: islandParameters.naturalness,
-        },
-        size: { width: 116 * islandParameters.size, depth: 116 * islandParameters.size },
-        perimeterPointCount: islandParameters.detail,
-        treeSpacing: 7.1,
-      }),
-    [islandParameters],
+    () => generateWaterLabIsland(visibleIslandParameters),
+    [visibleIslandParameters],
+  )
+  const waterFieldIsland = useMemo(
+    () => generateWaterLabIsland(waterFieldIslandParameters),
+    [waterFieldIslandParameters],
   )
   const metrics = useMemo(
     () => measureWaterLab(island, WATER_PLANE_SIZE, materialParameters, fieldParameters),
@@ -124,32 +94,55 @@ export function WaterLabClient() {
   const gates = useMemo(() => waterMetricGates(metrics), [metrics])
 
   const resetParameters = () => {
-    if (islandPreviewTimeoutRef.current !== null) {
-      window.clearTimeout(islandPreviewTimeoutRef.current)
-      islandPreviewTimeoutRef.current = null
-    }
-    setIsIslandPreviewing(false)
+    setHasUnappliedIslandChanges(false)
+    setPreviewResolution(WATER_FIELD_PREVIEW_RESOLUTION)
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
+    setVisibleIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
+    setWaterFieldIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
+    setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
     setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
+    setElevationParameters({ ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS })
     setMaterialParameters({ ...LANDRUSH_WATER_EFFECT_PARAMETERS })
   }
 
   const changeIslandParameter = (key: IslandSliderKey, value: number) => {
-    setIsIslandPreviewing(true)
-    setIslandParameters((current) => ({ ...current, [key]: value }))
+    const nextParameters = { ...islandParameters, [key]: value }
+    setIslandParameters(nextParameters)
 
-    if (islandPreviewTimeoutRef.current !== null) {
-      window.clearTimeout(islandPreviewTimeoutRef.current)
+    if (key === 'variant') {
+      setVisibleIslandParameters(nextParameters)
+      setWaterFieldIslandParameters(nextParameters)
+      setTerrainFieldResolution(previewResolution)
+      setHasUnappliedIslandChanges(false)
+    } else {
+      setVisibleIslandParameters((current) => ({ ...current, [key]: value }))
+      setHasUnappliedIslandChanges(true)
     }
-    islandPreviewTimeoutRef.current = window.setTimeout(() => {
-      setIsIslandPreviewing(false)
-      islandPreviewTimeoutRef.current = null
-    }, ISLAND_PREVIEW_SETTLE_MS)
+  }
+
+  const applyIslandWaterField = (resolution: number) => {
+    setVisibleIslandParameters({ ...islandParameters })
+    setWaterFieldIslandParameters({ ...islandParameters })
+    setTerrainFieldResolution(resolution)
+    setHasUnappliedIslandChanges(false)
   }
 
   const copyParameters = async () => {
     const snapshot = {
       island: Object.fromEntries(ISLAND_SLIDERS.map(({ key }) => [key, islandParameters[key]])),
+      preview: {
+        appliedIsland: Object.fromEntries(
+          ISLAND_SLIDERS.map(({ key }) => [key, waterFieldIslandParameters[key]]),
+        ),
+        resolution: previewResolution,
+        terrainFieldResolution,
+        visibleIsland: Object.fromEntries(
+          ISLAND_SLIDERS.map(({ key }) => [key, visibleIslandParameters[key]]),
+        ),
+      },
+      elevation: Object.fromEntries(
+        ELEVATION_SLIDERS.map(({ key }) => [key, elevationParameters[key]]),
+      ),
       field: Object.fromEntries(FIELD_SLIDERS.map(({ key }) => [key, fieldParameters[key]])),
       material: Object.fromEntries(
         MATERIAL_SLIDERS.map(({ key }) => [key, materialParameters[key]]),
@@ -192,24 +185,20 @@ export function WaterLabClient() {
   }, [])
 
   useEffect(() => {
-    return () => {
-      if (islandPreviewTimeoutRef.current !== null) {
-        window.clearTimeout(islandPreviewTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
     if (!debug) return
     window.__LANDRUSH_WATER_LAB__ = {
       frameP95,
       gates,
       metrics,
       parameters: {
+        elevation: elevationParameters,
         field: fieldParameters,
         island: islandParameters,
         material: materialParameters,
+        previewResolution,
         terrainFieldResolution,
+        visibleIsland: visibleIslandParameters,
+        waterFieldIsland: waterFieldIslandParameters,
       },
       preset: preset.id,
       reference: WATER_REFERENCE,
@@ -221,6 +210,7 @@ export function WaterLabClient() {
     }
   }, [
     debug,
+    elevationParameters,
     fieldParameters,
     frameP95,
     gates,
@@ -229,11 +219,15 @@ export function WaterLabClient() {
     materialParameters,
     metrics,
     preset.id,
+    previewResolution,
+    visibleIslandParameters,
+    waterFieldIslandParameters,
   ])
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#164a77]">
       <WaterScene
+        elevationParameters={elevationParameters}
         fieldParameters={fieldParameters}
         debugLayer={debugWaterLayer}
         island={island}
@@ -241,6 +235,7 @@ export function WaterLabClient() {
         preset={preset}
         terrainFieldResolution={terrainFieldResolution}
         showDepthReference={showDepthReference}
+        waterFieldIsland={waterFieldIsland}
       />
       {!clean ? (
         <section className="pointer-events-none absolute left-5 top-5 max-w-[390px] rounded-md border border-white/25 bg-slate-950/72 p-4 text-white shadow-xl backdrop-blur">
@@ -278,8 +273,12 @@ export function WaterLabClient() {
           materialParameters={materialParameters}
           onClose={() => setShowTunePanel(false)}
           onCopy={() => void copyParameters()}
+          elevationParameters={elevationParameters}
           onFieldChange={(key, value) =>
             setFieldParameters((current) => ({ ...current, [key]: value }))
+          }
+          onElevationChange={(key, value) =>
+            setElevationParameters((current) => ({ ...current, [key]: value }))
           }
           onIslandChange={changeIslandParameter}
           onMaterialChange={(key, value) =>
@@ -287,9 +286,18 @@ export function WaterLabClient() {
               (current) => ({ ...current, [key]: value }) as LandrushWaterEffectParameters,
             )
           }
+          onApplyFullResolution={() => applyIslandWaterField(WATER_FIELD_RESOLUTION)}
+          onApplyPreviewResolution={() => applyIslandWaterField(previewResolution)}
+          onPreviewResolutionChange={(value) => {
+            setPreviewResolution(Math.round(value))
+            setHasUnappliedIslandChanges(true)
+          }}
           onReset={resetParameters}
           onToggleDepthReference={() => setShowDepthReference((current) => !current)}
+          previewResolution={previewResolution}
           showDepthReference={showDepthReference}
+          hasUnappliedIslandChanges={hasUnappliedIslandChanges}
+          usingPreviewResolution={terrainFieldResolution !== WATER_FIELD_RESOLUTION}
         />
       ) : (
         <button
@@ -305,9 +313,10 @@ export function WaterLabClient() {
   )
 }
 
-type IslandSliderKey = keyof IslandGeneratorParameters
+type IslandSliderKey = keyof WaterLabIslandParameters
+type ElevationSliderKey = keyof IslandElevationParameters
 type FieldSliderKey = keyof WaterFieldParameters
-type TuningGroupId = 'depth' | 'island' | 'ripples'
+type TuningGroupId = 'areas' | 'island' | 'ripples'
 type MaterialSliderKey =
   | 'ripplesRatio'
   | 'ripplesSlopeFrequency'
@@ -332,14 +341,19 @@ type SliderConfig<Key extends string> = {
   step: number
 }
 
-const ISLAND_SLIDERS = [
-  { key: 'variant', label: 'shape variant', max: 50, min: 0, step: 1 },
-  { key: 'size', label: 'island size', max: 1.25, min: 0.75, step: 0.01 },
-  { key: 'detail', label: 'outline detail', max: 128, min: 32, step: 4 },
-  { key: 'lobes', label: 'big lobes', max: 1.8, min: 0, step: 0.05 },
-  { key: 'coast', label: 'coast cuts', max: 2, min: 0, step: 0.05 },
-  { key: 'naturalness', label: 'rough asymmetry', max: 1.8, min: 0, step: 0.05 },
-] satisfies readonly SliderConfig<IslandSliderKey>[]
+const ELEVATION_SLIDERS = [
+  { key: 'edgeLiftMeters', label: 'edge lift', max: 6, min: 0, step: 0.05 },
+  { key: 'outerContourMeters', label: 'outside edge', max: 14, min: 0, step: 0.25 },
+  { key: 'innerContourMeters', label: 'inside edge', max: 32, min: 1, step: 0.25 },
+  { key: 'contourVariationMeters', label: 'edge variation', max: 10, min: 0, step: 0.25 },
+  { key: 'contourNoiseFrequency', label: 'edge variation size', max: 0.2, min: 0.005, step: 0.005 },
+  { key: 'cliffBandMergeThresholdMeters', label: 'band merge', max: 32, min: 0, step: 0.01 },
+  { key: 'cliffBlockDepthMinMeters', label: 'depth out min', max: 18, min: 0, step: 0.05 },
+  { key: 'cliffBlockDepthMaxMeters', label: 'depth out max', max: 18, min: 0, step: 0.05 },
+  { key: 'cliffContrast', label: 'cliff contrast', max: 1, min: 0, step: 0.01 },
+  { key: 'cliffToneVariation', label: 'tone variation', max: 1, min: 0, step: 0.01 },
+  { key: 'cliffColorAverageRatio', label: 'color average', max: 1, min: 0, step: 0.01 },
+] satisfies readonly SliderConfig<ElevationSliderKey>[]
 
 const FIELD_SLIDERS = [
   { key: 'depthContourOffsetMeters', label: 'depth contour offset', max: 12, min: -6, step: 0.1 },
@@ -400,37 +414,53 @@ const MATERIAL_SLIDERS = [
 
 function WaterTunePanel({
   copyStatus,
+  elevationParameters,
   fieldParameters,
   islandParameters,
   materialParameters,
   onClose,
   onCopy,
+  onElevationChange,
   onFieldChange,
   onIslandChange,
   onMaterialChange,
+  onApplyFullResolution,
+  onApplyPreviewResolution,
+  onPreviewResolutionChange,
   onReset,
   onToggleDepthReference,
+  previewResolution,
   showDepthReference,
+  hasUnappliedIslandChanges,
+  usingPreviewResolution,
 }: {
   copyStatus: CopyStatus
+  elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
-  islandParameters: IslandGeneratorParameters
+  islandParameters: WaterLabIslandParameters
   materialParameters: LandrushWaterEffectParameters
   onClose: () => void
   onCopy: () => void
+  onElevationChange: (key: ElevationSliderKey, value: number) => void
   onFieldChange: (key: FieldSliderKey, value: number) => void
   onIslandChange: (key: IslandSliderKey, value: number) => void
   onMaterialChange: (key: MaterialSliderKey, value: number) => void
+  onApplyFullResolution: () => void
+  onApplyPreviewResolution: () => void
+  onPreviewResolutionChange: (value: number) => void
   onReset: () => void
   onToggleDepthReference: () => void
+  previewResolution: number
   showDepthReference: boolean
+  hasUnappliedIslandChanges: boolean
+  usingPreviewResolution: boolean
 }) {
   const CopyIcon = copyStatus === 'copied' ? Check : Copy
   const DepthReferenceIcon = showDepthReference ? EyeOff : Eye
   const copyLabel = copyStatus === 'copied' ? 'Copied' : copyStatus === 'failed' ? 'Failed' : 'Copy'
   const depthReferenceLabel = showDepthReference ? 'Hide contour' : 'View contour'
   const [collapsedGroups, setCollapsedGroups] = useState<Record<TuningGroupId, boolean>>({
-    depth: false,
+    areas: false,
     island: false,
     ripples: false,
   })
@@ -475,6 +505,27 @@ function WaterTunePanel({
 
       <div className="mt-4 grid gap-4">
         <TuningGroup
+          action={
+            <div className="flex items-center gap-1.5">
+              <button
+                className="inline-flex items-center gap-1.5 rounded border border-white/20 px-2 py-0.5 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white disabled:cursor-default disabled:opacity-45 disabled:hover:border-white/20 disabled:hover:text-white/70"
+                disabled={!hasUnappliedIslandChanges}
+                onClick={onApplyPreviewResolution}
+                type="button"
+              >
+                Preview
+              </button>
+              <button
+                className="inline-flex items-center gap-1.5 rounded border border-white/20 px-2 py-0.5 text-[11px] text-white/70 transition hover:border-white/40 hover:text-white disabled:cursor-default disabled:opacity-45 disabled:hover:border-white/20 disabled:hover:text-white/70"
+                disabled={!hasUnappliedIslandChanges && !usingPreviewResolution}
+                onClick={onApplyFullResolution}
+                type="button"
+              >
+                <Check aria-hidden className="size-3.5" />
+                Full
+              </button>
+            </div>
+          }
           collapsed={collapsedGroups.island}
           onToggle={() => toggleGroup('island')}
           title="Island shape"
@@ -487,6 +538,14 @@ function WaterTunePanel({
               value={islandParameters[key]}
             />
           ))}
+          <WaterSlider
+            label="preview resolution"
+            max={WATER_FIELD_RESOLUTION}
+            min={128}
+            onChange={onPreviewResolutionChange}
+            step={64}
+            value={previewResolution}
+          />
         </TuningGroup>
 
         <TuningGroup
@@ -501,18 +560,30 @@ function WaterTunePanel({
               {depthReferenceLabel}
             </button>
           }
-          collapsed={collapsedGroups.depth}
-          onToggle={() => toggleGroup('depth')}
-          title="Depth field"
+          collapsed={collapsedGroups.areas}
+          onToggle={() => toggleGroup('areas')}
+          title="Areas"
         >
-          {FIELD_SLIDERS.map(({ key, ...slider }) => (
-            <WaterSlider
-              key={key}
-              {...slider}
-              onChange={(value) => onFieldChange(key, value)}
-              value={fieldParameters[key]}
-            />
-          ))}
+          <TuningSubgroup title="Beach / depth contour">
+            {FIELD_SLIDERS.map(({ key, ...slider }) => (
+              <WaterSlider
+                key={key}
+                {...slider}
+                onChange={(value) => onFieldChange(key, value)}
+                value={fieldParameters[key]}
+              />
+            ))}
+          </TuningSubgroup>
+          <TuningSubgroup title="Raised island edge">
+            {ELEVATION_SLIDERS.map(({ key, ...slider }) => (
+              <WaterSlider
+                key={key}
+                {...slider}
+                onChange={(value) => onElevationChange(key, value)}
+                value={elevationParameters[key]}
+              />
+            ))}
+          </TuningSubgroup>
         </TuningGroup>
 
         <TuningGroup
@@ -531,6 +602,17 @@ function WaterTunePanel({
         </TuningGroup>
       </div>
     </section>
+  )
+}
+
+function TuningSubgroup({ children, title }: { children: React.ReactNode; title: string }) {
+  return (
+    <div className="grid gap-2.5">
+      <div className="text-[10px] font-semibold text-white/46 uppercase tracking-[0.08em]">
+        {title}
+      </div>
+      <div className="grid gap-2.5">{children}</div>
+    </div>
   )
 }
 

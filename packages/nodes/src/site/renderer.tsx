@@ -8,6 +8,7 @@ import {
   useScene,
 } from '@pascal-app/core'
 import {
+  createDefaultMaterial,
   getSceneTheme,
   NodeRenderer,
   unionPolygons,
@@ -16,7 +17,6 @@ import {
 } from '@pascal-app/viewer'
 import { useMemo, useRef } from 'react'
 import { BufferGeometry, Float32BufferAttribute, type Group, Path, Shape } from 'three'
-import { MeshLambertNodeMaterial } from 'three/webgpu'
 
 const Y_OFFSET = 0.01
 
@@ -56,7 +56,7 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
   // is unlit, which is why shadows used to stop dead at the slab edge. polygonOffset
   // keeps it tucked behind the grid/slab as before.
   const groundMaterial = useMemo(() => {
-    const material = new MeshLambertNodeMaterial({ color: bgColor })
+    const material = createDefaultMaterial(bgColor, 0.9, 'solid')
     material.polygonOffset = true
     material.polygonOffsetFactor = 1
     material.polygonOffsetUnits = 1

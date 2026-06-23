@@ -1,5 +1,5 @@
 import type * as THREE from 'three'
-import { type Brush, Evaluator } from 'three-bvh-csg'
+import { type Brush, Evaluator } from 'three-bvh-csg/src/index.js'
 import { computeBoundsTree } from 'three-mesh-bvh'
 
 /**
@@ -39,4 +39,4 @@ export function prepareBrushForCSG(brush: Brush) {
 
 // Re-export Brush + SUBTRACTION + ADDITION so kinds don't need a direct
 // `three-bvh-csg` dependency.
-export { ADDITION, Brush, SUBTRACTION } from 'three-bvh-csg'
+export { ADDITION, Brush, SUBTRACTION } from 'three-bvh-csg/src/index.js'

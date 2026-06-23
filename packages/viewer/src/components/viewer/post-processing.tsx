@@ -22,11 +22,19 @@ import {
 } from 'three/tsl'
 import { RenderPipeline, type WebGPURenderer } from 'three/webgpu'
 import { edgeColorFor } from '../../lib/edge-style'
-import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
+import { isPerfOverlayEnabled, pushGpuSample } from '../../lib/gpu-perf'
 import { inkedEdges } from '../../lib/ink-edges'
 import { GRID_LAYER, OVERLAY_LAYER, SCENE_LAYER, ZONE_LAYER } from '../../lib/layers'
 import { mergedOutline } from '../../lib/merged-outline-node'
 import { getSceneTheme } from '../../lib/scene-themes'
+import {
+  mergePostFxDisableFlags,
+  type PostFxVariant,
+  postFxVariantDisableFlags,
+  readViewerPerfFlagsFromUrl,
+} from '../../runtime/perf-flags'
+import { perfRecorder } from '../../runtime/perf-recorder'
+import { renderScheduler } from '../../runtime/render-scheduler'
 import useViewer from '../../store/use-viewer'
 
 // SSGI Parameters - adjust these to fine-tune global illumination and ambient occlusion
@@ -52,12 +60,13 @@ export const SSGI_PARAMS = {
 // pipeline build; reload after changing the URL.
 //   - ao:      skip SSGI entirely (and denoise, since denoise has nothing to denoise)
 //   - denoise: keep SSGI but feed its raw noisy AO straight to the composite
+//   - ink:     skip the screen-space ink pass and its normal/depth dependency when possible
 //   - outline: skip the merged-outline node and its 14 internal RTs
 //   - postFx:  bypass the whole RenderPipeline and use renderer.render(scene, camera)
 //              directly — isolates raw scene-render cost from any post-FX overhead
 function readPerfDisableFlags() {
   if (typeof window === 'undefined') {
-    return { ao: false, denoise: false, outline: false, postFx: false }
+    return { ao: false, denoise: false, ink: false, outline: false, postFx: false }
   }
   const raw = new URLSearchParams(window.location.search).get('disable') ?? ''
   const set = new Set(
@@ -69,6 +78,7 @@ function readPerfDisableFlags() {
   return {
     ao: set.has('ao'),
     denoise: set.has('denoise'),
+    ink: set.has('ink'),
     outline: set.has('outline'),
     postFx: set.has('postFx'),
   }
@@ -132,7 +142,14 @@ const PostProcessingPasses = ({
   const hasPipelineErrorRef = useRef(false)
   const retryCountRef = useRef(0)
   const rebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const postOrbitRebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const skippedZeroSizeRef = useRef(false)
+  const disposedForOrbitRef = useRef(false)
+  const perfOverlayEnabled = isPerfOverlayEnabled()
+  const viewerPerfFlags = useMemo(() => readViewerPerfFlagsFromUrl(), [])
+  const postFxVariant: PostFxVariant = viewerPerfFlags.postFxVariant
+  const orbitPostFxVariant: PostFxVariant = viewerPerfFlags.orbitPostFxVariant
+  const staticPostFxVariant: PostFxVariant = postFxVariant === 'orbit-lite' ? 'full' : postFxVariant
 
   // Background color uniform — updated every frame via lerp, read by the TSL pipeline.
   // Initialised from the current scene theme so there's no flash on first render.
@@ -211,6 +228,10 @@ const PostProcessingPasses = ({
         clearTimeout(rebuildTimeoutRef.current)
         rebuildTimeoutRef.current = null
       }
+      if (postOrbitRebuildTimeoutRef.current !== null) {
+        clearTimeout(postOrbitRebuildTimeoutRef.current)
+        postOrbitRebuildTimeoutRef.current = null
+      }
     }
   }, [])
 
@@ -259,11 +280,23 @@ const PostProcessingPasses = ({
       skippedZeroSizeRef.current = false
     }
 
-    const perfDisable = readPerfDisableFlags()
+    const buildStartedAt = perfRecorder.isEnabled() ? performance.now() : 0
+    const recordBuildMetric = () => {
+      if (!buildStartedAt) return
+      perfRecorder.record('postfx.build.cpu.ms', performance.now() - buildStartedAt, {
+        profile: renderScheduler.getSnapshot().profile,
+        tags: { postFxVariant: staticPostFxVariant },
+      })
+    }
+    const bypassesPostFxPipeline = staticPostFxVariant === 'off'
+    const perfDisable = mergePostFxDisableFlags(
+      readPerfDisableFlags(),
+      postFxVariantDisableFlags(staticPostFxVariant),
+    )
     const ssgiEnabled = shading === 'rendered' && SSGI_PARAMS.enabled && !perfDisable.ao
     const denoiseEnabled = ssgiEnabled && !perfDisable.denoise
     const outlineEnabled = !perfDisable.outline
-    const inkEnabled = edges !== 'off'
+    const inkEnabled = edges !== 'off' && !perfDisable.ink
     // The depth+normal MRT feeds both SSGI and the screen-space ink pass.
     const needsNormalMRT = ssgiEnabled || inkEnabled
     // Soft = thin (1px sample radius) + faint (50% opacity); strong = thick
@@ -280,6 +313,7 @@ const PostProcessingPasses = ({
       denoise: denoiseEnabled,
       outline: outlineEnabled,
       perfDisable,
+      postFxVariant: staticPostFxVariant,
       hoverHighlightMode,
       projectId,
       shading,
@@ -290,6 +324,15 @@ const PostProcessingPasses = ({
 
     hasPipelineErrorRef.current = false
 
+    if (bypassesPostFxPipeline || perfDisable.postFx) {
+      if (renderPipelineRef.current) {
+        renderPipelineRef.current.dispose()
+      }
+      renderPipelineRef.current = null
+      recordBuildMetric()
+      return
+    }
+
     // WebGPU availability check: SSGI, denoise, and RenderPipeline are all
     // WebGPU-only APIs. When the browser falls back to WebGL2 (no
     // `navigator.gpu`, or the device couldn't be created), building the
@@ -298,10 +341,14 @@ const PostProcessingPasses = ({
     // loop fights the direct-render fallback path. Short-circuit here so
     // `useFrame` uses the direct `renderer.render(scene, camera)` path
     // exclusively and never attempts the TSL pipeline.
-    const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator
+    const hasWebGPU =
+      typeof navigator !== 'undefined' &&
+      'gpu' in navigator &&
+      Boolean((renderer as any).backend?.device)
     if (!hasWebGPU) {
       hasPipelineErrorRef.current = true
       renderPipelineRef.current = null
+      recordBuildMetric()
       return
     }
 
@@ -463,6 +510,7 @@ const PostProcessingPasses = ({
       renderPipeline.outputNode = finalOutput
       renderPipelineRef.current = renderPipeline
       retryCountRef.current = 0
+      renderScheduler.markPostFxClean()
     } catch (error) {
       hasPipelineErrorRef.current = true
       console.error(
@@ -471,6 +519,7 @@ const PostProcessingPasses = ({
           version: pipelineVersion,
           ssgi: SSGI_PARAMS.enabled,
           rendererCtor: (renderer as any).constructor?.name,
+          postFxVariant: staticPostFxVariant,
         },
         error,
       )
@@ -479,6 +528,7 @@ const PostProcessingPasses = ({
       }
       renderPipelineRef.current = null
     }
+    recordBuildMetric()
 
     return () => {
       if (renderPipelineRef.current) {
@@ -495,6 +545,7 @@ const PostProcessingPasses = ({
     hoverVisibleColor,
     edges,
     pipelineVersion,
+    staticPostFxVariant,
     projectId,
     renderer,
     scene,
@@ -522,14 +573,52 @@ const PostProcessingPasses = ({
     sanitizeOutlineObjects(outliner.selectedObjects)
     sanitizeOutlineObjects(outliner.hoveredObjects)
 
-    if (PERF_POST_FX_DISABLED || hasPipelineErrorRef.current || !renderPipelineRef.current) {
+    const schedulerSnapshot = renderScheduler.getSnapshot()
+    const isOrbiting =
+      schedulerSnapshot.profile === 'orbit' ||
+      (typeof window !== 'undefined' &&
+        ((window as any).__PASCAL_CAMERA_DRAGGING__ === true ||
+          (window as any).__PASCAL_BENCH_ORBITING__ === true))
+    const activePostFxVariant = isOrbiting ? orbitPostFxVariant : staticPostFxVariant
+    const bypassesPostFxPipeline =
+      activePostFxVariant === 'off' || activePostFxVariant === 'orbit-lite'
+
+    if (bypassesPostFxPipeline && postOrbitRebuildTimeoutRef.current !== null) {
+      clearTimeout(postOrbitRebuildTimeoutRef.current)
+      postOrbitRebuildTimeoutRef.current = null
+    }
+
+    if (bypassesPostFxPipeline && renderPipelineRef.current) {
+      renderPipelineRef.current.dispose()
+      renderPipelineRef.current = null
+      disposedForOrbitRef.current = true
+    } else if (
+      !bypassesPostFxPipeline &&
+      disposedForOrbitRef.current &&
+      !renderPipelineRef.current &&
+      !hasPipelineErrorRef.current
+    ) {
+      disposedForOrbitRef.current = false
+      postOrbitRebuildTimeoutRef.current = setTimeout(() => {
+        postOrbitRebuildTimeoutRef.current = null
+        requestPipelineRebuild()
+      }, 750)
+    }
+
+    if (
+      PERF_POST_FX_DISABLED ||
+      bypassesPostFxPipeline ||
+      hasPipelineErrorRef.current ||
+      !renderPipelineRef.current
+    ) {
+      const renderStartedAt = perfRecorder.isEnabled() ? performance.now() : 0
       try {
         if ((renderer as any).setClearAlpha) {
           ;(renderer as any).setClearAlpha(1)
         }
-        const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
+        const submittedAt = perfOverlayEnabled ? performance.now() : 0
         ;(renderer as any).render(scene, camera)
-        if (PERF_OVERLAY_ENABLED) {
+        if (perfOverlayEnabled) {
           const queue = (renderer as any).backend?.device?.queue as
             | { onSubmittedWorkDone?: () => Promise<void> }
             | undefined
@@ -539,17 +628,25 @@ const PostProcessingPasses = ({
         }
       } catch (fallbackError) {
         console.error('[viewer/post-processing] Fallback render failed.', fallbackError)
+      } finally {
+        if (renderStartedAt) {
+          perfRecorder.record('postfx.render.cpu.ms', performance.now() - renderStartedAt, {
+            profile: renderScheduler.getSnapshot().profile,
+            tags: { postFxVariant: activePostFxVariant, fallback: true },
+          })
+        }
       }
       return
     }
 
+    const renderStartedAt = perfRecorder.isEnabled() ? performance.now() : 0
     try {
       // Clear alpha=0 so background pixels in the output MRT attachment (index 0) get a=0,
       // making scenePassColor.a a reliable geometry mask (geometry pixels write a=1 via output node).
       ;(renderer as any).setClearAlpha(0)
-      const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
+      const submittedAt = perfOverlayEnabled ? performance.now() : 0
       renderPipelineRef.current.render()
-      if (PERF_OVERLAY_ENABLED) {
+      if (perfOverlayEnabled) {
         // device.queue.onSubmittedWorkDone() resolves once the GPU has
         // finished the work we just submitted — the delta from our submit
         // timestamp is a clean per-frame GPU duration. Doesn't block CPU
@@ -585,6 +682,13 @@ const PostProcessingPasses = ({
         console.error(
           '[viewer/post-processing] Retries exhausted. Rendering without post FX for this session.',
         )
+      }
+    } finally {
+      if (renderStartedAt) {
+        perfRecorder.record('postfx.render.cpu.ms', performance.now() - renderStartedAt, {
+          profile: renderScheduler.getSnapshot().profile,
+          tags: { postFxVariant: activePostFxVariant, fallback: false },
+        })
       }
     }
   }, 1)

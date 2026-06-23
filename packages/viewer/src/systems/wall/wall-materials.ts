@@ -6,7 +6,7 @@ import {
   type WallNode,
   type WallSurfaceMaterialSpec,
 } from '@pascal-app/core'
-import { Color, type Material } from 'three'
+import { Color, type Material, MeshLambertMaterial, MeshStandardMaterial } from 'three'
 import { Fn, float, fract, length, mix, positionLocal, smoothstep, step, vec2 } from 'three/tsl'
 import { MeshLambertNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import {
@@ -15,6 +15,7 @@ import {
   createMaterial,
   createMaterialFromPresetRef,
   createSurfaceRoleMaterial,
+  getMaterialRendererBackend,
   type RenderShading,
   resolveSurfaceColor,
 } from '../../lib/materials'
@@ -135,6 +136,23 @@ function createHighlightedWallMaterial(material: Material, kind: WallHighlightKi
 }
 
 function createInvisibleWallMaterial(color: string, shading: RenderShading): Material {
+  if (getMaterialRendererBackend() === 'webgl') {
+    const params = {
+      transparent: true,
+      color,
+      depthWrite: false,
+      opacity: 0.16,
+    }
+    return shading === 'solid'
+      ? new MeshLambertMaterial(params)
+      : new MeshStandardMaterial({
+          ...params,
+          emissive: color,
+          roughness: 1,
+          metalness: 0,
+        })
+  }
+
   const material =
     shading === 'solid'
       ? new MeshLambertNodeMaterial({
@@ -192,10 +210,11 @@ export function getMaterialsForWall(
   colorPreset: ColorPreset = 'clay',
   sceneTheme?: string,
 ): WallMaterials {
-  const cacheKey = `${wallNode.id}-${shading}-${textures}-${colorPreset}-${sceneTheme ?? 'base'}`
+  const rendererBackend = getMaterialRendererBackend()
+  const cacheKey = `${rendererBackend}-${wallNode.id}-${shading}-${textures}-${colorPreset}-${sceneTheme ?? 'base'}`
   const materialHash = textures
-    ? getWallMaterialHash(wallNode, shading)
-    : JSON.stringify({ textures, colorPreset, sceneTheme })
+    ? JSON.stringify({ rendererBackend, wall: getWallMaterialHash(wallNode, shading) })
+    : JSON.stringify({ rendererBackend, textures, colorPreset, sceneTheme })
 
   const existing = wallMaterialCache.get(cacheKey)
   if (existing && existing.materialHash === materialHash) {

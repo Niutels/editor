@@ -2,6 +2,20 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import { AnyNode, loadPlugin, nodeRegistry } from '@pascal-app/core'
 import { builtinPlugin } from './index'
 
+function getLiteralTypeValue(option: unknown): string {
+  const typeSchema = (option as { shape: { type: unknown } }).shape.type as {
+    def?: { innerType?: { value?: string; values?: Set<string> | string[] } }
+    value?: string
+    values?: Set<string> | string[]
+  }
+  const literalSchema = typeSchema.def?.innerType ?? typeSchema
+  if (typeof literalSchema.value === 'string') return literalSchema.value
+  const values = literalSchema.values
+  if (values instanceof Set) return [...values][0] ?? ''
+  if (Array.isArray(values)) return values[0] ?? ''
+  return ''
+}
+
 describe('builtinPlugin', () => {
   beforeEach(() => {
     nodeRegistry._reset()
@@ -31,12 +45,7 @@ describe('builtinPlugin', () => {
     // (the union) and `nodes/src/index.ts` (the plugin), and this test
     // will keep them honest.
     await loadPlugin(builtinPlugin)
-    const unionKinds = new Set(
-      AnyNode.options.map((option) => {
-        const typeShape = (option as unknown as { shape: { type: { value: string } } }).shape.type
-        return typeShape.value
-      }),
-    )
+    const unionKinds = new Set(AnyNode.options.map(getLiteralTypeValue).filter(Boolean))
     const registryKinds = new Set(Array.from(nodeRegistry.entries(), ([kind]) => kind))
     const missingFromRegistry = [...unionKinds].filter((k) => !registryKinds.has(k))
     const missingFromUnion = [...registryKinds].filter((k) => !unionKinds.has(k))

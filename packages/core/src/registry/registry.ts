@@ -14,6 +14,7 @@ function isDevMode(): boolean {
     // import.meta unavailable in some CJS contexts — fall through.
   }
   if (typeof process !== 'undefined' && process.env?.NODE_ENV) {
+    if (process.env.NODE_ENV === 'test') return false
     return process.env.NODE_ENV !== 'production'
   }
   // No environment signal — be safe and treat as production.

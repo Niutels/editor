@@ -47,6 +47,7 @@
   ],
   "scripts": {
     "build": "tsc --build",
+    "check-types": "tsc --build",
     "dev": "tsc --build --watch",
     "start": "bun dist/bin/pascal-mcp.js",
     "test": "bun test",

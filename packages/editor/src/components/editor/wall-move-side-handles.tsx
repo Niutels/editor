@@ -17,6 +17,7 @@ import { createPortal, type ThreeEvent, useFrame, useThree } from '@react-three/
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BufferGeometry,
+  CircleGeometry,
   Color,
   CylinderGeometry,
   DoubleSide,
@@ -26,6 +27,7 @@ import {
   OrthographicCamera,
   Plane,
   Quaternion,
+  RingGeometry,
   Shape,
   Vector2,
   Vector3,
@@ -264,6 +266,11 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
       }),
     [],
   )
+  const hexGeometry = useMemo(() => new CircleGeometry(CORNER_HEX_RADIUS, 6), [])
+  const ringGeometry = useMemo(
+    () => new RingGeometry(CORNER_HEX_RADIUS, CORNER_HEX_RADIUS * 1.18, 6),
+    [],
+  )
 
   useEffect(() => {
     const next = isHovered ? ARROW_HOVER_COLOR : ARROW_COLOR
@@ -275,6 +282,8 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
   useEffect(() => () => dashMaterial.dispose(), [dashMaterial])
   useEffect(() => () => hexMaterial.dispose(), [hexMaterial])
   useEffect(() => () => ringMaterial.dispose(), [ringMaterial])
+  useEffect(() => () => hexGeometry.dispose(), [hexGeometry])
+  useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
 
   // Billboard the hex disc to the camera so the picker is always
   // recognisable regardless of viewing angle.
@@ -323,6 +332,7 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
       />
       <group position={[x, CORNER_FLOOR_OFFSET, z]} ref={billboardRef} scale={scale}>
         <mesh
+          geometry={hexGeometry}
           material={hexMaterial}
           onPointerDown={activateEndpointMove}
           onPointerEnter={(event) => {
@@ -338,12 +348,8 @@ function WallCornerLeaderHandle({ wall, endpoint }: { wall: WallNode; endpoint: 
             }
           }}
           renderOrder={1003}
-        >
-          <circleGeometry args={[CORNER_HEX_RADIUS, 6]} />
-        </mesh>
-        <mesh material={ringMaterial} renderOrder={1002}>
-          <ringGeometry args={[CORNER_HEX_RADIUS, CORNER_HEX_RADIUS * 1.18, 6]} />
-        </mesh>
+        />
+        <mesh geometry={ringGeometry} material={ringMaterial} renderOrder={1002} />
       </group>
     </>
   )
@@ -658,7 +664,6 @@ function FenceMoveArrowHandle({ fence, handle }: { fence: FenceNode; handle: Wal
         frustumCulled={false}
         geometry={arrowGeometry}
         material={arrowMaterial}
-
         onPointerDown={activateFenceMove}
         onPointerEnter={(event) => {
           event.stopPropagation()

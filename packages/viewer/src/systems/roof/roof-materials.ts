@@ -9,6 +9,7 @@ import {
   createMaterial,
   createMaterialFromPresetRef,
   createSurfaceRoleMaterial,
+  getMaterialRendererBackend,
   type RenderShading,
 } from '../../lib/materials'
 
@@ -53,6 +54,7 @@ export function getRoofMaterialArray(
   const wall = getEffectiveRoofSurfaceMaterial(node, 'wall')
 
   const cacheKey = JSON.stringify({
+    rendererBackend: getMaterialRendererBackend(),
     shading,
     textures,
     colorPreset,

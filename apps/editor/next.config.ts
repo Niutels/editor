@@ -1,8 +1,12 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { NextConfig } from 'next'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 const nextConfig: NextConfig = {
   logging: {
-    browserToTerminal: true,
+    browserToTerminal: process.env.NEXT_BROWSER_TO_TERMINAL === 'true',
   },
   typescript: {
     ignoreBuildErrors: true,
@@ -15,6 +19,7 @@ const nextConfig: NextConfig = {
     '@pascal-app/mcp',
   ],
   turbopack: {
+    root: repoRoot,
     resolveAlias: {
       react: './node_modules/react',
       three: './node_modules/three',

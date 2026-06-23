@@ -133,6 +133,15 @@ export default function ChimneyPanel() {
     }
   }, [selectedId, node, deleteNode, setSelection])
 
+  const activePreset = useMemo(() => detectActiveChimneyPreset(storeNode), [storeNode])
+  const applyPreset = useCallback(
+    (key: ChimneyPresetKey) => {
+      commitProp(chimneyPresets[key] as Partial<ChimneyNode>)
+      triggerSFX('sfx:item-pick')
+    },
+    [commitProp],
+  )
+
   if (!(node && node.type === 'chimney' && selectedId)) return null
 
   const scenestate = useScene.getState()
@@ -327,15 +336,6 @@ export default function ChimneyPanel() {
   // override-merged `node`, so the highlight is stable across slider
   // drags. Null means the user has tweaked away from any preset; the
   // segmented control will then render with no segment selected.
-  const activePreset = useMemo(() => detectActiveChimneyPreset(storeNode), [storeNode])
-  const applyPreset = useCallback(
-    (key: ChimneyPresetKey) => {
-      commitProp(chimneyPresets[key] as Partial<ChimneyNode>)
-      triggerSFX('sfx:item-pick')
-    },
-    [commitProp],
-  )
-
   return (
     <PanelWrapper
       icon="/icons/roof.png"

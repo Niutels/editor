@@ -104,6 +104,7 @@
       "apps/**/*.tsx",
       "apps/**/*.js",
       "apps/**/*.jsx",
+      "!apps/**/next-env.d.ts",
       "!**/node_modules",
       "!**/.next",
       "!**/dist",

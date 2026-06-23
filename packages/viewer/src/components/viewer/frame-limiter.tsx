@@ -1,22 +1,34 @@
 import { useThree } from '@react-three/fiber'
 import { useLayoutEffect } from 'react'
+import { renderScheduler } from '../../runtime/render-scheduler'
+import useViewer from '../../store/use-viewer'
 
 type FrameLimiterProps = {
   fps?: number
+  idleFps?: number
 }
 
-const FrameLimiter: React.FC<FrameLimiterProps> = ({ fps = 50 }) => {
-  const { advance, set, frameloop: initFrameloop, scene, clock } = useThree()
-  const renderer = useThree((state) => state.gl)
+const FrameLimiter: React.FC<FrameLimiterProps> = ({ fps = 50, idleFps = 20 }) => {
+  const { advance, set, frameloop: initFrameloop } = useThree()
 
   useLayoutEffect(() => {
     let elapsed = 0
     let then = 0
     let i = 0
     let raf: number | null = null
-    const interval = 1000 / fps
     function tick(t: DOMHighResTimeStamp) {
       raf = requestAnimationFrame(tick)
+      const profile = renderScheduler.getSnapshot().profile
+      const cameraDragging = useViewer.getState().cameraDragging
+      const globalCameraDragging =
+        typeof window !== 'undefined' && (window as any).__PASCAL_CAMERA_DRAGGING__ === true
+      const benchOrbiting =
+        typeof window !== 'undefined' && (window as any).__PASCAL_BENCH_ORBITING__ === true
+      const targetFps =
+        profile === 'static' && !cameraDragging && !globalCameraDragging && !benchOrbiting
+          ? idleFps
+          : fps
+      const interval = 1000 / targetFps
       elapsed = t - then
       if (elapsed > interval) {
         advance(i)
@@ -35,7 +47,7 @@ const FrameLimiter: React.FC<FrameLimiterProps> = ({ fps = 50 }) => {
       }
       set({ frameloop: initFrameloop })
     }
-  }, [fps, advance, set, initFrameloop])
+  }, [fps, idleFps, advance, set, initFrameloop])
 
   return null
 }

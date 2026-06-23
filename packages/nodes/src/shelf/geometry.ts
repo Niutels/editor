@@ -39,6 +39,16 @@ type ShelfMaterial = Material & {
 
 const shelfMaterialCache = new Map<string, Material>()
 
+function cloneMaterial(material: Material): Material {
+  const cloned = material.clone()
+  const sourceColor = (material as { color?: { copy: (color: unknown) => void } }).color
+  const clonedColor = (cloned as { color?: { copy: (color: unknown) => void } }).color
+  if (sourceColor && clonedColor) {
+    clonedColor.copy(sourceColor)
+  }
+  return cloned
+}
+
 function getShelfMaterial(node: ShelfNode, shading: RenderShading): Material {
   const cacheKey = JSON.stringify({
     shading,
@@ -52,7 +62,7 @@ function getShelfMaterial(node: ShelfNode, shading: RenderShading): Material {
   const material = preset
     ? createDefaultMaterial('#ffffff', 0.5, shading)
     : node.material
-      ? createMaterial(node.material, shading).clone()
+      ? cloneMaterial(createMaterial(node.material, shading))
       : DEFAULT_SHELF_MATERIAL(shading).clone()
 
   if (preset) {

@@ -207,8 +207,14 @@ export interface LandrushGeneratorOptions {
 export interface LandrushIslandShapeControls {
   readonly asymmetry: number
   readonly coast: number
+  readonly coastCharacter: number
+  readonly covePairing: number
+  readonly detailSeparation: number
+  readonly erosionSmoothness: number
   readonly lobes: number
+  readonly neckPinch: number
   readonly roughness: number
+  readonly spineInfluence: number
 }
 
 export interface LandrushPerimeter {

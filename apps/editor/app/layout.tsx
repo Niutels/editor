@@ -1,7 +1,7 @@
-import { Agentation } from 'agentation'
 import { GeistPixelSquare } from 'geist/font/pixel'
 import { Barlow } from 'next/font/google'
 import localFont from 'next/font/local'
+import { DevAgentation } from '@/components/dev-agentation'
 import { ClientBootstrap } from './client-bootstrap'
 import './globals.css'
 
@@ -31,14 +31,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${GeistPixelSquare.variable} ${barlow.variable}`}
       lang="en"
     >
-      <head>
-        {process.env.NODE_ENV === 'development' && (
-          <script async crossOrigin="anonymous" src="//unpkg.com/react-scan/dist/auto.global.js" />
-        )}
-      </head>
+      <head />
       <body className="font-sans">
         <ClientBootstrap>{children}</ClientBootstrap>
-        {process.env.NODE_ENV === 'development' && <Agentation />}
+        {process.env.NODE_ENV === 'development' && <DevAgentation />}
       </body>
     </html>
   )

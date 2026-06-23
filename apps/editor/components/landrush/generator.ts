@@ -35,8 +35,14 @@ export const DEFAULT_LANDRUSH_OPTIONS = {
 const DEFAULT_LANDRUSH_ISLAND_SHAPE = {
   asymmetry: 1,
   coast: 1,
+  coastCharacter: 0,
+  covePairing: 0,
+  detailSeparation: 0,
+  erosionSmoothness: 0,
   lobes: 1,
+  neckPinch: 0,
   roughness: 1,
+  spineInfluence: 0,
 } satisfies LandrushIslandShapeControls
 
 const OWNER_COLORS = [
@@ -161,8 +167,30 @@ function normalizeIslandShapeControls(
   return {
     asymmetry: clampFinite(shape?.asymmetry ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.asymmetry, 0, 2),
     coast: clampFinite(shape?.coast ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.coast, 0, 2),
+    coastCharacter: clampFinite(
+      shape?.coastCharacter ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.coastCharacter,
+      0,
+      1,
+    ),
+    covePairing: clampFinite(shape?.covePairing ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.covePairing, 0, 1),
+    detailSeparation: clampFinite(
+      shape?.detailSeparation ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.detailSeparation,
+      0,
+      1,
+    ),
+    erosionSmoothness: clampFinite(
+      shape?.erosionSmoothness ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.erosionSmoothness,
+      0,
+      1,
+    ),
     lobes: clampFinite(shape?.lobes ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.lobes, 0, 2),
+    neckPinch: clampFinite(shape?.neckPinch ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.neckPinch, 0, 1),
     roughness: clampFinite(shape?.roughness ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.roughness, 0, 2),
+    spineInfluence: clampFinite(
+      shape?.spineInfluence ?? DEFAULT_LANDRUSH_ISLAND_SHAPE.spineInfluence,
+      0,
+      1,
+    ),
   }
 }
 
@@ -193,26 +221,78 @@ function createPerimeter(
   const aspectLean = 1 + (0.88 + random() * 0.2 - 1) * shape.asymmetry
   const counterAspectLean = 1 + (0.94 + random() * 0.12 - 1) * shape.asymmetry
   const scallopPhase = random() * TAU
+  const bigShapeGain = 1 + shape.detailSeparation * 0.34
+  const coastlineDetailGain = 1 - shape.detailSeparation * 0.58
+  const coastCharacter = createCoastCharacterContext(
+    phaseA,
+    phaseB,
+    phaseC,
+    phaseD,
+    shape.coastCharacter,
+  )
+  const covePairing = createCovePairingContext(phaseA, phaseB, phaseC, phaseD, shape.covePairing)
+  const neckPinch = createNeckPinchContext(phaseA, phaseB, phaseC, phaseD, shape.neckPinch)
+  const spineInfluence = createSpineInfluenceContext(
+    phaseA,
+    phaseB,
+    phaseC,
+    phaseD,
+    shape.spineInfluence,
+  )
   const rawPoints: LandrushPoint2[] = []
 
   for (let index = 0; index < pointCount; index += 1) {
     const angle = (index / pointCount) * TAU
     const cos = Math.cos(angle)
     const sin = Math.sin(angle)
-    const lobeWave = Math.sin(angle * 2 + phaseA) * 0.22 * shape.lobes
-    const coveWave = Math.sin(angle * 3 + phaseB) * 0.12 * shape.coast
-    const fineWave = Math.sin(angle * 7 + phaseC) * 0.055 * shape.roughness
-    const terraceWave = Math.sin(angle * 11 + phaseD) * 0.034 * shape.roughness
-    const scallopWave = Math.sin(angle * 5 + scallopPhase) * 0.075 * shape.roughness
+    const coastSample = coastCharacter
+      ? sampleCoastCharacter(coastCharacter, angle)
+      : DEFAULT_COAST_CHARACTER_SAMPLE
+    const spineSample = spineInfluence
+      ? sampleSpineInfluence(spineInfluence, angle)
+      : DEFAULT_SPINE_INFLUENCE_SAMPLE
+    const lobeWave =
+      Math.sin(angle * 2 + phaseA) * 0.22 * shape.lobes * coastSample.lobes * bigShapeGain
+    const coveWave =
+      Math.sin(angle * 3 + phaseB) * 0.12 * shape.coast * coastSample.coves * bigShapeGain
+    const fineWave =
+      Math.sin(angle * 7 + phaseC) *
+      0.055 *
+      shape.roughness *
+      coastSample.roughness *
+      coastlineDetailGain
+    const terraceWave =
+      Math.sin(angle * 11 + phaseD) *
+      0.034 *
+      shape.roughness *
+      coastSample.roughness *
+      coastlineDetailGain
+    const scallopWave =
+      Math.sin(angle * 5 + scallopPhase) *
+      0.075 *
+      shape.roughness *
+      coastSample.roughness *
+      coastlineDetailGain
     const covePull = coves.reduce(
-      (total, cove) => total - localizedWave(angle, cove.angle, cove.amplitude, cove.power),
+      (total, cove) =>
+        total -
+        localizedWave(angle, cove.angle, cove.amplitude, cove.power) *
+          coastSample.coves *
+          bigShapeGain,
       0,
     )
     const capePush = capes.reduce(
-      (total, cape) => total + localizedWave(angle, cape.angle, cape.amplitude, cape.power),
+      (total, cape) =>
+        total +
+        localizedWave(angle, cape.angle, cape.amplitude, cape.power) *
+          coastSample.capes *
+          bigShapeGain,
       0,
     )
-    const jitter = (random() - 0.5) * 0.055 * shape.roughness
+    const pairedCovePush = covePairing ? sampleCovePairing(covePairing, angle) : 0
+    const neckPull = neckPinch ? sampleNeckPinch(neckPinch, angle) : 0
+    const jitter =
+      (random() - 0.5) * 0.055 * shape.roughness * coastSample.roughness * coastlineDetailGain
     const radiusScale = clampFinite(
       0.9 +
         lobeWave +
@@ -222,6 +302,10 @@ function createPerimeter(
         scallopWave +
         covePull +
         capePush +
+        coastSample.radiusOffset +
+        pairedCovePush +
+        neckPull +
+        spineSample.radiusOffset +
         jitter,
       0.44,
       1.34,
@@ -234,8 +318,10 @@ function createPerimeter(
 
     rawPoints.push(
       point(
-        cos * halfWidth * radiusScale * directionalLean * aspectLean,
-        sin * halfDepth * radiusScale * roundnessBias * counterAspectLean,
+        cos * halfWidth * radiusScale * directionalLean * aspectLean +
+          spineSample.offsetX * halfWidth,
+        sin * halfDepth * radiusScale * roundnessBias * counterAspectLean +
+          spineSample.offsetZ * halfDepth,
       ),
     )
   }
@@ -255,8 +341,12 @@ function createPerimeter(
     const z = (raw.z - centerZ) * uniformScale
     return point(x + z * shear, z)
   })
-  const first = openPoints[0]!
-  const points = [...openPoints, { ...first }]
+  const erodedPoints =
+    shape.erosionSmoothness > POINT_EPSILON
+      ? smoothOpenPerimeterPoints(openPoints, shape.erosionSmoothness)
+      : openPoints
+  const first = erodedPoints[0]!
+  const points = [...erodedPoints, { ...first }]
 
   return {
     id: 'island-perimeter',
@@ -269,6 +359,317 @@ function createPerimeter(
 
 function localizedWave(angle: number, center: number, amplitude: number, power: number): number {
   return Math.max(0, Math.cos(angle - center)) ** power * amplitude
+}
+
+type CoastCharacterContext = {
+  readonly profiles: readonly CoastSectorProfile[]
+  readonly rotation: number
+  readonly sectorCount: number
+  readonly strength: number
+}
+
+type CoastSectorProfile = {
+  readonly capes: number
+  readonly coves: number
+  readonly lobes: number
+  readonly radiusOffset: number
+  readonly roughness: number
+}
+
+const DEFAULT_COAST_CHARACTER_SAMPLE = {
+  capes: 1,
+  coves: 1,
+  lobes: 1,
+  radiusOffset: 0,
+  roughness: 1,
+} satisfies CoastSectorProfile
+
+function createCoastCharacterContext(
+  phaseA: number,
+  phaseB: number,
+  phaseC: number,
+  phaseD: number,
+  strength: number,
+): CoastCharacterContext | null {
+  if (strength <= POINT_EPSILON) return null
+
+  const sectorCount = 10
+  const profiles = Array.from({ length: sectorCount }, (_, index) =>
+    createCoastSectorProfile(index, phaseA, phaseB, phaseC, phaseD),
+  )
+
+  return {
+    profiles,
+    rotation: phaseA * 0.37 + phaseB * 0.19,
+    sectorCount,
+    strength: clamp01(strength),
+  }
+}
+
+function createCoastSectorProfile(
+  index: number,
+  phaseA: number,
+  phaseB: number,
+  phaseC: number,
+  phaseD: number,
+): CoastSectorProfile {
+  const kind = hashUnit(index + phaseA * 1.7, phaseB * 2.3)
+  const intensity = 0.65 + hashUnit(index + phaseC * 3.1, phaseD * 2.9) * 0.75
+
+  if (kind < 0.2) {
+    return scaleCoastProfile(
+      { capes: 0.55, coves: 0.35, lobes: 0.75, radiusOffset: -0.03, roughness: 0.18 },
+      intensity,
+    )
+  }
+  if (kind < 0.4) {
+    return scaleCoastProfile(
+      { capes: 1.2, coves: 1.35, lobes: 1.05, radiusOffset: 0.01, roughness: 1.8 },
+      intensity,
+    )
+  }
+  if (kind < 0.6) {
+    return scaleCoastProfile(
+      { capes: 0.45, coves: 2.1, lobes: 0.82, radiusOffset: -0.16, roughness: 0.65 },
+      intensity,
+    )
+  }
+  if (kind < 0.8) {
+    return scaleCoastProfile(
+      { capes: 1.9, coves: 0.65, lobes: 1.35, radiusOffset: 0.14, roughness: 0.7 },
+      intensity,
+    )
+  }
+
+  return scaleCoastProfile(
+    { capes: 0.42, coves: 1.45, lobes: 0.55, radiusOffset: -0.13, roughness: 0.35 },
+    intensity,
+  )
+}
+
+function sampleCoastCharacter(context: CoastCharacterContext, angle: number): CoastSectorProfile {
+  const normalizedAngle = positiveModulo(angle + context.rotation, TAU)
+  const sectorPosition = (normalizedAngle / TAU) * context.sectorCount
+  const sectorIndex = Math.floor(sectorPosition)
+  const blend = smooth01(sectorPosition - sectorIndex)
+  const current = context.profiles[sectorIndex % context.sectorCount]!
+  const next = context.profiles[(sectorIndex + 1) % context.sectorCount]!
+  const raw = mixCoastProfiles(current, next, blend)
+
+  return mixCoastProfiles(DEFAULT_COAST_CHARACTER_SAMPLE, raw, context.strength)
+}
+
+function scaleCoastProfile(profile: CoastSectorProfile, intensity: number): CoastSectorProfile {
+  return {
+    capes: lerpValue(1, profile.capes, intensity),
+    coves: lerpValue(1, profile.coves, intensity),
+    lobes: lerpValue(1, profile.lobes, intensity),
+    radiusOffset: profile.radiusOffset * intensity,
+    roughness: lerpValue(1, profile.roughness, intensity),
+  }
+}
+
+function mixCoastProfiles(
+  start: CoastSectorProfile,
+  end: CoastSectorProfile,
+  amount: number,
+): CoastSectorProfile {
+  return {
+    capes: lerpValue(start.capes, end.capes, amount),
+    coves: lerpValue(start.coves, end.coves, amount),
+    lobes: lerpValue(start.lobes, end.lobes, amount),
+    radiusOffset: lerpValue(start.radiusOffset, end.radiusOffset, amount),
+    roughness: lerpValue(start.roughness, end.roughness, amount),
+  }
+}
+
+type CovePairingContext = {
+  readonly pairs: readonly CovePair[]
+  readonly strength: number
+}
+
+type CovePair = {
+  readonly capeAmplitude: number
+  readonly capePower: number
+  readonly coveAmplitude: number
+  readonly covePower: number
+  readonly center: number
+  readonly shoulderWidth: number
+}
+
+function createCovePairingContext(
+  phaseA: number,
+  phaseB: number,
+  phaseC: number,
+  phaseD: number,
+  strength: number,
+): CovePairingContext | null {
+  if (strength <= POINT_EPSILON) return null
+
+  const pairs = Array.from({ length: 4 }, (_, index) => {
+    const center = hashUnit(index + phaseA * 2.1, phaseB * 1.7) * TAU
+    return {
+      capeAmplitude: 0.045 + hashUnit(index + phaseC * 1.9, phaseD * 2.4) * 0.06,
+      capePower: 3.1 + hashUnit(index + phaseB * 3.3, phaseC * 1.2) * 2.2,
+      center,
+      coveAmplitude: 0.075 + hashUnit(index + phaseD * 2.8, phaseA * 1.4) * 0.1,
+      covePower: 2.3 + hashUnit(index + phaseC * 2.9, phaseA * 2.2) * 2,
+      shoulderWidth: 0.18 + hashUnit(index + phaseB * 1.8, phaseD * 3.2) * 0.24,
+    }
+  })
+
+  return { pairs, strength: clamp01(strength) }
+}
+
+function sampleCovePairing(context: CovePairingContext, angle: number): number {
+  const value = context.pairs.reduce((total, pair) => {
+    const cove =
+      -localizedWave(angle, pair.center, pair.coveAmplitude, pair.covePower) * context.strength
+    const leftCape =
+      localizedWave(angle, pair.center - pair.shoulderWidth, pair.capeAmplitude, pair.capePower) *
+      context.strength
+    const rightCape =
+      localizedWave(angle, pair.center + pair.shoulderWidth, pair.capeAmplitude, pair.capePower) *
+      context.strength
+
+    return total + cove + leftCape + rightCape
+  }, 0)
+
+  return clampFinite(value, -0.28, 0.22)
+}
+
+type NeckPinchContext = {
+  readonly pinches: readonly NeckPinch[]
+  readonly strength: number
+}
+
+type NeckPinch = {
+  readonly center: number
+  readonly power: number
+  readonly shoulderWidth: number
+  readonly strength: number
+}
+
+function createNeckPinchContext(
+  phaseA: number,
+  phaseB: number,
+  phaseC: number,
+  phaseD: number,
+  strength: number,
+): NeckPinchContext | null {
+  if (strength <= POINT_EPSILON) return null
+
+  const pinches = Array.from({ length: 2 }, (_, index) => ({
+    center: hashUnit(index + phaseB * 1.5, phaseC * 2.6) * TAU,
+    power: 2.8 + hashUnit(index + phaseA * 2.7, phaseD * 1.3) * 2.7,
+    shoulderWidth: 0.34 + hashUnit(index + phaseC * 1.2, phaseA * 2.1) * 0.2,
+    strength: 0.08 + hashUnit(index + phaseD * 3.4, phaseB * 2.2) * 0.08,
+  }))
+
+  return { pinches, strength: clamp01(strength) }
+}
+
+function sampleNeckPinch(context: NeckPinchContext, angle: number): number {
+  const value = context.pinches.reduce((total, pinch) => {
+    const opposite = positiveModulo(pinch.center + Math.PI, TAU)
+    const waist =
+      -localizedWave(angle, pinch.center, pinch.strength, pinch.power) -
+      localizedWave(angle, opposite, pinch.strength * 0.74, pinch.power)
+    const shoulder =
+      localizedWave(angle, pinch.center - pinch.shoulderWidth, pinch.strength * 0.28, 3.2) +
+      localizedWave(angle, pinch.center + pinch.shoulderWidth, pinch.strength * 0.28, 3.2)
+
+    return total + (waist + shoulder) * context.strength
+  }, 0)
+
+  return clampFinite(value, -0.24, 0.1)
+}
+
+type SpineInfluenceContext = {
+  readonly axisAngle: number
+  readonly bendPhase: number
+  readonly strength: number
+}
+
+type SpineInfluenceSample = {
+  readonly offsetX: number
+  readonly offsetZ: number
+  readonly radiusOffset: number
+}
+
+const DEFAULT_SPINE_INFLUENCE_SAMPLE = {
+  offsetX: 0,
+  offsetZ: 0,
+  radiusOffset: 0,
+} satisfies SpineInfluenceSample
+
+function createSpineInfluenceContext(
+  phaseA: number,
+  phaseB: number,
+  phaseC: number,
+  phaseD: number,
+  strength: number,
+): SpineInfluenceContext | null {
+  if (strength <= POINT_EPSILON) return null
+
+  return {
+    axisAngle: positiveModulo(phaseA * 0.42 + phaseC * 0.18, TAU),
+    bendPhase: phaseB * 0.6 + phaseD * 0.25,
+    strength: clamp01(strength),
+  }
+}
+
+function sampleSpineInfluence(context: SpineInfluenceContext, angle: number): SpineInfluenceSample {
+  const axisDelta = angle - context.axisAngle
+  const alongAxis = Math.cos(axisDelta)
+  const acrossAxis = Math.sin(axisDelta)
+  const endWeight = Math.abs(alongAxis)
+  const sideWeight = Math.abs(acrossAxis)
+  const bend =
+    Math.sin(alongAxis * Math.PI + context.bendPhase) *
+    endWeight *
+    endWeight *
+    context.strength *
+    0.045
+  const perpendicularX = -Math.sin(context.axisAngle)
+  const perpendicularZ = Math.cos(context.axisAngle)
+
+  return {
+    offsetX: perpendicularX * bend,
+    offsetZ: perpendicularZ * bend,
+    radiusOffset:
+      (0.17 * endWeight ** 2.2 -
+        0.055 * sideWeight ** 1.6 +
+        0.035 * Math.sin(angle * 3 + context.bendPhase) * endWeight) *
+      context.strength,
+  }
+}
+
+function smoothOpenPerimeterPoints(
+  points: readonly LandrushPoint2[],
+  smoothness: number,
+): LandrushPoint2[] {
+  const amount = 0.12 + clamp01(smoothness) * 0.28
+  const passes = 1 + Math.round(clamp01(smoothness) * 3)
+  let current = [...points]
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    current = current.map((pointValue, index) => {
+      const previous = current[(index - 1 + current.length) % current.length]!
+      const next = current[(index + 1) % current.length]!
+      const average = {
+        x: (previous.x + next.x) / 2,
+        z: (previous.z + next.z) / 2,
+      }
+
+      return point(
+        lerpValue(pointValue.x, average.x, amount),
+        lerpValue(pointValue.z, average.z, amount),
+      )
+    })
+  }
+
+  return current
 }
 
 function createParcels(
@@ -1032,6 +1433,24 @@ function round(value: number): number {
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value))
+}
+
+function smooth01(value: number): number {
+  const t = clamp01(value)
+  return t * t * (3 - 2 * t)
+}
+
+function lerpValue(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor
+}
+
+function hashUnit(x: number, y: number): number {
+  const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123
+  return value - Math.floor(value)
 }
 
 function clampFinite(value: number, min: number, max: number): number {
