@@ -12,8 +12,14 @@ export const GRASS_WEBGPU_BLADE_SUBDIVISIONS = 240
 export const GRASS_WEBGPU_BLADE_PREVIEW_SUBDIVISIONS = 96
 export const GRASS_MIN_SPAWN_ALPHA = 0.08
 
-export function resolveGrassWebGpuBladeSubdivisions(_density: number) {
-  return GRASS_WEBGPU_BLADE_SUBDIVISIONS
+export function resolveGrassWebGpuBladeSubdivisions(density: number) {
+  const normalizedDensity = Math.max(0, Math.min(1, Number.isFinite(density) ? density : 1))
+  const densityScale = normalizedDensity * normalizedDensity * normalizedDensity
+  return Math.round(
+    GRASS_WEBGPU_BLADE_PREVIEW_SUBDIVISIONS +
+      (GRASS_WEBGPU_BLADE_SUBDIVISIONS - GRASS_WEBGPU_BLADE_PREVIEW_SUBDIVISIONS) *
+        densityScale,
+  )
 }
 
 type GrassBladeGeometryOptions = {

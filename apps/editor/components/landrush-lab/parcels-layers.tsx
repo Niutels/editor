@@ -4,11 +4,11 @@ import { useEffect, useMemo } from 'react'
 import {
   AdditiveBlending,
   BufferGeometry,
+  Color,
   DoubleSide,
   Float32BufferAttribute,
-  Line,
-  LineBasicMaterial,
-  Shape,
+  ShapeUtils,
+  Vector2,
 } from 'three'
 import type { LandrushPoint2 } from '@/components/landrush/types'
 import {
@@ -60,12 +60,21 @@ type NormalizedParcelOverlayOptions = {
 const STREET_ROAD_COLOR = '#626e75'
 const STREET_CURB_COLOR = '#b8ad96'
 const STREET_SHOULDER_COLOR = '#e7dfc8'
-const PARCEL_GRADIENT_BAND_COUNT = 7
+const PARCEL_CENTER_FILL_MIN_OPACITY = 0.02
+const PARCEL_GLOW_MIN_OPACITY = 0.08
+const PARCEL_GRADIENT_BAND_COUNT = 1
 const STREET_RENDER_NODE_PRECISION = 100
 
 type ParcelGradientBand = {
   geometry: BufferGeometry
   opacity: number
+}
+
+type ParcelOverlayGeometries = {
+  centerGeometry: BufferGeometry
+  contourGeometry: BufferGeometry
+  glowGeometry: BufferGeometry
+  gradientBands: readonly ParcelGradientBand[]
 }
 
 type StreetIncident = {
@@ -107,16 +116,13 @@ export function ParcelsLandLayers({
 
   return (
     <group>
-      {showParcels
-        ? allocation.parcels.map((parcel, index) => (
-            <ParcelMesh
-              elevation={surface.grassSurfaceElevation + index * 0.001}
-              key={parcel.id}
-              parcel={parcel}
-              style={parcelOverlayOptions}
-            />
-          ))
-        : null}
+      {showParcels ? (
+        <ParcelOverlayLayer
+          elevation={surface.grassSurfaceElevation}
+          parcels={allocation.parcels}
+          style={parcelOverlayOptions}
+        />
+      ) : null}
       {showStreets ? (
         <StreetNetworkLayer
           elevation={surface.grassSurfaceElevation + 0.18}
@@ -127,124 +133,82 @@ export function ParcelsLandLayers({
   )
 }
 
-function ParcelMesh({
+function ParcelOverlayLayer({
   elevation,
-  parcel,
+  parcels,
   style,
 }: {
   elevation: number
-  parcel: ParcelAllocationParcel
+  parcels: readonly ParcelAllocationParcel[]
   style: ParcelOverlayOptions
 }) {
   const overlay = useMemo(() => normalizeParcelOverlayOptions(style), [style])
-  const centerPoints = useMemo(
-    () => insetPointsTowardCentroid(parcel.points, parcel.centroid, overlay.gradientDistanceMeters),
-    [overlay.gradientDistanceMeters, parcel.centroid, parcel.points],
-  )
-  const centerShape = useMemo(() => shapeFromPoints(centerPoints), [centerPoints])
-  const glowGeometry = useMemo(
-    () =>
-      ringBandGeometry(
-        parcel.points,
-        parcel.centroid,
-        0,
-        overlay.glowWidthMeters,
-        elevation + 0.056,
-      ),
-    [elevation, overlay.glowWidthMeters, parcel.centroid, parcel.points],
-  )
-  const gradientBands = useMemo(
-    () => parcelGradientBands(parcel.points, parcel.centroid, overlay, elevation + 0.064),
-    [elevation, overlay, parcel.centroid, parcel.points],
-  )
-  const contourGeometry = useMemo(
-    () =>
-      ringBandGeometry(
-        parcel.points,
-        parcel.centroid,
-        0,
-        overlay.contourWidthMeters,
-        elevation + 0.084,
-      ),
-    [elevation, overlay.contourWidthMeters, parcel.centroid, parcel.points],
-  )
-  const boundaryLine = useMemo(
-    () =>
-      new Line(
-        lineLoopGeometry(parcel.points, elevation + 0.092),
-        new LineBasicMaterial({
-          color: parcel.color,
-          depthTest: false,
-          opacity: Math.min(1, overlay.edgeOpacity + 0.08),
-          toneMapped: false,
-          transparent: true,
-        }),
-      ),
-    [elevation, overlay.edgeOpacity, parcel.color, parcel.points],
+  const geometries = useMemo(
+    () => createParcelOverlayGeometries(parcels, overlay, elevation),
+    [elevation, overlay, parcels],
   )
 
   useEffect(
     () => () => {
-      glowGeometry.dispose()
-      contourGeometry.dispose()
-      for (const band of gradientBands) band.geometry.dispose()
-      boundaryLine.geometry.dispose()
-      boundaryLine.material.dispose()
+      geometries.centerGeometry.dispose()
+      geometries.glowGeometry.dispose()
+      geometries.contourGeometry.dispose()
+      for (const band of geometries.gradientBands) band.geometry.dispose()
     },
-    [boundaryLine, contourGeometry, glowGeometry, gradientBands],
+    [geometries],
   )
 
   return (
     <group>
-      {overlay.centerOpacity > 0.001 && centerPoints.length >= 3 ? (
-        <mesh position={[0, elevation + 0.052, 0]} renderOrder={18} rotation={[-Math.PI / 2, 0, 0]}>
-          <shapeGeometry args={[centerShape]} />
+      {overlay.centerOpacity > PARCEL_CENTER_FILL_MIN_OPACITY &&
+      geometryHasVertices(geometries.centerGeometry) ? (
+        <mesh geometry={geometries.centerGeometry} renderOrder={18}>
           <meshBasicMaterial
-            color={parcel.color}
             depthWrite={false}
             opacity={overlay.centerOpacity}
             side={DoubleSide}
             toneMapped={false}
             transparent
+            vertexColors
           />
         </mesh>
       ) : null}
-      {overlay.glowOpacity > 0.001 ? (
-        <mesh geometry={glowGeometry} renderOrder={19}>
+      {overlay.glowOpacity > PARCEL_GLOW_MIN_OPACITY &&
+      geometryHasVertices(geometries.glowGeometry) ? (
+        <mesh geometry={geometries.glowGeometry} renderOrder={19}>
           <meshBasicMaterial
             blending={AdditiveBlending}
-            color={parcel.color}
             depthWrite={false}
             opacity={overlay.glowOpacity}
             side={DoubleSide}
             toneMapped={false}
             transparent
+            vertexColors
           />
         </mesh>
       ) : null}
-      {gradientBands.map((band, index) => (
-        <mesh geometry={band.geometry} key={`${parcel.id}-gradient-${index}`} renderOrder={20}>
+      {geometries.gradientBands.map((band, index) => (
+        <mesh geometry={band.geometry} key={`parcel-gradient-${index}`} renderOrder={20 + index}>
           <meshBasicMaterial
-            color={parcel.color}
             depthWrite={false}
             opacity={band.opacity}
             side={DoubleSide}
             toneMapped={false}
             transparent
+            vertexColors
           />
         </mesh>
       ))}
-      <mesh geometry={contourGeometry} renderOrder={27}>
+      <mesh geometry={geometries.contourGeometry} renderOrder={27}>
         <meshBasicMaterial
-          color={parcel.color}
           depthWrite={false}
           opacity={overlay.edgeOpacity}
           side={DoubleSide}
           toneMapped={false}
           transparent
+          vertexColors
         />
       </mesh>
-      <primitive object={boundaryLine} renderOrder={28} />
     </group>
   )
 }
@@ -276,54 +240,117 @@ function normalizeParcelOverlayOptions(
   }
 }
 
-function parcelGradientBands(
-  points: readonly LandrushPoint2[],
-  centroid: LandrushPoint2,
+function createParcelOverlayGeometries(
+  parcels: readonly ParcelAllocationParcel[],
   style: NormalizedParcelOverlayOptions,
-  y: number,
-): readonly ParcelGradientBand[] {
+  elevation: number,
+): ParcelOverlayGeometries {
+  const centerPositions: number[] = []
+  const centerColors: number[] = []
+  const glowPositions: number[] = []
+  const glowColors: number[] = []
+  const contourPositions: number[] = []
+  const contourColors: number[] = []
   const startDistance = style.contourWidthMeters
   const distance = Math.max(0, style.gradientDistanceMeters - startDistance)
-  if (distance <= 0.02) return []
-
-  const bands: ParcelGradientBand[] = []
+  const gradientPositions = Array.from({ length: PARCEL_GRADIENT_BAND_COUNT }, () => [] as number[])
+  const gradientColors = Array.from({ length: PARCEL_GRADIENT_BAND_COUNT }, () => [] as number[])
+  const gradientOpacities: number[] = []
 
   for (let index = 0; index < PARCEL_GRADIENT_BAND_COUNT; index += 1) {
     const startT = index / PARCEL_GRADIENT_BAND_COUNT
     const endT = (index + 1) / PARCEL_GRADIENT_BAND_COUNT
     const opacityT = (index + 0.5) / PARCEL_GRADIENT_BAND_COUNT
-    const opacity = lerp(style.edgeOpacity * 0.72, style.centerOpacity, opacityT)
-    if (opacity <= 0.001) continue
-
-    bands.push({
-      geometry: ringBandGeometry(
-        points,
-        centroid,
-        startDistance + distance * startT,
-        startDistance + distance * endT,
-        y + index * 0.001,
-      ),
-      opacity,
-    })
+    gradientOpacities[index] = lerp(style.edgeOpacity * 0.72, style.centerOpacity, opacityT)
   }
 
-  return bands
+  parcels.forEach((parcel, parcelIndex) => {
+    const color = colorToRgb(parcel.color)
+    const parcelLift = parcelIndex * 0.0002
+    const centerPoints = insetPointsTowardCentroid(
+      parcel.points,
+      parcel.centroid,
+      style.gradientDistanceMeters,
+    )
+
+    if (style.centerOpacity > PARCEL_CENTER_FILL_MIN_OPACITY) {
+      appendFilledPolygonGeometry(
+        centerPositions,
+        centerColors,
+        centerPoints,
+        elevation + 0.052 + parcelLift,
+        color,
+      )
+    }
+
+    if (style.glowOpacity > PARCEL_GLOW_MIN_OPACITY) {
+      appendRingBandGeometry(
+        glowPositions,
+        glowColors,
+        parcel.points,
+        parcel.centroid,
+        0,
+        style.glowWidthMeters,
+        elevation + 0.056 + parcelLift,
+        color,
+      )
+    }
+
+    if (distance > 0.02) {
+      for (let index = 0; index < PARCEL_GRADIENT_BAND_COUNT; index += 1) {
+        const opacity = gradientOpacities[index] ?? 0
+        if (opacity <= 0.001) continue
+        const startT = index / PARCEL_GRADIENT_BAND_COUNT
+        const endT = (index + 1) / PARCEL_GRADIENT_BAND_COUNT
+        appendRingBandGeometry(
+          gradientPositions[index]!,
+          gradientColors[index]!,
+          parcel.points,
+          parcel.centroid,
+          startDistance + distance * startT,
+          startDistance + distance * endT,
+          elevation + 0.064 + index * 0.001 + parcelLift,
+          color,
+        )
+      }
+    }
+
+    appendRingBandGeometry(
+      contourPositions,
+      contourColors,
+      parcel.points,
+      parcel.centroid,
+      0,
+      style.contourWidthMeters,
+      elevation + 0.084 + parcelLift,
+      color,
+    )
+  })
+
+  return {
+    centerGeometry: coloredTriangleGeometry(centerPositions, centerColors),
+    contourGeometry: coloredTriangleGeometry(contourPositions, contourColors),
+    glowGeometry: coloredTriangleGeometry(glowPositions, glowColors),
+    gradientBands: gradientPositions
+      .map((positions, index) => ({
+        geometry: coloredTriangleGeometry(positions, gradientColors[index]!),
+        opacity: gradientOpacities[index] ?? 0,
+      }))
+      .filter((band) => band.opacity > 0.001 && geometryHasVertices(band.geometry)),
+  }
 }
 
-function ringBandGeometry(
+function appendRingBandGeometry(
+  positions: number[],
+  colors: number[],
   points: readonly LandrushPoint2[],
   centroid: LandrushPoint2,
   outerInset: number,
   innerInset: number,
   y: number,
+  color: RgbColor,
 ) {
-  const geometry = new BufferGeometry()
-  const positions: number[] = []
-  if (points.length < 3 || innerInset <= outerInset + 0.001) {
-    geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-    return geometry
-  }
-
+  if (points.length < 3 || innerInset <= outerInset + 0.001) return
   const outer = insetPointsTowardCentroid(points, centroid, outerInset)
   const inner = insetPointsTowardCentroid(points, centroid, innerInset)
 
@@ -334,31 +361,74 @@ function ringBandGeometry(
     const innerB = inner[(index + 1) % inner.length]
     if (!(outerA && outerB && innerA && innerB)) continue
 
-    positions.push(
-      outerA.x,
-      y,
-      outerA.z,
-      outerB.x,
-      y,
-      outerB.z,
-      innerA.x,
-      y,
-      innerA.z,
-      outerB.x,
-      y,
-      outerB.z,
-      innerB.x,
-      y,
-      innerB.z,
-      innerA.x,
-      y,
-      innerA.z,
-    )
+    pushColoredTriangle(positions, colors, outerA, outerB, innerA, y, color)
+    pushColoredTriangle(positions, colors, outerB, innerB, innerA, y, color)
   }
+}
 
+function appendFilledPolygonGeometry(
+  positions: number[],
+  colors: number[],
+  points: readonly LandrushPoint2[],
+  y: number,
+  color: RgbColor,
+) {
+  if (points.length < 3) return
+  const triangles = ShapeUtils.triangulateShape(
+    points.map((point) => new Vector2(point.x, point.z)),
+    [],
+  )
+
+  for (const triangle of triangles) {
+    const first = points[triangle[0]]
+    const second = points[triangle[1]]
+    const third = points[triangle[2]]
+    if (!(first && second && third)) continue
+    pushColoredTriangle(positions, colors, first, second, third, y, color)
+  }
+}
+
+type RgbColor = { b: number; g: number; r: number }
+
+function colorToRgb(value: string): RgbColor {
+  const color = new Color(value)
+  return { b: color.b, g: color.g, r: color.r }
+}
+
+function pushColoredTriangle(
+  positions: number[],
+  colors: number[],
+  first: LandrushPoint2,
+  second: LandrushPoint2,
+  third: LandrushPoint2,
+  y: number,
+  color: RgbColor,
+) {
+  pushColoredVertex(positions, colors, first, y, color)
+  pushColoredVertex(positions, colors, second, y, color)
+  pushColoredVertex(positions, colors, third, y, color)
+}
+
+function pushColoredVertex(
+  positions: number[],
+  colors: number[],
+  point: LandrushPoint2,
+  y: number,
+  color: RgbColor,
+) {
+  positions.push(point.x, y, point.z)
+  colors.push(color.r, color.g, color.b)
+}
+
+function coloredTriangleGeometry(positions: readonly number[], colors: readonly number[]) {
+  const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.computeVertexNormals()
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
   return geometry
+}
+
+function geometryHasVertices(geometry: BufferGeometry) {
+  return (geometry.getAttribute('position')?.count ?? 0) > 0
 }
 
 function insetPointsTowardCentroid(
@@ -379,35 +449,6 @@ function insetPointsTowardCentroid(
       z: point.z + (dz / length) * inset,
     }
   })
-}
-
-function shapeFromPoints(points: readonly LandrushPoint2[]) {
-  const shape = new Shape()
-  const first = points[0]
-  if (!first) return shape
-  shape.moveTo(first.x, -first.z)
-  for (let index = 1; index < points.length; index += 1) {
-    const point = points[index]
-    if (point) shape.lineTo(point.x, -point.z)
-  }
-  shape.closePath()
-  return shape
-}
-
-function lineLoopGeometry(points: readonly LandrushPoint2[], y: number) {
-  const geometry = new BufferGeometry()
-  const positions = new Float32Array((points.length + 1) * 3)
-
-  for (let index = 0; index <= points.length; index += 1) {
-    const point = points[index % points.length]
-    if (!point) continue
-    positions[index * 3] = point.x
-    positions[index * 3 + 1] = y
-    positions[index * 3 + 2] = point.z
-  }
-
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  return geometry
 }
 
 function StreetNetworkLayer({

@@ -24,6 +24,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Fn, float, instancedBufferAttribute, texture as textureNode, uv, vec4 } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import type { LandrushTree } from '@/components/landrush/types'
+import { measureLandrushFrameSlice } from './frame-load-profiler'
 import type { GrassBladeTuning } from './grass-material'
 
 export type BrunoTreeReference = {
@@ -147,9 +148,9 @@ export function BrunoTreeLayer({
     }),
     [canopyVisual, colorTexture, fieldSize, floweringVisual, pineVisual, treeGroups, tuning],
   )
-  useCameraFacingFoliage(canopyLeavesRef, foliageBillboards.canopy)
-  useCameraFacingFoliage(floweringLeavesRef, foliageBillboards.flowering)
-  useCameraFacingFoliage(pineLeavesRef, foliageBillboards.pine)
+  useCameraFacingFoliage(canopyLeavesRef, foliageBillboards.canopy, 'canopy')
+  useCameraFacingFoliage(floweringLeavesRef, foliageBillboards.flowering, 'flowering')
+  useCameraFacingFoliage(pineLeavesRef, foliageBillboards.pine, 'pine')
 
   useLayoutEffect(
     () => () => {
@@ -191,21 +192,21 @@ export function BrunoTreeLayer({
         billboards={foliageBillboards.canopy}
         geometry={foliageGeometries.canopy}
         meshRef={canopyLeavesRef}
-        opacity={tuning.opacity}
+        opacity={tuning.foliageOpacity}
       />
       <FoliageInstances
         alphaMap={foliageTexture}
         billboards={foliageBillboards.flowering}
         geometry={foliageGeometries.flowering}
         meshRef={floweringLeavesRef}
-        opacity={tuning.opacity}
+        opacity={tuning.foliageOpacity}
       />
       <FoliageInstances
         alphaMap={foliageTexture}
         billboards={foliageBillboards.pine}
         geometry={foliageGeometries.pine}
         meshRef={pineLeavesRef}
-        opacity={tuning.opacity}
+        opacity={tuning.foliageOpacity}
       />
     </>
   )
@@ -382,17 +383,58 @@ function createBrunoFoliageBillboards({
 function useCameraFacingFoliage(
   meshRef: RefObject<InstancedMesh | null>,
   billboards: readonly FoliageBillboard[],
+  kind: BrunoTreeKind,
 ) {
   const camera = useThree((state) => state.camera)
   const transform = useMemo(() => new Object3D(), [])
+  const hasAppliedMatricesRef = useRef(false)
+  const previousCameraMatrixRef = useRef(new Matrix4())
+  const hasPreviousCameraMatrixRef = useRef(false)
 
   useLayoutEffect(() => {
-    applyBillboardMatrices(meshRef.current, billboards, camera.position, transform)
+    hasAppliedMatricesRef.current = applyBillboardMatrices(
+      meshRef.current,
+      billboards,
+      camera.position,
+      transform,
+    )
+    camera.updateMatrixWorld()
+    previousCameraMatrixRef.current.copy(camera.matrixWorld)
+    hasPreviousCameraMatrixRef.current = true
   }, [billboards, camera, meshRef, transform])
 
   useFrame(() => {
-    applyBillboardMatrices(meshRef.current, billboards, camera.position, transform)
+    if (billboards.length === 0) return
+    measureLandrushFrameSlice(`scene.trees.${kind}.billboard-frame`, () => {
+      const cameraChanged = measureLandrushFrameSlice(`scene.trees.${kind}.camera-check`, () => {
+        camera.updateMatrixWorld()
+        return !(
+          hasAppliedMatricesRef.current &&
+          hasPreviousCameraMatrixRef.current &&
+          matrixElementsEqual(previousCameraMatrixRef.current, camera.matrixWorld)
+        )
+      })
+      if (!cameraChanged) return
+
+      previousCameraMatrixRef.current.copy(camera.matrixWorld)
+      hasPreviousCameraMatrixRef.current = true
+      hasAppliedMatricesRef.current = measureLandrushFrameSlice(
+        `scene.trees.${kind}.apply-billboard-matrices`,
+        () => applyBillboardMatrices(meshRef.current, billboards, camera.position, transform),
+      )
+    })
   })
+}
+
+function matrixElementsEqual(first: Matrix4, second: Matrix4) {
+  const firstElements = first.elements
+  const secondElements = second.elements
+  for (let index = 0; index < firstElements.length; index += 1) {
+    if (Math.abs((firstElements[index] ?? 0) - (secondElements[index] ?? 0)) > 0.00001) {
+      return false
+    }
+  }
+  return true
 }
 
 function applyBillboardMatrices(
@@ -401,7 +443,7 @@ function applyBillboardMatrices(
   cameraPosition: Vector3,
   transform: Object3D,
 ) {
-  if (!mesh) return
+  if (!mesh) return false
   billboards.forEach((billboard, index) => {
     transform.position.copy(billboard.position)
     transform.up.set(Math.sin(billboard.roll), Math.cos(billboard.roll), 0)
@@ -412,7 +454,7 @@ function applyBillboardMatrices(
   })
   mesh.count = billboards.length
   mesh.instanceMatrix.needsUpdate = true
-  mesh.computeBoundingSphere()
+  return true
 }
 
 function createFoliageColorAttribute(billboards: readonly FoliageBillboard[]) {
@@ -497,7 +539,6 @@ function applyInstancedMatrices(mesh: InstancedMesh | null, matrices: readonly M
   })
   mesh.count = matrices.length
   mesh.instanceMatrix.needsUpdate = true
-  mesh.computeBoundingSphere()
 }
 
 function createBrunoFoliageGeometry(random: () => number) {

@@ -28,6 +28,7 @@ import {
   createWaterFieldTexture,
   type WaterFieldParameters,
 } from './water-field-texture'
+import { FrameLoadProfilerProbe, measureLandrushFrameSlice } from './frame-load-profiler'
 import type { IslandElevationParameters } from './water-lab-parameters'
 import { WATER_PLANE_SIZE } from './water-material'
 import type { WaterViewPreset } from './water-view-presets'
@@ -36,6 +37,7 @@ type WaterSceneProps = {
   debugLayer: 'shoreline' | null
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
+  frameProfile?: boolean
   island: LandrushIsland
   materialParameters: LandrushWaterSurfaceParameters
   preset: WaterViewPreset
@@ -85,6 +87,7 @@ export function WaterScene({
   debugLayer,
   elevationParameters,
   fieldParameters,
+  frameProfile = false,
   island,
   materialParameters,
   preset,
@@ -103,6 +106,7 @@ export function WaterScene({
       gl={createWaterLabRenderer as never}
       shadows={false}
     >
+      <FrameLoadProfilerProbe enabled={frameProfile} />
       <color args={['#164a77']} attach="background" />
       <OrthographicCamera
         far={900}
@@ -295,7 +299,9 @@ function WaterMeshes({
   useEffect(() => () => cliffGeometry.dispose(), [cliffGeometry])
 
   useFrame((_, delta) => {
-    materialRef.current.userData.landrushWater.update(delta)
+    measureLandrushFrameSlice('scene.water.material-update', () => {
+      materialRef.current.userData.landrushWater.update(delta)
+    })
   })
 
   return (

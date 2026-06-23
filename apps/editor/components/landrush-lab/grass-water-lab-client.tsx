@@ -33,6 +33,7 @@ const GRASS_WATER_DEFAULT_TUNING = {
   ...DEFAULT_GRASS_BLADE_TUNING,
   brightness: 0.65,
   density: 0.54,
+  foliageOpacity: 0.23,
   height: 0.7,
   opacity: 0.23,
   patchSize: 8,

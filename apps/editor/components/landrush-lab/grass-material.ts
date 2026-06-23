@@ -10,6 +10,7 @@ export const BRUNO_GRASS_VIEW_CENTER = { x: -3.05, z: -3.05 } as const
 export type GrassBladeTuning = {
   brightness: number
   density: number
+  foliageOpacity: number
   height: number
   opacity: number
   patchSize: number
@@ -22,6 +23,7 @@ export type GrassBladeTuning = {
 export const DEFAULT_GRASS_BLADE_TUNING: GrassBladeTuning = {
   brightness: 1,
   density: 0.82,
+  foliageOpacity: 1,
   height: 0.6,
   opacity: 1,
   patchSize: 24,

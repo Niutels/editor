@@ -1,6 +1,14 @@
 'use client'
 
-import { ChevronDown, ChevronRight, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  RotateCcw,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
@@ -60,6 +68,7 @@ type StreetLabParameters = {
   roadWidthMeters: number
 }
 
+type CopyStatus = 'copied' | 'failed' | 'idle'
 type ElevationSliderKey = keyof IslandElevationParameters
 type FieldSliderKey = keyof WaterFieldParameters
 type MaterialSliderKey =
@@ -92,6 +101,7 @@ const WORLD_GRASS_TUNING = {
   ...DEFAULT_GRASS_BLADE_TUNING,
   brightness: 0.68,
   density: 0.58,
+  foliageOpacity: 0.24,
   height: 0.66,
   opacity: 0.24,
   patchSize: 8,
@@ -231,10 +241,12 @@ export function WorldLabClient() {
   const preset = getWaterViewPreset(searchParams.get('view'))
   const debug = searchParams.get('debugLandrush') === '1'
   const debugWaterLayer = searchParams.get('debugWaterLayer') === 'shoreline' ? 'shoreline' : null
+  const frameProfile = searchParams.get('frameProfile') === '1'
   const [showTunePanel, setShowTunePanel] = useState(() => searchParams.get('v') !== 'clean')
   const [showParcelHints, setShowParcelHints] = useState(() => searchParams.get('parcels') !== '0')
   const [showStreets, setShowStreets] = useState(() => searchParams.get('streets') !== '0')
   const [showDepthReference, setShowDepthReference] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
   const [frameP95, setFrameP95] = useState<number | null>(null)
   const [allocation, setAllocation] = useState<ParcelAllocationResult | null>(null)
   const [streetNetwork, setStreetNetwork] = useState<ParcelStreetNetwork | null>(null)
@@ -482,12 +494,49 @@ export function WorldLabClient() {
     setShowStreets(true)
   }
 
+  const copyParameters = async () => {
+    const snapshot = {
+      preset: preset.id,
+      visibility: {
+        depthReference: showDepthReference,
+        parcelHints: showParcelHints,
+        streets: showStreets,
+      },
+      water: {
+        elevation: Object.fromEntries(
+          ELEVATION_SLIDERS.map(({ key }) => [key, elevationParameters[key]]),
+        ),
+        field: Object.fromEntries(FIELD_SLIDERS.map(({ key }) => [key, fieldParameters[key]])),
+        material: Object.fromEntries(
+          MATERIAL_SLIDERS.map(({ key }) => [key, materialParameters[key]]),
+        ),
+        terrainFieldResolution,
+      },
+      grass: Object.fromEntries(GRASS_SLIDERS.map(({ key }) => [key, resolvedGrassTuning[key]])),
+      island: Object.fromEntries(ISLAND_SLIDERS.map(({ key }) => [key, islandParameters[key]])),
+      parcels: Object.fromEntries(PARCEL_SLIDERS.map(({ key }) => [key, parcelParameters[key]])),
+      parcelHint: Object.fromEntries(
+        PARCEL_HINT_SLIDERS.map(({ key }) => [key, parcelHintParameters[key]]),
+      ),
+      streets: Object.fromEntries(STREET_SLIDERS.map(({ key }) => [key, streetParameters[key]])),
+    }
+
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2))
+      setCopyStatus('copied')
+    } catch {
+      setCopyStatus('failed')
+    }
+    window.setTimeout(() => setCopyStatus('idle'), 1400)
+  }
+
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#164a77]">
       <WaterScene
         debugLayer={debugWaterLayer}
         elevationParameters={renderElevationParameters}
         fieldParameters={renderFieldParameters}
+        frameProfile={frameProfile}
         island={island}
         materialParameters={renderMaterialParameters}
         preset={preset}
@@ -498,12 +547,14 @@ export function WorldLabClient() {
       />
       {showTunePanel ? (
         <WorldTunePanel
+          copyStatus={copyStatus}
           elevationParameters={elevationParameters}
           fieldParameters={fieldParameters}
           grassTuning={resolvedGrassTuning}
           islandParameters={islandParameters}
           materialParameters={materialParameters}
           onClose={() => setShowTunePanel(false)}
+          onCopy={() => void copyParameters()}
           onElevationChange={(key, value) =>
             setElevationParameters((current) => ({ ...current, [key]: value }))
           }
@@ -560,12 +611,14 @@ export function WorldLabClient() {
 }
 
 function WorldTunePanel({
+  copyStatus,
   elevationParameters,
   fieldParameters,
   grassTuning,
   islandParameters,
   materialParameters,
   onClose,
+  onCopy,
   onElevationChange,
   onFieldChange,
   onGrassChange,
@@ -587,12 +640,14 @@ function WorldTunePanel({
   streetParameters,
   terrainFieldResolution,
 }: {
+  copyStatus: CopyStatus
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
   grassTuning: GrassBladeTuning
   islandParameters: WaterLabIslandParameters
   materialParameters: LandrushWaterEffectParameters
   onClose: () => void
+  onCopy: () => void
   onElevationChange: (key: ElevationSliderKey, value: number) => void
   onFieldChange: (key: FieldSliderKey, value: number) => void
   onGrassChange: (key: keyof GrassBladeTuning, value: number) => void
@@ -614,6 +669,8 @@ function WorldTunePanel({
   streetParameters: StreetLabParameters
   terrainFieldResolution: number
 }) {
+  const CopyIcon = copyStatus === 'copied' ? Check : Copy
+  const copyLabel = copyStatus === 'copied' ? 'Copied' : copyStatus === 'failed' ? 'Failed' : 'Copy'
   const [collapsedGroups, setCollapsedGroups] = useState<Record<WorldTuningGroupId, boolean>>({
     grass: true,
     island: true,
@@ -634,32 +691,15 @@ function WorldTunePanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold tracking-wide">World tune</div>
-          <div className="mt-0.5 text-[11px] text-white/54">water + grass + roads + parcels</div>
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           <button
-            aria-pressed={showDepthReference}
-            className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
-            onClick={onToggleDepthReference}
+            className="inline-flex items-center gap-1.5 rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
+            onClick={onCopy}
             type="button"
           >
-            {showDepthReference ? 'hide contour' : 'contour'}
-          </button>
-          <button
-            aria-label="Toggle parcel hints"
-            className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
-            onClick={onToggleParcelHints}
-            type="button"
-          >
-            {showParcelHints ? 'hints' : 'plain'}
-          </button>
-          <button
-            aria-label="Toggle streets"
-            className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
-            onClick={onToggleStreets}
-            type="button"
-          >
-            {showStreets ? 'roads' : 'lots'}
+            <CopyIcon aria-hidden className="size-3.5" />
+            {copyLabel}
           </button>
           <button
             aria-label="Reset"
@@ -678,6 +718,32 @@ function WorldTunePanel({
             <X aria-hidden className="size-3.5" />
           </button>
         </div>
+      </div>
+      <div className="mt-3 flex flex-wrap justify-end gap-2">
+        <button
+          aria-pressed={showDepthReference}
+          className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
+          onClick={onToggleDepthReference}
+          type="button"
+        >
+          {showDepthReference ? 'hide contour' : 'contour'}
+        </button>
+        <button
+          aria-label="Toggle parcel hints"
+          className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
+          onClick={onToggleParcelHints}
+          type="button"
+        >
+          {showParcelHints ? 'hints' : 'plain'}
+        </button>
+        <button
+          aria-label="Toggle streets"
+          className="rounded border border-white/20 px-2 py-1 text-xs text-white/72 transition hover:border-white/38 hover:text-white"
+          onClick={onToggleStreets}
+          type="button"
+        >
+          {showStreets ? 'roads' : 'lots'}
+        </button>
       </div>
       <div className="mt-4 grid gap-3">
         <TuningGroup
