@@ -2,6 +2,7 @@ import {
   type ColorPreset,
   createDefaultMaterial,
   createSurfaceRoleMaterial,
+  getMaterialRendererBackend,
   type RenderShading,
 } from '@pascal-app/viewer'
 import * as THREE from 'three'
@@ -15,7 +16,7 @@ export function getRoofMaterials(
   textures = true,
   colorPreset: ColorPreset = 'clay',
 ): THREE.Material[] {
-  const cacheKey = `${shading}-${textures}-${colorPreset}`
+  const cacheKey = `${getMaterialRendererBackend()}-${shading}-${textures}-${colorPreset}`
   const cached = roofMaterialsCache.get(cacheKey)
   if (cached) return cached
 
@@ -37,10 +38,11 @@ export function getRoofMaterials(
 }
 
 // Debug materials — vivid, distinct colours to identify each surface group.
-const roofDebugMaterialsCache = new Map<RenderShading, THREE.Material[]>()
+const roofDebugMaterialsCache = new Map<string, THREE.Material[]>()
 
 export function getRoofDebugMaterials(shading: RenderShading = 'rendered'): THREE.Material[] {
-  const cached = roofDebugMaterialsCache.get(shading)
+  const cacheKey = `${getMaterialRendererBackend()}-${shading}`
+  const cached = roofDebugMaterialsCache.get(cacheKey)
   if (cached) return cached
 
   const materials = [
@@ -49,6 +51,6 @@ export function getRoofDebugMaterials(shading: RenderShading = 'rendered'): THRE
     createDefaultMaterial('#dddddd', 0.9, shading, THREE.DoubleSide), // 2: Interior
     createDefaultMaterial('#4ade80', 0.9, shading, THREE.FrontSide), // 3: Shingle
   ]
-  roofDebugMaterialsCache.set(shading, materials)
+  roofDebugMaterialsCache.set(cacheKey, materials)
   return materials
 }

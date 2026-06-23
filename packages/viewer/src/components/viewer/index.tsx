@@ -2,24 +2,35 @@
 
 import { type AnyNodeId, StairOpeningSystem } from '@pascal-app/core'
 import { Canvas, extend, type ThreeToJSXElements, useFrame, useThree } from '@react-three/fiber'
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { WebGLRenderer } from 'three'
 import * as THREE from 'three/webgpu'
-import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
+import { isPerfOverlayEnabled, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
-import type { ColorPreset, RenderShading } from '../../lib/materials'
+import {
+  type ColorPreset,
+  type RenderShading,
+  setMaterialRendererBackend,
+} from '../../lib/materials'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { readViewerPerfFlagsFromUrl } from '../../runtime/perf-flags'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
 import { FloorElevationSystem } from '../../systems/floor-elevation/floor-elevation-system'
 import { GeometrySystem } from '../../systems/geometry/geometry-system'
 import { ErrorBoundary } from '../error-boundary'
 import { SceneRenderer } from '../renderers/scene-renderer'
+import { BenchSceneModuleGate } from './bench-scene-module-gate'
+import { BenchStatsProbe } from './bench-stats-probe'
 import FrameLimiter from './frame-limiter'
 import { Lights } from './lights'
-import { PerfMonitor } from './perf-monitor'
+import { INITIAL_PERF_STATS, PerfMonitor, PerfOverlay } from './perf-monitor'
+import { PerfProbe } from './perf-probe'
 import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
 import { RegisteredSystems } from './registered-systems'
+import { RenderSchedulerBridge } from './render-scheduler-bridge'
 import { SceneBvh } from './scene-bvh'
 import { SelectionManager } from './selection-manager'
+import { ShadowController } from './shadow-controller'
 import { ViewerCamera } from './viewer-camera'
 
 declare module '@react-three/fiber' {
@@ -42,7 +53,10 @@ extend(THREE as any)
 // We cache the in-flight Promise (not just the resolved renderer) so two
 // concurrent configure() calls await the same init instead of creating two
 // renderers in parallel and only caching the second.
-const WEBGPU_RENDERER_CACHE = new WeakMap<HTMLCanvasElement, Promise<THREE.WebGPURenderer>>()
+const WEBGPU_RENDERER_CACHE = new WeakMap<
+  HTMLCanvasElement,
+  Promise<THREE.WebGPURenderer | WebGLRenderer>
+>()
 
 /**
  * Monitors the WebGPU device for loss / uncaptured errors and logs them.
@@ -124,6 +138,8 @@ interface ViewerProps {
   hoverStyles?: HoverStyles
   selectionManager?: 'default' | 'custom'
   perf?: boolean
+  postProcessing?: boolean
+  rendererBackend?: 'webgpu' | 'webgl'
   useBvh?: boolean
   renderContext?: RenderContext
   defaultRender?: {
@@ -159,6 +175,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     hoverStyles = DEFAULT_HOVER_STYLES,
     selectionManager = 'default',
     perf = false,
+    postProcessing = true,
+    rendererBackend = 'webgpu',
     useBvh = true,
     renderContext = 'editor',
     defaultRender,
@@ -166,6 +184,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   },
   ref,
 ) {
+  setMaterialRendererBackend(rendererBackend)
+
   useImperativeHandle(
     ref,
     () => ({
@@ -226,95 +246,127 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // Desktops (fine pointer) keep the original 1.5 cap.
   const maxDpr =
     typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5
+  const [perfOverlayHydrated, setPerfOverlayHydrated] = useState(false)
+  useEffect(() => {
+    setPerfOverlayHydrated(true)
+  }, [])
+  const perfOverlayEnabled = perfOverlayHydrated && isPerfOverlayEnabled()
+  const showPerfOverlay = perfOverlayHydrated && (perf || perfOverlayEnabled)
+  const [perfStats, setPerfStats] = useState(INITIAL_PERF_STATS)
+  const collectPerfMetrics =
+    typeof window !== 'undefined' && readViewerPerfFlagsFromUrl().collectPerfMetrics
   return (
-    <Canvas
-      camera={{ position: [50, 50, 50], fov: 50 }}
-      className={`transition-colors duration-700 ${isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'}`}
-      dpr={[1, maxDpr]}
-      frameloop="never"
-      gl={
-        ((props: { canvas?: HTMLCanvasElement }) => {
-          const canvas = props.canvas
-          const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined
-          if (cached) return cached
-          const promise = (async () => {
-            try {
-              const renderer = new THREE.WebGPURenderer(props as any)
-              renderer.toneMapping = THREE.ACESFilmicToneMapping
-              renderer.toneMappingExposure = getSceneTheme(
-                useViewer.getState().sceneTheme,
-              ).toneMappingExposure
-              await renderer.init()
-              return renderer
-            } catch (err) {
-              // Drop the failed promise from the cache so a future Canvas
-              // mount on the same DOM can retry instead of inheriting the
-              // rejection forever.
-              if (canvas) WEBGPU_RENDERER_CACHE.delete(canvas)
-              console.error('[viewer] WebGPURenderer init failed', err)
-              throw err
-            }
-          })()
-          if (canvas) WEBGPU_RENDERER_CACHE.set(canvas, promise)
-          return promise
-        }) as any
-      }
-      resize={{
-        debounce: 100,
-      }}
-      shadows={{
-        type: THREE.PCFShadowMap,
-        enabled: true,
-      }}
-    >
-      <FrameLimiter fps={50} />
-      <ViewerCamera />
-      <GPUDeviceWatcher />
-      <ToneMappingExposure />
+    <>
+      <Canvas
+        camera={{ position: [50, 50, 50], fov: 50 }}
+        className={`transition-colors duration-700 ${isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'}`}
+        dpr={[1, maxDpr]}
+        frameloop="never"
+        gl={
+          ((props: { canvas?: HTMLCanvasElement }) => {
+            const canvas = props.canvas
+            const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined
+            if (cached) return cached
+            const promise = (async () => {
+              if (rendererBackend === 'webgl') {
+                const renderer = new WebGLRenderer(props as any)
+                renderer.toneMapping = THREE.ACESFilmicToneMapping
+                renderer.toneMappingExposure = getSceneTheme(
+                  useViewer.getState().sceneTheme,
+                ).toneMappingExposure
+                return renderer
+              }
 
-      <ErrorBoundary fallback={null} scope="viewer-scene">
-        {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
+              try {
+                const renderer = new THREE.WebGPURenderer(props as any)
+                renderer.toneMapping = THREE.ACESFilmicToneMapping
+                renderer.toneMappingExposure = getSceneTheme(
+                  useViewer.getState().sceneTheme,
+                ).toneMappingExposure
+                await renderer.init()
+                return renderer
+              } catch (err) {
+                console.warn(
+                  '[viewer] WebGPURenderer unavailable; falling back to WebGLRenderer',
+                  err,
+                )
+                const renderer = new WebGLRenderer(props as any)
+                renderer.toneMapping = THREE.ACESFilmicToneMapping
+                renderer.toneMappingExposure = getSceneTheme(
+                  useViewer.getState().sceneTheme,
+                ).toneMappingExposure
+                return renderer
+              }
+            })()
+            if (canvas) WEBGPU_RENDERER_CACHE.set(canvas, promise)
+            return promise
+          }) as any
+        }
+        resize={{
+          debounce: 100,
+        }}
+        shadows={{
+          type: THREE.PCFShadowMap,
+          enabled: true,
+        }}
+      >
+        <FrameLimiter fps={50} />
+        <RenderSchedulerBridge />
+        <ViewerCamera />
+        <GPUDeviceWatcher />
+        <ToneMappingExposure />
+        <ShadowController />
+        <BenchStatsProbe />
+        {collectPerfMetrics && <PerfProbe />}
+
+        <ErrorBoundary fallback={null} scope="viewer-scene">
+          <BenchSceneModuleGate>
+            {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
           /> */}
-        <Lights />
-        {useBvh ? (
-          <SceneBvh>
-            <SceneRenderer />
-          </SceneBvh>
-        ) : (
-          <SceneRenderer />
-        )}
+            <Lights />
+            {useBvh ? (
+              <SceneBvh>
+                <SceneRenderer />
+              </SceneBvh>
+            ) : (
+              <SceneRenderer />
+            )}
 
-        {/* Generic slab-elevation lift for any kind that declares
+            {/* Generic slab-elevation lift for any kind that declares
             `capabilities.floorPlaced`. Runs at frame priority 1 so it
             lands its mesh.position.y override before the priority-2
             systems below clear the dirty mark. */}
-        <FloorElevationSystem />
-        {/* Generic geometry rebuild loop for any registered kind that
+            <FloorElevationSystem />
+            {/* Generic geometry rebuild loop for any registered kind that
             ships `def.geometry`. Reads dirtyNodes, calls the kind's pure
             builder, swaps the registered group's children. See
             wiki/architecture/node-definitions.md. */}
-        <GeometrySystem />
-        {/* Automated stair opening sync — updates slab/ceiling cutouts
+            <GeometrySystem />
+            {/* Automated stair opening sync — updates slab/ceiling cutouts
             whenever stairs, slabs, or levels change. */}
-        <StairOpeningSystem />
-        {/* Mounts systems contributed by registry-backed kinds. Each
+            <StairOpeningSystem />
+            {/* Mounts systems contributed by registry-backed kinds. Each
             kind's `def.system` is loaded via lazy() and rendered here,
             ordered by `system.priority`. */}
-        <RegisteredSystems />
-        <PostProcessing hoverStyles={hoverStyles} />
-        {selectionManager === 'default' && <SelectionManager />}
-        {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
-        {children}
-      </ErrorBoundary>
-    </Canvas>
+            <RegisteredSystems />
+            {postProcessing ? <PostProcessing hoverStyles={hoverStyles} /> : <DebugRenderer />}
+            {selectionManager === 'default' && <SelectionManager />}
+            {showPerfOverlay && <PerfMonitor onStats={setPerfStats} />}
+            {children}
+          </BenchSceneModuleGate>
+        </ErrorBoundary>
+      </Canvas>
+      {showPerfOverlay && <PerfOverlay stats={perfStats} />}
+    </>
   )
 })
 
 const DebugRenderer = () => {
+  const perfOverlayEnabled = isPerfOverlayEnabled()
   useFrame(({ gl, scene, camera }) => {
-    const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
+    const submittedAt = perfOverlayEnabled ? performance.now() : 0
     gl.render(scene, camera)
-    if (PERF_OVERLAY_ENABLED) {
+    if (perfOverlayEnabled) {
       const queue = (gl as any).backend?.device?.queue as
         | { onSubmittedWorkDone?: () => Promise<void> }
         | undefined

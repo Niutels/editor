@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { EdgeMode } from '../lib/edge-style'
 import type { ColorPreset, RenderShading } from '../lib/materials'
+import { renderScheduler } from '../runtime/render-scheduler'
 
 export type RenderContext = 'editor' | 'viewer'
 
@@ -124,7 +125,12 @@ const useViewer = create<ViewerState>()(
       setHoverHighlightMode: (mode) =>
         set((state) => (state.hoverHighlightMode === mode ? state : { hoverHighlightMode: mode })),
       hoveredId: null,
-      setHoveredId: (id) => set((state) => (state.hoveredId === id ? state : { hoveredId: id })),
+      setHoveredId: (id) =>
+        set((state) => {
+          if (state.hoveredId === id) return {}
+          renderScheduler.requestFrame('hover:changed')
+          return { hoveredId: id }
+        }),
 
       cameraMode: 'perspective',
       setCameraMode: (mode) => set({ cameraMode: mode }),
@@ -235,18 +241,29 @@ const useViewer = create<ViewerState>()(
             if (updates.selectedIds === undefined) newSelection.selectedIds = []
           }
 
+          renderScheduler.requestFrame('selection:changed')
           return { selection: newSelection, previewSelectedIds: [] }
         }),
 
       resetSelection: () =>
-        set({
-          selection: {
-            buildingId: null,
-            levelId: null,
-            zoneId: null,
-            selectedIds: [],
-          },
-          previewSelectedIds: [],
+        set((state) => {
+          const alreadyEmpty =
+            state.selection.buildingId === null &&
+            state.selection.levelId === null &&
+            state.selection.zoneId === null &&
+            state.selection.selectedIds.length === 0 &&
+            state.previewSelectedIds.length === 0
+          if (alreadyEmpty) return {}
+          renderScheduler.requestFrame('selection:changed')
+          return {
+            selection: {
+              buildingId: null,
+              levelId: null,
+              zoneId: null,
+              selectedIds: [],
+            },
+            previewSelectedIds: [],
+          }
         }),
 
       outliner: { selectedObjects: [], hoveredObjects: [] },
@@ -261,7 +278,12 @@ const useViewer = create<ViewerState>()(
       setWalkthroughMode: (mode) => set({ walkthroughMode: mode }),
 
       cameraDragging: false,
-      setCameraDragging: (dragging) => set({ cameraDragging: dragging }),
+      setCameraDragging: (dragging) =>
+        set((state) => {
+          if (state.cameraDragging === dragging) return {}
+          renderScheduler.requestFrame(dragging ? 'camera:start' : 'camera:end')
+          return { cameraDragging: dragging }
+        }),
       inputDragging: false,
       setInputDragging: (dragging) => set({ inputDragging: dragging }),
     }),

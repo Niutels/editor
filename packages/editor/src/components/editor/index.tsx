@@ -125,6 +125,7 @@ export interface EditorProps {
   sidebarTabs?: (SidebarTab & { component: React.ComponentType })[]
   viewerToolbarLeft?: ReactNode
   viewerToolbarRight?: ReactNode
+  showEditorChrome?: boolean
   /**
    * Docked below the node inspector (v2). Hosts mount the "save as preset"
    * affordance here so it reads as part of the inspector surface and shows
@@ -149,6 +150,11 @@ export interface EditorProps {
 
   // Thumbnail
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
+
+  // Viewer runtime options for hosts that need a lean or constrained canvas.
+  viewerPostProcessing?: boolean
+  viewerRendererBackend?: 'webgpu' | 'webgl'
+  viewerUseBvh?: boolean
 
   // Version preview overlays (rendered by host app)
   sidebarOverlay?: ReactNode
@@ -587,34 +593,38 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isVersionPreviewMode,
   isLoading,
   isFirstPersonMode,
+  showEditorChrome,
   onThumbnailCapture,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
+  showEditorChrome: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
 }) {
   return (
     <>
       {!isFirstPersonMode && <SelectionManager />}
       {!(isVersionPreviewMode || isFirstPersonMode) && <BoxSelectTool />}
-      {!(isVersionPreviewMode || isFirstPersonMode) && <NodeArrowHandles />}
-      {!(isVersionPreviewMode || isFirstPersonMode) && <WallMoveSideHandles />}
-      {!(isVersionPreviewMode || isFirstPersonMode) && <FloatingActionMenu />}
-      {!(isVersionPreviewMode || isFirstPersonMode) && <FloatingBuildingActionMenu />}
-      {!isFirstPersonMode && <WallMeasurementLabel />}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <NodeArrowHandles />}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <WallMoveSideHandles />}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <FloatingActionMenu />}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && (
+        <FloatingBuildingActionMenu />
+      )}
+      {showEditorChrome && !isFirstPersonMode && <WallMeasurementLabel />}
       <ExportManager />
       {isFirstPersonMode ? <ViewerZoneSystem /> : <ZoneSystem />}
       <CeilingSystem />
       <CeilingSelectionAffordanceSystem />
       <RoofEditSystem />
       <StairEditSystem />
-      {!(isLoading || isFirstPersonMode) && <SnapAwareGrid />}
+      {showEditorChrome && !(isLoading || isFirstPersonMode) && <SnapAwareGrid />}
       {!(isLoading || isVersionPreviewMode || isFirstPersonMode) && <ToolManager />}
       {isFirstPersonMode && <FirstPersonControls />}
       <CustomCameraControls />
       <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
-      {!isFirstPersonMode && <SiteEdgeLabels />}
+      {showEditorChrome && !isFirstPersonMode && <SiteEdgeLabels />}
       <InteractiveSystem />
     </>
   )
@@ -799,16 +809,24 @@ const ViewerCanvas = memo(function ViewerCanvas({
   isVersionPreviewMode,
   isLoading,
   isFirstPersonMode,
+  showEditorChrome,
   hasLoadedInitialScene,
   showLoader,
   onThumbnailCapture,
+  viewerPostProcessing,
+  viewerRendererBackend,
+  viewerUseBvh,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
+  showEditorChrome: boolean
   hasLoadedInitialScene: boolean
   showLoader: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
+  viewerPostProcessing?: boolean
+  viewerRendererBackend?: 'webgpu' | 'webgl'
+  viewerUseBvh?: boolean
 }) {
   const viewMode = useEditor((s) => s.viewMode)
   const floorplanPaneRatio = useEditor((s) => s.floorplanPaneRatio)
@@ -901,7 +919,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
             containerRef={viewer3dRef}
             isVersionPreviewMode={isVersionPreviewMode}
           />
-          {!showLoader && isCameraControlsHintVisible && !isFirstPersonMode ? (
+          {showEditorChrome && !showLoader && isCameraControlsHintVisible && !isFirstPersonMode ? (
             <ViewerCanvasControlsHint
               isPreviewMode={isPreviewMode}
               onDismiss={dismissCameraControlsHint}
@@ -911,14 +929,18 @@ const ViewerCanvas = memo(function ViewerCanvas({
           <Viewer
             defaultRender={EDITOR_DEFAULT_RENDER}
             hoverStyles={EDITOR_HOVER_STYLES}
+            postProcessing={viewerPostProcessing}
+            rendererBackend={viewerRendererBackend}
             renderContext="editor"
             selectionManager={isFirstPersonMode ? 'default' : 'custom'}
+            useBvh={viewerUseBvh}
           >
             <ViewerSceneContent
               isFirstPersonMode={isFirstPersonMode}
               isLoading={isLoading}
               isVersionPreviewMode={isVersionPreviewMode}
               onThumbnailCapture={onThumbnailCapture}
+              showEditorChrome={showEditorChrome}
             />
           </Viewer>
         </div>
@@ -936,6 +958,7 @@ export default function Editor({
   sidebarTabs,
   viewerToolbarLeft,
   viewerToolbarRight,
+  showEditorChrome = true,
   inspectorFooter,
   projectId,
   onLoad,
@@ -946,6 +969,9 @@ export default function Editor({
   isVersionPreviewMode = false,
   isLoading = false,
   onThumbnailCapture,
+  viewerPostProcessing,
+  viewerRendererBackend,
+  viewerUseBvh,
   sidebarOverlay,
   viewerBanner,
   settingsPanelProps,
@@ -1086,8 +1112,11 @@ export default function Editor({
     <Viewer
       defaultRender={EDITOR_DEFAULT_RENDER}
       hoverStyles={EDITOR_HOVER_STYLES}
+      postProcessing={viewerPostProcessing}
+      rendererBackend={viewerRendererBackend}
       renderContext="editor"
       selectionManager="default"
+      useBvh={viewerUseBvh}
     >
       <ExportManager />
       <ViewerZoneSystem />
@@ -1107,7 +1136,11 @@ export default function Editor({
       isLoading={isLoading}
       isVersionPreviewMode={isVersionPreviewMode}
       onThumbnailCapture={onThumbnailCapture}
+      showEditorChrome={showEditorChrome}
       showLoader={showLoader}
+      viewerPostProcessing={viewerPostProcessing}
+      viewerRendererBackend={viewerRendererBackend}
+      viewerUseBvh={viewerUseBvh}
     />
   )
 
@@ -1158,18 +1191,18 @@ export default function Editor({
               navbarSlot={navbarSlot}
               overlays={
                 <>
-                  {!isCaptureMode && <FloatingLevelSelector />}
-                  {!(isVersionPreviewMode || isCaptureMode) && (
+                  {showEditorChrome && !isCaptureMode && <FloatingLevelSelector />}
+                  {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) && (
                     <div className="pointer-events-auto">
                       <ActionMenu />
                     </div>
                   )}
-                  {!(isVersionPreviewMode || isCaptureMode) && (
+                  {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) && (
                     <div className="pointer-events-auto">
                       <PanelManager inspectorFooter={inspectorFooter} />
                     </div>
                   )}
-                  {!isCaptureMode && (
+                  {showEditorChrome && !isCaptureMode && (
                     <div className="pointer-events-auto">
                       <HelperManager />
                     </div>
@@ -1180,15 +1213,17 @@ export default function Editor({
                     />
                   )}
                   {viewerBanner}
-                  {projectId ? <SnapshotCaptureOverlay projectId={projectId} /> : null}
+                  {showEditorChrome && projectId ? (
+                    <SnapshotCaptureOverlay projectId={projectId} />
+                  ) : null}
                 </>
               }
               renderTabContent={renderTabContent}
               sidebarOverlay={sidebarOverlay}
-              sidebarTabs={tabBarTabs}
+              sidebarTabs={showEditorChrome ? tabBarTabs : []}
               viewerContent={viewerCanvas}
-              viewerToolbarLeft={viewerToolbarLeft}
-              viewerToolbarRight={viewerToolbarRight}
+              viewerToolbarLeft={showEditorChrome ? viewerToolbarLeft : undefined}
+              viewerToolbarRight={showEditorChrome ? viewerToolbarRight : undefined}
             />
             <EditorCommands />
             <CommandPalette emptyAction={commandPaletteEmptyAction} />

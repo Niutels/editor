@@ -8,7 +8,7 @@ import {
   sceneRegistry,
   useScene,
 } from '@pascal-app/core'
-import { GRID_LAYER, useViewer, ZONE_LAYER } from '@pascal-app/viewer'
+import { GRID_LAYER, renderScheduler, useViewer, ZONE_LAYER } from '@pascal-app/viewer'
 import { CameraControls, CameraControlsImpl } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -25,6 +25,32 @@ const tempSize = new Vector3()
 const tempTarget = new Vector3()
 const DEFAULT_MAX_POLAR_ANGLE = Math.PI / 2 - 0.1
 const DEBUG_MAX_POLAR_ANGLE = Math.PI - 0.05
+const PROGRAMMATIC_CAMERA_FRAME_DELAYS_MS = [0, 80, 180, 360, 720] as const
+
+declare global {
+  interface Window {
+    __PASCAL_APPLY_VIEWER_BENCH_STATE__?:
+      | ((state: {
+          edges?: 'off' | 'soft' | 'strong'
+          shading?: 'solid' | 'rendered'
+          shadows?: boolean
+          textures?: boolean
+        }) => void)
+      | null
+    __PASCAL_CAMERA_CONTROLS__?: CameraControlsImpl | null
+    __PASCAL_CAMERA_DRAGGING__?: boolean
+    __PASCAL_GET_VIEWER_BENCH_STATE__?:
+      | (() => {
+          edges: string
+          shading: string
+          shadows: boolean
+          textures: boolean
+        })
+      | null
+    __PASCAL_RESET_VIEWER_INTERACTION__?: (() => void) | null
+    __PASCAL_SET_CAMERA_DRAGGING__?: ((dragging: boolean) => void) | null
+  }
+}
 
 export const CustomCameraControls = () => {
   const controls = useRef<CameraControlsImpl>(null!)
@@ -36,15 +62,97 @@ export const CustomCameraControls = () => {
   const firstLoad = useRef(true)
   const maxPolarAngle =
     !isPreviewMode && allowUndergroundCamera ? DEBUG_MAX_POLAR_ANGLE : DEFAULT_MAX_POLAR_ANGLE
+  const isLandrushWaterProofRoute = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    const params = new URLSearchParams(window.location.search)
+    return params.get('proof') === 'water'
+  }, [])
 
   const camera = useThree((state) => state.camera)
+  const gl = useThree((state) => state.gl)
   const raycaster = useThree((state) => state.raycaster)
+  const setCameraDragging = useCallback((dragging: boolean) => {
+    if (typeof window !== 'undefined') {
+      window.__PASCAL_CAMERA_DRAGGING__ = dragging
+    }
+    useViewer.getState().setCameraDragging(dragging)
+  }, [])
+  const requestProgrammaticCameraFrames = useCallback(() => {
+    renderScheduler.requestFrame('camera:start')
+    for (const delayMs of PROGRAMMATIC_CAMERA_FRAME_DELAYS_MS) {
+      window.setTimeout(() => renderScheduler.requestFrame('camera:move'), delayMs)
+    }
+    window.setTimeout(() => renderScheduler.requestFrame('camera:end'), 760)
+  }, [])
+
   useEffect(() => {
     camera.layers.enable(EDITOR_LAYER)
     camera.layers.enable(GRID_LAYER)
     raycaster.layers.enable(EDITOR_LAYER)
     raycaster.layers.enable(ZONE_LAYER)
   }, [camera, raycaster])
+
+  useEffect(() => {
+    const params =
+      typeof window === 'undefined' ? null : new URLSearchParams(window.location.search)
+    if (!(params?.has('perf') || params?.has('benchControls'))) {
+      return
+    }
+
+    const publishControls = () => {
+      const rect = gl.domElement.getBoundingClientRect()
+      if (rect.width > 100 && rect.height > 100) {
+        window.__PASCAL_CAMERA_CONTROLS__ = controls.current
+        window.__PASCAL_APPLY_VIEWER_BENCH_STATE__ = (state) => {
+          const viewer = useViewer.getState()
+          if (state.edges && ['off', 'soft', 'strong'].includes(state.edges)) {
+            viewer.setEdges(state.edges)
+          }
+          if (state.shading && ['solid', 'rendered'].includes(state.shading)) {
+            viewer.setShading(state.shading)
+          }
+          if (typeof state.shadows === 'boolean') {
+            viewer.setShadows(state.shadows)
+          }
+          if (typeof state.textures === 'boolean') {
+            viewer.setTextures(state.textures)
+          }
+        }
+        window.__PASCAL_GET_VIEWER_BENCH_STATE__ = () => {
+          const viewer = useViewer.getState()
+          return {
+            edges: viewer.edges,
+            shading: viewer.shading,
+            shadows: viewer.shadows,
+            textures: viewer.textures,
+          }
+        }
+        window.__PASCAL_RESET_VIEWER_INTERACTION__ = () => {
+          const viewer = useViewer.getState()
+          viewer.resetSelection()
+          viewer.setHoveredId(null)
+          viewer.outliner.selectedObjects.length = 0
+          viewer.outliner.hoveredObjects.length = 0
+        }
+        window.__PASCAL_SET_CAMERA_DRAGGING__ = setCameraDragging
+      }
+    }
+
+    publishControls()
+    const intervalId = window.setInterval(publishControls, 250)
+
+    return () => {
+      window.clearInterval(intervalId)
+      if (window.__PASCAL_CAMERA_CONTROLS__ === controls.current) {
+        window.__PASCAL_CAMERA_CONTROLS__ = null
+      }
+      window.__PASCAL_APPLY_VIEWER_BENCH_STATE__ = null
+      window.__PASCAL_RESET_VIEWER_INTERACTION__ = null
+      window.__PASCAL_GET_VIEWER_BENCH_STATE__ = null
+      window.__PASCAL_SET_CAMERA_DRAGGING__ = null
+      window.__PASCAL_CAMERA_DRAGGING__ = false
+    }
+  }, [gl, setCameraDragging])
 
   useEffect(() => {
     if (isPreviewMode) return // Preview mode uses auto-navigate instead
@@ -57,12 +165,30 @@ export const CustomCameraControls = () => {
     }
     if (!controls.current) return
     if (firstLoad.current) {
+      const selectedNode = currentLevelId ? useScene.getState().nodes[currentLevelId] : null
+      if (!(currentLevelId || selectedNode?.camera)) return
+
       firstLoad.current = false
-      controls.current.setLookAt(20, 20, 20, 0, 0, 0, true)
+      if (selectedNode?.camera) {
+        const { position, target } = selectedNode.camera
+        requestProgrammaticCameraFrames()
+        controls.current.setLookAt(
+          position[0],
+          position[1],
+          position[2],
+          target[0],
+          target[1],
+          target[2],
+          true,
+        )
+      } else {
+        requestProgrammaticCameraFrames()
+        controls.current.setLookAt(20, 20, 20, 0, 0, 0, true)
+      }
     }
     controls.current.getTarget(currentTarget)
     controls.current.moveTo(currentTarget.x, targetY, currentTarget.z, true)
-  }, [currentLevelId, isPreviewMode])
+  }, [currentLevelId, isPreviewMode, requestProgrammaticCameraFrames])
 
   useEffect(() => {
     if (!controls.current) return
@@ -90,6 +216,7 @@ export const CustomCameraControls = () => {
       controls.current.getTarget(tempTarget)
       tempDelta.copy(tempCenter).sub(tempTarget)
 
+      requestProgrammaticCameraFrames()
       controls.current.setLookAt(
         tempPosition.x + tempDelta.x,
         tempPosition.y + tempDelta.y,
@@ -100,7 +227,7 @@ export const CustomCameraControls = () => {
         true,
       )
     },
-    [isPreviewMode],
+    [isPreviewMode, requestProgrammaticCameraFrames],
   )
 
   // Configure mouse buttons based on control mode and camera mode
@@ -113,12 +240,16 @@ export const CustomCameraControls = () => {
         : CameraControlsImpl.ACTION.DOLLY
 
     return {
-      left: isPreviewMode ? CameraControlsImpl.ACTION.SCREEN_PAN : CameraControlsImpl.ACTION.NONE,
+      left: isLandrushWaterProofRoute
+        ? CameraControlsImpl.ACTION.ROTATE
+        : isPreviewMode
+          ? CameraControlsImpl.ACTION.SCREEN_PAN
+          : CameraControlsImpl.ACTION.NONE,
       middle: CameraControlsImpl.ACTION.SCREEN_PAN,
       right: CameraControlsImpl.ACTION.ROTATE,
       wheel: wheelAction,
     }
-  }, [cameraMode, isPreviewMode])
+  }, [cameraMode, isLandrushWaterProofRoute, isPreviewMode])
 
   // Touch gestures (mobile / trackpad).
   // - One finger drag    → rotate by default (much easier on a phone), but
@@ -156,18 +287,20 @@ export const CustomCameraControls = () => {
         ? CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK
         : CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK
 
-    const oneFingerAction = isPreviewMode
-      ? CameraControlsImpl.ACTION.TOUCH_TRUCK
-      : isInteracting
-        ? CameraControlsImpl.ACTION.NONE
-        : CameraControlsImpl.ACTION.TOUCH_ROTATE
+    const oneFingerAction = isLandrushWaterProofRoute
+      ? CameraControlsImpl.ACTION.TOUCH_ROTATE
+      : isPreviewMode
+        ? CameraControlsImpl.ACTION.TOUCH_TRUCK
+        : isInteracting
+          ? CameraControlsImpl.ACTION.NONE
+          : CameraControlsImpl.ACTION.TOUCH_ROTATE
 
     return {
       one: oneFingerAction,
       two: twoFingerAction,
       three: CameraControlsImpl.ACTION.TOUCH_ROTATE,
     }
-  }, [cameraMode, isPreviewMode, isInteracting])
+  }, [cameraMode, isLandrushWaterProofRoute, isPreviewMode, isInteracting])
 
   useEffect(() => {
     const keyState = {
@@ -192,7 +325,9 @@ export const CustomCameraControls = () => {
       controls.current.mouseButtons.wheel = wheelAction
       controls.current.mouseButtons.middle = CameraControlsImpl.ACTION.SCREEN_PAN
       controls.current.mouseButtons.right = CameraControlsImpl.ACTION.ROTATE
-      if (isPreviewMode) {
+      if (isLandrushWaterProofRoute) {
+        controls.current.mouseButtons.left = CameraControlsImpl.ACTION.ROTATE
+      } else if (isPreviewMode) {
         // In preview mode, left-click is always pan (viewer-style)
         controls.current.mouseButtons.left = CameraControlsImpl.ACTION.SCREEN_PAN
       } else if (space) {
@@ -250,7 +385,7 @@ export const CustomCameraControls = () => {
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [cameraMode, isPreviewMode])
+  }, [cameraMode, isLandrushWaterProofRoute, isPreviewMode])
 
   // Preview mode: auto-navigate camera to selected node (viewer behavior)
   const previewTargetNodeId = isPreviewMode
@@ -282,6 +417,7 @@ export const CustomCameraControls = () => {
       ) {
         requestAnimationFrame(() => {
           if (!controls.current) return
+          requestProgrammaticCameraFrames()
           controls.current.setLookAt(
             position[0],
             position[1],
@@ -309,6 +445,7 @@ export const CustomCameraControls = () => {
     const maxDim = Math.max(tempSize.x, tempSize.y, tempSize.z)
     const distance = Math.max(maxDim * 2, 15)
 
+    requestProgrammaticCameraFrames()
     controls.current.setLookAt(
       tempCenter.x + distance * 0.7,
       tempCenter.y + distance * 0.5,
@@ -318,7 +455,7 @@ export const CustomCameraControls = () => {
       tempCenter.z,
       true,
     )
-  }, [isPreviewMode, previewTargetNodeId])
+  }, [isPreviewMode, previewTargetNodeId, requestProgrammaticCameraFrames])
 
   // Preset capture auto-framing — when `setCaptureMode({ mode: 'preset',
   // isolated })` fires, fly the camera to a pose that fits the union
@@ -392,6 +529,7 @@ export const CustomCameraControls = () => {
     const viewAngle = yaw + SIDE_OFFSET_RAD
     const horizontal = distance * Math.cos(ELEVATION_RAD)
     const elevation = distance * Math.sin(ELEVATION_RAD)
+    requestProgrammaticCameraFrames()
     controls.current.setLookAt(
       tempCenter.x + Math.sin(viewAngle) * horizontal,
       tempCenter.y + elevation,
@@ -407,6 +545,7 @@ export const CustomCameraControls = () => {
       // pre-capture pose only if the controls are still around (during
       // unmount they might be torn down already).
       if (!controls.current) return
+      requestProgrammaticCameraFrames()
       controls.current.setLookAt(
         restorePos.x,
         restorePos.y,
@@ -417,7 +556,7 @@ export const CustomCameraControls = () => {
         true,
       )
     }
-  }, [captureMode])
+  }, [captureMode, requestProgrammaticCameraFrames])
 
   useEffect(() => {
     const handleNodeCapture = ({ nodeId }: CameraControlEvent) => {
@@ -445,6 +584,7 @@ export const CustomCameraControls = () => {
       if (!node?.camera) return
       const { position, target } = node.camera
 
+      requestProgrammaticCameraFrames()
       controls.current.setLookAt(
         position[0],
         position[1],
@@ -465,6 +605,7 @@ export const CustomCameraControls = () => {
       // Otherwise, go to top view (0°)
       const targetAngle = currentPolarAngle < 0.1 ? Math.PI / 4 : 0
 
+      requestProgrammaticCameraFrames()
       controls.current.rotatePolarTo(targetAngle, true)
     }
 
@@ -477,6 +618,7 @@ export const CustomCameraControls = () => {
       const rounded = Math.round(currentAzimuth / (Math.PI / 2)) * (Math.PI / 2)
       const target = rounded - Math.PI / 2
 
+      requestProgrammaticCameraFrames()
       controls.current.rotateTo(target, currentPolar, true)
     }
 
@@ -489,6 +631,7 @@ export const CustomCameraControls = () => {
       const rounded = Math.round(currentAzimuth / (Math.PI / 2)) * (Math.PI / 2)
       const target = rounded + Math.PI / 2
 
+      requestProgrammaticCameraFrames()
       controls.current.rotateTo(target, currentPolar, true)
     }
 
@@ -496,10 +639,31 @@ export const CustomCameraControls = () => {
       focusNode(nodeId)
     }
 
+    const handleGoToPosition = ({
+      position,
+      target,
+    }: {
+      position: [number, number, number]
+      target: [number, number, number]
+    }) => {
+      if (!controls.current || isPreviewMode) return
+      requestProgrammaticCameraFrames()
+      controls.current.setLookAt(
+        position[0],
+        position[1],
+        position[2],
+        target[0],
+        target[1],
+        target[2],
+        true,
+      )
+    }
+
     const handleFitScene = ({ bounds }: CameraControlFitSceneEvent) => {
       if (!controls.current || isPreviewMode) return
       if (!bounds) {
         // Restore default framing pose when no bounds were computed.
+        requestProgrammaticCameraFrames()
         controls.current.setLookAt(20, 20, 20, 0, 0, 0, true)
         return
       }
@@ -510,6 +674,7 @@ export const CustomCameraControls = () => {
       const maxExtent = Math.max(w, d)
       const distance = Math.max(maxExtent * 1.4, 15)
       const height = Math.max(maxExtent * 0.8, 10)
+      requestProgrammaticCameraFrames()
       controls.current.setLookAt(cx + distance * 0.7, height, cz + distance * 0.7, cx, 0, cz, true)
     }
 
@@ -520,6 +685,7 @@ export const CustomCameraControls = () => {
     emitter.on('camera-controls:orbit-cw', handleOrbitCW)
     emitter.on('camera-controls:orbit-ccw', handleOrbitCCW)
     emitter.on('camera-controls:fit-scene', handleFitScene)
+    emitter.on('camera:go-to-position', handleGoToPosition)
 
     return () => {
       emitter.off('camera-controls:capture', handleNodeCapture)
@@ -529,16 +695,23 @@ export const CustomCameraControls = () => {
       emitter.off('camera-controls:orbit-cw', handleOrbitCW)
       emitter.off('camera-controls:orbit-ccw', handleOrbitCCW)
       emitter.off('camera-controls:fit-scene', handleFitScene)
+      emitter.off('camera:go-to-position', handleGoToPosition)
     }
-  }, [focusNode, isPreviewMode])
+  }, [focusNode, isPreviewMode, requestProgrammaticCameraFrames])
 
   const onTransitionStart = useCallback(() => {
-    useViewer.getState().setCameraDragging(true)
+    setCameraDragging(true)
+    renderScheduler.requestFrame('camera:start')
+  }, [setCameraDragging])
+
+  const onChange = useCallback(() => {
+    renderScheduler.requestFrame('camera:move')
   }, [])
 
   const onRest = useCallback(() => {
-    useViewer.getState().setCameraDragging(false)
-  }, [])
+    setCameraDragging(false)
+    renderScheduler.requestFrame('camera:end')
+  }, [setCameraDragging])
 
   if (isFirstPersonMode) {
     return null
@@ -555,11 +728,12 @@ export const CustomCameraControls = () => {
   return (
     <CameraControls
       makeDefault
-      maxDistance={100}
+      maxDistance={500}
       maxPolarAngle={maxPolarAngle}
       minDistance={minDistance}
       minPolarAngle={0}
       mouseButtons={mouseButtons}
+      onChange={onChange}
       onRest={onRest}
       onSleep={onRest}
       onTransitionStart={onTransitionStart}

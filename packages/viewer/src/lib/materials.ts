@@ -15,6 +15,22 @@ import { getSceneTheme } from './scene-themes'
 
 export type RenderShading = 'solid' | 'rendered'
 export type ColorPreset = 'clay' | 'white' | 'mono' | 'blueprint'
+export type MaterialRendererBackend = 'webgpu' | 'webgl'
+
+let materialRendererBackend: MaterialRendererBackend = 'webgpu'
+
+export function getMaterialRendererBackend(): MaterialRendererBackend {
+  return materialRendererBackend
+}
+
+export function setMaterialRendererBackend(backend: MaterialRendererBackend): void {
+  if (materialRendererBackend === backend) return
+  materialRendererBackend = backend
+  const previousGlassMaterial = glassMaterial
+  glassMaterial = createGlassMaterial()
+  previousGlassMaterial.dispose()
+  clearMaterialCache()
+}
 
 export const CLAY_PALETTE: Record<SurfaceRole, string> = {
   wall: '#dcd6c7',
@@ -79,12 +95,7 @@ export function resolveSurfaceColor(
 // whose back-face shader variant doesn't declare outputs for every MRT target
 // — the validator rejects it and poisons the entire render context. FrontSide
 // avoids that code path. Same pattern as MeshStandardMaterial in renderer.tsx.
-export const glassMaterial = new MeshLambertNodeMaterial({
-  color: '#e0f2fe',
-  transparent: true,
-  opacity: 0.35,
-  side: THREE.FrontSide,
-})
+export let glassMaterial = createGlassMaterial()
 
 const sideMap: Record<MaterialProperties['side'], THREE.Side> = {
   front: THREE.FrontSide,
@@ -154,6 +165,27 @@ function getTextureChannel(slot?: TextureSlot): number {
   }
 
   return 0
+}
+
+function createLambertMaterial(params: THREE.MeshLambertMaterialParameters = {}): THREE.Material {
+  return materialRendererBackend === 'webgl'
+    ? new THREE.MeshLambertMaterial(params)
+    : new MeshLambertNodeMaterial(params)
+}
+
+function createStandardMaterial(params: THREE.MeshStandardMaterialParameters = {}): THREE.Material {
+  return materialRendererBackend === 'webgl'
+    ? new THREE.MeshStandardMaterial(params)
+    : new MeshStandardNodeMaterial(params)
+}
+
+function createGlassMaterial(): THREE.Material {
+  return createLambertMaterial({
+    color: '#e0f2fe',
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.FrontSide,
+  })
 }
 
 function getCacheKey(props: MaterialProperties, shading: RenderShading): string {
@@ -425,8 +457,7 @@ export function createMaterialFromPreset(
     return materialCache.get(cacheKey)!
   }
 
-  const material =
-    shading === 'solid' ? new MeshLambertNodeMaterial() : new MeshStandardNodeMaterial()
+  const material = shading === 'solid' ? createLambertMaterial() : createStandardMaterial()
   applyMaterialPresetToMaterials(material, preset)
   materialCache.set(cacheKey, material)
   return material
@@ -470,8 +501,8 @@ export function createMaterial(
 
   const threeMaterial =
     shading === 'solid'
-      ? new MeshLambertNodeMaterial(materialParams)
-      : new MeshStandardNodeMaterial({
+      ? createLambertMaterial(materialParams)
+      : createStandardMaterial({
           ...materialParams,
           roughness: props.roughness,
           metalness: props.metalness,
@@ -488,13 +519,13 @@ export function createDefaultMaterial(
   side: THREE.Side = THREE.FrontSide,
 ): THREE.Material {
   if (shading === 'solid') {
-    return new MeshLambertNodeMaterial({
+    return createLambertMaterial({
       color,
       side,
     })
   }
 
-  return new MeshStandardNodeMaterial({
+  return createStandardMaterial({
     color,
     roughness,
     metalness: 0,
@@ -531,14 +562,14 @@ export function createSurfaceRoleMaterial(
 
   const material =
     role === 'glazing'
-      ? new MeshLambertNodeMaterial({
+      ? createLambertMaterial({
           color: resolveSurfaceColor(role, preset, sceneThemeId),
           depthWrite: false,
           opacity: 0.25,
           side: resolvedSide,
           transparent: true,
         })
-      : new MeshLambertNodeMaterial({
+      : createLambertMaterial({
           color: resolveSurfaceColor(role, preset, sceneThemeId),
           side: resolvedSide,
         })
@@ -577,8 +608,8 @@ export function DEFAULT_WINDOW_MATERIAL(shading: RenderShading = 'rendered'): TH
   }
   const material =
     shading === 'solid'
-      ? new MeshLambertNodeMaterial(params)
-      : new MeshStandardNodeMaterial({
+      ? createLambertMaterial(params)
+      : createStandardMaterial({
           ...params,
           roughness: 0.1,
           metalness: 0.1,

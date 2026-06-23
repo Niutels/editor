@@ -5,9 +5,9 @@ import {
   DEFAULT_WALL_HEIGHT,
   type DoorNode,
   getAdjacentWallIds,
+  getEffectiveNode,
   getWallCurveFrameAt,
   getWallMiterBoundaryPoints,
-  getEffectiveNode,
   getWallPlanFootprint,
   getWallSurfacePolygon,
   getWallThickness,
@@ -25,7 +25,7 @@ import {
 } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg'
+import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg/src/index.js'
 import { computeBoundsTree } from 'three-mesh-bvh'
 
 // Reusable CSG evaluator for better performance

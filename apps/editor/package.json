@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "dotenv -e ../../.env.local -- next dev --port 3002",
+    "dev": "dotenv -e ../../.env.local -- next dev --turbo --port 3002",
     "build": "dotenv -e ../../.env.local -- next build",
     "start": "next start",
     "lint": "biome lint",
@@ -40,6 +40,7 @@
     "@types/node": "^22.19.12",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "@types/three": "^0.184.0",
     "agentation": "^2.3.2",
     "react-grab": "^0.1.29",
     "react-scan": "^0.5.3",

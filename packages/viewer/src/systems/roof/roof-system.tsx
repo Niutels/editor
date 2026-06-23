@@ -15,7 +15,7 @@ import {
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { ADDITION, Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg'
+import { ADDITION, Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg/src/index.js'
 import { computeBoundsTree } from 'three-mesh-bvh'
 
 function csgGeometry(brush: Brush): THREE.BufferGeometry {

@@ -22,6 +22,7 @@ import { createPortal, type ThreeEvent, useFrame, useThree } from '@react-three/
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   type BufferGeometry,
+  CircleGeometry,
   Color,
   CylinderGeometry,
   DoubleSide,
@@ -237,8 +238,7 @@ export function NodeArrowHandles() {
     rawNode ? s.overrides.get(rawNode.id) : undefined,
   )
   const node = useMemo<AnyNode | null>(
-    () =>
-      rawNode && liveOverride ? ({ ...rawNode, ...liveOverride } as AnyNode) : rawNode,
+    () => (rawNode && liveOverride ? ({ ...rawNode, ...liveOverride } as AnyNode) : rawNode),
     [rawNode, liveOverride],
   )
 
@@ -251,10 +251,7 @@ export function NodeArrowHandles() {
   }, [node, def])
 
   const shouldRender =
-    Boolean(node && descriptors?.length) &&
-    !isFloorplanHovered &&
-    mode !== 'delete' &&
-    !movingNode
+    Boolean(node && descriptors?.length) && !isFloorplanHovered && mode !== 'delete' && !movingNode
 
   if (!shouldRender || !node || !descriptors) return null
   return <NodeArrowHandlesForNode descriptors={descriptors} node={node} />
@@ -436,7 +433,10 @@ function pickCursor(descriptor: LinearResizeHandle<AnyNode> | RadialResizeHandle
 }
 
 function resolveBound(
-  bound: number | ((node: AnyNode, sceneApi: ReturnType<typeof createSceneApi>) => number) | undefined,
+  bound:
+    | number
+    | ((node: AnyNode, sceneApi: ReturnType<typeof createSceneApi>) => number)
+    | undefined,
   fallback: number,
   node: AnyNode,
   sceneApi: ReturnType<typeof createSceneApi>,
@@ -572,10 +572,7 @@ function LinearArrow({
             ? intersectionLocal.y
             : intersectionLocal.z
       const delta = currentPointer - initialPointer
-      const next = Math.min(
-        maxBound,
-        Math.max(minBound, initialValue + delta * factor),
-      )
+      const next = Math.min(maxBound, Math.max(minBound, initialValue + delta * factor))
       // apply sees the node-at-drag-start so it can compute anchors from
       // pre-drag geometry (door-width re-centers on the opposite edge).
       const patch = descriptor.apply(initialNode as never, next, sceneApi)
@@ -928,8 +925,7 @@ function TapActionArrow({
   const position = descriptor.placement.position(node, placementSceneApi)
   const rotationY = descriptor.placement.rotationY?.(node, placementSceneApi) ?? 0
   const shape = descriptor.shape ?? 'arrow'
-  const cursor: Cursor =
-    descriptor.cursor ?? (shape === 'corner-picker' ? 'move' : 'ew-resize')
+  const cursor: Cursor = descriptor.cursor ?? (shape === 'corner-picker' ? 'move' : 'ew-resize')
 
   const onActivate = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation()
@@ -1101,6 +1097,11 @@ function CornerPickerShape({
       }),
     [],
   )
+  const hexGeometry = useMemo(() => new CircleGeometry(CORNER_HEX_RADIUS, 6), [])
+  const cornerRingGeometry = useMemo(
+    () => new RingGeometry(CORNER_HEX_RADIUS, CORNER_HEX_RADIUS * 1.18, 6),
+    [],
+  )
   useEffect(() => {
     const next = isHovered ? ARROW_HOVER_COLOR : ARROW_COLOR
     dashMaterial.color.set(next)
@@ -1110,6 +1111,8 @@ function CornerPickerShape({
   useEffect(() => () => dashMaterial.dispose(), [dashMaterial])
   useEffect(() => () => hexMaterial.dispose(), [hexMaterial])
   useEffect(() => () => ringMaterial.dispose(), [ringMaterial])
+  useEffect(() => () => hexGeometry.dispose(), [hexGeometry])
+  useEffect(() => () => cornerRingGeometry.dispose(), [cornerRingGeometry])
 
   const billboardRef = useRef<Group>(null)
   const { camera } = useThree()
@@ -1151,17 +1154,14 @@ function CornerPickerShape({
         scale={scale}
       >
         <mesh
+          geometry={hexGeometry}
           material={hexMaterial}
           onPointerDown={onActivate}
           onPointerEnter={onEnter}
           onPointerLeave={onLeave}
           renderOrder={1003}
-        >
-          <circleGeometry args={[CORNER_HEX_RADIUS, 6]} />
-        </mesh>
-        <mesh material={ringMaterial} renderOrder={1002}>
-          <ringGeometry args={[CORNER_HEX_RADIUS, CORNER_HEX_RADIUS * 1.18, 6]} />
-        </mesh>
+        />
+        <mesh geometry={cornerRingGeometry} material={ringMaterial} renderOrder={1002} />
       </group>
     </>
   )
