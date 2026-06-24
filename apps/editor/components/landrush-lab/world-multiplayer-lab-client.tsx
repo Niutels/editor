@@ -10,9 +10,16 @@ import {
 } from '@pascal-app/nodes/landrush-world/robot'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { Copy, RadioTower, RefreshCw, Users, Wifi, WifiOff } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type PointerEvent as ReactPointerEvent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { type Camera, type Group, MathUtils, type Mesh, ShapeUtils, Vector2, Vector3 } from 'three'
 import type { LandrushPoint2 } from '@/components/landrush/types'
 import type { StylizedGrassInteraction, StylizedGrassPerfProbe } from './stylized-scene-land-layers'
@@ -40,7 +47,6 @@ type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
 }
 
 type ConnectionStatus = 'connected' | 'connecting' | 'offline' | 'reconnecting'
-type CopyInviteStatus = 'copied' | 'failed' | 'idle'
 
 type ServerMessage =
   | {
@@ -87,6 +93,18 @@ type RobotMotion = {
   position: Vector3
   speed: number
   velocity: Vector3
+}
+
+type RobotMovementInput = {
+  intensity: number
+  x: number
+  z: number
+}
+
+type MobileJoystickInput = {
+  forward: number
+  strafe: number
+  strength: number
 }
 
 type RobotWorldOrbitControls = {
@@ -366,18 +384,11 @@ function max(values: readonly number[]) {
   return values.length === 0 ? 0 : Math.max(...values)
 }
 
-function createRoomInviteUrl(roomId: string) {
-  const url = new URL(window.location.href)
-  url.searchParams.set('room', sanitizeRoomId(roomId))
-  url.searchParams.delete('offline')
-  return url.toString()
-}
-
 export function WorldMultiplayerLabClient() {
   const searchParams = useSearchParams()
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
+  const mobileJoystickRef = useRef<MobileJoystickInput | null>(null)
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile>(FALLBACK_LOCAL_PROFILE)
-  const [copyInviteStatus, setCopyInviteStatus] = useState<CopyInviteStatus>('idle')
   const clean = searchParams.get('v') === 'clean' || searchParams.get('clean') === '1'
   const roomId = sanitizeRoomId(searchParams.get('room') ?? DEFAULT_ROOM_ID)
   const offline = searchParams.get('offline') === '1'
@@ -393,6 +404,7 @@ export function WorldMultiplayerLabClient() {
       <LandrushWorldMultiplayerScene
         grassInteractionRef={grassInteractionRef}
         localProfile={localProfile}
+        mobileJoystickRef={mobileJoystickRef}
         onLocalPlayerChange={multiplayer.publishLocalPlayer}
         perfRun={perfRun}
         remotePlayers={multiplayer.remotePlayers}
@@ -401,20 +413,6 @@ export function WorldMultiplayerLabClient() {
     ),
     [localProfile, multiplayer.publishLocalPlayer, multiplayer.remotePlayers, perfRun],
   )
-
-  const copyInviteLink = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(createRoomInviteUrl(roomId))
-      setCopyInviteStatus('copied')
-    } catch {
-      setCopyInviteStatus('failed')
-    }
-    window.setTimeout(() => setCopyInviteStatus('idle'), 1400)
-  }, [roomId])
-
-  const goOnline = useCallback(() => {
-    window.location.assign(createRoomInviteUrl(roomId))
-  }, [roomId])
 
   useEffect(() => {
     setLocalProfile(readLocalPlayerProfile())
@@ -444,16 +442,11 @@ export function WorldMultiplayerLabClient() {
       {!clean ? (
         <MultiplayerStatusPanel
           connection={multiplayer.connection}
-          copyInviteStatus={copyInviteStatus}
-          isOfflineMode={offline}
-          localProfile={localProfile}
-          onCopyInvite={copyInviteLink}
-          onGoOnline={goOnline}
           remotePlayerCount={multiplayer.remotePlayers.length}
-          roomId={roomId}
           status={offline ? 'offline' : multiplayer.status}
         />
       ) : null}
+      <MobileMovementJoystick movementRef={mobileJoystickRef} />
     </div>
   )
 }
@@ -461,6 +454,7 @@ export function WorldMultiplayerLabClient() {
 function LandrushWorldMultiplayerScene({
   grassInteractionRef,
   localProfile,
+  mobileJoystickRef,
   onLocalPlayerChange,
   perfRun,
   remotePlayers,
@@ -468,6 +462,7 @@ function LandrushWorldMultiplayerScene({
 }: {
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   localProfile: LocalPlayerProfile
+  mobileJoystickRef: { current: MobileJoystickInput | null }
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
   perfRun: MultiplayerPerfRunOptions
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
@@ -482,6 +477,7 @@ function LandrushWorldMultiplayerScene({
         grassInteractionRef={grassInteractionRef}
         groundY={groundY}
         localProfile={localProfile}
+        mobileJoystickRef={mobileJoystickRef}
         onLocalPlayerChange={onLocalPlayerChange}
         perfRun={perfRun}
         spawn={spawn}
@@ -498,6 +494,7 @@ function LocalMultiplayerRobot({
   grassInteractionRef,
   groundY,
   localProfile,
+  mobileJoystickRef,
   onLocalPlayerChange,
   perfRun,
   spawn,
@@ -506,6 +503,7 @@ function LocalMultiplayerRobot({
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   groundY: number
   localProfile: LocalPlayerProfile
+  mobileJoystickRef: { current: MobileJoystickInput | null }
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
   perfRun: MultiplayerPerfRunOptions
   spawn: LandrushPoint2
@@ -649,10 +647,16 @@ function LocalMultiplayerRobot({
   useFrame((state, delta) => {
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const motion = motionRef.current
-    const movement = resolveCameraRelativeMovement(pressedKeysRef.current, state.camera)
+    const movement = resolveCameraRelativeMovement(
+      pressedKeysRef.current,
+      state.camera,
+      mobileJoystickRef.current,
+    )
     const cameraHeading = resolveCameraForwardHeading(state.camera)
     const targetSpeed =
-      ROBOT_WALK_SPEED * (isRunPressed(pressedKeysRef.current) ? ROBOT_RUN_MULTIPLIER : 1)
+      ROBOT_WALK_SPEED *
+      (isRunPressed(pressedKeysRef.current) ? ROBOT_RUN_MULTIPLIER : 1) *
+      (movement?.intensity ?? 1)
     const desiredVelocity = movement
       ? { x: movement.x * targetSpeed, z: movement.z * targetSpeed }
       : { x: 0, z: 0 }
@@ -968,96 +972,138 @@ function RobotWalkerPrimitive({ color }: { color: string }) {
 
 function MultiplayerStatusPanel({
   connection,
-  copyInviteStatus,
-  isOfflineMode,
-  localProfile,
-  onCopyInvite,
-  onGoOnline,
   remotePlayerCount,
-  roomId,
   status,
 }: {
   connection: MultiplayerConnectionDetails
-  copyInviteStatus: CopyInviteStatus
-  isOfflineMode: boolean
-  localProfile: LocalPlayerProfile
-  onCopyInvite: () => void
-  onGoOnline: () => void
   remotePlayerCount: number
-  roomId: string
   status: ConnectionStatus
 }) {
-  const statusTone =
-    status === 'connected'
-      ? 'text-emerald-200'
-      : status === 'offline'
-        ? 'text-amber-200'
-        : 'text-sky-200'
-  const StatusIcon = status === 'offline' ? WifiOff : status === 'connected' ? Wifi : RefreshCw
   const displayedPlayerCount = connection.serverPlayerCount ?? remotePlayerCount + 1
+  const statusLabel = compactStatusLabel(status)
+  const latencyLabel = connection.latencyMs === null ? '--ms' : `${connection.latencyMs}ms`
 
   return (
-    <section className="pointer-events-auto absolute left-5 top-5 z-40 w-[min(310px,calc(100vw-2.5rem))] rounded-md border border-white/25 bg-slate-950/72 p-4 text-white shadow-xl backdrop-blur">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-wide">
-          <RadioTower aria-hidden className="size-4 shrink-0 text-sky-200" />
-          <span className="min-w-0 truncate">Landrush lab world multiplayer</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {isOfflineMode ? (
-            <button
-              className="grid size-7 place-items-center rounded border border-emerald-200/45 bg-emerald-300/12 text-emerald-100 transition hover:bg-emerald-300/22"
-              onClick={onGoOnline}
-              title="Go online"
-              type="button"
-            >
-              <Wifi aria-hidden className="size-3.5" />
-            </button>
-          ) : null}
-          <button
-            className="grid size-7 place-items-center rounded border border-white/20 bg-white/8 text-white/82 transition hover:bg-white/14"
-            onClick={onCopyInvite}
-            title="Copy room link"
-            type="button"
-          >
-            <Copy aria-hidden className="size-3.5" />
-          </button>
-        </div>
-      </div>
-      <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-white/58">status</dt>
-        <dd className={`flex items-center gap-1.5 capitalize ${statusTone}`}>
-          <StatusIcon aria-hidden className="size-3.5" />
-          {status}
-        </dd>
-        <dt className="text-white/58">room</dt>
-        <dd className="min-w-0 truncate" title={roomId}>
-          {roomId}
-        </dd>
-        <dt className="text-white/58">you</dt>
-        <dd className="flex min-w-0 items-center gap-2">
-          <span
-            className="inline-block size-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: localProfile.color }}
-          />
-          <span className="min-w-0 truncate">{localProfile.name}</span>
-        </dd>
-        <dt className="text-white/58">players</dt>
-        <dd className="flex items-center gap-1.5">
-          <Users aria-hidden className="size-3.5 text-white/64" />
-          {displayedPlayerCount}
-        </dd>
-        <dt className="text-white/58">latency</dt>
-        <dd>{connection.latencyMs === null ? '-' : `${connection.latencyMs} ms`}</dd>
-        <dt className="text-white/58">invite</dt>
-        <dd className="capitalize text-white/74">{copyInviteStatus}</dd>
-      </dl>
-      {connection.lastError ? (
-        <p className="mt-2 truncate text-[11px] text-rose-200" title={connection.lastError}>
-          {connection.lastError}
-        </p>
-      ) : null}
+    <section className="pointer-events-none absolute top-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur">
+      <span
+        aria-hidden
+        className={`size-2 shrink-0 rounded-full ${compactStatusDotClass(status)}`}
+      />
+      <span className="capitalize">{statusLabel}</span>
+      <span className="text-white/35">/</span>
+      <span>{displayedPlayerCount}p</span>
+      <span className="text-white/35">/</span>
+      <span>{latencyLabel}</span>
     </section>
+  )
+}
+
+function compactStatusLabel(status: ConnectionStatus) {
+  if (status === 'connected') return 'online'
+  if (status === 'reconnecting') return 'retry'
+  if (status === 'connecting') return 'join'
+  return 'offline'
+}
+
+function compactStatusDotClass(status: ConnectionStatus) {
+  if (status === 'connected') return 'bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.7)]'
+  if (status === 'offline') return 'bg-amber-300 shadow-[0_0_10px_rgba(252,211,77,0.65)]'
+  return 'bg-sky-300 shadow-[0_0_10px_rgba(125,211,252,0.65)]'
+}
+
+function MobileMovementJoystick({
+  movementRef,
+}: {
+  movementRef: { current: MobileJoystickInput | null }
+}) {
+  const baseRef = useRef<HTMLDivElement>(null)
+  const pointerIdRef = useRef<number | null>(null)
+  const [thumb, setThumb] = useState({ active: false, x: 0, y: 0 })
+
+  const updateFromPointer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const base = baseRef.current
+      if (!base) return
+
+      const rect = base.getBoundingClientRect()
+      const maxOffset = rect.width * 0.32
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      const rawX = event.clientX - centerX
+      const rawY = event.clientY - centerY
+      const distance = Math.hypot(rawX, rawY)
+      const scale = distance > maxOffset && distance > 0 ? maxOffset / distance : 1
+      const x = rawX * scale
+      const y = rawY * scale
+      const strength = clamp01(distance / maxOffset)
+
+      movementRef.current =
+        strength > 0.08
+          ? {
+              forward: clamp(-y / maxOffset, -1, 1),
+              strafe: clamp(x / maxOffset, -1, 1),
+              strength,
+            }
+          : null
+      setThumb({ active: true, x, y })
+    },
+    [movementRef],
+  )
+
+  const stopJoystick = useCallback(
+    (event?: ReactPointerEvent<HTMLDivElement>) => {
+      if (event && pointerIdRef.current === event.pointerId) {
+        event.currentTarget.releasePointerCapture(event.pointerId)
+      }
+      pointerIdRef.current = null
+      movementRef.current = null
+      setThumb({ active: false, x: 0, y: 0 })
+    },
+    [movementRef],
+  )
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      pointerIdRef.current = event.pointerId
+      event.currentTarget.setPointerCapture(event.pointerId)
+      updateFromPointer(event)
+    },
+    [updateFromPointer],
+  )
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (pointerIdRef.current !== event.pointerId) return
+      event.preventDefault()
+      updateFromPointer(event)
+    },
+    [updateFromPointer],
+  )
+
+  return (
+    <div className="pointer-events-auto absolute bottom-5 left-5 z-40 md:hidden">
+      <div
+        aria-label="Move"
+        className="relative size-28 touch-none select-none rounded-full border border-white/25 bg-slate-950/38 shadow-xl backdrop-blur"
+        onPointerCancel={stopJoystick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopJoystick}
+        ref={baseRef}
+        role="application"
+      >
+        <span className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 size-3 rounded-full bg-white/28" />
+        <span
+          className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 size-11 rounded-full border border-white/28 bg-white/18 shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-transform duration-75"
+          style={{
+            transform: `translate(calc(-50% + ${thumb.x}px), calc(-50% + ${thumb.y}px)) scale(${
+              thumb.active ? 1.04 : 1
+            })`,
+          }}
+        />
+      </div>
+    </div>
   )
 }
 
@@ -1450,22 +1496,32 @@ function getRobotWorldOrbitControls(state: unknown) {
   return (state as { controls?: RobotWorldOrbitControls }).controls
 }
 
-function resolveCameraRelativeMovement(keys: ReadonlySet<string>, camera: Camera) {
-  const strafe =
+function resolveCameraRelativeMovement(
+  keys: ReadonlySet<string>,
+  camera: Camera,
+  joystick: MobileJoystickInput | null,
+): RobotMovementInput | null {
+  const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
     Number(keys.has('KeyA') || keys.has('ArrowLeft'))
-  const forwardInput =
+  const keyboardForward =
     Number(keys.has('KeyW') || keys.has('ArrowUp')) -
     Number(keys.has('KeyS') || keys.has('ArrowDown'))
+  const hasKeyboardInput = keyboardStrafe !== 0 || keyboardForward !== 0
+  const hasJoystickInput = Boolean(joystick && joystick.strength > 0.08)
+  const strafe = keyboardStrafe + (joystick?.strafe ?? 0)
+  const forwardInput = keyboardForward + (joystick?.forward ?? 0)
 
   if (strafe === 0 && forwardInput === 0) return null
 
   const forward = resolveCameraForwardXZ(camera)
   const right = { x: -forward.z, z: forward.x }
-  return normalize2(
+  const direction = normalize2(
     right.x * strafe + forward.x * forwardInput,
     right.z * strafe + forward.z * forwardInput,
   )
+  const intensity = hasKeyboardInput ? 1 : hasJoystickInput ? (joystick?.strength ?? 1) : 1
+  return { ...direction, intensity }
 }
 
 function resolveCameraForwardHeading(camera: Camera) {
@@ -1646,6 +1702,10 @@ function normalize2(x: number, z: number) {
 
 function clamp01(value: number) {
   return Math.min(1, Math.max(0, value))
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
 function round(value: number) {
