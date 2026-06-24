@@ -97,7 +97,9 @@ type RobotMotion = {
 }
 
 type RobotMovementInput = {
+  heading: number
   intensity: number
+  runAmount: number
   x: number
   z: number
 }
@@ -146,8 +148,10 @@ const LOCAL_STATE_HEADING_EPSILON = 0.02
 const LOCAL_STATE_POSITION_EPSILON = 0.03
 const LOCAL_STATE_SPEED_EPSILON = 0.05
 const REMOTE_PLAYER_STALE_MS = 12_000
-const ROBOT_WALK_SPEED = 2.75
-const ROBOT_RUN_MULTIPLIER = 2.48
+const ROBOT_PREVIOUS_WALK_SPEED = 2.75
+const ROBOT_WALK_SPEED = ROBOT_PREVIOUS_WALK_SPEED / 1.5
+const ROBOT_RUN_SPEED = ROBOT_PREVIOUS_WALK_SPEED * 2.48
+const ROBOT_JOYSTICK_RUN_START = 0.82
 const ROBOT_ACCELERATION = 18
 const ROBOT_DECELERATION = 24
 const ROBOT_TURN_RESPONSE = 12
@@ -162,8 +166,11 @@ const ROBOT_CAMERA_MIN_PITCH = MathUtils.degToRad(-8)
 const ROBOT_CAMERA_MAX_PITCH = MathUtils.degToRad(84)
 const ROBOT_CAMERA_MOUSE_PITCH_SPEED = 0.0026
 const ROBOT_CAMERA_MOUSE_YAW_SPEED = 0.0032
+const ROBOT_CAMERA_TOUCH_PITCH_SPEED = 0.0031
+const ROBOT_CAMERA_TOUCH_YAW_SPEED = 0.0038
 const ROBOT_CAMERA_WHEEL_ZOOM_SPEED = 0.001
 const ROBOT_GRASS_INTERACTION_RADIUS = 2.7
+const MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
 const REMOTE_POSITION_RESPONSE = 12
 const REMOTE_HEADING_RESPONSE = 14
 
@@ -511,6 +518,7 @@ function LocalMultiplayerRobot({
   surfacePoints: readonly LandrushPoint2[]
 }) {
   const pressedKeysRef = useRef(new Set<string>())
+  const joystickBasisHeadingRef = useRef<number | null>(null)
   const lastSentAtRef = useRef(0)
   const modelLoadedRef = useRef(false)
   const animationStateRef = useRef<LandrushRobotAnimationState>(createEmptyRobotAnimationState())
@@ -648,16 +656,30 @@ function LocalMultiplayerRobot({
   useFrame((state, delta) => {
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const motion = motionRef.current
+    const mobileViewport = isMobileControlViewport()
+    const joystick = mobileJoystickRef.current
+    const mobileJoystickActive = Boolean(mobileViewport && joystick && joystick.strength > 0.08)
+    if (mobileJoystickActive && joystickBasisHeadingRef.current === null) {
+      joystickBasisHeadingRef.current = resolveCameraForwardHeading(state.camera)
+    }
+    if (!mobileJoystickActive) joystickBasisHeadingRef.current = null
+
     const movement = resolveCameraRelativeMovement(
       pressedKeysRef.current,
       state.camera,
       mobileJoystickRef.current,
+      mobileJoystickActive ? joystickBasisHeadingRef.current : null,
     )
     const cameraHeading = resolveCameraForwardHeading(state.camera)
-    const targetSpeed =
-      ROBOT_WALK_SPEED *
-      (isRunPressed(pressedKeysRef.current) ? ROBOT_RUN_MULTIPLIER : 1) *
-      (movement?.intensity ?? 1)
+    const targetHeading =
+      mobileJoystickActive && movement
+        ? movement.heading
+        : mobileViewport
+          ? motion.heading
+          : cameraHeading
+    const targetSpeed = movement
+      ? resolveRobotTargetSpeed(movement, isRunPressed(pressedKeysRef.current))
+      : 0
     const desiredVelocity = movement
       ? { x: movement.x * targetSpeed, z: movement.z * targetSpeed }
       : { x: 0, z: 0 }
@@ -683,7 +705,7 @@ function LocalMultiplayerRobot({
     motion.isMoving = motion.speed > 0.05
     motion.heading = lerpAngle(
       motion.heading,
-      cameraHeading,
+      targetHeading,
       clamp01(frameDelta * ROBOT_TURN_RESPONSE),
     )
     grassInteractionRef.current = {
@@ -711,7 +733,7 @@ function LocalMultiplayerRobot({
 
   return (
     <>
-      <RobotThirdPersonCameraRig motionRef={motionRef} />
+      <RobotThirdPersonCameraRig mobileJoystickRef={mobileJoystickRef} motionRef={motionRef} />
       <Suspense
         fallback={<RobotNodePrimitiveActor color={localProfile.color} node={nodeRef.current} />}
       >
@@ -814,7 +836,13 @@ function RobotNodePrimitiveActor({ color, node }: { color: string; node: Landrus
   )
 }
 
-function RobotThirdPersonCameraRig({ motionRef }: { motionRef: { current: RobotMotion } }) {
+function RobotThirdPersonCameraRig({
+  mobileJoystickRef,
+  motionRef,
+}: {
+  mobileJoystickRef: { current: MobileJoystickInput | null }
+  motionRef: { current: RobotMotion }
+}) {
   const initialTarget = useMemo(() => new Vector3(), [])
 
   return (
@@ -833,12 +861,21 @@ function RobotThirdPersonCameraRig({ motionRef }: { motionRef: { current: RobotM
         target={initialTarget}
         zoomSpeed={0.75}
       />
-      <RobotThirdPersonCameraController motionRef={motionRef} />
+      <RobotThirdPersonCameraController
+        mobileJoystickRef={mobileJoystickRef}
+        motionRef={motionRef}
+      />
     </>
   )
 }
 
-function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current: RobotMotion } }) {
+function RobotThirdPersonCameraController({
+  mobileJoystickRef,
+  motionRef,
+}: {
+  mobileJoystickRef: { current: MobileJoystickInput | null }
+  motionRef: { current: RobotMotion }
+}) {
   const cameraDistanceRef = useRef(
     Math.hypot(ROBOT_CAMERA_INITIAL_DISTANCE, ROBOT_CAMERA_INITIAL_HEIGHT),
   )
@@ -850,6 +887,7 @@ function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current:
   const targetRef = useRef(new Vector3())
   const previousTargetRef = useRef<Vector3 | null>(null)
   const snapVersionRef = useRef<number | null>(null)
+  const mobileOrbitTouchRef = useRef<{ id: number; x: number; y: number } | null>(null)
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -881,11 +919,56 @@ function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current:
       )
     }
 
+    const handleTouchStart = (event: TouchEvent) => {
+      if (!isMobileControlViewport() || !isMobileCameraOrbitTarget(event.target)) return
+      const touch = event.changedTouches.item(0)
+      if (!touch) return
+      mobileOrbitTouchRef.current = {
+        id: touch.identifier,
+        x: touch.clientX,
+        y: touch.clientY,
+      }
+    }
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const activeTouch = mobileOrbitTouchRef.current
+      if (!activeTouch) return
+      const touch = findTouchById(event.touches, activeTouch.id)
+      if (!touch) return
+      event.preventDefault()
+
+      const dx = touch.clientX - activeTouch.x
+      const dy = touch.clientY - activeTouch.y
+      activeTouch.x = touch.clientX
+      activeTouch.y = touch.clientY
+
+      cameraYawRef.current -= dx * ROBOT_CAMERA_TOUCH_YAW_SPEED
+      cameraPitchRef.current = MathUtils.clamp(
+        cameraPitchRef.current + dy * ROBOT_CAMERA_TOUCH_PITCH_SPEED,
+        ROBOT_CAMERA_MIN_PITCH,
+        ROBOT_CAMERA_MAX_PITCH,
+      )
+    }
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const activeTouch = mobileOrbitTouchRef.current
+      if (!activeTouch || !findTouchById(event.changedTouches, activeTouch.id)) return
+      mobileOrbitTouchRef.current = null
+    }
+
     window.addEventListener('wheel', handleWheel, { passive: false })
+    window.addEventListener('touchstart', handleTouchStart, { passive: true })
+    window.addEventListener('touchmove', handleTouchMove, { passive: false })
+    window.addEventListener('touchend', handleTouchEnd)
+    window.addEventListener('touchcancel', handleTouchEnd)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('touchstart', handleTouchStart)
+      window.removeEventListener('touchmove', handleTouchMove)
+      window.removeEventListener('touchend', handleTouchEnd)
+      window.removeEventListener('touchcancel', handleTouchEnd)
     }
   }, [])
 
@@ -914,6 +997,11 @@ function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current:
     }
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const joystick = mobileJoystickRef.current
+    if (joystick && joystick.strength > 0.08 && isMobileControlViewport()) {
+      cameraYawRef.current = playerHeadingToCameraYaw(motion.heading)
+    }
+
     const followAmount = 1 - Math.exp(-ROBOT_CAMERA_FOLLOW_RESPONSE * frameDelta)
     previousTarget.lerp(target, followAmount)
     const desiredCameraPosition = resolveThirdPersonCameraPosition(
@@ -1127,7 +1215,10 @@ function MobileMovementJoystick({
   )
 
   return (
-    <div className="pointer-events-auto absolute bottom-[8.25rem] left-5 z-40 md:hidden">
+    <div
+      className="pointer-events-auto absolute bottom-[8.25rem] left-5 z-40 md:hidden"
+      data-landrush-mobile-joystick
+    >
       <div
         aria-label="Move"
         className="relative size-28 touch-none select-none rounded-full border border-white/25 bg-slate-950/38 shadow-xl backdrop-blur"
@@ -1142,26 +1233,45 @@ function MobileMovementJoystick({
         ref={baseRef}
         role="application"
       >
-        <span className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 size-3 rounded-full bg-white/28" />
-        <span
-          className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 size-11 rounded-full border border-white/28 bg-white/18 shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-transform duration-75"
-          style={{
-            transform: `translate(calc(-50% + ${thumb.x}px), calc(-50% + ${thumb.y}px)) scale(${
-              thumb.active ? 1.04 : 1
-            })`,
-          }}
-        />
+        <span className="pointer-events-none absolute inset-0 grid place-items-center">
+          <span className="size-3 rounded-full bg-white/28" />
+        </span>
+        <span className="pointer-events-none absolute inset-0 grid place-items-center">
+          <span
+            className="size-11 rounded-full border border-white/28 bg-white/18 shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-transform duration-75"
+            style={{
+              transform: `translate3d(${thumb.x}px, ${thumb.y}px, 0) scale(${
+                thumb.active ? 1.04 : 1
+              })`,
+            }}
+          />
+        </span>
       </div>
     </div>
   )
 }
 
-function findTouchById(touches: ReactTouchEvent<HTMLDivElement>['touches'], identifier: number) {
+function findTouchById<TouchLike extends { identifier: number }>(
+  touches: { item: (index: number) => TouchLike | null; length: number },
+  identifier: number,
+) {
   for (let index = 0; index < touches.length; index += 1) {
     const touch = touches.item(index)
     if (touch?.identifier === identifier) return touch
   }
   return null
+}
+
+function isMobileControlViewport() {
+  return typeof window !== 'undefined' && window.matchMedia(MOBILE_CONTROLS_QUERY).matches
+}
+
+function isMobileCameraOrbitTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  if (target.closest('[data-landrush-mobile-joystick]')) return false
+  return !target.closest(
+    'a, button, input, select, textarea, section, [role="button"], [role="slider"]',
+  )
 }
 
 function useLandrushWorldMultiplayer({
@@ -1553,10 +1663,17 @@ function getRobotWorldOrbitControls(state: unknown) {
   return (state as { controls?: RobotWorldOrbitControls }).controls
 }
 
+function resolveRobotTargetSpeed(movement: RobotMovementInput, runPressed: boolean) {
+  if (runPressed) return ROBOT_RUN_SPEED
+  const walkSpeed = ROBOT_WALK_SPEED * movement.intensity
+  return MathUtils.lerp(walkSpeed, ROBOT_RUN_SPEED, movement.runAmount)
+}
+
 function resolveCameraRelativeMovement(
   keys: ReadonlySet<string>,
   camera: Camera,
   joystick: MobileJoystickInput | null,
+  joystickBasisHeading: number | null = null,
 ): RobotMovementInput | null {
   const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
@@ -1571,19 +1688,36 @@ function resolveCameraRelativeMovement(
 
   if (strafe === 0 && forwardInput === 0) return null
 
-  const forward = resolveCameraForwardXZ(camera)
+  const forward =
+    joystickBasisHeading === null
+      ? resolveCameraForwardXZ(camera)
+      : headingToDirection(joystickBasisHeading)
   const right = { x: -forward.z, z: forward.x }
   const direction = normalize2(
     right.x * strafe + forward.x * forwardInput,
     right.z * strafe + forward.z * forwardInput,
   )
-  const intensity = hasKeyboardInput ? 1 : hasJoystickInput ? (joystick?.strength ?? 1) : 1
-  return { ...direction, intensity }
+  const heading = Math.atan2(direction.x, direction.z)
+  const joystickStrength = hasJoystickInput ? (joystick?.strength ?? 1) : 0
+  const intensity = hasKeyboardInput ? 1 : hasJoystickInput ? joystickStrength : 1
+  const runAmount =
+    hasKeyboardInput || !hasJoystickInput
+      ? 0
+      : clamp01((joystickStrength - ROBOT_JOYSTICK_RUN_START) / (1 - ROBOT_JOYSTICK_RUN_START))
+  return { ...direction, heading, intensity, runAmount }
 }
 
 function resolveCameraForwardHeading(camera: Camera) {
   const forward = resolveCameraForwardXZ(camera)
   return Math.atan2(forward.x, forward.z)
+}
+
+function headingToDirection(heading: number) {
+  return { x: Math.sin(heading), z: Math.cos(heading) }
+}
+
+function playerHeadingToCameraYaw(heading: number) {
+  return heading + Math.PI
 }
 
 function resolveCameraForwardXZ(camera: Camera) {
