@@ -518,7 +518,6 @@ function LocalMultiplayerRobot({
   surfacePoints: readonly LandrushPoint2[]
 }) {
   const pressedKeysRef = useRef(new Set<string>())
-  const joystickBasisHeadingRef = useRef<number | null>(null)
   const lastSentAtRef = useRef(0)
   const modelLoadedRef = useRef(false)
   const animationStateRef = useRef<LandrushRobotAnimationState>(createEmptyRobotAnimationState())
@@ -659,16 +658,11 @@ function LocalMultiplayerRobot({
     const mobileViewport = isMobileControlViewport()
     const joystick = mobileJoystickRef.current
     const mobileJoystickActive = Boolean(mobileViewport && joystick && joystick.strength > 0.08)
-    if (mobileJoystickActive && joystickBasisHeadingRef.current === null) {
-      joystickBasisHeadingRef.current = resolveCameraForwardHeading(state.camera)
-    }
-    if (!mobileJoystickActive) joystickBasisHeadingRef.current = null
 
     const movement = resolveCameraRelativeMovement(
       pressedKeysRef.current,
       state.camera,
       mobileJoystickRef.current,
-      mobileJoystickActive ? joystickBasisHeadingRef.current : null,
     )
     const cameraHeading = resolveCameraForwardHeading(state.camera)
     const targetHeading =
@@ -1673,7 +1667,6 @@ function resolveCameraRelativeMovement(
   keys: ReadonlySet<string>,
   camera: Camera,
   joystick: MobileJoystickInput | null,
-  joystickBasisHeading: number | null = null,
 ): RobotMovementInput | null {
   const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
@@ -1688,10 +1681,7 @@ function resolveCameraRelativeMovement(
 
   if (strafe === 0 && forwardInput === 0) return null
 
-  const forward =
-    joystickBasisHeading === null
-      ? resolveCameraForwardXZ(camera)
-      : headingToDirection(joystickBasisHeading)
+  const forward = resolveCameraForwardXZ(camera)
   const right = { x: -forward.z, z: forward.x }
   const direction = normalize2(
     right.x * strafe + forward.x * forwardInput,
@@ -1710,10 +1700,6 @@ function resolveCameraRelativeMovement(
 function resolveCameraForwardHeading(camera: Camera) {
   const forward = resolveCameraForwardXZ(camera)
   return Math.atan2(forward.x, forward.z)
-}
-
-function headingToDirection(heading: number) {
-  return { x: Math.sin(heading), z: Math.cos(heading) }
 }
 
 function playerHeadingToCameraYaw(heading: number) {
