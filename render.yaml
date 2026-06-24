@@ -2,6 +2,7 @@ services:
   - type: web
     name: landrush-world-multiplayer
     runtime: node
+    plan: free
     rootDir: apps/landrush-world-multiplayer-server
     buildCommand: npm install
     startCommand: npm start
