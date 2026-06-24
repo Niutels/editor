@@ -15,7 +15,7 @@ import { useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Camera, type Group, MathUtils, type Mesh, ShapeUtils, Vector2, Vector3 } from 'three'
 import type { LandrushPoint2 } from '@/components/landrush/types'
-import type { StylizedGrassInteraction } from './stylized-scene-land-layers'
+import type { StylizedGrassInteraction, StylizedGrassPerfProbe } from './stylized-scene-land-layers'
 import type { WaterLandSurface } from './water-scene'
 import { WorldLabClient } from './world-lab-client'
 
@@ -94,8 +94,33 @@ type RobotWorldOrbitControls = {
   update: () => void
 }
 
+type MultiplayerPerfRunOptions = {
+  durationMs: number
+  enabled: boolean
+  speed: 'run' | 'walk'
+}
+
+type MultiplayerPerfFrameSample = {
+  dt: number
+  time: number
+}
+
+type MultiplayerPerfRunState = {
+  completedAt: number | null
+  durationMs: number
+  frames: MultiplayerPerfFrameSample[]
+  speed: 'run' | 'walk'
+  spikeThresholdMs: number
+  startedAt: number | null
+  status: 'done' | 'pending' | 'running'
+}
+
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const PLAYER_STORAGE_KEY = 'landrush-lab-world-multiplayer-player'
+const MULTIPLAYER_PERF_DEFAULT_DURATION_MS = 9000
+const MULTIPLAYER_PERF_MAX_FRAME_SAMPLES = 1200
+const MULTIPLAYER_PERF_SPIKE_THRESHOLD_MS = 24
+const MULTIPLAYER_PERF_START_DELAY_MS = 2500
 const LOCAL_STATE_SEND_INTERVAL_MS = 80
 const LOCAL_STATE_IDLE_SEND_INTERVAL_MS = 2000
 const LOCAL_STATE_HEADING_EPSILON = 0.02
@@ -189,6 +214,158 @@ function getMultiplayerDebugSurface() {
   return current && typeof current === 'object' ? (current as Record<string, unknown>) : {}
 }
 
+function useMultiplayerPerfRunProbe(perfRun: MultiplayerPerfRunOptions) {
+  useEffect(() => {
+    if (!perfRun.enabled) {
+      if (window.__LANDRUSH_STYLIZED_GRASS_PERF__?.enabled) {
+        delete window.__LANDRUSH_STYLIZED_GRASS_PERF__
+      }
+      delete document.documentElement.dataset.landrushPerfRun
+      return
+    }
+
+    const grassProbe: StylizedGrassPerfProbe = { enabled: true, samples: [] }
+    const state: MultiplayerPerfRunState = {
+      completedAt: null,
+      durationMs: perfRun.durationMs,
+      frames: [],
+      speed: perfRun.speed,
+      spikeThresholdMs: MULTIPLAYER_PERF_SPIKE_THRESHOLD_MS,
+      startedAt: null,
+      status: 'pending',
+    }
+    window.__LANDRUSH_STYLIZED_GRASS_PERF__ = grassProbe
+    const publishSummary = () => {
+      document.documentElement.dataset.landrushPerfRun = JSON.stringify(
+        summarizeMultiplayerPerfRun(state, grassProbe),
+      )
+    }
+    const cleanupDebug = setMultiplayerDebugHandle('perfRun', () =>
+      summarizeMultiplayerPerfRun(state, grassProbe),
+    )
+
+    let raf = 0
+    const publishTimer = window.setInterval(publishSummary, 250)
+    const startTimer = window.setTimeout(() => {
+      state.startedAt = performance.now()
+      state.status = 'running'
+      let previous = state.startedAt
+
+      const tick = (now: number) => {
+        const time = now - (state.startedAt ?? now)
+        const dt = now - previous
+        previous = now
+        state.frames.push({ dt, time })
+        if (state.frames.length > MULTIPLAYER_PERF_MAX_FRAME_SAMPLES) {
+          state.frames.splice(0, state.frames.length - MULTIPLAYER_PERF_MAX_FRAME_SAMPLES)
+        }
+
+        if (time < perfRun.durationMs) {
+          raf = window.requestAnimationFrame(tick)
+          return
+        }
+
+        state.completedAt = now
+        state.status = 'done'
+        publishSummary()
+      }
+
+      raf = window.requestAnimationFrame(tick)
+    }, MULTIPLAYER_PERF_START_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(startTimer)
+      window.clearInterval(publishTimer)
+      window.cancelAnimationFrame(raf)
+      cleanupDebug()
+      delete document.documentElement.dataset.landrushPerfRun
+      if (window.__LANDRUSH_STYLIZED_GRASS_PERF__ === grassProbe) {
+        delete window.__LANDRUSH_STYLIZED_GRASS_PERF__
+      }
+    }
+  }, [perfRun])
+}
+
+function createMultiplayerPerfRunOptions(searchParams: { get: (key: string) => string | null }) {
+  const enabled = searchParams.get('perfRun') === 'straight'
+  const requestedDuration = Number(searchParams.get('perfDurationMs'))
+  const durationMs = MathUtils.clamp(
+    Number.isFinite(requestedDuration) ? requestedDuration : MULTIPLAYER_PERF_DEFAULT_DURATION_MS,
+    4000,
+    20_000,
+  )
+  const speed = searchParams.get('perfSpeed') === 'walk' ? 'walk' : 'run'
+  return { durationMs, enabled, speed } satisfies MultiplayerPerfRunOptions
+}
+
+function summarizeMultiplayerPerfRun(
+  state: MultiplayerPerfRunState,
+  grassProbe: StylizedGrassPerfProbe,
+) {
+  const frameDts = state.frames.map((frame) => frame.dt)
+  const frameSpikes = state.frames.filter((frame) => frame.dt >= state.spikeThresholdMs)
+  const grassSamples = grassProbe.samples
+  const matrixSamples = grassSamples.filter((sample) => sample.kind === 'matrix')
+  const buildSamples = grassSamples.filter((sample) => sample.kind === 'build')
+  const attributeSamples = grassSamples.filter((sample) => sample.kind === 'attributes')
+  const streamSamples = grassSamples.filter((sample) => sample.kind === 'stream')
+
+  return {
+    durationMs: state.durationMs,
+    frames: {
+      count: state.frames.length,
+      maxMs: round(max(frameDts)),
+      p95Ms: round(percentile(frameDts, 0.95)),
+      p99Ms: round(percentile(frameDts, 0.99)),
+      spikeCount: frameSpikes.length,
+      spikeThresholdMs: state.spikeThresholdMs,
+      spikes: frameSpikes.slice(0, 12).map((frame) => ({
+        dt: round(frame.dt),
+        time: round(frame.time),
+      })),
+    },
+    grass: {
+      attributes: summarizeGrassPerfSamples(attributeSamples),
+      builds: summarizeGrassPerfSamples(buildSamples),
+      matrices: summarizeGrassPerfSamples(matrixSamples),
+      streamUpdates: streamSamples.map((sample) => ({
+        time: round(sample.time - (state.startedAt ?? sample.time)),
+        x: round(sample.centerX ?? 0),
+        z: round(sample.centerZ ?? 0),
+      })),
+    },
+    speed: state.speed,
+    status: state.status,
+  }
+}
+
+function summarizeGrassPerfSamples(samples: StylizedGrassPerfProbe['samples']) {
+  const durations = samples.map((sample) => sample.durationMs)
+  return {
+    count: samples.length,
+    maxMs: round(max(durations)),
+    p95Ms: round(percentile(durations, 0.95)),
+    top: [...samples]
+      .sort((first, second) => second.durationMs - first.durationMs)
+      .slice(0, 8)
+      .map((sample) => ({
+        count: sample.count ?? 0,
+        durationMs: round(sample.durationMs),
+        moving: sample.moving ?? undefined,
+      })),
+  }
+}
+
+function percentile(values: readonly number[], percentileValue: number) {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((first, second) => first - second)
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * percentileValue))] ?? 0
+}
+
+function max(values: readonly number[]) {
+  return values.length === 0 ? 0 : Math.max(...values)
+}
+
 function createRoomInviteUrl(roomId: string) {
   const url = new URL(window.location.href)
   url.searchParams.set('room', sanitizeRoomId(roomId))
@@ -204,22 +381,25 @@ export function WorldMultiplayerLabClient() {
   const clean = searchParams.get('v') === 'clean' || searchParams.get('clean') === '1'
   const roomId = sanitizeRoomId(searchParams.get('room') ?? DEFAULT_ROOM_ID)
   const offline = searchParams.get('offline') === '1'
+  const perfRun = useMemo(() => createMultiplayerPerfRunOptions(searchParams), [searchParams])
   const multiplayer = useLandrushWorldMultiplayer({
     enabled: !offline,
     localProfile,
     roomId,
   })
+  useMultiplayerPerfRunProbe(perfRun)
   const renderSceneOverlay = useCallback(
     ({ surface }: { surface: WaterLandSurface }) => (
       <LandrushWorldMultiplayerScene
         grassInteractionRef={grassInteractionRef}
         localProfile={localProfile}
         onLocalPlayerChange={multiplayer.publishLocalPlayer}
+        perfRun={perfRun}
         remotePlayers={multiplayer.remotePlayers}
         surface={surface}
       />
     ),
-    [localProfile, multiplayer.publishLocalPlayer, multiplayer.remotePlayers],
+    [localProfile, multiplayer.publishLocalPlayer, multiplayer.remotePlayers, perfRun],
   )
 
   const copyInviteLink = useCallback(async () => {
@@ -296,12 +476,14 @@ function LandrushWorldMultiplayerScene({
   grassInteractionRef,
   localProfile,
   onLocalPlayerChange,
+  perfRun,
   remotePlayers,
   surface,
 }: {
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   localProfile: LocalPlayerProfile
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  perfRun: MultiplayerPerfRunOptions
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   surface: WaterLandSurface
 }) {
@@ -315,6 +497,7 @@ function LandrushWorldMultiplayerScene({
         groundY={groundY}
         localProfile={localProfile}
         onLocalPlayerChange={onLocalPlayerChange}
+        perfRun={perfRun}
         spawn={spawn}
         surfacePoints={surface.grassSurfacePoints}
       />
@@ -330,6 +513,7 @@ function LocalMultiplayerRobot({
   groundY,
   localProfile,
   onLocalPlayerChange,
+  perfRun,
   spawn,
   surfacePoints,
 }: {
@@ -337,6 +521,7 @@ function LocalMultiplayerRobot({
   groundY: number
   localProfile: LocalPlayerProfile
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  perfRun: MultiplayerPerfRunOptions
   spawn: LandrushPoint2
   surfacePoints: readonly LandrushPoint2[]
 }) {
@@ -421,6 +606,29 @@ function LocalMultiplayerRobot({
     updateRobotNodeIdentity(nodeRef.current, localProfile.id, spawn, groundY)
     resetToSpawn()
   }, [groundY, localProfile.id, resetToSpawn, spawn])
+
+  useEffect(() => {
+    if (!perfRun.enabled) return
+
+    let stopTimer = 0
+    const startTimer = window.setTimeout(() => {
+      resetToSpawn()
+      pressedKeysRef.current.add('KeyW')
+      if (perfRun.speed === 'run') pressedKeysRef.current.add('ShiftLeft')
+
+      stopTimer = window.setTimeout(() => {
+        pressedKeysRef.current.delete('KeyW')
+        pressedKeysRef.current.delete('ShiftLeft')
+      }, perfRun.durationMs)
+    }, MULTIPLAYER_PERF_START_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(startTimer)
+      window.clearTimeout(stopTimer)
+      pressedKeysRef.current.delete('KeyW')
+      pressedKeysRef.current.delete('ShiftLeft')
+    }
+  }, [perfRun, resetToSpawn])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

@@ -102,6 +102,8 @@ type StylizedGrassInstance = {
   z: number
 }
 
+type StylizedGrassCellCache = Map<string, readonly StylizedGrassInstance[]>
+
 export type StylizedGrassInteraction = {
   radius: number
   speed: number
@@ -111,6 +113,29 @@ export type StylizedGrassInteraction = {
 
 export type StylizedGrassInteractionRef = {
   current: StylizedGrassInteraction | null
+}
+
+export type StylizedGrassPerfKind = 'attributes' | 'build' | 'matrix' | 'stream'
+
+export type StylizedGrassPerfSample = {
+  centerX?: number
+  centerZ?: number
+  count?: number
+  durationMs: number
+  kind: StylizedGrassPerfKind
+  moving?: boolean
+  time: number
+}
+
+export type StylizedGrassPerfProbe = {
+  enabled: boolean
+  samples: StylizedGrassPerfSample[]
+}
+
+declare global {
+  interface Window {
+    __LANDRUSH_STYLIZED_GRASS_PERF__?: StylizedGrassPerfProbe
+  }
 }
 
 const STYLIZED_SCENE_BASE = '/landrush-lab/stylized-scene'
@@ -250,10 +275,23 @@ function StylizedSceneGrassLayer({
     () => createStylizedGrassRoadGrid(roads, STYLIZED_SCENE_FIELD_SIZE),
     [roads],
   )
+  const cellCacheRef = useRef<StylizedGrassCellCache>(new Map())
+  const cellCacheSignatureRef = useRef({ pathMaskData, resolvedTuning, roadGrid, surfacePoints })
+  const cellCacheSignature = cellCacheSignatureRef.current
+  if (
+    cellCacheSignature.pathMaskData !== pathMaskData ||
+    cellCacheSignature.roadGrid !== roadGrid ||
+    cellCacheSignature.resolvedTuning !== resolvedTuning ||
+    cellCacheSignature.surfacePoints !== surfacePoints
+  ) {
+    cellCacheRef.current = new Map()
+    cellCacheSignatureRef.current = { pathMaskData, resolvedTuning, roadGrid, surfacePoints }
+  }
   const renderCenter = useStylizedGrassRenderCenter()
   const instances = useMemo(
     () =>
       createStylizedGrassInstances({
+        cellCache: cellCacheRef.current,
         pathMaskData,
         renderCenter,
         roadGrid,
@@ -464,6 +502,15 @@ function useStylizedGrassRenderCenter(): StylizedGrassRenderCenter {
     }
 
     renderCenterRef.current = nextCenter
+    const profile = getStylizedGrassPerfProbe()
+    if (profile) {
+      recordStylizedGrassPerfSample(profile, {
+        centerX: nextCenter.x,
+        centerZ: nextCenter.z,
+        durationMs: 0,
+        kind: 'stream',
+      })
+    }
     startTransition(() => setRenderCenter(nextCenter))
   })
 
@@ -514,18 +561,34 @@ function resolveStylizedSceneTuning(
 }
 
 function createStylizedGrassInstances({
+  cellCache,
   pathMaskData,
   renderCenter,
   roadGrid,
   surfacePoints,
   tuning,
 }: {
+  cellCache: StylizedGrassCellCache
   pathMaskData: ImageData | null
   renderCenter: StylizedGrassRenderCenter
   roadGrid: StylizedGrassRoadGrid | null
   surfacePoints: readonly LandrushPoint2[]
   tuning: StylizedSceneResolvedGrassTuning
 }): StylizedGrassInstance[] {
+  const profile = getStylizedGrassPerfProbe()
+  const startedAt = profile ? performance.now() : 0
+  const finish = (result: StylizedGrassInstance[]) => {
+    if (profile) {
+      recordStylizedGrassPerfSample(profile, {
+        centerX: renderCenter.x,
+        centerZ: renderCenter.z,
+        count: result.length,
+        durationMs: performance.now() - startedAt,
+        kind: 'build',
+      })
+    }
+    return result
+  }
   const streamAreaScale = (STYLIZED_SCENE_STREAM_RADIUS / STYLIZED_SCENE_BASE_STREAM_RADIUS) ** 2
   const targetCount = Math.max(
     0,
@@ -534,9 +597,10 @@ function createStylizedGrassInstances({
       Math.round(finiteNumber(tuning.density, 0) * streamAreaScale),
     ),
   )
-  if (targetCount === 0) return []
+  if (targetCount === 0) return finish([])
 
   const surfaceRing = openRing(surfacePoints)
+  const surfaceBounds = stylizedGrassSurfaceBounds(surfaceRing)
   const radius = STYLIZED_SCENE_STREAM_RADIUS
   const radiusSquared = radius * radius
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
@@ -544,42 +608,105 @@ function createStylizedGrassInstances({
   const cellArea = cellSize * cellSize
   const slotsPerCell = Math.max(1, Math.ceil(densityPerSquareMeter * cellArea * 1.35))
   const candidateAcceptance = clamp01((densityPerSquareMeter * cellArea) / slotsPerCell)
-  const minCellX = Math.floor((renderCenter.x - radius) / cellSize)
-  const maxCellX = Math.floor((renderCenter.x + radius) / cellSize)
-  const minCellZ = Math.floor((renderCenter.z - radius) / cellSize)
-  const maxCellZ = Math.floor((renderCenter.z + radius) / cellSize)
+  const minCellX = Math.floor(Math.max(renderCenter.x - radius, surfaceBounds.minX) / cellSize)
+  const maxCellX = Math.floor(Math.min(renderCenter.x + radius, surfaceBounds.maxX) / cellSize)
+  const minCellZ = Math.floor(Math.max(renderCenter.z - radius, surfaceBounds.minZ) / cellSize)
+  const maxCellZ = Math.floor(Math.min(renderCenter.z + radius, surfaceBounds.maxZ) / cellSize)
   const instances: StylizedGrassInstance[] = []
 
   for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
     for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
-      for (let slot = 0; slot < slotsPerCell; slot += 1) {
-        if (instances.length >= STYLIZED_SCENE_MAX_GRASS_INSTANCES) return instances
-        if (stableGrassHash(cellX, cellZ, slot, 0) > candidateAcceptance) continue
-
-        const x = (cellX + stableGrassHash(cellX, cellZ, slot, 11.17)) * cellSize
-        const z = (cellZ + stableGrassHash(cellX, cellZ, slot, 23.41)) * cellSize
-        if (distanceSquared2(renderCenter, { x, z }) > radiusSquared) continue
-
-        const edgeJitter = stableGrassHash(cellX, cellZ, slot, 37.73)
-        if (surfaceRing.length >= 3 && !pointInPolygon({ x, z }, surfaceRing)) continue
-        if (isPointOnStylizedGrassRoad(x, z, roadGrid, edgeJitter)) continue
-        if (
-          surfaceRing.length < 3 &&
-          isPointOnReferencePathMask(x, z, pathMaskData, roadGrid, edgeJitter)
-        ) {
-          continue
-        }
-
-        const seed = stableGrassHash(cellX, cellZ, slot, 71.09) * 10_000
-        instances.push({
-          heightFactor: stylizedGrassHeightFactor(x, z, tuning),
-          seed,
-          x,
-          yaw: stableGrassHash(cellX, cellZ, slot, 53.29) * Math.PI * 2,
-          z,
-        })
+      const cellInstances = getStylizedGrassCellInstances(cellCache, {
+        candidateAcceptance,
+        cellSize,
+        cellX,
+        cellZ,
+        pathMaskData,
+        roadGrid,
+        slotsPerCell,
+        surfaceRing,
+        tuning,
+      })
+      for (const instance of cellInstances) {
+        if (instances.length >= STYLIZED_SCENE_MAX_GRASS_INSTANCES) return finish(instances)
+        if (distanceSquared2(renderCenter, instance) > radiusSquared) continue
+        instances.push(instance)
       }
     }
+  }
+
+  return finish(instances)
+}
+
+function getStylizedGrassCellInstances(
+  cellCache: StylizedGrassCellCache,
+  options: {
+    candidateAcceptance: number
+    cellSize: number
+    cellX: number
+    cellZ: number
+    pathMaskData: ImageData | null
+    roadGrid: StylizedGrassRoadGrid | null
+    slotsPerCell: number
+    surfaceRing: readonly LandrushPoint2[]
+    tuning: StylizedSceneResolvedGrassTuning
+  },
+) {
+  const key = `${options.cellX}:${options.cellZ}`
+  const cached = cellCache.get(key)
+  if (cached) return cached
+
+  const instances = createStylizedGrassCellInstances(options)
+  cellCache.set(key, instances)
+  return instances
+}
+
+function createStylizedGrassCellInstances({
+  candidateAcceptance,
+  cellSize,
+  cellX,
+  cellZ,
+  pathMaskData,
+  roadGrid,
+  slotsPerCell,
+  surfaceRing,
+  tuning,
+}: {
+  candidateAcceptance: number
+  cellSize: number
+  cellX: number
+  cellZ: number
+  pathMaskData: ImageData | null
+  roadGrid: StylizedGrassRoadGrid | null
+  slotsPerCell: number
+  surfaceRing: readonly LandrushPoint2[]
+  tuning: StylizedSceneResolvedGrassTuning
+}) {
+  const instances: StylizedGrassInstance[] = []
+
+  for (let slot = 0; slot < slotsPerCell; slot += 1) {
+    if (stableGrassHash(cellX, cellZ, slot, 0) > candidateAcceptance) continue
+
+    const x = (cellX + stableGrassHash(cellX, cellZ, slot, 11.17)) * cellSize
+    const z = (cellZ + stableGrassHash(cellX, cellZ, slot, 23.41)) * cellSize
+    const edgeJitter = stableGrassHash(cellX, cellZ, slot, 37.73)
+    if (surfaceRing.length >= 3 && !pointInPolygon({ x, z }, surfaceRing)) continue
+    if (isPointOnStylizedGrassRoad(x, z, roadGrid, edgeJitter)) continue
+    if (
+      surfaceRing.length < 3 &&
+      isPointOnReferencePathMask(x, z, pathMaskData, roadGrid, edgeJitter)
+    ) {
+      continue
+    }
+
+    const seed = stableGrassHash(cellX, cellZ, slot, 71.09) * 10_000
+    instances.push({
+      heightFactor: stylizedGrassHeightFactor(x, z, tuning),
+      seed,
+      x,
+      yaw: stableGrassHash(cellX, cellZ, slot, 53.29) * Math.PI * 2,
+      z,
+    })
   }
 
   return instances
@@ -593,20 +720,77 @@ function applyStylizedGrassMatrices(
   time: number,
   interaction: StylizedGrassInteraction | null,
 ) {
+  const profile = getStylizedGrassPerfProbe()
+  const startedAt = profile ? performance.now() : 0
   const scale = Math.max(0.001, finiteNumber(tuning.scale, STYLIZED_SCENE_GRASS_SCALE))
+  const windStrength = Math.max(0, tuning.windStrength)
+  const hasWind = windStrength > 0
+  const windDirection = (tuning.windAngle / 180) * Math.PI
+  const windSin = Math.sin(windDirection)
+  const windCos = Math.cos(windDirection)
+  const windSpeed = Math.max(0, tuning.windSpeed)
+  const windTurbulenceScale = tuning.turbulence * Math.PI * 2
+  const interactionSpeed = interaction?.speed ?? 0
+  const interactionRadius = interaction?.radius ?? 0
+  const hasInteraction = Boolean(interaction && interactionSpeed > 0.05 && interactionRadius > 0)
+  const interactionRadiusSquared = interactionRadius * interactionRadius
+  const interactionSpeedRatio = clamp01(interactionSpeed / STYLIZED_SCENE_INTERACTION_FULL_SPEED)
   for (let index = 0; index < instances.length; index += 1) {
     const instance = instances[index]!
-    const wind = stylizedGrassWind(instance, tuning, time)
-    const bend = stylizedGrassInteractionBend(instance, interaction)
+    let heightPulse = 1
+    let windPitch = 0
+    let windRoll = 0
+    let windYaw = 0
+    if (hasWind) {
+      const wave =
+        time * windSpeed + (instance.x * windCos + instance.z * windSin) * tuning.gustScale
+      const turbulence =
+        (stylizedGrassNoise(instance.x * 0.18 + time * 0.08, instance.z * 0.18 - time * 0.05) -
+          0.5) *
+        windTurbulenceScale
+      const flutter = Math.sin(wave * 3.1 + instance.seed * 0.37) * tuning.flutter * 0.35
+      const gust = Math.sin(wave + turbulence) + flutter
+      const lean = windStrength * gust * 0.18
+      heightPulse = clamp(1 + Math.abs(gust) * windStrength * 0.04, 0.9, 1.12)
+      windPitch = windSin * lean
+      windRoll = windCos * lean
+      windYaw = flutter * windStrength * 0.08
+    }
+
+    let bendPitch = 0
+    let bendRoll = 0
+    if (hasInteraction && interaction) {
+      const dx = instance.x - interaction.x
+      const dz = instance.z - interaction.z
+      const distanceSquared = dx * dx + dz * dz
+      if (distanceSquared < interactionRadiusSquared) {
+        const distance = Math.sqrt(distanceSquared)
+        const falloff = 1 - smoothstep(0.15, 1, distance / interactionRadius)
+        const lean = falloff * interactionSpeedRatio * STYLIZED_SCENE_INTERACTION_MAX_BEND
+        if (distance > 0.0001 && lean > 0.0001) {
+          bendPitch = (dz / distance) * lean
+          bendRoll = (dx / distance) * lean
+        }
+      }
+    }
+
     dummy.position.set(instance.x, 0, instance.z)
-    dummy.rotation.set(wind.pitch + bend.pitch, instance.yaw + wind.yaw, wind.roll + bend.roll)
+    dummy.rotation.set(windPitch + bendPitch, instance.yaw + windYaw, windRoll + bendRoll)
     dummy.scale.set(
       scale,
-      scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE * instance.heightFactor * wind.heightPulse,
+      scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE * instance.heightFactor * heightPulse,
       scale,
     )
     dummy.updateMatrix()
     mesh.setMatrixAt(index, dummy.matrix)
+  }
+  if (profile) {
+    recordStylizedGrassPerfSample(profile, {
+      count: instances.length,
+      durationMs: performance.now() - startedAt,
+      kind: 'matrix',
+      moving: Boolean(interaction && interaction.speed > 0.05),
+    })
   }
 }
 
@@ -682,6 +866,8 @@ function applyStylizedGrassInstanceAttributes(
   geometry: BufferGeometry,
   instances: readonly StylizedGrassInstance[],
 ) {
+  const profile = getStylizedGrassPerfProbe()
+  const startedAt = profile ? performance.now() : 0
   const origin = geometry.getAttribute('aOrigin') as InstancedBufferAttribute | undefined
   const seed = geometry.getAttribute('aSeed') as InstancedBufferAttribute | undefined
   if (!origin || !seed) return
@@ -694,6 +880,13 @@ function applyStylizedGrassInstanceAttributes(
 
   origin.needsUpdate = true
   seed.needsUpdate = true
+  if (profile) {
+    recordStylizedGrassPerfSample(profile, {
+      count: instances.length,
+      durationMs: performance.now() - startedAt,
+      kind: 'attributes',
+    })
+  }
 }
 
 function stylizedGrassHeightFactor(x: number, z: number, tuning: StylizedSceneResolvedGrassTuning) {
@@ -702,58 +895,6 @@ function stylizedGrassHeightFactor(x: number, z: number, tuning: StylizedSceneRe
     (z + 17) * tuning.heightNoiseScale,
   )
   return clamp(1 + (heightNoise - 0.5) * 2 * tuning.heightVariation, 0.2, 1.8)
-}
-
-function stylizedGrassWind(
-  instance: StylizedGrassInstance,
-  tuning: StylizedSceneResolvedGrassTuning,
-  time: number,
-) {
-  const strength = Math.max(0, tuning.windStrength)
-  if (strength <= 0) return { heightPulse: 1, pitch: 0, roll: 0, yaw: 0 }
-  const direction = (tuning.windAngle / 180) * Math.PI
-  const wave =
-    time * Math.max(0, tuning.windSpeed) +
-    (instance.x * Math.cos(direction) + instance.z * Math.sin(direction)) * tuning.gustScale
-  const turbulence =
-    (stylizedGrassNoise(instance.x * 0.18 + time * 0.08, instance.z * 0.18 - time * 0.05) - 0.5) *
-    tuning.turbulence *
-    Math.PI *
-    2
-  const flutter = Math.sin(wave * 3.1 + instance.seed * 0.37) * tuning.flutter * 0.35
-  const gust = Math.sin(wave + turbulence) + flutter
-  const lean = strength * gust * 0.18
-  return {
-    heightPulse: clamp(1 + Math.abs(gust) * strength * 0.04, 0.9, 1.12),
-    pitch: Math.sin(direction) * lean,
-    roll: Math.cos(direction) * lean,
-    yaw: flutter * strength * 0.08,
-  }
-}
-
-function stylizedGrassInteractionBend(
-  instance: StylizedGrassInstance,
-  interaction: StylizedGrassInteraction | null,
-) {
-  if (!interaction || interaction.speed <= 0.05 || interaction.radius <= 0) {
-    return { pitch: 0, roll: 0 }
-  }
-
-  const dx = instance.x - interaction.x
-  const dz = instance.z - interaction.z
-  const distance = Math.hypot(dx, dz)
-  if (distance >= interaction.radius) return { pitch: 0, roll: 0 }
-
-  const distanceRatio = distance / interaction.radius
-  const falloff = 1 - smoothstep(0.15, 1, distanceRatio)
-  const speedRatio = clamp01(interaction.speed / STYLIZED_SCENE_INTERACTION_FULL_SPEED)
-  const lean = falloff * speedRatio * STYLIZED_SCENE_INTERACTION_MAX_BEND
-  if (distance <= 0.0001 || lean <= 0.0001) return { pitch: 0, roll: 0 }
-
-  return {
-    pitch: (dz / distance) * lean,
-    roll: (dx / distance) * lean,
-  }
 }
 
 function extractImageData(texture: Texture): ImageData | null {
@@ -984,6 +1125,26 @@ function openRing(points: readonly LandrushPoint2[]) {
     : [...points]
 }
 
+function stylizedGrassSurfaceBounds(points: readonly LandrushPoint2[]) {
+  const fieldHalf = STYLIZED_SCENE_FIELD_SIZE / 2
+  if (points.length === 0) {
+    return { maxX: fieldHalf, maxZ: fieldHalf, minX: -fieldHalf, minZ: -fieldHalf }
+  }
+
+  let minX = Number.POSITIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  for (const point of points) {
+    minX = Math.min(minX, point.x)
+    minZ = Math.min(minZ, point.z)
+    maxX = Math.max(maxX, point.x)
+    maxZ = Math.max(maxZ, point.z)
+  }
+
+  return { maxX, maxZ, minX, minZ }
+}
+
 function distanceSquared2(first: StylizedGrassRenderCenter, second: StylizedGrassRenderCenter) {
   const dx = first.x - second.x
   const dz = first.z - second.z
@@ -1009,6 +1170,22 @@ function finiteNumber(value: number, fallback: number) {
 
 function lerp(start: number, end: number, t: number) {
   return start + (end - start) * t
+}
+
+function getStylizedGrassPerfProbe() {
+  if (typeof window === 'undefined') return null
+  const probe = window.__LANDRUSH_STYLIZED_GRASS_PERF__
+  return probe?.enabled ? probe : null
+}
+
+function recordStylizedGrassPerfSample(
+  probe: StylizedGrassPerfProbe,
+  sample: Omit<StylizedGrassPerfSample, 'time'>,
+) {
+  const maxSamples = 1800
+  if (probe.samples.length >= maxSamples)
+    probe.samples.splice(0, probe.samples.length - maxSamples + 1)
+  probe.samples.push({ ...sample, time: performance.now() })
 }
 
 useGLTF.preload(STYLIZED_SCENE_PATHS.grassBlades)
