@@ -168,6 +168,7 @@ const WORLD_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
 const WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 32
 const WORLD_PROGRESSIVE_MAX_PARCELS = 12
 const WORLD_PROGRESSIVE_WATER_FIELD_RESOLUTION = WATER_FIELD_PREVIEW_RESOLUTION
+const WORLD_TUNE_PANEL_MOBILE_QUERY = '(max-width: 767px)'
 const EMPTY_WORLD_GRASS_ROADS: readonly LandrushRoadSegment[] = []
 
 const DEFAULT_STREET_PARAMETERS = {
@@ -345,7 +346,7 @@ export function WorldLabClient({
   const debugWaterLayer = searchParams.get('debugWaterLayer') === 'shoreline' ? 'shoreline' : null
   const frameProfile = searchParams.get('frameProfile') === '1'
   const clean = searchParams.get('v') === 'clean' || searchParams.get('clean') === '1'
-  const [showTunePanel, setShowTunePanel] = useState(() => !clean)
+  const [showTunePanel, setShowTunePanel] = useState(() => shouldShowInitialWorldTunePanel(clean))
   const [showParcelHints, setShowParcelHints] = useState(() =>
     isDirtCopy
       ? showDirtCopyParcels && searchParams.get('parcels') !== '0'
@@ -802,7 +803,7 @@ export function WorldLabClient({
         />
       ) : (
         <button
-          className="pointer-events-auto absolute right-5 top-5 inline-flex items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white"
+          className="pointer-events-auto absolute top-14 right-5 inline-flex items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white md:top-5"
           onClick={() => setShowTunePanel(true)}
           type="button"
         >
@@ -812,6 +813,12 @@ export function WorldLabClient({
       )}
     </main>
   )
+}
+
+function shouldShowInitialWorldTunePanel(clean: boolean) {
+  if (clean) return false
+  if (typeof window === 'undefined') return true
+  return !window.matchMedia(WORLD_TUNE_PANEL_MOBILE_QUERY).matches
 }
 
 function WorldTunePanel({
