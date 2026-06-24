@@ -103,8 +103,8 @@ const LOCAL_STATE_HEADING_EPSILON = 0.02
 const LOCAL_STATE_POSITION_EPSILON = 0.03
 const LOCAL_STATE_SPEED_EPSILON = 0.05
 const REMOTE_PLAYER_STALE_MS = 12_000
-const ROBOT_WALK_SPEED = 4.4
-const ROBOT_RUN_MULTIPLIER = 1.55
+const ROBOT_WALK_SPEED = 2.75
+const ROBOT_RUN_MULTIPLIER = 2.48
 const ROBOT_ACCELERATION = 18
 const ROBOT_DECELERATION = 24
 const ROBOT_TURN_RESPONSE = 12
@@ -444,6 +444,7 @@ function LocalMultiplayerRobot({
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const motion = motionRef.current
     const movement = resolveCameraRelativeMovement(pressedKeysRef.current, state.camera)
+    const cameraHeading = resolveCameraForwardHeading(state.camera)
     const targetSpeed =
       ROBOT_WALK_SPEED * (isRunPressed(pressedKeysRef.current) ? ROBOT_RUN_MULTIPLIER : 1)
     const desiredVelocity = movement
@@ -469,18 +470,16 @@ function LocalMultiplayerRobot({
     )
     motion.speed = Math.hypot(motion.velocity.x, motion.velocity.z)
     motion.isMoving = motion.speed > 0.05
+    motion.heading = lerpAngle(
+      motion.heading,
+      cameraHeading,
+      clamp01(frameDelta * ROBOT_TURN_RESPONSE),
+    )
     grassInteractionRef.current = {
       radius: ROBOT_GRASS_INTERACTION_RADIUS,
       speed: motion.isMoving ? motion.speed : 0,
       x: motion.position.x,
       z: motion.position.z,
-    }
-    if (motion.speed > 0.05) {
-      motion.heading = lerpAngle(
-        motion.heading,
-        Math.atan2(motion.velocity.x, motion.velocity.z),
-        clamp01(frameDelta * ROBOT_TURN_RESPONSE),
-      )
     }
 
     writeMotionToRobotNode(nodeRef.current, motion)
@@ -1252,19 +1251,28 @@ function resolveCameraRelativeMovement(keys: ReadonlySet<string>, camera: Camera
 
   if (strafe === 0 && forwardInput === 0) return null
 
-  const forward = new Vector3()
-  camera.getWorldDirection(forward)
-  forward.y = 0
-  if (forward.lengthSq() < 0.000001) {
-    forward.set(0, 0, -1)
-  } else {
-    forward.normalize()
-  }
+  const forward = resolveCameraForwardXZ(camera)
   const right = { x: -forward.z, z: forward.x }
   return normalize2(
     right.x * strafe + forward.x * forwardInput,
     right.z * strafe + forward.z * forwardInput,
   )
+}
+
+function resolveCameraForwardHeading(camera: Camera) {
+  const forward = resolveCameraForwardXZ(camera)
+  return Math.atan2(forward.x, forward.z)
+}
+
+function resolveCameraForwardXZ(camera: Camera) {
+  const forward = new Vector3()
+  camera.getWorldDirection(forward)
+  forward.y = 0
+  if (forward.lengthSq() < 0.000001) {
+    return { x: 0, z: 1 }
+  }
+  forward.normalize()
+  return { x: forward.x, z: forward.z }
 }
 
 function constrainToPolygon(

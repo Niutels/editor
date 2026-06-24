@@ -141,7 +141,7 @@ const STYLIZED_SCENE_DEFAULT_TUNING: StylizedSceneResolvedGrassTuning = {
   flutter: 0.28,
   gustScale: 0.5,
   heightNoiseScale: 0.15,
-  heightVariation: 0.5,
+  heightVariation: 1,
   macroScale: 0.115,
   macroVariation: 0.48,
   projection: 0.74,
