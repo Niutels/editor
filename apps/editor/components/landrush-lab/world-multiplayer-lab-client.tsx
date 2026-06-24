@@ -454,20 +454,6 @@ export function WorldMultiplayerLabClient() {
           status={offline ? 'offline' : multiplayer.status}
         />
       ) : null}
-      <ThirdPersonAimReticle />
-    </div>
-  )
-}
-
-function ThirdPersonAimReticle() {
-  return (
-    <div
-      aria-hidden
-      className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 z-30 size-5"
-    >
-      <span className="-translate-x-1/2 absolute top-1/2 left-1/2 h-px w-5 bg-white/80 shadow-[0_0_8px_rgba(0,0,0,0.55)]" />
-      <span className="-translate-y-1/2 absolute top-1/2 left-1/2 h-5 w-px bg-white/80 shadow-[0_0_8px_rgba(0,0,0,0.55)]" />
-      <span className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2 size-1.5 rounded-full border border-black/45 bg-white/70" />
     </div>
   )
 }
