@@ -74,7 +74,6 @@ type MultiplayerConnectionDetails = {
   heartbeatIntervalMs: number
   latencyMs: number | null
   lastError: string | null
-  lastMessageAt: number | null
   maxPeers: number | null
   reconnectAttempt: number
   serverPlayerCount: number | null
@@ -120,7 +119,7 @@ const ROBOT_CAMERA_MAX_PITCH = MathUtils.degToRad(84)
 const ROBOT_CAMERA_MOUSE_PITCH_SPEED = 0.0026
 const ROBOT_CAMERA_MOUSE_YAW_SPEED = 0.0032
 const ROBOT_CAMERA_WHEEL_ZOOM_SPEED = 0.001
-const ROBOT_GRASS_INTERACTION_RADIUS = 1.8
+const ROBOT_GRASS_INTERACTION_RADIUS = 2.7
 const REMOTE_POSITION_RESPONSE = 12
 const REMOTE_HEADING_RESPONSE = 14
 
@@ -161,7 +160,6 @@ function createConnectionDetails(): MultiplayerConnectionDetails {
     heartbeatIntervalMs: 3000,
     latencyMs: null,
     lastError: null,
-    lastMessageAt: null,
     maxPeers: null,
     reconnectAttempt: 0,
     serverPlayerCount: null,
@@ -276,6 +274,20 @@ export function WorldMultiplayerLabClient() {
           status={offline ? 'offline' : multiplayer.status}
         />
       ) : null}
+      <ThirdPersonAimReticle />
+    </div>
+  )
+}
+
+function ThirdPersonAimReticle() {
+  return (
+    <div
+      aria-hidden
+      className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute top-1/2 left-1/2 z-30 size-5"
+    >
+      <span className="-translate-x-1/2 absolute top-1/2 left-1/2 h-px w-5 bg-white/80 shadow-[0_0_8px_rgba(0,0,0,0.55)]" />
+      <span className="-translate-y-1/2 absolute top-1/2 left-1/2 h-5 w-px bg-white/80 shadow-[0_0_8px_rgba(0,0,0,0.55)]" />
+      <span className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2 size-1.5 rounded-full border border-black/45 bg-white/70" />
     </div>
   )
 }
@@ -641,8 +653,13 @@ function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current:
   const snapVersionRef = useRef<number | null>(null)
 
   useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!(event.target instanceof HTMLCanvasElement)) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !(event.target instanceof HTMLCanvasElement)) return
+      void Promise.resolve(event.target.requestPointerLock()).catch(() => undefined)
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!(document.pointerLockElement instanceof HTMLCanvasElement)) return
       if (event.movementX === 0 && event.movementY === 0) return
 
       cameraYawRef.current -= event.movementX * ROBOT_CAMERA_MOUSE_YAW_SPEED
@@ -653,6 +670,8 @@ function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current:
       )
     }
 
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('mousemove', handleMouseMove, { passive: true })
     const handleWheel = (event: WheelEvent) => {
       if (!(event.target instanceof HTMLCanvasElement)) return
       event.preventDefault()
@@ -663,10 +682,10 @@ function RobotThirdPersonCameraController({ motionRef }: { motionRef: { current:
       )
     }
 
-    window.addEventListener('pointermove', handlePointerMove, { passive: true })
     window.addEventListener('wheel', handleWheel, { passive: false })
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('wheel', handleWheel)
     }
   }, [])
@@ -972,19 +991,13 @@ function useLandrushWorldMultiplayer({
         const message = parseServerMessage(event.data)
         if (!message) return
 
-        const receivedAt = Date.now()
-        setConnection((current) => ({
-          ...current,
-          lastError: null,
-          lastMessageAt: receivedAt,
-        }))
-
         if (message.type === 'welcome') {
           heartbeatIntervalMsRef.current = message.heartbeatIntervalMs
           setConnection((current) => ({
             ...current,
             connectionId: message.connectionId,
             heartbeatIntervalMs: message.heartbeatIntervalMs,
+            lastError: null,
             maxPeers: message.maxPeers,
             stalePeerMs: message.stalePeerMs,
           }))
@@ -1000,8 +1013,10 @@ function useLandrushWorldMultiplayer({
         }
 
         if (message.type === 'heartbeat') {
+          const receivedAt = Date.now()
           setConnection((current) => ({
             ...current,
+            lastError: null,
             latencyMs:
               typeof message.sentAt === 'number'
                 ? Math.max(0, receivedAt - message.sentAt)

@@ -2,7 +2,7 @@
 
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   type BufferGeometry,
   DoubleSide,
@@ -120,14 +120,14 @@ const STYLIZED_SCENE_STREAM_SIZE = 44
 const STYLIZED_SCENE_BASE_STREAM_RADIUS = STYLIZED_SCENE_STREAM_SIZE / 2
 const STYLIZED_SCENE_STREAM_RADIUS = STYLIZED_SCENE_BASE_STREAM_RADIUS * 3
 const STYLIZED_SCENE_STREAM_CELL_SIZE = 1
-const STYLIZED_SCENE_STREAM_UPDATE_METERS = 3
+const STYLIZED_SCENE_STREAM_UPDATE_METERS = STYLIZED_SCENE_STREAM_RADIUS * 0.25
 const STYLIZED_SCENE_MAX_GRASS_INSTANCES = 60_000
 const STYLIZED_SCENE_GRASS_DENSITY = 5000
 const STYLIZED_SCENE_GRASS_SCALE = 1.3
 const STYLIZED_SCENE_GRASS_HEIGHT_SCALE = 0.5
 const STYLIZED_SCENE_GRASS_SEED = 15_173
 const STYLIZED_SCENE_INTERACTION_FULL_SPEED = 5.8
-const STYLIZED_SCENE_INTERACTION_MAX_BEND = 0.26
+const STYLIZED_SCENE_INTERACTION_MAX_BEND = 0.65
 const STYLIZED_SCENE_PATH_CLEARANCE_METERS = 0.48
 const STYLIZED_SCENE_PATH_EDGE_JITTER_METERS = 0.22
 const STYLIZED_SCENE_PATH_WIDTH_SCALE = 1.08
@@ -464,7 +464,7 @@ function useStylizedGrassRenderCenter(): StylizedGrassRenderCenter {
     }
 
     renderCenterRef.current = nextCenter
-    setRenderCenter(nextCenter)
+    startTransition(() => setRenderCenter(nextCenter))
   })
 
   return renderCenter
