@@ -13,6 +13,8 @@ import {
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  createSmoothedWaterPerimeter,
+  createWaterFieldTexture,
   WATER_FIELD_PREVIEW_RESOLUTION,
   WATER_FIELD_RESOLUTION,
   type WaterFieldParameters,
@@ -31,8 +33,14 @@ import {
   type LandrushWaterEffectParameters,
   WATER_PLANE_SIZE,
 } from './water-material'
+import { WATER_MATERIAL_SLIDERS } from './water-material-sliders'
 import { measureWaterLab, WATER_REFERENCE, waterMetricGates } from './water-metrics'
-import { WaterScene } from './water-scene'
+import {
+  createWaveDepthFieldTexture,
+  type WaterArtifactDiagnostics,
+  type WaterMaterialFactory,
+  WaterScene,
+} from './water-scene'
 import { getWaterViewPreset } from './water-view-presets'
 
 declare global {
@@ -42,14 +50,79 @@ declare global {
 }
 
 type CopyStatus = 'copied' | 'failed' | 'idle'
+type ArtifactDiagnosticKey = keyof WaterArtifactDiagnostics
+type DepthTexturePreviewState = {
+  histogram: readonly number[]
+  resolution: number
+  stats: {
+    blackAt: number
+    max: number
+    median: number
+    min: number
+    p10: number
+    p90: number
+    sentinelPercent: number
+    waterPercent: number
+    whiteAt: number
+  }
+  url: string
+}
 
-export function WaterLabClient() {
+const ARTIFACT_DIAGNOSTICS_DEFAULTS = {
+  expandLand: false,
+  hideWater: false,
+  liftLand: false,
+  maskLandWater: false,
+  opaqueWater: false,
+  showDepthTexture: false,
+} satisfies WaterArtifactDiagnostics
+
+const ARTIFACT_DIAGNOSTIC_BUTTONS = [
+  { key: 'opaqueWater', label: 'Opaque water' },
+  { key: 'hideWater', label: 'Hide water' },
+  { key: 'maskLandWater', label: 'Mask land water' },
+  { key: 'showDepthTexture', label: 'Depth texture' },
+  { key: 'liftLand', label: 'Lift land' },
+  { key: 'expandLand', label: 'Expand land' },
+] satisfies readonly { key: ArtifactDiagnosticKey; label: string }[]
+
+export type WaterLabMaterialParameters = LandrushWaterEffectParameters &
+  Partial<Record<WaterLabBodyMaterialKey, number>>
+
+export type WaterLabMaterialSliderConfig = SliderConfig<MaterialSliderKey>
+export type WaterLabMaterialToggleConfig = ToggleConfig<MaterialToggleKey>
+
+type WaterLabClientProps = {
+  labTitle?: string
+  materialDefaults?: WaterLabMaterialParameters
+  materialSliders?: readonly WaterLabMaterialSliderConfig[]
+  materialToggles?: readonly WaterLabMaterialToggleConfig[]
+  panelSubtitle?: string
+  waterMaterialFactory?: WaterMaterialFactory
+}
+
+export function WaterLabClient({
+  labTitle = 'Landrush water lab',
+  materialDefaults = LANDRUSH_WATER_EFFECT_PARAMETERS,
+  materialSliders = MATERIAL_SLIDERS,
+  materialToggles = [],
+  panelSubtitle = 'field + Bruno mask',
+  waterMaterialFactory,
+}: WaterLabClientProps = {}) {
   const searchParams = useSearchParams()
   const preset = getWaterViewPreset(searchParams.get('view'))
   const clean = searchParams.get('clean') === '1'
   const debug = searchParams.get('debugLandrush') === '1'
   const debugWaterLayer = searchParams.get('debugWaterLayer') === 'shoreline' ? 'shoreline' : null
+  const waveDepthTextureEnabled = 'waveDepthSmooth' in materialDefaults
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
+  const [artifactDiagnostics, setArtifactDiagnostics] = useState<WaterArtifactDiagnostics>({
+    ...ARTIFACT_DIAGNOSTICS_DEFAULTS,
+  })
+  const [depthTexturePreview, setDepthTexturePreview] = useState<DepthTexturePreviewState | null>(
+    null,
+  )
+  const [depthTexturePreviewZoom, setDepthTexturePreviewZoom] = useState(1)
   const [frameP95, setFrameP95] = useState<number | null>(null)
   const [showDepthReference, setShowDepthReference] = useState(false)
   const [showTunePanel, setShowTunePanel] = useState(true)
@@ -74,11 +147,9 @@ export function WaterLabClient() {
   const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
     ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
   }))
-  const [materialParameters, setMaterialParameters] = useState<LandrushWaterEffectParameters>(
-    () => ({
-      ...LANDRUSH_WATER_EFFECT_PARAMETERS,
-    }),
-  )
+  const [materialParameters, setMaterialParameters] = useState<WaterLabMaterialParameters>(() => ({
+    ...materialDefaults,
+  }))
   const island = useMemo(
     () => generateWaterLabIsland(visibleIslandParameters),
     [visibleIslandParameters],
@@ -92,6 +163,37 @@ export function WaterLabClient() {
     [fieldParameters, island, materialParameters],
   )
   const gates = useMemo(() => waterMetricGates(metrics), [metrics])
+  const waterSceneKey = useMemo(
+    () =>
+      JSON.stringify({
+        field: {
+          depthContourCollapseMeters: fieldParameters.depthContourCollapseMeters,
+          depthContourCollapseScale: fieldParameters.depthContourCollapseScale,
+          depthContourNoiseFrequency: fieldParameters.depthContourNoiseFrequency,
+          depthContourOffsetMeters: fieldParameters.depthContourOffsetMeters,
+          depthContourVariationMeters: fieldParameters.depthContourVariationMeters,
+          shoreBandMeters: fieldParameters.shoreBandMeters,
+          shoreFeatherMeters: fieldParameters.shoreFeatherMeters,
+          shoreNoiseFrequency: fieldParameters.shoreNoiseFrequency,
+          shoreVariationMeters: fieldParameters.shoreVariationMeters,
+        },
+        island: waterFieldIslandParameters,
+        resolution: terrainFieldResolution,
+      }),
+    [
+      fieldParameters.depthContourCollapseMeters,
+      fieldParameters.depthContourCollapseScale,
+      fieldParameters.depthContourNoiseFrequency,
+      fieldParameters.depthContourOffsetMeters,
+      fieldParameters.depthContourVariationMeters,
+      fieldParameters.shoreBandMeters,
+      fieldParameters.shoreFeatherMeters,
+      fieldParameters.shoreNoiseFrequency,
+      fieldParameters.shoreVariationMeters,
+      terrainFieldResolution,
+      waterFieldIslandParameters,
+    ],
+  )
 
   const resetParameters = () => {
     setHasUnappliedIslandChanges(false)
@@ -102,7 +204,7 @@ export function WaterLabClient() {
     setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
     setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
     setElevationParameters({ ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS })
-    setMaterialParameters({ ...LANDRUSH_WATER_EFFECT_PARAMETERS })
+    setMaterialParameters({ ...materialDefaults })
   }
 
   const changeIslandParameter = (key: IslandSliderKey, value: number) => {
@@ -129,24 +231,16 @@ export function WaterLabClient() {
 
   const copyParameters = async () => {
     const snapshot = {
-      island: Object.fromEntries(ISLAND_SLIDERS.map(({ key }) => [key, islandParameters[key]])),
+      island: { ...islandParameters },
       preview: {
-        appliedIsland: Object.fromEntries(
-          ISLAND_SLIDERS.map(({ key }) => [key, waterFieldIslandParameters[key]]),
-        ),
+        appliedIsland: { ...waterFieldIslandParameters },
         resolution: previewResolution,
         terrainFieldResolution,
-        visibleIsland: Object.fromEntries(
-          ISLAND_SLIDERS.map(({ key }) => [key, visibleIslandParameters[key]]),
-        ),
+        visibleIsland: { ...visibleIslandParameters },
       },
-      elevation: Object.fromEntries(
-        ELEVATION_SLIDERS.map(({ key }) => [key, elevationParameters[key]]),
-      ),
-      field: Object.fromEntries(FIELD_SLIDERS.map(({ key }) => [key, fieldParameters[key]])),
-      material: Object.fromEntries(
-        MATERIAL_SLIDERS.map(({ key }) => [key, materialParameters[key]]),
-      ),
+      elevation: { ...elevationParameters },
+      field: { ...fieldParameters },
+      material: { ...materialParameters },
     }
 
     try {
@@ -157,6 +251,129 @@ export function WaterLabClient() {
     }
     window.setTimeout(() => setCopyStatus('idle'), 1400)
   }
+
+  useEffect(() => {
+    if (!artifactDiagnostics.showDepthTexture) {
+      setDepthTexturePreview(null)
+      return
+    }
+
+    let cancelled = false
+    const previewTimer = window.setTimeout(() => {
+      const texture = createWaterFieldTexture({
+        parameters: fieldParameters,
+        perimeter: createSmoothedWaterPerimeter(waterFieldIsland.perimeter.points),
+        planeSize: WATER_PLANE_SIZE,
+        resolution: terrainFieldResolution,
+      })
+      const waveDepthTexture = createWaveDepthFieldTexture(
+        texture,
+        fieldParameters,
+        materialParameters.waveDepthSmooth ?? 0,
+      )
+      const image = waveDepthTexture.image as {
+        data?: Uint8Array
+        height?: number
+        width?: number
+      }
+      const bytes = image.data
+      const width = image.width ?? 0
+      const height = image.height ?? 0
+      if (!bytes || width <= 0 || height <= 0) {
+        waveDepthTexture.dispose()
+        texture.dispose()
+        return
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) {
+        waveDepthTexture.dispose()
+        texture.dispose()
+        return
+      }
+
+      const preview = context.createImageData(width, height)
+      const visibleWaveDepthValues: number[] = []
+      let sentinelPixels = 0
+      for (let index = 0; index < bytes.length; index += 4) {
+        const alpha = bytes[index + 3] ?? 0
+        const waveDepth = (bytes[index] ?? 0) / 255
+        if (alpha <= 0 || waveDepth <= 0.000001) {
+          sentinelPixels += 1
+          continue
+        }
+
+        if (waveDepth > 0.000001 && waveDepth < 0.999999) {
+          visibleWaveDepthValues.push(waveDepth)
+        }
+      }
+      visibleWaveDepthValues.sort((a, b) => a - b)
+      const waterMin = visibleWaveDepthValues[0] ?? 0
+      const waterMax = visibleWaveDepthValues.at(-1) ?? 1
+      const waterP10 = percentile(visibleWaveDepthValues, 0.1)
+      const waterMedian = percentile(visibleWaveDepthValues, 0.5)
+      const waterP90 = percentile(visibleWaveDepthValues, 0.9)
+      const histogram = createDepthHistogram(visibleWaveDepthValues, 48)
+      const contrastLow = waterP10
+      const contrastHigh = Math.max(waterP90, contrastLow + 0.000001)
+      const waterRange = contrastHigh - contrastLow
+      for (let index = 0; index < bytes.length; index += 4) {
+        const alpha = bytes[index + 3] ?? 0
+        const waveDepth = (bytes[index] ?? 0) / 255
+        if (alpha <= 0 || waveDepth <= 0.000001) {
+          preview.data[index] = 10
+          preview.data[index + 1] = 14
+          preview.data[index + 2] = 18
+          preview.data[index + 3] = 0
+          continue
+        }
+
+        const normalizedDepth = Math.max(0, Math.min(1, (waveDepth - contrastLow) / waterRange))
+        const depthValue = Math.round(normalizedDepth * 255)
+        preview.data[index] = depthValue
+        preview.data[index + 1] = depthValue
+        preview.data[index + 2] = depthValue
+        preview.data[index + 3] = 255
+      }
+      context.putImageData(preview, 0, 0)
+
+      if (!cancelled) {
+        const waterPixelPercent = (visibleWaveDepthValues.length / (width * height)) * 100
+        setDepthTexturePreview({
+          histogram,
+          resolution: width,
+          stats: {
+            blackAt: waterP10,
+            max: waterMax,
+            median: waterMedian,
+            min: waterMin,
+            p10: waterP10,
+            p90: waterP90,
+            sentinelPercent: (sentinelPixels / (width * height)) * 100,
+            waterPercent: waterPixelPercent,
+            whiteAt: waterP90,
+          },
+          url: canvas.toDataURL('image/png'),
+        })
+      }
+      waveDepthTexture.dispose()
+      texture.dispose()
+    }, 0)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(previewTimer)
+    }
+  }, [
+    artifactDiagnostics.showDepthTexture,
+    fieldParameters,
+    materialParameters.waveDepthSmooth,
+    terrainFieldResolution,
+    waterFieldIsland,
+  ])
 
   useEffect(() => {
     const samples: number[] = []
@@ -227,7 +444,9 @@ export function WaterLabClient() {
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#164a77]">
       <WaterScene
+        artifactDiagnostics={artifactDiagnostics}
         elevationParameters={elevationParameters}
+        fieldRevisionKey={waterSceneKey}
         fieldParameters={fieldParameters}
         debugLayer={debugWaterLayer}
         island={island}
@@ -236,10 +455,12 @@ export function WaterLabClient() {
         terrainFieldResolution={terrainFieldResolution}
         showDepthReference={showDepthReference}
         waterFieldIsland={waterFieldIsland}
+        waterMaterialFactory={waterMaterialFactory}
+        waveDepthTextureEnabled={waveDepthTextureEnabled}
       />
       {!clean ? (
         <section className="pointer-events-none absolute left-5 top-5 max-w-[390px] rounded-md border border-white/25 bg-slate-950/72 p-4 text-white shadow-xl backdrop-blur">
-          <div className="text-sm font-semibold tracking-wide">Landrush water lab</div>
+          <div className="text-sm font-semibold tracking-wide">{labTitle}</div>
           <div className="mt-1 text-xs text-white/72">{preset.label}</div>
           <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <dt className="text-white/58">water ratio</dt>
@@ -271,6 +492,8 @@ export function WaterLabClient() {
           fieldParameters={fieldParameters}
           islandParameters={islandParameters}
           materialParameters={materialParameters}
+          materialSliders={materialSliders}
+          materialToggles={materialToggles}
           onClose={() => setShowTunePanel(false)}
           onCopy={() => void copyParameters()}
           elevationParameters={elevationParameters}
@@ -283,7 +506,7 @@ export function WaterLabClient() {
           onIslandChange={changeIslandParameter}
           onMaterialChange={(key, value) =>
             setMaterialParameters(
-              (current) => ({ ...current, [key]: value }) as LandrushWaterEffectParameters,
+              (current) => ({ ...current, [key]: value }) as WaterLabMaterialParameters,
             )
           }
           onApplyFullResolution={() => applyIslandWaterField(WATER_FIELD_RESOLUTION)}
@@ -295,6 +518,7 @@ export function WaterLabClient() {
           onReset={resetParameters}
           onToggleDepthReference={() => setShowDepthReference((current) => !current)}
           previewResolution={previewResolution}
+          panelSubtitle={panelSubtitle}
           showDepthReference={showDepthReference}
           hasUnappliedIslandChanges={hasUnappliedIslandChanges}
           usingPreviewResolution={terrainFieldResolution !== WATER_FIELD_RESOLUTION}
@@ -309,6 +533,21 @@ export function WaterLabClient() {
           Sliders
         </button>
       )}
+      {debug ? (
+        <ArtifactDiagnosticsBar
+          diagnostics={artifactDiagnostics}
+          onToggle={(key) =>
+            setArtifactDiagnostics((current) => ({ ...current, [key]: !current[key] }))
+          }
+        />
+      ) : null}
+      {artifactDiagnostics.showDepthTexture ? (
+        <DepthTexturePreview
+          onZoomChange={setDepthTexturePreviewZoom}
+          preview={depthTexturePreview}
+          zoom={depthTexturePreviewZoom}
+        />
+      ) : null}
     </main>
   )
 }
@@ -317,6 +556,21 @@ type IslandSliderKey = keyof WaterLabIslandParameters
 type ElevationSliderKey = keyof IslandElevationParameters
 type FieldSliderKey = keyof WaterFieldParameters
 type TuningGroupId = 'areas' | 'island' | 'ripples'
+type WaveBodyMaterialSliderKey =
+  | 'waveBodyAheadBrightness'
+  | 'waveBodyAheadLagSeconds'
+  | 'waveBodyAheadRatio'
+  | 'waveBodyAheadWidth'
+  | 'waveBodyBehindBrightness'
+  | 'waveBodyBehindLagSeconds'
+  | 'waveBodyBehindRatio'
+  | 'waveBodyBehindWidth'
+  | 'waveDepthSmooth'
+  | 'waveSectorCount'
+  | 'waveSectorRotationSpeed'
+  | 'waveSectorTimeOffset'
+type WaveBodyMaterialToggleKey = 'waveSectorEnabled'
+type WaterLabBodyMaterialKey = WaveBodyMaterialSliderKey | WaveBodyMaterialToggleKey
 type MaterialSliderKey =
   | 'ripplesRatio'
   | 'ripplesSlopeFrequency'
@@ -332,6 +586,9 @@ type MaterialSliderKey =
   | 'shoreEdge'
   | 'windStrength'
   | 'windTimeFrequency'
+  | WaveBodyMaterialSliderKey
+type MaterialToggleKey = WaveBodyMaterialToggleKey
+type MaterialControlKey = MaterialSliderKey | MaterialToggleKey
 
 type SliderConfig<Key extends string> = {
   key: Key
@@ -339,6 +596,11 @@ type SliderConfig<Key extends string> = {
   max: number
   min: number
   step: number
+}
+
+type ToggleConfig<Key extends string> = {
+  key: Key
+  label: string
 }
 
 const ELEVATION_SLIDERS = [
@@ -385,7 +647,7 @@ const FIELD_SLIDERS = [
     min: 0.15,
     step: 0.05,
   },
-  { key: 'depthReach', label: 'depth reach', max: 70, min: 4, step: 1 },
+  { key: 'depthReach', label: 'depth reach', max: 70, min: 1, step: 1 },
   { key: 'depthExponent', label: 'depth curve', max: 2, min: 0.45, step: 0.01 },
   { key: 'depthNoiseStrength', label: 'field noise', max: 0.14, min: 0, step: 0.001 },
   { key: 'depthNoiseFrequency', label: 'field noise size', max: 0.16, min: 0.001, step: 0.001 },
@@ -393,24 +655,11 @@ const FIELD_SLIDERS = [
   { key: 'shoreFeatherMeters', label: 'shore feather', max: 4, min: 0.02, step: 0.02 },
   { key: 'shoreVariationMeters', label: 'shore variation', max: 5, min: 0, step: 0.05 },
   { key: 'shoreNoiseFrequency', label: 'shore variation size', max: 0.35, min: 0.002, step: 0.002 },
+  { key: 'edgeFadeDistance', label: 'edge fade distance', max: 80, min: 0, step: 0.5 },
 ] satisfies readonly SliderConfig<FieldSliderKey>[]
 
-const MATERIAL_SLIDERS = [
-  { key: 'ripplesRatio', label: 'ripple amount', max: 1, min: 0, step: 0.01 },
-  { key: 'ripplesSlopeFrequency', label: 'ripple count', max: 40, min: 1, step: 0.1 },
-  { key: 'ripplesNoiseStrength', label: 'ripple noise amount', max: 1, min: 0, step: 0.01 },
-  { key: 'ripplesNoiseFrequency', label: 'ripple noise size', max: 0.7, min: 0, step: 0.005 },
-  { key: 'ripplesNoiseOffset', label: 'ripple breakup', max: 1.5, min: 0.04, step: 0.005 },
-  { key: 'ripplesBreakupStart', label: 'breakup start', max: 1, min: 0, step: 0.01 },
-  { key: 'ripplesBreakupEnd', label: 'breakup full', max: 1, min: 0.05, step: 0.01 },
-  { key: 'ripplesBreakupFrequency', label: 'break spacing', max: 0.45, min: 0.005, step: 0.005 },
-  { key: 'ripplesBreakupSize', label: 'break size', max: 0.95, min: 0, step: 0.01 },
-  { key: 'ripplesReachStart', label: 'ripple near', max: 0.6, min: 0, step: 0.01 },
-  { key: 'ripplesReachEnd', label: 'ripple far', max: 1, min: 0.05, step: 0.01 },
-  { key: 'shoreEdge', label: 'shore line', max: 0.55, min: 0.005, step: 0.005 },
-  { key: 'windStrength', label: 'wind strength', max: 1.6, min: 0, step: 0.01 },
-  { key: 'windTimeFrequency', label: 'wind speed', max: 0.6, min: 0, step: 0.005 },
-] satisfies readonly SliderConfig<MaterialSliderKey>[]
+export const MATERIAL_SLIDERS =
+  WATER_MATERIAL_SLIDERS satisfies readonly WaterLabMaterialSliderConfig[]
 
 function WaterTunePanel({
   copyStatus,
@@ -418,6 +667,8 @@ function WaterTunePanel({
   fieldParameters,
   islandParameters,
   materialParameters,
+  materialSliders,
+  materialToggles,
   onClose,
   onCopy,
   onElevationChange,
@@ -429,6 +680,7 @@ function WaterTunePanel({
   onPreviewResolutionChange,
   onReset,
   onToggleDepthReference,
+  panelSubtitle,
   previewResolution,
   showDepthReference,
   hasUnappliedIslandChanges,
@@ -438,18 +690,21 @@ function WaterTunePanel({
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
   islandParameters: WaterLabIslandParameters
-  materialParameters: LandrushWaterEffectParameters
+  materialParameters: WaterLabMaterialParameters
+  materialSliders: readonly WaterLabMaterialSliderConfig[]
+  materialToggles: readonly WaterLabMaterialToggleConfig[]
   onClose: () => void
   onCopy: () => void
   onElevationChange: (key: ElevationSliderKey, value: number) => void
   onFieldChange: (key: FieldSliderKey, value: number) => void
   onIslandChange: (key: IslandSliderKey, value: number) => void
-  onMaterialChange: (key: MaterialSliderKey, value: number) => void
+  onMaterialChange: (key: MaterialControlKey, value: number) => void
   onApplyFullResolution: () => void
   onApplyPreviewResolution: () => void
   onPreviewResolutionChange: (value: number) => void
   onReset: () => void
   onToggleDepthReference: () => void
+  panelSubtitle: string
   previewResolution: number
   showDepthReference: boolean
   hasUnappliedIslandChanges: boolean
@@ -473,7 +728,7 @@ function WaterTunePanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold tracking-wide">Water tuning</div>
-          <div className="mt-0.5 text-xs text-white/58">field + Bruno mask</div>
+          <div className="mt-0.5 text-xs text-white/58">{panelSubtitle}</div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -591,12 +846,20 @@ function WaterTunePanel({
           onToggle={() => toggleGroup('ripples')}
           title="Ripples"
         >
-          {MATERIAL_SLIDERS.map(({ key, ...slider }) => (
+          {materialToggles.map(({ key, label }) => (
+            <WaterToggle
+              key={key}
+              label={label}
+              onChange={(enabled) => onMaterialChange(key, enabled ? 1 : 0)}
+              value={(materialParameters[key] ?? 0) > 0.5}
+            />
+          ))}
+          {materialSliders.map(({ key, ...slider }) => (
             <WaterSlider
               key={key}
               {...slider}
               onChange={(value) => onMaterialChange(key, value)}
-              value={materialParameters[key]}
+              value={materialParameters[key] ?? 0}
             />
           ))}
         </TuningGroup>
@@ -650,6 +913,208 @@ function TuningGroup({
   )
 }
 
+function WaterToggle({
+  label,
+  onChange,
+  value,
+}: {
+  label: string
+  onChange: (value: boolean) => void
+  value: boolean
+}) {
+  return (
+    <button
+      aria-pressed={value}
+      className="flex h-8 items-center justify-between rounded border border-white/18 bg-white/8 px-2 text-xs transition hover:border-white/36 hover:bg-white/12"
+      onClick={() => onChange(!value)}
+      type="button"
+    >
+      <span className="text-white/72">{label}</span>
+      <span
+        className={
+          value
+            ? 'rounded bg-cyan-300/18 px-1.5 py-0.5 font-semibold text-[10px] text-cyan-100 uppercase'
+            : 'rounded bg-white/10 px-1.5 py-0.5 font-semibold text-[10px] text-white/48 uppercase'
+        }
+      >
+        {value ? 'On' : 'Off'}
+      </span>
+    </button>
+  )
+}
+
+function ArtifactDiagnosticsBar({
+  diagnostics,
+  onToggle,
+}: {
+  diagnostics: WaterArtifactDiagnostics
+  onToggle: (key: ArtifactDiagnosticKey) => void
+}) {
+  return (
+    <div className="pointer-events-auto absolute bottom-5 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-white/20 bg-slate-950/76 p-2 text-xs text-white shadow-xl backdrop-blur">
+      {ARTIFACT_DIAGNOSTIC_BUTTONS.map(({ key, label }) => {
+        const enabled = diagnostics[key]
+        return (
+          <button
+            aria-pressed={enabled}
+            className={
+              enabled
+                ? 'rounded border border-cyan-200/60 bg-cyan-300/18 px-2.5 py-1.5 font-medium text-cyan-50'
+                : 'rounded border border-white/20 bg-white/8 px-2.5 py-1.5 font-medium text-white/68 transition hover:border-white/38 hover:text-white'
+            }
+            key={key}
+            onClick={() => onToggle(key)}
+            type="button"
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function DepthTexturePreview({
+  onZoomChange,
+  preview,
+  zoom,
+}: {
+  onZoomChange: (value: number) => void
+  preview: DepthTexturePreviewState | null
+  zoom: number
+}) {
+  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 })
+  const decreaseZoom = () => onZoomChange(Math.max(1, Math.round((zoom / 1.25) * 100) / 100))
+  const increaseZoom = () => onZoomChange(Math.min(12, Math.round(zoom * 1.25 * 100) / 100))
+  const changeZoomFromWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    setZoomOrigin({
+      x: Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100)),
+    })
+    const nextZoom = event.deltaY < 0 ? zoom * 1.18 : zoom / 1.18
+    onZoomChange(Math.max(1, Math.min(12, Math.round(nextZoom * 100) / 100)))
+  }
+
+  return (
+    <div className="absolute bottom-20 left-5 w-[520px] max-w-[calc(100vw-2.5rem)] rounded-md border border-white/20 bg-slate-950/76 p-2 text-white shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-semibold text-white/62 uppercase tracking-[0.08em]">
+        <span>Depth texture</span>
+        <div className="pointer-events-auto flex items-center gap-1">
+          <button
+            className="rounded border border-white/20 px-1.5 py-0.5 text-white/70 transition hover:border-white/40 hover:text-white"
+            onClick={decreaseZoom}
+            type="button"
+          >
+            -
+          </button>
+          <span className="min-w-10 text-center">{Math.round(zoom * 100)}%</span>
+          <button
+            className="rounded border border-white/20 px-1.5 py-0.5 text-white/70 transition hover:border-white/40 hover:text-white"
+            onClick={increaseZoom}
+            type="button"
+          >
+            +
+          </button>
+          <span className="ml-1">{preview ? `${preview.resolution}px` : 'loading'}</span>
+        </div>
+      </div>
+      {preview ? (
+        <div
+          className="pointer-events-auto aspect-square w-full overflow-hidden rounded border border-white/15 bg-slate-950/40"
+          onWheel={changeZoomFromWheel}
+        >
+          <img
+            alt="Packed water depth texture"
+            className="size-full object-cover [image-rendering:pixelated]"
+            src={preview.url}
+            style={{
+              transform: `scale(${zoom})`,
+              transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+            }}
+          />
+        </div>
+      ) : (
+        <div className="aspect-square w-full rounded border border-white/15 bg-white/8" />
+      )}
+      <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 text-[10px] text-white/50">
+        <span>wave depth p10-p90</span>
+        <span>p10 {preview ? formatDepthPercent(preview.stats.p10) : '--'}</span>
+        <span>p90 {preview ? formatDepthPercent(preview.stats.p90) : '--'}</span>
+        <span>min {preview ? formatDepthPercent(preview.stats.min) : '--'}</span>
+        <span>mid {preview ? formatDepthPercent(preview.stats.median) : '--'}</span>
+        <span>max {preview ? formatDepthPercent(preview.stats.max) : '--'}</span>
+        <span>visible {preview ? `${preview.stats.waterPercent.toFixed(1)}%` : '--'}</span>
+        <span>sentinel {preview ? `${preview.stats.sentinelPercent.toFixed(1)}%` : '--'}</span>
+        <span>smoothed texture</span>
+      </div>
+      {preview ? <DepthHistogram preview={preview} /> : null}
+    </div>
+  )
+}
+
+function DepthHistogram({ preview }: { preview: DepthTexturePreviewState }) {
+  const maxBucket = Math.max(...preview.histogram, 1)
+  const whiteMarkerLeft = `${Math.max(0, Math.min(100, preview.stats.whiteAt * 100))}%`
+  const blackMarkerLeft = `${Math.max(0, Math.min(100, preview.stats.blackAt * 100))}%`
+
+  return (
+    <div className="mt-2">
+      <div className="relative flex h-16 items-end gap-px rounded border border-white/15 bg-black/28 px-1 pt-2 pb-1">
+        {preview.histogram.map((count, index) => (
+          <div
+            className="flex-1 rounded-t-[1px] bg-cyan-200/70"
+            key={`${index}-${count}`}
+            style={{ height: `${Math.max(1, (count / maxBucket) * 100)}%` }}
+          />
+        ))}
+        <div
+          className="pointer-events-none absolute top-1 bottom-1 w-0.5 bg-sky-300"
+          title="full white"
+          style={{ left: whiteMarkerLeft }}
+        />
+        <div
+          className="pointer-events-none absolute top-1 bottom-1 w-0.5 bg-red-400"
+          title="full black"
+          style={{ left: blackMarkerLeft }}
+        />
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] text-white/42">
+        <span>0%</span>
+        <span>
+          <span className="text-sky-300">white</span>
+          <span className="px-1">/</span>
+          <span className="text-red-400">black</span>
+        </span>
+        <span>100%</span>
+      </div>
+    </div>
+  )
+}
+
+function percentile(sortedValues: readonly number[], ratio: number) {
+  if (sortedValues.length === 0) return 0
+  const index = Math.max(
+    0,
+    Math.min(sortedValues.length - 1, Math.round((sortedValues.length - 1) * ratio)),
+  )
+  return sortedValues[index] ?? 0
+}
+
+function createDepthHistogram(values: readonly number[], bucketCount: number) {
+  const buckets = Array.from({ length: bucketCount }, () => 0)
+  for (const value of values) {
+    const bucket = Math.max(0, Math.min(bucketCount - 1, Math.floor(value * bucketCount)))
+    buckets[bucket] = (buckets[bucket] ?? 0) + 1
+  }
+  return buckets
+}
+
+function formatDepthPercent(value: number) {
+  return `${(value * 100).toFixed(2)}%`
+}
+
 function WaterSlider({
   label,
   max,
@@ -665,6 +1130,13 @@ function WaterSlider({
   step: number
   value: number
 }) {
+  const changeValue = (rawValue: string) => {
+    if (rawValue === '') return
+    const nextValue = Number(rawValue)
+    if (!Number.isFinite(nextValue)) return
+    onChange(Math.max(min, Math.min(max, nextValue)))
+  }
+
   return (
     <label className="grid gap-1 text-xs">
       <span className="flex items-center justify-between gap-3">
@@ -673,7 +1145,7 @@ function WaterSlider({
           className="h-6 w-16 rounded border border-white/18 bg-white/8 px-1.5 text-right font-mono text-[11px] text-white outline-none focus:border-cyan-300/70"
           max={max}
           min={min}
-          onChange={(event) => onChange(Number(event.currentTarget.value))}
+          onChange={(event) => changeValue(event.currentTarget.value)}
           step={step}
           type="number"
           value={formatSliderValue(value, step)}
@@ -683,7 +1155,7 @@ function WaterSlider({
         className="h-5 w-full accent-cyan-300"
         max={max}
         min={min}
-        onChange={(event) => onChange(Number(event.currentTarget.value))}
+        onChange={(event) => changeValue(event.currentTarget.value)}
         step={step}
         type="range"
         value={value}

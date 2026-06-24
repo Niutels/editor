@@ -202,6 +202,8 @@ export interface LandrushGeneratorOptions {
   readonly ownerParcelIndex?: number
   readonly perimeterPointCount?: number
   readonly treeSpacing?: number
+  readonly profileMeasure?: <T>(id: string, callback: () => T) => T
+  readonly profileScope?: string
 }
 
 export interface LandrushIslandShapeControls {

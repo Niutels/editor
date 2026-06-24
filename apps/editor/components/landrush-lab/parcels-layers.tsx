@@ -4,12 +4,14 @@ import { useTexture } from '@react-three/drei'
 import { useEffect, useMemo } from 'react'
 import {
   BufferGeometry,
+  CanvasTexture,
   ClampToEdgeWrapping,
   Color,
   DataTexture,
   DoubleSide,
   Float32BufferAttribute,
   LinearFilter,
+  NoColorSpace,
   RepeatWrapping,
   RGBAFormat,
   SRGBColorSpace,
@@ -40,6 +42,7 @@ type ParcelsLandLayersProps = {
   onStreetNetworkChange?: (network: ParcelStreetNetwork) => void
   options: ParcelAllocationOptions
   parcelOverlayOptions: ParcelOverlayOptions
+  renderStreetGeometry?: boolean
   showParcels?: boolean
   showStreets: boolean
   streetAppearance?: StreetAppearance
@@ -73,8 +76,18 @@ const STREET_ROAD_COLOR = '#626e75'
 const STREET_CURB_COLOR = '#b8ad96'
 const STREET_SHOULDER_COLOR = '#e7dfc8'
 const DIRT_PATH_TEXTURE_BASE = '/landrush-lab/stylized-scene/ground_texture/ground_07_4k'
-const DIRT_PATH_TEXTURE_REPEAT = 8
-const DIRT_PATH_TEXTURE_WORLD_SIZE_METERS = 40
+const DIRT_PATH_GRASS_TEXTURE_BASE = '/landrush-lab/stylized-scene/grass_texture'
+const DIRT_PATH_TEXTURE_REPEAT = 1
+const DIRT_PATH_TEXTURE_WORLD_SIZE_METERS = 1.18
+const DIRT_PATH_LAYER_OFFSET_METERS = 0.019
+const DIRT_PATH_RENDER_ORDER = 11
+const DIRT_PATH_BLEND_TEXTURE_SIZE = 2048
+const DIRT_PATH_CENTER_DEPRESSION_METERS = 0.014
+const DIRT_PATH_EDGE_RISE_METERS = 0.008
+const DIRT_PATH_PATCH_SUBDIVISION_DEPTH = 2
+const DIRT_PATH_SPAN_STEP_METERS = 0.32
+const DIRT_PATH_SURFACE_NOISE_METERS = 0.006
+const DIRT_PATH_WIDTH_SUBDIVISIONS = 4
 const DEFAULT_DIRT_PATH_FILLET_RADIUS_SCALE = 0.72
 const DIRT_PATH_FILLET_RADIUS_MAX_METERS = 15
 const DIRT_PATH_FILLET_STEPS = 8
@@ -90,8 +103,23 @@ const PARCEL_OVERLAY_RGB = colorToRgb(PARCEL_OVERLAY_COLOR)
 const STREET_RENDER_NODE_PRECISION = 100
 
 const DIRT_PATH_TEXTURE_PATHS = {
+  ambientOcclusion: `${DIRT_PATH_TEXTURE_BASE}/ground_07__ambientocclusion_1k.webp`,
   color: `${DIRT_PATH_TEXTURE_BASE}/ground_07__basecolor_1k.webp`,
+  grassColor: `${DIRT_PATH_GRASS_TEXTURE_BASE}/grass_05_basecolor_1k.webp`,
+  height: `${DIRT_PATH_TEXTURE_BASE}/ground_07__height_1k.webp`,
+  normal: `${DIRT_PATH_TEXTURE_BASE}/ground_07__normal_gl_1k.webp`,
+  roughness: `${DIRT_PATH_TEXTURE_BASE}/ground_07__roughness_1k.webp`,
 } as const
+
+type DirtPathTextures = {
+  ambientOcclusion: Texture
+  color: Texture
+  height: Texture
+  normal: Texture
+  roughness: Texture
+}
+
+type RgbByte = readonly [number, number, number]
 
 type ParcelFillTexture = {
   hasVisiblePixels: boolean
@@ -133,6 +161,12 @@ type DirtPathIncident = {
   parcelIds: readonly string[]
 }
 
+type DirtPathRenderPoint = LandrushPoint2 & {
+  u?: number
+  v?: number
+  y?: number
+}
+
 type DirtPathField = {
   junctions: readonly DirtPathJunction[]
   spans: readonly DirtPathSpan[]
@@ -163,6 +197,7 @@ export function ParcelsLandLayers({
   onStreetNetworkChange,
   options,
   parcelOverlayOptions,
+  renderStreetGeometry = true,
   showParcels = true,
   showStreets,
   streetAppearance = 'paved',
@@ -189,6 +224,7 @@ export function ParcelsLandLayers({
     [showStreets, streetAppearance, streetNetwork.segments],
   )
   const parcelOverlayPathInsetMeters = dirtPathField ? PARCEL_OVERLAY_PATH_PADDING_METERS : 0
+  const shouldRenderStreetGeometry = showStreets && renderStreetGeometry
 
   useEffect(() => {
     onAllocationChange?.(allocation)
@@ -211,11 +247,11 @@ export function ParcelsLandLayers({
           style={parcelOverlayOptions}
         />
       ) : null}
-      {showStreets ? (
+      {shouldRenderStreetGeometry ? (
         streetAppearance === 'dirt' ? (
           dirtPathField ? (
             <DirtStreetNetworkLayer
-              elevation={surface.grassSurfaceElevation + 0.18}
+              elevation={surface.grassSurfaceElevation + DIRT_PATH_LAYER_OFFSET_METERS}
               filletRadiusScale={dirtPathFilletRadiusScale}
               pathField={dirtPathField}
             />
@@ -611,9 +647,9 @@ function DirtStreetNetworkLayer({
   filletRadiusScale: number
   pathField: DirtPathField
 }) {
-  const texture = useDirtPathTexture()
+  const textures = useDirtPathTextures()
   const geometry = useMemo(
-    () => dirtStreetNetworkGeometry(pathField, filletRadiusScale, elevation + 0.018),
+    () => dirtStreetNetworkGeometry(pathField, filletRadiusScale, elevation),
     [elevation, filletRadiusScale, pathField],
   )
 
@@ -622,37 +658,207 @@ function DirtStreetNetworkLayer({
   if (!geometryHasVertices(geometry)) return null
 
   return (
-    <mesh geometry={geometry} renderOrder={35}>
-      <meshBasicMaterial
+    <mesh geometry={geometry} renderOrder={DIRT_PATH_RENDER_ORDER}>
+      <meshStandardMaterial
+        aoMap={textures.ambientOcclusion}
+        aoMapIntensity={0.55}
+        bumpMap={textures.height}
+        bumpScale={0.035}
         color="#ffffff"
         depthTest={true}
-        depthWrite={false}
-        map={texture}
-        polygonOffset={true}
-        polygonOffsetFactor={-1}
-        polygonOffsetUnits={-2}
+        depthWrite={true}
+        map={textures.color}
+        metalness={0}
+        normalMap={textures.normal}
+        roughness={0.92}
+        roughnessMap={textures.roughness}
         side={DoubleSide}
         toneMapped={false}
-        transparent
       />
     </mesh>
   )
 }
 
-function useDirtPathTexture(): Texture {
-  const texture = useTexture(DIRT_PATH_TEXTURE_PATHS.color) as Texture
-  return useMemo(() => {
-    configureDirtPathTexture(texture)
-    return texture
-  }, [texture])
+function useDirtPathTextures(): DirtPathTextures {
+  const [sourceColor, grassColor, ambientOcclusion, height, normal, roughness] = useTexture([
+    DIRT_PATH_TEXTURE_PATHS.color,
+    DIRT_PATH_TEXTURE_PATHS.grassColor,
+    DIRT_PATH_TEXTURE_PATHS.ambientOcclusion,
+    DIRT_PATH_TEXTURE_PATHS.height,
+    DIRT_PATH_TEXTURE_PATHS.normal,
+    DIRT_PATH_TEXTURE_PATHS.roughness,
+  ]) as Texture[]
+
+  const textures = useMemo(() => {
+    const color = createDirtPathAlbedoTexture(sourceColor!, grassColor!)
+    const textures = {
+      ambientOcclusion: ambientOcclusion!,
+      color,
+      height: height!,
+      normal: normal!,
+      roughness: roughness!,
+    }
+    configureDirtPathTextures(textures)
+    return textures
+  }, [ambientOcclusion, grassColor, height, normal, roughness, sourceColor])
+
+  useEffect(
+    () => () => {
+      if (textures.color.userData.landrushGeneratedDirtPathAlbedo) textures.color.dispose()
+    },
+    [textures.color],
+  )
+
+  return textures
 }
 
-function configureDirtPathTexture(texture: Texture) {
-  texture.colorSpace = SRGBColorSpace
-  texture.wrapS = RepeatWrapping
-  texture.wrapT = RepeatWrapping
-  texture.repeat.set(DIRT_PATH_TEXTURE_REPEAT, DIRT_PATH_TEXTURE_REPEAT)
-  texture.needsUpdate = true
+function createDirtPathAlbedoTexture(dirtColor: Texture, grassColor: Texture): Texture {
+  if (typeof document === 'undefined') return dirtColor
+  const dirtImage = dirtColor.image as CanvasImageSource | undefined
+  const grassImage = grassColor.image as CanvasImageSource | undefined
+  if (!dirtImage || !grassImage) return dirtColor
+
+  const size = DIRT_PATH_BLEND_TEXTURE_SIZE
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return dirtColor
+
+  context.drawImage(dirtImage, 0, 0, size, size)
+  const dirt = context.getImageData(0, 0, size, size)
+  context.clearRect(0, 0, size, size)
+  context.drawImage(grassImage, 0, 0, size, size)
+  const grass = context.getImageData(0, 0, size, size)
+  const data = dirt.data
+  const grassData = grass.data
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4
+      const u = x / (size - 1)
+      const v = y / (size - 1)
+      const across = Math.abs(v - 0.5) * 2
+      const rawDirt: RgbByte = [data[index]!, data[index + 1]!, data[index + 2]!]
+      const rawGrass: RgbByte = [grassData[index]!, grassData[index + 1]!, grassData[index + 2]!]
+      const stone = pathTextureStoneMask(u, v)
+      const dirt = pathTextureDirtColor(rawDirt, u, v, across)
+      const grass = pathTextureGrassColor(rawGrass, u, v)
+      const edgeGrassNoise =
+        (pathTextureNoise(u * 4.8 + 1.5, v * 3.8 - 2.4) - 0.5) * 0.24 +
+        (pathTextureNoise(u * 14.5 - 3.2, v * 11.1 + 5.6) - 0.5) * 0.12
+      const edgeGrass = smoothstep(0.72, 1.04, across + edgeGrassNoise)
+      const rawGrassGap = pathTextureGrassGap(rawDirt)
+      const grassBlend = Math.min(0.52, edgeGrass * 0.22 + rawGrassGap * 0.22)
+      const edgeShadow = smoothstep(0.82, 1, across) * 0.04
+      const centerLight = (1 - smoothstep(0.22, 0.9, across)) * 0.12
+      let color = mixRgb(dirt, grass, grassBlend)
+      color = scaleRgb(color, 1 + centerLight - edgeShadow)
+      color = scaleRgb(color, 0.99 + stone.highlight * 0.05)
+      color = mixRgb(color, [82, 54, 37], stone.crack * 0.24)
+      color = mixRgb(color, grass, stone.grassCrack * 0.12)
+      data[index] = byte255(color[0])
+      data[index + 1] = byte255(color[1])
+      data[index + 2] = byte255(color[2])
+    }
+  }
+
+  context.putImageData(dirt, 0, 0)
+  const texture = new CanvasTexture(canvas)
+  texture.userData.landrushGeneratedDirtPathAlbedo = true
+  return texture
+}
+
+function pathTextureStoneMask(u: number, v: number) {
+  const slabCount = 3.55
+  const slabIndex = Math.floor(u * slabCount)
+  const slabJitter = (pathTextureNoise(slabIndex * 1.7 + 0.4, 3.7) - 0.5) * 0.14
+  const slabLocal = fractional(u * slabCount + slabJitter)
+  const transverseCrack = 1 - smoothstep(0.024, 0.145, Math.min(slabLocal, 1 - slabLocal))
+  const splitJitter = (pathTextureNoise(slabIndex * 2.3 + 8.1, 11.4) - 0.5) * 0.12
+  const splitA = 0.32 + splitJitter
+  const splitB = 0.68 - splitJitter * 0.65
+  const splitCrackA = 1 - smoothstep(0.022, 0.125, Math.abs(v - splitA))
+  const splitCrackB = 1 - smoothstep(0.022, 0.12, Math.abs(v - splitB))
+  const centerDrift = 0.5 + splitJitter * 0.75
+  const centerCrack =
+    (1 - smoothstep(0.02, 0.105, Math.abs(v - centerDrift))) *
+    smoothstep(0.14, 0.58, slabLocal) *
+    (1 - smoothstep(0.68, 0.98, slabLocal))
+  const brokenEdge =
+    (1 - smoothstep(0.58, 0.9, pathTextureNoise(u * 12.8 + 2.2, v * 16.4 - 4.1))) *
+    smoothstep(0.58, 1, Math.abs(v - 0.5) * 2)
+  const crack = clamp01(
+    Math.max(
+      transverseCrack * 0.86,
+      splitCrackA * 0.68,
+      splitCrackB * 0.62,
+      centerCrack * 0.6,
+      brokenEdge * 0.46,
+    ),
+  )
+  const grassCrack = crack * smoothstep(0.35, 0.9, pathTextureNoise(u * 8.4 - 1.2, v * 7.6 + 4.8))
+  const highlight = pathTextureNoise(u * 7.6 + 0.2, v * 5.4 - 3.1)
+
+  return { crack, grassCrack, highlight }
+}
+
+function pathTextureDirtColor(raw: RgbByte, u: number, v: number, across: number): RgbByte {
+  const warmTan: RgbByte = [226, 170, 125]
+  const lightTan: RgbByte = [244, 202, 160]
+  const grassGap = pathTextureGrassGap(raw)
+  const stoneNoise =
+    pathTextureNoise(u * 4.6 + 0.9, v * 4.2 - 1.7) * 0.7 +
+    pathTextureNoise(u * 13.5 - 4.4, v * 12.1 + 3.9) * 0.3
+  const warmth = 0.34 - grassGap * 0.08
+  const edgeWarmth = smoothstep(0.62, 1, across) * 0.06
+  let color = mixRgb(raw, warmTan, warmth)
+  color = mixRgb(color, lightTan, stoneNoise * (1 - grassGap) * 0.1)
+  return scaleRgb(color, 1.02 + stoneNoise * 0.08 + edgeWarmth)
+}
+
+function pathTextureGrassColor(raw: RgbByte, u: number, v: number): RgbByte {
+  const saturatedGrass: RgbByte = [94, 150, 66]
+  const highlightGrass: RgbByte = [159, 189, 91]
+  const patch = pathTextureNoise(u * 8.4 + 3.2, v * 9.7 - 2.9)
+  return mixRgb(mixRgb(raw, saturatedGrass, 0.36), highlightGrass, patch * 0.2)
+}
+
+function pathTextureGrassGap(raw: RgbByte) {
+  const greenLead = raw[1] - Math.max(raw[0], raw[2])
+  const redSuppression = raw[0] - raw[1]
+  return Math.max(smoothstep(8, 42, greenLead), smoothstep(22, 78, -redSuppression))
+}
+
+function mixRgb(first: RgbByte, second: RgbByte, amount: number): RgbByte {
+  const t = clamp01(amount)
+  return [lerp(first[0], second[0], t), lerp(first[1], second[1], t), lerp(first[2], second[2], t)]
+}
+
+function scaleRgb(color: RgbByte, scale: number): RgbByte {
+  return [color[0] * scale, color[1] * scale, color[2] * scale]
+}
+
+function byte255(value: number) {
+  return Math.max(0, Math.min(255, Math.round(value)))
+}
+
+function fractional(value: number) {
+  return value - Math.floor(value)
+}
+
+function configureDirtPathTextures(textures: DirtPathTextures) {
+  textures.color.colorSpace = SRGBColorSpace
+  textures.ambientOcclusion.colorSpace = NoColorSpace
+  textures.height.colorSpace = NoColorSpace
+  textures.normal.colorSpace = NoColorSpace
+  textures.roughness.colorSpace = NoColorSpace
+  for (const texture of Object.values(textures)) {
+    texture.wrapS = RepeatWrapping
+    texture.wrapT = RepeatWrapping
+    texture.repeat.set(DIRT_PATH_TEXTURE_REPEAT, DIRT_PATH_TEXTURE_REPEAT)
+    texture.needsUpdate = true
+  }
 }
 
 function createDirtPathField(
@@ -669,67 +875,138 @@ function createDirtPathField(
 function dirtStreetNetworkGeometry(pathField: DirtPathField, filletRadiusScale: number, y: number) {
   const geometry = new BufferGeometry()
   const positions: number[] = []
+  const uvs: number[] = []
   const patchesByJunction = dirtPathJunctionPatchesByJunction(
     pathField.junctions,
     filletRadiusScale,
   )
 
   for (const span of pathField.spans) {
-    addDirtPathSpanGeometry(positions, span, y)
+    addDirtPathSpanGeometry(positions, uvs, span, y)
   }
 
   for (const junction of pathField.junctions) {
     const patches = patchesByJunction.get(streetRenderNodeId(junction.point))
-    addDirtPathBendJoinGeometry(positions, patches?.bendJoins ?? [], y)
-    addDirtPathJunctionGeometry(positions, patches?.fillets ?? [], y)
+    addDirtPathBendJoinGeometry(positions, uvs, patches?.bendJoins ?? [], y)
+    addDirtPathJunctionGeometry(positions, uvs, patches?.fillets ?? [], y)
   }
 
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.setAttribute('uv', new Float32BufferAttribute(dirtPathUvsForPositions(positions), 2))
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+  geometry.setAttribute('uv2', new Float32BufferAttribute(uvs, 2))
   geometry.computeVertexNormals()
   return geometry
 }
 
-function dirtPathUvsForPositions(positions: readonly number[]) {
-  const uvs: number[] = []
-  for (let index = 0; index < positions.length; index += 3) {
-    const x = positions[index] ?? 0
-    const z = positions[index + 2] ?? 0
-    uvs.push(
-      x / DIRT_PATH_TEXTURE_WORLD_SIZE_METERS + 0.5,
-      z / DIRT_PATH_TEXTURE_WORLD_SIZE_METERS + 0.5,
-    )
-  }
-  return uvs
-}
-
-function addDirtPathSpanGeometry(positions: number[], span: DirtPathSpan, y: number) {
-  if (distance2(span.start, span.end) <= 0.001) return
+function addDirtPathSpanGeometry(
+  positions: number[],
+  uvs: number[],
+  span: DirtPathSpan,
+  y: number,
+) {
+  const length = distance2(span.start, span.end)
+  if (length <= 0.001) return
 
   const normal = normalForSegment(span.start, span.end)
-  const firstLeft = {
-    x: span.start.x + normal.x * span.halfWidth,
-    z: span.start.z + normal.z * span.halfWidth,
+  const direction = {
+    x: (span.end.x - span.start.x) / length,
+    z: (span.end.z - span.start.z) / length,
   }
-  const firstRight = {
-    x: span.start.x - normal.x * span.halfWidth,
-    z: span.start.z - normal.z * span.halfWidth,
-  }
-  const secondLeft = {
-    x: span.end.x + normal.x * span.halfWidth,
-    z: span.end.z + normal.z * span.halfWidth,
-  }
-  const secondRight = {
-    x: span.end.x - normal.x * span.halfWidth,
-    z: span.end.z - normal.z * span.halfWidth,
-  }
+  const lengthSteps = Math.max(1, Math.ceil(length / DIRT_PATH_SPAN_STEP_METERS))
 
-  pushTriangle(positions, firstLeft, firstRight, secondLeft, y)
-  pushTriangle(positions, firstRight, secondRight, secondLeft, y)
+  for (let lengthIndex = 0; lengthIndex < lengthSteps; lengthIndex += 1) {
+    const startT = lengthIndex / lengthSteps
+    const endT = (lengthIndex + 1) / lengthSteps
+    for (let widthIndex = 0; widthIndex < DIRT_PATH_WIDTH_SUBDIVISIONS; widthIndex += 1) {
+      const firstOffset = lerp(
+        -span.halfWidth,
+        span.halfWidth,
+        widthIndex / DIRT_PATH_WIDTH_SUBDIVISIONS,
+      )
+      const secondOffset = lerp(
+        -span.halfWidth,
+        span.halfWidth,
+        (widthIndex + 1) / DIRT_PATH_WIDTH_SUBDIVISIONS,
+      )
+      const first = dirtPathSpanPoint(
+        span.start,
+        direction,
+        normal,
+        length,
+        startT,
+        firstOffset,
+        span.halfWidth,
+        y,
+      )
+      const second = dirtPathSpanPoint(
+        span.start,
+        direction,
+        normal,
+        length,
+        endT,
+        firstOffset,
+        span.halfWidth,
+        y,
+      )
+      const third = dirtPathSpanPoint(
+        span.start,
+        direction,
+        normal,
+        length,
+        startT,
+        secondOffset,
+        span.halfWidth,
+        y,
+      )
+      const fourth = dirtPathSpanPoint(
+        span.start,
+        direction,
+        normal,
+        length,
+        endT,
+        secondOffset,
+        span.halfWidth,
+        y,
+      )
+
+      pushDirtTriangle(positions, uvs, first, third, second, y)
+      pushDirtTriangle(positions, uvs, second, third, fourth, y)
+    }
+  }
+}
+
+function dirtPathSpanPoint(
+  start: LandrushPoint2,
+  direction: LandrushPoint2,
+  normal: LandrushPoint2,
+  length: number,
+  t: number,
+  offset: number,
+  halfWidth: number,
+  baseY: number,
+): DirtPathRenderPoint {
+  const point = {
+    x: start.x + direction.x * length * t + normal.x * offset,
+    z: start.z + direction.z * length * t + normal.z * offset,
+  }
+  const edgeRatio = clamp01(Math.abs(offset) / Math.max(halfWidth, 0.000001))
+  const edgeRise = smoothstep(0.68, 1, edgeRatio)
+  const centerDepression = -DIRT_PATH_CENTER_DEPRESSION_METERS * (1 - edgeRise)
+  const rockNoise =
+    (pathTextureNoise(point.x * 0.74 + 8.2, point.z * 0.74 - 3.5) - 0.5) *
+    DIRT_PATH_SURFACE_NOISE_METERS *
+    (1 - smoothstep(0.86, 1, edgeRatio))
+  return {
+    ...point,
+    u: (length * t) / Math.max(halfWidth * 2, 0.000001),
+    v: offset / Math.max(halfWidth * 2, 0.000001) + 0.5,
+    y: baseY + centerDepression + DIRT_PATH_EDGE_RISE_METERS * edgeRise + rockNoise,
+  }
 }
 
 function addDirtPathJunctionGeometry(
   positions: number[],
+  uvs: number[],
   fillets: readonly DirtPathFillet[],
   y: number,
 ) {
@@ -737,7 +1014,16 @@ function addDirtPathJunctionGeometry(
     for (let index = 0; index < fillet.arc.length - 1; index += 1) {
       const current = fillet.arc[index]
       const next = fillet.arc[index + 1]
-      if (current && next) pushTriangle(positions, fillet.corner, current, next, y)
+      if (current && next)
+        pushSubdividedDirtTriangle(
+          positions,
+          uvs,
+          fillet.corner,
+          current,
+          next,
+          y,
+          DIRT_PATH_PATCH_SUBDIVISION_DEPTH,
+        )
     }
   }
 }
@@ -917,6 +1203,7 @@ function dirtPathBendJoinForIncidentPair(
 
 function addDirtPathBendJoinGeometry(
   positions: number[],
+  uvs: number[],
   bendJoins: readonly DirtPathBendJoin[],
   y: number,
 ) {
@@ -925,7 +1212,15 @@ function addDirtPathBendJoinGeometry(
       const currentPoint = bendJoin.arc[index]
       const nextPoint = bendJoin.arc[index + 1]
       if (currentPoint && nextPoint)
-        pushTriangle(positions, bendJoin.center, currentPoint, nextPoint, y)
+        pushSubdividedDirtTriangle(
+          positions,
+          uvs,
+          bendJoin.center,
+          currentPoint,
+          nextPoint,
+          y,
+          DIRT_PATH_PATCH_SUBDIVISION_DEPTH,
+        )
     }
   }
 }
@@ -1241,6 +1536,104 @@ function pushTriangle(
   positions.push(first.x, y, first.z, second.x, y, second.z, third.x, y, third.z)
 }
 
+function pushDirtTriangle(
+  positions: number[],
+  uvs: number[],
+  first: DirtPathRenderPoint,
+  second: DirtPathRenderPoint,
+  third: DirtPathRenderPoint,
+  y: number,
+) {
+  if (cross2(first, second, third) > 0) {
+    pushDirtVertex(positions, uvs, first, y)
+    pushDirtVertex(positions, uvs, third, y)
+    pushDirtVertex(positions, uvs, second, y)
+    return
+  }
+  pushDirtVertex(positions, uvs, first, y)
+  pushDirtVertex(positions, uvs, second, y)
+  pushDirtVertex(positions, uvs, third, y)
+}
+
+function pushDirtVertex(
+  positions: number[],
+  uvs: number[],
+  point: DirtPathRenderPoint,
+  fallbackY: number,
+) {
+  positions.push(point.x, dirtPathVertexY(point, fallbackY), point.z)
+  const uv = dirtPathVertexUv(point)
+  uvs.push(uv.u, uv.v)
+}
+
+function pushSubdividedDirtTriangle(
+  positions: number[],
+  uvs: number[],
+  first: DirtPathRenderPoint,
+  second: DirtPathRenderPoint,
+  third: DirtPathRenderPoint,
+  y: number,
+  depth: number,
+) {
+  if (depth <= 0) {
+    pushDirtTriangle(positions, uvs, first, second, third, y)
+    return
+  }
+
+  const firstSecond = dirtPathRenderMidpoint(first, second)
+  const secondThird = dirtPathRenderMidpoint(second, third)
+  const thirdFirst = dirtPathRenderMidpoint(third, first)
+  pushSubdividedDirtTriangle(positions, uvs, first, firstSecond, thirdFirst, y, depth - 1)
+  pushSubdividedDirtTriangle(positions, uvs, firstSecond, second, secondThird, y, depth - 1)
+  pushSubdividedDirtTriangle(positions, uvs, thirdFirst, secondThird, third, y, depth - 1)
+  pushSubdividedDirtTriangle(positions, uvs, firstSecond, secondThird, thirdFirst, y, depth - 1)
+}
+
+function dirtPathVertexY(point: DirtPathRenderPoint, fallbackY: number) {
+  return (
+    point.y ?? fallbackY - DIRT_PATH_CENTER_DEPRESSION_METERS * 0.42 + dirtPathSurfaceNoise(point)
+  )
+}
+
+function dirtPathVertexUv(point: DirtPathRenderPoint) {
+  if (Number.isFinite(point.u) && Number.isFinite(point.v)) {
+    return { u: point.u!, v: point.v! }
+  }
+  return {
+    u: point.x / DIRT_PATH_TEXTURE_WORLD_SIZE_METERS + 0.5,
+    v: point.z / DIRT_PATH_TEXTURE_WORLD_SIZE_METERS + 0.5,
+  }
+}
+
+function dirtPathRenderMidpoint(
+  first: DirtPathRenderPoint,
+  second: DirtPathRenderPoint,
+): DirtPathRenderPoint {
+  const midpoint = midpoint2(first, second)
+  return {
+    ...midpoint,
+    u:
+      Number.isFinite(first.u) && Number.isFinite(second.u)
+        ? ((first.u ?? 0) + (second.u ?? 0)) / 2
+        : undefined,
+    v:
+      Number.isFinite(first.v) && Number.isFinite(second.v)
+        ? ((first.v ?? 0) + (second.v ?? 0)) / 2
+        : undefined,
+    y:
+      Number.isFinite(first.y) && Number.isFinite(second.y)
+        ? ((first.y ?? 0) + (second.y ?? 0)) / 2
+        : undefined,
+  }
+}
+
+function dirtPathSurfaceNoise(point: LandrushPoint2) {
+  return (
+    (pathTextureNoise(point.x * 0.82 - 2.4, point.z * 0.82 + 5.7) - 0.5) *
+    DIRT_PATH_SURFACE_NOISE_METERS
+  )
+}
+
 function clockwiseArcPoints(
   center: LandrushPoint2,
   start: LandrushPoint2,
@@ -1374,4 +1767,23 @@ function smoothstep(edge0: number, edge1: number, value: number) {
 
 function lerp(start: number, end: number, t: number) {
   return start + (end - start) * t
+}
+
+function pathTextureNoise(x: number, z: number) {
+  const ix = Math.floor(x)
+  const iz = Math.floor(z)
+  const fx = x - ix
+  const fz = z - iz
+  const ux = fx * fx * (3 - 2 * fx)
+  const uz = fz * fz * (3 - 2 * fz)
+  return lerp(
+    lerp(pathTextureHash(ix, iz), pathTextureHash(ix + 1, iz), ux),
+    lerp(pathTextureHash(ix, iz + 1), pathTextureHash(ix + 1, iz + 1), ux),
+    uz,
+  )
+}
+
+function pathTextureHash(x: number, z: number) {
+  const value = Math.sin(x * 127.1 + z * 311.7) * 43758.5453123
+  return value - Math.floor(value)
 }

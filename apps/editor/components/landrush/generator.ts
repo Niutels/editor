@@ -84,46 +84,66 @@ interface RoadGraphAnalysis {
 }
 
 export function generateLandrushIsland(options: LandrushGeneratorOptions = {}): LandrushIsland {
-  const seed = String(options.seed ?? DEFAULT_LANDRUSH_OPTIONS.seed)
-  const random = createRandom(seed)
-  const ownerRandom = createRandom(`${seed}:owner`)
-  const size = normalizeSize(options.size)
-  const parcelCount = clampInteger(
-    options.parcelCount ?? DEFAULT_LANDRUSH_OPTIONS.parcelCount,
-    1,
-    24,
+  const measure = options.profileMeasure ?? measureUnprofiled
+  const profileScope = options.profileScope ?? 'setup.landrush-generator'
+  const { ownerParcelIndex, parcelCount, random, seed, shape, size } = measure(
+    `${profileScope}.normalize-options`,
+    () => {
+      const seed = String(options.seed ?? DEFAULT_LANDRUSH_OPTIONS.seed)
+      const random = createRandom(seed)
+      const ownerRandom = createRandom(`${seed}:owner`)
+      const size = normalizeSize(options.size)
+      const parcelCount = clampInteger(
+        options.parcelCount ?? DEFAULT_LANDRUSH_OPTIONS.parcelCount,
+        1,
+        24,
+      )
+      const ownerParcelIndex = clampInteger(
+        options.ownerParcelIndex ?? Math.floor(ownerRandom() * parcelCount),
+        0,
+        parcelCount - 1,
+      )
+      const shape = normalizeIslandShapeControls(options.shape)
+      return { ownerParcelIndex, parcelCount, random, seed, shape, size }
+    },
   )
-  const ownerParcelIndex = clampInteger(
-    options.ownerParcelIndex ?? Math.floor(ownerRandom() * parcelCount),
-    0,
-    parcelCount - 1,
-  )
-  const shape = normalizeIslandShapeControls(options.shape)
 
-  const perimeter = createPerimeter(
-    size,
-    options.perimeterPointCount ?? DEFAULT_LANDRUSH_OPTIONS.perimeterPointCount,
-    random,
-    shape,
+  const perimeter = measure(`${profileScope}.create-perimeter`, () =>
+    createPerimeter(
+      size,
+      options.perimeterPointCount ?? DEFAULT_LANDRUSH_OPTIONS.perimeterPointCount,
+      random,
+      shape,
+      measure,
+      `${profileScope}.create-perimeter`,
+    ),
   )
-  const parcels = createParcels(size, parcelCount, ownerParcelIndex, perimeter, random)
-  const ownerParcel = parcels[ownerParcelIndex]!
-  const roads = createRoadNetwork(parcels)
-  const trees = createTrees(
-    perimeter,
-    parcels,
-    options.treeSpacing ?? DEFAULT_LANDRUSH_OPTIONS.treeSpacing,
-    random,
+  const parcels = measure(`${profileScope}.create-parcels`, () =>
+    createParcels(
+      size,
+      parcelCount,
+      ownerParcelIndex,
+      perimeter,
+      random,
+      measure,
+      `${profileScope}.create-parcels`,
+    ),
   )
-  const metadata = createMetadata(
-    seed,
-    size,
-    parcelCount,
-    perimeter,
-    parcels,
-    ownerParcel,
-    roads,
-    trees,
+  const ownerParcel = measure(
+    `${profileScope}.select-owner-parcel`,
+    () => parcels[ownerParcelIndex]!,
+  )
+  const roads = measure(`${profileScope}.create-road-network`, () => createRoadNetwork(parcels))
+  const trees = measure(`${profileScope}.create-trees`, () =>
+    createTrees(
+      perimeter,
+      parcels,
+      options.treeSpacing ?? DEFAULT_LANDRUSH_OPTIONS.treeSpacing,
+      random,
+    ),
+  )
+  const metadata = measure(`${profileScope}.create-metadata`, () =>
+    createMetadata(seed, size, parcelCount, perimeter, parcels, ownerParcel, roads, trees),
   )
 
   return {
@@ -199,162 +219,233 @@ function createPerimeter(
   requestedPointCount: number,
   random: RandomSource,
   shape: LandrushIslandShapeControls,
+  profileMeasure: LandrushGeneratorOptions['profileMeasure'] = measureUnprofiled,
+  profileScope = 'setup.landrush-generator.create-perimeter',
 ): LandrushPerimeter {
-  const pointCount = clampInteger(requestedPointCount, 12, 128)
-  const halfWidth = size.width / 2
-  const halfDepth = size.depth / 2
-  const phaseA = random() * TAU
-  const phaseB = random() * TAU
-  const phaseC = random() * TAU
-  const phaseD = random() * TAU
-  const coves = Array.from({ length: 6 }, () => ({
-    angle: random() * TAU,
-    amplitude: (0.14 + random() * 0.22) * shape.coast,
-    power: 2.1 + random() * 2.3,
-  }))
-  const capes = Array.from({ length: 5 }, () => ({
-    angle: random() * TAU,
-    amplitude: (0.09 + random() * 0.17) * shape.coast,
-    power: 1.8 + random() * 1.65,
-  }))
-  const leanAngle = random() * TAU
-  const aspectLean = 1 + (0.88 + random() * 0.2 - 1) * shape.asymmetry
-  const counterAspectLean = 1 + (0.94 + random() * 0.12 - 1) * shape.asymmetry
-  const scallopPhase = random() * TAU
-  const bigShapeGain = 1 + shape.detailSeparation * 0.34
-  const coastlineDetailGain = 1 - shape.detailSeparation * 0.58
-  const coastCharacter = createCoastCharacterContext(
+  const {
+    aspectLean,
+    bigShapeGain,
+    capes,
+    coastCharacter,
+    coastlineDetailGain,
+    counterAspectLean,
+    covePairing,
+    coves,
+    halfDepth,
+    halfWidth,
+    leanAngle,
+    neckPinch,
     phaseA,
     phaseB,
     phaseC,
     phaseD,
-    shape.coastCharacter,
-  )
-  const covePairing = createCovePairingContext(phaseA, phaseB, phaseC, phaseD, shape.covePairing)
-  const neckPinch = createNeckPinchContext(phaseA, phaseB, phaseC, phaseD, shape.neckPinch)
-  const spineInfluence = createSpineInfluenceContext(
-    phaseA,
-    phaseB,
-    phaseC,
-    phaseD,
-    shape.spineInfluence,
-  )
-  const rawPoints: LandrushPoint2[] = []
+    pointCount,
+    scallopPhase,
+    spineInfluence,
+  } = profileMeasure(`${profileScope}.setup-context`, () => {
+    const pointCount = clampInteger(requestedPointCount, 12, 128)
+    const halfWidth = size.width / 2
+    const halfDepth = size.depth / 2
+    const phaseA = random() * TAU
+    const phaseB = random() * TAU
+    const phaseC = random() * TAU
+    const phaseD = random() * TAU
+    const coves = Array.from({ length: 6 }, () => ({
+      angle: random() * TAU,
+      amplitude: (0.14 + random() * 0.22) * shape.coast,
+      power: 2.1 + random() * 2.3,
+    }))
+    const capes = Array.from({ length: 5 }, () => ({
+      angle: random() * TAU,
+      amplitude: (0.09 + random() * 0.17) * shape.coast,
+      power: 1.8 + random() * 1.65,
+    }))
+    const leanAngle = random() * TAU
+    const aspectLean = 1 + (0.88 + random() * 0.2 - 1) * shape.asymmetry
+    const counterAspectLean = 1 + (0.94 + random() * 0.12 - 1) * shape.asymmetry
+    const scallopPhase = random() * TAU
+    const bigShapeGain = 1 + shape.detailSeparation * 0.34
+    const coastlineDetailGain = 1 - shape.detailSeparation * 0.58
+    const coastCharacter = createCoastCharacterContext(
+      phaseA,
+      phaseB,
+      phaseC,
+      phaseD,
+      shape.coastCharacter,
+    )
+    const covePairing = createCovePairingContext(phaseA, phaseB, phaseC, phaseD, shape.covePairing)
+    const neckPinch = createNeckPinchContext(phaseA, phaseB, phaseC, phaseD, shape.neckPinch)
+    const spineInfluence = createSpineInfluenceContext(
+      phaseA,
+      phaseB,
+      phaseC,
+      phaseD,
+      shape.spineInfluence,
+    )
 
-  for (let index = 0; index < pointCount; index += 1) {
-    const angle = (index / pointCount) * TAU
-    const cos = Math.cos(angle)
-    const sin = Math.sin(angle)
-    const coastSample = coastCharacter
-      ? sampleCoastCharacter(coastCharacter, angle)
-      : DEFAULT_COAST_CHARACTER_SAMPLE
-    const spineSample = spineInfluence
-      ? sampleSpineInfluence(spineInfluence, angle)
-      : DEFAULT_SPINE_INFLUENCE_SAMPLE
-    const lobeWave =
-      Math.sin(angle * 2 + phaseA) * 0.22 * shape.lobes * coastSample.lobes * bigShapeGain
-    const coveWave =
-      Math.sin(angle * 3 + phaseB) * 0.12 * shape.coast * coastSample.coves * bigShapeGain
-    const fineWave =
-      Math.sin(angle * 7 + phaseC) *
-      0.055 *
-      shape.roughness *
-      coastSample.roughness *
-      coastlineDetailGain
-    const terraceWave =
-      Math.sin(angle * 11 + phaseD) *
-      0.034 *
-      shape.roughness *
-      coastSample.roughness *
-      coastlineDetailGain
-    const scallopWave =
-      Math.sin(angle * 5 + scallopPhase) *
-      0.075 *
-      shape.roughness *
-      coastSample.roughness *
-      coastlineDetailGain
-    const covePull = coves.reduce(
-      (total, cove) =>
-        total -
-        localizedWave(angle, cove.angle, cove.amplitude, cove.power) *
-          coastSample.coves *
-          bigShapeGain,
-      0,
-    )
-    const capePush = capes.reduce(
-      (total, cape) =>
-        total +
-        localizedWave(angle, cape.angle, cape.amplitude, cape.power) *
-          coastSample.capes *
-          bigShapeGain,
-      0,
-    )
-    const pairedCovePush = covePairing ? sampleCovePairing(covePairing, angle) : 0
-    const neckPull = neckPinch ? sampleNeckPinch(neckPinch, angle) : 0
-    const jitter =
-      (random() - 0.5) * 0.055 * shape.roughness * coastSample.roughness * coastlineDetailGain
-    const radiusScale = clampFinite(
-      0.9 +
-        lobeWave +
-        coveWave +
-        fineWave +
-        terraceWave +
-        scallopWave +
-        covePull +
-        capePush +
-        coastSample.radiusOffset +
-        pairedCovePush +
-        neckPull +
-        spineSample.radiusOffset +
-        jitter,
-      0.44,
-      1.34,
-    )
-    const directionalLean = 1 + Math.cos(angle - leanAngle) * 0.11 * shape.asymmetry
-    const roundnessBias =
-      0.9 +
-      0.08 * Math.abs(Math.sin(angle * 2 + phaseB)) * shape.asymmetry +
-      Math.sin(angle + phaseD) * 0.035 * shape.roughness
-
-    rawPoints.push(
-      point(
-        cos * halfWidth * radiusScale * directionalLean * aspectLean +
-          spineSample.offsetX * halfWidth,
-        sin * halfDepth * radiusScale * roundnessBias * counterAspectLean +
-          spineSample.offsetZ * halfDepth,
-      ),
-    )
-  }
-
-  const rawBounds = boundsFor(rawPoints)
-  const centerX = (rawBounds.minX + rawBounds.maxX) / 2
-  const centerZ = (rawBounds.minZ + rawBounds.maxZ) / 2
-  const uniformScale =
-    Math.min(
-      (size.width * 0.985) / Math.max(rawBounds.width, POINT_EPSILON),
-      (size.depth * 0.965) / Math.max(rawBounds.depth, POINT_EPSILON),
-    ) *
-    (0.97 + random() * 0.04)
-  const shear = (random() - 0.5) * 0.12 * shape.asymmetry
-  const openPoints = rawPoints.map((raw) => {
-    const x = (raw.x - centerX) * uniformScale
-    const z = (raw.z - centerZ) * uniformScale
-    return point(x + z * shear, z)
+    return {
+      aspectLean,
+      bigShapeGain,
+      capes,
+      coastCharacter,
+      coastlineDetailGain,
+      counterAspectLean,
+      covePairing,
+      coves,
+      halfDepth,
+      halfWidth,
+      leanAngle,
+      neckPinch,
+      phaseA,
+      phaseB,
+      phaseC,
+      phaseD,
+      pointCount,
+      scallopPhase,
+      spineInfluence,
+    }
   })
-  const erodedPoints =
+  const rawPoints: LandrushPoint2[] = profileMeasure(
+    `${profileScope}.allocate-raw-points`,
+    () => [],
+  )
+
+  profileMeasure(`${profileScope}.sample-raw-points`, () => {
+    const blockSize = 4
+    for (let blockStart = 0; blockStart < pointCount; blockStart += blockSize) {
+      const blockEnd = Math.min(pointCount, blockStart + blockSize)
+      profileMeasure(`${profileScope}.sample-raw-point-block`, () => {
+        for (let index = blockStart; index < blockEnd; index += 1) {
+          const angle = (index / pointCount) * TAU
+          const cos = Math.cos(angle)
+          const sin = Math.sin(angle)
+          const coastSample = coastCharacter
+            ? sampleCoastCharacter(coastCharacter, angle)
+            : DEFAULT_COAST_CHARACTER_SAMPLE
+          const spineSample = spineInfluence
+            ? sampleSpineInfluence(spineInfluence, angle)
+            : DEFAULT_SPINE_INFLUENCE_SAMPLE
+          const lobeWave =
+            Math.sin(angle * 2 + phaseA) * 0.22 * shape.lobes * coastSample.lobes * bigShapeGain
+          const coveWave =
+            Math.sin(angle * 3 + phaseB) * 0.12 * shape.coast * coastSample.coves * bigShapeGain
+          const fineWave =
+            Math.sin(angle * 7 + phaseC) *
+            0.055 *
+            shape.roughness *
+            coastSample.roughness *
+            coastlineDetailGain
+          const terraceWave =
+            Math.sin(angle * 11 + phaseD) *
+            0.034 *
+            shape.roughness *
+            coastSample.roughness *
+            coastlineDetailGain
+          const scallopWave =
+            Math.sin(angle * 5 + scallopPhase) *
+            0.075 *
+            shape.roughness *
+            coastSample.roughness *
+            coastlineDetailGain
+          const covePull = coves.reduce(
+            (total, cove) =>
+              total -
+              localizedWave(angle, cove.angle, cove.amplitude, cove.power) *
+                coastSample.coves *
+                bigShapeGain,
+            0,
+          )
+          const capePush = capes.reduce(
+            (total, cape) =>
+              total +
+              localizedWave(angle, cape.angle, cape.amplitude, cape.power) *
+                coastSample.capes *
+                bigShapeGain,
+            0,
+          )
+          const pairedCovePush = covePairing ? sampleCovePairing(covePairing, angle) : 0
+          const neckPull = neckPinch ? sampleNeckPinch(neckPinch, angle) : 0
+          const jitter =
+            (random() - 0.5) * 0.055 * shape.roughness * coastSample.roughness * coastlineDetailGain
+          const radiusScale = clampFinite(
+            0.9 +
+              lobeWave +
+              coveWave +
+              fineWave +
+              terraceWave +
+              scallopWave +
+              covePull +
+              capePush +
+              coastSample.radiusOffset +
+              pairedCovePush +
+              neckPull +
+              spineSample.radiusOffset +
+              jitter,
+            0.44,
+            1.34,
+          )
+          const directionalLean = 1 + Math.cos(angle - leanAngle) * 0.11 * shape.asymmetry
+          const roundnessBias =
+            0.9 +
+            0.08 * Math.abs(Math.sin(angle * 2 + phaseB)) * shape.asymmetry +
+            Math.sin(angle + phaseD) * 0.035 * shape.roughness
+
+          rawPoints.push(
+            point(
+              cos * halfWidth * radiusScale * directionalLean * aspectLean +
+                spineSample.offsetX * halfWidth,
+              sin * halfDepth * radiusScale * roundnessBias * counterAspectLean +
+                spineSample.offsetZ * halfDepth,
+            ),
+          )
+        }
+      })
+    }
+  })
+
+  const { centerX, centerZ, shear, uniformScale } = profileMeasure(
+    `${profileScope}.resolve-transform`,
+    () => {
+      const rawBounds = boundsFor(rawPoints)
+      const uniformScale =
+        Math.min(
+          (size.width * 0.985) / Math.max(rawBounds.width, POINT_EPSILON),
+          (size.depth * 0.965) / Math.max(rawBounds.depth, POINT_EPSILON),
+        ) *
+        (0.97 + random() * 0.04)
+      const shear = (random() - 0.5) * 0.12 * shape.asymmetry
+      return {
+        centerX: (rawBounds.minX + rawBounds.maxX) / 2,
+        centerZ: (rawBounds.minZ + rawBounds.maxZ) / 2,
+        shear,
+        uniformScale,
+      }
+    },
+  )
+  const openPoints = profileMeasure(`${profileScope}.transform-points`, () =>
+    rawPoints.map((raw) => {
+      const x = (raw.x - centerX) * uniformScale
+      const z = (raw.z - centerZ) * uniformScale
+      return point(x + z * shear, z)
+    }),
+  )
+  const erodedPoints = profileMeasure(`${profileScope}.smooth-points`, () =>
     shape.erosionSmoothness > POINT_EPSILON
       ? smoothOpenPerimeterPoints(openPoints, shape.erosionSmoothness)
-      : openPoints
-  const first = erodedPoints[0]!
-  const points = [...erodedPoints, { ...first }]
+      : openPoints,
+  )
+  const points = profileMeasure(`${profileScope}.close-points`, () => {
+    const first = erodedPoints[0]!
+    return [...erodedPoints, { ...first }]
+  })
 
-  return {
+  return profileMeasure(`${profileScope}.assemble`, () => ({
+    bounds: boundsFor(points),
+    closed: areSamePoint(points[0]!, points[points.length - 1]!),
     id: 'island-perimeter',
     points,
     r3fPoints: landrushPointsToVec3(points),
-    bounds: boundsFor(points),
-    closed: areSamePoint(points[0]!, points[points.length - 1]!),
-  }
+  }))
 }
 
 function localizedWave(angle: number, center: number, amplitude: number, power: number): number {
@@ -678,31 +769,53 @@ function createParcels(
   ownerParcelIndex: number,
   perimeter: LandrushPerimeter,
   random: RandomSource,
+  profileMeasure: NonNullable<LandrushGeneratorOptions['profileMeasure']> = measureUnprofiled,
+  profileScope = 'setup.landrush-generator.create-parcels',
 ): LandrushParcel[] {
-  const columns = Math.ceil(parcelCount / 2)
-  const rows = Math.ceil(parcelCount / columns)
-  const xSpan = size.width * 0.58
-  const zSpan = rows > 1 ? size.depth * 0.34 : 0
-  const xStep = columns > 1 ? xSpan / (columns - 1) : 0
-  const zStep = rows > 1 ? zSpan / (rows - 1) : 0
-  const radius = Math.min(size.width / (Math.max(columns, 1) * 2.82), size.depth / 13.7, 7.35)
+  const { columns, radius, xSpan, xStep, zSpan, zStep } = profileMeasure(
+    `${profileScope}.layout`,
+    () => {
+      const columns = Math.ceil(parcelCount / 2)
+      const rows = Math.ceil(parcelCount / columns)
+      const xSpan = size.width * 0.58
+      const zSpan = rows > 1 ? size.depth * 0.34 : 0
+      const xStep = columns > 1 ? xSpan / (columns - 1) : 0
+      const zStep = rows > 1 ? zSpan / (rows - 1) : 0
+      const radius = Math.min(size.width / (Math.max(columns, 1) * 2.82), size.depth / 13.7, 7.35)
+      return { columns, radius, xSpan, xStep, zSpan, zStep }
+    },
+  )
   const parcels: LandrushParcel[] = []
 
   for (let index = 0; index < parcelCount; index += 1) {
-    const row = Math.floor(index / columns)
-    const column = index % columns
-    const rawCenter = point(
-      -xSpan / 2 + column * xStep + (random() - 0.5) * radius * 0.32,
-      -zSpan / 2 + row * zStep + (random() - 0.5) * radius * 0.22,
-    )
-    const center = separateParcelCenter(
-      fitParcelCenterInsidePerimeter(rawCenter, radius, perimeter),
-      radius,
-      parcels,
-      perimeter,
-    )
-    const parcel = createParcel(index, center, radius, index === ownerParcelIndex, random)
-    parcels.push(parcel)
+    profileMeasure(`${profileScope}.parcel-step`, () => {
+      const row = Math.floor(index / columns)
+      const column = index % columns
+      const rawCenter = profileMeasure(`${profileScope}.raw-center`, () =>
+        point(
+          -xSpan / 2 + column * xStep + (random() - 0.5) * radius * 0.32,
+          -zSpan / 2 + row * zStep + (random() - 0.5) * radius * 0.22,
+        ),
+      )
+      const fittedCenter = profileMeasure(`${profileScope}.fit-center`, () =>
+        fitParcelCenterInsidePerimeter(rawCenter, radius, perimeter),
+      )
+      const center = profileMeasure(`${profileScope}.separate-center`, () =>
+        separateParcelCenter(fittedCenter, radius, parcels, perimeter),
+      )
+      const parcel = profileMeasure(`${profileScope}.create-parcel`, () =>
+        createParcel(
+          index,
+          center,
+          radius,
+          index === ownerParcelIndex,
+          random,
+          profileMeasure,
+          `${profileScope}.create-parcel`,
+        ),
+      )
+      parcels.push(parcel)
+    })
   }
 
   return parcels
@@ -775,20 +888,34 @@ function createParcel(
   radius: number,
   isOwner: boolean,
   random: RandomSource,
+  profileMeasure: NonNullable<LandrushGeneratorOptions['profileMeasure']> = measureUnprofiled,
+  profileScope = 'setup.landrush-generator.create-parcel',
 ): LandrushParcel {
-  const id = `parcel-${String(index + 1).padStart(2, '0')}`
-  const owner = createOwner(index, isOwner)
-  const vertices = createParcelVertices(index, center, radius, random)
-  const edges = createParcelEdges(id, vertices, radius, random)
-  const outline = createOutlineFromEdges(edges)
-  const centroid = centroidFor(vertices)
+  const id = profileMeasure(
+    `${profileScope}.id`,
+    () => `parcel-${String(index + 1).padStart(2, '0')}`,
+  )
+  const owner = profileMeasure(`${profileScope}.owner`, () => createOwner(index, isOwner))
+  const vertices = profileMeasure(`${profileScope}.vertices`, () =>
+    createParcelVertices(index, center, radius, random),
+  )
+  const edges = profileMeasure(`${profileScope}.edges`, () =>
+    createParcelEdges(id, vertices, radius, random),
+  )
+  const outline = profileMeasure(`${profileScope}.outline`, () => createOutlineFromEdges(edges))
+  const centroid = profileMeasure(`${profileScope}.centroid`, () => centroidFor(vertices))
   const directionToRoad = center.z >= 0 ? -1 : 1
-  const entryPoint = point(
-    center.x + (random() - 0.5) * radius * 0.28,
-    center.z + directionToRoad * radius * 1.08,
+  const entryPoint = profileMeasure(`${profileScope}.entry-point`, () =>
+    point(center.x + (random() - 0.5) * radius * 0.28, center.z + directionToRoad * radius * 1.08),
+  )
+  const r3fOutline = profileMeasure(`${profileScope}.r3f-outline`, () =>
+    landrushPointsToVec3(outline, 0.025),
+  )
+  const r3fEntryPoint = profileMeasure(`${profileScope}.r3f-entry-point`, () =>
+    landrushPointToVec3(entryPoint, 0.035),
   )
 
-  return {
+  return profileMeasure(`${profileScope}.assemble`, () => ({
     id,
     index,
     kind: isOwner ? 'owner' : 'neighbor',
@@ -799,12 +926,12 @@ function createParcel(
     owner,
     vertices,
     outline,
-    r3fOutline: landrushPointsToVec3(outline, 0.025),
+    r3fOutline,
     edges,
     entryPoint,
-    r3fEntryPoint: landrushPointToVec3(entryPoint, 0.035),
+    r3fEntryPoint,
     fillColor: isOwner ? '#f7d154' : PARCEL_COLORS[index % PARCEL_COLORS.length]!,
-  }
+  }))
 }
 
 function createOwner(index: number, isOwner: boolean): LandrushOwner {
@@ -1460,6 +1587,10 @@ function clampFinite(value: number, min: number, max: number): number {
 
 function clampInteger(value: number, min: number, max: number): number {
   return Math.round(clampFinite(value, min, max))
+}
+
+function measureUnprofiled<T>(_id: string, callback: () => T): T {
+  return callback()
 }
 
 function slugSeed(seed: string): string {

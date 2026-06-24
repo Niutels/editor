@@ -7,7 +7,14 @@ export const ROBOT_ASSET_BYTES = 7_243_308
 export const ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
 export const ROBOT_TARGET_HEIGHT = 1.82
 export const ROBOT_IDLE_TIME_SCALE = 0.5
-export const ROBOT_IDLE_CLIP_NAMES = ['Idle_9', 'Idle_11', 'Idle_7', 'Idle_12'] as const
+export const ROBOT_IDLE_CLIP_NAMES = [
+  'Idle_9',
+  'Idle_11',
+  'Idle_7',
+  'Idle_12',
+  'Idle_Talking_Loop',
+  'Idle_Loop',
+] as const
 export const ROBOT_WALK_CLIP_NAMES = [
   'Walking',
   'Walk_Loop',

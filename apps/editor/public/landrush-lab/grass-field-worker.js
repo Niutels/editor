@@ -57,7 +57,9 @@ function createGrassFieldData({
       bytes[index + 1] = byte(sample.color[1] / 255)
       bytes[index + 2] = byte(sample.color[2] / 255)
       bytes[index + 3] =
-        alphaMode === 'surface' ? 255 : byte(smoothstep(0.08, 0.7, sample.density))
+        alphaMode === 'surface'
+          ? byte(sample.surfaceAlpha)
+          : byte(smoothstep(0.08, 0.7, sample.density))
       counts[sample.colorIndex] = (counts[sample.colorIndex] ?? 0) + 1
       insideCount += 1
       if (sample.density > 0.48) dense += 1
@@ -101,6 +103,7 @@ function sampleGrassFieldPoint(point, openPerimeter, roads, patchOptions) {
   const broadMask = 0.82 + highResolutionGrain * 0.18
   const patchMask = grassPatchDensity(point, patchOptions, region.density)
   const density = clamp(shoreFade * roadFade * broadMask * patchMask)
+  const surfaceAlpha = clamp(shoreFade * roadFade)
   const shade = 0.88 + density * 0.12 + region.highlight * 0.04
   const detail = 0.97 + noise(point.x * 0.24 + 18.5, point.z * 0.24 - 7.1) * 0.06
   const color = mixGrassColors(region.weights, shade * detail)
@@ -111,6 +114,7 @@ function sampleGrassFieldPoint(point, openPerimeter, roads, patchOptions) {
     density,
     roadDistance,
     shoreDistance,
+    surfaceAlpha,
   }
 }
 

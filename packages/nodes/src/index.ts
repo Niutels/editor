@@ -96,11 +96,21 @@ export { guideDefinition } from './guide'
 export { itemDefinition } from './item'
 export { landrushWorldDefinition } from './landrush-world'
 export {
+  createLandrushWaterBodyMaterial,
+  LANDRUSH_WATER_BODY_SURFACE_PARAMETERS,
+  type LandrushWaterBodySurfaceMaterial,
+  type LandrushWaterBodySurfaceParameters,
+} from './landrush-world/water-body-surface'
+export {
+  createLandrushIncomingWaterMaterial,
   createLandrushWaterMaterial,
   LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION,
+  LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS,
   LANDRUSH_WATER_SURFACE_ELEVATION,
   LANDRUSH_WATER_SURFACE_PARAMETERS,
   LANDRUSH_WATER_SURFACE_THICKNESS,
+  type LandrushIncomingWaterSurfaceMaterial,
+  type LandrushIncomingWaterSurfaceParameters,
   type LandrushWaterSurfaceMaterial,
   type LandrushWaterSurfaceParameters,
 } from './landrush-world/water-surface'

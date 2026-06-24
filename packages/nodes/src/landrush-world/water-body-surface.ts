@@ -1,10 +1,11 @@
-// @ts-nocheck -- Bruno Simon TSL/WebGPU water surface port; see BRUNO_SIMON_LICENSE.md.
+// @ts-nocheck -- Independent lag-body water experiment copied from water-surface.ts.
 import type { LandrushWorldNode } from '@pascal-app/core'
 import { ClampToEdgeWrapping, type Texture, Vector2 } from 'three'
 import { hashBlur } from 'three/examples/jsm/tsl/display/hashBlur.js'
 import {
+  atan,
   color,
-  dot,
+  cos,
   Fn,
   float,
   hash,
@@ -13,6 +14,7 @@ import {
   positionWorld,
   screenUV,
   select,
+  sin,
   texture,
   uniform,
   vec2,
@@ -24,165 +26,74 @@ import type * as THREE from 'three/webgpu'
 import { LandrushBrunoMeshDefaultMaterial } from './bruno-mesh-default-material'
 import { LandrushBrunoWaterNoises } from './bruno-water-noises'
 import { LandrushBrunoWaterWind } from './bruno-water-wind'
+import {
+  LANDRUSH_WATER_SURFACE_ELEVATION,
+  LANDRUSH_WATER_SURFACE_PARAMETERS,
+  LANDRUSH_WATER_SURFACE_THICKNESS,
+  type LandrushWaterSurfaceParameters,
+} from './water-surface'
 
-export { LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION } from './bruno-water-noises'
-
-export const LANDRUSH_WATER_SURFACE_ELEVATION = -0.3
-export const LANDRUSH_WATER_DEPTH_ELEVATION = -1.5
-export const LANDRUSH_WATER_SURFACE_THICKNESS = 0.013
-
-export type LandrushWaterSurfaceParameters = {
-  blurStrength: number
-  depthExponent: number
-  depthNoiseFrequency: number
-  depthNoiseStrength: number
-  depthReach: number
-  depthReferenceReach: number
-  edgeFadeDistance: number
-  hasBlurredUnderlay: boolean
-  iceNoiseFrequency: number
-  iceRatio: number
-  qualityLevel: 0 | 1
-  ripplesBreakupEnd: number
-  ripplesBreakupFrequency: number
-  ripplesBreakupSize: number
-  ripplesBreakupStart: number
-  ripplesNoiseFrequency: number
-  ripplesNoiseOffset: number
-  ripplesNoiseStrength: number
-  ripplesReachEnd: number
-  ripplesReachStart: number
-  ripplesRatio: number
-  ripplesSlopeFrequency: number
-  shoreEdge: number
-  splashesEdgeAttenuationHigh: number
-  splashesEdgeAttenuationLow: number
-  splashesNoiseFrequency: number
-  splashesRatio: number
-  splashesThickness: number
-  splashesTimeFrequency: number
-  surfaceThickness: number
-  windAngle: number
-  windStrength: number
-  windTimeFrequency: number
+export type LandrushWaterBodySurfaceParameters = LandrushWaterSurfaceParameters & {
+  waveBodyAheadBrightness: number
+  waveBodyAheadLagSeconds: number
+  waveBodyAheadRatio: number
+  waveBodyAheadWidth: number
+  waveBodyBehindBrightness: number
+  waveBodyBehindLagSeconds: number
+  waveBodyBehindRatio: number
+  waveBodyBehindWidth: number
+  waveDepthSmooth: number
+  waveSectorCount: number
+  waveSectorEnabled: number
+  waveSectorRotationSpeed: number
+  waveSectorTimeOffset: number
 }
 
-export type LandrushIncomingWaterSurfaceParameters = LandrushWaterSurfaceParameters & {
-  waveDepthSlowdown: number
-  waveShoreWrap: number
-}
-
-export const LANDRUSH_WATER_SURFACE_PARAMETERS = {
-  blurStrength: 0.01,
-  depthExponent: 0.52,
-  depthNoiseFrequency: 0.03,
-  depthNoiseStrength: 0,
-  depthReach: 10,
-  depthReferenceReach: 70,
-  edgeFadeDistance: 18,
-  hasBlurredUnderlay: true,
-  iceNoiseFrequency: 0.3,
-  iceRatio: 0,
-  qualityLevel: 1,
-  ripplesBreakupEnd: 0.3,
-  ripplesBreakupFrequency: 0.005,
-  ripplesBreakupSize: 0.64,
-  ripplesBreakupStart: 0.21,
-  ripplesNoiseFrequency: 0.1,
-  ripplesNoiseOffset: 1.5,
-  ripplesNoiseStrength: 0.18,
-  ripplesReachEnd: 0.55,
-  ripplesReachStart: 0.39,
-  ripplesRatio: 1,
-  ripplesSlopeFrequency: 6.5,
-  shoreEdge: 0.55,
-  splashesEdgeAttenuationHigh: 1,
-  splashesEdgeAttenuationLow: 0.14,
-  splashesNoiseFrequency: 0.33,
-  splashesRatio: 0,
-  splashesThickness: 0.3,
-  splashesTimeFrequency: 6,
-  surfaceThickness: LANDRUSH_WATER_SURFACE_THICKNESS,
-  windAngle: Math.PI * 0.6,
-  windStrength: 0.5,
-  windTimeFrequency: 0.1,
-} satisfies LandrushWaterSurfaceParameters
-
-export const LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS = {
+export const LANDRUSH_WATER_BODY_SURFACE_PARAMETERS = {
   ...LANDRUSH_WATER_SURFACE_PARAMETERS,
-  waveDepthSlowdown: 0.28,
-  waveShoreWrap: 0.12,
-} satisfies LandrushIncomingWaterSurfaceParameters
+  ripplesBreakupEnd: 0.61,
+  ripplesBreakupFrequency: 0.02,
+  ripplesBreakupStart: 0.06,
+  waveBodyAheadBrightness: 0.51,
+  waveBodyAheadLagSeconds: 1.97,
+  waveBodyAheadRatio: 0.16,
+  waveBodyAheadWidth: 0.6,
+  waveBodyBehindBrightness: 0.69,
+  waveBodyBehindLagSeconds: 0.36,
+  waveBodyBehindRatio: 0.28,
+  waveBodyBehindWidth: 0.12,
+  waveDepthSmooth: 1,
+  waveSectorCount: 1,
+  waveSectorEnabled: 1,
+  waveSectorRotationSpeed: 0,
+  waveSectorTimeOffset: 5,
+} satisfies LandrushWaterBodySurfaceParameters
 
-export type LandrushWaterSurfaceMaterial = LandrushBrunoMeshDefaultMaterial & {
+export type LandrushWaterBodySurfaceMaterial = LandrushBrunoMeshDefaultMaterial & {
   userData: {
     landrushWater: {
       noises: LandrushBrunoWaterNoises
-      parameters: LandrushWaterSurfaceParameters
-      setParameters: (parameters: Partial<LandrushWaterSurfaceParameters>) => void
+      parameters: LandrushWaterBodySurfaceParameters
+      setParameters: (parameters: Partial<LandrushWaterBodySurfaceParameters>) => void
       update: (deltaSeconds: number) => void
       wind: LandrushBrunoWaterWind
     }
   }
 }
 
-export type LandrushIncomingWaterSurfaceMaterial = LandrushBrunoMeshDefaultMaterial & {
-  userData: {
-    landrushWater: {
-      noises: LandrushBrunoWaterNoises
-      parameters: LandrushIncomingWaterSurfaceParameters
-      setParameters: (parameters: Partial<LandrushIncomingWaterSurfaceParameters>) => void
-      update: (deltaSeconds: number) => void
-      wind: LandrushBrunoWaterWind
-    }
-  }
-}
-
-export function createLandrushWaterMaterial(
+export function createLandrushWaterBodyMaterial(
   renderer: THREE.WebGPURenderer,
   terrainFieldTexture: Texture,
   bounds: LandrushWorldNode['perimeter']['bounds'],
-  parameters: Partial<LandrushWaterSurfaceParameters> = {},
-): LandrushWaterSurfaceMaterial {
-  return createLandrushWaterMaterialInternal(
-    renderer,
-    terrainFieldTexture,
-    bounds,
-    {
-      ...LANDRUSH_WATER_SURFACE_PARAMETERS,
-      ...parameters,
-      waveDepthSlowdown: 0,
-      waveShoreWrap: 1,
-    },
-    'shore',
-  ) as LandrushWaterSurfaceMaterial
-}
-
-export function createLandrushIncomingWaterMaterial(
-  renderer: THREE.WebGPURenderer,
-  terrainFieldTexture: Texture,
-  bounds: LandrushWorldNode['perimeter']['bounds'],
-  parameters: Partial<LandrushIncomingWaterSurfaceParameters> = {},
-): LandrushIncomingWaterSurfaceMaterial {
-  return createLandrushWaterMaterialInternal(
-    renderer,
-    terrainFieldTexture,
-    bounds,
-    { ...LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS, ...parameters },
-    'incoming',
-  )
-}
-
-function createLandrushWaterMaterialInternal(
-  renderer: THREE.WebGPURenderer,
-  terrainFieldTexture: Texture,
-  bounds: LandrushWorldNode['perimeter']['bounds'],
-  params: LandrushIncomingWaterSurfaceParameters,
-  ripplePhase: 'incoming' | 'shore',
-): LandrushIncomingWaterSurfaceMaterial {
+  parameters: Partial<LandrushWaterBodySurfaceParameters> = {},
+  waveDepthTexture: Texture = terrainFieldTexture,
+): LandrushWaterBodySurfaceMaterial {
   terrainFieldTexture.wrapS = ClampToEdgeWrapping
   terrainFieldTexture.wrapT = ClampToEdgeWrapping
+  waveDepthTexture.wrapS = ClampToEdgeWrapping
+  waveDepthTexture.wrapT = ClampToEdgeWrapping
 
+  const params = { ...LANDRUSH_WATER_BODY_SURFACE_PARAMETERS, ...parameters }
   const noises = new LandrushBrunoWaterNoises(renderer)
   const wind = new LandrushBrunoWaterWind(noises)
   wind.angle = params.windAngle
@@ -190,11 +101,12 @@ function createLandrushWaterMaterialInternal(
   wind.strength.value = params.windStrength
   wind.timeFrequency = params.windTimeFrequency
 
-  const context = createLandrushBrunoWaterContext({
+  const context = createLandrushBodyWaterContext({
     bounds,
     noises,
     params,
     terrainFieldTexture,
+    waveDepthTexture,
     wind,
   })
 
@@ -215,6 +127,19 @@ function createLandrushWaterMaterialInternal(
   const ripplesNoiseStrength = uniform(params.ripplesNoiseStrength)
   const ripplesReachEnd = uniform(params.ripplesReachEnd)
   const ripplesReachStart = uniform(params.ripplesReachStart)
+  const waveBodyAheadBrightness = uniform(params.waveBodyAheadBrightness)
+  const waveBodyAheadLagSeconds = uniform(params.waveBodyAheadLagSeconds)
+  const waveBodyAheadRatio = uniform(params.waveBodyAheadRatio)
+  const waveBodyAheadWidth = uniform(params.waveBodyAheadWidth)
+  const waveBodyBehindBrightness = uniform(params.waveBodyBehindBrightness)
+  const waveBodyBehindLagSeconds = uniform(params.waveBodyBehindLagSeconds)
+  const waveBodyBehindRatio = uniform(params.waveBodyBehindRatio)
+  const waveBodyBehindWidth = uniform(params.waveBodyBehindWidth)
+  const waveDepthSmooth = uniform(params.waveDepthSmooth)
+  const waveSectorCount = uniform(params.waveSectorCount)
+  const waveSectorEnabled = uniform(params.waveSectorEnabled)
+  const waveSectorRotationSpeed = uniform(params.waveSectorRotationSpeed)
+  const waveSectorTimeOffset = uniform(params.waveSectorTimeOffset)
   const iceRatio = uniform(params.iceRatio)
   const iceNoiseFrequency = uniform(params.iceNoiseFrequency)
   const splashesRatio = uniform(params.splashesRatio)
@@ -224,8 +149,7 @@ function createLandrushWaterMaterialInternal(
   const splashesEdgeAttenuationLow = uniform(params.splashesEdgeAttenuationLow)
   const splashesEdgeAttenuationHigh = uniform(params.splashesEdgeAttenuationHigh)
   const shoreEdge = uniform(params.shoreEdge)
-  const waveDepthSlowdown = uniform(params.waveDepthSlowdown)
-  const waveShoreWrap = uniform(params.waveShoreWrap)
+  const windTimeFrequency = uniform(params.windTimeFrequency)
   const parameterUniforms = {
     depthExponent,
     depthNoiseFrequency,
@@ -253,8 +177,20 @@ function createLandrushWaterMaterialInternal(
     splashesRatio,
     splashesThickness,
     splashesTimeFrequency,
-    waveDepthSlowdown,
-    waveShoreWrap,
+    waveBodyAheadBrightness,
+    waveBodyAheadLagSeconds,
+    waveBodyAheadRatio,
+    waveBodyAheadWidth,
+    waveBodyBehindBrightness,
+    waveBodyBehindLagSeconds,
+    waveBodyBehindRatio,
+    waveBodyBehindWidth,
+    waveDepthSmooth,
+    waveSectorCount,
+    waveSectorEnabled,
+    waveSectorRotationSpeed,
+    waveSectorTimeOffset,
+    windTimeFrequency,
   }
 
   const hasRipples = params.ripplesRatio > 0
@@ -305,26 +241,44 @@ function createLandrushWaterMaterialInternal(
     return mix(shallowToMid, deepColor, waterDepth.smoothstep(0.28, 0.68))
   })
 
-  const ripplesNode = Fn(([terrainData]) => {
-    const shoreDepthField = shoreDepthFieldNode(terrainData)
+  const waveDepthNode = Fn(([position]) => {
+    return context.terrain.waveDepthNode(position)
+  })
+
+  const waveSectorTimeOffsetNode = Fn(() => {
+    const center = vec2(bounds.minX + bounds.width * 0.5, bounds.minZ + bounds.depth * 0.5)
+    const centered = positionWorld.xz.sub(center)
+    const rotation = wind.localTime.mul(waveSectorRotationSpeed)
+    const rotationCos = cos(rotation)
+    const rotationSin = sin(rotation)
+    const rotated = vec2(
+      centered.x.mul(rotationCos).sub(centered.y.mul(rotationSin)),
+      centered.x.mul(rotationSin).add(centered.y.mul(rotationCos)),
+    )
+    const direction = rotated.div(rotated.length().max(0.001))
+    const sectorCount = waveSectorCount.clamp(1, 60).floor()
+    const angle = atan(direction.y, direction.x).add(Math.PI)
+    const stagger = angle
+      .div(Math.PI * 2)
+      .mul(sectorCount)
+      .floor()
+    const adjacentSectorLag = waveSectorTimeOffset
+      .mul(windTimeFrequency.mul(0.5))
+      .mul(wind.strength)
+
+    return stagger.mul(adjacentSectorLag).mul(waveSectorEnabled)
+  })
+
+  const rippleMasksNode = Fn(([terrainData, timeOffset, softness]) => {
+    const shoreDepthField = waveDepthNode(positionWorld.xz)
     const rippleVisibilityDepth = rippleVisibilityDepthNode(terrainData)
     const rippleMask = rippleVisibilityDepth.smoothstep(ripplesReachStart, ripplesReachEnd)
     const ripplesBreakupMask = rippleVisibilityDepth.smoothstep(
       ripplesBreakupStart,
       ripplesBreakupEnd,
     )
-    const rippleTime = wind.localTime.mul(0.5)
-    const baseRipple =
-      ripplePhase === 'incoming'
-        ? mix(
-            dot(positionWorld.xz, wind.direction).div(max(depthReferenceReach, float(0.001))),
-            shoreDepthField,
-            waveShoreWrap,
-          )
-            .add(shoreDepthField.mul(shoreDepthField).mul(waveDepthSlowdown))
-            .sub(rippleTime)
-            .mul(ripplesSlopeFrequency)
-        : shoreDepthField.sub(rippleTime).mul(ripplesSlopeFrequency)
+    const rippleTime = wind.localTime.mul(0.5).add(timeOffset).add(waveSectorTimeOffsetNode())
+    const baseRipple = shoreDepthField.sub(rippleTime).mul(ripplesSlopeFrequency)
     const rippleIndex = baseRipple.floor()
 
     const ripplesNoise = texture(
@@ -341,14 +295,36 @@ function createLandrushWaterMaterialInternal(
     ).r
     const breakupKeep = ripplesBreakupMask.mul(ripplesBreakupSize).sub(0.08).step(breakupNoise)
 
-    const ripples = baseRipple
+    const ripples = shoreDepthField
+      .sub(rippleTime)
+      .mul(ripplesSlopeFrequency)
       .mod(1)
       .sub(shoreDepthField.remap(0, 1, -0.3, 1).oneMinus())
       .add(ripplesNoise)
 
-    ripples.assign(ripplesRatio.remap(0, 1, -1, -0.4).step(ripples))
+    const threshold = ripplesRatio.remap(0, 1, -1, -0.4)
+    const crest = threshold.step(ripples)
+    const bodyDistance = ripples.sub(threshold).abs()
+    const body = bodyDistance.smoothstep(softness, float(0))
+    const visibility = rippleMask.mul(breakupKeep)
 
-    return ripples.mul(rippleMask).mul(breakupKeep)
+    return vec2(crest.mul(visibility), body.mul(visibility))
+  })
+
+  const ripplesNode = Fn(([terrainData]) => {
+    return rippleMasksNode(terrainData, float(0), float(0.001)).x
+  })
+
+  const rippleBodyBehindNode = Fn(([terrainData]) => {
+    const lagPhase = waveBodyBehindLagSeconds.mul(windTimeFrequency.mul(0.5)).mul(wind.strength)
+    return rippleMasksNode(terrainData, lagPhase, waveBodyBehindWidth).y.mul(waveBodyBehindRatio)
+  })
+
+  const rippleBodyAheadNode = Fn(([terrainData]) => {
+    const lagPhase = waveBodyAheadLagSeconds.mul(windTimeFrequency.mul(0.5)).mul(wind.strength)
+    return rippleMasksNode(terrainData, float(0).sub(lagPhase), waveBodyAheadWidth).y.mul(
+      waveBodyAheadRatio,
+    )
   })
 
   const iceNode = Fn(([terrainData]) => {
@@ -408,16 +384,37 @@ function createLandrushWaterMaterialInternal(
       return value
     })()
 
+  const bodyBehindMask = () =>
+    Fn(() => {
+      if (!hasRipples) return float(0)
+
+      const terrainData = context.terrain.terrainNode(positionWorld.xz)
+      return rippleBodyBehindNode(terrainData)
+    })()
+
+  const bodyAheadMask = () =>
+    Fn(() => {
+      if (!hasRipples) return float(0)
+
+      const terrainData = context.terrain.terrainNode(positionWorld.xz)
+      return rippleBodyAheadNode(terrainData)
+    })()
+
   const waterSurfaceColor = Fn(() => {
     const terrainData = context.terrain.terrainNode(positionWorld.xz)
     const details = detailsMask()
+    const behindBody = bodyBehindMask()
+    const aheadBody = bodyAheadMask()
     const shoreDepthField = shoreDepthFieldNode(terrainData)
+    const waterColor = waterColorNode(shoreDepthField)
+    const behindColor = mix(waterColor, color('#b9f3ed'), behindBody.mul(waveBodyBehindBrightness))
+    const bodiedColor = mix(behindColor, color('#d7fbff'), aheadBody.mul(waveBodyAheadBrightness))
 
-    return mix(waterColorNode(shoreDepthField), color(0xffffff), details)
+    return mix(bodiedColor, color(0xffffff), details)
   })()
 
   const waterSurfaceAlpha = Fn(() => {
-    return max(float(0.92), detailsMask()).clamp(0, 1)
+    return max(float(0.92), max(detailsMask(), max(bodyBehindMask(), bodyAheadMask()))).clamp(0, 1)
   })()
 
   const blurOutputNode = Fn(() => {
@@ -440,7 +437,7 @@ function createLandrushWaterMaterialInternal(
     hasFog: true,
     hasWater: false,
     transparent: true,
-  }) as LandrushIncomingWaterSurfaceMaterial
+  }) as LandrushWaterBodySurfaceMaterial
 
   const baseOutput = material.outputNode
   const blurredOutput = Fn(() => {
@@ -492,27 +489,39 @@ function createLandrushWaterMaterialInternal(
   return material
 }
 
-function createLandrushBrunoWaterContext({
+function createLandrushBodyWaterContext({
   bounds,
   noises,
   params,
   terrainFieldTexture,
+  waveDepthTexture,
   wind,
 }: {
   bounds: LandrushWorldNode['perimeter']['bounds']
   noises: LandrushBrunoWaterNoises
-  params: LandrushWaterSurfaceParameters
+  params: LandrushWaterBodySurfaceParameters
   terrainFieldTexture: Texture
+  waveDepthTexture: Texture
   wind: LandrushBrunoWaterWind
 }) {
   const boundsMin = uniform(new Vector2(bounds.minX, bounds.minZ))
   const boundsSize = uniform(new Vector2(bounds.width, bounds.depth))
   const surfaceElevationUniform = uniform(LANDRUSH_WATER_SURFACE_ELEVATION)
-  const surfaceThicknessUniform = uniform(params.surfaceThickness)
+  const surfaceThicknessUniform = uniform(
+    params.surfaceThickness ?? LANDRUSH_WATER_SURFACE_THICKNESS,
+  )
+
+  const textureUvNode = Fn(([position]) => {
+    const textureUv = position.sub(boundsMin).div(boundsSize).clamp(0, 1)
+    return textureUv
+  })
 
   const terrainNode = Fn(([position]) => {
-    const textureUv = position.sub(boundsMin).div(boundsSize).clamp(0, 1)
-    return texture(terrainFieldTexture, textureUv)
+    return texture(terrainFieldTexture, textureUvNode(position))
+  })
+
+  const waveDepthNode = Fn(([position]) => {
+    return texture(waveDepthTexture, textureUvNode(position)).r
   })
 
   const colorNode = Fn(([terrainData]) => {
@@ -556,6 +565,7 @@ function createLandrushBrunoWaterContext({
     terrain: {
       colorNode,
       terrainNode,
+      waveDepthNode,
     },
     water: {
       surfaceElevationUniform,

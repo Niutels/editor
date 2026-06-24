@@ -43,12 +43,12 @@ export const WATER_LAB_DEFAULT_FIELD_PARAMETERS = {
   depthContourCollapseMeters: 10.3,
   depthContourCollapseScale: 1.25,
   depthContourNoiseFrequency: 0.1,
-  depthContourOffsetMeters: 3.2,
+  depthContourOffsetMeters: 2.6,
   depthContourVariationMeters: 8.6,
   depthExponent: 0.52,
   depthNoiseFrequency: 0.03,
   depthNoiseStrength: 0,
-  depthReach: 10,
+  depthReach: 15,
   edgeFadeDistance: 18,
   shoreBandMeters: 0,
   shoreFeatherMeters: 0.45,
@@ -58,11 +58,11 @@ export const WATER_LAB_DEFAULT_FIELD_PARAMETERS = {
 
 export const WATER_LAB_DEFAULT_ELEVATION_PARAMETERS = {
   cliffBandMergeThresholdMeters: 3.6,
-  cliffBlockDepthMaxMeters: 3.2,
-  cliffBlockDepthMinMeters: 0.8,
-  cliffColorAverageRatio: 0.37,
-  cliffContrast: 0.39,
-  cliffToneVariation: 0.41,
+  cliffBlockDepthMaxMeters: 2.1,
+  cliffBlockDepthMinMeters: 0.5,
+  cliffColorAverageRatio: 0.75,
+  cliffContrast: 0.41,
+  cliffToneVariation: 0.35,
   contourNoiseFrequency: 0.08,
   contourVariationMeters: 3.5,
   edgeLiftMeters: 6,
@@ -97,9 +97,17 @@ export const WATER_LAB_ISLAND_SLIDERS = [
   { key: 'naturalness', label: 'rough asymmetry', max: 1.8, min: 0, step: 0.05 },
 ] satisfies readonly LabSliderConfig<keyof WaterLabIslandParameters>[]
 
-export function generateWaterLabIsland(parameters: WaterLabIslandParameters): LandrushIsland {
+type WaterLabIslandProfileMeasure = <T>(id: string, callback: () => T) => T
+
+export function generateWaterLabIsland(
+  parameters: WaterLabIslandParameters,
+  profileMeasure?: WaterLabIslandProfileMeasure,
+  profileScope = 'setup.water-lab.generate-island',
+): LandrushIsland {
   return generateLandrushIsland({
     seed: parameters.variant === 0 ? 'mvp-loop-1-295' : `mvp-loop-1-295:${parameters.variant}`,
+    profileMeasure,
+    profileScope,
     shape: {
       asymmetry: parameters.naturalness,
       coast: parameters.coast,

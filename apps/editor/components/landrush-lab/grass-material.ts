@@ -9,28 +9,58 @@ export const BRUNO_GRASS_VIEW_CENTER = { x: -3.05, z: -3.05 } as const
 
 export type GrassBladeTuning = {
   brightness: number
+  colorPatchScale: number
+  colorVariation: number
   density: number
+  flutter: number
   foliageOpacity: number
+  gustScale: number
   height: number
+  heightNoiseScale: number
+  heightVariation: number
+  macroScale: number
+  macroVariation: number
   opacity: number
   patchSize: number
   patchSoftness: number
+  projection: number
   rootShadow: number
+  scale: number
+  treeSway: number
+  turbulence: number
   width: number
   wind: number
+  windAngle: number
+  windSpeed: number
+  windStrength: number
 }
 
 export const DEFAULT_GRASS_BLADE_TUNING: GrassBladeTuning = {
   brightness: 1,
+  colorPatchScale: 0.7,
+  colorVariation: 0.5,
   density: 0.82,
+  flutter: 0.28,
   foliageOpacity: 1,
+  gustScale: 0.5,
   height: 0.6,
+  heightNoiseScale: 0.15,
+  heightVariation: 0.5,
+  macroScale: 0.115,
+  macroVariation: 0.48,
   opacity: 1,
   patchSize: 24,
   patchSoftness: 0.18,
+  projection: 0.74,
   rootShadow: 1,
+  scale: 1.3,
+  treeSway: 0.7,
+  turbulence: 0.28,
   width: 0.1,
   wind: 0.5,
+  windAngle: 45,
+  windSpeed: 2,
+  windStrength: 0.25,
 }
 
 const BRUNO_TERRAIN_GLSL = `

@@ -4,7 +4,7 @@ import { WorldLabClient } from '@/components/landrush-lab/world-lab-client'
 export default function LandrushWorldLabPage() {
   return (
     <Suspense fallback={null}>
-      <WorldLabClient />
+      <WorldLabClient variant="dirt-copy" />
     </Suspense>
   )
 }

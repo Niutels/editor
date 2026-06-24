@@ -1,5 +1,10 @@
 'use client'
 
+import {
+  createLandrushIncomingWaterMaterial,
+  LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS,
+  type LandrushIncomingWaterSurfaceParameters,
+} from '@pascal-app/nodes'
 import { useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
@@ -16,10 +21,7 @@ import {
   WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
   type WaterLabIslandParameters,
 } from './water-lab-parameters'
-import {
-  LANDRUSH_WATER_EFFECT_PARAMETERS,
-  type LandrushWaterEffectParameters,
-} from './water-material'
+import { INCOMING_WATER_MATERIAL_SLIDERS } from './water-material-sliders'
 import { type WaterLandSurface, WaterScene } from './water-scene'
 import { getWaterViewPreset } from './water-view-presets'
 
@@ -56,6 +58,10 @@ export function GrassWaterLabClient() {
   const [tuning, setTuning] = useState<GrassBladeTuning>(() => ({
     ...GRASS_WATER_DEFAULT_TUNING,
   }))
+  const [waterMaterialParameters, setWaterMaterialParameters] =
+    useState<LandrushIncomingWaterSurfaceParameters>(() => ({
+      ...LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS,
+    }))
   const resolvedTuning = useMemo(() => ({ ...GRASS_WATER_DEFAULT_TUNING, ...tuning }), [tuning])
   const renderTuning = useSettledRenderValue(resolvedTuning, 260)
   const bladeSubdivisions = useMemo(
@@ -125,18 +131,19 @@ export function GrassWaterLabClient() {
       water: {
         elevation: WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
         field: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
-        material: LANDRUSH_WATER_EFFECT_PARAMETERS,
+        material: waterMaterialParameters,
         terrainFieldResolution: WATER_FIELD_RESOLUTION,
       },
     }
     return () => {
       delete window.__LANDRUSH_GRASS_WATER_LAB__
     }
-  }, [debug, frameP95, island, islandParameters, resolvedTuning])
+  }, [debug, frameP95, island, islandParameters, resolvedTuning, waterMaterialParameters])
 
   const resetParameters = () => {
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
     setTuning({ ...GRASS_WATER_DEFAULT_TUNING })
+    setWaterMaterialParameters({ ...LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS })
   }
 
   return (
@@ -146,12 +153,13 @@ export function GrassWaterLabClient() {
         elevationParameters={WATER_LAB_DEFAULT_ELEVATION_PARAMETERS}
         fieldParameters={WATER_LAB_DEFAULT_FIELD_PARAMETERS}
         island={island}
-        materialParameters={LANDRUSH_WATER_EFFECT_PARAMETERS as LandrushWaterEffectParameters}
+        materialParameters={waterMaterialParameters}
         preset={preset}
         renderLandOverlay={renderGrassLandOverlay}
         terrainFieldResolution={WATER_FIELD_RESOLUTION}
         showDepthReference={false}
         waterFieldIsland={island}
+        waterMaterialFactory={createLandrushIncomingWaterMaterial}
       />
       {showTunePanel ? (
         <GrassWaterTunePanel
@@ -162,7 +170,11 @@ export function GrassWaterLabClient() {
           }
           onReset={resetParameters}
           onTuningChange={(key, value) => setTuning((current) => ({ ...current, [key]: value }))}
+          onWaterMaterialChange={(key, value) =>
+            setWaterMaterialParameters((current) => ({ ...current, [key]: value }))
+          }
           tuning={resolvedTuning}
+          waterMaterialParameters={waterMaterialParameters}
         />
       ) : (
         <button
@@ -183,14 +195,18 @@ function GrassWaterTunePanel({
   onIslandChange,
   onReset,
   onTuningChange,
+  onWaterMaterialChange,
   tuning,
+  waterMaterialParameters,
 }: {
   islandParameters: WaterLabIslandParameters
   onClose: () => void
   onIslandChange: (key: keyof WaterLabIslandParameters, value: number) => void
   onReset: () => void
   onTuningChange: (key: keyof GrassBladeTuning, value: number) => void
+  onWaterMaterialChange: (key: keyof LandrushIncomingWaterSurfaceParameters, value: number) => void
   tuning: GrassBladeTuning
+  waterMaterialParameters: LandrushIncomingWaterSurfaceParameters
 }) {
   return (
     <section className="absolute right-5 top-5 max-h-[calc(100vh-2.5rem)] w-[min(350px,calc(100vw-2.5rem))] overflow-y-auto rounded-md border border-white/25 bg-slate-950/78 p-4 text-white shadow-xl backdrop-blur">
@@ -227,6 +243,21 @@ function GrassWaterTunePanel({
             value={islandParameters[key]}
           />
         ))}
+      </TuningGroup>
+      <TuningGroup title="Water ripples">
+        {INCOMING_WATER_MATERIAL_SLIDERS.map(({ key, ...slider }) => {
+          const materialKey = key as keyof LandrushIncomingWaterSurfaceParameters
+          const value = waterMaterialParameters[materialKey]
+
+          return (
+            <TuneSlider
+              key={key}
+              {...slider}
+              onChange={(nextValue) => onWaterMaterialChange(materialKey, nextValue)}
+              value={typeof value === 'number' ? value : 0}
+            />
+          )
+        })}
       </TuningGroup>
       <TuningGroup title="Ground and blades">
         {GRASS_SLIDERS.map(({ key, ...slider }) => (

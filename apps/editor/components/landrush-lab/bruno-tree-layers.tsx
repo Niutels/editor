@@ -9,7 +9,6 @@ import {
   type BufferGeometry,
   Color,
   DoubleSide,
-  InstancedBufferAttribute,
   type InstancedMesh,
   Matrix4,
   NearestFilter,
@@ -21,8 +20,6 @@ import {
   Vector3,
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { Fn, float, instancedBufferAttribute, texture as textureNode, uv, vec4 } from 'three/tsl'
-import { MeshBasicNodeMaterial } from 'three/webgpu'
 import type { LandrushTree } from '@/components/landrush/types'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
 import type { GrassBladeTuning } from './grass-material'
@@ -252,13 +249,6 @@ function FoliageInstances({
   opacity: number
 }) {
   const count = billboards.length
-  const instanceColors = useMemo(() => createFoliageColorAttribute(billboards), [billboards])
-  const material = useMemo(
-    () => createBrunoFoliageMaterial(alphaMap, instanceColors, opacity),
-    [alphaMap, instanceColors, opacity],
-  )
-
-  useLayoutEffect(() => () => material.dispose(), [material])
 
   if (count === 0) return null
 
@@ -270,7 +260,16 @@ function FoliageInstances({
       renderOrder={17}
     >
       <primitive attach="geometry" object={geometry} />
-      <primitive attach="material" object={material} />
+      <meshBasicMaterial
+        alphaMap={alphaMap}
+        alphaTest={0.035}
+        depthWrite={false}
+        opacity={opacity}
+        side={DoubleSide}
+        toneMapped={false}
+        transparent
+        vertexColors
+      />
     </instancedMesh>
   )
 }
@@ -451,41 +450,12 @@ function applyBillboardMatrices(
     transform.scale.setScalar(billboard.scale)
     transform.updateMatrix()
     mesh.setMatrixAt(index, transform.matrix)
+    mesh.setColorAt(index, billboard.color)
   })
   mesh.count = billboards.length
   mesh.instanceMatrix.needsUpdate = true
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   return true
-}
-
-function createFoliageColorAttribute(billboards: readonly FoliageBillboard[]) {
-  const colors = new Float32Array(Math.max(1, billboards.length) * 3)
-  billboards.forEach((billboard, index) => {
-    billboard.color.toArray(colors, index * 3)
-  })
-  return new InstancedBufferAttribute(colors, 3)
-}
-
-function createBrunoFoliageMaterial(
-  foliageTexture: Texture,
-  instanceColors: InstancedBufferAttribute,
-  opacity: number,
-) {
-  const material = new MeshBasicNodeMaterial()
-  material.depthWrite = false
-  material.depthTest = true
-  material.side = DoubleSide
-  material.toneMapped = false
-  material.transparent = true
-
-  const colorNode = instancedBufferAttribute(instanceColors, 'vec3')
-  const sdfAlpha = textureNode(foliageTexture, uv()).r.remapClamp(0.4, 1, 0, 1)
-  const outputAlpha = sdfAlpha.mul(float(Math.max(0, Math.min(1, opacity))))
-  material.outputNode = Fn(() => {
-    sdfAlpha.lessThan(0.001).discard()
-    return vec4(colorNode, outputAlpha)
-  })()
-
-  return material
 }
 
 function sampleGrassTextureColor(texture: Texture, fieldSize: number, x: number, z: number) {

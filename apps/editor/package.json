@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "dotenv -e ../../.env.local -- next dev --turbo --port 3002",
+    "dev": "dotenv -e ../../.env.local -- bun scripts/dev-with-landrush-ws.mjs",
+    "dev:next": "dotenv -e ../../.env.local -- next dev --turbo --port 3002",
+    "dev:world-multiplayer-ws": "bun scripts/landrush-world-multiplayer-ws.mjs",
     "build": "dotenv -e ../../.env.local -- next build",
     "start": "next start",
     "lint": "biome lint",
@@ -22,6 +24,7 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@tailwindcss/postcss": "^4.2.1",
+    "@vercel/functions": "^3.7.3",
     "clsx": "^2.1.1",
     "geist": "^1.7.0",
     "lucide-react": "^1.7.0",
@@ -32,6 +35,7 @@
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
     "three": "^0.184.0",
+    "ws": "^8.21.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
