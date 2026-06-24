@@ -346,7 +346,7 @@ export function WorldLabClient({
   const debugWaterLayer = searchParams.get('debugWaterLayer') === 'shoreline' ? 'shoreline' : null
   const frameProfile = searchParams.get('frameProfile') === '1'
   const clean = searchParams.get('v') === 'clean' || searchParams.get('clean') === '1'
-  const [showTunePanel, setShowTunePanel] = useState(() => shouldShowInitialWorldTunePanel(clean))
+  const [showTunePanel, setShowTunePanel] = useState(false)
   const [showParcelHints, setShowParcelHints] = useState(() =>
     isDirtCopy
       ? showDirtCopyParcels && searchParams.get('parcels') !== '0'
@@ -547,6 +547,14 @@ export function WorldLabClient({
       visibleGrassRoads,
     ],
   )
+
+  useEffect(() => {
+    if (clean) {
+      setShowTunePanel(false)
+      return
+    }
+    setShowTunePanel(!window.matchMedia(WORLD_TUNE_PANEL_MOBILE_QUERY).matches)
+  }, [clean])
 
   useEffect(() => {
     const samples: number[] = []
@@ -813,12 +821,6 @@ export function WorldLabClient({
       )}
     </main>
   )
-}
-
-function shouldShowInitialWorldTunePanel(clean: boolean) {
-  if (clean) return false
-  if (typeof window === 'undefined') return true
-  return !window.matchMedia(WORLD_TUNE_PANEL_MOBILE_QUERY).matches
 }
 
 function WorldTunePanel({

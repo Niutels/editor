@@ -13,6 +13,7 @@ import { useFrame } from '@react-three/fiber'
 import { useSearchParams } from 'next/navigation'
 import {
   type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent,
   Suspense,
   useCallback,
   useEffect,
@@ -1018,10 +1019,11 @@ function MobileMovementJoystick({
 }) {
   const baseRef = useRef<HTMLDivElement>(null)
   const pointerIdRef = useRef<number | null>(null)
+  const touchIdRef = useRef<number | null>(null)
   const [thumb, setThumb] = useState({ active: false, x: 0, y: 0 })
 
-  const updateFromPointer = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
+  const updateFromPoint = useCallback(
+    (clientX: number, clientY: number) => {
       const base = baseRef.current
       if (!base) return
 
@@ -1029,8 +1031,8 @@ function MobileMovementJoystick({
       const maxOffset = rect.width * 0.32
       const centerX = rect.left + rect.width / 2
       const centerY = rect.top + rect.height / 2
-      const rawX = event.clientX - centerX
-      const rawY = event.clientY - centerY
+      const rawX = clientX - centerX
+      const rawY = clientY - centerY
       const distance = Math.hypot(rawX, rawY)
       const scale = distance > maxOffset && distance > 0 ? maxOffset / distance : 1
       const x = rawX * scale
@@ -1050,35 +1052,78 @@ function MobileMovementJoystick({
     [movementRef],
   )
 
-  const stopJoystick = useCallback(
+  const clearJoystick = useCallback(() => {
+    pointerIdRef.current = null
+    touchIdRef.current = null
+    movementRef.current = null
+    setThumb({ active: false, x: 0, y: 0 })
+  }, [movementRef])
+
+  const stopPointerJoystick = useCallback(
     (event?: ReactPointerEvent<HTMLDivElement>) => {
+      if (touchIdRef.current !== null) return
       if (event && pointerIdRef.current === event.pointerId) {
-        event.currentTarget.releasePointerCapture(event.pointerId)
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
       }
-      pointerIdRef.current = null
-      movementRef.current = null
-      setThumb({ active: false, x: 0, y: 0 })
+      clearJoystick()
     },
-    [movementRef],
+    [clearJoystick],
   )
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (touchIdRef.current !== null) return
       event.preventDefault()
       pointerIdRef.current = event.pointerId
       event.currentTarget.setPointerCapture(event.pointerId)
-      updateFromPointer(event)
+      updateFromPoint(event.clientX, event.clientY)
     },
-    [updateFromPointer],
+    [updateFromPoint],
   )
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (pointerIdRef.current !== event.pointerId) return
       event.preventDefault()
-      updateFromPointer(event)
+      updateFromPoint(event.clientX, event.clientY)
     },
-    [updateFromPointer],
+    [updateFromPoint],
+  )
+
+  const handleTouchStart = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touch = event.changedTouches.item(0)
+      if (!touch) return
+      event.preventDefault()
+      pointerIdRef.current = null
+      touchIdRef.current = touch.identifier
+      updateFromPoint(touch.clientX, touch.clientY)
+    },
+    [updateFromPoint],
+  )
+
+  const handleTouchMove = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touchId = touchIdRef.current
+      if (touchId === null) return
+      const touch = findTouchById(event.touches, touchId)
+      if (!touch) return
+      event.preventDefault()
+      updateFromPoint(touch.clientX, touch.clientY)
+    },
+    [updateFromPoint],
+  )
+
+  const handleTouchEnd = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touchId = touchIdRef.current
+      if (touchId === null || !findTouchById(event.changedTouches, touchId)) return
+      event.preventDefault()
+      clearJoystick()
+    },
+    [clearJoystick],
   )
 
   return (
@@ -1086,10 +1131,14 @@ function MobileMovementJoystick({
       <div
         aria-label="Move"
         className="relative size-28 touch-none select-none rounded-full border border-white/25 bg-slate-950/38 shadow-xl backdrop-blur"
-        onPointerCancel={stopJoystick}
+        onPointerCancel={stopPointerJoystick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={stopJoystick}
+        onPointerUp={stopPointerJoystick}
+        onTouchCancel={handleTouchEnd}
+        onTouchEnd={handleTouchEnd}
+        onTouchMove={handleTouchMove}
+        onTouchStart={handleTouchStart}
         ref={baseRef}
         role="application"
       >
@@ -1105,6 +1154,14 @@ function MobileMovementJoystick({
       </div>
     </div>
   )
+}
+
+function findTouchById(touches: ReactTouchEvent<HTMLDivElement>['touches'], identifier: number) {
+  for (let index = 0; index < touches.length; index += 1) {
+    const touch = touches.item(index)
+    if (touch?.identifier === identifier) return touch
+  }
+  return null
 }
 
 function useLandrushWorldMultiplayer({
