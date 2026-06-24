@@ -155,6 +155,7 @@ const ROBOT_JOYSTICK_RUN_START = 0.82
 const ROBOT_ACCELERATION = 18
 const ROBOT_DECELERATION = 24
 const ROBOT_TURN_RESPONSE = 12
+const ROBOT_MOBILE_JOYSTICK_TURN_RESPONSE = ROBOT_TURN_RESPONSE / 5
 const ROBOT_GROUND_CLEARANCE = 0.04
 const ROBOT_CAMERA_TARGET_HEIGHT = 1.28
 const ROBOT_CAMERA_INITIAL_DISTANCE = 8.2
@@ -167,7 +168,7 @@ const ROBOT_CAMERA_MAX_PITCH = MathUtils.degToRad(84)
 const ROBOT_CAMERA_MOUSE_PITCH_SPEED = 0.0026
 const ROBOT_CAMERA_MOUSE_YAW_SPEED = 0.0032
 const ROBOT_CAMERA_TOUCH_PITCH_SPEED = 0.0031
-const ROBOT_CAMERA_TOUCH_YAW_SPEED = 0.0038
+const ROBOT_CAMERA_TOUCH_YAW_SPEED = 0.0038 / 5
 const ROBOT_CAMERA_WHEEL_ZOOM_SPEED = 0.001
 const ROBOT_GRASS_INTERACTION_RADIUS = 2.7
 const MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
@@ -700,7 +701,10 @@ function LocalMultiplayerRobot({
     motion.heading = lerpAngle(
       motion.heading,
       targetHeading,
-      clamp01(frameDelta * ROBOT_TURN_RESPONSE),
+      clamp01(
+        frameDelta *
+          (mobileJoystickActive ? ROBOT_MOBILE_JOYSTICK_TURN_RESPONSE : ROBOT_TURN_RESPONSE),
+      ),
     )
     grassInteractionRef.current = {
       radius: ROBOT_GRASS_INTERACTION_RADIUS,
