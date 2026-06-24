@@ -1082,7 +1082,7 @@ function MobileMovementJoystick({
   )
 
   return (
-    <div className="pointer-events-auto absolute bottom-5 left-5 z-40 md:hidden">
+    <div className="pointer-events-auto absolute bottom-[8.25rem] left-5 z-40 md:hidden">
       <div
         aria-label="Move"
         className="relative size-28 touch-none select-none rounded-full border border-white/25 bg-slate-950/38 shadow-xl backdrop-blur"
