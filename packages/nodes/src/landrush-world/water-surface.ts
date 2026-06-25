@@ -14,6 +14,7 @@ import {
   screenUV,
   select,
   texture,
+  time,
   uniform,
   vec2,
   vec3,
@@ -224,6 +225,7 @@ function createLandrushWaterMaterialInternal(
   const splashesEdgeAttenuationLow = uniform(params.splashesEdgeAttenuationLow)
   const splashesEdgeAttenuationHigh = uniform(params.splashesEdgeAttenuationHigh)
   const shoreEdge = uniform(params.shoreEdge)
+  const windTimeFrequency = uniform(params.windTimeFrequency)
   const waveDepthSlowdown = uniform(params.waveDepthSlowdown)
   const waveShoreWrap = uniform(params.waveShoreWrap)
   const parameterUniforms = {
@@ -255,6 +257,7 @@ function createLandrushWaterMaterialInternal(
     splashesTimeFrequency,
     waveDepthSlowdown,
     waveShoreWrap,
+    windTimeFrequency,
   }
 
   const hasRipples = params.ripplesRatio > 0
@@ -313,7 +316,8 @@ function createLandrushWaterMaterialInternal(
       ripplesBreakupStart,
       ripplesBreakupEnd,
     )
-    const rippleTime = wind.localTime.mul(0.5)
+    const localTime = time.mul(windTimeFrequency).mul(wind.strength)
+    const rippleTime = localTime.mul(0.5)
     const baseRipple =
       ripplePhase === 'incoming'
         ? mix(
@@ -370,7 +374,8 @@ function createLandrushWaterMaterialInternal(
     const splash = splashesVoronoi.r
 
     const splashTimeRandom = hash(splashesVoronoi.b.mul(123456)).add(splashPerlin)
-    const splashTime = wind.localTime.mul(splashesTimeFrequency).add(splashTimeRandom)
+    const localTime = time.mul(windTimeFrequency).mul(wind.strength)
+    const splashTime = localTime.mul(splashesTimeFrequency).add(splashTimeRandom)
     splash.assign(splash.sub(splashTime).mod(1))
 
     const edgeMutliplier = splashesVoronoi.g.remapClamp(

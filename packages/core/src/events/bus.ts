@@ -15,6 +15,7 @@ import type {
   ItemNode,
   LandrushWorldNode,
   LevelNode,
+  PascalWaterNode,
   RidgeVentNode,
   RoofNode,
   RoofSegmentNode,
@@ -88,6 +89,7 @@ export type ElevatorEvent = NodeEvent<ElevatorNode>
 export type ScanEvent = NodeEvent<ScanNode>
 export type GuideEvent = NodeEvent<GuideNode>
 export type LandrushWorldEvent = NodeEvent<LandrushWorldNode>
+export type PascalWaterEvent = NodeEvent<PascalWaterNode>
 export type BoxVentEvent = NodeEvent<BoxVentNode>
 export type RidgeVentEvent = NodeEvent<RidgeVentNode>
 export type ChimneyEvent = NodeEvent<ChimneyNode>
@@ -230,6 +232,7 @@ type EditorEvents = GridEvents &
   NodeEvents<'scan', ScanEvent> &
   NodeEvents<'guide', GuideEvent> &
   NodeEvents<'landrush-world', LandrushWorldEvent> &
+  NodeEvents<'pascal-water', PascalWaterEvent> &
   NodeEvents<'box-vent', BoxVentEvent> &
   NodeEvents<'ridge-vent', RidgeVentEvent> &
   NodeEvents<'chimney', ChimneyEvent> &

@@ -9,6 +9,7 @@ import {
 import { OrbitControls, OrthographicCamera } from '@react-three/drei'
 import { Canvas, useThree } from '@react-three/fiber'
 import {
+  type CSSProperties,
   type MutableRefObject,
   type ReactNode,
   type RefObject,
@@ -54,6 +55,7 @@ import type { WaterViewPreset } from './water-view-presets'
 
 type WaterSceneProps = {
   artifactDiagnostics?: WaterArtifactDiagnostics
+  canvasStyle?: CSSProperties
   debugLayer: 'shoreline' | null
   elevationParameters: IslandElevationParameters
   fieldRevisionKey?: string
@@ -142,6 +144,7 @@ export function WaterScene({
     opaqueWater: false,
     showDepthTexture: false,
   },
+  canvasStyle,
   debugLayer,
   elevationParameters,
   fieldRevisionKey,
@@ -170,6 +173,7 @@ export function WaterScene({
       frameloop="never"
       gl={createWaterLabRenderer as never}
       shadows={false}
+      style={{ height: '100%', width: '100%', ...canvasStyle }}
     >
       <FrameLoadProfilerProbe enabled={frameProfile} />
       <WaterSceneToneMapping toneMapping={toneMapping} />

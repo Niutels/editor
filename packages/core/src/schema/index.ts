@@ -85,6 +85,7 @@ export {
 } from './nodes/item'
 export { LandrushWorldNode } from './nodes/landrush-world'
 export { LevelNode } from './nodes/level'
+export { PascalWaterNode } from './nodes/pascal-water'
 // Nodes
 export { RidgeVentNode } from './nodes/ridge-vent'
 export type { RoofSurfaceMaterialRole, RoofSurfaceMaterialSpec } from './nodes/roof'

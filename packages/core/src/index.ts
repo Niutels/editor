@@ -17,6 +17,7 @@ export type {
   LandrushWorldEvent,
   LevelEvent,
   NodeEvent,
+  PascalWaterEvent,
   RidgeVentEvent,
   RoofEvent,
   RoofSegmentEvent,

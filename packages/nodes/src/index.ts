@@ -12,6 +12,7 @@ import { guideDefinition } from './guide'
 import { itemDefinition } from './item'
 import { landrushWorldDefinition } from './landrush-world'
 import { levelDefinition } from './level'
+import { pascalWaterDefinition } from './pascal-water'
 import { ridgeVentDefinition } from './ridge-vent'
 import { roofDefinition } from './roof'
 import { roofSegmentDefinition } from './roof-segment'
@@ -73,6 +74,7 @@ export const builtinPlugin: Plugin = {
     guideDefinition as unknown as AnyNodeDefinition,
     scanDefinition as unknown as AnyNodeDefinition,
     landrushWorldDefinition as unknown as AnyNodeDefinition,
+    pascalWaterDefinition as unknown as AnyNodeDefinition,
     // Roof-mounted accessories (custom renderer + bespoke roof-event tool).
     boxVentDefinition as unknown as AnyNodeDefinition,
     ridgeVentDefinition as unknown as AnyNodeDefinition,
@@ -115,6 +117,12 @@ export {
   type LandrushWaterSurfaceParameters,
 } from './landrush-world/water-surface'
 export { levelDefinition } from './level'
+export { pascalWaterDefinition } from './pascal-water'
+export {
+  createPascalWaterLandSurface,
+  PASCAL_WATER_LOW_ELEVATION,
+  type PascalWaterLandSurface,
+} from './pascal-water/surface-geometry'
 export { ridgeVentDefinition } from './ridge-vent'
 export { roofDefinition } from './roof'
 export { roofSegmentDefinition } from './roof-segment'

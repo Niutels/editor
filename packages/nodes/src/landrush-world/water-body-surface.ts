@@ -273,10 +273,8 @@ export function createLandrushWaterBodyMaterial(
     const shoreDepthField = waveDepthNode(positionWorld.xz)
     const rippleVisibilityDepth = rippleVisibilityDepthNode(terrainData)
     const rippleMask = rippleVisibilityDepth.smoothstep(ripplesReachStart, ripplesReachEnd)
-    const ripplesBreakupMask = rippleVisibilityDepth.smoothstep(
-      ripplesBreakupStart,
-      ripplesBreakupEnd,
-    )
+    const rippleBreakupDepth = max(rippleVisibilityDepth, shoreDepthField)
+    const ripplesBreakupMask = rippleBreakupDepth.smoothstep(ripplesBreakupStart, ripplesBreakupEnd)
     const rippleTime = wind.localTime.mul(0.5).add(timeOffset).add(waveSectorTimeOffsetNode())
     const baseRipple = shoreDepthField.sub(rippleTime).mul(ripplesSlopeFrequency)
     const rippleIndex = baseRipple.floor()
@@ -287,13 +285,20 @@ export function createLandrushWaterBodyMaterial(
     )
       .r.mul(ripplesNoiseStrength)
       .mul(ripplesBreakupMask)
-    const breakupNoise = texture(
+    const perlinBreakupNoise = texture(
       noises.perlin,
       positionWorld.xz
         .add(vec2(rippleIndex.mul(17.3), rippleIndex.mul(41.9)))
         .mul(ripplesBreakupFrequency),
     ).r
-    const breakupKeep = ripplesBreakupMask.mul(ripplesBreakupSize).sub(0.08).step(breakupNoise)
+    const cellBreakupNoise = hash(
+      positionWorld.xz
+        .mul(ripplesBreakupFrequency.mul(4))
+        .add(vec2(rippleIndex.mul(0.37), rippleIndex.mul(0.73)))
+        .floor(),
+    )
+    const breakupNoise = max(perlinBreakupNoise, cellBreakupNoise.mul(0.9))
+    const breakupKeep = breakupNoise.step(ripplesBreakupMask.mul(ripplesBreakupSize).sub(0.08))
 
     const ripples = shoreDepthField
       .sub(rippleTime)
