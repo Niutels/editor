@@ -42,7 +42,7 @@ jobs:
           repository: Niutels/landrush-site
           ref: main
           path: landrush-site
-          ssh-key: ${{ secrets.LANDRUSH_SITE_DEPLOY_KEY }}
+          token: ${{ secrets.LANDRUSH_SITE_PUSH_TOKEN }}
 
       - name: Refresh Landrush static bundle
         shell: bash
