@@ -57,6 +57,7 @@ import {
 import type { LandrushPoint2 } from '@/components/landrush/types'
 import type { ParcelAllocationParcel, ParcelAllocationResult } from './parcel-allocation'
 import type { ParcelStreetNetwork } from './parcel-streets'
+import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import type { StylizedGrassInteraction, StylizedGrassPerfProbe } from './stylized-scene-land-layers'
 import type { WaterLandSurface } from './water-scene'
 import { WorldLabClient } from './world-lab-client'
@@ -1280,6 +1281,12 @@ function LocalMultiplayerRobot({
           onLoaded={handleModelLoaded}
         />
       </Suspense>
+      <LandrushRobotFootstepAudio
+        groundY={groundY}
+        motionRef={motionRef}
+        runSpeed={ROBOT_RUN_SPEED}
+        walkSpeed={ROBOT_WALK_SPEED}
+      />
       <RobotPlayerBeacon color={localProfile.color} node={nodeRef.current} />
     </>
   )
@@ -1932,6 +1939,7 @@ function LocalMapPlayerMarker({
 }) {
   const groupRef = useRef<Group>(null!)
   const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
 
   useFrame((_, delta) => {
     const group = groupRef.current
@@ -1981,6 +1989,17 @@ function LocalMapPlayerMarker({
         />
       </mesh>
       <mesh renderOrder={94} rotation={[-Math.PI / 2, 0, 0]}>
+        <shapeGeometry args={[directionShape]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.96}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={95} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[0.28, 24]} />
         <meshBasicMaterial
           color="#f8fafc"
@@ -2006,6 +2025,7 @@ function RemoteMapPlayerMarker({
 }) {
   const groupRef = useRef<Group>(null!)
   const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
   const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
@@ -2061,6 +2081,17 @@ function RemoteMapPlayerMarker({
         <shapeGeometry args={[arrowShape]} />
         <meshBasicMaterial
           color={player.color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.96}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={98} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
+        <shapeGeometry args={[directionShape]} />
+        <meshBasicMaterial
+          color="#f8fafc"
           depthTest={false}
           depthWrite={false}
           opacity={0.96}
@@ -3166,6 +3197,15 @@ function createMapPlayerArrowShape() {
   shape.lineTo(-0.22, 0.78)
   shape.lineTo(-0.22, 0.26)
   shape.lineTo(-0.62, 0.42)
+  shape.closePath()
+  return shape
+}
+
+function createMapPlayerDirectionShape() {
+  const shape = new Shape()
+  shape.moveTo(0, -1.72)
+  shape.lineTo(0.26, -1.16)
+  shape.lineTo(-0.26, -1.16)
   shape.closePath()
   return shape
 }

@@ -90,6 +90,7 @@ import {
   type ParcelStreetNetwork,
   type ParcelStreetSegment,
 } from './parcel-streets'
+import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import type { StylizedGrassInteraction } from './stylized-scene-land-layers'
 import {
   WATER_FIELD_PREVIEW_RESOLUTION,
@@ -2578,6 +2579,12 @@ function LocalPascalWaterRobot({
       >
         <LandrushRobot node={nodeRef.current} />
       </Suspense>
+      <LandrushRobotFootstepAudio
+        groundY={groundY}
+        motionRef={motionRef}
+        runSpeed={PASCAL_WATER_ROBOT_RUN_SPEED}
+        walkSpeed={PASCAL_WATER_ROBOT_WALK_SPEED}
+      />
       <PascalWaterRobotPlayerBeacon color={localProfile.color} node={nodeRef.current} />
     </>
   )
@@ -3134,6 +3141,7 @@ function PascalWaterMapPlayerMarker({
 }) {
   const groupRef = useRef<Group>(null!)
   const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
 
   useFrame((_, delta) => {
     const group = groupRef.current
@@ -3147,7 +3155,14 @@ function PascalWaterMapPlayerMarker({
     group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
   })
 
-  return <PascalWaterMapArrowMarker color={color} groupRef={groupRef} shape={arrowShape} />
+  return (
+    <PascalWaterMapArrowMarker
+      color={color}
+      directionShape={directionShape}
+      groupRef={groupRef}
+      shape={arrowShape}
+    />
+  )
 }
 
 function PascalWaterRemoteMapPlayerMarker({
@@ -3161,6 +3176,7 @@ function PascalWaterRemoteMapPlayerMarker({
 }) {
   const groupRef = useRef<Group>(null!)
   const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
   const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
@@ -3188,16 +3204,26 @@ function PascalWaterRemoteMapPlayerMarker({
     group.rotation.y = headingRef.current
   })
 
-  return <PascalWaterMapArrowMarker color={player.color} groupRef={groupRef} scale={0.82} shape={arrowShape} />
+  return (
+    <PascalWaterMapArrowMarker
+      color={player.color}
+      directionShape={directionShape}
+      groupRef={groupRef}
+      scale={0.82}
+      shape={arrowShape}
+    />
+  )
 }
 
 function PascalWaterMapArrowMarker({
   color,
+  directionShape,
   groupRef,
   scale = 1,
   shape,
 }: {
   color: string
+  directionShape: Shape
   groupRef: RefObject<Group>
   scale?: number
   shape: Shape
@@ -3230,6 +3256,17 @@ function PascalWaterMapArrowMarker({
         <shapeGeometry args={[shape]} />
         <meshBasicMaterial
           color={color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.96}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={94} rotation={[-Math.PI / 2, 0, 0]}>
+        <shapeGeometry args={[directionShape]} />
+        <meshBasicMaterial
+          color="#f8fafc"
           depthTest={false}
           depthWrite={false}
           opacity={0.96}
@@ -3806,6 +3843,15 @@ function createMapPlayerArrowShape() {
   shape.lineTo(-0.22, 0.78)
   shape.lineTo(-0.22, 0.26)
   shape.lineTo(-0.62, 0.42)
+  shape.closePath()
+  return shape
+}
+
+function createMapPlayerDirectionShape() {
+  const shape = new Shape()
+  shape.moveTo(0, -1.72)
+  shape.lineTo(0.26, -1.16)
+  shape.lineTo(-0.26, -1.16)
   shape.closePath()
   return shape
 }

@@ -173,7 +173,7 @@ export function createGrassBladeColorGeometry({
     const tipX = centerX + bendX * tipBend
     const tipZ = centerZ + bendZ * tipBend
     const bladeColor = grassBladeBaseColor(sample, alpha)
-    const topColor = scaleColor(bladeColor, brightnessScale * (0.74 + alpha * 0.12))
+    const topColor = scaleColor(bladeColor, brightnessScale * (0.66 + alpha * 0.1))
     const rootColor = scaleColor(
       bladeColor,
       brightnessScale * (0.42 + alpha * 0.08 - rootShadowStrength * 0.18),

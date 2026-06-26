@@ -58,6 +58,7 @@ export function EditorLayoutMobile({
   const panelSheetHeight = useEditor((s) => s.mobilePanelSheetHeight)
   const isDark = useViewer((s) => getSceneTheme(s.sceneTheme).appearance === 'dark')
   const viewerBg = isDark ? VIEWER_BG_DARK : VIEWER_BG_LIGHT
+  const hasSidebarTabs = sidebarTabs.length > 0
 
   const middleRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<BottomSheetHandle>(null)
@@ -120,16 +121,26 @@ export function EditorLayoutMobile({
   // Initialise sheet to current tab default once we know the middle height
   const didInit = useRef(false)
   useEffect(() => {
-    if (didInit.current || middleH <= 0) return
+    if (middleH <= 0) return
+    if (!hasSidebarTabs) {
+      didInit.current = false
+      setCommittedSheetH(0)
+      return
+    }
+    if (didInit.current) return
     didInit.current = true
     const targetPx = getDefaultSnap(currentTab) * middleH
     setCommittedSheetH(targetPx)
     sheetRef.current?.snapTo(targetPx)
-  }, [middleH, currentTab])
+  }, [middleH, currentTab, hasSidebarTabs])
 
   // When middle height changes (rotation / resize), keep sheet in proportion
   const prevMiddleH = useRef(0)
   useEffect(() => {
+    if (!hasSidebarTabs) {
+      prevMiddleH.current = middleH
+      return
+    }
     if (middleH <= 0) return
     if (prevMiddleH.current === 0) {
       prevMiddleH.current = middleH
@@ -141,7 +152,7 @@ export function EditorLayoutMobile({
     prevMiddleH.current = middleH
     setCommittedSheetH(nextPx)
     sheetRef.current?.snapTo(nextPx)
-  }, [middleH, committedSheetH])
+  }, [middleH, committedSheetH, hasSidebarTabs])
 
   const handleTabPress = useCallback(
     (id: string) => {
@@ -177,7 +188,9 @@ export function EditorLayoutMobile({
   const panelPenetrationInMiddle = Math.max(0, panelSheetHeight - middleBottomFromViewport)
   // The effective "sheet height" that the viewer sits above is the larger of
   // the primary sidebar sheet and the secondary panel sheet's penetration.
-  const effectiveSheetH = Math.max(committedSheetH, panelPenetrationInMiddle)
+  const effectiveSheetH = hasSidebarTabs
+    ? Math.max(committedSheetH, panelPenetrationInMiddle)
+    : 0
 
   // In capture mode the sheet and tab bar are hidden — the viewer should fill
   // the entire middle area regardless of the stored sheet height.

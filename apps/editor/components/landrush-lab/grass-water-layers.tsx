@@ -90,7 +90,8 @@ const STYLIZED_DIRT_HEIGHT_TEXTURE_PATH =
 const DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 5
 const MIN_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 0.001
 const STYLIZED_GROUND_PREVIEW_TEXTURE_RESOLUTION = 512
-const STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION = 1024
+const STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION = 2048
+const STYLIZED_DIRT_TEXTURE_DETAIL_SCALE = 1.85
 const STYLIZED_PATH_EDGE_FEATHER_METERS = 0.48
 const STYLIZED_PATH_EDGE_NOISE_METERS = 0.18
 const STYLIZED_PATH_WIDTH_SCALE = 1.08
@@ -711,6 +712,7 @@ type PreparedStylizedGroundTexture = {
   maskData: Uint8Array
   maskSize: number
   pathGrid: StylizedPathGrid | null
+  dirtTextureRepeat: number
   textureRepeat: number
 }
 
@@ -810,6 +812,8 @@ function prepareStylizedGroundTexture({
   const dirtHeightSource = imageDataFromTexture(dirtHeightTexture)
   if (!grassSource || !dirtSource || !dirtAOSource || !dirtHeightSource) return null
 
+  const textureRepeat = fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters)
+
   return {
     dirtAOSource,
     dirtHeightSource,
@@ -819,7 +823,8 @@ function prepareStylizedGroundTexture({
     maskData,
     maskSize,
     pathGrid: createStylizedPathGrid(roads, fieldSize),
-    textureRepeat: fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters),
+    dirtTextureRepeat: textureRepeat * STYLIZED_DIRT_TEXTURE_DETAIL_SCALE,
+    textureRepeat,
   }
 }
 
@@ -848,6 +853,7 @@ function createStylizedGrassGroundTexture({
   if (!grassSource || !dirtSource || !dirtAOSource || !dirtHeightSource) return maskTexture
   const pathGrid = createStylizedPathGrid(roads, fieldSize)
   const textureRepeat = fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters)
+  const dirtTextureRepeat = textureRepeat * STYLIZED_DIRT_TEXTURE_DETAIL_SCALE
   const outputSize = outputSizeOverride ?? stylizedGroundTextureOutputSize(maskSize)
 
   const canvas = document.createElement('canvas')
@@ -886,14 +892,14 @@ function createStylizedGrassGroundTexture({
       let color = grassColor
 
       if (pathWeight > 0.001) {
-        const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.028
-        const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.028
-        const rawDirt = sampleRepeatedRgb(dirtSource, u, v, textureRepeat, dirtWarpX, dirtWarpY)
+        const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.016
+        const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.016
+        const rawDirt = sampleRepeatedRgb(dirtSource, u, v, dirtTextureRepeat, dirtWarpX, dirtWarpY)
         const dirtAO = sampleRepeatedChannel(
           dirtAOSource,
           u,
           v,
-          textureRepeat,
+          dirtTextureRepeat,
           dirtWarpX,
           dirtWarpY,
         )
@@ -901,7 +907,7 @@ function createStylizedGrassGroundTexture({
           dirtHeightSource,
           u,
           v,
-          textureRepeat,
+          dirtTextureRepeat,
           dirtWarpX,
           dirtWarpY,
         )
@@ -949,6 +955,7 @@ function paintStylizedGroundTextureRow(
     maskData,
     maskSize,
     pathGrid,
+    dirtTextureRepeat,
     textureRepeat,
   } = prepared
 
@@ -980,14 +987,14 @@ function paintStylizedGroundTextureRow(
     let color = grassColor
 
     if (pathWeight > 0.001) {
-      const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.028
-      const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.028
-      const rawDirt = sampleRepeatedRgb(dirtSource, u, v, textureRepeat, dirtWarpX, dirtWarpY)
+      const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.016
+      const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.016
+      const rawDirt = sampleRepeatedRgb(dirtSource, u, v, dirtTextureRepeat, dirtWarpX, dirtWarpY)
       const dirtAO = sampleRepeatedChannel(
         dirtAOSource,
         u,
         v,
-        textureRepeat,
+        dirtTextureRepeat,
         dirtWarpX,
         dirtWarpY,
       )
@@ -995,7 +1002,7 @@ function paintStylizedGroundTextureRow(
         dirtHeightSource,
         u,
         v,
-        textureRepeat,
+        dirtTextureRepeat,
         dirtWarpX,
         dirtWarpY,
       )
