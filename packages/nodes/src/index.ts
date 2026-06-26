@@ -10,6 +10,7 @@ import { elevatorDefinition } from './elevator'
 import { fenceDefinition } from './fence'
 import { guideDefinition } from './guide'
 import { itemDefinition } from './item'
+import { landrushLayoutDefinition } from './landrush-layout'
 import { landrushWorldDefinition } from './landrush-world'
 import { levelDefinition } from './level'
 import { pascalWaterDefinition } from './pascal-water'
@@ -73,6 +74,7 @@ export const builtinPlugin: Plugin = {
     levelDefinition as unknown as AnyNodeDefinition,
     guideDefinition as unknown as AnyNodeDefinition,
     scanDefinition as unknown as AnyNodeDefinition,
+    landrushLayoutDefinition as unknown as AnyNodeDefinition,
     landrushWorldDefinition as unknown as AnyNodeDefinition,
     pascalWaterDefinition as unknown as AnyNodeDefinition,
     // Roof-mounted accessories (custom renderer + bespoke roof-event tool).
@@ -96,6 +98,7 @@ export { elevatorDefinition } from './elevator'
 export { fenceDefinition } from './fence'
 export { guideDefinition } from './guide'
 export { itemDefinition } from './item'
+export { landrushLayoutDefinition } from './landrush-layout'
 export { landrushWorldDefinition } from './landrush-world'
 export {
   createLandrushWaterBodyMaterial,

@@ -39,13 +39,18 @@ import type { GrassBladeTuning } from './grass-material'
 type StylizedSceneLandLayerProps = {
   elevation: number
   grassBlockers?: readonly StylizedGrassBlocker[]
+  grassFadeBlockers?: readonly StylizedGrassBlocker[]
   grassInteractionRef?: StylizedGrassInteractionRef
+  grassRenderOrder?: number
+  profileMeasure?: StylizedSceneProfileMeasure
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
   showTrees?: boolean
   surfacePoints?: readonly LandrushPoint2[]
   tuning?: GrassBladeTuning
 }
+
+type StylizedSceneProfileMeasure = <T>(id: string, callback: () => T) => T
 
 type StylizedSceneTreeProps = {
   elevation: number
@@ -107,6 +112,14 @@ type StylizedGrassInstance = {
   z: number
 }
 
+type StylizedGrassFadeZone = {
+  id: string
+  points: readonly LandrushPoint2[]
+  ring: readonly LandrushPoint2[]
+  targetVisibility: number
+  visibility: number
+}
+
 type StylizedGrassCellCache = Map<string, readonly StylizedGrassInstance[]>
 
 export type StylizedGrassInteraction = {
@@ -152,17 +165,22 @@ const STYLIZED_SCENE_STREAM_RADIUS = STYLIZED_SCENE_BASE_STREAM_RADIUS * 3
 const STYLIZED_SCENE_STREAM_CELL_SIZE = 1
 const STYLIZED_SCENE_STREAM_UPDATE_METERS = STYLIZED_SCENE_STREAM_RADIUS * 0.25
 const STYLIZED_SCENE_MAX_GRASS_INSTANCES = 60_000
+const STYLIZED_SCENE_MAX_GRASS_CACHE_CELLS = Math.ceil(
+  ((STYLIZED_SCENE_FIELD_SIZE / STYLIZED_SCENE_STREAM_CELL_SIZE) + 1) ** 2,
+)
 const STYLIZED_SCENE_GRASS_DENSITY = 5000
 const STYLIZED_SCENE_GRASS_SCALE = 1.3
 const STYLIZED_SCENE_GRASS_HEIGHT_SCALE = 0.5
 const STYLIZED_SCENE_GRASS_SEED = 15_173
 const STYLIZED_SCENE_INTERACTION_FULL_SPEED = 5.8
 const STYLIZED_SCENE_INTERACTION_MAX_BEND = 0.65
+const STYLIZED_SCENE_GRASS_FADE_SECONDS = 1.375
 const STYLIZED_SCENE_PATH_CLEARANCE_METERS = 0.48
 const STYLIZED_SCENE_PATH_EDGE_JITTER_METERS = 0.22
 const STYLIZED_SCENE_PATH_WIDTH_SCALE = 1.08
 const STYLIZED_SCENE_TEXTURE_REPEAT = 8
 const STYLIZED_TREE_TRUNK_SCALE = 12
+const STYLIZED_GRASS_RENDER_ORDER = 14
 
 const STYLIZED_SCENE_DEFAULT_TUNING: StylizedSceneResolvedGrassTuning = {
   colorPatchScale: 0.7,
@@ -221,7 +239,10 @@ const STYLIZED_TREE_BUSHES: readonly BushInstance[] = [
 export function StylizedSceneLandLayer({
   elevation,
   grassBlockers = [],
+  grassFadeBlockers = [],
   grassInteractionRef,
+  grassRenderOrder = STYLIZED_GRASS_RENDER_ORDER,
+  profileMeasure,
   roads = [],
   showBlades = true,
   showTrees = true,
@@ -233,8 +254,11 @@ export function StylizedSceneLandLayer({
       {showBlades ? (
         <StylizedSceneGrassLayer
           elevation={elevation}
+          grassFadeBlockers={grassFadeBlockers}
           grassBlockers={grassBlockers}
           interactionRef={grassInteractionRef}
+          profileMeasure={profileMeasure}
+          renderOrder={grassRenderOrder}
           roads={roads}
           surfacePoints={surfacePoints}
           tuning={tuning}
@@ -246,6 +270,7 @@ export function StylizedSceneLandLayer({
               elevation={elevation}
               key={`${tree.position.join(':')}:${index}`}
               position={tree.position}
+              profileMeasure={profileMeasure}
               rotationY={tree.rotationY}
               scale={tree.scale}
               tuning={tuning}
@@ -259,14 +284,20 @@ export function StylizedSceneLandLayer({
 function StylizedSceneGrassLayer({
   elevation,
   grassBlockers,
+  grassFadeBlockers,
   interactionRef,
+  profileMeasure,
+  renderOrder,
   roads,
   surfacePoints,
   tuning,
 }: {
   elevation: number
   grassBlockers: readonly StylizedGrassBlocker[]
+  grassFadeBlockers: readonly StylizedGrassBlocker[]
   interactionRef?: StylizedGrassInteractionRef
+  profileMeasure?: StylizedSceneProfileMeasure
+  renderOrder: number
   roads: readonly LandrushRoadSegment[]
   surfacePoints: readonly LandrushPoint2[]
   tuning?: GrassBladeTuning
@@ -274,15 +305,32 @@ function StylizedSceneGrassLayer({
   const { scene } = useGLTF(STYLIZED_SCENE_PATHS.grassBlades)
   const pathMask = useTexture(STYLIZED_SCENE_PATHS.pathMask) as Texture
   const grassTexture = useTexture(STYLIZED_SCENE_PATHS.grassTexture) as Texture
-  const resolvedTuning = useMemo(() => resolveStylizedSceneTuning(tuning), [tuning])
+  const resolvedTuning = useMemo(
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-grass.resolve-tuning', () =>
+        resolveStylizedSceneTuning(tuning),
+      ),
+    [profileMeasure, tuning],
+  )
   const geometry = useMemo(() => {
-    const extractedGeometry = extractFirstMeshGeometry(scene)
-    return extractedGeometry ? withStylizedGrassInstanceAttributes(extractedGeometry) : null
-  }, [scene])
-  const pathMaskData = useMemo(() => extractImageData(pathMask), [pathMask])
+    return measureStylizedScene(profileMeasure, 'setup.stylized-grass.instance-geometry', () => {
+      const extractedGeometry = extractFirstMeshGeometry(scene)
+      return extractedGeometry ? withStylizedGrassInstanceAttributes(extractedGeometry) : null
+    })
+  }, [profileMeasure, scene])
+  const pathMaskData = useMemo(
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-grass.path-mask-data', () =>
+        extractImageData(pathMask),
+      ),
+    [pathMask, profileMeasure],
+  )
   const roadGrid = useMemo(
-    () => createStylizedGrassRoadGrid(roads, STYLIZED_SCENE_FIELD_SIZE),
-    [roads],
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-grass.road-grid', () =>
+        createStylizedGrassRoadGrid(roads, STYLIZED_SCENE_FIELD_SIZE),
+      ),
+    [profileMeasure, roads],
   )
   const cellCacheRef = useRef<StylizedGrassCellCache>(new Map())
   const cellCacheSignatureRef = useRef({
@@ -312,30 +360,43 @@ function StylizedSceneGrassLayer({
   const renderCenter = useStylizedGrassRenderCenter()
   const lastNonEmptyInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
   const instances = useMemo(
-    () => {
-      const nextInstances = createStylizedGrassInstances({
-        cellCache: cellCacheRef.current,
-        grassBlockers,
-        pathMaskData,
-        renderCenter,
-        roadGrid,
-        surfacePoints,
-        tuning: resolvedTuning,
-      })
-      if (nextInstances.length > 0 || grassBlockers.length > 0) {
-        lastNonEmptyInstancesRef.current = nextInstances
-        return nextInstances
-      }
-      return lastNonEmptyInstancesRef.current
-    },
-    [grassBlockers, pathMaskData, renderCenter, roadGrid, resolvedTuning, surfacePoints],
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-grass.instances', () => {
+        const nextInstances = createStylizedGrassInstances({
+          cellCache: cellCacheRef.current,
+          grassBlockers,
+          pathMaskData,
+          renderCenter,
+          roadGrid,
+          surfacePoints,
+          tuning: resolvedTuning,
+        })
+        if (nextInstances.length > 0 || grassBlockers.length > 0) {
+          lastNonEmptyInstancesRef.current = nextInstances
+          return nextInstances
+        }
+        return lastNonEmptyInstancesRef.current
+      }),
+    [
+      grassBlockers,
+      pathMaskData,
+      profileMeasure,
+      renderCenter,
+      roadGrid,
+      resolvedTuning,
+      surfacePoints,
+    ],
   )
   const material = useMemo(
-    () => createStylizedGrassNodeMaterial(geometry, grassTexture, resolvedTuning),
-    [geometry, grassTexture, resolvedTuning],
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-grass.node-material', () =>
+        createStylizedGrassNodeMaterial(geometry, grassTexture, resolvedTuning),
+      ),
+    [geometry, grassTexture, profileMeasure, resolvedTuning],
   )
   const meshRef = useRef<InstancedMesh>(null!)
   const dummyRef = useRef(new Object3D())
+  const fadeZonesRef = useRef<StylizedGrassFadeZone[]>([])
 
   useEffect(() => {
     grassTexture.colorSpace = SRGBColorSpace
@@ -348,22 +409,30 @@ function StylizedSceneGrassLayer({
     const mesh = meshRef.current
     if (!mesh || !geometry) return
 
-    applyStylizedGrassMatrices(
-      mesh,
-      instances,
-      resolvedTuning,
-      dummyRef.current,
-      0,
-      interactionRef?.current ?? null,
-    )
-    applyStylizedGrassInstanceAttributes(geometry, instances)
-    mesh.count = instances.length
-    mesh.instanceMatrix.needsUpdate = true
-  }, [geometry, instances, interactionRef, resolvedTuning])
+    measureStylizedScene(profileMeasure, 'setup.stylized-grass.apply-layout', () => {
+      applyStylizedGrassMatrices(
+        mesh,
+        instances,
+        resolvedTuning,
+        dummyRef.current,
+        0,
+        interactionRef?.current ?? null,
+        fadeZonesRef.current,
+      )
+      applyStylizedGrassInstanceAttributes(geometry, instances)
+      mesh.count = instances.length
+      mesh.instanceMatrix.needsUpdate = true
+    })
+  }, [geometry, instances, interactionRef, profileMeasure, resolvedTuning])
 
-  useFrame(({ clock }) => {
+  useEffect(() => {
+    updateStylizedGrassFadeZones(fadeZonesRef.current, grassFadeBlockers)
+  }, [grassFadeBlockers])
+
+  useFrame(({ clock }, delta) => {
     const mesh = meshRef.current
     if (!mesh || instances.length === 0) return
+    advanceStylizedGrassFadeZones(fadeZonesRef.current, delta)
     applyStylizedGrassMatrices(
       mesh,
       instances,
@@ -371,6 +440,7 @@ function StylizedSceneGrassLayer({
       dummyRef.current,
       clock.elapsedTime,
       interactionRef?.current ?? null,
+      fadeZonesRef.current,
     )
     mesh.instanceMatrix.needsUpdate = true
   })
@@ -392,7 +462,7 @@ function StylizedSceneGrassLayer({
       position={[0, elevation + 0.03, 0]}
       receiveShadow
       ref={meshRef}
-      renderOrder={14}
+      renderOrder={renderOrder}
     />
   )
 }
@@ -400,70 +470,94 @@ function StylizedSceneGrassLayer({
 function StylizedSceneTree({
   elevation,
   position,
+  profileMeasure,
   rotationY,
   scale,
   tuning,
-}: StylizedSceneTreeProps & { tuning?: GrassBladeTuning }) {
+}: StylizedSceneTreeProps & {
+  profileMeasure?: StylizedSceneProfileMeasure
+  tuning?: GrassBladeTuning
+}) {
   const treeRef = useRef<Group>(null)
   const { scene: leavesScene } = useGLTF(STYLIZED_SCENE_PATHS.treeLeaves)
   const { scene: trunkScene } = useGLTF(STYLIZED_SCENE_PATHS.treeTrunk)
   const alphaMap = useTexture(STYLIZED_SCENE_PATHS.leavesAlpha) as Texture
-  const leavesGeometry = useMemo(() => extractFirstMeshGeometry(leavesScene), [leavesScene])
+  const leavesGeometry = useMemo(
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-tree.leaves-geometry', () =>
+        extractFirstMeshGeometry(leavesScene),
+      ),
+    [leavesScene, profileMeasure],
+  )
   const trunk = useMemo(() => {
-    const clone = trunkScene.clone(true)
-    clone.traverse((child) => {
-      const mesh = child as Mesh
-      if (!mesh.isMesh) return
-      mesh.castShadow = true
-      mesh.receiveShadow = true
+    return measureStylizedScene(profileMeasure, 'setup.stylized-tree.trunk-clone', () => {
+      const clone = trunkScene.clone(true)
+      clone.traverse((child) => {
+        const mesh = child as Mesh
+        if (!mesh.isMesh) return
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+      })
+      return clone
     })
-    return clone
-  }, [trunkScene])
+  }, [profileMeasure, trunkScene])
   const leavesMaterial = useMemo(() => {
-    alphaMap.flipY = false
-    alphaMap.needsUpdate = true
-    return new MeshStandardMaterial({
-      alphaMap,
-      alphaTest: 0.1,
-      color: '#4a6b27',
-      metalness: 0,
-      roughness: 0.8,
-      side: DoubleSide,
+    return measureStylizedScene(profileMeasure, 'setup.stylized-tree.leaves-material', () => {
+      alphaMap.flipY = false
+      alphaMap.needsUpdate = true
+      return new MeshStandardMaterial({
+        alphaMap,
+        alphaTest: 0.1,
+        color: '#4a6b27',
+        metalness: 0,
+        roughness: 0.8,
+        side: DoubleSide,
+      })
     })
-  }, [alphaMap])
+  }, [alphaMap, profileMeasure])
   const bushesRef = useRef<InstancedMesh>(null!)
-  const resolvedTuning = useMemo(() => resolveStylizedSceneTuning(tuning), [tuning])
+  const resolvedTuning = useMemo(
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-tree.resolve-tuning', () =>
+        resolveStylizedSceneTuning(tuning),
+      ),
+    [profileMeasure, tuning],
+  )
 
   useMemo(() => {
-    if (!leavesGeometry) return
-    const origin = new Float32Array(STYLIZED_TREE_BUSHES.length * 2)
-    const facing = new Float32Array(STYLIZED_TREE_BUSHES.length * 2)
-    for (let index = 0; index < STYLIZED_TREE_BUSHES.length; index += 1) {
-      const bush = STYLIZED_TREE_BUSHES[index]!
-      origin[index * 2] = position[0] + bush.pos[0]
-      origin[index * 2 + 1] = position[2] + bush.pos[2]
-      facing[index * 2] = Math.cos(bush.yaw)
-      facing[index * 2 + 1] = Math.sin(bush.yaw)
-    }
-    leavesGeometry.setAttribute('aOrigin', new InstancedBufferAttribute(origin, 2))
-    leavesGeometry.setAttribute('aFacing', new InstancedBufferAttribute(facing, 2))
-  }, [leavesGeometry, position])
+    measureStylizedScene(profileMeasure, 'setup.stylized-tree.bush-attributes', () => {
+      if (!leavesGeometry) return
+      const origin = new Float32Array(STYLIZED_TREE_BUSHES.length * 2)
+      const facing = new Float32Array(STYLIZED_TREE_BUSHES.length * 2)
+      for (let index = 0; index < STYLIZED_TREE_BUSHES.length; index += 1) {
+        const bush = STYLIZED_TREE_BUSHES[index]!
+        origin[index * 2] = position[0] + bush.pos[0]
+        origin[index * 2 + 1] = position[2] + bush.pos[2]
+        facing[index * 2] = Math.cos(bush.yaw)
+        facing[index * 2 + 1] = Math.sin(bush.yaw)
+      }
+      leavesGeometry.setAttribute('aOrigin', new InstancedBufferAttribute(origin, 2))
+      leavesGeometry.setAttribute('aFacing', new InstancedBufferAttribute(facing, 2))
+    })
+  }, [leavesGeometry, position, profileMeasure])
 
   useLayoutEffect(() => {
     const mesh = bushesRef.current
     if (!mesh || !leavesGeometry) return
 
-    const dummy = new Object3D()
-    for (let index = 0; index < STYLIZED_TREE_BUSHES.length; index += 1) {
-      const bush = STYLIZED_TREE_BUSHES[index]!
-      dummy.position.set(bush.pos[0], bush.pos[1], bush.pos[2])
-      dummy.rotation.set(0, bush.yaw, 0)
-      dummy.scale.setScalar(bush.scale)
-      dummy.updateMatrix()
-      mesh.setMatrixAt(index, dummy.matrix)
-    }
-    mesh.instanceMatrix.needsUpdate = true
-  }, [leavesGeometry])
+    measureStylizedScene(profileMeasure, 'setup.stylized-tree.apply-bush-layout', () => {
+      const dummy = new Object3D()
+      for (let index = 0; index < STYLIZED_TREE_BUSHES.length; index += 1) {
+        const bush = STYLIZED_TREE_BUSHES[index]!
+        dummy.position.set(bush.pos[0], bush.pos[1], bush.pos[2])
+        dummy.rotation.set(0, bush.yaw, 0)
+        dummy.scale.setScalar(bush.scale)
+        dummy.updateMatrix()
+        mesh.setMatrixAt(index, dummy.matrix)
+      }
+      mesh.instanceMatrix.needsUpdate = true
+    })
+  }, [leavesGeometry, profileMeasure])
 
   useFrame(({ clock }) => {
     const mesh = bushesRef.current
@@ -688,11 +782,24 @@ function getStylizedGrassCellInstances(
 ) {
   const key = `${options.cellX}:${options.cellZ}`
   const cached = cellCache.get(key)
-  if (cached) return cached
+  if (cached) {
+    cellCache.delete(key)
+    cellCache.set(key, cached)
+    return cached
+  }
 
   const instances = createStylizedGrassCellInstances(options)
   cellCache.set(key, instances)
+  trimStylizedGrassCellCache(cellCache)
   return instances
+}
+
+function trimStylizedGrassCellCache(cellCache: StylizedGrassCellCache) {
+  while (cellCache.size > STYLIZED_SCENE_MAX_GRASS_CACHE_CELLS) {
+    const oldestKey = cellCache.keys().next().value
+    if (typeof oldestKey !== 'string') return
+    cellCache.delete(oldestKey)
+  }
 }
 
 function createStylizedGrassCellInstances({
@@ -756,6 +863,7 @@ function applyStylizedGrassMatrices(
   dummy: Object3D,
   time: number,
   interaction: StylizedGrassInteraction | null,
+  fadeZones: readonly StylizedGrassFadeZone[] = [],
 ) {
   const profile = getStylizedGrassPerfProbe()
   const startedAt = profile ? performance.now() : 0
@@ -772,8 +880,16 @@ function applyStylizedGrassMatrices(
   const hasInteraction = Boolean(interaction && interactionSpeed > 0.05 && interactionRadius > 0)
   const interactionRadiusSquared = interactionRadius * interactionRadius
   const interactionSpeedRatio = clamp01(interactionSpeed / STYLIZED_SCENE_INTERACTION_FULL_SPEED)
+  const hasFadeZones = fadeZones.length > 0
+  const fadeAttribute = mesh.geometry.getAttribute('aFade') as
+    | InstancedBufferAttribute
+    | undefined
+  const fadeState = { heightVisibility: 1, opacity: 1 }
   for (let index = 0; index < instances.length; index += 1) {
     const instance = instances[index]!
+    resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
+    const fadeVisibility = hasFadeZones ? fadeState.heightVisibility : 1
+    if (fadeAttribute) fadeAttribute.setX(index, hasFadeZones ? fadeState.opacity : 1)
     let heightPulse = 1
     let windPitch = 0
     let windRoll = 0
@@ -813,14 +929,23 @@ function applyStylizedGrassMatrices(
 
     dummy.position.set(instance.x, 0, instance.z)
     dummy.rotation.set(windPitch + bendPitch, instance.yaw + windYaw, windRoll + bendRoll)
-    dummy.scale.set(
-      scale,
-      scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE * instance.heightFactor * heightPulse,
-      scale,
-    )
+    if (fadeVisibility <= 0.001) {
+      dummy.scale.set(0, 0, 0)
+    } else {
+      dummy.scale.set(
+        scale,
+        scale *
+          STYLIZED_SCENE_GRASS_HEIGHT_SCALE *
+          instance.heightFactor *
+          heightPulse *
+          fadeVisibility,
+        scale,
+      )
+    }
     dummy.updateMatrix()
     mesh.setMatrixAt(index, dummy.matrix)
   }
+  if (fadeAttribute) fadeAttribute.needsUpdate = true
   if (profile) {
     recordStylizedGrassPerfSample(profile, {
       count: instances.length,
@@ -829,6 +954,75 @@ function applyStylizedGrassMatrices(
       moving: Boolean(interaction && interaction.speed > 0.05),
     })
   }
+}
+
+function updateStylizedGrassFadeZones(
+  zones: StylizedGrassFadeZone[],
+  blockers: readonly StylizedGrassBlocker[],
+) {
+  const activeIds = new Set<string>()
+  for (const blocker of blockers) {
+    const id = stylizedGrassFadeZoneId(blocker)
+    activeIds.add(id)
+    const existing = zones.find((zone) => zone.id === id)
+    if (existing) {
+      existing.points = blocker.points
+      existing.ring = openRing(blocker.points)
+      existing.targetVisibility = 0
+    } else {
+      zones.push({
+        id,
+        points: blocker.points,
+        ring: openRing(blocker.points),
+        targetVisibility: 0,
+        visibility: 1,
+      })
+    }
+  }
+
+  for (const zone of zones) {
+    if (!activeIds.has(zone.id)) zone.targetVisibility = 1
+  }
+}
+
+function advanceStylizedGrassFadeZones(zones: StylizedGrassFadeZone[], delta: number) {
+  if (zones.length === 0) return
+
+  const step = Math.max(0, delta) / STYLIZED_SCENE_GRASS_FADE_SECONDS
+  for (const zone of zones) {
+    zone.visibility = approach(zone.visibility, zone.targetVisibility, step)
+  }
+
+  for (let index = zones.length - 1; index >= 0; index -= 1) {
+    const zone = zones[index]
+    if (zone && zone.targetVisibility >= 1 && zone.visibility >= 0.999) zones.splice(index, 1)
+  }
+}
+
+function resolveStylizedGrassFadeState(
+  instance: StylizedGrassInstance,
+  zones: readonly StylizedGrassFadeZone[],
+  state: { heightVisibility: number; opacity: number },
+) {
+  state.heightVisibility = 1
+  state.opacity = 1
+  for (const zone of zones) {
+    if (pointInPolygon({ x: instance.x, z: instance.z }, zone.ring)) {
+      state.heightVisibility = Math.min(state.heightVisibility, zone.visibility)
+      if (zone.targetVisibility < zone.visibility) {
+        state.opacity = Math.min(state.opacity, zone.visibility)
+      }
+    }
+  }
+}
+
+function stylizedGrassFadeZoneId(blocker: StylizedGrassBlocker) {
+  return blocker.points.map((point) => `${point.x.toFixed(2)}:${point.z.toFixed(2)}`).join('|')
+}
+
+function approach(value: number, target: number, step: number) {
+  if (value < target) return Math.min(target, value + step)
+  return Math.max(target, value - step)
 }
 
 function withStylizedGrassInstanceAttributes(geometry: BufferGeometry) {
@@ -842,6 +1036,9 @@ function withStylizedGrassInstanceAttributes(geometry: BufferGeometry) {
     'aSeed',
     new InstancedBufferAttribute(new Float32Array(STYLIZED_SCENE_MAX_GRASS_INSTANCES), 1),
   )
+  const fade = new Float32Array(STYLIZED_SCENE_MAX_GRASS_INSTANCES)
+  fade.fill(1)
+  instancedGeometry.setAttribute('aFade', new InstancedBufferAttribute(fade, 1))
   return instancedGeometry
 }
 
@@ -862,6 +1059,7 @@ function createStylizedGrassNodeMaterial(
   const gradientB = mix(tslColor('#74a022'), tslColor('#e8e84f'), gradientT)
   const instanceOrigin: TSLNode<'vec2'> = attribute<'vec2'>('aOrigin', 'vec2')
   const instanceSeed: TSLNode<'float'> = attribute<'float'>('aSeed', 'float')
+  const instanceFade: TSLNode<'float'> = attribute<'float'>('aFade', 'float')
   const colorPatchScale = float(tuning.colorPatchScale)
   const colorVariation = float(tuning.colorVariation)
   const macroScale = float(tuning.macroScale)
@@ -892,10 +1090,12 @@ function createStylizedGrassNodeMaterial(
     .pow(4)
   const fresnelRim = tslColor(0xeaf2c0).mul(fresnel).mul(0.25)
 
-  const material = new MeshStandardNodeMaterial({ side: DoubleSide })
+  const material = new MeshStandardNodeMaterial({ side: DoubleSide, transparent: true })
   material.colorNode = projectedColor.mul(brightness).mul(macroFactor)
   material.emissiveNode = translucency.add(fresnelRim)
+  material.opacityNode = instanceFade
   material.roughnessNode = float(0.85)
+  material.depthWrite = false
   return material
 }
 
@@ -1214,6 +1414,14 @@ function clamp(value: number, min: number, max: number) {
 
 function finiteNumber(value: number, fallback: number) {
   return Number.isFinite(value) ? value : fallback
+}
+
+function measureStylizedScene<T>(
+  profileMeasure: StylizedSceneProfileMeasure | undefined,
+  id: string,
+  callback: () => T,
+) {
+  return profileMeasure ? profileMeasure(id, callback) : callback()
 }
 
 function lerp(start: number, end: number, t: number) {

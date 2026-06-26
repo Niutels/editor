@@ -10,6 +10,7 @@ import { ElevatorNode } from './nodes/elevator'
 import { FenceNode } from './nodes/fence'
 import { GuideNode } from './nodes/guide'
 import { ItemNode } from './nodes/item'
+import { LandrushLayoutNode } from './nodes/landrush-layout'
 import { LandrushWorldNode } from './nodes/landrush-world'
 import { LevelNode } from './nodes/level'
 import { PascalWaterNode } from './nodes/pascal-water'
@@ -57,6 +58,7 @@ export const AnyNode = z.discriminatedUnion('type', [
   SolarPanelNode,
   SkylightNode,
   DormerNode,
+  LandrushLayoutNode,
   LandrushWorldNode,
   PascalWaterNode,
 ])

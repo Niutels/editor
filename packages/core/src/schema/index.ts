@@ -83,6 +83,7 @@ export {
   isLowProfileItemSurface,
   LOW_PROFILE_ITEM_SURFACE_MAX_HEIGHT,
 } from './nodes/item'
+export { LandrushLayoutNode } from './nodes/landrush-layout'
 export { LandrushWorldNode } from './nodes/landrush-world'
 export { LevelNode } from './nodes/level'
 export { PascalWaterNode } from './nodes/pascal-water'

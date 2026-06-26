@@ -226,6 +226,8 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
   }, [])
 
   useFrame((_, delta) => {
+    if (node.visible === false || document.visibilityState === 'hidden') return
+
     const water = (waterMaterial as LandrushWaterSurfaceMaterial).userData?.landrushWater
     const safeDelta = Math.min(Math.max(delta, 0), 0.08)
     if (!water) return

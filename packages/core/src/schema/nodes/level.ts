@@ -6,6 +6,7 @@ import { ColumnNode } from './column'
 import { FenceNode } from './fence'
 import { GuideNode } from './guide'
 import { ItemNode } from './item'
+import { LandrushLayoutNode } from './landrush-layout'
 import { LandrushWorldNode } from './landrush-world'
 import { PascalWaterNode } from './pascal-water'
 import { RoofNode } from './roof'
@@ -36,6 +37,7 @@ export const LevelNode = BaseNode.extend({
         GuideNode.shape.id,
         SpawnNode.shape.id,
         ShelfNode.shape.id,
+        LandrushLayoutNode.shape.id,
         LandrushWorldNode.shape.id,
         PascalWaterNode.shape.id,
       ]),

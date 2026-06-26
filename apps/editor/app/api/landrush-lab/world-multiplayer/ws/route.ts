@@ -26,11 +26,31 @@ type ParcelOwnership = {
   worldId: string
 }
 
+type BuildNodeSnapshot = Record<string, unknown> & {
+  id: string
+  parentId?: string | null
+  type: string
+}
+
+type ParcelBuildNodesSnapshot = {
+  nodes: BuildNodeSnapshot[]
+  parcelId: string
+  updatedAt: number
+  updatedBy: string
+  worldId: string
+}
+
 type ClientMessage =
   | { parcelId: string; type: 'claim-parcel'; worldId: string }
   | { player: PlayerSnapshot; roomId?: string; type: 'join' }
   | { player: PlayerSnapshot; type: 'state' }
   | { sentAt?: number; type: 'heartbeat' }
+  | {
+      nodes: unknown[]
+      parcelId: string
+      type: 'sync-parcel-build-nodes'
+      worldId: string
+    }
   | { type: 'leave' }
   | { roomId?: string; type: 'watch' }
   | { roomId?: string; type: 'watch-parcels'; worldId: string }
@@ -70,6 +90,19 @@ type ServerMessage =
       type: 'parcel-ownership-snapshot'
       worldId: string
     }
+  | {
+      builds: ParcelBuildNodesSnapshot[]
+      roomId: string
+      serverTime: number
+      type: 'parcel-build-nodes-snapshot'
+      worldId: string
+    }
+  | {
+      build: ParcelBuildNodesSnapshot
+      roomId: string
+      serverTime: number
+      type: 'parcel-build-nodes-synced' | 'parcel-build-nodes-updated'
+    }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
       playerCount?: number
@@ -105,6 +138,18 @@ type Room = {
 
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const HEARTBEAT_INTERVAL_MS = 3000
+const LANDRUSH_BUILD_NODE_TYPES = new Set([
+  'ceiling',
+  'column',
+  'elevator',
+  'fence',
+  'item',
+  'slab',
+  'stair',
+  'wall',
+])
+const MAX_BUILD_NODES_PER_PARCEL = 240
+const MAX_BUILD_SNAPSHOT_BYTES = 320_000
 const MAX_ROOM_ID_LENGTH = 80
 const MAX_ROOM_PEERS = 32
 const MIN_STATE_INTERVAL_MS = 40
@@ -113,6 +158,7 @@ const PEER_STALE_MS = 15_000
 // Instance-local room state. On scaled Vercel deployments, durable room state/pubsub belongs in
 // an external store because reconnects may land on another function instance.
 const rooms = new Map<string, Room>()
+const parcelBuildNodesByWorld = new Map<string, Map<string, ParcelBuildNodesSnapshot>>()
 const parcelOwnershipByWorld = new Map<string, Map<string, ParcelOwnership>>()
 
 export async function GET(request: Request) {
@@ -191,10 +237,51 @@ export async function GET(request: Request) {
       if (message.type === 'watch-parcels') {
         if (peer) peer.lastSeenAt = now
         if (watcher) watcher.lastSeenAt = now
+        const worldId = sanitizeParcelWorldId(message.worldId)
+        const roomId = sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
         sendParcelOwnershipSnapshot(
           socket,
-          sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId),
-          sanitizeParcelWorldId(message.worldId),
+          roomId,
+          worldId,
+        )
+        sendParcelBuildNodesSnapshot(socket, roomId, worldId)
+        return
+      }
+
+      if (message.type === 'sync-parcel-build-nodes') {
+        if (!peer) {
+          sendError(socket, 'not-joined', 'Join a room before syncing parcel build nodes')
+          return
+        }
+
+        peer.lastSeenAt = now
+        const synced = syncParcelBuildNodes(
+          peer,
+          message.worldId,
+          message.parcelId,
+          message.nodes,
+          now,
+        )
+        if (!synced.ok) {
+          sendError(socket, synced.code, synced.message)
+          return
+        }
+
+        send(socket, {
+          build: synced.build,
+          roomId: peer.roomId,
+          serverTime: now,
+          type: 'parcel-build-nodes-synced',
+        })
+        broadcast(
+          peer.roomId,
+          {
+            build: synced.build,
+            roomId: peer.roomId,
+            serverTime: now,
+            type: 'parcel-build-nodes-updated',
+          },
+          peer.id,
         )
         return
       }
@@ -465,6 +552,50 @@ function sendParcelOwnershipSnapshot(socket: WebSocket, roomId: string, worldId:
   })
 }
 
+function sendParcelBuildNodesSnapshot(socket: WebSocket, roomId: string, worldId: string) {
+  send(socket, {
+    builds: parcelBuildNodesSnapshot(worldId),
+    roomId,
+    serverTime: Date.now(),
+    type: 'parcel-build-nodes-snapshot',
+    worldId,
+  })
+}
+
+function syncParcelBuildNodes(
+  peer: Peer,
+  worldIdValue: string,
+  parcelIdValue: string,
+  nodesValue: unknown[],
+  now: number,
+):
+  | { build: ParcelBuildNodesSnapshot; ok: true }
+  | { code: string; message: string; ok: false } {
+  const worldId = sanitizeParcelWorldId(worldIdValue)
+  const parcelId = sanitizeParcelId(parcelIdValue)
+  const ownership = getParcelOwnerships(worldId).get(parcelId)
+  if (!ownership || ownership.owner.id !== peer.id) {
+    return {
+      code: 'parcel-build-not-owned',
+      message: 'Only the parcel owner can sync build nodes',
+      ok: false,
+    }
+  }
+
+  const nodes = sanitizeBuildNodes(nodesValue)
+  if (!nodes.ok) return nodes
+
+  const build = {
+    nodes: nodes.nodes,
+    parcelId,
+    updatedAt: now,
+    updatedBy: peer.id,
+    worldId,
+  }
+  getParcelBuildNodes(worldId).set(parcelId, build)
+  return { build, ok: true }
+}
+
 function sendParcelClaimRejected(
   socket: WebSocket,
   rejection: {
@@ -495,8 +626,23 @@ function getParcelOwnerships(worldId: string) {
   return ownerships
 }
 
+function getParcelBuildNodes(worldId: string) {
+  let builds = parcelBuildNodesByWorld.get(worldId)
+  if (!builds) {
+    builds = new Map()
+    parcelBuildNodesByWorld.set(worldId, builds)
+  }
+  return builds
+}
+
 function parcelOwnershipSnapshot(worldId: string) {
   return [...(parcelOwnershipByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
+    first.parcelId.localeCompare(second.parcelId),
+  )
+}
+
+function parcelBuildNodesSnapshot(worldId: string) {
+  return [...(parcelBuildNodesByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
     first.parcelId.localeCompare(second.parcelId),
   )
 }
@@ -559,6 +705,14 @@ function parseClientMessage(data: WebSocketData): ClientMessage | null {
     if (raw?.type === 'leave') return raw
     if (raw?.type === 'watch') return raw
     if (raw?.type === 'watch-parcels' && typeof raw.worldId === 'string') return raw
+    if (
+      raw?.type === 'sync-parcel-build-nodes' &&
+      typeof raw.worldId === 'string' &&
+      typeof raw.parcelId === 'string' &&
+      Array.isArray(raw.nodes)
+    ) {
+      return raw
+    }
     if (
       raw?.type === 'claim-parcel' &&
       typeof raw.worldId === 'string' &&
@@ -626,6 +780,64 @@ function sanitizeParcelId(value: string | undefined) {
 function sanitizeParcelKey(value: string | undefined, fallback: string, maxLength: number) {
   const normalized = typeof value === 'string' ? value.trim() : ''
   return (normalized || fallback).slice(0, maxLength).replace(/[^a-zA-Z0-9._:-]/g, '-')
+}
+
+function sanitizeBuildNodes(
+  value: unknown[],
+):
+  | { nodes: BuildNodeSnapshot[]; ok: true }
+  | { code: string; message: string; ok: false } {
+  if (!Array.isArray(value)) {
+    return { code: 'bad-build-nodes', message: 'Build nodes must be an array', ok: false }
+  }
+  if (value.length > MAX_BUILD_NODES_PER_PARCEL) {
+    return {
+      code: 'too-many-build-nodes',
+      message: 'Parcel build node limit exceeded',
+      ok: false,
+    }
+  }
+
+  const encoded = JSON.stringify(value)
+  if (encoded.length > MAX_BUILD_SNAPSHOT_BYTES) {
+    return {
+      code: 'build-snapshot-too-large',
+      message: 'Parcel build snapshot is too large',
+      ok: false,
+    }
+  }
+
+  const nodes: BuildNodeSnapshot[] = []
+  for (const candidate of value) {
+    const node = sanitizeBuildNode(candidate)
+    if (!node) continue
+    nodes.push(node)
+  }
+  nodes.sort((first, second) => first.id.localeCompare(second.id))
+  return { nodes, ok: true }
+}
+
+function sanitizeBuildNode(value: unknown): BuildNodeSnapshot | null {
+  if (!value || typeof value !== 'object') return null
+  const rawNode = value as Record<string, unknown>
+  const type = typeof rawNode.type === 'string' ? rawNode.type : ''
+  if (!LANDRUSH_BUILD_NODE_TYPES.has(type)) return null
+  const id = sanitizeBuildNodeId(rawNode.id)
+  if (!id) return null
+
+  const node = JSON.parse(JSON.stringify(rawNode)) as BuildNodeSnapshot
+  node.id = id
+  node.type = type
+  node.object = 'node'
+  node.visible = node.visible !== false
+  if (typeof node.parentId !== 'string') node.parentId = null
+  if (node.type === 'wall') node.children = []
+  return node
+}
+
+function sanitizeBuildNodeId(value: unknown) {
+  if (typeof value !== 'string') return ''
+  return value.trim().slice(0, 120).replace(/[^a-zA-Z0-9._:-]/g, '-')
 }
 
 function finiteNumber(value: number | undefined, fallback: number): number

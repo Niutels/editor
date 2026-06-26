@@ -28,12 +28,16 @@ import {
 import type { WaterLandSurface } from './water-scene'
 
 type GrassWaterLandLayersProps = {
+  bladeFadeBlockers?: readonly GrassFieldBlocker[]
   bladeSubdivisions?: number
+  bladeGrassBlockers?: readonly GrassFieldBlocker[]
+  bladeRenderOrder?: number
   fieldResolution?: number
   finalFieldResolution?: number
   finalSpawnResolution?: number
   grassBlockers?: readonly GrassFieldBlocker[]
   grassInteractionRef?: StylizedGrassInteractionRef
+  groundRenderOrder?: number
   profileMeasure?: ProfileMeasure
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
@@ -49,6 +53,8 @@ type GrassWaterLandLayersProps = {
 
 type GrassGroundLayerProps = {
   elevation: number
+  profileMeasure?: ProfileMeasure
+  renderOrder: number
   roads: readonly LandrushRoadSegment[]
   stylizedTexture: boolean
   stylizedTextureWorldSizeMeters: number
@@ -61,6 +67,7 @@ type GrassBladeLayerWebGPUProps = {
   elevation: number
   fieldTexture: Texture
   profileMeasure?: ProfileMeasure
+  renderOrder: number
   tuning: GrassBladeTuning
 }
 
@@ -83,18 +90,25 @@ const STYLIZED_DIRT_HEIGHT_TEXTURE_PATH =
 const DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 5
 const MIN_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 0.001
 const STYLIZED_GROUND_PREVIEW_TEXTURE_RESOLUTION = 512
-const STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION = 2048
+const STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION = 1024
 const STYLIZED_PATH_EDGE_FEATHER_METERS = 0.48
 const STYLIZED_PATH_EDGE_NOISE_METERS = 0.18
 const STYLIZED_PATH_WIDTH_SCALE = 1.08
+const GRASS_GROUND_RENDER_ORDER = 12
+const GRASS_BLADE_RENDER_ORDER = 13
+const STYLIZED_GRASS_BLADE_RENDER_ORDER = 14
 
 export function GrassWaterLandLayers({
+  bladeFadeBlockers = [],
   bladeSubdivisions,
+  bladeGrassBlockers,
+  bladeRenderOrder,
   fieldResolution,
   finalFieldResolution,
   finalSpawnResolution,
   grassBlockers = [],
   grassInteractionRef,
+  groundRenderOrder = GRASS_GROUND_RENDER_ORDER,
   profileMeasure,
   roads = EMPTY_GRASS_ROADS,
   showBlades = true,
@@ -117,6 +131,10 @@ export function GrassWaterLandLayers({
     ? (finalSpawnResolution ?? spawnPreviewResolution)
     : 2
   const groundTextureRoads = stylizedGroundTexture ? EMPTY_GRASS_ROADS : roads
+  const resolvedBladeGrassBlockers = bladeGrassBlockers ?? grassBlockers
+  const resolvedBladeRenderOrder =
+    bladeRenderOrder ??
+    (stylizedSceneLayout ? STYLIZED_GRASS_BLADE_RENDER_ORDER : GRASS_BLADE_RENDER_ORDER)
   const groundField = useMemo(
     () =>
       measure(profileMeasure, 'setup.grass.ground-field-texture', () =>
@@ -167,7 +185,7 @@ export function GrassWaterLandLayers({
     () =>
       measure(profileMeasure, 'setup.grass.spawn-field-texture', () =>
         createGrassFieldTexture({
-          blockers: grassBlockers,
+          blockers: resolvedBladeGrassBlockers,
           density: tuning.density,
           edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
           patchSize: tuning.patchSize,
@@ -182,8 +200,8 @@ export function GrassWaterLandLayers({
       ),
     [
       spawnPreviewResolution,
-      grassBlockers,
       profileMeasure,
+      resolvedBladeGrassBlockers,
       roads,
       surface.grassSurfacePoints,
       tuning.density,
@@ -193,7 +211,7 @@ export function GrassWaterLandLayers({
   )
   const asyncSpawnField = useAsyncGrassFieldTexture({
     alphaMode: 'density',
-    blockers: grassBlockers,
+    blockers: resolvedBladeGrassBlockers,
     density: tuning.density,
     edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
     patchSize: tuning.patchSize,
@@ -235,6 +253,8 @@ export function GrassWaterLandLayers({
       {showGround ? (
         <GrassGroundLayer
           elevation={surface.grassSurfaceElevation}
+          profileMeasure={profileMeasure}
+          renderOrder={groundRenderOrder}
           roads={roads}
           stylizedTexture={stylizedGroundTexture}
           stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
@@ -245,9 +265,12 @@ export function GrassWaterLandLayers({
         <Suspense fallback={null}>
           <StylizedSceneLandLayer
             elevation={surface.grassSurfaceElevation}
+            grassFadeBlockers={bladeFadeBlockers}
             grassInteractionRef={grassInteractionRef}
-            grassBlockers={grassBlockers}
+            grassBlockers={resolvedBladeGrassBlockers}
+            profileMeasure={profileMeasure}
             roads={roads}
+            grassRenderOrder={resolvedBladeRenderOrder}
             showBlades={showBlades}
             showTrees={showTrees}
             surfacePoints={surface.grassSurfacePoints}
@@ -261,6 +284,7 @@ export function GrassWaterLandLayers({
           elevation={surface.grassSurfaceElevation}
           fieldTexture={spawnField.texture}
           profileMeasure={profileMeasure}
+          renderOrder={resolvedBladeRenderOrder}
           tuning={tuning}
         />
       ) : null}
@@ -499,6 +523,8 @@ function smoothstep(edge0: number, edge1: number, value: number) {
 
 export function GrassGroundLayer({
   elevation,
+  profileMeasure,
+  renderOrder,
   roads,
   stylizedTexture,
   stylizedTextureWorldSizeMeters,
@@ -508,6 +534,8 @@ export function GrassGroundLayer({
     return (
       <StylizedGrassGroundLayer
         elevation={elevation}
+        profileMeasure={profileMeasure}
+        renderOrder={renderOrder}
         roads={roads}
         texture={texture}
         textureWorldSizeMeters={stylizedTextureWorldSizeMeters}
@@ -515,16 +543,27 @@ export function GrassGroundLayer({
     )
   }
 
-  return <GrassGroundMesh elevation={elevation} opacity={0.88} texture={texture} />
+  return (
+    <GrassGroundMesh
+      elevation={elevation}
+      opacity={0.88}
+      renderOrder={renderOrder}
+      texture={texture}
+    />
+  )
 }
 
 function StylizedGrassGroundLayer({
   elevation,
+  profileMeasure,
+  renderOrder,
   roads,
   texture,
   textureWorldSizeMeters,
 }: {
   elevation: number
+  profileMeasure?: ProfileMeasure
+  renderOrder: number
   roads: readonly LandrushRoadSegment[]
   texture: Texture
   textureWorldSizeMeters: number
@@ -535,18 +574,17 @@ function StylizedGrassGroundLayer({
     STYLIZED_DIRT_AO_TEXTURE_PATH,
     STYLIZED_DIRT_HEIGHT_TEXTURE_PATH,
   ]) as Texture[]
-  const groundTexture = useMemo(
-    () =>
-      createStylizedGrassGroundTexture({
-        dirtAOTexture: dirtAOTexture!,
-        dirtHeightTexture: dirtHeightTexture!,
-        dirtTexture: dirtTexture!,
-        fieldSize: GRASS_FIELD_PLANE_SIZE,
-        grassTexture: grassTexture!,
-        maskTexture: texture,
-        roads,
-        textureWorldSizeMeters,
-      }),
+  const textureOptions = useMemo(
+    () => ({
+      dirtAOTexture: dirtAOTexture!,
+      dirtHeightTexture: dirtHeightTexture!,
+      dirtTexture: dirtTexture!,
+      fieldSize: GRASS_FIELD_PLANE_SIZE,
+      grassTexture: grassTexture!,
+      maskTexture: texture,
+      roads,
+      textureWorldSizeMeters,
+    }),
     [
       dirtAOTexture,
       dirtHeightTexture,
@@ -557,28 +595,67 @@ function StylizedGrassGroundLayer({
       textureWorldSizeMeters,
     ],
   )
+  const previewGroundTexture = useMemo(
+    () =>
+      measure(profileMeasure, 'setup.grass.stylized-ground-preview-texture', () =>
+        createStylizedGrassGroundTexture(
+          textureOptions,
+          STYLIZED_GROUND_PREVIEW_TEXTURE_RESOLUTION,
+        ),
+      ),
+    [profileMeasure, textureOptions],
+  )
+  const finalGroundTexture = useDeferredStylizedGrassGroundTexture({
+    outputSize: STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION,
+    profileMeasure,
+    textureOptions,
+  })
+  const groundTexture = finalGroundTexture ?? previewGroundTexture
 
   useEffect(
     () => () => {
-      if (groundTexture.userData.landrushGeneratedStylizedGrassGround) groundTexture.dispose()
+      if (previewGroundTexture.userData.landrushGeneratedStylizedGrassGround) {
+        previewGroundTexture.dispose()
+      }
     },
-    [groundTexture],
+    [previewGroundTexture],
+  )
+  useEffect(
+    () => () => {
+      if (finalGroundTexture?.userData.landrushGeneratedStylizedGrassGround) {
+        finalGroundTexture.dispose()
+      }
+    },
+    [finalGroundTexture],
   )
 
-  return <GrassGroundMesh elevation={elevation} opacity={0.96} texture={groundTexture} />
+  return (
+    <GrassGroundMesh
+      elevation={elevation}
+      opacity={0.96}
+      renderOrder={renderOrder}
+      texture={groundTexture}
+    />
+  )
 }
 
 function GrassGroundMesh({
   elevation,
   opacity,
+  renderOrder,
   texture,
 }: {
   elevation: number
   opacity: number
+  renderOrder: number
   texture: Texture
 }) {
   return (
-    <mesh position={[0, elevation + 0.018, 0]} renderOrder={12} rotation={[-Math.PI / 2, 0, 0]}>
+    <mesh
+      position={[0, elevation + 0.018, 0]}
+      renderOrder={renderOrder}
+      rotation={[-Math.PI / 2, 0, 0]}
+    >
       <planeGeometry args={[GRASS_FIELD_PLANE_SIZE, GRASS_FIELD_PLANE_SIZE, 1, 1]} />
       <meshBasicMaterial
         depthWrite={false}
@@ -625,6 +702,127 @@ type TextureImageData = {
   width: number
 }
 
+type PreparedStylizedGroundTexture = {
+  dirtAOSource: TextureImageData
+  dirtHeightSource: TextureImageData
+  dirtSource: TextureImageData
+  fieldSize: number
+  grassSource: TextureImageData
+  maskData: Uint8Array
+  maskSize: number
+  pathGrid: StylizedPathGrid | null
+  textureRepeat: number
+}
+
+function useDeferredStylizedGrassGroundTexture({
+  outputSize,
+  profileMeasure,
+  textureOptions,
+}: {
+  outputSize: number
+  profileMeasure?: ProfileMeasure
+  textureOptions: StylizedGroundTextureOptions
+}) {
+  const [texture, setTexture] = useState<Texture | null>(null)
+
+  useEffect(() => {
+    setTexture(null)
+    if (typeof window === 'undefined') return
+
+    const prepared = measure(profileMeasure, 'setup.grass.stylized-ground-final-prepare', () =>
+      prepareStylizedGroundTexture(textureOptions),
+    )
+    if (!prepared) return
+
+    let cancelled = false
+    let frameId: number | null = null
+    let timeoutId: number | null = null
+    let row = 0
+    const canvas = document.createElement('canvas')
+    canvas.width = outputSize
+    canvas.height = outputSize
+    const context = canvas.getContext('2d')
+    if (!context) return
+    const output = context.createImageData(outputSize, outputSize)
+
+    const step = () => {
+      if (cancelled) return
+      const startedAt = performance.now()
+      while (row < outputSize && performance.now() - startedAt < 10) {
+        paintStylizedGroundTextureRow(output.data, row, outputSize, prepared)
+        row += 1
+      }
+      if (row < outputSize) {
+        frameId = window.requestAnimationFrame(step)
+        return
+      }
+
+      const generatedTexture = measure(
+        profileMeasure,
+        'setup.grass.stylized-ground-final-commit',
+        () => {
+          context.putImageData(output, 0, 0)
+          return createStylizedGroundTextureFromCanvas(canvas)
+        },
+      )
+      if (cancelled) {
+        generatedTexture.dispose()
+        return
+      }
+      setTexture(generatedTexture)
+    }
+
+    timeoutId = window.setTimeout(() => {
+      frameId = window.requestAnimationFrame(step)
+    }, 120)
+
+    return () => {
+      cancelled = true
+      if (frameId !== null) window.cancelAnimationFrame(frameId)
+      if (timeoutId !== null) window.clearTimeout(timeoutId)
+    }
+  }, [outputSize, profileMeasure, textureOptions])
+
+  return texture
+}
+
+function prepareStylizedGroundTexture({
+  dirtAOTexture,
+  dirtHeightTexture,
+  dirtTexture,
+  fieldSize,
+  grassTexture,
+  maskTexture,
+  roads,
+  textureWorldSizeMeters,
+}: StylizedGroundTextureOptions): PreparedStylizedGroundTexture | null {
+  if (typeof document === 'undefined') return null
+  const maskImage = maskTexture.image as
+    | { data?: Uint8Array; height?: number; width?: number }
+    | undefined
+  const maskData = maskImage?.data
+  const maskSize = maskImage?.width ?? 0
+  if (!maskData || maskSize <= 1 || maskImage?.height !== maskSize) return null
+
+  const grassSource = imageDataFromTexture(grassTexture)
+  const dirtSource = imageDataFromTexture(dirtTexture)
+  const dirtAOSource = imageDataFromTexture(dirtAOTexture)
+  const dirtHeightSource = imageDataFromTexture(dirtHeightTexture)
+  if (!grassSource || !dirtSource || !dirtAOSource || !dirtHeightSource) return null
+
+  return {
+    dirtAOSource,
+    dirtHeightSource,
+    dirtSource,
+    fieldSize,
+    grassSource,
+    maskData,
+    maskSize,
+    pathGrid: createStylizedPathGrid(roads, fieldSize),
+    textureRepeat: fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters),
+  }
+}
+
 function createStylizedGrassGroundTexture({
   dirtAOTexture,
   dirtHeightTexture,
@@ -634,7 +832,7 @@ function createStylizedGrassGroundTexture({
   maskTexture,
   roads,
   textureWorldSizeMeters,
-}: StylizedGroundTextureOptions): Texture {
+}: StylizedGroundTextureOptions, outputSizeOverride?: number): Texture {
   if (typeof document === 'undefined') return maskTexture
   const maskImage = maskTexture.image as
     | { data?: Uint8Array; height?: number; width?: number }
@@ -650,7 +848,7 @@ function createStylizedGrassGroundTexture({
   if (!grassSource || !dirtSource || !dirtAOSource || !dirtHeightSource) return maskTexture
   const pathGrid = createStylizedPathGrid(roads, fieldSize)
   const textureRepeat = fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters)
-  const outputSize = stylizedGroundTextureOutputSize(maskSize)
+  const outputSize = outputSizeOverride ?? stylizedGroundTextureOutputSize(maskSize)
 
   const canvas = document.createElement('canvas')
   canvas.width = outputSize
@@ -666,7 +864,15 @@ function createStylizedGrassGroundTexture({
       const v = y / (outputSize - 1)
       const mask = sampleMaskRgba(maskData, maskSize, u, v)
       const alpha = mask[3]
-      if (alpha <= 0) continue
+      if (alpha <= 0) {
+        const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, 0, 0)
+        const color = stylizedGrassGroundColor(rawGrass, [128, 164, 82], u, v)
+        output.data[index] = byte255(color[0])
+        output.data[index + 1] = byte255(color[1])
+        output.data[index + 2] = byte255(color[2])
+        output.data[index + 3] = 0
+        continue
+      }
 
       const worldPoint = {
         x: (u - 0.5) * fieldSize,
@@ -715,6 +921,100 @@ function createStylizedGrassGroundTexture({
   }
 
   context.putImageData(output, 0, 0)
+  const texture = new CanvasTexture(canvas)
+  texture.colorSpace = SRGBColorSpace
+  texture.flipY = true
+  texture.magFilter = LinearFilter
+  texture.minFilter = LinearMipmapLinearFilter
+  texture.wrapS = ClampToEdgeWrapping
+  texture.wrapT = ClampToEdgeWrapping
+  texture.generateMipmaps = true
+  texture.userData.landrushGeneratedStylizedGrassGround = true
+  texture.needsUpdate = true
+  return texture
+}
+
+function paintStylizedGroundTextureRow(
+  output: Uint8ClampedArray,
+  y: number,
+  outputSize: number,
+  prepared: PreparedStylizedGroundTexture,
+) {
+  const {
+    dirtAOSource,
+    dirtHeightSource,
+    dirtSource,
+    fieldSize,
+    grassSource,
+    maskData,
+    maskSize,
+    pathGrid,
+    textureRepeat,
+  } = prepared
+
+  for (let x = 0; x < outputSize; x += 1) {
+    const index = (y * outputSize + x) * 4
+    const u = x / (outputSize - 1)
+    const v = y / (outputSize - 1)
+    const mask = sampleMaskRgba(maskData, maskSize, u, v)
+    const alpha = mask[3]
+    if (alpha <= 0) {
+      const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, 0, 0)
+      const color = stylizedGrassGroundColor(rawGrass, [128, 164, 82], u, v)
+      output[index] = byte255(color[0])
+      output[index + 1] = byte255(color[1])
+      output[index + 2] = byte255(color[2])
+      output[index + 3] = 0
+      continue
+    }
+
+    const worldPoint = {
+      x: (u - 0.5) * fieldSize,
+      z: (v - 0.5) * fieldSize,
+    }
+    const warpX = (stylizedGroundNoise(u * 7.1 + 2.4, v * 7.1 - 1.7) - 0.5) * 0.045
+    const warpY = (stylizedGroundNoise(u * 6.4 - 4.1, v * 6.4 + 5.9) - 0.5) * 0.045
+    const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, warpX, warpY)
+    const grassColor = stylizedGrassGroundColor(rawGrass, [mask[0], mask[1], mask[2]], u, v)
+    const pathWeight = stylizedPathWeight(worldPoint, pathGrid, u, v)
+    let color = grassColor
+
+    if (pathWeight > 0.001) {
+      const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.028
+      const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.028
+      const rawDirt = sampleRepeatedRgb(dirtSource, u, v, textureRepeat, dirtWarpX, dirtWarpY)
+      const dirtAO = sampleRepeatedChannel(
+        dirtAOSource,
+        u,
+        v,
+        textureRepeat,
+        dirtWarpX,
+        dirtWarpY,
+      )
+      const dirtHeight = sampleRepeatedChannel(
+        dirtHeightSource,
+        u,
+        v,
+        textureRepeat,
+        dirtWarpX,
+        dirtWarpY,
+      )
+      const dirtColor = stylizedDirtGroundColor(rawDirt, dirtAO, dirtHeight, u, v)
+      color = mixRgbBytes(
+        grassColor,
+        dirtColor,
+        stylizedHeightAdjustedPathWeight(pathWeight, dirtHeight),
+      )
+    }
+
+    output[index] = byte255(color[0])
+    output[index + 1] = byte255(color[1])
+    output[index + 2] = byte255(color[2])
+    output[index + 3] = alpha
+  }
+}
+
+function createStylizedGroundTextureFromCanvas(canvas: HTMLCanvasElement) {
   const texture = new CanvasTexture(canvas)
   texture.colorSpace = SRGBColorSpace
   texture.flipY = true
@@ -1063,6 +1363,7 @@ export function GrassBladeLayerWebGPU({
   elevation,
   fieldTexture,
   profileMeasure,
+  renderOrder,
   tuning,
 }: GrassBladeLayerWebGPUProps) {
   const bladeGeometry = useMemo(
@@ -1102,7 +1403,7 @@ export function GrassBladeLayerWebGPU({
       frustumCulled={false}
       geometry={bladeGeometry}
       position={[0, elevation + 0.02, 0]}
-      renderOrder={13}
+      renderOrder={renderOrder}
     >
       <meshBasicMaterial
         depthWrite={false}

@@ -14,6 +14,7 @@ export type {
   GridEvent,
   GuideEvent,
   ItemEvent,
+  LandrushLayoutEvent,
   LandrushWorldEvent,
   LevelEvent,
   NodeEvent,

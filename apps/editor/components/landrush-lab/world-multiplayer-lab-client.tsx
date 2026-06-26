@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  type AnyNode,
   type LandrushWorldNode,
   LandrushWorldNode as LandrushWorldNodeSchema,
   useScene,
@@ -94,6 +95,14 @@ export type ParcelClaimError = {
   worldId?: string
 }
 
+export type ParcelBuildNodesSnapshot = {
+  nodes: AnyNode[]
+  parcelId: string
+  updatedAt: number
+  updatedBy: string
+  worldId: string
+}
+
 export type ConnectionStatus = 'connected' | 'connecting' | 'offline' | 'reconnecting'
 
 type ServerMessage =
@@ -134,6 +143,19 @@ type ServerMessage =
       serverTime: number
       type: 'parcel-ownership-snapshot'
       worldId: string
+    }
+  | {
+      builds: ParcelBuildNodesSnapshot[]
+      roomId: string
+      serverTime: number
+      type: 'parcel-build-nodes-snapshot'
+      worldId: string
+    }
+  | {
+      build: ParcelBuildNodesSnapshot
+      roomId: string
+      serverTime: number
+      type: 'parcel-build-nodes-synced' | 'parcel-build-nodes-updated'
     }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
@@ -2447,7 +2469,11 @@ export function useLandrushWorldMultiplayer({
   const [parcelOwnershipMap, setParcelOwnershipMap] = useState<Map<string, ParcelOwnership>>(
     () => new Map(),
   )
+  const [parcelBuildNodeMap, setParcelBuildNodeMap] = useState<
+    Map<string, ParcelBuildNodesSnapshot>
+  >(() => new Map())
   const parcelOwnershipMapRef = useRef(parcelOwnershipMap)
+  const parcelBuildNodeMapRef = useRef(parcelBuildNodeMap)
   const remotePlayers = useMemo(
     () =>
       [...remotePlayerMap.values()].sort((first, second) => first.name.localeCompare(second.name)),
@@ -2460,10 +2486,21 @@ export function useLandrushWorldMultiplayer({
       ),
     [parcelOwnershipMap],
   )
+  const parcelBuildNodes = useMemo(
+    () =>
+      [...parcelBuildNodeMap.values()].sort((first, second) =>
+        first.parcelId.localeCompare(second.parcelId),
+      ),
+    [parcelBuildNodeMap],
+  )
 
   useEffect(() => {
     parcelOwnershipMapRef.current = parcelOwnershipMap
   }, [parcelOwnershipMap])
+
+  useEffect(() => {
+    parcelBuildNodeMapRef.current = parcelBuildNodeMap
+  }, [parcelBuildNodeMap])
 
   const sendMessage = useCallback((message: unknown, socket = socketRef.current) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return
@@ -2516,12 +2553,45 @@ export function useLandrushWorldMultiplayer({
       if (watchedParcelWorldIdRef.current !== worldId) {
         watchedParcelWorldIdRef.current = worldId
         const nextOwnershipMap = new Map<string, ParcelOwnership>()
+        const nextBuildNodeMap = new Map<string, ParcelBuildNodesSnapshot>()
         parcelOwnershipMapRef.current = nextOwnershipMap
+        parcelBuildNodeMapRef.current = nextBuildNodeMap
         setParcelOwnershipMap(nextOwnershipMap)
+        setParcelBuildNodeMap(nextBuildNodeMap)
       }
       sendMessage({ roomId, type: 'watch-parcels', worldId })
     },
     [roomId, sendMessage],
+  )
+
+  const syncParcelBuildNodes = useCallback(
+    (worldId: string, parcelId: string, nodes: readonly AnyNode[]) => {
+      watchedParcelWorldIdRef.current = worldId
+      if (!enabled) {
+        const build = {
+          nodes: [...nodes],
+          parcelId,
+          updatedAt: Date.now(),
+          updatedBy: localProfile.id,
+          worldId,
+        } satisfies ParcelBuildNodesSnapshot
+        const nextBuildNodeMap = new Map(parcelBuildNodeMapRef.current)
+        nextBuildNodeMap.set(parcelId, build)
+        parcelBuildNodeMapRef.current = nextBuildNodeMap
+        setParcelBuildNodeMap(nextBuildNodeMap)
+        return true
+      }
+
+      const sent = sendMessage({ nodes, parcelId, type: 'sync-parcel-build-nodes', worldId })
+      if (!sent) {
+        setConnection((current) => ({
+          ...current,
+          lastError: 'Connect before syncing build nodes',
+        }))
+      }
+      return Boolean(sent)
+    },
+    [enabled, localProfile.id, sendMessage],
   )
 
   const claimParcel = useCallback(
@@ -2588,6 +2658,7 @@ export function useLandrushWorldMultiplayer({
       setStatus(enabled ? 'connecting' : 'offline')
       setRemotePlayerMap(new Map())
       setParcelClaimError(null)
+      setParcelBuildNodeMap(new Map())
       setParcelOwnershipMap(new Map())
       setConnection(createConnectionDetails())
       return
@@ -2710,6 +2781,27 @@ export function useLandrushWorldMultiplayer({
           return
         }
 
+        if (message.type === 'parcel-build-nodes-snapshot') {
+          if (message.worldId !== watchedParcelWorldIdRef.current) return
+          setParcelBuildNodeMap(
+            new Map(message.builds.map((build) => [build.parcelId, build])),
+          )
+          return
+        }
+
+        if (
+          message.type === 'parcel-build-nodes-synced' ||
+          message.type === 'parcel-build-nodes-updated'
+        ) {
+          if (message.build.worldId !== watchedParcelWorldIdRef.current) return
+          setParcelBuildNodeMap((current) => {
+            const next = new Map(current)
+            next.set(message.build.parcelId, message.build)
+            return next
+          })
+          return
+        }
+
         if (message.type === 'room-state') {
           setConnection((current) => ({
             ...current,
@@ -2810,10 +2902,12 @@ export function useLandrushWorldMultiplayer({
   return {
     claimParcel,
     connection,
+    parcelBuildNodes,
     parcelClaimError,
     parcelOwnerships,
     publishLocalPlayer,
     remotePlayers,
+    syncParcelBuildNodes,
     status,
     watchParcelWorld,
   }
@@ -3360,6 +3454,23 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       return message
     }
     if (
+      message?.type === 'parcel-build-nodes-snapshot' &&
+      typeof message.roomId === 'string' &&
+      typeof message.worldId === 'string' &&
+      Array.isArray(message.builds) &&
+      message.builds.every(isParcelBuildNodesSnapshot)
+    ) {
+      return message
+    }
+    if (
+      (message?.type === 'parcel-build-nodes-synced' ||
+        message?.type === 'parcel-build-nodes-updated') &&
+      typeof message.roomId === 'string' &&
+      isParcelBuildNodesSnapshot(message.build)
+    ) {
+      return message
+    }
+    if (
       (message?.type === 'parcel-owned' || message?.type === 'parcel-claim-result') &&
       typeof message.roomId === 'string' &&
       isParcelOwnership(message.ownership)
@@ -3404,6 +3515,23 @@ function isParcelOwnership(value: unknown): value is ParcelOwnership {
     typeof ownership.owner.name === 'string' &&
     typeof ownership.owner.color === 'string'
   )
+}
+
+function isParcelBuildNodesSnapshot(value: unknown): value is ParcelBuildNodesSnapshot {
+  const build = value as ParcelBuildNodesSnapshot
+  return (
+    typeof build?.parcelId === 'string' &&
+    typeof build.updatedAt === 'number' &&
+    typeof build.updatedBy === 'string' &&
+    typeof build.worldId === 'string' &&
+    Array.isArray(build.nodes) &&
+    build.nodes.every(isSyncedBuildNode)
+  )
+}
+
+function isSyncedBuildNode(value: unknown): value is AnyNode {
+  const node = value as AnyNode
+  return typeof node?.id === 'string' && typeof node.type === 'string'
 }
 
 function isPlayerSnapshot(value: unknown): value is MultiplayerPlayerSnapshot {

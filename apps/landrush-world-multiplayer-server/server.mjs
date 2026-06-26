@@ -4,6 +4,18 @@ import { WebSocket, WebSocketServer } from 'ws'
 
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const HEARTBEAT_INTERVAL_MS = 3000
+const LANDRUSH_BUILD_NODE_TYPES = new Set([
+  'ceiling',
+  'column',
+  'elevator',
+  'fence',
+  'item',
+  'slab',
+  'stair',
+  'wall',
+])
+const MAX_BUILD_NODES_PER_PARCEL = 240
+const MAX_BUILD_SNAPSHOT_BYTES = 320_000
 const MAX_ROOM_ID_LENGTH = 80
 const MAX_ROOM_PEERS = 32
 const MIN_STATE_INTERVAL_MS = 40
@@ -12,6 +24,7 @@ const PORT = Number(process.env.PORT ?? process.env.LANDRUSH_WORLD_MULTIPLAYER_W
 const WS_PATH = process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PATH ?? '/api/landrush-lab/world-multiplayer/ws'
 
 const rooms = new Map()
+const parcelBuildNodesByWorld = new Map()
 const parcelOwnershipByWorld = new Map()
 const startedAt = Date.now()
 
@@ -150,10 +163,51 @@ wss.on('connection', (socket) => {
     if (message.type === 'watch-parcels') {
       if (peer) peer.lastSeenAt = now
       if (watcher) watcher.lastSeenAt = now
+      const worldId = sanitizeParcelWorldId(message.worldId)
+      const roomId = sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
       sendParcelOwnershipSnapshot(
         socket,
-        sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId),
-        sanitizeParcelWorldId(message.worldId),
+        roomId,
+        worldId,
+      )
+      sendParcelBuildNodesSnapshot(socket, roomId, worldId)
+      return
+    }
+
+    if (message.type === 'sync-parcel-build-nodes') {
+      if (!peer) {
+        sendError(socket, 'not-joined', 'Join a room before syncing parcel build nodes')
+        return
+      }
+
+      peer.lastSeenAt = now
+      const synced = syncParcelBuildNodes(
+        peer,
+        message.worldId,
+        message.parcelId,
+        message.nodes,
+        now,
+      )
+      if (!synced.ok) {
+        sendError(socket, synced.code, synced.message)
+        return
+      }
+
+      send(socket, {
+        build: synced.build,
+        roomId: peer.roomId,
+        serverTime: now,
+        type: 'parcel-build-nodes-synced',
+      })
+      broadcast(
+        peer.roomId,
+        {
+          build: synced.build,
+          roomId: peer.roomId,
+          serverTime: now,
+          type: 'parcel-build-nodes-updated',
+        },
+        peer.id,
       )
       return
     }
@@ -416,6 +470,57 @@ function sendParcelOwnershipSnapshot(socket, roomId, worldId) {
   })
 }
 
+function sendParcelBuildNodesSnapshot(socket, roomId, worldId) {
+  send(socket, {
+    builds: parcelBuildNodesSnapshot(worldId),
+    roomId,
+    serverTime: Date.now(),
+    type: 'parcel-build-nodes-snapshot',
+    worldId,
+  })
+}
+
+function syncParcelBuildNodes(peer, worldIdValue, parcelIdValue, nodesValue, now) {
+  const worldId = sanitizeParcelWorldId(worldIdValue)
+  const parcelId = sanitizeParcelId(parcelIdValue)
+  const ownership = getParcelOwnerships(worldId).get(parcelId)
+  if (!ownership || ownership.owner.id !== peer.id) {
+    return {
+      code: 'parcel-build-not-owned',
+      message: 'Only the parcel owner can sync build nodes',
+      ok: false,
+    }
+  }
+
+  const nodes = sanitizeBuildNodes(nodesValue)
+  if (!nodes.ok) return nodes
+
+  const build = {
+    nodes: nodes.nodes,
+    parcelId,
+    updatedAt: now,
+    updatedBy: peer.id,
+    worldId,
+  }
+  getParcelBuildNodes(worldId).set(parcelId, build)
+  return { build, ok: true }
+}
+
+function getParcelBuildNodes(worldId) {
+  let builds = parcelBuildNodesByWorld.get(worldId)
+  if (!builds) {
+    builds = new Map()
+    parcelBuildNodesByWorld.set(worldId, builds)
+  }
+  return builds
+}
+
+function parcelBuildNodesSnapshot(worldId) {
+  return [...(parcelBuildNodesByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
+    first.parcelId.localeCompare(second.parcelId),
+  )
+}
+
 function sendParcelClaimRejected(socket, rejection) {
   send(socket, {
     code: rejection.code,
@@ -516,6 +621,14 @@ function parseClientMessage(data) {
     if (raw?.type === 'watch') return raw
     if (raw?.type === 'watch-parcels' && typeof raw.worldId === 'string') return raw
     if (
+      raw?.type === 'sync-parcel-build-nodes' &&
+      typeof raw.worldId === 'string' &&
+      typeof raw.parcelId === 'string' &&
+      Array.isArray(raw.nodes)
+    ) {
+      return raw
+    }
+    if (
       raw?.type === 'claim-parcel' &&
       typeof raw.worldId === 'string' &&
       typeof raw.parcelId === 'string'
@@ -581,6 +694,59 @@ function sanitizeParcelId(value) {
 function sanitizeParcelKey(value, fallback, maxLength) {
   const normalized = typeof value === 'string' ? value.trim() : ''
   return (normalized || fallback).slice(0, maxLength).replace(/[^a-zA-Z0-9._:-]/g, '-')
+}
+
+function sanitizeBuildNodes(value) {
+  if (!Array.isArray(value)) {
+    return { code: 'bad-build-nodes', message: 'Build nodes must be an array', ok: false }
+  }
+  if (value.length > MAX_BUILD_NODES_PER_PARCEL) {
+    return {
+      code: 'too-many-build-nodes',
+      message: 'Parcel build node limit exceeded',
+      ok: false,
+    }
+  }
+
+  const encoded = JSON.stringify(value)
+  if (encoded.length > MAX_BUILD_SNAPSHOT_BYTES) {
+    return {
+      code: 'build-snapshot-too-large',
+      message: 'Parcel build snapshot is too large',
+      ok: false,
+    }
+  }
+
+  const nodes = []
+  for (const candidate of value) {
+    const node = sanitizeBuildNode(candidate)
+    if (!node) continue
+    nodes.push(node)
+  }
+  nodes.sort((first, second) => first.id.localeCompare(second.id))
+  return { nodes, ok: true }
+}
+
+function sanitizeBuildNode(value) {
+  if (!value || typeof value !== 'object') return null
+  const type = typeof value.type === 'string' ? value.type : ''
+  if (!LANDRUSH_BUILD_NODE_TYPES.has(type)) return null
+  const id = sanitizeBuildNodeId(value.id)
+  if (!id) return null
+
+  const node = JSON.parse(JSON.stringify(value))
+  node.id = id
+  node.type = type
+  node.object = 'node'
+  node.visible = node.visible !== false
+  if (typeof node.parentId !== 'string') node.parentId = null
+  if (node.type === 'wall') node.children = []
+  return node
+}
+
+function sanitizeBuildNodeId(value) {
+  if (typeof value !== 'string') return ''
+  return value.trim().slice(0, 120).replace(/[^a-zA-Z0-9._:-]/g, '-')
 }
 
 function finiteNumber(value, fallback) {

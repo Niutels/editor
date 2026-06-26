@@ -162,7 +162,14 @@ function createGrassFieldData(
               patchOptions,
               blockers,
             )
-            if (!sample) continue
+            if (!sample) {
+              const transparentGrassColor = GRASS_COLORS[1]
+              bytes[index] = byte(transparentGrassColor[0] / 255)
+              bytes[index + 1] = byte(transparentGrassColor[1] / 255)
+              bytes[index + 2] = byte(transparentGrassColor[2] / 255)
+              bytes[index + 3] = 0
+              continue
+            }
 
             bytes[index] = byte(sample.color[0] / 255)
             bytes[index + 1] = byte(sample.color[1] / 255)

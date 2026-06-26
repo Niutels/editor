@@ -50,6 +50,7 @@ const DRAFT_ANGLE_ARC_Y = WALL_HEIGHT + 0.012
 const DRAFT_ANGLE_ARC_MIN_RADIUS = 0.32
 const DRAFT_ANGLE_ARC_MAX_RADIUS = 0.72
 const DRAFT_ANGLE_ARC_SEGMENTS = 24
+const DRAFT_WALL_RENDER_ORDER = 1000
 
 type DraftAngleLabel = {
   id: string
@@ -539,7 +540,13 @@ export const WallTool: React.FC = () => {
   return (
     <group>
       <CursorSphere ref={cursorRef} />
-      <mesh layers={EDITOR_LAYER} ref={wallPreviewRef} renderOrder={1} visible={false}>
+      <mesh
+        frustumCulled={false}
+        layers={EDITOR_LAYER}
+        ref={wallPreviewRef}
+        renderOrder={DRAFT_WALL_RENDER_ORDER}
+        visible={false}
+      >
         <shapeGeometry />
         <meshBasicMaterial
           color="#818cf8"

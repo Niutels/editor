@@ -13,6 +13,7 @@ import type {
   FenceNode,
   GuideNode,
   ItemNode,
+  LandrushLayoutNode,
   LandrushWorldNode,
   LevelNode,
   PascalWaterNode,
@@ -88,6 +89,7 @@ export type DoorEvent = NodeEvent<DoorNode>
 export type ElevatorEvent = NodeEvent<ElevatorNode>
 export type ScanEvent = NodeEvent<ScanNode>
 export type GuideEvent = NodeEvent<GuideNode>
+export type LandrushLayoutEvent = NodeEvent<LandrushLayoutNode>
 export type LandrushWorldEvent = NodeEvent<LandrushWorldNode>
 export type PascalWaterEvent = NodeEvent<PascalWaterNode>
 export type BoxVentEvent = NodeEvent<BoxVentNode>
@@ -231,6 +233,7 @@ type EditorEvents = GridEvents &
   NodeEvents<'door', DoorEvent> &
   NodeEvents<'scan', ScanEvent> &
   NodeEvents<'guide', GuideEvent> &
+  NodeEvents<'landrush-layout', LandrushLayoutEvent> &
   NodeEvents<'landrush-world', LandrushWorldEvent> &
   NodeEvents<'pascal-water', PascalWaterEvent> &
   NodeEvents<'box-vent', BoxVentEvent> &
