@@ -34,7 +34,7 @@ jobs:
         run: touch .env.local
 
       - name: Build editor Landrush routes
-        run: bun run --cwd apps/editor build
+        run: bun run build
 
       - name: Checkout Landrush site
         uses: actions/checkout@v4
