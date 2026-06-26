@@ -14,7 +14,6 @@ import {
   screenUV,
   select,
   texture,
-  time,
   uniform,
   vec2,
   vec3,
@@ -316,8 +315,7 @@ function createLandrushWaterMaterialInternal(
       ripplesBreakupStart,
       ripplesBreakupEnd,
     )
-    const localTime = time.mul(windTimeFrequency).mul(wind.strength)
-    const rippleTime = localTime.mul(0.5)
+    const rippleTime = wind.localTime.mul(0.5)
     const baseRipple =
       ripplePhase === 'incoming'
         ? mix(
@@ -329,7 +327,8 @@ function createLandrushWaterMaterialInternal(
             .sub(rippleTime)
             .mul(ripplesSlopeFrequency)
         : shoreDepthField.sub(rippleTime).mul(ripplesSlopeFrequency)
-    const rippleIndex = baseRipple.floor()
+    const wrappedBaseRipple = baseRipple.add(1000)
+    const rippleIndex = wrappedBaseRipple.floor()
 
     const ripplesNoise = texture(
       noises.perlin,
@@ -337,20 +336,26 @@ function createLandrushWaterMaterialInternal(
     )
       .r.mul(ripplesNoiseStrength)
       .mul(ripplesBreakupMask)
-    const breakupNoise = texture(
+    const perlinBreakupNoise = texture(
       noises.perlin,
       positionWorld.xz
         .add(vec2(rippleIndex.mul(17.3), rippleIndex.mul(41.9)))
         .mul(ripplesBreakupFrequency),
     ).r
-    const breakupKeep = ripplesBreakupMask.mul(ripplesBreakupSize).sub(0.08).step(breakupNoise)
+    const cellBreakupNoise = hash(
+      positionWorld.xz
+        .mul(ripplesBreakupFrequency.mul(4))
+        .add(vec2(rippleIndex.mul(0.37), rippleIndex.mul(0.73)))
+        .floor(),
+    )
+    const breakupNoise = max(perlinBreakupNoise, cellBreakupNoise.mul(0.9))
+    const breakupKeep = breakupNoise.step(ripplesBreakupMask.mul(ripplesBreakupSize).sub(0.08))
 
-    const ripples = baseRipple
-      .mod(1)
+    const ripplesValue = wrappedBaseRipple
+      .fract()
       .sub(shoreDepthField.remap(0, 1, -0.3, 1).oneMinus())
       .add(ripplesNoise)
-
-    ripples.assign(ripplesRatio.remap(0, 1, -1, -0.4).step(ripples))
+    const ripples = ripplesRatio.remap(0, 1, -1, -0.4).step(ripplesValue)
 
     return ripples.mul(rippleMask).mul(breakupKeep)
   })
@@ -374,9 +379,8 @@ function createLandrushWaterMaterialInternal(
     const splash = splashesVoronoi.r
 
     const splashTimeRandom = hash(splashesVoronoi.b.mul(123456)).add(splashPerlin)
-    const localTime = time.mul(windTimeFrequency).mul(wind.strength)
-    const splashTime = localTime.mul(splashesTimeFrequency).add(splashTimeRandom)
-    splash.assign(splash.sub(splashTime).mod(1))
+    const splashTime = wind.localTime.mul(splashesTimeFrequency).add(splashTimeRandom)
+    splash.assign(splash.sub(splashTime).fract())
 
     const edgeMutliplier = splashesVoronoi.g.remapClamp(
       splashesEdgeAttenuationLow,
@@ -388,7 +392,7 @@ function createLandrushWaterMaterialInternal(
     splash.assign(splash.step(thickness).oneMinus())
 
     const splashVisibilityRandom = hash(splashesVoronoi.b.mul(654321))
-    const visible = splashVisibilityRandom.add(splashPerlin).mod(1)
+    const visible = splashVisibilityRandom.add(splashPerlin).fract()
     visible.assign(splashesRatio.step(visible))
     splash.assign(splash.mul(visible))
 

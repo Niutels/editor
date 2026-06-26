@@ -18,6 +18,7 @@ import {
   createGrassFieldTexture,
   createGrassFieldTextureFromData,
   GRASS_FIELD_PLANE_SIZE,
+  type GrassFieldBlocker,
 } from './grass-field-texture'
 import type { GrassBladeTuning } from './grass-material'
 import {
@@ -31,10 +32,12 @@ type GrassWaterLandLayersProps = {
   fieldResolution?: number
   finalFieldResolution?: number
   finalSpawnResolution?: number
+  grassBlockers?: readonly GrassFieldBlocker[]
   grassInteractionRef?: StylizedGrassInteractionRef
   profileMeasure?: ProfileMeasure
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
+  showGround?: boolean
   showTrees?: boolean
   spawnResolution?: number
   stylizedGroundTexture?: boolean
@@ -90,10 +93,12 @@ export function GrassWaterLandLayers({
   fieldResolution,
   finalFieldResolution,
   finalSpawnResolution,
+  grassBlockers = [],
   grassInteractionRef,
   profileMeasure,
   roads = EMPTY_GRASS_ROADS,
   showBlades = true,
+  showGround = true,
   showTrees = true,
   spawnResolution,
   stylizedGroundTexture = false,
@@ -102,16 +107,22 @@ export function GrassWaterLandLayers({
   surface,
   tuning,
 }: GrassWaterLandLayersProps) {
-  const groundResolution = fieldResolution
-  const groundFinalResolution = finalFieldResolution ?? fieldResolution
-  const spawnPreviewResolution = spawnResolution ?? fieldResolution
-  const spawnFinalResolution = finalSpawnResolution ?? spawnPreviewResolution
+  const classicFoliageEnabled = !stylizedSceneLayout && (showBlades || showTrees)
+  const groundFieldNeeded = showGround || classicFoliageEnabled
+  const spawnFieldNeeded = classicFoliageEnabled
+  const groundResolution = groundFieldNeeded ? fieldResolution : 2
+  const groundFinalResolution = groundFieldNeeded ? (finalFieldResolution ?? fieldResolution) : 2
+  const spawnPreviewResolution = spawnFieldNeeded ? (spawnResolution ?? fieldResolution) : 2
+  const spawnFinalResolution = spawnFieldNeeded
+    ? (finalSpawnResolution ?? spawnPreviewResolution)
+    : 2
   const groundTextureRoads = stylizedGroundTexture ? EMPTY_GRASS_ROADS : roads
   const groundField = useMemo(
     () =>
       measure(profileMeasure, 'setup.grass.ground-field-texture', () =>
         createGrassFieldTexture({
           alphaMode: 'surface',
+          blockers: grassBlockers,
           density: tuning.density,
           edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
           patchSize: tuning.patchSize,
@@ -126,6 +137,7 @@ export function GrassWaterLandLayers({
       ),
     [
       groundResolution,
+      grassBlockers,
       groundTextureRoads,
       profileMeasure,
       surface.grassSurfacePoints,
@@ -136,6 +148,7 @@ export function GrassWaterLandLayers({
   )
   const asyncGroundField = useAsyncGrassFieldTexture({
     alphaMode: 'surface',
+    blockers: grassBlockers,
     density: tuning.density,
     edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
     patchSize: tuning.patchSize,
@@ -145,13 +158,16 @@ export function GrassWaterLandLayers({
     resolution: groundFinalResolution,
     roads: groundTextureRoads,
     shouldGenerate:
-      typeof groundFinalResolution === 'number' && groundFinalResolution !== groundResolution,
+      groundFieldNeeded &&
+      typeof groundFinalResolution === 'number' &&
+      groundFinalResolution !== groundResolution,
   })
   const renderedGroundField = asyncGroundField ?? groundField
   const spawnPreviewField = useMemo(
     () =>
       measure(profileMeasure, 'setup.grass.spawn-field-texture', () =>
         createGrassFieldTexture({
+          blockers: grassBlockers,
           density: tuning.density,
           edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
           patchSize: tuning.patchSize,
@@ -166,6 +182,7 @@ export function GrassWaterLandLayers({
       ),
     [
       spawnPreviewResolution,
+      grassBlockers,
       profileMeasure,
       roads,
       surface.grassSurfacePoints,
@@ -176,6 +193,7 @@ export function GrassWaterLandLayers({
   )
   const asyncSpawnField = useAsyncGrassFieldTexture({
     alphaMode: 'density',
+    blockers: grassBlockers,
     density: tuning.density,
     edgeFadeMeters: GRASS_WATER_EDGE_FADE_METERS,
     patchSize: tuning.patchSize,
@@ -185,11 +203,13 @@ export function GrassWaterLandLayers({
     resolution: spawnFinalResolution,
     roads,
     shouldGenerate:
-      typeof spawnFinalResolution === 'number' && spawnFinalResolution !== spawnPreviewResolution,
+      spawnFieldNeeded &&
+      typeof spawnFinalResolution === 'number' &&
+      spawnFinalResolution !== spawnPreviewResolution,
   })
   const spawnField = asyncSpawnField ?? spawnPreviewField
   const treeReferences = useMemo(() => {
-    if (!showTrees) return []
+    if (!showTrees || stylizedSceneLayout) return []
     return measure(profileMeasure, 'setup.grass.tree-references', () =>
       createGrassTextureTreeReferences({
         density: tuning.density,
@@ -198,25 +218,35 @@ export function GrassWaterLandLayers({
         fieldTexture: spawnField.texture,
       }),
     )
-  }, [profileMeasure, showTrees, spawnField.texture, surface.grassSurfaceElevation, tuning.density])
+  }, [
+    profileMeasure,
+    showTrees,
+    spawnField.texture,
+    stylizedSceneLayout,
+    surface.grassSurfaceElevation,
+    tuning.density,
+  ])
 
   useEffect(() => () => groundField.texture.dispose(), [groundField.texture])
   useEffect(() => () => spawnPreviewField.texture.dispose(), [spawnPreviewField.texture])
 
   return (
     <>
-      <GrassGroundLayer
-        elevation={surface.grassSurfaceElevation}
-        roads={roads}
-        stylizedTexture={stylizedGroundTexture}
-        stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
-        texture={renderedGroundField.texture}
-      />
+      {showGround ? (
+        <GrassGroundLayer
+          elevation={surface.grassSurfaceElevation}
+          roads={roads}
+          stylizedTexture={stylizedGroundTexture}
+          stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
+          texture={renderedGroundField.texture}
+        />
+      ) : null}
       {stylizedSceneLayout ? (
         <Suspense fallback={null}>
           <StylizedSceneLandLayer
             elevation={surface.grassSurfaceElevation}
             grassInteractionRef={grassInteractionRef}
+            grassBlockers={grassBlockers}
             roads={roads}
             showBlades={showBlades}
             showTrees={showTrees}
@@ -252,6 +282,7 @@ type GrassFieldTextureResult = ReturnType<typeof createGrassFieldTexture>
 
 function useAsyncGrassFieldTexture({
   alphaMode,
+  blockers,
   density,
   edgeFadeMeters,
   patchSize,
@@ -263,6 +294,7 @@ function useAsyncGrassFieldTexture({
   shouldGenerate,
 }: {
   alphaMode: 'density' | 'surface'
+  blockers: readonly GrassFieldBlocker[]
   density: number
   edgeFadeMeters: number
   patchSize: number
@@ -305,6 +337,10 @@ function useAsyncGrassFieldTexture({
     }
     worker.postMessage({
       alphaMode,
+      blockers: blockers.map((blocker) => ({
+        featherMeters: blocker.featherMeters,
+        points: blocker.points.map((point) => ({ x: point.x, z: point.z })),
+      })),
       density,
       edgeFadeMeters,
       patchSize,
@@ -324,6 +360,7 @@ function useAsyncGrassFieldTexture({
     }
   }, [
     alphaMode,
+    blockers,
     density,
     edgeFadeMeters,
     patchSize,

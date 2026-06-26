@@ -21,7 +21,7 @@ const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot.glb'
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
 const LANDRUSH_ROBOT_TARGET_HEIGHT = 1.82
 const LANDRUSH_ROBOT_IDLE_TIME_SCALE = 0.5
-const LANDRUSH_ROBOT_WALK_TIME_SCALE_RANGE = [0.55, 1.35] as const
+const LANDRUSH_ROBOT_WALK_TIME_SCALE = 0.88
 const LANDRUSH_ROBOT_RUN_TIME_SCALE_RANGE = [0.75, 1.45] as const
 const LANDRUSH_ROBOT_ANIMATION_PACE_RANGE = [0.2, 1.6] as const
 const LANDRUSH_ROBOT_CLIP_BLEND_RESPONSE = 8
@@ -515,12 +515,8 @@ function roundRobotAnimationValue(value: number) {
   return Math.round(value * 1000) / 1000
 }
 
-function resolveRobotWalkTimeScale(speed: number) {
-  return MathUtils.clamp(
-    speed / 4.4,
-    LANDRUSH_ROBOT_WALK_TIME_SCALE_RANGE[0],
-    LANDRUSH_ROBOT_WALK_TIME_SCALE_RANGE[1],
-  )
+function resolveRobotWalkTimeScale(_speed: number) {
+  return LANDRUSH_ROBOT_WALK_TIME_SCALE
 }
 
 function resolveRobotRunTimeScale(speed: number) {

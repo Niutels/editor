@@ -277,7 +277,8 @@ export function createLandrushWaterBodyMaterial(
     const ripplesBreakupMask = rippleBreakupDepth.smoothstep(ripplesBreakupStart, ripplesBreakupEnd)
     const rippleTime = wind.localTime.mul(0.5).add(timeOffset).add(waveSectorTimeOffsetNode())
     const baseRipple = shoreDepthField.sub(rippleTime).mul(ripplesSlopeFrequency)
-    const rippleIndex = baseRipple.floor()
+    const wrappedBaseRipple = baseRipple.add(1000)
+    const rippleIndex = wrappedBaseRipple.floor()
 
     const ripplesNoise = texture(
       noises.perlin,
@@ -300,14 +301,12 @@ export function createLandrushWaterBodyMaterial(
     const breakupNoise = max(perlinBreakupNoise, cellBreakupNoise.mul(0.9))
     const breakupKeep = breakupNoise.step(ripplesBreakupMask.mul(ripplesBreakupSize).sub(0.08))
 
-    const ripples = shoreDepthField
-      .sub(rippleTime)
-      .mul(ripplesSlopeFrequency)
-      .mod(1)
+    const ripples = wrappedBaseRipple
+      .fract()
       .sub(shoreDepthField.remap(0, 1, -0.3, 1).oneMinus())
       .add(ripplesNoise)
 
-    const threshold = ripplesRatio.remap(0, 1, -1, -0.4)
+    const threshold = ripplesRatio.remap(0, 1, -1, -0.12)
     const crest = threshold.step(ripples)
     const bodyDistance = ripples.sub(threshold).abs()
     const body = bodyDistance.smoothstep(softness, float(0))
@@ -352,7 +351,7 @@ export function createLandrushWaterBodyMaterial(
 
     const splashTimeRandom = hash(splashesVoronoi.b.mul(123456)).add(splashPerlin)
     const splashTime = wind.localTime.mul(splashesTimeFrequency).add(splashTimeRandom)
-    splash.assign(splash.sub(splashTime).mod(1))
+    splash.assign(splash.sub(splashTime).fract())
 
     const edgeMutliplier = splashesVoronoi.g.remapClamp(
       splashesEdgeAttenuationLow,
@@ -364,7 +363,7 @@ export function createLandrushWaterBodyMaterial(
     splash.assign(splash.step(thickness).oneMinus())
 
     const splashVisibilityRandom = hash(splashesVoronoi.b.mul(654321))
-    const visible = splashVisibilityRandom.add(splashPerlin).mod(1)
+    const visible = splashVisibilityRandom.add(splashPerlin).fract()
     visible.assign(splashesRatio.step(visible))
     splash.assign(splash.mul(visible))
 

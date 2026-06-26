@@ -3,15 +3,29 @@
 import {
   type LandrushWorldNode,
   LandrushWorldNode as LandrushWorldNodeSchema,
+  useScene,
 } from '@pascal-app/core'
+import { useEditor } from '@pascal-app/editor'
 import {
   LandrushRobot,
   type LandrushRobotAnimationState,
 } from '@pascal-app/nodes/landrush-world/robot'
-import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
-import { useFrame } from '@react-three/fiber'
+import { useViewer } from '@pascal-app/viewer'
+import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
+import { useFrame, useThree } from '@react-three/fiber'
+import {
+  Box,
+  DoorOpen,
+  Hammer,
+  Map as MapIcon,
+  MousePointer2,
+  Paintbrush,
+  Square,
+  X,
+} from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import {
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
   Suspense,
@@ -21,8 +35,27 @@ import {
   useRef,
   useState,
 } from 'react'
-import { type Camera, type Group, MathUtils, type Mesh, ShapeUtils, Vector2, Vector3 } from 'three'
+import {
+  type Camera,
+  Color,
+  type Group,
+  MathUtils,
+  type Mesh,
+  type MeshBasicMaterial,
+  Raycaster,
+  Shape,
+  ShapeUtils,
+  Vector2,
+  Vector3,
+} from 'three'
+import {
+  LANDRUSH_BUILDING_ID,
+  LANDRUSH_LEVEL_ID,
+  LANDRUSH_WORLD_ID,
+} from '@/components/landrush/pascal-landrush-scene'
 import type { LandrushPoint2 } from '@/components/landrush/types'
+import type { ParcelAllocationParcel, ParcelAllocationResult } from './parcel-allocation'
+import type { ParcelStreetNetwork } from './parcel-streets'
 import type { StylizedGrassInteraction, StylizedGrassPerfProbe } from './stylized-scene-land-layers'
 import type { WaterLandSurface } from './water-scene'
 import { WorldLabClient } from './world-lab-client'
@@ -33,13 +66,13 @@ declare global {
   }
 }
 
-type LocalPlayerProfile = {
+export type LocalPlayerProfile = {
   color: string
   id: string
   name: string
 }
 
-type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
+export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
   heading: number
   moving: boolean
   position: [number, number, number]
@@ -47,7 +80,21 @@ type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
   updatedAt: number
 }
 
-type ConnectionStatus = 'connected' | 'connecting' | 'offline' | 'reconnecting'
+export type ParcelOwnership = {
+  claimedAt: number
+  owner: LocalPlayerProfile
+  parcelId: string
+  worldId: string
+}
+
+export type ParcelClaimError = {
+  code: string
+  message: string
+  parcelId?: string
+  worldId?: string
+}
+
+export type ConnectionStatus = 'connected' | 'connecting' | 'offline' | 'reconnecting'
 
 type ServerMessage =
   | {
@@ -66,6 +113,28 @@ type ServerMessage =
       type: 'player-joined' | 'player-state'
     }
   | { id: string; reason?: string; roomId: string; serverTime: number; type: 'player-left' }
+  | {
+      ownership: ParcelOwnership
+      roomId: string
+      serverTime: number
+      type: 'parcel-claim-result' | 'parcel-owned'
+    }
+  | {
+      code: string
+      message: string
+      parcelId?: string
+      roomId?: string
+      serverTime: number
+      type: 'parcel-claim-rejected'
+      worldId?: string
+    }
+  | {
+      ownerships: ParcelOwnership[]
+      roomId: string
+      serverTime: number
+      type: 'parcel-ownership-snapshot'
+      worldId: string
+    }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
       playerCount?: number
@@ -76,7 +145,7 @@ type ServerMessage =
     }
   | { code: string; message: string; serverTime: number; type: 'error' }
 
-type MultiplayerConnectionDetails = {
+export type MultiplayerConnectionDetails = {
   connectionId: string | null
   heartbeatIntervalMs: number
   latencyMs: number | null
@@ -136,6 +205,23 @@ type MultiplayerPerfRunState = {
   status: 'done' | 'pending' | 'running'
 }
 
+type PascalBuildToolId = 'wall' | 'slab' | 'door' | 'window' | 'item'
+type LandrushBuildToolbarToolId = PascalBuildToolId | 'move' | 'paint'
+export type WorldMultiplayerBuildParcel = ParcelAllocationParcel
+export type WorldMultiplayerBuildContext = {
+  allocation: ParcelAllocationResult
+  parcel: ParcelAllocationParcel
+  parcelWorldId: string
+  streetNetwork: ParcelStreetNetwork | null
+  surface: WaterLandSurface
+}
+
+type WorldMultiplayerLabClientProps = {
+  buildModeExitRequest?: number
+  onBuildModeChange?: (context: WorldMultiplayerBuildContext | null) => void
+  showInlineBuildOverlay?: boolean
+}
+
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const PLAYER_STORAGE_KEY = 'landrush-lab-world-multiplayer-player'
 const MULTIPLAYER_PERF_DEFAULT_DURATION_MS = 9000
@@ -171,6 +257,16 @@ const ROBOT_CAMERA_TOUCH_PITCH_SPEED = 0.0031
 const ROBOT_CAMERA_TOUCH_YAW_SPEED = 0.0038 / 5
 const ROBOT_CAMERA_WHEEL_ZOOM_SPEED = 0.001
 const ROBOT_GRASS_INTERACTION_RADIUS = 2.7
+const PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
+const PARCEL_MAP_OVERLAY_HOVER_SCALE = 1.014
+const PARCEL_MAP_OVERLAY_RESPONSE = 12
+const PARCEL_MAP_BASE_COLOR = '#d3aa58'
+const PARCEL_MAP_HOVER_COLOR = '#f5cf78'
+const PARCEL_MAP_BASE_OPACITY = 0.19
+const PARCEL_MAP_HOVER_OPACITY = 0.34
+const PARCEL_MAP_CAMERA_POSITION = [0, 128, 0.01] as const
+const PARCEL_MAP_CAMERA_TARGET = [0, 0, 0] as const
+const PARCEL_MAP_CAMERA_ZOOM = 8.6
 const MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
 const REMOTE_POSITION_RESPONSE = 12
 const REMOTE_HEADING_RESPONSE = 14
@@ -180,12 +276,26 @@ const DEFAULT_MULTIPLAYER_WEBSOCKET_URL =
   'wss://landrush-world-multiplayer.onrender.com/api/landrush-lab/world-multiplayer/ws'
 const HOSTED_MULTIPLAYER_WEBSOCKET_URL =
   process.env.NEXT_PUBLIC_LANDRUSH_WORLD_MULTIPLAYER_WS_URL ?? DEFAULT_MULTIPLAYER_WEBSOCKET_URL
+const WORLD_MULTIPLAYER_CANVAS_STYLE = { touchAction: 'none' } satisfies CSSProperties
 
 const FALLBACK_LOCAL_PROFILE = {
   color: PLAYER_COLORS[0],
   id: 'local-pending',
   name: 'Player',
 } satisfies LocalPlayerProfile
+
+const LANDRUSH_BUILD_TOOLBAR_TOOLS = [
+  { icon: MousePointer2, id: 'move', label: 'Move' },
+  { icon: Hammer, id: 'wall', label: 'Wall' },
+  { icon: Square, id: 'slab', label: 'Slab' },
+  { icon: DoorOpen, id: 'door', label: 'Door' },
+  { icon: Box, id: 'item', label: 'Item' },
+  { icon: Paintbrush, id: 'paint', label: 'Paint' },
+] satisfies readonly {
+  icon: typeof Hammer
+  id: LandrushBuildToolbarToolId
+  label: string
+}[]
 
 function createEmptyRobotAnimationState(): LandrushRobotAnimationState {
   return {
@@ -239,6 +349,93 @@ function setMultiplayerDebugHandle(key: string, value: unknown) {
 function getMultiplayerDebugSurface() {
   const current = window.__LANDRUSH_WORLD_MULTIPLAYER_LAB__
   return current && typeof current === 'object' ? (current as Record<string, unknown>) : {}
+}
+
+function isLandrushBuildToolbarToolId(value: unknown): value is LandrushBuildToolbarToolId {
+  return (
+    value === 'move' ||
+    value === 'wall' ||
+    value === 'slab' ||
+    value === 'door' ||
+    value === 'window' ||
+    value === 'item' ||
+    value === 'paint'
+  )
+}
+
+function syncPascalLandrushBuildMode(parcelId: string, tool: PascalBuildToolId = 'wall') {
+  const editor = useEditor.getState()
+  const sceneStore = useScene.getState()
+  const viewer = useViewer.getState()
+
+  sceneStore.updateNode(
+    LANDRUSH_WORLD_ID as never,
+    {
+      focusParcelId: parcelId,
+      landrushMode: 'build',
+    } as never,
+  )
+  viewer.setSelection({
+    buildingId: LANDRUSH_BUILDING_ID as never,
+    levelId: LANDRUSH_LEVEL_ID as never,
+    selectedIds: [],
+    zoneId: null,
+  })
+  viewer.setCameraMode('perspective')
+  viewer.setShowGrid(false)
+
+  editor.setFirstPersonMode(false)
+  editor.setPreviewMode(false)
+  editor.setViewMode('3d')
+  applyPascalLandrushBuildTool(tool)
+}
+
+function leavePascalLandrushBuildMode() {
+  const editor = useEditor.getState()
+  const sceneStore = useScene.getState()
+
+  sceneStore.updateNode(
+    LANDRUSH_WORLD_ID as never,
+    {
+      focusParcelId: null,
+      landrushMode: 'walk',
+    } as never,
+  )
+  editor.setMode('select')
+  editor.setTool(null)
+}
+
+function applyPascalLandrushBuildTool(tool: LandrushBuildToolbarToolId) {
+  const editor = useEditor.getState()
+
+  editor.setFirstPersonMode(false)
+  editor.setPreviewMode(false)
+  editor.setViewMode('3d')
+
+  if (tool === 'move') {
+    editor.setMode('select')
+    editor.setTool(null)
+    return
+  }
+
+  if (tool === 'paint') {
+    editor.setMode('material-paint')
+    return
+  }
+
+  if (tool === 'item') {
+    editor.setPhase('furnish')
+    editor.setMode('build')
+    editor.setTool('item')
+    editor.setCatalogCategory('furniture')
+    return
+  }
+
+  editor.setPhase('structure')
+  editor.setStructureLayer('elements')
+  editor.setMode('build')
+  editor.setTool(tool)
+  editor.setCatalogCategory(null)
 }
 
 function useMultiplayerPerfRunProbe(perfRun: MultiplayerPerfRunOptions) {
@@ -325,6 +522,19 @@ function createMultiplayerPerfRunOptions(searchParams: { get: (key: string) => s
   return { durationMs, enabled, speed } satisfies MultiplayerPerfRunOptions
 }
 
+function isLayoutView(searchParams: { get: (key: string) => string | null }) {
+  const camera = searchParams.get('camera')
+  return (
+    searchParams.get('layout') === '1' ||
+    searchParams.get('topdown') === '1' ||
+    searchParams.get('observer') === '1' ||
+    searchParams.get('spectator') === '1' ||
+    camera === 'layout' ||
+    camera === 'topdown' ||
+    camera === 'overhead'
+  )
+}
+
 function summarizeMultiplayerPerfRun(
   state: MultiplayerPerfRunState,
   grassProbe: StylizedGrassPerfProbe,
@@ -393,39 +603,190 @@ function max(values: readonly number[]) {
   return values.length === 0 ? 0 : Math.max(...values)
 }
 
-export function WorldMultiplayerLabClient() {
+export function WorldMultiplayerLabClient({
+  buildModeExitRequest = 0,
+  onBuildModeChange,
+  showInlineBuildOverlay = true,
+}: WorldMultiplayerLabClientProps = {}) {
   const searchParams = useSearchParams()
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
   const mobileJoystickRef = useRef<MobileJoystickInput | null>(null)
+  const localMotionRef = useRef<RobotMotion | null>(null)
+  const restorePointerLockAfterMapRef = useRef(false)
+  const restorePointerLockAfterBuildRef = useRef(false)
+  const buildReturnMapViewRef = useRef(false)
+  const buildModeExitRequestRef = useRef(buildModeExitRequest)
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile>(FALLBACK_LOCAL_PROFILE)
+  const [mapView, setMapView] = useState(false)
+  const [buildContext, setBuildContext] = useState<WorldMultiplayerBuildContext | null>(null)
+  const activeEditorMode = useEditor((state) => state.mode)
+  const activeEditorTool = useEditor((state) => state.tool)
   const clean = searchParams.get('v') === 'clean' || searchParams.get('clean') === '1'
   const roomId = sanitizeRoomId(searchParams.get('room') ?? DEFAULT_ROOM_ID)
   const offline = searchParams.get('offline') === '1'
+  const layoutView = isLayoutView(searchParams)
+  const buildParcel = buildContext?.parcel ?? null
+  const effectiveMapView = layoutView || mapView || Boolean(buildContext)
+  const activeBuildToolbarTool = useMemo<LandrushBuildToolbarToolId>(() => {
+    if (activeEditorMode === 'material-paint') return 'paint'
+    if (activeEditorMode === 'select') return 'move'
+    return isLandrushBuildToolbarToolId(activeEditorTool) ? activeEditorTool : 'wall'
+  }, [activeEditorMode, activeEditorTool])
   const perfRun = useMemo(() => createMultiplayerPerfRunOptions(searchParams), [searchParams])
   const multiplayer = useLandrushWorldMultiplayer({
     enabled: !offline,
     localProfile,
     roomId,
+    spectator: layoutView,
   })
   useMultiplayerPerfRunProbe(perfRun)
+
+  const enterBuildMode = useCallback(
+    (context: WorldMultiplayerBuildContext) => {
+      buildReturnMapViewRef.current = mapView
+      restorePointerLockAfterBuildRef.current = !mapView && releaseWorldPointerLock()
+      setMapView(true)
+      setBuildContext(context)
+      syncPascalLandrushBuildMode(context.parcel.id)
+      onBuildModeChange?.(context)
+    },
+    [mapView, onBuildModeChange],
+  )
+
+  const leaveBuildMode = useCallback(() => {
+    const returnToMapView = buildReturnMapViewRef.current
+
+    setBuildContext(null)
+    leavePascalLandrushBuildMode()
+    onBuildModeChange?.(null)
+    if (!layoutView) setMapView(returnToMapView)
+    if (!layoutView && !returnToMapView && restorePointerLockAfterBuildRef.current) {
+      requestWorldPointerLock()
+    }
+
+    restorePointerLockAfterBuildRef.current = false
+    buildReturnMapViewRef.current = false
+  }, [layoutView, onBuildModeChange])
+
+  const selectBuildTool = useCallback((tool: LandrushBuildToolbarToolId) => {
+    applyPascalLandrushBuildTool(tool)
+  }, [])
+
   const renderSceneOverlay = useCallback(
-    ({ surface }: { surface: WaterLandSurface }) => (
+    ({
+      allocation,
+      parcelWorldId,
+      streetNetwork,
+      surface,
+    }: {
+      allocation: ParcelAllocationResult | null
+      parcelWorldId: string
+      streetNetwork: ParcelStreetNetwork | null
+      surface: WaterLandSurface
+    }) => (
       <LandrushWorldMultiplayerScene
+        allocation={allocation}
+        buildParcelId={buildParcel?.id ?? null}
+        claimParcel={multiplayer.claimParcel}
         grassInteractionRef={grassInteractionRef}
+        layoutView={layoutView}
+        localMotionRef={localMotionRef}
         localProfile={localProfile}
+        mapView={effectiveMapView}
         mobileJoystickRef={mobileJoystickRef}
+        onBuildParcel={enterBuildMode}
         onLocalPlayerChange={multiplayer.publishLocalPlayer}
+        parcelClaimError={multiplayer.parcelClaimError}
+        parcelOwnerships={multiplayer.parcelOwnerships}
+        parcelWorldId={parcelWorldId}
         perfRun={perfRun}
         remotePlayers={multiplayer.remotePlayers}
+        streetNetwork={streetNetwork}
         surface={surface}
+        watchParcelWorld={multiplayer.watchParcelWorld}
       />
     ),
-    [localProfile, multiplayer.publishLocalPlayer, multiplayer.remotePlayers, perfRun],
+    [
+      buildParcel?.id,
+      effectiveMapView,
+      enterBuildMode,
+      layoutView,
+      localProfile,
+      multiplayer.claimParcel,
+      multiplayer.parcelClaimError,
+      multiplayer.parcelOwnerships,
+      multiplayer.publishLocalPlayer,
+      multiplayer.remotePlayers,
+      multiplayer.watchParcelWorld,
+      perfRun,
+    ],
   )
 
   useEffect(() => {
     setLocalProfile(readLocalPlayerProfile())
   }, [])
+
+  useEffect(() => {
+    if (!buildContext) return
+    return () => leavePascalLandrushBuildMode()
+  }, [buildContext])
+
+  useEffect(() => {
+    if (buildModeExitRequestRef.current === buildModeExitRequest) return
+    buildModeExitRequestRef.current = buildModeExitRequest
+    if (buildContext) leaveBuildMode()
+  }, [buildModeExitRequest, buildContext, leaveBuildMode])
+
+  const enterMapView = useCallback(() => {
+    if (layoutView) return
+    restorePointerLockAfterMapRef.current = releaseWorldPointerLock()
+    setMapView(true)
+  }, [layoutView])
+
+  const leaveMapView = useCallback(() => {
+    if (layoutView) return
+    setMapView(false)
+    if (!restorePointerLockAfterMapRef.current) return
+    restorePointerLockAfterMapRef.current = false
+    requestWorldPointerLock()
+  }, [layoutView])
+
+  const toggleMapView = useCallback(() => {
+    if (mapView) {
+      leaveMapView()
+      return
+    }
+
+    enterMapView()
+  }, [enterMapView, leaveMapView, mapView])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isEditableTarget(event.target) || layoutView) return
+      if (buildParcel && event.code === 'Escape') {
+        event.preventDefault()
+        leaveBuildMode()
+        return
+      }
+      if (buildParcel && event.code === 'KeyM') {
+        event.preventDefault()
+        if (!event.repeat) leaveBuildMode()
+        return
+      }
+      if (event.code !== 'KeyM') return
+      event.preventDefault()
+      if (!event.repeat) toggleMapView()
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [buildParcel, layoutView, leaveBuildMode, toggleMapView])
+
+  useEffect(() => {
+    if (!effectiveMapView) return
+    mobileJoystickRef.current = null
+    releaseWorldPointerLock()
+  }, [effectiveMapView])
 
   useEffect(
     () =>
@@ -434,16 +795,28 @@ export function WorldMultiplayerLabClient() {
         offline,
         remotePlayers: multiplayer.remotePlayers.length,
         roomId,
+        view: buildParcel ? 'build' : layoutView ? 'layout' : mapView ? 'map' : 'robot',
         status: offline ? 'offline' : multiplayer.status,
       })),
-    [multiplayer.connection, multiplayer.remotePlayers.length, multiplayer.status, offline, roomId],
+    [
+      buildParcel,
+      layoutView,
+      mapView,
+      multiplayer.connection,
+      multiplayer.remotePlayers.length,
+      multiplayer.status,
+      offline,
+      roomId,
+    ],
   )
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
       <WorldLabClient
+        canvasStyle={WORLD_MULTIPLAYER_CANVAS_STYLE}
         grassInteractionRef={grassInteractionRef}
         labTitle="Landrush lab world multiplayer"
+        parcelOwnershipScope={roomId}
         renderSceneOverlay={renderSceneOverlay}
         showDirtCopyParcels
         variant="dirt-copy"
@@ -451,50 +824,174 @@ export function WorldMultiplayerLabClient() {
       {!clean ? (
         <MultiplayerStatusPanel
           connection={multiplayer.connection}
+          localPlayerIncluded={!layoutView}
           remotePlayerCount={multiplayer.remotePlayers.length}
           status={offline ? 'offline' : multiplayer.status}
         />
       ) : null}
-      <MobileMovementJoystick movementRef={mobileJoystickRef} />
+      {layoutView || buildParcel ? null : (
+        <MobileMapToggleButton mapView={mapView} onToggle={toggleMapView} />
+      )}
+      {showInlineBuildOverlay ? (
+        <LandrushBuildModeOverlay
+          activeTool={activeBuildToolbarTool}
+          parcel={buildParcel}
+          onExit={leaveBuildMode}
+          onSelectTool={selectBuildTool}
+        />
+      ) : null}
+      {effectiveMapView ? null : <MobileMovementJoystick movementRef={mobileJoystickRef} />}
+    </div>
+  )
+}
+
+function LandrushBuildModeOverlay({
+  activeTool,
+  onExit,
+  onSelectTool,
+  parcel,
+}: {
+  activeTool: LandrushBuildToolbarToolId
+  onExit: () => void
+  onSelectTool: (tool: LandrushBuildToolbarToolId) => void
+  parcel: ParcelAllocationParcel | null
+}) {
+  if (!parcel) return null
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-40">
+      <style>{`
+        @keyframes landrush-build-panel-in {
+          0% { opacity: 0; transform: translateY(12px) scale(0.975); }
+          70% { opacity: 1; transform: translateY(-2px) scale(1.012); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
+      <div className="absolute inset-x-0 bottom-5 flex justify-center px-4 md:bottom-7">
+        <section
+          className="pointer-events-auto flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-xl border border-amber-100/20 bg-slate-950/82 px-2.5 py-2 text-white shadow-[0_18px_60px_rgba(0,0,0,0.38)] backdrop-blur-md"
+          style={{ animation: 'landrush-build-panel-in 260ms cubic-bezier(0.2, 0.9, 0.2, 1) both' }}
+        >
+          <div className="hidden min-w-0 px-2 sm:block">
+            <p className="truncate text-[11px] font-semibold uppercase text-amber-100/72">Build</p>
+            <p className="truncate text-xs text-white/78">{parcel.id}</p>
+          </div>
+          <div className="flex items-center gap-1">
+            {LANDRUSH_BUILD_TOOLBAR_TOOLS.map(({ icon: Icon, id, label }) => {
+              const active = activeTool === id
+              return (
+                <button
+                  aria-label={label}
+                  className={[
+                    'grid size-9 place-items-center rounded-lg border transition',
+                    active
+                      ? 'border-amber-100/54 bg-amber-200/22 text-amber-50 shadow-[0_0_18px_rgba(245,207,120,0.18)]'
+                      : 'border-white/10 bg-white/6 text-white/70 hover:border-amber-100/30 hover:bg-white/10 hover:text-amber-50',
+                  ].join(' ')}
+                  key={id}
+                  onClick={() => onSelectTool(id)}
+                  title={label}
+                  type="button"
+                >
+                  <Icon className="size-4" aria-hidden />
+                </button>
+              )
+            })}
+          </div>
+          <button
+            className="ml-1 inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-white/6 px-2.5 text-xs font-semibold text-white/76 transition hover:border-amber-100/30 hover:bg-white/10 hover:text-amber-50"
+            onClick={onExit}
+            type="button"
+          >
+            <X className="size-3.5" aria-hidden />
+            <span>Exit</span>
+          </button>
+        </section>
+      </div>
     </div>
   )
 }
 
 function LandrushWorldMultiplayerScene({
+  allocation,
+  buildParcelId,
+  claimParcel,
   grassInteractionRef,
+  layoutView,
+  localMotionRef,
   localProfile,
+  mapView,
   mobileJoystickRef,
+  onBuildParcel,
   onLocalPlayerChange,
+  parcelClaimError,
+  parcelOwnerships,
+  parcelWorldId,
   perfRun,
   remotePlayers,
+  streetNetwork,
   surface,
+  watchParcelWorld,
 }: {
+  allocation: ParcelAllocationResult | null
+  buildParcelId: string | null
+  claimParcel: (worldId: string, parcelId: string) => boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
+  layoutView: boolean
+  localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
+  mapView: boolean
   mobileJoystickRef: { current: MobileJoystickInput | null }
+  onBuildParcel: (context: WorldMultiplayerBuildContext) => void
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  parcelClaimError: ParcelClaimError | null
+  parcelOwnerships: readonly ParcelOwnership[]
+  parcelWorldId: string
   perfRun: MultiplayerPerfRunOptions
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
+  streetNetwork: ParcelStreetNetwork | null
   surface: WaterLandSurface
+  watchParcelWorld: (worldId: string) => void
 }) {
   const spawn = useMemo(() => centroidForPolygon(surface.grassSurfacePoints), [surface])
   const groundY = surface.grassSurfaceElevation + ROBOT_GROUND_CLEARANCE
 
   return (
     <group>
-      <LocalMultiplayerRobot
-        grassInteractionRef={grassInteractionRef}
-        groundY={groundY}
-        localProfile={localProfile}
-        mobileJoystickRef={mobileJoystickRef}
-        onLocalPlayerChange={onLocalPlayerChange}
-        perfRun={perfRun}
-        spawn={spawn}
-        surfacePoints={surface.grassSurfacePoints}
-      />
+      {mapView ? <ParcelMapCameraRig /> : null}
+      {layoutView ? null : (
+        <LocalMultiplayerRobot
+          grassInteractionRef={grassInteractionRef}
+          groundY={groundY}
+          localMotionRef={localMotionRef}
+          localProfile={localProfile}
+          mapView={mapView}
+          mobileJoystickRef={mobileJoystickRef}
+          onLocalPlayerChange={onLocalPlayerChange}
+          perfRun={perfRun}
+          spawn={spawn}
+          surfacePoints={surface.grassSurfacePoints}
+        />
+      )}
       {remotePlayers.map((player) => (
         <RemoteMultiplayerRobot groundY={groundY} key={player.id} player={player} />
       ))}
+      <ParcelOwnershipLayer
+        allocation={allocation}
+        buildParcelId={buildParcelId}
+        claimParcel={claimParcel}
+        localMotionRef={localMotionRef}
+        localProfile={localProfile}
+        mapView={mapView}
+        onBuildParcel={onBuildParcel}
+        parcelClaimError={parcelClaimError}
+        parcelOwnerships={parcelOwnerships}
+        parcelWorldId={parcelWorldId}
+        remotePlayers={remotePlayers}
+        streetNetwork={streetNetwork}
+        surface={surface}
+        watchParcelWorld={watchParcelWorld}
+      />
     </group>
   )
 }
@@ -502,7 +999,9 @@ function LandrushWorldMultiplayerScene({
 function LocalMultiplayerRobot({
   grassInteractionRef,
   groundY,
+  localMotionRef,
   localProfile,
+  mapView,
   mobileJoystickRef,
   onLocalPlayerChange,
   perfRun,
@@ -511,7 +1010,9 @@ function LocalMultiplayerRobot({
 }: {
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   groundY: number
+  localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
+  mapView: boolean
   mobileJoystickRef: { current: MobileJoystickInput | null }
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
   perfRun: MultiplayerPerfRunOptions
@@ -533,6 +1034,13 @@ function LocalMultiplayerRobot({
     velocity: new Vector3(),
   })
   surfacePointsRef.current = surfacePoints
+
+  useEffect(() => {
+    localMotionRef.current = motionRef.current
+    return () => {
+      if (localMotionRef.current === motionRef.current) localMotionRef.current = null
+    }
+  }, [localMotionRef])
 
   const publishCurrentPlayer = useCallback(() => {
     const motion = motionRef.current
@@ -601,6 +1109,12 @@ function LocalMultiplayerRobot({
   }, [groundY, localProfile.id, resetToSpawn, spawn])
 
   useEffect(() => {
+    if (!mapView) return
+    pressedKeysRef.current.clear()
+    mobileJoystickRef.current = null
+  }, [mapView, mobileJoystickRef])
+
+  useEffect(() => {
     if (!perfRun.enabled) return
 
     let stopTimer = 0
@@ -660,18 +1174,19 @@ function LocalMultiplayerRobot({
     const joystick = mobileJoystickRef.current
     const mobileJoystickActive = Boolean(mobileViewport && joystick && joystick.strength > 0.08)
 
-    const movement = resolveCameraRelativeMovement(
-      pressedKeysRef.current,
-      state.camera,
-      mobileJoystickRef.current,
-    )
+    const movement = mapView
+      ? null
+      : resolveCameraRelativeMovement(
+          pressedKeysRef.current,
+          state.camera,
+          mobileJoystickRef.current,
+        )
     const cameraHeading = resolveCameraForwardHeading(state.camera)
-    const targetHeading =
-      mobileJoystickActive && movement
-        ? movement.heading
-        : mobileViewport
-          ? motion.heading
-          : cameraHeading
+    const targetHeading = movement
+      ? movement.heading
+      : mobileViewport
+        ? motion.heading
+        : cameraHeading
     const targetSpeed = movement
       ? resolveRobotTargetSpeed(movement, isRunPressed(pressedKeysRef.current))
       : 0
@@ -731,7 +1246,9 @@ function LocalMultiplayerRobot({
 
   return (
     <>
-      <RobotThirdPersonCameraRig mobileJoystickRef={mobileJoystickRef} motionRef={motionRef} />
+      {mapView ? null : (
+        <RobotThirdPersonCameraRig mobileJoystickRef={mobileJoystickRef} motionRef={motionRef} />
+      )}
       <Suspense
         fallback={<RobotNodePrimitiveActor color={localProfile.color} node={nodeRef.current} />}
       >
@@ -834,6 +1351,46 @@ function RobotNodePrimitiveActor({ color, node }: { color: string; node: Landrus
   )
 }
 
+function ParcelMapCameraRig() {
+  const controlsTarget = useMemo(() => new Vector3(...PARCEL_MAP_CAMERA_TARGET), [])
+
+  return (
+    <>
+      <OrthographicCamera
+        far={900}
+        makeDefault
+        near={0.1}
+        position={PARCEL_MAP_CAMERA_POSITION}
+        zoom={PARCEL_MAP_CAMERA_ZOOM}
+      />
+      <ParcelMapCameraTarget target={PARCEL_MAP_CAMERA_TARGET} />
+      <OrbitControls
+        dampingFactor={0.08}
+        enableDamping
+        enablePan
+        enableRotate={false}
+        enableZoom
+        makeDefault
+        maxZoom={28}
+        minZoom={3}
+        target={controlsTarget}
+      />
+    </>
+  )
+}
+
+function ParcelMapCameraTarget({ target }: { target: readonly [number, number, number] }) {
+  const { camera, invalidate } = useThree()
+
+  useEffect(() => {
+    camera.lookAt(new Vector3(...target))
+    camera.updateProjectionMatrix()
+    invalidate()
+  }, [camera, invalidate, target])
+
+  return null
+}
+
 function RobotThirdPersonCameraRig({
   mobileJoystickRef,
   motionRef,
@@ -910,6 +1467,7 @@ function RobotThirdPersonCameraController({
     const handleWheel = (event: WheelEvent) => {
       if (!(event.target instanceof HTMLCanvasElement)) return
       event.preventDefault()
+      event.stopPropagation()
       cameraDistanceRef.current = MathUtils.clamp(
         cameraDistanceRef.current * Math.exp(event.deltaY * ROBOT_CAMERA_WHEEL_ZOOM_SPEED),
         ROBOT_CAMERA_MIN_DISTANCE,
@@ -921,6 +1479,8 @@ function RobotThirdPersonCameraController({
       if (!isMobileControlViewport() || !isMobileCameraOrbitTarget(event.target)) return
       const touch = event.changedTouches.item(0)
       if (!touch) return
+      event.preventDefault()
+      event.stopPropagation()
       mobileOrbitTouchRef.current = {
         id: touch.identifier,
         x: touch.clientX,
@@ -934,6 +1494,7 @@ function RobotThirdPersonCameraController({
       const touch = findTouchById(event.touches, activeTouch.id)
       if (!touch) return
       event.preventDefault()
+      event.stopPropagation()
 
       const dx = touch.clientX - activeTouch.x
       const dy = touch.clientY - activeTouch.y
@@ -951,22 +1512,24 @@ function RobotThirdPersonCameraController({
     const handleTouchEnd = (event: TouchEvent) => {
       const activeTouch = mobileOrbitTouchRef.current
       if (!activeTouch || !findTouchById(event.changedTouches, activeTouch.id)) return
+      event.preventDefault()
+      event.stopPropagation()
       mobileOrbitTouchRef.current = null
     }
 
-    window.addEventListener('wheel', handleWheel, { passive: false })
-    window.addEventListener('touchstart', handleTouchStart, { passive: true })
-    window.addEventListener('touchmove', handleTouchMove, { passive: false })
-    window.addEventListener('touchend', handleTouchEnd)
-    window.addEventListener('touchcancel', handleTouchEnd)
+    window.addEventListener('wheel', handleWheel, { capture: true, passive: false })
+    window.addEventListener('touchstart', handleTouchStart, { capture: true, passive: false })
+    window.addEventListener('touchmove', handleTouchMove, { capture: true, passive: false })
+    window.addEventListener('touchend', handleTouchEnd, true)
+    window.addEventListener('touchcancel', handleTouchEnd, true)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('wheel', handleWheel)
-      window.removeEventListener('touchstart', handleTouchStart)
-      window.removeEventListener('touchmove', handleTouchMove)
-      window.removeEventListener('touchend', handleTouchEnd)
-      window.removeEventListener('touchcancel', handleTouchEnd)
+      window.removeEventListener('wheel', handleWheel, true)
+      window.removeEventListener('touchstart', handleTouchStart, true)
+      window.removeEventListener('touchmove', handleTouchMove, true)
+      window.removeEventListener('touchend', handleTouchEnd, true)
+      window.removeEventListener('touchcancel', handleTouchEnd, true)
     }
   }, [])
 
@@ -996,7 +1559,12 @@ function RobotThirdPersonCameraController({
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const joystick = mobileJoystickRef.current
-    if (joystick && joystick.strength > 0.08 && isMobileControlViewport()) {
+    if (
+      joystick &&
+      joystick.strength > 0.08 &&
+      !mobileOrbitTouchRef.current &&
+      isMobileControlViewport()
+    ) {
       cameraYawRef.current = playerHeadingToCameraYaw(motion.heading)
     }
 
@@ -1042,6 +1610,564 @@ function RobotPlayerBeacon({ color, node }: { color: string; node: LandrushWorld
   )
 }
 
+function ParcelOwnershipLayer({
+  allocation,
+  buildParcelId,
+  claimParcel,
+  localMotionRef,
+  localProfile,
+  mapView,
+  onBuildParcel,
+  parcelClaimError,
+  parcelOwnerships,
+  parcelWorldId,
+  remotePlayers,
+  streetNetwork,
+  surface,
+  watchParcelWorld,
+}: {
+  allocation: ParcelAllocationResult | null
+  buildParcelId: string | null
+  claimParcel: (worldId: string, parcelId: string) => boolean
+  localMotionRef: { current: RobotMotion | null }
+  localProfile: LocalPlayerProfile
+  mapView: boolean
+  onBuildParcel: (context: WorldMultiplayerBuildContext) => void
+  parcelClaimError: ParcelClaimError | null
+  parcelOwnerships: readonly ParcelOwnership[]
+  parcelWorldId: string
+  remotePlayers: readonly MultiplayerPlayerSnapshot[]
+  streetNetwork: ParcelStreetNetwork | null
+  surface: WaterLandSurface
+  watchParcelWorld: (worldId: string) => void
+}) {
+  const { camera, gl } = useThree()
+  const [hoveredParcelId, setHoveredParcelId] = useState<string | null>(null)
+  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null)
+  const [insideOwnedParcelId, setInsideOwnedParcelId] = useState<string | null>(null)
+  const insideCheckAtRef = useRef(0)
+  const mapPickNdc = useMemo(() => new Vector2(), [])
+  const mapPickRaycaster = useMemo(() => new Raycaster(), [])
+  const ownershipMap = useMemo(() => {
+    const map = new Map<string, ParcelOwnership>()
+    for (const ownership of parcelOwnerships) {
+      if (ownership.worldId === parcelWorldId) map.set(ownership.parcelId, ownership)
+    }
+    return map
+  }, [parcelOwnerships, parcelWorldId])
+  const localOwnership = useMemo(
+    () => [...ownershipMap.values()].find((ownership) => ownership.owner.id === localProfile.id),
+    [localProfile.id, ownershipMap],
+  )
+  const groundY = surface.grassSurfaceElevation + PARCEL_MAP_OVERLAY_ELEVATION_OFFSET
+  const selectedParcel = useMemo(
+    () => allocation?.parcels.find((parcel) => parcel.id === selectedParcelId) ?? null,
+    [allocation, selectedParcelId],
+  )
+
+  useEffect(() => {
+    if (!allocation) return
+    watchParcelWorld(parcelWorldId)
+  }, [allocation, parcelWorldId, watchParcelWorld])
+
+  useEffect(() => {
+    if (mapView) return
+    setHoveredParcelId(null)
+    setSelectedParcelId(null)
+  }, [mapView])
+
+  useEffect(() => {
+    if (!allocation || !mapView) return
+
+    const canvas = gl.domElement
+    const previousCursor = canvas.style.cursor
+    const pickParcel = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      mapPickNdc.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      mapPickRaycaster.setFromCamera(mapPickNdc, camera)
+
+      const directionY = mapPickRaycaster.ray.direction.y
+      if (Math.abs(directionY) < 0.000001) return null
+
+      const distance = (groundY - mapPickRaycaster.ray.origin.y) / directionY
+      if (distance < 0) return null
+
+      const point = {
+        x: mapPickRaycaster.ray.origin.x + mapPickRaycaster.ray.direction.x * distance,
+        z: mapPickRaycaster.ray.origin.z + mapPickRaycaster.ray.direction.z * distance,
+      }
+      return allocation.parcels.find((candidate) => pointInPolygon(point, candidate.points)) ?? null
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const parcel = pickParcel(event)
+      canvas.style.cursor = parcel ? 'pointer' : previousCursor
+      setHoveredParcelId((current) => (current === parcel?.id ? current : (parcel?.id ?? null)))
+    }
+
+    const handlePointerLeave = () => {
+      canvas.style.cursor = previousCursor
+      setHoveredParcelId(null)
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      if (buildParcelId) return
+
+      const parcel = pickParcel(event)
+      if (!parcel) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectedParcelId(parcel.id)
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown, { capture: true })
+    canvas.addEventListener('pointerleave', handlePointerLeave)
+    canvas.addEventListener('pointermove', handlePointerMove, { capture: true })
+    return () => {
+      canvas.style.cursor = previousCursor
+      canvas.removeEventListener('pointerdown', handlePointerDown, true)
+      canvas.removeEventListener('pointerleave', handlePointerLeave)
+      canvas.removeEventListener('pointermove', handlePointerMove, true)
+    }
+  }, [allocation, buildParcelId, camera, gl, groundY, mapPickNdc, mapPickRaycaster, mapView])
+
+  useFrame((state) => {
+    if (!allocation || mapView || !localOwnership) {
+      if (insideOwnedParcelId !== null) setInsideOwnedParcelId(null)
+      return
+    }
+
+    const elapsed = state.clock.elapsedTime
+    if (elapsed - insideCheckAtRef.current < 0.12) return
+    insideCheckAtRef.current = elapsed
+
+    const motion = localMotionRef.current
+    const parcel = allocation.parcels.find((candidate) => candidate.id === localOwnership.parcelId)
+    const nextInsideParcelId =
+      motion &&
+      parcel &&
+      pointInPolygon({ x: motion.position.x, z: motion.position.z }, parcel.points)
+        ? parcel.id
+        : null
+    setInsideOwnedParcelId((current) =>
+      current === nextInsideParcelId ? current : nextInsideParcelId,
+    )
+  })
+
+  if (!allocation) return null
+
+  return (
+    <>
+      {allocation.parcels.map((parcel) => (
+        <ParcelClaimMesh
+          groundY={groundY}
+          hovered={hoveredParcelId === parcel.id}
+          key={parcel.id}
+          mapView={mapView}
+          onSelect={() => setSelectedParcelId(parcel.id)}
+          parcel={parcel}
+          selected={selectedParcelId === parcel.id || buildParcelId === parcel.id}
+        />
+      ))}
+      <LocalMapPlayerMarker
+        color={localProfile.color}
+        groundY={groundY}
+        motionRef={localMotionRef}
+        visible={mapView}
+      />
+      {remotePlayers.map((player) => (
+        <RemoteMapPlayerMarker
+          groundY={groundY}
+          key={player.id}
+          player={player}
+          visible={mapView}
+        />
+      ))}
+      {localOwnership
+        ? allocation.parcels
+            .filter((parcel) => parcel.id === localOwnership.parcelId)
+            .map((parcel) => (
+              <ParcelBuildMarker
+                groundY={groundY}
+                key={parcel.id}
+                onBuild={(ownedParcel) =>
+                  onBuildParcel({
+                    allocation,
+                    parcel: ownedParcel,
+                    parcelWorldId,
+                    streetNetwork,
+                    surface,
+                  })
+                }
+                parcel={parcel}
+                visible={!buildParcelId && (mapView || insideOwnedParcelId === parcel.id)}
+              />
+            ))
+        : null}
+      {mapView && !buildParcelId && selectedParcel ? (
+        <ParcelClaimDialog
+          claimError={parcelClaimError}
+          claimParcel={claimParcel}
+          localOwnership={localOwnership}
+          localProfile={localProfile}
+          onClose={() => setSelectedParcelId(null)}
+          ownership={ownershipMap.get(selectedParcel.id)}
+          parcel={selectedParcel}
+          parcelWorldId={parcelWorldId}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function ParcelClaimMesh({
+  groundY,
+  hovered,
+  mapView,
+  onSelect,
+  parcel,
+  selected,
+}: {
+  groundY: number
+  hovered: boolean
+  mapView: boolean
+  onSelect: () => void
+  parcel: ParcelAllocationParcel
+  selected: boolean
+}) {
+  const groupRef = useRef<Group>(null!)
+  const materialRef = useRef<MeshBasicMaterial>(null!)
+  const shape = useMemo(() => centeredShapeFromParcel(parcel), [parcel])
+  const baseColor = useMemo(() => new Color(PARCEL_MAP_BASE_COLOR), [])
+  const hoverColor = useMemo(() => new Color(PARCEL_MAP_HOVER_COLOR), [])
+
+  useFrame((state, delta) => {
+    const group = groupRef.current
+    const material = materialRef.current
+    if (!group || !material) return
+
+    const interactive = mapView
+    const emphasis = interactive && (hovered || selected)
+    const targetScale = emphasis ? PARCEL_MAP_OVERLAY_HOVER_SCALE : 1
+    const scale = MathUtils.damp(group.scale.x, targetScale, PARCEL_MAP_OVERLAY_RESPONSE, delta)
+    group.scale.setScalar(scale)
+
+    const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 3.1 + parcel.index * 0.61) * 0.5
+    const targetOpacity = interactive
+      ? MathUtils.lerp(PARCEL_MAP_BASE_OPACITY, PARCEL_MAP_HOVER_OPACITY, emphasis ? 1 : 0) +
+        pulse * 0.018
+      : 0
+    material.opacity = MathUtils.damp(
+      material.opacity,
+      targetOpacity,
+      PARCEL_MAP_OVERLAY_RESPONSE,
+      delta,
+    )
+    material.color.lerpColors(baseColor, hoverColor, emphasis ? 0.26 : pulse * 0.08)
+  })
+
+  return (
+    <group ref={groupRef} position={[parcel.centroid.x, groundY, parcel.centroid.z]}>
+      <mesh
+        onClick={(event) => {
+          if (!mapView) return
+          event.stopPropagation()
+          onSelect()
+        }}
+        renderOrder={75}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <shapeGeometry args={[shape]} />
+        <meshBasicMaterial
+          color={PARCEL_MAP_BASE_COLOR}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0}
+          ref={materialRef}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function LocalMapPlayerMarker({
+  color,
+  groundY,
+  motionRef,
+  visible,
+}: {
+  color: string
+  groundY: number
+  motionRef: { current: RobotMotion | null }
+  visible: boolean
+}) {
+  const groupRef = useRef<Group>(null!)
+  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    const motion = motionRef.current
+    if (!group) return
+
+    group.visible = visible && Boolean(motion)
+    if (!motion) return
+
+    group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
+    group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
+  })
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh renderOrder={91} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.08, 36]} />
+        <meshBasicMaterial
+          color="#0f172a"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.46}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.76, 1.02, 40]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.82}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]}>
+        <shapeGeometry args={[arrowShape]} />
+        <meshBasicMaterial
+          color={color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.96}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={94} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.28, 24]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.95}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function RemoteMapPlayerMarker({
+  groundY,
+  player,
+  visible,
+}: {
+  groundY: number
+  player: MultiplayerPlayerSnapshot
+  visible: boolean
+}) {
+  const groupRef = useRef<Group>(null!)
+  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+  const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
+  const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
+  const headingRef = useRef(player.heading)
+  const targetHeadingRef = useRef(player.heading)
+
+  useEffect(() => {
+    targetPositionRef.current.set(player.position[0], groundY, player.position[2])
+    targetHeadingRef.current = player.heading
+  }, [groundY, player])
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    if (!group) return
+
+    group.visible = visible
+    if (!visible) return
+
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const positionAmount = 1 - Math.exp(-REMOTE_POSITION_RESPONSE * frameDelta)
+    const headingAmount = 1 - Math.exp(-REMOTE_HEADING_RESPONSE * frameDelta)
+    positionRef.current.lerp(targetPositionRef.current, positionAmount)
+    headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+
+    group.position.set(positionRef.current.x, groundY + 0.24, positionRef.current.z)
+    group.rotation.y = headingRef.current
+  })
+
+  return (
+    <group ref={groupRef} visible={false}>
+      <mesh renderOrder={95} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
+        <circleGeometry args={[1.08, 36]} />
+        <meshBasicMaterial
+          color="#020617"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.5}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={96} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
+        <ringGeometry args={[0.76, 1.02, 40]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.74}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={97} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
+        <shapeGeometry args={[arrowShape]} />
+        <meshBasicMaterial
+          color={player.color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.96}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <Html center className="pointer-events-none" position={[0, 0.36, 0]} zIndexRange={[68, 0]}>
+        <span className="whitespace-nowrap rounded-full border border-white/16 bg-slate-950/72 px-2 py-0.5 text-[10px] font-semibold text-white/86 shadow-lg backdrop-blur">
+          {player.name}
+        </span>
+      </Html>
+    </group>
+  )
+}
+
+function ParcelBuildMarker({
+  groundY,
+  onBuild,
+  parcel,
+  visible,
+}: {
+  groundY: number
+  onBuild: (parcel: ParcelAllocationParcel) => void
+  parcel: ParcelAllocationParcel
+  visible: boolean
+}) {
+  if (!visible) return null
+
+  return (
+    <Html
+      center
+      position={[parcel.centroid.x, groundY + 1.05, parcel.centroid.z]}
+      zIndexRange={[70, 0]}
+    >
+      <button
+        className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-amber-100/65 bg-slate-950/72 px-3 py-2 text-xs font-semibold text-amber-100 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur transition hover:scale-105 hover:bg-slate-900/82"
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onBuild(parcel)
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        type="button"
+      >
+        <Hammer className="size-3.5" aria-hidden />
+        <span>Build</span>
+      </button>
+    </Html>
+  )
+}
+
+function ParcelClaimDialog({
+  claimError,
+  claimParcel,
+  localOwnership,
+  localProfile,
+  onClose,
+  ownership,
+  parcel,
+  parcelWorldId,
+}: {
+  claimError: ParcelClaimError | null
+  claimParcel: (worldId: string, parcelId: string) => boolean
+  localOwnership: ParcelOwnership | undefined
+  localProfile: LocalPlayerProfile
+  onClose: () => void
+  ownership: ParcelOwnership | undefined
+  parcel: ParcelAllocationParcel
+  parcelWorldId: string
+}) {
+  const isFallbackProfile = localProfile.id === FALLBACK_LOCAL_PROFILE.id
+  const localAlreadyOwnsAnother = Boolean(localOwnership && localOwnership.parcelId !== parcel.id)
+  const canClaim = !ownership && !localAlreadyOwnsAnother && !isFallbackProfile
+  const statusText = ownership
+    ? `Claimed by ${ownership.owner.name}`
+    : localAlreadyOwnsAnother
+      ? `You already own ${localOwnership?.parcelId}`
+      : 'Free parcel'
+  const errorVisible = claimError && (!claimError.parcelId || claimError.parcelId === parcel.id)
+
+  return (
+    <Html center position={[parcel.centroid.x, 2.8, parcel.centroid.z]} zIndexRange={[90, 0]}>
+      <section
+        className="pointer-events-auto w-64 rounded-lg border border-amber-100/24 bg-slate-950/82 p-3 text-white shadow-[0_18px_56px_rgba(0,0,0,0.42)] backdrop-blur-md"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-normal text-amber-100">
+              {formatParcelLabel(parcel.id)}
+            </h2>
+            <p className="mt-1 text-xs text-white/64">{statusText}</p>
+          </div>
+          <button
+            aria-label="Close parcel claim"
+            className="grid size-7 place-items-center rounded-full border border-white/12 bg-white/7 text-white/72 transition hover:bg-white/12 hover:text-white"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-3.5" aria-hidden />
+          </button>
+        </div>
+        {errorVisible ? <p className="mt-2 text-xs text-rose-200">{claimError.message}</p> : null}
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            className="rounded-full border border-white/12 px-3 py-1.5 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+            onClick={onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="rounded-full border border-amber-100/60 bg-amber-300 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-[0_8px_24px_rgba(245,203,92,0.22)] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/12 disabled:text-white/36 disabled:shadow-none"
+            disabled={!canClaim}
+            onClick={() => {
+              if (claimParcel(parcelWorldId, parcel.id)) onClose()
+            }}
+            type="button"
+          >
+            Claim free
+          </button>
+        </div>
+      </section>
+    </Html>
+  )
+}
+
 function RobotWalkerPrimitive({ color }: { color: string }) {
   return (
     <group>
@@ -1057,16 +2183,19 @@ function RobotWalkerPrimitive({ color }: { color: string }) {
   )
 }
 
-function MultiplayerStatusPanel({
+export function MultiplayerStatusPanel({
   connection,
+  localPlayerIncluded,
   remotePlayerCount,
   status,
 }: {
   connection: MultiplayerConnectionDetails
+  localPlayerIncluded: boolean
   remotePlayerCount: number
   status: ConnectionStatus
 }) {
-  const displayedPlayerCount = connection.serverPlayerCount ?? remotePlayerCount + 1
+  const displayedPlayerCount =
+    connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
   const statusLabel = compactStatusLabel(status)
   const latencyLabel = connection.latencyMs === null ? '--ms' : `${connection.latencyMs}ms`
 
@@ -1096,6 +2225,23 @@ function compactStatusDotClass(status: ConnectionStatus) {
   if (status === 'connected') return 'bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.7)]'
   if (status === 'offline') return 'bg-amber-300 shadow-[0_0_10px_rgba(252,211,77,0.65)]'
   return 'bg-sky-300 shadow-[0_0_10px_rgba(125,211,252,0.65)]'
+}
+
+function MobileMapToggleButton({ mapView, onToggle }: { mapView: boolean; onToggle: () => void }) {
+  return (
+    <button
+      aria-label={mapView ? 'Close map view' : 'Open map view'}
+      className={`pointer-events-auto absolute right-5 bottom-[8.25rem] z-40 grid size-12 place-items-center rounded-full border shadow-xl backdrop-blur transition md:hidden ${
+        mapView
+          ? 'border-amber-100/70 bg-amber-300 text-slate-950'
+          : 'border-white/24 bg-slate-950/48 text-white'
+      }`}
+      onClick={onToggle}
+      type="button"
+    >
+      <MapIcon className="size-5" aria-hidden />
+    </button>
+  )
 }
 
 function MobileMovementJoystick({
@@ -1272,14 +2418,16 @@ function isMobileCameraOrbitTarget(target: EventTarget | null) {
   )
 }
 
-function useLandrushWorldMultiplayer({
+export function useLandrushWorldMultiplayer({
   enabled,
   localProfile,
   roomId,
+  spectator,
 }: {
   enabled: boolean
   localProfile: LocalPlayerProfile
   roomId: string
+  spectator: boolean
 }) {
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectDelayRef = useRef(1000)
@@ -1288,17 +2436,34 @@ function useLandrushWorldMultiplayer({
   const heartbeatIntervalMsRef = useRef(createConnectionDetails().heartbeatIntervalMs)
   const lastNetworkSentAtRef = useRef(0)
   const lastSentPlayerRef = useRef<MultiplayerPlayerSnapshot | null>(null)
+  const watchedParcelWorldIdRef = useRef<string | null>(null)
   const [connection, setConnection] =
     useState<MultiplayerConnectionDetails>(createConnectionDetails)
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? 'connecting' : 'offline')
   const [remotePlayerMap, setRemotePlayerMap] = useState<Map<string, MultiplayerPlayerSnapshot>>(
     () => new Map(),
   )
+  const [parcelClaimError, setParcelClaimError] = useState<ParcelClaimError | null>(null)
+  const [parcelOwnershipMap, setParcelOwnershipMap] = useState<Map<string, ParcelOwnership>>(
+    () => new Map(),
+  )
+  const parcelOwnershipMapRef = useRef(parcelOwnershipMap)
   const remotePlayers = useMemo(
     () =>
       [...remotePlayerMap.values()].sort((first, second) => first.name.localeCompare(second.name)),
     [remotePlayerMap],
   )
+  const parcelOwnerships = useMemo(
+    () =>
+      [...parcelOwnershipMap.values()].sort((first, second) =>
+        first.parcelId.localeCompare(second.parcelId),
+      ),
+    [parcelOwnershipMap],
+  )
+
+  useEffect(() => {
+    parcelOwnershipMapRef.current = parcelOwnershipMap
+  }, [parcelOwnershipMap])
 
   const sendMessage = useCallback((message: unknown, socket = socketRef.current) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return
@@ -1318,7 +2483,7 @@ function useLandrushWorldMultiplayer({
   const sendPlayerState = useCallback(
     (player: MultiplayerPlayerSnapshot) => {
       latestPlayerRef.current = player
-      if (!enabled) return
+      if (!enabled || spectator) return
 
       const now = window.performance.now()
       if (
@@ -1336,7 +2501,7 @@ function useLandrushWorldMultiplayer({
         lastSentPlayerRef.current = player
       }
     },
-    [enabled, sendMessage],
+    [enabled, sendMessage, spectator],
   )
 
   const publishLocalPlayer = useCallback(
@@ -1346,10 +2511,84 @@ function useLandrushWorldMultiplayer({
     [sendPlayerState],
   )
 
+  const watchParcelWorld = useCallback(
+    (worldId: string) => {
+      if (watchedParcelWorldIdRef.current !== worldId) {
+        watchedParcelWorldIdRef.current = worldId
+        const nextOwnershipMap = new Map<string, ParcelOwnership>()
+        parcelOwnershipMapRef.current = nextOwnershipMap
+        setParcelOwnershipMap(nextOwnershipMap)
+      }
+      sendMessage({ roomId, type: 'watch-parcels', worldId })
+    },
+    [roomId, sendMessage],
+  )
+
+  const claimParcel = useCallback(
+    (worldId: string, parcelId: string) => {
+      watchedParcelWorldIdRef.current = worldId
+      setParcelClaimError(null)
+      if (!enabled) {
+        const currentOwnershipMap = parcelOwnershipMapRef.current
+        const existingOwnership = currentOwnershipMap.get(parcelId)
+        if (existingOwnership && existingOwnership.owner.id !== localProfile.id) {
+          setParcelClaimError({
+            code: 'parcel-owned',
+            message: 'Parcel already claimed',
+            parcelId,
+            worldId,
+          })
+          return false
+        }
+
+        const existingLocalOwnership = [...currentOwnershipMap.values()].find(
+          (ownership) =>
+            ownership.worldId === worldId &&
+            ownership.owner.id === localProfile.id &&
+            ownership.parcelId !== parcelId,
+        )
+        if (existingLocalOwnership) {
+          setParcelClaimError({
+            code: 'already-owns-parcel',
+            message: 'You already claimed a parcel',
+            parcelId,
+            worldId,
+          })
+          return false
+        }
+
+        const nextOwnershipMap = new Map(currentOwnershipMap)
+        nextOwnershipMap.set(parcelId, {
+          claimedAt: Date.now(),
+          owner: localProfile,
+          parcelId,
+          worldId,
+        })
+        parcelOwnershipMapRef.current = nextOwnershipMap
+        setParcelOwnershipMap(nextOwnershipMap)
+        return true
+      }
+
+      const sent = sendMessage({ parcelId, type: 'claim-parcel', worldId })
+      if (!sent) {
+        setParcelClaimError({
+          code: 'not-connected',
+          message: 'Connect before claiming a parcel',
+          parcelId,
+          worldId,
+        })
+      }
+      return Boolean(sent)
+    },
+    [enabled, localProfile, sendMessage],
+  )
+
   useEffect(() => {
-    if (!enabled || localProfile.id === FALLBACK_LOCAL_PROFILE.id) {
+    if (!enabled || (!spectator && localProfile.id === FALLBACK_LOCAL_PROFILE.id)) {
       setStatus(enabled ? 'connecting' : 'offline')
       setRemotePlayerMap(new Map())
+      setParcelClaimError(null)
+      setParcelOwnershipMap(new Map())
       setConnection(createConnectionDetails())
       return
     }
@@ -1382,9 +2621,16 @@ function useLandrushWorldMultiplayer({
         reconnectAttemptRef.current = 0
         setStatus('connected')
         const player = latestPlayerRef.current ?? createStationaryPlayer(localProfile)
-        if (sendMessage({ player, roomId, type: 'join' }, socket)) {
+        const joined = spectator
+          ? sendMessage({ roomId, type: 'watch' }, socket)
+          : sendMessage({ player, roomId, type: 'join' }, socket)
+        if (joined) {
           lastNetworkSentAtRef.current = window.performance.now()
           lastSentPlayerRef.current = player
+        }
+        const watchedParcelWorldId = watchedParcelWorldIdRef.current
+        if (watchedParcelWorldId) {
+          sendMessage({ roomId, type: 'watch-parcels', worldId: watchedParcelWorldId }, socket)
         }
         clearHeartbeat()
         heartbeatTimer = window.setInterval(() => {
@@ -1431,7 +2677,38 @@ function useLandrushWorldMultiplayer({
           return
         }
 
+        if (message.type === 'parcel-claim-rejected') {
+          if (message.roomId && message.roomId !== roomId) return
+          setParcelClaimError({
+            code: message.code,
+            message: message.message,
+            parcelId: message.parcelId,
+            worldId: message.worldId,
+          })
+          return
+        }
+
         if (message.roomId !== roomId) return
+
+        if (message.type === 'parcel-ownership-snapshot') {
+          if (message.worldId !== watchedParcelWorldIdRef.current) return
+          setParcelOwnershipMap(
+            new Map(message.ownerships.map((ownership) => [ownership.parcelId, ownership])),
+          )
+          setParcelClaimError(null)
+          return
+        }
+
+        if (message.type === 'parcel-owned' || message.type === 'parcel-claim-result') {
+          if (message.ownership.worldId !== watchedParcelWorldIdRef.current) return
+          setParcelOwnershipMap((current) => {
+            const next = new Map(current)
+            next.set(message.ownership.parcelId, message.ownership)
+            return next
+          })
+          setParcelClaimError(null)
+          return
+        }
 
         if (message.type === 'room-state') {
           setConnection((current) => ({
@@ -1451,7 +2728,7 @@ function useLandrushWorldMultiplayer({
           )
           setConnection((current) => ({
             ...current,
-            serverPlayerCount: message.players.length + 1,
+            serverPlayerCount: message.players.length + (spectator ? 0 : 1),
           }))
           return
         }
@@ -1515,7 +2792,7 @@ function useLandrushWorldMultiplayer({
       }
       socket?.close()
     }
-  }, [enabled, localProfile, roomId, sendMessage])
+  }, [enabled, localProfile, roomId, sendMessage, spectator])
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1530,7 +2807,16 @@ function useLandrushWorldMultiplayer({
     return () => window.clearInterval(interval)
   }, [])
 
-  return { connection, publishLocalPlayer, remotePlayers, status }
+  return {
+    claimParcel,
+    connection,
+    parcelClaimError,
+    parcelOwnerships,
+    publishLocalPlayer,
+    remotePlayers,
+    status,
+    watchParcelWorld,
+  }
 }
 
 function shouldSendPlayerSnapshot(
@@ -1762,6 +3048,41 @@ function centroidForPolygon(points: readonly LandrushPoint2[]) {
   return triangulatedInteriorPoint(ring) ?? averagePoint(ring)
 }
 
+function centeredShapeFromParcel(parcel: ParcelAllocationParcel) {
+  const shape = new Shape()
+  const ring = openRing(parcel.points)
+  const first = ring[0]
+  if (!first) return shape
+
+  shape.moveTo(first.x - parcel.centroid.x, -(first.z - parcel.centroid.z))
+  for (let index = 1; index < ring.length; index += 1) {
+    const point = ring[index]
+    if (point) shape.lineTo(point.x - parcel.centroid.x, -(point.z - parcel.centroid.z))
+  }
+  shape.closePath()
+  return shape
+}
+
+function createMapPlayerArrowShape() {
+  const shape = new Shape()
+  shape.moveTo(0, -1.18)
+  shape.lineTo(0.62, 0.42)
+  shape.lineTo(0.22, 0.26)
+  shape.lineTo(0.22, 0.78)
+  shape.lineTo(-0.22, 0.78)
+  shape.lineTo(-0.22, 0.26)
+  shape.lineTo(-0.62, 0.42)
+  shape.closePath()
+  return shape
+}
+
+function formatParcelLabel(parcelId: string) {
+  return parcelId
+    .split('-')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
 function averagePoint(points: readonly LandrushPoint2[]) {
   if (points.length === 0) return { x: 0, z: 0 }
   let x = 0
@@ -1904,6 +3225,18 @@ function isEditableTarget(target: EventTarget | null) {
   )
 }
 
+function releaseWorldPointerLock() {
+  if (!(document.pointerLockElement instanceof HTMLCanvasElement)) return false
+  document.exitPointerLock()
+  return true
+}
+
+function requestWorldPointerLock() {
+  const canvas = document.querySelector('canvas')
+  if (!(canvas instanceof HTMLCanvasElement) || document.pointerLockElement === canvas) return
+  void Promise.resolve(canvas.requestPointerLock()).catch(() => undefined)
+}
+
 function snapshotPoint(player: MultiplayerPlayerSnapshot): LandrushPoint2 {
   return { x: player.position[0], z: player.position[2] }
 }
@@ -1919,7 +3252,7 @@ function createStationaryPlayer(profile: LocalPlayerProfile): MultiplayerPlayerS
   }
 }
 
-function readLocalPlayerProfile(): LocalPlayerProfile {
+export function readLocalPlayerProfile(): LocalPlayerProfile {
   const stored = window.localStorage.getItem(PLAYER_STORAGE_KEY)
   if (stored) {
     try {
@@ -1955,7 +3288,7 @@ function hashString(value: string) {
   return Math.abs(hash)
 }
 
-function sanitizeRoomId(roomId: string) {
+export function sanitizeRoomId(roomId: string) {
   const normalized = roomId.trim()
   return (normalized || DEFAULT_ROOM_ID).slice(0, 80).replace(/[^a-zA-Z0-9_-]/g, '-')
 }
@@ -1963,14 +3296,18 @@ function sanitizeRoomId(roomId: string) {
 function resolveWebSocketUrl() {
   const explicitUrl = new URLSearchParams(window.location.search).get('ws')
   if (explicitUrl) return normalizeWebSocketUrl(explicitUrl)
-  if (HOSTED_MULTIPLAYER_WEBSOCKET_URL) {
-    return normalizeWebSocketUrl(HOSTED_MULTIPLAYER_WEBSOCKET_URL)
-  }
 
   const url = new URL('/api/landrush-lab/world-multiplayer/ws', window.location.href)
   if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
     url.port = '3003'
+    url.protocol = 'ws:'
+    return url.toString()
   }
+
+  if (HOSTED_MULTIPLAYER_WEBSOCKET_URL) {
+    return normalizeWebSocketUrl(HOSTED_MULTIPLAYER_WEBSOCKET_URL)
+  }
+
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return url.toString()
 }
@@ -2014,6 +3351,29 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       return message
     }
     if (
+      message?.type === 'parcel-ownership-snapshot' &&
+      typeof message.roomId === 'string' &&
+      typeof message.worldId === 'string' &&
+      Array.isArray(message.ownerships) &&
+      message.ownerships.every(isParcelOwnership)
+    ) {
+      return message
+    }
+    if (
+      (message?.type === 'parcel-owned' || message?.type === 'parcel-claim-result') &&
+      typeof message.roomId === 'string' &&
+      isParcelOwnership(message.ownership)
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'parcel-claim-rejected' &&
+      typeof message.code === 'string' &&
+      typeof message.message === 'string'
+    ) {
+      return message
+    }
+    if (
       message?.type === 'room-state' &&
       typeof message.roomId === 'string' &&
       typeof message.playerCount === 'number'
@@ -2032,6 +3392,18 @@ function parseServerMessage(data: unknown): ServerMessage | null {
     return null
   }
   return null
+}
+
+function isParcelOwnership(value: unknown): value is ParcelOwnership {
+  const ownership = value as ParcelOwnership
+  return (
+    typeof ownership?.claimedAt === 'number' &&
+    typeof ownership.parcelId === 'string' &&
+    typeof ownership.worldId === 'string' &&
+    typeof ownership.owner?.id === 'string' &&
+    typeof ownership.owner.name === 'string' &&
+    typeof ownership.owner.color === 'string'
+  )
 }
 
 function isPlayerSnapshot(value: unknown): value is MultiplayerPlayerSnapshot {

@@ -16,9 +16,16 @@ const GRASS_REGION_CORE_SHARPNESS = 5.2
 const GRASS_REGION_BLEND_SHARPNESS = 2.15
 const GRASS_ROAD_EDGE_PADDING_METERS = 0.08
 const GRASS_ROAD_FEATHER_METERS = 0.46
+const GRASS_BLOCKER_FEATHER_METERS = 0.28
+
+export type GrassFieldBlocker = {
+  featherMeters?: number
+  points: readonly LandrushPoint2[]
+}
 
 type GrassFieldOptions = {
   alphaMode?: 'density' | 'surface'
+  blockers?: readonly GrassFieldBlocker[]
   density?: number
   edgeFadeMeters?: number
   patchSize?: number
@@ -36,6 +43,7 @@ type GrassFieldProfileMeasure = <T>(id: string, callback: () => T) => T
 export type GrassFieldSample = {
   color: readonly [number, number, number]
   colorIndex: 0 | 1 | 2 | 3
+  blockerDistance: number
   density: number
   detail: number
   roadDistance: number
@@ -94,6 +102,7 @@ export function measureGrassFieldDistribution(
 function createGrassFieldData(
   {
     alphaMode = 'density',
+    blockers = [],
     density,
     edgeFadeMeters,
     patchSize,
@@ -146,7 +155,13 @@ function createGrassFieldData(
               z: (y / (fieldResolution - 1) - 0.5) * planeSize,
             }
             const index = (y * fieldResolution + x) * 4
-            const sample = sampleGrassFieldPoint(world, openPerimeter, roads, patchOptions)
+            const sample = sampleGrassFieldPoint(
+              world,
+              openPerimeter,
+              roads,
+              patchOptions,
+              blockers,
+            )
             if (!sample) continue
 
             bytes[index] = byte(sample.color[0] / 255)
@@ -207,19 +222,23 @@ export function sampleGrassFieldPoint(
     patchSize: 24,
     patchSoftness: 0.18,
   },
+  blockers: readonly GrassFieldBlocker[] = [],
 ): GrassFieldSample | null {
   if (!pointInPolygon(point, openPerimeter)) return null
 
   const shoreDistance = distanceToPolyline(point, openPerimeter)
   const roadDistance = distanceToRoads(point, roads)
+  const blockerSample = sampleBlockerDistance(point, blockers)
+  const blockerDistance = blockerSample.distance
   const roadFade = smoothstep(0.02, GRASS_ROAD_FEATHER_METERS, roadDistance)
+  const blockerFade = smoothstep(0, blockerSample.featherMeters, blockerDistance)
   const region = organicGrassRegion(point)
   const shoreFade = edgeFade(shoreDistance, patchOptions.edgeFadeMeters)
   const highResolutionGrain = fbm(point.x * 0.096 + 3.1, point.z * 0.096 - 8.4)
   const broadMask = 0.82 + highResolutionGrain * 0.18
   const patchMask = grassPatchDensity(point, patchOptions, region.density)
-  const density = clamp(shoreFade * roadFade * broadMask * patchMask)
-  const surfaceAlpha = clamp(shoreFade * roadFade)
+  const density = clamp(shoreFade * roadFade * blockerFade * broadMask * patchMask)
+  const surfaceAlpha = clamp(shoreFade * roadFade * blockerFade)
   const shade = 0.88 + density * 0.12 + region.highlight * 0.04
   const detail = 0.97 + noise(point.x * 0.24 + 18.5, point.z * 0.24 - 7.1) * 0.06
   const color = mixGrassColors(region.weights, shade * detail)
@@ -227,6 +246,7 @@ export function sampleGrassFieldPoint(
   return {
     color,
     colorIndex: region.colorIndex,
+    blockerDistance,
     density,
     detail: region.detail,
     roadDistance,
@@ -243,6 +263,21 @@ function distanceToRoads(point: LandrushPoint2, roads: readonly LandrushRoadSegm
     best = Math.min(best, distanceToOpenPolyline(point, road.points) - clearance)
   }
   return best
+}
+
+function sampleBlockerDistance(point: LandrushPoint2, blockers: readonly GrassFieldBlocker[]) {
+  let distance = Number.POSITIVE_INFINITY
+  let featherMeters = GRASS_BLOCKER_FEATHER_METERS
+  for (const blocker of blockers) {
+    const ring = openRing(blocker.points)
+    if (ring.length < 3) continue
+    const nextDistance = pointInPolygon(point, ring) ? -1 : distanceToPolyline(point, ring)
+    if (nextDistance < distance) {
+      distance = nextDistance
+      featherMeters = blocker.featherMeters ?? GRASS_BLOCKER_FEATHER_METERS
+    }
+  }
+  return { distance, featherMeters: Math.max(0.001, featherMeters) }
 }
 
 function organicGrassRegion(point: LandrushPoint2) {

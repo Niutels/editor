@@ -123,6 +123,7 @@ export {
   PASCAL_WATER_LOW_ELEVATION,
   type PascalWaterLandSurface,
 } from './pascal-water/surface-geometry'
+export { createPascalWaterSmoothedPerimeter } from './pascal-water/water-field'
 export { ridgeVentDefinition } from './ridge-vent'
 export { roofDefinition } from './roof'
 export { roofSegmentDefinition } from './roof-segment'

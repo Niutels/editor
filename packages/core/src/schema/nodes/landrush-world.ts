@@ -104,6 +104,30 @@ const LandrushTree = z.object({
   canopyRadius: z.number(),
 })
 
+const LandrushRemotePlayer = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  color: z.string().optional(),
+  position: LandrushVec3,
+  heading: z.number().default(0),
+  moving: z.boolean().default(false),
+  speed: z.number().default(0),
+  updatedAt: z.number().optional(),
+})
+
+const LandrushRenderFlags = z.object({
+  grassBlades: z.boolean().optional(),
+  grassPatches: z.boolean().optional(),
+  ground: z.boolean().optional(),
+  parcels: z.boolean().optional(),
+  parcelDetails: z.boolean().optional(),
+  robot: z.boolean().optional(),
+  roads: z.boolean().optional(),
+  shoreDetails: z.boolean().optional(),
+  trees: z.boolean().optional(),
+  water: z.boolean().optional(),
+})
+
 const LandrushMetadataCheck = z.object({
   check: z.string(),
   pass: z.boolean(),
@@ -170,6 +194,8 @@ export const LandrushWorldNode = BaseNode.extend({
   playerHeading: z.number().default(0),
   playerMoving: z.boolean().default(false),
   playerSpeed: z.number().default(0),
+  remotePlayers: z.array(LandrushRemotePlayer).default([]),
+  renderFlags: LandrushRenderFlags.default({}),
   focusParcelId: z.string().nullable().default(null),
   landrushMode: z.enum(['intro', 'walk', 'build']).default('intro'),
   metadata: LandrushGenerationMetadata.default({

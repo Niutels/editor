@@ -33,8 +33,9 @@ export function createLandrushTerrainData(
   bounds: LandrushWorldNode['perimeter']['bounds'],
   perimeter: readonly Point2[],
   roads: LandrushWorldNode['roads']['segments'],
+  textureSize = LANDRUSH_TERRAIN_TEXTURE_SIZE,
 ) {
-  const size = LANDRUSH_TERRAIN_TEXTURE_SIZE
+  const size = textureSize
   const data = new Uint8Array(size * size * 4)
   const textureBounds = expandBounds(bounds, LANDRUSH_WATER_FIELD_PADDING)
   const seedOffset = (hashSeed(`${seed}:grass-field`) % 997) / 997
@@ -55,7 +56,7 @@ export function createLandrushTerrainData(
 
   return {
     bounds: textureBounds,
-    grassTexture: createGrassRegionTexture(sample),
+    grassTexture: createGrassRegionTexture(sample, textureSize),
     sample,
     texture: createProceduralTexture(data, size, size),
   }
@@ -182,8 +183,11 @@ export function createGrassPatchShapes(
   return patches
 }
 
-function createGrassRegionTexture(sampleTerrain: (x: number, z: number) => LandrushTerrainSample) {
-  const size = LANDRUSH_TERRAIN_TEXTURE_SIZE
+function createGrassRegionTexture(
+  sampleTerrain: (x: number, z: number) => LandrushTerrainSample,
+  textureSize = LANDRUSH_TERRAIN_TEXTURE_SIZE,
+) {
+  const size = textureSize
   const data = new Uint8Array(size * size * 4)
   const colors = GRASS_COLORS.map(hexToRgb)
 
@@ -196,7 +200,7 @@ function createGrassRegionTexture(sampleTerrain: (x: number, z: number) => Landr
       const base = colors[region.colorIndex]!
       const fourth = colors[3]!
       const fourthMix = region.highlight * 0.18
-      const roadWash = region.roadMask * 0.42
+      const roadWash = region.roadMask * 0.18
       const shoreWash = region.shoreEdge * 0.12
       const index = (y * size + x) * 4
       data[index] = clampByte(lerp(lerp(base.r, fourth.r, fourthMix), 207, roadWash) * shade)
@@ -225,7 +229,9 @@ function sampleLandrushTerrain(
   const shoreEdge = inside
     ? 1 - smoothstep(1.15, 7.5, shoreDistance)
     : 1 - smoothstep(0.35, 9, shoreDistance)
-  const waterShoreLine = inside ? 0 : 1 - smoothstep(0, LANDRUSH_WATER_SHORE_LINE_WIDTH, shoreDistance)
+  const waterShoreLine = inside
+    ? 0
+    : 1 - smoothstep(0, LANDRUSH_WATER_SHORE_LINE_WIDTH, shoreDistance)
   const grassDensity = inside
     ? clamp01(
         (0.2 + grass.density * 0.8) *
@@ -251,7 +257,7 @@ function sampleWaterDepth(x: number, z: number, shoreDistance: number, seedOffse
   const offshore = clamp01(
     shoreDistance / (LANDRUSH_WATER_DEPTH_REACH * LANDRUSH_BRUNO_DEPTH_FIELD_SCALE),
   )
-  const depth = Math.pow(offshore, LANDRUSH_WATER_DEPTH_EXPONENT)
+  const depth = offshore ** LANDRUSH_WATER_DEPTH_EXPONENT
   const seabed =
     (fbm(
       x * LANDRUSH_WATER_DEPTH_NOISE_FREQUENCY,

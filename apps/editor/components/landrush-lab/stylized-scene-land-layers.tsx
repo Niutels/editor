@@ -38,6 +38,7 @@ import type { GrassBladeTuning } from './grass-material'
 
 type StylizedSceneLandLayerProps = {
   elevation: number
+  grassBlockers?: readonly StylizedGrassBlocker[]
   grassInteractionRef?: StylizedGrassInteractionRef
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
@@ -73,6 +74,10 @@ type StylizedGrassRoadGrid = {
   cells: StylizedGrassRoadSpan[][]
   cellsPerAxis: number
   fieldSize: number
+}
+
+export type StylizedGrassBlocker = {
+  points: readonly LandrushPoint2[]
 }
 
 type StylizedSceneResolvedGrassTuning = {
@@ -215,6 +220,7 @@ const STYLIZED_TREE_BUSHES: readonly BushInstance[] = [
 
 export function StylizedSceneLandLayer({
   elevation,
+  grassBlockers = [],
   grassInteractionRef,
   roads = [],
   showBlades = true,
@@ -227,6 +233,7 @@ export function StylizedSceneLandLayer({
       {showBlades ? (
         <StylizedSceneGrassLayer
           elevation={elevation}
+          grassBlockers={grassBlockers}
           interactionRef={grassInteractionRef}
           roads={roads}
           surfacePoints={surfacePoints}
@@ -251,12 +258,14 @@ export function StylizedSceneLandLayer({
 
 function StylizedSceneGrassLayer({
   elevation,
+  grassBlockers,
   interactionRef,
   roads,
   surfacePoints,
   tuning,
 }: {
   elevation: number
+  grassBlockers: readonly StylizedGrassBlocker[]
   interactionRef?: StylizedGrassInteractionRef
   roads: readonly LandrushRoadSegment[]
   surfacePoints: readonly LandrushPoint2[]
@@ -276,29 +285,50 @@ function StylizedSceneGrassLayer({
     [roads],
   )
   const cellCacheRef = useRef<StylizedGrassCellCache>(new Map())
-  const cellCacheSignatureRef = useRef({ pathMaskData, resolvedTuning, roadGrid, surfacePoints })
+  const cellCacheSignatureRef = useRef({
+    grassBlockers,
+    pathMaskData,
+    resolvedTuning,
+    roadGrid,
+    surfacePoints,
+  })
   const cellCacheSignature = cellCacheSignatureRef.current
   if (
+    cellCacheSignature.grassBlockers !== grassBlockers ||
     cellCacheSignature.pathMaskData !== pathMaskData ||
     cellCacheSignature.roadGrid !== roadGrid ||
     cellCacheSignature.resolvedTuning !== resolvedTuning ||
     cellCacheSignature.surfacePoints !== surfacePoints
   ) {
     cellCacheRef.current = new Map()
-    cellCacheSignatureRef.current = { pathMaskData, resolvedTuning, roadGrid, surfacePoints }
+    cellCacheSignatureRef.current = {
+      grassBlockers,
+      pathMaskData,
+      resolvedTuning,
+      roadGrid,
+      surfacePoints,
+    }
   }
   const renderCenter = useStylizedGrassRenderCenter()
+  const lastNonEmptyInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
   const instances = useMemo(
-    () =>
-      createStylizedGrassInstances({
+    () => {
+      const nextInstances = createStylizedGrassInstances({
         cellCache: cellCacheRef.current,
+        grassBlockers,
         pathMaskData,
         renderCenter,
         roadGrid,
         surfacePoints,
         tuning: resolvedTuning,
-      }),
-    [pathMaskData, renderCenter, roadGrid, resolvedTuning, surfacePoints],
+      })
+      if (nextInstances.length > 0 || grassBlockers.length > 0) {
+        lastNonEmptyInstancesRef.current = nextInstances
+        return nextInstances
+      }
+      return lastNonEmptyInstancesRef.current
+    },
+    [grassBlockers, pathMaskData, renderCenter, roadGrid, resolvedTuning, surfacePoints],
   )
   const material = useMemo(
     () => createStylizedGrassNodeMaterial(geometry, grassTexture, resolvedTuning),
@@ -562,6 +592,7 @@ function resolveStylizedSceneTuning(
 
 function createStylizedGrassInstances({
   cellCache,
+  grassBlockers,
   pathMaskData,
   renderCenter,
   roadGrid,
@@ -569,6 +600,7 @@ function createStylizedGrassInstances({
   tuning,
 }: {
   cellCache: StylizedGrassCellCache
+  grassBlockers: readonly StylizedGrassBlocker[]
   pathMaskData: ImageData | null
   renderCenter: StylizedGrassRenderCenter
   roadGrid: StylizedGrassRoadGrid | null
@@ -621,6 +653,7 @@ function createStylizedGrassInstances({
         cellSize,
         cellX,
         cellZ,
+        grassBlockers,
         pathMaskData,
         roadGrid,
         slotsPerCell,
@@ -645,6 +678,7 @@ function getStylizedGrassCellInstances(
     cellSize: number
     cellX: number
     cellZ: number
+    grassBlockers: readonly StylizedGrassBlocker[]
     pathMaskData: ImageData | null
     roadGrid: StylizedGrassRoadGrid | null
     slotsPerCell: number
@@ -666,6 +700,7 @@ function createStylizedGrassCellInstances({
   cellSize,
   cellX,
   cellZ,
+  grassBlockers,
   pathMaskData,
   roadGrid,
   slotsPerCell,
@@ -676,6 +711,7 @@ function createStylizedGrassCellInstances({
   cellSize: number
   cellX: number
   cellZ: number
+  grassBlockers: readonly StylizedGrassBlocker[]
   pathMaskData: ImageData | null
   roadGrid: StylizedGrassRoadGrid | null
   slotsPerCell: number
@@ -691,6 +727,7 @@ function createStylizedGrassCellInstances({
     const z = (cellZ + stableGrassHash(cellX, cellZ, slot, 23.41)) * cellSize
     const edgeJitter = stableGrassHash(cellX, cellZ, slot, 37.73)
     if (surfaceRing.length >= 3 && !pointInPolygon({ x, z }, surfaceRing)) continue
+    if (isPointInStylizedGrassBlocker({ x, z }, grassBlockers)) continue
     if (isPointOnStylizedGrassRoad(x, z, roadGrid, edgeJitter)) continue
     if (
       surfaceRing.length < 3 &&
@@ -956,6 +993,17 @@ function isPointOnReferencePathMask(
     z / STYLIZED_SCENE_FIELD_SIZE + 0.5,
   )
   return maskValue + (edgeJitter - 0.5) * 0.3 > 0.5
+}
+
+function isPointInStylizedGrassBlocker(
+  point: LandrushPoint2,
+  blockers: readonly StylizedGrassBlocker[],
+) {
+  for (const blocker of blockers) {
+    const ring = openRing(blocker.points)
+    if (ring.length >= 3 && pointInPolygon(point, ring)) return true
+  }
+  return false
 }
 
 function createStylizedGrassRoadGrid(

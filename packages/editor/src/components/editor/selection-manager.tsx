@@ -510,12 +510,37 @@ type HighlightableMaterial = Material & {
   needsUpdate?: boolean
 }
 
+type SelectionHighlightUserData = {
+  landrushWater?: unknown
+  __pascalSkipMaterialHighlight?: boolean
+}
+
+function materialSkipsSelectionHighlight(material: Material | Material[]): boolean {
+  const materials = Array.isArray(material) ? material : [material]
+  return materials.some((entry) => {
+    const userData = entry.userData as SelectionHighlightUserData | undefined
+    return (
+      userData?.__pascalSkipMaterialHighlight === true ||
+      userData?.landrushWater !== undefined ||
+      entry.constructor.name === 'LandrushBrunoMeshDefaultMaterial'
+    )
+  })
+}
+
+function objectSkipsSelectionHighlight(object: Object3D): boolean {
+  const userData = object.userData as SelectionHighlightUserData | undefined
+  return userData?.__pascalSkipMaterialHighlight === true
+}
+
 function isHighlightableMesh(object: Object3D): object is Mesh {
+  const mesh = object as Mesh
   return Boolean(
-    (object as Mesh).isMesh &&
-      (object as Mesh).material &&
+    mesh.isMesh &&
+      mesh.material &&
       object.visible &&
-      object.name !== 'collision-mesh',
+      object.name !== 'collision-mesh' &&
+      !objectSkipsSelectionHighlight(object) &&
+      !materialSkipsSelectionHighlight(mesh.material),
   )
 }
 

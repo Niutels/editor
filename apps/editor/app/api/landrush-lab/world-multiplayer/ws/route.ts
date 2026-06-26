@@ -19,11 +19,21 @@ type PlayerSnapshot = {
   updatedAt: number
 }
 
+type ParcelOwnership = {
+  claimedAt: number
+  owner: Pick<PlayerSnapshot, 'color' | 'id' | 'name'>
+  parcelId: string
+  worldId: string
+}
+
 type ClientMessage =
+  | { parcelId: string; type: 'claim-parcel'; worldId: string }
   | { player: PlayerSnapshot; roomId?: string; type: 'join' }
   | { player: PlayerSnapshot; type: 'state' }
   | { sentAt?: number; type: 'heartbeat' }
   | { type: 'leave' }
+  | { roomId?: string; type: 'watch' }
+  | { roomId?: string; type: 'watch-parcels'; worldId: string }
 
 type ServerMessage =
   | {
@@ -38,6 +48,28 @@ type ServerMessage =
   | { player: PlayerSnapshot; roomId: string; serverTime: number; type: 'player-joined' }
   | { player: PlayerSnapshot; roomId: string; serverTime: number; type: 'player-state' }
   | { id: string; reason?: string; roomId: string; serverTime: number; type: 'player-left' }
+  | {
+      ownership: ParcelOwnership
+      roomId: string
+      serverTime: number
+      type: 'parcel-claim-result' | 'parcel-owned'
+    }
+  | {
+      code: string
+      message: string
+      parcelId?: string
+      roomId?: string
+      serverTime: number
+      type: 'parcel-claim-rejected'
+      worldId?: string
+    }
+  | {
+      ownerships: ParcelOwnership[]
+      roomId: string
+      serverTime: number
+      type: 'parcel-ownership-snapshot'
+      worldId: string
+    }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
       playerCount?: number
@@ -59,6 +91,18 @@ type Peer = {
   socket: WebSocket
 }
 
+type Watcher = {
+  connectionId: string
+  lastSeenAt: number
+  roomId: string
+  socket: WebSocket
+}
+
+type Room = {
+  peers: Map<string, Peer>
+  watchers: Set<Watcher>
+}
+
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const HEARTBEAT_INTERVAL_MS = 3000
 const MAX_ROOM_ID_LENGTH = 80
@@ -68,7 +112,8 @@ const PEER_STALE_MS = 15_000
 
 // Instance-local room state. On scaled Vercel deployments, durable room state/pubsub belongs in
 // an external store because reconnects may land on another function instance.
-const rooms = new Map<string, Map<string, Peer>>()
+const rooms = new Map<string, Room>()
+const parcelOwnershipByWorld = new Map<string, Map<string, ParcelOwnership>>()
 
 export async function GET(request: Request) {
   if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
@@ -78,6 +123,7 @@ export async function GET(request: Request) {
   return experimental_upgradeWebSocket((socket) => {
     const connectionId = crypto.randomUUID()
     let peer: Peer | null = null
+    let watcher: Watcher | null = null
 
     send(socket, {
       connectionId,
@@ -102,14 +148,16 @@ export async function GET(request: Request) {
         const player = sanitizePlayerSnapshot(message.player, now)
         const roomId = sanitizeRoomId(message.roomId)
         const room = getRoom(roomId)
-        const existingPeer = room.get(player.id)
+        const existingPeer = room.peers.get(player.id)
 
-        if (!existingPeer && room.size >= MAX_ROOM_PEERS) {
+        if (!existingPeer && room.peers.size >= MAX_ROOM_PEERS) {
           sendError(socket, 'room-full', 'Room is full')
           socket.close(1013, 'Room is full')
           return
         }
 
+        leaveWatcher(watcher)
+        watcher = null
         leaveRoom(peer, false, 'room-change')
         peer = {
           connectionId,
@@ -122,6 +170,70 @@ export async function GET(request: Request) {
           socket,
         }
         joinRoom(peer)
+        return
+      }
+
+      if (message.type === 'watch') {
+        const roomId = sanitizeRoomId(message.roomId)
+        leaveRoom(peer, true, 'watching')
+        peer = null
+        leaveWatcher(watcher)
+        watcher = {
+          connectionId,
+          lastSeenAt: now,
+          roomId,
+          socket,
+        }
+        watchRoom(watcher)
+        return
+      }
+
+      if (message.type === 'watch-parcels') {
+        if (peer) peer.lastSeenAt = now
+        if (watcher) watcher.lastSeenAt = now
+        sendParcelOwnershipSnapshot(
+          socket,
+          sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId),
+          sanitizeParcelWorldId(message.worldId),
+        )
+        return
+      }
+
+      if (message.type === 'claim-parcel') {
+        if (!peer) {
+          sendParcelClaimRejected(socket, {
+            code: 'not-joined',
+            message: 'Join a room before claiming a parcel',
+            parcelId: sanitizeParcelId(message.parcelId),
+            roomId: watcher?.roomId,
+            worldId: sanitizeParcelWorldId(message.worldId),
+          })
+          return
+        }
+
+        peer.lastSeenAt = now
+        const claim = claimParcel(peer, message.worldId, message.parcelId, now)
+        if (!claim.ok) {
+          sendParcelClaimRejected(socket, claim)
+          return
+        }
+
+        send(socket, {
+          ownership: claim.ownership,
+          roomId: peer.roomId,
+          serverTime: now,
+          type: 'parcel-claim-result',
+        })
+        broadcast(
+          peer.roomId,
+          {
+            ownership: claim.ownership,
+            roomId: peer.roomId,
+            serverTime: now,
+            type: 'parcel-owned',
+          },
+          peer.id,
+        )
         return
       }
 
@@ -146,9 +258,12 @@ export async function GET(request: Request) {
 
       if (message.type === 'heartbeat') {
         if (peer) peer.lastSeenAt = now
+        if (watcher) watcher.lastSeenAt = now
+        const roomId = peer?.roomId ?? watcher?.roomId
+        const room = roomId ? rooms.get(roomId) : undefined
         send(socket, {
-          playerCount: peer ? (rooms.get(peer.roomId)?.size ?? 1) : undefined,
-          roomId: peer?.roomId,
+          playerCount: room ? room.peers.size : undefined,
+          roomId,
           sentAt: finiteNumber(message.sentAt, undefined),
           serverTime: now,
           type: 'heartbeat',
@@ -158,28 +273,34 @@ export async function GET(request: Request) {
 
       leaveRoom(peer, true, 'left')
       peer = null
+      leaveWatcher(watcher)
+      watcher = null
     })
 
     socket.on('close', () => {
       leaveRoom(peer, true, 'closed')
       peer = null
+      leaveWatcher(watcher)
+      watcher = null
     })
 
     socket.on('error', () => {
       leaveRoom(peer, true, 'error')
       peer = null
+      leaveWatcher(watcher)
+      watcher = null
     })
   })
 }
 
 function joinRoom(peer: Peer) {
   const room = getRoom(peer.roomId)
-  const previousPeer = room.get(peer.id)
+  const previousPeer = room.peers.get(peer.id)
   if (previousPeer && previousPeer.socket !== peer.socket) {
     previousPeer.socket.close(1000, 'Replaced by a newer connection')
   }
 
-  room.set(peer.id, peer)
+  room.peers.set(peer.id, peer)
   const now = Date.now()
 
   send(peer.socket, {
@@ -196,15 +317,34 @@ function joinRoom(peer: Peer) {
   broadcastRoomState(peer.roomId)
 }
 
+function watchRoom(watcher: Watcher) {
+  const room = getRoom(watcher.roomId)
+  room.watchers.add(watcher)
+  const now = Date.now()
+
+  send(watcher.socket, {
+    players: roomSnapshots(room),
+    roomId: watcher.roomId,
+    serverTime: now,
+    type: 'snapshot',
+  })
+  send(watcher.socket, {
+    playerCount: room.peers.size,
+    roomId: watcher.roomId,
+    serverTime: now,
+    type: 'room-state',
+  })
+}
+
 function leaveRoom(peer: Peer | null, announce: boolean, reason?: string) {
   if (!peer) return
 
   const room = rooms.get(peer.roomId)
-  if (!room || room.get(peer.id) !== peer) return
+  if (!room || room.peers.get(peer.id) !== peer) return
 
-  room.delete(peer.id)
+  room.peers.delete(peer.id)
   const now = Date.now()
-  if (room.size === 0) {
+  if (roomIsEmpty(room)) {
     rooms.delete(peer.roomId)
     return
   }
@@ -221,12 +361,25 @@ function leaveRoom(peer: Peer | null, announce: boolean, reason?: string) {
   broadcastRoomState(peer.roomId)
 }
 
+function leaveWatcher(watcher: Watcher | null) {
+  if (!watcher) return
+  const room = rooms.get(watcher.roomId)
+  if (!room) return
+  room.watchers.delete(watcher)
+  if (roomIsEmpty(room)) rooms.delete(watcher.roomId)
+}
+
 function sweepStalePeers(now: number) {
   for (const room of rooms.values()) {
-    for (const peer of room.values()) {
+    for (const peer of room.peers.values()) {
       if (now - peer.lastSeenAt <= PEER_STALE_MS) continue
       peer.socket.close(1001, 'Stale peer')
       leaveRoom(peer, true, 'stale')
+    }
+    for (const watcher of room.watchers) {
+      if (now - watcher.lastSeenAt <= PEER_STALE_MS) continue
+      watcher.socket.close(1001, 'Stale watcher')
+      leaveWatcher(watcher)
     }
   }
 }
@@ -236,20 +389,128 @@ function broadcastRoomState(roomId: string) {
   if (!room) return
 
   broadcast(roomId, {
-    playerCount: room.size,
+    playerCount: room.peers.size,
     roomId,
     serverTime: Date.now(),
     type: 'room-state',
   })
 }
 
+function claimParcel(
+  peer: Peer,
+  worldIdValue: string,
+  parcelIdValue: string,
+  now: number,
+):
+  | { ok: true; ownership: ParcelOwnership }
+  | {
+      code: string
+      message: string
+      ok: false
+      parcelId: string
+      roomId: string
+      worldId: string
+    } {
+  const worldId = sanitizeParcelWorldId(worldIdValue)
+  const parcelId = sanitizeParcelId(parcelIdValue)
+  const ownerships = getParcelOwnerships(worldId)
+  const existingOwner = ownerships.get(parcelId)
+
+  if (existingOwner) {
+    return {
+      code: 'already-owned',
+      message: `${parcelId} is already claimed`,
+      ok: false,
+      parcelId,
+      roomId: peer.roomId,
+      worldId,
+    }
+  }
+
+  const existingParcel = [...ownerships.values()].find(
+    (ownership) => ownership.owner.id === peer.id,
+  )
+  if (existingParcel) {
+    return {
+      code: 'claim-limit',
+      message: 'You already claimed a parcel in this world',
+      ok: false,
+      parcelId: existingParcel.parcelId,
+      roomId: peer.roomId,
+      worldId,
+    }
+  }
+
+  const ownership: ParcelOwnership = {
+    claimedAt: now,
+    owner: {
+      color: peer.player.color,
+      id: peer.id,
+      name: peer.player.name,
+    },
+    parcelId,
+    worldId,
+  }
+  ownerships.set(parcelId, ownership)
+  return { ok: true, ownership }
+}
+
+function sendParcelOwnershipSnapshot(socket: WebSocket, roomId: string, worldId: string) {
+  send(socket, {
+    ownerships: parcelOwnershipSnapshot(worldId),
+    roomId,
+    serverTime: Date.now(),
+    type: 'parcel-ownership-snapshot',
+    worldId,
+  })
+}
+
+function sendParcelClaimRejected(
+  socket: WebSocket,
+  rejection: {
+    code: string
+    message: string
+    parcelId?: string
+    roomId?: string
+    worldId?: string
+  },
+) {
+  send(socket, {
+    code: rejection.code,
+    message: rejection.message,
+    parcelId: rejection.parcelId,
+    roomId: rejection.roomId,
+    serverTime: Date.now(),
+    type: 'parcel-claim-rejected',
+    worldId: rejection.worldId,
+  })
+}
+
+function getParcelOwnerships(worldId: string) {
+  let ownerships = parcelOwnershipByWorld.get(worldId)
+  if (!ownerships) {
+    ownerships = new Map()
+    parcelOwnershipByWorld.set(worldId, ownerships)
+  }
+  return ownerships
+}
+
+function parcelOwnershipSnapshot(worldId: string) {
+  return [...(parcelOwnershipByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
+    first.parcelId.localeCompare(second.parcelId),
+  )
+}
+
 function broadcast(roomId: string, message: ServerMessage, exceptPeerId?: string) {
   const room = rooms.get(roomId)
   if (!room) return
 
-  for (const roomPeer of room.values()) {
+  for (const roomPeer of room.peers.values()) {
     if (roomPeer.id === exceptPeerId) continue
     send(roomPeer.socket, message)
+  }
+  for (const watcher of room.watchers) {
+    send(watcher.socket, message)
   }
 }
 
@@ -272,17 +533,21 @@ function sendError(socket: WebSocket, code: string, message: string) {
 function getRoom(roomId: string) {
   let room = rooms.get(roomId)
   if (!room) {
-    room = new Map()
+    room = { peers: new Map(), watchers: new Set() }
     rooms.set(roomId, room)
   }
   return room
 }
 
-function roomSnapshots(room: Map<string, Peer>, exceptPeerId?: string) {
-  return [...room.values()]
+function roomSnapshots(room: Room, exceptPeerId?: string) {
+  return [...room.peers.values()]
     .filter((roomPeer) => roomPeer.id !== exceptPeerId)
     .map((roomPeer) => roomPeer.player)
     .sort((first, second) => first.name.localeCompare(second.name))
+}
+
+function roomIsEmpty(room: Room) {
+  return room.peers.size === 0 && room.watchers.size === 0
 }
 
 function parseClientMessage(data: WebSocketData): ClientMessage | null {
@@ -292,6 +557,15 @@ function parseClientMessage(data: WebSocketData): ClientMessage | null {
     if (raw?.type === 'state' && isPlayerSnapshot(raw.player)) return raw
     if (raw?.type === 'heartbeat') return raw
     if (raw?.type === 'leave') return raw
+    if (raw?.type === 'watch') return raw
+    if (raw?.type === 'watch-parcels' && typeof raw.worldId === 'string') return raw
+    if (
+      raw?.type === 'claim-parcel' &&
+      typeof raw.worldId === 'string' &&
+      typeof raw.parcelId === 'string'
+    ) {
+      return raw
+    }
   } catch {
     return null
   }
@@ -339,6 +613,19 @@ function sanitizeText(value: string | undefined, fallback: string, maxLength: nu
 
 function sanitizeColor(value: string | undefined) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#7dd3fc'
+}
+
+function sanitizeParcelWorldId(value: string | undefined) {
+  return sanitizeParcelKey(value, 'landrush-world', 240)
+}
+
+function sanitizeParcelId(value: string | undefined) {
+  return sanitizeParcelKey(value, 'parcel', 80)
+}
+
+function sanitizeParcelKey(value: string | undefined, fallback: string, maxLength: number) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return (normalized || fallback).slice(0, maxLength).replace(/[^a-zA-Z0-9._:-]/g, '-')
 }
 
 function finiteNumber(value: number | undefined, fallback: number): number

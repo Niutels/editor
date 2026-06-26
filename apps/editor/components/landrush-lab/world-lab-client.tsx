@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NeutralToneMapping } from 'three'
 import type { LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
@@ -168,7 +168,6 @@ const WORLD_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
 const WORLD_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 32
 const WORLD_PROGRESSIVE_MAX_PARCELS = 12
 const WORLD_PROGRESSIVE_WATER_FIELD_RESOLUTION = WATER_FIELD_PREVIEW_RESOLUTION
-const WORLD_TUNE_PANEL_MOBILE_QUERY = '(max-width: 767px)'
 const EMPTY_WORLD_GRASS_ROADS: readonly LandrushRoadSegment[] = []
 
 const DEFAULT_STREET_PARAMETERS = {
@@ -312,21 +311,28 @@ type LabSliderConfig<Key extends string> = {
   step: number
 }
 
-type WorldLabOverlayContext = {
+export type WorldLabOverlayContext = {
+  allocation: ParcelAllocationResult | null
+  parcelWorldId: string
+  streetNetwork: ParcelStreetNetwork | null
   surface: WaterLandSurface
 }
 
 type WorldLabClientProps = {
+  canvasStyle?: CSSProperties
   grassInteractionRef?: StylizedGrassInteractionRef
   labTitle?: string
+  parcelOwnershipScope?: string
   renderSceneOverlay?: (context: WorldLabOverlayContext) => React.ReactNode
   showDirtCopyParcels?: boolean
   variant?: WorldLabVariant
 }
 
 export function WorldLabClient({
+  canvasStyle,
   grassInteractionRef,
   labTitle = 'World tune',
+  parcelOwnershipScope = 'world-lab',
   renderSceneOverlay,
   showDirtCopyParcels = false,
   variant = 'classic',
@@ -461,6 +467,10 @@ export function WorldLabClient({
     }),
     [island.seed, renderParcelParameters],
   )
+  const parcelWorldId = useMemo(
+    () => createParcelOwnershipWorldId(parcelOwnershipScope, parcelOptions),
+    [parcelOptions, parcelOwnershipScope],
+  )
   const streetOptions = useMemo<ParcelStreetOptions>(
     () => ({
       loopiness: renderStreetParameters.loopiness,
@@ -527,15 +537,17 @@ export function WorldLabClient({
           streetPathMode={isDirtCopy ? 'parcel-edges' : 'connected'}
           surface={surface}
         />
-        {renderSceneOverlay?.({ surface })}
+        {renderSceneOverlay?.({ allocation, parcelWorldId, streetNetwork, surface })}
       </group>
     ),
     [
+      allocation,
       bladeSubdivisions,
       grassInteractionRef,
       isGrassFieldPreviewing,
       isDirtCopy,
       parcelOptions,
+      parcelWorldId,
       renderGrassTuning,
       renderParcelHintParameters,
       renderStreetParameters.filletRadiusScale,
@@ -544,16 +556,13 @@ export function WorldLabClient({
       showParcelOverlay,
       showStreets,
       streetOptions,
+      streetNetwork,
       visibleGrassRoads,
     ],
   )
 
   useEffect(() => {
-    if (clean) {
-      setShowTunePanel(false)
-      return
-    }
-    setShowTunePanel(!window.matchMedia(WORLD_TUNE_PANEL_MOBILE_QUERY).matches)
+    if (clean) setShowTunePanel(false)
   }, [clean])
 
   useEffect(() => {
@@ -739,6 +748,7 @@ export function WorldLabClient({
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-[#164a77]">
       <WaterScene
+        canvasStyle={canvasStyle}
         debugLayer={debugWaterLayer}
         elevationParameters={renderElevationParameters}
         fieldParameters={renderFieldParameters}
@@ -1197,6 +1207,23 @@ function grassRoadSegmentsFromStreetNetwork(
 
 function nodeId(point: { x: number; z: number }) {
   return `${Math.round(point.x * 100)}-${Math.round(point.z * 100)}`
+}
+
+function createParcelOwnershipWorldId(scope: string, options: ParcelAllocationOptions) {
+  return [
+    'landrush-world',
+    scope,
+    options.seed,
+    options.count,
+    options.maxEdges,
+    options.shoreSetbackMeters,
+    options.simplifyToleranceMeters,
+    options.splitJitter,
+    options.squareness,
+  ]
+    .join(':')
+    .replace(/[^a-zA-Z0-9._:-]/g, '-')
+    .slice(0, 240)
 }
 
 function formatTuningValue(value: number, step = 0.01) {

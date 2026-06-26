@@ -152,6 +152,9 @@ export interface EditorProps {
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
 
   // Viewer runtime options for hosts that need a lean or constrained canvas.
+  viewerCameraControls?: boolean
+  viewerEditorSystems?: boolean
+  viewerSceneChildren?: ReactNode
   viewerPostProcessing?: boolean
   viewerRendererBackend?: 'webgpu' | 'webgl'
   viewerUseBvh?: boolean
@@ -594,18 +597,24 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isLoading,
   isFirstPersonMode,
   showEditorChrome,
+  viewerCameraControls,
+  viewerEditorSystems,
+  viewerSceneChildren,
   onThumbnailCapture,
 }: {
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
   showEditorChrome: boolean
+  viewerCameraControls: boolean
+  viewerEditorSystems: boolean
+  viewerSceneChildren?: ReactNode
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
 }) {
   return (
     <>
-      {!isFirstPersonMode && <SelectionManager />}
-      {!(isVersionPreviewMode || isFirstPersonMode) && <BoxSelectTool />}
+      {viewerEditorSystems && !isFirstPersonMode && <SelectionManager />}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <BoxSelectTool />}
       {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <NodeArrowHandles />}
       {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <WallMoveSideHandles />}
       {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <FloatingActionMenu />}
@@ -613,19 +622,22 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
         <FloatingBuildingActionMenu />
       )}
       {showEditorChrome && !isFirstPersonMode && <WallMeasurementLabel />}
-      <ExportManager />
-      {isFirstPersonMode ? <ViewerZoneSystem /> : <ZoneSystem />}
-      <CeilingSystem />
-      <CeilingSelectionAffordanceSystem />
-      <RoofEditSystem />
-      <StairEditSystem />
+      {viewerEditorSystems && <ExportManager />}
+      {viewerEditorSystems && (isFirstPersonMode ? <ViewerZoneSystem /> : <ZoneSystem />)}
+      {viewerEditorSystems && <CeilingSystem />}
+      {viewerEditorSystems && <CeilingSelectionAffordanceSystem />}
+      {viewerEditorSystems && <RoofEditSystem />}
+      {viewerEditorSystems && <StairEditSystem />}
       {showEditorChrome && !(isLoading || isFirstPersonMode) && <SnapAwareGrid />}
-      {!(isLoading || isVersionPreviewMode || isFirstPersonMode) && <ToolManager />}
+      {showEditorChrome && !(isLoading || isVersionPreviewMode || isFirstPersonMode) && (
+        <ToolManager />
+      )}
       {isFirstPersonMode && <FirstPersonControls />}
-      <CustomCameraControls />
-      <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
+      {viewerCameraControls ? <CustomCameraControls /> : null}
+      {viewerSceneChildren}
+      {viewerEditorSystems && <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />}
       {showEditorChrome && !isFirstPersonMode && <SiteEdgeLabels />}
-      <InteractiveSystem />
+      {viewerEditorSystems && <InteractiveSystem />}
     </>
   )
 })
@@ -813,8 +825,11 @@ const ViewerCanvas = memo(function ViewerCanvas({
   hasLoadedInitialScene,
   showLoader,
   onThumbnailCapture,
+  viewerCameraControls,
+  viewerEditorSystems,
   viewerPostProcessing,
   viewerRendererBackend,
+  viewerSceneChildren,
   viewerUseBvh,
 }: {
   isVersionPreviewMode: boolean
@@ -824,8 +839,11 @@ const ViewerCanvas = memo(function ViewerCanvas({
   hasLoadedInitialScene: boolean
   showLoader: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
+  viewerCameraControls: boolean
+  viewerEditorSystems: boolean
   viewerPostProcessing?: boolean
   viewerRendererBackend?: 'webgpu' | 'webgl'
+  viewerSceneChildren?: ReactNode
   viewerUseBvh?: boolean
 }) {
   const viewMode = useEditor((s) => s.viewMode)
@@ -911,21 +929,25 @@ const ViewerCanvas = memo(function ViewerCanvas({
           ref={viewer3dRef}
           style={{ display: show3d ? undefined : 'none' }}
         >
-          <DeleteCursorLayer
-            containerRef={viewer3dRef}
-            isVersionPreviewMode={isVersionPreviewMode}
-          />
-          <PaintCursorLayer
-            containerRef={viewer3dRef}
-            isVersionPreviewMode={isVersionPreviewMode}
-          />
+          {viewerEditorSystems ? (
+            <DeleteCursorLayer
+              containerRef={viewer3dRef}
+              isVersionPreviewMode={isVersionPreviewMode}
+            />
+          ) : null}
+          {viewerEditorSystems ? (
+            <PaintCursorLayer
+              containerRef={viewer3dRef}
+              isVersionPreviewMode={isVersionPreviewMode}
+            />
+          ) : null}
           {showEditorChrome && !showLoader && isCameraControlsHintVisible && !isFirstPersonMode ? (
             <ViewerCanvasControlsHint
               isPreviewMode={isPreviewMode}
               onDismiss={dismissCameraControlsHint}
             />
           ) : null}
-          <SelectionPersistenceManager enabled={hasLoadedInitialScene && !showLoader} />
+          <SelectionPersistenceManager enabled={viewerEditorSystems && hasLoadedInitialScene && !showLoader} />
           <Viewer
             defaultRender={EDITOR_DEFAULT_RENDER}
             hoverStyles={EDITOR_HOVER_STYLES}
@@ -941,6 +963,9 @@ const ViewerCanvas = memo(function ViewerCanvas({
               isVersionPreviewMode={isVersionPreviewMode}
               onThumbnailCapture={onThumbnailCapture}
               showEditorChrome={showEditorChrome}
+              viewerCameraControls={viewerCameraControls}
+              viewerEditorSystems={viewerEditorSystems}
+              viewerSceneChildren={viewerSceneChildren}
             />
           </Viewer>
         </div>
@@ -969,8 +994,11 @@ export default function Editor({
   isVersionPreviewMode = false,
   isLoading = false,
   onThumbnailCapture,
+  viewerCameraControls = true,
+  viewerEditorSystems = true,
   viewerPostProcessing,
   viewerRendererBackend,
+  viewerSceneChildren,
   viewerUseBvh,
   sidebarOverlay,
   viewerBanner,
@@ -1118,14 +1146,15 @@ export default function Editor({
       selectionManager="default"
       useBvh={viewerUseBvh}
     >
-      <ExportManager />
-      <ViewerZoneSystem />
-      <CeilingSystem />
-      <RoofEditSystem />
-      <StairEditSystem />
-      <CustomCameraControls />
-      <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
-      <InteractiveSystem />
+      {viewerEditorSystems && <ExportManager />}
+      {viewerEditorSystems && <ViewerZoneSystem />}
+      {viewerEditorSystems && <CeilingSystem />}
+      {viewerEditorSystems && <RoofEditSystem />}
+      {viewerEditorSystems && <StairEditSystem />}
+      {viewerCameraControls ? <CustomCameraControls /> : null}
+      {viewerSceneChildren}
+      {viewerEditorSystems && <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />}
+      {viewerEditorSystems && <InteractiveSystem />}
     </Viewer>
   )
 
@@ -1138,8 +1167,11 @@ export default function Editor({
       onThumbnailCapture={onThumbnailCapture}
       showEditorChrome={showEditorChrome}
       showLoader={showLoader}
+      viewerCameraControls={viewerCameraControls}
+      viewerEditorSystems={viewerEditorSystems}
       viewerPostProcessing={viewerPostProcessing}
       viewerRendererBackend={viewerRendererBackend}
+      viewerSceneChildren={viewerSceneChildren}
       viewerUseBvh={viewerUseBvh}
     />
   )

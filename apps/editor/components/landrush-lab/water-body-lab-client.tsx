@@ -138,24 +138,22 @@ export function WaterBodyLabClient() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#164a77]">
-      <div
-        className={`absolute inset-0 transition-opacity duration-300 ease-out ${
-          showStandaloneWaterLayer
-            ? 'pointer-events-auto opacity-100'
-            : 'pointer-events-none opacity-0'
-        }`}
-        data-landrush-water-layer
-      >
-        <WaterLabClient
-          key="water-body-defaults-v7"
-          labTitle="Landrush water body lab"
-          materialDefaults={BODY_MATERIAL_DEFAULTS}
-          materialSliders={BODY_MATERIAL_SLIDERS}
-          materialToggles={BODY_MATERIAL_TOGGLES}
-          panelSubtitle="independent lagged body material"
-          waterMaterialFactory={createLandrushWaterBodyMaterial}
-        />
-      </div>
+      {showStandaloneWaterLayer ? (
+        <div
+          className="pointer-events-auto absolute inset-0 opacity-100 transition-opacity duration-300 ease-out"
+          data-landrush-water-layer
+        >
+          <WaterLabClient
+            key="water-body-defaults-v7"
+            labTitle="Landrush water body lab"
+            materialDefaults={BODY_MATERIAL_DEFAULTS}
+            materialSliders={BODY_MATERIAL_SLIDERS}
+            materialToggles={BODY_MATERIAL_TOGGLES}
+            panelSubtitle="independent lagged body material"
+            waterMaterialFactory={createLandrushWaterBodyMaterial}
+          />
+        </div>
+      ) : null}
 
       {buildLayerMounted ? (
         <div
@@ -189,6 +187,7 @@ function WaterBodyPascalBuildClient({ active }: { active: boolean }) {
   useEffect(() => {
     const editor = useEditor.getState()
     const scene = useScene.getState()
+    const viewer = useViewer.getState()
 
     if (!active) {
       scene.setReadOnly(true)
@@ -197,13 +196,17 @@ function WaterBodyPascalBuildClient({ active }: { active: boolean }) {
       editor.setMode('select')
       editor.setTool(null)
       editor.setCatalogCategory(null)
+      viewer.resetSelection()
+      viewer.setHoveredId(null)
+      viewer.setPreviewSelectedIds([])
+      viewer.outliner.selectedObjects.length = 0
+      viewer.outliner.hoveredObjects.length = 0
       delete window.__LANDRUSH_WATER_BODY_PASCAL_BUILD__
       return () => {
         useScene.getState().setReadOnly(false)
       }
     }
 
-    const viewer = useViewer.getState()
     const sidebar = useSidebarStore.getState()
 
     scene.setReadOnly(false)
@@ -354,7 +357,7 @@ function createWaterBodyPascalBuildSceneGraph(): {
           type: 'site',
           name: 'Water Body Island Site',
           parentId: null,
-          visible: true,
+          visible: false,
           metadata: { source: 'water-body-pascal-build' },
           polygon: {
             points: sitePolygon,

@@ -122,6 +122,8 @@ export function createPascalLandrushScene(): PascalLandrushScene {
     playerHeading: 0,
     playerMoving: false,
     playerSpeed: 0,
+    remotePlayers: [],
+    renderFlags: {},
     focusParcelId: null,
     landrushMode: 'intro',
     metadata: {

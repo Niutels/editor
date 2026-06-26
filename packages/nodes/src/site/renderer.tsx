@@ -131,8 +131,9 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
   }, [node?.polygon?.points])
 
   const handlers = useNodeEvents(node, 'site')
+  const showSiteSurface = node.visible !== false
 
-  if (!(node && lineGeometry)) {
+  if (!node) {
     return null
   }
 
@@ -144,7 +145,7 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
       ))}
 
       {/* Ground fill: site polygon with slab holes, occludes below-grade geometry */}
-      {groundShape && (
+      {showSiteSurface && groundShape && (
         <mesh
           material={groundMaterial}
           position={[0, -0.05, 0]}
@@ -155,11 +156,12 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
         </mesh>
       )}
 
-      {/* Simple boundary line */}
-      {/* @ts-ignore */}
-      <line frustumCulled={false} geometry={lineGeometry} renderOrder={9}>
-        <lineBasicMaterial color="#f59e0b" linewidth={2} opacity={0.6} transparent />
-      </line>
+      {showSiteSurface && lineGeometry ? (
+        // @ts-expect-error
+        <line frustumCulled={false} geometry={lineGeometry} renderOrder={9}>
+          <lineBasicMaterial color="#f59e0b" linewidth={2} opacity={0.6} transparent />
+        </line>
+      ) : null}
     </group>
   )
 }

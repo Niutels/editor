@@ -1,53 +1,653 @@
 'use client'
 
-import { type LevelNode, PascalWaterNode, type SceneGraph, useScene } from '@pascal-app/core'
 import {
-  LANDRUSH_WATER_BODY_SURFACE_PARAMETERS,
-  type LandrushWaterBodySurfaceParameters,
+  type AnyNode,
+  type LandrushWorldNode,
+  type LevelNode,
+  type PascalWaterNode,
+  useScene,
+} from '@pascal-app/core'
+import { Editor, ItemsPanel, type SceneGraph, useEditor, useSidebarStore } from '@pascal-app/editor'
+import {
+  createPascalWaterLandSurface,
+  createPascalWaterSmoothedPerimeter,
+  LANDRUSH_WATER_SURFACE_PARAMETERS,
+  type LandrushWaterSurfaceParameters,
+  type PascalWaterLandSurface,
 } from '@pascal-app/nodes'
-import { renderScheduler, useViewer, Viewer } from '@pascal-app/viewer'
-import { OrbitControls } from '@react-three/drei'
-import { useThree } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
-import { Vector3 } from 'three'
+import { LandrushRobot } from '@pascal-app/nodes/landrush-world/robot'
+import { renderScheduler, useViewer } from '@pascal-app/viewer'
+import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
+import { useFrame, useThree } from '@react-three/fiber'
+import {
+  ChevronDown,
+  ChevronRight,
+  Hammer,
+  Layers,
+  Package,
+  RotateCcw,
+  Settings,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
+import {
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  Suspense,
+  type TouchEvent as ReactTouchEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import {
+  type Camera,
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  type GridHelper,
+  type Group,
+  MathUtils,
+  type Mesh,
+  type MeshBasicMaterial,
+  Raycaster,
+  Shape,
+  ShapeUtils,
+  Vector2,
+  Vector3,
+} from 'three'
+import type { LandrushPoint2, LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
+import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
+import {
+  GRASS_FIELD_RESOLUTION,
+  GRASS_SPAWN_FIELD_RESOLUTION,
+  type GrassFieldBlocker,
+} from './grass-field-texture'
+import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-material'
+import { GrassWaterLandLayers } from './grass-water-layers'
+import {
+  allocateParcels,
+  type ParcelAllocationOptions,
+  type ParcelAllocationParcel,
+  type ParcelAllocationResult,
+  polygonCentroid,
+} from './parcel-allocation'
+import {
+  DEFAULT_PARCEL_STREET_WIDTH_METERS,
+  generateParcelEdgeStreets,
+  PARCEL_STREET_CURB_EXTRA_WIDTH_METERS,
+  PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS,
+  type ParcelStreetNetwork,
+  type ParcelStreetSegment,
+} from './parcel-streets'
+import {
+  type ConnectionStatus,
+  type LocalPlayerProfile,
+  type MultiplayerPlayerSnapshot,
+  MultiplayerStatusPanel,
+  type ParcelClaimError,
+  type ParcelOwnership,
+  readLocalPlayerProfile,
+  sanitizeRoomId,
+  useLandrushWorldMultiplayer,
+} from './world-multiplayer-lab-client'
+import {
+  WATER_FIELD_PREVIEW_RESOLUTION,
+  WATER_FIELD_RESOLUTION,
+  type WaterFieldParameters,
+} from './water-field-texture'
 import {
   generateWaterLabIsland,
+  type IslandElevationParameters,
+  type LabSliderConfig,
   WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
   WATER_LAB_DEFAULT_FIELD_PARAMETERS,
   WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+  WATER_LAB_ISLAND_SLIDERS,
+  type WaterLabIslandParameters,
 } from './water-lab-parameters'
 import { WATER_PLANE_SIZE } from './water-material'
+import { WATER_MATERIAL_SLIDERS, type WaterMaterialSliderKey } from './water-material-sliders'
+import type { StylizedGrassInteraction } from './stylized-scene-land-layers'
 
 const PASCAL_WATER_SITE_ID = 'site_pascal-water-debug'
 const PASCAL_WATER_BUILDING_ID = 'building_pascal-water-debug'
 const PASCAL_WATER_LEVEL_ID = 'level_pascal-water-debug'
+const PASCAL_WATER_NODE_ID = 'pascal-water_debug-water'
+const PASCAL_WATER_LAYOUT_NODE_ID = 'landrush-world_pascal-water-layout'
 const PASCAL_WATER_CAMERA_POSITION = [88, 86, 94] as const
 const PASCAL_WATER_CAMERA_TARGET = [0, 0, 0] as const
 const PASCAL_WATER_CAMERA_ZOOM = 7.8
+const PASCAL_WATER_MATERIAL_PARAMETERS = {
+  ...LANDRUSH_WATER_SURFACE_PARAMETERS,
+} satisfies LandrushWaterSurfaceParameters
+const PASCAL_WATER_ELEVATION_PARAMETERS = {
+  ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
+  cliffBlockDepthMaxMeters: 0,
+  cliffBlockDepthMinMeters: 0,
+  cliffColorAverageRatio: 0.92,
+  cliffToneVariation: 0.12,
+} satisfies IslandElevationParameters
+const PASCAL_WATER_PARCEL_PARAMETERS = {
+  maxEdges: 15,
+  parcelCount: 12,
+  shoreSetbackMeters: 0,
+  simplifyToleranceMeters: 0.18,
+  splitJitter: 0.12,
+  squareness: 0.82,
+} as const
+const PASCAL_WATER_PARCEL_OVERLAY_COLOR = '#e0a35a'
+const PASCAL_WATER_DIRT_ROAD_WIDTH_METERS =
+  (DEFAULT_PARCEL_STREET_WIDTH_METERS +
+    PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS +
+    PARCEL_STREET_CURB_EXTRA_WIDTH_METERS) /
+  2.35
+const PASCAL_WATER_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
+const PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 32
+const PASCAL_WATER_GRASS_TEXTURE_TILE_METERS = 5
+const PASCAL_WATER_GRASS_TUNING = {
+  ...DEFAULT_GRASS_BLADE_TUNING,
+  colorPatchScale: 0.7,
+  colorVariation: 0.5,
+  density: 5000,
+  flutter: 0.28,
+  gustScale: 0.5,
+  heightNoiseScale: 0.15,
+  heightVariation: 1,
+  macroScale: 0.115,
+  macroVariation: 0.48,
+  projection: 0.74,
+  scale: 1.3,
+  treeSway: 0.7,
+  turbulence: 0.28,
+  windAngle: 45,
+  windSpeed: 2,
+  windStrength: 0.25,
+} satisfies GrassBladeTuning
+const PASCAL_WATER_MULTIPLAYER_ROOM_ID = 'landrush-lab-world-multiplayer'
+const PASCAL_WATER_VISUAL_PLAYER_GROUND_Y = 0.04
+const PASCAL_WATER_LOCAL_STATE_SEND_INTERVAL_MS = 80
+const PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED = 2.75
+const PASCAL_WATER_ROBOT_WALK_SPEED = PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED / 1.5
+const PASCAL_WATER_ROBOT_RUN_SPEED = PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED * 2.48
+const PASCAL_WATER_ROBOT_JOYSTICK_RUN_START = 0.82
+const PASCAL_WATER_ROBOT_ACCELERATION = 18
+const PASCAL_WATER_ROBOT_DECELERATION = 24
+const PASCAL_WATER_ROBOT_TURN_RESPONSE = 12
+const PASCAL_WATER_ROBOT_MOBILE_JOYSTICK_TURN_RESPONSE = PASCAL_WATER_ROBOT_TURN_RESPONSE / 5
+const PASCAL_WATER_ROBOT_GROUND_CLEARANCE = 0.04
+const PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT = 1.28
+const PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE = 8.2
+const PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT = 4.5
+const PASCAL_WATER_ROBOT_CAMERA_FOLLOW_RESPONSE = 16
+const PASCAL_WATER_ROBOT_CAMERA_MIN_DISTANCE = 3.2
+const PASCAL_WATER_ROBOT_CAMERA_MAX_DISTANCE = 15
+const PASCAL_WATER_ROBOT_CAMERA_MIN_PITCH = MathUtils.degToRad(-8)
+const PASCAL_WATER_ROBOT_CAMERA_MAX_PITCH = MathUtils.degToRad(84)
+const PASCAL_WATER_ROBOT_CAMERA_MOUSE_PITCH_SPEED = 0.0026
+const PASCAL_WATER_ROBOT_CAMERA_MOUSE_YAW_SPEED = 0.0032
+const PASCAL_WATER_ROBOT_CAMERA_TOUCH_PITCH_SPEED = 0.0031
+const PASCAL_WATER_ROBOT_CAMERA_TOUCH_YAW_SPEED = 0.0038 / 5
+const PASCAL_WATER_ROBOT_CAMERA_WHEEL_ZOOM_SPEED = 0.001
+const PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS = 2.7
+const PASCAL_WATER_BUILT_GRASS_PADDING_METERS = 0.2
+const PASCAL_WATER_BUILT_GRASS_FEATHER_METERS = 0.22
+const PASCAL_WATER_BUILD_PARCEL_GRASS_FEATHER_METERS = 0.18
+const PASCAL_WATER_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
+const PASCAL_WATER_BUILD_GRID_SIZE_METERS = 132
+const PASCAL_WATER_BUILD_GRID_DIVISIONS = 132
+const PASCAL_WATER_BUILD_GRID_ELEVATION_OFFSET = 0.16
+const PASCAL_WATER_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
+const PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE = 1.014
+const PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE = 12
+const PASCAL_WATER_PARCEL_MAP_BASE_COLOR = '#d3aa58'
+const PASCAL_WATER_PARCEL_MAP_HOVER_COLOR = '#f5cf78'
+const PASCAL_WATER_PARCEL_MAP_BASE_OPACITY = 0.19
+const PASCAL_WATER_PARCEL_MAP_HOVER_OPACITY = 0.34
+const PASCAL_WATER_MAP_CAMERA_POSITION = [0, 128, 0.01] as const
+const PASCAL_WATER_MAP_CAMERA_TARGET = [0, 0, 0] as const
+const PASCAL_WATER_MAP_CAMERA_ZOOM = 8.6
+const PASCAL_WATER_MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
+const PASCAL_WATER_REMOTE_POSITION_RESPONSE = 12
+const PASCAL_WATER_REMOTE_HEADING_RESPONSE = 14
+const PASCAL_WATER_FALLBACK_PROFILE = {
+  color: '#7dd3fc',
+  id: 'pascal-water-pending',
+  name: 'Builder',
+} satisfies LocalPlayerProfile
+
+const PASCAL_WATER_SIDEBAR_TABS = [
+  {
+    id: 'site',
+    label: 'Scene',
+    component: () => null,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Layers className="h-5 w-5" />,
+  },
+  {
+    id: 'items',
+    label: 'Items',
+    component: ItemsPanel,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Package className="h-5 w-5" />,
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    component: () => null,
+    mobileDefaultSnap: 0.5,
+    mobileIcon: <Settings className="h-5 w-5" />,
+  },
+]
+
+type FieldSliderKey = keyof WaterFieldParameters
+type ElevationSliderKey = keyof IslandElevationParameters
+type IslandSliderKey = keyof WaterLabIslandParameters
+type PascalWaterTuningGroupId = 'grass' | 'island' | 'waterAreas' | 'waterEdge' | 'waterRipples'
+type PascalWaterIsland = ReturnType<typeof generateWaterLabIsland>
+type PascalWaterPerimeter = PascalWaterNode['perimeter']
+type PascalWaterViewMode = 'build' | 'map' | 'player'
+type ProgressiveRenderValue<T> = {
+  finalValue: T
+  isSettling: boolean
+  previewValue: T
+}
+type RobotMotion = {
+  cameraSnapVersion: number
+  heading: number
+  isMoving: boolean
+  position: Vector3
+  speed: number
+  velocity: Vector3
+}
+type RobotMovementInput = {
+  heading: number
+  intensity: number
+  runAmount: number
+  x: number
+  z: number
+}
+type MobileJoystickInput = {
+  forward: number
+  strafe: number
+  strength: number
+}
+type RobotWorldOrbitControls = {
+  target: Vector3
+  update: () => void
+}
+
+const FIELD_SLIDERS = [
+  { key: 'depthContourOffsetMeters', label: 'depth contour offset', max: 12, min: -6, step: 0.1 },
+  {
+    key: 'depthContourVariationMeters',
+    label: 'depth contour variation',
+    max: 14,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'depthContourNoiseFrequency',
+    label: 'depth contour scale',
+    max: 0.18,
+    min: 0.005,
+    step: 0.005,
+  },
+  {
+    key: 'depthContourCollapseMeters',
+    label: 'depth contour collapse',
+    max: 12,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'depthContourCollapseScale',
+    label: 'collapse pocket size',
+    max: 1.4,
+    min: 0.15,
+    step: 0.05,
+  },
+  { key: 'depthReach', label: 'depth reach', max: 70, min: 4, step: 1 },
+  { key: 'depthExponent', label: 'depth curve', max: 2, min: 0.45, step: 0.01 },
+  { key: 'depthNoiseStrength', label: 'field noise', max: 0.14, min: 0, step: 0.001 },
+  { key: 'depthNoiseFrequency', label: 'field noise size', max: 0.16, min: 0.001, step: 0.001 },
+  { key: 'shoreBandMeters', label: 'shore width', max: 10, min: 0, step: 0.05 },
+  { key: 'shoreFeatherMeters', label: 'shore feather', max: 4, min: 0.02, step: 0.02 },
+  { key: 'shoreVariationMeters', label: 'shore variation', max: 5, min: 0, step: 0.05 },
+  { key: 'shoreNoiseFrequency', label: 'shore variation size', max: 0.35, min: 0.002, step: 0.002 },
+] satisfies readonly LabSliderConfig<FieldSliderKey>[]
+
+const ELEVATION_SLIDERS = [
+  { key: 'edgeLiftMeters', label: 'edge lift', max: 6, min: 0, step: 0.05 },
+  { key: 'outerContourMeters', label: 'outside edge', max: 14, min: 0, step: 0.25 },
+  { key: 'innerContourMeters', label: 'inside edge', max: 32, min: 1, step: 0.25 },
+  { key: 'contourVariationMeters', label: 'edge variation', max: 10, min: 0, step: 0.25 },
+  { key: 'contourNoiseFrequency', label: 'edge variation size', max: 0.2, min: 0.005, step: 0.005 },
+  { key: 'cliffBandMergeThresholdMeters', label: 'band merge', max: 32, min: 0, step: 0.01 },
+  { key: 'cliffBlockDepthMinMeters', label: 'depth out min', max: 18, min: 0, step: 0.05 },
+  { key: 'cliffBlockDepthMaxMeters', label: 'depth out max', max: 18, min: 0, step: 0.05 },
+  { key: 'cliffContrast', label: 'cliff contrast', max: 1, min: 0, step: 0.01 },
+  { key: 'cliffToneVariation', label: 'tone variation', max: 1, min: 0, step: 0.01 },
+  { key: 'cliffColorAverageRatio', label: 'color average', max: 1, min: 0, step: 0.01 },
+] satisfies readonly LabSliderConfig<ElevationSliderKey>[]
+
+const PASCAL_WATER_GRASS_SLIDERS = [
+  { key: 'density', label: 'density', max: 30_000, min: 0, step: 100 },
+  { key: 'scale', label: 'scale', max: 3, min: 0.1, step: 0.05 },
+  { key: 'heightVariation', label: 'height variation', max: 1, min: 0, step: 0.01 },
+  { key: 'heightNoiseScale', label: 'height noise scale', max: 2, min: 0.05, step: 0.01 },
+  { key: 'windStrength', label: 'wind strength', max: 0.5, min: 0, step: 0.01 },
+  { key: 'windSpeed', label: 'wind speed', max: 5, min: 0, step: 0.1 },
+  { key: 'windAngle', label: 'wind direction', max: 360, min: 0, step: 1 },
+  { key: 'gustScale', label: 'gust frequency', max: 1.5, min: 0.1, step: 0.01 },
+  { key: 'turbulence', label: 'turbulence', max: 1, min: 0, step: 0.01 },
+  { key: 'flutter', label: 'tip flutter', max: 1, min: 0, step: 0.01 },
+  { key: 'treeSway', label: 'tree sway', max: 3, min: 0, step: 0.05 },
+  { key: 'projection', label: 'ground projection', max: 1, min: 0, step: 0.01 },
+  { key: 'colorVariation', label: 'color variation', max: 1, min: 0, step: 0.01 },
+  { key: 'colorPatchScale', label: 'color patch scale', max: 2, min: 0.05, step: 0.01 },
+  { key: 'macroVariation', label: 'macro variation', max: 0.5, min: 0, step: 0.01 },
+  { key: 'macroScale', label: 'macro scale', max: 0.5, min: 0.01, step: 0.005 },
+] satisfies readonly LabSliderConfig<keyof GrassBladeTuning>[]
 
 declare global {
   interface Window {
     __PASCAL_BENCH_ORBITING__?: boolean
     __PASCAL_WATER_DEBUG__?: {
       features: readonly string[]
+      layoutNodeId: string
+      materialParameters: Partial<LandrushWaterSurfaceParameters>
       nodeId: string
       source: string
+      worldLayout: {
+        parcels: number
+        roadSegments: number
+      }
     }
   }
 }
 
 export function PascalWaterClient() {
-  const pascalWaterScene = useMemo(createPascalWaterSceneGraph, [])
-  const { sceneGraph, waterNode } = pascalWaterScene
+  const searchParams = useSearchParams()
+  const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
+  const mobileJoystickRef = useRef<MobileJoystickInput | null>(null)
+  const localMotionRef = useRef<RobotMotion | null>(null)
+  const initialViewModeAppliedRef = useRef(false)
+  const [buildMode, setBuildMode] = useState(false)
+  const [buildParcelId, setBuildParcelId] = useState<string | null>(null)
+  const [mapView, setMapView] = useState(false)
+  const [showTunePanel, setShowTunePanel] = useState(false)
+  const [localProfile, setLocalProfile] = useState<LocalPlayerProfile | null>(null)
+  const [islandParameters, setIslandParameters] = useState<WaterLabIslandParameters>(() => ({
+    ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+  }))
+  const [fieldParameters, setFieldParameters] = useState<WaterFieldParameters>(() => ({
+    ...WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+  }))
+  const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
+    ...PASCAL_WATER_ELEVATION_PARAMETERS,
+  }))
+  const [materialParameters, setMaterialParameters] = useState<LandrushWaterSurfaceParameters>(
+    () => ({
+      ...PASCAL_WATER_MATERIAL_PARAMETERS,
+    }),
+  )
+  const [grassTuning, setGrassTuning] = useState<GrassBladeTuning>(() => ({
+    ...PASCAL_WATER_GRASS_TUNING,
+  }))
+  const [terrainFieldResolution, setTerrainFieldResolution] = useState(WATER_FIELD_RESOLUTION)
+  const showDepthReference = false
+  const offline = searchParams.get('offline') === '1'
+  const roomId = useMemo(
+    () => sanitizeRoomId(searchParams.get('room') ?? PASCAL_WATER_MULTIPLAYER_ROOM_ID),
+    [searchParams],
+  )
+  const multiplayer = useLandrushWorldMultiplayer({
+    enabled: !offline && Boolean(localProfile),
+    localProfile: localProfile ?? PASCAL_WATER_FALLBACK_PROFILE,
+    roomId,
+    spectator: false,
+  })
+  const resolvedLocalProfile = localProfile ?? PASCAL_WATER_FALLBACK_PROFILE
+  const multiplayerStatus: ConnectionStatus = offline ? 'offline' : multiplayer.status
+  const viewMode: PascalWaterViewMode = buildMode ? 'build' : mapView ? 'map' : 'player'
+  const islandRender = useProgressiveRenderValue(islandParameters, 320)
+  const fieldRender = useProgressiveRenderValue(fieldParameters, 160)
+  const elevationRender = useProgressiveRenderValue(elevationParameters, 160)
+  const grassRender = useProgressiveRenderValue(grassTuning, 160)
+  const terrainFieldResolutionRender = useProgressiveRenderValue(terrainFieldResolution, 160)
+  const renderIslandParameters = progressiveRenderValue(islandRender)
+  const renderFieldParameters = progressiveRenderValue(fieldRender)
+  const renderElevationParameters = progressiveRenderValue(elevationRender)
+  const renderGrassTuning = progressiveRenderValue(grassRender)
+  const isWaterFieldPreviewing =
+    islandRender.isSettling || fieldRender.isSettling || terrainFieldResolutionRender.isSettling
+  const isGrassFieldPreviewing =
+    islandRender.isSettling || elevationRender.isSettling || grassRender.isSettling
+  const renderTerrainFieldResolution = isWaterFieldPreviewing
+    ? Math.min(terrainFieldResolutionRender.previewValue, WATER_FIELD_PREVIEW_RESOLUTION)
+    : terrainFieldResolutionRender.finalValue
+  const liveIsland = useMemo(
+    () => generateWaterLabIsland(renderIslandParameters),
+    [renderIslandParameters],
+  )
+  const livePerimeter = useMemo(() => createPascalWaterPerimeter(liveIsland), [liveIsland])
+  const liveSmoothedShorelinePoints = useMemo(
+    () => createPascalWaterSmoothedPerimeter(livePerimeter.points),
+    [livePerimeter.points],
+  )
+  const liveLandSurface = useMemo(
+    () =>
+      createPascalWaterLandSurface({
+        elevationParameters: renderElevationParameters,
+        shorelinePoints: liveSmoothedShorelinePoints,
+        waterPlaneSize: WATER_PLANE_SIZE,
+      }),
+    [liveSmoothedShorelinePoints, renderElevationParameters],
+  )
+  const liveParcelOptions = useMemo(
+    () => createPascalWaterParcelOptions(liveIsland.seed),
+    [liveIsland.seed],
+  )
+  const liveParcelAllocation = useMemo(
+    () => allocateParcels(liveLandSurface.grassSurfacePoints, liveParcelOptions),
+    [liveLandSurface.grassSurfacePoints, liveParcelOptions],
+  )
+  const parcelWorldId = useMemo(
+    () => createPascalWaterParcelOwnershipWorldId(liveParcelOptions),
+    [liveParcelOptions],
+  )
+  const localParcelOwnership = useMemo(
+    () =>
+      multiplayer.parcelOwnerships.find(
+        (ownership) =>
+          ownership.worldId === parcelWorldId && ownership.owner.id === resolvedLocalProfile.id,
+      ) ?? null,
+    [multiplayer.parcelOwnerships, parcelWorldId, resolvedLocalProfile.id],
+  )
+  const localOwnedParcel = useMemo(
+    () =>
+      localParcelOwnership
+        ? (liveParcelAllocation.parcels.find(
+            (parcel) => parcel.id === localParcelOwnership.parcelId,
+          ) ?? null)
+        : null,
+    [liveParcelAllocation.parcels, localParcelOwnership],
+  )
+  const activeBuildParcel = useMemo(
+    () =>
+      buildParcelId
+        ? (liveParcelAllocation.parcels.find((parcel) => parcel.id === buildParcelId) ?? null)
+        : null,
+    [buildParcelId, liveParcelAllocation.parcels],
+  )
+  const liveViewerLandSurface = useMemo(
+    () => createPascalWaterViewerLandSurface(liveLandSurface),
+    [liveLandSurface],
+  )
+  const bladeSubdivisions = useMemo(
+    () =>
+      isGrassFieldPreviewing
+        ? Math.min(
+            PASCAL_WATER_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS,
+            resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
+          )
+        : resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
+    [isGrassFieldPreviewing, renderGrassTuning.density],
+  )
+  const pascalWaterScene = useMemo(
+    () =>
+      createPascalWaterSceneGraph({
+        elevationParameters: PASCAL_WATER_ELEVATION_PARAMETERS,
+        fieldParameters: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+        islandParameters: WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+        materialParameters: PASCAL_WATER_MATERIAL_PARAMETERS,
+        showDepthReference: false,
+        terrainFieldResolution: WATER_FIELD_RESOLUTION,
+      }),
+    [],
+  )
+  const liveWaterNode = useMemo(
+    () =>
+      createPascalWaterNode({
+        elevationParameters: renderElevationParameters,
+        fieldParameters: renderFieldParameters,
+        materialParameters,
+        perimeter: livePerimeter,
+        showDepthReference,
+        terrainFieldResolution: renderTerrainFieldResolution,
+        waterLabSeed: liveIsland.seed,
+      }).waterNode,
+    [
+      renderElevationParameters,
+      renderFieldParameters,
+      renderTerrainFieldResolution,
+      liveIsland.seed,
+      livePerimeter,
+      materialParameters,
+    ],
+  )
+  const liveLayoutNode = useMemo(
+    () =>
+      createPascalWaterLayoutNode({
+        allocation: liveParcelAllocation,
+        island: liveIsland,
+        landSurface: liveLandSurface,
+        remotePlayers: multiplayer.remotePlayers,
+      }),
+    [liveIsland, liveLandSurface, liveParcelAllocation, multiplayer.remotePlayers],
+  )
+  const liveGrassRoads = useMemo(
+    () => createPascalWaterGrassRoadSegments(liveLayoutNode.roads.segments),
+    [liveLayoutNode.roads.segments],
+  )
+  const hasLiveWaterNode = useScene((state) => Boolean(state.nodes[PASCAL_WATER_NODE_ID as never]))
+  const hasLiveLayoutNode = useScene((state) =>
+    Boolean(state.nodes[PASCAL_WATER_LAYOUT_NODE_ID as never]),
+  )
+  const sceneNodes = useScene((state) => state.nodes)
+  const builtGrassBlockers = useMemo(
+    () => createPascalWaterBuiltGrassBlockers(sceneNodes),
+    [sceneNodes],
+  )
+  const grassBlockers = useMemo(() => {
+    if (!(buildMode && activeBuildParcel)) return builtGrassBlockers
+    return [
+      ...builtGrassBlockers,
+      {
+        featherMeters: PASCAL_WATER_BUILD_PARCEL_GRASS_FEATHER_METERS,
+        points: activeBuildParcel.points,
+      },
+    ] satisfies GrassFieldBlocker[]
+  }, [activeBuildParcel, buildMode, builtGrassBlockers])
+  const handleLoad = useCallback(async () => pascalWaterScene.sceneGraph, [pascalWaterScene])
 
   useEffect(() => {
-    const viewer = useViewer.getState()
+    setLocalProfile(readLocalPlayerProfile())
+  }, [])
 
-    useScene.getState().setScene(sceneGraph.nodes as never, sceneGraph.rootNodeIds as never)
-    viewer.setProjectId('pascal-water-debug')
-    viewer.setCameraMode('orthographic')
-    viewer.setShowGrid(false)
-    viewer.setShadows(false)
+  useEffect(() => {
+    if (initialViewModeAppliedRef.current) return
+    initialViewModeAppliedRef.current = true
+
+    const initialBuildMode =
+      searchParams.get('build') === '1' || searchParams.get('pascalBuild') === '1'
+    const camera = searchParams.get('camera')
+    const initialMapView =
+      searchParams.get('map') === '1' ||
+      camera === 'layout' ||
+      camera === 'topdown' ||
+      camera === 'overhead'
+
+    setBuildMode(initialBuildMode)
+    setMapView(!initialBuildMode && initialMapView)
+    if (initialBuildMode || initialMapView) releasePascalWaterPointerLock()
+  }, [searchParams])
+
+  useEffect(() => {
+    if (!buildMode) return
+    if (localOwnedParcel && activeBuildParcel?.id === localOwnedParcel.id) return
+    if (localOwnedParcel) {
+      setBuildParcelId(localOwnedParcel.id)
+      return
+    }
+    setBuildMode(false)
+    setBuildParcelId(null)
+  }, [activeBuildParcel, buildMode, localOwnedParcel])
+
+  useEffect(() => {
+    if (!buildMode || !activeBuildParcel) return
+
+    const pendingDeleteIds = new Set<string>()
+    let deleteQueued = false
+    const enforceOwnedParcel = () => {
+      const scene = useScene.getState()
+      const invalidIds = createPascalWaterInvalidBuildNodeIds(scene.nodes, activeBuildParcel)
+      if (invalidIds.length === 0) return
+
+      for (const id of invalidIds) pendingDeleteIds.add(id)
+      if (deleteQueued) return
+
+      deleteQueued = true
+      queueMicrotask(() => {
+        deleteQueued = false
+        const currentScene = useScene.getState()
+        const ids = [...pendingDeleteIds]
+        pendingDeleteIds.clear()
+        for (const id of ids) {
+          if (currentScene.nodes[id as never]) currentScene.deleteNode(id as never)
+        }
+        if (ids.length > 0) renderScheduler.requestFrame('geometry:changed')
+      })
+    }
+
+    enforceOwnedParcel()
+    return useScene.subscribe(enforceOwnedParcel)
+  }, [activeBuildParcel, buildMode])
+
+  useEffect(() => {
+    window.__PASCAL_BENCH_ORBITING__ = true
+
+    return () => {
+      delete window.__PASCAL_BENCH_ORBITING__
+      useScene.getState().unloadScene()
+    }
+  }, [])
+
+  useEffect(() => {
+    const editor = useEditor.getState()
+    const viewer = useViewer.getState()
+    const sidebar = useSidebarStore.getState()
+
+    viewer.setCameraMode(mapView && !buildMode ? 'orthographic' : 'perspective')
+    viewer.setColorPreset('clay')
+    viewer.setShading('rendered')
+    viewer.setTextures(true)
+    viewer.setShowGrid(buildMode)
+    viewer.setShadows(buildMode)
+    viewer.setWallMode('up')
     viewer.resetSelection()
     viewer.setSelection({
       buildingId: PASCAL_WATER_BUILDING_ID as never,
@@ -55,104 +655,2852 @@ export function PascalWaterClient() {
       selectedIds: [],
       zoneId: null,
     })
-    renderScheduler.requestFrame('geometry:changed')
-    window.__PASCAL_BENCH_ORBITING__ = true
+    editor.setFirstPersonMode(false)
+    editor.setPreviewMode(false)
+    editor.setViewMode('3d')
+    editor.setPhase('structure')
+    editor.setStructureLayer('elements')
+    editor.setCatalogCategory(null)
 
-    if (waterNode) {
-      window.__PASCAL_WATER_DEBUG__ = {
-        features: [
-          'pascal-viewer-canvas',
-          'pascal-water-node',
-          'donated-water-field-texture',
-          'donated-water-material',
-          'donated-shore-contours',
-          'editor-panels-reserved-for-build-mode',
-        ],
-        nodeId: waterNode.id,
-        source: 'pascal-water',
+    if (buildMode) {
+      sidebar.setIsCollapsed(false)
+      if (sidebar.width < 300) sidebar.setWidth(300)
+      editor.setActiveSidebarPanel('site')
+      editor.setMode('build')
+      editor.setTool('wall')
+    } else {
+      editor.setMode('select')
+      editor.setTool(null)
+      sidebar.setIsCollapsed(true)
+    }
+
+    renderScheduler.requestFrame('geometry:changed')
+  }, [buildMode, mapView])
+
+  useEffect(() => {
+    if (viewMode === 'player') return
+    mobileJoystickRef.current = null
+    releasePascalWaterPointerLock()
+  }, [viewMode])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isEditableTarget(event.target) || event.repeat) return
+      if (event.code === 'KeyM') {
+        event.preventDefault()
+        if (buildMode) {
+          setBuildMode(false)
+          setBuildParcelId(null)
+          setMapView(false)
+          requestPascalWaterPointerLock()
+          return
+        }
+        if (mapView) {
+          setMapView(false)
+          requestPascalWaterPointerLock()
+          return
+        }
+        setMapView(true)
+        releasePascalWaterPointerLock()
+        return
+      }
+      if (event.code === 'KeyB') {
+        event.preventDefault()
+        setMapView(false)
+        if (buildMode) {
+          setBuildMode(false)
+          setBuildParcelId(null)
+          requestPascalWaterPointerLock()
+          return
+        }
+        if (!localOwnedParcel) return
+        setBuildParcelId(localOwnedParcel.id)
+        setBuildMode(true)
+        releasePascalWaterPointerLock()
       }
     }
 
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [buildMode, localOwnedParcel, mapView])
+
+  useEffect(() => {
+    const scene = useScene.getState()
+    if (hasLiveWaterNode) {
+      scene.updateNode(PASCAL_WATER_NODE_ID as never, liveWaterNode as never)
+    }
+    if (hasLiveLayoutNode) {
+      scene.updateNode(PASCAL_WATER_LAYOUT_NODE_ID as never, liveLayoutNode as never)
+    }
+    window.__PASCAL_WATER_DEBUG__ = {
+      features: [
+        'pascal-editor-canvas',
+        'pascal-water-node',
+        'pascal-landrush-layout-node',
+        'pascal-build-grid-aligned-to-grass-plane',
+        'build-chrome-hidden-until-toggle',
+        'donated-water-field-texture',
+        'world-multiplayer-water-material',
+        'world-multiplayer-full-water-plane',
+        'donated-shore-contours',
+        'world-multiplayer-dirt-copy-parcels',
+        'world-multiplayer-dirt-copy-edge-paths',
+        'water-scene-cliff-ring',
+        'grass-water-blades',
+        'grass-water-stylized-trees',
+        'grass-water-road-masked-spawn-field',
+        'world-multiplayer-local-player',
+        'world-multiplayer-remote-players',
+        'world-multiplayer-status-panel',
+        'debug-water-sliders',
+        'editor-panels-reserved-for-build-mode',
+      ],
+      layoutNodeId: liveLayoutNode.id,
+      materialParameters:
+        liveWaterNode.materialParameters as Partial<LandrushWaterSurfaceParameters>,
+      nodeId: liveWaterNode.id,
+      source: 'pascal-water',
+      worldLayout: {
+        parcels: liveLayoutNode.parcels.length,
+        roadSegments: liveLayoutNode.roads.segments.length,
+      },
+    }
+    renderScheduler.requestFrame('geometry:changed')
+
     return () => {
       delete window.__PASCAL_WATER_DEBUG__
-      delete window.__PASCAL_BENCH_ORBITING__
-      useScene.getState().unloadScene()
     }
-  }, [sceneGraph, waterNode])
+  }, [hasLiveLayoutNode, hasLiveWaterNode, liveLayoutNode, liveWaterNode])
+
+  const resetParameters = () => {
+    setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
+    setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
+    setElevationParameters({ ...PASCAL_WATER_ELEVATION_PARAMETERS })
+    setMaterialParameters({ ...PASCAL_WATER_MATERIAL_PARAMETERS })
+    setGrassTuning({ ...PASCAL_WATER_GRASS_TUNING })
+    setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
+  }
 
   return (
-    <main className="h-screen w-screen overflow-hidden bg-[#0f1720]">
-      <Viewer
-        defaultRender={{ colorPreset: 'clay', shading: 'rendered', textures: true }}
-        postProcessing={false}
-        renderContext="viewer"
-        rendererBackend="webgpu"
-        selectionManager="custom"
-        useBvh={false}
-      >
-        <PascalWaterCameraRig />
-      </Viewer>
+    <main className="relative h-screen w-screen overflow-hidden bg-[#0f1720] [&_canvas]:h-full [&_canvas]:w-full">
+      <Editor
+        layoutVersion="v2"
+        onLoad={handleLoad}
+        projectId="pascal-water-debug"
+        showEditorChrome={buildMode}
+        sidebarTabs={PASCAL_WATER_SIDEBAR_TABS}
+        viewerCameraControls={buildMode}
+        viewerEditorSystems={buildMode}
+        viewerPostProcessing={false}
+        viewerRendererBackend="webgpu"
+        viewerSceneChildren={
+          <>
+            <PascalWaterPlayerLayer
+              baseNode={liveLayoutNode}
+              buildMode={buildMode}
+              grassInteractionRef={grassInteractionRef}
+              localMotionRef={localMotionRef}
+              localProfile={resolvedLocalProfile}
+              mobileJoystickRef={mobileJoystickRef}
+              onLocalPlayerChange={multiplayer.publishLocalPlayer}
+              remotePlayers={multiplayer.remotePlayers}
+              surface={liveViewerLandSurface}
+              viewMode={viewMode}
+            />
+            <PascalWaterParcelOwnershipLayer
+              allocation={liveParcelAllocation}
+              buildParcelId={buildParcelId}
+              buildMode={buildMode}
+              claimParcel={multiplayer.claimParcel}
+              localMotionRef={localMotionRef}
+              localProfile={resolvedLocalProfile}
+              mapView={viewMode === 'map'}
+              onBuildParcel={(parcel) => {
+                setBuildParcelId(parcel.id)
+                setBuildMode(true)
+                setMapView(false)
+                releasePascalWaterPointerLock()
+              }}
+              parcelClaimError={multiplayer.parcelClaimError}
+              parcelOwnerships={multiplayer.parcelOwnerships}
+              parcelWorldId={parcelWorldId}
+              surface={liveViewerLandSurface}
+              watchParcelWorld={multiplayer.watchParcelWorld}
+            />
+            <PascalWaterBuildParcelGuardLayer
+              buildMode={buildMode}
+              groundY={liveViewerLandSurface.grassSurfaceElevation}
+              parcel={activeBuildParcel}
+            />
+            <Suspense fallback={null}>
+              <GrassWaterLandLayers
+                bladeSubdivisions={bladeSubdivisions}
+                fieldResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                finalFieldResolution={
+                  isGrassFieldPreviewing
+                    ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                    : GRASS_FIELD_RESOLUTION
+                }
+                finalSpawnResolution={
+                  isGrassFieldPreviewing
+                    ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                    : GRASS_SPAWN_FIELD_RESOLUTION
+                }
+                grassInteractionRef={grassInteractionRef}
+                grassBlockers={grassBlockers}
+                roads={liveGrassRoads}
+                showGround
+                spawnResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                stylizedGroundTexture
+                stylizedGroundTextureWorldSizeMeters={PASCAL_WATER_GRASS_TEXTURE_TILE_METERS}
+                stylizedSceneLayout
+                surface={liveViewerLandSurface}
+                tuning={renderGrassTuning}
+              />
+            </Suspense>
+            <PascalWaterBuildGridOverlay
+              groundY={liveViewerLandSurface.grassSurfaceElevation}
+              visible={buildMode}
+            />
+          </>
+        }
+        viewerUseBvh={false}
+      />
+      <MultiplayerStatusPanel
+        connection={multiplayer.connection}
+        localPlayerIncluded={!offline}
+        remotePlayerCount={multiplayer.remotePlayers.length}
+        status={multiplayerStatus}
+      />
+      <div className="pointer-events-auto absolute top-[24vh] right-5 z-[80] flex flex-col gap-2">
+        <button
+          aria-label="Map mode"
+          aria-pressed={mapView && !buildMode}
+          className={pascalWaterModeButtonClass(mapView && !buildMode)}
+          data-landrush-map-toggle
+          onClick={() => {
+            if (buildMode) {
+              setBuildMode(false)
+              setBuildParcelId(null)
+              setMapView(false)
+              requestPascalWaterPointerLock()
+              return
+            }
+            if (mapView) {
+              setMapView(false)
+              requestPascalWaterPointerLock()
+              return
+            }
+            setMapView(true)
+            releasePascalWaterPointerLock()
+          }}
+          type="button"
+        >
+          M
+        </button>
+        <button
+          aria-label="Build mode"
+          aria-pressed={buildMode}
+          className={pascalWaterModeButtonClass(buildMode)}
+          data-landrush-build-toggle
+          onClick={() => {
+            setMapView(false)
+            if (buildMode) {
+              setBuildMode(false)
+              setBuildParcelId(null)
+              requestPascalWaterPointerLock()
+              return
+            }
+            if (!localOwnedParcel) return
+            setBuildParcelId(localOwnedParcel.id)
+            setBuildMode(true)
+            releasePascalWaterPointerLock()
+          }}
+          type="button"
+        >
+          B
+        </button>
+      </div>
+      {showTunePanel ? (
+        <PascalWaterTunePanel
+          elevationParameters={elevationParameters}
+          fieldParameters={fieldParameters}
+          grassTuning={grassTuning}
+          islandParameters={islandParameters}
+          materialParameters={materialParameters}
+          onClose={() => setShowTunePanel(false)}
+          onElevationChange={(key, value) =>
+            setElevationParameters((current) => ({ ...current, [key]: value }))
+          }
+          onFieldChange={(key, value) =>
+            setFieldParameters((current) => ({ ...current, [key]: value }))
+          }
+          onGrassChange={(key, value) => setGrassTuning((current) => ({ ...current, [key]: value }))}
+          onIslandChange={(key, value) =>
+            setIslandParameters((current) => ({ ...current, [key]: value }))
+          }
+          onMaterialChange={(key, value) =>
+            setMaterialParameters(
+              (current) => ({ ...current, [key]: value }) as LandrushWaterSurfaceParameters,
+            )
+          }
+          onReset={resetParameters}
+          onTerrainFieldResolutionChange={(value) => setTerrainFieldResolution(Math.round(value))}
+          terrainFieldResolution={terrainFieldResolution}
+        />
+      ) : (
+        <button
+          className="pointer-events-auto absolute top-5 right-5 inline-flex items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white"
+          onClick={() => setShowTunePanel(true)}
+          type="button"
+        >
+          <SlidersHorizontal aria-hidden className="size-4" />
+          Sliders
+        </button>
+      )}
+      {viewMode === 'player' ? <MobileMovementJoystick movementRef={mobileJoystickRef} /> : null}
     </main>
   )
 }
 
-function PascalWaterCameraRig() {
-  const camera = useThree((state) => state.camera)
-  const invalidate = useThree((state) => state.invalidate)
-  const target = useMemo(() => new Vector3(...PASCAL_WATER_CAMERA_TARGET), [])
-
-  useEffect(() => {
-    camera.position.set(...PASCAL_WATER_CAMERA_POSITION)
-    camera.lookAt(target)
-    if ('zoom' in camera && typeof camera.zoom === 'number') {
-      camera.zoom = PASCAL_WATER_CAMERA_ZOOM
-    }
-    camera.updateProjectionMatrix()
-    invalidate()
-    renderScheduler.requestFrame('camera:move')
-  }, [camera, invalidate, target])
+function PascalWaterTunePanel({
+  elevationParameters,
+  fieldParameters,
+  grassTuning,
+  islandParameters,
+  materialParameters,
+  onClose,
+  onElevationChange,
+  onFieldChange,
+  onGrassChange,
+  onIslandChange,
+  onMaterialChange,
+  onReset,
+  onTerrainFieldResolutionChange,
+  terrainFieldResolution,
+}: {
+  elevationParameters: IslandElevationParameters
+  fieldParameters: WaterFieldParameters
+  grassTuning: GrassBladeTuning
+  islandParameters: WaterLabIslandParameters
+  materialParameters: LandrushWaterSurfaceParameters
+  onClose: () => void
+  onElevationChange: (key: ElevationSliderKey, value: number) => void
+  onFieldChange: (key: FieldSliderKey, value: number) => void
+  onGrassChange: (key: keyof GrassBladeTuning, value: number) => void
+  onIslandChange: (key: IslandSliderKey, value: number) => void
+  onMaterialChange: (key: WaterMaterialSliderKey, value: number) => void
+  onReset: () => void
+  onTerrainFieldResolutionChange: (value: number) => void
+  terrainFieldResolution: number
+}) {
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<PascalWaterTuningGroupId, boolean>>(
+    {
+      grass: true,
+      island: true,
+      waterAreas: true,
+      waterEdge: true,
+      waterRipples: false,
+    },
+  )
+  const toggleGroup = (group: PascalWaterTuningGroupId) => {
+    setCollapsedGroups((current) => ({ ...current, [group]: !current[group] }))
+  }
 
   return (
-    <OrbitControls
-      dampingFactor={0.08}
-      enableDamping
-      makeDefault
-      maxDistance={900}
-      minDistance={30}
-      target={target}
+    <section className="pointer-events-auto absolute right-5 top-5 max-h-[calc(100vh-2.5rem)] w-[min(390px,calc(100vw-2.5rem))] overflow-y-auto rounded-md border border-white/25 bg-slate-950/78 p-4 text-white shadow-xl backdrop-blur">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold tracking-wide">Pascal water</div>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            aria-label="Reset"
+            className="inline-flex size-7 items-center justify-center rounded border border-white/20 text-white/72 transition hover:border-white/38 hover:text-white"
+            onClick={onReset}
+            type="button"
+          >
+            <RotateCcw aria-hidden className="size-3.5" />
+          </button>
+          <button
+            aria-label="Close sliders"
+            className="inline-flex size-7 items-center justify-center rounded border border-white/20 text-white/72 transition hover:border-white/38 hover:text-white"
+            onClick={onClose}
+            type="button"
+          >
+            <X aria-hidden className="size-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3">
+        <PascalWaterTuningGroup
+          collapsed={collapsedGroups.island}
+          onToggle={() => toggleGroup('island')}
+          title="Water island"
+        >
+          {WATER_LAB_ISLAND_SLIDERS.map(({ key, ...slider }) => (
+            <PascalWaterTuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onIslandChange(key, value)}
+              value={islandParameters[key]}
+            />
+          ))}
+          <PascalWaterTuneSlider
+            label="field resolution"
+            max={WATER_FIELD_RESOLUTION}
+            min={128}
+            onChange={onTerrainFieldResolutionChange}
+            step={64}
+            value={terrainFieldResolution}
+          />
+        </PascalWaterTuningGroup>
+        <PascalWaterTuningGroup
+          collapsed={collapsedGroups.waterAreas}
+          onToggle={() => toggleGroup('waterAreas')}
+          title="Water areas"
+        >
+          {FIELD_SLIDERS.map(({ key, ...slider }) => (
+            <PascalWaterTuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onFieldChange(key, value)}
+              value={fieldParameters[key]}
+            />
+          ))}
+        </PascalWaterTuningGroup>
+        <PascalWaterTuningGroup
+          collapsed={collapsedGroups.waterEdge}
+          onToggle={() => toggleGroup('waterEdge')}
+          title="Raised edge"
+        >
+          {ELEVATION_SLIDERS.map(({ key, ...slider }) => (
+            <PascalWaterTuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onElevationChange(key, value)}
+              value={elevationParameters[key]}
+            />
+          ))}
+        </PascalWaterTuningGroup>
+        <PascalWaterTuningGroup
+          collapsed={collapsedGroups.waterRipples}
+          onToggle={() => toggleGroup('waterRipples')}
+          title="Water ripples"
+        >
+          {WATER_MATERIAL_SLIDERS.map(({ key, ...slider }) => (
+            <PascalWaterTuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onMaterialChange(key, value)}
+              value={materialParameters[key]}
+            />
+          ))}
+        </PascalWaterTuningGroup>
+        <PascalWaterTuningGroup
+          collapsed={collapsedGroups.grass}
+          onToggle={() => toggleGroup('grass')}
+          title="Grass and trees"
+        >
+          {PASCAL_WATER_GRASS_SLIDERS.map(({ key, ...slider }) => (
+            <PascalWaterTuneSlider
+              key={key}
+              {...slider}
+              onChange={(value) => onGrassChange(key, value)}
+              value={grassTuning[key]}
+            />
+          ))}
+        </PascalWaterTuningGroup>
+      </div>
+    </section>
+  )
+}
+
+function PascalWaterTuningGroup({
+  children,
+  collapsed,
+  onToggle,
+  title,
+}: {
+  children: React.ReactNode
+  collapsed: boolean
+  onToggle: () => void
+  title: string
+}) {
+  const ToggleIcon = collapsed ? ChevronRight : ChevronDown
+  return (
+    <div className="overflow-hidden rounded border border-white/14 bg-white/[0.03]">
+      <button
+        aria-expanded={!collapsed}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-semibold text-white/78 transition hover:bg-white/[0.04] hover:text-white"
+        onClick={onToggle}
+        type="button"
+      >
+        <span>{title}</span>
+        <ToggleIcon aria-hidden className="size-3.5 shrink-0" />
+      </button>
+      <div className={collapsed ? 'hidden' : 'grid gap-3 border-white/10 border-t px-3 py-3'}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function PascalWaterTuneSlider({
+  label,
+  max,
+  min,
+  onChange,
+  step,
+  value,
+}: {
+  label: string
+  max: number
+  min: number
+  onChange: (value: number) => void
+  step: number
+  value: number
+}) {
+  return (
+    <label className="grid gap-1 text-xs">
+      <span className="flex items-center justify-between gap-3">
+        <span className="text-white/70">{label}</span>
+        <input
+          className="h-6 w-20 rounded border border-white/18 bg-white/8 px-1.5 text-right font-mono text-[11px] text-white outline-none focus:border-lime-300/70"
+          max={max}
+          min={min}
+          onChange={(event) => onChange(Number(event.currentTarget.value))}
+          step={step}
+          type="number"
+          value={formatTuningValue(value, step)}
+        />
+      </span>
+      <input
+        className="h-5 w-full accent-lime-300"
+        max={max}
+        min={min}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+        step={step}
+        type="range"
+        value={value}
+      />
+    </label>
+  )
+}
+
+function formatTuningValue(value: number, step = 0.01) {
+  if (!Number.isFinite(value)) return '--'
+  if (step < 0.005) return value.toFixed(3)
+  if (step < 0.05) return value.toFixed(2)
+  if (step < 0.5) return value.toFixed(1)
+  return String(Math.round(value))
+}
+
+function pascalWaterModeButtonClass(active: boolean) {
+  return [
+    'grid size-11 place-items-center rounded-full border font-semibold text-sm shadow-xl backdrop-blur transition',
+    active
+      ? 'border-amber-100/64 bg-amber-300 text-slate-950 shadow-[0_0_22px_rgba(245,207,120,0.22)]'
+      : 'border-white/22 bg-slate-950/70 text-white/78 hover:border-white/42 hover:bg-slate-900/84 hover:text-white',
+  ].join(' ')
+}
+
+function PascalWaterBuildParcelGuardLayer({
+  buildMode,
+  groundY,
+  parcel,
+}: {
+  buildMode: boolean
+  groundY: number
+  parcel: ParcelAllocationParcel | null
+}) {
+  const { camera, gl } = useThree()
+  const pointerNdc = useMemo(() => new Vector2(), [])
+  const raycaster = useMemo(() => new Raycaster(), [])
+
+  useEffect(() => {
+    if (!buildMode) return
+
+    const canvas = gl.domElement
+    const isInsideParcel = (event: MouseEvent | PointerEvent) => {
+      if (!parcel) return false
+
+      const point = pickPascalWaterBuildGroundPoint({
+        camera,
+        canvas,
+        event,
+        groundY,
+        pointerNdc,
+        raycaster,
+      })
+      return Boolean(point && pointInPolygonOrNearEdge(point, parcel.points))
+    }
+    const blockOutsideParcel = (event: MouseEvent | PointerEvent) => {
+      if ('button' in event && event.button !== 0) return
+      if (isInsideParcel(event)) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    }
+
+    canvas.addEventListener('pointerdown', blockOutsideParcel, { capture: true })
+    canvas.addEventListener('pointerup', blockOutsideParcel, { capture: true })
+    canvas.addEventListener('click', blockOutsideParcel, { capture: true })
+    canvas.addEventListener('dblclick', blockOutsideParcel, { capture: true })
+    return () => {
+      canvas.removeEventListener('pointerdown', blockOutsideParcel, true)
+      canvas.removeEventListener('pointerup', blockOutsideParcel, true)
+      canvas.removeEventListener('click', blockOutsideParcel, true)
+      canvas.removeEventListener('dblclick', blockOutsideParcel, true)
+    }
+  }, [buildMode, camera, gl, groundY, parcel, pointerNdc, raycaster])
+
+  return null
+}
+
+function PascalWaterBuildGridOverlay({ groundY, visible }: { groundY: number; visible: boolean }) {
+  const gridRef = useRef<GridHelper>(null!)
+
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+
+    grid.renderOrder = 86
+    const materials = Array.isArray(grid.material) ? grid.material : [grid.material]
+    for (const material of materials) {
+      material.depthTest = false
+      material.depthWrite = false
+      material.opacity = 0.42
+      material.transparent = true
+      material.toneMapped = false
+      material.needsUpdate = true
+    }
+  }, [])
+
+  return (
+    <gridHelper
+      args={[
+        PASCAL_WATER_BUILD_GRID_SIZE_METERS,
+        PASCAL_WATER_BUILD_GRID_DIVISIONS,
+        '#fff1a8',
+        '#f2c86c',
+      ]}
+      position={[0, groundY + PASCAL_WATER_BUILD_GRID_ELEVATION_OFFSET, 0]}
+      ref={gridRef}
+      visible={visible}
     />
   )
 }
 
-function createPascalWaterSceneGraph(): {
+function PascalWaterPlayerLayer({
+  baseNode,
+  buildMode,
+  grassInteractionRef,
+  localMotionRef,
+  localProfile,
+  mobileJoystickRef,
+  onLocalPlayerChange,
+  remotePlayers,
+  surface,
+  viewMode,
+}: {
+  baseNode: LandrushWorldNode
+  buildMode: boolean
+  grassInteractionRef: { current: StylizedGrassInteraction | null }
+  localMotionRef: { current: RobotMotion | null }
+  localProfile: LocalPlayerProfile
+  mobileJoystickRef: { current: MobileJoystickInput | null }
+  onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  remotePlayers: readonly MultiplayerPlayerSnapshot[]
+  surface: PascalWaterLandSurface
+  viewMode: PascalWaterViewMode
+}) {
+  const spawn = useMemo(() => centroidForPolygon(surface.grassSurfacePoints), [surface])
+  const groundY = surface.grassSurfaceElevation + PASCAL_WATER_ROBOT_GROUND_CLEARANCE
+  const mapVisible = viewMode === 'map'
+  const movementEnabled = viewMode === 'player'
+  const cameraEnabled = viewMode === 'player' || buildMode
+
+  return (
+    <group>
+      {mapVisible ? <PascalWaterMapCameraRig /> : null}
+      <LocalPascalWaterRobot
+        baseNode={baseNode}
+        grassInteractionRef={grassInteractionRef}
+        groundY={groundY}
+        localMotionRef={localMotionRef}
+        localProfile={localProfile}
+        mobileJoystickRef={mobileJoystickRef}
+        cameraEnabled={cameraEnabled}
+        movementEnabled={movementEnabled}
+        onLocalPlayerChange={onLocalPlayerChange}
+        spawn={spawn}
+        surfacePoints={surface.grassSurfacePoints}
+      />
+      {remotePlayers.map((player) => (
+        <RemotePascalWaterRobot
+          baseNode={baseNode}
+          groundY={groundY}
+          key={player.id}
+          player={player}
+        />
+      ))}
+      <PascalWaterMapPlayerMarker
+        color={localProfile.color}
+        groundY={groundY}
+        motionRef={localMotionRef}
+        visible={mapVisible}
+      />
+      {remotePlayers.map((player) => (
+        <PascalWaterRemoteMapPlayerMarker
+          groundY={groundY}
+          key={`map-${player.id}`}
+          player={player}
+          visible={mapVisible}
+        />
+      ))}
+    </group>
+  )
+}
+
+function PascalWaterParcelOwnershipLayer({
+  allocation,
+  buildMode,
+  buildParcelId,
+  claimParcel,
+  localMotionRef,
+  localProfile,
+  mapView,
+  onBuildParcel,
+  parcelClaimError,
+  parcelOwnerships,
+  parcelWorldId,
+  surface,
+  watchParcelWorld,
+}: {
+  allocation: ParcelAllocationResult
+  buildMode: boolean
+  buildParcelId: string | null
+  claimParcel: (worldId: string, parcelId: string) => boolean
+  localMotionRef: { current: RobotMotion | null }
+  localProfile: LocalPlayerProfile
+  mapView: boolean
+  onBuildParcel: (parcel: ParcelAllocationParcel) => void
+  parcelClaimError: ParcelClaimError | null
+  parcelOwnerships: readonly ParcelOwnership[]
+  parcelWorldId: string
+  surface: PascalWaterLandSurface
+  watchParcelWorld: (worldId: string) => void
+}) {
+  const { camera, gl } = useThree()
+  const [hoveredParcelId, setHoveredParcelId] = useState<string | null>(null)
+  const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null)
+  const [insideOwnedParcelId, setInsideOwnedParcelId] = useState<string | null>(null)
+  const insideCheckAtRef = useRef(0)
+  const mapPickNdc = useMemo(() => new Vector2(), [])
+  const mapPickRaycaster = useMemo(() => new Raycaster(), [])
+  const ownershipMap = useMemo(() => {
+    const map = new Map<string, ParcelOwnership>()
+    for (const ownership of parcelOwnerships) {
+      if (ownership.worldId === parcelWorldId) map.set(ownership.parcelId, ownership)
+    }
+    return map
+  }, [parcelOwnerships, parcelWorldId])
+  const localOwnership = useMemo(
+    () => [...ownershipMap.values()].find((ownership) => ownership.owner.id === localProfile.id),
+    [localProfile.id, ownershipMap],
+  )
+  const groundY = surface.grassSurfaceElevation + PASCAL_WATER_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET
+  const selectedParcel = useMemo(
+    () => allocation.parcels.find((parcel) => parcel.id === selectedParcelId) ?? null,
+    [allocation.parcels, selectedParcelId],
+  )
+
+  useEffect(() => {
+    watchParcelWorld(parcelWorldId)
+  }, [parcelWorldId, watchParcelWorld])
+
+  useEffect(() => {
+    if (mapView) return
+    setHoveredParcelId(null)
+    setSelectedParcelId(null)
+  }, [mapView])
+
+  useEffect(() => {
+    if (!mapView || buildMode) return
+
+    const canvas = gl.domElement
+    const previousCursor = canvas.style.cursor
+    const pickParcel = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      mapPickNdc.set(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      mapPickRaycaster.setFromCamera(mapPickNdc, camera)
+
+      const directionY = mapPickRaycaster.ray.direction.y
+      if (Math.abs(directionY) < 0.000001) return null
+
+      const distance = (groundY - mapPickRaycaster.ray.origin.y) / directionY
+      if (distance < 0) return null
+
+      const point = {
+        x: mapPickRaycaster.ray.origin.x + mapPickRaycaster.ray.direction.x * distance,
+        z: mapPickRaycaster.ray.origin.z + mapPickRaycaster.ray.direction.z * distance,
+      }
+      return allocation.parcels.find((candidate) => pointInPolygon(point, candidate.points)) ?? null
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const parcel = pickParcel(event)
+      canvas.style.cursor = parcel ? 'pointer' : previousCursor
+      setHoveredParcelId((current) => (current === parcel?.id ? current : (parcel?.id ?? null)))
+    }
+
+    const handlePointerLeave = () => {
+      canvas.style.cursor = previousCursor
+      setHoveredParcelId(null)
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || buildParcelId) return
+
+      const parcel = pickParcel(event)
+      if (!parcel) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectedParcelId(parcel.id)
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown, { capture: true })
+    canvas.addEventListener('pointerleave', handlePointerLeave)
+    canvas.addEventListener('pointermove', handlePointerMove, { capture: true })
+    return () => {
+      canvas.style.cursor = previousCursor
+      canvas.removeEventListener('pointerdown', handlePointerDown, true)
+      canvas.removeEventListener('pointerleave', handlePointerLeave)
+      canvas.removeEventListener('pointermove', handlePointerMove, true)
+    }
+  }, [
+    allocation.parcels,
+    buildMode,
+    buildParcelId,
+    camera,
+    gl,
+    groundY,
+    mapPickNdc,
+    mapPickRaycaster,
+    mapView,
+  ])
+
+  useFrame((state) => {
+    if (mapView || !localOwnership || buildMode) {
+      if (insideOwnedParcelId !== null) setInsideOwnedParcelId(null)
+      return
+    }
+
+    const elapsed = state.clock.elapsedTime
+    if (elapsed - insideCheckAtRef.current < 0.12) return
+    insideCheckAtRef.current = elapsed
+
+    const motion = localMotionRef.current
+    const parcel = allocation.parcels.find((candidate) => candidate.id === localOwnership.parcelId)
+    const nextInsideParcelId =
+      motion &&
+      parcel &&
+      pointInPolygon({ x: motion.position.x, z: motion.position.z }, parcel.points)
+        ? parcel.id
+        : null
+    setInsideOwnedParcelId((current) =>
+      current === nextInsideParcelId ? current : nextInsideParcelId,
+    )
+  })
+
+  return (
+    <>
+      {allocation.parcels.map((parcel) => (
+        <PascalWaterParcelClaimMesh
+          groundY={groundY}
+          hovered={hoveredParcelId === parcel.id}
+          key={parcel.id}
+          mapView={mapView && !buildMode}
+          onSelect={() => setSelectedParcelId(parcel.id)}
+          parcel={parcel}
+          selected={selectedParcelId === parcel.id || buildParcelId === parcel.id}
+        />
+      ))}
+      {localOwnership
+        ? allocation.parcels
+            .filter((parcel) => parcel.id === localOwnership.parcelId)
+            .map((parcel) => (
+              <PascalWaterParcelBuildMarker
+                groundY={groundY}
+                key={parcel.id}
+                onBuild={onBuildParcel}
+                parcel={parcel}
+                visible={!buildMode && (mapView || insideOwnedParcelId === parcel.id)}
+              />
+            ))
+        : null}
+      {mapView && !buildMode && selectedParcel ? (
+        <PascalWaterParcelClaimDialog
+          claimError={parcelClaimError}
+          claimParcel={claimParcel}
+          localOwnership={localOwnership}
+          localProfile={localProfile}
+          onClose={() => setSelectedParcelId(null)}
+          ownership={ownershipMap.get(selectedParcel.id)}
+          parcel={selectedParcel}
+          parcelWorldId={parcelWorldId}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function PascalWaterParcelClaimMesh({
+  groundY,
+  hovered,
+  mapView,
+  onSelect,
+  parcel,
+  selected,
+}: {
+  groundY: number
+  hovered: boolean
+  mapView: boolean
+  onSelect: () => void
+  parcel: ParcelAllocationParcel
+  selected: boolean
+}) {
+  const groupRef = useRef<Group>(null!)
+  const materialRef = useRef<MeshBasicMaterial>(null!)
+  const geometry = useMemo(() => createCenteredParcelGeometry(parcel), [parcel])
+  const baseColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_BASE_COLOR), [])
+  const hoverColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_HOVER_COLOR), [])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  useEffect(() => {
+    if (mapView) return
+    const material = materialRef.current
+    if (material) material.opacity = 0
+  }, [mapView])
+
+  useFrame((state, delta) => {
+    const group = groupRef.current
+    const material = materialRef.current
+    if (!group || !material) return
+
+    const emphasis = mapView && (hovered || selected)
+    const targetScale = emphasis ? PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE : 1
+    const scale = MathUtils.damp(
+      group.scale.x,
+      targetScale,
+      PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE,
+      delta,
+    )
+    group.scale.setScalar(scale)
+
+    const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 3.1 + parcel.index * 0.61) * 0.5
+    const targetOpacity = mapView
+      ? MathUtils.lerp(
+          PASCAL_WATER_PARCEL_MAP_BASE_OPACITY,
+          PASCAL_WATER_PARCEL_MAP_HOVER_OPACITY,
+          emphasis ? 1 : 0,
+        ) +
+        pulse * 0.018
+      : 0
+    material.opacity = MathUtils.damp(
+      material.opacity,
+      targetOpacity,
+      PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE,
+      delta,
+    )
+    material.color.lerpColors(baseColor, hoverColor, emphasis ? 0.26 : pulse * 0.08)
+  })
+
+  if (!mapView) return null
+
+  return (
+    <group ref={groupRef} position={[parcel.centroid.x, groundY, parcel.centroid.z]}>
+      <mesh
+        onClick={(event) => {
+          if (!mapView) return
+          event.stopPropagation()
+          onSelect()
+        }}
+        renderOrder={75}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <primitive attach="geometry" object={geometry} />
+        <meshBasicMaterial
+          color={PASCAL_WATER_PARCEL_MAP_BASE_COLOR}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0}
+          ref={materialRef}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function PascalWaterParcelBuildMarker({
+  groundY,
+  onBuild,
+  parcel,
+  visible,
+}: {
+  groundY: number
+  onBuild: (parcel: ParcelAllocationParcel) => void
+  parcel: ParcelAllocationParcel
+  visible: boolean
+}) {
+  if (!visible) return null
+
+  return (
+    <Html
+      center
+      position={[parcel.centroid.x, groundY + 1.05, parcel.centroid.z]}
+      zIndexRange={[70, 0]}
+    >
+      <button
+        className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-amber-100/65 bg-slate-950/72 px-3 py-2 text-xs font-semibold text-amber-100 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur transition hover:scale-105 hover:bg-slate-900/82"
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onBuild(parcel)
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+        type="button"
+      >
+        <Hammer aria-hidden className="size-3.5" />
+        <span>Build</span>
+      </button>
+    </Html>
+  )
+}
+
+function PascalWaterParcelClaimDialog({
+  claimError,
+  claimParcel,
+  localOwnership,
+  localProfile,
+  onClose,
+  ownership,
+  parcel,
+  parcelWorldId,
+}: {
+  claimError: ParcelClaimError | null
+  claimParcel: (worldId: string, parcelId: string) => boolean
+  localOwnership: ParcelOwnership | undefined
+  localProfile: LocalPlayerProfile
+  onClose: () => void
+  ownership: ParcelOwnership | undefined
+  parcel: ParcelAllocationParcel
+  parcelWorldId: string
+}) {
+  const isFallbackProfile = localProfile.id === PASCAL_WATER_FALLBACK_PROFILE.id
+  const localAlreadyOwnsAnother = Boolean(localOwnership && localOwnership.parcelId !== parcel.id)
+  const canClaim = !ownership && !localAlreadyOwnsAnother && !isFallbackProfile
+  const statusText = ownership
+    ? `Claimed by ${ownership.owner.name}`
+    : localAlreadyOwnsAnother
+      ? `You already own ${localOwnership?.parcelId}`
+      : 'Free parcel'
+  const errorVisible = claimError && (!claimError.parcelId || claimError.parcelId === parcel.id)
+
+  return (
+    <Html center position={[parcel.centroid.x, 2.8, parcel.centroid.z]} zIndexRange={[90, 0]}>
+      <section
+        className="pointer-events-auto w-64 rounded-lg border border-amber-100/24 bg-slate-950/82 p-3 text-white shadow-[0_18px_56px_rgba(0,0,0,0.42)] backdrop-blur-md"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold tracking-normal text-amber-100">
+              {formatParcelLabel(parcel.id)}
+            </h2>
+            <p className="mt-1 text-xs text-white/64">{statusText}</p>
+          </div>
+          <button
+            aria-label="Close parcel claim"
+            className="grid size-7 place-items-center rounded-full border border-white/12 bg-white/7 text-white/72 transition hover:bg-white/12 hover:text-white"
+            onClick={onClose}
+            type="button"
+          >
+            <X aria-hidden className="size-3.5" />
+          </button>
+        </div>
+        {errorVisible ? <p className="mt-2 text-xs text-rose-200">{claimError.message}</p> : null}
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            className="rounded-full border border-white/12 px-3 py-1.5 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+            onClick={onClose}
+            type="button"
+          >
+            Cancel
+          </button>
+          <button
+            className="rounded-full border border-amber-100/60 bg-amber-300 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-[0_8px_24px_rgba(245,203,92,0.22)] transition hover:bg-amber-200 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/12 disabled:text-white/36 disabled:shadow-none"
+            disabled={!canClaim}
+            onClick={() => {
+              if (claimParcel(parcelWorldId, parcel.id)) onClose()
+            }}
+            type="button"
+          >
+            Claim free
+          </button>
+        </div>
+      </section>
+    </Html>
+  )
+}
+
+function LocalPascalWaterRobot({
+  baseNode,
+  cameraEnabled,
+  grassInteractionRef,
+  groundY,
+  localMotionRef,
+  localProfile,
+  mobileJoystickRef,
+  movementEnabled,
+  onLocalPlayerChange,
+  spawn,
+  surfacePoints,
+}: {
+  baseNode: LandrushWorldNode
+  cameraEnabled: boolean
+  grassInteractionRef: { current: StylizedGrassInteraction | null }
+  groundY: number
+  localMotionRef: { current: RobotMotion | null }
+  localProfile: LocalPlayerProfile
+  mobileJoystickRef: { current: MobileJoystickInput | null }
+  movementEnabled: boolean
+  onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  spawn: LandrushPoint2
+  surfacePoints: readonly LandrushPoint2[]
+}) {
+  const pressedKeysRef = useRef(new Set<string>())
+  const lastSentAtRef = useRef(0)
+  const surfacePointsRef = useRef(surfacePoints)
+  const nodeRef = useRef<LandrushWorldNode>(
+    createPascalWaterRobotActorNode(baseNode, localProfile.id, spawn, groundY),
+  )
+  const motionRef = useRef<RobotMotion>({
+    cameraSnapVersion: 0,
+    heading: 0,
+    isMoving: false,
+    position: new Vector3(spawn.x, groundY, spawn.z),
+    speed: 0,
+    velocity: new Vector3(),
+  })
+  surfacePointsRef.current = surfacePoints
+
+  useEffect(() => {
+    localMotionRef.current = motionRef.current
+    return () => {
+      if (localMotionRef.current === motionRef.current) localMotionRef.current = null
+    }
+  }, [localMotionRef])
+
+  const publishCurrentPlayer = useCallback(() => {
+    const motion = motionRef.current
+    onLocalPlayerChange(
+      createPascalWaterPlayerSnapshot({
+        heading: motion.heading,
+        localProfile,
+        moving: motion.isMoving,
+        position: [motion.position.x, motion.position.y, motion.position.z],
+        speed: motion.speed,
+      }),
+    )
+  }, [localProfile, onLocalPlayerChange])
+
+  const resetToSpawn = useCallback(() => {
+    const motion = motionRef.current
+    motion.position.set(spawn.x, groundY, spawn.z)
+    motion.velocity.set(0, 0, 0)
+    motion.heading = 0
+    motion.isMoving = false
+    motion.speed = 0
+    motion.cameraSnapVersion += 1
+    grassInteractionRef.current = {
+      radius: PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS,
+      speed: 0,
+      x: motion.position.x,
+      z: motion.position.z,
+    }
+    writeMotionToPascalWaterRobotNode(nodeRef.current, motion)
+    publishCurrentPlayer()
+  }, [grassInteractionRef, groundY, publishCurrentPlayer, spawn])
+
+  useEffect(() => {
+    nodeRef.current = createPascalWaterRobotActorNode(baseNode, localProfile.id, spawn, groundY)
+    resetToSpawn()
+  }, [baseNode, groundY, localProfile.id, resetToSpawn, spawn])
+
+  useEffect(() => {
+    if (movementEnabled) return
+    pressedKeysRef.current.clear()
+    mobileJoystickRef.current = null
+  }, [mobileJoystickRef, movementEnabled])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!movementEnabled || event.defaultPrevented || isEditableTarget(event.target)) return
+
+      if (event.code === 'KeyR') {
+        event.preventDefault()
+        if (!event.repeat) resetToSpawn()
+        return
+      }
+
+      if (!isTrackedWalkKey(event.code)) return
+      event.preventDefault()
+      pressedKeysRef.current.add(event.code)
+    }
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (!isTrackedWalkKey(event.code)) return
+      pressedKeysRef.current.delete(event.code)
+    }
+
+    window.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('keyup', handleKeyUp, true)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('keyup', handleKeyUp, true)
+      pressedKeysRef.current.clear()
+    }
+  }, [movementEnabled, resetToSpawn])
+
+  useFrame((state, delta) => {
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const motion = motionRef.current
+    const mobileViewport = isPascalWaterMobileControlViewport()
+    const joystick = mobileJoystickRef.current
+    const mobileJoystickActive = Boolean(mobileViewport && joystick && joystick.strength > 0.08)
+    const movement = movementEnabled
+      ? resolveCameraRelativeMovement(pressedKeysRef.current, state.camera, mobileJoystickRef.current)
+      : null
+    const cameraHeading = resolveCameraForwardHeading(state.camera)
+    const targetHeading = movement
+      ? movement.heading
+      : mobileViewport
+        ? motion.heading
+        : cameraHeading
+    const targetSpeed = movement
+      ? resolveRobotTargetSpeed(movement, isRunPressed(pressedKeysRef.current))
+      : 0
+    const desiredVelocity = movement
+      ? { x: movement.x * targetSpeed, z: movement.z * targetSpeed }
+      : { x: 0, z: 0 }
+    const acceleration = movement
+      ? PASCAL_WATER_ROBOT_ACCELERATION
+      : PASCAL_WATER_ROBOT_DECELERATION
+    const nextVelocity = {
+      x: approach(motion.velocity.x, desiredVelocity.x, acceleration * frameDelta),
+      z: approach(motion.velocity.z, desiredVelocity.z, acceleration * frameDelta),
+    }
+    const previous = { x: motion.position.x, z: motion.position.z }
+    const proposed = {
+      x: motion.position.x + nextVelocity.x * frameDelta,
+      z: motion.position.z + nextVelocity.z * frameDelta,
+    }
+    const constrained = constrainToPolygon(proposed, previous, surfacePoints)
+
+    motion.position.set(constrained.x, groundY, constrained.z)
+    motion.velocity.set(
+      (constrained.x - previous.x) / frameDelta,
+      0,
+      (constrained.z - previous.z) / frameDelta,
+    )
+    motion.speed = Math.hypot(motion.velocity.x, motion.velocity.z)
+    motion.isMoving = motion.speed > 0.05
+    motion.heading = lerpAngle(
+      motion.heading,
+      targetHeading,
+      clamp01(
+        frameDelta *
+          (mobileJoystickActive
+            ? PASCAL_WATER_ROBOT_MOBILE_JOYSTICK_TURN_RESPONSE
+            : PASCAL_WATER_ROBOT_TURN_RESPONSE),
+      ),
+    )
+    grassInteractionRef.current = {
+      radius: PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS,
+      speed: motion.isMoving ? motion.speed : 0,
+      x: motion.position.x,
+      z: motion.position.z,
+    }
+
+    writeMotionToPascalWaterRobotNode(nodeRef.current, motion)
+
+    const now = window.performance.now()
+    if (now - lastSentAtRef.current >= PASCAL_WATER_LOCAL_STATE_SEND_INTERVAL_MS) {
+      lastSentAtRef.current = now
+      publishCurrentPlayer()
+    }
+  }, -1)
+
+  useEffect(
+    () => () => {
+      grassInteractionRef.current = null
+    },
+    [grassInteractionRef],
+  )
+
+  return (
+    <>
+      {cameraEnabled ? (
+        <PascalWaterThirdPersonCameraRig
+          controllerEnabled={movementEnabled}
+          mobileJoystickRef={mobileJoystickRef}
+          motionRef={motionRef}
+        />
+      ) : null}
+      <Suspense
+        fallback={<PascalWaterRobotNodePrimitiveActor color={localProfile.color} node={nodeRef.current} />}
+      >
+        <LandrushRobot node={nodeRef.current} />
+      </Suspense>
+      <PascalWaterRobotPlayerBeacon color={localProfile.color} node={nodeRef.current} />
+    </>
+  )
+}
+
+function RemotePascalWaterRobot({
+  baseNode,
+  groundY,
+  player,
+}: {
+  baseNode: LandrushWorldNode
+  groundY: number
+  player: MultiplayerPlayerSnapshot
+}) {
+  const nodeRef = useRef<LandrushWorldNode>(
+    createPascalWaterRobotActorNode(baseNode, player.id, snapshotPoint(player), groundY),
+  )
+  const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
+  const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
+  const headingRef = useRef(player.heading)
+  const targetHeadingRef = useRef(player.heading)
+
+  useEffect(() => {
+    targetPositionRef.current.set(player.position[0], player.position[1] || groundY, player.position[2])
+    targetHeadingRef.current = player.heading
+  }, [groundY, player])
+
+  useFrame((_, delta) => {
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const positionAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_POSITION_RESPONSE * frameDelta)
+    const headingAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_HEADING_RESPONSE * frameDelta)
+
+    positionRef.current.lerp(targetPositionRef.current, positionAmount)
+    headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+
+    const node = nodeRef.current
+    node.playerPosition = [
+      positionRef.current.x,
+      positionRef.current.y || groundY,
+      positionRef.current.z,
+    ]
+    node.playerHeading = headingRef.current
+    node.playerMoving = player.moving
+    node.playerSpeed = player.speed
+  })
+
+  return (
+    <>
+      <Suspense fallback={<PascalWaterRobotNodePrimitiveActor color={player.color} node={nodeRef.current} />}>
+        <LandrushRobot node={nodeRef.current} />
+      </Suspense>
+      <PascalWaterRobotPlayerBeacon color={player.color} node={nodeRef.current} />
+    </>
+  )
+}
+
+function PascalWaterMapCameraRig() {
+  const controlsTarget = useMemo(() => new Vector3(...PASCAL_WATER_MAP_CAMERA_TARGET), [])
+
+  return (
+    <>
+      <OrthographicCamera
+        far={900}
+        makeDefault
+        near={0.1}
+        position={PASCAL_WATER_MAP_CAMERA_POSITION}
+        zoom={PASCAL_WATER_MAP_CAMERA_ZOOM}
+      />
+      <PascalWaterMapCameraTarget target={PASCAL_WATER_MAP_CAMERA_TARGET} />
+      <OrbitControls
+        dampingFactor={0.08}
+        enableDamping
+        enablePan
+        enableRotate={false}
+        enableZoom
+        makeDefault
+        maxZoom={28}
+        minZoom={3}
+        target={controlsTarget}
+      />
+    </>
+  )
+}
+
+function PascalWaterMapCameraTarget({ target }: { target: readonly [number, number, number] }) {
+  const { camera, invalidate } = useThree()
+
+  useEffect(() => {
+    camera.lookAt(new Vector3(...target))
+    camera.updateProjectionMatrix()
+    invalidate()
+  }, [camera, invalidate, target])
+
+  return null
+}
+
+function PascalWaterThirdPersonCameraRig({
+  controllerEnabled,
+  mobileJoystickRef,
+  motionRef,
+}: {
+  controllerEnabled: boolean
+  mobileJoystickRef: { current: MobileJoystickInput | null }
+  motionRef: { current: RobotMotion }
+}) {
+  const initialTarget = useMemo(() => new Vector3(), [])
+
+  return (
+    <>
+      <PerspectiveCamera far={900} fov={48} makeDefault near={0.1} position={[0, 4.5, -8.2]} />
+      {controllerEnabled ? (
+        <>
+          <OrbitControls
+            dampingFactor={0.12}
+            enableDamping
+            enablePan={false}
+            enableRotate={false}
+            enableZoom={false}
+            makeDefault
+            maxDistance={PASCAL_WATER_ROBOT_CAMERA_MAX_DISTANCE}
+            minDistance={PASCAL_WATER_ROBOT_CAMERA_MIN_DISTANCE}
+            rotateSpeed={0.82}
+            target={initialTarget}
+            zoomSpeed={0.75}
+          />
+          <PascalWaterThirdPersonCameraController
+            mobileJoystickRef={mobileJoystickRef}
+            motionRef={motionRef}
+          />
+        </>
+      ) : null}
+    </>
+  )
+}
+
+function PascalWaterThirdPersonCameraController({
+  mobileJoystickRef,
+  motionRef,
+}: {
+  mobileJoystickRef: { current: MobileJoystickInput | null }
+  motionRef: { current: RobotMotion }
+}) {
+  const cameraDistanceRef = useRef(
+    Math.hypot(PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE, PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT),
+  )
+  const cameraPitchRef = useRef(
+    Math.atan2(PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT, PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE),
+  )
+  const cameraYawRef = useRef(Math.PI)
+  const desiredCameraPositionRef = useRef(new Vector3())
+  const targetRef = useRef(new Vector3())
+  const previousTargetRef = useRef<Vector3 | null>(null)
+  const snapVersionRef = useRef<number | null>(null)
+  const mobileOrbitTouchRef = useRef<{ id: number; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !(event.target instanceof HTMLCanvasElement)) return
+      void Promise.resolve(event.target.requestPointerLock()).catch(() => undefined)
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!(document.pointerLockElement instanceof HTMLCanvasElement)) return
+      if (event.movementX === 0 && event.movementY === 0) return
+
+      cameraYawRef.current -= event.movementX * PASCAL_WATER_ROBOT_CAMERA_MOUSE_YAW_SPEED
+      cameraPitchRef.current = MathUtils.clamp(
+        cameraPitchRef.current + event.movementY * PASCAL_WATER_ROBOT_CAMERA_MOUSE_PITCH_SPEED,
+        PASCAL_WATER_ROBOT_CAMERA_MIN_PITCH,
+        PASCAL_WATER_ROBOT_CAMERA_MAX_PITCH,
+      )
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!(event.target instanceof HTMLCanvasElement)) return
+      event.preventDefault()
+      event.stopPropagation()
+      cameraDistanceRef.current = MathUtils.clamp(
+        cameraDistanceRef.current *
+          Math.exp(event.deltaY * PASCAL_WATER_ROBOT_CAMERA_WHEEL_ZOOM_SPEED),
+        PASCAL_WATER_ROBOT_CAMERA_MIN_DISTANCE,
+        PASCAL_WATER_ROBOT_CAMERA_MAX_DISTANCE,
+      )
+    }
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (!isPascalWaterMobileControlViewport() || !isPascalWaterMobileCameraOrbitTarget(event.target)) {
+        return
+      }
+      const touch = event.changedTouches.item(0)
+      if (!touch) return
+      event.preventDefault()
+      event.stopPropagation()
+      mobileOrbitTouchRef.current = {
+        id: touch.identifier,
+        x: touch.clientX,
+        y: touch.clientY,
+      }
+    }
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const activeTouch = mobileOrbitTouchRef.current
+      if (!activeTouch) return
+      const touch = findTouchById(event.touches, activeTouch.id)
+      if (!touch) return
+      event.preventDefault()
+      event.stopPropagation()
+
+      const dx = touch.clientX - activeTouch.x
+      const dy = touch.clientY - activeTouch.y
+      activeTouch.x = touch.clientX
+      activeTouch.y = touch.clientY
+
+      cameraYawRef.current -= dx * PASCAL_WATER_ROBOT_CAMERA_TOUCH_YAW_SPEED
+      cameraPitchRef.current = MathUtils.clamp(
+        cameraPitchRef.current + dy * PASCAL_WATER_ROBOT_CAMERA_TOUCH_PITCH_SPEED,
+        PASCAL_WATER_ROBOT_CAMERA_MIN_PITCH,
+        PASCAL_WATER_ROBOT_CAMERA_MAX_PITCH,
+      )
+    }
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const activeTouch = mobileOrbitTouchRef.current
+      if (!activeTouch || !findTouchById(event.changedTouches, activeTouch.id)) return
+      event.preventDefault()
+      event.stopPropagation()
+      mobileOrbitTouchRef.current = null
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('mousemove', handleMouseMove, { passive: true })
+    window.addEventListener('wheel', handleWheel, { capture: true, passive: false })
+    window.addEventListener('touchstart', handleTouchStart, { capture: true, passive: false })
+    window.addEventListener('touchmove', handleTouchMove, { capture: true, passive: false })
+    window.addEventListener('touchend', handleTouchEnd, true)
+    window.addEventListener('touchcancel', handleTouchEnd, true)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('wheel', handleWheel, true)
+      window.removeEventListener('touchstart', handleTouchStart, true)
+      window.removeEventListener('touchmove', handleTouchMove, true)
+      window.removeEventListener('touchend', handleTouchEnd, true)
+      window.removeEventListener('touchcancel', handleTouchEnd, true)
+    }
+  }, [])
+
+  useFrame((state, delta) => {
+    const motion = motionRef.current
+    const target = targetRef.current.set(
+      motion.position.x,
+      motion.position.y + PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT,
+      motion.position.z,
+    )
+    const controls = getRobotWorldOrbitControls(state)
+    const previousTarget = previousTargetRef.current
+
+    if (!previousTarget || snapVersionRef.current !== motion.cameraSnapVersion) {
+      snapThirdPersonCamera(state.camera, controls, target, motion.heading)
+      syncThirdPersonCameraOrbitRefs(
+        state.camera,
+        target,
+        cameraYawRef,
+        cameraPitchRef,
+        cameraDistanceRef,
+      )
+      previousTargetRef.current = target.clone()
+      snapVersionRef.current = motion.cameraSnapVersion
+      return
+    }
+
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const joystick = mobileJoystickRef.current
+    if (
+      joystick &&
+      joystick.strength > 0.08 &&
+      !mobileOrbitTouchRef.current &&
+      isPascalWaterMobileControlViewport()
+    ) {
+      cameraYawRef.current = playerHeadingToCameraYaw(motion.heading)
+    }
+
+    const followAmount = 1 - Math.exp(-PASCAL_WATER_ROBOT_CAMERA_FOLLOW_RESPONSE * frameDelta)
+    previousTarget.lerp(target, followAmount)
+    const desiredCameraPosition = resolveThirdPersonCameraPosition(
+      previousTarget,
+      cameraYawRef.current,
+      cameraPitchRef.current,
+      cameraDistanceRef.current,
+      desiredCameraPositionRef.current,
+    )
+    state.camera.position.lerp(desiredCameraPosition, followAmount)
+
+    if (controls) {
+      controls.target.copy(previousTarget)
+      controls.update()
+      return
+    }
+
+    state.camera.lookAt(previousTarget)
+  })
+
+  return null
+}
+
+function PascalWaterRobotNodePrimitiveActor({
+  color,
+  node,
+}: {
+  color: string
+  node: LandrushWorldNode
+}) {
+  const groupRef = useRef<Group>(null!)
+
+  useFrame(() => {
+    groupRef.current?.position.set(
+      node.playerPosition[0],
+      node.playerPosition[1],
+      node.playerPosition[2],
+    )
+    groupRef.current?.rotation.set(0, node.playerHeading ?? 0, 0)
+  })
+
+  return (
+    <group
+      position={[node.playerPosition[0], node.playerPosition[1], node.playerPosition[2]]}
+      ref={groupRef}
+      rotation={[0, node.playerHeading ?? 0, 0]}
+    >
+      <mesh position={[0, 0.9, 0]}>
+        <boxGeometry args={[0.46, 1.28, 0.32]} />
+        <meshStandardMaterial color="#dce8ea" roughness={0.78} />
+      </mesh>
+      <mesh position={[0, 1.66, 0.02]}>
+        <boxGeometry args={[0.36, 0.32, 0.3]} />
+        <meshStandardMaterial color={color} roughness={0.74} />
+      </mesh>
+    </group>
+  )
+}
+
+function PascalWaterRobotPlayerBeacon({ color, node }: { color: string; node: LandrushWorldNode }) {
+  const meshRef = useRef<Mesh>(null!)
+
+  useFrame(() => {
+    meshRef.current?.position.set(
+      node.playerPosition[0],
+      node.playerPosition[1] + 2.28,
+      node.playerPosition[2],
+    )
+  })
+
+  return (
+    <mesh ref={meshRef} renderOrder={60}>
+      <sphereGeometry args={[0.13, 16, 16]} />
+      <meshBasicMaterial color={color} toneMapped={false} />
+    </mesh>
+  )
+}
+
+function PascalWaterMapPlayerMarker({
+  color,
+  groundY,
+  motionRef,
+  visible,
+}: {
+  color: string
+  groundY: number
+  motionRef: { current: RobotMotion | null }
+  visible: boolean
+}) {
+  const groupRef = useRef<Group>(null!)
+  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    const motion = motionRef.current
+    if (!group) return
+
+    group.visible = visible && Boolean(motion)
+    if (!motion) return
+
+    group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
+    group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
+  })
+
+  return <PascalWaterMapArrowMarker color={color} groupRef={groupRef} shape={arrowShape} />
+}
+
+function PascalWaterRemoteMapPlayerMarker({
+  groundY,
+  player,
+  visible,
+}: {
+  groundY: number
+  player: MultiplayerPlayerSnapshot
+  visible: boolean
+}) {
+  const groupRef = useRef<Group>(null!)
+  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
+  const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
+  const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
+  const headingRef = useRef(player.heading)
+  const targetHeadingRef = useRef(player.heading)
+
+  useEffect(() => {
+    targetPositionRef.current.set(player.position[0], player.position[1] || groundY, player.position[2])
+    targetHeadingRef.current = player.heading
+  }, [groundY, player])
+
+  useFrame((_, delta) => {
+    const group = groupRef.current
+    if (!group) return
+
+    group.visible = visible
+    if (!visible) return
+
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const positionAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_POSITION_RESPONSE * frameDelta)
+    const headingAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_HEADING_RESPONSE * frameDelta)
+    positionRef.current.lerp(targetPositionRef.current, positionAmount)
+    headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+
+    group.position.set(positionRef.current.x, groundY + 0.24, positionRef.current.z)
+    group.rotation.y = headingRef.current
+  })
+
+  return <PascalWaterMapArrowMarker color={player.color} groupRef={groupRef} scale={0.82} shape={arrowShape} />
+}
+
+function PascalWaterMapArrowMarker({
+  color,
+  groupRef,
+  scale = 1,
+  shape,
+}: {
+  color: string
+  groupRef: RefObject<Group>
+  scale?: number
+  shape: Shape
+}) {
+  return (
+    <group ref={groupRef} scale={scale} visible={false}>
+      <mesh renderOrder={91} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[1.08, 36]} />
+        <meshBasicMaterial
+          color="#0f172a"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.46}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.76, 1.02, 40]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.82}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]}>
+        <shapeGeometry args={[shape]} />
+        <meshBasicMaterial
+          color={color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.96}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+    </group>
+  )
+}
+
+function MobileMovementJoystick({
+  movementRef,
+}: {
+  movementRef: { current: MobileJoystickInput | null }
+}) {
+  const baseRef = useRef<HTMLDivElement>(null)
+  const pointerIdRef = useRef<number | null>(null)
+  const touchIdRef = useRef<number | null>(null)
+  const [thumb, setThumb] = useState({ active: false, x: 0, y: 0 })
+
+  const updateFromPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const base = baseRef.current
+      if (!base) return
+
+      const rect = base.getBoundingClientRect()
+      const maxOffset = rect.width * 0.32
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      const rawX = clientX - centerX
+      const rawY = clientY - centerY
+      const distance = Math.hypot(rawX, rawY)
+      const scale = distance > maxOffset && distance > 0 ? maxOffset / distance : 1
+      const x = rawX * scale
+      const y = rawY * scale
+      const strength = clamp01(distance / maxOffset)
+
+      movementRef.current =
+        strength > 0.08
+          ? {
+              forward: clamp(-y / maxOffset, -1, 1),
+              strafe: clamp(x / maxOffset, -1, 1),
+              strength,
+            }
+          : null
+      setThumb({ active: true, x, y })
+    },
+    [movementRef],
+  )
+
+  const clearJoystick = useCallback(() => {
+    pointerIdRef.current = null
+    touchIdRef.current = null
+    movementRef.current = null
+    setThumb({ active: false, x: 0, y: 0 })
+  }, [movementRef])
+
+  const stopPointerJoystick = useCallback(
+    (event?: ReactPointerEvent<HTMLDivElement>) => {
+      if (touchIdRef.current !== null) return
+      if (event && pointerIdRef.current === event.pointerId) {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+      }
+      clearJoystick()
+    },
+    [clearJoystick],
+  )
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (touchIdRef.current !== null) return
+      event.preventDefault()
+      pointerIdRef.current = event.pointerId
+      event.currentTarget.setPointerCapture(event.pointerId)
+      updateFromPoint(event.clientX, event.clientY)
+    },
+    [updateFromPoint],
+  )
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (pointerIdRef.current !== event.pointerId) return
+      event.preventDefault()
+      updateFromPoint(event.clientX, event.clientY)
+    },
+    [updateFromPoint],
+  )
+
+  const handleTouchStart = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touch = event.changedTouches.item(0)
+      if (!touch) return
+      event.preventDefault()
+      pointerIdRef.current = null
+      touchIdRef.current = touch.identifier
+      updateFromPoint(touch.clientX, touch.clientY)
+    },
+    [updateFromPoint],
+  )
+
+  const handleTouchMove = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touchId = touchIdRef.current
+      if (touchId === null) return
+      const touch = findTouchById(event.touches, touchId)
+      if (!touch) return
+      event.preventDefault()
+      updateFromPoint(touch.clientX, touch.clientY)
+    },
+    [updateFromPoint],
+  )
+
+  const handleTouchEnd = useCallback(
+    (event: ReactTouchEvent<HTMLDivElement>) => {
+      const touchId = touchIdRef.current
+      if (touchId === null || !findTouchById(event.changedTouches, touchId)) return
+      event.preventDefault()
+      clearJoystick()
+    },
+    [clearJoystick],
+  )
+
+  return (
+    <div
+      className="pointer-events-auto absolute bottom-[8.25rem] left-5 z-40 md:hidden"
+      data-landrush-mobile-joystick
+    >
+      <div
+        aria-label="Move"
+        className="relative size-28 touch-none select-none rounded-full border border-white/25 bg-slate-950/38 shadow-xl backdrop-blur"
+        onPointerCancel={stopPointerJoystick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopPointerJoystick}
+        onTouchCancel={handleTouchEnd}
+        onTouchEnd={handleTouchEnd}
+        onTouchMove={handleTouchMove}
+        onTouchStart={handleTouchStart}
+        ref={baseRef}
+        role="application"
+      >
+        <span className="pointer-events-none absolute inset-0 grid place-items-center">
+          <span className="size-3 rounded-full bg-white/28" />
+        </span>
+        <span className="pointer-events-none absolute inset-0 grid place-items-center">
+          <span
+            className="size-11 rounded-full border border-white/28 bg-white/18 shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-transform duration-75"
+            style={{
+              transform: `translate3d(${thumb.x}px, ${thumb.y}px, 0) scale(${
+                thumb.active ? 1.04 : 1
+              })`,
+            }}
+          />
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function createPascalWaterPlayerSnapshot({
+  heading,
+  localProfile,
+  moving,
+  position,
+  speed,
+}: {
+  heading: number
+  localProfile: LocalPlayerProfile
+  moving: boolean
+  position: [number, number, number]
+  speed: number
+}): MultiplayerPlayerSnapshot {
+  return {
+    ...localProfile,
+    heading,
+    moving,
+    position,
+    speed,
+    updatedAt: Date.now(),
+  }
+}
+
+function createPascalWaterRemotePlayer(
+  player: MultiplayerPlayerSnapshot,
+): LandrushWorldNode['remotePlayers'][number] {
+  return {
+    ...player,
+    position: [player.position[0], PASCAL_WATER_VISUAL_PLAYER_GROUND_Y, player.position[2]],
+  }
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target.isContentEditable ||
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT'
+  )
+}
+
+function progressiveRenderValue<T>(renderValue: ProgressiveRenderValue<T>) {
+  return renderValue.isSettling ? renderValue.previewValue : renderValue.finalValue
+}
+
+function useProgressiveRenderValue<T>(value: T, settleMs: number): ProgressiveRenderValue<T> {
+  const [finalValue, setFinalValue] = useState(value)
+  const [isSettling, setIsSettling] = useState(false)
+  const latestValueRef = useRef(value)
+  const didMountRef = useRef(false)
+  const settleTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    latestValueRef.current = value
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      setFinalValue(value)
+      setIsSettling(false)
+      return
+    }
+
+    setIsSettling(true)
+    if (settleTimerRef.current !== null) {
+      window.clearTimeout(settleTimerRef.current)
+    }
+    settleTimerRef.current = window.setTimeout(() => {
+      setFinalValue(latestValueRef.current)
+      setIsSettling(false)
+      settleTimerRef.current = null
+    }, settleMs)
+  }, [settleMs, value])
+
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current)
+    },
+    [],
+  )
+
+  return { finalValue, isSettling, previewValue: value }
+}
+
+function createPascalWaterRobotActorNode(
+  baseNode: LandrushWorldNode,
+  id: string,
+  spawn: LandrushPoint2,
+  groundY: number,
+): LandrushWorldNode {
+  return {
+    ...baseNode,
+    focusParcelId: null,
+    id: pascalWaterRobotNodeId(id),
+    landrushMode: 'walk',
+    name: id,
+    playerHeading: 0,
+    playerMoving: false,
+    playerPosition: [spawn.x, groundY, spawn.z],
+    playerSpeed: 0,
+    playerStart: [spawn.x, groundY, spawn.z],
+    remotePlayers: [],
+  }
+}
+
+function pascalWaterRobotNodeId(id: string): `landrush-world_${string}` {
+  return `landrush-world_pascal-water-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+}
+
+function writeMotionToPascalWaterRobotNode(node: LandrushWorldNode, motion: RobotMotion) {
+  node.playerPosition = [motion.position.x, motion.position.y, motion.position.z]
+  node.playerHeading = motion.heading
+  node.playerMoving = motion.isMoving
+  node.playerSpeed = motion.speed
+}
+
+function snapThirdPersonCamera(
+  camera: Camera,
+  controls: RobotWorldOrbitControls | undefined,
+  target: Vector3,
+  heading: number,
+) {
+  camera.position.set(
+    target.x - Math.sin(heading) * PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE,
+    target.y + PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT,
+    target.z - Math.cos(heading) * PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE,
+  )
+  camera.lookAt(target)
+
+  if (!controls) return
+  controls.target.copy(target)
+  controls.update()
+}
+
+function syncThirdPersonCameraOrbitRefs(
+  camera: Camera,
+  target: Vector3,
+  yawRef: { current: number },
+  pitchRef: { current: number },
+  distanceRef: { current: number },
+) {
+  const offsetX = camera.position.x - target.x
+  const offsetY = camera.position.y - target.y
+  const offsetZ = camera.position.z - target.z
+  const horizontalDistance = Math.hypot(offsetX, offsetZ)
+  yawRef.current = Math.atan2(offsetX, offsetZ)
+  pitchRef.current = MathUtils.clamp(
+    Math.atan2(offsetY, horizontalDistance),
+    PASCAL_WATER_ROBOT_CAMERA_MIN_PITCH,
+    PASCAL_WATER_ROBOT_CAMERA_MAX_PITCH,
+  )
+  distanceRef.current = MathUtils.clamp(
+    Math.hypot(horizontalDistance, offsetY),
+    PASCAL_WATER_ROBOT_CAMERA_MIN_DISTANCE,
+    PASCAL_WATER_ROBOT_CAMERA_MAX_DISTANCE,
+  )
+}
+
+function resolveThirdPersonCameraPosition(
+  target: Vector3,
+  yaw: number,
+  pitch: number,
+  distance: number,
+  output: Vector3,
+) {
+  const horizontalDistance = Math.cos(pitch) * distance
+  output.set(
+    target.x + Math.sin(yaw) * horizontalDistance,
+    target.y + Math.sin(pitch) * distance,
+    target.z + Math.cos(yaw) * horizontalDistance,
+  )
+  return output
+}
+
+function getRobotWorldOrbitControls(state: unknown) {
+  return (state as { controls?: RobotWorldOrbitControls }).controls
+}
+
+function resolveRobotTargetSpeed(movement: RobotMovementInput, runPressed: boolean) {
+  if (runPressed) return PASCAL_WATER_ROBOT_RUN_SPEED
+  const walkSpeed = PASCAL_WATER_ROBOT_WALK_SPEED * movement.intensity
+  return MathUtils.lerp(walkSpeed, PASCAL_WATER_ROBOT_RUN_SPEED, movement.runAmount)
+}
+
+function resolveCameraRelativeMovement(
+  keys: ReadonlySet<string>,
+  camera: Camera,
+  joystick: MobileJoystickInput | null,
+): RobotMovementInput | null {
+  const keyboardStrafe =
+    Number(keys.has('KeyD') || keys.has('ArrowRight')) -
+    Number(keys.has('KeyA') || keys.has('ArrowLeft'))
+  const keyboardForward =
+    Number(keys.has('KeyW') || keys.has('ArrowUp')) -
+    Number(keys.has('KeyS') || keys.has('ArrowDown'))
+  const hasKeyboardInput = keyboardStrafe !== 0 || keyboardForward !== 0
+  const hasJoystickInput = Boolean(joystick && joystick.strength > 0.08)
+  const strafe = keyboardStrafe + (joystick?.strafe ?? 0)
+  const forwardInput = keyboardForward + (joystick?.forward ?? 0)
+
+  if (strafe === 0 && forwardInput === 0) return null
+
+  const forward = resolveCameraForwardXZ(camera)
+  const right = { x: -forward.z, z: forward.x }
+  const direction = normalize2(
+    right.x * strafe + forward.x * forwardInput,
+    right.z * strafe + forward.z * forwardInput,
+  )
+  const heading = Math.atan2(direction.x, direction.z)
+  const joystickStrength = hasJoystickInput ? (joystick?.strength ?? 1) : 0
+  const intensity = hasKeyboardInput ? 1 : hasJoystickInput ? joystickStrength : 1
+  const runAmount =
+    hasKeyboardInput || !hasJoystickInput
+      ? 0
+      : clamp01(
+          (joystickStrength - PASCAL_WATER_ROBOT_JOYSTICK_RUN_START) /
+            (1 - PASCAL_WATER_ROBOT_JOYSTICK_RUN_START),
+        )
+  return { ...direction, heading, intensity, runAmount }
+}
+
+function resolveCameraForwardHeading(camera: Camera) {
+  const forward = resolveCameraForwardXZ(camera)
+  return Math.atan2(forward.x, forward.z)
+}
+
+function playerHeadingToCameraYaw(heading: number) {
+  return heading + Math.PI
+}
+
+function resolveCameraForwardXZ(camera: Camera) {
+  const forward = new Vector3()
+  camera.getWorldDirection(forward)
+  forward.y = 0
+  if (forward.lengthSq() < 0.000001) return { x: 0, z: 1 }
+  forward.normalize()
+  return { x: forward.x, z: forward.z }
+}
+
+function constrainToPolygon(
+  next: LandrushPoint2,
+  current: LandrushPoint2,
+  polygon: readonly LandrushPoint2[],
+) {
+  if (pointInPolygon(next, polygon)) return next
+
+  const xOnly = { x: next.x, z: current.z }
+  if (pointInPolygon(xOnly, polygon)) return xOnly
+
+  const zOnly = { x: current.x, z: next.z }
+  if (pointInPolygon(zOnly, polygon)) return zOnly
+
+  return current
+}
+
+function centroidForPolygon(points: readonly LandrushPoint2[]) {
+  return polygonCentroid(openPointRing(points))
+}
+
+function createMapPlayerArrowShape() {
+  const shape = new Shape()
+  shape.moveTo(0, -1.18)
+  shape.lineTo(0.62, 0.42)
+  shape.lineTo(0.22, 0.26)
+  shape.lineTo(0.22, 0.78)
+  shape.lineTo(-0.22, 0.78)
+  shape.lineTo(-0.22, 0.26)
+  shape.lineTo(-0.62, 0.42)
+  shape.closePath()
+  return shape
+}
+
+function createCenteredParcelGeometry(parcel: ParcelAllocationParcel) {
+  const geometry = new BufferGeometry()
+  const ring = openPointRing(parcel.points)
+  if (ring.length < 3) return geometry
+
+  const points = ring.map((point) => new Vector2(point.x - parcel.centroid.x, -(point.z - parcel.centroid.z)))
+  const triangles = ShapeUtils.triangulateShape(points, [])
+  const positions = new Float32Array(points.length * 3)
+  const normals = new Float32Array(points.length * 3)
+  const uvs = new Float32Array(points.length * 2)
+  const indices: number[] = []
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+
+  for (const point of points) {
+    minX = Math.min(minX, point.x)
+    maxX = Math.max(maxX, point.x)
+    minY = Math.min(minY, point.y)
+    maxY = Math.max(maxY, point.y)
+  }
+
+  const width = Math.max(0.000001, maxX - minX)
+  const height = Math.max(0.000001, maxY - minY)
+
+  points.forEach((point, index) => {
+    positions[index * 3] = point.x
+    positions[index * 3 + 1] = point.y
+    positions[index * 3 + 2] = 0
+    normals[index * 3 + 2] = 1
+    uvs[index * 2] = (point.x - minX) / width
+    uvs[index * 2 + 1] = (point.y - minY) / height
+  })
+
+  for (const triangle of triangles) {
+    const [a, b, c] = triangle
+    if (a === undefined || b === undefined || c === undefined) continue
+    indices.push(a, b, c)
+  }
+
+  geometry.setAttribute('position', new BufferAttribute(positions, 3))
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3))
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2))
+  geometry.setIndex(indices)
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+function formatParcelLabel(parcelId: string) {
+  return parcelId
+    .split('-')
+    .map((part) => (part ? part[0]!.toUpperCase() + part.slice(1) : part))
+    .join(' ')
+}
+
+function isTrackedWalkKey(code: string) {
+  return isMovementKey(code) || code === 'ShiftLeft' || code === 'ShiftRight'
+}
+
+function isMovementKey(code: string) {
+  return (
+    code === 'KeyW' ||
+    code === 'ArrowUp' ||
+    code === 'KeyA' ||
+    code === 'ArrowLeft' ||
+    code === 'KeyS' ||
+    code === 'ArrowDown' ||
+    code === 'KeyD' ||
+    code === 'ArrowRight'
+  )
+}
+
+function isRunPressed(keys: ReadonlySet<string>) {
+  return keys.has('ShiftLeft') || keys.has('ShiftRight')
+}
+
+function approach(current: number, target: number, maxDelta: number) {
+  if (current < target) return Math.min(current + maxDelta, target)
+  if (current > target) return Math.max(current - maxDelta, target)
+  return target
+}
+
+function lerpAngle(current: number, target: number, amount: number) {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current))
+  return current + delta * amount
+}
+
+function normalize2(x: number, z: number) {
+  const length = Math.hypot(x, z)
+  if (length < 0.000001) return { x: 0, z: -1 }
+  return { x: x / length, z: z / length }
+}
+
+function clamp01(value: number) {
+  return Math.min(1, Math.max(0, value))
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+  const ring = openPointRing(polygon)
+  let inside = false
+  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; index += 1) {
+    const current = ring[index]
+    const previous = ring[previousIndex]
+    if (!(current && previous)) continue
+    const crosses = current.z > point.z !== previous.z > point.z
+    const boundaryX =
+      ((previous.x - current.x) * (point.z - current.z)) / (previous.z - current.z || 0.000001) +
+      current.x
+    if (crosses && point.x < boundaryX) inside = !inside
+    previousIndex = index
+  }
+  return inside
+}
+
+function pickPascalWaterBuildGroundPoint({
+  camera,
+  canvas,
+  event,
+  groundY,
+  pointerNdc,
+  raycaster,
+}: {
+  camera: Camera
+  canvas: HTMLCanvasElement
+  event: MouseEvent | PointerEvent
+  groundY: number
+  pointerNdc: Vector2
+  raycaster: Raycaster
+}): LandrushPoint2 | null {
+  const rect = canvas.getBoundingClientRect()
+  pointerNdc.set(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  )
+  raycaster.setFromCamera(pointerNdc, camera)
+
+  const directionY = raycaster.ray.direction.y
+  if (Math.abs(directionY) <= 0.000001) return null
+
+  const distance = (groundY - raycaster.ray.origin.y) / directionY
+  if (distance < 0) return null
+
+  return {
+    x: raycaster.ray.origin.x + raycaster.ray.direction.x * distance,
+    z: raycaster.ray.origin.z + raycaster.ray.direction.z * distance,
+  }
+}
+
+function createPascalWaterBuiltGrassBlockers(
+  nodes: Record<string, AnyNode>,
+): readonly GrassFieldBlocker[] {
+  const blockers: GrassFieldBlocker[] = []
+  for (const node of Object.values(nodes)) {
+    const footprint = createPascalWaterBuildNodeFootprint(
+      node,
+      PASCAL_WATER_BUILT_GRASS_PADDING_METERS,
+    )
+    if (!footprint) continue
+    blockers.push({
+      featherMeters: PASCAL_WATER_BUILT_GRASS_FEATHER_METERS,
+      points: footprint,
+    })
+  }
+  return blockers
+}
+
+function createPascalWaterInvalidBuildNodeIds(
+  nodes: Record<string, AnyNode>,
+  parcel: ParcelAllocationParcel,
+) {
+  const invalidIds: string[] = []
+  for (const node of Object.values(nodes)) {
+    if (node.parentId !== PASCAL_WATER_LEVEL_ID) continue
+    const footprint = createPascalWaterBuildNodeFootprint(node, 0)
+    if (!footprint) continue
+    if (footprint.every((point) => pointInPolygonOrNearEdge(point, parcel.points))) continue
+    invalidIds.push(node.id)
+  }
+  return invalidIds
+}
+
+function createPascalWaterBuildNodeFootprint(
+  node: AnyNode,
+  padding: number,
+): readonly LandrushPoint2[] | null {
+  if (!isPascalWaterBuildObjectNode(node)) return null
+
+  if (node.type === 'wall' || node.type === 'fence') {
+    return segmentFootprint(
+      { x: node.start[0], z: node.start[1] },
+      { x: node.end[0], z: node.end[1] },
+      (node.thickness ?? 0.18) + padding * 2,
+    )
+  }
+
+  if (node.type === 'slab' || node.type === 'ceiling') {
+    return node.polygon.map(([x, z]) => ({ x, z }))
+  }
+
+  if (node.type === 'item') {
+    if (node.parentId !== PASCAL_WATER_LEVEL_ID || node.asset.attachTo) return null
+    const [width, , depth] = node.asset.dimensions
+    return rectFootprint({
+      center: { x: node.position[0], z: node.position[2] },
+      depth: depth * node.scale[2] + padding * 2,
+      rotation: node.rotation[1] ?? 0,
+      width: width * node.scale[0] + padding * 2,
+    })
+  }
+
+  if (node.type === 'column') {
+    const width = node.crossSection === 'round' ? node.radius * 2 : node.width
+    const depth = node.crossSection === 'round' ? node.radius * 2 : node.depth
+    return rectFootprint({
+      center: { x: node.position[0], z: node.position[2] },
+      depth: depth + padding * 2,
+      rotation: node.rotation,
+      width: width + padding * 2,
+    })
+  }
+
+  if (node.type === 'elevator') {
+    return rectFootprint({
+      center: { x: node.position[0], z: node.position[2] },
+      depth: (node.shaftDepth ?? node.depth) + padding * 2,
+      rotation: node.rotation,
+      width: (node.shaftWidth ?? node.width) + padding * 2,
+    })
+  }
+
+  if (node.type === 'stair') {
+    const run = Math.max(0.8, node.stepCount * 0.28 + node.topLandingDepth)
+    return rectFootprint({
+      center: { x: node.position[0], z: node.position[2] },
+      depth: run + padding * 2,
+      rotation: node.rotation,
+      width: node.width + padding * 2,
+    })
+  }
+
+  return null
+}
+
+function isPascalWaterBuildObjectNode(node: AnyNode) {
+  if (node.visible === false || node.parentId !== PASCAL_WATER_LEVEL_ID) return false
+  const metadata = node.metadata as { isTransient?: boolean } | undefined
+  if (metadata?.isTransient) return false
+  return (
+    node.type === 'wall' ||
+    node.type === 'fence' ||
+    node.type === 'item' ||
+    node.type === 'slab' ||
+    node.type === 'ceiling' ||
+    node.type === 'column' ||
+    node.type === 'elevator' ||
+    node.type === 'stair'
+  )
+}
+
+function rectFootprint({
+  center,
+  depth,
+  rotation,
+  width,
+}: {
+  center: LandrushPoint2
+  depth: number
+  rotation: number
+  width: number
+}): readonly LandrushPoint2[] {
+  const halfWidth = Math.max(0.04, width / 2)
+  const halfDepth = Math.max(0.04, depth / 2)
+  return [
+    rotateFootprintPoint({ x: -halfWidth, z: -halfDepth }, center, rotation),
+    rotateFootprintPoint({ x: halfWidth, z: -halfDepth }, center, rotation),
+    rotateFootprintPoint({ x: halfWidth, z: halfDepth }, center, rotation),
+    rotateFootprintPoint({ x: -halfWidth, z: halfDepth }, center, rotation),
+  ]
+}
+
+function segmentFootprint(
+  start: LandrushPoint2,
+  end: LandrushPoint2,
+  width: number,
+): readonly LandrushPoint2[] {
+  const dx = end.x - start.x
+  const dz = end.z - start.z
+  const length = Math.hypot(dx, dz)
+  if (length <= 0.000001) {
+    return rectFootprint({ center: start, depth: width, rotation: 0, width })
+  }
+
+  const halfWidth = Math.max(0.04, width / 2)
+  const nx = (-dz / length) * halfWidth
+  const nz = (dx / length) * halfWidth
+  return [
+    { x: start.x + nx, z: start.z + nz },
+    { x: end.x + nx, z: end.z + nz },
+    { x: end.x - nx, z: end.z - nz },
+    { x: start.x - nx, z: start.z - nz },
+  ]
+}
+
+function rotateFootprintPoint(
+  point: LandrushPoint2,
+  center: LandrushPoint2,
+  rotation: number,
+): LandrushPoint2 {
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
+  return {
+    x: center.x + point.x * cos - point.z * sin,
+    z: center.z + point.x * sin + point.z * cos,
+  }
+}
+
+function pointInPolygonOrNearEdge(
+  point: LandrushPoint2,
+  polygon: readonly LandrushPoint2[],
+  tolerance = PASCAL_WATER_BUILD_PARCEL_EDGE_TOLERANCE_METERS,
+) {
+  return pointInPolygon(point, polygon) || distanceToClosedPolyline(point, polygon) <= tolerance
+}
+
+function distanceToClosedPolyline(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+  const ring = openPointRing(polygon)
+  let best = Number.POSITIVE_INFINITY
+  for (let index = 0; index < ring.length; index += 1) {
+    const start = ring[index]
+    const end = ring[(index + 1) % ring.length]
+    if (start && end) best = Math.min(best, distanceToSegment2(point, start, end))
+  }
+  return best
+}
+
+function distanceToSegment2(point: LandrushPoint2, start: LandrushPoint2, end: LandrushPoint2) {
+  const dx = end.x - start.x
+  const dz = end.z - start.z
+  const t = clamp01(
+    ((point.x - start.x) * dx + (point.z - start.z) * dz) / (dx * dx + dz * dz || 0.000001),
+  )
+  return Math.hypot(point.x - (start.x + dx * t), point.z - (start.z + dz * t))
+}
+
+function snapshotPoint(player: MultiplayerPlayerSnapshot): LandrushPoint2 {
+  return { x: player.position[0], z: player.position[2] }
+}
+
+function releasePascalWaterPointerLock() {
+  if (!(document.pointerLockElement instanceof HTMLCanvasElement)) return false
+  document.exitPointerLock()
+  return true
+}
+
+function requestPascalWaterPointerLock() {
+  const canvas = document.querySelector('canvas')
+  if (!(canvas instanceof HTMLCanvasElement) || document.pointerLockElement === canvas) return
+  void Promise.resolve(canvas.requestPointerLock()).catch(() => undefined)
+}
+
+function findTouchById<TouchLike extends { identifier: number }>(
+  touches: { item: (index: number) => TouchLike | null; length: number },
+  identifier: number,
+) {
+  for (let index = 0; index < touches.length; index += 1) {
+    const touch = touches.item(index)
+    if (touch?.identifier === identifier) return touch
+  }
+  return null
+}
+
+function isPascalWaterMobileControlViewport() {
+  return (
+    typeof window !== 'undefined' && window.matchMedia(PASCAL_WATER_MOBILE_CONTROLS_QUERY).matches
+  )
+}
+
+function isPascalWaterMobileCameraOrbitTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  if (target.closest('[data-landrush-mobile-joystick]')) return false
+  return !target.closest(
+    'a, button, input, select, textarea, section, [role="button"], [role="slider"]',
+  )
+}
+
+function createPascalWaterViewerLandSurface(
+  surface: PascalWaterLandSurface,
+): PascalWaterLandSurface {
+  const elevationOffset = surface.grassSurfaceElevation
+  return {
+    ...surface,
+    grassSurfaceElevation: 0,
+    plateauElevation: surface.plateauElevation - elevationOffset,
+  }
+}
+
+function createPascalWaterGrassRoadSegments(
+  segments: LandrushWorldNode['roads']['segments'],
+): readonly LandrushRoadSegment[] {
+  return segments.map((segment) => ({
+    connectsParcelIds: segment.connectsParcelIds,
+    fromNodeId: segment.fromNodeId,
+    id: `pascal-water-grass-${segment.id}`,
+    kind: segment.kind === 'driveway' ? 'driveway' : 'spine',
+    points: segment.points,
+    r3fPoints: segment.points.map(
+      (point) => [point.x, 0, point.z] satisfies LandrushVec3,
+    ),
+    toNodeId: segment.toNodeId,
+    width: segment.width,
+  }))
+}
+
+function createPascalWaterPerimeter(island: PascalWaterIsland): PascalWaterPerimeter {
+  return {
+    bounds: island.perimeter.bounds,
+    closed: island.perimeter.closed,
+    points: [...island.perimeter.points],
+  }
+}
+
+function createPascalWaterNode({
+  elevationParameters,
+  fieldParameters,
+  materialParameters,
+  perimeter,
+  showDepthReference,
+  terrainFieldResolution,
+  waterLabSeed,
+}: {
+  elevationParameters: IslandElevationParameters
+  fieldParameters: WaterFieldParameters
+  materialParameters: LandrushWaterSurfaceParameters
+  perimeter: PascalWaterPerimeter
+  showDepthReference: boolean
+  terrainFieldResolution: number
+  waterLabSeed: string
+}) {
+  const landSurface = createPascalWaterLandSurface({
+    elevationParameters,
+    shorelinePoints: perimeter.points,
+    waterPlaneSize: WATER_PLANE_SIZE,
+  })
+  const waterNode: PascalWaterNode = {
+    object: 'node',
+    id: PASCAL_WATER_NODE_ID as never,
+    type: 'pascal-water',
+    name: 'Pascal Water',
+    parentId: PASCAL_WATER_LEVEL_ID,
+    visible: true,
+    position: [0, -landSurface.grassSurfaceElevation, 0],
+    planeSize: WATER_PLANE_SIZE,
+    perimeter,
+    fieldParameters,
+    elevationParameters,
+    materialParameters: {
+      ...materialParameters,
+      depthExponent: fieldParameters.depthExponent,
+      depthNoiseFrequency: fieldParameters.depthNoiseFrequency,
+      depthNoiseStrength: fieldParameters.depthNoiseStrength,
+      depthReach: fieldParameters.depthReach,
+      edgeFadeDistance: fieldParameters.edgeFadeDistance,
+    } satisfies Partial<LandrushWaterSurfaceParameters>,
+    showDepthReference,
+    terrainFieldResolution,
+    maskLandWater: false,
+    metadata: {
+      grassSurfaceElevation: landSurface.grassSurfaceElevation,
+      source: 'pascal-water-debug',
+      waterLabSeed,
+    },
+  }
+
+  return { waterNode }
+}
+
+function createPascalWaterLayoutNode({
+  allocation,
+  island,
+  landSurface,
+  remotePlayers,
+}: {
+  allocation: ParcelAllocationResult
+  island: PascalWaterIsland
+  landSurface: PascalWaterLandSurface
+  remotePlayers: readonly MultiplayerPlayerSnapshot[]
+}): LandrushWorldNode {
+  const streetNetwork = generateParcelEdgeStreets(allocation, {
+    loopiness: 0,
+    roadWidthMeters: PASCAL_WATER_DIRT_ROAD_WIDTH_METERS,
+    seed: `${island.seed}:world-streets:${PASCAL_WATER_PARCEL_PARAMETERS.parcelCount}`,
+  })
+  const perimeterPoints = openPointRing(landSurface.grassSurfacePoints)
+  const bounds = boundsForPoints(perimeterPoints)
+  const center = polygonCentroid(perimeterPoints)
+  const roadNodes = createPascalWaterRoadNodes(streetNetwork)
+  const roadSegments = streetNetwork.segments.map((segment) =>
+    createPascalWaterRoadSegment(segment),
+  )
+
+  return {
+    object: 'node',
+    id: PASCAL_WATER_LAYOUT_NODE_ID as never,
+    type: 'landrush-world',
+    name: 'World Multiplayer Layout',
+    parentId: PASCAL_WATER_LEVEL_ID,
+    visible: true,
+    position: [0, 0, 0],
+    seed: island.seed,
+    size: { width: WATER_PLANE_SIZE, depth: WATER_PLANE_SIZE },
+    perimeter: {
+      bounds,
+      closed: true,
+      id: 'world-multiplayer-grass-surface',
+      points: closedPointRing(perimeterPoints),
+    },
+    parcels: allocation.parcels.map(createPascalWaterParcel),
+    ownerParcelId: '',
+    roads: {
+      adjacency: createPascalWaterRoadAdjacency(roadSegments),
+      connected: streetNetwork.roadConnected,
+      connectedParcelIds: [...streetNetwork.connectedParcelIds],
+      nodes: roadNodes,
+      segments: roadSegments,
+      sidewalks: [],
+    },
+    trees: [],
+    playerStart: [center.x, PASCAL_WATER_VISUAL_PLAYER_GROUND_Y, center.z],
+    playerPosition: [center.x, PASCAL_WATER_VISUAL_PLAYER_GROUND_Y, center.z],
+    playerHeading: 0,
+    playerMoving: false,
+    playerSpeed: 0,
+    remotePlayers: remotePlayers.map(createPascalWaterRemotePlayer),
+    renderFlags: {
+      grassBlades: false,
+      grassPatches: false,
+      ground: true,
+      parcelDetails: false,
+      parcels: true,
+      robot: false,
+      roads: true,
+      shoreDetails: false,
+      trees: false,
+      water: false,
+    },
+    focusParcelId: null,
+    landrushMode: 'walk',
+    metadata: {
+      actualBounds: bounds,
+      checks: [
+        {
+          check: 'world-multiplayer parcel allocation',
+          pass: allocation.parcels.length === PASCAL_WATER_PARCEL_PARAMETERS.parcelCount,
+          value: allocation.parcels.length,
+        },
+        {
+          check: 'world-multiplayer dirt edge paths',
+          pass: streetNetwork.segments.length > 0,
+          value: streetNetwork.segments.length,
+        },
+      ],
+      counts: {
+        parcels: allocation.parcels.length,
+        perimeterPoints: perimeterPoints.length,
+        roadNodes: roadNodes.length,
+        roadSegments: roadSegments.length,
+        sidewalks: 0,
+        trees: 0,
+      },
+      ownerParcelId: '',
+      requestedSize: island.size,
+      roadGraph: {
+        connected: streetNetwork.roadConnected,
+        connectedParcelIds: [...streetNetwork.connectedParcelIds],
+        reachableNodeCount: roadNodes.length,
+        totalNodeCount: roadNodes.length,
+      },
+      seed: island.seed,
+      source: 'world-multiplayer-dirt-copy-layout',
+      summary: `World multiplayer layout: ${allocation.parcels.length} parcels, ${streetNetwork.segments.length} dirt edge paths.`,
+      verificationSummary: 'Generated from the same smoothed water island, parcel allocator, and dirt-copy edge street path used by world-multiplayer.',
+    },
+  }
+}
+
+function createPascalWaterSceneGraph(options: {
+  elevationParameters: IslandElevationParameters
+  fieldParameters: WaterFieldParameters
+  islandParameters: WaterLabIslandParameters
+  materialParameters: LandrushWaterSurfaceParameters
+  showDepthReference: boolean
+  terrainFieldResolution: number
+}): {
+  landrushLayoutNode: LandrushWorldNode
   sceneGraph: SceneGraph
   waterNode: PascalWaterNode
 } {
-  const island = generateWaterLabIsland(WATER_LAB_DEFAULT_ISLAND_PARAMETERS)
-  const waterNode = PascalWaterNode.parse({
-    name: 'Pascal Water',
-    parentId: PASCAL_WATER_LEVEL_ID,
-    planeSize: WATER_PLANE_SIZE,
-    perimeter: {
-      bounds: island.perimeter.bounds,
-      closed: island.perimeter.closed,
-      points: [...island.perimeter.points],
-    },
-    fieldParameters: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
-    elevationParameters: WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
-    materialParameters: {
-      ...LANDRUSH_WATER_BODY_SURFACE_PARAMETERS,
-      depthExponent: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthExponent,
-      depthNoiseFrequency: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthNoiseFrequency,
-      depthNoiseStrength: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthNoiseStrength,
-      depthReach: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthReach,
-      edgeFadeDistance: WATER_LAB_DEFAULT_FIELD_PARAMETERS.edgeFadeDistance,
-    } satisfies Partial<LandrushWaterBodySurfaceParameters>,
-    terrainFieldResolution: 1024,
-    metadata: {
-      source: 'pascal-water-debug',
-      waterLabSeed: island.seed,
-    },
+  const island = generateWaterLabIsland(options.islandParameters)
+  const landSurface = createPascalWaterLandSurface({
+    elevationParameters: options.elevationParameters,
+    shorelinePoints: createPascalWaterSmoothedPerimeter(island.perimeter.points),
+    waterPlaneSize: WATER_PLANE_SIZE,
+  })
+  const { waterNode } = createPascalWaterNode({
+    elevationParameters: options.elevationParameters,
+    fieldParameters: options.fieldParameters,
+    materialParameters: options.materialParameters,
+    perimeter: createPascalWaterPerimeter(island),
+    showDepthReference: options.showDepthReference,
+    terrainFieldResolution: options.terrainFieldResolution,
+    waterLabSeed: island.seed,
+  })
+  const landrushLayoutNode = createPascalWaterLayoutNode({
+    allocation: allocateParcels(
+      landSurface.grassSurfacePoints,
+      createPascalWaterParcelOptions(island.seed),
+    ),
+    island,
+    landSurface,
+    remotePlayers: [],
   })
   const sitePolygon: [number, number][] = island.perimeter.points
     .slice(0, -1)
@@ -170,12 +3518,13 @@ function createPascalWaterSceneGraph(): {
       target: [...PASCAL_WATER_CAMERA_TARGET],
       zoom: PASCAL_WATER_CAMERA_ZOOM,
     },
-    children: [waterNode.id],
+    children: [waterNode.id, landrushLayoutNode.id],
     level: 0,
     metadata: { source: 'pascal-water-debug' },
   }
 
   return {
+    landrushLayoutNode,
     waterNode,
     sceneGraph: {
       rootNodeIds: [PASCAL_WATER_SITE_ID],
@@ -186,7 +3535,7 @@ function createPascalWaterSceneGraph(): {
           type: 'site',
           name: 'Pascal Water Site',
           parentId: null,
-          visible: true,
+          visible: false,
           metadata: { source: 'pascal-water-debug' },
           polygon: {
             points: sitePolygon,
@@ -207,8 +3556,185 @@ function createPascalWaterSceneGraph(): {
           rotation: [0, 0, 0],
         },
         [PASCAL_WATER_LEVEL_ID]: level,
+        [landrushLayoutNode.id]: landrushLayoutNode,
         [waterNode.id]: waterNode,
       },
     },
+  }
+}
+
+function createPascalWaterParcelOptions(seed: string): ParcelAllocationOptions {
+  return {
+    count: PASCAL_WATER_PARCEL_PARAMETERS.parcelCount,
+    maxEdges: PASCAL_WATER_PARCEL_PARAMETERS.maxEdges,
+    seed: `${seed}:world-parcels:${PASCAL_WATER_PARCEL_PARAMETERS.parcelCount}`,
+    shoreSetbackMeters: PASCAL_WATER_PARCEL_PARAMETERS.shoreSetbackMeters,
+    simplifyToleranceMeters: PASCAL_WATER_PARCEL_PARAMETERS.simplifyToleranceMeters,
+    splitJitter: PASCAL_WATER_PARCEL_PARAMETERS.splitJitter,
+    squareness: PASCAL_WATER_PARCEL_PARAMETERS.squareness,
+  }
+}
+
+function createPascalWaterParcelOwnershipWorldId(options: ParcelAllocationOptions) {
+  return [
+    'landrush-world',
+    'pascal-water',
+    options.seed,
+    options.count,
+    options.maxEdges,
+    options.shoreSetbackMeters,
+    options.simplifyToleranceMeters,
+    options.splitJitter,
+    options.squareness,
+  ]
+    .join(':')
+    .replace(/[^a-zA-Z0-9._:-]/g, '-')
+    .slice(0, 240)
+}
+
+function createPascalWaterParcel(parcel: ParcelAllocationParcel): LandrushWorldNode['parcels'][number] {
+  return {
+    center: parcel.centroid,
+    centroid: parcel.centroid,
+    edges: parcel.points.map((start, index) => {
+      const end = parcel.points[(index + 1) % parcel.points.length] ?? start
+      const control = midpoint2(start, end)
+      return {
+        control,
+        end,
+        id: `${parcel.id}-edge-${index + 1}`,
+        samples: [start, control, end],
+        start,
+      }
+    }),
+    entryPoint: parcel.centroid,
+    fillColor: PASCAL_WATER_PARCEL_OVERLAY_COLOR,
+    id: parcel.id,
+    index: parcel.index,
+    kind: 'neighbor',
+    label: `Parcel ${parcel.index + 1}`,
+    outline: [...parcel.points],
+    owner: {
+      accentColor: PASCAL_WATER_PARCEL_OVERLAY_COLOR,
+      id: 'unclaimed',
+      label: 'Unclaimed',
+    },
+    radius: Math.sqrt(Math.max(0.001, parcel.area) / Math.PI),
+    vertices: [...parcel.points],
+  }
+}
+
+function createPascalWaterRoadNodes(network: ParcelStreetNetwork) {
+  const nodes = new Map<string, LandrushWorldNode['roads']['nodes'][number]>()
+
+  for (const segment of network.segments) {
+    const start = segment.points[0]
+    const end = segment.points.at(-1)
+    if (start) {
+      nodes.set(roadNodeId(start), {
+        id: roadNodeId(start),
+        kind: 'spine',
+        position: start,
+      })
+    }
+    if (end) {
+      nodes.set(roadNodeId(end), {
+        id: roadNodeId(end),
+        kind: 'spine',
+        position: end,
+      })
+    }
+  }
+
+  return [...nodes.values()]
+}
+
+function createPascalWaterRoadSegment(
+  segment: ParcelStreetSegment,
+): LandrushWorldNode['roads']['segments'][number] {
+  const start = segment.points[0] ?? { x: 0, z: 0 }
+  const end = segment.points.at(-1) ?? start
+  return {
+    connectsParcelIds: [...segment.parcelIds],
+    fromNodeId: roadNodeId(start),
+    id: `world-multiplayer-${segment.id}`,
+    kind: 'spine',
+    points: [...segment.points],
+    toNodeId: roadNodeId(end),
+    width: segment.width,
+  }
+}
+
+function createPascalWaterRoadAdjacency(
+  segments: readonly LandrushWorldNode['roads']['segments'][number][],
+) {
+  const adjacency: Record<string, string[]> = {}
+
+  for (const segment of segments) {
+    adjacency[segment.fromNodeId] ??= []
+    adjacency[segment.toNodeId] ??= []
+    adjacency[segment.fromNodeId]!.push(segment.toNodeId)
+    adjacency[segment.toNodeId]!.push(segment.fromNodeId)
+  }
+
+  return adjacency
+}
+
+function roadNodeId(point: LandrushPoint2) {
+  return `layout-road-${Math.round(point.x * 100)}-${Math.round(point.z * 100)}`
+}
+
+function boundsForPoints(points: readonly LandrushPoint2[]): LandrushWorldNode['perimeter']['bounds'] {
+  let minX = Number.POSITIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+
+  for (const point of points) {
+    minX = Math.min(minX, point.x)
+    minZ = Math.min(minZ, point.z)
+    maxX = Math.max(maxX, point.x)
+    maxZ = Math.max(maxZ, point.z)
+  }
+
+  if (!Number.isFinite(minX)) {
+    return { depth: 0, maxX: 0, maxZ: 0, minX: 0, minZ: 0, width: 0 }
+  }
+
+  return {
+    depth: maxZ - minZ,
+    maxX,
+    maxZ,
+    minX,
+    minZ,
+    width: maxX - minX,
+  }
+}
+
+function openPointRing(points: readonly LandrushPoint2[]) {
+  if (points.length < 2) return [...points]
+  const first = points[0]
+  const last = points.at(-1)
+  if (first && last && areSamePoint(first, last)) return points.slice(0, -1)
+  return [...points]
+}
+
+function closedPointRing(points: readonly LandrushPoint2[]) {
+  const ring = openPointRing(points)
+  const first = ring[0]
+  const last = ring.at(-1)
+  if (!first) return ring
+  if (last && areSamePoint(first, last)) return ring
+  return [...ring, first]
+}
+
+function areSamePoint(first: LandrushPoint2, second: LandrushPoint2) {
+  return Math.abs(first.x - second.x) <= 0.001 && Math.abs(first.z - second.z) <= 0.001
+}
+
+function midpoint2(first: LandrushPoint2, second: LandrushPoint2): LandrushPoint2 {
+  return {
+    x: (first.x + second.x) / 2,
+    z: (first.z + second.z) / 2,
   }
 }

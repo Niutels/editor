@@ -59,16 +59,18 @@ export function createLandrushMaterials(
       toon(color, { opacity: index === 0 ? 0.34 : 0.28, transparent: true }),
     ),
     road: new MeshBasicMaterial({
-      color: '#b4aa8d',
+      color: '#9d7652',
       depthTest: false,
       depthWrite: false,
       side: DoubleSide,
     }),
     roadCrown: new MeshBasicMaterial({
-      color: '#d8ceb3',
+      color: '#bf9468',
       depthTest: false,
       depthWrite: false,
+      opacity: 0.46,
       side: DoubleSide,
+      transparent: true,
     }),
     sidewalk: new MeshBasicMaterial({
       color: '#efe6c9',
