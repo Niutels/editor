@@ -52,7 +52,7 @@ import type { ExtraPanel } from '../ui/sidebar/icon-rail'
 import { SettingsPanel, type SettingsPanelProps } from '../ui/sidebar/panels/settings-panel'
 import { SitePanel, type SitePanelProps } from '../ui/sidebar/panels/site-panel'
 import type { SidebarTab } from '../ui/sidebar/tab-bar'
-import { CustomCameraControls } from './custom-camera-controls'
+import { CustomCameraControls, type EditorCameraInitialPose } from './custom-camera-controls'
 import { EditorLayoutV2 } from './editor-layout-v2'
 import { ExportManager } from './export-manager'
 import { FirstPersonControls, FirstPersonOverlay } from './first-person-controls'
@@ -153,6 +153,7 @@ export interface EditorProps {
 
   // Viewer runtime options for hosts that need a lean or constrained canvas.
   viewerCameraControls?: boolean
+  viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerEditorSystems?: boolean
   viewerSceneChildren?: ReactNode
   viewerPostProcessing?: boolean
@@ -598,6 +599,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isFirstPersonMode,
   showEditorChrome,
   viewerCameraControls,
+  viewerCameraInitialPose,
   viewerEditorSystems,
   viewerSceneChildren,
   onThumbnailCapture,
@@ -607,6 +609,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isFirstPersonMode: boolean
   showEditorChrome: boolean
   viewerCameraControls: boolean
+  viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerEditorSystems: boolean
   viewerSceneChildren?: ReactNode
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
@@ -633,7 +636,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
         <ToolManager />
       )}
       {isFirstPersonMode && <FirstPersonControls />}
-      {viewerCameraControls ? <CustomCameraControls /> : null}
+      {viewerCameraControls ? <CustomCameraControls initialPose={viewerCameraInitialPose} /> : null}
       {viewerSceneChildren}
       {viewerEditorSystems && <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />}
       {showEditorChrome && !isFirstPersonMode && <SiteEdgeLabels />}
@@ -826,6 +829,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   showLoader,
   onThumbnailCapture,
   viewerCameraControls,
+  viewerCameraInitialPose,
   viewerEditorSystems,
   viewerPostProcessing,
   viewerRendererBackend,
@@ -840,6 +844,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   showLoader: boolean
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
   viewerCameraControls: boolean
+  viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerEditorSystems: boolean
   viewerPostProcessing?: boolean
   viewerRendererBackend?: 'webgpu' | 'webgl'
@@ -947,7 +952,9 @@ const ViewerCanvas = memo(function ViewerCanvas({
               onDismiss={dismissCameraControlsHint}
             />
           ) : null}
-          <SelectionPersistenceManager enabled={viewerEditorSystems && hasLoadedInitialScene && !showLoader} />
+          <SelectionPersistenceManager
+            enabled={viewerEditorSystems && hasLoadedInitialScene && !showLoader}
+          />
           <Viewer
             defaultRender={EDITOR_DEFAULT_RENDER}
             hoverStyles={EDITOR_HOVER_STYLES}
@@ -964,6 +971,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
               onThumbnailCapture={onThumbnailCapture}
               showEditorChrome={showEditorChrome}
               viewerCameraControls={viewerCameraControls}
+              viewerCameraInitialPose={viewerCameraInitialPose}
               viewerEditorSystems={viewerEditorSystems}
               viewerSceneChildren={viewerSceneChildren}
             />
@@ -995,6 +1003,7 @@ export default function Editor({
   isLoading = false,
   onThumbnailCapture,
   viewerCameraControls = true,
+  viewerCameraInitialPose,
   viewerEditorSystems = true,
   viewerPostProcessing,
   viewerRendererBackend,
@@ -1151,7 +1160,7 @@ export default function Editor({
       {viewerEditorSystems && <CeilingSystem />}
       {viewerEditorSystems && <RoofEditSystem />}
       {viewerEditorSystems && <StairEditSystem />}
-      {viewerCameraControls ? <CustomCameraControls /> : null}
+      {viewerCameraControls ? <CustomCameraControls initialPose={viewerCameraInitialPose} /> : null}
       {viewerSceneChildren}
       {viewerEditorSystems && <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />}
       {viewerEditorSystems && <InteractiveSystem />}
@@ -1168,6 +1177,7 @@ export default function Editor({
       showEditorChrome={showEditorChrome}
       showLoader={showLoader}
       viewerCameraControls={viewerCameraControls}
+      viewerCameraInitialPose={viewerCameraInitialPose}
       viewerEditorSystems={viewerEditorSystems}
       viewerPostProcessing={viewerPostProcessing}
       viewerRendererBackend={viewerRendererBackend}

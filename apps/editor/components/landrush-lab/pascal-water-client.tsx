@@ -14,6 +14,7 @@ import {
 import {
   EDITOR_LAYER,
   Editor,
+  type EditorCameraInitialPose,
   ItemsPanel,
   type SceneGraph,
   useEditor,
@@ -28,7 +29,7 @@ import {
 } from '@pascal-app/nodes'
 import { LandrushRobot } from '@pascal-app/nodes/landrush-world/robot'
 import { renderScheduler, useViewer } from '@pascal-app/viewer'
-import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
+import { Html, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import {
   ChevronDown,
@@ -68,7 +69,6 @@ import {
   type Mesh,
   type MeshBasicMaterial,
   Raycaster,
-  Shape,
   ShapeUtils,
   Vector2,
   Vector3,
@@ -131,8 +131,7 @@ const PASCAL_WATER_BUILDING_ID = 'building_pascal-water-debug'
 const PASCAL_WATER_LEVEL_ID = 'level_pascal-water-debug'
 const PASCAL_WATER_NODE_ID = 'pascal-water_debug-water'
 const PASCAL_WATER_LAYOUT_NODE_ID = 'landrush-world_pascal-water-layout'
-const PASCAL_MULTIPLAYER_ISLAND_LAYOUT_NODE_ID =
-  'landrush-layout_pascal-multiplayer-island-layout'
+const PASCAL_MULTIPLAYER_ISLAND_LAYOUT_NODE_ID = 'landrush-layout_pascal-multiplayer-island-layout'
 const PASCAL_WATER_CAMERA_POSITION = [88, 86, 94] as const
 const PASCAL_WATER_CAMERA_TARGET = [0, 0, 0] as const
 const PASCAL_WATER_CAMERA_ZOOM = 7.8
@@ -268,7 +267,6 @@ const PASCAL_WATER_PARCEL_MAP_BASE_OPACITY = 0.19
 const PASCAL_WATER_PARCEL_MAP_HOVER_OPACITY = 0.34
 const PASCAL_WATER_MAP_CAMERA_POSITION = [0, 128, 0.01] as const
 const PASCAL_WATER_MAP_CAMERA_TARGET = [0, 0, 0] as const
-const PASCAL_WATER_MAP_CAMERA_ZOOM = 8.6
 const PASCAL_WATER_MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
 const PASCAL_WATER_REMOTE_POSITION_RESPONSE = 12
 const PASCAL_WATER_REMOTE_HEADING_RESPONSE = 14
@@ -324,11 +322,8 @@ type PascalWaterCameraPose = {
 type PascalWaterReturnCameraTransition = {
   elapsed: number
   started: boolean
-  startDirection: Vector3
-  startDistance: number
+  startPosition: Vector3
   startTarget: Vector3
-  targetDirection: Vector3
-  targetDistance: number
   targetPose: PascalWaterCameraPose
 }
 type PascalWaterStartupProfileSpan = {
@@ -431,6 +426,20 @@ type MobileJoystickInput = {
 type RobotWorldOrbitControls = {
   target: Vector3
   update: () => void
+}
+type PascalWaterCameraControls = {
+  getTarget?: (target: Vector3, receiveEndValue?: boolean) => Vector3
+  setLookAt?: (
+    positionX: number,
+    positionY: number,
+    positionZ: number,
+    targetX: number,
+    targetY: number,
+    targetZ: number,
+    enableTransition?: boolean,
+  ) => unknown
+  target?: Vector3
+  update?: (delta?: number) => void
 }
 
 const FIELD_SLIDERS = [
@@ -777,7 +786,7 @@ export function PascalWaterClient({
   const playerCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
   const buildCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
   const playerReturnCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
-  const previousBuildModeRef = useRef(false)
+  const previousViewModeRef = useRef<PascalWaterViewMode>('player')
   const lastAppliedBuildSnapshotSignatureRef = useRef(new Map<string, string>())
   const lastSyncedBuildSnapshotSignatureRef = useRef<string | null>(null)
   const initialViewModeAppliedRef = useRef(false)
@@ -834,6 +843,8 @@ export function PascalWaterClient({
   const viewerRendererBackend = searchParams.get('rendererBackend') === 'webgl' ? 'webgl' : 'webgpu'
   const [buildMode, setBuildMode] = useState(false)
   const [buildParcelId, setBuildParcelId] = useState<string | null>(null)
+  const [buildCameraInitialPose, setBuildCameraInitialPose] =
+    useState<EditorCameraInitialPose | null>(null)
   const [mapView, setMapView] = useState(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile | null>(null)
@@ -876,14 +887,17 @@ export function PascalWaterClient({
   usePascalWaterPerfRunProbe(activePerfRun)
 
   useLayoutEffect(() => {
-    if (buildMode) {
-      buildCameraPoseRef.current = null
+    const previousViewMode = previousViewModeRef.current
+    if (viewMode === 'player') {
+      if (previousViewMode !== 'player') {
+        playerReturnCameraPoseRef.current = clonePascalWaterCameraPose(playerCameraPoseRef.current)
+      }
+    } else {
       playerReturnCameraPoseRef.current = null
-    } else if (previousBuildModeRef.current) {
-      playerReturnCameraPoseRef.current = clonePascalWaterCameraPose(playerCameraPoseRef.current)
+      if (previousViewMode === 'player') buildCameraPoseRef.current = null
     }
-    previousBuildModeRef.current = buildMode
-  }, [buildMode])
+    previousViewModeRef.current = viewMode
+  }, [viewMode])
 
   const islandRender = useProgressiveRenderValue(islandParameters, 320)
   const fieldRender = useProgressiveRenderValue(fieldParameters, 160)
@@ -987,10 +1001,8 @@ export function PascalWaterClient({
   )
   const liveViewerLandSurface = useMemo(
     () =>
-      measurePascalWaterSetup(
-        activeProfileMeasure,
-        'setup.pascal-water.viewer-land-surface',
-        () => createPascalWaterViewerLandSurface(liveLandSurface),
+      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.viewer-land-surface', () =>
+        createPascalWaterViewerLandSurface(liveLandSurface),
       ),
     [activeProfileMeasure, liveLandSurface],
   )
@@ -1033,18 +1045,21 @@ export function PascalWaterClient({
   )
   const liveWaterNode = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.live-water-node', () =>
-        createPascalWaterNode({
-          elevationParameters: renderElevationParameters,
-          fieldParameters: renderFieldParameters,
-          materialParameters,
-          perimeter: livePerimeter,
-          profilePlainWaterMaterial,
-          showDepthReference,
-          terrainFieldResolution: renderTerrainFieldResolution,
-          waterFieldDebugMode,
-          waterLabSeed: liveIsland.seed,
-        }).waterNode,
+      measurePascalWaterSetup(
+        activeProfileMeasure,
+        'setup.pascal-water.live-water-node',
+        () =>
+          createPascalWaterNode({
+            elevationParameters: renderElevationParameters,
+            fieldParameters: renderFieldParameters,
+            materialParameters,
+            perimeter: livePerimeter,
+            profilePlainWaterMaterial,
+            showDepthReference,
+            terrainFieldResolution: renderTerrainFieldResolution,
+            waterFieldDebugMode,
+            waterLabSeed: liveIsland.seed,
+          }).waterNode,
       ),
     [
       activeProfileMeasure,
@@ -1089,9 +1104,21 @@ export function PascalWaterClient({
       ),
     [activeProfileMeasure, sceneNodes],
   )
+  const frozenBuildModeBladeGrassBlockersRef =
+    useRef<readonly GrassFieldBlocker[]>(builtGrassBlockers)
+  const previousGrassBlockerBuildModeRef = useRef(buildMode)
+  useEffect(() => {
+    const wasBuildMode = previousGrassBlockerBuildModeRef.current
+    if (!buildMode || !wasBuildMode) {
+      frozenBuildModeBladeGrassBlockersRef.current = builtGrassBlockers
+    }
+    previousGrassBlockerBuildModeRef.current = buildMode
+  }, [buildMode, builtGrassBlockers])
   // Built objects only clear vertical blades; the flat ground texture stays stable below walls.
   const grassBlockers = PASCAL_WATER_GROUND_GRASS_BLOCKERS
-  const bladeGrassBlockers = builtGrassBlockers
+  const bladeGrassBlockers = buildMode
+    ? frozenBuildModeBladeGrassBlockersRef.current
+    : builtGrassBlockers
   const bladeGrassFadeBlockers = useMemo(() => {
     if (!(buildMode && activeBuildParcel)) return []
     return [
@@ -1102,10 +1129,31 @@ export function PascalWaterClient({
     ] satisfies GrassFieldBlocker[]
   }, [activeBuildParcel, buildMode])
   const handleLoad = useCallback(async () => pascalWaterScene.sceneGraph, [pascalWaterScene])
+  const prepareBuildCameraInitialPose = useCallback(
+    (sourceViewMode: PascalWaterViewMode = viewMode) => {
+      const pose =
+        sourceViewMode === 'player'
+          ? playerCameraPoseRef.current
+          : (buildCameraPoseRef.current ?? playerCameraPoseRef.current)
+
+      setBuildCameraInitialPose(pose ? pascalWaterCameraPoseToEditorInitialPose(pose) : null)
+    },
+    [viewMode],
+  )
+  const activeBuildCameraInitialPose =
+    buildMode && !buildCameraInitialPose
+      ? maybePascalWaterCameraPoseToEditorInitialPose(
+          buildCameraPoseRef.current ?? playerCameraPoseRef.current,
+        )
+      : buildCameraInitialPose
 
   useEffect(() => {
     setLocalProfile(readLocalPlayerProfile())
   }, [])
+
+  useEffect(() => {
+    if (!buildMode) setBuildCameraInitialPose(null)
+  }, [buildMode])
 
   useEffect(() => {
     if (!startupProfileEnabled || !startupProfileRef.current) {
@@ -1178,9 +1226,7 @@ export function PascalWaterClient({
             renderStartMs: roundPerf((frame.renderStart ?? 0) - profile.startedAt),
             scripts: (frame.scripts ?? []).map((script) => ({
               durationMs: roundPerf(script.duration ?? 0),
-              forcedStyleAndLayoutDurationMs: roundPerf(
-                script.forcedStyleAndLayoutDuration ?? 0,
-              ),
+              forcedStyleAndLayoutDurationMs: roundPerf(script.forcedStyleAndLayoutDuration ?? 0),
               invoker: script.invoker ?? '',
               invokerType: script.invokerType ?? '',
               pauseDurationMs: roundPerf(script.pauseDuration ?? 0),
@@ -1225,10 +1271,11 @@ export function PascalWaterClient({
       camera === 'topdown' ||
       camera === 'overhead'
 
+    if (initialBuildMode) prepareBuildCameraInitialPose('player')
     setBuildMode(initialBuildMode)
     setMapView(!initialBuildMode && initialMapView)
     if (initialBuildMode || initialMapView) releasePascalWaterPointerLock()
-  }, [searchParams])
+  }, [prepareBuildCameraInitialPose, searchParams])
 
   useEffect(() => {
     if (!buildMode) return
@@ -1295,12 +1342,16 @@ export function PascalWaterClient({
   }, [localOwnedParcel, multiplayer.syncParcelBuildNodes, parcelWorldId])
 
   useEffect(() => {
-    const snapshots = multiplayer.parcelBuildNodes.filter((build) => build.worldId === parcelWorldId)
+    const snapshots = multiplayer.parcelBuildNodes.filter(
+      (build) => build.worldId === parcelWorldId,
+    )
     if (snapshots.length === 0) return
 
     const scene = useScene.getState()
     for (const build of snapshots) {
-      const parcel = liveParcelAllocation.parcels.find((candidate) => candidate.id === build.parcelId)
+      const parcel = liveParcelAllocation.parcels.find(
+        (candidate) => candidate.id === build.parcelId,
+      )
       if (!parcel) continue
       if (buildMode && build.updatedBy === resolvedLocalProfile.id) continue
 
@@ -1345,7 +1396,7 @@ export function PascalWaterClient({
     const viewer = useViewer.getState()
     const sidebar = useSidebarStore.getState()
 
-    viewer.setCameraMode(mapView && !buildMode ? 'orthographic' : 'perspective')
+    viewer.setCameraMode('perspective')
     viewer.setColorPreset('clay')
     viewer.setShading('rendered')
     viewer.setTextures(true)
@@ -1376,7 +1427,7 @@ export function PascalWaterClient({
     }
 
     renderScheduler.requestFrame('geometry:changed')
-  }, [buildMode, mapView])
+  }, [buildMode])
 
   useEffect(() => {
     if (viewMode === 'player') return
@@ -1392,8 +1443,8 @@ export function PascalWaterClient({
         if (buildMode) {
           setBuildMode(false)
           setBuildParcelId(null)
-          setMapView(false)
-          requestPascalWaterPointerLock()
+          setMapView(true)
+          releasePascalWaterPointerLock()
           return
         }
         if (mapView) {
@@ -1415,6 +1466,7 @@ export function PascalWaterClient({
           return
         }
         if (!localOwnedParcel) return
+        prepareBuildCameraInitialPose(viewMode)
         setBuildParcelId(localOwnedParcel.id)
         setBuildMode(true)
         releasePascalWaterPointerLock()
@@ -1423,7 +1475,7 @@ export function PascalWaterClient({
 
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [buildMode, localOwnedParcel, mapView])
+  }, [buildMode, localOwnedParcel, mapView, prepareBuildCameraInitialPose, viewMode])
 
   useEffect(() => {
     const scene = useScene.getState()
@@ -1524,7 +1576,8 @@ export function PascalWaterClient({
             projectId={experienceConfig.projectId}
             showEditorChrome={buildMode}
             sidebarTabs={[]}
-            viewerCameraControls={false}
+            viewerCameraControls={buildMode}
+            viewerCameraInitialPose={activeBuildCameraInitialPose}
             viewerEditorSystems={buildMode}
             viewerPostProcessing={false}
             viewerRendererBackend={viewerRendererBackend}
@@ -1534,106 +1587,108 @@ export function PascalWaterClient({
                 id="pascal-water.viewer-scene-children"
                 onRender={handleStartupReactRender}
               >
-              <color args={['#164a77']} attach="background" />
-              <FrameLoadProfilerProbe enabled={frameProfile} />
-              <PascalWaterEditorOverlayLayerBridge enabled={buildMode} />
-              <PascalWaterPlayerLayer
-                baseNode={liveLayoutNode}
-                buildCameraPoseRef={buildCameraPoseRef}
-                buildMode={buildMode}
-                grassInteractionRef={grassInteractionRef}
-                localMotionRef={localMotionRef}
-                localProfile={resolvedLocalProfile}
-                mobileJoystickRef={mobileJoystickRef}
-                onLocalPlayerChange={multiplayer.publishLocalPlayer}
-                perfRun={activePerfRun}
-                playerCameraPoseRef={playerCameraPoseRef}
-                playerReturnCameraPoseRef={playerReturnCameraPoseRef}
-                remotePlayers={multiplayer.remotePlayers}
-                surface={liveViewerLandSurface}
-                viewMode={viewMode}
-              />
-              <PascalWaterParcelOwnershipLayer
-                allocation={liveParcelAllocation}
-                buildParcelId={buildParcelId}
-                buildMode={buildMode}
-                claimParcel={multiplayer.claimParcel}
-                localMotionRef={localMotionRef}
-                localProfile={resolvedLocalProfile}
-                mapView={viewMode === 'map'}
-                onBuildParcel={(parcel) => {
-                  setBuildParcelId(parcel.id)
-                  setBuildMode(true)
-                  setMapView(false)
-                  releasePascalWaterPointerLock()
-                }}
-                parcelClaimError={multiplayer.parcelClaimError}
-                parcelOwnerships={multiplayer.parcelOwnerships}
-                parcelWorldId={parcelWorldId}
-                surface={liveViewerLandSurface}
-                watchParcelWorld={multiplayer.watchParcelWorld}
-              />
-              <PascalWaterBuildParcelGuardLayer
-                buildMode={buildMode}
-                groundY={liveViewerLandSurface.grassSurfaceElevation}
-                parcel={activeBuildParcel}
-              />
-              <PascalWaterBuildCameraRig
-                buildCameraPoseRef={buildCameraPoseRef}
-                groundY={liveViewerLandSurface.grassSurfaceElevation}
-                parcel={activeBuildParcel}
-                playerCameraPoseRef={playerCameraPoseRef}
-                visible={buildMode}
-              />
-              {!startupProfileNoLandLayers ? (
-                <PascalWaterStartupReactProfiler
-                  enabled={startupProfileEnabled}
-                  id="pascal-water.land-layers"
-                  onRender={handleStartupReactRender}
-                >
-                  <Suspense fallback={null}>
-                    <GrassWaterLandLayers
-                      bladeFadeBlockers={bladeGrassFadeBlockers}
-                      bladeSubdivisions={bladeSubdivisions}
-                      bladeGrassBlockers={bladeGrassBlockers}
-                      fieldResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
-                      finalFieldResolution={
-                        isGrassFieldPreviewing
-                          ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
-                          : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
-                      }
-                      finalSpawnResolution={
-                        isGrassFieldPreviewing
-                          ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
-                          : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
-                      }
-                      bladeRenderOrder={
-                        buildMode ? PASCAL_WATER_BUILD_GRASS_BLADE_RENDER_ORDER : undefined
-                      }
-                      grassInteractionRef={grassInteractionRef}
-                      grassBlockers={grassBlockers}
-                      groundRenderOrder={
-                        buildMode ? PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER : undefined
-                      }
-                      profileMeasure={activeProfileMeasure}
-                      roads={liveGrassRoads}
-                      showBlades={!startupProfileNoStylizedBlades}
-                      showGround
-                      showTrees={!startupProfileNoStylizedTrees}
-                      spawnResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
-                      stylizedGroundTexture={!startupProfileNoStylizedGround}
-                      stylizedGroundTextureWorldSizeMeters={PASCAL_WATER_GRASS_TEXTURE_TILE_METERS}
-                      stylizedSceneLayout
-                      surface={liveViewerLandSurface}
-                      tuning={renderGrassTuning}
-                    />
-                  </Suspense>
-                </PascalWaterStartupReactProfiler>
-              ) : null}
-              <PascalWaterBuildGridOverlay
-                groundY={liveViewerLandSurface.grassSurfaceElevation}
-                visible={buildMode}
-              />
+                <color args={['#164a77']} attach="background" />
+                <FrameLoadProfilerProbe enabled={frameProfile} />
+                <PascalWaterEditorOverlayLayerBridge enabled={buildMode} />
+                <PascalWaterPlayerLayer
+                  baseNode={liveLayoutNode}
+                  buildCameraPoseRef={buildCameraPoseRef}
+                  grassInteractionRef={grassInteractionRef}
+                  localMotionRef={localMotionRef}
+                  localProfile={resolvedLocalProfile}
+                  mobileJoystickRef={mobileJoystickRef}
+                  onLocalPlayerChange={multiplayer.publishLocalPlayer}
+                  perfRun={activePerfRun}
+                  playerCameraPoseRef={playerCameraPoseRef}
+                  playerReturnCameraPoseRef={playerReturnCameraPoseRef}
+                  remotePlayers={multiplayer.remotePlayers}
+                  surface={liveViewerLandSurface}
+                  viewMode={viewMode}
+                />
+                <PascalWaterParcelOwnershipLayer
+                  allocation={liveParcelAllocation}
+                  buildParcelId={buildParcelId}
+                  buildMode={buildMode}
+                  claimParcel={multiplayer.claimParcel}
+                  localMotionRef={localMotionRef}
+                  localProfile={resolvedLocalProfile}
+                  mapView={viewMode === 'map'}
+                  onBuildParcel={(parcel) => {
+                    prepareBuildCameraInitialPose('map')
+                    setBuildParcelId(parcel.id)
+                    setBuildMode(true)
+                    setMapView(false)
+                    releasePascalWaterPointerLock()
+                  }}
+                  parcelClaimError={multiplayer.parcelClaimError}
+                  parcelOwnerships={multiplayer.parcelOwnerships}
+                  parcelWorldId={parcelWorldId}
+                  surface={liveViewerLandSurface}
+                  watchParcelWorld={multiplayer.watchParcelWorld}
+                />
+                <PascalWaterBuildParcelGuardLayer
+                  buildMode={buildMode}
+                  groundY={liveViewerLandSurface.grassSurfaceElevation}
+                  parcel={activeBuildParcel}
+                />
+                <PascalWaterBuildCameraRig
+                  buildCameraPoseRef={buildCameraPoseRef}
+                  groundY={liveViewerLandSurface.grassSurfaceElevation}
+                  parcel={activeBuildParcel}
+                  playerCameraPoseRef={playerCameraPoseRef}
+                  visible={buildMode}
+                />
+                {!startupProfileNoLandLayers ? (
+                  <PascalWaterStartupReactProfiler
+                    enabled={startupProfileEnabled}
+                    id="pascal-water.land-layers"
+                    onRender={handleStartupReactRender}
+                  >
+                    <Suspense fallback={null}>
+                      <GrassWaterLandLayers
+                        bladeFadeBlockers={bladeGrassFadeBlockers}
+                        bladeSubdivisions={bladeSubdivisions}
+                        bladeGrassBlockers={bladeGrassBlockers}
+                        fieldResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                        finalFieldResolution={
+                          isGrassFieldPreviewing
+                            ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                            : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
+                        }
+                        finalSpawnResolution={
+                          isGrassFieldPreviewing
+                            ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                            : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
+                        }
+                        bladeRenderOrder={
+                          buildMode ? PASCAL_WATER_BUILD_GRASS_BLADE_RENDER_ORDER : undefined
+                        }
+                        grassInteractionRef={grassInteractionRef}
+                        grassBlockers={grassBlockers}
+                        groundRenderOrder={
+                          buildMode ? PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER : undefined
+                        }
+                        profileMeasure={activeProfileMeasure}
+                        roads={liveGrassRoads}
+                        showBlades={!startupProfileNoStylizedBlades}
+                        showGround
+                        showTrees={!startupProfileNoStylizedTrees}
+                        spawnResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                        stylizedGroundTexture={!startupProfileNoStylizedGround}
+                        stylizedGroundTextureWorldSizeMeters={
+                          PASCAL_WATER_GRASS_TEXTURE_TILE_METERS
+                        }
+                        stylizedSceneLayout
+                        surface={liveViewerLandSurface}
+                        tuning={renderGrassTuning}
+                      />
+                    </Suspense>
+                  </PascalWaterStartupReactProfiler>
+                ) : null}
+                <PascalWaterBuildGridOverlay
+                  groundY={liveViewerLandSurface.grassSurfaceElevation}
+                  visible={buildMode}
+                />
               </PascalWaterStartupReactProfiler>
             }
             viewerUseBvh={false}
@@ -1655,8 +1710,8 @@ export function PascalWaterClient({
               if (buildMode) {
                 setBuildMode(false)
                 setBuildParcelId(null)
-                setMapView(false)
-                requestPascalWaterPointerLock()
+                setMapView(true)
+                releasePascalWaterPointerLock()
                 return
               }
               if (mapView) {
@@ -1685,6 +1740,7 @@ export function PascalWaterClient({
                 return
               }
               if (!localOwnedParcel) return
+              prepareBuildCameraInitialPose(viewMode)
               setBuildParcelId(localOwnedParcel.id)
               setBuildMode(true)
               releasePascalWaterPointerLock()
@@ -1740,11 +1796,7 @@ export function PascalWaterClient({
   )
 }
 
-function PascalWaterLoadingOverlay({
-  onLoaded,
-}: {
-  onLoaded: () => void
-}) {
+function PascalWaterLoadingOverlay({ onLoaded }: { onLoaded: () => void }) {
   const { progress, visible } = usePascalWaterLoadingProgress()
   const percent = Math.round(clamp(progress, 0, 100))
   const complete = percent >= 100
@@ -2105,18 +2157,21 @@ function PascalWaterBuildCameraRig({
   visible: boolean
 }) {
   const controlsTarget = useMemo(() => new Vector3(), [])
-  const [controlsEnabled, setControlsEnabled] = useState(false)
+  const initialPose = buildCameraPoseRef.current ?? playerCameraPoseRef.current
+  const initialPosition = initialPose
+    ? ([initialPose.position.x, initialPose.position.y, initialPose.position.z] as const)
+    : ([0, 4.5, -8.2] as const)
 
   useEffect(() => {
-    setControlsEnabled(false)
-  }, [parcel?.id, visible])
+    if (!visible || parcel) return
+    buildCameraPoseRef.current = null
+  }, [buildCameraPoseRef, parcel, visible])
 
   useFrame((state) => {
     if (!visible || !parcel) return
 
-    const controls = getRobotWorldOrbitControls(state)
-    const target = controls?.target ?? controlsTarget
-    if (controls) controlsTarget.copy(controls.target)
+    const controls = getPascalWaterCameraControls(state)
+    const target = readPascalWaterCameraControlsTarget(controls, controlsTarget) ?? controlsTarget
     writePascalWaterCameraPose(buildCameraPoseRef, state.camera, target)
   })
 
@@ -2124,26 +2179,13 @@ function PascalWaterBuildCameraRig({
 
   return (
     <>
-      {controlsEnabled ? (
-        <OrbitControls
-          dampingFactor={0.12}
-          enableDamping
-          enablePan
-          enableRotate
-          enableZoom
-          makeDefault
-          maxDistance={72}
-          minDistance={5}
-          rotateSpeed={0.82}
-          target={controlsTarget}
-          zoomSpeed={0.75}
-        />
-      ) : null}
+      <PerspectiveCamera far={900} fov={48} makeDefault near={0.1} position={initialPosition} />
+      <PascalWaterCameraPoseSeed pose={initialPose} />
       <PascalWaterBuildCameraTransition
         controlsTarget={controlsTarget}
         groundY={groundY}
         buildCameraPoseRef={buildCameraPoseRef}
-        onSettled={() => setControlsEnabled(true)}
+        key={parcel.id}
         parcel={parcel}
         playerCameraPoseRef={playerCameraPoseRef}
       />
@@ -2151,18 +2193,29 @@ function PascalWaterBuildCameraRig({
   )
 }
 
+function PascalWaterCameraPoseSeed({ pose }: { pose: PascalWaterCameraPose | null }) {
+  const camera = useThree((state) => state.camera)
+
+  useLayoutEffect(() => {
+    if (!pose) return
+    camera.position.copy(pose.position)
+    camera.lookAt(pose.target)
+    camera.updateMatrixWorld()
+  }, [camera, pose])
+
+  return null
+}
+
 function PascalWaterBuildCameraTransition({
   buildCameraPoseRef,
   controlsTarget,
   groundY,
-  onSettled,
   parcel,
   playerCameraPoseRef,
 }: {
   buildCameraPoseRef: { current: PascalWaterCameraPose | null }
   controlsTarget: Vector3
   groundY: number
-  onSettled: () => void
   parcel: ParcelAllocationParcel
   playerCameraPoseRef: { current: PascalWaterCameraPose | null }
 }) {
@@ -2176,21 +2229,15 @@ function PascalWaterBuildCameraTransition({
   const elapsedRef = useRef(0)
   const parcelRadius = useMemo(() => parcelBuildCameraRadius(parcel), [parcel])
 
-  useEffect(() => {
-    directionRef.current = null
-    settledRef.current = false
-    elapsedRef.current = 0
-  }, [parcel.id])
-
   useFrame((state, delta) => {
     if (settledRef.current) return
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const target = targetRef.current.set(parcel.centroid.x, groundY + 0.35, parcel.centroid.z)
-    const controls = getRobotWorldOrbitControls(state)
+    const controls = getPascalWaterCameraControls(state)
 
     if (!directionRef.current) {
-      const rememberedPose = playerCameraPoseRef.current
+      const rememberedPose = buildCameraPoseRef.current ?? playerCameraPoseRef.current
       if (rememberedPose) {
         startPositionRef.current.copy(rememberedPose.position)
         startTargetRef.current.copy(rememberedPose.target)
@@ -2226,9 +2273,7 @@ function PascalWaterBuildCameraTransition({
       PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT,
       PASCAL_WATER_BUILD_CAMERA_MAX_HEIGHT,
     )
-    const desired = desiredRef.current
-      .copy(target)
-      .addScaledVector(directionRef.current, distance)
+    const desired = desiredRef.current.copy(target).addScaledVector(directionRef.current, distance)
     desired.y = target.y + height
 
     elapsedRef.current += frameDelta
@@ -2237,26 +2282,15 @@ function PascalWaterBuildCameraTransition({
     state.camera.position.lerpVectors(startPositionRef.current, desired, amount)
     controlsTarget.lerpVectors(startTargetRef.current, target, amount)
 
-    if (controls) {
-      controls.target.copy(controlsTarget)
-      controls.update()
-    } else {
-      state.camera.lookAt(controlsTarget)
-    }
+    syncPascalWaterCameraControlsLookAt(controls, state.camera, controlsTarget)
     writePascalWaterCameraPose(buildCameraPoseRef, state.camera, controlsTarget)
 
     if (progress >= 1) {
       state.camera.position.copy(desired)
       controlsTarget.copy(target)
-      if (controls) {
-        controls.target.copy(target)
-        controls.update()
-      } else {
-        state.camera.lookAt(target)
-      }
+      syncPascalWaterCameraControlsLookAt(controls, state.camera, target)
       writePascalWaterCameraPose(buildCameraPoseRef, state.camera, target)
       settledRef.current = true
-      onSettled()
     }
   })
 
@@ -2318,7 +2352,6 @@ function PascalWaterBuildGridOverlay({ groundY, visible }: { groundY: number; vi
 function PascalWaterPlayerLayer({
   baseNode,
   buildCameraPoseRef,
-  buildMode,
   grassInteractionRef,
   localMotionRef,
   localProfile,
@@ -2333,7 +2366,6 @@ function PascalWaterPlayerLayer({
 }: {
   baseNode: PascalWaterLayoutNode
   buildCameraPoseRef: { current: PascalWaterCameraPose | null }
-  buildMode: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
@@ -2350,11 +2382,16 @@ function PascalWaterPlayerLayer({
   const groundY = surface.grassSurfaceElevation + PASCAL_WATER_ROBOT_GROUND_CLEARANCE
   const mapVisible = viewMode === 'map'
   const movementEnabled = viewMode === 'player'
-  const cameraEnabled = viewMode === 'player' || buildMode
+  const cameraEnabled = viewMode === 'player'
 
   return (
     <group>
-      {mapVisible ? <PascalWaterMapCameraRig /> : null}
+      {mapVisible ? (
+        <PascalWaterMapCameraRig
+          buildCameraPoseRef={buildCameraPoseRef}
+          playerCameraPoseRef={playerCameraPoseRef}
+        />
+      ) : null}
       <LocalPascalWaterRobot
         baseNode={baseNode}
         grassInteractionRef={grassInteractionRef}
@@ -2573,6 +2610,7 @@ function PascalWaterParcelOwnershipLayer({
               <PascalWaterParcelBuildMarker
                 groundY={groundY}
                 key={parcel.id}
+                mapView={mapView}
                 onBuild={onBuildParcel}
                 parcel={parcel}
                 visible={!buildMode && (mapView || insideOwnedParcelId === parcel.id)}
@@ -2687,16 +2725,48 @@ function PascalWaterParcelClaimMesh({
 
 function PascalWaterParcelBuildMarker({
   groundY,
+  mapView,
   onBuild,
   parcel,
   visible,
 }: {
   groundY: number
+  mapView: boolean
   onBuild: (parcel: ParcelAllocationParcel) => void
   parcel: ParcelAllocationParcel
   visible: boolean
 }) {
   if (!visible) return null
+
+  if (mapView) {
+    return (
+      <>
+        <PascalWaterParcelBuildGlow groundY={groundY} parcel={parcel} />
+        <Html
+          center
+          position={[parcel.centroid.x, groundY + 1.05, parcel.centroid.z]}
+          zIndexRange={[70, 0]}
+        >
+          <button
+            aria-label="Build"
+            className="group pointer-events-auto inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-amber-100/55 bg-slate-950/72 text-xs font-semibold text-amber-100 shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur transition-[width,background-color,transform] duration-200 hover:w-[5.75rem] hover:scale-105 hover:bg-slate-900/84 focus-visible:w-[5.75rem] focus-visible:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/70"
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              onBuild(parcel)
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            type="button"
+          >
+            <Hammer aria-hidden className="size-4 shrink-0" />
+            <span className="ml-0 max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity,margin] duration-200 group-hover:ml-1.5 group-hover:max-w-12 group-hover:opacity-100 group-focus-visible:ml-1.5 group-focus-visible:max-w-12 group-focus-visible:opacity-100">
+              Build
+            </span>
+          </button>
+        </Html>
+      </>
+    )
+  }
 
   return (
     <Html
@@ -2718,6 +2788,62 @@ function PascalWaterParcelBuildMarker({
         <span>Build</span>
       </button>
     </Html>
+  )
+}
+
+function PascalWaterParcelBuildGlow({
+  groundY,
+  parcel,
+}: {
+  groundY: number
+  parcel: ParcelAllocationParcel
+}) {
+  const groupRef = useRef<Group>(null!)
+  const materialRef = useRef<MeshBasicMaterial>(null!)
+  const geometry = useMemo(() => createCenteredParcelGeometry(parcel), [parcel])
+  const baseColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_BASE_COLOR), [])
+  const hoverColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_HOVER_COLOR), [])
+
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  useFrame((state, delta) => {
+    const group = groupRef.current
+    const material = materialRef.current
+    if (!group || !material) return
+
+    const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 2.2 + parcel.index * 0.61) * 0.5
+    const targetScale = PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE * 0.998
+    const scale = MathUtils.damp(
+      group.scale.x,
+      targetScale,
+      PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE,
+      delta,
+    )
+    group.scale.setScalar(scale)
+    material.opacity = MathUtils.damp(
+      material.opacity,
+      PASCAL_WATER_PARCEL_MAP_BASE_OPACITY * 0.62 + pulse * 0.01,
+      PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE,
+      delta,
+    )
+    material.color.lerpColors(baseColor, hoverColor, 0.16 + pulse * 0.05)
+  })
+
+  return (
+    <group ref={groupRef} position={[parcel.centroid.x, groundY + 0.015, parcel.centroid.z]}>
+      <mesh renderOrder={76} rotation={[-Math.PI / 2, 0, 0]}>
+        <primitive attach="geometry" object={geometry} />
+        <meshBasicMaterial
+          color={PASCAL_WATER_PARCEL_MAP_BASE_COLOR}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0}
+          ref={materialRef}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+    </group>
   )
 }
 
@@ -2956,7 +3082,11 @@ function LocalPascalWaterRobot({
     const joystick = mobileJoystickRef.current
     const mobileJoystickActive = Boolean(mobileViewport && joystick && joystick.strength > 0.08)
     const movement = movementEnabled
-      ? resolveCameraRelativeMovement(pressedKeysRef.current, state.camera, mobileJoystickRef.current)
+      ? resolveCameraRelativeMovement(
+          pressedKeysRef.current,
+          state.camera,
+          mobileJoystickRef.current,
+        )
       : null
     const cameraHeading = resolveCameraForwardHeading(state.camera)
     const targetHeading = movement
@@ -3038,7 +3168,9 @@ function LocalPascalWaterRobot({
         />
       ) : null}
       <Suspense
-        fallback={<PascalWaterRobotNodePrimitiveActor color={localProfile.color} node={nodeRef.current} />}
+        fallback={
+          <PascalWaterRobotNodePrimitiveActor color={localProfile.color} node={nodeRef.current} />
+        }
       >
         <LandrushRobot node={nodeRef.current} />
       </Suspense>
@@ -3071,7 +3203,11 @@ function RemotePascalWaterRobot({
   const targetHeadingRef = useRef(player.heading)
 
   useEffect(() => {
-    targetPositionRef.current.set(player.position[0], player.position[1] || groundY, player.position[2])
+    targetPositionRef.current.set(
+      player.position[0],
+      player.position[1] || groundY,
+      player.position[2],
+    )
     targetHeadingRef.current = player.heading
   }, [groundY, player])
 
@@ -3096,7 +3232,11 @@ function RemotePascalWaterRobot({
 
   return (
     <>
-      <Suspense fallback={<PascalWaterRobotNodePrimitiveActor color={player.color} node={nodeRef.current} />}>
+      <Suspense
+        fallback={
+          <PascalWaterRobotNodePrimitiveActor color={player.color} node={nodeRef.current} />
+        }
+      >
         <LandrushRobot node={nodeRef.current} />
       </Suspense>
       <PascalWaterRobotPlayerBeacon color={player.color} node={nodeRef.current} />
@@ -3104,42 +3244,137 @@ function RemotePascalWaterRobot({
   )
 }
 
-function PascalWaterMapCameraRig() {
+function PascalWaterMapCameraRig({
+  buildCameraPoseRef,
+  playerCameraPoseRef,
+}: {
+  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
+}) {
   const controlsTarget = useMemo(() => new Vector3(...PASCAL_WATER_MAP_CAMERA_TARGET), [])
+  const [controlsEnabled, setControlsEnabled] = useState(false)
+  const initialPose = buildCameraPoseRef.current ?? playerCameraPoseRef.current
+  const initialPosition = initialPose
+    ? ([initialPose.position.x, initialPose.position.y, initialPose.position.z] as const)
+    : PASCAL_WATER_MAP_CAMERA_POSITION
+
+  useEffect(() => {
+    setControlsEnabled(false)
+  }, [])
+
+  useFrame((state) => {
+    if (!controlsEnabled) return
+    const controls = getRobotWorldOrbitControls(state)
+    if (controls) controlsTarget.copy(controls.target)
+    writePascalWaterCameraPose(buildCameraPoseRef, state.camera, controls?.target ?? controlsTarget)
+  })
 
   return (
     <>
-      <OrthographicCamera
-        far={900}
-        makeDefault
-        near={0.1}
-        position={PASCAL_WATER_MAP_CAMERA_POSITION}
-        zoom={PASCAL_WATER_MAP_CAMERA_ZOOM}
-      />
-      <PascalWaterMapCameraTarget target={PASCAL_WATER_MAP_CAMERA_TARGET} />
-      <OrbitControls
-        dampingFactor={0.08}
-        enableDamping
-        enablePan
-        enableRotate={false}
-        enableZoom
-        makeDefault
-        maxZoom={28}
-        minZoom={3}
-        target={controlsTarget}
+      <PerspectiveCamera far={900} fov={48} makeDefault near={0.1} position={initialPosition} />
+      {controlsEnabled ? (
+        <OrbitControls
+          dampingFactor={0.08}
+          enableDamping
+          enablePan
+          enableRotate={false}
+          enableZoom
+          makeDefault
+          maxDistance={180}
+          minDistance={42}
+          target={controlsTarget}
+          zoomSpeed={0.75}
+        />
+      ) : null}
+      <PascalWaterMapCameraTransition
+        buildCameraPoseRef={buildCameraPoseRef}
+        controlsTarget={controlsTarget}
+        onSettled={() => setControlsEnabled(true)}
+        playerCameraPoseRef={playerCameraPoseRef}
       />
     </>
   )
 }
 
-function PascalWaterMapCameraTarget({ target }: { target: readonly [number, number, number] }) {
-  const { camera, invalidate } = useThree()
+function PascalWaterMapCameraTransition({
+  buildCameraPoseRef,
+  controlsTarget,
+  onSettled,
+  playerCameraPoseRef,
+}: {
+  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  controlsTarget: Vector3
+  onSettled: () => void
+  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
+}) {
+  const settledRef = useRef(false)
+  const elapsedRef = useRef(0)
+  const startPositionRef = useRef(new Vector3())
+  const startTargetRef = useRef(new Vector3())
+  const desiredRef = useRef(new Vector3(...PASCAL_WATER_MAP_CAMERA_POSITION))
+  const targetRef = useRef(new Vector3(...PASCAL_WATER_MAP_CAMERA_TARGET))
+  const forwardRef = useRef(new Vector3())
 
   useEffect(() => {
-    camera.lookAt(new Vector3(...target))
-    camera.updateProjectionMatrix()
-    invalidate()
-  }, [camera, invalidate, target])
+    settledRef.current = false
+    elapsedRef.current = 0
+  }, [])
+
+  useFrame((state, delta) => {
+    if (settledRef.current) return
+
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const controls = getRobotWorldOrbitControls(state)
+    const target = targetRef.current
+    const desired = desiredRef.current
+
+    if (elapsedRef.current === 0) {
+      const rememberedPose = buildCameraPoseRef.current ?? playerCameraPoseRef.current
+      if (rememberedPose) {
+        startPositionRef.current.copy(rememberedPose.position)
+        startTargetRef.current.copy(rememberedPose.target)
+        state.camera.position.copy(rememberedPose.position)
+        state.camera.lookAt(rememberedPose.target)
+      } else {
+        startPositionRef.current.copy(state.camera.position)
+        resolvePascalWaterBuildCameraStartTarget(
+          state.camera,
+          target.y,
+          startTargetRef.current,
+          forwardRef.current,
+        )
+      }
+      controlsTarget.copy(startTargetRef.current)
+    }
+
+    elapsedRef.current += frameDelta
+    const progress = clamp01(elapsedRef.current / PASCAL_WATER_BUILD_CAMERA_TRANSITION_SECONDS)
+    const amount = progress * progress * (3 - 2 * progress)
+
+    state.camera.position.lerpVectors(startPositionRef.current, desired, amount)
+    controlsTarget.lerpVectors(startTargetRef.current, target, amount)
+    if (controls) {
+      controls.target.copy(controlsTarget)
+      controls.update()
+    } else {
+      state.camera.lookAt(controlsTarget)
+    }
+    writePascalWaterCameraPose(buildCameraPoseRef, state.camera, controlsTarget)
+
+    if (progress >= 1) {
+      state.camera.position.copy(desired)
+      controlsTarget.copy(target)
+      if (controls) {
+        controls.target.copy(target)
+        controls.update()
+      } else {
+        state.camera.lookAt(target)
+      }
+      writePascalWaterCameraPose(buildCameraPoseRef, state.camera, target)
+      settledRef.current = true
+      onSettled()
+    }
+  })
 
   return null
 }
@@ -3160,6 +3395,11 @@ function PascalWaterThirdPersonCameraRig({
   playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
 }) {
   const [controlsReady, setControlsReady] = useState(false)
+  const initialPose =
+    buildCameraPoseRef.current ?? playerReturnCameraPoseRef.current ?? playerCameraPoseRef.current
+  const initialPosition = initialPose
+    ? ([initialPose.position.x, initialPose.position.y, initialPose.position.z] as const)
+    : ([0, 4.5, -8.2] as const)
   const initialTarget = useMemo(() => {
     const target = new Vector3()
     const handoffPose = buildCameraPoseRef.current ?? playerCameraPoseRef.current
@@ -3177,10 +3417,10 @@ function PascalWaterThirdPersonCameraRig({
 
   return (
     <>
-      <PerspectiveCamera far={900} fov={48} makeDefault near={0.1} position={[0, 4.5, -8.2]} />
+      <PerspectiveCamera far={900} fov={48} makeDefault near={0.1} position={initialPosition} />
+      <PascalWaterCameraPoseSeed pose={initialPose} />
       {controllerEnabled ? (
         <>
-          <PascalWaterThirdPersonCameraHandoffSeed buildCameraPoseRef={buildCameraPoseRef} />
           {controlsReady ? (
             <OrbitControls
               dampingFactor={0.12}
@@ -3210,25 +3450,6 @@ function PascalWaterThirdPersonCameraRig({
   )
 }
 
-function PascalWaterThirdPersonCameraHandoffSeed({
-  buildCameraPoseRef,
-}: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
-}) {
-  const camera = useThree((state) => state.camera)
-
-  useLayoutEffect(() => {
-    const buildPose = buildCameraPoseRef.current
-    if (!buildPose) return
-
-    camera.position.copy(buildPose.position)
-    camera.lookAt(buildPose.target)
-    camera.updateMatrixWorld()
-  }, [buildCameraPoseRef, camera])
-
-  return null
-}
-
 function PascalWaterThirdPersonCameraController({
   buildCameraPoseRef,
   mobileJoystickRef,
@@ -3245,16 +3466,21 @@ function PascalWaterThirdPersonCameraController({
   playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
 }) {
   const cameraDistanceRef = useRef(
-    Math.hypot(PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE, PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT),
+    Math.hypot(
+      PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE,
+      PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT,
+    ),
   )
   const cameraPitchRef = useRef(
-    Math.atan2(PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT, PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE),
+    Math.atan2(
+      PASCAL_WATER_ROBOT_CAMERA_INITIAL_HEIGHT,
+      PASCAL_WATER_ROBOT_CAMERA_INITIAL_DISTANCE,
+    ),
   )
   const cameraYawRef = useRef(Math.PI)
   const desiredCameraPositionRef = useRef(new Vector3())
   const targetRef = useRef(new Vector3())
   const previousTargetRef = useRef<Vector3 | null>(null)
-  const returnOffsetRef = useRef(new Vector3())
   const returnTargetRef = useRef(new Vector3())
   const returnForwardRef = useRef(new Vector3())
   const returnTransitionRef = useRef<PascalWaterReturnCameraTransition | null>(null)
@@ -3292,7 +3518,10 @@ function PascalWaterThirdPersonCameraController({
     }
 
     const handleTouchStart = (event: TouchEvent) => {
-      if (!isPascalWaterMobileControlViewport() || !isPascalWaterMobileCameraOrbitTarget(event.target)) {
+      if (
+        !isPascalWaterMobileControlViewport() ||
+        !isPascalWaterMobileCameraOrbitTarget(event.target)
+      ) {
         return
       }
       const touch = event.changedTouches.item(0)
@@ -3368,7 +3597,7 @@ function PascalWaterThirdPersonCameraController({
       if (!transition) {
         const buildPose = clonePascalWaterCameraPose(buildCameraPoseRef.current)
         const startTarget =
-          buildPose?.target ??
+          buildPose?.target.clone() ??
           resolvePascalWaterBuildCameraStartTarget(
             state.camera,
             target.y,
@@ -3376,12 +3605,9 @@ function PascalWaterThirdPersonCameraController({
             returnForwardRef.current,
           )
         const targetPose =
-          clonePascalWaterCameraPose(returnPose) ?? createPascalWaterCameraPose(state.camera, target)
-        const startPosition = buildPose?.position ?? state.camera.position
-        const startOffset = startPosition.clone().sub(startTarget)
-        const targetOffset = targetPose.position.clone().sub(targetPose.target)
-        const startDistance = Math.max(0.001, startOffset.length())
-        const targetDistance = Math.max(0.001, targetOffset.length())
+          clonePascalWaterCameraPose(returnPose) ??
+          createPascalWaterCameraPose(state.camera, target)
+        const startPosition = buildPose?.position.clone() ?? state.camera.position.clone()
         if (buildPose) {
           state.camera.position.copy(buildPose.position)
           if (controls) {
@@ -3394,11 +3620,8 @@ function PascalWaterThirdPersonCameraController({
         transition = {
           elapsed: 0,
           started: false,
-          startDirection: startOffset.divideScalar(startDistance),
-          startDistance,
+          startPosition,
           startTarget,
-          targetDirection: targetOffset.divideScalar(targetDistance),
-          targetDistance,
           targetPose,
         }
         returnTransitionRef.current = transition
@@ -3407,9 +3630,7 @@ function PascalWaterThirdPersonCameraController({
       if (!transition.started) {
         transition.started = true
         returnTargetRef.current.copy(transition.startTarget)
-        state.camera.position
-          .copy(transition.startTarget)
-          .addScaledVector(transition.startDirection, transition.startDistance)
+        state.camera.position.copy(transition.startPosition)
         if (controls) {
           controls.target.copy(transition.startTarget)
           controls.update()
@@ -3428,24 +3649,11 @@ function PascalWaterThirdPersonCameraController({
         transition.targetPose.target,
         amount,
       )
-      const transitionDirection = returnOffsetRef.current.lerpVectors(
-        transition.startDirection,
-        transition.targetDirection,
+      state.camera.position.lerpVectors(
+        transition.startPosition,
+        transition.targetPose.position,
         amount,
       )
-      if (transitionDirection.lengthSq() <= 0.000001) {
-        transitionDirection.copy(transition.targetDirection)
-      } else {
-        transitionDirection.normalize()
-      }
-      const transitionDistance = MathUtils.lerp(
-        transition.startDistance,
-        transition.targetDistance,
-        amount,
-      )
-      state.camera.position
-        .copy(transitionTarget)
-        .addScaledVector(transitionDirection, transitionDistance)
 
       if (controls) {
         controls.target.copy(transitionTarget)
@@ -3603,13 +3811,16 @@ function PascalWaterMapPlayerMarker({
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
+  const [labelVisible, setLabelVisible] = useState(false)
 
   useFrame((_, delta) => {
     const group = groupRef.current
     const motion = motionRef.current
     if (!group) return
 
-    group.visible = visible && Boolean(motion)
+    const markerVisible = visible && Boolean(motion)
+    group.visible = markerVisible
+    setLabelVisible((current) => (current === markerVisible ? current : markerVisible))
     if (!motion) return
 
     group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
@@ -3620,6 +3831,8 @@ function PascalWaterMapPlayerMarker({
     <PascalWaterMapBadgeMarker
       color={color}
       groupRef={groupRef}
+      label="P"
+      labelVisible={labelVisible}
     />
   )
 }
@@ -3640,7 +3853,11 @@ function PascalWaterRemoteMapPlayerMarker({
   const targetHeadingRef = useRef(player.heading)
 
   useEffect(() => {
-    targetPositionRef.current.set(player.position[0], player.position[1] || groundY, player.position[2])
+    targetPositionRef.current.set(
+      player.position[0],
+      player.position[1] || groundY,
+      player.position[2],
+    )
     targetHeadingRef.current = player.heading
   }, [groundY, player])
 
@@ -3661,22 +3878,20 @@ function PascalWaterRemoteMapPlayerMarker({
     group.rotation.y = headingRef.current
   })
 
-  return (
-    <PascalWaterMapBadgeMarker
-      color={player.color}
-      groupRef={groupRef}
-      scale={1.28}
-    />
-  )
+  return <PascalWaterMapBadgeMarker color={player.color} groupRef={groupRef} scale={1.28} />
 }
 
 function PascalWaterMapBadgeMarker({
   color,
   groupRef,
+  label,
+  labelVisible = false,
   scale = 1.5,
 }: {
   color: string
   groupRef: RefObject<Group>
+  label?: string
+  labelVisible?: boolean
   scale?: number
 }) {
   return (
@@ -3778,17 +3993,24 @@ function PascalWaterMapBadgeMarker({
           transparent
         />
       </mesh>
-      <Html center className="pointer-events-none select-none" position={[0, 0.12, 0]}>
-        <span
-          className="grid h-5 w-5 place-items-center rounded-full text-[13px] font-black leading-none text-slate-950"
-          style={{
-            textShadow:
-              '0 1px 0 rgba(248,250,252,0.95), 1px 0 0 rgba(248,250,252,0.95), 0 -1px 0 rgba(248,250,252,0.95), -1px 0 0 rgba(248,250,252,0.95)',
-          }}
+      {label ? (
+        <Html
+          center
+          className="pointer-events-none select-none transition-opacity duration-300 ease-out"
+          position={[0, 0.12, 0]}
+          style={{ opacity: labelVisible ? 1 : 0 }}
         >
-          P
-        </span>
-      </Html>
+          <span
+            className="grid h-5 w-5 place-items-center rounded-full text-[13px] font-black leading-none text-slate-950"
+            style={{
+              textShadow:
+                '0 1px 0 rgba(248,250,252,0.95), 1px 0 0 rgba(248,250,252,0.95), 0 -1px 0 rgba(248,250,252,0.95), -1px 0 0 rgba(248,250,252,0.95)',
+            }}
+          >
+            {label}
+          </span>
+        </Html>
+      ) : null}
     </group>
   )
 }
@@ -4166,6 +4388,21 @@ function clonePascalWaterCameraPose(
   }
 }
 
+function pascalWaterCameraPoseToEditorInitialPose(
+  pose: PascalWaterCameraPose,
+): EditorCameraInitialPose {
+  return {
+    position: [pose.position.x, pose.position.y, pose.position.z],
+    target: [pose.target.x, pose.target.y, pose.target.z],
+  }
+}
+
+function maybePascalWaterCameraPoseToEditorInitialPose(
+  pose: PascalWaterCameraPose | null,
+): EditorCameraInitialPose | null {
+  return pose ? pascalWaterCameraPoseToEditorInitialPose(pose) : null
+}
+
 function writePascalWaterCameraPose(
   poseRef: { current: PascalWaterCameraPose | null },
   camera: Camera,
@@ -4265,7 +4502,71 @@ function resolveThirdPersonCameraPosition(
 }
 
 function getRobotWorldOrbitControls(state: unknown) {
-  return (state as { controls?: RobotWorldOrbitControls }).controls
+  const controls = (state as { controls?: unknown }).controls
+  if (!isRobotWorldOrbitControls(controls)) return undefined
+  return controls
+}
+
+function getPascalWaterCameraControls(state: unknown) {
+  const controls = (state as { controls?: unknown }).controls
+  if (!isPascalWaterCameraControls(controls)) return undefined
+  return controls
+}
+
+function isRobotWorldOrbitControls(controls: unknown): controls is RobotWorldOrbitControls {
+  if (!controls || typeof controls !== 'object') return false
+  const candidate = controls as Partial<RobotWorldOrbitControls> & { setLookAt?: unknown }
+  return (
+    typeof candidate.update === 'function' &&
+    candidate.target instanceof Vector3 &&
+    typeof candidate.setLookAt !== 'function'
+  )
+}
+
+function isPascalWaterCameraControls(controls: unknown): controls is PascalWaterCameraControls {
+  if (!controls || typeof controls !== 'object') return false
+  const candidate = controls as Partial<PascalWaterCameraControls>
+  return (
+    typeof candidate.setLookAt === 'function' ||
+    (candidate.target instanceof Vector3 && typeof candidate.update === 'function')
+  )
+}
+
+function readPascalWaterCameraControlsTarget(
+  controls: PascalWaterCameraControls | undefined,
+  output: Vector3,
+) {
+  if (controls?.getTarget) {
+    controls.getTarget(output, false)
+    return output
+  }
+  if (controls?.target) return output.copy(controls.target)
+  return null
+}
+
+function syncPascalWaterCameraControlsLookAt(
+  controls: PascalWaterCameraControls | undefined,
+  camera: Camera,
+  target: Vector3,
+) {
+  if (controls?.setLookAt) {
+    controls.setLookAt(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z,
+      target.x,
+      target.y,
+      target.z,
+      false,
+    )
+    return
+  }
+
+  camera.lookAt(target)
+  if (controls?.target) {
+    controls.target.copy(target)
+    controls.update?.()
+  }
 }
 
 function resolveRobotTargetSpeed(movement: RobotMovementInput, runPressed: boolean) {
@@ -4354,7 +4655,9 @@ function createCenteredParcelGeometry(parcel: ParcelAllocationParcel) {
   const ring = openPointRing(parcel.points)
   if (ring.length < 3) return geometry
 
-  const points = ring.map((point) => new Vector2(point.x - parcel.centroid.x, -(point.z - parcel.centroid.z)))
+  const points = ring.map(
+    (point) => new Vector2(point.x - parcel.centroid.x, -(point.z - parcel.centroid.z)),
+  )
   const triangles = ShapeUtils.triangulateShape(points, [])
   const positions = new Float32Array(points.length * 3)
   const normals = new Float32Array(points.length * 3)
@@ -4575,10 +4878,7 @@ function sanitizePascalWaterBuildNodeForSync(
   return clone as AnyNode
 }
 
-function isPascalWaterBuildNodeInsideParcel(
-  node: AnyNode,
-  parcel: ParcelAllocationParcel,
-) {
+function isPascalWaterBuildNodeInsideParcel(node: AnyNode, parcel: ParcelAllocationParcel) {
   const footprint = createPascalWaterBuildNodeFootprint(node, 0)
   return Boolean(footprint?.every((point) => pointInPolygonOrNearEdge(point, parcel.points)))
 }
@@ -4883,9 +5183,7 @@ function createPascalWaterGrassRoadSegments(
     id: `pascal-water-grass-${segment.id}`,
     kind: segment.kind === 'driveway' ? 'driveway' : 'spine',
     points: segment.points,
-    r3fPoints: segment.points.map(
-      (point) => [point.x, 0, point.z] satisfies LandrushVec3,
-    ),
+    r3fPoints: segment.points.map((point) => [point.x, 0, point.z] satisfies LandrushVec3),
     toNodeId: segment.toNodeId,
     width: segment.width,
   }))
@@ -5065,7 +5363,8 @@ function createPascalWaterLayoutNode({
       seed: island.seed,
       source: layoutConfig.layoutNodeMetadataSource,
       summary: `World multiplayer layout: ${allocation.parcels.length} parcels, ${streetNetwork.segments.length} dirt edge paths.`,
-      verificationSummary: 'Generated from the same smoothed water island, parcel allocator, and dirt-copy edge street path used by world-multiplayer.',
+      verificationSummary:
+        'Generated from the same smoothed water island, parcel allocator, and dirt-copy edge street path used by world-multiplayer.',
     },
   }
 
@@ -5223,7 +5522,9 @@ function createPascalWaterParcelOwnershipWorldId(options: ParcelAllocationOption
     .slice(0, 240)
 }
 
-function createPascalWaterParcel(parcel: ParcelAllocationParcel): LandrushWorldNode['parcels'][number] {
+function createPascalWaterParcel(
+  parcel: ParcelAllocationParcel,
+): LandrushWorldNode['parcels'][number] {
   return {
     center: parcel.centroid,
     centroid: parcel.centroid,
@@ -5315,7 +5616,9 @@ function roadNodeId(point: LandrushPoint2) {
   return `layout-road-${Math.round(point.x * 100)}-${Math.round(point.z * 100)}`
 }
 
-function boundsForPoints(points: readonly LandrushPoint2[]): LandrushWorldNode['perimeter']['bounds'] {
+function boundsForPoints(
+  points: readonly LandrushPoint2[],
+): LandrushWorldNode['perimeter']['bounds'] {
   let minX = Number.POSITIVE_INFINITY
   let minZ = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY

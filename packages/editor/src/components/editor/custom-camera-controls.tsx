@@ -11,7 +11,7 @@ import {
 import { GRID_LAYER, renderScheduler, useViewer, ZONE_LAYER } from '@pascal-app/viewer'
 import { CameraControls, CameraControlsImpl } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Box3, Vector3 } from 'three'
 import { EDITOR_LAYER } from '../../lib/constants'
 import useEditor from '../../store/use-editor'
@@ -26,6 +26,11 @@ const tempTarget = new Vector3()
 const DEFAULT_MAX_POLAR_ANGLE = Math.PI / 2 - 0.1
 const DEBUG_MAX_POLAR_ANGLE = Math.PI - 0.05
 const PROGRAMMATIC_CAMERA_FRAME_DELAYS_MS = [0, 80, 180, 360, 720] as const
+
+export type EditorCameraInitialPose = {
+  position: [number, number, number]
+  target: [number, number, number]
+}
 
 declare global {
   interface Window {
@@ -52,7 +57,11 @@ declare global {
   }
 }
 
-export const CustomCameraControls = () => {
+export const CustomCameraControls = ({
+  initialPose,
+}: {
+  initialPose?: EditorCameraInitialPose | null
+}) => {
   const controls = useRef<CameraControlsImpl>(null!)
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
   const isFirstPersonMode = useEditor((s) => s.isFirstPersonMode)
@@ -60,6 +69,7 @@ export const CustomCameraControls = () => {
   const selection = useViewer((s) => s.selection)
   const currentLevelId = selection.levelId
   const firstLoad = useRef(true)
+  const initialPoseAppliedRef = useRef(false)
   const maxPolarAngle =
     !isPreviewMode && allowUndergroundCamera ? DEBUG_MAX_POLAR_ANGLE : DEFAULT_MAX_POLAR_ANGLE
   const isLandrushWaterProofRoute = useMemo(() => {
@@ -91,6 +101,23 @@ export const CustomCameraControls = () => {
     raycaster.layers.enable(EDITOR_LAYER)
     raycaster.layers.enable(ZONE_LAYER)
   }, [camera, raycaster])
+
+  useLayoutEffect(() => {
+    if (!initialPose || !controls.current || initialPoseAppliedRef.current) return
+
+    initialPoseAppliedRef.current = true
+    firstLoad.current = false
+    requestProgrammaticCameraFrames()
+    controls.current.setLookAt(
+      initialPose.position[0],
+      initialPose.position[1],
+      initialPose.position[2],
+      initialPose.target[0],
+      initialPose.target[1],
+      initialPose.target[2],
+      false,
+    )
+  }, [initialPose, requestProgrammaticCameraFrames])
 
   useEffect(() => {
     const params =
@@ -164,6 +191,7 @@ export const CustomCameraControls = () => {
       }
     }
     if (!controls.current) return
+    if (initialPose) return
     if (firstLoad.current) {
       const selectedNode = currentLevelId ? useScene.getState().nodes[currentLevelId] : null
       if (!(currentLevelId || selectedNode?.camera)) return
@@ -188,7 +216,7 @@ export const CustomCameraControls = () => {
     }
     controls.current.getTarget(currentTarget)
     controls.current.moveTo(currentTarget.x, targetY, currentTarget.z, true)
-  }, [currentLevelId, isPreviewMode, requestProgrammaticCameraFrames])
+  }, [currentLevelId, initialPose, isPreviewMode, requestProgrammaticCameraFrames])
 
   useEffect(() => {
     if (!controls.current) return
