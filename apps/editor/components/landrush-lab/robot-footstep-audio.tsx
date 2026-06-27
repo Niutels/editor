@@ -1,26 +1,32 @@
 'use client'
 
+import { useAudio } from '@pascal-app/editor'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
 import {
   AudioListener,
   AudioLoader,
+  type Group,
   MathUtils,
   PositionalAudio,
-  type Group,
   type Vector3,
 } from 'three'
-import { useAudio } from '@pascal-app/editor'
 
 const FOOTSTEP_LEFT_URLS = [
   '/audios/sfx/footsteps/sand-l1.ogg',
   '/audios/sfx/footsteps/sand-l2.ogg',
   '/audios/sfx/footsteps/sand-l3.ogg',
+  '/audios/sfx/footsteps/stone-l1.ogg',
+  '/audios/sfx/footsteps/stone-l2.ogg',
+  '/audios/sfx/footsteps/stone-l3.ogg',
 ] as const
 const FOOTSTEP_RIGHT_URLS = [
   '/audios/sfx/footsteps/sand-r1.ogg',
   '/audios/sfx/footsteps/sand-r2.ogg',
   '/audios/sfx/footsteps/sand-r3.ogg',
+  '/audios/sfx/footsteps/stone-r1.ogg',
+  '/audios/sfx/footsteps/stone-r2.ogg',
+  '/audios/sfx/footsteps/stone-r3.ogg',
 ] as const
 const FOOTSTEP_POOL_SIZE = 5
 const FOOTSTEP_MIN_SPEED = 0.22
@@ -29,7 +35,7 @@ const FOOTSTEP_RUN_STRIDE_METERS = 1.08
 const FOOTSTEP_LATERAL_OFFSET_METERS = 0.23
 const FOOTSTEP_FORWARD_OFFSET_METERS = 0.08
 const FOOTSTEP_HEIGHT_METERS = 0.08
-const FOOTSTEP_BASE_VOLUME = 0.55
+const FOOTSTEP_BASE_VOLUME = 0.033
 const FOOTSTEP_REF_DISTANCE = 5.2
 const FOOTSTEP_MAX_DISTANCE = 22
 const FOOTSTEP_ROLLOFF = 0.8
@@ -50,10 +56,10 @@ type FootstepBuffers = {
 
 type FootstepRuntime = {
   distance: number
-  leftIndex: number
+  lastLeftIndex: number
+  lastRightIndex: number
   nextLeft: boolean
   poolIndex: number
-  rightIndex: number
   wasMoving: boolean
 }
 
@@ -76,10 +82,10 @@ export function LandrushRobotFootstepAudio({
   const audioPoolRef = useRef<PositionalAudio[]>([])
   const runtimeRef = useRef<FootstepRuntime>({
     distance: 0,
-    leftIndex: 0,
+    lastLeftIndex: -1,
+    lastRightIndex: -1,
     nextLeft: true,
     poolIndex: 0,
-    rightIndex: 0,
     wasMoving: false,
   })
   const [buffers, setBuffers] = useState<FootstepBuffers | null>(null)
@@ -182,7 +188,14 @@ export function LandrushRobotFootstepAudio({
     const motion = motionRef.current
     const volumeScale = muted ? 0 : (masterVolume / 100) * (sfxVolume / 100)
 
-    if (!enabled || !motion || !buffers || !audioUnlocked || volumeScale <= 0 || pool.length === 0) {
+    if (
+      !enabled ||
+      !motion ||
+      !buffers ||
+      !audioUnlocked ||
+      volumeScale <= 0 ||
+      pool.length === 0
+    ) {
       runtime.distance = 0
       runtime.wasMoving = false
       return
@@ -247,10 +260,16 @@ function playFootstep({
   const sideBuffers = leftStep ? buffers.left : buffers.right
   if (sideBuffers.length === 0) return
 
-  const bufferIndex = leftStep
-    ? runtime.leftIndex++ % sideBuffers.length
-    : runtime.rightIndex++ % sideBuffers.length
-  const buffer = sideBuffers[bufferIndex]
+  const { buffer, index } = pickFootstepBuffer(
+    sideBuffers,
+    leftStep ? runtime.lastLeftIndex : runtime.lastRightIndex,
+  )
+  if (leftStep) {
+    runtime.lastLeftIndex = index
+  } else {
+    runtime.lastRightIndex = index
+  }
+
   const audio = pool[runtime.poolIndex++ % pool.length]
   if (!audio || !buffer) return
 
@@ -284,4 +303,12 @@ function playFootstep({
   )
   audio.updateMatrixWorld()
   audio.play()
+}
+
+function pickFootstepBuffer(buffers: readonly AudioBuffer[], lastIndex: number) {
+  if (buffers.length === 1) return { buffer: buffers[0], index: 0 }
+
+  const randomIndex = MathUtils.randInt(0, buffers.length - 2)
+  const index = lastIndex >= 0 && randomIndex >= lastIndex ? randomIndex + 1 : randomIndex
+  return { buffer: buffers[index], index }
 }
