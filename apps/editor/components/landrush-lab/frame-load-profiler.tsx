@@ -142,12 +142,19 @@ export function FrameLoadProfilerProbe({ enabled }: { enabled: boolean }) {
     const profiler = getOrCreateProfiler()
     profiler.reset()
     const restore = installRendererProfiling(renderer as unknown as MethodTarget, profiler)
+    const publishReport = () => {
+      document.documentElement.dataset.landrushFrameProfile = JSON.stringify(profiler.report())
+    }
+    const publishTimer = window.setInterval(publishReport, 1000)
     window.__LANDRUSH_FRAME_PROFILE__ = profiler.api
     return () => {
+      window.clearInterval(publishTimer)
+      publishReport()
       restore()
       if (window.__LANDRUSH_FRAME_PROFILE__ === profiler.api) {
         delete window.__LANDRUSH_FRAME_PROFILE__
       }
+      delete document.documentElement.dataset.landrushFrameProfile
     }
   }, [enabled, renderer])
 

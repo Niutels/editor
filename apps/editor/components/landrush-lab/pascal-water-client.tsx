@@ -44,6 +44,9 @@ import {
 import { useSearchParams } from 'next/navigation'
 import {
   type PointerEvent as ReactPointerEvent,
+  Profiler,
+  type ProfilerOnRenderCallback,
+  type ReactNode,
   type TouchEvent as ReactTouchEvent,
   type RefObject,
   Suspense,
@@ -74,6 +77,7 @@ import type { LandrushPoint2, LandrushRoadSegment, LandrushVec3 } from '@/compon
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, type GrassFieldBlocker } from './grass-field-texture'
 import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-material'
+import { FrameLoadProfilerProbe } from './frame-load-profiler'
 import { GrassWaterLandLayers } from './grass-water-layers'
 import {
   allocateParcels,
@@ -91,7 +95,7 @@ import {
   type ParcelStreetSegment,
 } from './parcel-streets'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
-import type { StylizedGrassInteraction } from './stylized-scene-land-layers'
+import type { StylizedGrassInteraction, StylizedGrassPerfProbe } from './stylized-scene-land-layers'
 import {
   WATER_FIELD_PREVIEW_RESOLUTION,
   WATER_FIELD_RESOLUTION,
@@ -227,6 +231,7 @@ const PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE = 1.014
 const PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE = 12
 
 type PascalWaterClientExperience = 'pascal-water' | 'pascal-multiplayer-island'
+type PascalWaterFieldDebugMode = 'cached-worker'
 type PascalWaterLayoutNode = LandrushWorldNode | LandrushLayoutNode
 type PascalWaterLayoutNodeKind = PascalWaterLayoutNode['type']
 
@@ -267,6 +272,10 @@ const PASCAL_WATER_MAP_CAMERA_ZOOM = 8.6
 const PASCAL_WATER_MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
 const PASCAL_WATER_REMOTE_POSITION_RESPONSE = 12
 const PASCAL_WATER_REMOTE_HEADING_RESPONSE = 14
+const PASCAL_WATER_PERF_DEFAULT_DURATION_MS = 9000
+const PASCAL_WATER_PERF_MAX_FRAME_SAMPLES = 1200
+const PASCAL_WATER_PERF_SPIKE_THRESHOLD_MS = 24
+const PASCAL_WATER_PERF_START_DELAY_MS = 2500
 const PASCAL_WATER_FALLBACK_PROFILE = {
   color: '#7dd3fc',
   id: 'pascal-water-pending',
@@ -332,10 +341,65 @@ type PascalWaterStartupLongTask = {
   name: string
   startMs: number
 }
+type PascalWaterStartupAnimationFrameScript = {
+  durationMs: number
+  forcedStyleAndLayoutDurationMs: number
+  invoker: string
+  invokerType: string
+  pauseDurationMs: number
+  sourceChar: number
+  sourceFunctionName: string
+  sourceLine: number
+  sourceURL: string
+  windowAttribution: string
+}
+type PascalWaterStartupAnimationFrame = {
+  blockingDurationMs: number
+  durationMs: number
+  firstUIEventTimestampMs: number
+  renderStartMs: number
+  scripts: PascalWaterStartupAnimationFrameScript[]
+  startMs: number
+  styleAndLayoutStartMs: number
+}
+type PascalWaterStartupReactCommit = {
+  actualDurationMs: number
+  baseDurationMs: number
+  commitMs: number
+  id: string
+  phase: string
+  startMs: number
+}
 type PascalWaterStartupProfile = {
+  animationFrames: PascalWaterStartupAnimationFrame[]
   longTasks: PascalWaterStartupLongTask[]
+  reactCommits: PascalWaterStartupReactCommit[]
   spans: PascalWaterStartupProfileSpan[]
   startedAt: number
+}
+type PascalWaterPerfRunOptions = {
+  durationMs: number
+  enabled: boolean
+  speed: 'run' | 'walk'
+}
+type PascalWaterPerfFrameSample = {
+  dt: number
+  time: number
+}
+type PascalWaterPerfLongTaskSample = {
+  durationMs: number
+  name: string
+  startMs: number
+}
+type PascalWaterPerfRunState = {
+  completedAt: number | null
+  durationMs: number
+  frames: PascalWaterPerfFrameSample[]
+  longTasks: PascalWaterPerfLongTaskSample[]
+  speed: 'run' | 'walk'
+  spikeThresholdMs: number
+  startedAt: number | null
+  status: 'done' | 'pending' | 'running'
 }
 
 type PascalWaterSceneStore = ReturnType<typeof useScene.getState>
@@ -445,6 +509,7 @@ const PASCAL_WATER_GRASS_SLIDERS = [
 declare global {
   interface Window {
     __PASCAL_BENCH_ORBITING__?: boolean
+    __PASCAL_WATER_PERF_RUN__?: () => unknown
     __PASCAL_WATER_STARTUP_PROFILE__?: PascalWaterStartupProfile
     __PASCAL_WATER_DEBUG__?: {
       features: readonly string[]
@@ -461,25 +526,250 @@ declare global {
   }
 }
 
+function usePascalWaterPerfRunProbe(perfRun: PascalWaterPerfRunOptions) {
+  useEffect(() => {
+    if (!perfRun.enabled) {
+      if (window.__LANDRUSH_STYLIZED_GRASS_PERF__?.enabled) {
+        delete window.__LANDRUSH_STYLIZED_GRASS_PERF__
+      }
+      delete window.__PASCAL_WATER_PERF_RUN__
+      delete document.documentElement.dataset.pascalWaterPerfRun
+      return
+    }
+
+    const grassProbe: StylizedGrassPerfProbe = { enabled: true, samples: [] }
+    const state: PascalWaterPerfRunState = {
+      completedAt: null,
+      durationMs: perfRun.durationMs,
+      frames: [],
+      longTasks: [],
+      speed: perfRun.speed,
+      spikeThresholdMs: PASCAL_WATER_PERF_SPIKE_THRESHOLD_MS,
+      startedAt: null,
+      status: 'pending',
+    }
+    window.__LANDRUSH_STYLIZED_GRASS_PERF__ = grassProbe
+
+    const publishSummary = () => {
+      const summary = summarizePascalWaterPerfRun(state, grassProbe)
+      document.documentElement.dataset.pascalWaterPerfRun = JSON.stringify(summary)
+      return summary
+    }
+
+    window.__PASCAL_WATER_PERF_RUN__ = publishSummary
+
+    let raf = 0
+    let longTaskObserver: PerformanceObserver | null = null
+    if (typeof PerformanceObserver !== 'undefined') {
+      longTaskObserver = new PerformanceObserver((list) => {
+        const startedAt = state.startedAt
+        if (startedAt === null || state.status !== 'running') return
+        for (const entry of list.getEntries()) {
+          if (entry.startTime < startedAt) continue
+          state.longTasks.push({
+            durationMs: entry.duration,
+            name: entry.name,
+            startMs: entry.startTime - startedAt,
+          })
+        }
+      })
+      try {
+        longTaskObserver.observe({ entryTypes: ['longtask'] })
+      } catch {
+        longTaskObserver.disconnect()
+        longTaskObserver = null
+      }
+    }
+    const publishTimer = window.setInterval(publishSummary, 250)
+    const startTimer = window.setTimeout(() => {
+      state.startedAt = performance.now()
+      state.status = 'running'
+      let previous = state.startedAt
+
+      const tick = (now: number) => {
+        const time = now - (state.startedAt ?? now)
+        const dt = now - previous
+        previous = now
+        state.frames.push({ dt, time })
+        if (state.frames.length > PASCAL_WATER_PERF_MAX_FRAME_SAMPLES) {
+          state.frames.splice(0, state.frames.length - PASCAL_WATER_PERF_MAX_FRAME_SAMPLES)
+        }
+
+        if (time < perfRun.durationMs) {
+          raf = window.requestAnimationFrame(tick)
+          return
+        }
+
+        state.completedAt = now
+        state.status = 'done'
+        publishSummary()
+      }
+
+      raf = window.requestAnimationFrame(tick)
+    }, PASCAL_WATER_PERF_START_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(startTimer)
+      window.clearInterval(publishTimer)
+      window.cancelAnimationFrame(raf)
+      longTaskObserver?.disconnect()
+      if (window.__LANDRUSH_STYLIZED_GRASS_PERF__ === grassProbe) {
+        delete window.__LANDRUSH_STYLIZED_GRASS_PERF__
+      }
+      if (window.__PASCAL_WATER_PERF_RUN__ === publishSummary) {
+        delete window.__PASCAL_WATER_PERF_RUN__
+      }
+      delete document.documentElement.dataset.pascalWaterPerfRun
+    }
+  }, [perfRun])
+}
+
+function createPascalWaterPerfRunOptions(searchParams: { get: (key: string) => string | null }) {
+  const enabled = searchParams.get('perfRun') === 'straight'
+  const requestedDuration = Number(searchParams.get('perfDurationMs'))
+  const durationMs = MathUtils.clamp(
+    Number.isFinite(requestedDuration) ? requestedDuration : PASCAL_WATER_PERF_DEFAULT_DURATION_MS,
+    4000,
+    20_000,
+  )
+  const speed = searchParams.get('perfSpeed') === 'walk' ? 'walk' : 'run'
+  return { durationMs, enabled, speed } satisfies PascalWaterPerfRunOptions
+}
+
+function summarizePascalWaterPerfRun(
+  state: PascalWaterPerfRunState,
+  grassProbe: StylizedGrassPerfProbe,
+) {
+  const frameDts = state.frames.map((frame) => frame.dt)
+  const frameSpikes = state.frames.filter((frame) => frame.dt >= state.spikeThresholdMs)
+  const longTaskDurations = state.longTasks.map((task) => task.durationMs)
+  const grassSamples = grassProbe.samples
+  const matrixSamples = grassSamples.filter((sample) => sample.kind === 'matrix')
+  const buildSamples = grassSamples.filter((sample) => sample.kind === 'build')
+  const attributeSamples = grassSamples.filter((sample) => sample.kind === 'attributes')
+  const streamSamples = grassSamples.filter((sample) => sample.kind === 'stream')
+
+  return {
+    durationMs: state.durationMs,
+    frames: {
+      count: state.frames.length,
+      maxMs: roundPerf(maxPerf(frameDts)),
+      p95Ms: roundPerf(percentilePerf(frameDts, 0.95)),
+      p99Ms: roundPerf(percentilePerf(frameDts, 0.99)),
+      spikeCount: frameSpikes.length,
+      spikeThresholdMs: state.spikeThresholdMs,
+      spikes: frameSpikes.slice(0, 12).map((frame) => ({
+        dt: roundPerf(frame.dt),
+        time: roundPerf(frame.time),
+      })),
+    },
+    grass: {
+      attributes: summarizePascalWaterGrassPerfSamples(attributeSamples),
+      builds: summarizePascalWaterGrassPerfSamples(buildSamples),
+      matrices: summarizePascalWaterGrassPerfSamples(matrixSamples),
+      streamUpdates: streamSamples.map((sample) => ({
+        time: roundPerf(sample.time - (state.startedAt ?? sample.time)),
+        x: roundPerf(sample.centerX ?? 0),
+        z: roundPerf(sample.centerZ ?? 0),
+      })),
+    },
+    longTasks: {
+      count: state.longTasks.length,
+      maxMs: roundPerf(maxPerf(longTaskDurations)),
+      p95Ms: roundPerf(percentilePerf(longTaskDurations, 0.95)),
+      totalMs: roundPerf(longTaskDurations.reduce((total, duration) => total + duration, 0)),
+      top: [...state.longTasks]
+        .sort((first, second) => second.durationMs - first.durationMs)
+        .slice(0, 8)
+        .map((task) => ({
+          durationMs: roundPerf(task.durationMs),
+          name: task.name,
+          startMs: roundPerf(task.startMs),
+        })),
+    },
+    speed: state.speed,
+    status: state.status,
+  }
+}
+
+function summarizePascalWaterGrassPerfSamples(samples: StylizedGrassPerfProbe['samples']) {
+  const durations = samples.map((sample) => sample.durationMs)
+  return {
+    count: samples.length,
+    maxMs: roundPerf(maxPerf(durations)),
+    p95Ms: roundPerf(percentilePerf(durations, 0.95)),
+    top: [...samples]
+      .sort((first, second) => second.durationMs - first.durationMs)
+      .slice(0, 8)
+      .map((sample) => ({
+        count: sample.count ?? 0,
+        durationMs: roundPerf(sample.durationMs),
+        moving: sample.moving ?? undefined,
+      })),
+  }
+}
+
+function percentilePerf(values: readonly number[], percentileValue: number) {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((first, second) => first - second)
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * percentileValue))] ?? 0
+}
+
+function maxPerf(values: readonly number[]) {
+  return values.length === 0 ? 0 : Math.max(...values)
+}
+
+function roundPerf(value: number) {
+  return Math.round(value * 1000) / 1000
+}
+
+function PascalWaterStartupReactProfiler({
+  children,
+  enabled,
+  id,
+  onRender,
+}: {
+  children: ReactNode
+  enabled: boolean
+  id: string
+  onRender: ProfilerOnRenderCallback
+}) {
+  if (!enabled) return <>{children}</>
+  return (
+    <Profiler id={id} onRender={onRender}>
+      {children}
+    </Profiler>
+  )
+}
+
 export function PascalWaterClient({
   experience = 'pascal-water',
+  waterFieldDebugMode,
 }: {
   experience?: PascalWaterClientExperience
+  waterFieldDebugMode?: PascalWaterFieldDebugMode
 } = {}) {
   const experienceConfig = PASCAL_WATER_EXPERIENCE_CONFIGS[experience]
   const searchParams = useSearchParams()
   const startupProfileEnabled =
     searchParams.get('startupProfile') === '1' || searchParams.get('profileStartup') === '1'
-  const startupProfileNoLandLayers =
-    startupProfileEnabled && searchParams.get('profileNoLandLayers') === '1'
-  const startupProfileNoStylizedBlades =
-    startupProfileEnabled && searchParams.get('profileNoStylizedBlades') === '1'
-  const startupProfileNoStylizedGround =
-    startupProfileEnabled && searchParams.get('profileNoStylizedGround') === '1'
-  const startupProfileNoStylizedTrees =
-    startupProfileEnabled && searchParams.get('profileNoStylizedTrees') === '1'
-  const startupProfileNoWaterNode =
-    startupProfileEnabled && searchParams.get('profileNoWaterNode') === '1'
+  const startupProfileNoLandLayers = searchParams.get('profileNoLandLayers') === '1'
+  const startupProfileNoStylizedBlades = searchParams.get('profileNoStylizedBlades') === '1'
+  const startupProfileNoStylizedGround = searchParams.get('profileNoStylizedGround') === '1'
+  const startupProfileNoStylizedTrees = searchParams.get('profileNoStylizedTrees') === '1'
+  const startupProfileNoWaterNode = searchParams.get('profileNoWaterNode') === '1'
+  const profilePlainWaterMaterial = searchParams.get('profilePlainWaterMaterial') === '1'
+  const profileGrassDensityScale = clampOptionalNumber(
+    optionalSearchParamNumber(searchParams, 'profileGrassDensityScale'),
+    0,
+    1,
+  )
+  const profileBladeSubdivisions = clampOptionalNumber(
+    optionalSearchParamNumber(searchParams, 'profileBladeSubdivisions'),
+    4,
+    160,
+  )
+  const perfRun = useMemo(() => createPascalWaterPerfRunOptions(searchParams), [searchParams])
   const startupProfileRef = useRef<PascalWaterStartupProfile | null>(null)
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
   const mobileJoystickRef = useRef<MobileJoystickInput | null>(null)
@@ -493,10 +783,15 @@ export function PascalWaterClient({
   const initialViewModeAppliedRef = useRef(false)
   if (startupProfileEnabled && !startupProfileRef.current && typeof performance !== 'undefined') {
     startupProfileRef.current = {
+      animationFrames: [],
       longTasks: [],
+      reactCommits: [],
       spans: [],
       startedAt: performance.now(),
     }
+  }
+  if (startupProfileEnabled && startupProfileRef.current && typeof window !== 'undefined') {
+    window.__PASCAL_WATER_STARTUP_PROFILE__ = startupProfileRef.current
   }
   const startupProfileMeasure = useCallback<PascalWaterProfileMeasure>((id, callback) => {
     const profile = startupProfileRef.current
@@ -514,7 +809,29 @@ export function PascalWaterClient({
     }
   }, [])
   const activeProfileMeasure = startupProfileEnabled ? startupProfileMeasure : undefined
+  const handleStartupReactRender = useCallback<ProfilerOnRenderCallback>(
+    (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
+      const profile = startupProfileRef.current
+      if (!profile) return
+      profile.reactCommits.push({
+        actualDurationMs: roundPerf(actualDuration),
+        baseDurationMs: roundPerf(baseDuration),
+        commitMs: roundPerf(commitTime - profile.startedAt),
+        id,
+        phase,
+        startMs: roundPerf(startTime - profile.startedAt),
+      })
+    },
+    [],
+  )
   const [loadingActive, setLoadingActive] = useState(true)
+  const activePerfRun = useMemo(
+    () => ({ ...perfRun, enabled: perfRun.enabled && !loadingActive }),
+    [loadingActive, perfRun],
+  )
+  const frameProfile =
+    searchParams.get('frameProfile') === '1' || searchParams.get('profileFrame') === '1'
+  const viewerRendererBackend = searchParams.get('rendererBackend') === 'webgl' ? 'webgl' : 'webgpu'
   const [buildMode, setBuildMode] = useState(false)
   const [buildParcelId, setBuildParcelId] = useState<string | null>(null)
   const [mapView, setMapView] = useState(false)
@@ -556,6 +873,8 @@ export function PascalWaterClient({
   const multiplayerStatus: ConnectionStatus = offline ? 'offline' : multiplayer.status
   const viewMode: PascalWaterViewMode = buildMode ? 'build' : mapView ? 'map' : 'player'
 
+  usePascalWaterPerfRunProbe(activePerfRun)
+
   useLayoutEffect(() => {
     if (buildMode) {
       buildCameraPoseRef.current = null
@@ -574,7 +893,17 @@ export function PascalWaterClient({
   const renderIslandParameters = progressiveRenderValue(islandRender)
   const renderFieldParameters = progressiveRenderValue(fieldRender)
   const renderElevationParameters = progressiveRenderValue(elevationRender)
-  const renderGrassTuning = progressiveRenderValue(grassRender)
+  const baseRenderGrassTuning = progressiveRenderValue(grassRender)
+  const renderGrassTuning = useMemo(
+    () =>
+      profileGrassDensityScale === null
+        ? baseRenderGrassTuning
+        : {
+            ...baseRenderGrassTuning,
+            density: Math.max(0, baseRenderGrassTuning.density * profileGrassDensityScale),
+          },
+    [baseRenderGrassTuning, profileGrassDensityScale],
+  )
   const isWaterFieldPreviewing =
     islandRender.isSettling || fieldRender.isSettling || terrainFieldResolutionRender.isSettling
   const isGrassFieldPreviewing =
@@ -667,13 +996,16 @@ export function PascalWaterClient({
   )
   const bladeSubdivisions = useMemo(
     () =>
-      isGrassFieldPreviewing
-        ? Math.min(
-            PASCAL_WATER_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS,
-            resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
-          )
-        : resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
-    [isGrassFieldPreviewing, renderGrassTuning.density],
+      Math.min(
+        profileBladeSubdivisions ?? Number.POSITIVE_INFINITY,
+        isGrassFieldPreviewing
+          ? Math.min(
+              PASCAL_WATER_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS,
+              resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
+            )
+          : resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
+      ),
+    [isGrassFieldPreviewing, profileBladeSubdivisions, renderGrassTuning.density],
   )
   const pascalWaterScene = useMemo(
     () =>
@@ -685,11 +1017,19 @@ export function PascalWaterClient({
           layoutConfig: experienceConfig,
           materialParameters: PASCAL_WATER_MATERIAL_PARAMETERS,
           omitWaterNode: startupProfileNoWaterNode,
+          profilePlainWaterMaterial,
           showDepthReference: false,
           terrainFieldResolution: WATER_FIELD_RESOLUTION,
+          waterFieldDebugMode,
         }),
       ),
-    [activeProfileMeasure, experienceConfig, startupProfileNoWaterNode],
+    [
+      activeProfileMeasure,
+      experienceConfig,
+      profilePlainWaterMaterial,
+      startupProfileNoWaterNode,
+      waterFieldDebugMode,
+    ],
   )
   const liveWaterNode = useMemo(
     () =>
@@ -699,8 +1039,10 @@ export function PascalWaterClient({
           fieldParameters: renderFieldParameters,
           materialParameters,
           perimeter: livePerimeter,
+          profilePlainWaterMaterial,
           showDepthReference,
           terrainFieldResolution: renderTerrainFieldResolution,
+          waterFieldDebugMode,
           waterLabSeed: liveIsland.seed,
         }).waterNode,
       ),
@@ -712,6 +1054,8 @@ export function PascalWaterClient({
       liveIsland.seed,
       livePerimeter,
       materialParameters,
+      profilePlainWaterMaterial,
+      waterFieldDebugMode,
     ],
   )
   const liveLayoutNode = useMemo(
@@ -804,10 +1148,65 @@ export function PascalWaterClient({
       observer.disconnect()
       observer = null
     }
+    let animationFrameObserver: PerformanceObserver | null = null
+    const supportedEntryTypes = PerformanceObserver.supportedEntryTypes ?? []
+    if (supportedEntryTypes.includes('long-animation-frame')) {
+      animationFrameObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const frame = entry as PerformanceEntry & {
+            blockingDuration?: number
+            firstUIEventTimestamp?: number
+            renderStart?: number
+            scripts?: Array<{
+              duration?: number
+              forcedStyleAndLayoutDuration?: number
+              invoker?: string
+              invokerType?: string
+              pauseDuration?: number
+              sourceChar?: number
+              sourceFunctionName?: string
+              sourceLine?: number
+              sourceURL?: string
+              windowAttribution?: string
+            }>
+            styleAndLayoutStart?: number
+          }
+          profile.animationFrames.push({
+            blockingDurationMs: roundPerf(frame.blockingDuration ?? 0),
+            durationMs: roundPerf(frame.duration),
+            firstUIEventTimestampMs: roundPerf(frame.firstUIEventTimestamp ?? 0),
+            renderStartMs: roundPerf((frame.renderStart ?? 0) - profile.startedAt),
+            scripts: (frame.scripts ?? []).map((script) => ({
+              durationMs: roundPerf(script.duration ?? 0),
+              forcedStyleAndLayoutDurationMs: roundPerf(
+                script.forcedStyleAndLayoutDuration ?? 0,
+              ),
+              invoker: script.invoker ?? '',
+              invokerType: script.invokerType ?? '',
+              pauseDurationMs: roundPerf(script.pauseDuration ?? 0),
+              sourceChar: script.sourceChar ?? 0,
+              sourceFunctionName: script.sourceFunctionName ?? '',
+              sourceLine: script.sourceLine ?? 0,
+              sourceURL: script.sourceURL ?? '',
+              windowAttribution: script.windowAttribution ?? '',
+            })),
+            startMs: roundPerf(entry.startTime - profile.startedAt),
+            styleAndLayoutStartMs: roundPerf((frame.styleAndLayoutStart ?? 0) - profile.startedAt),
+          })
+        }
+      })
+      try {
+        animationFrameObserver.observe({ type: 'long-animation-frame', buffered: true })
+      } catch {
+        animationFrameObserver.disconnect()
+        animationFrameObserver = null
+      }
+    }
 
     return () => {
       window.clearInterval(intervalId)
       observer?.disconnect()
+      animationFrameObserver?.disconnect()
       profileOutput.remove()
       delete window.__PASCAL_WATER_STARTUP_PROFILE__
     }
@@ -1029,7 +1428,17 @@ export function PascalWaterClient({
   useEffect(() => {
     const scene = useScene.getState()
     if (hasLiveWaterNode) {
-      scene.updateNode(PASCAL_WATER_NODE_ID as never, liveWaterNode as never)
+      const existingWaterNode = scene.nodes[PASCAL_WATER_NODE_ID as never] as
+        | PascalWaterNode
+        | undefined
+      const skipIdenticalDebugWaterNode =
+        waterFieldDebugMode === 'cached-worker' &&
+        existingWaterNode &&
+        createPascalWaterNodeRenderSignature(existingWaterNode) ===
+          createPascalWaterNodeRenderSignature(liveWaterNode)
+      if (!skipIdenticalDebugWaterNode) {
+        scene.updateNode(PASCAL_WATER_NODE_ID as never, liveWaterNode as never)
+      }
     }
     if (hasLiveLayoutNode) {
       scene.updateNode(experienceConfig.layoutNodeId as never, liveLayoutNode as never)
@@ -1056,6 +1465,7 @@ export function PascalWaterClient({
         'world-multiplayer-status-panel',
         'debug-water-sliders',
         'editor-panels-reserved-for-build-mode',
+        ...(waterFieldDebugMode === 'cached-worker' ? ['water-field-debug-cached-worker'] : []),
       ],
       layoutNodeId: liveLayoutNode.id,
       layoutNodeKind: liveLayoutNode.type,
@@ -1073,7 +1483,14 @@ export function PascalWaterClient({
     return () => {
       delete window.__PASCAL_WATER_DEBUG__
     }
-  }, [experienceConfig, hasLiveLayoutNode, hasLiveWaterNode, liveLayoutNode, liveWaterNode])
+  }, [
+    experienceConfig,
+    hasLiveLayoutNode,
+    hasLiveWaterNode,
+    liveLayoutNode,
+    liveWaterNode,
+    waterFieldDebugMode,
+  ])
 
   const resetParameters = () => {
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
@@ -1096,19 +1513,29 @@ export function PascalWaterClient({
             : 'scale-100 blur-0 brightness-100',
         ].join(' ')}
       >
-        <Editor
-          layoutVersion="v2"
-          onLoad={handleLoad}
-          projectId={experienceConfig.projectId}
-          showEditorChrome={buildMode}
-          sidebarTabs={[]}
-          viewerCameraControls={false}
-          viewerEditorSystems={buildMode}
-          viewerPostProcessing={false}
-          viewerRendererBackend="webgpu"
-          viewerSceneChildren={
-            <>
+        <PascalWaterStartupReactProfiler
+          enabled={startupProfileEnabled}
+          id="pascal-water.editor"
+          onRender={handleStartupReactRender}
+        >
+          <Editor
+            layoutVersion="v2"
+            onLoad={handleLoad}
+            projectId={experienceConfig.projectId}
+            showEditorChrome={buildMode}
+            sidebarTabs={[]}
+            viewerCameraControls={false}
+            viewerEditorSystems={buildMode}
+            viewerPostProcessing={false}
+            viewerRendererBackend={viewerRendererBackend}
+            viewerSceneChildren={
+              <PascalWaterStartupReactProfiler
+                enabled={startupProfileEnabled}
+                id="pascal-water.viewer-scene-children"
+                onRender={handleStartupReactRender}
+              >
               <color args={['#164a77']} attach="background" />
+              <FrameLoadProfilerProbe enabled={frameProfile} />
               <PascalWaterEditorOverlayLayerBridge enabled={buildMode} />
               <PascalWaterPlayerLayer
                 baseNode={liveLayoutNode}
@@ -1119,6 +1546,7 @@ export function PascalWaterClient({
                 localProfile={resolvedLocalProfile}
                 mobileJoystickRef={mobileJoystickRef}
                 onLocalPlayerChange={multiplayer.publishLocalPlayer}
+                perfRun={activePerfRun}
                 playerCameraPoseRef={playerCameraPoseRef}
                 playerReturnCameraPoseRef={playerReturnCameraPoseRef}
                 remotePlayers={multiplayer.remotePlayers}
@@ -1158,52 +1586,59 @@ export function PascalWaterClient({
                 visible={buildMode}
               />
               {!startupProfileNoLandLayers ? (
-                <Suspense fallback={null}>
-                  <GrassWaterLandLayers
-                    bladeFadeBlockers={bladeGrassFadeBlockers}
-                    bladeSubdivisions={bladeSubdivisions}
-                    bladeGrassBlockers={bladeGrassBlockers}
-                    fieldResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
-                    finalFieldResolution={
-                      isGrassFieldPreviewing
-                        ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
-                        : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
-                    }
-                    finalSpawnResolution={
-                      isGrassFieldPreviewing
-                        ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
-                        : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
-                    }
-                    bladeRenderOrder={
-                      buildMode ? PASCAL_WATER_BUILD_GRASS_BLADE_RENDER_ORDER : undefined
-                    }
-                    grassInteractionRef={grassInteractionRef}
-                    grassBlockers={grassBlockers}
-                    groundRenderOrder={
-                      buildMode ? PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER : undefined
-                    }
-                    profileMeasure={activeProfileMeasure}
-                    roads={liveGrassRoads}
-                    showBlades={!startupProfileNoStylizedBlades}
-                    showGround
-                    showTrees={!startupProfileNoStylizedTrees}
-                    spawnResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
-                    stylizedGroundTexture={!startupProfileNoStylizedGround}
-                    stylizedGroundTextureWorldSizeMeters={PASCAL_WATER_GRASS_TEXTURE_TILE_METERS}
-                    stylizedSceneLayout
-                    surface={liveViewerLandSurface}
-                    tuning={renderGrassTuning}
-                  />
-                </Suspense>
+                <PascalWaterStartupReactProfiler
+                  enabled={startupProfileEnabled}
+                  id="pascal-water.land-layers"
+                  onRender={handleStartupReactRender}
+                >
+                  <Suspense fallback={null}>
+                    <GrassWaterLandLayers
+                      bladeFadeBlockers={bladeGrassFadeBlockers}
+                      bladeSubdivisions={bladeSubdivisions}
+                      bladeGrassBlockers={bladeGrassBlockers}
+                      fieldResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                      finalFieldResolution={
+                        isGrassFieldPreviewing
+                          ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                          : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
+                      }
+                      finalSpawnResolution={
+                        isGrassFieldPreviewing
+                          ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                          : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
+                      }
+                      bladeRenderOrder={
+                        buildMode ? PASCAL_WATER_BUILD_GRASS_BLADE_RENDER_ORDER : undefined
+                      }
+                      grassInteractionRef={grassInteractionRef}
+                      grassBlockers={grassBlockers}
+                      groundRenderOrder={
+                        buildMode ? PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER : undefined
+                      }
+                      profileMeasure={activeProfileMeasure}
+                      roads={liveGrassRoads}
+                      showBlades={!startupProfileNoStylizedBlades}
+                      showGround
+                      showTrees={!startupProfileNoStylizedTrees}
+                      spawnResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                      stylizedGroundTexture={!startupProfileNoStylizedGround}
+                      stylizedGroundTextureWorldSizeMeters={PASCAL_WATER_GRASS_TEXTURE_TILE_METERS}
+                      stylizedSceneLayout
+                      surface={liveViewerLandSurface}
+                      tuning={renderGrassTuning}
+                    />
+                  </Suspense>
+                </PascalWaterStartupReactProfiler>
               ) : null}
               <PascalWaterBuildGridOverlay
                 groundY={liveViewerLandSurface.grassSurfaceElevation}
                 visible={buildMode}
               />
-            </>
-          }
-          viewerUseBvh={false}
-        />
+              </PascalWaterStartupReactProfiler>
+            }
+            viewerUseBvh={false}
+          />
+        </PascalWaterStartupReactProfiler>
         <MultiplayerStatusPanel
           connection={multiplayer.connection}
           localPlayerIncluded={!offline}
@@ -1889,6 +2324,7 @@ function PascalWaterPlayerLayer({
   localProfile,
   mobileJoystickRef,
   onLocalPlayerChange,
+  perfRun,
   playerCameraPoseRef,
   playerReturnCameraPoseRef,
   remotePlayers,
@@ -1903,6 +2339,7 @@ function PascalWaterPlayerLayer({
   localProfile: LocalPlayerProfile
   mobileJoystickRef: { current: MobileJoystickInput | null }
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  perfRun: PascalWaterPerfRunOptions
   playerCameraPoseRef: { current: PascalWaterCameraPose | null }
   playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
@@ -1928,6 +2365,7 @@ function PascalWaterPlayerLayer({
         cameraEnabled={cameraEnabled}
         movementEnabled={movementEnabled}
         onLocalPlayerChange={onLocalPlayerChange}
+        perfRun={perfRun}
         buildCameraPoseRef={buildCameraPoseRef}
         playerCameraPoseRef={playerCameraPoseRef}
         playerReturnCameraPoseRef={playerReturnCameraPoseRef}
@@ -2371,6 +2809,7 @@ function LocalPascalWaterRobot({
   mobileJoystickRef,
   movementEnabled,
   onLocalPlayerChange,
+  perfRun,
   playerCameraPoseRef,
   playerReturnCameraPoseRef,
   spawn,
@@ -2386,6 +2825,7 @@ function LocalPascalWaterRobot({
   mobileJoystickRef: { current: MobileJoystickInput | null }
   movementEnabled: boolean
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  perfRun: PascalWaterPerfRunOptions
   playerCameraPoseRef: { current: PascalWaterCameraPose | null }
   playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
   spawn: LandrushPoint2
@@ -2455,6 +2895,29 @@ function LocalPascalWaterRobot({
     pressedKeysRef.current.clear()
     mobileJoystickRef.current = null
   }, [mobileJoystickRef, movementEnabled])
+
+  useEffect(() => {
+    if (!movementEnabled || !perfRun.enabled) return
+
+    let stopTimer = 0
+    const startTimer = window.setTimeout(() => {
+      resetToSpawn()
+      pressedKeysRef.current.add('KeyW')
+      if (perfRun.speed === 'run') pressedKeysRef.current.add('ShiftLeft')
+
+      stopTimer = window.setTimeout(() => {
+        pressedKeysRef.current.delete('KeyW')
+        pressedKeysRef.current.delete('ShiftLeft')
+      }, perfRun.durationMs)
+    }, PASCAL_WATER_PERF_START_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(startTimer)
+      window.clearTimeout(stopTimer)
+      pressedKeysRef.current.delete('KeyW')
+      pressedKeysRef.current.delete('ShiftLeft')
+    }
+  }, [movementEnabled, perfRun, resetToSpawn])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -3140,8 +3603,6 @@ function PascalWaterMapPlayerMarker({
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
-  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
-  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
 
   useFrame((_, delta) => {
     const group = groupRef.current
@@ -3156,11 +3617,9 @@ function PascalWaterMapPlayerMarker({
   })
 
   return (
-    <PascalWaterMapArrowMarker
+    <PascalWaterMapBadgeMarker
       color={color}
-      directionShape={directionShape}
       groupRef={groupRef}
-      shape={arrowShape}
     />
   )
 }
@@ -3175,8 +3634,6 @@ function PascalWaterRemoteMapPlayerMarker({
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
-  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
-  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
   const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
@@ -3205,75 +3662,133 @@ function PascalWaterRemoteMapPlayerMarker({
   })
 
   return (
-    <PascalWaterMapArrowMarker
+    <PascalWaterMapBadgeMarker
       color={player.color}
-      directionShape={directionShape}
       groupRef={groupRef}
-      scale={0.82}
-      shape={arrowShape}
+      scale={1.28}
     />
   )
 }
 
-function PascalWaterMapArrowMarker({
+function PascalWaterMapBadgeMarker({
   color,
-  directionShape,
   groupRef,
-  scale = 1,
-  shape,
+  scale = 1.5,
 }: {
   color: string
-  directionShape: Shape
   groupRef: RefObject<Group>
   scale?: number
-  shape: Shape
 }) {
   return (
     <group ref={groupRef} scale={scale} visible={false}>
-      <mesh renderOrder={91} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.08, 36]} />
+      <mesh renderOrder={91} rotation={[-Math.PI / 2, 0, 0]} scale={1.14}>
+        <circleGeometry args={[0.92, 32]} />
         <meshBasicMaterial
-          color="#0f172a"
+          color="#020617"
           depthTest={false}
           depthWrite={false}
-          opacity={0.46}
+          opacity={0.52}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.76, 1.02, 40]} />
+      <mesh
+        position={[0, 0, 0.9]}
+        renderOrder={91}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={1.14}
+      >
+        <circleGeometry args={[0.62, 3]} />
+        <meshBasicMaterial
+          color="#020617"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.52}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]} scale={1.03}>
+        <circleGeometry args={[0.92, 32]} />
         <meshBasicMaterial
           color="#f8fafc"
           depthTest={false}
           depthWrite={false}
-          opacity={0.82}
+          opacity={0.9}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[shape]} />
+      <mesh
+        position={[0, 0, 0.9]}
+        renderOrder={92}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={1.03}
+      >
+        <circleGeometry args={[0.62, 3]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.9}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]} scale={0.9}>
+        <circleGeometry args={[0.92, 32]} />
         <meshBasicMaterial
           color={color}
           depthTest={false}
           depthWrite={false}
-          opacity={0.96}
+          opacity={0.98}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh renderOrder={94} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[directionShape]} />
+      <mesh
+        position={[0, 0, 0.9]}
+        renderOrder={93}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={0.9}
+      >
+        <circleGeometry args={[0.5, 3]} />
+        <meshBasicMaterial
+          color={color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.98}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh
+        position={[0, 0, 1.18]}
+        renderOrder={94}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={0.9}
+      >
+        <circleGeometry args={[0.24, 3]} />
         <meshBasicMaterial
           color="#f8fafc"
           depthTest={false}
           depthWrite={false}
-          opacity={0.96}
+          opacity={0.98}
           toneMapped={false}
           transparent
         />
       </mesh>
+      <Html center className="pointer-events-none select-none" position={[0, 0.12, 0]}>
+        <span
+          className="grid h-5 w-5 place-items-center rounded-full text-[13px] font-black leading-none text-slate-950"
+          style={{
+            textShadow:
+              '0 1px 0 rgba(248,250,252,0.95), 1px 0 0 rgba(248,250,252,0.95), 0 -1px 0 rgba(248,250,252,0.95), -1px 0 0 rgba(248,250,252,0.95)',
+          }}
+        >
+          P
+        </span>
+      </Html>
     </group>
   )
 }
@@ -3834,28 +4349,6 @@ function centroidForPolygon(points: readonly LandrushPoint2[]) {
   return polygonCentroid(openPointRing(points))
 }
 
-function createMapPlayerArrowShape() {
-  const shape = new Shape()
-  shape.moveTo(0, -1.18)
-  shape.lineTo(0.62, 0.42)
-  shape.lineTo(0.22, 0.26)
-  shape.lineTo(0.22, 0.78)
-  shape.lineTo(-0.22, 0.78)
-  shape.lineTo(-0.22, 0.26)
-  shape.lineTo(-0.62, 0.42)
-  shape.closePath()
-  return shape
-}
-
-function createMapPlayerDirectionShape() {
-  const shape = new Shape()
-  shape.moveTo(0, -1.72)
-  shape.lineTo(0.26, -1.16)
-  shape.lineTo(-0.26, -1.16)
-  shape.closePath()
-  return shape
-}
-
 function createCenteredParcelGeometry(parcel: ParcelAllocationParcel) {
   const geometry = new BufferGeometry()
   const ring = openPointRing(parcel.points)
@@ -3964,6 +4457,19 @@ function clamp01(value: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+function clampOptionalNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return null
+  return clamp(value, min, max)
+}
+
+function optionalSearchParamNumber(
+  searchParams: { get: (key: string) => string | null },
+  key: string,
+) {
+  const value = searchParams.get(key)
+  return value === null ? Number.NaN : Number(value)
 }
 
 function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
@@ -4393,21 +4899,39 @@ function createPascalWaterPerimeter(island: PascalWaterIsland): PascalWaterPerim
   }
 }
 
+function createPascalWaterNodeRenderSignature(node: PascalWaterNode) {
+  return JSON.stringify({
+    elevationParameters: node.elevationParameters,
+    fieldParameters: node.fieldParameters,
+    maskLandWater: node.maskLandWater,
+    materialParameters: node.materialParameters,
+    perimeter: node.perimeter,
+    planeSize: node.planeSize,
+    position: node.position,
+    showDepthReference: node.showDepthReference,
+    terrainFieldResolution: node.terrainFieldResolution,
+  })
+}
+
 function createPascalWaterNode({
   elevationParameters,
   fieldParameters,
   materialParameters,
   perimeter,
+  profilePlainWaterMaterial,
   showDepthReference,
   terrainFieldResolution,
+  waterFieldDebugMode,
   waterLabSeed,
 }: {
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
   materialParameters: LandrushWaterSurfaceParameters
   perimeter: PascalWaterPerimeter
+  profilePlainWaterMaterial?: boolean
   showDepthReference: boolean
   terrainFieldResolution: number
+  waterFieldDebugMode?: PascalWaterFieldDebugMode
   waterLabSeed: string
 }) {
   const landSurface = createPascalWaterLandSurface({
@@ -4440,7 +4964,9 @@ function createPascalWaterNode({
     maskLandWater: false,
     metadata: {
       grassSurfaceElevation: landSurface.grassSurfaceElevation,
+      ...(profilePlainWaterMaterial ? { profilePlainWaterMaterial: true } : {}),
       source: 'pascal-water-debug',
+      ...(waterFieldDebugMode ? { waterFieldDebugMode } : {}),
       waterLabSeed,
     },
   }
@@ -4572,8 +5098,10 @@ function createPascalWaterSceneGraph(options: {
   layoutConfig: PascalWaterExperienceConfig
   materialParameters: LandrushWaterSurfaceParameters
   omitWaterNode?: boolean
+  profilePlainWaterMaterial?: boolean
   showDepthReference: boolean
   terrainFieldResolution: number
+  waterFieldDebugMode?: PascalWaterFieldDebugMode
 }): {
   landrushLayoutNode: PascalWaterLayoutNode
   sceneGraph: SceneGraph
@@ -4590,8 +5118,10 @@ function createPascalWaterSceneGraph(options: {
     fieldParameters: options.fieldParameters,
     materialParameters: options.materialParameters,
     perimeter: createPascalWaterPerimeter(island),
+    profilePlainWaterMaterial: options.profilePlainWaterMaterial,
     showDepthReference: options.showDepthReference,
     terrainFieldResolution: options.terrainFieldResolution,
+    waterFieldDebugMode: options.waterFieldDebugMode,
     waterLabSeed: island.seed,
   })
   const landrushLayoutNode = createPascalWaterLayoutNode({

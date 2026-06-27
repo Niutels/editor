@@ -15,6 +15,7 @@ import {
   RepeatWrapping,
   SRGBColorSpace,
   type Texture,
+  Vector4,
 } from 'three'
 import {
   attribute,
@@ -26,9 +27,11 @@ import {
   positionLocal,
   positionWorld,
   pow,
+  sin,
   clamp as tslClamp,
   color as tslColor,
   texture as tslTexture,
+  uniform,
   vec2,
   vec3,
 } from 'three/tsl'
@@ -357,7 +360,11 @@ function StylizedSceneGrassLayer({
       surfacePoints,
     }
   }
-  const renderCenter = useStylizedGrassRenderCenter()
+  const staticRenderCenter = useMemo(
+    () => resolveStaticStylizedGrassRenderCenter(surfacePoints),
+    [surfacePoints],
+  )
+  const renderCenter = useStylizedGrassRenderCenter(interactionRef, staticRenderCenter)
   const lastNonEmptyInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
   const instances = useMemo(
     () =>
@@ -387,16 +394,18 @@ function StylizedSceneGrassLayer({
       surfacePoints,
     ],
   )
-  const material = useMemo(
+  const materialBundle = useMemo(
     () =>
       measureStylizedScene(profileMeasure, 'setup.stylized-grass.node-material', () =>
         createStylizedGrassNodeMaterial(geometry, grassTexture, resolvedTuning),
       ),
     [geometry, grassTexture, profileMeasure, resolvedTuning],
   )
+  const material = materialBundle?.material ?? null
   const meshRef = useRef<InstancedMesh>(null!)
   const dummyRef = useRef(new Object3D())
   const fadeZonesRef = useRef<StylizedGrassFadeZone[]>([])
+  const profiledStartupFramesRef = useRef(0)
 
   useEffect(() => {
     grassTexture.colorSpace = SRGBColorSpace
@@ -410,16 +419,9 @@ function StylizedSceneGrassLayer({
     if (!mesh || !geometry) return
 
     measureStylizedScene(profileMeasure, 'setup.stylized-grass.apply-layout', () => {
-      applyStylizedGrassMatrices(
-        mesh,
-        instances,
-        resolvedTuning,
-        dummyRef.current,
-        0,
-        interactionRef?.current ?? null,
-        fadeZonesRef.current,
-      )
+      applyStylizedGrassStaticMatrices(mesh, instances, resolvedTuning, dummyRef.current)
       applyStylizedGrassInstanceAttributes(geometry, instances)
+      applyStylizedGrassFadeAttributes(geometry, instances, fadeZonesRef.current)
       mesh.count = instances.length
       mesh.instanceMatrix.needsUpdate = true
     })
@@ -430,19 +432,34 @@ function StylizedSceneGrassLayer({
   }, [grassFadeBlockers])
 
   useFrame(({ clock }, delta) => {
-    const mesh = meshRef.current
-    if (!mesh || instances.length === 0) return
-    advanceStylizedGrassFadeZones(fadeZonesRef.current, delta)
-    applyStylizedGrassMatrices(
-      mesh,
-      instances,
-      resolvedTuning,
-      dummyRef.current,
-      clock.elapsedTime,
-      interactionRef?.current ?? null,
-      fadeZonesRef.current,
-    )
-    mesh.instanceMatrix.needsUpdate = true
+    const runFrame = () => {
+      const mesh = meshRef.current
+      if (!mesh || !geometry || !materialBundle || instances.length === 0) return
+      materialBundle.uniforms.time.value = clock.elapsedTime
+      const interaction = interactionRef?.current
+      if (interaction && interaction.speed > 0.05 && interaction.radius > 0) {
+        materialBundle.uniforms.interaction.value.set(
+          interaction.x,
+          interaction.z,
+          interaction.radius,
+          clamp01(interaction.speed / STYLIZED_SCENE_INTERACTION_FULL_SPEED),
+        )
+      } else {
+        materialBundle.uniforms.interaction.value.set(0, 0, 0, 0)
+      }
+      const hadFadeZones = fadeZonesRef.current.length > 0
+      advanceStylizedGrassFadeZones(fadeZonesRef.current, delta)
+      if (hadFadeZones || fadeZonesRef.current.length > 0) {
+        applyStylizedGrassFadeAttributes(geometry, instances, fadeZonesRef.current)
+      }
+    }
+    if (profileMeasure && profiledStartupFramesRef.current < 6) {
+      const frameIndex = profiledStartupFramesRef.current
+      profiledStartupFramesRef.current += 1
+      measureStylizedScene(profileMeasure, `setup.stylized-grass.frame-${frameIndex}`, runFrame)
+      return
+    }
+    runFrame()
   })
 
   useEffect(
@@ -606,20 +623,33 @@ function extractFirstMeshGeometry(scene: Object3D): BufferGeometry | null {
   return geometry
 }
 
-function useStylizedGrassRenderCenter(): StylizedGrassRenderCenter {
+function useStylizedGrassRenderCenter(
+  interactionRef?: StylizedGrassInteractionRef,
+  staticRenderCenter?: StylizedGrassRenderCenter | null,
+): StylizedGrassRenderCenter {
   const [renderCenter, setRenderCenter] = useState<StylizedGrassRenderCenter>(() => ({
-    x: 0,
-    z: 0,
+    x: staticRenderCenter?.x ?? 0,
+    z: staticRenderCenter?.z ?? 0,
   }))
   const renderCenterRef = useRef(renderCenter)
   const camera = useThree((state) => state.camera)
 
+  useEffect(() => {
+    if (!staticRenderCenter) return
+    renderCenterRef.current = staticRenderCenter
+    setRenderCenter(staticRenderCenter)
+  }, [staticRenderCenter])
+
   useFrame((state) => {
+    if (staticRenderCenter) return
     const controls = getStylizedOrbitControls(state)
     const target = controls?.target
-    const nextCenter = target
-      ? { x: target.x, z: target.z }
-      : { x: camera.position.x, z: camera.position.z }
+    const interaction = interactionRef?.current
+    const nextCenter = interaction
+      ? { x: interaction.x, z: interaction.z }
+      : target
+        ? { x: target.x, z: target.z }
+        : { x: camera.position.x, z: camera.position.z }
     const current = renderCenterRef.current
     if (distanceSquared2(current, nextCenter) < STYLIZED_SCENE_STREAM_UPDATE_METERS ** 2) {
       return
@@ -643,6 +673,24 @@ function useStylizedGrassRenderCenter(): StylizedGrassRenderCenter {
 
 function getStylizedOrbitControls(state: unknown) {
   return (state as { controls?: StylizedOrbitControls }).controls
+}
+
+function resolveStaticStylizedGrassRenderCenter(
+  surfacePoints: readonly LandrushPoint2[],
+): StylizedGrassRenderCenter | null {
+  const surfaceRing = openRing(surfacePoints)
+  if (surfaceRing.length < 3) return null
+
+  const bounds = stylizedGrassSurfaceBounds(surfaceRing)
+  const center = {
+    x: (bounds.minX + bounds.maxX) / 2,
+    z: (bounds.minZ + bounds.maxZ) / 2,
+  }
+  const radiusSquared = STYLIZED_SCENE_STREAM_RADIUS ** 2
+  for (const point of surfaceRing) {
+    if (distanceSquared2(center, point) > radiusSquared) return null
+  }
+  return center
 }
 
 function resolveStylizedSceneTuning(
@@ -856,104 +904,53 @@ function createStylizedGrassCellInstances({
   return instances
 }
 
-function applyStylizedGrassMatrices(
+function applyStylizedGrassStaticMatrices(
   mesh: InstancedMesh,
   instances: readonly StylizedGrassInstance[],
   tuning: StylizedSceneResolvedGrassTuning,
   dummy: Object3D,
-  time: number,
-  interaction: StylizedGrassInteraction | null,
-  fadeZones: readonly StylizedGrassFadeZone[] = [],
 ) {
   const profile = getStylizedGrassPerfProbe()
   const startedAt = profile ? performance.now() : 0
   const scale = Math.max(0.001, finiteNumber(tuning.scale, STYLIZED_SCENE_GRASS_SCALE))
-  const windStrength = Math.max(0, tuning.windStrength)
-  const hasWind = windStrength > 0
-  const windDirection = (tuning.windAngle / 180) * Math.PI
-  const windSin = Math.sin(windDirection)
-  const windCos = Math.cos(windDirection)
-  const windSpeed = Math.max(0, tuning.windSpeed)
-  const windTurbulenceScale = tuning.turbulence * Math.PI * 2
-  const interactionSpeed = interaction?.speed ?? 0
-  const interactionRadius = interaction?.radius ?? 0
-  const hasInteraction = Boolean(interaction && interactionSpeed > 0.05 && interactionRadius > 0)
-  const interactionRadiusSquared = interactionRadius * interactionRadius
-  const interactionSpeedRatio = clamp01(interactionSpeed / STYLIZED_SCENE_INTERACTION_FULL_SPEED)
-  const hasFadeZones = fadeZones.length > 0
-  const fadeAttribute = mesh.geometry.getAttribute('aFade') as
-    | InstancedBufferAttribute
-    | undefined
-  const fadeState = { heightVisibility: 1, opacity: 1 }
   for (let index = 0; index < instances.length; index += 1) {
     const instance = instances[index]!
-    resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
-    const fadeVisibility = hasFadeZones ? fadeState.heightVisibility : 1
-    if (fadeAttribute) fadeAttribute.setX(index, hasFadeZones ? fadeState.opacity : 1)
-    let heightPulse = 1
-    let windPitch = 0
-    let windRoll = 0
-    let windYaw = 0
-    if (hasWind) {
-      const wave =
-        time * windSpeed + (instance.x * windCos + instance.z * windSin) * tuning.gustScale
-      const turbulence =
-        (stylizedGrassNoise(instance.x * 0.18 + time * 0.08, instance.z * 0.18 - time * 0.05) -
-          0.5) *
-        windTurbulenceScale
-      const flutter = Math.sin(wave * 3.1 + instance.seed * 0.37) * tuning.flutter * 0.35
-      const gust = Math.sin(wave + turbulence) + flutter
-      const lean = windStrength * gust * 0.18
-      heightPulse = clamp(1 + Math.abs(gust) * windStrength * 0.04, 0.9, 1.12)
-      windPitch = windSin * lean
-      windRoll = windCos * lean
-      windYaw = flutter * windStrength * 0.08
-    }
-
-    let bendPitch = 0
-    let bendRoll = 0
-    if (hasInteraction && interaction) {
-      const dx = instance.x - interaction.x
-      const dz = instance.z - interaction.z
-      const distanceSquared = dx * dx + dz * dz
-      if (distanceSquared < interactionRadiusSquared) {
-        const distance = Math.sqrt(distanceSquared)
-        const falloff = 1 - smoothstep(0.15, 1, distance / interactionRadius)
-        const lean = falloff * interactionSpeedRatio * STYLIZED_SCENE_INTERACTION_MAX_BEND
-        if (distance > 0.0001 && lean > 0.0001) {
-          bendPitch = (dz / distance) * lean
-          bendRoll = (dx / distance) * lean
-        }
-      }
-    }
-
     dummy.position.set(instance.x, 0, instance.z)
-    dummy.rotation.set(windPitch + bendPitch, instance.yaw + windYaw, windRoll + bendRoll)
-    if (fadeVisibility <= 0.001) {
-      dummy.scale.set(0, 0, 0)
-    } else {
-      dummy.scale.set(
-        scale,
-        scale *
-          STYLIZED_SCENE_GRASS_HEIGHT_SCALE *
-          instance.heightFactor *
-          heightPulse *
-          fadeVisibility,
-        scale,
-      )
-    }
+    dummy.rotation.set(0, instance.yaw, 0)
+    dummy.scale.set(
+      scale,
+      scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE * instance.heightFactor,
+      scale,
+    )
     dummy.updateMatrix()
     mesh.setMatrixAt(index, dummy.matrix)
   }
-  if (fadeAttribute) fadeAttribute.needsUpdate = true
   if (profile) {
     recordStylizedGrassPerfSample(profile, {
       count: instances.length,
       durationMs: performance.now() - startedAt,
       kind: 'matrix',
-      moving: Boolean(interaction && interaction.speed > 0.05),
+      moving: false,
     })
   }
+}
+
+function applyStylizedGrassFadeAttributes(
+  geometry: BufferGeometry,
+  instances: readonly StylizedGrassInstance[],
+  fadeZones: readonly StylizedGrassFadeZone[] = [],
+) {
+  const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
+  if (!fade) return
+
+  const hasFadeZones = fadeZones.length > 0
+  const fadeState = { heightVisibility: 1, opacity: 1 }
+  for (let index = 0; index < instances.length; index += 1) {
+    const instance = instances[index]!
+    resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
+    fade.setX(index, hasFadeZones ? Math.min(fadeState.heightVisibility, fadeState.opacity) : 1)
+  }
+  fade.needsUpdate = true
 }
 
 function updateStylizedGrassFadeZones(
@@ -1060,6 +1057,8 @@ function createStylizedGrassNodeMaterial(
   const instanceOrigin: TSLNode<'vec2'> = attribute<'vec2'>('aOrigin', 'vec2')
   const instanceSeed: TSLNode<'float'> = attribute<'float'>('aSeed', 'float')
   const instanceFade: TSLNode<'float'> = attribute<'float'>('aFade', 'float')
+  const grassTime = uniform(0)
+  const grassInteraction = uniform(new Vector4())
   const colorPatchScale = float(tuning.colorPatchScale)
   const colorVariation = float(tuning.colorVariation)
   const macroScale = float(tuning.macroScale)
@@ -1089,14 +1088,54 @@ function createStylizedGrassNodeMaterial(
     .sub(vec3(0, 1, 0).dot(viewDir).max(0))
     .pow(4)
   const fresnelRim = tslColor(0xb7d06a).mul(fresnel).mul(0.08)
+  const windDirection = (tuning.windAngle / 180) * Math.PI
+  const windSin = Math.sin(windDirection)
+  const windCos = Math.cos(windDirection)
+  const wave = grassTime
+    .mul(Math.max(0, tuning.windSpeed))
+    .add(instanceOrigin.x.mul(windCos).add(instanceOrigin.y.mul(windSin)).mul(tuning.gustScale))
+  const turbulence = mx_noise_float(
+    instanceOrigin.mul(0.18).add(vec2(grassTime.mul(0.08), grassTime.mul(-0.05))),
+  )
+    .sub(0.5)
+    .mul(tuning.turbulence * Math.PI * 2)
+  const flutter = sin(wave.mul(3.1).add(instanceSeed.mul(0.37))).mul(tuning.flutter * 0.35)
+  const gust = sin(wave.add(turbulence)).add(flutter)
+  const windLean = gust.mul(Math.max(0, tuning.windStrength) * 0.18)
+  const heightPulse = tslClamp(
+    float(1).add(gust.abs().mul(Math.max(0, tuning.windStrength) * 0.04)),
+    0.9,
+    1.12,
+  )
+  const windWorldOffset = vec2(windCos, windSin).mul(windLean)
+  const interactionRadius = grassInteraction.z.max(0.001)
+  const interactionDelta = instanceOrigin.sub(vec2(grassInteraction.x, grassInteraction.y))
+  const interactionDistance = interactionDelta.length()
+  const interactionFalloff = float(1).sub(
+    interactionDistance.div(interactionRadius).smoothstep(0.15, 1),
+  )
+  const interactionDirection = interactionDelta.div(interactionDistance.max(0.001))
+  const interactionWorldOffset = interactionDirection.mul(
+    interactionFalloff.mul(grassInteraction.w).mul(STYLIZED_SCENE_INTERACTION_MAX_BEND),
+  )
+  const worldOffset = windWorldOffset
+    .add(interactionWorldOffset)
+    .mul(heightAlongBlade)
+    .mul(STYLIZED_SCENE_GRASS_HEIGHT_SCALE)
+  const deformedPosition = vec3(
+    positionLocal.x.add(worldOffset.x),
+    positionLocal.y.mul(heightPulse).mul(instanceFade),
+    positionLocal.z.add(worldOffset.y),
+  )
 
   const material = new MeshStandardNodeMaterial({ side: DoubleSide, transparent: true })
+  material.positionNode = deformedPosition
   material.colorNode = projectedColor.mul(brightness).mul(macroFactor)
   material.emissiveNode = translucency.add(fresnelRim)
   material.opacityNode = instanceFade
   material.roughnessNode = float(0.85)
   material.depthWrite = false
-  return material
+  return { material, uniforms: { interaction: grassInteraction, time: grassTime } }
 }
 
 function applyStylizedGrassInstanceAttributes(
@@ -1401,11 +1440,6 @@ function distanceSquared2(first: StylizedGrassRenderCenter, second: StylizedGras
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value))
-}
-
-function smoothstep(edge0: number, edge1: number, value: number) {
-  const t = clamp01((value - edge0) / (edge1 - edge0 || 0.000001))
-  return t * t * (3 - 2 * t)
 }
 
 function clamp(value: number, min: number, max: number) {

@@ -1,32 +1,8 @@
-import { ClampToEdgeWrapping, DataTexture, LinearFilter, RGBAFormat } from 'three'
-
-export const PASCAL_WATER_FIELD_RESOLUTION = 1024
+const PASCAL_WATER_FIELD_RESOLUTION = 1024
 const BRUNO_DEPTH_FIELD_SCALE = 6.4
 const TAU = Math.PI * 2
 
-export type PascalWaterPoint2 = {
-  x: number
-  z: number
-}
-
-export type PascalWaterFieldParameters = {
-  depthContourCollapseMeters: number
-  depthContourCollapseScale: number
-  depthContourNoiseFrequency: number
-  depthContourOffsetMeters: number
-  depthContourVariationMeters: number
-  depthExponent: number
-  depthNoiseFrequency: number
-  depthNoiseStrength: number
-  depthReach: number
-  edgeFadeDistance: number
-  shoreBandMeters: number
-  shoreFeatherMeters: number
-  shoreNoiseFrequency: number
-  shoreVariationMeters: number
-}
-
-export const PASCAL_WATER_FIELD_DEFAULT_PARAMETERS = {
+const PASCAL_WATER_FIELD_DEFAULT_PARAMETERS = {
   depthContourCollapseMeters: 10.3,
   depthContourCollapseScale: 1.25,
   depthContourNoiseFrequency: 0.1,
@@ -41,34 +17,51 @@ export const PASCAL_WATER_FIELD_DEFAULT_PARAMETERS = {
   shoreFeatherMeters: 0.45,
   shoreNoiseFrequency: 0.075,
   shoreVariationMeters: 0.85,
-} satisfies PascalWaterFieldParameters
+}
 
-export const PASCAL_WATER_FIELD_DEPTH_REFERENCE_REACH = 70
-
+const PASCAL_WATER_FIELD_DEPTH_REFERENCE_REACH = 70
 const WATER_FIELD_DEPTH_DISTANCE_MAX_METERS =
   PASCAL_WATER_FIELD_DEPTH_REFERENCE_REACH * BRUNO_DEPTH_FIELD_SCALE
 const WATER_FIELD_DEPTH_EXACT_DISTANCE_METERS =
   PASCAL_WATER_FIELD_DEFAULT_PARAMETERS.depthReach * BRUNO_DEPTH_FIELD_SCALE
 
-type WaterFieldOptions = {
-  parameters?: Partial<PascalWaterFieldParameters>
-  perimeter: readonly PascalWaterPoint2[]
-  planeSize: number
-  resolution?: number
+self.onmessage = (event) => {
+  const message = event.data
+  if (!message || message.type !== 'generate') return
+
+  try {
+    const result = createPascalWaterFieldTextureData({
+      parameters: message.parameters,
+      perimeter: message.perimeter || [],
+      planeSize: message.planeSize,
+      resolution: message.resolution,
+    })
+
+    self.postMessage(
+      {
+        bytes: result.data.buffer,
+        height: result.height,
+        id: message.id,
+        type: 'complete',
+        width: result.width,
+      },
+      [result.data.buffer],
+    )
+  } catch (error) {
+    self.postMessage({
+      id: message.id || '',
+      message: error instanceof Error ? error.message : String(error),
+      type: 'error',
+    })
+  }
 }
 
-export type PascalWaterFieldTextureData = {
-  data: Uint8Array
-  height: number
-  width: number
-}
-
-export function createPascalWaterFieldTextureData({
+function createPascalWaterFieldTextureData({
   parameters,
   perimeter,
   planeSize,
   resolution = PASCAL_WATER_FIELD_RESOLUTION,
-}: WaterFieldOptions): PascalWaterFieldTextureData {
+}) {
   const params = { ...PASCAL_WATER_FIELD_DEFAULT_PARAMETERS, ...parameters }
   const textureResolution = clampResolution(resolution)
   const data = new Uint8Array(textureResolution * textureResolution * 4)
@@ -89,13 +82,14 @@ export function createPascalWaterFieldTextureData({
   )
   const distanceIndex = createDistanceIndex(openPerimeter, shoreUsefulDistance)
   const depthDistanceIndex = createDistanceIndex(depthPerimeter, depthExactDistance)
+  const world = { x: 0, z: 0 }
+  const denominator = textureResolution - 1
 
   for (let y = 0; y < textureResolution; y += 1) {
+    world.z = (y / denominator - 0.5) * planeSize
+
     for (let x = 0; x < textureResolution; x += 1) {
-      const world = {
-        x: (x / (textureResolution - 1) - 0.5) * planeSize,
-        z: (y / (textureResolution - 1) - 0.5) * planeSize,
-      }
+      world.x = (x / denominator - 0.5) * planeSize
       const index = (y * textureResolution + x) * 4
       const boundsDistance = distanceToBounds(world, perimeterBounds)
       const depthBoundsDistance = distanceToBounds(world, depthBounds)
@@ -141,142 +135,13 @@ export function createPascalWaterFieldTextureData({
   return { data, height: textureResolution, width: textureResolution }
 }
 
-export function createPascalWaterFieldTextureFromData(
-  bytes: Uint8Array,
-  width: number,
-  height: number,
-) {
-  const texture = new DataTexture(bytes, width, height, RGBAFormat)
-  texture.flipY = false
-  texture.magFilter = LinearFilter
-  texture.minFilter = LinearFilter
-  texture.wrapS = ClampToEdgeWrapping
-  texture.wrapT = ClampToEdgeWrapping
-  texture.needsUpdate = true
-  return texture
-}
-
-export function createPascalWaterFieldTexture(options: WaterFieldOptions) {
-  const { data, height, width } = createPascalWaterFieldTextureData(options)
-  return createPascalWaterFieldTextureFromData(data, width, height)
-}
-
-export function createPascalWaveDepthFieldTexture(
-  sourceTexture: DataTexture,
-  parameters: Pick<PascalWaterFieldParameters, 'depthExponent' | 'depthReach' | 'edgeFadeDistance'>,
-  smoothingRatio: number,
-  planeSize: number,
-) {
-  const image = sourceTexture.image as {
-    data?: Uint8Array
-    height?: number
-    width?: number
-  }
-  const width = image.width ?? 1
-  const height = image.height ?? width
-  const source = image.data
-  const baseValues = new Float32Array(width * height)
-  const smoothedValues = new Float32Array(width * height)
-  const bytes = new Uint8Array(width * height * 4)
-  const smoothAmount = clamp01(smoothingRatio)
-
-  if (!source) {
-    return createPascalWaterFieldTextureFromData(bytes, width, height)
-  }
-
-  for (let pixelIndex = 0; pixelIndex < baseValues.length; pixelIndex += 1) {
-    const sourceIndex = pixelIndex * 4
-    const depthRatio = ((source[sourceIndex] ?? 0) * 256 + (source[sourceIndex + 1] ?? 0)) / 65535
-    if (depthRatio >= 0.995) {
-      baseValues[pixelIndex] = -1
-      continue
-    }
-
-    const edgeDistance =
-      ((source[sourceIndex + 2] ?? 0) / 255) * PASCAL_WATER_FIELD_DEPTH_REFERENCE_REACH
-    const edgeFade = smoothstep(0, parameters.edgeFadeDistance, edgeDistance)
-    const offshore = clamp01(
-      (depthRatio * PASCAL_WATER_FIELD_DEPTH_REFERENCE_REACH) /
-        Math.max(parameters.depthReach, 0.001),
-    )
-    baseValues[pixelIndex] = (1 - offshore ** parameters.depthExponent) * edgeFade
-  }
-
-  const radius = Math.max(1, Math.round((3 / planeSize) * Math.max(width, height)))
-  const diagonalRadius = Math.max(1, Math.round(radius * Math.SQRT1_2))
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const pixelIndex = y * width + x
-      const baseValue = baseValues[pixelIndex] ?? -1
-      if (baseValue < 0) {
-        smoothedValues[pixelIndex] = -1
-        continue
-      }
-
-      const smoothedValue = weightedWaveDepthSample(baseValues, width, height, x, y, [
-        [0, 0, 0.2],
-        [radius, 0, 0.12],
-        [-radius, 0, 0.12],
-        [0, radius, 0.12],
-        [0, -radius, 0.12],
-        [diagonalRadius, diagonalRadius, 0.08],
-        [-diagonalRadius, diagonalRadius, 0.08],
-        [diagonalRadius, -diagonalRadius, 0.08],
-        [-diagonalRadius, -diagonalRadius, 0.08],
-      ])
-      smoothedValues[pixelIndex] = lerp(baseValue, smoothedValue, smoothAmount)
-    }
-  }
-
-  for (let pixelIndex = 0; pixelIndex < smoothedValues.length; pixelIndex += 1) {
-    const value = smoothedValues[pixelIndex] ?? -1
-    const byteValue = value < 0 ? 0 : byte(value)
-    const index = pixelIndex * 4
-    bytes[index] = byteValue
-    bytes[index + 1] = byteValue
-    bytes[index + 2] = byteValue
-    bytes[index + 3] = value < 0 ? 0 : 255
-  }
-
-  return createPascalWaterFieldTextureFromData(bytes, width, height)
-}
-
-export function createPascalWaterSmoothedPerimeter(
-  perimeter: readonly PascalWaterPoint2[],
-  samplesPerSegment = 2,
-) {
-  const ring = openRing(perimeter)
-  if (ring.length < 4) return ring
-
-  const smoothed: PascalWaterPoint2[] = []
-  for (let index = 0; index < ring.length; index += 1) {
-    const p0 = ring[(index - 1 + ring.length) % ring.length]!
-    const p1 = ring[index]!
-    const p2 = ring[(index + 1) % ring.length]!
-    const p3 = ring[(index + 2) % ring.length]!
-
-    for (let step = 0; step < samplesPerSegment; step += 1) {
-      const t = step / samplesPerSegment
-      smoothed.push({
-        x: catmullRom(p0.x, p1.x, p2.x, p3.x, t),
-        z: catmullRom(p0.z, p1.z, p2.z, p3.z, t),
-      })
-    }
-  }
-
-  return smoothed
-}
-
-export function createPascalWaterDepthReferencePerimeter(
-  points: readonly PascalWaterPoint2[],
-  parameters?: Partial<PascalWaterFieldParameters>,
-) {
+function createPascalWaterDepthReferencePerimeter(points, parameters) {
   if (points.length < 3) return [...points]
   const params = { ...PASCAL_WATER_FIELD_DEFAULT_PARAMETERS, ...parameters }
-  const center = points.reduce((total, point) => ({ x: total.x + point.x, z: total.z + point.z }), {
-    x: 0,
-    z: 0,
-  })
+  const center = points.reduce(
+    (total, point) => ({ x: total.x + point.x, z: total.z + point.z }),
+    { x: 0, z: 0 },
+  )
   const centerX = center.x / points.length
   const centerZ = center.z / points.length
 
@@ -319,39 +184,7 @@ export function createPascalWaterDepthReferencePerimeter(
   })
 }
 
-type WaterFieldBounds = {
-  depth: number
-  maxX: number
-  maxZ: number
-  minX: number
-  minZ: number
-  width: number
-}
-
-type WaterFieldSegment = {
-  end: PascalWaterPoint2
-  maxX: number
-  maxZ: number
-  minX: number
-  minZ: number
-  start: PascalWaterPoint2
-}
-
-type DistanceIndex = {
-  cells: Map<string, WaterFieldSegment[]>
-  cellSize: number
-  maxDistance: number
-}
-
-function catmullRom(a: number, b: number, c: number, d: number, t: number) {
-  const t2 = t * t
-  const t3 = t2 * t
-  return (
-    0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3)
-  )
-}
-
-function collapsePocketField(angle: number, scale: number) {
+function collapsePocketField(angle, scale) {
   let value = 0
   const widthMultiplier = Math.max(0.2, scale)
 
@@ -367,17 +200,14 @@ function collapsePocketField(angle: number, scale: number) {
   return Math.min(1, value)
 }
 
-function angularDistance(a: number, b: number) {
+function angularDistance(a, b) {
   const delta = Math.abs(((((a - b + Math.PI) % TAU) + TAU) % TAU) - Math.PI)
   return Math.min(delta, TAU - delta)
 }
 
-function createDistanceIndex(
-  points: readonly PascalWaterPoint2[],
-  maxDistance: number,
-): DistanceIndex {
+function createDistanceIndex(points, maxDistance) {
   const cellSize = Math.max(8, Math.min(24, maxDistance / 3))
-  const cells = new Map<string, WaterFieldSegment[]>()
+  const cells = new Map()
 
   for (let index = 0; index < points.length; index += 1) {
     const start = points[index]
@@ -413,30 +243,7 @@ function createDistanceIndex(
   return { cells, cellSize, maxDistance }
 }
 
-function weightedWaveDepthSample(
-  values: Float32Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  samples: readonly (readonly [number, number, number])[],
-) {
-  let weightedValue = 0
-  let totalWeight = 0
-
-  for (const [offsetX, offsetY, weight] of samples) {
-    const sampleX = Math.max(0, Math.min(width - 1, x + offsetX))
-    const sampleY = Math.max(0, Math.min(height - 1, y + offsetY))
-    const sampleValue = values[sampleY * width + sampleX]
-    if (sampleValue === undefined || sampleValue < 0) continue
-    weightedValue += sampleValue * weight
-    totalWeight += weight
-  }
-
-  return totalWeight > 0 ? weightedValue / totalWeight : values[y * width + x] || 0
-}
-
-function distanceToIndexedPolyline(point: PascalWaterPoint2, index: DistanceIndex) {
+function distanceToIndexedPolyline(point, index) {
   const candidates = index.cells.get(
     gridKey(gridCell(point.x, index.cellSize), gridCell(point.z, index.cellSize)),
   )
@@ -449,15 +256,15 @@ function distanceToIndexedPolyline(point: PascalWaterPoint2, index: DistanceInde
   return best
 }
 
-function gridCell(value: number, cellSize: number) {
+function gridCell(value, cellSize) {
   return Math.floor(value / cellSize)
 }
 
-function gridKey(cellX: number, cellZ: number) {
+function gridKey(cellX, cellZ) {
   return `${cellX}:${cellZ}`
 }
 
-function boundsFor(points: readonly PascalWaterPoint2[]): WaterFieldBounds {
+function boundsFor(points) {
   let minX = Number.POSITIVE_INFINITY
   let minZ = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -477,24 +284,19 @@ function boundsFor(points: readonly PascalWaterPoint2[]): WaterFieldBounds {
   return { depth: maxZ - minZ, maxX, maxZ, minX, minZ, width: maxX - minX }
 }
 
-function distanceToBounds(point: PascalWaterPoint2, bounds: WaterFieldBounds) {
+function distanceToBounds(point, bounds) {
   const dx = point.x < bounds.minX ? bounds.minX - point.x : Math.max(0, point.x - bounds.maxX)
   const dz = point.z < bounds.minZ ? bounds.minZ - point.z : Math.max(0, point.z - bounds.maxZ)
   return Math.hypot(dx, dz)
 }
 
-function approximateDepthDistance(
-  point: PascalWaterPoint2,
-  center: PascalWaterPoint2,
-  radius: number,
-  exactDistance: number,
-) {
+function approximateDepthDistance(point, center, radius, exactDistance) {
   const radialDistance = Math.max(0, Math.hypot(point.x - center.x, point.z - center.z) - radius)
 
   return Math.min(WATER_FIELD_DEPTH_DISTANCE_MAX_METERS, Math.max(exactDistance, radialDistance))
 }
 
-function centerFor(points: readonly PascalWaterPoint2[]) {
+function centerFor(points) {
   if (points.length === 0) return { x: 0, z: 0 }
   let x = 0
   let z = 0
@@ -505,7 +307,7 @@ function centerFor(points: readonly PascalWaterPoint2[]) {
   return { x: x / points.length, z: z / points.length }
 }
 
-function averageRadiusFor(points: readonly PascalWaterPoint2[], center: PascalWaterPoint2) {
+function averageRadiusFor(points, center) {
   if (points.length === 0) return 0
   let radius = 0
   for (const point of points) {
@@ -514,15 +316,15 @@ function averageRadiusFor(points: readonly PascalWaterPoint2[], center: PascalWa
   return radius / points.length
 }
 
-function openRing(points: readonly PascalWaterPoint2[]) {
+function openRing(points) {
   if (points.length < 2) return [...points]
-  const first = points[0]!
-  const last = points[points.length - 1]!
+  const first = points[0]
+  const last = points[points.length - 1]
   if (Math.hypot(first.x - last.x, first.z - last.z) <= 0.001) return points.slice(0, -1)
   return [...points]
 }
 
-function pointInPolygon(point: PascalWaterPoint2, polygon: readonly PascalWaterPoint2[]) {
+function pointInPolygon(point, polygon) {
   let inside = false
   for (let index = 0, previousIndex = polygon.length - 1; index < polygon.length; index += 1) {
     const current = polygon[index]
@@ -539,11 +341,7 @@ function pointInPolygon(point: PascalWaterPoint2, polygon: readonly PascalWaterP
   return inside
 }
 
-function distanceToSegment(
-  point: PascalWaterPoint2,
-  start: PascalWaterPoint2,
-  end: PascalWaterPoint2,
-) {
+function distanceToSegment(point, start, end) {
   const dx = end.x - start.x
   const dz = end.z - start.z
   const lengthSquared = dx * dx + dz * dz || 0.000001
@@ -556,33 +354,29 @@ function distanceToSegment(
   return Math.hypot(point.x - closestX, point.z - closestZ)
 }
 
-function smoothstep(edge0: number, edge1: number, value: number) {
+function smoothstep(edge0, edge1, value) {
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0 || 0.000001)))
   return t * t * (3 - 2 * t)
 }
 
-function byte(value: number) {
+function byte(value) {
   return Math.max(0, Math.min(255, Math.round(value * 255)))
 }
 
-function clamp01(value: number) {
-  return Math.max(0, Math.min(1, value))
-}
-
-function packUnit16(value: number): [number, number] {
+function packUnit16(value) {
   const encoded = Math.max(0, Math.min(65535, Math.round(value * 65535)))
   return [Math.floor(encoded / 256), encoded % 256]
 }
 
-function clampResolution(value: number) {
+function clampResolution(value) {
   return Math.max(64, Math.min(PASCAL_WATER_FIELD_RESOLUTION, Math.round(value)))
 }
 
-function clampRange(value: number, min: number, max: number) {
+function clampRange(value, min, max) {
   return Math.max(min, Math.min(max, value))
 }
 
-function fbm(x: number, y: number, seed: number) {
+function fbm(x, y, seed) {
   let value = 0
   let amplitude = 0.55
   let frequency = 1
@@ -596,7 +390,7 @@ function fbm(x: number, y: number, seed: number) {
   return value
 }
 
-function valueNoise(x: number, y: number, seed: number) {
+function valueNoise(x, y, seed) {
   const ix = Math.floor(x)
   const iy = Math.floor(y)
   const fx = x - ix
@@ -610,11 +404,11 @@ function valueNoise(x: number, y: number, seed: number) {
   )
 }
 
-function gridHash(x: number, y: number, seed: number) {
+function gridHash(x, y, seed) {
   const value = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453123
   return value - Math.floor(value)
 }
 
-function lerp(a: number, b: number, t: number) {
+function lerp(a, b, t) {
   return a + (b - a) * t
 }

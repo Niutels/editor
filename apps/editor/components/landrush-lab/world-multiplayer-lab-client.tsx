@@ -29,6 +29,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
+  type RefObject,
   Suspense,
   useCallback,
   useEffect,
@@ -1938,8 +1939,6 @@ function LocalMapPlayerMarker({
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
-  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
-  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
 
   useFrame((_, delta) => {
     const group = groupRef.current
@@ -1953,65 +1952,7 @@ function LocalMapPlayerMarker({
     group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
   })
 
-  return (
-    <group ref={groupRef} visible={false}>
-      <mesh renderOrder={91} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[1.08, 36]} />
-        <meshBasicMaterial
-          color="#0f172a"
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.46}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.76, 1.02, 40]} />
-        <meshBasicMaterial
-          color="#f8fafc"
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.82}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[arrowShape]} />
-        <meshBasicMaterial
-          color={color}
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.96}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh renderOrder={94} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[directionShape]} />
-        <meshBasicMaterial
-          color="#f8fafc"
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.96}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh renderOrder={95} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[0.28, 24]} />
-        <meshBasicMaterial
-          color="#f8fafc"
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.95}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-    </group>
-  )
+  return <MapPlayerBadgeMarker color={color} groupRef={groupRef} visible={false} />
 }
 
 function RemoteMapPlayerMarker({
@@ -2024,8 +1965,6 @@ function RemoteMapPlayerMarker({
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
-  const arrowShape = useMemo(() => createMapPlayerArrowShape(), [])
-  const directionShape = useMemo(() => createMapPlayerDirectionShape(), [])
   const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
@@ -2055,53 +1994,135 @@ function RemoteMapPlayerMarker({
 
   return (
     <group ref={groupRef} visible={false}>
-      <mesh renderOrder={95} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
-        <circleGeometry args={[1.08, 36]} />
+      <MapPlayerBadgeMarker color={player.color} scale={1.28} />
+      <Html center className="pointer-events-none" position={[0, 0.36, 0]} zIndexRange={[68, 0]}>
+        <span className="whitespace-nowrap rounded-full border border-white/16 bg-slate-950/72 px-2 py-0.5 text-[10px] font-semibold text-white/86 shadow-lg backdrop-blur">
+          {player.name}
+        </span>
+      </Html>
+    </group>
+  )
+}
+
+function MapPlayerBadgeMarker({
+  color,
+  groupRef,
+  scale = 1.5,
+  visible = true,
+}: {
+  color: string
+  groupRef?: RefObject<Group>
+  scale?: number
+  visible?: boolean
+}) {
+  return (
+    <group ref={groupRef} scale={scale} visible={visible}>
+      <mesh renderOrder={91} rotation={[-Math.PI / 2, 0, 0]} scale={1.14}>
+        <circleGeometry args={[0.92, 32]} />
         <meshBasicMaterial
           color="#020617"
           depthTest={false}
           depthWrite={false}
-          opacity={0.5}
+          opacity={0.52}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh renderOrder={96} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
-        <ringGeometry args={[0.76, 1.02, 40]} />
+      <mesh
+        position={[0, 0, 0.9]}
+        renderOrder={91}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={1.14}
+      >
+        <circleGeometry args={[0.62, 3]} />
+        <meshBasicMaterial
+          color="#020617"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.52}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]} scale={1.03}>
+        <circleGeometry args={[0.92, 32]} />
         <meshBasicMaterial
           color="#f8fafc"
           depthTest={false}
           depthWrite={false}
-          opacity={0.74}
+          opacity={0.9}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh renderOrder={97} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
-        <shapeGeometry args={[arrowShape]} />
-        <meshBasicMaterial
-          color={player.color}
-          depthTest={false}
-          depthWrite={false}
-          opacity={0.96}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh renderOrder={98} rotation={[-Math.PI / 2, 0, 0]} scale={0.82}>
-        <shapeGeometry args={[directionShape]} />
+      <mesh
+        position={[0, 0, 0.9]}
+        renderOrder={92}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={1.03}
+      >
+        <circleGeometry args={[0.62, 3]} />
         <meshBasicMaterial
           color="#f8fafc"
           depthTest={false}
           depthWrite={false}
-          opacity={0.96}
+          opacity={0.9}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <Html center className="pointer-events-none" position={[0, 0.36, 0]} zIndexRange={[68, 0]}>
-        <span className="whitespace-nowrap rounded-full border border-white/16 bg-slate-950/72 px-2 py-0.5 text-[10px] font-semibold text-white/86 shadow-lg backdrop-blur">
-          {player.name}
+      <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]} scale={0.9}>
+        <circleGeometry args={[0.92, 32]} />
+        <meshBasicMaterial
+          color={color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.98}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh
+        position={[0, 0, 0.9]}
+        renderOrder={93}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={0.9}
+      >
+        <circleGeometry args={[0.5, 3]} />
+        <meshBasicMaterial
+          color={color}
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.98}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <mesh
+        position={[0, 0, 1.18]}
+        renderOrder={94}
+        rotation={[-Math.PI / 2, 0, -Math.PI / 2]}
+        scale={0.9}
+      >
+        <circleGeometry args={[0.24, 3]} />
+        <meshBasicMaterial
+          color="#f8fafc"
+          depthTest={false}
+          depthWrite={false}
+          opacity={0.98}
+          toneMapped={false}
+          transparent
+        />
+      </mesh>
+      <Html center className="pointer-events-none select-none" position={[0, 0.12, 0]}>
+        <span
+          className="grid h-5 w-5 place-items-center rounded-full text-[13px] font-black leading-none text-slate-950"
+          style={{
+            textShadow:
+              '0 1px 0 rgba(248,250,252,0.95), 1px 0 0 rgba(248,250,252,0.95), 0 -1px 0 rgba(248,250,252,0.95), -1px 0 0 rgba(248,250,252,0.95)',
+          }}
+        >
+          P
         </span>
       </Html>
     </group>
@@ -2814,9 +2835,7 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'parcel-build-nodes-snapshot') {
           if (message.worldId !== watchedParcelWorldIdRef.current) return
-          setParcelBuildNodeMap(
-            new Map(message.builds.map((build) => [build.parcelId, build])),
-          )
+          setParcelBuildNodeMap(new Map(message.builds.map((build) => [build.parcelId, build])))
           return
         }
 
@@ -3184,28 +3203,6 @@ function centeredShapeFromParcel(parcel: ParcelAllocationParcel) {
     const point = ring[index]
     if (point) shape.lineTo(point.x - parcel.centroid.x, -(point.z - parcel.centroid.z))
   }
-  shape.closePath()
-  return shape
-}
-
-function createMapPlayerArrowShape() {
-  const shape = new Shape()
-  shape.moveTo(0, -1.18)
-  shape.lineTo(0.62, 0.42)
-  shape.lineTo(0.22, 0.26)
-  shape.lineTo(0.22, 0.78)
-  shape.lineTo(-0.22, 0.78)
-  shape.lineTo(-0.22, 0.26)
-  shape.lineTo(-0.62, 0.42)
-  shape.closePath()
-  return shape
-}
-
-function createMapPlayerDirectionShape() {
-  const shape = new Shape()
-  shape.moveTo(0, -1.72)
-  shape.lineTo(0.26, -1.16)
-  shape.lineTo(-0.26, -1.16)
   shape.closePath()
   return shape
 }

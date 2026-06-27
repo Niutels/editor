@@ -27,6 +27,27 @@ import { LandrushBrunoWaterWind } from './bruno-water-wind'
 
 export { LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION } from './bruno-water-noises'
 
+function roundLandrushWaterMaterialPerf(value: number) {
+  return Math.round(value * 1000) / 1000
+}
+
+function measureLandrushWaterMaterialStartup<T>(id: string, callback: () => T) {
+  if (typeof performance === 'undefined') return callback()
+  const profile = globalThis.__PASCAL_WATER_STARTUP_PROFILE__
+  if (!profile) return callback()
+
+  const startedAt = performance.now()
+  try {
+    return callback()
+  } finally {
+    profile.spans.push({
+      durationMs: roundLandrushWaterMaterialPerf(performance.now() - startedAt),
+      id,
+      startMs: roundLandrushWaterMaterialPerf(startedAt - profile.startedAt),
+    })
+  }
+}
+
 export const LANDRUSH_WATER_SURFACE_ELEVATION = -0.3
 export const LANDRUSH_WATER_DEPTH_ELEVATION = -1.5
 export const LANDRUSH_WATER_SURFACE_THICKNESS = 0.013
@@ -180,24 +201,64 @@ function createLandrushWaterMaterialInternal(
   params: LandrushIncomingWaterSurfaceParameters,
   ripplePhase: 'incoming' | 'shore',
 ): LandrushIncomingWaterSurfaceMaterial {
-  terrainFieldTexture.wrapS = ClampToEdgeWrapping
-  terrainFieldTexture.wrapT = ClampToEdgeWrapping
+  return measureLandrushWaterMaterialStartup('setup.landrush-water.material.internal', () => {
+    terrainFieldTexture.wrapS = ClampToEdgeWrapping
+    terrainFieldTexture.wrapT = ClampToEdgeWrapping
 
-  const noises = new LandrushBrunoWaterNoises(renderer)
-  const wind = new LandrushBrunoWaterWind(noises)
-  wind.angle = params.windAngle
-  wind.direction.value.set(Math.sin(params.windAngle), Math.cos(params.windAngle))
-  wind.strength.value = params.windStrength
-  wind.timeFrequency = params.windTimeFrequency
+    const noises = measureLandrushWaterMaterialStartup(
+      'setup.landrush-water.material.create-noises',
+      () => new LandrushBrunoWaterNoises(renderer),
+    )
+    const wind = measureLandrushWaterMaterialStartup(
+      'setup.landrush-water.material.create-wind',
+      () => new LandrushBrunoWaterWind(noises),
+    )
+    wind.angle = params.windAngle
+    wind.direction.value.set(Math.sin(params.windAngle), Math.cos(params.windAngle))
+    wind.strength.value = params.windStrength
+    wind.timeFrequency = params.windTimeFrequency
 
-  const context = createLandrushBrunoWaterContext({
-    bounds,
-    noises,
-    params,
-    terrainFieldTexture,
-    wind,
+    const context = measureLandrushWaterMaterialStartup(
+      'setup.landrush-water.material.create-context',
+      () =>
+        createLandrushBrunoWaterContext({
+          bounds,
+          noises,
+          params,
+          terrainFieldTexture,
+          wind,
+        }),
+    )
+
+    const material = measureLandrushWaterMaterialStartup(
+      'setup.landrush-water.material.build-node-graph',
+      () =>
+        createLandrushWaterMaterialFromContext({
+          context,
+          noises,
+          params,
+          ripplePhase,
+          wind,
+        }),
+    )
+
+    return material
   })
+}
 
+function createLandrushWaterMaterialFromContext({
+  context,
+  noises,
+  params,
+  ripplePhase,
+  wind,
+}: {
+  context: ReturnType<typeof createLandrushBrunoWaterContext>
+  noises: LandrushBrunoWaterNoises
+  params: LandrushIncomingWaterSurfaceParameters
+  ripplePhase: 'incoming' | 'shore'
+  wind: LandrushBrunoWaterWind
+}): LandrushIncomingWaterSurfaceMaterial {
   const depthExponent = uniform(params.depthExponent)
   const depthNoiseFrequency = uniform(params.depthNoiseFrequency)
   const depthNoiseStrength = uniform(params.depthNoiseStrength)

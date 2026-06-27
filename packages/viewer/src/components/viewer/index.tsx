@@ -39,6 +39,8 @@ declare module '@react-three/fiber' {
 
 extend(THREE as any)
 
+type ViewerRendererBackend = 'webgpu' | 'webgl'
+
 // R3F's <Canvas> useLayoutEffect has no deps, so any re-render (theme switch,
 // parent re-render, StrictMode double-mount) re-invokes `configure()`. With a
 // sync `gl` factory that's harmless — the renderer is created once and reused.
@@ -48,14 +50,14 @@ extend(THREE as any)
 // `state.gl` but R3F's store already holds the new size/dpr, so the new
 // renderer is never resized and stays at the canvas's 300×150 default.
 //
-// Caching by canvas guarantees both branches return the same instance, so
-// "duplicate" configure calls become no-ops on an already-sized renderer.
+// Caching by canvas/backend guarantees duplicate configure calls return the
+// same instance without letting a WebGL fallback poison a later WebGPU mount.
 // We cache the in-flight Promise (not just the resolved renderer) so two
 // concurrent configure() calls await the same init instead of creating two
 // renderers in parallel and only caching the second.
 const WEBGPU_RENDERER_CACHE = new WeakMap<
   HTMLCanvasElement,
-  Promise<THREE.WebGPURenderer | WebGLRenderer>
+  Map<ViewerRendererBackend, Promise<THREE.WebGPURenderer | WebGLRenderer>>
 >()
 
 /**
@@ -139,7 +141,7 @@ interface ViewerProps {
   selectionManager?: 'default' | 'custom'
   perf?: boolean
   postProcessing?: boolean
-  rendererBackend?: 'webgpu' | 'webgl'
+  rendererBackend?: ViewerRendererBackend
   useBvh?: boolean
   renderContext?: RenderContext
   defaultRender?: {
@@ -265,7 +267,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         gl={
           ((props: { canvas?: HTMLCanvasElement }) => {
             const canvas = props.canvas
-            const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined
+            const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas)?.get(rendererBackend) : undefined
             if (cached) return cached
             const promise = (async () => {
               if (rendererBackend === 'webgl') {
@@ -298,7 +300,14 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
                 return renderer
               }
             })()
-            if (canvas) WEBGPU_RENDERER_CACHE.set(canvas, promise)
+            if (canvas) {
+              let backendCache = WEBGPU_RENDERER_CACHE.get(canvas)
+              if (!backendCache) {
+                backendCache = new Map()
+                WEBGPU_RENDERER_CACHE.set(canvas, backendCache)
+              }
+              backendCache.set(rendererBackend, promise)
+            }
             return promise
           }) as any
         }

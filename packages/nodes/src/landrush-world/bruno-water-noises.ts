@@ -26,6 +26,27 @@ import {
 
 export const LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION = 128
 
+function roundLandrushWaterNoisePerf(value: number) {
+  return Math.round(value * 1000) / 1000
+}
+
+function measureLandrushWaterNoiseStartup<T>(id: string, callback: () => T) {
+  if (typeof performance === 'undefined') return callback()
+  const profile = globalThis.__PASCAL_WATER_STARTUP_PROFILE__
+  if (!profile) return callback()
+
+  const startedAt = performance.now()
+  try {
+    return callback()
+  } finally {
+    profile.spans.push({
+      durationMs: roundLandrushWaterNoisePerf(performance.now() - startedAt),
+      id,
+      startMs: roundLandrushWaterNoisePerf(startedAt - profile.startedAt),
+    })
+  }
+}
+
 const brunoHash = /*#__PURE__*/ Fn(([pImmutable]) => {
   const p = vec2(pImmutable).toVar()
   p.assign(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))))
@@ -157,10 +178,12 @@ export class LandrushBrunoWaterNoises {
   private readonly resolution = LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION
 
   constructor(renderer: THREE.WebGPURenderer) {
-    this.renderer = renderer
-    this.voronoi = this.renderVoronoi()
-    this.perlin = this.renderPerlin()
-    this.hash = this.renderHash()
+    measureLandrushWaterNoiseStartup('setup.landrush-water.noises.constructor', () => {
+      this.renderer = renderer
+      this.voronoi = this.renderVoronoi()
+      this.perlin = this.renderPerlin()
+      this.hash = this.renderHash()
+    })
   }
 
   dispose() {
@@ -170,70 +193,91 @@ export class LandrushBrunoWaterNoises {
   }
 
   private renderVoronoi() {
-    const renderTarget = new THREE.RenderTarget(this.resolution, this.resolution, {
-      depthBuffer: false,
-      type: THREE.HalfFloatType,
-    })
-    this.renderTargets.push(renderTarget)
-    renderTarget.texture.wrapS = THREE.RepeatWrapping
-    renderTarget.texture.wrapT = THREE.RepeatWrapping
+    return measureLandrushWaterNoiseStartup('setup.landrush-water.noises.voronoi', () => {
+      const renderTarget = new THREE.RenderTarget(this.resolution, this.resolution, {
+        depthBuffer: false,
+        type: THREE.HalfFloatType,
+      })
+      this.renderTargets.push(renderTarget)
+      renderTarget.texture.wrapS = THREE.RepeatWrapping
+      renderTarget.texture.wrapT = THREE.RepeatWrapping
 
-    const material = new THREE.MeshBasicNodeMaterial({ color: 'red', wireframe: false })
-    material.outputNode = vec4(voronoiNode(uv(), 8), 0)
-    this.render(material, renderTarget)
-    return renderTarget.texture
+      const material = new THREE.MeshBasicNodeMaterial({ color: 'red', wireframe: false })
+      material.outputNode = vec4(voronoiNode(uv(), 8), 0)
+      this.render(material, renderTarget, 'voronoi')
+      return renderTarget.texture
+    })
   }
 
   private renderPerlin() {
-    const renderTarget = new THREE.RenderTarget(this.resolution, this.resolution, {
-      depthBuffer: false,
-      format: THREE.RedFormat,
-      type: THREE.HalfFloatType,
-    })
-    this.renderTargets.push(renderTarget)
-    renderTarget.texture.wrapS = THREE.RepeatWrapping
-    renderTarget.texture.wrapT = THREE.RepeatWrapping
+    return measureLandrushWaterNoiseStartup('setup.landrush-water.noises.perlin', () => {
+      const renderTarget = new THREE.RenderTarget(this.resolution, this.resolution, {
+        depthBuffer: false,
+        format: THREE.RedFormat,
+        type: THREE.HalfFloatType,
+      })
+      this.renderTargets.push(renderTarget)
+      renderTarget.texture.wrapS = THREE.RepeatWrapping
+      renderTarget.texture.wrapT = THREE.RepeatWrapping
 
-    const material = new THREE.MeshBasicNodeMaterial()
-    material.outputNode = vec4(
-      perlinNode(uv(), 6.0, 6.0).remap(0.1, 0.9, 0.0, 1.0),
-      brunoHash(uv().mul(128).floor().div(128)).x,
-      0,
-      0,
-    )
-    this.render(material, renderTarget)
-    return renderTarget.texture
+      const material = new THREE.MeshBasicNodeMaterial()
+      material.outputNode = vec4(
+        perlinNode(uv(), 6.0, 6.0).remap(0.1, 0.9, 0.0, 1.0),
+        brunoHash(uv().mul(128).floor().div(128)).x,
+        0,
+        0,
+      )
+      this.render(material, renderTarget, 'perlin')
+      return renderTarget.texture
+    })
   }
 
   private renderHash() {
-    const renderTarget = new THREE.RenderTarget(this.resolution, this.resolution, {
-      depthBuffer: false,
-      format: THREE.RedFormat,
-      type: THREE.HalfFloatType,
-    })
-    this.renderTargets.push(renderTarget)
-    renderTarget.texture.wrapS = THREE.RepeatWrapping
-    renderTarget.texture.wrapT = THREE.RepeatWrapping
-    renderTarget.texture.minFilter = THREE.NearestFilter
-    renderTarget.texture.magFilter = THREE.NearestFilter
-    renderTarget.texture.generateMipmaps = false
+    return measureLandrushWaterNoiseStartup('setup.landrush-water.noises.hash', () => {
+      const renderTarget = new THREE.RenderTarget(this.resolution, this.resolution, {
+        depthBuffer: false,
+        format: THREE.RedFormat,
+        type: THREE.HalfFloatType,
+      })
+      this.renderTargets.push(renderTarget)
+      renderTarget.texture.wrapS = THREE.RepeatWrapping
+      renderTarget.texture.wrapT = THREE.RepeatWrapping
+      renderTarget.texture.minFilter = THREE.NearestFilter
+      renderTarget.texture.magFilter = THREE.NearestFilter
+      renderTarget.texture.generateMipmaps = false
 
-    const material = new THREE.MeshBasicNodeMaterial()
-    material.outputNode = vec4(brunoHash(viewportUV).x, 0, 0, 0)
-    this.render(material, renderTarget)
-    return renderTarget.texture
+      const material = new THREE.MeshBasicNodeMaterial()
+      material.outputNode = vec4(brunoHash(viewportUV).x, 0, 0, 0)
+      this.render(material, renderTarget, 'hash')
+      return renderTarget.texture
+    })
   }
 
-  private render(material: THREE.MeshBasicNodeMaterial, renderTarget: THREE.RenderTarget) {
-    this.quadMesh.material = material
-    const rendererState = THREE.RendererUtils.resetRendererState(this.renderer)
+  private render(
+    material: THREE.MeshBasicNodeMaterial,
+    renderTarget: THREE.RenderTarget,
+    profileId: string,
+  ) {
+    measureLandrushWaterNoiseStartup(`setup.landrush-water.noises.${profileId}.render`, () => {
+      this.quadMesh.material = material
+      const rendererState = measureLandrushWaterNoiseStartup(
+        `setup.landrush-water.noises.${profileId}.reset-renderer-state`,
+        () => THREE.RendererUtils.resetRendererState(this.renderer),
+      )
 
-    this.renderer.setPixelRatio(1)
-    this.renderer.setRenderTarget(renderTarget)
-    this.quadMesh.render(this.renderer)
-    this.renderer.setRenderTarget(null)
+      this.renderer.setPixelRatio(1)
+      this.renderer.setRenderTarget(renderTarget)
+      measureLandrushWaterNoiseStartup(
+        `setup.landrush-water.noises.${profileId}.quad-render`,
+        () => this.quadMesh.render(this.renderer),
+      )
+      this.renderer.setRenderTarget(null)
 
-    THREE.RendererUtils.restoreRendererState(this.renderer, rendererState)
-    material.dispose()
+      measureLandrushWaterNoiseStartup(
+        `setup.landrush-water.noises.${profileId}.restore-renderer-state`,
+        () => THREE.RendererUtils.restoreRendererState(this.renderer, rendererState),
+      )
+      material.dispose()
+    })
   }
 }
