@@ -46,7 +46,13 @@ export type FirstPersonSpawn = {
   yaw: number
 }
 
-type ColliderNodeType = (typeof COLLIDER_NODE_TYPES)[number]
+export type ColliderNodeType = (typeof COLLIDER_NODE_TYPES)[number]
+
+export type FirstPersonColliderWorldOptions = {
+  excludeNodeTypes?: readonly ColliderNodeType[]
+  includeNodeTypes?: readonly ColliderNodeType[]
+  userData?: THREE.Mesh['userData']
+}
 
 function isMesh(object: THREE.Object3D): object is THREE.Mesh {
   return 'isMesh' in object && (object as THREE.Mesh).isMesh
@@ -243,17 +249,24 @@ function collectColliderGeometriesFromNode(
   return geometries
 }
 
-export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonColliderWorld | null {
+export function buildFirstPersonColliderWorldFromRegistry(
+  options: FirstPersonColliderWorldOptions = {},
+): FirstPersonColliderWorld | null {
   const geometries: THREE.BufferGeometry[] = []
   const visitedMeshes = new WeakSet<THREE.Object3D>()
   const registeredNodeTypes = buildRegisteredNodeTypeLookup()
   const registeredObjectIds = new Map<THREE.Object3D, string>()
+  const includeNodeTypes = options.includeNodeTypes ? new Set(options.includeNodeTypes) : null
+  const excludeNodeTypes = options.excludeNodeTypes ? new Set(options.excludeNodeTypes) : null
 
   for (const [nodeId, object] of sceneRegistry.nodes) {
     registeredObjectIds.set(object, nodeId)
   }
 
   for (const type of COLLIDER_NODE_TYPES) {
+    if (includeNodeTypes && !includeNodeTypes.has(type)) continue
+    if (excludeNodeTypes?.has(type)) continue
+
     for (const nodeId of sceneRegistry.byType[type]!) {
       if (shouldSkipColliderNode(nodeId, type)) continue
 
@@ -320,6 +333,7 @@ export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonCollider
     restitution: 0.05,
     excludeFloatHit: false,
     excludeCollisionCheck: false,
+    ...options.userData,
   }
   mesh.updateMatrixWorld(true)
 

@@ -124,6 +124,7 @@ type LandrushRobotProps = {
   onHoverPoseSample?: (sample: LandrushRobotHoverPoseSample) => void
   presentationMode?: LandrushRobotPresentationMode
   profileMeasure?: LandrushRobotProfileMeasure
+  visualRootRef?: { current: Group | null }
 }
 
 export function LandrushRobot({
@@ -134,6 +135,7 @@ export function LandrushRobot({
   onHoverPoseSample,
   presentationMode = 'default',
   profileMeasure,
+  visualRootRef,
 }: LandrushRobotProps) {
   const measure = profileMeasure ?? measureUnprofiled
   const animationPaceValue = MathUtils.clamp(
@@ -222,6 +224,14 @@ export function LandrushRobot({
   const hoverAmountRef = useRef(0)
   const reportAnimationFrameRef = useRef(0)
   const reportHoverPoseFrameRef = useRef(0)
+
+  useEffect(() => {
+    if (!visualRootRef) return
+    visualRootRef.current = groupRef.current
+    return () => {
+      if (visualRootRef.current === groupRef.current) visualRootRef.current = null
+    }
+  }, [visualRootRef])
 
   useEffect(() => {
     mixer.timeScale = animationPaceValue

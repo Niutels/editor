@@ -277,6 +277,7 @@ const PASCAL_WATER_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
 const PASCAL_WATER_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
 const PASCAL_WATER_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE = 2
 const PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS = 0.16
+const PASCAL_WATER_WALK_TARGET_MIN_NORMAL_Y = 0.35
 const PASCAL_WATER_BUILT_GRASS_PADDING_METERS = 1
 const PASCAL_WATER_BUILT_GRASS_FEATHER_METERS = 0.3
 const PASCAL_WATER_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
@@ -3551,39 +3552,77 @@ const PASCAL_WATER_GROUND_COLLIDER_MATERIAL = new MeshBasicMaterial({
   visible: false,
 })
 
-function usePascalWaterBuiltColliderWorld() {
+function usePascalWaterBuiltColliderWorlds() {
   const physicsSignature = useScene((state) => createPascalWaterPhysicsNodeSignature(state.nodes))
   const doorAnimationSignature = useInteractive((state) =>
     createPascalWaterDoorAnimationSignature(state.doorAnimations),
   )
   const [runtimeColliderVersion, setRuntimeColliderVersion] = useState(0)
-  const [world, setWorld] = useState<FirstPersonColliderWorld | null>(null)
-  const worldRef = useRef<FirstPersonColliderWorld | null>(null)
+  const [worlds, setWorlds] = useState<{
+    collision: FirstPersonColliderWorld | null
+    floatOnly: FirstPersonColliderWorld | null
+  }>({ collision: null, floatOnly: null })
+  const worldsRef = useRef<{
+    collision: FirstPersonColliderWorld | null
+    floatOnly: FirstPersonColliderWorld | null
+  }>({ collision: null, floatOnly: null })
   const colliderWorldVersion = `${physicsSignature}:${doorAnimationSignature}:${runtimeColliderVersion}`
 
-  const replaceWorld = useCallback((nextWorld: FirstPersonColliderWorld | null) => {
-    worldRef.current?.dispose()
-    worldRef.current = nextWorld
-    setWorld(nextWorld)
+  const replaceWorlds = useCallback(
+    (nextWorlds: {
+      collision: FirstPersonColliderWorld | null
+      floatOnly: FirstPersonColliderWorld | null
+    }) => {
+      worldsRef.current.collision?.dispose()
+      worldsRef.current.floatOnly?.dispose()
+      worldsRef.current = nextWorlds
+      setWorlds(nextWorlds)
+    },
+    [],
+  )
+
+  const disposeWorlds = useCallback(
+    (nextWorlds: {
+      collision: FirstPersonColliderWorld | null
+      floatOnly: FirstPersonColliderWorld | null
+    }) => {
+      nextWorlds.collision?.dispose()
+      nextWorlds.floatOnly?.dispose()
+    },
+    [],
+  )
+
+  const buildWorlds = useCallback(() => {
+    const collision = buildFirstPersonColliderWorldFromRegistry({
+      excludeNodeTypes: ['slab', 'ceiling'],
+    })
+    const floatOnly = buildFirstPersonColliderWorldFromRegistry({
+      includeNodeTypes: ['slab', 'ceiling'],
+      userData: {
+        excludeCollisionCheck: true,
+        excludeFloatHit: false,
+      },
+    })
+    return { collision, floatOnly }
   }, [])
 
   useEffect(() => {
     void colliderWorldVersion
     let cancelled = false
     const frame = window.requestAnimationFrame(() => {
-      const nextWorld = buildFirstPersonColliderWorldFromRegistry()
+      const nextWorlds = buildWorlds()
       if (cancelled) {
-        nextWorld?.dispose()
+        disposeWorlds(nextWorlds)
         return
       }
-      replaceWorld(nextWorld)
+      replaceWorlds(nextWorlds)
     })
 
     return () => {
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [colliderWorldVersion, replaceWorld])
+  }, [buildWorlds, colliderWorldVersion, disposeWorlds, replaceWorlds])
 
   useEffect(() => {
     const rebuildColliderWorld = () => setRuntimeColliderVersion((version) => version + 1)
@@ -3597,13 +3636,14 @@ function usePascalWaterBuiltColliderWorld() {
 
   useEffect(
     () => () => {
-      worldRef.current?.dispose()
-      worldRef.current = null
+      worldsRef.current.collision?.dispose()
+      worldsRef.current.floatOnly?.dispose()
+      worldsRef.current = { collision: null, floatOnly: null }
     },
     [],
   )
 
-  return world
+  return worlds
 }
 
 function createPascalWaterDoorAnimationSignature(
