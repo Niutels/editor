@@ -104,6 +104,24 @@ function shouldSkipColliderNode(nodeId: string, type: (typeof COLLIDER_NODE_TYPE
   return node.segments.every((segment: { type: string }) => segment.type === 'empty')
 }
 
+function resolveDoorColliderState(node: DoorNode) {
+  const interactive = useInteractive.getState()
+  const runtimeDoorState = interactive.doors[node.id]
+  const queuedDoorAnimation = interactive.doorAnimations[node.id]
+  let operationState = runtimeDoorState?.operationState ?? node.operationState
+  let swingAngle = runtimeDoorState?.swingAngle ?? node.swingAngle
+
+  if (queuedDoorAnimation && queuedDoorAnimation.to > queuedDoorAnimation.from) {
+    if (queuedDoorAnimation.field === 'operationState') {
+      operationState = Math.max(operationState ?? 0, queuedDoorAnimation.to)
+    } else {
+      swingAngle = Math.max(swingAngle ?? 0, queuedDoorAnimation.to)
+    }
+  }
+
+  return { operationState, swingAngle }
+}
+
 function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   const hasLeafContent = node.segments.some((segment) => segment.type !== 'empty')
   if (!hasLeafContent) return null
@@ -113,9 +131,7 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   if (leafW <= 0 || leafH <= 0) return null
 
   const leafCenterY = -node.frameThickness / 2
-  const runtimeDoorState = useInteractive.getState().doors[node.id]
-  const operationState = runtimeDoorState?.operationState ?? node.operationState
-  const swingAngle = runtimeDoorState?.swingAngle ?? node.swingAngle
+  const { operationState, swingAngle } = resolveDoorColliderState(node)
 
   root.updateWorldMatrix(true, false)
 

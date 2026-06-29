@@ -22,7 +22,6 @@ import {
   attribute,
   cameraPosition,
   cos,
-  exp,
   float,
   hash,
   mix,
@@ -51,6 +50,7 @@ type StylizedSceneLandLayerProps = {
   grassInteractionRef?: StylizedGrassInteractionRef
   grassRenderOrder?: number
   profileMeasure?: StylizedSceneProfileMeasure
+  progressiveReveal?: ProgressiveIslandRevealState | null
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
   showTrees?: boolean
@@ -207,7 +207,7 @@ const STYLIZED_SCENE_GRASS_SCALE = 1.3
 const STYLIZED_SCENE_GRASS_HEIGHT_SCALE = 0.5
 const STYLIZED_SCENE_GRASS_SEED = 15_173
 const STYLIZED_SCENE_INTERACTION_FULL_SPEED = 5.8
-const STYLIZED_SCENE_INTERACTION_MAX_BEND = 1.55
+const STYLIZED_SCENE_INTERACTION_MAX_BEND = 0.65
 const STYLIZED_SCENE_GRASS_FADE_SECONDS = 1.375
 const STYLIZED_SCENE_PATH_CLEARANCE_METERS = 0.48
 const STYLIZED_SCENE_PATH_EDGE_JITTER_METERS = 0.22
@@ -215,23 +215,6 @@ const STYLIZED_SCENE_PATH_WIDTH_SCALE = 1.08
 const STYLIZED_SCENE_TEXTURE_REPEAT = 8
 const STYLIZED_TREE_TRUNK_SCALE = 12
 const STYLIZED_GRASS_RENDER_ORDER = 14
-
-type StylizedGrassDisposableGpuResource = {
-  dispose: () => void
-}
-
-function disposeStylizedGrassGpuResourceLater(
-  resource: StylizedGrassDisposableGpuResource | null | undefined,
-) {
-  if (!resource) return
-  if (typeof requestAnimationFrame !== 'function') {
-    resource.dispose()
-    return
-  }
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => resource.dispose())
-  })
-}
 
 const STYLIZED_SCENE_DEFAULT_TUNING: StylizedSceneResolvedGrassTuning = {
   colorPatchScale: 0.7,
@@ -274,6 +257,12 @@ type StylizedGrassRenderCenter = {
   z: number
 }
 
+export type ProgressiveIslandRevealState = {
+  center: StylizedGrassRenderCenter
+  featherMeters: number
+  radius: number
+}
+
 type StylizedOrbitControls = {
   target?: { x: number; z: number }
 }
@@ -303,6 +292,7 @@ export function StylizedSceneLandLayer({
   grassInteractionRef,
   grassRenderOrder = STYLIZED_GRASS_RENDER_ORDER,
   profileMeasure,
+  progressiveReveal,
   roads = [],
   showBlades = true,
   showTrees = true,
@@ -319,6 +309,7 @@ export function StylizedSceneLandLayer({
           grassBlockers={grassBlockers}
           interactionRef={grassInteractionRef}
           profileMeasure={profileMeasure}
+          progressiveReveal={progressiveReveal}
           renderOrder={grassRenderOrder}
           roads={roads}
           surfacePoints={surfacePoints}
@@ -326,7 +317,9 @@ export function StylizedSceneLandLayer({
         />
       ) : null}
       {showTrees
-        ? STYLIZED_TREE_LAYOUT.map((tree, index) => (
+        ? STYLIZED_TREE_LAYOUT.filter((tree) =>
+            isStylizedSceneTreeInsideReveal(tree.position, progressiveReveal),
+          ).map((tree, index) => (
             <StylizedSceneTree
               elevation={elevation}
               key={`${tree.position.join(':')}:${index}`}
@@ -342,6 +335,16 @@ export function StylizedSceneLandLayer({
   )
 }
 
+function isStylizedSceneTreeInsideReveal(
+  position: readonly [number, number, number],
+  reveal?: ProgressiveIslandRevealState | null,
+) {
+  if (!reveal) return true
+  const dx = position[0] - reveal.center.x
+  const dz = position[2] - reveal.center.z
+  return Math.hypot(dx, dz) <= reveal.radius + reveal.featherMeters
+}
+
 function StylizedSceneGrassLayer({
   elevation,
   grassBlockers,
@@ -349,6 +352,7 @@ function StylizedSceneGrassLayer({
   grassFadeBlockers,
   interactionRef,
   profileMeasure,
+  progressiveReveal,
   renderOrder,
   roads,
   surfacePoints,
@@ -360,6 +364,7 @@ function StylizedSceneGrassLayer({
   grassFadeBlockers: readonly StylizedGrassBlocker[]
   interactionRef?: StylizedGrassInteractionRef
   profileMeasure?: StylizedSceneProfileMeasure
+  progressiveReveal?: ProgressiveIslandRevealState | null
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
   surfacePoints: readonly LandrushPoint2[]
@@ -443,14 +448,15 @@ function StylizedSceneGrassLayer({
     }
   }
   const staticRenderCenter = useMemo(
-    () => resolveStaticStylizedGrassRenderCenter(surfacePoints),
-    [surfacePoints],
+    () => progressiveReveal?.center ?? resolveStaticStylizedGrassRenderCenter(surfacePoints),
+    [progressiveReveal, surfacePoints],
   )
   const grassFadeBlockerSignature = useMemo(
     () => stylizedGrassBlockersSignature(grassFadeBlockers),
     [grassFadeBlockers],
   )
   const renderCenter = useStylizedGrassRenderCenter(interactionRef, staticRenderCenter)
+  const streamRadius = progressiveReveal?.radius ?? STYLIZED_SCENE_STREAM_RADIUS
   const lastNonEmptyInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
   const instances = useMemo(
     () =>
@@ -463,6 +469,7 @@ function StylizedSceneGrassLayer({
           renderCenter,
           roadGrid,
           surfacePoints,
+          streamRadius,
           tuning: resolvedTuning,
         })
         if (nextInstances.length > 0 || stableGrassBlockers.length > 0) {
@@ -479,6 +486,7 @@ function StylizedSceneGrassLayer({
       resolvedTuning,
       stableGrassBlockers,
       surfacePoints,
+      streamRadius,
     ],
   )
   const materialBundle = useMemo(
@@ -574,7 +582,6 @@ function StylizedSceneGrassLayer({
         smoothedInteraction.set(0, 0, 0, 0)
         materialBundle.uniforms.interaction.value.copy(smoothedInteraction)
       }
-      recordStylizedGrassRuntimeProbe(interaction, smoothedInteraction)
       const hadFadeZones = fadeZonesRef.current.length > 0
       advanceStylizedGrassFadeZones(fadeZonesRef.current, delta)
       if (hadFadeZones || fadeZonesRef.current.length > 0) {
@@ -601,12 +608,12 @@ function StylizedSceneGrassLayer({
       return
     }
     runFrame()
-  }, 2)
+  })
 
   useEffect(
     () => () => {
-      disposeStylizedGrassGpuResourceLater(geometry)
-      disposeStylizedGrassGpuResourceLater(material)
+      geometry?.dispose()
+      material?.dispose()
     },
     [geometry, material],
   )
@@ -733,8 +740,8 @@ function StylizedSceneTree({
 
   useEffect(
     () => () => {
-      disposeStylizedGrassGpuResourceLater(leavesGeometry)
-      disposeStylizedGrassGpuResourceLater(leavesMaterial)
+      leavesGeometry?.dispose()
+      leavesMaterial.dispose()
     },
     [leavesGeometry, leavesMaterial],
   )
@@ -910,6 +917,7 @@ function createStylizedGrassInstances({
   renderCenter,
   roadGrid,
   surfacePoints,
+  streamRadius,
   tuning,
 }: {
   cellCache: StylizedGrassCellCache
@@ -919,6 +927,7 @@ function createStylizedGrassInstances({
   renderCenter: StylizedGrassRenderCenter
   roadGrid: StylizedGrassRoadGrid | null
   surfacePoints: readonly LandrushPoint2[]
+  streamRadius: number
   tuning: StylizedSceneResolvedGrassTuning
 }): StylizedGrassInstance[] {
   const profile = getStylizedGrassPerfProbe()
@@ -936,7 +945,8 @@ function createStylizedGrassInstances({
     }
     return result
   }
-  const streamAreaScale = (STYLIZED_SCENE_STREAM_RADIUS / STYLIZED_SCENE_BASE_STREAM_RADIUS) ** 2
+  const radius = Math.max(STYLIZED_SCENE_STREAM_CELL_SIZE, finiteNumber(streamRadius, 0))
+  const streamAreaScale = (radius / STYLIZED_SCENE_BASE_STREAM_RADIUS) ** 2
   const targetCount = Math.max(
     0,
     Math.min(
@@ -948,7 +958,6 @@ function createStylizedGrassInstances({
 
   const surfaceRing = openRing(surfacePoints)
   const surfaceBounds = stylizedGrassSurfaceBounds(surfaceRing)
-  const radius = STYLIZED_SCENE_STREAM_RADIUS
   const radiusSquared = radius * radius
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
   const densityPerSquareMeter = targetCount / (Math.PI * radiusSquared)
@@ -1267,8 +1276,8 @@ function stylizedGrassFadeZoneBoundsOverlap(
   first: StylizedGrassFadeZone,
   second: StylizedGrassFadeZone,
 ) {
-  const firstBounds = boundsForStylizedGrassFadeZone(first)
-  const secondBounds = boundsForStylizedGrassFadeZone(second)
+  const firstBounds = stylizedGrassPointsBounds(first.ring, first.clearanceMeters)
+  const secondBounds = stylizedGrassPointsBounds(second.ring, second.clearanceMeters)
   return !(
     firstBounds.maxX < secondBounds.minX ||
     firstBounds.minX > secondBounds.maxX ||
@@ -1277,9 +1286,8 @@ function stylizedGrassFadeZoneBoundsOverlap(
   )
 }
 
-function boundsForStylizedGrassFadeZone(zone: StylizedGrassFadeZone) {
-  const bounds = stylizedGrassSurfaceBounds(zone.ring)
-  const clearance = Math.max(0, zone.clearanceMeters)
+function stylizedGrassPointsBounds(points: readonly LandrushPoint2[], clearance = 0) {
+  const bounds = stylizedGrassSurfaceBounds(points)
   return {
     maxX: bounds.maxX + clearance,
     maxZ: bounds.maxZ + clearance,
@@ -1300,7 +1308,9 @@ function centroidForStylizedGrassPoints(points: readonly LandrushPoint2[]) {
 }
 
 function stylizedGrassFadeZoneId(blocker: StylizedGrassBlocker) {
-  return blocker.points.map((point) => `${point.x.toFixed(2)}:${point.z.toFixed(2)}`).join('|')
+  return `${Math.max(0, blocker.clearanceMeters ?? 0).toFixed(2)}:${blocker.points
+    .map((point) => `${point.x.toFixed(2)}:${point.z.toFixed(2)}`)
+    .join('|')}`
 }
 
 function stylizedGrassBlockersSignature(blockers: readonly StylizedGrassBlocker[]) {
@@ -1413,9 +1423,9 @@ function createStylizedGrassNodeMaterial(
   const interactionRadius = grassInteraction.z.max(0.001)
   const interactionDelta = instanceOrigin.sub(vec2(grassInteraction.x, grassInteraction.y))
   const interactionDistance = interactionDelta.length()
-  const normalizedInteractionDistance = interactionDistance.div(interactionRadius)
-  const interactionEdgeMask = float(1).sub(normalizedInteractionDistance.smoothstep(0.94, 1))
-  const interactionFalloff = exp(normalizedInteractionDistance.mul(-4.25)).mul(interactionEdgeMask)
+  const interactionFalloff = float(1).sub(
+    interactionDistance.div(interactionRadius).smoothstep(0.15, 1),
+  )
   const interactionDirection = interactionDelta.div(interactionDistance.max(0.001))
   const interactionWorldOffset = interactionDirection.mul(
     interactionFalloff.mul(grassInteraction.w).mul(STYLIZED_SCENE_INTERACTION_MAX_BEND),
@@ -1426,7 +1436,7 @@ function createStylizedGrassNodeMaterial(
     interactionWorldOffset.x.mul(yawCos).sub(interactionWorldOffset.y.mul(yawSin)),
     interactionWorldOffset.x.mul(yawSin).add(interactionWorldOffset.y.mul(yawCos)),
   )
-  const interactionFold = tslClamp(interactionFalloff.mul(grassInteraction.w).mul(0.96), 0, 0.86)
+  const interactionFold = tslClamp(interactionFalloff.mul(grassInteraction.w).mul(0.42), 0, 0.58)
   const worldOffset = windWorldOffset
     .add(interactionLocalOffset)
     .mul(heightAlongBlade)
@@ -1818,48 +1828,6 @@ function takeStylizedGrassCacheStats(stats: StylizedGrassCacheStats) {
   return snapshot
 }
 
-function recordStylizedGrassRuntimeProbe(
-  interaction: StylizedGrassInteraction | null | undefined,
-  smoothedInteraction: Vector4,
-) {
-  if (!interaction || typeof window === 'undefined') return
-  const probe = (
-    window as typeof window & {
-      __PASCAL_WATER_RUNTIME_PROBE__?: {
-        grassSamples?: Record<string, unknown>[]
-        lastStylizedGrassProbeAt?: number
-        startedAt?: number
-      }
-    }
-  ).__PASCAL_WATER_RUNTIME_PROBE__
-  if (!probe?.grassSamples) return
-
-  const now = performance.now()
-  if (probe.lastStylizedGrassProbeAt && now - probe.lastStylizedGrassProbeAt < 250) return
-  probe.lastStylizedGrassProbeAt = now
-  probe.grassSamples.push({
-    centerLagMeters:
-      Math.round(
-        Math.hypot(smoothedInteraction.x - interaction.x, smoothedInteraction.y - interaction.z) *
-          1000,
-      ) / 1000,
-    moving: (interaction.speed ?? 0) > 0.05,
-    physicsLagMeters: 0,
-    position: [
-      Math.round(smoothedInteraction.x * 1000) / 1000,
-      Math.round(smoothedInteraction.y * 1000) / 1000,
-    ],
-    radius: Math.round(smoothedInteraction.z * 1000) / 1000,
-    source: 'stylized-grass-uniform',
-    speed: Math.round((interaction.speed ?? 0) * 1000) / 1000,
-    strength: Math.round(smoothedInteraction.w * 1000) / 1000,
-    timeMs: Math.round((now - (probe.startedAt ?? now)) * 1000) / 1000,
-  })
-  if (probe.grassSamples.length > 800) {
-    probe.grassSamples.splice(0, probe.grassSamples.length - 800)
-  }
-}
-
 function recordStylizedGrassFadeRuntimeProbe({
   cacheStats,
   debugState,
@@ -1896,7 +1864,7 @@ function recordStylizedGrassFadeRuntimeProbe({
     fadeMin: Math.round(fadeSummary.fadeMin * 1000) / 1000,
     fadeZoneCount,
     instanceCount,
-    source: debugState?.source ?? 'stylized-grass-fade',
+    source: debugState?.source ?? 'progressive-stylized-grass-fade',
     structuralBlockerSignature:
       debugState?.structuralBlockerSignature ?? structuralBlockerSignature,
     timeMs: Math.round((now - (probe.startedAt ?? now)) * 1000) / 1000,

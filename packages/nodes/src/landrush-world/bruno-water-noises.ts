@@ -47,6 +47,23 @@ function measureLandrushWaterNoiseStartup<T>(id: string, callback: () => T) {
   }
 }
 
+type LandrushWaterDisposableGpuResource = {
+  dispose: () => void
+}
+
+function disposeLandrushWaterGpuResourceLater(
+  resource: LandrushWaterDisposableGpuResource | null | undefined,
+) {
+  if (!resource) return
+  if (typeof requestAnimationFrame !== 'function') {
+    resource.dispose()
+    return
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => resource.dispose())
+  })
+}
+
 const brunoHash = /*#__PURE__*/ Fn(([pImmutable]) => {
   const p = vec2(pImmutable).toVar()
   p.assign(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))))
@@ -188,7 +205,7 @@ export class LandrushBrunoWaterNoises {
 
   dispose() {
     for (const renderTarget of this.renderTargets) {
-      renderTarget.dispose()
+      disposeLandrushWaterGpuResourceLater(renderTarget)
     }
   }
 
@@ -277,7 +294,7 @@ export class LandrushBrunoWaterNoises {
         `setup.landrush-water.noises.${profileId}.restore-renderer-state`,
         () => THREE.RendererUtils.restoreRendererState(this.renderer, rendererState),
       )
-      material.dispose()
+      disposeLandrushWaterGpuResourceLater(material)
     })
   }
 }

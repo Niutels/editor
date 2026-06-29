@@ -7,6 +7,15 @@ export { useViewer } from '@pascal-app/viewer'
 export type { EditorProps } from './components/editor'
 export type { EditorCameraInitialPose } from './components/editor/custom-camera-controls'
 export { default as Editor } from './components/editor'
+export {
+  BVHEcctrl,
+  type BVHEcctrlApi,
+  type MovementInput,
+} from './components/editor/first-person/bvh-ecctrl'
+export {
+  buildFirstPersonColliderWorldFromRegistry,
+  type FirstPersonColliderWorld,
+} from './components/editor/first-person/build-collider-world'
 // Headless component aliases: the implementation files keep their
 // internal names (`ParametricInspector`, `FloatingActionMenu`) because
 // they're referenced throughout the editor's own internals; the public

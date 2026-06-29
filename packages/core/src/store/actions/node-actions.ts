@@ -6,6 +6,7 @@ import {
   type WallNode,
 } from '../../schema'
 import type { CollectionId } from '../../schema/collections'
+import { normalizeSceneRelations } from '../scene-relations'
 import type { SceneState } from '../use-scene'
 
 type AnyContainerNode = AnyNode & { children: string[] }
@@ -238,6 +239,7 @@ export const createNodesAction = (
   ops: NodeCreateOp[],
 ) => {
   if (get().readOnly) return
+  const parentsToMarkDirty = new Set<AnyNodeId>()
   set((state) => {
     const nextNodes = { ...state.nodes }
     const nextRootIds = [...state.rootNodeIds]
@@ -280,7 +282,10 @@ export const createNodesAction = (
       }
     }
 
-    return { nodes: nextNodes, rootNodeIds: nextRootIds }
+    const normalized = normalizeSceneRelations(nextNodes)
+    normalized.changedNodeIds.forEach((id) => parentsToMarkDirty.add(id))
+
+    return { nodes: normalized.nodes, rootNodeIds: nextRootIds }
   })
 
   // 4. System Sync
@@ -289,6 +294,7 @@ export const createNodesAction = (
     if (parentId) get().markDirty(parentId)
     else if (node.parentId) get().markDirty(node.parentId as AnyNodeId)
   })
+  parentsToMarkDirty.forEach((id) => get().markDirty(id))
 }
 
 export const applyNodeChangesAction = (
@@ -413,7 +419,10 @@ export const applyNodeChangesAction = (
       delete nextNodes[id]
     }
 
-    return { nodes: nextNodes, rootNodeIds: resolvedRootIds, collections: nextCollections }
+    const normalized = normalizeSceneRelations(nextNodes)
+    normalized.changedNodeIds.forEach((id) => parentsToMarkDirty.add(id))
+
+    return { nodes: normalized.nodes, rootNodeIds: resolvedRootIds, collections: nextCollections }
   })
 
   nodesToMarkDirty.forEach((id) => {
@@ -485,7 +494,10 @@ export const updateNodesAction = (
       nextNodes[id] = { ...nextNodes[id], ...data } as AnyNode
     }
 
-    return { nodes: nextNodes }
+    const normalized = normalizeSceneRelations(nextNodes)
+    normalized.changedNodeIds.forEach((id) => parentsToUpdate.add(id))
+
+    return { nodes: normalized.nodes }
   })
 
   // Batch dirty-marking into a single RAF to avoid redundant callbacks during rapid updates

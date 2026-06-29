@@ -143,6 +143,7 @@ interface ViewerProps {
   postProcessing?: boolean
   rendererBackend?: ViewerRendererBackend
   useBvh?: boolean
+  defaultCamera?: boolean
   renderContext?: RenderContext
   defaultRender?: {
     shading?: RenderShading
@@ -180,6 +181,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     postProcessing = true,
     rendererBackend = 'webgpu',
     useBvh = true,
+    defaultCamera = true,
     renderContext = 'editor',
     defaultRender,
     isolate,
@@ -267,7 +269,9 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         gl={
           ((props: { canvas?: HTMLCanvasElement }) => {
             const canvas = props.canvas
-            const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas)?.get(rendererBackend) : undefined
+            const cached = canvas
+              ? WEBGPU_RENDERER_CACHE.get(canvas)?.get(rendererBackend)
+              : undefined
             if (cached) return cached
             const promise = (async () => {
               if (rendererBackend === 'webgl') {
@@ -321,7 +325,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       >
         <FrameLimiter fps={50} />
         <RenderSchedulerBridge />
-        <ViewerCamera />
+        {defaultCamera ? <ViewerCamera /> : null}
         <GPUDeviceWatcher />
         <ToneMappingExposure />
         <ShadowController />

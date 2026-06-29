@@ -12,8 +12,10 @@ export type MovementInput = {
   leftward?: boolean
   rightward?: boolean
   joystick?: { x: number; y: number }
+  worldDirection?: { x: number; z: number } | null
   run?: boolean
   jump?: boolean
+  speedScale?: number
 }
 
 export type CharacterAnimationStatus =
@@ -96,7 +98,7 @@ export const characterStatus: CharacterStatus = {
   animationStatus: 'IDLE',
 }
 
-const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
+export const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
   (
     {
       children,
@@ -179,8 +181,11 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
     const leftwardState = useRef(false)
     const rightwardState = useRef(false)
     const joystickState = useRef(new THREE.Vector2())
+    const worldDirectionState = useRef(new THREE.Vector2())
+    const hasWorldDirectionState = useRef(false)
     const runState = useRef(false)
     const jumpState = useRef(false)
+    const speedScaleState = useRef(1)
     const isOnGround = useRef(false)
     const prevIsOnGround = useRef(false)
     const prevAnimation = useRef<CharacterAnimationStatus>('IDLE')
@@ -294,8 +299,17 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         leftward?: boolean
         rightward?: boolean
         joystick?: THREE.Vector2
+        worldDirection?: THREE.Vector2 | null
       }) => {
         inputDir.current.set(0, 0, 0)
+
+        if (dir.worldDirection) {
+          inputDir.current
+            .set(dir.worldDirection.x, 0, dir.worldDirection.y)
+            .projectOnPlane(upAxis.current)
+            .normalize()
+          return
+        }
 
         camera.getWorldDirection(camProjDir.current)
         camProjDir.current.projectOnPlane(upAxis.current).normalize()
@@ -336,7 +350,7 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
             )
           }
 
-          const maxSpeed = run ? maxRunSpeed : maxWalkSpeed
+          const maxSpeed = (run ? maxRunSpeed : maxWalkSpeed) * speedScaleState.current
           wantToMoveVel.current.copy(inputDir.current).multiplyScalar(maxSpeed)
           const dot = movingDir.current.dot(inputDir.current)
 
@@ -717,8 +731,21 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
       if (movement.leftward !== undefined) leftwardState.current = movement.leftward
       if (movement.rightward !== undefined) rightwardState.current = movement.rightward
       if (movement.joystick) joystickState.current.set(movement.joystick.x, movement.joystick.y)
+      if ('worldDirection' in movement) {
+        hasWorldDirectionState.current = movement.worldDirection != null
+        if (movement.worldDirection) {
+          worldDirectionState.current.set(movement.worldDirection.x, movement.worldDirection.z)
+        } else {
+          worldDirectionState.current.set(0, 0)
+        }
+      }
       if (movement.run !== undefined) runState.current = movement.run
       if (movement.jump !== undefined) jumpState.current = movement.jump
+      if (movement.speedScale !== undefined) {
+        speedScaleState.current = clamp(movement.speedScale, 0, 1)
+      } else if (movement.worldDirection === null) {
+        speedScaleState.current = 1
+      }
     }, [])
 
     useImperativeHandle(
@@ -762,7 +789,7 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
       elapsedRef.current += delta
       if (paused || elapsedRef.current < delay) return
 
-      const deltaTime = Math.min(1 / 45, delta) * slowMotionFactor
+      const frameDelta = Math.min(0.1, Math.max(0, delta)) * slowMotionFactor
       const keys = getKeys() ?? presetKeys
       const forward = forwardState.current || (keys.forward ?? false)
       const backward = backwardState.current || (keys.backward ?? false)
@@ -777,27 +804,38 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         leftward,
         rightward,
         joystick: joystickState.current,
+        worldDirection: hasWorldDirectionState.current ? worldDirectionState.current : null,
       })
-      handleCharacterMovement(run, deltaTime)
-      if (jump && isOnGround.current) currentLinVel.current.y = jumpVel
-      movingDir.current.copy(currentLinVel.current).normalize()
-      currentLinVelOnPlane.current.copy(currentLinVel.current).projectOnPlane(upAxis.current)
+      let remainingDelta = frameDelta
+      let shouldApplyJump = jump && isOnGround.current
+      while (remainingDelta > 0) {
+        const deltaTime = Math.min(1 / 45, remainingDelta)
+        remainingDelta -= deltaTime
 
-      checkCharacterSleep(jump, deltaTime)
-      if (!isSleeping.current) {
-        if (!isOnGround.current) applyGravity(deltaTime)
-
-        updateSegmentBBox()
-        handleCollisionResponse(colliderMeshes, deltaTime)
-        handleFloatingResponse(colliderMeshes, jump, deltaTime)
-        updateCharacterWithPlatform()
-
-        if (characterGroupRef.current) {
-          characterGroupRef.current.position.addScaledVector(currentLinVel.current, deltaTime)
+        handleCharacterMovement(run, deltaTime)
+        if (shouldApplyJump) {
+          currentLinVel.current.y = jumpVel
+          shouldApplyJump = false
         }
+        movingDir.current.copy(currentLinVel.current).normalize()
+        currentLinVelOnPlane.current.copy(currentLinVel.current).projectOnPlane(upAxis.current)
 
-        updateCharacterStatus(run, jump)
-        prevIsOnGround.current = isOnGround.current
+        checkCharacterSleep(jump, deltaTime)
+        if (!isSleeping.current) {
+          if (!isOnGround.current) applyGravity(deltaTime)
+
+          updateSegmentBBox()
+          handleCollisionResponse(colliderMeshes, deltaTime)
+          handleFloatingResponse(colliderMeshes, jump, deltaTime)
+          updateCharacterWithPlatform()
+
+          if (characterGroupRef.current) {
+            characterGroupRef.current.position.addScaledVector(currentLinVel.current, deltaTime)
+          }
+
+          updateCharacterStatus(run, jump)
+          prevIsOnGround.current = isOnGround.current
+        }
       }
 
       if (debug) updateDebugger()

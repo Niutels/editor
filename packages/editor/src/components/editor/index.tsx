@@ -154,6 +154,7 @@ export interface EditorProps {
   // Viewer runtime options for hosts that need a lean or constrained canvas.
   viewerCameraControls?: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
+  viewerDefaultCamera?: boolean
   viewerEditorSystems?: boolean
   viewerSceneChildren?: ReactNode
   viewerPostProcessing?: boolean
@@ -830,6 +831,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   onThumbnailCapture,
   viewerCameraControls,
   viewerCameraInitialPose,
+  viewerDefaultCamera,
   viewerEditorSystems,
   viewerPostProcessing,
   viewerRendererBackend,
@@ -845,6 +847,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
   viewerCameraControls: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
+  viewerDefaultCamera?: boolean
   viewerEditorSystems: boolean
   viewerPostProcessing?: boolean
   viewerRendererBackend?: 'webgpu' | 'webgl'
@@ -963,6 +966,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
             renderContext="editor"
             selectionManager={isFirstPersonMode ? 'default' : 'custom'}
             useBvh={viewerUseBvh}
+            defaultCamera={viewerDefaultCamera}
           >
             <ViewerSceneContent
               isFirstPersonMode={isFirstPersonMode}
@@ -1004,6 +1008,7 @@ export default function Editor({
   onThumbnailCapture,
   viewerCameraControls = true,
   viewerCameraInitialPose,
+  viewerDefaultCamera,
   viewerEditorSystems = true,
   viewerPostProcessing,
   viewerRendererBackend,
@@ -1154,6 +1159,7 @@ export default function Editor({
       renderContext="editor"
       selectionManager="default"
       useBvh={viewerUseBvh}
+      defaultCamera={viewerDefaultCamera}
     >
       {viewerEditorSystems && <ExportManager />}
       {viewerEditorSystems && <ViewerZoneSystem />}
@@ -1178,6 +1184,7 @@ export default function Editor({
       showLoader={showLoader}
       viewerCameraControls={viewerCameraControls}
       viewerCameraInitialPose={viewerCameraInitialPose}
+      viewerDefaultCamera={viewerDefaultCamera}
       viewerEditorSystems={viewerEditorSystems}
       viewerPostProcessing={viewerPostProcessing}
       viewerRendererBackend={viewerRendererBackend}

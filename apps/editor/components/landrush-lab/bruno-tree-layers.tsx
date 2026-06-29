@@ -20,9 +20,12 @@ import {
   Vector3,
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { float } from 'three/tsl'
+import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import type { LandrushTree } from '@/components/landrush/types'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
 import type { GrassBladeTuning } from './grass-material'
+import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
 
 export type BrunoTreeReference = {
   elevation: number
@@ -220,18 +223,33 @@ function TreeBodies({
   geometry: BufferGeometry | null
   meshRef: RefObject<InstancedMesh | null>
 }) {
+  const material = useMemo(() => {
+    const nextMaterial = new MeshStandardNodeMaterial({
+      color,
+      depthWrite: false,
+      roughness: 0.92,
+      transparent: true,
+    })
+    nextMaterial.opacityNode = createLandrushRobotScreenRevealOpacityNode()
+    nextMaterial.userData.landrushRobotScreenRevealSoftMask = true
+    return nextMaterial
+  }, [color])
+
+  useLayoutEffect(() => () => material.dispose(), [material])
   if (count === 0 || !geometry) return null
 
   return (
-    <instancedMesh
-      args={[undefined, undefined, count]}
-      frustumCulled={false}
-      ref={meshRef}
-      renderOrder={16}
-    >
-      <primitive attach="geometry" object={geometry} />
-      <meshStandardMaterial color={color} roughness={0.92} />
-    </instancedMesh>
+    <group userData={{ landrushRobotOccluder: true }}>
+      <instancedMesh
+        args={[undefined, undefined, count]}
+        frustumCulled={false}
+        ref={meshRef}
+        renderOrder={16}
+      >
+        <primitive attach="geometry" object={geometry} />
+        <primitive attach="material" object={material} />
+      </instancedMesh>
+    </group>
   )
 }
 
@@ -249,28 +267,36 @@ function FoliageInstances({
   opacity: number
 }) {
   const count = billboards.length
+  const material = useMemo(() => {
+    const nextMaterial = new MeshBasicNodeMaterial({
+      alphaMap,
+      alphaTest: 0.035,
+      depthWrite: false,
+      side: DoubleSide,
+      toneMapped: false,
+      transparent: true,
+      vertexColors: true,
+    })
+    nextMaterial.opacityNode = createLandrushRobotScreenRevealOpacityNode(float(opacity))
+    nextMaterial.userData.landrushRobotScreenRevealSoftMask = true
+    return nextMaterial
+  }, [alphaMap, opacity])
 
+  useLayoutEffect(() => () => material.dispose(), [material])
   if (count === 0) return null
 
   return (
-    <instancedMesh
-      args={[undefined, undefined, count]}
-      frustumCulled={false}
-      ref={meshRef}
-      renderOrder={17}
-    >
-      <primitive attach="geometry" object={geometry} />
-      <meshBasicMaterial
-        alphaMap={alphaMap}
-        alphaTest={0.035}
-        depthWrite={false}
-        opacity={opacity}
-        side={DoubleSide}
-        toneMapped={false}
-        transparent
-        vertexColors
-      />
-    </instancedMesh>
+    <group userData={{ landrushRobotOccluder: true }}>
+      <instancedMesh
+        args={[undefined, undefined, count]}
+        frustumCulled={false}
+        ref={meshRef}
+        renderOrder={17}
+      >
+        <primitive attach="geometry" object={geometry} />
+        <primitive attach="material" object={material} />
+      </instancedMesh>
+    </group>
   )
 }
 

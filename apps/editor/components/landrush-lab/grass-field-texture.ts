@@ -19,7 +19,9 @@ const GRASS_ROAD_FEATHER_METERS = 0.46
 const GRASS_BLOCKER_FEATHER_METERS = 0.28
 
 export type GrassFieldBlocker = {
+  clearanceMeters?: number
   featherMeters?: number
+  initialVisibility?: number
   points: readonly LandrushPoint2[]
 }
 
@@ -278,7 +280,9 @@ function sampleBlockerDistance(point: LandrushPoint2, blockers: readonly GrassFi
   for (const blocker of blockers) {
     const ring = openRing(blocker.points)
     if (ring.length < 3) continue
-    const nextDistance = pointInPolygon(point, ring) ? -1 : distanceToPolyline(point, ring)
+    const boundaryDistance = distanceToPolyline(point, ring)
+    const signedDistance = pointInPolygon(point, ring) ? -boundaryDistance : boundaryDistance
+    const nextDistance = signedDistance - Math.max(0, blocker.clearanceMeters ?? 0)
     if (nextDistance < distance) {
       distance = nextDistance
       featherMeters = blocker.featherMeters ?? GRASS_BLOCKER_FEATHER_METERS

@@ -112,6 +112,23 @@ function measurePascalWaterRendererStartup<T>(id: string, callback: () => T) {
   }
 }
 
+type PascalWaterDisposableGpuResource = {
+  dispose: () => void
+}
+
+function disposePascalWaterGpuResourceLater(
+  resource: PascalWaterDisposableGpuResource | null | undefined,
+) {
+  if (!resource) return
+  if (typeof requestAnimationFrame !== 'function') {
+    resource.dispose()
+    return
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => resource.dispose())
+  })
+}
+
 function getPascalWaterFieldDebugMode(node: PascalWaterNode) {
   const metadata = node.metadata as { waterFieldDebugMode?: unknown } | undefined
   return metadata?.waterFieldDebugMode === PASCAL_WATER_DEBUG_FIELD_WORKER_MODE
@@ -453,10 +470,10 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     return line
   }, [depthReferenceGeometry, depthReferenceMaterial])
 
-  useEffect(() => () => waterField?.dispose(), [waterField])
+  useEffect(() => () => disposePascalWaterGpuResourceLater(waterField), [waterField])
   useEffect(() => {
     if (waterMaterial === PASCAL_WATER_FALLBACK_MATERIAL) return
-    return () => waterMaterial.dispose()
+    return () => disposePascalWaterGpuResourceLater(waterMaterial)
   }, [waterMaterial])
   useEffect(() => {
     // TSL/WebGPU water binds generated noise render targets more reliably after mount.
@@ -482,9 +499,15 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     appliedMaterialRef.current = waterMaterial as LandrushWaterSurfaceMaterial
     appliedMaterialParametersRef.current = materialParameters
   }, [materialParameters, waterMaterial])
-  useEffect(() => () => cliffGeometry.dispose(), [cliffGeometry])
-  useEffect(() => () => depthReferenceGeometry.dispose(), [depthReferenceGeometry])
-  useEffect(() => () => depthReferenceMaterial.dispose(), [depthReferenceMaterial])
+  useEffect(() => () => disposePascalWaterGpuResourceLater(cliffGeometry), [cliffGeometry])
+  useEffect(
+    () => () => disposePascalWaterGpuResourceLater(depthReferenceGeometry),
+    [depthReferenceGeometry],
+  )
+  useEffect(
+    () => () => disposePascalWaterGpuResourceLater(depthReferenceMaterial),
+    [depthReferenceMaterial],
+  )
   useEffect(() => {
     renderScheduler.requestFrame('geometry:changed')
   }, [])

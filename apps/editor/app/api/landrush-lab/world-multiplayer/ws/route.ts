@@ -141,12 +141,14 @@ const HEARTBEAT_INTERVAL_MS = 3000
 const LANDRUSH_BUILD_NODE_TYPES = new Set([
   'ceiling',
   'column',
+  'door',
   'elevator',
   'fence',
   'item',
   'slab',
   'stair',
   'wall',
+  'window',
 ])
 const MAX_BUILD_NODES_PER_PARCEL = 240
 const MAX_BUILD_SNAPSHOT_BYTES = 320_000
@@ -813,8 +815,9 @@ function sanitizeBuildNodes(
     if (!node) continue
     nodes.push(node)
   }
-  nodes.sort((first, second) => first.id.localeCompare(second.id))
-  return { nodes, ok: true }
+  const normalizedNodes = sanitizeBuildNodeRelations(nodes)
+  normalizedNodes.sort((first, second) => first.id.localeCompare(second.id))
+  return { nodes: normalizedNodes, ok: true }
 }
 
 function sanitizeBuildNode(value: unknown): BuildNodeSnapshot | null {
@@ -831,8 +834,21 @@ function sanitizeBuildNode(value: unknown): BuildNodeSnapshot | null {
   node.object = 'node'
   node.visible = node.visible !== false
   if (typeof node.parentId !== 'string') node.parentId = null
-  if (node.type === 'wall') node.children = []
   return node
+}
+
+function sanitizeBuildNodeRelations(nodes: BuildNodeSnapshot[]) {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  return nodes.map((node) => {
+    if (!Array.isArray(node.children)) return node
+
+    const children = node.children.filter((childId): childId is string => {
+      if (typeof childId !== 'string') return false
+      const child = nodesById.get(childId)
+      return Boolean(child && child.parentId === node.id)
+    })
+    return { ...node, children }
+  })
 }
 
 function sanitizeBuildNodeId(value: unknown) {

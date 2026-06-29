@@ -18,6 +18,7 @@ import { StairSegmentNode as StairSegmentNodeSchema } from '../schema/nodes/stai
 import type { AnyNode, AnyNodeId } from '../schema/types'
 import * as nodeActions from './actions/node-actions'
 import { resetSceneHistoryPauseDepth } from './history-control'
+import { normalizeSceneRelations } from './scene-relations'
 
 function getFiniteNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
@@ -603,31 +604,34 @@ const useScene: UseSceneStore = create<SceneState>()(
           }
         }
 
+        const relationNormalized = normalizeSceneRelations(cleanedNodes)
+        const normalizedNodes = relationNormalized.nodes
+
         set({
-          nodes: cleanedNodes,
+          nodes: normalizedNodes,
           rootNodeIds,
           dirtyNodes: new Set<AnyNodeId>(),
           collections: {},
         })
 
-        const normalizedRootNodeIds = normalizeRootNodeIds(cleanedNodes, rootNodeIds)
-        const reachableNodeIds = collectReachableNodeIds(cleanedNodes, normalizedRootNodeIds)
+        const normalizedRootNodeIds = normalizeRootNodeIds(normalizedNodes, rootNodeIds)
+        const reachableNodeIds = collectReachableNodeIds(normalizedNodes, normalizedRootNodeIds)
         if (normalizedRootNodeIds.length > 0) {
-          for (const node of Object.values(cleanedNodes)) {
+          for (const node of Object.values(normalizedNodes)) {
             if (reachableNodeIds.has(node.id as AnyNodeId)) continue
             console.warn('[Scene] Removing unreachable node', node.id)
-            delete cleanedNodes[node.id]
+            delete normalizedNodes[node.id]
           }
         }
 
         set({
-          nodes: cleanedNodes,
+          nodes: normalizedNodes,
           rootNodeIds: normalizedRootNodeIds,
           dirtyNodes: new Set<AnyNodeId>(),
           collections: {},
         })
         // Mark all nodes as dirty to trigger re-validation
-        Object.values(cleanedNodes).forEach((node) => {
+        Object.values(normalizedNodes).forEach((node) => {
           get().markDirty(node.id)
         })
       },

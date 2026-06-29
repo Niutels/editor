@@ -102,9 +102,8 @@ export const CustomCameraControls = ({
     raycaster.layers.enable(ZONE_LAYER)
   }, [camera, raycaster])
 
-  useLayoutEffect(() => {
-    if (!initialPose || !controls.current || initialPoseAppliedRef.current) return
-
+  const applyInitialPose = useCallback(() => {
+    if (!initialPose || !controls.current || initialPoseAppliedRef.current) return false
     initialPoseAppliedRef.current = true
     firstLoad.current = false
     requestProgrammaticCameraFrames()
@@ -117,7 +116,18 @@ export const CustomCameraControls = ({
       initialPose.target[2],
       false,
     )
+    return true
   }, [initialPose, requestProgrammaticCameraFrames])
+
+  useLayoutEffect(() => {
+    if (!initialPose) return
+    if (applyInitialPose()) return
+
+    const frameId = requestAnimationFrame(() => {
+      applyInitialPose()
+    })
+    return () => cancelAnimationFrame(frameId)
+  }, [applyInitialPose])
 
   useEffect(() => {
     const params =

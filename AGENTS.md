@@ -45,6 +45,7 @@ Invoke the `review-architecture` skill (`.agents/skills/review-architecture/SKIL
 ## Operating rules
 
 - Read the full file before editing. Plan all changes, then make one complete edit.
+- When subagent tools are available and the task has independent workstreams, parallelize with subagents. Keep each subagent's ownership explicit and disjoint, then integrate their results without reverting other work.
 - When the user corrects you, stop and re-read their message.
 - After two consecutive tool failures, stop and change approach.
 - Don't introduce backwards-compatibility shims, dead code, or speculative abstractions.

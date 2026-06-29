@@ -22,9 +22,10 @@ import {
 } from './grass-field-texture'
 import type { GrassBladeTuning } from './grass-material'
 import {
+  type ProgressiveIslandRevealState,
   type StylizedGrassInteractionRef,
   StylizedSceneLandLayer,
-} from './stylized-scene-land-layers'
+} from './progressive-stylized-scene-land-layers'
 import type { WaterLandSurface } from './water-scene'
 
 type GrassWaterLandLayersProps = {
@@ -40,6 +41,7 @@ type GrassWaterLandLayersProps = {
   grassInteractionRef?: StylizedGrassInteractionRef
   groundRenderOrder?: number
   profileMeasure?: ProfileMeasure
+  progressiveReveal?: ProgressiveIslandRevealState | null
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
   showGround?: boolean
@@ -84,21 +86,6 @@ const GRASS_TREE_CELL_METERS = 5.8
 const GRASS_TREE_MIN_ALPHA = 0.12
 const GRASS_TREE_MIN_COUNT = 7
 const GRASS_TREE_MAX_COUNT = 34
-
-type DisposableGpuResource = {
-  dispose: () => void
-}
-
-function disposeGrassWaterGpuResourceLater(resource: DisposableGpuResource | null | undefined) {
-  if (!resource) return
-  if (typeof requestAnimationFrame !== 'function') {
-    resource.dispose()
-    return
-  }
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => resource.dispose())
-  })
-}
 const EMPTY_GRASS_ROADS: readonly LandrushRoadSegment[] = []
 const STYLIZED_GRASS_TEXTURE_PATH =
   '/landrush-lab/stylized-scene/grass_texture/grass_05_basecolor_1k.webp'
@@ -133,6 +120,7 @@ export function GrassWaterLandLayers({
   grassInteractionRef,
   groundRenderOrder = GRASS_GROUND_RENDER_ORDER,
   profileMeasure,
+  progressiveReveal,
   roads = EMPTY_GRASS_ROADS,
   showBlades = true,
   showGround = true,
@@ -268,14 +256,8 @@ export function GrassWaterLandLayers({
     tuning.density,
   ])
 
-  useEffect(
-    () => () => disposeGrassWaterGpuResourceLater(groundField.texture),
-    [groundField.texture],
-  )
-  useEffect(
-    () => () => disposeGrassWaterGpuResourceLater(spawnPreviewField.texture),
-    [spawnPreviewField.texture],
-  )
+  useEffect(() => () => groundField.texture.dispose(), [groundField.texture])
+  useEffect(() => () => spawnPreviewField.texture.dispose(), [spawnPreviewField.texture])
 
   return (
     <>
@@ -303,6 +285,7 @@ export function GrassWaterLandLayers({
             grassInteractionRef={grassInteractionRef}
             grassBlockers={resolvedBladeGrassBlockers}
             profileMeasure={profileMeasure}
+            progressiveReveal={progressiveReveal}
             roads={roads}
             grassRenderOrder={resolvedBladeRenderOrder}
             showBlades={showBlades}
@@ -438,7 +421,7 @@ function useAsyncGrassFieldTexture({
     shouldGenerate,
   ])
 
-  useEffect(() => () => disposeGrassWaterGpuResourceLater(field?.texture), [field])
+  useEffect(() => () => field?.texture.dispose(), [field])
 
   return field
 }
@@ -657,7 +640,7 @@ function StylizedGrassGroundLayer({
   useEffect(
     () => () => {
       if (previewGroundTexture.userData.landrushGeneratedStylizedGrassGround) {
-        disposeGrassWaterGpuResourceLater(previewGroundTexture)
+        previewGroundTexture.dispose()
       }
     },
     [previewGroundTexture],
@@ -665,7 +648,7 @@ function StylizedGrassGroundLayer({
   useEffect(
     () => () => {
       if (finalGroundTexture?.userData.landrushGeneratedStylizedGrassGround) {
-        disposeGrassWaterGpuResourceLater(finalGroundTexture)
+        finalGroundTexture.dispose()
       }
     },
     [finalGroundTexture],
@@ -809,7 +792,7 @@ function useDeferredStylizedGrassGroundTexture({
         },
       )
       if (cancelled) {
-        disposeGrassWaterGpuResourceLater(generatedTexture)
+        generatedTexture.dispose()
         return
       }
       setTexture(generatedTexture)
@@ -1447,7 +1430,7 @@ export function GrassBladeLayerWebGPU({
     ],
   )
 
-  useEffect(() => () => disposeGrassWaterGpuResourceLater(bladeGeometry), [bladeGeometry])
+  useEffect(() => () => bladeGeometry.dispose(), [bladeGeometry])
 
   return (
     <mesh

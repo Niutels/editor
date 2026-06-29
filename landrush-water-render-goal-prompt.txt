@@ -1,0 +1,14 @@
+Goal: Evolve Pascal's Landrush water rendering toward the visual character of Bruno Simon's folio water surface, while preserving Pascal's renderer architecture, package boundaries, scene data model, and runtime constraints.
+
+Aim for the same high-level qualities, not a direct port:
+
+- Water should feel like layered surface detail integrated with terrain and shore context, not just a blue plane with color noise.
+- Favor thin animated surface marks, soft shoreline masks, depth-aware fades, transparent overlays, and subtle moving ripple lines.
+- Preserve Pascal's rendering constraints: use the existing React/Three renderer shape, current scene/node data, deterministic generated terrain fields, and local material/texture patterns.
+- Keep Pascal's package boundaries intact. Core data stays pure; rendering behavior belongs in renderer/node code; editor debug UI stays editor-side.
+- Parameterize the effect instead of hard-coding it: ripple ratio, line frequency, noise frequency, shore threshold, fade width, splash density, animation speed, color stops, opacity, and surface thickness should be tunable.
+- Use Pascal-native inputs where possible: island perimeter, terrain/depth field, shore distance, road/parcel masks when relevant, generated noise textures or procedural textures compatible with the current renderer.
+- Prioritize the feel of Bruno's water: transparent surface-detail masks, moving lines driven by time and depth, organic noise breakup, soft blur/fade behavior, and restrained color treatment.
+- Do not copy Bruno's game framework, weather system, WebGPU/TSL architecture, physics/ice behavior, or exact source layout unless Pascal already has an equivalent place for it.
+- Keep the implementation practical for Pascal: stable frame cost, deterministic output, clear debug/proof routes, and no dependence on external runtime systems that the editor does not already own.
+- Success means the water reads closer to a living, layered surface system with animated shore/ripple detail, while still being unmistakably implemented in Pascal's renderer.
