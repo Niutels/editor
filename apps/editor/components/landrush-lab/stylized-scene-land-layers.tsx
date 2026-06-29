@@ -514,6 +514,7 @@ function StylizedSceneGrassLayer({
         geometry,
         instances,
         fadeZonesRef.current,
+        fadeZonesRef.current.length > 0,
       )
       mesh.count = instances.length
       mesh.instanceMatrix.needsUpdate = true
@@ -521,12 +522,14 @@ function StylizedSceneGrassLayer({
   }, [geometry, instances, profileMeasure, resolvedTuning])
 
   useLayoutEffect(() => {
+    const hadFadeZones = fadeZonesRef.current.length > 0
     updateStylizedGrassFadeZones(fadeZonesRef.current, grassFadeBlockers)
-    if (geometry) {
+    if (geometry && (hadFadeZones || fadeZonesRef.current.length > 0)) {
       lastFadeSummaryRef.current = applyStylizedGrassFadeAttributes(
         geometry,
         instances,
         fadeZonesRef.current,
+        hadFadeZones,
       )
     }
   }, [geometry, grassFadeBlockers, instances])
@@ -582,6 +585,7 @@ function StylizedSceneGrassLayer({
           geometry,
           instances,
           fadeZonesRef.current,
+          hadFadeZones,
         )
       }
       recordStylizedGrassFadeRuntimeProbe({
@@ -1112,11 +1116,14 @@ function applyStylizedGrassFadeAttributes(
   geometry: BufferGeometry,
   instances: readonly StylizedGrassInstance[],
   fadeZones: readonly StylizedGrassFadeZone[] = [],
+  forceNoZoneUpdate = false,
 ) {
   const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
   if (!fade) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
 
   const hasFadeZones = fadeZones.length > 0
+  if (!hasFadeZones && !forceNoZoneUpdate) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
+
   const fadeState = { heightVisibility: 1, opacity: 1 }
   let blockedFullCount = 0
   let blockedInstanceCount = 0

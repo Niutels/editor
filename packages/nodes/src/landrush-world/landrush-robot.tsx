@@ -2,27 +2,25 @@
 
 import type { LandrushWorldNode } from '@pascal-app/core'
 import { useAnimations, useGLTF } from '@react-three/drei'
-import { createPortal, useFrame } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
   type AnimationAction,
   type AnimationClip,
+  AnimationMixer,
   Box3,
   type BufferGeometry,
-  Color,
   Euler,
   type Group,
   LoopRepeat,
   MathUtils,
-  type Material,
-  Mesh,
   type Object3D,
   Quaternion,
-  SkinnedMesh,
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { BackSide, MeshBasicNodeMaterial } from 'three/webgpu'
+import { cameraPosition, color as tslColor, float, normalWorld, positionWorld } from 'three/tsl'
+import { MeshBasicNodeMaterial } from 'three/webgpu'
 
 const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot.glb'
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
@@ -39,12 +37,8 @@ export const LANDRUSH_ROBOT_HOVER_OFFSET = 1.524
 export const LANDRUSH_ROBOT_HOVER_BOB_AMPLITUDE = 0.14
 export const LANDRUSH_ROBOT_HOVER_BOB_SPEED = 1.15
 export const LANDRUSH_ROBOT_HOVER_RESPONSE = 6
-const LANDRUSH_ROBOT_HOVER_FILL_COLOR = new Color('#f7fbff')
-const LANDRUSH_ROBOT_HOVER_OUTLINE_GLOW_COLOR = '#79d7ff'
-const LANDRUSH_ROBOT_HOVER_OUTLINE_INK_COLOR = '#14283a'
-const LANDRUSH_ROBOT_HOVER_OUTLINE_GLOW_SCALE = 1.055
-const LANDRUSH_ROBOT_HOVER_OUTLINE_INK_SCALE = 1.032
-const LANDRUSH_ROBOT_HOVER_OUTLINE_RENDER_ORDER = 44
+const LANDRUSH_ROBOT_HOVER_FILL_COLOR = 0xf7fbff
+const LANDRUSH_ROBOT_HOVER_OUTLINE_INK_COLOR = 0x050505
 const LANDRUSH_ROBOT_IDLE_CLIP_NAMES = [
   'Idle_9',
   'Idle_11',
@@ -105,20 +99,15 @@ export type LandrushRobotHoverPoseSample = {
 }
 
 type LandrushRobotProfileMeasure = <T>(id: string, callback: () => T) => T
-type LandrushRobotOutlineMesh = Object3D & {
-  bindMatrix?: SkinnedMesh['bindMatrix']
-  bindMatrixInverse?: SkinnedMesh['bindMatrixInverse']
-  bindMode?: SkinnedMesh['bindMode']
-  geometry: BufferGeometry
-  isMesh: true
-  isSkinnedMesh?: boolean
-  morphTargetDictionary?: Mesh['morphTargetDictionary']
-  morphTargetInfluences?: Mesh['morphTargetInfluences']
-  skeleton?: SkinnedMesh['skeleton']
+type LandrushRobotHoverMaterialState = Object3D['userData'] & {
+  landrushHoverMaterial?: MeshBasicNodeMaterial
+  landrushHoverMaterialScale?: number
+  landrushOriginalMaterial?: unknown
 }
 type LandrushRobotProps = {
   animationPace?: number
   framePriority?: number
+  hoverOutlineWidthScale?: number
   node: LandrushWorldNode
   onAnimationState?: (state: LandrushRobotAnimationState) => void
   onHoverPoseSample?: (sample: LandrushRobotHoverPoseSample) => void
@@ -130,6 +119,7 @@ type LandrushRobotProps = {
 export function LandrushRobot({
   animationPace = 1,
   framePriority = 0,
+  hoverOutlineWidthScale = 1,
   node,
   onAnimationState,
   onHoverPoseSample,
@@ -143,6 +133,7 @@ export function LandrushRobot({
     LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[0],
     LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[1],
   )
+  const hoverOutlineWidthScaleValue = MathUtils.clamp(hoverOutlineWidthScale, 0.5, 3)
   const idleTimeScale = LANDRUSH_ROBOT_IDLE_TIME_SCALE
   const groupRef = useRef<Group>(null!)
   const { animations, scene } = useGLTF(LANDRUSH_ROBOT_ASSET_PATH)
@@ -157,19 +148,12 @@ export function LandrushRobot({
     () => measure('setup.robot-glb.clone-skeleton', () => cloneSkeleton(scene) as Group),
     [measure, scene],
   )
-  const hoverOutlineTargets = useMemo(
-    () =>
-      measure('setup.robot-glb.collect-hover-outline-targets', () =>
-        collectLandrushRobotOutlineTargets(clonedScene),
-      ),
-    [clonedScene, measure],
-  )
   const hoverRestPose = useMemo(
     () =>
       measure('setup.robot-glb.capture-hover-rest-pose', () =>
-        captureLandrushRobotRestPose(clonedScene),
+        captureLandrushRobotRestPose(clonedScene, locomotionClips),
       ),
-    [clonedScene, measure],
+    [clonedScene, locomotionClips, measure],
   )
   const robotTransform = useMemo(() => {
     return measure('setup.robot-glb.compute-transform', () => {
@@ -444,12 +428,16 @@ export function LandrushRobot({
         const mesh = child as {
           castShadow?: boolean
           frustumCulled?: boolean
+          geometry?: BufferGeometry
           isMesh?: boolean
           material?: unknown
           receiveShadow?: boolean
           visible?: boolean
         }
         if (!mesh.isMesh) return
+        if (mesh.geometry && !mesh.geometry.getAttribute('normal')) {
+          mesh.geometry.computeVertexNormals()
+        }
         mesh.castShadow = true
         mesh.frustumCulled = false
         mesh.receiveShadow = true
@@ -460,9 +448,13 @@ export function LandrushRobot({
 
   useEffect(() => {
     measure('setup.robot-glb.configure-hover-fill', () => {
-      applyLandrushRobotHoverFill(clonedScene, presentationMode === 'hover')
+      applyLandrushRobotHoverFill(
+        clonedScene,
+        presentationMode === 'hover',
+        hoverOutlineWidthScaleValue,
+      )
     })
-  }, [clonedScene, measure, presentationMode])
+  }, [clonedScene, hoverOutlineWidthScaleValue, measure, presentationMode])
 
   return (
     <group
@@ -472,141 +464,9 @@ export function LandrushRobot({
     >
       <group scale={robotTransform.scale * LANDRUSH_ROBOT_GLB_VISUAL_SCALE}>
         <primitive object={clonedScene} position={robotTransform.offset} />
-        {presentationMode === 'hover' ? (
-          <LandrushRobotHoverMeshOutlines targets={hoverOutlineTargets} />
-        ) : null}
       </group>
     </group>
   )
-}
-
-function LandrushRobotHoverMeshOutlines({
-  targets,
-}: {
-  targets: readonly LandrushRobotOutlineMesh[]
-}) {
-  return (
-    <>
-      {targets.map((target) => (
-        <LandrushRobotHoverMeshOutlinePortal key={target.uuid} target={target} />
-      ))}
-    </>
-  )
-}
-
-function LandrushRobotHoverMeshOutlinePortal({ target }: { target: LandrushRobotOutlineMesh }) {
-  const parent = target.parent
-  if (!parent) return null
-
-  return createPortal(
-    <>
-      <LandrushRobotHoverMeshOutlineShell
-        color={LANDRUSH_ROBOT_HOVER_OUTLINE_GLOW_COLOR}
-        opacity={0.4}
-        renderOrder={LANDRUSH_ROBOT_HOVER_OUTLINE_RENDER_ORDER}
-        scale={LANDRUSH_ROBOT_HOVER_OUTLINE_GLOW_SCALE}
-        target={target}
-      />
-      <LandrushRobotHoverMeshOutlineShell
-        color={LANDRUSH_ROBOT_HOVER_OUTLINE_INK_COLOR}
-        opacity={0.92}
-        renderOrder={LANDRUSH_ROBOT_HOVER_OUTLINE_RENDER_ORDER + 1}
-        scale={LANDRUSH_ROBOT_HOVER_OUTLINE_INK_SCALE}
-        target={target}
-      />
-    </>,
-    parent,
-  )
-}
-
-function LandrushRobotHoverMeshOutlineShell({
-  color,
-  opacity,
-  renderOrder,
-  scale,
-  target,
-}: {
-  color: string
-  opacity: number
-  renderOrder: number
-  scale: number
-  target: LandrushRobotOutlineMesh
-}) {
-  const material = useMemo(
-    () =>
-      new MeshBasicNodeMaterial({
-        color,
-        depthTest: true,
-        depthWrite: false,
-        opacity,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        side: BackSide,
-        toneMapped: false,
-        transparent: true,
-      }),
-    [color, opacity],
-  )
-  const outline = useMemo(() => {
-    const nextOutline = createLandrushRobotHoverOutlineShell(target, material)
-    nextOutline.castShadow = false
-    nextOutline.frustumCulled = false
-    nextOutline.receiveShadow = false
-    nextOutline.userData.landrushRobotHoverOutline = true
-    syncLandrushRobotHoverOutlineShell(nextOutline, target, scale, renderOrder)
-    return nextOutline
-  }, [material, renderOrder, scale, target])
-
-  useEffect(
-    () => () => {
-      outline.removeFromParent()
-      material.dispose()
-    },
-    [material, outline],
-  )
-
-  useFrame(() => {
-    syncLandrushRobotHoverOutlineShell(outline, target, scale, renderOrder)
-  })
-
-  return <primitive object={outline} />
-}
-
-function createLandrushRobotHoverOutlineShell(
-  target: LandrushRobotOutlineMesh,
-  material: MeshBasicNodeMaterial,
-) {
-  if (target.isSkinnedMesh === true && target.skeleton) {
-    const outline = new SkinnedMesh(target.geometry, material)
-    outline.bind(target.skeleton, target.bindMatrix)
-    if (target.bindMode) outline.bindMode = target.bindMode
-    if (target.bindMatrixInverse) outline.bindMatrixInverse.copy(target.bindMatrixInverse)
-    return outline
-  }
-  return new Mesh(target.geometry, material)
-}
-
-function syncLandrushRobotHoverOutlineShell(
-  outline: Mesh | SkinnedMesh,
-  target: LandrushRobotOutlineMesh,
-  scale: number,
-  renderOrder: number,
-) {
-  outline.layers.mask = target.layers.mask
-  outline.position.copy(target.position)
-  outline.quaternion.copy(target.quaternion)
-  outline.renderOrder = renderOrder
-  outline.scale.copy(target.scale).multiplyScalar(scale)
-  outline.visible = target.visible !== false && target.parent !== null
-  syncLandrushRobotHoverOutlineMorphTargets(outline, target)
-}
-
-function syncLandrushRobotHoverOutlineMorphTargets(
-  outline: Mesh | SkinnedMesh,
-  target: LandrushRobotOutlineMesh,
-) {
-  outline.morphTargetDictionary = target.morphTargetDictionary
-  outline.morphTargetInfluences = target.morphTargetInfluences
 }
 
 export function resolveLandrushRobotHoverOffset(hoverAmount: number, elapsedTime: number) {
@@ -618,61 +478,110 @@ export function resolveLandrushRobotHoverOffset(hoverAmount: number, elapsedTime
   )
 }
 
-function applyLandrushRobotHoverFill(root: Group, active: boolean) {
+function applyLandrushRobotHoverFill(root: Group, active: boolean, outlineWidthScale: number) {
   root.traverse((child) => {
-    const mesh = child as { isMesh?: boolean; material?: unknown }
+    const mesh = child as {
+      isMesh?: boolean
+      material?: unknown
+      userData: LandrushRobotHoverMaterialState
+    }
     if (!mesh.isMesh) return
-    if (isLandrushRobotHoverOutlineObject(child)) return
 
-    for (const material of getRobotMaterials(mesh.material)) {
-      const colorMaterial = material as Material & {
-        color?: Color
-        userData: Material['userData'] & { landrushOriginalColor?: Color }
+    if (active) {
+      mesh.userData.landrushOriginalMaterial ??= mesh.material
+      if (
+        !mesh.userData.landrushHoverMaterial ||
+        mesh.userData.landrushHoverMaterialScale !== outlineWidthScale
+      ) {
+        mesh.userData.landrushHoverMaterial?.dispose()
+        mesh.userData.landrushHoverMaterial = createLandrushRobotHoverMaterial(outlineWidthScale)
+        mesh.userData.landrushHoverMaterialScale = outlineWidthScale
       }
-      if (!colorMaterial.color) continue
+      mesh.material = mesh.userData.landrushHoverMaterial
+      return
+    }
 
-      colorMaterial.userData.landrushOriginalColor ??= colorMaterial.color.clone()
-      colorMaterial.color.copy(
-        active ? LANDRUSH_ROBOT_HOVER_FILL_COLOR : colorMaterial.userData.landrushOriginalColor,
-      )
-      colorMaterial.needsUpdate = true
+    if ('landrushOriginalMaterial' in mesh.userData) {
+      mesh.material = mesh.userData.landrushOriginalMaterial
+      delete mesh.userData.landrushOriginalMaterial
     }
   })
 }
 
-function collectLandrushRobotOutlineTargets(root: Group) {
-  const targets: LandrushRobotOutlineMesh[] = []
-  root.traverse((child) => {
-    if (isLandrushRobotOutlineMesh(child) && child.visible !== false) {
-      targets.push(child)
-    }
+function createLandrushRobotHoverMaterial(outlineWidthScale: number) {
+  const viewDirection = cameraPosition.sub(positionWorld).normalize()
+  const rimEdgeScale = Math.max(0.5, outlineWidthScale)
+  const rim = float(1)
+    .sub(normalWorld.dot(viewDirection).abs())
+    .smoothstep(0.06 / rimEdgeScale, 0.42 / rimEdgeScale)
+    .mul(0.98)
+  const fill = tslColor(LANDRUSH_ROBOT_HOVER_FILL_COLOR)
+  const ink = tslColor(LANDRUSH_ROBOT_HOVER_OUTLINE_INK_COLOR)
+
+  const material = new MeshBasicNodeMaterial({
+    colorNode: fill.mul(float(1).sub(rim)).add(ink.mul(rim)),
+    toneMapped: false,
   })
-  return targets
-}
-
-function isLandrushRobotOutlineMesh(object: Object3D): object is LandrushRobotOutlineMesh {
-  const mesh = object as Object3D & { geometry?: BufferGeometry; isMesh?: boolean }
-  return mesh.isMesh === true && Boolean(mesh.geometry?.getAttribute('position'))
-}
-
-function isLandrushRobotHoverOutlineObject(object: Object3D) {
-  let current: Object3D | null = object
-  while (current) {
-    if (current.userData?.landrushRobotHoverOutline === true) return true
-    current = current.parent
-  }
-  return false
+  material.depthWrite = true
+  return material
 }
 
 type LandrushRobotRestPose = Map<string, Euler>
 
-function captureLandrushRobotRestPose(root: Group): LandrushRobotRestPose {
+function captureLandrushRobotRestPose(
+  root: Group,
+  locomotionClips: readonly AnimationClip[],
+): LandrushRobotRestPose {
+  const originalPose = captureLandrushRobotBonePose(root)
+  const idleClip = selectLandrushRobotHoverIdleClip(locomotionClips)
+  if (!idleClip) return originalPose
+
+  const mixer = new AnimationMixer(root)
+  const action = mixer.clipAction(idleClip)
+  action.enabled = true
+  action.setEffectiveWeight(1)
+  action.play()
+  mixer.setTime(resolveLandrushRobotHoverIdleSampleTime(idleClip))
+  root.updateMatrixWorld(true)
+  const sampledPose = captureLandrushRobotBonePose(root)
+
+  action.stop()
+  mixer.stopAllAction()
+  mixer.uncacheRoot(root)
+  applyLandrushRobotBonePose(root, originalPose)
+  root.updateMatrixWorld(true)
+  return sampledPose
+}
+
+function captureLandrushRobotBonePose(root: Group): LandrushRobotRestPose {
   const restPose: LandrushRobotRestPose = new Map()
   root.traverse((child) => {
     if ((child as Object3D & { isBone?: boolean }).isBone !== true) return
     restPose.set(child.name, child.rotation.clone())
   })
   return restPose
+}
+
+function applyLandrushRobotBonePose(root: Group, pose: LandrushRobotRestPose) {
+  root.traverse((child) => {
+    if ((child as Object3D & { isBone?: boolean }).isBone !== true) return
+    const rotation = pose.get(child.name)
+    if (!rotation) return
+    child.rotation.copy(rotation)
+  })
+}
+
+function selectLandrushRobotHoverIdleClip(locomotionClips: readonly AnimationClip[]) {
+  for (const name of LANDRUSH_ROBOT_IDLE_CLIP_NAMES) {
+    const clip = locomotionClips.find((candidate) => candidate.name === name)
+    if (clip) return clip
+  }
+  return locomotionClips.find((candidate) => candidate.name.toLowerCase().includes('idle')) ?? null
+}
+
+function resolveLandrushRobotHoverIdleSampleTime(clip: AnimationClip) {
+  if (!Number.isFinite(clip.duration) || clip.duration <= 0) return 0
+  return Math.min(0.35, clip.duration * 0.18)
 }
 
 function applyLandrushRobotHoverPose(
@@ -701,22 +610,12 @@ function applyLandrushRobotHoverPose(
 
 function resolveLandrushRobotHoverBonePose(name: string, restRotation: Euler) {
   if (name.includes('toe')) {
-    return { x: restRotation.x - 0.36, y: restRotation.y, z: restRotation.z }
+    return { x: restRotation.x + 0.28, y: restRotation.y, z: restRotation.z }
   }
   if (name.includes('foot')) {
-    return { x: restRotation.x - 0.46, y: restRotation.y, z: restRotation.z }
+    return { x: restRotation.x + 0.38, y: restRotation.y, z: restRotation.z }
   }
-  if (
-    name === 'hips' ||
-    name.includes('spine') ||
-    name.includes('neck') ||
-    name.includes('head') ||
-    name.includes('arm') ||
-    name.includes('hand')
-  ) {
-    return restRotation
-  }
-  return null
+  return restRotation
 }
 
 function createLandrushRobotHoverPoseSample(
@@ -762,15 +661,6 @@ function roundRobotProbeDegrees(value: number) {
 
 function roundRobotProbeValue(value: number) {
   return Math.round(value * 1000) / 1000
-}
-
-function getRobotMaterials(material: unknown): Material[] {
-  if (Array.isArray(material)) return material.filter(isRobotMaterial)
-  return isRobotMaterial(material) ? [material] : []
-}
-
-function isRobotMaterial(material: unknown): material is Material {
-  return Boolean(material && typeof material === 'object' && 'needsUpdate' in material)
 }
 
 function getFirstAvailableRobotAction(

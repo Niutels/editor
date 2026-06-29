@@ -39,6 +39,7 @@ type GrassWaterLandLayersProps = {
   grassDebugState?: GrassLifecycleDebugState
   grassInteractionRef?: StylizedGrassInteractionRef
   groundRenderOrder?: number
+  onStylizedGroundTextureReady?: (ready: boolean) => void
   profileMeasure?: ProfileMeasure
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
@@ -54,6 +55,7 @@ type GrassWaterLandLayersProps = {
 
 type GrassGroundLayerProps = {
   elevation: number
+  onTextureReady?: (ready: boolean) => void
   profileMeasure?: ProfileMeasure
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
@@ -132,6 +134,7 @@ export function GrassWaterLandLayers({
   grassDebugState,
   grassInteractionRef,
   groundRenderOrder = GRASS_GROUND_RENDER_ORDER,
+  onStylizedGroundTextureReady,
   profileMeasure,
   roads = EMPTY_GRASS_ROADS,
   showBlades = true,
@@ -285,6 +288,7 @@ export function GrassWaterLandLayers({
           profileMeasure={profileMeasure}
           renderOrder={groundRenderOrder}
           roads={roads}
+          onTextureReady={onStylizedGroundTextureReady}
           stylizedTexture={stylizedGroundTexture}
           stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
           texture={renderedGroundField.texture}
@@ -565,6 +569,7 @@ function smoothstep(edge0: number, edge1: number, value: number) {
 
 export function GrassGroundLayer({
   elevation,
+  onTextureReady,
   profileMeasure,
   renderOrder,
   roads,
@@ -572,10 +577,15 @@ export function GrassGroundLayer({
   stylizedTextureWorldSizeMeters,
   texture,
 }: GrassGroundLayerProps) {
+  useEffect(() => {
+    if (!stylizedTexture) onTextureReady?.(true)
+  }, [onTextureReady, stylizedTexture])
+
   if (stylizedTexture) {
     return (
       <StylizedGrassGroundLayer
         elevation={elevation}
+        onTextureReady={onTextureReady}
         profileMeasure={profileMeasure}
         renderOrder={renderOrder}
         roads={roads}
@@ -600,10 +610,12 @@ function StylizedGrassGroundLayer({
   profileMeasure,
   renderOrder,
   roads,
+  onTextureReady,
   texture,
   textureWorldSizeMeters,
 }: {
   elevation: number
+  onTextureReady?: (ready: boolean) => void
   profileMeasure?: ProfileMeasure
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
@@ -653,6 +665,10 @@ function StylizedGrassGroundLayer({
     textureOptions,
   })
   const groundTexture = finalGroundTexture ?? previewGroundTexture
+
+  useEffect(() => {
+    onTextureReady?.(Boolean(finalGroundTexture))
+  }, [finalGroundTexture, onTextureReady])
 
   useEffect(
     () => () => {

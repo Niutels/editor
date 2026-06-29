@@ -52,6 +52,7 @@ import {
   ChevronRight,
   Hammer,
   Layers,
+  Map as MapIcon,
   Package,
   RotateCcw,
   Settings,
@@ -258,10 +259,12 @@ const PASCAL_WATER_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX = 8
 const PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS = 0.48
 const PASCAL_WATER_NAVIGATION_VERTEX_OFFSET_METERS = 0.35
 const PASCAL_WATER_NAVIGATION_MAX_GRAPH_POINTS = 96
-const PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS = 1.5
+const PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS = 1
 const PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS = 0.24
 const PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS = 0.18
 const PASCAL_WATER_DOOR_CROSSING_TANGENT_MARGIN_METERS = 0.5
+const PASCAL_WATER_DOOR_CROSSING_MIN_INTENSITY = 0.68
+const PASCAL_WATER_DOOR_CROSSING_OPEN_MIN = 0.82
 const PASCAL_WATER_DOOR_OPEN_TRIGGER_METERS = 1.45
 const PASCAL_WATER_DOOR_OPEN_LOOKAHEAD_METERS = 4.8
 const PASCAL_WATER_DOOR_OPEN_PATH_CLEARANCE_METERS = 0.62
@@ -277,6 +280,7 @@ const PASCAL_WATER_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
 const PASCAL_WATER_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
 const PASCAL_WATER_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE = 2
 const PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS = 0.16
+const PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS = 1.24
 const PASCAL_WATER_WALK_TARGET_MIN_NORMAL_Y = 0.35
 const PASCAL_WATER_BUILT_GRASS_PADDING_METERS = 1
 const PASCAL_WATER_BUILT_GRASS_FEATHER_METERS = 0.3
@@ -296,7 +300,6 @@ const PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT = 7
 const PASCAL_WATER_BUILD_CAMERA_MAX_HEIGHT = 15
 const PASCAL_WATER_BUILD_CAMERA_TRANSITION_SECONDS = 1.15
 const PASCAL_WATER_CAMERA_TRANSITION_TICK_MS = 1000 / 120
-const PASCAL_WATER_CAMERA_TRANSITION_FRAME_STALL_MS = 34
 const PASCAL_WATER_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
 const PASCAL_WATER_RUNTIME_FRAME_GAP_MS = 34
 const PASCAL_WATER_LOADING_EXPECTED_MS = 18_000
@@ -532,10 +535,19 @@ type PascalWaterMoveTarget = {
 }
 type PascalWaterMoveRouteState = {
   bestDistance: number
+  doorCrossing: PascalWaterDoorCrossingState | null
   lastProgressAt: number
   lastRobotPoint: LandrushPoint2
   lastSteeringPoint: LandrushPoint2 | null
   recoveryCount: number
+}
+type PascalWaterDoorCrossingPhase = 'center' | 'entry' | 'exit'
+type PascalWaterDoorCrossingState = {
+  center: LandrushPoint2
+  doorId: AnyNodeId
+  entry: LandrushPoint2
+  exit: LandrushPoint2
+  phase: PascalWaterDoorCrossingPhase
 }
 type PascalWaterRightHoldMove = {
   id: number
@@ -626,6 +638,7 @@ type PascalWaterDoorPortal = {
 }
 type PascalWaterNavigationSteeringKind = 'direct' | 'door' | 'graph' | 'recovery'
 type PascalWaterNavigationSteeringResult = {
+  doorCrossing?: PascalWaterDoorCrossingState
   doorId?: AnyNodeId
   kind: PascalWaterNavigationSteeringKind
   point: LandrushPoint2
@@ -1451,6 +1464,11 @@ export function PascalWaterClient({
     [],
   )
   const [loadingActive, setLoadingActive] = useState(true)
+  const stylizedGroundTextureRequired =
+    !startupProfileNoLandLayers && !startupProfileNoStylizedGround
+  const [stylizedGroundTextureReady, setStylizedGroundTextureReady] = useState(
+    !stylizedGroundTextureRequired,
+  )
   const activePerfRun = useMemo(
     () => ({ ...perfRun, enabled: perfRun.enabled && !loadingActive }),
     [loadingActive, perfRun],
@@ -1504,6 +1522,11 @@ export function PascalWaterClient({
   const multiplayerStatus: ConnectionStatus = offline ? 'offline' : multiplayer.status
   const viewMode: PascalWaterViewMode = buildMode ? 'build' : mapView ? 'map' : 'player'
   const mapPresentationProgressRef = useRef(viewMode === 'map' ? 1 : 0)
+  const loadingAssetsReady = !stylizedGroundTextureRequired || stylizedGroundTextureReady
+
+  useEffect(() => {
+    setStylizedGroundTextureReady(!stylizedGroundTextureRequired)
+  }, [stylizedGroundTextureRequired])
 
   usePascalWaterPerfRunProbe(activePerfRun)
   useEffect(() => {
@@ -2489,6 +2512,7 @@ export function PascalWaterClient({
                           groundRenderOrder={
                             buildMode ? PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER : undefined
                           }
+                          onStylizedGroundTextureReady={setStylizedGroundTextureReady}
                           profileMeasure={activeProfileMeasure}
                           roads={liveGrassRoads}
                           showBlades={!startupProfileNoStylizedBlades}
@@ -2545,7 +2569,8 @@ export function PascalWaterClient({
             }}
             type="button"
           >
-            M
+            <MapIcon aria-hidden className="size-9" />
+            <span>M</span>
           </button>
           <button
             aria-label="Build mode"
@@ -2562,7 +2587,8 @@ export function PascalWaterClient({
             }}
             type="button"
           >
-            B
+            <Hammer aria-hidden className="size-9" />
+            <span>B</span>
           </button>
         </div>
         {showTunePanel ? (
@@ -2606,7 +2632,7 @@ export function PascalWaterClient({
         )}
         {viewMode === 'player' ? <MobileMovementJoystick movementRef={mobileJoystickRef} /> : null}
       </div>
-      <PascalWaterLoadingOverlay onLoaded={handleLoadingLoaded} />
+      <PascalWaterLoadingOverlay assetsReady={loadingAssetsReady} onLoaded={handleLoadingLoaded} />
     </main>
   )
 }
@@ -2624,8 +2650,14 @@ function resolvePascalWaterMapPresentationProgress(
   return viewMode === 'map' ? 1 : 0
 }
 
-function PascalWaterLoadingOverlay({ onLoaded }: { onLoaded: () => void }) {
-  const { progress, visible } = usePascalWaterLoadingProgress()
+function PascalWaterLoadingOverlay({
+  assetsReady,
+  onLoaded,
+}: {
+  assetsReady: boolean
+  onLoaded: () => void
+}) {
+  const { progress, visible } = usePascalWaterLoadingProgress(assetsReady)
   const percent = Math.round(clamp(progress, 0, 100))
   const complete = percent >= 100
 
@@ -2898,7 +2930,7 @@ function formatTuningValue(value: number, step = 0.01) {
 
 function pascalWaterModeButtonClass(active: boolean) {
   return [
-    'grid size-11 place-items-center rounded-full border font-semibold text-sm shadow-xl backdrop-blur transition',
+    'inline-flex size-[8.25rem] items-center justify-center gap-3 rounded-full border text-4xl font-black shadow-xl backdrop-blur transition',
     active
       ? 'border-amber-100/64 bg-amber-300 text-slate-950 shadow-[0_0_22px_rgba(245,207,120,0.22)]'
       : 'border-white/22 bg-slate-950/70 text-white/78 hover:border-white/42 hover:bg-slate-900/84 hover:text-white',
@@ -3594,10 +3626,10 @@ function usePascalWaterBuiltColliderWorlds() {
 
   const buildWorlds = useCallback(() => {
     const collision = buildFirstPersonColliderWorldFromRegistry({
-      excludeNodeTypes: ['slab', 'ceiling'],
+      excludeNodeTypes: ['slab'],
     })
     const floatOnly = buildFirstPersonColliderWorldFromRegistry({
-      includeNodeTypes: ['slab', 'ceiling'],
+      includeNodeTypes: ['slab'],
       userData: {
         excludeCollisionCheck: true,
         excludeFloatHit: false,
@@ -3765,6 +3797,7 @@ function PascalWaterPlayerLayer({
   const mapVisible = viewMode === 'map'
   const movementEnabled = viewMode === 'player'
   const cameraEnabled = viewMode === 'player'
+  const localRobotVisualRootRef = useRef<Group | null>(null)
   const robotPresentationMode: LandrushRobotPresentationMode =
     viewMode === 'build' ? 'hover' : 'default'
 
@@ -3782,6 +3815,7 @@ function PascalWaterPlayerLayer({
         groundY={groundY}
         localMotionRef={localMotionRef}
         localProfile={localProfile}
+        localRobotVisualRootRef={localRobotVisualRootRef}
         mobileJoystickRef={mobileJoystickRef}
         cameraEnabled={cameraEnabled}
         movementEnabled={movementEnabled}
@@ -3807,6 +3841,7 @@ function PascalWaterPlayerLayer({
       <PascalWaterRobotScreenRevealClipper
         motionRef={localMotionRef}
         presentationMode={robotPresentationMode}
+        visualRootRef={localRobotVisualRootRef}
         visible={viewMode !== 'map'}
       />
       <PascalWaterMapPlayerMarker
@@ -4216,7 +4251,7 @@ function PascalWaterParcelBuildMarker({
     )
   })
 
-  if (!visible && mapOpacityAmount <= 0.002) return null
+  if (!visible) return null
 
   if (mapView || mapOpacityAmount > 0.002) {
     return (
@@ -4418,10 +4453,12 @@ const PASCAL_WATER_ROBOT_REVEAL_OCCLUDER_NODE_TYPES = [
 function PascalWaterRobotScreenRevealClipper({
   motionRef,
   presentationMode,
+  visualRootRef,
   visible,
 }: {
   motionRef: { current: RobotMotion | null }
   presentationMode: LandrushRobotPresentationMode
+  visualRootRef: { current: Group | null }
   visible: boolean
 }) {
   const { camera, gl, scene } = useThree()
@@ -4440,6 +4477,7 @@ function PascalWaterRobotScreenRevealClipper({
     Array.from({ length: PASCAL_WATER_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Vector3()),
   )
   const cameraPositionRef = useRef(new Vector3())
+  const robotVisualRootRef = useRef(new Vector3())
   const robotBaseRef = useRef(new Vector3())
   const robotHeadRef = useRef(new Vector3())
   const robotCenterRef = useRef(new Vector3())
@@ -4507,29 +4545,33 @@ function PascalWaterRobotScreenRevealClipper({
       LANDRUSH_ROBOT_HOVER_RESPONSE,
       Math.min(delta, 0.05),
     )
+    const visualRoot = visualRootRef.current
+    visualRoot?.updateWorldMatrix(true, false)
+    const robotVisualRoot = visualRoot
+      ? robotVisualRootRef.current.setFromMatrixPosition(visualRoot.matrixWorld)
+      : null
     const robotVisualY =
+      robotVisualRoot?.y ??
       motion.position.y + resolveLandrushRobotHoverOffset(hoverAmountRef.current, clock.elapsedTime)
-    const robotPoint = { x: motion.position.x, z: motion.position.z }
+    const robotX = robotVisualRoot?.x ?? motion.position.x
+    const robotZ = robotVisualRoot?.z ?? motion.position.z
+    const robotPoint = { x: robotX, z: robotZ }
     if (clock.elapsedTime - lastRefreshAtRef.current > 0.35) {
       lastRefreshAtRef.current = clock.elapsedTime
       occludersRef.current = collectPascalWaterRobotRevealOccluders(scene, robotPoint)
       materialsRef.current = collectPascalWaterRobotRevealMaterials(occludersRef.current)
     }
     const robotBase = robotBaseRef.current.set(
-      motion.position.x,
+      robotX,
       robotVisualY + 0.08,
-      motion.position.z,
+      robotZ,
     )
     const robotHead = robotHeadRef.current.set(
-      motion.position.x,
+      robotX,
       robotVisualY + 1.88,
-      motion.position.z,
+      robotZ,
     )
-    const robotCenter = robotCenterRef.current.set(
-      motion.position.x,
-      robotVisualY + PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT,
-      motion.position.z,
-    )
+    const robotCenter = robotCenterRef.current.copy(robotBase).lerp(robotHead, 0.5)
     const robotNdc = robotNdcRef.current.copy(robotCenter).project(camera)
     if (robotNdc.z < -1 || robotNdc.z > 1) {
       restoreClipping()
@@ -4538,8 +4580,14 @@ function PascalWaterRobotScreenRevealClipper({
 
     const baseScreen = projectPascalWaterScreenPoint(robotBase.project(camera), width, height)
     const headScreen = projectPascalWaterScreenPoint(robotHead.project(camera), width, height)
-    const robotScreen = projectPascalWaterScreenPoint(robotNdc, width, height)
-    const robotScreenHeight = Math.hypot(headScreen.x - baseScreen.x, headScreen.y - baseScreen.y)
+    const robotScreen = {
+      x: (baseScreen.x + headScreen.x) * 0.5,
+      y: (baseScreen.y + headScreen.y) * 0.5,
+    }
+    const robotScreenHeight = Math.hypot(
+      headScreen.x - baseScreen.x,
+      headScreen.y - baseScreen.y,
+    )
     const baseRevealRadiusPx = Math.max(
       PASCAL_WATER_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX,
       robotScreenHeight * PASCAL_WATER_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE * 0.5,
@@ -4578,6 +4626,7 @@ function PascalWaterRobotScreenRevealClipper({
         occluderCount: occludersRef.current.length,
         path: revealPath,
         radiusRatio: roundPerf(revealOuterRadiusPx / revealRadiusPx),
+        screenSource: 'visual-root-segment',
         robotScreen: [roundPerf(robotScreen.x), roundPerf(robotScreen.y)],
         softMaterialCount: materialsRef.current.filter(isPascalWaterSoftRevealMaterial).length,
       })
@@ -4922,6 +4971,36 @@ function projectPascalWaterScreenPoint(ndc: Vector3, width: number, height: numb
   }
 }
 
+const _pascalWaterScreenProjectionVector = new Vector3()
+const _pascalWaterScreenProjectionPoint = new Vector2()
+
+function projectVectorToPascalWaterScreenPoint(
+  point: Vector3,
+  camera: Camera,
+  viewport: { height: number; width: number },
+) {
+  const projected = _pascalWaterScreenProjectionVector.copy(point).project(camera)
+  const screen = projectPascalWaterScreenPoint(projected, viewport.width, viewport.height)
+  return _pascalWaterScreenProjectionPoint.set(screen.x, screen.y)
+}
+
+function distanceSqToPascalWaterScreenSegment(point: Vector2, start: Vector2, end: Vector2) {
+  const segmentX = end.x - start.x
+  const segmentY = end.y - start.y
+  const segmentLengthSq = segmentX * segmentX + segmentY * segmentY
+  if (segmentLengthSq <= Number.EPSILON) return point.distanceToSquared(start)
+  const projectedAmount = MathUtils.clamp(
+    ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) / segmentLengthSq,
+    0,
+    1,
+  )
+  const closestX = start.x + segmentX * projectedAmount
+  const closestY = start.y + segmentY * projectedAmount
+  const dx = point.x - closestX
+  const dy = point.y - closestY
+  return dx * dx + dy * dy
+}
+
 function LocalPascalWaterRobot({
   baseNode,
   buildCameraPoseRef,
@@ -4930,6 +5009,7 @@ function LocalPascalWaterRobot({
   groundY,
   localMotionRef,
   localProfile,
+  localRobotVisualRootRef,
   mapReturnCameraPoseRef,
   mobileJoystickRef,
   movementEnabled,
@@ -4949,6 +5029,7 @@ function LocalPascalWaterRobot({
   groundY: number
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
+  localRobotVisualRootRef: { current: Group | null }
   mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
   mobileJoystickRef: { current: MobileJoystickInput | null }
   movementEnabled: boolean
@@ -4962,7 +5043,7 @@ function LocalPascalWaterRobot({
   surfacePoints: readonly LandrushPoint2[]
 }) {
   const { camera, gl } = useThree()
-  const builtColliderWorld = usePascalWaterBuiltColliderWorld()
+  const builtColliderWorlds = usePascalWaterBuiltColliderWorlds()
   const sceneNodesForNavigation = useScene((state) => state.nodes)
   const pressedKeysRef = useRef(new Set<string>())
   const clickMoveTargetRef = useRef<PascalWaterMoveTarget | null>(null)
@@ -4982,8 +5063,12 @@ function LocalPascalWaterRobot({
   )
   const colliderMeshes = useMemo(
     () =>
-      builtColliderWorld ? [groundColliderMesh, builtColliderWorld.mesh] : [groundColliderMesh],
-    [builtColliderWorld, groundColliderMesh],
+      [
+        groundColliderMesh,
+        builtColliderWorlds.collision?.mesh,
+        builtColliderWorlds.floatOnly?.mesh,
+      ].filter((mesh): mesh is Mesh => Boolean(mesh)),
+    [builtColliderWorlds, groundColliderMesh],
   )
   const navigationObstacles = useMemo(
     () => createPascalWaterNavigationObstacles(sceneNodesForNavigation),
@@ -4996,6 +5081,7 @@ function LocalPascalWaterRobot({
   const nodeRef = useRef<LandrushWorldNode>(
     createPascalWaterRobotActorNode(baseNode, localProfile.id, spawn, groundY),
   )
+  const [buildRobotHovered, setBuildRobotHovered] = useState(false)
   const motionRef = useRef<RobotMotion>({
     cameraSnapVersion: 0,
     heading: 0,
@@ -5005,6 +5091,10 @@ function LocalPascalWaterRobot({
     velocity: new Vector3(),
   })
   surfacePointsRef.current = surfacePoints
+
+  useEffect(() => {
+    if (presentationMode !== 'hover') setBuildRobotHovered(false)
+  }, [presentationMode])
 
   useEffect(
     () => () => {
@@ -5162,9 +5252,10 @@ function LocalPascalWaterRobot({
         return
       }
 
-      const point = pickPascalWaterBuildGroundPoint({
+      const point = pickPascalWaterWalkTargetPoint({
         camera,
         canvas,
+        colliderMeshes,
         event,
         groundY,
         pointerNdc: clickMovePointerNdc,
@@ -5203,7 +5294,15 @@ function LocalPascalWaterRobot({
       window.removeEventListener('pointercancel', handlePointerCancel, true)
       canvas.removeEventListener('contextmenu', handleContextMenu)
     }
-  }, [camera, clickMovePointerNdc, clickMoveRaycaster, gl, groundY, movementEnabled])
+  }, [
+    camera,
+    clickMovePointerNdc,
+    clickMoveRaycaster,
+    colliderMeshes,
+    gl,
+    groundY,
+    movementEnabled,
+  ])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -5251,6 +5350,7 @@ function LocalPascalWaterRobot({
         ? resolveRightHoldMovement({
             camera: state.camera,
             canvas: gl.domElement,
+            colliderMeshes,
             groundY,
             doorPortals,
             motion,
@@ -5444,10 +5544,12 @@ function LocalPascalWaterRobot({
       >
         <LandrushRobot
           framePriority={2}
+          hoverOutlineWidthScale={buildRobotHovered ? 2 : 1}
           node={nodeRef.current}
           onAnimationState={recordPascalWaterRobotAnimationProbe}
           onHoverPoseSample={recordPascalWaterRobotHoverPoseProbe}
           presentationMode={presentationMode}
+          visualRootRef={localRobotVisualRootRef}
         />
       </Suspense>
       <LandrushRobotFootstepAudio
@@ -5464,6 +5566,7 @@ function LocalPascalWaterRobot({
       <PascalWaterBuildRobotExitHotspot
         motionRef={motionRef}
         onExitBuildMode={onExitBuildMode}
+        onHoverChange={setBuildRobotHovered}
         visible={presentationMode === 'hover'}
       />
     </>
@@ -5673,22 +5776,12 @@ function usePascalWaterExplicitCameraTransitionClock({
   onFrame: (state: RootState, frameDelta: number) => boolean
   onInactive: () => void
 }) {
-  const advance = useThree((state) => state.advance)
   const getThreeState = useThree((state) => state.get)
   const onFrameRef = useRef(onFrame)
   const onInactiveRef = useRef(onInactive)
-  const lastCanvasFrameAtRef = useRef(0)
-  const lastManualAdvanceAtRef = useRef(Number.NEGATIVE_INFINITY)
 
   onFrameRef.current = onFrame
   onInactiveRef.current = onInactive
-
-  useFrame(() => {
-    const now = performance.now()
-    if (now - lastManualAdvanceAtRef.current > 4) {
-      lastCanvasFrameAtRef.current = now
-    }
-  }, -10_000)
 
   useEffect(() => {
     if (!active) {
@@ -5708,10 +5801,6 @@ function usePascalWaterExplicitCameraTransitionClock({
       lastAt = now
 
       settled = onFrameRef.current(state, frameDelta)
-      if (now - lastCanvasFrameAtRef.current > PASCAL_WATER_CAMERA_TRANSITION_FRAME_STALL_MS) {
-        lastManualAdvanceAtRef.current = now
-        advance(state.clock.elapsedTime + frameDelta, false)
-      }
       if (settled) window.clearInterval(intervalId)
     }
 
@@ -5721,7 +5810,7 @@ function usePascalWaterExplicitCameraTransitionClock({
       settled = true
       window.clearInterval(intervalId)
     }
-  }, [active, advance, getThreeState])
+  }, [active, getThreeState])
 }
 
 function createPascalWaterCameraPoseTransition({
@@ -6469,10 +6558,12 @@ function PascalWaterRobotPlayerBeacon({
 function PascalWaterBuildRobotExitHotspot({
   motionRef,
   onExitBuildMode,
+  onHoverChange,
   visible,
 }: {
   motionRef: { current: RobotMotion }
   onExitBuildMode: () => void
+  onHoverChange: (hovered: boolean) => void
   visible: boolean
 }) {
   const { camera, gl } = useThree()
@@ -6483,9 +6574,25 @@ function PascalWaterBuildRobotExitHotspot({
   const segmentEnd = useMemo(() => new Vector3(), [])
   const closestRayPoint = useMemo(() => new Vector3(), [])
   const closestRobotPoint = useMemo(() => new Vector3(), [])
+  const hoverScreenPointer = useMemo(() => new Vector2(), [])
+  const hoverScreenStart = useMemo(() => new Vector2(), [])
+  const hoverScreenEnd = useMemo(() => new Vector2(), [])
+  const hoverScreenMid = useMemo(() => new Vector3(), [])
+  const hoverScreenRadiusPoint = useMemo(() => new Vector3(), [])
+  const hoverScreenRight = useMemo(() => new Vector3(), [])
   const hoverAmountRef = useRef(0)
   const hoverOffsetRef = useRef(0)
+  const hoveredRef = useRef(false)
   const [hovered, setHovered] = useState(false)
+  const setHotspotHovered = useCallback(
+    (nextHovered: boolean) => {
+      if (hoveredRef.current === nextHovered) return
+      hoveredRef.current = nextHovered
+      setHovered(nextHovered)
+      onHoverChange(nextHovered)
+    },
+    [onHoverChange],
+  )
 
   useFrame(({ clock }, delta) => {
     hoverAmountRef.current = MathUtils.damp(
@@ -6509,7 +6616,7 @@ function PascalWaterBuildRobotExitHotspot({
 
   useEffect(() => {
     if (!visible) {
-      setHovered(false)
+      setHotspotHovered(false)
       return
     }
 
@@ -6517,6 +6624,14 @@ function PascalWaterBuildRobotExitHotspot({
     const previousCursor = canvas.style.cursor
     const isRobotHit = (event: MouseEvent | PointerEvent) => {
       const rect = canvas.getBoundingClientRect()
+      if (
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom
+      ) {
+        return false
+      }
       pointerNdc.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1,
@@ -6533,16 +6648,44 @@ function PascalWaterBuildRobotExitHotspot({
         closestRayPoint,
         closestRobotPoint,
       )
-      return distanceSq <= 0.62 * 0.62
+      if (
+        distanceSq <=
+        PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS * PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS
+      ) {
+        return true
+      }
+
+      hoverScreenPointer.set(event.clientX - rect.left, event.clientY - rect.top)
+      hoverScreenStart.copy(projectVectorToPascalWaterScreenPoint(segmentStart, camera, rect))
+      hoverScreenEnd.copy(projectVectorToPascalWaterScreenPoint(segmentEnd, camera, rect))
+      hoverScreenMid.copy(segmentStart).lerp(segmentEnd, 0.5)
+      hoverScreenRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+      hoverScreenRadiusPoint
+        .copy(hoverScreenMid)
+        .addScaledVector(hoverScreenRight, PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS)
+      const hoverScreenRadius = Math.max(
+        36,
+        hoverScreenStart.distanceTo(
+          projectVectorToPascalWaterScreenPoint(hoverScreenRadiusPoint, camera, rect),
+        ),
+      )
+      return (
+        distanceSqToPascalWaterScreenSegment(
+          hoverScreenPointer,
+          hoverScreenStart,
+          hoverScreenEnd,
+        ) <=
+        hoverScreenRadius * hoverScreenRadius
+      )
     }
     const suppressBuilderEvent = (event: MouseEvent | PointerEvent) => {
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
     }
-    const handlePointerMove = (event: PointerEvent) => {
+    const handlePointerMove = (event: MouseEvent | PointerEvent) => {
       const robotHit = isRobotHit(event)
-      setHovered((current) => (current === robotHit ? current : robotHit))
+      setHotspotHovered(robotHit)
       if (!robotHit) {
         canvas.style.cursor = previousCursor
         return
@@ -6552,7 +6695,7 @@ function PascalWaterBuildRobotExitHotspot({
       suppressBuilderEvent(event)
     }
     const handlePointerLeave = () => {
-      setHovered(false)
+      setHotspotHovered(false)
       canvas.style.cursor = previousCursor
     }
     const handlePointerDown = (event: PointerEvent) => {
@@ -6573,35 +6716,44 @@ function PascalWaterBuildRobotExitHotspot({
       suppressBuilderEvent(event)
     }
 
-    canvas.addEventListener('pointermove', handlePointerMove, { capture: true })
+    window.addEventListener('pointermove', handlePointerMove, { capture: true })
+    window.addEventListener('mousemove', handlePointerMove, { capture: true })
     canvas.addEventListener('pointerleave', handlePointerLeave)
-    canvas.addEventListener('pointerdown', handlePointerDown, { capture: true })
-    canvas.addEventListener('pointerup', handleClick, { capture: true })
-    canvas.addEventListener('click', handleClick, { capture: true })
-    canvas.addEventListener('dblclick', handleBlockedMouseEvent, { capture: true })
-    canvas.addEventListener('contextmenu', handleBlockedMouseEvent, { capture: true })
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true })
+    window.addEventListener('pointerup', handleClick, { capture: true })
+    window.addEventListener('click', handleClick, { capture: true })
+    window.addEventListener('dblclick', handleBlockedMouseEvent, { capture: true })
+    window.addEventListener('contextmenu', handleBlockedMouseEvent, { capture: true })
     return () => {
-      setHovered(false)
+      setHotspotHovered(false)
       canvas.style.cursor = previousCursor
-      canvas.removeEventListener('pointermove', handlePointerMove, true)
+      window.removeEventListener('pointermove', handlePointerMove, true)
+      window.removeEventListener('mousemove', handlePointerMove, true)
       canvas.removeEventListener('pointerleave', handlePointerLeave)
-      canvas.removeEventListener('pointerdown', handlePointerDown, true)
-      canvas.removeEventListener('pointerup', handleClick, true)
-      canvas.removeEventListener('click', handleClick, true)
-      canvas.removeEventListener('dblclick', handleBlockedMouseEvent, true)
-      canvas.removeEventListener('contextmenu', handleBlockedMouseEvent, true)
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+      window.removeEventListener('pointerup', handleClick, true)
+      window.removeEventListener('click', handleClick, true)
+      window.removeEventListener('dblclick', handleBlockedMouseEvent, true)
+      window.removeEventListener('contextmenu', handleBlockedMouseEvent, true)
     }
   }, [
     camera,
     closestRayPoint,
     closestRobotPoint,
     gl,
+    hoverScreenEnd,
+    hoverScreenMid,
+    hoverScreenPointer,
+    hoverScreenRadiusPoint,
+    hoverScreenRight,
+    hoverScreenStart,
     motionRef,
     onExitBuildMode,
     pointerNdc,
     raycaster,
     segmentEnd,
     segmentStart,
+    setHotspotHovered,
     visible,
   ])
 
@@ -6614,11 +6766,11 @@ function PascalWaterBuildRobotExitHotspot({
         style={{ opacity: hovered ? 1 : 0 }}
         zIndexRange={[120, 0]}
       >
-        <span className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-white/18 bg-slate-950/82 px-3 py-1.5 text-xs font-bold leading-none text-white shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur">
-          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-white text-[13px] font-black leading-none text-slate-950">
-            X
+        <span className="inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-white/18 bg-slate-950/82 px-3.5 py-1.5 text-sm font-black leading-none text-white shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-white text-base font-black leading-none text-slate-950">
+            B
           </span>
-          Build mode
+          <span className="text-lg font-black leading-none">Exit</span>
         </span>
       </Html>
     </group>
@@ -6650,13 +6802,12 @@ function PascalWaterMapPlayerMarker({
     const targetOpacity = visible && motion ? clamp01(opacityRef.current) : 0
     materialOpacityRef.current = targetOpacity
     setPascalWaterGroupMaterialOpacity(group, materialOpacityRef.current)
-    if (motion) group.visible = true
     setLabelOpacity((current) =>
       Math.abs(current - materialOpacityRef.current) < 0.01
         ? current
         : materialOpacityRef.current,
     )
-    if (!motion) return
+    if (!motion || targetOpacity <= 0.002) return
 
     group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
     group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
@@ -6705,8 +6856,7 @@ function PascalWaterRemoteMapPlayerMarker({
 
     materialOpacityRef.current = visible ? clamp01(opacityRef.current) : 0
     setPascalWaterGroupMaterialOpacity(group, materialOpacityRef.current)
-    group.visible = true
-    if (!visible) return
+    if (materialOpacityRef.current <= 0.002) return
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const positionAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_POSITION_RESPONSE * frameDelta)
@@ -7058,8 +7208,13 @@ function measurePascalWaterSetup<T>(
   return profileMeasure ? profileMeasure(id, callback) : callback()
 }
 
-function usePascalWaterLoadingProgress() {
+function usePascalWaterLoadingProgress(assetsReady: boolean) {
   const [progressState, setProgressState] = useState({ progress: 0, visible: true })
+  const assetsReadyRef = useRef(assetsReady)
+
+  useEffect(() => {
+    assetsReadyRef.current = assetsReady
+  }, [assetsReady])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof performance === 'undefined') {
@@ -7107,6 +7262,7 @@ function usePascalWaterLoadingProgress() {
       const target = Math.min(96, (elapsed / PASCAL_WATER_LOADING_EXPECTED_MS) * 96)
       const quietFor = now - lastLongTaskAt
       const canComplete =
+        assetsReadyRef.current &&
         document.readyState !== 'loading' &&
         elapsed >= PASCAL_WATER_LOADING_MINIMUM_MS &&
         quietFor >= PASCAL_WATER_LOADING_QUIET_MS
@@ -7426,6 +7582,7 @@ function readPascalWaterCameraControlsTarget(
 function resolveRightHoldMovement({
   camera,
   canvas,
+  colliderMeshes,
   doorPortals,
   groundY,
   motion,
@@ -7437,6 +7594,7 @@ function resolveRightHoldMovement({
 }: {
   camera: Camera
   canvas: HTMLCanvasElement
+  colliderMeshes: Mesh[]
   doorPortals: readonly PascalWaterDoorPortal[]
   groundY: number
   motion: RobotMotion
@@ -7448,9 +7606,10 @@ function resolveRightHoldMovement({
 }): RobotMovementInput | null {
   if (!pointer) return null
 
-  const point = pickPascalWaterBuildGroundPoint({
+  const point = pickPascalWaterWalkTargetPoint({
     camera,
     canvas,
+    colliderMeshes,
     event: { clientX: pointer.x, clientY: pointer.y } as PointerEvent,
     groundY,
     pointerNdc,
@@ -7490,9 +7649,13 @@ function resolveRightHoldMovement({
     ...direction,
     doorId: steeringPoint.doorId,
     heading: Math.atan2(direction.x, direction.z),
-    intensity: resolvePascalWaterClickMoveIntensity(steeringDistance),
+    intensity: resolvePascalWaterNavigationMoveIntensity(
+      steeringPoint.kind,
+      steeringDistance,
+      distance,
+    ),
     navigationKind: steeringPoint.kind,
-    runAmount: steeringDistance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE ? 1 : 0,
+    runAmount: distance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE ? 1 : 0,
     steeringDistance,
     steeringPoint: steeringPoint.point,
   }
@@ -7610,22 +7773,22 @@ function resolveClickMoveMovement(
       })
     }
   }
-  const dx = steering.point.x - start.x
-  const dz = steering.point.z - start.z
-  const steeringDistance = Math.hypot(dx, dz)
-  const waypointRadius =
-    steering.kind === 'door'
-      ? PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS
-      : PASCAL_WATER_CLICK_MOVE_WAYPOINT_RADIUS
-  if (
-    steeringDistance <= waypointRadius ||
-    segmentReachedPascalWaterNavigationPoint(
-      target.route.lastRobotPoint,
-      start,
-      steering.point,
-      waypointRadius,
-    )
-  ) {
+  for (let advance = 0; advance < 3; advance += 1) {
+    const steeringDistance = Math.hypot(steering.point.x - start.x, steering.point.z - start.z)
+    const waypointRadius =
+      steering.kind === 'door'
+        ? PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+        : PASCAL_WATER_CLICK_MOVE_WAYPOINT_RADIUS
+    const reached =
+      steeringDistance <= waypointRadius ||
+      segmentReachedPascalWaterNavigationPoint(
+        target.route.lastRobotPoint,
+        start,
+        steering.point,
+        waypointRadius,
+      )
+    if (!reached) break
+
     target.route.lastProgressAt = now
     target.route.lastRobotPoint = start
     target.route.lastSteeringPoint = steering.point
@@ -7634,9 +7797,27 @@ function resolveClickMoveMovement(
       navigationKind: steering.kind,
       steeringDistance: roundPerf(steeringDistance),
     })
-    return null
+    const nextSteering = resolvePascalWaterNavigationSteeringPoint(
+      start,
+      target.point,
+      navigationObstacles,
+      doorPortals,
+      surfacePoints,
+    )
+    if (
+      !nextSteering ||
+      (nextSteering.kind === steering.kind &&
+        Math.hypot(nextSteering.point.x - steering.point.x, nextSteering.point.z - steering.point.z) <=
+          0.001)
+    ) {
+      return null
+    }
+    steering = nextSteering
   }
 
+  const dx = steering.point.x - start.x
+  const dz = steering.point.z - start.z
+  const steeringDistance = Math.hypot(dx, dz)
   const direction = normalize2(dx, dz)
   if (steering.doorId && target.route.lastSteeringPoint !== steering.point) {
     recordPascalWaterNavigationProbe({
@@ -7653,9 +7834,9 @@ function resolveClickMoveMovement(
     ...direction,
     doorId: steering.doorId,
     heading: Math.atan2(direction.x, direction.z),
-    intensity: resolvePascalWaterClickMoveIntensity(steeringDistance),
+    intensity: resolvePascalWaterNavigationMoveIntensity(steering.kind, steeringDistance, distance),
     navigationKind: steering.kind,
-    runAmount: steeringDistance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE ? 1 : 0,
+    runAmount: distance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE ? 1 : 0,
     steeringDistance,
     steeringPoint: steering.point,
   }
@@ -7692,6 +7873,16 @@ function updatePascalWaterMoveRouteProgress(
 function resolvePascalWaterClickMoveIntensity(distance: number) {
   const normalized = clamp01(distance / PASCAL_WATER_CLICK_MOVE_FULL_SPEED_DISTANCE)
   return MathUtils.clamp(normalized * normalized, PASCAL_WATER_CLICK_MOVE_MIN_SPEED_SCALE, 1)
+}
+
+function resolvePascalWaterNavigationMoveIntensity(
+  kind: PascalWaterNavigationSteeringKind,
+  steeringDistance: number,
+  targetDistance: number,
+) {
+  const speedDistance = kind === 'door' ? targetDistance : steeringDistance
+  const intensity = resolvePascalWaterClickMoveIntensity(speedDistance)
+  return kind === 'door' ? Math.max(PASCAL_WATER_DOOR_CROSSING_MIN_INTENSITY, intensity) : intensity
 }
 
 function segmentReachedPascalWaterNavigationPoint(
@@ -8053,6 +8244,48 @@ function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[
   return inside
 }
 
+function pickPascalWaterWalkTargetPoint({
+  camera,
+  canvas,
+  colliderMeshes,
+  event,
+  groundY,
+  pointerNdc,
+  raycaster,
+}: {
+  camera: Camera
+  canvas: HTMLCanvasElement
+  colliderMeshes: Mesh[]
+  event: Pick<MouseEvent | PointerEvent, 'clientX' | 'clientY'>
+  groundY: number
+  pointerNdc: Vector2
+  raycaster: Raycaster
+}): LandrushPoint2 | null {
+  const rect = canvas.getBoundingClientRect()
+  pointerNdc.set(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1,
+  )
+  raycaster.setFromCamera(pointerNdc, camera)
+
+  const hits = raycaster.intersectObjects(colliderMeshes, false)
+  for (const hit of hits) {
+    if (!hit.face) continue
+    const normalY = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y
+    if (normalY < PASCAL_WATER_WALK_TARGET_MIN_NORMAL_Y) continue
+    return { x: hit.point.x, z: hit.point.z }
+  }
+
+  return pickPascalWaterBuildGroundPoint({
+    camera,
+    canvas,
+    event,
+    groundY,
+    pointerNdc,
+    raycaster,
+  })
+}
+
 function pickPascalWaterBuildGroundPoint({
   camera,
   canvas,
@@ -8063,7 +8296,7 @@ function pickPascalWaterBuildGroundPoint({
 }: {
   camera: Camera
   canvas: HTMLCanvasElement
-  event: MouseEvent | PointerEvent
+  event: Pick<MouseEvent | PointerEvent, 'clientX' | 'clientY'>
   groundY: number
   pointerNdc: Vector2
   raycaster: Raycaster
@@ -8323,8 +8556,7 @@ function createPascalWaterDoorPortals(
     if (!wallFrame) continue
 
     const centerX = MathUtils.clamp(node.position[0], 0, wallFrame.length)
-    const crossingDistance =
-      PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS + (wall.thickness ?? 0.18) / 2
+    const crossingDistance = PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS
     const center = {
       x: wall.start[0] + wallFrame.dir.x * centerX,
       z: wall.start[1] + wallFrame.dir.z * centerX,
@@ -8785,14 +9017,32 @@ function nextPascalWaterDoorCrossingWaypoint(
   const routeDirZ = routeZ / routeLength
   const progressFromEntry = (start.x - entry.x) * routeDirX + (start.z - entry.z) * routeDirZ
   const centerFromEntry = (center.x - entry.x) * routeDirX + (center.z - entry.z) * routeDirZ
+  const lateralFromRoute = Math.abs(
+    (start.x - entry.x) * -routeDirZ + (start.z - entry.z) * routeDirX,
+  )
+  const entryDistance = Math.hypot(start.x - entry.x, start.z - entry.z)
+  const centerDistance = Math.hypot(start.x - center.x, start.z - center.z)
+  const exitDistance = Math.hypot(start.x - exit.x, start.z - exit.z)
+  const entryAligned =
+    entryDistance <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS ||
+    (progressFromEntry >= -PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS &&
+      lateralFromRoute <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS)
+  const centerAligned =
+    centerDistance <= PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS ||
+    (progressFromEntry >= centerFromEntry - PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS &&
+      lateralFromRoute <= PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS)
+  const exitAligned =
+    exitDistance <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS ||
+    (progressFromEntry >= routeLength - PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS &&
+      lateralFromRoute <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS)
 
-  if (progressFromEntry < -PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS) {
+  if (!entryAligned) {
     return entry
   }
-  if (progressFromEntry < centerFromEntry - PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS) {
+  if (!centerAligned) {
     return center
   }
-  if (progressFromEntry < routeLength - PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS) {
+  if (!exitAligned) {
     return exit
   }
   return null
