@@ -7694,51 +7694,27 @@ function resolveClickMoveMovement(
     return null
   }
 
-  let steering = resolvePascalWaterNavigationSteeringPoint(
-    start,
-    target.point,
-    navigationObstacles,
-    doorPortals,
-    surfacePoints,
-  )
-  if (!steering) {
-    steering = resolvePascalWaterNavigationEscapeSteeringPoint(
-      start,
-      target.point,
-      navigationObstacles,
-      doorPortals,
-      surfacePoints,
-    )
-    if (steering) {
-      target.route.lastProgressAt = now
-      target.route.recoveryCount += 1
-      recordPascalWaterNavigationProbe({
-        distance: roundPerf(distance),
-        kind: 'click-route-recovery',
-        recoveryCount: target.route.recoveryCount,
-        steering: [roundPerf(steering.point.x), roundPerf(steering.point.z)],
-        target: [roundPerf(target.point.x), roundPerf(target.point.z)],
-      })
-    } else {
-      recordPascalWaterNavigationProbe({
-        distance: roundPerf(distance),
-        kind: 'click-no-route',
-        target: [roundPerf(target.point.x), roundPerf(target.point.z)],
-      })
-      targetRef.current = null
-      return null
-    }
-  }
-
   target.route = updatePascalWaterMoveRouteProgress(target.route, start, distance, now)
+  let doorCrossingResolution = resolvePascalWaterActiveDoorCrossingSteering(
+    target.route,
+    start,
+    now,
+  )
+  if (doorCrossingResolution?.waiting) {
+    target.route.lastRobotPoint = start
+    return null
+  }
+  const completedDoorCrossing = doorCrossingResolution?.completed === true
+  let activeSteering: PascalWaterNavigationSteeringResult | null =
+    doorCrossingResolution?.steering ?? null
   const hasStalled =
     now - target.route.lastProgressAt >= PASCAL_WATER_CLICK_MOVE_STALL_MS &&
     motion.speed <= PASCAL_WATER_CLICK_MOVE_STALL_SPEED
-  if (hasStalled) {
+  if (!activeSteering && hasStalled) {
     const recovery = resolvePascalWaterNavigationRecoverySteeringPoint(
       start,
       target.point,
-      steering.point,
+      target.route.lastSteeringPoint ?? target.point,
       navigationObstacles,
       doorPortals,
       surfacePoints,
@@ -7746,7 +7722,7 @@ function resolveClickMoveMovement(
     target.route.lastProgressAt = now
     target.route.recoveryCount += 1
     if (recovery) {
-      steering = recovery
+      activeSteering = recovery
       recordPascalWaterNavigationProbe({
         distance: roundPerf(distance),
         kind: 'click-stall-recovery',
@@ -7762,21 +7738,94 @@ function resolveClickMoveMovement(
     }
   }
 
-  openPascalWaterDoorPortalsAlongSegment(start, target.point, doorPortals)
-  if (steering.doorId) {
-    const openState = openPascalWaterDoor(steering.doorId)
-    if (openState === 'started') {
+  if (!activeSteering) {
+    activeSteering = resolvePascalWaterNavigationSteeringPoint(
+      start,
+      target.point,
+      navigationObstacles,
+      doorPortals,
+      surfacePoints,
+    )
+    if (!activeSteering) {
+      activeSteering = resolvePascalWaterNavigationEscapeSteeringPoint(
+        start,
+        target.point,
+        navigationObstacles,
+        doorPortals,
+        surfacePoints,
+      )
+      if (activeSteering) {
+        target.route.lastProgressAt = now
+        target.route.recoveryCount += 1
+        recordPascalWaterNavigationProbe({
+          distance: roundPerf(distance),
+          kind: 'click-route-recovery',
+          recoveryCount: target.route.recoveryCount,
+          steering: [roundPerf(activeSteering.point.x), roundPerf(activeSteering.point.z)],
+          target: [roundPerf(target.point.x), roundPerf(target.point.z)],
+        })
+      } else {
+        recordPascalWaterNavigationProbe({
+          distance: roundPerf(distance),
+          kind: 'click-no-route',
+          target: [roundPerf(target.point.x), roundPerf(target.point.z)],
+        })
+        targetRef.current = null
+        return null
+      }
+    } else if (completedDoorCrossing) {
       recordPascalWaterNavigationProbe({
-        doorId: steering.doorId,
-        kind: 'door-open-on-route',
-        navigationKind: steering.kind,
+        distance: roundPerf(distance),
+        kind: 'door-crossing-resume-target',
       })
     }
   }
-  for (let advance = 0; advance < 3; advance += 1) {
-    const steeringDistance = Math.hypot(steering.point.x - start.x, steering.point.z - start.z)
+
+  if (activeSteering.doorCrossing) {
+    target.route.doorCrossing = clonePascalWaterDoorCrossingState(activeSteering.doorCrossing)
+    recordPascalWaterNavigationProbe({
+      doorId: activeSteering.doorId,
+      entry: [
+        roundPerf(target.route.doorCrossing.entry.x),
+        roundPerf(target.route.doorCrossing.entry.z),
+      ],
+      exit: [
+        roundPerf(target.route.doorCrossing.exit.x),
+        roundPerf(target.route.doorCrossing.exit.z),
+      ],
+      kind: 'door-crossing-start',
+      phase: target.route.doorCrossing.phase,
+    })
+    doorCrossingResolution = resolvePascalWaterActiveDoorCrossingSteering(
+      target.route,
+      start,
+      now,
+    )
+    if (doorCrossingResolution?.waiting) {
+      target.route.lastRobotPoint = start
+      return null
+    }
+    activeSteering = doorCrossingResolution?.steering ?? activeSteering
+  }
+
+  openPascalWaterDoorPortalsAlongSegment(start, target.point, doorPortals)
+  if (activeSteering.doorId) {
+    const openState = openPascalWaterDoor(activeSteering.doorId)
+    if (openState === 'started') {
+      recordPascalWaterNavigationProbe({
+        doorId: activeSteering.doorId,
+        kind: 'door-open-on-route',
+        navigationKind: activeSteering.kind,
+      })
+    }
+  }
+  for (let advance = 0; activeSteering.kind !== 'door' && advance < 3; advance += 1) {
+    const steeringDistance = Math.hypot(
+      activeSteering.point.x - start.x,
+      activeSteering.point.z - start.z,
+    )
     const waypointRadius =
-      steering.kind === 'door'
+      activeSteering.kind === 'door'
         ? PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
         : PASCAL_WATER_CLICK_MOVE_WAYPOINT_RADIUS
     const reached =
@@ -7784,17 +7833,17 @@ function resolveClickMoveMovement(
       segmentReachedPascalWaterNavigationPoint(
         target.route.lastRobotPoint,
         start,
-        steering.point,
+        activeSteering.point,
         waypointRadius,
       )
     if (!reached) break
 
     target.route.lastProgressAt = now
     target.route.lastRobotPoint = start
-    target.route.lastSteeringPoint = steering.point
+    target.route.lastSteeringPoint = activeSteering.point
     recordPascalWaterNavigationProbe({
       kind: 'click-waypoint-reached',
-      navigationKind: steering.kind,
+      navigationKind: activeSteering.kind,
       steeringDistance: roundPerf(steeringDistance),
     })
     const nextSteering = resolvePascalWaterNavigationSteeringPoint(
@@ -7806,39 +7855,45 @@ function resolveClickMoveMovement(
     )
     if (
       !nextSteering ||
-      (nextSteering.kind === steering.kind &&
-        Math.hypot(nextSteering.point.x - steering.point.x, nextSteering.point.z - steering.point.z) <=
-          0.001)
+      (nextSteering.kind === activeSteering.kind &&
+        Math.hypot(
+          nextSteering.point.x - activeSteering.point.x,
+          nextSteering.point.z - activeSteering.point.z,
+        ) <= 0.001)
     ) {
       return null
     }
-    steering = nextSteering
+    activeSteering = nextSteering
   }
 
-  const dx = steering.point.x - start.x
-  const dz = steering.point.z - start.z
+  const dx = activeSteering.point.x - start.x
+  const dz = activeSteering.point.z - start.z
   const steeringDistance = Math.hypot(dx, dz)
   const direction = normalize2(dx, dz)
-  if (steering.doorId && target.route.lastSteeringPoint !== steering.point) {
+  if (activeSteering.doorId && target.route.lastSteeringPoint !== activeSteering.point) {
     recordPascalWaterNavigationProbe({
-      doorId: steering.doorId,
+      doorId: activeSteering.doorId,
       kind: 'door-route-selected',
       steeringDistance: roundPerf(steeringDistance),
-      steeringPoint: [roundPerf(steering.point.x), roundPerf(steering.point.z)],
+      steeringPoint: [roundPerf(activeSteering.point.x), roundPerf(activeSteering.point.z)],
       target: [roundPerf(target.point.x), roundPerf(target.point.z)],
     })
   }
   target.route.lastRobotPoint = start
-  target.route.lastSteeringPoint = steering.point
+  target.route.lastSteeringPoint = activeSteering.point
   return {
     ...direction,
-    doorId: steering.doorId,
+    doorId: activeSteering.doorId,
     heading: Math.atan2(direction.x, direction.z),
-    intensity: resolvePascalWaterNavigationMoveIntensity(steering.kind, steeringDistance, distance),
-    navigationKind: steering.kind,
+    intensity: resolvePascalWaterNavigationMoveIntensity(
+      activeSteering.kind,
+      steeringDistance,
+      distance,
+    ),
+    navigationKind: activeSteering.kind,
     runAmount: distance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE ? 1 : 0,
     steeringDistance,
-    steeringPoint: steering.point,
+    steeringPoint: activeSteering.point,
   }
 }
 
@@ -7849,6 +7904,7 @@ function createPascalWaterMoveRouteState(
 ): PascalWaterMoveRouteState {
   return {
     bestDistance: distance,
+    doorCrossing: null,
     lastProgressAt: now,
     lastRobotPoint: point,
     lastSteeringPoint: null,
@@ -7883,6 +7939,156 @@ function resolvePascalWaterNavigationMoveIntensity(
   const speedDistance = kind === 'door' ? targetDistance : steeringDistance
   const intensity = resolvePascalWaterClickMoveIntensity(speedDistance)
   return kind === 'door' ? Math.max(PASCAL_WATER_DOOR_CROSSING_MIN_INTENSITY, intensity) : intensity
+}
+
+function resolvePascalWaterActiveDoorCrossingSteering(
+  route: PascalWaterMoveRouteState,
+  start: LandrushPoint2,
+  now: number,
+): {
+  completed: boolean
+  steering: PascalWaterNavigationSteeringResult | null
+  waiting: boolean
+} | null {
+  const crossing = route.doorCrossing
+  if (!crossing) return null
+
+  for (let advance = 0; advance < 3; advance += 1) {
+    const point = pointForPascalWaterDoorCrossingPhase(crossing)
+    const radius =
+      crossing.phase === 'center'
+        ? PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS
+        : PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+    const distance = Math.hypot(point.x - start.x, point.z - start.z)
+    const reached =
+      distance <= radius ||
+      segmentReachedPascalWaterNavigationPoint(route.lastRobotPoint, start, point, radius)
+    if (!reached) {
+      return {
+        completed: false,
+        steering: {
+          doorCrossing: clonePascalWaterDoorCrossingState(crossing),
+          doorId: crossing.doorId,
+          kind: 'door',
+          point,
+        },
+        waiting: false,
+      }
+    }
+
+    if (
+      crossing.phase === 'entry' &&
+      getPascalWaterDoorOpenRatio(crossing.doorId) < PASCAL_WATER_DOOR_CROSSING_OPEN_MIN
+    ) {
+      const openState = openPascalWaterDoor(crossing.doorId)
+      route.lastProgressAt = now
+      route.lastSteeringPoint = point
+      recordPascalWaterNavigationProbe({
+        distance: roundPerf(distance),
+        doorId: crossing.doorId,
+        kind: 'door-crossing-wait-open',
+        openRatio: roundPerf(getPascalWaterDoorOpenRatio(crossing.doorId)),
+        openState,
+        phase: crossing.phase,
+      })
+      return { completed: false, steering: null, waiting: true }
+    }
+
+    route.lastProgressAt = now
+    route.lastSteeringPoint = point
+    recordPascalWaterNavigationProbe({
+      distance: roundPerf(distance),
+      doorId: crossing.doorId,
+      kind: 'door-crossing-waypoint',
+      phase: crossing.phase,
+      signedDistance: roundPerf(signedPascalWaterDoorCrossingDistance(start, crossing)),
+      tangentDistance: roundPerf(tangentPascalWaterDoorCrossingDistance(start, crossing)),
+    })
+
+    const nextPhase = nextPascalWaterDoorCrossingPhase(crossing.phase)
+    if (!nextPhase) {
+      route.doorCrossing = null
+      recordPascalWaterNavigationProbe({
+        doorId: crossing.doorId,
+        kind: 'door-crossing-complete',
+      })
+      return { completed: true, steering: null, waiting: false }
+    }
+    crossing.phase = nextPhase
+  }
+
+  const point = pointForPascalWaterDoorCrossingPhase(crossing)
+  return {
+    completed: false,
+    steering: {
+      doorCrossing: clonePascalWaterDoorCrossingState(crossing),
+      doorId: crossing.doorId,
+      kind: 'door',
+      point,
+    },
+    waiting: false,
+  }
+}
+
+function pointForPascalWaterDoorCrossingPhase(crossing: PascalWaterDoorCrossingState) {
+  if (crossing.phase === 'entry') return crossing.entry
+  if (crossing.phase === 'center') return crossing.center
+  return crossing.exit
+}
+
+function nextPascalWaterDoorCrossingPhase(
+  phase: PascalWaterDoorCrossingPhase,
+): PascalWaterDoorCrossingPhase | null {
+  if (phase === 'entry') return 'center'
+  if (phase === 'center') return 'exit'
+  return null
+}
+
+function clonePascalWaterDoorCrossingState(
+  crossing: PascalWaterDoorCrossingState,
+): PascalWaterDoorCrossingState {
+  return {
+    center: clonePoint2(crossing.center),
+    doorId: crossing.doorId,
+    entry: clonePoint2(crossing.entry),
+    exit: clonePoint2(crossing.exit),
+    phase: crossing.phase,
+  }
+}
+
+function clonePoint2(point: LandrushPoint2): LandrushPoint2 {
+  return { x: point.x, z: point.z }
+}
+
+function signedPascalWaterDoorCrossingDistance(
+  point: LandrushPoint2,
+  crossing: PascalWaterDoorCrossingState,
+) {
+  const normal = normalize2(crossing.entry.x - crossing.center.x, crossing.entry.z - crossing.center.z)
+  return (point.x - crossing.center.x) * normal.x + (point.z - crossing.center.z) * normal.z
+}
+
+function tangentPascalWaterDoorCrossingDistance(
+  point: LandrushPoint2,
+  crossing: PascalWaterDoorCrossingState,
+) {
+  const normal = normalize2(crossing.entry.x - crossing.center.x, crossing.entry.z - crossing.center.z)
+  return (
+    (point.x - crossing.center.x) * -normal.z + (point.z - crossing.center.z) * normal.x
+  )
+}
+
+function getPascalWaterDoorOpenRatio(doorId: AnyNodeId) {
+  const node = useScene.getState().nodes[doorId]
+  if (node?.type !== 'door') return 1
+  if (node.openingKind === 'opening') return 1
+
+  const interactiveDoor = useInteractive.getState().doors[doorId]
+  if (isOperationDoorType(node.doorType)) {
+    return clamp01(interactiveDoor?.operationState ?? node.operationState ?? 0)
+  }
+
+  return clamp01((interactiveDoor?.swingAngle ?? node.swingAngle ?? 0) / PASCAL_WATER_DOOR_OPEN_SWING_ANGLE)
 }
 
 function segmentReachedPascalWaterNavigationPoint(
@@ -8943,13 +9149,28 @@ function resolvePascalWaterDoorCrossingSteeringPoint(
 
     const nextPoint = nextPascalWaterDoorCrossingWaypoint(start, entry, portal.center, exit)
     if (!nextPoint) continue
+    const phase = pascalWaterDoorCrossingPhaseForPoint(nextPoint, entry, portal.center, exit)
     const score =
       Math.hypot(start.x - entry.x, start.z - entry.z) +
       Math.hypot(entry.x - portal.center.x, entry.z - portal.center.z) +
       Math.hypot(portal.center.x - exit.x, portal.center.z - exit.z) +
       Math.hypot(exit.x - target.x, exit.z - target.z)
     if (!best || score < best.score) {
-      best = { point: { doorId: portal.doorId, kind: 'door', point: nextPoint }, score }
+      best = {
+        point: {
+          doorCrossing: {
+            center: clonePoint2(portal.center),
+            doorId: portal.doorId,
+            entry: clonePoint2(entry),
+            exit: clonePoint2(exit),
+            phase,
+          },
+          doorId: portal.doorId,
+          kind: 'door',
+          point: nextPoint,
+        },
+        score,
+      }
     }
   }
 
@@ -9046,6 +9267,18 @@ function nextPascalWaterDoorCrossingWaypoint(
     return exit
   }
   return null
+}
+
+function pascalWaterDoorCrossingPhaseForPoint(
+  point: LandrushPoint2,
+  entry: LandrushPoint2,
+  center: LandrushPoint2,
+  exit: LandrushPoint2,
+): PascalWaterDoorCrossingPhase {
+  if (Math.hypot(point.x - entry.x, point.z - entry.z) <= 0.001) return 'entry'
+  if (Math.hypot(point.x - center.x, point.z - center.z) <= 0.001) return 'center'
+  if (Math.hypot(point.x - exit.x, point.z - exit.z) <= 0.001) return 'exit'
+  return 'entry'
 }
 
 function collectPascalWaterNavigationCandidates(
