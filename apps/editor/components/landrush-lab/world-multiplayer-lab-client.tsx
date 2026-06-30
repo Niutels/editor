@@ -62,6 +62,14 @@ import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import type { StylizedGrassInteraction, StylizedGrassPerfProbe } from './stylized-scene-land-layers'
 import type { WaterLandSurface } from './water-scene'
 import { WorldLabClient } from './world-lab-client'
+import {
+  isSpatialVoiceSignalPayload,
+  SpatialVoiceControl,
+  type SpatialVoiceController,
+  type SpatialVoiceSignalMessage,
+  type SpatialVoiceSignalPayload,
+  useLandrushSpatialVoice,
+} from './world-multiplayer-spatial-audio'
 
 declare global {
   interface Window {
@@ -105,6 +113,11 @@ export type ParcelBuildNodesSnapshot = {
   worldId: string
 }
 
+type OfflineParcelStateStore = Record<
+  string,
+  { builds?: ParcelBuildNodesSnapshot[]; ownerships?: ParcelOwnership[] } | undefined
+>
+
 export type ConnectionStatus = 'connected' | 'connecting' | 'offline' | 'reconnecting'
 
 type ServerMessage =
@@ -122,6 +135,13 @@ type ServerMessage =
       roomId: string
       serverTime: number
       type: 'player-joined' | 'player-state'
+    }
+  | {
+      from: string
+      roomId: string
+      serverTime: number
+      signal: SpatialVoiceSignalPayload
+      type: 'voice-signal'
     }
   | { id: string; reason?: string; roomId: string; serverTime: number; type: 'player-left' }
   | {
@@ -248,6 +268,7 @@ type WorldMultiplayerLabClientProps = {
 
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const PLAYER_STORAGE_KEY = 'landrush-lab-world-multiplayer-player'
+const OFFLINE_PARCEL_STATE_STORAGE_KEY = 'landrush-lab-world-multiplayer-offline-parcels'
 const MULTIPLAYER_PERF_DEFAULT_DURATION_MS = 9000
 const MULTIPLAYER_PERF_MAX_FRAME_SAMPLES = 1200
 const MULTIPLAYER_PERF_SPIKE_THRESHOLD_MS = 24
@@ -660,11 +681,25 @@ export function WorldMultiplayerLabClient({
     return isLandrushBuildToolbarToolId(activeEditorTool) ? activeEditorTool : 'wall'
   }, [activeEditorMode, activeEditorTool])
   const perfRun = useMemo(() => createMultiplayerPerfRunOptions(searchParams), [searchParams])
+  const [incomingVoiceSignals, setIncomingVoiceSignals] = useState<SpatialVoiceSignalMessage[]>([])
+  const handleVoiceSignal = useCallback((message: SpatialVoiceSignalMessage) => {
+    setIncomingVoiceSignals((current) => [...current.slice(-63), message])
+  }, [])
   const multiplayer = useLandrushWorldMultiplayer({
     enabled: !offline,
     localProfile,
+    onVoiceSignal: handleVoiceSignal,
     roomId,
     spectator: layoutView,
+  })
+  const spatialVoice = useLandrushSpatialVoice({
+    available: !offline && !layoutView && multiplayer.status === 'connected',
+    incomingSignals: incomingVoiceSignals,
+    localMotionRef,
+    localProfile,
+    remotePlayers: multiplayer.remotePlayers,
+    roomId,
+    sendSignal: multiplayer.sendVoiceSignal,
   })
   useMultiplayerPerfRunProbe(perfRun)
 
@@ -854,6 +889,7 @@ export function WorldMultiplayerLabClient({
           localPlayerIncluded={!layoutView}
           remotePlayerCount={multiplayer.remotePlayers.length}
           status={offline ? 'offline' : multiplayer.status}
+          voice={spatialVoice}
         />
       ) : null}
       {layoutView || buildParcel ? null : (
@@ -2265,11 +2301,13 @@ export function MultiplayerStatusPanel({
   localPlayerIncluded,
   remotePlayerCount,
   status,
+  voice,
 }: {
   connection: MultiplayerConnectionDetails
   localPlayerIncluded: boolean
   remotePlayerCount: number
   status: ConnectionStatus
+  voice?: SpatialVoiceController
 }) {
   const displayedPlayerCount =
     connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
@@ -2277,7 +2315,7 @@ export function MultiplayerStatusPanel({
   const latencyLabel = connection.latencyMs === null ? '--ms' : `${connection.latencyMs}ms`
 
   return (
-    <section className="pointer-events-none absolute top-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur">
+    <section className="pointer-events-auto absolute top-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur">
       <span
         aria-hidden
         className={`size-2 shrink-0 rounded-full ${compactStatusDotClass(status)}`}
@@ -2287,6 +2325,12 @@ export function MultiplayerStatusPanel({
       <span>{displayedPlayerCount}p</span>
       <span className="text-white/35">/</span>
       <span>{latencyLabel}</span>
+      {voice ? (
+        <>
+          <span className="text-white/35">/</span>
+          <SpatialVoiceControl voice={voice} />
+        </>
+      ) : null}
     </section>
   )
 }
@@ -2498,11 +2542,13 @@ function isMobileCameraOrbitTarget(target: EventTarget | null) {
 export function useLandrushWorldMultiplayer({
   enabled,
   localProfile,
+  onVoiceSignal,
   roomId,
   spectator,
 }: {
   enabled: boolean
   localProfile: LocalPlayerProfile
+  onVoiceSignal?: (message: SpatialVoiceSignalMessage) => void
   roomId: string
   spectator: boolean
 }) {
@@ -2513,6 +2559,8 @@ export function useLandrushWorldMultiplayer({
   const heartbeatIntervalMsRef = useRef(createConnectionDetails().heartbeatIntervalMs)
   const lastNetworkSentAtRef = useRef(0)
   const lastSentPlayerRef = useRef<MultiplayerPlayerSnapshot | null>(null)
+  const onVoiceSignalRef = useRef(onVoiceSignal)
+  const voiceSignalSequenceRef = useRef(0)
   const watchedParcelWorldIdRef = useRef<string | null>(null)
   const [connection, setConnection] =
     useState<MultiplayerConnectionDetails>(createConnectionDetails)
@@ -2556,6 +2604,10 @@ export function useLandrushWorldMultiplayer({
   useEffect(() => {
     parcelBuildNodeMapRef.current = parcelBuildNodeMap
   }, [parcelBuildNodeMap])
+
+  useEffect(() => {
+    onVoiceSignalRef.current = onVoiceSignal
+  }, [onVoiceSignal])
 
   const sendMessage = useCallback((message: unknown, socket = socketRef.current) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return
@@ -2603,20 +2655,32 @@ export function useLandrushWorldMultiplayer({
     [sendPlayerState],
   )
 
+  const sendVoiceSignal = useCallback(
+    (to: string, signal: SpatialVoiceSignalPayload) =>
+      Boolean(sendMessage({ signal, to, type: 'voice-signal' })),
+    [sendMessage],
+  )
+
   const watchParcelWorld = useCallback(
     (worldId: string) => {
       if (watchedParcelWorldIdRef.current !== worldId) {
         watchedParcelWorldIdRef.current = worldId
-        const nextOwnershipMap = new Map<string, ParcelOwnership>()
-        const nextBuildNodeMap = new Map<string, ParcelBuildNodesSnapshot>()
+        const offlineState = enabled ? null : readOfflineParcelWorldState(worldId)
+        const nextOwnershipMap = offlineState
+          ? new Map(offlineState.ownerships.map((ownership) => [ownership.parcelId, ownership]))
+          : new Map<string, ParcelOwnership>()
+        const nextBuildNodeMap = offlineState
+          ? new Map(offlineState.builds.map((build) => [build.parcelId, build]))
+          : new Map<string, ParcelBuildNodesSnapshot>()
         parcelOwnershipMapRef.current = nextOwnershipMap
         parcelBuildNodeMapRef.current = nextBuildNodeMap
         setParcelOwnershipMap(nextOwnershipMap)
         setParcelBuildNodeMap(nextBuildNodeMap)
       }
+      if (!enabled) return
       sendMessage({ roomId, type: 'watch-parcels', worldId })
     },
-    [roomId, sendMessage],
+    [enabled, roomId, sendMessage],
   )
 
   const syncParcelBuildNodes = useCallback(
@@ -2634,6 +2698,11 @@ export function useLandrushWorldMultiplayer({
         nextBuildNodeMap.set(parcelId, build)
         parcelBuildNodeMapRef.current = nextBuildNodeMap
         setParcelBuildNodeMap(nextBuildNodeMap)
+        writeOfflineParcelWorldState(
+          worldId,
+          [...parcelOwnershipMapRef.current.values()],
+          [...nextBuildNodeMap.values()],
+        )
         return true
       }
 
@@ -2691,6 +2760,11 @@ export function useLandrushWorldMultiplayer({
         })
         parcelOwnershipMapRef.current = nextOwnershipMap
         setParcelOwnershipMap(nextOwnershipMap)
+        writeOfflineParcelWorldState(
+          worldId,
+          [...nextOwnershipMap.values()],
+          [...parcelBuildNodeMapRef.current.values()],
+        )
         return true
       }
 
@@ -2713,8 +2787,19 @@ export function useLandrushWorldMultiplayer({
       setStatus(enabled ? 'connecting' : 'offline')
       setRemotePlayerMap(new Map())
       setParcelClaimError(null)
-      setParcelBuildNodeMap(new Map())
-      setParcelOwnershipMap(new Map())
+      const offlineState = !enabled
+        ? readOfflineParcelWorldState(watchedParcelWorldIdRef.current)
+        : null
+      const nextOwnershipMap = offlineState
+        ? new Map(offlineState.ownerships.map((ownership) => [ownership.parcelId, ownership]))
+        : new Map<string, ParcelOwnership>()
+      const nextBuildNodeMap = offlineState
+        ? new Map(offlineState.builds.map((build) => [build.parcelId, build]))
+        : new Map<string, ParcelBuildNodesSnapshot>()
+      parcelOwnershipMapRef.current = nextOwnershipMap
+      parcelBuildNodeMapRef.current = nextBuildNodeMap
+      setParcelBuildNodeMap(nextBuildNodeMap)
+      setParcelOwnershipMap(nextOwnershipMap)
       setConnection(createConnectionDetails())
       return
     }
@@ -2800,6 +2885,16 @@ export function useLandrushWorldMultiplayer({
                 : current.latencyMs,
             serverPlayerCount: message.playerCount ?? current.serverPlayerCount,
           }))
+          return
+        }
+
+        if (message.type === 'voice-signal') {
+          if (message.roomId !== roomId || message.from === localProfile.id) return
+          onVoiceSignalRef.current?.({
+            from: message.from,
+            sequence: voiceSignalSequenceRef.current++,
+            signal: message.signal,
+          })
           return
         }
 
@@ -2960,6 +3055,7 @@ export function useLandrushWorldMultiplayer({
     parcelOwnerships,
     publishLocalPlayer,
     remotePlayers,
+    sendVoiceSignal,
     syncParcelBuildNodes,
     status,
     watchParcelWorld,
@@ -3408,6 +3504,54 @@ export function readLocalPlayerProfile(): LocalPlayerProfile {
   return profile
 }
 
+function readOfflineParcelWorldState(worldId: string | null) {
+  if (!worldId) return null
+  const state = readOfflineParcelStateStore()[worldId]
+  if (!state) return { builds: [], ownerships: [] }
+
+  return {
+    builds: Array.isArray(state.builds)
+      ? state.builds.filter(
+          (build) => build?.worldId === worldId && typeof build.parcelId === 'string',
+        )
+      : [],
+    ownerships: Array.isArray(state.ownerships)
+      ? state.ownerships.filter(
+          (ownership) => ownership?.worldId === worldId && typeof ownership.parcelId === 'string',
+        )
+      : [],
+  }
+}
+
+function writeOfflineParcelWorldState(
+  worldId: string,
+  ownerships: readonly ParcelOwnership[],
+  builds: readonly ParcelBuildNodesSnapshot[],
+) {
+  const store = readOfflineParcelStateStore()
+  store[worldId] = {
+    builds: builds.filter((build) => build.worldId === worldId),
+    ownerships: ownerships.filter((ownership) => ownership.worldId === worldId),
+  }
+  try {
+    window.localStorage.setItem(OFFLINE_PARCEL_STATE_STORAGE_KEY, JSON.stringify(store))
+  } catch {
+    window.localStorage.removeItem(OFFLINE_PARCEL_STATE_STORAGE_KEY)
+  }
+}
+
+function readOfflineParcelStateStore(): OfflineParcelStateStore {
+  const stored = window.localStorage.getItem(OFFLINE_PARCEL_STATE_STORAGE_KEY)
+  if (!stored) return {}
+  try {
+    const parsed = JSON.parse(stored) as OfflineParcelStateStore
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    window.localStorage.removeItem(OFFLINE_PARCEL_STATE_STORAGE_KEY)
+    return {}
+  }
+}
+
 function createPlayerId() {
   return typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -3474,6 +3618,14 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       (message?.type === 'player-joined' || message?.type === 'player-state') &&
       isPlayerSnapshot(message.player) &&
       typeof message.roomId === 'string'
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'voice-signal' &&
+      typeof message.from === 'string' &&
+      typeof message.roomId === 'string' &&
+      isSpatialVoiceSignalPayload(message.signal)
     ) {
       return message
     }

@@ -18,6 +18,7 @@ import {
   ErrorBoundary,
   glassMaterial,
   NodeRenderer,
+  normalizeLineLoopsForWebGPU,
   type RenderShading,
   resolveCdnUrl,
   useItemLightPool,
@@ -139,6 +140,10 @@ const ModelRenderer = ({ node }: { node: ItemNode }) => {
   if (nodes.cutout) {
     nodes.cutout.visible = false
   }
+
+  useMemo(() => {
+    normalizeLineLoopsForWebGPU(scene)
+  }, [scene])
 
   const handlers = useNodeEvents(node, 'item')
 

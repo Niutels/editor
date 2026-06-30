@@ -40,11 +40,18 @@ type ParcelBuildNodesSnapshot = {
   worldId: string
 }
 
+type VoiceSignalPayload =
+  | { description: { sdp: string; type: 'answer' | 'offer' }; type: 'description' }
+  | { candidate: Record<string, unknown>; type: 'ice-candidate' }
+  | { type: 'disconnect' }
+  | { type: 'ready' }
+
 type ClientMessage =
   | { parcelId: string; type: 'claim-parcel'; worldId: string }
   | { player: PlayerSnapshot; roomId?: string; type: 'join' }
   | { player: PlayerSnapshot; type: 'state' }
   | { sentAt?: number; type: 'heartbeat' }
+  | { signal: VoiceSignalPayload; to: string; type: 'voice-signal' }
   | {
       nodes: unknown[]
       parcelId: string
@@ -68,6 +75,13 @@ type ServerMessage =
   | { player: PlayerSnapshot; roomId: string; serverTime: number; type: 'player-joined' }
   | { player: PlayerSnapshot; roomId: string; serverTime: number; type: 'player-state' }
   | { id: string; reason?: string; roomId: string; serverTime: number; type: 'player-left' }
+  | {
+      from: string
+      roomId: string
+      serverTime: number
+      signal: VoiceSignalPayload
+      type: 'voice-signal'
+    }
   | {
       ownership: ParcelOwnership
       roomId: string
@@ -139,19 +153,29 @@ type Room = {
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const HEARTBEAT_INTERVAL_MS = 3000
 const LANDRUSH_BUILD_NODE_TYPES = new Set([
+  'box-vent',
   'ceiling',
+  'chimney',
   'column',
   'door',
+  'dormer',
   'elevator',
   'fence',
   'item',
+  'ridge-vent',
+  'roof',
+  'roof-segment',
+  'shelf',
   'slab',
+  'skylight',
+  'solar-panel',
   'stair',
+  'stair-segment',
   'wall',
   'window',
 ])
-const MAX_BUILD_NODES_PER_PARCEL = 240
-const MAX_BUILD_SNAPSHOT_BYTES = 320_000
+const MAX_BUILD_NODES_PER_PARCEL = 1000
+const MAX_BUILD_SNAPSHOT_BYTES = 1_250_000
 const MAX_ROOM_ID_LENGTH = 80
 const MAX_ROOM_PEERS = 32
 const MIN_STATE_INTERVAL_MS = 40
@@ -182,7 +206,7 @@ export async function GET(request: Request) {
       type: 'welcome',
     })
 
-    socket.on('message', (data) => {
+    socket.on('message', (data: WebSocketData) => {
       const now = Date.now()
       sweepStalePeers(now)
 
@@ -241,11 +265,7 @@ export async function GET(request: Request) {
         if (watcher) watcher.lastSeenAt = now
         const worldId = sanitizeParcelWorldId(message.worldId)
         const roomId = sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
-        sendParcelOwnershipSnapshot(
-          socket,
-          roomId,
-          worldId,
-        )
+        sendParcelOwnershipSnapshot(socket, roomId, worldId)
         sendParcelBuildNodesSnapshot(socket, roomId, worldId)
         return
       }
@@ -342,6 +362,17 @@ export async function GET(request: Request) {
           { player: peer.player, roomId: peer.roomId, serverTime: now, type: 'player-state' },
           peer.id,
         )
+        return
+      }
+
+      if (message.type === 'voice-signal') {
+        if (!peer) {
+          sendError(socket, 'not-joined', 'Join a room before sending voice signals')
+          return
+        }
+
+        peer.lastSeenAt = now
+        forwardVoiceSignal(peer, message.to, message.signal, now)
         return
       }
 
@@ -485,6 +516,27 @@ function broadcastRoomState(roomId: string) {
   })
 }
 
+function forwardVoiceSignal(
+  peer: Peer,
+  targetPeerIdValue: string,
+  signal: VoiceSignalPayload,
+  now: number,
+) {
+  const targetPeerId = sanitizeText(targetPeerIdValue, '', 80)
+  if (!targetPeerId || targetPeerId === peer.id) return
+
+  const target = rooms.get(peer.roomId)?.peers.get(targetPeerId)
+  if (!target) return
+
+  send(target.socket, {
+    from: peer.id,
+    roomId: peer.roomId,
+    serverTime: now,
+    signal,
+    type: 'voice-signal',
+  })
+}
+
 function claimParcel(
   peer: Peer,
   worldIdValue: string,
@@ -570,9 +622,7 @@ function syncParcelBuildNodes(
   parcelIdValue: string,
   nodesValue: unknown[],
   now: number,
-):
-  | { build: ParcelBuildNodesSnapshot; ok: true }
-  | { code: string; message: string; ok: false } {
+): { build: ParcelBuildNodesSnapshot; ok: true } | { code: string; message: string; ok: false } {
   const worldId = sanitizeParcelWorldId(worldIdValue)
   const parcelId = sanitizeParcelId(parcelIdValue)
   const ownership = getParcelOwnerships(worldId).get(parcelId)
@@ -708,6 +758,13 @@ function parseClientMessage(data: WebSocketData): ClientMessage | null {
     if (raw?.type === 'watch') return raw
     if (raw?.type === 'watch-parcels' && typeof raw.worldId === 'string') return raw
     if (
+      raw?.type === 'voice-signal' &&
+      typeof raw.to === 'string' &&
+      isVoiceSignalPayload(raw.signal)
+    ) {
+      return raw
+    }
+    if (
       raw?.type === 'sync-parcel-build-nodes' &&
       typeof raw.worldId === 'string' &&
       typeof raw.parcelId === 'string' &&
@@ -736,6 +793,19 @@ function isPlayerSnapshot(value: unknown): value is PlayerSnapshot {
     typeof player.color === 'string' &&
     Array.isArray(player.position) &&
     player.position.length === 3
+  )
+}
+
+function isVoiceSignalPayload(value: unknown): value is VoiceSignalPayload {
+  const signal = value as VoiceSignalPayload
+  if (signal?.type === 'disconnect') return true
+  if (signal?.type === 'ready') return true
+  if (signal?.type === 'ice-candidate') return typeof signal.candidate === 'object'
+  return (
+    signal?.type === 'description' &&
+    (signal.description?.type === 'offer' || signal.description?.type === 'answer') &&
+    typeof signal.description.sdp === 'string' &&
+    signal.description.sdp.length <= 120_000
   )
 }
 
@@ -786,9 +856,7 @@ function sanitizeParcelKey(value: string | undefined, fallback: string, maxLengt
 
 function sanitizeBuildNodes(
   value: unknown[],
-):
-  | { nodes: BuildNodeSnapshot[]; ok: true }
-  | { code: string; message: string; ok: false } {
+): { nodes: BuildNodeSnapshot[]; ok: true } | { code: string; message: string; ok: false } {
   if (!Array.isArray(value)) {
     return { code: 'bad-build-nodes', message: 'Build nodes must be an array', ok: false }
   }
@@ -853,7 +921,10 @@ function sanitizeBuildNodeRelations(nodes: BuildNodeSnapshot[]) {
 
 function sanitizeBuildNodeId(value: unknown) {
   if (typeof value !== 'string') return ''
-  return value.trim().slice(0, 120).replace(/[^a-zA-Z0-9._:-]/g, '-')
+  return value
+    .trim()
+    .slice(0, 120)
+    .replace(/[^a-zA-Z0-9._:-]/g, '-')
 }
 
 function finiteNumber(value: number | undefined, fallback: number): number

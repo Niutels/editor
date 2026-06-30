@@ -1,7 +1,9 @@
 import { useGLTF } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
+import { useMemo } from 'react'
 import { KTX2Loader } from 'three/examples/jsm/Addons.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+import { normalizeLineLoopsForWebGPU } from '../lib/line-loop-normalization'
 
 const ktx2LoaderInstance = new KTX2Loader()
 ktx2LoaderInstance.setTranscoderPath('https://cdn.jsdelivr.net/gh/pmndrs/drei-assets@master/basis/')
@@ -11,7 +13,7 @@ const ktx2WarningLoggedRenderers = new WeakSet<object>()
 const useGLTFKTX2 = (path: string): ReturnType<typeof useGLTF> => {
   const gl = useThree((state) => state.gl)
 
-  return useGLTF(path, true, true, (loader) => {
+  const gltf = useGLTF(path, true, true, (loader) => {
     const renderer = gl as unknown as object
 
     if (!ktx2ConfiguredRenderers.has(renderer)) {
@@ -35,6 +37,12 @@ const useGLTFKTX2 = (path: string): ReturnType<typeof useGLTF> => {
 
     loader.setMeshoptDecoder(MeshoptDecoder)
   })
+
+  useMemo(() => {
+    normalizeLineLoopsForWebGPU(gltf.scene)
+  }, [gltf.scene])
+
+  return gltf
 }
 
 export { useGLTFKTX2 }

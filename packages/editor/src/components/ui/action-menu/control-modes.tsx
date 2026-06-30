@@ -1,10 +1,8 @@
 'use client'
 
-import { Icon } from '@iconify/react'
 import { type LevelNode, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { type LucideIcon, Trash2 } from 'lucide-react'
-import Image from 'next/image'
+import { type LucideIcon, SquareDashedMousePointer, Trash2 } from 'lucide-react'
 import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { ActionButton } from './action-button'
@@ -22,7 +20,6 @@ type ControlId =
 type ControlConfig = {
   id: ControlId
   icon?: LucideIcon
-  iconifyIcon?: string
   imageSrc?: string
   label: string
   shortcut?: string
@@ -42,7 +39,7 @@ const controls: ControlConfig[] = [
   },
   {
     id: 'box-select',
-    iconifyIcon: 'mdi:select-drag',
+    icon: SquareDashedMousePointer,
     label: 'Box select',
     color: 'hover:bg-white/5',
     activeColor: 'bg-white/10 hover:bg-white/10',
@@ -246,10 +243,11 @@ export function ControlModes() {
             onClick={() => handleClick(c.id)}
             shortcut={c.shortcut}
             size="icon"
+            tooltipProvider={false}
             variant="ghost"
           >
             {c.imageSrc ? (
-              <Image
+              <img
                 alt={c.label}
                 className={cn(
                   'h-[28px] w-[28px] object-contain transition-[opacity,filter] duration-200',
@@ -259,14 +257,10 @@ export function ControlModes() {
                       : ''
                     : isActive
                       ? 'opacity-100 grayscale-0'
-                      : 'opacity-60 grayscale group-hover:opacity-100 group-hover:grayscale-0',
+                    : 'opacity-60 grayscale group-hover:opacity-100 group-hover:grayscale-0',
                 )}
-                height={28}
                 src={c.imageSrc}
-                width={28}
               />
-            ) : c.iconifyIcon ? (
-              <Icon color="currentColor" height={18} icon={c.iconifyIcon} width={18} />
             ) : (
               ModeIcon && <ModeIcon className="h-5 w-5" />
             )}

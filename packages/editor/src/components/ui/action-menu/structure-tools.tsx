@@ -1,6 +1,5 @@
 'use client'
 
-import NextImage from 'next/image'
 import { useContextualTools } from '../../../hooks/use-contextual-tools'
 
 import { cn } from '../../../lib/utils'
@@ -94,14 +93,13 @@ export function StructureTools() {
               }
             }}
             size="icon"
+            tooltipProvider={false}
             variant="ghost"
           >
-            <NextImage
+            <img
               alt={tool.label}
               className="size-full object-contain"
-              height={28}
               src={tool.iconSrc}
-              width={28}
             />
           </ActionButton>
         )

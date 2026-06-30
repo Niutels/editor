@@ -3,7 +3,7 @@
 import { useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useMemo } from 'react'
+import { memo, Profiler, type ProfilerOnRenderCallback, type ReactNode, useEffect, useMemo } from 'react'
 import { MaterialPicker } from './../../../components/ui/controls/material-picker'
 import { TooltipProvider } from './../../../components/ui/primitives/tooltip'
 import { useIsMobile } from './../../../hooks/use-mobile'
@@ -20,6 +20,30 @@ import { GridSnapControl, SecondaryToggles } from './view-toggles'
 // rounded corners (SHEET_OVERLAP_PX in editor-layout-mobile) so the menu sits
 // just above that strip instead of inside it.
 const MOBILE_BOTTOM_OFFSET = 24
+const CONTEXTUAL_TABS = new Set(['ai', 'items', 'studio'])
+
+type ActionMenuReactProfilerConfig = {
+  enabled: boolean
+  idPrefix: string
+  onRender: ProfilerOnRenderCallback
+}
+
+function ActionMenuReactProfiler({
+  children,
+  config,
+  id,
+}: {
+  children: ReactNode
+  config?: ActionMenuReactProfilerConfig
+  id: string
+}) {
+  if (!config?.enabled) return <>{children}</>
+  return (
+    <Profiler id={`${config.idPrefix}.${id}`} onRender={config.onRender}>
+      {children}
+    </Profiler>
+  )
+}
 
 function PaintMaterialTray() {
   const activePaintMaterial = useEditor((state) => state.activePaintMaterial)
@@ -57,15 +81,18 @@ function PaintMaterialTray() {
   )
 }
 
-export function ActionMenu({ className }: { className?: string }) {
+export const ActionMenu = memo(function ActionMenu({
+  className,
+  reactProfiler,
+}: {
+  className?: string
+  reactProfiler?: ActionMenuReactProfilerConfig
+}) {
   const phase = useEditor((state) => state.phase)
   const mode = useEditor((state) => state.mode)
-  const tool = useEditor((state) => state.tool)
-  const catalogCategory = useEditor((state) => state.catalogCategory)
   const isMobile = useIsMobile()
   const hasSelectionOnMobile = useViewer((s) => isMobile && s.selection.selectedIds.length > 0)
   const hasReferenceOnMobile = useEditor((s) => isMobile && Boolean(s.selectedReferenceId))
-  const CONTEXTUAL_TABS = new Set(['ai', 'items', 'studio'])
   const isContextualPanelOnMobile = useEditor(
     (s) => isMobile && CONTEXTUAL_TABS.has(s.activeSidebarPanel),
   )
@@ -126,7 +153,9 @@ export function ActionMenu({ className }: { className?: string }) {
               transition={transition}
             >
               <div className="w-max">
-                <StructureTools />
+                <ActionMenuReactProfiler config={reactProfiler} id="action-menu.structure-tools">
+                  <StructureTools />
+                </ActionMenuReactProfiler>
               </div>
             </motion.div>
           )}
@@ -159,7 +188,9 @@ export function ActionMenu({ className }: { className?: string }) {
               }}
               transition={transition}
             >
-              <PaintMaterialTray />
+              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.paint-material-tray">
+                <PaintMaterialTray />
+              </ActionMenuReactProfiler>
             </motion.div>
           )}
         </AnimatePresence>
@@ -167,25 +198,39 @@ export function ActionMenu({ className }: { className?: string }) {
           <div className="flex flex-col items-stretch gap-0.5 px-2 py-1.5">
             {/* Row 1: control modes only */}
             <div className="flex items-center justify-center gap-1">
-              <ControlModes />
+              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.control-modes">
+                <ControlModes />
+              </ActionMenuReactProfiler>
             </div>
             {/* Row 2: grid snap + secondary toggles (orbit + top view hidden) */}
             <div className="flex items-center justify-center gap-1 border-border/50 border-t pt-1">
-              <GridSnapControl />
-              <SecondaryToggles />
+              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.grid-snap-control">
+                <GridSnapControl />
+              </ActionMenuReactProfiler>
+              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.secondary-toggles">
+                <SecondaryToggles />
+              </ActionMenuReactProfiler>
             </div>
           </div>
         ) : (
           <div className="flex items-center justify-center gap-1 px-2 py-1.5">
-            <ControlModes />
+            <ActionMenuReactProfiler config={reactProfiler} id="action-menu.control-modes">
+              <ControlModes />
+            </ActionMenuReactProfiler>
             <div className="mx-1 h-5 w-px bg-border" />
-            <GridSnapControl />
-            <SecondaryToggles />
+            <ActionMenuReactProfiler config={reactProfiler} id="action-menu.grid-snap-control">
+              <GridSnapControl />
+            </ActionMenuReactProfiler>
+            <ActionMenuReactProfiler config={reactProfiler} id="action-menu.secondary-toggles">
+              <SecondaryToggles />
+            </ActionMenuReactProfiler>
             <div className="mx-1 h-5 w-px bg-border" />
-            <CameraActions />
+            <ActionMenuReactProfiler config={reactProfiler} id="action-menu.camera-actions">
+              <CameraActions />
+            </ActionMenuReactProfiler>
           </div>
         )}
       </motion.div>
     </TooltipProvider>
   )
-}
+})

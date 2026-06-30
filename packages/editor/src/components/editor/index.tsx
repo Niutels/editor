@@ -10,6 +10,8 @@ import {
 import { type HoverStyles, InteractiveSystem, useViewer, Viewer } from '@pascal-app/viewer'
 import {
   memo,
+  Profiler,
+  type ProfilerOnRenderCallback,
   type ReactNode,
   useCallback,
   useEffect,
@@ -89,6 +91,12 @@ const EDITOR_HOVER_STYLES: HoverStyles = {
 }
 const EDITOR_DEFAULT_RENDER = { shading: 'solid' } as const
 
+type EditorReactProfilerConfig = {
+  enabled: boolean
+  idPrefix: string
+  onRender: ProfilerOnRenderCallback
+}
+
 /**
  * Wire up module-level singletons (spatial grid, space detection, SFX) for
  * an Editor mount. Returns a teardown function that detaches the scene-store
@@ -152,6 +160,7 @@ export interface EditorProps {
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
 
   // Viewer runtime options for hosts that need a lean or constrained canvas.
+  reactProfiler?: EditorReactProfilerConfig
   viewerCameraControls?: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerDefaultCamera?: boolean
@@ -203,6 +212,23 @@ function EditorSceneCrashFallback() {
 }
 
 // ── Sidebar slot: in-flow, resizable, collapses to a grab strip ──────────────
+
+function EditorReactProfiler({
+  children,
+  config,
+  id,
+}: {
+  children: ReactNode
+  config?: EditorReactProfilerConfig
+  id: string
+}) {
+  if (!config?.enabled) return <>{children}</>
+  return (
+    <Profiler id={`${config.idPrefix}.${id}`} onRender={config.onRender}>
+      {children}
+    </Profiler>
+  )
+}
 
 function SidebarSlot({ children }: { children: ReactNode }) {
   const width = useSidebarStore((s) => s.width)
@@ -598,6 +624,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isVersionPreviewMode,
   isLoading,
   isFirstPersonMode,
+  reactProfiler,
   showEditorChrome,
   viewerCameraControls,
   viewerCameraInitialPose,
@@ -608,6 +635,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
+  reactProfiler?: EditorReactProfilerConfig
   showEditorChrome: boolean
   viewerCameraControls: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
@@ -617,31 +645,111 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
 }) {
   return (
     <>
-      {viewerEditorSystems && !isFirstPersonMode && <SelectionManager />}
-      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <BoxSelectTool />}
-      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <NodeArrowHandles />}
-      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <WallMoveSideHandles />}
-      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && <FloatingActionMenu />}
-      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) && (
-        <FloatingBuildingActionMenu />
-      )}
-      {showEditorChrome && !isFirstPersonMode && <WallMeasurementLabel />}
-      {viewerEditorSystems && <ExportManager />}
-      {viewerEditorSystems && (isFirstPersonMode ? <ViewerZoneSystem /> : <ZoneSystem />)}
-      {viewerEditorSystems && <CeilingSystem />}
-      {viewerEditorSystems && <CeilingSelectionAffordanceSystem />}
-      {viewerEditorSystems && <RoofEditSystem />}
-      {viewerEditorSystems && <StairEditSystem />}
-      {showEditorChrome && !(isLoading || isFirstPersonMode) && <SnapAwareGrid />}
-      {showEditorChrome && !(isLoading || isVersionPreviewMode || isFirstPersonMode) && (
-        <ToolManager />
-      )}
-      {isFirstPersonMode && <FirstPersonControls />}
-      {viewerCameraControls ? <CustomCameraControls initialPose={viewerCameraInitialPose} /> : null}
-      {viewerSceneChildren}
-      {viewerEditorSystems && <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />}
-      {showEditorChrome && !isFirstPersonMode && <SiteEdgeLabels />}
-      {viewerEditorSystems && <InteractiveSystem />}
+      {viewerEditorSystems && !isFirstPersonMode ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.selection-manager">
+          <SelectionManager />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.box-select-tool">
+          <BoxSelectTool />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.node-arrow-handles">
+          <NodeArrowHandles />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.wall-move-side-handles">
+          <WallMoveSideHandles />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.floating-action-menu">
+          <FloatingActionMenu />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isVersionPreviewMode || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.floating-building-action-menu">
+          <FloatingBuildingActionMenu />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !isFirstPersonMode ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.wall-measurement-label">
+          <WallMeasurementLabel />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.export-manager">
+          <ExportManager />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.zone-system">
+          {isFirstPersonMode ? <ViewerZoneSystem /> : <ZoneSystem />}
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.ceiling-system">
+          <CeilingSystem />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.ceiling-selection-affordance-system">
+          <CeilingSelectionAffordanceSystem />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.roof-edit-system">
+          <RoofEditSystem />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.stair-edit-system">
+          <StairEditSystem />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isLoading || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.snap-aware-grid">
+          <SnapAwareGrid />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !(isLoading || isVersionPreviewMode || isFirstPersonMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.tool-manager">
+          <ToolManager />
+        </EditorReactProfiler>
+      ) : null}
+      {isFirstPersonMode ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.first-person-controls">
+          <FirstPersonControls />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerCameraControls ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.custom-camera-controls">
+          <CustomCameraControls initialPose={viewerCameraInitialPose} />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerSceneChildren ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.viewer-scene-children-slot">
+          {viewerSceneChildren}
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.thumbnail-generator">
+          <ThumbnailGenerator onThumbnailCapture={onThumbnailCapture} />
+        </EditorReactProfiler>
+      ) : null}
+      {showEditorChrome && !isFirstPersonMode ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.site-edge-labels">
+          <SiteEdgeLabels />
+        </EditorReactProfiler>
+      ) : null}
+      {viewerEditorSystems ? (
+        <EditorReactProfiler config={reactProfiler} id="scene.interactive-system">
+          <InteractiveSystem />
+        </EditorReactProfiler>
+      ) : null}
     </>
   )
 })
@@ -825,6 +933,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   isVersionPreviewMode,
   isLoading,
   isFirstPersonMode,
+  reactProfiler,
   showEditorChrome,
   hasLoadedInitialScene,
   showLoader,
@@ -841,6 +950,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   isVersionPreviewMode: boolean
   isLoading: boolean
   isFirstPersonMode: boolean
+  reactProfiler?: EditorReactProfilerConfig
   showEditorChrome: boolean
   hasLoadedInitialScene: boolean
   showLoader: boolean
@@ -906,30 +1016,41 @@ const ViewerCanvas = memo(function ViewerCanvas({
 
   const show2d = viewMode === '2d' || viewMode === 'split'
   const show3d = viewMode === '3d' || viewMode === 'split'
+  const [hasMountedFloorplan, setHasMountedFloorplan] = useState(show2d)
+
+  useEffect(() => {
+    if (show2d) {
+      setHasMountedFloorplan(true)
+    }
+  }, [show2d])
+
+  const floorplanPane = hasMountedFloorplan ? (
+    <div
+      className="relative h-full flex-shrink-0"
+      style={{
+        width: viewMode === '2d' ? '100%' : `${floorplanPaneRatio * 100}%`,
+        display: show2d ? undefined : 'none',
+      }}
+    >
+      <div className="h-full w-full overflow-hidden">
+        <FloorplanPanel />
+      </div>
+      {viewMode === 'split' && (
+        <div
+          className="absolute inset-y-0 -right-3 z-10 flex w-6 cursor-col-resize items-center justify-center"
+          onPointerDown={handleFloorplanDividerDown}
+        >
+          <div className="h-8 w-1 rounded-full bg-neutral-400" />
+        </div>
+      )}
+    </div>
+  ) : null
 
   return (
     <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
       <div className="flex h-full" ref={viewerAreaRef}>
-        {/* 2D floorplan — always mounted once shown, hidden via CSS to preserve state */}
-        <div
-          className="relative h-full flex-shrink-0"
-          style={{
-            width: viewMode === '2d' ? '100%' : `${floorplanPaneRatio * 100}%`,
-            display: show2d ? undefined : 'none',
-          }}
-        >
-          <div className="h-full w-full overflow-hidden">
-            <FloorplanPanel />
-          </div>
-          {viewMode === 'split' && (
-            <div
-              className="absolute inset-y-0 -right-3 z-10 flex w-6 cursor-col-resize items-center justify-center"
-              onPointerDown={handleFloorplanDividerDown}
-            >
-              <div className="h-8 w-1 rounded-full bg-neutral-400" />
-            </div>
-          )}
-        </div>
+        {/* 2D floorplan - lazy-mounted once shown, hidden via CSS to preserve state */}
+        {floorplanPane}
 
         {/* 3D viewer — always mounted, hidden via CSS to avoid destroying the WebGL context */}
         <div
@@ -938,51 +1059,66 @@ const ViewerCanvas = memo(function ViewerCanvas({
           style={{ display: show3d ? undefined : 'none' }}
         >
           {viewerEditorSystems ? (
-            <DeleteCursorLayer
-              containerRef={viewer3dRef}
-              isVersionPreviewMode={isVersionPreviewMode}
-            />
+            <EditorReactProfiler config={reactProfiler} id="viewer.delete-cursor-layer">
+              <DeleteCursorLayer
+                containerRef={viewer3dRef}
+                isVersionPreviewMode={isVersionPreviewMode}
+              />
+            </EditorReactProfiler>
           ) : null}
           {viewerEditorSystems ? (
-            <PaintCursorLayer
-              containerRef={viewer3dRef}
-              isVersionPreviewMode={isVersionPreviewMode}
-            />
+            <EditorReactProfiler config={reactProfiler} id="viewer.paint-cursor-layer">
+              <PaintCursorLayer
+                containerRef={viewer3dRef}
+                isVersionPreviewMode={isVersionPreviewMode}
+              />
+            </EditorReactProfiler>
           ) : null}
           {showEditorChrome && !showLoader && isCameraControlsHintVisible && !isFirstPersonMode ? (
-            <ViewerCanvasControlsHint
-              isPreviewMode={isPreviewMode}
-              onDismiss={dismissCameraControlsHint}
-            />
+            <EditorReactProfiler config={reactProfiler} id="viewer.camera-controls-hint">
+              <ViewerCanvasControlsHint
+                isPreviewMode={isPreviewMode}
+                onDismiss={dismissCameraControlsHint}
+              />
+            </EditorReactProfiler>
           ) : null}
-          <SelectionPersistenceManager
-            enabled={viewerEditorSystems && hasLoadedInitialScene && !showLoader}
-          />
-          <Viewer
-            defaultRender={EDITOR_DEFAULT_RENDER}
-            hoverStyles={EDITOR_HOVER_STYLES}
-            postProcessing={viewerPostProcessing}
-            rendererBackend={viewerRendererBackend}
-            renderContext="editor"
-            selectionManager={isFirstPersonMode ? 'default' : 'custom'}
-            useBvh={viewerUseBvh}
-            defaultCamera={viewerDefaultCamera}
-          >
-            <ViewerSceneContent
-              isFirstPersonMode={isFirstPersonMode}
-              isLoading={isLoading}
-              isVersionPreviewMode={isVersionPreviewMode}
-              onThumbnailCapture={onThumbnailCapture}
-              showEditorChrome={showEditorChrome}
-              viewerCameraControls={viewerCameraControls}
-              viewerCameraInitialPose={viewerCameraInitialPose}
-              viewerEditorSystems={viewerEditorSystems}
-              viewerSceneChildren={viewerSceneChildren}
+          <EditorReactProfiler config={reactProfiler} id="viewer.selection-persistence">
+            <SelectionPersistenceManager
+              enabled={viewerEditorSystems && hasLoadedInitialScene && !showLoader}
             />
-          </Viewer>
+          </EditorReactProfiler>
+          <EditorReactProfiler config={reactProfiler} id="viewer.canvas">
+            <Viewer
+              defaultCamera={viewerDefaultCamera}
+              defaultRender={EDITOR_DEFAULT_RENDER}
+              hoverStyles={EDITOR_HOVER_STYLES}
+              postProcessing={viewerPostProcessing}
+              renderContext="editor"
+              rendererBackend={viewerRendererBackend}
+              selectionManager={isFirstPersonMode ? 'default' : 'custom'}
+              useBvh={viewerUseBvh}
+            >
+              <ViewerSceneContent
+                isFirstPersonMode={isFirstPersonMode}
+                isLoading={isLoading}
+                isVersionPreviewMode={isVersionPreviewMode}
+                onThumbnailCapture={onThumbnailCapture}
+                reactProfiler={reactProfiler}
+                showEditorChrome={showEditorChrome}
+                viewerCameraControls={viewerCameraControls}
+                viewerCameraInitialPose={viewerCameraInitialPose}
+                viewerEditorSystems={viewerEditorSystems}
+                viewerSceneChildren={viewerSceneChildren}
+              />
+            </Viewer>
+          </EditorReactProfiler>
         </div>
       </div>
-      {!(isLoading || isVersionPreviewMode) && <ZoneLabelEditorSystem />}
+      {!(isLoading || isVersionPreviewMode) ? (
+        <EditorReactProfiler config={reactProfiler} id="viewer.zone-label-editor-system">
+          <ZoneLabelEditorSystem />
+        </EditorReactProfiler>
+      ) : null}
     </ErrorBoundary>
   )
 })
@@ -1006,6 +1142,7 @@ export default function Editor({
   isVersionPreviewMode = false,
   isLoading = false,
   onThumbnailCapture,
+  reactProfiler,
   viewerCameraControls = true,
   viewerCameraInitialPose,
   viewerDefaultCamera,
@@ -1180,6 +1317,7 @@ export default function Editor({
       isLoading={isLoading}
       isVersionPreviewMode={isVersionPreviewMode}
       onThumbnailCapture={onThumbnailCapture}
+      reactProfiler={reactProfiler}
       showEditorChrome={showEditorChrome}
       showLoader={showLoader}
       viewerCameraControls={viewerCameraControls}
@@ -1236,46 +1374,76 @@ export default function Editor({
           </div>
         ) : (
           <>
-            <EditorLayoutV2
-              navbarSlot={navbarSlot}
-              overlays={
-                <>
-                  {showEditorChrome && !isCaptureMode && <FloatingLevelSelector />}
-                  {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) && (
-                    <div className="pointer-events-auto">
-                      <ActionMenu />
-                    </div>
-                  )}
-                  {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) && (
-                    <div className="pointer-events-auto">
-                      <PanelManager inspectorFooter={inspectorFooter} />
-                    </div>
-                  )}
-                  {showEditorChrome && !isCaptureMode && (
-                    <div className="pointer-events-auto">
-                      <HelperManager />
-                    </div>
-                  )}
-                  {isFirstPersonMode && (
-                    <FirstPersonOverlay
-                      onExit={() => useEditor.getState().setFirstPersonMode(false)}
-                    />
-                  )}
-                  {viewerBanner}
-                  {showEditorChrome && projectId ? (
-                    <SnapshotCaptureOverlay projectId={projectId} />
-                  ) : null}
-                </>
-              }
-              renderTabContent={renderTabContent}
-              sidebarOverlay={sidebarOverlay}
-              sidebarTabs={showEditorChrome ? tabBarTabs : []}
-              viewerContent={viewerCanvas}
-              viewerToolbarLeft={showEditorChrome ? viewerToolbarLeft : undefined}
-              viewerToolbarRight={showEditorChrome ? viewerToolbarRight : undefined}
-            />
-            <EditorCommands />
-            <CommandPalette emptyAction={commandPaletteEmptyAction} />
+            <EditorReactProfiler config={reactProfiler} id="layout.v2">
+              <EditorLayoutV2
+                navbarSlot={navbarSlot}
+                overlays={
+                  <>
+                    {showEditorChrome && !isCaptureMode ? (
+                      <EditorReactProfiler
+                        config={reactProfiler}
+                        id="layout.floating-level-selector"
+                      >
+                        <FloatingLevelSelector />
+                      </EditorReactProfiler>
+                    ) : null}
+                    {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) ? (
+                      <EditorReactProfiler config={reactProfiler} id="layout.action-menu">
+                        <div className="pointer-events-auto">
+                          <ActionMenu reactProfiler={reactProfiler} />
+                        </div>
+                      </EditorReactProfiler>
+                    ) : null}
+                    {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) ? (
+                      <EditorReactProfiler config={reactProfiler} id="layout.panel-manager">
+                        <div className="pointer-events-auto">
+                          <PanelManager inspectorFooter={inspectorFooter} />
+                        </div>
+                      </EditorReactProfiler>
+                    ) : null}
+                    {showEditorChrome && !isCaptureMode ? (
+                      <EditorReactProfiler config={reactProfiler} id="layout.helper-manager">
+                        <div className="pointer-events-auto">
+                          <HelperManager />
+                        </div>
+                      </EditorReactProfiler>
+                    ) : null}
+                    {isFirstPersonMode ? (
+                      <EditorReactProfiler config={reactProfiler} id="layout.first-person-overlay">
+                        <FirstPersonOverlay
+                          onExit={() => useEditor.getState().setFirstPersonMode(false)}
+                        />
+                      </EditorReactProfiler>
+                    ) : null}
+                    {viewerBanner ? (
+                      <EditorReactProfiler config={reactProfiler} id="layout.viewer-banner">
+                        {viewerBanner}
+                      </EditorReactProfiler>
+                    ) : null}
+                    {showEditorChrome && projectId ? (
+                      <EditorReactProfiler
+                        config={reactProfiler}
+                        id="layout.snapshot-capture-overlay"
+                      >
+                        <SnapshotCaptureOverlay projectId={projectId} />
+                      </EditorReactProfiler>
+                    ) : null}
+                  </>
+                }
+                renderTabContent={renderTabContent}
+                sidebarOverlay={sidebarOverlay}
+                sidebarTabs={showEditorChrome ? tabBarTabs : []}
+                viewerContent={viewerCanvas}
+                viewerToolbarLeft={showEditorChrome ? viewerToolbarLeft : undefined}
+                viewerToolbarRight={showEditorChrome ? viewerToolbarRight : undefined}
+              />
+            </EditorReactProfiler>
+            <EditorReactProfiler config={reactProfiler} id="layout.editor-commands">
+              <EditorCommands />
+            </EditorReactProfiler>
+            <EditorReactProfiler config={reactProfiler} id="layout.command-palette">
+              <CommandPalette emptyAction={commandPaletteEmptyAction} />
+            </EditorReactProfiler>
           </>
         )}
       </>
@@ -1321,7 +1489,7 @@ export default function Editor({
           {/* Fixed UI overlays scoped to the viewer area */}
           <ViewerOverlays left={overlayLeft}>
             <div className="pointer-events-auto">
-              <ActionMenu />
+              <ActionMenu reactProfiler={reactProfiler} />
             </div>
             <div className="pointer-events-auto">
               <PanelManager />

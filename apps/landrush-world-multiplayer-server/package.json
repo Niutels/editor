@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node server.mjs",
+    "test": "node --test voice-signal.test.mjs",
     "check": "node --check server.mjs"
   },
   "dependencies": {

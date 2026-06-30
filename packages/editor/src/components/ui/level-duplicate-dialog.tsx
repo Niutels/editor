@@ -41,7 +41,7 @@ const DUPLICATE_PRESETS: Array<{
   },
 ]
 
-function getLevelLabel(level: LevelNode | null) {
+function getLevelLabel(level: Pick<LevelNode, 'name' | 'level'> | null) {
   if (!level) return 'this level'
   return getLevelDisplayName(level)
 }
@@ -53,7 +53,7 @@ export function LevelDuplicateDialog({
   onOpenChange,
 }: {
   open: boolean
-  level: LevelNode | null
+  level: Pick<LevelNode, 'name' | 'level'> | null
   onConfirm: (preset: LevelDuplicatePreset) => void
   onOpenChange: (open: boolean) => void
 }) {

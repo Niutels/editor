@@ -34,7 +34,7 @@ export function updateLandrushRobotScreenRevealMask({
   width: number
 }) {
   viewportPx.set(width, height)
-  centerPx.set(centerX, height - centerY)
+  centerPx.set(centerX, centerY)
   innerRadiusPx.value = Math.max(0, innerRadius)
   outerRadiusPx.value = Math.max(innerRadiusPx.value + 1, outerRadius)
 }

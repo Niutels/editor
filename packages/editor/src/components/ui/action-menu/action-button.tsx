@@ -12,16 +12,30 @@ interface ActionButtonProps extends React.ComponentProps<typeof Button> {
   shortcut?: string
   isActive?: boolean
   tooltipContent?: React.ReactNode
+  tooltipProvider?: boolean
   tooltipSide?: 'top' | 'right' | 'bottom' | 'left'
 }
 
 export const ActionButton = React.forwardRef<HTMLButtonElement, ActionButtonProps>(
   (
-    { className, children, label, shortcut, isActive, tooltipContent, tooltipSide, ...props },
+    {
+      className,
+      children,
+      label,
+      shortcut,
+      isActive,
+      tooltipContent,
+      tooltipProvider = true,
+      tooltipSide,
+      ...props
+    },
     ref,
   ) => {
+    const [tooltipOpen, setTooltipOpen] = React.useState(false)
+    const tooltipLabel = `${label}${shortcut ? ` (${shortcut})` : ''}`
+
     return (
-      <Tooltip>
+      <Tooltip onOpenChange={setTooltipOpen} open={tooltipOpen} withProvider={tooltipProvider}>
         <TooltipTrigger asChild>
           <Button
             className={cn('relative h-11 w-11 transition-all', className)}
@@ -45,13 +59,13 @@ export const ActionButton = React.forwardRef<HTMLButtonElement, ActionButtonProp
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side={tooltipSide}>
-          {tooltipContent || (
-            <p>
-              {label} {shortcut && `(${shortcut})`}
-            </p>
-          )}
-        </TooltipContent>
+        {tooltipOpen ? (
+          <TooltipContent side={tooltipSide}>
+            {tooltipContent || (
+              <p>{tooltipLabel}</p>
+            )}
+          </TooltipContent>
+        ) : null}
       </Tooltip>
     )
   },

@@ -30,8 +30,10 @@ import { ClipboardPaste, Copy, GripVertical, MoreVertical, Plus, Trash2 } from '
 import {
   type ButtonHTMLAttributes,
   type CSSProperties,
+  memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -61,6 +63,32 @@ import {
 } from './primitives/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from './primitives/popover'
 
+type LevelListEntry = Pick<LevelNode, 'id' | 'level' | 'name'>
+
+function serializeLevelListEntry(level: LevelNode) {
+  return JSON.stringify([level.id, level.level, level.name ?? null])
+}
+
+function parseLevelListEntry(value: string): LevelListEntry {
+  const [id, level, name] = JSON.parse(value) as [LevelNode['id'], number, string | null]
+  return {
+    id,
+    level,
+    name: name ?? undefined,
+  }
+}
+
+function readBuildingLevels(buildingId: BuildingNode['id'] | null): LevelNode[] {
+  if (!buildingId) return []
+  const nodes = useScene.getState().nodes
+  const building = nodes[buildingId]
+  if (!building || building.type !== 'building') return []
+  return (building as BuildingNode).children
+    .map((id) => nodes[id])
+    .filter((node): node is LevelNode => node?.type === 'level')
+    .sort((a, b) => a.level - b.level)
+}
+
 // ── Inline rename input for a level row ─────────────────────────────────────
 
 function LevelInlineRename({
@@ -68,7 +96,7 @@ function LevelInlineRename({
   isEditing,
   onStopEditing,
 }: {
-  level: LevelNode
+  level: LevelListEntry
   isEditing: boolean
   onStopEditing: () => void
 }) {
@@ -133,7 +161,7 @@ function LevelRow({
   onPaste,
   onRequestDelete,
 }: {
-  level: LevelNode
+  level: LevelListEntry
   isSelected: boolean
   isDragging?: boolean
   dragHandleProps?: ButtonHTMLAttributes<HTMLButtonElement>
@@ -278,7 +306,7 @@ function SortableLevelRow({
   onPaste,
   onRequestDelete,
 }: {
-  level: LevelNode
+  level: LevelListEntry
   isSelected: boolean
   onSelect: () => void
   onDuplicate: (preset?: LevelDuplicatePreset) => void
@@ -322,7 +350,7 @@ function SortableLevelRow({
 
 // ── Main component ──────────────────────────────────────────────────────────
 
-export function FloatingLevelSelector() {
+export const FloatingLevelSelector = memo(function FloatingLevelSelector() {
   const selectedBuildingId = useViewer((s) => s.selection.buildingId)
   const levelId = useViewer((s) => s.selection.levelId)
   const setSelection = useViewer((s) => s.setSelection)
@@ -354,17 +382,19 @@ export function FloatingLevelSelector() {
     return first?.id ?? null
   })
 
-  const levels = useScene(
+  const levelKeys = useScene(
     useShallow((state) => {
-      if (!resolvedBuildingId) return [] as LevelNode[]
+      if (!resolvedBuildingId) return [] as string[]
       const building = state.nodes[resolvedBuildingId]
-      if (!building || building.type !== 'building') return [] as LevelNode[]
+      if (!building || building.type !== 'building') return [] as string[]
       return (building as BuildingNode).children
         .map((id) => state.nodes[id])
         .filter((node): node is LevelNode => node?.type === 'level')
         .sort((a, b) => a.level - b.level)
+        .map(serializeLevelListEntry)
     }),
   )
+  const levels = useMemo(() => levelKeys.map(parseLevelListEntry), [levelKeys])
 
   const handleAddAbove = useCallback(() => {
     if (!resolvedBuildingId) return
@@ -425,11 +455,15 @@ export function FloatingLevelSelector() {
   }, [deletingLevel])
 
   const handleDuplicateLevel = useCallback(
-    (level: LevelNode, preset: LevelDuplicatePreset = 'everything') => {
+    (level: LevelListEntry, preset: LevelDuplicatePreset = 'everything') => {
+      const nodes = useScene.getState().nodes
+      const fullLevel = nodes[level.id]
+      if (!fullLevel || fullLevel.type !== 'level') return
+      const currentLevels = readBuildingLevels(resolvedBuildingId)
       const { createOps, newLevelId, shiftedLevels } = buildLevelDuplicateCreateOps({
-        nodes: useScene.getState().nodes,
-        level,
-        levels,
+        nodes,
+        level: fullLevel,
+        levels: currentLevels,
         preset,
       })
 
@@ -448,10 +482,10 @@ export function FloatingLevelSelector() {
         levelId: newLevelId as LevelNode['id'],
       })
     },
-    [createNodes, levels, resolvedBuildingId, setSelection, updateNodes],
+    [createNodes, resolvedBuildingId, setSelection, updateNodes],
   )
 
-  const handlePasteToLevel = useCallback((level: LevelNode) => {
+  const handlePasteToLevel = useCallback((level: LevelListEntry) => {
     const result = pasteEditorClipboardToLevel(level.id)
     if (result?.pastedIds.length) {
       sfxEmitter.emit('sfx:item-place')
@@ -557,10 +591,11 @@ export function FloatingLevelSelector() {
                         isSelected={isSelected}
                         level={level}
                         onDuplicate={(preset) => handleDuplicateLevel(level, preset)}
-                        onPaste={
-                          clipboardSnapshot ? () => handlePasteToLevel(level) : undefined
-                        }
-                        onRequestDelete={() => setDeletingLevel(level)}
+                        onPaste={clipboardSnapshot ? () => handlePasteToLevel(level) : undefined}
+                        onRequestDelete={() => {
+                          const fullLevel = useScene.getState().nodes[level.id]
+                          if (fullLevel?.type === 'level') setDeletingLevel(fullLevel)
+                        }}
                         onSelect={() =>
                           setSelection(
                             resolvedBuildingId
@@ -620,4 +655,4 @@ export function FloatingLevelSelector() {
       </Dialog>
     </>
   )
-}
+})

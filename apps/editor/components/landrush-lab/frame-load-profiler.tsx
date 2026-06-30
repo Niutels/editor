@@ -1,7 +1,9 @@
 'use client'
 
+import { emitter, useScene } from '@pascal-app/core'
+import { renderScheduler } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 declare global {
   interface Window {
@@ -23,6 +25,7 @@ type FrameRecord = {
   index: number
   intervalMs: number
   measuredTopLevelMs: number
+  schedulerProfile: string
   slices: FrameSlice[]
   unmeasuredActiveMs: number
   waitMs: number
@@ -43,12 +46,22 @@ type OpenSlice = {
   startMs: number
 }
 
+type ProfiledCallback = (this: unknown, ...args: unknown[]) => unknown
 type PatchRestore = () => void
 type MethodTarget = Record<string, unknown>
+type R3fFrameSubscriber = {
+  priority?: number
+  ref?: {
+    current?: unknown
+  }
+}
 
 export type LandrushFrameProfileApi = {
+  compactReport: (options?: ReportOptions) => LandrushFrameProfileReport
+  compactSlowFrames: (options?: SlowFrameReportOptions) => LandrushFrameProfileSlowFramesReport
   enabled: boolean
-  report: () => LandrushFrameProfileReport
+  freeze: () => void
+  report: (options?: ReportOptions) => LandrushFrameProfileReport
   reset: () => void
 }
 
@@ -64,11 +77,19 @@ export type LandrushFrameProfileReport = {
   metadata: {
     frameCount: number
     generatedAt: string
+    slowFrameThresholdMs: number
+    slowFrameCount: number
     thresholdMs: number
   }
   nodes: ProfileNodeReport[]
   overThreshold: ProfileNodeReport[]
   proofFrames: ProfileProofFrame[]
+  slowFrames: ProfileSlowFrame[]
+}
+
+export type LandrushFrameProfileSlowFramesReport = {
+  slowFrameCount: number
+  slowFrames: ProfileSlowFrame[]
 }
 
 type ProfileStats = {
@@ -92,17 +113,39 @@ type ProfileNodeReport = {
 
 type ProfileProofFrame = {
   activeWallMs: number
+  endMs: number
   frameIndex: number
   intervalMs: number
   measuredTopLevelMs: number
+  schedulerProfile: string
+  startMs: number
   sumCheckMs: number
   topLevel: { durationMs: number; id: string }[]
   unmeasuredActiveMs: number
   waitMs: number
 }
 
-const FRAME_PROFILE_MAX_FRAMES = 420
+type ProfileSlowFrame = ProfileProofFrame & {
+  slices: FrameSlice[]
+}
+
+type FrameSliceReader = (frame: FrameRecord) => readonly FrameSlice[]
+type ReportOptions = {
+  includeSlowFrames?: boolean
+  slowFrameLimit?: number
+  slowFrameOffset?: number
+  topLevelOnly?: boolean
+}
+
+type SlowFrameReportOptions = {
+  limit?: number
+  offset?: number
+  topLevelOnly?: boolean
+}
+
+const FRAME_PROFILE_MAX_FRAMES = 1800
 const FRAME_PROFILE_PROOF_FRAME_COUNT = 18
+const FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS = 30
 const FRAME_PROFILE_THRESHOLD_MS = 3
 const FRAME_PROFILE_RENDERER_METHODS = [
   ['_renderScene', 'renderer.three.render-scene'],
@@ -132,34 +175,51 @@ const FRAME_PROFILE_GPU_METHODS = [
   ['GPUQueue', 'submit', 'gpu.queue.submit'],
 ] satisfies readonly (readonly [string, string, string])[]
 
+const FRAME_PROFILE_SCENE_METHODS = [
+  'applyNodeChanges',
+  'createNode',
+  'createNodes',
+  'deleteNode',
+  'deleteNodes',
+  'setScene',
+  'unloadScene',
+  'updateNode',
+  'updateNodes',
+] as const
+
 let singletonProfiler: LandrushFrameProfiler | null = null
+let earlyRuntimeRestore: PatchRestore | null = null
 
 export function FrameLoadProfilerProbe({ enabled }: { enabled: boolean }) {
   const renderer = useThree((state) => state.gl)
+  const getThreeState = useThree((state) => state.get)
+  const wrapR3fSubscribersRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!enabled) return
     const profiler = getOrCreateProfiler()
     profiler.reset()
-    const restore = installRendererProfiling(renderer as unknown as MethodTarget, profiler)
-    const publishReport = () => {
-      document.documentElement.dataset.landrushFrameProfile = JSON.stringify(profiler.report())
-    }
-    const publishTimer = window.setInterval(publishReport, 1000)
+    const r3fSubscriberProfiling = installR3fSubscriberProfiling(getThreeState, profiler)
+    wrapR3fSubscribersRef.current = r3fSubscriberProfiling.wrap
+    const restore = restoreAll([
+      installEarlyRuntimeProfiling(profiler),
+      r3fSubscriberProfiling.restore,
+      installRendererProfiling(renderer as unknown as MethodTarget, profiler),
+      installSceneStoreMethodProfiling(profiler),
+    ])
     window.__LANDRUSH_FRAME_PROFILE__ = profiler.api
     return () => {
-      window.clearInterval(publishTimer)
-      publishReport()
+      wrapR3fSubscribersRef.current = null
       restore()
       if (window.__LANDRUSH_FRAME_PROFILE__ === profiler.api) {
         delete window.__LANDRUSH_FRAME_PROFILE__
       }
-      delete document.documentElement.dataset.landrushFrameProfile
     }
-  }, [enabled, renderer])
+  }, [enabled, getThreeState, renderer])
 
   useFrame(() => {
     if (!enabled) return
+    wrapR3fSubscribersRef.current?.()
     singletonProfiler?.beginFrame(performance.now())
   }, -100_000)
 
@@ -177,24 +237,255 @@ function getOrCreateProfiler() {
   return singletonProfiler
 }
 
+function shouldInstallEarlyRuntimeProfiling() {
+  return (
+    typeof window !== 'undefined' &&
+    (window.location.search.includes('frameProfile=1') ||
+      window.location.search.includes('profileFrame=1'))
+  )
+}
+
+function installEarlyRuntimeProfiling(profiler: LandrushFrameProfiler) {
+  if (!shouldInstallEarlyRuntimeProfiling()) return () => {}
+  if (earlyRuntimeRestore) return earlyRuntimeRestore
+
+  const restoreCallbacks: PatchRestore[] = []
+  installEmitterProfiling(profiler, restoreCallbacks)
+  installSceneSubscriptionProfiling(profiler, restoreCallbacks)
+  const restore = restoreAll(restoreCallbacks)
+  earlyRuntimeRestore = () => {
+    restore()
+    earlyRuntimeRestore = null
+  }
+  return earlyRuntimeRestore
+}
+
+function installEmitterProfiling(
+  profiler: LandrushFrameProfiler,
+  restoreCallbacks: PatchRestore[],
+) {
+  const target = emitter as unknown as MethodTarget
+  const originalEmit = target.emit
+  const originalOn = target.on
+  const originalOff = target.off
+  if (
+    typeof originalEmit !== 'function' ||
+    typeof originalOn !== 'function' ||
+    typeof originalOff !== 'function'
+  ) {
+    return
+  }
+
+  const wrappedHandlers = new Map<unknown, WeakMap<ProfiledCallback, ProfiledCallback>>()
+  const getWrappedHandler = (type: unknown, handler: ProfiledCallback) => {
+    let handlersForType = wrappedHandlers.get(type)
+    if (!handlersForType) {
+      handlersForType = new WeakMap()
+      wrappedHandlers.set(type, handlersForType)
+    }
+
+    const existing = handlersForType.get(handler)
+    if (existing) return existing
+
+    const label = `event.listener.${normalizeProfileLabel(String(type))}.${normalizeProfileLabel(
+      handler.name || labelFromStack('anonymous'),
+    )}`
+    const wrapped = function profiledEventHandler(this: unknown, ...args: unknown[]) {
+      return profiler.measure(label, () => handler.apply(this, args))
+    }
+    handlersForType.set(handler, wrapped)
+    return wrapped
+  }
+
+  target.emit = function profiledEmit(this: unknown, type: unknown, ...args: unknown[]) {
+    return profiler.measure(`event.emit.${normalizeProfileLabel(String(type))}`, () =>
+      originalEmit.apply(this, [type, ...args]),
+    )
+  }
+
+  target.on = function profiledOn(this: unknown, type: unknown, handler: unknown) {
+    if (typeof handler !== 'function') {
+      return originalOn.apply(this, [type, handler])
+    }
+    return originalOn.apply(this, [type, getWrappedHandler(type, handler as ProfiledCallback)])
+  }
+
+  target.off = function profiledOff(this: unknown, type: unknown, handler?: unknown) {
+    if (typeof handler !== 'function') {
+      return originalOff.apply(this, [type, handler])
+    }
+    const wrapped = wrappedHandlers.get(type)?.get(handler as ProfiledCallback)
+    return originalOff.apply(this, [type, wrapped ?? handler])
+  }
+
+  restoreCallbacks.push(() => {
+    target.emit = originalEmit
+    target.on = originalOn
+    target.off = originalOff
+  })
+}
+
+function installSceneSubscriptionProfiling(
+  profiler: LandrushFrameProfiler,
+  restoreCallbacks: PatchRestore[],
+) {
+  const store = useScene as unknown as MethodTarget
+  const originalSubscribe = store.subscribe
+  if (typeof originalSubscribe !== 'function') return
+
+  store.subscribe = function profiledSubscribe(this: unknown, ...args: unknown[]) {
+    const listenerIndex = typeof args[0] === 'function' ? 0 : typeof args[1] === 'function' ? 1 : -1
+    if (listenerIndex >= 0) {
+      const listener = args[listenerIndex] as ProfiledCallback
+      const label = `scene.subscribe.${labelFromStack('listener')}`
+      args[listenerIndex] = function profiledSceneSubscriber(
+        this: unknown,
+        ...listenerArgs: unknown[]
+      ) {
+        return profiler.measure(label, () => listener.apply(this, listenerArgs))
+      }
+    }
+    return originalSubscribe.apply(this, args)
+  }
+
+  restoreCallbacks.push(() => {
+    store.subscribe = originalSubscribe
+  })
+}
+
+function installSceneStoreMethodProfiling(profiler: LandrushFrameProfiler) {
+  const restoreCallbacks: PatchRestore[] = []
+  const state = useScene.getState() as unknown as MethodTarget
+  for (const methodName of FRAME_PROFILE_SCENE_METHODS) {
+    patchOwnMethod(state, methodName, `scene.action.${methodName}`, restoreCallbacks, profiler)
+  }
+  return restoreAll(restoreCallbacks)
+}
+
+function installR3fSubscriberProfiling(
+  getRootState: () => unknown,
+  profiler: LandrushFrameProfiler,
+) {
+  const restoreCallbacks: PatchRestore[] = []
+  const wrappedCallbacks = new WeakSet<ProfiledCallback>()
+
+  const wrap = () => {
+    const subscribers = getR3fFrameSubscribers(getRootState())
+    subscribers.forEach((subscriber, index) => {
+      if (subscriber.priority === -100_000) return
+
+      const frameRef = subscriber.ref
+      if (!frameRef) return
+      const current = frameRef?.current
+      if (typeof current !== 'function') return
+      const original = current as ProfiledCallback
+      if (wrappedCallbacks.has(original)) return
+
+      const priority = subscriber.priority ?? 0
+      const label = `r3f.useFrame.${index}.p${normalizeProfileLabel(String(priority))}.${normalizeProfileLabel(
+        original.name || 'anonymous',
+      )}`
+      const wrapped = function profiledUseFrame(this: unknown, ...args: unknown[]) {
+        return profiler.measure(label, () => original.apply(this, args))
+      }
+      wrappedCallbacks.add(wrapped)
+      frameRef.current = wrapped
+      restoreCallbacks.push(() => {
+        if (frameRef.current === wrapped) frameRef.current = original
+      })
+    })
+  }
+
+  wrap()
+  return {
+    restore: restoreAll(restoreCallbacks),
+    wrap,
+  }
+}
+
+function getR3fFrameSubscribers(rootState: unknown): R3fFrameSubscriber[] {
+  const internal = (rootState as { internal?: { subscribers?: unknown } } | null)?.internal
+  const subscribers = internal?.subscribers
+  if (Array.isArray(subscribers)) return subscribers as R3fFrameSubscriber[]
+  if (subscribers instanceof Set) return [...subscribers] as R3fFrameSubscriber[]
+
+  const current = (subscribers as { current?: unknown } | null)?.current
+  if (Array.isArray(current)) return current as R3fFrameSubscriber[]
+  if (current instanceof Set) return [...current] as R3fFrameSubscriber[]
+  return []
+}
+
+function restoreAll(restoreCallbacks: readonly PatchRestore[]): PatchRestore {
+  return () => {
+    for (const restore of [...restoreCallbacks].reverse()) restore()
+  }
+}
+
+function labelFromStack(fallback: string) {
+  const stack = new Error().stack
+  const frame = stack
+    ?.split('\n')
+    .map((line) => line.trim())
+    .find(
+      (line) =>
+        line &&
+        line !== 'Error' &&
+        !line.includes('frame-load-profiler') &&
+        !line.includes('labelFromStack') &&
+        !line.includes('profiledSubscribe') &&
+        !line.includes('profiledOn'),
+    )
+  return normalizeProfileLabel(frame ?? fallback)
+}
+
+function normalizeProfileLabel(value: string) {
+  return value
+    .replace(/^at\s+/, '')
+    .replace(/^https?:\/\/[^/]+\/_next\/static\/chunks\//, '')
+    .replace(/[^A-Za-z0-9_.:/\\-]+/g, '-')
+    .slice(0, 120)
+}
+
 class LandrushFrameProfiler {
   enabled = true
   private currentFrame: OpenFrameRecord | null = null
   private frames: FrameRecord[] = []
   private nextFrameIndex = 0
   private openStack: OpenSlice[] = []
+  private startedAtMs = performance.now()
 
   readonly api: LandrushFrameProfileApi = {
+    compactReport: (options) => this.report({ ...options, topLevelOnly: true }),
+    compactSlowFrames: (options) =>
+      this.slowFrames({
+        ...options,
+        topLevelOnly: options?.topLevelOnly ?? true,
+      }),
     enabled: true,
-    report: () => this.report(),
+    freeze: () => this.freeze(),
+    report: (options) => this.report(options),
     reset: () => this.reset(),
   }
 
   reset() {
+    this.enabled = true
+    this.api.enabled = true
     this.currentFrame = null
     this.frames = []
     this.nextFrameIndex = 0
     this.openStack = []
+    this.startedAtMs = performance.now()
+  }
+
+  freeze(now = performance.now()) {
+    if (!this.enabled) return
+    if (this.currentFrame) {
+      this.finalizeCurrentFrame(now)
+      this.currentFrame = null
+    }
+    this.openStack = []
+    this.enabled = false
+    this.api.enabled = false
   }
 
   beginFrame(now: number) {
@@ -207,6 +498,7 @@ class LandrushFrameProfiler {
       beginMs: now,
       index: this.nextFrameIndex,
       nextSliceIndex: 0,
+      schedulerProfile: renderScheduler.getSnapshot().profile,
       slices: [],
       workEndMs: now,
     }
@@ -246,9 +538,45 @@ class LandrushFrameProfiler {
     frame.workEndMs = Math.max(frame.workEndMs, now)
   }
 
-  report(): LandrushFrameProfileReport {
-    const frames = this.frames.slice(-FRAME_PROFILE_MAX_FRAMES)
-    const nodeReports = createNodeReports(frames)
+  report(options: ReportOptions = {}): LandrushFrameProfileReport {
+    const reportFrames = this.currentFrame
+      ? [...this.frames, this.createFrameRecord(this.currentFrame, performance.now())]
+      : this.frames
+    const frames = reportFrames.slice(-FRAME_PROFILE_MAX_FRAMES)
+    const topLevelSlicesByFrame = new Map<number, readonly FrameSlice[]>()
+    const getTopLevelSlices = (frame: FrameRecord) => {
+      const cached = topLevelSlicesByFrame.get(frame.index)
+      if (cached) return cached
+      const topLevelSlices = frame.slices.filter((slice) => slice.parentIndex === null)
+      topLevelSlicesByFrame.set(frame.index, topLevelSlices)
+      return topLevelSlices
+    }
+    const nodeReports = createNodeReports(
+      frames,
+      options.topLevelOnly ? getTopLevelSlices : undefined,
+    )
+    const toProofFrame = (frame: FrameRecord): ProfileProofFrame => ({
+      activeWallMs: roundMs(frame.activeWallMs),
+      endMs: roundMs(frame.beginMs + frame.intervalMs - this.startedAtMs),
+      frameIndex: frame.index,
+      intervalMs: roundMs(frame.intervalMs),
+      measuredTopLevelMs: roundMs(frame.measuredTopLevelMs),
+      schedulerProfile: frame.schedulerProfile,
+      startMs: roundMs(frame.beginMs - this.startedAtMs),
+      sumCheckMs: roundMs(frame.measuredTopLevelMs + frame.unmeasuredActiveMs + frame.waitMs),
+      topLevel: getTopLevelSlices(frame).map((slice) => ({
+        durationMs: roundMs(slice.durationMs),
+        id: slice.id,
+      })),
+      unmeasuredActiveMs: roundMs(frame.unmeasuredActiveMs),
+      waitMs: roundMs(frame.waitMs),
+    })
+    const slowFrameRecords = getSlowFrames(frames)
+    const slowFrameStart = Math.max(0, options.slowFrameOffset ?? 0)
+    const slowFrameEnd =
+      options.slowFrameLimit === undefined
+        ? undefined
+        : slowFrameStart + Math.max(0, options.slowFrameLimit)
     return {
       frames: {
         activeWallMs: stats(frames.map((frame) => frame.activeWallMs)),
@@ -268,6 +596,8 @@ class LandrushFrameProfiler {
       metadata: {
         frameCount: frames.length,
         generatedAt: new Date().toISOString(),
+        slowFrameThresholdMs: FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS,
+        slowFrameCount: slowFrameRecords.length,
         thresholdMs: FRAME_PROFILE_THRESHOLD_MS,
       },
       nodes: nodeReports,
@@ -277,18 +607,33 @@ class LandrushFrameProfiler {
           node.p95PerFrameMs > FRAME_PROFILE_THRESHOLD_MS ||
           node.selfAvgPerFrameMs > FRAME_PROFILE_THRESHOLD_MS,
       ),
-      proofFrames: frames.slice(-FRAME_PROFILE_PROOF_FRAME_COUNT).map((frame) => ({
-        activeWallMs: roundMs(frame.activeWallMs),
-        frameIndex: frame.index,
-        intervalMs: roundMs(frame.intervalMs),
-        measuredTopLevelMs: roundMs(frame.measuredTopLevelMs),
-        sumCheckMs: roundMs(frame.measuredTopLevelMs + frame.unmeasuredActiveMs + frame.waitMs),
-        topLevel: frame.slices
-          .filter((slice) => slice.parentIndex === null)
-          .map((slice) => ({ durationMs: roundMs(slice.durationMs), id: slice.id })),
-        unmeasuredActiveMs: roundMs(frame.unmeasuredActiveMs),
-        waitMs: roundMs(frame.waitMs),
-      })),
+      proofFrames: frames.slice(-FRAME_PROFILE_PROOF_FRAME_COUNT).map(toProofFrame),
+      slowFrames:
+        options.includeSlowFrames === false
+          ? []
+          : slowFrameRecords.slice(slowFrameStart, slowFrameEnd).map((frame) => {
+              const proofFrame = toProofFrame(frame)
+              return {
+                ...proofFrame,
+                slices: getTopLevelSlices(frame).map((slice) => ({
+                  ...slice,
+                  durationMs: roundMs(slice.durationMs),
+                  startMs: roundMs(slice.startMs - frame.beginMs),
+                })),
+              }
+            }),
+    }
+  }
+
+  slowFrames(options: SlowFrameReportOptions = {}): LandrushFrameProfileSlowFramesReport {
+    const report = this.report({
+      slowFrameLimit: options.limit,
+      slowFrameOffset: options.offset,
+      topLevelOnly: options.topLevelOnly,
+    })
+    return {
+      slowFrameCount: report.metadata.slowFrameCount,
+      slowFrames: report.slowFrames,
     }
   }
 
@@ -303,15 +648,21 @@ class LandrushFrameProfiler {
     const frame = this.currentFrame
     if (!frame) return
 
-    const activeWallMs = Math.max(0, frame.workEndMs - frame.beginMs)
+    this.frames.push(this.createFrameRecord(frame, nextBeginMs))
+    if (this.frames.length > FRAME_PROFILE_MAX_FRAMES) {
+      this.frames.splice(0, this.frames.length - FRAME_PROFILE_MAX_FRAMES)
+    }
+  }
+
+  private createFrameRecord(frame: OpenFrameRecord, nextBeginMs: number): FrameRecord {
     const intervalMs = Math.max(0, nextBeginMs - frame.beginMs)
-    const measuredTopLevelMs = frame.slices
-      .filter((slice) => slice.parentIndex === null)
-      .reduce((total, slice) => total + slice.durationMs, 0)
+    const topLevelSlices = frame.slices.filter((slice) => slice.parentIndex === null)
+    const activeWallMs = calculateIntervalUnionMs(topLevelSlices)
+    const measuredTopLevelMs = topLevelSlices.reduce((total, slice) => total + slice.durationMs, 0)
     const unmeasuredActiveMs = Math.max(0, activeWallMs - measuredTopLevelMs)
     const waitMs = Math.max(0, intervalMs - activeWallMs)
 
-    this.frames.push({
+    return {
       beginMs: frame.beginMs,
       index: frame.index,
       slices: frame.slices,
@@ -319,20 +670,53 @@ class LandrushFrameProfiler {
       activeWallMs,
       intervalMs,
       measuredTopLevelMs,
+      schedulerProfile: frame.schedulerProfile,
       unmeasuredActiveMs,
       waitMs,
-    })
-    if (this.frames.length > FRAME_PROFILE_MAX_FRAMES) {
-      this.frames.splice(0, this.frames.length - FRAME_PROFILE_MAX_FRAMES)
     }
   }
+}
+
+function calculateIntervalUnionMs(slices: readonly FrameSlice[]) {
+  const intervals = slices
+    .filter((slice) => slice.durationMs > 0)
+    .map((slice) => [slice.startMs, slice.startMs + slice.durationMs] as const)
+    .sort((a, b) => a[0] - b[0])
+  let totalMs = 0
+  let currentStartMs: number | null = null
+  let currentEndMs = 0
+
+  for (const [startMs, endMs] of intervals) {
+    if (currentStartMs === null) {
+      currentStartMs = startMs
+      currentEndMs = endMs
+      continue
+    }
+
+    if (startMs <= currentEndMs) {
+      currentEndMs = Math.max(currentEndMs, endMs)
+      continue
+    }
+
+    totalMs += currentEndMs - currentStartMs
+    currentStartMs = startMs
+    currentEndMs = endMs
+  }
+
+  if (currentStartMs !== null) totalMs += currentEndMs - currentStartMs
+  return Math.max(0, totalMs)
 }
 
 function installRendererProfiling(renderer: MethodTarget, profiler: LandrushFrameProfiler) {
   const restoreCallbacks: PatchRestore[] = []
 
-  patchPrototypeMethod(renderer, 'render', 'renderer.render.total', restoreCallbacks, profiler, () =>
-    profiler.markWorkEnd(),
+  patchPrototypeMethod(
+    renderer,
+    'render',
+    'renderer.render.total',
+    restoreCallbacks,
+    profiler,
+    () => profiler.markWorkEnd(),
   )
 
   for (const [methodName, label] of FRAME_PROFILE_RENDERER_METHODS) {
@@ -363,7 +747,7 @@ function patchPrototypeMethod(
 ) {
   let target: MethodTarget | null = instance
   while (target) {
-    if (Object.prototype.hasOwnProperty.call(target, methodName)) {
+    if (Object.hasOwn(target, methodName)) {
       patchOwnMethod(target, methodName, label, restoreCallbacks, profiler, afterCall)
       return
     }
@@ -399,7 +783,10 @@ function patchOwnMethod(
   }
 }
 
-function createNodeReports(frames: readonly FrameRecord[]) {
+function createNodeReports(
+  frames: readonly FrameRecord[],
+  readSlices: FrameSliceReader = (frame) => frame.slices,
+) {
   const childIdsByParent = new Map<string, Set<string>>()
   const aggregates = new Map<
     string,
@@ -412,9 +799,10 @@ function createNodeReports(frames: readonly FrameRecord[]) {
   >()
 
   frames.forEach((frame, frameIndex) => {
+    const slices = readSlices(frame)
     const childDurationBySlice = new Map<number, number>()
-    const sliceByIndex = new Map(frame.slices.map((slice) => [slice.index, slice]))
-    for (const slice of frame.slices) {
+    const sliceByIndex = new Map(slices.map((slice) => [slice.index, slice]))
+    for (const slice of slices) {
       if (slice.parentIndex === null) continue
       childDurationBySlice.set(
         slice.parentIndex,
@@ -428,18 +816,29 @@ function createNodeReports(frames: readonly FrameRecord[]) {
       }
     }
 
-    for (const slice of frame.slices) {
+    for (const slice of slices) {
       const aggregate = ensureAggregate(aggregates, slice.id, frames.length)
       const selfMs = Math.max(0, slice.durationMs - (childDurationBySlice.get(slice.index) ?? 0))
       aggregate.count += 1
       aggregate.totalMs += slice.durationMs
       aggregate.perFrame[frameIndex] = (aggregate.perFrame[frameIndex] ?? 0) + slice.durationMs
-      aggregate.selfPerFrame[frameIndex] =
-        (aggregate.selfPerFrame[frameIndex] ?? 0) + selfMs
+      aggregate.selfPerFrame[frameIndex] = (aggregate.selfPerFrame[frameIndex] ?? 0) + selfMs
     }
 
-    addPseudoAggregate(aggregates, 'frame.active.unmeasured-r3f-or-react', frame.unmeasuredActiveMs, frameIndex, frames.length)
-    addPseudoAggregate(aggregates, 'frame.wait.idle-vsync-browser-or-gpu', frame.waitMs, frameIndex, frames.length)
+    addPseudoAggregate(
+      aggregates,
+      'frame.active.unmeasured-r3f-or-react',
+      frame.unmeasuredActiveMs,
+      frameIndex,
+      frames.length,
+    )
+    addPseudoAggregate(
+      aggregates,
+      'frame.wait.idle-vsync-browser-or-gpu',
+      frame.waitMs,
+      frameIndex,
+      frames.length,
+    )
   })
 
   return [...aggregates.entries()]
@@ -461,7 +860,10 @@ function createNodeReports(frames: readonly FrameRecord[]) {
 }
 
 function ensureAggregate(
-  aggregates: Map<string, { count: number; perFrame: number[]; selfPerFrame: number[]; totalMs: number }>,
+  aggregates: Map<
+    string,
+    { count: number; perFrame: number[]; selfPerFrame: number[]; totalMs: number }
+  >,
   id: string,
   frameCount: number,
 ) {
@@ -478,7 +880,10 @@ function ensureAggregate(
 }
 
 function addPseudoAggregate(
-  aggregates: Map<string, { count: number; perFrame: number[]; selfPerFrame: number[]; totalMs: number }>,
+  aggregates: Map<
+    string,
+    { count: number; perFrame: number[]; selfPerFrame: number[]; totalMs: number }
+  >,
   id: string,
   valueMs: number,
   frameIndex: number,
@@ -489,6 +894,14 @@ function addPseudoAggregate(
   aggregate.totalMs += valueMs
   aggregate.perFrame[frameIndex] = valueMs
   aggregate.selfPerFrame[frameIndex] = valueMs
+}
+
+function getSlowFrames(frames: readonly FrameRecord[]) {
+  return frames.filter(
+    (frame) =>
+      frame.intervalMs > FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS ||
+      frame.activeWallMs > FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS,
+  )
 }
 
 function stats(values: readonly number[]): ProfileStats {

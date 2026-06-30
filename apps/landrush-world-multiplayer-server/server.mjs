@@ -5,19 +5,29 @@ import { WebSocket, WebSocketServer } from 'ws'
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const HEARTBEAT_INTERVAL_MS = 3000
 const LANDRUSH_BUILD_NODE_TYPES = new Set([
+  'box-vent',
   'ceiling',
+  'chimney',
   'column',
   'door',
+  'dormer',
   'elevator',
   'fence',
   'item',
+  'ridge-vent',
+  'roof',
+  'roof-segment',
+  'shelf',
   'slab',
+  'skylight',
+  'solar-panel',
   'stair',
+  'stair-segment',
   'wall',
   'window',
 ])
-const MAX_BUILD_NODES_PER_PARCEL = 240
-const MAX_BUILD_SNAPSHOT_BYTES = 320_000
+const MAX_BUILD_NODES_PER_PARCEL = 1000
+const MAX_BUILD_SNAPSHOT_BYTES = 1_250_000
 const MAX_ROOM_ID_LENGTH = 80
 const MAX_ROOM_PEERS = 32
 const MIN_STATE_INTERVAL_MS = 40
@@ -266,6 +276,17 @@ wss.on('connection', (socket) => {
       return
     }
 
+    if (message.type === 'voice-signal') {
+      if (!peer) {
+        sendError(socket, 'not-joined', 'Join a room before sending voice signals')
+        return
+      }
+
+      peer.lastSeenAt = now
+      forwardVoiceSignal(peer, message.to, message.signal, now)
+      return
+    }
+
     if (message.type === 'heartbeat') {
       if (peer) peer.lastSeenAt = now
       if (watcher) watcher.lastSeenAt = now
@@ -414,6 +435,22 @@ function broadcastRoomState(roomId) {
     roomId,
     serverTime: Date.now(),
     type: 'room-state',
+  })
+}
+
+function forwardVoiceSignal(peer, targetPeerIdValue, signal, now) {
+  const targetPeerId = sanitizeText(targetPeerIdValue, '', 80)
+  if (!targetPeerId || targetPeerId === peer.id) return
+
+  const target = rooms.get(peer.roomId)?.peers.get(targetPeerId)
+  if (!target) return
+
+  send(target.socket, {
+    from: peer.id,
+    roomId: peer.roomId,
+    serverTime: now,
+    signal,
+    type: 'voice-signal',
   })
 }
 
@@ -623,6 +660,13 @@ function parseClientMessage(data) {
     if (raw?.type === 'watch') return raw
     if (raw?.type === 'watch-parcels' && typeof raw.worldId === 'string') return raw
     if (
+      raw?.type === 'voice-signal' &&
+      typeof raw.to === 'string' &&
+      isVoiceSignalPayload(raw.signal)
+    ) {
+      return raw
+    }
+    if (
       raw?.type === 'sync-parcel-build-nodes' &&
       typeof raw.worldId === 'string' &&
       typeof raw.parcelId === 'string' &&
@@ -650,6 +694,18 @@ function isPlayerSnapshot(value) {
     typeof value.color === 'string' &&
     Array.isArray(value.position) &&
     value.position.length === 3
+  )
+}
+
+function isVoiceSignalPayload(value) {
+  if (value?.type === 'disconnect') return true
+  if (value?.type === 'ready') return true
+  if (value?.type === 'ice-candidate') return typeof value.candidate === 'object'
+  return (
+    value?.type === 'description' &&
+    (value.description?.type === 'offer' || value.description?.type === 'answer') &&
+    typeof value.description.sdp === 'string' &&
+    value.description.sdp.length <= 120_000
   )
 }
 

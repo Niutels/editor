@@ -8,6 +8,7 @@ import {
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
 import { type ComponentType, lazy, Suspense } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import useEditor, { type Phase, type Tool } from '../../store/use-editor'
 import { ColumnTool } from './column/column-tool'
 import { ElevatorTool } from './elevator/elevator-tool'
@@ -22,6 +23,8 @@ import { ZoneTool } from './zone/zone-tool'
 // Cache lazy tool components keyed by their loader so React.lazy isn't
 // re-invoked across renders.
 const lazyToolCache = new WeakMap<() => Promise<unknown>, ComponentType>()
+const DEFAULT_BUILDING_POSITION: [number, number, number] = [0, 0, 0]
+const DEFAULT_BUILDING_ROTATION: [number, number, number] = [0, 0, 0]
 
 function getRegistryTool(tool: Tool | null): ComponentType | null {
   if (!tool) return null
@@ -64,25 +67,26 @@ export const ToolManager: React.FC = () => {
   const buildingId = useViewer((state) => state.selection.buildingId)
   const activeLevelId = useViewer((state) => state.selection.levelId)
   const setSelection = useViewer((state) => state.setSelection)
-  const nodes = useScene((state) => state.nodes)
+  const { buildingPosition, buildingRotation, selectedCeilingId, selectedSlabId } = useScene(
+    useShallow((state) => {
+      const building = buildingId
+        ? (state.nodes[buildingId as AnyNodeId] as BuildingNode | undefined)
+        : undefined
+      const selectedSlab = selectedIds.find(
+        (id) => state.nodes[id as AnyNodeId]?.type === 'slab',
+      ) as SlabNode['id'] | undefined
+      const selectedCeiling = selectedIds.find(
+        (id) => state.nodes[id as AnyNodeId]?.type === 'ceiling',
+      ) as CeilingNode['id'] | undefined
 
-  // Building transform for the local group — all building-relative tools live inside this group
-  // so their cursor positions and committed data are naturally in building-local space.
-  const building = buildingId
-    ? (nodes[buildingId as AnyNodeId] as BuildingNode | undefined)
-    : undefined
-  const buildingPosition = building?.position ?? [0, 0, 0]
-  const buildingRotation = building?.rotation ?? [0, 0, 0]
-
-  // Check if a slab is selected
-  const selectedSlabId = selectedIds.find((id) => nodes[id as AnyNodeId]?.type === 'slab') as
-    | SlabNode['id']
-    | undefined
-
-  // Check if a ceiling is selected
-  const selectedCeilingId = selectedIds.find((id) => nodes[id as AnyNodeId]?.type === 'ceiling') as
-    | CeilingNode['id']
-    | undefined
+      return {
+        buildingPosition: building?.position ?? DEFAULT_BUILDING_POSITION,
+        buildingRotation: building?.rotation ?? DEFAULT_BUILDING_ROTATION,
+        selectedCeilingId: selectedCeiling,
+        selectedSlabId: selectedSlab,
+      }
+    }),
+  )
 
   // Show site boundary editor when in site phase (toggle controls entry/exit)
   const showSiteBoundaryEditor = phase === 'site'

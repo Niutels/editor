@@ -1,6 +1,5 @@
 'use client'
 
-import { Icon } from '@iconify/react'
 import {
   type AnyNodeId,
   type BuildingNode,
@@ -10,7 +9,7 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { Check, ChevronDown, Eye, EyeOff, Layers2, Plus, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, Eye, EyeOff, Grid2x2, Layers2, Plus, Trash2 } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { getLevelDisplayName } from '../../../lib/level-name'
@@ -218,6 +217,7 @@ function GuidesControl() {
           label={`Guides: ${showGuides ? 'Visible' : 'Hidden'}`}
           onClick={() => setShowGuides(!showGuides)}
           size="icon"
+          tooltipProvider={false}
           variant="ghost"
         >
           <div className="relative">
@@ -360,7 +360,7 @@ function GridSnapControl() {
 
   return (
     <Popover onOpenChange={setIsOpen} open={isOpen}>
-      <Tooltip>
+      <Tooltip withProvider={false}>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <button
@@ -372,7 +372,7 @@ function GridSnapControl() {
               )}
               type="button"
             >
-              <Icon height={16} icon="lucide:grid-2x2" width={16} />
+              <Grid2x2 className="h-4 w-4" />
               <span className="mt-1 font-medium text-[9px] leading-none">
                 {formatGridSnapStep(gridSnapStep)}
               </span>
@@ -461,6 +461,7 @@ function ScansControl() {
           label={`Scans: ${showScans ? 'Visible' : 'Hidden'}`}
           onClick={() => setShowScans(!showScans)}
           size="icon"
+          tooltipProvider={false}
           variant="ghost"
         >
           <div className="relative">
@@ -625,6 +626,7 @@ function ReferenceFloorControl() {
             if (hasLowerLevels) toggleReferenceFloor()
           }}
           size="icon"
+          tooltipProvider={false}
           variant="ghost"
         >
           <div className="relative">

@@ -1,7 +1,6 @@
 'use client'
 
 import { emitter } from '@pascal-app/core'
-import Image from 'next/image'
 import { ActionButton } from './action-button'
 
 export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
@@ -27,14 +26,13 @@ export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
             label="Orbit Left"
             onClick={orbitCCW}
             size="icon"
+            tooltipProvider={false}
             variant="ghost"
           >
-            <Image
+            <img
               alt="Orbit Left"
               className="h-[28px] w-[28px] -scale-x-100 object-contain opacity-70 transition-opacity group-hover:opacity-100"
-              height={28}
               src="/icons/rotate.png"
-              width={28}
             />
           </ActionButton>
 
@@ -44,14 +42,13 @@ export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
             label="Orbit Right"
             onClick={orbitCW}
             size="icon"
+            tooltipProvider={false}
             variant="ghost"
           >
-            <Image
+            <img
               alt="Orbit Right"
               className="h-[28px] w-[28px] object-contain opacity-70 transition-opacity group-hover:opacity-100"
-              height={28}
               src="/icons/rotate.png"
-              width={28}
             />
           </ActionButton>
         </>
@@ -63,14 +60,13 @@ export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
         label="Top View"
         onClick={goToTopView}
         size="icon"
+        tooltipProvider={false}
         variant="ghost"
       >
-        <Image
+        <img
           alt="Top View"
           className="h-[28px] w-[28px] object-contain opacity-70 transition-opacity group-hover:opacity-100"
-          height={28}
           src="/icons/topview.png"
-          width={28}
         />
       </ActionButton>
     </div>

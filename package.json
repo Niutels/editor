@@ -50,5 +50,23 @@
     "apps/*",
     "packages/*",
     "tooling/*"
-  ]
+  ],
+  "version": "1.0.0",
+  "description": "A 3D building editor built with React Three Fiber and WebGPU.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pascalorg/editor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/pascalorg/editor/issues"
+  },
+  "homepage": "https://github.com/pascalorg/editor#readme"
 }

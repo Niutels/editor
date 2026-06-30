@@ -39,6 +39,7 @@ export {
 export type { EdgeMode } from './lib/edge-style'
 export { applyIsolation, clearIsolation, collectIsolationSubtree } from './lib/isolation'
 export { GRID_LAYER, OVERLAY_LAYER, SCENE_LAYER, ZONE_LAYER } from './lib/layers'
+export { normalizeLineLoopsForWebGPU } from './lib/line-loop-normalization'
 export {
   applyMaterialPresetToMaterials,
   BLUEPRINT_PALETTE,

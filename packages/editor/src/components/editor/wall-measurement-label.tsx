@@ -75,10 +75,10 @@ function formatMeasurement(value: number, unit: 'metric' | 'imperial') {
 
 export function WallMeasurementLabel() {
   const selectedIds = useViewer((state) => state.selection.selectedIds)
-  const nodes = useScene((state) => state.nodes)
-
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
-  const selectedNode = selectedId ? nodes[selectedId as AnyNodeId] : null
+  const selectedNode = useScene((state) =>
+    selectedId ? (state.nodes[selectedId as AnyNodeId] ?? null) : null,
+  )
   const measurableNode = selectedNode?.type === 'item' ? selectedNode : null
 
   const [objectState, setObjectState] = useState<{

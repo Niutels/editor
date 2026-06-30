@@ -41,7 +41,7 @@ import {
   getStairRailingMaterial,
   useViewer,
 } from '@pascal-app/viewer'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { type BufferGeometry, Color, type Material, type Mesh, type Object3D } from 'three'
 import {
   type ActivePaintMaterial,
@@ -1861,58 +1861,51 @@ const EditorOutlinerSync = () => {
   const previewSelectedIds = useViewer((s) => s.previewSelectedIds)
   const hoveredId = useViewer((s) => s.hoveredId)
   const outliner = useViewer((s) => s.outliner)
-  const nodes = useScene((s) => s.nodes)
-
-  useEffect(() => {
-    let idsToHighlight: string[] = []
-
-    // 1. Determine what should be highlighted based on Phase
+  const idsToHighlight = useMemo(() => {
     switch (phase) {
       case 'site':
-        // Only highlight the building if one is selected
-        if (selection.buildingId) idsToHighlight = [selection.buildingId]
-        break
+        return selection.buildingId ? [selection.buildingId] : []
 
       case 'structure':
-        // Highlight selected items (walls/slabs)
-        // We IGNORE buildingId even if it's set in the store
-        idsToHighlight = Array.from(new Set([...selection.selectedIds, ...previewSelectedIds]))
-        break
-
       case 'furnish':
-        // Highlight selected furniture/items
-        idsToHighlight = Array.from(new Set([...selection.selectedIds, ...previewSelectedIds]))
-        break
+        return Array.from(new Set([...selection.selectedIds, ...previewSelectedIds]))
 
       default:
-        // Pure Viewer mode: Highlight based on the "deepest" selection
         if (selection.selectedIds.length > 0 || previewSelectedIds.length > 0) {
-          idsToHighlight = Array.from(new Set([...selection.selectedIds, ...previewSelectedIds]))
-        } else if (selection.levelId) {
-          idsToHighlight = [selection.levelId]
-        } else if (selection.buildingId) {
-          idsToHighlight = [selection.buildingId]
+          return Array.from(new Set([...selection.selectedIds, ...previewSelectedIds]))
         }
+        if (selection.levelId) return [selection.levelId]
+        return selection.buildingId ? [selection.buildingId] : []
     }
+  }, [phase, previewSelectedIds, selection])
+  const existingHighlightIdsKey = useScene((s) =>
+    idsToHighlight.filter((id) => s.nodes[id as AnyNodeId]).join('\u0000'),
+  )
+  const hoveredNodeExists = useScene((s) =>
+    hoveredId ? Boolean(s.nodes[hoveredId as AnyNodeId]) : true,
+  )
 
-    // 2. Sync with the imperative outliner arrays (mutate in place to keep references)
+  useEffect(() => {
+    const existingHighlightIds = existingHighlightIdsKey
+      ? existingHighlightIdsKey.split('\u0000')
+      : []
+
     outliner.selectedObjects.length = 0
-    for (const id of idsToHighlight) {
-      if (!nodes[id as AnyNodeId]) continue
+    for (const id of existingHighlightIds) {
       const obj = sceneRegistry.nodes.get(id)
       if (obj?.parent) outliner.selectedObjects.push(obj)
     }
 
     outliner.hoveredObjects.length = 0
     if (hoveredId) {
-      if (!nodes[hoveredId as AnyNodeId]) {
+      if (!hoveredNodeExists) {
         useViewer.setState({ hoveredId: null })
       } else {
         const obj = sceneRegistry.nodes.get(hoveredId)
         if (obj?.parent) outliner.hoveredObjects.push(obj)
       }
     }
-  }, [phase, previewSelectedIds, selection, hoveredId, outliner, nodes])
+  }, [existingHighlightIdsKey, hoveredId, hoveredNodeExists, outliner])
 
   return null
 }
