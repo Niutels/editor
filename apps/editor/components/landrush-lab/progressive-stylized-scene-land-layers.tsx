@@ -11,7 +11,7 @@ import {
   type InstancedMesh,
   type Material,
   type Mesh,
-  MeshStandardMaterial,
+  type MeshStandardMaterial,
   Object3D,
   RepeatWrapping,
   SRGBColorSpace,
@@ -73,14 +73,27 @@ type BushInstance = {
   yaw: number
 }
 
-type StylizedGrassRoadSpan = {
+type StylizedGrassBounds = {
+  maxX: number
+  maxZ: number
+  minX: number
+  minZ: number
+}
+
+type StylizedGrassSegmentSpan = {
+  dx: number
+  dz: number
   end: { x: number; z: number }
-  halfWidth: number
+  lengthSquared: number
   maxX: number
   maxZ: number
   minX: number
   minZ: number
   start: { x: number; z: number }
+}
+
+type StylizedGrassRoadSpan = StylizedGrassSegmentSpan & {
+  halfWidth: number
 }
 
 type StylizedGrassRoadGrid = {
@@ -122,11 +135,19 @@ type StylizedGrassInstance = {
   z: number
 }
 
-type StylizedGrassFadeZone = {
-  clearanceMeters: number
-  id: string
-  points: readonly LandrushPoint2[]
+type StylizedGrassCompiledPolygon = {
+  bounds: StylizedGrassBounds
   ring: readonly LandrushPoint2[]
+  spans: readonly StylizedGrassSegmentSpan[]
+}
+
+type StylizedGrassCompiledBlocker = StylizedGrassCompiledPolygon & {
+  clearanceMeters: number
+  points: readonly LandrushPoint2[]
+}
+
+type StylizedGrassFadeZone = StylizedGrassCompiledBlocker & {
+  id: string
   targetVisibility: number
   visibility: number
 }
@@ -415,6 +436,13 @@ function StylizedSceneGrassLayer({
     }
   }
   const stableGrassBlockers = stableGrassBlockersRef.current.blockers
+  const compiledGrassBlockers = useMemo(
+    () =>
+      measureStylizedScene(profileMeasure, 'setup.stylized-grass.blocker-geometry', () =>
+        createStylizedGrassCompiledBlockers(stableGrassBlockers),
+      ),
+    [profileMeasure, stableGrassBlockers],
+  )
   const cellCacheRef = useRef<StylizedGrassCellCache>(new Map())
   const cacheStatsRef = useRef<StylizedGrassCacheStats>({
     clears: 0,
@@ -425,6 +453,7 @@ function StylizedSceneGrassLayer({
   const cellCacheSignatureRef = useRef({
     grassBlockerSignature,
     pathMaskData,
+    compiledGrassBlockers,
     resolvedTuning,
     roadGrid,
     surfacePoints,
@@ -432,6 +461,7 @@ function StylizedSceneGrassLayer({
   const cellCacheSignature = cellCacheSignatureRef.current
   if (
     cellCacheSignature.grassBlockerSignature !== grassBlockerSignature ||
+    cellCacheSignature.compiledGrassBlockers !== compiledGrassBlockers ||
     cellCacheSignature.pathMaskData !== pathMaskData ||
     cellCacheSignature.roadGrid !== roadGrid ||
     cellCacheSignature.resolvedTuning !== resolvedTuning ||
@@ -442,6 +472,7 @@ function StylizedSceneGrassLayer({
     cellCacheSignatureRef.current = {
       grassBlockerSignature,
       pathMaskData,
+      compiledGrassBlockers,
       resolvedTuning,
       roadGrid,
       surfacePoints,
@@ -464,7 +495,7 @@ function StylizedSceneGrassLayer({
         const nextInstances = createStylizedGrassInstances({
           cellCache: cellCacheRef.current,
           cacheStats: cacheStatsRef.current,
-          grassBlockers: stableGrassBlockers,
+          grassBlockers: compiledGrassBlockers,
           pathMaskData,
           renderCenter,
           roadGrid,
@@ -472,7 +503,7 @@ function StylizedSceneGrassLayer({
           streamRadius,
           tuning: resolvedTuning,
         })
-        if (nextInstances.length > 0 || stableGrassBlockers.length > 0) {
+        if (nextInstances.length > 0 || compiledGrassBlockers.length > 0) {
           lastNonEmptyInstancesRef.current = nextInstances
           return nextInstances
         }
@@ -484,7 +515,7 @@ function StylizedSceneGrassLayer({
       renderCenter,
       roadGrid,
       resolvedTuning,
-      stableGrassBlockers,
+      compiledGrassBlockers,
       surfacePoints,
       streamRadius,
     ],
@@ -926,7 +957,7 @@ function createStylizedGrassInstances({
 }: {
   cellCache: StylizedGrassCellCache
   cacheStats?: StylizedGrassCacheStats
-  grassBlockers: readonly StylizedGrassBlocker[]
+  grassBlockers: readonly StylizedGrassCompiledBlocker[]
   pathMaskData: ImageData | null
   renderCenter: StylizedGrassRenderCenter
   roadGrid: StylizedGrassRoadGrid | null
@@ -960,8 +991,8 @@ function createStylizedGrassInstances({
   )
   if (targetCount === 0) return finish([])
 
-  const surfaceRing = openRing(surfacePoints)
-  const surfaceBounds = stylizedGrassSurfaceBounds(surfaceRing)
+  const surfacePolygon = createStylizedGrassCompiledPolygon(surfacePoints)
+  const surfaceBounds = surfacePolygon.bounds
   const radiusSquared = radius * radius
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
   const densityPerSquareMeter = targetCount / (Math.PI * radiusSquared)
@@ -986,7 +1017,7 @@ function createStylizedGrassInstances({
         pathMaskData,
         roadGrid,
         slotsPerCell,
-        surfaceRing,
+        surfacePolygon,
         tuning,
       })
       for (const instance of cellInstances) {
@@ -1008,11 +1039,11 @@ function getStylizedGrassCellInstances(
     cellSize: number
     cellX: number
     cellZ: number
-    grassBlockers: readonly StylizedGrassBlocker[]
+    grassBlockers: readonly StylizedGrassCompiledBlocker[]
     pathMaskData: ImageData | null
     roadGrid: StylizedGrassRoadGrid | null
     slotsPerCell: number
-    surfaceRing: readonly LandrushPoint2[]
+    surfacePolygon: StylizedGrassCompiledPolygon
     tuning: StylizedSceneResolvedGrassTuning
   },
 ) {
@@ -1049,18 +1080,18 @@ function createStylizedGrassCellInstances({
   pathMaskData,
   roadGrid,
   slotsPerCell,
-  surfaceRing,
+  surfacePolygon,
   tuning,
 }: {
   candidateAcceptance: number
   cellSize: number
   cellX: number
   cellZ: number
-  grassBlockers: readonly StylizedGrassBlocker[]
+  grassBlockers: readonly StylizedGrassCompiledBlocker[]
   pathMaskData: ImageData | null
   roadGrid: StylizedGrassRoadGrid | null
   slotsPerCell: number
-  surfaceRing: readonly LandrushPoint2[]
+  surfacePolygon: StylizedGrassCompiledPolygon
   tuning: StylizedSceneResolvedGrassTuning
 }) {
   const instances: StylizedGrassInstance[] = []
@@ -1071,11 +1102,13 @@ function createStylizedGrassCellInstances({
     const x = (cellX + stableGrassHash(cellX, cellZ, slot, 11.17)) * cellSize
     const z = (cellZ + stableGrassHash(cellX, cellZ, slot, 23.41)) * cellSize
     const edgeJitter = stableGrassHash(cellX, cellZ, slot, 37.73)
-    if (surfaceRing.length >= 3 && !pointInPolygon({ x, z }, surfaceRing)) continue
+    if (surfacePolygon.ring.length >= 3 && !pointInPolygon({ x, z }, surfacePolygon)) {
+      continue
+    }
     if (isPointInStylizedGrassBlocker({ x, z }, grassBlockers)) continue
     if (isPointOnStylizedGrassRoad(x, z, roadGrid, edgeJitter)) continue
     if (
-      surfaceRing.length < 3 &&
+      surfacePolygon.ring.length < 3 &&
       isPointOnReferencePathMask(x, z, pathMaskData, roadGrid, edgeJitter)
     ) {
       continue
@@ -1133,7 +1166,7 @@ function applyStylizedGrassFadeAttributes(
   const hasFadeZones = fadeZones.length > 0
   if (!hasFadeZones && !forceNoZoneUpdate) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
 
-  const fadeState = { heightVisibility: 1, opacity: 1 }
+  const fadeState = { heightVisibility: 1, insideHiddenZone: false, opacity: 1 }
   let blockedFullCount = 0
   let blockedInstanceCount = 0
   let blockedVisibleCount = 0
@@ -1146,7 +1179,7 @@ function applyStylizedGrassFadeAttributes(
     fade.setX(index, fadeValue)
     fadeMin = Math.min(fadeMin, fadeValue)
     fadeMax = Math.max(fadeMax, fadeValue)
-    if (hasFadeZones && isStylizedGrassInstanceInsideHiddenFadeZone(instance, fadeZones)) {
+    if (hasFadeZones && fadeState.insideHiddenZone) {
       blockedInstanceCount += 1
       if (fadeValue > 0.95) blockedFullCount += 1
       if (fadeValue > 0.05) blockedVisibleCount += 1
@@ -1173,26 +1206,24 @@ function updateStylizedGrassFadeZones(
     activeIds.add(id)
     const existing = zones.find((zone) => zone.id === id)
     if (existing) {
-      existing.points = blocker.points
-      existing.ring = openRing(blocker.points)
-      existing.clearanceMeters = Math.max(0, blocker.clearanceMeters ?? 0)
+      const compiled = createStylizedGrassCompiledBlocker(blocker)
+      existing.bounds = compiled.bounds
+      existing.clearanceMeters = compiled.clearanceMeters
+      existing.points = compiled.points
+      existing.ring = compiled.ring
+      existing.spans = compiled.spans
       existing.targetVisibility = 0
     } else {
-      const clearanceMeters = Math.max(0, blocker.clearanceMeters ?? 0)
-      const ring = openRing(blocker.points)
+      const compiled = createStylizedGrassCompiledBlocker(blocker)
       zones.push({
-        clearanceMeters,
+        ...compiled,
         id,
-        points: blocker.points,
-        ring,
         targetVisibility: 0,
         visibility: clamp01(
           blocker.initialVisibility ??
             initialStylizedGrassFadeZoneVisibility(previousZones, {
-              clearanceMeters,
+              ...compiled,
               id,
-              points: blocker.points,
-              ring,
               targetVisibility: 0,
               visibility: 1,
             }),
@@ -1223,29 +1254,20 @@ function advanceStylizedGrassFadeZones(zones: StylizedGrassFadeZone[], delta: nu
 function resolveStylizedGrassFadeState(
   instance: StylizedGrassInstance,
   zones: readonly StylizedGrassFadeZone[],
-  state: { heightVisibility: number; opacity: number },
+  state: { heightVisibility: number; insideHiddenZone: boolean; opacity: number },
 ) {
   state.heightVisibility = 1
+  state.insideHiddenZone = false
   state.opacity = 1
   for (const zone of zones) {
     if (pointWithinStylizedGrassBlocker({ x: instance.x, z: instance.z }, zone)) {
       state.heightVisibility = Math.min(state.heightVisibility, zone.visibility)
+      if (zone.targetVisibility <= 0.001) state.insideHiddenZone = true
       if (zone.targetVisibility < zone.visibility) {
         state.opacity = Math.min(state.opacity, zone.visibility)
       }
     }
   }
-}
-
-function isStylizedGrassInstanceInsideHiddenFadeZone(
-  instance: StylizedGrassInstance,
-  zones: readonly StylizedGrassFadeZone[],
-) {
-  for (const zone of zones) {
-    if (zone.targetVisibility > 0.001) continue
-    if (pointWithinStylizedGrassBlocker({ x: instance.x, z: instance.z }, zone)) return true
-  }
-  return false
 }
 
 function initialStylizedGrassFadeZoneVisibility(
@@ -1283,8 +1305,8 @@ function stylizedGrassFadeZoneBoundsOverlap(
   first: StylizedGrassFadeZone,
   second: StylizedGrassFadeZone,
 ) {
-  const firstBounds = stylizedGrassPointsBounds(first.ring, first.clearanceMeters)
-  const secondBounds = stylizedGrassPointsBounds(second.ring, second.clearanceMeters)
+  const firstBounds = first.bounds
+  const secondBounds = second.bounds
   return !(
     firstBounds.maxX < secondBounds.minX ||
     firstBounds.minX > secondBounds.maxX ||
@@ -1301,6 +1323,15 @@ function stylizedGrassPointsBounds(points: readonly LandrushPoint2[], clearance 
     minX: bounds.minX - clearance,
     minZ: bounds.minZ - clearance,
   }
+}
+
+function pointWithinStylizedGrassBounds(point: LandrushPoint2, bounds: StylizedGrassBounds) {
+  return (
+    point.x >= bounds.minX &&
+    point.x <= bounds.maxX &&
+    point.z >= bounds.minZ &&
+    point.z <= bounds.maxZ
+  )
 }
 
 function centroidForStylizedGrassPoints(points: readonly LandrushPoint2[]) {
@@ -1565,7 +1596,7 @@ function isPointOnReferencePathMask(
 
 function isPointInStylizedGrassBlocker(
   point: LandrushPoint2,
-  blockers: readonly StylizedGrassBlocker[],
+  blockers: readonly StylizedGrassCompiledBlocker[],
 ) {
   for (const blocker of blockers) {
     if (pointWithinStylizedGrassBlocker(point, blocker)) return true
@@ -1575,17 +1606,13 @@ function isPointInStylizedGrassBlocker(
 
 function pointWithinStylizedGrassBlocker(
   point: LandrushPoint2,
-  blocker: {
-    clearanceMeters?: number
-    points: readonly LandrushPoint2[]
-    ring?: readonly LandrushPoint2[]
-  },
+  blocker: StylizedGrassCompiledBlocker,
 ) {
-  const ring = blocker.ring ?? openRing(blocker.points)
-  if (ring.length < 3) return false
-  const boundaryDistance = distanceToClosedPolyline(point, ring)
-  const signedDistance = pointInPolygon(point, ring) ? -boundaryDistance : boundaryDistance
-  return signedDistance <= Math.max(0, blocker.clearanceMeters ?? 0)
+  if (blocker.ring.length < 3) return false
+  if (!pointWithinStylizedGrassBounds(point, blocker.bounds)) return false
+  const boundaryDistance = distanceToClosedPolyline(point, blocker.spans)
+  const signedDistance = pointInPolygon(point, blocker) ? -boundaryDistance : boundaryDistance
+  return signedDistance <= blocker.clearanceMeters
 }
 
 function createStylizedGrassRoadGrid(
@@ -1605,15 +1632,17 @@ function createStylizedGrassRoadGrid(
       const end = road.points[index + 1]
       if (!(start && end)) continue
 
-      const minX = Math.min(start.x, end.x) - padding
-      const maxX = Math.max(start.x, end.x) + padding
-      const minZ = Math.min(start.z, end.z) - padding
-      const maxZ = Math.max(start.z, end.z) + padding
-      if (maxX < -fieldHalf || minX > fieldHalf || maxZ < -fieldHalf || minZ > fieldHalf) {
+      const span = createStylizedGrassSegmentSpan(start, end, padding)
+      if (
+        span.maxX < -fieldHalf ||
+        span.minX > fieldHalf ||
+        span.maxZ < -fieldHalf ||
+        span.minZ > fieldHalf
+      ) {
         continue
       }
 
-      spans.push({ end, halfWidth, maxX, maxZ, minX, minZ, start })
+      spans.push({ ...span, halfWidth })
     }
   }
 
@@ -1664,35 +1693,96 @@ function signedDistanceToStylizedGrassRoadSpans(
   for (const span of spans) {
     signedDistance = Math.min(
       signedDistance,
-      distanceToStylizedGrassRoadSegment(point, span.start, span.end) - span.halfWidth,
+      distanceToStylizedGrassSegmentSpan(point, span) - span.halfWidth,
     )
   }
   return signedDistance
 }
 
-function distanceToStylizedGrassRoadSegment(
-  point: { x: number; z: number },
+function createStylizedGrassCompiledBlockers(blockers: readonly StylizedGrassBlocker[]) {
+  return blockers.map(createStylizedGrassCompiledBlocker)
+}
+
+function createStylizedGrassCompiledBlocker(
+  blocker: StylizedGrassBlocker,
+): StylizedGrassCompiledBlocker {
+  const clearanceMeters = Math.max(0, blocker.clearanceMeters ?? 0)
+  const polygon = createStylizedGrassCompiledPolygon(blocker.points, clearanceMeters)
+  return {
+    ...polygon,
+    clearanceMeters,
+    points: blocker.points,
+  }
+}
+
+function createStylizedGrassCompiledPolygon(
+  points: readonly LandrushPoint2[],
+  clearanceMeters = 0,
+): StylizedGrassCompiledPolygon {
+  const ring = openRing(points)
+  return {
+    bounds: stylizedGrassPointsBounds(ring, Math.max(0, clearanceMeters)),
+    ring,
+    spans: createStylizedGrassClosedPolylineSpans(ring),
+  }
+}
+
+function createStylizedGrassClosedPolylineSpans(points: readonly LandrushPoint2[]) {
+  const spans: StylizedGrassSegmentSpan[] = []
+  for (let index = 0; index < points.length; index += 1) {
+    const start = points[index]
+    const end = points[(index + 1) % points.length]
+    if (start && end) spans.push(createStylizedGrassSegmentSpan(start, end, 0))
+  }
+  return spans
+}
+
+function createStylizedGrassSegmentSpan(
   start: { x: number; z: number },
   end: { x: number; z: number },
-) {
+  padding: number,
+): StylizedGrassSegmentSpan {
   const dx = end.x - start.x
   const dz = end.z - start.z
-  const lengthSquared = dx * dx + dz * dz
-  if (lengthSquared <= 0.000001) return Math.hypot(point.x - start.x, point.z - start.z)
+  return {
+    dx,
+    dz,
+    end,
+    lengthSquared: dx * dx + dz * dz,
+    maxX: Math.max(start.x, end.x) + padding,
+    maxZ: Math.max(start.z, end.z) + padding,
+    minX: Math.min(start.x, end.x) - padding,
+    minZ: Math.min(start.z, end.z) - padding,
+    start,
+  }
+}
+
+function distanceToStylizedGrassSegmentSpan(
+  point: { x: number; z: number },
+  span: StylizedGrassSegmentSpan,
+) {
+  if (span.lengthSquared <= 0.000001) {
+    return Math.hypot(point.x - span.start.x, point.z - span.start.z)
+  }
 
   const t = Math.max(
     0,
-    Math.min(1, ((point.x - start.x) * dx + (point.z - start.z) * dz) / lengthSquared),
+    Math.min(
+      1,
+      ((point.x - span.start.x) * span.dx + (point.z - span.start.z) * span.dz) /
+        span.lengthSquared,
+    ),
   )
-  return Math.hypot(point.x - (start.x + dx * t), point.z - (start.z + dz * t))
+  return Math.hypot(point.x - (span.start.x + span.dx * t), point.z - (span.start.z + span.dz * t))
 }
 
-function distanceToClosedPolyline(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+function distanceToClosedPolyline(
+  point: LandrushPoint2,
+  spans: readonly StylizedGrassSegmentSpan[],
+) {
   let best = Number.POSITIVE_INFINITY
-  for (let index = 0; index < polygon.length; index += 1) {
-    const start = polygon[index]
-    const end = polygon[(index + 1) % polygon.length]
-    if (start && end) best = Math.min(best, distanceToStylizedGrassRoadSegment(point, start, end))
+  for (const span of spans) {
+    best = Math.min(best, distanceToStylizedGrassSegmentSpan(point, span))
   }
   return best
 }
@@ -1741,18 +1831,15 @@ function stableGrassHash(cellX: number, cellZ: number, slot: number, salt: numbe
   return value - Math.floor(value)
 }
 
-function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[]) {
+function pointInPolygon(point: LandrushPoint2, polygon: StylizedGrassCompiledPolygon) {
   let inside = false
-  for (let index = 0, previousIndex = polygon.length - 1; index < polygon.length; index += 1) {
-    const current = polygon[index]
-    const previous = polygon[previousIndex]
-    if (!(current && previous)) continue
-    const crosses = current.z > point.z !== previous.z > point.z
+  for (const span of polygon.spans) {
+    const crosses = span.start.z > point.z !== span.end.z > point.z
     const boundaryX =
-      ((previous.x - current.x) * (point.z - current.z)) / (previous.z - current.z || 0.000001) +
-      current.x
+      ((span.end.x - span.start.x) * (point.z - span.start.z)) /
+        (span.end.z - span.start.z || 0.000001) +
+      span.start.x
     if (crosses && point.x < boundaryX) inside = !inside
-    previousIndex = index
   }
   return inside
 }
