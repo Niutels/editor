@@ -14,13 +14,13 @@ import {
 import {
   BVHEcctrl,
   type BVHEcctrlApi,
+  buildFirstPersonColliderWorldFromRegistry,
   EDITOR_LAYER,
   Editor,
   type EditorCameraInitialPose,
   type FirstPersonColliderWorld,
   ItemsPanel,
   type SceneGraph,
-  buildFirstPersonColliderWorldFromRegistry,
   useEditor,
   useSidebarStore,
 } from '@pascal-app/editor'
@@ -32,8 +32,8 @@ import {
   type PascalWaterLandSurface,
 } from '@pascal-app/nodes'
 import {
-  LandrushRobot,
   LANDRUSH_ROBOT_HOVER_RESPONSE,
+  LandrushRobot,
   type LandrushRobotPresentationMode,
   resolveLandrushRobotHoverOffset,
 } from '@pascal-app/nodes/landrush-world/robot'
@@ -59,10 +59,10 @@ import {
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import {
-  type PointerEvent as ReactPointerEvent,
   Profiler,
   type ProfilerOnRenderCallback,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
   type TouchEvent as ReactTouchEvent,
   type RefObject,
   Suspense,
@@ -95,11 +95,10 @@ import {
   disposeBoundsTree,
 } from 'three-mesh-bvh/src/index.js'
 import type { LandrushPoint2, LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
+import { FrameLoadProfilerProbe } from './frame-load-profiler'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, type GrassFieldBlocker } from './grass-field-texture'
 import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-material'
-import { FrameLoadProfilerProbe } from './frame-load-profiler'
-import { GrassWaterLandLayers } from './progressive-grass-water-layers'
 import {
   allocateParcels,
   type ParcelAllocationOptions,
@@ -115,12 +114,13 @@ import {
   type ParcelStreetNetwork,
   type ParcelStreetSegment,
 } from './parcel-streets'
-import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
+import { GrassWaterLandLayers } from './progressive-grass-water-layers'
 import type {
   ProgressiveIslandRevealState,
   StylizedGrassInteraction,
   StylizedGrassPerfProbe,
 } from './progressive-stylized-scene-land-layers'
+import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import {
   WATER_FIELD_PREVIEW_RESOLUTION,
   WATER_FIELD_RESOLUTION,
@@ -475,6 +475,8 @@ type PascalWaterRightHoldMove = {
 type PascalWaterNavigationObstacle = {
   points: readonly LandrushPoint2[]
 }
+type PascalWaterRoofNode = Extract<AnyNode, { type: 'roof' }>
+type PascalWaterRoofSegmentNode = Extract<AnyNode, { type: 'roof-segment' }>
 type MobileJoystickInput = {
   forward: number
   strafe: number
@@ -5750,7 +5752,7 @@ function collectPascalWaterBuildNodesInsideParcel(
 
   for (const node of Object.values(nodes)) {
     if (!isPascalWaterBuildObjectNode(node)) continue
-    if (!isPascalWaterBuildNodeInsideParcel(node, parcel)) continue
+    if (!isPascalWaterBuildNodeInsideParcel(node, parcel, nodes)) continue
 
     collectDescendants(node.id as AnyNodeId)
   }
@@ -5808,9 +5810,18 @@ function pascalWaterBuildNodeParentDepth(node: AnyNode, nodes: Record<string, An
   return depth
 }
 
-function isPascalWaterBuildNodeInsideParcel(node: AnyNode, parcel: ParcelAllocationParcel) {
-  const footprint = createPascalWaterBuildNodeFootprint(node, 0)
-  return Boolean(footprint?.every((point) => pointInPolygonOrNearEdge(point, parcel.points)))
+function isPascalWaterBuildNodeInsideParcel(
+  node: AnyNode,
+  parcel: ParcelAllocationParcel,
+  nodes: Record<string, AnyNode>,
+) {
+  const footprints = createPascalWaterBuildNodeFootprints(node, 0, nodes)
+  return (
+    footprints.length > 0 &&
+    footprints.every((footprint) =>
+      footprint.every((point) => pointInPolygonOrNearEdge(point, parcel.points)),
+    )
+  )
 }
 
 function applyPascalWaterBuildSnapshot(
@@ -5830,7 +5841,12 @@ function applyPascalWaterBuildSnapshot(
     const id = node.id as AnyNodeId
     const existing = scene.nodes[id]
     if (existing) {
-      if (isPascalWaterBuildObjectNode(existing)) updateNodes.push({ data: node, id })
+      if (
+        isPascalWaterSyncedBuildNodeForParcel(existing, parcelId) ||
+        isPascalWaterSyncedBuildNodeForParcel(node, parcelId)
+      ) {
+        updateNodes.push({ data: node, id })
+      }
       continue
     }
     createNodes.push({
@@ -5867,15 +5883,16 @@ function createPascalWaterBuiltGrassBlockers(
 ): readonly GrassFieldBlocker[] {
   const blockers: GrassFieldBlocker[] = []
   for (const node of Object.values(nodes)) {
-    const footprint = createPascalWaterBuildNodeFootprint(
+    for (const footprint of createPascalWaterBuildNodeFootprints(
       node,
       PASCAL_WATER_BUILT_GRASS_PADDING_METERS,
-    )
-    if (!footprint) continue
-    blockers.push({
-      featherMeters: PASCAL_WATER_BUILT_GRASS_FEATHER_METERS,
-      points: footprint,
-    })
+      nodes,
+    )) {
+      blockers.push({
+        featherMeters: PASCAL_WATER_BUILT_GRASS_FEATHER_METERS,
+        points: footprint,
+      })
+    }
   }
   return blockers
 }
@@ -5910,12 +5927,70 @@ function createPascalWaterInvalidBuildNodeIds(
   const invalidIds: string[] = []
   for (const node of Object.values(nodes)) {
     if (node.parentId !== PASCAL_WATER_LEVEL_ID) continue
-    const footprint = createPascalWaterBuildNodeFootprint(node, 0)
-    if (!footprint) continue
-    if (footprint.every((point) => pointInPolygonOrNearEdge(point, parcel.points))) continue
+    const footprints = createPascalWaterBuildNodeFootprints(node, 0, nodes)
+    if (footprints.length === 0) continue
+    if (
+      footprints.every((footprint) =>
+        footprint.every((point) => pointInPolygonOrNearEdge(point, parcel.points)),
+      )
+    ) {
+      continue
+    }
     invalidIds.push(node.id)
   }
   return invalidIds
+}
+
+function createPascalWaterBuildNodeFootprints(
+  node: AnyNode,
+  padding: number,
+  nodes: Record<string, AnyNode>,
+): readonly (readonly LandrushPoint2[])[] {
+  if (!isPascalWaterBuildObjectNode(node)) return []
+  if (node.type === 'roof') return createPascalWaterRoofBuildFootprints(node, padding, nodes)
+
+  const footprint = createPascalWaterBuildNodeFootprint(node, padding)
+  return footprint ? [footprint] : []
+}
+
+function createPascalWaterRoofBuildFootprints(
+  roof: PascalWaterRoofNode,
+  padding: number,
+  nodes: Record<string, AnyNode>,
+): readonly (readonly LandrushPoint2[])[] {
+  const childIds = new Set([
+    ...(roof.children ?? []),
+    ...Object.values(nodes)
+      .filter((node) => node.parentId === roof.id)
+      .map((node) => node.id as AnyNodeId),
+  ])
+  const footprints: Array<readonly LandrushPoint2[]> = [...childIds].flatMap((childId) => {
+    const segment = nodes[childId] as PascalWaterRoofSegmentNode | undefined
+    if (segment?.type !== 'roof-segment' || segment.visible === false) return []
+    const overhang = segment.overhang ?? 0
+    return [
+      rectFootprint({
+        center: rotateFootprintPoint(
+          { x: segment.position[0], z: segment.position[2] },
+          { x: roof.position[0], z: roof.position[2] },
+          roof.rotation ?? 0,
+        ),
+        depth: segment.depth + overhang * 2 + padding * 2,
+        rotation: (roof.rotation ?? 0) + (segment.rotation ?? 0),
+        width: segment.width + overhang * 2 + padding * 2,
+      }),
+    ]
+  })
+
+  if (footprints.length > 0) return footprints
+  return [
+    rectFootprint({
+      center: { x: roof.position[0], z: roof.position[2] },
+      depth: 0.4 + padding * 2,
+      rotation: roof.rotation ?? 0,
+      width: 0.4 + padding * 2,
+    }),
+  ]
 }
 
 function createPascalWaterBuildNodeFootprint(
@@ -5977,6 +6052,15 @@ function createPascalWaterBuildNodeFootprint(
     })
   }
 
+  if (node.type === 'shelf') {
+    return rectFootprint({
+      center: { x: node.position[0], z: node.position[2] },
+      depth: node.depth + padding * 2,
+      rotation: node.rotation[1] ?? 0,
+      width: node.width + padding * 2,
+    })
+  }
+
   return null
 }
 
@@ -5992,7 +6076,9 @@ function isPascalWaterBuildObjectNode(node: AnyNode) {
     node.type === 'ceiling' ||
     node.type === 'column' ||
     node.type === 'elevator' ||
-    node.type === 'stair'
+    node.type === 'stair' ||
+    node.type === 'roof' ||
+    node.type === 'shelf'
   )
 }
 

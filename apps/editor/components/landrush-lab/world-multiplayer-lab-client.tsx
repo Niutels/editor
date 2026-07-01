@@ -70,6 +70,7 @@ import {
   type SpatialVoiceSignalPayload,
   useLandrushSpatialVoice,
 } from './world-multiplayer-spatial-audio'
+import { SpatialVoiceRangeRing } from './world-multiplayer-spatial-voice-range'
 
 declare global {
   interface Window {
@@ -765,6 +766,7 @@ export function WorldMultiplayerLabClient({
         remotePlayers={multiplayer.remotePlayers}
         streetNetwork={streetNetwork}
         surface={surface}
+        voiceRangeVisible={spatialVoice.desired && spatialVoice.status === 'live'}
         watchParcelWorld={multiplayer.watchParcelWorld}
       />
     ),
@@ -781,6 +783,8 @@ export function WorldMultiplayerLabClient({
       multiplayer.remotePlayers,
       multiplayer.watchParcelWorld,
       perfRun,
+      spatialVoice.desired,
+      spatialVoice.status,
     ],
   )
 
@@ -994,6 +998,7 @@ function LandrushWorldMultiplayerScene({
   remotePlayers,
   streetNetwork,
   surface,
+  voiceRangeVisible,
   watchParcelWorld,
 }: {
   allocation: ParcelAllocationResult | null
@@ -1014,6 +1019,7 @@ function LandrushWorldMultiplayerScene({
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   streetNetwork: ParcelStreetNetwork | null
   surface: WaterLandSurface
+  voiceRangeVisible: boolean
   watchParcelWorld: (worldId: string) => void
 }) {
   const spawn = useMemo(() => centroidForPolygon(surface.grassSurfacePoints), [surface])
@@ -1023,18 +1029,26 @@ function LandrushWorldMultiplayerScene({
     <group>
       {mapView ? <ParcelMapCameraRig /> : null}
       {layoutView ? null : (
-        <LocalMultiplayerRobot
-          grassInteractionRef={grassInteractionRef}
-          groundY={groundY}
-          localMotionRef={localMotionRef}
-          localProfile={localProfile}
-          mapView={mapView}
-          mobileJoystickRef={mobileJoystickRef}
-          onLocalPlayerChange={onLocalPlayerChange}
-          perfRun={perfRun}
-          spawn={spawn}
-          surfacePoints={surface.grassSurfacePoints}
-        />
+        <>
+          <LocalMultiplayerRobot
+            grassInteractionRef={grassInteractionRef}
+            groundY={groundY}
+            localMotionRef={localMotionRef}
+            localProfile={localProfile}
+            mapView={mapView}
+            mobileJoystickRef={mobileJoystickRef}
+            onLocalPlayerChange={onLocalPlayerChange}
+            perfRun={perfRun}
+            spawn={spawn}
+            surfacePoints={surface.grassSurfacePoints}
+          />
+          <SpatialVoiceRangeRing
+            color={localProfile.color}
+            groundY={surface.grassSurfaceElevation}
+            motionRef={localMotionRef}
+            visible={voiceRangeVisible}
+          />
+        </>
       )}
       {remotePlayers.map((player) => (
         <RemoteMultiplayerRobot groundY={groundY} key={player.id} player={player} />

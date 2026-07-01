@@ -75,7 +75,7 @@ type VoicePeer = {
   source: MediaStreamAudioSourceNode | null
 }
 
-const SPATIAL_VOICE_MAX_DISTANCE = 28
+export const SPATIAL_VOICE_MAX_DISTANCE = 28
 const SPATIAL_VOICE_REFERENCE_DISTANCE = 1.5
 const SPATIAL_VOICE_ROLLOFF = 1.35
 const SPATIAL_VOICE_UPDATE_INTERVAL_MS = 80

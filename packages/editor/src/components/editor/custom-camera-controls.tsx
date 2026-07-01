@@ -118,6 +118,14 @@ export const CustomCameraControls = ({
     )
     return true
   }, [initialPose, requestProgrammaticCameraFrames])
+  const handleControlsRef = useCallback(
+    (instance: CameraControlsImpl | null) => {
+      if (!instance) return
+      controls.current = instance
+      applyInitialPose()
+    },
+    [applyInitialPose],
+  )
 
   useLayoutEffect(() => {
     if (!initialPose) return
@@ -775,7 +783,7 @@ export const CustomCameraControls = ({
       onRest={onRest}
       onSleep={onRest}
       onTransitionStart={onTransitionStart}
-      ref={controls}
+      ref={handleControlsRef}
       restThreshold={0.01}
       touches={touches}
     />
