@@ -102,14 +102,9 @@ type VoicePeerRtcStats = {
 }
 
 type VoiceLocalGraph = {
-  compressor: DynamicsCompressorNode
-  gain: GainNode
   inputAnalyser: AnalyserNode
   inputAudioData: Uint8Array<ArrayBuffer>
   rawStream: MediaStream
-  sendAnalyser: AnalyserNode
-  sendAudioData: Uint8Array<ArrayBuffer>
-  sendStream: MediaStream
   source: MediaStreamAudioSourceNode
 }
 
@@ -201,8 +196,8 @@ export function useLandrushSpatialVoice({
       connectedPeerCount,
       inboundBytes,
       inboundPackets,
-      localMicRmsLevel: roundLevel(measureLocalGraphLevel(localGraph, 'input')),
-      localSendRmsLevel: roundLevel(measureLocalGraphLevel(localGraph, 'send')),
+      localMicRmsLevel: roundLevel(measureLocalGraphLevel(localGraph)),
+      localSendRmsLevel: roundLevel(measureLocalGraphLevel(localGraph)),
       outboundTrackCount: localStream?.getAudioTracks().length ?? 0,
       outboundBytes,
       outboundPackets,
@@ -467,7 +462,7 @@ export function useLandrushSpatialVoice({
         const localGraph = createLocalVoiceGraph(audioContext, rawStream)
         audioContextRef.current = audioContext
         localGraphRef.current = localGraph
-        localStreamRef.current = localGraph?.sendStream ?? rawStream
+        localStreamRef.current = rawStream
         setStatus('live')
         syncPeers()
         flushPendingSignals()
@@ -826,54 +821,26 @@ function connectPeerAudio(peer: VoicePeer, audioContext: AudioContext | null) {
 
 function createLocalVoiceGraph(audioContext: AudioContext, rawStream: MediaStream) {
   const audioTracks = rawStream.getAudioTracks()
-  if (audioTracks.length === 0 || typeof audioContext.createMediaStreamDestination !== 'function') {
-    return null
-  }
+  if (audioTracks.length === 0) return null
 
   const source = audioContext.createMediaStreamSource(rawStream)
   const inputAnalyser = audioContext.createAnalyser()
-  const gain = audioContext.createGain()
-  const compressor = audioContext.createDynamicsCompressor()
-  const sendAnalyser = audioContext.createAnalyser()
-  const destination = audioContext.createMediaStreamDestination()
 
   inputAnalyser.fftSize = 256
-  sendAnalyser.fftSize = 256
-  gain.gain.value = 2.4
-  compressor.threshold.value = -36
-  compressor.knee.value = 24
-  compressor.ratio.value = 3
-  compressor.attack.value = 0.004
-  compressor.release.value = 0.18
 
   source.connect(inputAnalyser)
-  source.connect(gain)
-  gain.connect(compressor)
-  compressor.connect(sendAnalyser)
-  sendAnalyser.connect(destination)
 
   return {
-    compressor,
-    gain,
     inputAnalyser,
     inputAudioData: new Uint8Array(inputAnalyser.fftSize),
     rawStream,
-    sendAnalyser,
-    sendAudioData: new Uint8Array(sendAnalyser.fftSize),
-    sendStream: destination.stream,
     source,
   } satisfies VoiceLocalGraph
 }
 
 function disposeLocalVoiceGraph(graph: VoiceLocalGraph | null) {
   if (!graph) return
-  for (const node of [
-    graph.source,
-    graph.inputAnalyser,
-    graph.gain,
-    graph.compressor,
-    graph.sendAnalyser,
-  ]) {
+  for (const node of [graph.source, graph.inputAnalyser]) {
     try {
       node.disconnect()
     } catch {
@@ -881,9 +848,6 @@ function disposeLocalVoiceGraph(graph: VoiceLocalGraph | null) {
     }
   }
   graph.rawStream.getTracks().forEach((track) => {
-    track.stop()
-  })
-  graph.sendStream.getTracks().forEach((track) => {
     track.stop()
   })
 }
@@ -959,12 +923,10 @@ function measurePeerOutputLevel(peer: VoicePeer) {
   return measureAudioDataLevel(peer.outputAudioData)
 }
 
-function measureLocalGraphLevel(graph: VoiceLocalGraph | null, stage: 'input' | 'send') {
+function measureLocalGraphLevel(graph: VoiceLocalGraph | null) {
   if (!graph) return 0
-  const analyser = stage === 'input' ? graph.inputAnalyser : graph.sendAnalyser
-  const audioData = stage === 'input' ? graph.inputAudioData : graph.sendAudioData
-  analyser.getByteTimeDomainData(audioData)
-  return measureAudioDataLevel(audioData)
+  graph.inputAnalyser.getByteTimeDomainData(graph.inputAudioData)
+  return measureAudioDataLevel(graph.inputAudioData)
 }
 
 function measureAudioDataLevel(audioData: Uint8Array<ArrayBuffer>) {
@@ -990,12 +952,16 @@ function cleanupVoice(
   }
   peers.clear()
 
-  localStreamRef.current?.getTracks().forEach((track) => {
-    track.stop()
-  })
+  const localGraph = localGraphRef.current
+  const localStream = localStreamRef.current
   localStreamRef.current = null
-  disposeLocalVoiceGraph(localGraphRef.current)
   localGraphRef.current = null
+  disposeLocalVoiceGraph(localGraph)
+  if (localStream && localStream !== localGraph?.rawStream) {
+    localStream.getTracks().forEach((track) => {
+      track.stop()
+    })
+  }
 
   const audioContext = audioContextRef.current
   audioContextRef.current = null
