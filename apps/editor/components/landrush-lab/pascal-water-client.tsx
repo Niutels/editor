@@ -2659,6 +2659,14 @@ export function PascalWaterClient({
   }, [buildMode])
 
   useEffect(() => {
+    if (!hasLiveLayoutNode) return
+    measureLandrushFrameSlice('pascal-water.effect.sync-build-mode-after-scene-load', () => {
+      syncPascalWaterBuildEditorMode(buildMode)
+      renderScheduler.requestFrame('geometry:changed')
+    })
+  }, [buildMode, hasLiveLayoutNode])
+
+  useEffect(() => {
     if (viewMode === 'player') return
     releasePascalWaterPointerLock()
   }, [viewMode])

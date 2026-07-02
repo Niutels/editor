@@ -810,6 +810,42 @@ function PascalWaterStartupReactProfiler({
   )
 }
 
+function syncPascalMultiplayerIslandBuildEditorMode(buildMode: boolean) {
+  const editor = useEditor.getState()
+
+  if (buildMode) {
+    if (
+      editor.phase === 'structure' &&
+      editor.mode === 'select' &&
+      editor.structureLayer === 'elements' &&
+      editor.tool === null &&
+      editor.activeSidebarPanel === 'site' &&
+      editor.catalogCategory === null &&
+      editor.floorplanSelectionTool === 'click'
+    ) {
+      return
+    }
+
+    useEditor.setState({
+      activeSidebarPanel: 'site',
+      catalogCategory: null,
+      floorplanSelectionTool: 'click',
+      mode: 'select',
+      phase: 'structure',
+      structureLayer: 'elements',
+      tool: null,
+    })
+    return
+  }
+
+  if (editor.mode === 'select' && editor.tool === null && editor.catalogCategory === null) return
+  useEditor.setState({
+    catalogCategory: null,
+    mode: 'select',
+    tool: null,
+  })
+}
+
 export function PascalWaterClient({
   experience = 'pascal-water',
   waterFieldDebugMode,
@@ -1530,21 +1566,17 @@ export function PascalWaterClient({
     editor.setFirstPersonMode(false)
     editor.setPreviewMode(false)
     editor.setViewMode('3d')
-    editor.setPhase('structure')
-    editor.setStructureLayer('elements')
-    editor.setCatalogCategory(null)
     sidebar.setIsCollapsed(true)
-
-    if (buildMode) {
-      editor.setMode('build')
-      editor.setTool('wall')
-    } else {
-      editor.setMode('select')
-      editor.setTool(null)
-    }
+    syncPascalMultiplayerIslandBuildEditorMode(buildMode)
 
     renderScheduler.requestFrame('geometry:changed')
   }, [buildMode])
+
+  useEffect(() => {
+    if (!hasLiveLayoutNode) return
+    syncPascalMultiplayerIslandBuildEditorMode(buildMode)
+    renderScheduler.requestFrame('geometry:changed')
+  }, [buildMode, hasLiveLayoutNode])
 
   useEffect(() => {
     if (viewMode === 'player') return
