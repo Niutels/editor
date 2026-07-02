@@ -115,7 +115,9 @@ export const ActionMenu = memo(function ActionMenu({
       <motion.div
         className={cn(
           'left-1/2 z-50 -translate-x-1/2',
-          isMobile ? 'absolute origin-bottom scale-90' : 'fixed bottom-6',
+          isMobile
+            ? 'absolute w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] origin-bottom scale-90'
+            : 'fixed bottom-6',
           'rounded-2xl border border-border bg-background/90 shadow-2xl backdrop-blur-md',
           'transition-colors duration-200 ease-out',
           className,
@@ -152,10 +154,12 @@ export const ActionMenu = memo(function ActionMenu({
               }}
               transition={transition}
             >
-              <div className="w-max">
-                <ActionMenuReactProfiler config={reactProfiler} id="action-menu.structure-tools">
-                  <StructureTools />
-                </ActionMenuReactProfiler>
+              <div className="no-scrollbar max-w-full overflow-x-auto overscroll-x-contain [touch-action:pan-x]">
+                <div className="w-max">
+                  <ActionMenuReactProfiler config={reactProfiler} id="action-menu.structure-tools">
+                    <StructureTools />
+                  </ActionMenuReactProfiler>
+                </div>
               </div>
             </motion.div>
           )}
@@ -195,21 +199,24 @@ export const ActionMenu = memo(function ActionMenu({
           )}
         </AnimatePresence>
         {isMobile ? (
-          <div className="flex flex-col items-stretch gap-0.5 px-2 py-1.5">
-            {/* Row 1: control modes only */}
-            <div className="flex items-center justify-center gap-1">
-              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.control-modes">
-                <ControlModes />
-              </ActionMenuReactProfiler>
-            </div>
-            {/* Row 2: grid snap + secondary toggles (orbit + top view hidden) */}
-            <div className="flex items-center justify-center gap-1 border-border/50 border-t pt-1">
-              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.grid-snap-control">
-                <GridSnapControl />
-              </ActionMenuReactProfiler>
-              <ActionMenuReactProfiler config={reactProfiler} id="action-menu.secondary-toggles">
-                <SecondaryToggles />
-              </ActionMenuReactProfiler>
+          <div className="px-2 py-1.5">
+            <div className="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain [touch-action:pan-x]">
+              <div className="w-max shrink-0">
+                <ActionMenuReactProfiler config={reactProfiler} id="action-menu.control-modes">
+                  <ControlModes />
+                </ActionMenuReactProfiler>
+              </div>
+              <div className="mx-1 h-5 w-px shrink-0 bg-border" />
+              <div className="shrink-0">
+                <ActionMenuReactProfiler config={reactProfiler} id="action-menu.grid-snap-control">
+                  <GridSnapControl />
+                </ActionMenuReactProfiler>
+              </div>
+              <div className="shrink-0">
+                <ActionMenuReactProfiler config={reactProfiler} id="action-menu.secondary-toggles">
+                  <SecondaryToggles />
+                </ActionMenuReactProfiler>
+              </div>
             </div>
           </div>
         ) : (

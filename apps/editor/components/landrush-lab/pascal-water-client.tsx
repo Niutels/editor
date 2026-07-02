@@ -327,10 +327,14 @@ const PASCAL_WATER_BUILT_GRASS_PADDING_METERS = 1
 const PASCAL_WATER_BUILT_GRASS_FEATHER_METERS = 0.3
 const PASCAL_WATER_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
 const PASCAL_WATER_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
-const PASCAL_WATER_BUILD_GRID_SIZE_METERS = 132
-const PASCAL_WATER_BUILD_GRID_DIVISIONS = 132
+const PASCAL_WATER_BUILD_GRID_STEP_METERS = 0.5
 const PASCAL_WATER_BUILD_GRID_ELEVATION_OFFSET = 0.015
 const PASCAL_WATER_BUILD_GRID_FADE_METERS = 4
+const PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS = 1.35
+const PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS = 4.25
+const PASCAL_WATER_BUILD_GRID_PATH_CLEARANCE_METERS = 0.72
+const PASCAL_WATER_BUILD_GRID_PATH_FADE_METERS = 3
+const PASCAL_WATER_BUILD_GRID_PATH_WIDTH_SCALE = 1.08
 const PASCAL_WATER_BUILD_GRID_FADE_BUCKETS = 8
 const PASCAL_WATER_BUILD_GRID_RENDER_ORDER = 0.05
 const PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER = 0
@@ -2786,7 +2790,7 @@ export function PascalWaterClient({
   const handleLoadingLoaded = useCallback(() => setLoadingActive(false), [])
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-[#0f1720] [&_canvas]:h-full [&_canvas]:w-full">
+    <main className="relative h-screen w-screen overflow-hidden bg-[#0f1720] [&_canvas]:h-full [&_canvas]:w-full [&_canvas]:touch-none">
       <div
         aria-hidden={loadingActive}
         className={[
@@ -2982,7 +2986,9 @@ export function PascalWaterClient({
                     ) : null}
                     <PascalWaterBuildGridOverlay
                       groundY={liveViewerLandSurface.grassSurfaceElevation}
+                      islandSurfacePoints={liveViewerLandSurface.grassSurfacePoints}
                       parcel={activeBuildParcel}
+                      roads={liveGrassRoads}
                       visible={buildMode}
                     />
                     <PascalWaterRuntimeCameraProbeRecorder mode={viewMode} />
@@ -3846,14 +3852,19 @@ function resolvePascalWaterBuildCameraStartTarget(
 
 function PascalWaterBuildGridOverlay({
   groundY,
+  islandSurfacePoints,
   parcel,
+  roads,
   visible,
 }: {
   groundY: number
+  islandSurfacePoints: readonly LandrushPoint2[]
   parcel: ParcelAllocationParcel | null
+  roads: readonly LandrushRoadSegment[]
   visible: boolean
 }) {
   const invalidate = useThree((state) => state.invalidate)
+  const gridSnapStep = useEditor((state) => state.gridSnapStep)
   const targetVisible = visible && Boolean(parcel)
   const [renderParcel, setRenderParcel] = useState(parcel)
   const [renderVisible, setRenderVisible] = useState(targetVisible)
@@ -3864,8 +3875,9 @@ function PascalWaterBuildGridOverlay({
     to: targetVisible ? 1 : 0,
   })
   const geometries = useMemo(
-    () => createPascalWaterBuildGridGeometries(renderParcel),
-    [renderParcel],
+    () =>
+      createPascalWaterBuildGridGeometries(renderParcel, gridSnapStep, islandSurfacePoints, roads),
+    [gridSnapStep, islandSurfacePoints, renderParcel, roads],
   )
   const materials = useMemo(() => createPascalWaterBuildGridMaterials(), [])
   const lastProbeAtRef = useRef(-Infinity)
@@ -3913,6 +3925,7 @@ function PascalWaterBuildGridOverlay({
           opacity: roundPerf(opacity),
           parcelId: currentParcel?.id ?? null,
           progress: roundPerf(progress),
+          gridStep: gridSnapStep,
           renderOrder: PASCAL_WATER_BUILD_GRID_RENDER_ORDER,
           visible: opacity > 0.002 && Boolean(currentParcel),
         })
@@ -3926,14 +3939,14 @@ function PascalWaterBuildGridOverlay({
     }
     animationFrame = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(animationFrame)
-  }, [invalidate, materials, parcel, targetVisible])
+  }, [gridSnapStep, invalidate, materials, parcel, targetVisible])
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    invalidate()
+    return () => {
       for (const geometry of geometries) geometry.dispose()
-    },
-    [geometries],
-  )
+    }
+  }, [geometries, invalidate])
   useEffect(
     () => () => {
       for (const material of materials) material.dispose()
@@ -3989,15 +4002,23 @@ function createPascalWaterBuildGridMaterials() {
   })
 }
 
-function createPascalWaterBuildGridGeometries(parcel: ParcelAllocationParcel | null) {
+function createPascalWaterBuildGridGeometries(
+  parcel: ParcelAllocationParcel | null,
+  gridStep = PASCAL_WATER_BUILD_GRID_STEP_METERS,
+  islandSurfacePoints: readonly LandrushPoint2[] = [],
+  roads: readonly LandrushRoadSegment[] = [],
+) {
   const bucketVertices = Array.from(
     { length: PASCAL_WATER_BUILD_GRID_FADE_BUCKETS },
     () => [] as number[],
   )
   if (parcel) {
-    const ring = openPointRing(parcel.points)
-    const bounds = boundsForPoints(ring)
-    const gridStep = PASCAL_WATER_BUILD_GRID_SIZE_METERS / PASCAL_WATER_BUILD_GRID_DIVISIONS
+    const mask = {
+      islandRing: openPointRing(islandSurfacePoints),
+      parcelRing: openPointRing(parcel.points),
+      roads,
+    }
+    const bounds = boundsForPoints(mask.parcelRing)
     const segmentStep = gridStep / 2
     const minX =
       Math.floor((bounds.minX - PASCAL_WATER_BUILD_GRID_FADE_METERS) / gridStep) * gridStep
@@ -4012,7 +4033,7 @@ function createPascalWaterBuildGridGeometries(parcel: ParcelAllocationParcel | n
       for (let z = minZ; z < maxZ - 0.0001; z += segmentStep) {
         pushPascalWaterBuildGridSegment(
           bucketVertices,
-          ring,
+          mask,
           x,
           z,
           x,
@@ -4024,7 +4045,7 @@ function createPascalWaterBuildGridGeometries(parcel: ParcelAllocationParcel | n
       for (let x = minX; x < maxX - 0.0001; x += segmentStep) {
         pushPascalWaterBuildGridSegment(
           bucketVertices,
-          ring,
+          mask,
           x,
           z,
           Math.min(maxX, x + segmentStep),
@@ -4043,7 +4064,11 @@ function createPascalWaterBuildGridGeometries(parcel: ParcelAllocationParcel | n
 
 function pushPascalWaterBuildGridSegment(
   bucketVertices: number[][],
-  ring: readonly LandrushPoint2[],
+  mask: {
+    islandRing: readonly LandrushPoint2[]
+    parcelRing: readonly LandrushPoint2[]
+    roads: readonly LandrushRoadSegment[]
+  },
   startX: number,
   startZ: number,
   endX: number,
@@ -4054,7 +4079,7 @@ function pushPascalWaterBuildGridSegment(
       x: (startX + endX) / 2,
       z: (startZ + endZ) / 2,
     },
-    ring,
+    mask,
   )
   if (alpha <= 0.015) return
 
@@ -4065,11 +4090,65 @@ function pushPascalWaterBuildGridSegment(
   bucketVertices[bucket]?.push(startX, 0, startZ, endX, 0, endZ)
 }
 
-function pascalWaterBuildGridAlphaAtPoint(point: LandrushPoint2, ring: readonly LandrushPoint2[]) {
-  if (ring.length < 3) return 0
-  if (pointInPolygon(point, ring)) return 1
-  const distance = distanceToClosedPolyline(point, ring)
+function pascalWaterBuildGridAlphaAtPoint(
+  point: LandrushPoint2,
+  mask: {
+    islandRing: readonly LandrushPoint2[]
+    parcelRing: readonly LandrushPoint2[]
+    roads: readonly LandrushRoadSegment[]
+  },
+) {
+  const parcelAlpha = pascalWaterBuildGridParcelAlphaAtPoint(point, mask.parcelRing)
+  if (parcelAlpha <= 0) return 0
+
+  const islandAlpha = pascalWaterBuildGridIslandAlphaAtPoint(point, mask.islandRing)
+  if (islandAlpha <= 0) return 0
+
+  const pathAlpha = pascalWaterBuildGridPathAlphaAtPoint(point, mask.roads)
+  return Math.min(parcelAlpha, islandAlpha, pathAlpha)
+}
+
+function pascalWaterBuildGridParcelAlphaAtPoint(
+  point: LandrushPoint2,
+  parcelRing: readonly LandrushPoint2[],
+) {
+  if (parcelRing.length < 3) return 0
+  if (pointInPolygon(point, parcelRing)) return 1
+  const distance = distanceToClosedPolyline(point, parcelRing)
   return clamp01(1 - distance / PASCAL_WATER_BUILD_GRID_FADE_METERS)
+}
+
+function pascalWaterBuildGridIslandAlphaAtPoint(
+  point: LandrushPoint2,
+  islandRing: readonly LandrushPoint2[],
+) {
+  if (islandRing.length < 3) return 1
+  if (!pointInPolygon(point, islandRing)) return 0
+  const distance = distanceToClosedPolyline(point, islandRing)
+  return clamp01(
+    (distance - PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS) /
+      PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS,
+  )
+}
+
+function pascalWaterBuildGridPathAlphaAtPoint(
+  point: LandrushPoint2,
+  roads: readonly LandrushRoadSegment[],
+) {
+  let alpha = 1
+  for (const road of roads) {
+    const distance = distanceToOpenPolyline(point, road.points)
+    const clearance =
+      (Math.max(0.1, road.width) * PASCAL_WATER_BUILD_GRID_PATH_WIDTH_SCALE) / 2 +
+      PASCAL_WATER_BUILD_GRID_PATH_CLEARANCE_METERS
+    if (distance <= clearance) return 0
+    alpha = Math.min(
+      alpha,
+      clamp01((distance - clearance) / PASCAL_WATER_BUILD_GRID_PATH_FADE_METERS),
+    )
+    if (alpha <= 0.015) return 0
+  }
+  return alpha
 }
 
 const PASCAL_WATER_PHYSICS_COLLIDER_NODE_TYPES = new Set([
@@ -5101,7 +5180,7 @@ function PascalWaterParcelClaimDialog({
   const errorVisible = claimError && (!claimError.parcelId || claimError.parcelId === parcel.id)
 
   return (
-    <Html center position={[parcel.centroid.x, 2.8, parcel.centroid.z]} zIndexRange={[90, 0]}>
+    <Html center position={[parcel.centroid.x, 2.8, parcel.centroid.z]} zIndexRange={[240, 0]}>
       <section
         className="pointer-events-auto w-64 rounded-lg border border-amber-100/24 bg-slate-950/82 p-3 text-white shadow-[0_18px_56px_rgba(0,0,0,0.42)] backdrop-blur-md"
         onClick={(event) => event.stopPropagation()}
@@ -6328,6 +6407,11 @@ function LocalPascalWaterRobot({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === 'touch' && !event.isPrimary) {
+        rightHoldMoveRef.current = null
+        clickMoveTargetRef.current = null
+        return
+      }
       const mobileScreenPress =
         cameraEnabled &&
         event.pointerType === 'touch' &&
@@ -8048,6 +8132,10 @@ function PascalWaterThirdPersonCameraController({
     y: number
     yaw: number
   } | null>(null)
+  const pinchZoomRef = useRef<{
+    cameraDistance: number
+    distance: number
+  } | null>(null)
   const desiredCameraPositionRef = useRef(new Vector3())
   const targetRef = useRef(new Vector3())
   const previousTargetRef = useRef<Vector3 | null>(null)
@@ -8109,6 +8197,61 @@ function PascalWaterThirdPersonCameraController({
     canvas.addEventListener('wheel', handleWheel, { capture: true, passive: false })
     return () => canvas.removeEventListener('wheel', handleWheel, true)
   }, [gl])
+
+  useEffect(() => {
+    const canvas = gl.domElement
+    const getTouchDistance = (touches: TouchList) => {
+      const first = touches.item(0)
+      const second = touches.item(1)
+      if (!(first && second)) return null
+      return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY)
+    }
+    const handleTouch = (event: TouchEvent) => {
+      if (event.defaultPrevented || event.target !== canvas) return
+      const distance = getTouchDistance(event.touches)
+      if (distance === null) {
+        pinchZoomRef.current = null
+        return
+      }
+
+      event.preventDefault()
+      event.stopPropagation()
+      pitchDragRef.current = null
+
+      if (!pinchZoomRef.current) {
+        pinchZoomRef.current = {
+          cameraDistance: cameraDistanceRef.current,
+          distance,
+        }
+        setCameraMotionActive(true)
+        return
+      }
+
+      const nextDistance =
+        pinchZoomRef.current.cameraDistance * (pinchZoomRef.current.distance / distance)
+      cameraDistanceRef.current = clamp(
+        nextDistance,
+        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
+        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+      )
+      renderScheduler.requestFrame('camera:move')
+    }
+    const handleTouchEnd = () => {
+      pinchZoomRef.current = null
+    }
+
+    canvas.addEventListener('touchstart', handleTouch, { capture: true, passive: false })
+    window.addEventListener('touchmove', handleTouch, { capture: true, passive: false })
+    window.addEventListener('touchend', handleTouchEnd, true)
+    window.addEventListener('touchcancel', handleTouchEnd, true)
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouch, true)
+      window.removeEventListener('touchmove', handleTouch, true)
+      window.removeEventListener('touchend', handleTouchEnd, true)
+      window.removeEventListener('touchcancel', handleTouchEnd, true)
+      pinchZoomRef.current = null
+    }
+  }, [gl, setCameraMotionActive])
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -8386,6 +8529,7 @@ function PascalWaterThirdPersonCameraController({
       motion.isMoving ||
       yawInput !== 0 ||
       pitchDragRef.current !== null ||
+      pinchZoomRef.current !== null ||
       targetShiftSq > 0.000001 ||
       cameraShiftSq > 0.000001 ||
       yawSettling > 0.0001 ||
@@ -12471,6 +12615,16 @@ function distanceToClosedPolyline(point: LandrushPoint2, polygon: readonly Landr
   for (let index = 0; index < ring.length; index += 1) {
     const start = ring[index]
     const end = ring[(index + 1) % ring.length]
+    if (start && end) best = Math.min(best, distanceToSegment2(point, start, end))
+  }
+  return best
+}
+
+function distanceToOpenPolyline(point: LandrushPoint2, polyline: readonly LandrushPoint2[]) {
+  let best = Number.POSITIVE_INFINITY
+  for (let index = 0; index < polyline.length - 1; index += 1) {
+    const start = polyline[index]
+    const end = polyline[index + 1]
     if (start && end) best = Math.min(best, distanceToSegment2(point, start, end))
   }
   return best

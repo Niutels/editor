@@ -62,7 +62,7 @@ export function StructureTools() {
   )
 
   return (
-    <div className="flex items-center gap-1.5 px-1">
+    <div className="flex items-center gap-1 px-1 md:gap-1.5">
       {visibleTools.map((tool, index) => {
         // For item tools with catalog category, check both tool and category match
         const isActive =
@@ -74,7 +74,7 @@ export function StructureTools() {
         return (
           <ActionButton
             className={cn(
-              'rounded-lg duration-300',
+              'h-10 w-10 shrink-0 rounded-lg duration-300 md:h-11 md:w-11',
               isActive
                 ? 'z-10 scale-110 bg-black/40 hover:bg-black/40'
                 : 'scale-95 bg-transparent opacity-60 grayscale hover:bg-black/20 hover:opacity-100 hover:grayscale-0',
