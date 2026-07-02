@@ -23,6 +23,7 @@ import { ViewerOverlay } from '../../components/viewer-overlay'
 import { ViewerZoneSystem } from '../../components/viewer-zone-system'
 import { type SaveStatus, useAutoSave } from '../../hooks/use-auto-save'
 import { useKeyboard } from '../../hooks/use-keyboard'
+import { useIsMobile } from '../../hooks/use-mobile'
 import {
   applySceneGraphToEditor,
   loadSceneFromLocalStorage,
@@ -968,6 +969,8 @@ const ViewerCanvas = memo(function ViewerCanvas({
   const floorplanPaneRatio = useEditor((s) => s.floorplanPaneRatio)
   const setFloorplanPaneRatio = useEditor((s) => s.setFloorplanPaneRatio)
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
+  const mode = useEditor((s) => s.mode)
+  const isMobile = useIsMobile()
 
   const [isCameraControlsHintVisible, setIsCameraControlsHintVisible] = useState<boolean | null>(
     null,
@@ -1024,6 +1027,13 @@ const ViewerCanvas = memo(function ViewerCanvas({
     }
   }, [show2d])
 
+  const showCameraControlsHint =
+    showEditorChrome &&
+    !showLoader &&
+    isCameraControlsHintVisible &&
+    !isFirstPersonMode &&
+    !(isMobile && mode === 'build')
+
   const floorplanPane = hasMountedFloorplan ? (
     <div
       className="relative h-full flex-shrink-0"
@@ -1074,7 +1084,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
               />
             </EditorReactProfiler>
           ) : null}
-          {showEditorChrome && !showLoader && isCameraControlsHintVisible && !isFirstPersonMode ? (
+          {showCameraControlsHint ? (
             <EditorReactProfiler config={reactProfiler} id="viewer.camera-controls-hint">
               <ViewerCanvasControlsHint
                 isPreviewMode={isPreviewMode}

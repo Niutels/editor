@@ -1650,11 +1650,12 @@ function syncPascalWaterBuildEditorMode(buildMode: boolean) {
       if (buildMode) {
         if (
           editor.phase === 'structure' &&
-          editor.mode === 'build' &&
+          editor.mode === 'select' &&
           editor.structureLayer === 'elements' &&
-          editor.tool === 'wall' &&
+          editor.tool === null &&
           editor.activeSidebarPanel === 'site' &&
-          editor.catalogCategory === null
+          editor.catalogCategory === null &&
+          editor.floorplanSelectionTool === 'click'
         ) {
           return
         }
@@ -1662,10 +1663,11 @@ function syncPascalWaterBuildEditorMode(buildMode: boolean) {
         useEditor.setState({
           activeSidebarPanel: 'site',
           catalogCategory: null,
-          mode: 'build',
+          floorplanSelectionTool: 'click',
+          mode: 'select',
           phase: 'structure',
           structureLayer: 'elements',
-          tool: 'wall',
+          tool: null,
         })
         return
       }
@@ -2637,10 +2639,13 @@ export function PascalWaterClient({
     editor.setFirstPersonMode(false)
     editor.setPreviewMode(false)
     editor.setViewMode('3d')
+    editor.setMode('select')
     editor.setPhase('structure')
     editor.setStructureLayer('elements')
+    editor.setFloorplanSelectionTool('click')
     editor.setActiveSidebarPanel('site')
     editor.setCatalogCategory(null)
+    editor.setTool(null)
     sidebar.setIsCollapsed(true)
 
     renderScheduler.requestFrame('geometry:changed')
@@ -2981,6 +2986,7 @@ export function PascalWaterClient({
                               }
                               stylizedSceneLayout
                               surface={liveViewerLandSurface}
+                              treeBlockers={visibleBladeGrassBlockers}
                               tuning={renderGrassTuning}
                             />
                           </Suspense>

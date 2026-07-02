@@ -55,6 +55,7 @@ type StylizedSceneLandLayerProps = {
   showBlades?: boolean
   showTrees?: boolean
   surfacePoints?: readonly LandrushPoint2[]
+  treeBlockers?: readonly StylizedGrassBlocker[]
   tuning?: GrassBladeTuning
 }
 
@@ -66,6 +67,8 @@ type StylizedSceneTreeProps = {
   rotationY: number
   scale: number
 }
+
+type StylizedTreeLayoutEntry = Omit<StylizedSceneTreeProps, 'elevation'>
 
 type BushInstance = {
   pos: [number, number, number]
@@ -233,6 +236,7 @@ const STYLIZED_SCENE_GRASS_FADE_SECONDS = 1.375
 const STYLIZED_SCENE_PATH_CLEARANCE_METERS = 0.48
 const STYLIZED_SCENE_PATH_EDGE_JITTER_METERS = 0.22
 const STYLIZED_SCENE_PATH_WIDTH_SCALE = 1.08
+const STYLIZED_TREE_BLOCKER_CLEARANCE_METERS = 2.35
 const STYLIZED_SCENE_TEXTURE_REPEAT = 8
 const STYLIZED_TREE_TRUNK_SCALE = 12
 const STYLIZED_GRASS_RENDER_ORDER = 14
@@ -299,11 +303,7 @@ type StylizedOrbitControls = {
   target?: { x: number; z: number }
 }
 
-const STYLIZED_TREE_LAYOUT: readonly {
-  position: [number, number, number]
-  rotationY: number
-  scale: number
-}[] = [
+const STYLIZED_TREE_LAYOUT: readonly StylizedTreeLayoutEntry[] = [
   { position: [13, 0, -13], rotationY: 0, scale: 1 },
   { position: [-13, 0, -13], rotationY: 2.1, scale: 0.9 },
   { position: [-13, 0, 13], rotationY: 4, scale: 1.1 },
@@ -328,8 +328,19 @@ export function StylizedSceneLandLayer({
   showBlades = true,
   showTrees = true,
   surfacePoints = [],
+  treeBlockers = [],
   tuning,
 }: StylizedSceneLandLayerProps) {
+  const compiledTreeBlockers = useMemo(
+    () =>
+      showTrees
+        ? measureStylizedScene(profileMeasure, 'setup.stylized-tree.blocker-geometry', () =>
+            createStylizedTreeCompiledBlockers(treeBlockers),
+          )
+        : [],
+    [profileMeasure, showTrees, treeBlockers],
+  )
+
   return (
     <>
       {showBlades ? (
@@ -347,17 +358,19 @@ export function StylizedSceneLandLayer({
         />
       ) : null}
       {showTrees
-        ? STYLIZED_TREE_LAYOUT.map((tree, index) => (
-            <StylizedSceneTree
-              elevation={elevation}
-              key={`${tree.position.join(':')}:${index}`}
-              position={tree.position}
-              profileMeasure={profileMeasure}
-              rotationY={tree.rotationY}
-              scale={tree.scale}
-              tuning={tuning}
-            />
-          ))
+        ? STYLIZED_TREE_LAYOUT.map((tree, index) =>
+            isStylizedTreeBlocked(tree, compiledTreeBlockers) ? null : (
+              <StylizedSceneTree
+                elevation={elevation}
+                key={`${tree.position.join(':')}:${index}`}
+                position={tree.position}
+                profileMeasure={profileMeasure}
+                rotationY={tree.rotationY}
+                scale={tree.scale}
+                tuning={tuning}
+              />
+            ),
+          )
         : null}
     </>
   )
@@ -1667,6 +1680,48 @@ function signedDistanceToStylizedGrassRoadSpans(
     )
   }
   return signedDistance
+}
+
+function createStylizedTreeCompiledBlockers(blockers: readonly StylizedGrassBlocker[]) {
+  return blockers.map((blocker) =>
+    createStylizedGrassCompiledBlocker({
+      ...blocker,
+      clearanceMeters: (blocker.clearanceMeters ?? 0) + STYLIZED_TREE_BLOCKER_CLEARANCE_METERS,
+    }),
+  )
+}
+
+function isStylizedTreeBlocked(
+  tree: StylizedTreeLayoutEntry,
+  blockers: readonly StylizedGrassCompiledBlocker[],
+) {
+  if (blockers.length === 0) return false
+  for (const point of stylizedTreeOccupancyPoints(tree)) {
+    if (isPointInStylizedGrassBlocker(point, blockers)) return true
+  }
+  return false
+}
+
+function stylizedTreeOccupancyPoints(tree: StylizedTreeLayoutEntry) {
+  const points: LandrushPoint2[] = [{ x: tree.position[0], z: tree.position[2] }]
+  for (const bush of STYLIZED_TREE_BUSHES) {
+    points.push(stylizedTreeLocalPointToWorld(tree, { x: bush.pos[0], z: bush.pos[2] }))
+  }
+  return points
+}
+
+function stylizedTreeLocalPointToWorld(
+  tree: StylizedTreeLayoutEntry,
+  point: LandrushPoint2,
+): LandrushPoint2 {
+  const localX = point.x * tree.scale
+  const localZ = point.z * tree.scale
+  const cosY = Math.cos(tree.rotationY)
+  const sinY = Math.sin(tree.rotationY)
+  return {
+    x: tree.position[0] + localX * cosY - localZ * sinY,
+    z: tree.position[2] + localX * sinY + localZ * cosY,
+  }
 }
 
 function createStylizedGrassCompiledBlockers(blockers: readonly StylizedGrassBlocker[]) {

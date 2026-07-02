@@ -50,6 +50,7 @@ type GrassWaterLandLayersProps = {
   stylizedSceneLayout?: boolean
   stylizedGroundTextureWorldSizeMeters?: number
   surface: WaterLandSurface
+  treeBlockers?: readonly GrassFieldBlocker[]
   tuning: GrassBladeTuning
 }
 
@@ -145,6 +146,7 @@ export function GrassWaterLandLayers({
   stylizedSceneLayout = false,
   stylizedGroundTextureWorldSizeMeters = DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS,
   surface,
+  treeBlockers,
   tuning,
 }: GrassWaterLandLayersProps) {
   const classicFoliageEnabled = !stylizedSceneLayout && (showBlades || showTrees)
@@ -158,6 +160,7 @@ export function GrassWaterLandLayers({
     : 2
   const groundTextureRoads = stylizedGroundTexture ? EMPTY_GRASS_ROADS : roads
   const resolvedBladeGrassBlockers = bladeGrassBlockers ?? grassBlockers
+  const resolvedTreeBlockers = treeBlockers ?? bladeFadeBlockers
   const resolvedBladeRenderOrder =
     bladeRenderOrder ??
     (stylizedSceneLayout ? STYLIZED_GRASS_BLADE_RENDER_ORDER : GRASS_BLADE_RENDER_ORDER)
@@ -312,6 +315,7 @@ export function GrassWaterLandLayers({
             showBlades={showBlades}
             showTrees={showTrees}
             surfacePoints={surface.grassSurfacePoints}
+            treeBlockers={resolvedTreeBlockers}
             tuning={tuning}
           />
         </Suspense>
