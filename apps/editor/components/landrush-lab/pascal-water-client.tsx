@@ -1889,7 +1889,7 @@ export function PascalWaterClient({
   const resolvedLocalProfile = localProfile ?? PASCAL_WATER_FALLBACK_PROFILE
   const multiplayerStatus: ConnectionStatus = offline ? 'offline' : multiplayer.status
   const spatialVoice = useLandrushSpatialVoice({
-    available: !offline && Boolean(localProfile) && multiplayer.status === 'connected',
+    available: !offline && multiplayer.status === 'connected',
     incomingSignals: incomingVoiceSignals,
     localMotionRef,
     localProfile: resolvedLocalProfile,
@@ -3430,15 +3430,18 @@ function pascalWaterModeHintClass() {
 }
 
 function PascalWaterVoiceModeButton({ voice }: { voice: SpatialVoiceController }) {
-  const active = voice.desired && voice.status === 'live'
+  const active = voice.desired && voice.status !== 'error' && voice.status !== 'unsupported'
+  const live = voice.desired && voice.status === 'live'
   const blocked = !voice.available && !voice.desired
   const Icon = active ? Mic : MicOff
   const title =
     voice.status === 'error'
       ? (voice.error ?? 'Voice unavailable')
-      : active
+      : live
         ? 'Mute spatial voice'
-        : 'Enable spatial voice'
+        : voice.desired
+          ? 'Starting spatial voice'
+          : 'Enable spatial voice'
 
   return (
     <button
