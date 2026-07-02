@@ -690,8 +690,10 @@ function StylizedSceneTree({
   const alphaMap = useTexture(STYLIZED_SCENE_PATHS.leavesAlpha) as Texture
   const leavesGeometry = useMemo(
     () =>
-      measureStylizedScene(profileMeasure, 'setup.stylized-tree.leaves-geometry', () =>
-        extractFirstMeshGeometry(leavesScene),
+      measureStylizedScene(
+        profileMeasure,
+        'setup.stylized-tree.leaves-geometry',
+        () => extractFirstMeshGeometry(leavesScene)?.clone() ?? null,
       ),
     [leavesScene, profileMeasure],
   )
