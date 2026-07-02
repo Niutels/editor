@@ -333,7 +333,7 @@ export function StylizedSceneLandLayer({
 }: StylizedSceneLandLayerProps) {
   const compiledTreeBlockers = useMemo(
     () =>
-      showTrees
+      showTrees && treeBlockers.length > 0
         ? measureStylizedScene(profileMeasure, 'setup.stylized-tree.blocker-geometry', () =>
             createStylizedTreeCompiledBlockers(treeBlockers),
           )

@@ -70,6 +70,7 @@ export function EditorLayoutMobile({
   const [committedSheetH, setCommittedSheetH] = useState(0)
 
   const currentTab = sidebarTabs.find((t) => t.id === activePanel)
+  const hasActiveTab = Boolean(currentTab)
 
   // Keep active panel valid
   useEffect(() => {
@@ -84,6 +85,7 @@ export function EditorLayoutMobile({
   //   desktop "Furnish" action which itself opens the Items panel).
   // - Leaving Items while still furnishing exits the build mode.
   useEffect(() => {
+    if (!hasActiveTab) return
     const { phase, mode, setMode, setPhase } = useEditor.getState()
     if (activePanel === 'ai' && mode === 'build') {
       setMode('select')
@@ -97,7 +99,7 @@ export function EditorLayoutMobile({
     if (phase === 'furnish' && mode === 'build') {
       setMode('select')
     }
-  }, [activePanel])
+  }, [activePanel, hasActiveTab])
 
   // Measure middle area height + its bottom offset from viewport bottom
   useLayoutEffect(() => {
@@ -188,9 +190,7 @@ export function EditorLayoutMobile({
   const panelPenetrationInMiddle = Math.max(0, panelSheetHeight - middleBottomFromViewport)
   // The effective "sheet height" that the viewer sits above is the larger of
   // the primary sidebar sheet and the secondary panel sheet's penetration.
-  const effectiveSheetH = hasSidebarTabs
-    ? Math.max(committedSheetH, panelPenetrationInMiddle)
-    : 0
+  const effectiveSheetH = hasSidebarTabs ? Math.max(committedSheetH, panelPenetrationInMiddle) : 0
 
   // In capture mode the sheet and tab bar are hidden — the viewer should fill
   // the entire middle area regardless of the stored sheet height.

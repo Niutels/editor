@@ -328,6 +328,7 @@ const PASCAL_WATER_BUILT_GRASS_FEATHER_METERS = 0.3
 const PASCAL_WATER_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
 const PASCAL_WATER_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
 const PASCAL_WATER_BUILD_GRID_STEP_METERS = 0.5
+const PASCAL_WATER_BUILD_GRID_SEGMENT_STEP_METERS = 1
 const PASCAL_WATER_BUILD_GRID_ELEVATION_OFFSET = 0.015
 const PASCAL_WATER_BUILD_GRID_FADE_METERS = 4
 const PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS = 1.35
@@ -1869,6 +1870,7 @@ export function PascalWaterClient({
   }))
   const [terrainFieldResolution, setTerrainFieldResolution] = useState(WATER_FIELD_RESOLUTION)
   const showDepthReference = false
+  const clean = searchParams.get('v') === 'clean' || searchParams.get('clean') === '1'
   const offline = searchParams.get('offline') === '1'
   const benchmarkOrbiting =
     searchParams.get('benchOrbiting') === '1' || searchParams.get('benchmark') === '1'
@@ -1880,6 +1882,7 @@ export function PascalWaterClient({
     enabled: !offline && Boolean(localProfile),
     localProfile: localProfile ?? PASCAL_WATER_FALLBACK_PROFILE,
     onVoiceSignal: handleVoiceSignal,
+    persistOfflineState: !clean,
     roomId,
     spectator: false,
   })
@@ -2677,6 +2680,7 @@ export function PascalWaterClient({
         if (event.defaultPrevented || isEditableTarget(event.target) || event.repeat) return
         if (event.code === 'KeyM') {
           event.preventDefault()
+          event.stopPropagation()
           if (buildMode) {
             measureLandrushFrameSlice('pascal-water.input.mode-keydown.enter-map', enterMapView)
             return
@@ -2693,6 +2697,7 @@ export function PascalWaterClient({
         }
         if (event.code === 'KeyB') {
           event.preventDefault()
+          event.stopPropagation()
           if (buildMode) {
             measureLandrushFrameSlice(
               'pascal-water.input.mode-keydown.enter-player',
@@ -2710,6 +2715,7 @@ export function PascalWaterClient({
           const voiceBlocked = !spatialVoice.available && !spatialVoice.desired
           if (voiceBlocked) return
           event.preventDefault()
+          event.stopPropagation()
           spatialVoice.toggle()
           return
         }
@@ -2994,7 +3000,7 @@ export function PascalWaterClient({
                               }
                               stylizedSceneLayout
                               surface={liveViewerLandSurface}
-                              treeBlockers={visibleBladeGrassBlockers}
+                              treeBlockers={bladeGrassFadeBlockers}
                               tuning={renderGrassTuning}
                             />
                           </Suspense>
@@ -3002,8 +3008,8 @@ export function PascalWaterClient({
                       </PascalWaterStartupReactProfiler>
                     ) : null}
                     <PascalWaterBuildGridOverlay
+                      buildableBoundaryPoints={liveParcelAllocation.boundary}
                       groundY={liveViewerLandSurface.grassSurfaceElevation}
-                      islandSurfacePoints={liveViewerLandSurface.grassSurfacePoints}
                       parcel={activeBuildParcel}
                       roads={liveGrassRoads}
                       visible={buildMode}
@@ -3868,14 +3874,14 @@ function resolvePascalWaterBuildCameraStartTarget(
 }
 
 function PascalWaterBuildGridOverlay({
+  buildableBoundaryPoints,
   groundY,
-  islandSurfacePoints,
   parcel,
   roads,
   visible,
 }: {
+  buildableBoundaryPoints: readonly LandrushPoint2[]
   groundY: number
-  islandSurfacePoints: readonly LandrushPoint2[]
   parcel: ParcelAllocationParcel | null
   roads: readonly LandrushRoadSegment[]
   visible: boolean
@@ -3893,8 +3899,13 @@ function PascalWaterBuildGridOverlay({
   })
   const geometries = useMemo(
     () =>
-      createPascalWaterBuildGridGeometries(renderParcel, gridSnapStep, islandSurfacePoints, roads),
-    [gridSnapStep, islandSurfacePoints, renderParcel, roads],
+      createPascalWaterBuildGridGeometries(
+        renderParcel,
+        gridSnapStep,
+        buildableBoundaryPoints,
+        roads,
+      ),
+    [buildableBoundaryPoints, gridSnapStep, renderParcel, roads],
   )
   const materials = useMemo(() => createPascalWaterBuildGridMaterials(), [])
   const lastProbeAtRef = useRef(-Infinity)
@@ -4022,31 +4033,37 @@ function createPascalWaterBuildGridMaterials() {
 function createPascalWaterBuildGridGeometries(
   parcel: ParcelAllocationParcel | null,
   gridStep = PASCAL_WATER_BUILD_GRID_STEP_METERS,
-  islandSurfacePoints: readonly LandrushPoint2[] = [],
+  buildableBoundaryPoints: readonly LandrushPoint2[] = [],
   roads: readonly LandrushRoadSegment[] = [],
 ) {
+  const resolvedGridStep =
+    Number.isFinite(gridStep) && gridStep > 0 ? gridStep : PASCAL_WATER_BUILD_GRID_STEP_METERS
   const bucketVertices = Array.from(
     { length: PASCAL_WATER_BUILD_GRID_FADE_BUCKETS },
     () => [] as number[],
   )
   if (parcel) {
     const mask = {
-      islandRing: openPointRing(islandSurfacePoints),
+      islandRing: openPointRing(buildableBoundaryPoints),
       parcelRing: openPointRing(parcel.points),
       roads,
     }
     const bounds = boundsForPoints(mask.parcelRing)
-    const segmentStep = gridStep / 2
+    const segmentStep = Math.max(resolvedGridStep, PASCAL_WATER_BUILD_GRID_SEGMENT_STEP_METERS)
     const minX =
-      Math.floor((bounds.minX - PASCAL_WATER_BUILD_GRID_FADE_METERS) / gridStep) * gridStep
+      Math.floor((bounds.minX - PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      resolvedGridStep
     const maxX =
-      Math.ceil((bounds.maxX + PASCAL_WATER_BUILD_GRID_FADE_METERS) / gridStep) * gridStep
+      Math.ceil((bounds.maxX + PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      resolvedGridStep
     const minZ =
-      Math.floor((bounds.minZ - PASCAL_WATER_BUILD_GRID_FADE_METERS) / gridStep) * gridStep
+      Math.floor((bounds.minZ - PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      resolvedGridStep
     const maxZ =
-      Math.ceil((bounds.maxZ + PASCAL_WATER_BUILD_GRID_FADE_METERS) / gridStep) * gridStep
+      Math.ceil((bounds.maxZ + PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      resolvedGridStep
 
-    for (let x = minX; x <= maxX + 0.0001; x += gridStep) {
+    for (let x = minX; x <= maxX + 0.0001; x += resolvedGridStep) {
       for (let z = minZ; z < maxZ - 0.0001; z += segmentStep) {
         pushPascalWaterBuildGridSegment(
           bucketVertices,
@@ -4058,7 +4075,7 @@ function createPascalWaterBuildGridGeometries(
         )
       }
     }
-    for (let z = minZ; z <= maxZ + 0.0001; z += gridStep) {
+    for (let z = minZ; z <= maxZ + 0.0001; z += resolvedGridStep) {
       for (let x = minX; x < maxX - 0.0001; x += segmentStep) {
         pushPascalWaterBuildGridSegment(
           bucketVertices,
@@ -4130,8 +4147,8 @@ function pascalWaterBuildGridParcelAlphaAtPoint(
   parcelRing: readonly LandrushPoint2[],
 ) {
   if (parcelRing.length < 3) return 0
-  if (pointInPolygon(point, parcelRing)) return 1
-  const distance = distanceToClosedPolyline(point, parcelRing)
+  if (pointInPascalWaterBuildGridRing(point, parcelRing)) return 1
+  const distance = distanceToPascalWaterBuildGridRing(point, parcelRing)
   return clamp01(1 - distance / PASCAL_WATER_BUILD_GRID_FADE_METERS)
 }
 
@@ -4140,12 +4157,48 @@ function pascalWaterBuildGridIslandAlphaAtPoint(
   islandRing: readonly LandrushPoint2[],
 ) {
   if (islandRing.length < 3) return 1
-  if (!pointInPolygon(point, islandRing)) return 0
-  const distance = distanceToClosedPolyline(point, islandRing)
+  const distance = distanceToPascalWaterBuildGridRing(point, islandRing)
+  if (
+    distance >
+    PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS +
+      PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS
+  ) {
+    return 1
+  }
+  if (!pointInPascalWaterBuildGridRing(point, islandRing)) return 0
   return clamp01(
     (distance - PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS) /
       PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS,
   )
+}
+
+function pointInPascalWaterBuildGridRing(point: LandrushPoint2, ring: readonly LandrushPoint2[]) {
+  let inside = false
+  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; index += 1) {
+    const current = ring[index]
+    const previous = ring[previousIndex]
+    if (!(current && previous)) continue
+    const crosses = current.z > point.z !== previous.z > point.z
+    const boundaryX =
+      ((previous.x - current.x) * (point.z - current.z)) / (previous.z - current.z || 0.000001) +
+      current.x
+    if (crosses && point.x < boundaryX) inside = !inside
+    previousIndex = index
+  }
+  return inside
+}
+
+function distanceToPascalWaterBuildGridRing(
+  point: LandrushPoint2,
+  ring: readonly LandrushPoint2[],
+) {
+  let best = Number.POSITIVE_INFINITY
+  for (let index = 0; index < ring.length; index += 1) {
+    const start = ring[index]
+    const end = ring[(index + 1) % ring.length]
+    if (start && end) best = Math.min(best, distanceToSegment2(point, start, end))
+  }
+  return best
 }
 
 function pascalWaterBuildGridPathAlphaAtPoint(

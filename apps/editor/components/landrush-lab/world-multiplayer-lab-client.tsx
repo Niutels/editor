@@ -690,6 +690,7 @@ export function WorldMultiplayerLabClient({
     enabled: !offline,
     localProfile,
     onVoiceSignal: handleVoiceSignal,
+    persistOfflineState: !clean,
     roomId,
     spectator: layoutView,
   })
@@ -2557,12 +2558,14 @@ export function useLandrushWorldMultiplayer({
   enabled,
   localProfile,
   onVoiceSignal,
+  persistOfflineState = true,
   roomId,
   spectator,
 }: {
   enabled: boolean
   localProfile: LocalPlayerProfile
   onVoiceSignal?: (message: SpatialVoiceSignalMessage) => void
+  persistOfflineState?: boolean
   roomId: string
   spectator: boolean
 }) {
@@ -2679,7 +2682,8 @@ export function useLandrushWorldMultiplayer({
     (worldId: string) => {
       if (watchedParcelWorldIdRef.current !== worldId) {
         watchedParcelWorldIdRef.current = worldId
-        const offlineState = enabled ? null : readOfflineParcelWorldState(worldId)
+        const offlineState =
+          !enabled && persistOfflineState ? readOfflineParcelWorldState(worldId) : null
         const nextOwnershipMap = offlineState
           ? new Map(offlineState.ownerships.map((ownership) => [ownership.parcelId, ownership]))
           : new Map<string, ParcelOwnership>()
@@ -2694,7 +2698,7 @@ export function useLandrushWorldMultiplayer({
       if (!enabled) return
       sendMessage({ roomId, type: 'watch-parcels', worldId })
     },
-    [enabled, roomId, sendMessage],
+    [enabled, persistOfflineState, roomId, sendMessage],
   )
 
   const syncParcelBuildNodes = useCallback(
@@ -2712,11 +2716,13 @@ export function useLandrushWorldMultiplayer({
         nextBuildNodeMap.set(parcelId, build)
         parcelBuildNodeMapRef.current = nextBuildNodeMap
         setParcelBuildNodeMap(nextBuildNodeMap)
-        writeOfflineParcelWorldState(
-          worldId,
-          [...parcelOwnershipMapRef.current.values()],
-          [...nextBuildNodeMap.values()],
-        )
+        if (persistOfflineState) {
+          writeOfflineParcelWorldState(
+            worldId,
+            [...parcelOwnershipMapRef.current.values()],
+            [...nextBuildNodeMap.values()],
+          )
+        }
         return true
       }
 
@@ -2729,7 +2735,7 @@ export function useLandrushWorldMultiplayer({
       }
       return Boolean(sent)
     },
-    [enabled, localProfile.id, sendMessage],
+    [enabled, localProfile.id, persistOfflineState, sendMessage],
   )
 
   const claimParcel = useCallback(
@@ -2774,11 +2780,13 @@ export function useLandrushWorldMultiplayer({
         })
         parcelOwnershipMapRef.current = nextOwnershipMap
         setParcelOwnershipMap(nextOwnershipMap)
-        writeOfflineParcelWorldState(
-          worldId,
-          [...nextOwnershipMap.values()],
-          [...parcelBuildNodeMapRef.current.values()],
-        )
+        if (persistOfflineState) {
+          writeOfflineParcelWorldState(
+            worldId,
+            [...nextOwnershipMap.values()],
+            [...parcelBuildNodeMapRef.current.values()],
+          )
+        }
         return true
       }
 
@@ -2793,7 +2801,7 @@ export function useLandrushWorldMultiplayer({
       }
       return Boolean(sent)
     },
-    [enabled, localProfile, sendMessage],
+    [enabled, localProfile, persistOfflineState, sendMessage],
   )
 
   useEffect(() => {
@@ -2801,9 +2809,10 @@ export function useLandrushWorldMultiplayer({
       setStatus(enabled ? 'connecting' : 'offline')
       setRemotePlayerMap(new Map())
       setParcelClaimError(null)
-      const offlineState = !enabled
-        ? readOfflineParcelWorldState(watchedParcelWorldIdRef.current)
-        : null
+      const offlineState =
+        !enabled && persistOfflineState
+          ? readOfflineParcelWorldState(watchedParcelWorldIdRef.current)
+          : null
       const nextOwnershipMap = offlineState
         ? new Map(offlineState.ownerships.map((ownership) => [ownership.parcelId, ownership]))
         : new Map<string, ParcelOwnership>()
@@ -3046,7 +3055,7 @@ export function useLandrushWorldMultiplayer({
       }
       socket?.close()
     }
-  }, [enabled, localProfile, roomId, sendMessage, spectator])
+  }, [enabled, localProfile, persistOfflineState, roomId, sendMessage, spectator])
 
   useEffect(() => {
     const interval = window.setInterval(() => {

@@ -969,7 +969,6 @@ const ViewerCanvas = memo(function ViewerCanvas({
   const floorplanPaneRatio = useEditor((s) => s.floorplanPaneRatio)
   const setFloorplanPaneRatio = useEditor((s) => s.setFloorplanPaneRatio)
   const isPreviewMode = useEditor((s) => s.isPreviewMode)
-  const mode = useEditor((s) => s.mode)
   const isMobile = useIsMobile()
 
   const [isCameraControlsHintVisible, setIsCameraControlsHintVisible] = useState<boolean | null>(
@@ -1032,7 +1031,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
     !showLoader &&
     isCameraControlsHintVisible &&
     !isFirstPersonMode &&
-    !(isMobile && mode === 'build')
+    !isMobile
 
   const floorplanPane = hasMountedFloorplan ? (
     <div
