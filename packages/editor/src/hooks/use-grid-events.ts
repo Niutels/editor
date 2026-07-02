@@ -10,16 +10,38 @@ import { useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { Plane, Raycaster, Vector2, Vector3 } from 'three'
 
+const TOUCH_TAP_MAX_DISTANCE_PX = 10
+const TOUCH_NATIVE_CLICK_SUPPRESSION_MS = 700
+const TOUCH_NATIVE_CLICK_SUPPRESSION_RADIUS_PX = 24
+
+type TouchTapStart = {
+  id: number
+  x: number
+  y: number
+}
+
+type SyntheticTouchClick = {
+  at: number
+  x: number
+  y: number
+}
+
+function getGridEventTarget(canvas: HTMLCanvasElement, connected: unknown) {
+  return connected instanceof HTMLElement ? connected : canvas
+}
+
 /**
  * Custom grid events hook that uses manual raycasting instead of mesh events.
  * This ensures grid events work even when other meshes block pointer events with stopPropagation.
  */
 export function useGridEvents(gridY: number) {
-  const { camera, gl } = useThree()
+  const { camera, events, gl } = useThree()
   const raycaster = useRef(new Raycaster())
   const pointer = useRef(new Vector2())
   const groundPlane = useRef(new Plane(new Vector3(0, 1, 0), 0))
   const intersectionPoint = useRef(new Vector3())
+  const touchTapStart = useRef<TouchTapStart | null>(null)
+  const syntheticTouchClick = useRef<SyntheticTouchClick | null>(null)
 
   // Update ground plane when grid Y changes
   useEffect(() => {
@@ -28,10 +50,19 @@ export function useGridEvents(gridY: number) {
 
   useEffect(() => {
     const canvas = gl.domElement
+    const eventTarget = getGridEventTarget(canvas, events.connected)
 
     const getIntersection = (nativeEvent: MouseEvent | PointerEvent): Vector3 | null => {
       // Convert mouse position to normalized device coordinates (-1 to +1)
       const rect = canvas.getBoundingClientRect()
+      if (
+        nativeEvent.clientX < rect.left ||
+        nativeEvent.clientX > rect.right ||
+        nativeEvent.clientY < rect.top ||
+        nativeEvent.clientY > rect.bottom
+      ) {
+        return null
+      }
       pointer.current.x = ((nativeEvent.clientX - rect.left) / rect.width) * 2 - 1
       pointer.current.y = -((nativeEvent.clientY - rect.top) / rect.height) * 2 + 1
 
@@ -68,6 +99,13 @@ export function useGridEvents(gridY: number) {
     const handlePointerDown = (e: PointerEvent) => {
       if (useViewer.getState().cameraDragging) return
       if (e.button !== 0) return
+      if (e.pointerType === 'touch') {
+        touchTapStart.current = {
+          id: e.pointerId,
+          x: e.clientX,
+          y: e.clientY,
+        }
+      }
       emit('pointerdown', e)
     }
 
@@ -75,12 +113,41 @@ export function useGridEvents(gridY: number) {
       if (useViewer.getState().cameraDragging) return
       if (e.button !== 0) return
       emit('pointerup', e)
+
+      const tapStart = touchTapStart.current
+      if (e.pointerType !== 'touch' || !tapStart || tapStart.id !== e.pointerId) return
+      touchTapStart.current = null
+
+      const dragDistance = Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y)
+      if (dragDistance > TOUCH_TAP_MAX_DISTANCE_PX) return
+
+      emit('click', e)
+      syntheticTouchClick.current = {
+        at: performance.now(),
+        x: e.clientX,
+        y: e.clientY,
+      }
     }
 
-    const handleClick = (e: PointerEvent) => {
+    const handleClick = (e: MouseEvent) => {
       if (useViewer.getState().cameraDragging) return
       if (e.button !== 0) return
+      const synthetic = syntheticTouchClick.current
+      if (synthetic) {
+        const clickAge = performance.now() - synthetic.at
+        const clickDistance = Math.hypot(e.clientX - synthetic.x, e.clientY - synthetic.y)
+        if (
+          clickAge <= TOUCH_NATIVE_CLICK_SUPPRESSION_MS &&
+          clickDistance <= TOUCH_NATIVE_CLICK_SUPPRESSION_RADIUS_PX
+        ) {
+          return
+        }
+      }
       emit('click', e)
+    }
+
+    const handlePointerCancel = (e: PointerEvent) => {
+      if (touchTapStart.current?.id === e.pointerId) touchTapStart.current = null
     }
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -98,21 +165,22 @@ export function useGridEvents(gridY: number) {
       emit('context-menu', e)
     }
 
-    // Attach listeners to canvas
-    canvas.addEventListener('pointerdown', handlePointerDown)
-    canvas.addEventListener('pointerup', handlePointerUp)
-    canvas.addEventListener('click', handleClick)
-    canvas.addEventListener('pointermove', handlePointerMove)
-    canvas.addEventListener('dblclick', handleDoubleClick)
-    canvas.addEventListener('contextmenu', handleContextMenu)
+    eventTarget.addEventListener('pointerdown', handlePointerDown)
+    eventTarget.addEventListener('pointerup', handlePointerUp)
+    eventTarget.addEventListener('pointercancel', handlePointerCancel)
+    eventTarget.addEventListener('click', handleClick)
+    eventTarget.addEventListener('pointermove', handlePointerMove)
+    eventTarget.addEventListener('dblclick', handleDoubleClick)
+    eventTarget.addEventListener('contextmenu', handleContextMenu)
 
     return () => {
-      canvas.removeEventListener('pointerdown', handlePointerDown)
-      canvas.removeEventListener('pointerup', handlePointerUp)
-      canvas.removeEventListener('click', handleClick)
-      canvas.removeEventListener('pointermove', handlePointerMove)
-      canvas.removeEventListener('dblclick', handleDoubleClick)
-      canvas.removeEventListener('contextmenu', handleContextMenu)
+      eventTarget.removeEventListener('pointerdown', handlePointerDown)
+      eventTarget.removeEventListener('pointerup', handlePointerUp)
+      eventTarget.removeEventListener('pointercancel', handlePointerCancel)
+      eventTarget.removeEventListener('click', handleClick)
+      eventTarget.removeEventListener('pointermove', handlePointerMove)
+      eventTarget.removeEventListener('dblclick', handleDoubleClick)
+      eventTarget.removeEventListener('contextmenu', handleContextMenu)
     }
-  }, [camera, gl])
+  }, [camera, events.connected, gl])
 }

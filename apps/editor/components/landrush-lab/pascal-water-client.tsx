@@ -3485,7 +3485,7 @@ function PascalWaterBuildParcelGuardLayer({
   groundY: number
   parcel: ParcelAllocationParcel | null
 }) {
-  const { camera, gl } = useThree()
+  const { camera, events, gl } = useThree()
   const pointerNdc = useMemo(() => new Vector2(), [])
   const raycaster = useMemo(() => new Raycaster(), [])
 
@@ -3493,6 +3493,7 @@ function PascalWaterBuildParcelGuardLayer({
     if (!buildMode) return
 
     const canvas = gl.domElement
+    const eventTarget = getPascalWaterCanvasEventTarget(canvas, events.connected)
     const isInsideParcel = (event: MouseEvent | PointerEvent) => {
       if (!parcel) return false
 
@@ -3507,6 +3508,12 @@ function PascalWaterBuildParcelGuardLayer({
       return Boolean(point && pointInPolygonOrNearEdge(point, parcel.points))
     }
     const blockOutsideParcel = (event: MouseEvent | PointerEvent) => {
+      if (
+        !pointerEventInPascalWaterCanvas(event, canvas) ||
+        isPascalWaterInteractivePointerTarget(event.target)
+      ) {
+        return
+      }
       if ('button' in event && event.button !== 0) return
       if (isInsideParcel(event)) return
 
@@ -3515,17 +3522,17 @@ function PascalWaterBuildParcelGuardLayer({
       event.stopImmediatePropagation()
     }
 
-    canvas.addEventListener('pointerdown', blockOutsideParcel, { capture: true })
-    canvas.addEventListener('pointerup', blockOutsideParcel, { capture: true })
-    canvas.addEventListener('click', blockOutsideParcel, { capture: true })
-    canvas.addEventListener('dblclick', blockOutsideParcel, { capture: true })
+    eventTarget.addEventListener('pointerdown', blockOutsideParcel, { capture: true })
+    eventTarget.addEventListener('pointerup', blockOutsideParcel, { capture: true })
+    eventTarget.addEventListener('click', blockOutsideParcel, { capture: true })
+    eventTarget.addEventListener('dblclick', blockOutsideParcel, { capture: true })
     return () => {
-      canvas.removeEventListener('pointerdown', blockOutsideParcel, true)
-      canvas.removeEventListener('pointerup', blockOutsideParcel, true)
-      canvas.removeEventListener('click', blockOutsideParcel, true)
-      canvas.removeEventListener('dblclick', blockOutsideParcel, true)
+      eventTarget.removeEventListener('pointerdown', blockOutsideParcel, true)
+      eventTarget.removeEventListener('pointerup', blockOutsideParcel, true)
+      eventTarget.removeEventListener('click', blockOutsideParcel, true)
+      eventTarget.removeEventListener('dblclick', blockOutsideParcel, true)
     }
-  }, [buildMode, camera, gl, groundY, parcel, pointerNdc, raycaster])
+  }, [buildMode, camera, events.connected, gl, groundY, parcel, pointerNdc, raycaster])
 
   return null
 }
@@ -11039,6 +11046,10 @@ function pointerEventInPascalWaterCanvas(
     event.clientY >= rect.top &&
     event.clientY <= rect.bottom
   )
+}
+
+function getPascalWaterCanvasEventTarget(canvas: HTMLCanvasElement, connected: unknown) {
+  return connected instanceof HTMLElement ? connected : canvas
 }
 
 function isPascalWaterInteractivePointerTarget(target: EventTarget | null) {

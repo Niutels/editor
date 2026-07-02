@@ -32,7 +32,7 @@ export default function RootLayout({
       lang="en"
     >
       <head />
-      <body className="font-sans">
+      <body className="font-sans" suppressHydrationWarning>
         <ClientBootstrap>{children}</ClientBootstrap>
         {process.env.NODE_ENV === 'development' && <DevAgentation />}
       </body>

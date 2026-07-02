@@ -1,10 +1,22 @@
+import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NextConfig } from 'next'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
+const lanDevOrigins = Array.from(
+  new Set(
+    Object.values(networkInterfaces())
+      .flatMap((interfaces) => interfaces ?? [])
+      .filter(
+        (networkInterface) => networkInterface.family === 'IPv4' && !networkInterface.internal,
+      )
+      .map((networkInterface) => networkInterface.address),
+  ),
+)
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: lanDevOrigins,
   logging: {
     browserToTerminal: process.env.NEXT_BROWSER_TO_TERMINAL === 'true',
   },
