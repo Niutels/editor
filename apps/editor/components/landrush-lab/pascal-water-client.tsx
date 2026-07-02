@@ -1653,12 +1653,14 @@ function syncPascalWaterBuildEditorMode(buildMode: boolean) {
           editor.mode === 'build' &&
           editor.structureLayer === 'elements' &&
           editor.tool === 'wall' &&
+          editor.activeSidebarPanel === 'site' &&
           editor.catalogCategory === null
         ) {
           return
         }
 
         useEditor.setState({
+          activeSidebarPanel: 'site',
           catalogCategory: null,
           mode: 'build',
           phase: 'structure',
@@ -2637,6 +2639,7 @@ export function PascalWaterClient({
     editor.setViewMode('3d')
     editor.setPhase('structure')
     editor.setStructureLayer('elements')
+    editor.setActiveSidebarPanel('site')
     editor.setCatalogCategory(null)
     sidebar.setIsCollapsed(true)
 
