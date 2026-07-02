@@ -68,8 +68,6 @@ import {
   Profiler,
   type ProfilerOnRenderCallback,
   type ReactNode,
-  type PointerEvent as ReactPointerEvent,
-  type TouchEvent as ReactTouchEvent,
   type RefObject,
   Suspense,
   useCallback,
@@ -235,7 +233,6 @@ const PASCAL_WATER_LOCAL_STATE_SEND_INTERVAL_MS = 80
 const PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED = 2.75
 const PASCAL_WATER_ROBOT_WALK_SPEED = PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED / 1.5
 const PASCAL_WATER_ROBOT_RUN_SPEED = PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED * 2.48
-const PASCAL_WATER_ROBOT_JOYSTICK_RUN_START = 0.82
 const PASCAL_WATER_ROBOT_ACCELERATION = 18
 const PASCAL_WATER_ROBOT_DECELERATION = 24
 const PASCAL_WATER_ROBOT_LOCAL_POSITION_RESPONSE = 26
@@ -650,6 +647,7 @@ type PascalWaterDoorCrossingState = {
 }
 type PascalWaterRightHoldMove = {
   id: number
+  source: 'mouse' | 'touch'
   startX: number
   startY: number
   x: number
@@ -806,11 +804,6 @@ type PascalWaterRevealObjectState = {
   clipShadows: unknown
   enabled: unknown
   isClippingGroup: unknown
-}
-type MobileJoystickInput = {
-  forward: number
-  strafe: number
-  strength: number
 }
 type RobotWorldOrbitControls = {
   target: Vector3
@@ -1737,7 +1730,6 @@ export function PascalWaterClient({
   const perfRun = useMemo(() => createPascalWaterPerfRunOptions(searchParams), [searchParams])
   const startupProfileRef = useRef<PascalWaterStartupProfile | null>(null)
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
-  const mobileJoystickRef = useRef<MobileJoystickInput | null>(null)
   const localMotionRef = useRef<RobotMotion | null>(null)
   const playerCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
   const buildCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
@@ -2656,7 +2648,6 @@ export function PascalWaterClient({
 
   useEffect(() => {
     if (viewMode === 'player') return
-    mobileJoystickRef.current = null
     releasePascalWaterPointerLock()
   }, [viewMode])
 
@@ -2858,7 +2849,6 @@ export function PascalWaterClient({
                         mapCameraPoseRef={mapCameraPoseRef}
                         mapReturnCameraPoseRef={mapReturnCameraPoseRef}
                         mapTransitionStartPoseRef={mapTransitionStartPoseRef}
-                        mobileJoystickRef={mobileJoystickRef}
                         navigationDebugEnabled={
                           navigationDebugEnabled || navigationLiveScenario !== null
                         }
@@ -3009,7 +2999,10 @@ export function PascalWaterClient({
           remotePlayerCount={multiplayer.remotePlayers.length}
           status={multiplayerStatus}
         />
-        <div className="pointer-events-auto absolute top-[18vh] right-5 z-[80] flex flex-col gap-1.5 rounded-lg border border-white/16 bg-slate-950/58 p-1.5 shadow-2xl backdrop-blur-md">
+        <div
+          className="pointer-events-auto absolute top-20 right-3 z-[80] flex flex-col gap-1 rounded-md border border-white/16 bg-slate-950/58 p-1 shadow-2xl backdrop-blur-md md:top-[18vh] md:right-5 md:gap-1.5 md:rounded-lg md:p-1.5"
+          data-landrush-ui
+        >
           <button
             aria-label="Map mode"
             aria-pressed={mapView && !buildMode}
@@ -3029,7 +3022,7 @@ export function PascalWaterClient({
             type="button"
           >
             <MapIcon aria-hidden className="size-5" />
-            <span>M</span>
+            <span className="hidden md:inline">M</span>
           </button>
           <button
             aria-label="Build mode"
@@ -3047,7 +3040,7 @@ export function PascalWaterClient({
             type="button"
           >
             <Hammer aria-hidden className="size-5" />
-            <span>B</span>
+            <span className="hidden md:inline">B</span>
           </button>
           <PascalWaterVoiceModeButton voice={spatialVoice} />
           <div className={pascalWaterModeHintClass()} title="Right click to move">
@@ -3086,7 +3079,7 @@ export function PascalWaterClient({
           />
         ) : (
           <button
-            className="pointer-events-auto absolute top-5 right-5 inline-flex items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white"
+            className="pointer-events-auto absolute top-5 right-5 hidden items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white md:inline-flex"
             onClick={() => setShowTunePanel(true)}
             type="button"
           >
@@ -3094,7 +3087,6 @@ export function PascalWaterClient({
             Sliders
           </button>
         )}
-        {viewMode === 'player' ? <MobileMovementJoystick movementRef={mobileJoystickRef} /> : null}
       </div>
       <PascalWaterLoadingOverlay assetsReady={loadingAssetsReady} onLoaded={handleLoadingLoaded} />
     </main>
@@ -3394,7 +3386,7 @@ function formatTuningValue(value: number, step = 0.01) {
 
 function pascalWaterModeButtonClass(active: boolean, disabled = false) {
   return [
-    'inline-flex h-14 w-28 items-center justify-center gap-3 rounded-md border px-3 text-2xl font-black leading-none shadow-xl backdrop-blur transition',
+    'inline-flex size-11 items-center justify-center rounded-md border text-2xl font-black leading-none shadow-xl backdrop-blur transition md:h-14 md:w-28 md:gap-3 md:px-3',
     active
       ? 'border-amber-100/64 bg-amber-300 text-slate-950 shadow-[0_0_22px_rgba(245,207,120,0.22)]'
       : 'border-white/22 bg-slate-950/70 text-white/78 hover:border-white/42 hover:bg-slate-900/84 hover:text-white',
@@ -3404,7 +3396,7 @@ function pascalWaterModeButtonClass(active: boolean, disabled = false) {
 
 function pascalWaterModeHintClass() {
   return [
-    'pointer-events-none inline-flex h-14 w-28 items-center justify-center gap-3 rounded-md border border-white/18 bg-slate-950/54 px-3 text-base font-black uppercase leading-none text-white/76 shadow-xl backdrop-blur',
+    'pointer-events-none hidden h-14 w-28 items-center justify-center gap-3 rounded-md border border-white/18 bg-slate-950/54 px-3 text-base font-black uppercase leading-none text-white/76 shadow-xl backdrop-blur md:inline-flex',
   ].join(' ')
 }
 
@@ -3438,7 +3430,7 @@ function PascalWaterVoiceModeButton({ voice }: { voice: SpatialVoiceController }
       type="button"
     >
       <Icon aria-hidden className="size-5" />
-      <span>P</span>
+      <span className="hidden md:inline">P</span>
     </button>
   )
 }
@@ -4306,7 +4298,6 @@ function PascalWaterPlayerLayer({
   mapPresentationVisible,
   mapReturnCameraPoseRef,
   mapTransitionStartPoseRef,
-  mobileJoystickRef,
   navigationDebugEnabled,
   navigationLiveScenario,
   navigationLiveScenarioAutoRun,
@@ -4332,7 +4323,6 @@ function PascalWaterPlayerLayer({
   mapPresentationVisible: boolean
   mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
   mapTransitionStartPoseRef: { current: PascalWaterCameraPose | null }
-  mobileJoystickRef: { current: MobileJoystickInput | null }
   navigationDebugEnabled: boolean
   navigationLiveScenario: PascalWaterNavigationLiveScenarioKind | null
   navigationLiveScenarioAutoRun: boolean
@@ -4372,7 +4362,6 @@ function PascalWaterPlayerLayer({
         localMotionRef={localMotionRef}
         localProfile={localProfile}
         localRobotVisualRootRef={localRobotVisualRootRef}
-        mobileJoystickRef={mobileJoystickRef}
         cameraEnabled={cameraEnabled}
         movementEnabled={movementEnabled}
         navigationDebugEnabled={navigationDebugEnabled}
@@ -5862,7 +5851,6 @@ function LocalPascalWaterRobot({
   localProfile,
   localRobotVisualRootRef,
   mapReturnCameraPoseRef,
-  mobileJoystickRef,
   movementEnabled,
   navigationDebugEnabled,
   navigationLiveScenario,
@@ -5886,7 +5874,6 @@ function LocalPascalWaterRobot({
   localProfile: LocalPlayerProfile
   localRobotVisualRootRef: { current: Group | null }
   mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
-  mobileJoystickRef: { current: MobileJoystickInput | null }
   movementEnabled: boolean
   navigationDebugEnabled: boolean
   navigationLiveScenario: PascalWaterNavigationLiveScenarioKind | null
@@ -6202,14 +6189,13 @@ function LocalPascalWaterRobot({
   useEffect(() => {
     if (movementEnabled) return
     pressedKeysRef.current.clear()
-    mobileJoystickRef.current = null
     clickMoveTargetRef.current = null
     rightHoldMoveRef.current = null
     activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
     motionRef.current.runRequested = false
     physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
     physicsControllerRef.current?.resetLinVel()
-  }, [mobileJoystickRef, movementEnabled])
+  }, [movementEnabled])
 
   useEffect(() => {
     if (!navigationLiveScenario || !navigationLiveScenarioDefinition) {
@@ -6342,9 +6328,15 @@ function LocalPascalWaterRobot({
     }
 
     const handlePointerDown = (event: PointerEvent) => {
+      const mobileScreenPress =
+        cameraEnabled &&
+        event.pointerType === 'touch' &&
+        event.button === 0 &&
+        isPascalWaterMobileControlViewport()
+      const desktopRightPress = event.button === 2
       if (
         event.defaultPrevented ||
-        event.button !== 2 ||
+        (!desktopRightPress && !mobileScreenPress) ||
         !pointerEventInPascalWaterCanvas(event, canvas) ||
         isPascalWaterInteractivePointerTarget(event.target)
       ) {
@@ -6352,15 +6344,20 @@ function LocalPascalWaterRobot({
       }
       event.preventDefault()
       event.stopPropagation()
+      if (mobileScreenPress) event.stopImmediatePropagation()
       clickMoveTargetRef.current = null
       rightHoldMoveRef.current = {
         id: event.pointerId,
+        source: mobileScreenPress ? 'touch' : 'mouse',
         startX: event.clientX,
         startY: event.clientY,
         x: event.clientX,
         y: event.clientY,
       }
-      recordPascalWaterInputProbe({ kind: 'right-click-down' })
+      recordPascalWaterInputProbe({
+        kind: 'right-click-down',
+        source: mobileScreenPress ? 'mobile-touch' : 'mouse',
+      })
     }
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -6368,6 +6365,7 @@ function LocalPascalWaterRobot({
       if (!active || active.id !== event.pointerId) return
       event.preventDefault()
       event.stopPropagation()
+      if (active.source === 'touch') event.stopImmediatePropagation()
       active.x = event.clientX
       active.y = event.clientY
     }
@@ -6377,6 +6375,7 @@ function LocalPascalWaterRobot({
       if (active?.id !== event.pointerId) return
       event.preventDefault()
       event.stopPropagation()
+      if (active.source === 'touch') event.stopImmediatePropagation()
       rightHoldMoveRef.current = null
       const dragDistance = Math.hypot(active.x - active.startX, active.y - active.startY)
       if (dragDistance > PASCAL_WATER_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX) {
@@ -6455,6 +6454,7 @@ function LocalPascalWaterRobot({
     }
   }, [
     camera,
+    cameraEnabled,
     clickMovePointerNdc,
     clickMoveRaycaster,
     colliderMeshes,
@@ -6499,11 +6499,7 @@ function LocalPascalWaterRobot({
   useFrame((state) => {
     const motion = motionRef.current
     const movement = movementEnabled
-      ? resolveCameraRelativeMovement(
-          pressedKeysRef.current,
-          state.camera,
-          mobileJoystickRef.current,
-        )
+      ? resolveCameraRelativeMovement(pressedKeysRef.current, state.camera)
       : null
     if (movement) clickMoveTargetRef.current = null
     const rightHoldMovement =
@@ -8760,12 +8756,7 @@ function PascalWaterMapPlayerMarker({
   })
 
   return (
-    <PascalWaterMapBadgeMarker
-      color={color}
-      groupRef={groupRef}
-      label="P"
-      labelRef={labelRef}
-    />
+    <PascalWaterMapBadgeMarker color={color} groupRef={groupRef} label="P" labelRef={labelRef} />
   )
 }
 
@@ -8956,157 +8947,6 @@ function PascalWaterMapBadgeMarker({
         </Html>
       ) : null}
     </group>
-  )
-}
-
-function MobileMovementJoystick({
-  movementRef,
-}: {
-  movementRef: { current: MobileJoystickInput | null }
-}) {
-  const baseRef = useRef<HTMLDivElement>(null)
-  const pointerIdRef = useRef<number | null>(null)
-  const touchIdRef = useRef<number | null>(null)
-  const [thumb, setThumb] = useState({ active: false, x: 0, y: 0 })
-
-  const updateFromPoint = useCallback(
-    (clientX: number, clientY: number) => {
-      const base = baseRef.current
-      if (!base) return
-
-      const rect = base.getBoundingClientRect()
-      const maxOffset = rect.width * 0.32
-      const centerX = rect.left + rect.width / 2
-      const centerY = rect.top + rect.height / 2
-      const rawX = clientX - centerX
-      const rawY = clientY - centerY
-      const distance = Math.hypot(rawX, rawY)
-      const scale = distance > maxOffset && distance > 0 ? maxOffset / distance : 1
-      const x = rawX * scale
-      const y = rawY * scale
-      const strength = clamp01(distance / maxOffset)
-
-      movementRef.current =
-        strength > 0.08
-          ? {
-              forward: clamp(-y / maxOffset, -1, 1),
-              strafe: clamp(x / maxOffset, -1, 1),
-              strength,
-            }
-          : null
-      setThumb({ active: true, x, y })
-    },
-    [movementRef],
-  )
-
-  const clearJoystick = useCallback(() => {
-    pointerIdRef.current = null
-    touchIdRef.current = null
-    movementRef.current = null
-    setThumb({ active: false, x: 0, y: 0 })
-  }, [movementRef])
-
-  const stopPointerJoystick = useCallback(
-    (event?: ReactPointerEvent<HTMLDivElement>) => {
-      if (touchIdRef.current !== null) return
-      if (event && pointerIdRef.current === event.pointerId) {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId)
-        }
-      }
-      clearJoystick()
-    },
-    [clearJoystick],
-  )
-
-  const handlePointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (touchIdRef.current !== null) return
-      event.preventDefault()
-      pointerIdRef.current = event.pointerId
-      event.currentTarget.setPointerCapture(event.pointerId)
-      updateFromPoint(event.clientX, event.clientY)
-    },
-    [updateFromPoint],
-  )
-
-  const handlePointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (pointerIdRef.current !== event.pointerId) return
-      event.preventDefault()
-      updateFromPoint(event.clientX, event.clientY)
-    },
-    [updateFromPoint],
-  )
-
-  const handleTouchStart = useCallback(
-    (event: ReactTouchEvent<HTMLDivElement>) => {
-      const touch = event.changedTouches.item(0)
-      if (!touch) return
-      event.preventDefault()
-      pointerIdRef.current = null
-      touchIdRef.current = touch.identifier
-      updateFromPoint(touch.clientX, touch.clientY)
-    },
-    [updateFromPoint],
-  )
-
-  const handleTouchMove = useCallback(
-    (event: ReactTouchEvent<HTMLDivElement>) => {
-      const touchId = touchIdRef.current
-      if (touchId === null) return
-      const touch = findTouchById(event.touches, touchId)
-      if (!touch) return
-      event.preventDefault()
-      updateFromPoint(touch.clientX, touch.clientY)
-    },
-    [updateFromPoint],
-  )
-
-  const handleTouchEnd = useCallback(
-    (event: ReactTouchEvent<HTMLDivElement>) => {
-      const touchId = touchIdRef.current
-      if (touchId === null || !findTouchById(event.changedTouches, touchId)) return
-      event.preventDefault()
-      clearJoystick()
-    },
-    [clearJoystick],
-  )
-
-  return (
-    <div
-      className="pointer-events-auto absolute bottom-[8.25rem] left-5 z-40 md:hidden"
-      data-landrush-mobile-joystick
-    >
-      <div
-        aria-label="Move"
-        className="relative size-28 touch-none select-none rounded-full border border-white/25 bg-slate-950/38 shadow-xl backdrop-blur"
-        onPointerCancel={stopPointerJoystick}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={stopPointerJoystick}
-        onTouchCancel={handleTouchEnd}
-        onTouchEnd={handleTouchEnd}
-        onTouchMove={handleTouchMove}
-        onTouchStart={handleTouchStart}
-        ref={baseRef}
-        role="application"
-      >
-        <span className="pointer-events-none absolute inset-0 grid place-items-center">
-          <span className="size-3 rounded-full bg-white/28" />
-        </span>
-        <span className="pointer-events-none absolute inset-0 grid place-items-center">
-          <span
-            className="size-11 rounded-full border border-white/28 bg-white/18 shadow-[0_8px_28px_rgba(0,0,0,0.35)] transition-transform duration-75"
-            style={{
-              transform: `translate3d(${thumb.x}px, ${thumb.y}px, 0) scale(${
-                thumb.active ? 1.04 : 1
-              })`,
-            }}
-          />
-        </span>
-      </div>
-    </div>
   )
 }
 
@@ -10681,7 +10521,6 @@ function pascalWaterNavigationSegmentBlockedByOtherObstacles(
 function resolveCameraRelativeMovement(
   keys: ReadonlySet<string>,
   camera: Camera,
-  joystick: MobileJoystickInput | null,
 ): RobotMovementInput | null {
   const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
@@ -10689,10 +10528,8 @@ function resolveCameraRelativeMovement(
   const keyboardForward =
     Number(keys.has('KeyW') || keys.has('ArrowUp')) -
     Number(keys.has('KeyS') || keys.has('ArrowDown'))
-  const hasKeyboardInput = keyboardStrafe !== 0 || keyboardForward !== 0
-  const hasJoystickInput = Boolean(joystick && joystick.strength > 0.08)
-  const strafe = keyboardStrafe + (joystick?.strafe ?? 0)
-  const forwardInput = keyboardForward + (joystick?.forward ?? 0)
+  const strafe = keyboardStrafe
+  const forwardInput = keyboardForward
 
   if (strafe === 0 && forwardInput === 0) return null
 
@@ -10703,15 +10540,8 @@ function resolveCameraRelativeMovement(
     right.z * strafe + forward.z * forwardInput,
   )
   const heading = Math.atan2(direction.x, direction.z)
-  const joystickStrength = hasJoystickInput ? (joystick?.strength ?? 1) : 0
-  const intensity = hasKeyboardInput ? 1 : hasJoystickInput ? joystickStrength : 1
-  const runAmount =
-    hasKeyboardInput || !hasJoystickInput
-      ? 0
-      : clamp01(
-          (joystickStrength - PASCAL_WATER_ROBOT_JOYSTICK_RUN_START) /
-            (1 - PASCAL_WATER_ROBOT_JOYSTICK_RUN_START),
-        )
+  const intensity = 1
+  const runAmount = 0
   return { ...direction, heading, intensity, runAmount }
 }
 
@@ -12700,17 +12530,6 @@ function releasePascalWaterPointerLock() {
   if (!(document.pointerLockElement instanceof HTMLCanvasElement)) return false
   document.exitPointerLock()
   return true
-}
-
-function findTouchById<TouchLike extends { identifier: number }>(
-  touches: { item: (index: number) => TouchLike | null; length: number },
-  identifier: number,
-) {
-  for (let index = 0; index < touches.length; index += 1) {
-    const touch = touches.item(index)
-    if (touch?.identifier === identifier) return touch
-  }
-  return null
 }
 
 function isPascalWaterMobileControlViewport() {
