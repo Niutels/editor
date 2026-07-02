@@ -243,7 +243,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     if (defaultRender.colorPreset && !('colorPreset' in persistedState)) {
       useViewer.getState().setColorPreset(defaultRender.colorPreset)
     }
-  }, [])
+  }, [defaultRender, renderContext])
 
   // Coarse-pointer devices (phones/tablets) get a tighter DPR ceiling to keep
   // fragment-shader cost down — saves another ~30% over 1.5x on high-DPI mobile.
@@ -257,118 +257,124 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   const perfOverlayEnabled = perfOverlayHydrated && isPerfOverlayEnabled()
   const showPerfOverlay = perfOverlayHydrated && (perf || perfOverlayEnabled)
   const [perfStats, setPerfStats] = useState(INITIAL_PERF_STATS)
+  const [eventSource, setEventSource] = useState<HTMLDivElement | null>(null)
   const collectPerfMetrics =
     typeof window !== 'undefined' && readViewerPerfFlagsFromUrl().collectPerfMetrics
   return (
     <>
-      <Canvas
-        camera={{ position: [50, 50, 50], fov: 50 }}
-        className={`transition-colors duration-700 ${isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'}`}
-        dpr={[1, maxDpr]}
-        frameloop="never"
-        gl={
-          ((props: { canvas?: HTMLCanvasElement }) => {
-            const canvas = props.canvas
-            const cached = canvas
-              ? WEBGPU_RENDERER_CACHE.get(canvas)?.get(rendererBackend)
-              : undefined
-            if (cached) return cached
-            const promise = (async () => {
-              if (rendererBackend === 'webgl') {
-                const renderer = new WebGLRenderer(props as any)
-                renderer.toneMapping = THREE.ACESFilmicToneMapping
-                renderer.toneMappingExposure = getSceneTheme(
-                  useViewer.getState().sceneTheme,
-                ).toneMappingExposure
-                return renderer
-              }
+      <div className="h-full w-full" ref={setEventSource}>
+        {eventSource ? (
+          <Canvas
+            camera={{ position: [50, 50, 50], fov: 50 }}
+            className={`transition-colors duration-700 ${isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'}`}
+            dpr={[1, maxDpr]}
+            eventSource={eventSource}
+            frameloop="never"
+            gl={
+              ((props: { canvas?: HTMLCanvasElement }) => {
+                const canvas = props.canvas
+                const cached = canvas
+                  ? WEBGPU_RENDERER_CACHE.get(canvas)?.get(rendererBackend)
+                  : undefined
+                if (cached) return cached
+                const promise = (async () => {
+                  if (rendererBackend === 'webgl') {
+                    const renderer = new WebGLRenderer(props as any)
+                    renderer.toneMapping = THREE.ACESFilmicToneMapping
+                    renderer.toneMappingExposure = getSceneTheme(
+                      useViewer.getState().sceneTheme,
+                    ).toneMappingExposure
+                    return renderer
+                  }
 
-              try {
-                const renderer = new THREE.WebGPURenderer(props as any)
-                renderer.toneMapping = THREE.ACESFilmicToneMapping
-                renderer.toneMappingExposure = getSceneTheme(
-                  useViewer.getState().sceneTheme,
-                ).toneMappingExposure
-                await renderer.init()
-                return renderer
-              } catch (err) {
-                console.warn(
-                  '[viewer] WebGPURenderer unavailable; falling back to WebGLRenderer',
-                  err,
-                )
-                const renderer = new WebGLRenderer(props as any)
-                renderer.toneMapping = THREE.ACESFilmicToneMapping
-                renderer.toneMappingExposure = getSceneTheme(
-                  useViewer.getState().sceneTheme,
-                ).toneMappingExposure
-                return renderer
-              }
-            })()
-            if (canvas) {
-              let backendCache = WEBGPU_RENDERER_CACHE.get(canvas)
-              if (!backendCache) {
-                backendCache = new Map()
-                WEBGPU_RENDERER_CACHE.set(canvas, backendCache)
-              }
-              backendCache.set(rendererBackend, promise)
+                  try {
+                    const renderer = new THREE.WebGPURenderer(props as any)
+                    renderer.toneMapping = THREE.ACESFilmicToneMapping
+                    renderer.toneMappingExposure = getSceneTheme(
+                      useViewer.getState().sceneTheme,
+                    ).toneMappingExposure
+                    await renderer.init()
+                    return renderer
+                  } catch (err) {
+                    console.warn(
+                      '[viewer] WebGPURenderer unavailable; falling back to WebGLRenderer',
+                      err,
+                    )
+                    const renderer = new WebGLRenderer(props as any)
+                    renderer.toneMapping = THREE.ACESFilmicToneMapping
+                    renderer.toneMappingExposure = getSceneTheme(
+                      useViewer.getState().sceneTheme,
+                    ).toneMappingExposure
+                    return renderer
+                  }
+                })()
+                if (canvas) {
+                  let backendCache = WEBGPU_RENDERER_CACHE.get(canvas)
+                  if (!backendCache) {
+                    backendCache = new Map()
+                    WEBGPU_RENDERER_CACHE.set(canvas, backendCache)
+                  }
+                  backendCache.set(rendererBackend, promise)
+                }
+                return promise
+              }) as any
             }
-            return promise
-          }) as any
-        }
-        resize={{
-          debounce: 100,
-        }}
-        shadows={{
-          type: THREE.PCFShadowMap,
-          enabled: true,
-        }}
-      >
-        <FrameLimiter fps={50} />
-        <RenderSchedulerBridge />
-        {defaultCamera ? <ViewerCamera /> : null}
-        <GPUDeviceWatcher />
-        <ToneMappingExposure />
-        <ShadowController />
-        <BenchStatsProbe />
-        {collectPerfMetrics && <PerfProbe />}
+            resize={{
+              debounce: 100,
+            }}
+            shadows={{
+              type: THREE.PCFShadowMap,
+              enabled: true,
+            }}
+          >
+            <FrameLimiter fps={50} />
+            <RenderSchedulerBridge />
+            {defaultCamera ? <ViewerCamera /> : null}
+            <GPUDeviceWatcher />
+            <ToneMappingExposure />
+            <ShadowController />
+            <BenchStatsProbe />
+            {collectPerfMetrics && <PerfProbe />}
 
-        <ErrorBoundary fallback={null} scope="viewer-scene">
-          <BenchSceneModuleGate>
-            {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
+            <ErrorBoundary fallback={null} scope="viewer-scene">
+              <BenchSceneModuleGate>
+                {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
           /> */}
-            <Lights />
-            {useBvh ? (
-              <SceneBvh>
-                <SceneRenderer />
-              </SceneBvh>
-            ) : (
-              <SceneRenderer />
-            )}
+                <Lights />
+                {useBvh ? (
+                  <SceneBvh>
+                    <SceneRenderer />
+                  </SceneBvh>
+                ) : (
+                  <SceneRenderer />
+                )}
 
-            {/* Generic slab-elevation lift for any kind that declares
+                {/* Generic slab-elevation lift for any kind that declares
             `capabilities.floorPlaced`. Runs at frame priority 1 so it
             lands its mesh.position.y override before the priority-2
             systems below clear the dirty mark. */}
-            <FloorElevationSystem />
-            {/* Generic geometry rebuild loop for any registered kind that
+                <FloorElevationSystem />
+                {/* Generic geometry rebuild loop for any registered kind that
             ships `def.geometry`. Reads dirtyNodes, calls the kind's pure
             builder, swaps the registered group's children. See
             wiki/architecture/node-definitions.md. */}
-            <GeometrySystem />
-            {/* Automated stair opening sync — updates slab/ceiling cutouts
+                <GeometrySystem />
+                {/* Automated stair opening sync — updates slab/ceiling cutouts
             whenever stairs, slabs, or levels change. */}
-            <StairOpeningSystem />
-            {/* Mounts systems contributed by registry-backed kinds. Each
+                <StairOpeningSystem />
+                {/* Mounts systems contributed by registry-backed kinds. Each
             kind's `def.system` is loaded via lazy() and rendered here,
             ordered by `system.priority`. */}
-            <RegisteredSystems />
-            {postProcessing ? <PostProcessing hoverStyles={hoverStyles} /> : <DebugRenderer />}
-            {selectionManager === 'default' && <SelectionManager />}
-            {showPerfOverlay && <PerfMonitor onStats={setPerfStats} />}
-            {children}
-          </BenchSceneModuleGate>
-        </ErrorBoundary>
-      </Canvas>
+                <RegisteredSystems />
+                {postProcessing ? <PostProcessing hoverStyles={hoverStyles} /> : <DebugRenderer />}
+                {selectionManager === 'default' && <SelectionManager />}
+                {showPerfOverlay && <PerfMonitor onStats={setPerfStats} />}
+                {children}
+              </BenchSceneModuleGate>
+            </ErrorBoundary>
+          </Canvas>
+        ) : null}
+      </div>
       {showPerfOverlay && <PerfOverlay stats={perfStats} />}
     </>
   )
