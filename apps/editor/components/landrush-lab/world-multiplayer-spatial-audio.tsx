@@ -28,8 +28,15 @@ export type SpatialVoiceStatus = 'idle' | 'starting' | 'live' | 'error' | 'unsup
 
 export type SpatialVoiceStats = {
   audiblePeerCount: number
+  audioConnectedPeerCount: number
+  audioContextState: AudioContextState | 'missing'
   connectedPeerCount: number
+  inboundBytes: number
+  inboundPackets: number
   outboundTrackCount: number
+  outboundBytes: number
+  outboundPackets: number
+  outputRmsLevel: number
   peerCount: number
   remoteTrackCount: number
   rmsLevel: number
@@ -61,18 +68,35 @@ type UseLandrushSpatialVoiceOptions = {
 
 type VoicePeer = {
   analyser: AnalyserNode | null
+  audioElement: HTMLAudioElement | null
+  audioElementError: string | null
   audioData: Uint8Array<ArrayBuffer> | null
   connection: RTCPeerConnection
   gain: GainNode | null
   hasRemoteTrack: boolean
   id: string
   makingOffer: boolean
+  outputAnalyser: AnalyserNode | null
+  outputAudioData: Uint8Array<ArrayBuffer> | null
   panner: PannerNode | null
   pendingIceCandidates: RTCIceCandidateInit[]
   polite: boolean
   remoteStream: MediaStream
+  rtcStats: VoicePeerRtcStats
   settingRemoteAnswerPending: boolean
-  source: MediaStreamAudioSourceNode | null
+  source: AudioNode | null
+}
+
+type VoicePeerRtcStats = {
+  inboundAudioLevel: number
+  inboundBytes: number
+  inboundPackets: number
+  inboundTotalAudioEnergy: number
+  localAudioLevel: number
+  localTotalAudioEnergy: number
+  outboundBytes: number
+  outboundPackets: number
+  sampledAt: number
 }
 
 export const SPATIAL_VOICE_MAX_DISTANCE = 28
@@ -84,8 +108,15 @@ const SPATIAL_VOICE_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.c
 
 const EMPTY_STATS: SpatialVoiceStats = {
   audiblePeerCount: 0,
+  audioConnectedPeerCount: 0,
+  audioContextState: 'missing',
   connectedPeerCount: 0,
+  inboundBytes: 0,
+  inboundPackets: 0,
   outboundTrackCount: 0,
+  outboundBytes: 0,
+  outboundPackets: 0,
+  outputRmsLevel: 0,
   peerCount: 0,
   remoteTrackCount: 0,
   rmsLevel: 0,
@@ -117,24 +148,45 @@ export function useLandrushSpatialVoice({
   sendSignalRef.current = sendSignal
 
   const publishStats = useCallback(() => {
+    const audioContext = audioContextRef.current
     const localStream = localStreamRef.current
     let audiblePeerCount = 0
+    let audioConnectedPeerCount = 0
     let connectedPeerCount = 0
+    let inboundBytes = 0
+    let inboundPackets = 0
     let maxLevel = 0
+    let maxOutputLevel = 0
+    let outboundBytes = 0
+    let outboundPackets = 0
     let remoteTrackCount = 0
 
     for (const peer of peersRef.current.values()) {
       if (peer.connection.connectionState === 'connected') connectedPeerCount += 1
       if (peer.hasRemoteTrack) remoteTrackCount += 1
+      if (peer.source && peer.analyser) audioConnectedPeerCount += 1
+      inboundBytes += peer.rtcStats.inboundBytes
+      inboundPackets += peer.rtcStats.inboundPackets
+      outboundBytes += peer.rtcStats.outboundBytes
+      outboundPackets += peer.rtcStats.outboundPackets
       const level = measurePeerLevel(peer)
+      const outputLevel = measurePeerOutputLevel(peer)
       if (level > 0.01) audiblePeerCount += 1
       maxLevel = Math.max(maxLevel, level)
+      maxOutputLevel = Math.max(maxOutputLevel, outputLevel)
     }
 
     setStats({
       audiblePeerCount,
+      audioConnectedPeerCount,
+      audioContextState: audioContext?.state ?? 'missing',
       connectedPeerCount,
+      inboundBytes,
+      inboundPackets,
       outboundTrackCount: localStream?.getAudioTracks().length ?? 0,
+      outboundBytes,
+      outboundPackets,
+      outputRmsLevel: roundLevel(maxOutputLevel),
       peerCount: peersRef.current.size,
       remoteTrackCount,
       rmsLevel: roundLevel(maxLevel),
@@ -163,16 +215,21 @@ export function useLandrushSpatialVoice({
       const connection = new RTCPeerConnection({ iceServers: SPATIAL_VOICE_ICE_SERVERS })
       const peer: VoicePeer = {
         analyser: null,
+        audioElement: null,
+        audioElementError: null,
         audioData: null,
         connection,
         gain: null,
         hasRemoteTrack: false,
         id: peerId,
         makingOffer: false,
+        outputAnalyser: null,
+        outputAudioData: null,
         panner: null,
         pendingIceCandidates: [],
         polite: localProfile.id.localeCompare(peerId) > 0,
         remoteStream: new MediaStream(),
+        rtcStats: createEmptyVoicePeerRtcStats(),
         settingRemoteAnswerPending: false,
         source: null,
       }
@@ -225,21 +282,25 @@ export function useLandrushSpatialVoice({
     for (const peerId of remoteIds) {
       const peer = createPeer(peerId)
       sendSignalRef.current(peerId, { type: 'ready' })
-      void createAndSendDescription(peer, sendSignalRef.current)
+      if (shouldInitiateVoicePeer(localProfile.id, peerId)) {
+        void createAndSendDescription(peer, sendSignalRef.current)
+      }
     }
     for (const peerId of peersRef.current.keys()) {
       if (!remoteIds.has(peerId)) closePeer(peerId)
     }
     publishStats()
-  }, [closePeer, createPeer, publishStats])
+  }, [closePeer, createPeer, localProfile.id, publishStats])
 
   const handleSignal = useCallback(
     async (message: SpatialVoiceSignalMessage) => {
-      if (!isSpatialVoiceSignalPayload(message.signal) || !localStreamRef.current) {
-        if (desired) pendingSignalsRef.current.push(message)
+      if (!isSpatialVoiceSignalPayload(message.signal)) return
+      if (message.from === localProfile.id) return
+
+      if (!localStreamRef.current) {
+        queuePendingVoiceSignal(pendingSignalsRef.current, message)
         return
       }
-      if (message.from === localProfile.id) return
 
       if (message.signal.type === 'disconnect') {
         closePeer(message.from, false)
@@ -248,7 +309,9 @@ export function useLandrushSpatialVoice({
 
       if (message.signal.type === 'ready') {
         const peer = createPeer(message.from)
-        await createAndSendDescription(peer, sendSignalRef.current)
+        if (shouldInitiateVoicePeer(localProfile.id, message.from)) {
+          await createAndSendDescription(peer, sendSignalRef.current)
+        }
         return
       }
 
@@ -302,7 +365,7 @@ export function useLandrushSpatialVoice({
         publishStats()
       }
     },
-    [closePeer, createPeer, desired, localProfile.id, publishStats],
+    [closePeer, createPeer, localProfile.id, publishStats],
   )
 
   const flushPendingSignals = useCallback(() => {
@@ -350,14 +413,13 @@ export function useLandrushSpatialVoice({
       setError(null)
 
       try {
-        const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext
-        if (!AudioContextCtor) {
+        const audioContext = getOrCreateSpatialVoiceAudioContext(audioContextRef.current)
+        if (!audioContext) {
           setStatus('unsupported')
           setError('Web Audio is not supported in this browser')
           return
         }
 
-        const audioContext = new AudioContextCtor()
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             autoGainControl: true,
@@ -370,6 +432,7 @@ export function useLandrushSpatialVoice({
           stream.getTracks().forEach((track) => {
             track.stop()
           })
+          if (audioContextRef.current === audioContext) audioContextRef.current = null
           void audioContext.close()
           return
         }
@@ -411,10 +474,14 @@ export function useLandrushSpatialVoice({
       updatePeerPositions(peersRef.current, remotePlayersRef.current)
     }, SPATIAL_VOICE_UPDATE_INTERVAL_MS)
     const statsTimer = window.setInterval(publishStats, SPATIAL_VOICE_STATS_INTERVAL_MS)
+    const rtcStatsTimer = window.setInterval(() => {
+      void updatePeerRtcStats(peersRef.current).finally(publishStats)
+    }, 1000)
 
     return () => {
       window.clearInterval(updateTimer)
       window.clearInterval(statsTimer)
+      window.clearInterval(rtcStatsTimer)
     }
   }, [localMotionRef, publishStats, status])
 
@@ -424,13 +491,52 @@ export function useLandrushSpatialVoice({
         available,
         desired,
         error,
-        peers: [...peersRef.current.values()].map((peer) => ({
-          connected: peer.connection.connectionState,
-          hasRemoteTrack: peer.hasRemoteTrack,
-          id: peer.id,
-          level: roundLevel(measurePeerLevel(peer)),
-          signaling: peer.connection.signalingState,
-        })),
+        peers: [...peersRef.current.values()].map((peer) => {
+          const remotePlayer = remotePlayersRef.current.find((player) => player.id === peer.id)
+          const localPosition = localMotionRef.current?.position
+          const distanceMeters =
+            remotePlayer && localPosition
+              ? Math.hypot(
+                  remotePlayer.position[0] - localPosition.x,
+                  remotePlayer.position[1] - localPosition.y,
+                  remotePlayer.position[2] - localPosition.z,
+                )
+              : null
+
+          return {
+            connected: peer.connection.connectionState,
+            audioConnected: Boolean(peer.source && peer.analyser),
+            audioElement: peer.audioElement
+              ? {
+                  error: peer.audioElementError,
+                  paused: peer.audioElement.paused,
+                  readyState: peer.audioElement.readyState,
+                }
+              : null,
+            distanceMeters: distanceMeters === null ? null : roundLevel(distanceMeters),
+            gain: peer.gain ? roundLevel(peer.gain.gain.value) : null,
+            hasRemoteTrack: peer.hasRemoteTrack,
+            id: peer.id,
+            level: roundLevel(measurePeerLevel(peer)),
+            outputLevel: roundLevel(measurePeerOutputLevel(peer)),
+            pannerPosition: peer.panner
+              ? [
+                  roundLevel(peer.panner.positionX.value),
+                  roundLevel(peer.panner.positionY.value),
+                  roundLevel(peer.panner.positionZ.value),
+                ]
+              : null,
+            remotePlayerPosition: remotePlayer?.position ?? null,
+            remoteTracks: peer.remoteStream.getAudioTracks().map((track) => ({
+              enabled: track.enabled,
+              id: track.id,
+              muted: track.muted,
+              readyState: track.readyState,
+            })),
+            rtc: peer.rtcStats,
+            signaling: peer.connection.signalingState,
+          }
+        }),
         roomId,
         stats,
         status,
@@ -447,6 +553,18 @@ export function useLandrushSpatialVoice({
 
   const toggle = useCallback(() => {
     if (!available && !desired) return
+    if (!desired) {
+      const audioContext = getOrCreateSpatialVoiceAudioContext(audioContextRef.current)
+      if (!audioContext) {
+        setStatus('unsupported')
+        setError('Web Audio is not supported in this browser')
+        return
+      }
+      audioContextRef.current = audioContext
+      void audioContext.resume().catch((resumeError: unknown) => {
+        setError(resumeError instanceof Error ? resumeError.message : 'Audio playback was blocked')
+      })
+    }
     setDesired((current) => !current)
   }, [available, desired])
 
@@ -515,6 +633,79 @@ async function flushPendingIceCandidates(peer: VoicePeer) {
   }
 }
 
+function queuePendingVoiceSignal(
+  pendingSignals: SpatialVoiceSignalMessage[],
+  message: SpatialVoiceSignalMessage,
+) {
+  pendingSignals.push(message)
+  if (pendingSignals.length > 96) pendingSignals.splice(0, pendingSignals.length - 96)
+}
+
+function shouldInitiateVoicePeer(localPeerId: string, remotePeerId: string) {
+  return localPeerId.localeCompare(remotePeerId) < 0
+}
+
+function getOrCreateSpatialVoiceAudioContext(current: AudioContext | null) {
+  if (current && current.state !== 'closed') return current
+  const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext
+  return AudioContextCtor ? new AudioContextCtor() : null
+}
+
+function createEmptyVoicePeerRtcStats(): VoicePeerRtcStats {
+  return {
+    inboundAudioLevel: 0,
+    inboundBytes: 0,
+    inboundPackets: 0,
+    inboundTotalAudioEnergy: 0,
+    localAudioLevel: 0,
+    localTotalAudioEnergy: 0,
+    outboundBytes: 0,
+    outboundPackets: 0,
+    sampledAt: 0,
+  }
+}
+
+async function updatePeerRtcStats(peers: Map<string, VoicePeer>) {
+  await Promise.all(
+    [...peers.values()].map(async (peer) => {
+      if (peer.connection.connectionState === 'closed') return
+
+      try {
+        const stats = await peer.connection.getStats()
+        const nextStats = createEmptyVoicePeerRtcStats()
+        nextStats.sampledAt = Date.now()
+
+        stats.forEach((report) => {
+          if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+            nextStats.inboundAudioLevel = Math.max(
+              nextStats.inboundAudioLevel,
+              numberStat(report.audioLevel),
+            )
+            nextStats.inboundBytes += numberStat(report.bytesReceived)
+            nextStats.inboundPackets += numberStat(report.packetsReceived)
+            nextStats.inboundTotalAudioEnergy += numberStat(report.totalAudioEnergy)
+          }
+          if (report.type === 'outbound-rtp' && report.kind === 'audio') {
+            nextStats.outboundBytes += numberStat(report.bytesSent)
+            nextStats.outboundPackets += numberStat(report.packetsSent)
+          }
+          if (report.type === 'media-source' && report.kind === 'audio') {
+            nextStats.localAudioLevel = Math.max(
+              nextStats.localAudioLevel,
+              numberStat(report.audioLevel),
+            )
+            nextStats.localTotalAudioEnergy += numberStat(report.totalAudioEnergy)
+          }
+        })
+
+        peer.rtcStats = nextStats
+      } catch {
+        peer.rtcStats = createEmptyVoicePeerRtcStats()
+      }
+    }),
+  )
+}
+
 async function createAndSendDescription(
   peer: VoicePeer,
   sendSignal: (to: string, signal: SpatialVoiceSignalPayload) => boolean,
@@ -543,10 +734,19 @@ function connectPeerAudio(peer: VoicePeer, audioContext: AudioContext | null) {
   const tracks = peer.remoteStream.getAudioTracks()
   if (tracks.length === 0) return
 
+  const audioElement = document.createElement('audio')
+  audioElement.autoplay = true
+  audioElement.setAttribute('playsinline', 'true')
+  audioElement.srcObject = peer.remoteStream
+  audioElement.style.display = 'none'
+  audioElement.volume = 0
+  document.body.appendChild(audioElement)
+
   const source = audioContext.createMediaStreamSource(peer.remoteStream)
   const panner = audioContext.createPanner()
   const gain = audioContext.createGain()
   const analyser = audioContext.createAnalyser()
+  const outputAnalyser = audioContext.createAnalyser()
 
   panner.distanceModel = 'inverse'
   panner.maxDistance = SPATIAL_VOICE_MAX_DISTANCE
@@ -555,21 +755,31 @@ function connectPeerAudio(peer: VoicePeer, audioContext: AudioContext | null) {
   panner.panningModel = 'HRTF'
   gain.gain.value = 0.95
   analyser.fftSize = 256
+  outputAnalyser.fftSize = 256
 
+  source.connect(analyser)
   source.connect(panner)
   panner.connect(gain)
-  gain.connect(analyser)
-  analyser.connect(audioContext.destination)
+  gain.connect(outputAnalyser)
+  outputAnalyser.connect(audioContext.destination)
+
+  void audioElement.play().catch((error: unknown) => {
+    peer.audioElementError = error instanceof Error ? error.message : 'Remote audio play blocked'
+  })
 
   peer.analyser = analyser
+  peer.audioElement = audioElement
+  peer.audioElementError = null
   peer.audioData = new Uint8Array(analyser.fftSize)
   peer.gain = gain
+  peer.outputAnalyser = outputAnalyser
+  peer.outputAudioData = new Uint8Array(outputAnalyser.fftSize)
   peer.panner = panner
   peer.source = source
 }
 
 function disconnectPeerAudio(peer: VoicePeer) {
-  for (const node of [peer.source, peer.panner, peer.gain, peer.analyser]) {
+  for (const node of [peer.source, peer.panner, peer.gain, peer.analyser, peer.outputAnalyser]) {
     try {
       node?.disconnect()
     } catch {
@@ -579,9 +789,14 @@ function disconnectPeerAudio(peer: VoicePeer) {
   peer.remoteStream.getTracks().forEach((track) => {
     track.stop()
   })
+  peer.audioElement?.remove()
   peer.analyser = null
+  peer.audioElement = null
+  peer.audioElementError = null
   peer.audioData = null
   peer.gain = null
+  peer.outputAnalyser = null
+  peer.outputAudioData = null
   peer.panner = null
   peer.source = null
 }
@@ -625,13 +840,22 @@ function setAudioParam(param: AudioParam, value: number, time: number) {
 function measurePeerLevel(peer: VoicePeer) {
   if (!peer.analyser || !peer.audioData) return 0
   peer.analyser.getByteTimeDomainData(peer.audioData)
+  return measureAudioDataLevel(peer.audioData)
+}
 
+function measurePeerOutputLevel(peer: VoicePeer) {
+  if (!peer.outputAnalyser || !peer.outputAudioData) return 0
+  peer.outputAnalyser.getByteTimeDomainData(peer.outputAudioData)
+  return measureAudioDataLevel(peer.outputAudioData)
+}
+
+function measureAudioDataLevel(audioData: Uint8Array<ArrayBuffer>) {
   let sum = 0
-  for (const value of peer.audioData) {
+  for (const value of audioData) {
     const centered = (value - 128) / 128
     sum += centered * centered
   }
-  return Math.sqrt(sum / peer.audioData.length)
+  return Math.sqrt(sum / audioData.length)
 }
 
 function cleanupVoice(
@@ -687,4 +911,8 @@ function getMultiplayerDebugSurface() {
 
 function roundLevel(value: number) {
   return Math.round(value * 1000) / 1000
+}
+
+function numberStat(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
