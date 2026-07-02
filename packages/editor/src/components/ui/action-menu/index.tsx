@@ -20,7 +20,7 @@ import { GridSnapControl, SecondaryToggles } from './view-toggles'
 // rounded corners (SHEET_OVERLAP_PX in editor-layout-mobile) so the menu sits
 // just above that strip instead of inside it.
 const MOBILE_BOTTOM_OFFSET = 24
-const CONTEXTUAL_TABS = new Set(['ai', 'items', 'studio'])
+const CONTEXTUAL_PANEL_IDS = ['ai', 'items', 'studio'] as const
 
 type ActionMenuReactProfilerConfig = {
   enabled: boolean
@@ -82,19 +82,27 @@ function PaintMaterialTray() {
 }
 
 export const ActionMenu = memo(function ActionMenu({
+  availableMobilePanelIds,
   className,
   reactProfiler,
 }: {
+  availableMobilePanelIds?: readonly string[]
   className?: string
   reactProfiler?: ActionMenuReactProfilerConfig
 }) {
   const phase = useEditor((state) => state.phase)
   const mode = useEditor((state) => state.mode)
   const isMobile = useIsMobile()
+  const contextualMobilePanelIds = useMemo(() => {
+    const availablePanels = availableMobilePanelIds ? new Set(availableMobilePanelIds) : null
+    return new Set<string>(
+      CONTEXTUAL_PANEL_IDS.filter((id) => !availablePanels || availablePanels.has(id)),
+    )
+  }, [availableMobilePanelIds])
   const hasSelectionOnMobile = useViewer((s) => isMobile && s.selection.selectedIds.length > 0)
   const hasReferenceOnMobile = useEditor((s) => isMobile && Boolean(s.selectedReferenceId))
   const isContextualPanelOnMobile = useEditor(
-    (s) => isMobile && CONTEXTUAL_TABS.has(s.activeSidebarPanel),
+    (s) => isMobile && contextualMobilePanelIds.has(s.activeSidebarPanel),
   )
   const reducedMotion = useReducedMotion()
   const showPaintTray = useMemo(() => mode === 'material-paint', [mode])

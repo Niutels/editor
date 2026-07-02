@@ -1367,6 +1367,7 @@ export default function Editor({
         mobileIcon,
         icon,
       })) ?? []
+    const availableMobilePanelIds = tabBarTabs.map(({ id }) => id)
 
     return (
       <>
@@ -1399,7 +1400,10 @@ export default function Editor({
                     {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) ? (
                       <EditorReactProfiler config={reactProfiler} id="layout.action-menu">
                         <div className="pointer-events-auto">
-                          <ActionMenu reactProfiler={reactProfiler} />
+                          <ActionMenu
+                            availableMobilePanelIds={availableMobilePanelIds}
+                            reactProfiler={reactProfiler}
+                          />
                         </div>
                       </EditorReactProfiler>
                     ) : null}
