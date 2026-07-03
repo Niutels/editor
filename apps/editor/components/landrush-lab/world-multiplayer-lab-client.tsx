@@ -2867,7 +2867,6 @@ export function useLandrushWorldMultiplayer({
         if (cancelled) return
         reconnectDelayRef.current = 1000
         reconnectAttemptRef.current = 0
-        setStatus('connected')
         const player = latestPlayerRef.current ?? createStationaryPlayer(localProfile)
         const joined = spectator
           ? sendMessage({ roomId, type: 'watch' }, socket)
@@ -2996,6 +2995,7 @@ export function useLandrushWorldMultiplayer({
         }
 
         if (message.type === 'snapshot') {
+          setStatus('connected')
           setRemotePlayerMap(
             new Map(
               message.players
@@ -3073,6 +3073,7 @@ export function useLandrushWorldMultiplayer({
 
   useEffect(() => {
     const interval = window.setInterval(() => {
+      if (status === 'connected') return
       const cutoff = Date.now() - REMOTE_PLAYER_STALE_MS
       setRemotePlayerMap((current) => {
         const next = new Map(
@@ -3082,7 +3083,7 @@ export function useLandrushWorldMultiplayer({
       })
     }, 3000)
     return () => window.clearInterval(interval)
-  }, [])
+  }, [status])
 
   return {
     claimParcel,

@@ -75,6 +75,7 @@ type VoicePeer = {
   audioElementError: string | null
   audioData: Uint8Array<ArrayBuffer> | null
   connection: RTCPeerConnection
+  createdAt: number
   gain: GainNode | null
   hasRemoteTrack: boolean
   id: string
@@ -89,6 +90,7 @@ type VoicePeer = {
   settingRemoteAnswerPending: boolean
   source: AudioNode | null
   targetGain: number
+  unhealthySince: number | null
 }
 
 type VoicePeerRtcStats = {
@@ -116,6 +118,9 @@ const SPATIAL_VOICE_REFERENCE_DISTANCE = 0.9
 const SPATIAL_VOICE_ROLLOFF = 2.4
 const SPATIAL_VOICE_UPDATE_INTERVAL_MS = 80
 const SPATIAL_VOICE_STATS_INTERVAL_MS = 250
+const SPATIAL_VOICE_RECONCILE_INTERVAL_MS = 1500
+const SPATIAL_VOICE_CONNECT_TIMEOUT_MS = 10_000
+const SPATIAL_VOICE_DISCONNECTED_GRACE_MS = 3500
 const SPATIAL_VOICE_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
 
 const EMPTY_STATS: SpatialVoiceStats = {
@@ -245,6 +250,7 @@ export function useLandrushSpatialVoice({
         audioElementError: null,
         audioData: null,
         connection,
+        createdAt: Date.now(),
         gain: null,
         hasRemoteTrack: false,
         id: peerId,
@@ -259,6 +265,7 @@ export function useLandrushSpatialVoice({
         settingRemoteAnswerPending: false,
         source: null,
         targetGain: 0,
+        unhealthySince: null,
       }
       peersRef.current.set(peerId, peer)
 
@@ -275,12 +282,13 @@ export function useLandrushSpatialVoice({
       })
 
       connection.addEventListener('connectionstatechange', () => {
-        if (
-          connection.connectionState === 'closed' ||
+        if (connection.connectionState === 'connected' || connection.connectionState === 'closed') {
+          peer.unhealthySince = null
+        } else if (
           connection.connectionState === 'failed' ||
           connection.connectionState === 'disconnected'
         ) {
-          if (connection.connectionState === 'failed') closePeer(peerId, true)
+          peer.unhealthySince ??= Date.now()
         }
         publishStats()
       })
@@ -299,7 +307,7 @@ export function useLandrushSpatialVoice({
       publishStats()
       return peer
     },
-    [closePeer, localProfile.id, publishStats],
+    [localProfile.id, publishStats],
   )
 
   const syncPeers = useCallback(() => {
@@ -308,8 +316,10 @@ export function useLandrushSpatialVoice({
     const remoteIds = new Set(remotePlayersRef.current.map((player) => player.id))
     for (const peerId of remoteIds) {
       const peer = createPeer(peerId)
-      sendSignalRef.current(peerId, { type: 'ready' })
-      if (shouldInitiateVoicePeer(localProfile.id, peerId)) {
+      if (!voicePeerIsComplete(peer)) {
+        sendSignalRef.current(peerId, { type: 'ready' })
+      }
+      if (!voicePeerIsComplete(peer) && shouldInitiateVoicePeer(localProfile.id, peerId)) {
         void createAndSendDescription(peer, sendSignalRef.current)
       }
     }
@@ -336,7 +346,7 @@ export function useLandrushSpatialVoice({
 
       if (message.signal.type === 'ready') {
         const peer = createPeer(message.from)
-        if (shouldInitiateVoicePeer(localProfile.id, message.from)) {
+        if (!voicePeerIsComplete(peer) && shouldInitiateVoicePeer(localProfile.id, message.from)) {
           await createAndSendDescription(peer, sendSignalRef.current)
         }
         return
@@ -394,6 +404,31 @@ export function useLandrushSpatialVoice({
     },
     [closePeer, createPeer, localProfile.id, publishStats],
   )
+
+  const reconcilePeers = useCallback(() => {
+    if (!localStreamRef.current) return
+
+    const now = Date.now()
+    let resetPeer = false
+    for (const peer of peersRef.current.values()) {
+      const connectionState = peer.connection.connectionState
+      const stalledConnection =
+        (connectionState === 'new' || connectionState === 'connecting') &&
+        now - peer.createdAt >= SPATIAL_VOICE_CONNECT_TIMEOUT_MS
+      const staleDisconnection =
+        connectionState === 'disconnected' &&
+        peer.unhealthySince !== null &&
+        now - peer.unhealthySince >= SPATIAL_VOICE_DISCONNECTED_GRACE_MS
+
+      if (connectionState === 'failed' || stalledConnection || staleDisconnection) {
+        closePeer(peer.id, true)
+        resetPeer = true
+      }
+    }
+
+    syncPeers()
+    if (resetPeer) publishStats()
+  }, [closePeer, publishStats, syncPeers])
 
   const flushPendingSignals = useCallback(() => {
     const pending = pendingSignalsRef.current.splice(0)
@@ -523,6 +558,7 @@ export function useLandrushSpatialVoice({
       updatePeerPositions(peersRef.current, remotePlayersRef.current, localMotionRef.current)
     }, SPATIAL_VOICE_UPDATE_INTERVAL_MS)
     const statsTimer = window.setInterval(publishStats, SPATIAL_VOICE_STATS_INTERVAL_MS)
+    const reconcileTimer = window.setInterval(reconcilePeers, SPATIAL_VOICE_RECONCILE_INTERVAL_MS)
     const rtcStatsTimer = window.setInterval(() => {
       void updatePeerRtcStats(peersRef.current).finally(publishStats)
     }, 1000)
@@ -530,9 +566,10 @@ export function useLandrushSpatialVoice({
     return () => {
       window.clearInterval(updateTimer)
       window.clearInterval(statsTimer)
+      window.clearInterval(reconcileTimer)
       window.clearInterval(rtcStatsTimer)
     }
-  }, [localMotionRef, publishStats, status])
+  }, [localMotionRef, publishStats, reconcilePeers, status])
 
   useEffect(
     () =>
@@ -550,6 +587,7 @@ export function useLandrushSpatialVoice({
 
           return {
             connected: peer.connection.connectionState,
+            connectionAgeMs: Date.now() - peer.createdAt,
             audioConnected: Boolean(peer.source && peer.analyser),
             audioElement: peer.audioElement
               ? {
@@ -586,8 +624,11 @@ export function useLandrushSpatialVoice({
             rtc: peer.rtcStats,
             signaling: peer.connection.signalingState,
             targetGain: roundLevel(peer.targetGain),
+            unhealthyForMs:
+              peer.unhealthySince === null ? null : Math.max(0, Date.now() - peer.unhealthySince),
           }
         }),
+        remotePlayerIds: remotePlayersRef.current.map((player) => player.id),
         remoteVoicePeerIds,
         roomId,
         stats,
@@ -702,6 +743,10 @@ function queuePendingVoiceSignal(
 
 function shouldInitiateVoicePeer(localPeerId: string, remotePeerId: string) {
   return localPeerId.localeCompare(remotePeerId) < 0
+}
+
+function voicePeerIsComplete(peer: VoicePeer) {
+  return peer.connection.connectionState === 'connected' && peer.hasRemoteTrack
 }
 
 function getOrCreateSpatialVoiceAudioContext(current: AudioContext | null) {
