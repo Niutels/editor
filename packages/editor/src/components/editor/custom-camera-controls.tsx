@@ -72,10 +72,15 @@ export const CustomCameraControls = ({
   const initialPoseAppliedRef = useRef(false)
   const maxPolarAngle =
     !isPreviewMode && allowUndergroundCamera ? DEBUG_MAX_POLAR_ANGLE : DEFAULT_MAX_POLAR_ANGLE
-  const isLandrushWaterProofRoute = useMemo(() => {
+  const isLandrushWaterRoute = useMemo(() => {
     if (typeof window === 'undefined') return false
     const params = new URLSearchParams(window.location.search)
-    return params.get('proof') === 'water'
+    const pathname = window.location.pathname
+    return (
+      params.get('proof') === 'water' ||
+      pathname.startsWith('/landrush-lab/pascal-water') ||
+      pathname.startsWith('/landrush-lab/pascal-multiplayer-island')
+    )
   }, [])
 
   const camera = useThree((state) => state.camera)
@@ -286,7 +291,7 @@ export const CustomCameraControls = ({
         : CameraControlsImpl.ACTION.DOLLY
 
     return {
-      left: isLandrushWaterProofRoute
+      left: isLandrushWaterRoute
         ? CameraControlsImpl.ACTION.ROTATE
         : isPreviewMode
           ? CameraControlsImpl.ACTION.SCREEN_PAN
@@ -295,7 +300,7 @@ export const CustomCameraControls = ({
       right: CameraControlsImpl.ACTION.ROTATE,
       wheel: wheelAction,
     }
-  }, [cameraMode, isLandrushWaterProofRoute, isPreviewMode])
+  }, [cameraMode, isLandrushWaterRoute, isPreviewMode])
 
   // Touch gestures (mobile / trackpad).
   // - One finger drag    → rotate by default (much easier on a phone), but
@@ -333,7 +338,7 @@ export const CustomCameraControls = ({
         ? CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK
         : CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK
 
-    const oneFingerAction = isLandrushWaterProofRoute
+    const oneFingerAction = isLandrushWaterRoute
       ? CameraControlsImpl.ACTION.TOUCH_ROTATE
       : isPreviewMode
         ? CameraControlsImpl.ACTION.TOUCH_TRUCK
@@ -346,7 +351,7 @@ export const CustomCameraControls = ({
       two: twoFingerAction,
       three: CameraControlsImpl.ACTION.TOUCH_ROTATE,
     }
-  }, [cameraMode, isLandrushWaterProofRoute, isPreviewMode, isInteracting])
+  }, [cameraMode, isLandrushWaterRoute, isPreviewMode, isInteracting])
 
   useEffect(() => {
     const keyState = {
@@ -371,7 +376,7 @@ export const CustomCameraControls = ({
       controls.current.mouseButtons.wheel = wheelAction
       controls.current.mouseButtons.middle = CameraControlsImpl.ACTION.SCREEN_PAN
       controls.current.mouseButtons.right = CameraControlsImpl.ACTION.ROTATE
-      if (isLandrushWaterProofRoute) {
+      if (isLandrushWaterRoute) {
         controls.current.mouseButtons.left = CameraControlsImpl.ACTION.ROTATE
       } else if (isPreviewMode) {
         // In preview mode, left-click is always pan (viewer-style)
@@ -431,7 +436,7 @@ export const CustomCameraControls = ({
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('keyup', onKeyUp)
     }
-  }, [cameraMode, isLandrushWaterProofRoute, isPreviewMode])
+  }, [cameraMode, isLandrushWaterRoute, isPreviewMode])
 
   // Preview mode: auto-navigate camera to selected node (viewer behavior)
   const previewTargetNodeId = isPreviewMode

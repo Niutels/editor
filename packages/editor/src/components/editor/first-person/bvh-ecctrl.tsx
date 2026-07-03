@@ -32,8 +32,10 @@ export type FloatCheckType = 'RAYCAST' | 'SHAPECAST' | 'BOTH'
 export interface BVHEcctrlApi {
   group: THREE.Group | null
   model: THREE.Group | null
+  getLinVel: (target?: THREE.Vector3) => THREE.Vector3
   resetLinVel: () => void
   addLinVel: (v: THREE.Vector3) => void
+  setPaused: (paused: boolean) => void
   setLinVel: (v: THREE.Vector3) => void
   setMovement: (input: MovementInput) => void
 }
@@ -186,6 +188,7 @@ export const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
     const runState = useRef(false)
     const jumpState = useRef(false)
     const speedScaleState = useRef(1)
+    const imperativePaused = useRef(false)
     const isOnGround = useRef(false)
     const prevIsOnGround = useRef(false)
     const prevAnimation = useRef<CharacterAnimationStatus>('IDLE')
@@ -606,7 +609,12 @@ export const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
 
     const handleFloatingResponse = useCallback(
       (meshes: THREE.Mesh[], jump: boolean, delta: number) => {
-        if (meshes.length === 0) return
+        if (meshes.length === 0) {
+          isOnGround.current = false
+          totalPlatformDeltaPos.current.set(0, 0, 0)
+          isOnMovingPlatform.current = false
+          return
+        }
         let shouldJump = jump
 
         globalMinDistance.current = Number.POSITIVE_INFINITY
@@ -721,10 +729,16 @@ export const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
       (velocity: THREE.Vector3) => currentLinVel.current.add(velocity),
       [],
     )
+    const getLinVel = useCallback((target = new THREE.Vector3()) => {
+      return target.copy(currentLinVel.current)
+    }, [])
     const setLinVel = useCallback(
       (velocity: THREE.Vector3) => currentLinVel.current.copy(velocity),
       [],
     )
+    const setPaused = useCallback((nextPaused: boolean) => {
+      imperativePaused.current = nextPaused
+    }, [])
     const setMovement = useCallback((movement: MovementInput) => {
       if (movement.forward !== undefined) forwardState.current = movement.forward
       if (movement.backward !== undefined) backwardState.current = movement.backward
@@ -757,12 +771,14 @@ export const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         get model() {
           return characterModelRef.current
         },
+        getLinVel,
         resetLinVel,
         addLinVel,
+        setPaused,
         setLinVel,
         setMovement,
       }),
-      [addLinVel, resetLinVel, setLinVel, setMovement],
+      [addLinVel, getLinVel, resetLinVel, setLinVel, setMovement, setPaused],
     )
 
     const updateDebugger = useCallback(() => {
@@ -787,7 +803,7 @@ export const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
 
     useFrame((_, delta) => {
       elapsedRef.current += delta
-      if (paused || elapsedRef.current < delay) return
+      if (paused || imperativePaused.current || elapsedRef.current < delay) return
 
       const frameDelta = Math.min(0.1, Math.max(0, delta)) * slowMotionFactor
       const keys = getKeys() ?? presetKeys

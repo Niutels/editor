@@ -56,6 +56,7 @@ import {
   LANDRUSH_WORLD_ID,
 } from '@/components/landrush/pascal-landrush-scene'
 import type { LandrushPoint2 } from '@/components/landrush/types'
+import { type LandrushGamepadInput, readLandrushGamepadInput } from './landrush-gamepad-input'
 import type { ParcelAllocationParcel, ParcelAllocationResult } from './parcel-allocation'
 import type { ParcelStreetNetwork } from './parcel-streets'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
@@ -87,6 +88,7 @@ export type LocalPlayerProfile = {
 export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
   heading: number
   moving: boolean
+  pose?: 'falling'
   position: [number, number, number]
   speed: number
   updatedAt: number
@@ -301,6 +303,8 @@ const ROBOT_CAMERA_MOUSE_PITCH_SPEED = 0.0026
 const ROBOT_CAMERA_MOUSE_YAW_SPEED = 0.0032
 const ROBOT_CAMERA_TOUCH_PITCH_SPEED = 0.0031
 const ROBOT_CAMERA_TOUCH_YAW_SPEED = 0.0038 / 5
+const ROBOT_CAMERA_GAMEPAD_YAW_SPEED = MathUtils.degToRad(130)
+const ROBOT_CAMERA_GAMEPAD_PITCH_SPEED = MathUtils.degToRad(92)
 const ROBOT_CAMERA_WHEEL_ZOOM_SPEED = 0.001
 const ROBOT_GRASS_INTERACTION_RADIUS = 2.7
 const PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
@@ -837,6 +841,11 @@ export function WorldMultiplayerLabClient({
         leaveBuildMode()
         return
       }
+      if (mapView && event.code === 'Escape') {
+        event.preventDefault()
+        leaveMapView()
+        return
+      }
       if (buildParcel && event.code === 'KeyM') {
         event.preventDefault()
         if (!event.repeat) leaveBuildMode()
@@ -849,7 +858,7 @@ export function WorldMultiplayerLabClient({
 
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [buildParcel, layoutView, leaveBuildMode, toggleMapView])
+  }, [buildParcel, layoutView, leaveBuildMode, leaveMapView, mapView, toggleMapView])
 
   useEffect(() => {
     if (!effectiveMapView) return
@@ -1265,6 +1274,7 @@ function LocalMultiplayerRobot({
     const mobileViewport = isMobileControlViewport()
     const joystick = mobileJoystickRef.current
     const mobileJoystickActive = Boolean(mobileViewport && joystick && joystick.strength > 0.08)
+    const gamepadInput = mapView ? null : readLandrushGamepadInput()
 
     const movement = mapView
       ? null
@@ -1272,6 +1282,7 @@ function LocalMultiplayerRobot({
           pressedKeysRef.current,
           state.camera,
           mobileJoystickRef.current,
+          gamepadInput,
         )
     const cameraHeading = resolveCameraForwardHeading(state.camera)
     const targetHeading = movement
@@ -1280,7 +1291,10 @@ function LocalMultiplayerRobot({
         ? motion.heading
         : cameraHeading
     const targetSpeed = movement
-      ? resolveRobotTargetSpeed(movement, isRunPressed(pressedKeysRef.current))
+      ? resolveRobotTargetSpeed(
+          movement,
+          isRunPressed(pressedKeysRef.current) || Boolean(gamepadInput?.run),
+        )
       : 0
     const desiredVelocity = movement
       ? { x: movement.x * targetSpeed, z: movement.z * targetSpeed }
@@ -1656,8 +1670,19 @@ function RobotThirdPersonCameraController({
     }
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const gamepadInput = readLandrushGamepadInput()
+    const gamepadLookActive = Boolean(gamepadInput && gamepadInput.lookStrength > 0)
+    if (gamepadLookActive && gamepadInput && !mobileOrbitTouchRef.current) {
+      cameraYawRef.current -= gamepadInput.lookX * ROBOT_CAMERA_GAMEPAD_YAW_SPEED * frameDelta
+      cameraPitchRef.current = MathUtils.clamp(
+        cameraPitchRef.current + gamepadInput.lookY * ROBOT_CAMERA_GAMEPAD_PITCH_SPEED * frameDelta,
+        ROBOT_CAMERA_MIN_PITCH,
+        ROBOT_CAMERA_MAX_PITCH,
+      )
+    }
     const joystick = mobileJoystickRef.current
     if (
+      !gamepadLookActive &&
       joystick &&
       joystick.strength > 0.08 &&
       !mobileOrbitTouchRef.current &&
@@ -3109,6 +3134,7 @@ function shouldSendPlayerSnapshot(
   if (elapsedSinceLastSendMs >= LOCAL_STATE_IDLE_SEND_INTERVAL_MS) return true
   if (player.name !== previous.name || player.color !== previous.color) return true
   if (player.moving !== previous.moving) return true
+  if (player.pose !== previous.pose) return true
   if (Math.abs(player.speed - previous.speed) >= LOCAL_STATE_SPEED_EPSILON) return true
   if (angleDistance(player.heading, previous.heading) >= LOCAL_STATE_HEADING_EPSILON) return true
 
@@ -3238,6 +3264,7 @@ function resolveCameraRelativeMovement(
   keys: ReadonlySet<string>,
   camera: Camera,
   joystick: MobileJoystickInput | null,
+  gamepadInput: LandrushGamepadInput | null = null,
 ): RobotMovementInput | null {
   const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
@@ -3247,8 +3274,9 @@ function resolveCameraRelativeMovement(
     Number(keys.has('KeyS') || keys.has('ArrowDown'))
   const hasKeyboardInput = keyboardStrafe !== 0 || keyboardForward !== 0
   const hasJoystickInput = Boolean(joystick && joystick.strength > 0.08)
-  const strafe = keyboardStrafe + (joystick?.strafe ?? 0)
-  const forwardInput = keyboardForward + (joystick?.forward ?? 0)
+  const hasGamepadInput = Boolean(gamepadInput && gamepadInput.strength > 0)
+  const strafe = keyboardStrafe + (joystick?.strafe ?? 0) + (gamepadInput?.strafe ?? 0)
+  const forwardInput = keyboardForward + (joystick?.forward ?? 0) + (gamepadInput?.forward ?? 0)
 
   if (strafe === 0 && forwardInput === 0) return null
 
@@ -3260,11 +3288,14 @@ function resolveCameraRelativeMovement(
   )
   const heading = Math.atan2(direction.x, direction.z)
   const joystickStrength = hasJoystickInput ? (joystick?.strength ?? 1) : 0
-  const intensity = hasKeyboardInput ? 1 : hasJoystickInput ? joystickStrength : 1
-  const runAmount =
-    hasKeyboardInput || !hasJoystickInput
+  const gamepadStrength = hasGamepadInput ? (gamepadInput?.strength ?? 1) : 0
+  const analogStrength = Math.max(joystickStrength, gamepadStrength)
+  const intensity = hasKeyboardInput ? 1 : hasJoystickInput || hasGamepadInput ? analogStrength : 1
+  const runAmount = gamepadInput?.run
+    ? 1
+    : hasKeyboardInput || (!hasJoystickInput && !hasGamepadInput)
       ? 0
-      : clamp01((joystickStrength - ROBOT_JOYSTICK_RUN_START) / (1 - ROBOT_JOYSTICK_RUN_START))
+      : clamp01((analogStrength - ROBOT_JOYSTICK_RUN_START) / (1 - ROBOT_JOYSTICK_RUN_START))
   return { ...direction, heading, intensity, runAmount }
 }
 
@@ -3775,6 +3806,7 @@ function isPlayerSnapshot(value: unknown): value is MultiplayerPlayerSnapshot {
     typeof player.heading === 'number' &&
     typeof player.speed === 'number' &&
     typeof player.moving === 'boolean' &&
+    (player.pose === undefined || player.pose === 'falling') &&
     typeof player.updatedAt === 'number'
   )
 }

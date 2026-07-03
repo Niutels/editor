@@ -229,6 +229,7 @@ export function ControlModes() {
               !isSiteButton && isImageMode && isActive && 'bg-white/10 hover:bg-white/10',
               !isSiteButton && isImageMode && !isActive && 'hover:bg-white/5',
             )}
+            data-editor-control-mode={c.id}
             disabled={isDisabled}
             key={c.id}
             label={

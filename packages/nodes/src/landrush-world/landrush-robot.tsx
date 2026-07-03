@@ -19,7 +19,7 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { cameraPosition, color as tslColor, float, normalWorld, positionWorld } from 'three/tsl'
+import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 
 const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot.glb'
@@ -33,6 +33,10 @@ const LANDRUSH_ROBOT_RUN_BLEND_FULL_SPEED = 4.8
 const LANDRUSH_ROBOT_ANIMATION_PACE_RANGE = [0.2, 1.6] as const
 const LANDRUSH_ROBOT_CLIP_BLEND_RESPONSE = 8
 const LANDRUSH_ROBOT_CLIP_TIME_SCALE_RESPONSE = 10
+const LANDRUSH_ROBOT_FALL_RESPONSE = 7
+const LANDRUSH_ROBOT_FALL_SPIN_SPEED = 1.35
+const LANDRUSH_ROBOT_UP_AXIS = new Vector3(0, 1, 0)
+const LANDRUSH_ROBOT_IDENTITY_QUATERNION = new Quaternion()
 export const LANDRUSH_ROBOT_HOVER_OFFSET = 1.524
 export const LANDRUSH_ROBOT_HOVER_BOB_AMPLITUDE = 0.14
 export const LANDRUSH_ROBOT_HOVER_BOB_SPEED = 1.15
@@ -70,7 +74,7 @@ type RobotAnimationBlendState = {
   walkWeight: number
 }
 
-export type LandrushRobotPresentationMode = 'default' | 'hover'
+export type LandrushRobotPresentationMode = 'default' | 'fall' | 'hover'
 
 export type LandrushRobotAnimationState = {
   clipCount: number
@@ -106,6 +110,9 @@ type LandrushRobotHoverMaterialState = Object3D['userData'] & {
 }
 type LandrushRobotProps = {
   animationPace?: number
+  fallControlRotation?: Quaternion
+  fallIntensity?: number
+  fallMotionScale?: number
   framePriority?: number
   hoverOutlineWidthScale?: number
   node: LandrushWorldNode
@@ -118,6 +125,9 @@ type LandrushRobotProps = {
 
 export function LandrushRobot({
   animationPace = 1,
+  fallControlRotation,
+  fallIntensity = 1,
+  fallMotionScale = 1,
   framePriority = 0,
   hoverOutlineWidthScale = 1,
   node,
@@ -134,6 +144,8 @@ export function LandrushRobot({
     LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[1],
   )
   const hoverOutlineWidthScaleValue = MathUtils.clamp(hoverOutlineWidthScale, 0.5, 3)
+  const fallIntensityValue = MathUtils.clamp(fallIntensity, 0, 1)
+  const fallMotionScaleValue = MathUtils.clamp(fallMotionScale, 0.05, 1)
   const idleTimeScale = LANDRUSH_ROBOT_IDLE_TIME_SCALE
   const groupRef = useRef<Group>(null!)
   const { animations, scene } = useGLTF(LANDRUSH_ROBOT_ASSET_PATH)
@@ -173,9 +185,13 @@ export function LandrushRobot({
       const scale = measure('setup.robot-glb.compute-transform.resolve-scale', () =>
         Number.isFinite(size.y) && size.y > 0 ? LANDRUSH_ROBOT_TARGET_HEIGHT / size.y : 1,
       )
+      const visualScale = scale * LANDRUSH_ROBOT_GLB_VISUAL_SCALE
+      const fallPivotY = (center.y - bounds.min.y) * visualScale
       return measure('setup.robot-glb.compute-transform.build-offset', () => ({
+        fallPivot: [0, fallPivotY, 0] as const,
+        fallPivotInverse: [0, -fallPivotY, 0] as const,
         offset: [-center.x, -bounds.min.y, -center.z] as const,
-        scale,
+        scale: visualScale,
       }))
     })
   }, [clonedScene, measure])
@@ -206,6 +222,13 @@ export function LandrushRobot({
     walkWeight: 0,
   })
   const hoverAmountRef = useRef(0)
+  const fallAmountRef = useRef(0)
+  const fallSpinRef = useRef(0)
+  const headingQuaternionRef = useRef(new Quaternion())
+  const fallControlQuaternionRef = useRef(new Quaternion())
+  const fallProceduralEulerRef = useRef(new Euler())
+  const fallProceduralQuaternionRef = useRef(new Quaternion())
+  const fallPivotRef = useRef<Group>(null!)
   const reportAnimationFrameRef = useRef(0)
   const reportHoverPoseFrameRef = useRef(0)
 
@@ -292,10 +315,28 @@ export function LandrushRobot({
         )
         return hoverAmountRef.current
       })
+      const fallAmount = measure('frame.robot-glb.damp-fall-presentation', () => {
+        fallAmountRef.current = MathUtils.damp(
+          fallAmountRef.current,
+          presentationMode === 'fall' ? 1 : 0,
+          LANDRUSH_ROBOT_FALL_RESPONSE,
+          frameDelta,
+        )
+        if (fallAmountRef.current > 0.0001) {
+          fallSpinRef.current +=
+            frameDelta *
+            fallMotionScaleValue *
+            LANDRUSH_ROBOT_FALL_SPIN_SPEED *
+            (0.35 + fallAmountRef.current)
+        } else {
+          fallSpinRef.current = 0
+        }
+        return fallAmountRef.current
+      })
       const blendTargets = measure('frame.robot-glb.compute-blend-targets', () => {
         const moveBlendTarget = node.playerMoving ? MathUtils.clamp(speed / 2.4, 0, 1) : 0
         const runBlendTarget = moveBlendTarget * resolveRobotRunBlendTarget(speed)
-        const locomotionAmount = 1 - hoverAmount
+        const locomotionAmount = 1 - Math.max(hoverAmount, fallAmount)
         const walkBlendTarget = Math.max(0, moveBlendTarget - runBlendTarget) * locomotionAmount
         const suppressedRunBlendTarget = runBlendTarget * locomotionAmount
         return {
@@ -378,16 +419,44 @@ export function LandrushRobot({
 
       measure('frame.robot-glb.apply-transform', () => {
         const hoverOffset = resolveLandrushRobotHoverOffset(hoverAmount, clock.elapsedTime)
+        const fallRotation = resolveLandrushRobotFallRotation(
+          fallAmount,
+          fallSpinRef.current,
+          fallIntensityValue,
+        )
         groupRef.current?.position.set(
           node.playerPosition[0],
           node.playerPosition[1] + hoverOffset,
           node.playerPosition[2],
         )
-        groupRef.current?.rotation.set(0, node.playerHeading ?? 0, 0)
+        if (fallPivotRef.current) {
+          headingQuaternionRef.current.setFromAxisAngle(
+            LANDRUSH_ROBOT_UP_AXIS,
+            node.playerHeading ?? 0,
+          )
+          fallControlQuaternionRef.current.copy(
+            presentationMode === 'fall' && fallControlRotation
+              ? fallControlRotation
+              : LANDRUSH_ROBOT_IDENTITY_QUATERNION,
+          )
+          fallProceduralEulerRef.current.set(fallRotation.x, fallRotation.y, fallRotation.z, 'XYZ')
+          fallProceduralQuaternionRef.current.setFromEuler(fallProceduralEulerRef.current)
+          fallPivotRef.current.quaternion
+            .copy(fallControlQuaternionRef.current)
+            .multiply(headingQuaternionRef.current)
+            .multiply(fallProceduralQuaternionRef.current)
+        }
       })
 
       measure('frame.robot-glb.apply-hover-pose', () => {
         applyLandrushRobotHoverPose(clonedScene, hoverAmount, hoverRestPose)
+        applyLandrushRobotFallPose(
+          clonedScene,
+          fallAmount,
+          hoverRestPose,
+          fallSpinRef.current,
+          fallIntensityValue,
+        )
       })
 
       if (onHoverPoseSample) {
@@ -460,10 +529,17 @@ export function LandrushRobot({
     <group
       position={[node.playerPosition[0], node.playerPosition[1], node.playerPosition[2]]}
       ref={groupRef}
-      rotation={[0, node.playerHeading ?? 0, 0]}
     >
-      <group scale={robotTransform.scale * LANDRUSH_ROBOT_GLB_VISUAL_SCALE}>
-        <primitive object={clonedScene} position={robotTransform.offset} />
+      <group
+        position={robotTransform.fallPivot}
+        ref={fallPivotRef}
+        rotation={[0, node.playerHeading ?? 0, 0]}
+      >
+        <group position={robotTransform.fallPivotInverse}>
+          <group scale={robotTransform.scale}>
+            <primitive object={clonedScene} position={robotTransform.offset} />
+          </group>
+        </group>
       </group>
     </group>
   )
@@ -476,6 +552,25 @@ export function resolveLandrushRobotHoverOffset(hoverAmount: number, elapsedTime
     (LANDRUSH_ROBOT_HOVER_OFFSET +
       Math.sin(elapsedTime * LANDRUSH_ROBOT_HOVER_BOB_SPEED) * LANDRUSH_ROBOT_HOVER_BOB_AMPLITUDE)
   )
+}
+
+function resolveLandrushRobotFallRotation(fallAmount: number, spin: number, fallIntensity: number) {
+  if (fallAmount <= 0.0001) return { x: 0, y: 0, z: 0 }
+  const amount = MathUtils.smoothstep(fallAmount, 0, 1)
+  const looseAmount = MathUtils.smoothstep(fallIntensity, 0, 1)
+  return {
+    x:
+      (-0.95 +
+        Math.sin(spin * 1.4) * (0.14 + looseAmount * 0.36) +
+        Math.sin(spin * 3.9 + 0.4) * 0.18 * looseAmount) *
+      amount,
+    y: Math.sin(spin * 0.7) * (0.24 + looseAmount * 0.48) * amount,
+    z:
+      (1.02 +
+        Math.sin(spin) * (0.2 + looseAmount * 0.46) +
+        Math.sin(spin * 3.1 + 1.1) * 0.24 * looseAmount) *
+      amount,
+  }
 }
 
 function applyLandrushRobotHoverFill(root: Group, active: boolean, outlineWidthScale: number) {
@@ -616,6 +711,101 @@ function resolveLandrushRobotHoverBonePose(name: string, restRotation: Euler) {
     return { x: restRotation.x + 0.38, y: restRotation.y, z: restRotation.z }
   }
   return restRotation
+}
+
+function applyLandrushRobotFallPose(
+  root: Group,
+  fallAmount: number,
+  restPose: LandrushRobotRestPose,
+  spin: number,
+  fallIntensity: number,
+) {
+  if (fallAmount <= 0.0001) return
+
+  root.traverse((child) => {
+    if ((child as Object3D & { isBone?: boolean }).isBone !== true) return
+
+    const restRotation = restPose.get(child.name)
+    if (!restRotation) return
+
+    const poseTarget = resolveLandrushRobotFallBonePose(
+      child.name.toLowerCase(),
+      restRotation,
+      spin,
+      fallIntensity,
+    )
+    if (!poseTarget) return
+
+    child.rotation.set(
+      MathUtils.lerp(child.rotation.x, poseTarget.x, fallAmount),
+      MathUtils.lerp(child.rotation.y, poseTarget.y, fallAmount),
+      MathUtils.lerp(child.rotation.z, poseTarget.z, fallAmount),
+    )
+  })
+}
+
+function resolveLandrushRobotFallBonePose(
+  name: string,
+  restRotation: Euler,
+  spin: number,
+  fallIntensity: number,
+) {
+  const side = name.includes('left') ? 1 : name.includes('right') ? -1 : 0
+  const looseAmount = MathUtils.smoothstep(fallIntensity, 0, 1)
+  const phase = landrushRobotBonePhase(name)
+  const wiggle = Math.sin(spin * 4.2 + phase) * looseAmount * 2.25
+  const counterWiggle = Math.sin(spin * 3.1 + phase * 0.73) * looseAmount * 2.1
+  if (name.includes('hips')) {
+    return {
+      x: restRotation.x + 0.22 + wiggle * 0.07,
+      y: restRotation.y + counterWiggle * 0.05,
+      z: restRotation.z + 0.16 + wiggle * 0.08,
+    }
+  }
+  if (name.includes('spine')) {
+    return {
+      x: restRotation.x + 0.34 + wiggle * 0.1,
+      y: restRotation.y + counterWiggle * 0.08,
+      z: restRotation.z - 0.18 + wiggle * 0.1,
+    }
+  }
+  if (name.includes('neck') || name.includes('head')) {
+    return {
+      x: restRotation.x - 0.26 + counterWiggle * 0.09,
+      y: restRotation.y + wiggle * 0.08,
+      z: restRotation.z + 0.12 + wiggle * 0.08,
+    }
+  }
+  if (name.includes('arm') || name.includes('hand')) {
+    return {
+      x: restRotation.x + 0.58 + wiggle * 0.2,
+      y: restRotation.y + side * 0.18 + counterWiggle * 0.14,
+      z: restRotation.z + (side || 1) * (0.95 + wiggle * 0.22),
+    }
+  }
+  if (name.includes('leg') || name.includes('thigh') || name.includes('calf')) {
+    return {
+      x: restRotation.x - 0.42 + counterWiggle * 0.18,
+      y: restRotation.y + wiggle * 0.12,
+      z: restRotation.z + (side || 1) * (0.42 + counterWiggle * 0.16),
+    }
+  }
+  if (name.includes('foot') || name.includes('toe')) {
+    return {
+      x: restRotation.x + 0.5 + wiggle * 0.14,
+      y: restRotation.y + counterWiggle * 0.1,
+      z: restRotation.z + (side || 1) * (0.26 + wiggle * 0.1),
+    }
+  }
+  return null
+}
+
+function landrushRobotBonePhase(name: string) {
+  let hash = 0
+  for (let index = 0; index < name.length; index += 1) {
+    hash = (hash * 31 + name.charCodeAt(index)) % 997
+  }
+  return hash * 0.013
 }
 
 function createLandrushRobotHoverPoseSample(
