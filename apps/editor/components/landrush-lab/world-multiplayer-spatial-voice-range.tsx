@@ -26,11 +26,13 @@ export function SpatialVoiceRangeRing({
   color = '#7dd3fc',
   groundY,
   motionRef,
+  position,
   visible,
 }: {
   color?: string
   groundY: number
-  motionRef: { current: SpatialVoiceRangeMotion | null }
+  motionRef?: { current: SpatialVoiceRangeMotion | null }
+  position?: readonly [number, number, number] | null
   visible: boolean
 }) {
   const lineRef = useRef<LineSegments | null>(null)
@@ -43,21 +45,20 @@ export function SpatialVoiceRangeRing({
   useFrame((_, delta) => {
     const line = lineRef.current
     const material = materialRef.current
-    const motion = motionRef.current
+    const motion = motionRef?.current
     if (!line || !material) return
 
-    const targetOpacity = visible && motion ? 0.72 : 0
+    const positionX = motion?.position.x ?? position?.[0]
+    const positionZ = motion?.position.z ?? position?.[2]
+    const hasPosition = typeof positionX === 'number' && typeof positionZ === 'number'
+    const targetOpacity = visible && hasPosition ? 0.72 : 0
     const alpha = 1 - Math.exp(-SPATIAL_VOICE_RANGE_RESPONSE * delta)
     material.opacity += (targetOpacity - material.opacity) * alpha
     material.color.copy(colorValue)
     line.visible = material.opacity > 0.01
 
-    if (motion) {
-      line.position.set(
-        motion.position.x,
-        groundY + SPATIAL_VOICE_RANGE_GROUND_OFFSET,
-        motion.position.z,
-      )
+    if (hasPosition) {
+      line.position.set(positionX, groundY + SPATIAL_VOICE_RANGE_GROUND_OFFSET, positionZ)
     }
   })
 

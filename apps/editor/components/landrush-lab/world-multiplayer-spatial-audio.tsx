@@ -48,6 +48,7 @@ export type SpatialVoiceController = {
   available: boolean
   desired: boolean
   error: string | null
+  remoteVoicePeerIds: readonly string[]
   stats: SpatialVoiceStats
   status: SpatialVoiceStatus
   toggle: () => void
@@ -147,6 +148,7 @@ export function useLandrushSpatialVoice({
   const [desired, setDesired] = useState(false)
   const [status, setStatus] = useState<SpatialVoiceStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [remoteVoicePeerIds, setRemoteVoicePeerIds] = useState<string[]>([])
   const [stats, setStats] = useState<SpatialVoiceStats>(EMPTY_STATS)
   const audioContextRef = useRef<AudioContext | null>(null)
   const localGraphRef = useRef<VoiceLocalGraph | null>(null)
@@ -175,11 +177,15 @@ export function useLandrushSpatialVoice({
     let outboundBytes = 0
     let outboundPackets = 0
     let remoteTrackCount = 0
+    const nextRemoteVoicePeerIds: string[] = []
 
     for (const peer of peersRef.current.values()) {
       if (peer.connection.connectionState === 'connected') connectedPeerCount += 1
       if (peer.hasRemoteTrack) remoteTrackCount += 1
       if (peer.source && peer.analyser) audioConnectedPeerCount += 1
+      if (peer.connection.connectionState === 'connected' && peer.hasRemoteTrack) {
+        nextRemoteVoicePeerIds.push(peer.id)
+      }
       inboundBytes += peer.rtcStats.inboundBytes
       inboundPackets += peer.rtcStats.inboundPackets
       outboundBytes += peer.rtcStats.outboundBytes
@@ -191,6 +197,9 @@ export function useLandrushSpatialVoice({
       maxOutputLevel = Math.max(maxOutputLevel, outputLevel)
     }
 
+    setRemoteVoicePeerIds((current) =>
+      stringArraysEqual(current, nextRemoteVoicePeerIds) ? current : nextRemoteVoicePeerIds,
+    )
     setStats({
       audiblePeerCount,
       audioConnectedPeerCount,
@@ -419,6 +428,7 @@ export function useLandrushSpatialVoice({
         sendSignalRef.current,
       )
       pendingSignalsRef.current = []
+      setRemoteVoicePeerIds([])
       setStats(EMPTY_STATS)
       setStatus(desired && !available ? 'idle' : 'idle')
       return
@@ -494,6 +504,7 @@ export function useLandrushSpatialVoice({
         audioContextRef,
         sendSignalRef.current,
       )
+      setRemoteVoicePeerIds([])
       setStats(EMPTY_STATS)
     }
   }, [available, desired, flushPendingSignals, localProfile.id, publishStats, syncPeers])
@@ -574,11 +585,12 @@ export function useLandrushSpatialVoice({
             targetGain: roundLevel(peer.targetGain),
           }
         }),
+        remoteVoicePeerIds,
         roomId,
         stats,
         status,
       })),
-    [available, desired, error, roomId, stats, status],
+    [available, desired, error, remoteVoicePeerIds, roomId, stats, status],
   )
 
   useEffect(
@@ -615,6 +627,7 @@ export function useLandrushSpatialVoice({
     available,
     desired,
     error,
+    remoteVoicePeerIds,
     stats,
     status,
     toggle,
@@ -1050,4 +1063,12 @@ function roundLevel(value: number) {
 
 function numberStat(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function stringArraysEqual(first: readonly string[], second: readonly string[]) {
+  if (first.length !== second.length) return false
+  for (let index = 0; index < first.length; index += 1) {
+    if (first[index] !== second[index]) return false
+  }
+  return true
 }

@@ -2889,6 +2889,7 @@ export function PascalWaterClient({
                         playerCameraPoseRef={playerCameraPoseRef}
                         playerReturnCameraPoseRef={playerReturnCameraPoseRef}
                         remotePlayers={multiplayer.remotePlayers}
+                        remoteVoicePeerIds={spatialVoice.remoteVoicePeerIds}
                         robotScreenRevealEnabled={robotScreenRevealEnabled}
                         surface={liveViewerLandSurface}
                         viewMode={viewMode}
@@ -4467,6 +4468,7 @@ function PascalWaterPlayerLayer({
   playerCameraPoseRef,
   playerReturnCameraPoseRef,
   remotePlayers,
+  remoteVoicePeerIds,
   robotScreenRevealEnabled,
   surface,
   viewMode,
@@ -4492,6 +4494,7 @@ function PascalWaterPlayerLayer({
   playerCameraPoseRef: { current: PascalWaterCameraPose | null }
   playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
+  remoteVoicePeerIds: readonly string[]
   robotScreenRevealEnabled: boolean
   surface: PascalWaterLandSurface
   viewMode: PascalWaterViewMode
@@ -4505,6 +4508,7 @@ function PascalWaterPlayerLayer({
   const localRobotVisualRootRef = useRef<Group | null>(null)
   const robotPresentationMode: LandrushRobotPresentationMode =
     viewMode === 'build' ? 'hover' : 'default'
+  const remoteVoicePeerIdSet = useMemo(() => new Set(remoteVoicePeerIds), [remoteVoicePeerIds])
 
   return (
     <group>
@@ -4550,6 +4554,15 @@ function PascalWaterPlayerLayer({
           groundY={groundY}
           key={player.id}
           player={player}
+        />
+      ))}
+      {remotePlayers.map((player) => (
+        <SpatialVoiceRangeRing
+          color={player.color}
+          groundY={surface.grassSurfaceElevation}
+          key={`voice-range-${player.id}`}
+          position={player.position}
+          visible={voiceRangeVisible && remoteVoicePeerIdSet.has(player.id)}
         />
       ))}
       <PascalWaterRobotScreenRevealClipper

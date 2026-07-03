@@ -765,6 +765,7 @@ export function WorldMultiplayerLabClient({
         parcelWorldId={parcelWorldId}
         perfRun={perfRun}
         remotePlayers={multiplayer.remotePlayers}
+        remoteVoicePeerIds={spatialVoice.remoteVoicePeerIds}
         streetNetwork={streetNetwork}
         surface={surface}
         voiceRangeVisible={spatialVoice.desired && spatialVoice.status === 'live'}
@@ -785,6 +786,7 @@ export function WorldMultiplayerLabClient({
       multiplayer.watchParcelWorld,
       perfRun,
       spatialVoice.desired,
+      spatialVoice.remoteVoicePeerIds,
       spatialVoice.status,
     ],
   )
@@ -997,6 +999,7 @@ function LandrushWorldMultiplayerScene({
   parcelWorldId,
   perfRun,
   remotePlayers,
+  remoteVoicePeerIds,
   streetNetwork,
   surface,
   voiceRangeVisible,
@@ -1018,6 +1021,7 @@ function LandrushWorldMultiplayerScene({
   parcelWorldId: string
   perfRun: MultiplayerPerfRunOptions
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
+  remoteVoicePeerIds: readonly string[]
   streetNetwork: ParcelStreetNetwork | null
   surface: WaterLandSurface
   voiceRangeVisible: boolean
@@ -1025,6 +1029,7 @@ function LandrushWorldMultiplayerScene({
 }) {
   const spawn = useMemo(() => centroidForPolygon(surface.grassSurfacePoints), [surface])
   const groundY = surface.grassSurfaceElevation + ROBOT_GROUND_CLEARANCE
+  const remoteVoicePeerIdSet = useMemo(() => new Set(remoteVoicePeerIds), [remoteVoicePeerIds])
 
   return (
     <group>
@@ -1053,6 +1058,15 @@ function LandrushWorldMultiplayerScene({
       )}
       {remotePlayers.map((player) => (
         <RemoteMultiplayerRobot groundY={groundY} key={player.id} player={player} />
+      ))}
+      {remotePlayers.map((player) => (
+        <SpatialVoiceRangeRing
+          color={player.color}
+          groundY={surface.grassSurfaceElevation}
+          key={`voice-range-${player.id}`}
+          position={player.position}
+          visible={voiceRangeVisible && remoteVoicePeerIdSet.has(player.id)}
+        />
       ))}
       <ParcelOwnershipLayer
         allocation={allocation}
