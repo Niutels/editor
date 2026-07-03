@@ -553,9 +553,12 @@ export function useLandrushSpatialVoice({
             audioConnected: Boolean(peer.source && peer.analyser),
             audioElement: peer.audioElement
               ? {
+                  defaultMuted: peer.audioElement.defaultMuted,
                   error: peer.audioElementError,
+                  muted: peer.audioElement.muted,
                   paused: peer.audioElement.paused,
                   readyState: peer.audioElement.readyState,
+                  volume: peer.audioElement.volume,
                 }
               : null,
             distanceMeters: distanceMeters === null ? null : roundLevel(distanceMeters),
@@ -792,7 +795,10 @@ function connectPeerAudio(peer: VoicePeer, audioContext: AudioContext | null) {
 
   const audioElement = document.createElement('audio')
   audioElement.autoplay = true
+  audioElement.defaultMuted = true
+  audioElement.muted = true
   audioElement.setAttribute('playsinline', 'true')
+  audioElement.setAttribute('muted', '')
   audioElement.srcObject = peer.remoteStream
   audioElement.style.display = 'none'
   audioElement.volume = 0
@@ -921,14 +927,15 @@ function updatePeerPositions(
   const playerMap = new Map(remotePlayers.map((player) => [player.id, player]))
   for (const peer of peers.values()) {
     const player = playerMap.get(peer.id)
-    if (!player || !peer.panner) continue
+    if (!peer.panner) continue
     const time = peer.panner.context.currentTime
-    const relativePosition = localMotion
-      ? {
-          x: player.position[0] - localMotion.position.x,
-          z: player.position[2] - localMotion.position.z,
-        }
-      : null
+    const relativePosition =
+      player && localMotion
+        ? {
+            x: player.position[0] - localMotion.position.x,
+            z: player.position[2] - localMotion.position.z,
+          }
+        : null
     setAudioParam(
       peer.panner.positionX,
       relativePosition?.x ?? SPATIAL_VOICE_MAX_DISTANCE * 4,
