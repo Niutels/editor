@@ -87,6 +87,7 @@ type VoicePeer = {
   rtcStats: VoicePeerRtcStats
   settingRemoteAnswerPending: boolean
   source: AudioNode | null
+  targetGain: number
 }
 
 type VoicePeerRtcStats = {
@@ -108,9 +109,10 @@ type VoiceLocalGraph = {
   source: MediaStreamAudioSourceNode
 }
 
-export const SPATIAL_VOICE_MAX_DISTANCE = 28
-const SPATIAL_VOICE_REFERENCE_DISTANCE = 1.5
-const SPATIAL_VOICE_ROLLOFF = 1.35
+export const SPATIAL_VOICE_MAX_DISTANCE = 5.6
+const SPATIAL_VOICE_FULL_VOLUME_DISTANCE = 1.2
+const SPATIAL_VOICE_REFERENCE_DISTANCE = 0.9
+const SPATIAL_VOICE_ROLLOFF = 2.4
 const SPATIAL_VOICE_UPDATE_INTERVAL_MS = 80
 const SPATIAL_VOICE_STATS_INTERVAL_MS = 250
 const SPATIAL_VOICE_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -184,7 +186,7 @@ export function useLandrushSpatialVoice({
       outboundPackets += peer.rtcStats.outboundPackets
       const level = measurePeerLevel(peer)
       const outputLevel = measurePeerOutputLevel(peer)
-      if (level > 0.01) audiblePeerCount += 1
+      if (outputLevel > 0.01) audiblePeerCount += 1
       maxLevel = Math.max(maxLevel, level)
       maxOutputLevel = Math.max(maxOutputLevel, outputLevel)
     }
@@ -247,6 +249,7 @@ export function useLandrushSpatialVoice({
         rtcStats: createEmptyVoicePeerRtcStats(),
         settingRemoteAnswerPending: false,
         source: null,
+        targetGain: 0,
       }
       peersRef.current.set(peerId, peer)
 
@@ -506,7 +509,7 @@ export function useLandrushSpatialVoice({
 
     const updateTimer = window.setInterval(() => {
       updateListener(audioContextRef.current, localMotionRef.current)
-      updatePeerPositions(peersRef.current, remotePlayersRef.current)
+      updatePeerPositions(peersRef.current, remotePlayersRef.current, localMotionRef.current)
     }, SPATIAL_VOICE_UPDATE_INTERVAL_MS)
     const statsTimer = window.setInterval(publishStats, SPATIAL_VOICE_STATS_INTERVAL_MS)
     const rtcStatsTimer = window.setInterval(() => {
@@ -531,11 +534,7 @@ export function useLandrushSpatialVoice({
           const localPosition = localMotionRef.current?.position
           const distanceMeters =
             remotePlayer && localPosition
-              ? Math.hypot(
-                  remotePlayer.position[0] - localPosition.x,
-                  remotePlayer.position[1] - localPosition.y,
-                  remotePlayer.position[2] - localPosition.z,
-                )
+              ? measureSpatialVoiceDistance(localPosition, remotePlayer)
               : null
 
           return {
@@ -551,6 +550,8 @@ export function useLandrushSpatialVoice({
             distanceMeters: distanceMeters === null ? null : roundLevel(distanceMeters),
             gain: peer.gain ? roundLevel(peer.gain.gain.value) : null,
             hasRemoteTrack: peer.hasRemoteTrack,
+            inVoiceRange:
+              distanceMeters === null ? false : distanceMeters < SPATIAL_VOICE_MAX_DISTANCE,
             id: peer.id,
             level: roundLevel(measurePeerLevel(peer)),
             outputLevel: roundLevel(measurePeerOutputLevel(peer)),
@@ -570,6 +571,7 @@ export function useLandrushSpatialVoice({
             })),
             rtc: peer.rtcStats,
             signaling: peer.connection.signalingState,
+            targetGain: roundLevel(peer.targetGain),
           }
         }),
         roomId,
@@ -789,12 +791,18 @@ function connectPeerAudio(peer: VoicePeer, audioContext: AudioContext | null) {
   const analyser = audioContext.createAnalyser()
   const outputAnalyser = audioContext.createAnalyser()
 
-  panner.distanceModel = 'inverse'
+  panner.coneInnerAngle = 360
+  panner.coneOuterAngle = 360
+  panner.coneOuterGain = 1
+  panner.distanceModel = 'exponential'
   panner.maxDistance = SPATIAL_VOICE_MAX_DISTANCE
   panner.refDistance = SPATIAL_VOICE_REFERENCE_DISTANCE
   panner.rolloffFactor = SPATIAL_VOICE_ROLLOFF
-  panner.panningModel = 'HRTF'
-  gain.gain.value = 0.95
+  panner.panningModel = 'equalpower'
+  panner.positionX.value = SPATIAL_VOICE_MAX_DISTANCE * 4
+  panner.positionY.value = 0
+  panner.positionZ.value = SPATIAL_VOICE_MAX_DISTANCE * 4
+  gain.gain.value = 0
   analyser.fftSize = 256
   outputAnalyser.fftSize = 256
 
@@ -879,11 +887,11 @@ function updateListener(audioContext: AudioContext | null, motion: SpatialAudioM
   if (!audioContext || !motion) return
 
   const listener = audioContext.listener
-  const { heading, position } = motion
+  const { heading } = motion
   const time = audioContext.currentTime
-  setAudioParam(listener.positionX, position.x, time)
-  setAudioParam(listener.positionY, position.y, time)
-  setAudioParam(listener.positionZ, position.z, time)
+  setAudioParam(listener.positionX, 0, time)
+  setAudioParam(listener.positionY, 0, time)
+  setAudioParam(listener.positionZ, 0, time)
   setAudioParam(listener.forwardX, Math.sin(heading), time)
   setAudioParam(listener.forwardY, 0, time)
   setAudioParam(listener.forwardZ, Math.cos(heading), time)
@@ -895,16 +903,56 @@ function updateListener(audioContext: AudioContext | null, motion: SpatialAudioM
 function updatePeerPositions(
   peers: Map<string, VoicePeer>,
   remotePlayers: readonly MultiplayerPlayerSnapshot[],
+  localMotion: SpatialAudioMotion | null,
 ) {
   const playerMap = new Map(remotePlayers.map((player) => [player.id, player]))
   for (const peer of peers.values()) {
     const player = playerMap.get(peer.id)
     if (!player || !peer.panner) continue
     const time = peer.panner.context.currentTime
-    setAudioParam(peer.panner.positionX, player.position[0], time)
-    setAudioParam(peer.panner.positionY, player.position[1], time)
-    setAudioParam(peer.panner.positionZ, player.position[2], time)
+    const relativePosition = localMotion
+      ? {
+          x: player.position[0] - localMotion.position.x,
+          z: player.position[2] - localMotion.position.z,
+        }
+      : null
+    setAudioParam(
+      peer.panner.positionX,
+      relativePosition?.x ?? SPATIAL_VOICE_MAX_DISTANCE * 4,
+      time,
+    )
+    setAudioParam(peer.panner.positionY, 0, time)
+    setAudioParam(
+      peer.panner.positionZ,
+      relativePosition?.z ?? SPATIAL_VOICE_MAX_DISTANCE * 4,
+      time,
+    )
+
+    const distance = relativePosition ? Math.hypot(relativePosition.x, relativePosition.z) : null
+    peer.targetGain = distance === null ? 0 : resolveSpatialVoiceGain(distance)
+    if (peer.gain) setAudioParam(peer.gain.gain, peer.targetGain, time)
   }
+}
+
+function measureSpatialVoiceDistance(
+  localPosition: Vector3,
+  remotePlayer: MultiplayerPlayerSnapshot,
+) {
+  return Math.hypot(
+    remotePlayer.position[0] - localPosition.x,
+    remotePlayer.position[2] - localPosition.z,
+  )
+}
+
+function resolveSpatialVoiceGain(distance: number) {
+  if (distance >= SPATIAL_VOICE_MAX_DISTANCE) return 0
+  if (distance <= SPATIAL_VOICE_FULL_VOLUME_DISTANCE) return 1
+
+  const fadeProgress =
+    (distance - SPATIAL_VOICE_FULL_VOLUME_DISTANCE) /
+    (SPATIAL_VOICE_MAX_DISTANCE - SPATIAL_VOICE_FULL_VOLUME_DISTANCE)
+  const smoothFade = fadeProgress * fadeProgress * (3 - 2 * fadeProgress)
+  return Math.max(0, Math.min(1, 1 - smoothFade))
 }
 
 function setAudioParam(param: AudioParam, value: number, time: number) {
