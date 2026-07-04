@@ -32,6 +32,7 @@ export const BuildingTreeNode = memo(function BuildingTreeNode({
   const isSelected = useViewer((state) => state.selection.buildingId === nodeId)
   const isHovered = useViewer((state) => state.hoveredId === nodeId)
   const setSelection = useViewer((state) => state.setSelection)
+  const setLevelMode = useViewer((state) => state.setLevelMode)
 
   const handleClick = () => {
     setSelection({ buildingId: nodeId })
@@ -47,6 +48,8 @@ export const BuildingTreeNode = memo(function BuildingTreeNode({
       parentId: nodeId,
     })
     createNode(newLevel, nodeId)
+    setLevelMode('stacked')
+    setSelection({ buildingId: nodeId, levelId: newLevel.id })
   }
 
   return (

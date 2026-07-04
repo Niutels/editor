@@ -50,7 +50,7 @@ import {
   type LandrushRobotPresentationMode,
   resolveLandrushRobotHoverOffset,
 } from '@pascal-app/nodes/landrush-world/robot'
-import { GRID_LAYER, renderScheduler, useViewer } from '@pascal-app/viewer'
+import { GRID_LAYER, getLevelHeight, renderScheduler, useViewer } from '@pascal-app/viewer'
 import { Html, KeyboardControls, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { type RootState, useFrame, useThree } from '@react-three/fiber'
 import {
@@ -272,6 +272,7 @@ const PASCAL_WATER_ROBOT_FALL_POINTER_FULL_INPUT_PX = 96
 const PASCAL_WATER_ROBOT_LOCAL_POSITION_RESPONSE = 26
 const PASCAL_WATER_ROBOT_TURN_RESPONSE = 12
 const PASCAL_WATER_ROBOT_GROUND_CLEARANCE = 0.04
+const PASCAL_WATER_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS = 0.35
 const PASCAL_WATER_ROBOT_FALL_COLLIDER_MESHES: Mesh[] = []
 const PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT = 1.28
 const PASCAL_WATER_ROBOT_CAMERA_FOLLOW_RESPONSE = 16
@@ -463,7 +464,6 @@ const PASCAL_WATER_MAP_CAMERA_MIN_DISTANCE =
 const PASCAL_WATER_MAP_CAMERA_MAX_DISTANCE =
   (PASCAL_WATER_MAP_CAMERA_DISTANCE * PASCAL_WATER_MAP_CAMERA_ZOOM) /
   PASCAL_WATER_MAP_CAMERA_MIN_ZOOM
-const PASCAL_WATER_MOBILE_CONTROLS_QUERY = '(max-width: 767px)'
 const PASCAL_WATER_REMOTE_POSITION_RESPONSE = 12
 const PASCAL_WATER_REMOTE_HEADING_RESPONSE = 14
 const PASCAL_WATER_REMOTE_ROBOT_FRAME_PRIORITY = 1
@@ -1605,6 +1605,62 @@ function getPascalWaterParcelMapCentroid(
   return shapes.get(parcel.id)?.centroid ?? parcel.centroid
 }
 
+function resolvePascalWaterBuildingLevels(
+  nodes: ReturnType<typeof useScene.getState>['nodes'],
+  buildingId: AnyNodeId | null,
+) {
+  if (!buildingId) return []
+  const building = nodes[buildingId]
+  if (building?.type !== 'building') return []
+
+  return building.children
+    .map((id) => nodes[id])
+    .filter((node): node is LevelNode => node?.type === 'level')
+    .sort((first, second) => first.level - second.level)
+}
+
+function resolvePascalWaterActiveLevelBaseY(
+  nodes: ReturnType<typeof useScene.getState>['nodes'],
+  selectedLevelId: LevelNode['id'] | null,
+) {
+  if (!selectedLevelId) return 0
+
+  const selectedLevel = nodes[selectedLevelId]
+  if (selectedLevel?.type !== 'level') return 0
+
+  let baseY = 0
+  const levels = resolvePascalWaterBuildingLevels(
+    nodes,
+    (selectedLevel.parentId as AnyNodeId | null) ?? null,
+  )
+  for (const level of levels) {
+    if (level.id === selectedLevel.id) return baseY
+    baseY += getLevelHeight(level.id, nodes)
+  }
+
+  return 0
+}
+
+function resolvePascalWaterRobotLevelId(
+  nodes: ReturnType<typeof useScene.getState>['nodes'],
+  robotWorldY: number,
+  groundY: number,
+) {
+  const levels = resolvePascalWaterBuildingLevels(nodes, PASCAL_WATER_BUILDING_ID as AnyNodeId)
+  if (levels.length === 0) return PASCAL_WATER_LEVEL_ID as LevelNode['id']
+
+  let baseY = groundY
+  let currentLevelId = levels[0]!.id
+  for (const level of levels) {
+    if (robotWorldY + PASCAL_WATER_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS >= baseY) {
+      currentLevelId = level.id
+    }
+    baseY += getLevelHeight(level.id, nodes)
+  }
+
+  return currentLevelId
+}
+
 function resolvePascalWaterDefaultParcelSelection({
   camera,
   parcels,
@@ -2674,6 +2730,13 @@ export function PascalWaterClient({
         : null,
     [buildParcelId, liveParcelAllocation.parcels],
   )
+  const selectedLevelId = useViewer((state) => state.selection.levelId)
+  const activeBuildLevelBaseY = useScene((state) =>
+    resolvePascalWaterActiveLevelBaseY(
+      state.nodes,
+      selectedLevelId ?? (PASCAL_WATER_LEVEL_ID as LevelNode['id']),
+    ),
+  )
   const liveViewerLandSurface = useMemo(
     () =>
       measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.viewer-land-surface', () =>
@@ -2681,6 +2744,7 @@ export function PascalWaterClient({
       ),
     [activeProfileMeasure, liveLandSurface],
   )
+  const activeBuildGroundY = liveViewerLandSurface.grassSurfaceElevation + activeBuildLevelBaseY
   const bladeSubdivisions = useMemo(
     () =>
       Math.min(
@@ -3087,6 +3151,7 @@ export function PascalWaterClient({
     viewer.setColorPreset('clay')
     viewer.setShading('rendered')
     viewer.setTextures(true)
+    viewer.setLevelMode('stacked')
     viewer.setShowGrid(false)
     viewer.setShadows(false)
     viewer.setWallMode('up')
@@ -3532,7 +3597,7 @@ export function PascalWaterClient({
                     </PascalWaterStartupReactProfiler>
                     <PascalWaterBuildParcelGuardLayer
                       buildMode={buildMode}
-                      groundY={liveViewerLandSurface.grassSurfaceElevation}
+                      groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                     />
                     <PascalWaterStartupReactProfiler
@@ -3543,7 +3608,7 @@ export function PascalWaterClient({
                       <PascalWaterBuildCameraRig
                         buildCameraPoseRef={buildCameraPoseRef}
                         captureEditorCameraPose={buildCameraControlsReady}
-                        groundY={liveViewerLandSurface.grassSurfaceElevation}
+                        groundY={activeBuildGroundY}
                         onSettled={handleBuildCameraSettled}
                         parcel={activeBuildParcel}
                         playerCameraPoseRef={playerCameraPoseRef}
@@ -3552,17 +3617,22 @@ export function PascalWaterClient({
                     </PascalWaterStartupReactProfiler>
                     <PascalWaterBuildCameraMouseOrbitController
                       buildCameraPoseRef={buildCameraPoseRef}
-                      groundY={liveViewerLandSurface.grassSurfaceElevation}
+                      groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                       visible={buildMode}
                     />
                     <PascalWaterBuildGamepadPlacementController
                       buildCameraPoseRef={buildCameraPoseRef}
                       focusRowRef={gamepadBuildFocusRowRef}
-                      groundY={liveViewerLandSurface.grassSurfaceElevation}
+                      groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                       visible={buildMode}
                       wallDraftActiveRef={gamepadBuildWallDraftActiveRef}
+                    />
+                    <PascalWaterRobotLevelSelectionTracker
+                      enabled={!buildMode}
+                      groundY={liveViewerLandSurface.grassSurfaceElevation}
+                      localMotionRef={localMotionRef}
                     />
                     {!startupProfileNoLandLayers ? (
                       <PascalWaterStartupReactProfiler
@@ -3625,7 +3695,7 @@ export function PascalWaterClient({
                     ) : null}
                     <PascalWaterBuildGridOverlay
                       buildableBoundaryPoints={liveParcelAllocation.boundary}
-                      groundY={liveViewerLandSurface.grassSurfaceElevation}
+                      groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                       roads={liveGrassRoads}
                       visible={buildMode}
@@ -3691,6 +3761,7 @@ export function PascalWaterClient({
             gamepadHintsActive={gamepadHintsActive}
             voice={spatialVoice}
           />
+          <PascalWaterLevelModeControls />
           <div className={pascalWaterModeHintClass()} title="Right click to move">
             <MouseRight aria-hidden className="size-6 text-white/82" />
             <span>Move</span>
@@ -4098,6 +4169,49 @@ function pascalWaterModeHintClass() {
   return [
     'pointer-events-none hidden h-14 w-28 items-center justify-center gap-3 rounded-md border border-white/18 bg-slate-950/54 px-3 text-base font-black uppercase leading-none text-white/76 shadow-xl backdrop-blur md:inline-flex',
   ].join(' ')
+}
+
+const PASCAL_WATER_LEVEL_MODE_OPTIONS = [
+  { label: 'Stack', mode: 'stacked' },
+  { label: 'Explode', mode: 'exploded' },
+  { label: 'Solo', mode: 'solo' },
+] as const
+
+function pascalWaterLevelModeButtonClass(active: boolean) {
+  return [
+    'inline-flex h-8 min-w-0 items-center justify-center gap-1 rounded border px-1.5 font-black text-[9px] uppercase leading-none shadow-lg transition md:h-9 md:w-full md:px-2 md:text-[10px]',
+    active
+      ? 'border-sky-100/70 bg-sky-300 text-slate-950 shadow-[0_0_18px_rgba(125,211,252,0.2)]'
+      : 'border-white/18 bg-slate-950/64 text-white/74 hover:border-white/38 hover:bg-slate-900/84 hover:text-white',
+  ].join(' ')
+}
+
+function PascalWaterLevelModeControls() {
+  const levelMode = useViewer((state) => state.levelMode)
+  const setLevelMode = useViewer((state) => state.setLevelMode)
+
+  return (
+    <div className="grid grid-cols-3 gap-1 border-white/12 border-t pt-1 md:grid-cols-1">
+      {PASCAL_WATER_LEVEL_MODE_OPTIONS.map((option) => (
+        <button
+          aria-label={`Level mode: ${option.label}`}
+          aria-pressed={levelMode === option.mode}
+          className={pascalWaterLevelModeButtonClass(levelMode === option.mode)}
+          key={option.mode}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            setLevelMode(option.mode)
+          }}
+          title={`Levels: ${option.label}`}
+          type="button"
+        >
+          <Layers aria-hidden className="hidden size-3.5 md:block" />
+          <span>{option.label}</span>
+        </button>
+      ))}
+    </div>
+  )
 }
 
 function PascalWaterVoiceModeButton({
@@ -5799,7 +5913,7 @@ function pascalWaterStairColliderGeometryReady() {
     if (
       node.type !== 'stair' ||
       node.visible === false ||
-      node.parentId !== PASCAL_WATER_LEVEL_ID ||
+      !isPascalWaterBuildLevelId(node.parentId, nodes) ||
       (node.stairType ?? 'straight') !== 'straight' ||
       (node.children?.length ?? 0) === 0
     ) {
@@ -6222,6 +6336,48 @@ function PascalWaterRevealProofOccluder({
       />
     </group>
   )
+}
+
+function PascalWaterRobotLevelSelectionTracker({
+  enabled,
+  groundY,
+  localMotionRef,
+}: {
+  enabled: boolean
+  groundY: number
+  localMotionRef: { current: RobotMotion | null }
+}) {
+  const lastLevelIdRef = useRef<LevelNode['id'] | null>(null)
+
+  useFrame(() => {
+    if (!enabled) {
+      lastLevelIdRef.current = null
+      return
+    }
+
+    const motion = localMotionRef.current
+    if (!motion) return
+
+    const nodes = useScene.getState().nodes
+    const levelId = resolvePascalWaterRobotLevelId(nodes, motion.position.y, groundY)
+    if (levelId === lastLevelIdRef.current) return
+
+    const viewer = useViewer.getState()
+    if (viewer.selection.levelId === levelId) {
+      lastLevelIdRef.current = levelId
+      return
+    }
+
+    lastLevelIdRef.current = levelId
+    viewer.setSelection({
+      buildingId: PASCAL_WATER_BUILDING_ID as never,
+      levelId,
+      selectedIds: [],
+      zoneId: null,
+    })
+  })
+
+  return null
 }
 
 function PascalWaterParcelOwnershipLayer({
@@ -7450,9 +7606,11 @@ function pointInPascalWaterRevealStairFootprint(
   node: Extract<AnyNode, { type: 'stair' }>,
   point: LandrushPoint2,
 ) {
+  const nodes = useScene.getState().nodes
   const footprint = createPascalWaterBuildNodeFootprint(
     node,
     PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
+    nodes,
   )
   return Boolean(
     footprint &&
@@ -7468,7 +7626,7 @@ function isPascalWaterRobotRevealSupportSlab(
   node: Extract<AnyNode, { type: 'slab' }>,
   context: PascalWaterRobotRevealOccluderContext,
 ) {
-  const footprint = createPascalWaterBuildNodeFootprint(node, 0)
+  const footprint = createPascalWaterBuildNodeFootprint(node, 0, useScene.getState().nodes)
   if (
     !footprint ||
     !pointInPolygonOrNearEdge(
@@ -8270,21 +8428,21 @@ function LocalPascalWaterRobot({
       return
     }
 
+    const previousTouchAction = canvas.style.touchAction
+    canvas.style.touchAction = 'none'
+
     const handlePointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'touch' && !event.isPrimary) {
         rightHoldMoveRef.current = null
         clickMoveTargetRef.current = null
         return
       }
-      const mobileScreenPress =
-        cameraEnabled &&
-        event.pointerType === 'touch' &&
-        event.button === 0 &&
-        isPascalWaterMobileControlViewport()
+      const touchScreenPress =
+        cameraEnabled && event.pointerType === 'touch' && (event.button === 0 || event.button < 0)
       const desktopRightPress = event.button === 2
       if (
         event.defaultPrevented ||
-        (!desktopRightPress && !mobileScreenPress) ||
+        (!desktopRightPress && !touchScreenPress) ||
         !pointerEventInPascalWaterCanvas(event, canvas) ||
         isPascalWaterInteractivePointerTarget(event.target)
       ) {
@@ -8292,19 +8450,22 @@ function LocalPascalWaterRobot({
       }
       event.preventDefault()
       event.stopPropagation()
-      if (mobileScreenPress) event.stopImmediatePropagation()
+      if (touchScreenPress) event.stopImmediatePropagation()
       clickMoveTargetRef.current = null
       rightHoldMoveRef.current = {
         id: event.pointerId,
-        source: mobileScreenPress ? 'touch' : 'mouse',
+        source: touchScreenPress ? 'touch' : 'mouse',
         startX: event.clientX,
         startY: event.clientY,
         x: event.clientX,
         y: event.clientY,
       }
+      try {
+        canvas.setPointerCapture(event.pointerId)
+      } catch {}
       recordPascalWaterInputProbe({
         kind: 'right-click-down',
-        source: mobileScreenPress ? 'mobile-touch' : 'mouse',
+        source: touchScreenPress ? 'mobile-touch' : 'mouse',
       })
     }
 
@@ -8325,6 +8486,9 @@ function LocalPascalWaterRobot({
       event.stopPropagation()
       if (active.source === 'touch') event.stopImmediatePropagation()
       rightHoldMoveRef.current = null
+      try {
+        canvas.releasePointerCapture(active.id)
+      } catch {}
       const dragDistance = Math.hypot(active.x - active.startX, active.y - active.startY)
       if (dragDistance > PASCAL_WATER_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX) {
         recordPascalWaterInputProbe({
@@ -8380,6 +8544,9 @@ function LocalPascalWaterRobot({
     const handlePointerCancel = (event: PointerEvent) => {
       if (rightHoldMoveRef.current?.id === event.pointerId) {
         rightHoldMoveRef.current = null
+        try {
+          canvas.releasePointerCapture(event.pointerId)
+        } catch {}
       }
     }
     const handleContextMenu = (event: MouseEvent) => {
@@ -8394,6 +8561,7 @@ function LocalPascalWaterRobot({
     window.addEventListener('pointercancel', handlePointerCancel, true)
     window.addEventListener('contextmenu', handleContextMenu, { capture: true })
     return () => {
+      canvas.style.touchAction = previousTouchAction
       window.removeEventListener('pointerdown', handlePointerDown, true)
       window.removeEventListener('pointermove', handlePointerMove, true)
       window.removeEventListener('pointerup', handlePointerUp, true)
@@ -10323,7 +10491,7 @@ function PascalWaterThirdPersonCameraController({
       if (
         event.defaultPrevented ||
         event.button !== 0 ||
-        (event.pointerType === 'touch' && isPascalWaterMobileControlViewport()) ||
+        event.pointerType === 'touch' ||
         !pointerEventInPascalWaterCanvas(event, canvas) ||
         isPascalWaterInteractivePointerTarget(event.target)
       ) {
@@ -13425,8 +13593,10 @@ function createPascalWaterSyncedBuildNodes({
   parcel: ParcelAllocationParcel
   parcelWorldId: string
 }) {
-  return collectPascalWaterBuildNodesInsideParcel(nodes, parcel).map((node) =>
-    sanitizePascalWaterBuildNodeForSync(node, parcelWorldId, parcel.id),
+  const buildNodes = collectPascalWaterBuildNodesInsideParcel(nodes, parcel)
+  const syncedIds = new Set(buildNodes.map((node) => node.id as AnyNodeId))
+  return buildNodes.map((node) =>
+    sanitizePascalWaterBuildNodeForSync(node, parcelWorldId, parcel.id, syncedIds),
   )
 }
 
@@ -13439,8 +13609,10 @@ function sanitizePascalWaterIncomingBuildNodes(
     string,
     AnyNode
   >
-  return collectPascalWaterBuildNodesInsideParcel(nodes, parcel).map((node) =>
-    sanitizePascalWaterBuildNodeForSync(node, parcelWorldId, parcel.id),
+  const buildNodes = collectPascalWaterBuildNodesInsideParcel(nodes, parcel)
+  const syncedIds = new Set(buildNodes.map((node) => node.id as AnyNodeId))
+  return buildNodes.map((node) =>
+    sanitizePascalWaterBuildNodeForSync(node, parcelWorldId, parcel.id, syncedIds),
   )
 }
 
@@ -13475,10 +13647,26 @@ function collectPascalWaterBuildNodesInsideParcel(
     childIds.forEach(collectDescendants)
   }
 
+  const collectBuildAncestors = (id: AnyNodeId) => {
+    let parentId = nodes[id]?.parentId as AnyNodeId | null
+    const visited = new Set<AnyNodeId>()
+
+    while (parentId && !visited.has(parentId)) {
+      if (parentId === PASCAL_WATER_LEVEL_ID) return
+      visited.add(parentId)
+      const parent = nodes[parentId]
+      if (!parent) return
+      if (parent.type === 'building') return
+      selectedIds.add(parentId)
+      parentId = parent.parentId as AnyNodeId | null
+    }
+  }
+
   for (const node of Object.values(nodes)) {
-    if (!isPascalWaterBuildObjectNode(node)) continue
+    if (!isPascalWaterBuildObjectNode(node, nodes)) continue
     if (!isPascalWaterBuildNodeInsideParcel(node, parcel, nodes)) continue
 
+    collectBuildAncestors(node.id as AnyNodeId)
     collectDescendants(node.id as AnyNodeId)
   }
 
@@ -13497,10 +13685,14 @@ function sanitizePascalWaterBuildNodeForSync(
   node: AnyNode,
   parcelWorldId: string,
   parcelId: string,
+  syncedIds?: ReadonlySet<AnyNodeId>,
 ) {
   const clone = JSON.parse(JSON.stringify(node)) as AnyNode & {
     children?: unknown[]
     metadata?: Record<string, unknown>
+  }
+  if (Array.isArray(clone.children) && syncedIds) {
+    clone.children = clone.children.filter((id) => syncedIds.has(id as AnyNodeId))
   }
   const metadata =
     clone.metadata && typeof clone.metadata === 'object' && !Array.isArray(clone.metadata)
@@ -13522,7 +13714,7 @@ function pascalWaterBuildNodeParentDepth(node: AnyNode, nodes: Record<string, An
 
   while (
     parentId &&
-    parentId !== PASCAL_WATER_LEVEL_ID &&
+    parentId !== PASCAL_WATER_BUILDING_ID &&
     nodes[parentId] &&
     !visited.has(parentId)
   ) {
@@ -13579,7 +13771,9 @@ function applyPascalWaterBuildSnapshot(
       parentId:
         node.parentId && incomingIds.has(node.parentId as AnyNodeId)
           ? (node.parentId as AnyNodeId)
-          : (PASCAL_WATER_LEVEL_ID as AnyNodeId),
+          : isPascalWaterBuildLevelNode(node)
+            ? (PASCAL_WATER_BUILDING_ID as AnyNodeId)
+            : (PASCAL_WATER_LEVEL_ID as AnyNodeId),
     })
   }
 
@@ -13631,7 +13825,7 @@ function createPascalWaterNavigationObstacles(
 ): readonly PascalWaterNavigationObstacle[] {
   const obstacles: PascalWaterNavigationObstacle[] = []
   for (const node of Object.values(nodes)) {
-    if (!isPascalWaterNavigationObstacleNode(node)) continue
+    if (!isPascalWaterNavigationObstacleNode(node, nodes)) continue
     if (node.type === 'wall') {
       for (const footprint of createPascalWaterWallNavigationFootprints(
         node,
@@ -13657,6 +13851,7 @@ function createPascalWaterNavigationObstacles(
     const footprint = createPascalWaterBuildNodeFootprint(
       node,
       PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS,
+      nodes,
     )
     if (!footprint) continue
     obstacles.push({
@@ -13710,7 +13905,7 @@ function createPascalWaterStairPortals(
 ): readonly PascalWaterStairPortal[] {
   const portals: PascalWaterStairPortal[] = []
   for (const node of Object.values(nodes)) {
-    if (node.type !== 'stair' || !isPascalWaterBuildObjectNode(node)) continue
+    if (node.type !== 'stair' || !isPascalWaterBuildObjectNode(node, nodes)) continue
     portals.push(...createPascalWaterStairNavigationPortals(node, nodes))
   }
   return portals
@@ -13957,7 +14152,7 @@ function createPascalWaterInvalidBuildNodeIds(
 ) {
   const invalidIds: string[] = []
   for (const node of Object.values(nodes)) {
-    if (node.parentId !== PASCAL_WATER_LEVEL_ID) continue
+    if (!isPascalWaterBuildObjectNode(node, nodes)) continue
     const footprints = createPascalWaterBuildNodeFootprints(node, 0, nodes)
     if (footprints.length === 0) continue
     if (
@@ -13977,10 +14172,10 @@ function createPascalWaterBuildNodeFootprints(
   padding: number,
   nodes: Record<string, AnyNode>,
 ): readonly (readonly LandrushPoint2[])[] {
-  if (!isPascalWaterBuildObjectNode(node)) return []
+  if (!isPascalWaterBuildObjectNode(node, nodes)) return []
   if (node.type === 'roof') return createPascalWaterRoofBuildFootprints(node, padding, nodes)
 
-  const footprint = createPascalWaterBuildNodeFootprint(node, padding)
+  const footprint = createPascalWaterBuildNodeFootprint(node, padding, nodes)
   return footprint ? [footprint] : []
 }
 
@@ -14027,8 +14222,9 @@ function createPascalWaterRoofBuildFootprints(
 function createPascalWaterBuildNodeFootprint(
   node: AnyNode,
   padding: number,
+  nodes?: Record<string, AnyNode>,
 ): readonly LandrushPoint2[] | null {
-  if (!isPascalWaterBuildObjectNode(node)) return null
+  if (!isPascalWaterBuildObjectNode(node, nodes)) return null
 
   if (node.type === 'wall' || node.type === 'fence') {
     return segmentFootprint(
@@ -14043,7 +14239,7 @@ function createPascalWaterBuildNodeFootprint(
   }
 
   if (node.type === 'item') {
-    if (node.parentId !== PASCAL_WATER_LEVEL_ID || node.asset.attachTo) return null
+    if (node.asset.attachTo) return null
     const [width, , depth] = node.asset.dimensions
     return rectFootprint({
       center: { x: node.position[0], z: node.position[2] },
@@ -14095,8 +14291,22 @@ function createPascalWaterBuildNodeFootprint(
   return null
 }
 
-function isPascalWaterBuildObjectNode(node: AnyNode) {
-  if (node.visible === false || node.parentId !== PASCAL_WATER_LEVEL_ID) return false
+function isPascalWaterBuildLevelNode(node: AnyNode | undefined): node is LevelNode {
+  return node?.type === 'level' && node.parentId === PASCAL_WATER_BUILDING_ID
+}
+
+function isPascalWaterBuildLevelId(
+  levelId: AnyNodeId | string | null | undefined,
+  nodes?: Record<string, AnyNode>,
+) {
+  if (!levelId) return false
+  if (levelId === PASCAL_WATER_LEVEL_ID) return true
+  if (!nodes) return false
+  return isPascalWaterBuildLevelNode(nodes[levelId as AnyNodeId])
+}
+
+function isPascalWaterBuildObjectNode(node: AnyNode, nodes?: Record<string, AnyNode>) {
+  if (node.visible === false || !isPascalWaterBuildLevelId(node.parentId, nodes)) return false
   const metadata = node.metadata as { isTransient?: boolean } | undefined
   if (metadata?.isTransient) return false
   return (
@@ -14113,8 +14323,8 @@ function isPascalWaterBuildObjectNode(node: AnyNode) {
   )
 }
 
-function isPascalWaterNavigationObstacleNode(node: AnyNode) {
-  if (node.visible === false || node.parentId !== PASCAL_WATER_LEVEL_ID) return false
+function isPascalWaterNavigationObstacleNode(node: AnyNode, nodes: Record<string, AnyNode>) {
+  if (node.visible === false || !isPascalWaterBuildLevelId(node.parentId, nodes)) return false
   const metadata = node.metadata as { isTransient?: boolean } | undefined
   if (metadata?.isTransient) return false
   return (
@@ -15121,12 +15331,6 @@ function releasePascalWaterPointerLock() {
   return true
 }
 
-function isPascalWaterMobileControlViewport() {
-  return (
-    typeof window !== 'undefined' && window.matchMedia(PASCAL_WATER_MOBILE_CONTROLS_QUERY).matches
-  )
-}
-
 function createPascalWaterViewerLandSurface(
   surface: PascalWaterLandSurface,
 ): PascalWaterLandSurface {
@@ -15206,7 +15410,7 @@ function createPascalWaterNode({
     id: PASCAL_WATER_NODE_ID as never,
     type: 'pascal-water',
     name: 'Pascal Water',
-    parentId: PASCAL_WATER_LEVEL_ID,
+    parentId: null,
     visible: true,
     position: [0, -landSurface.grassSurfaceElevation, 0],
     planeSize: WATER_PLANE_SIZE,
@@ -15264,7 +15468,7 @@ function createPascalWaterLayoutNode({
     id: layoutConfig.layoutNodeId as never,
     type: layoutConfig.layoutNodeKind,
     name: layoutConfig.layoutNodeName,
-    parentId: PASCAL_WATER_LEVEL_ID,
+    parentId: null,
     visible: true,
     position: [0, 0, 0],
     seed: island.seed,
@@ -15396,7 +15600,7 @@ function createPascalWaterSceneGraph(options: {
     landSurface,
     layoutConfig: options.layoutConfig,
   })
-  const levelChildren = options.omitWaterNode
+  const contextRootNodeIds = options.omitWaterNode
     ? [landrushLayoutNode.id]
     : [waterNode.id, landrushLayoutNode.id]
   const level: LevelNode & { camera?: unknown } = {
@@ -15412,7 +15616,7 @@ function createPascalWaterSceneGraph(options: {
       target: [...PASCAL_WATER_CAMERA_TARGET],
       zoom: PASCAL_WATER_CAMERA_ZOOM,
     },
-    children: levelChildren,
+    children: [],
     level: 0,
     metadata: { source: 'pascal-water-debug' },
   }
@@ -15421,7 +15625,7 @@ function createPascalWaterSceneGraph(options: {
     landrushLayoutNode,
     waterNode,
     sceneGraph: {
-      rootNodeIds: [PASCAL_WATER_SITE_ID],
+      rootNodeIds: [PASCAL_WATER_SITE_ID, ...contextRootNodeIds],
       nodes: {
         [PASCAL_WATER_SITE_ID]: {
           object: 'node',

@@ -354,6 +354,7 @@ export const FloatingLevelSelector = memo(function FloatingLevelSelector() {
   const selectedBuildingId = useViewer((s) => s.selection.buildingId)
   const levelId = useViewer((s) => s.selection.levelId)
   const setSelection = useViewer((s) => s.setSelection)
+  const setLevelMode = useViewer((s) => s.setLevelMode)
   const createNode = useScene((s) => s.createNode)
   const createNodes = useScene((s) => s.createNodes)
   const updateNodes = useScene((s) => s.updateNodes)
@@ -405,8 +406,9 @@ export const FloatingLevelSelector = memo(function FloatingLevelSelector() {
       parentId: resolvedBuildingId,
     })
     createNode(newLevel, resolvedBuildingId)
+    setLevelMode('stacked')
     setSelection({ buildingId: resolvedBuildingId, levelId: newLevel.id })
-  }, [resolvedBuildingId, levels, createNode, setSelection])
+  }, [resolvedBuildingId, levels, createNode, setLevelMode, setSelection])
 
   const handleAddBelow = useCallback(() => {
     if (!resolvedBuildingId) return
@@ -417,8 +419,9 @@ export const FloatingLevelSelector = memo(function FloatingLevelSelector() {
       parentId: resolvedBuildingId,
     })
     createNode(newLevel, resolvedBuildingId)
+    setLevelMode('stacked')
     setSelection({ buildingId: resolvedBuildingId, levelId: newLevel.id })
-  }, [resolvedBuildingId, levels, createNode, setSelection])
+  }, [resolvedBuildingId, levels, createNode, setLevelMode, setSelection])
 
   const handleInsertBetween = useCallback(
     (lowerIndex: number) => {
@@ -443,9 +446,10 @@ export const FloatingLevelSelector = memo(function FloatingLevelSelector() {
         parentId: resolvedBuildingId,
       })
       createNode(newLevel, resolvedBuildingId)
+      setLevelMode('stacked')
       setSelection({ buildingId: resolvedBuildingId, levelId: newLevel.id })
     },
-    [resolvedBuildingId, levels, createNode, updateNodes, setSelection],
+    [resolvedBuildingId, levels, createNode, updateNodes, setLevelMode, setSelection],
   )
 
   const handleConfirmDelete = useCallback(() => {
@@ -477,12 +481,13 @@ export const FloatingLevelSelector = memo(function FloatingLevelSelector() {
       }
       createNodes(createOps)
 
+      setLevelMode('stacked')
       setSelection({
         buildingId: resolvedBuildingId ?? undefined,
         levelId: newLevelId as LevelNode['id'],
       })
     },
-    [createNodes, resolvedBuildingId, setSelection, updateNodes],
+    [createNodes, resolvedBuildingId, setLevelMode, setSelection, updateNodes],
   )
 
   const handlePasteToLevel = useCallback((level: LevelListEntry) => {

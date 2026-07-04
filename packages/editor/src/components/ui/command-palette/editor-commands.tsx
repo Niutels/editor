@@ -200,7 +200,8 @@ export function EditorCommands() {
               parentId: building.id,
             })
             useScene.getState().createNode(newLevel, building.id)
-            useViewer.getState().setSelection({ levelId: newLevel.id })
+            useViewer.getState().setLevelMode('stacked')
+            useViewer.getState().setSelection({ buildingId: building.id, levelId: newLevel.id })
           }),
       },
       {
