@@ -3886,7 +3886,7 @@ export function LandrushIslandClient({
             <MapIcon aria-hidden className="size-5" />
             <span className="hidden text-lg md:inline">{gamepadHintsActive ? '△' : 'M'}</span>
           </button>
-          {mapView && !buildMode ? (
+          {!buildMode && !fpvActive ? (
             <button
               aria-label="Build mode"
               aria-pressed={buildMode}

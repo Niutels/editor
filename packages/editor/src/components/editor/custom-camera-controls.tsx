@@ -338,13 +338,16 @@ export const CustomCameraControls = ({
         ? CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK
         : CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK
 
-    const oneFingerAction = isLandrushWaterRoute
-      ? CameraControlsImpl.ACTION.TOUCH_ROTATE
-      : isPreviewMode
-        ? CameraControlsImpl.ACTION.TOUCH_TRUCK
-        : isInteracting
-          ? CameraControlsImpl.ACTION.NONE
-          : CameraControlsImpl.ACTION.TOUCH_ROTATE
+    const oneFingerAction =
+      isLandrushWaterRoute && isInteracting
+        ? CameraControlsImpl.ACTION.NONE
+        : isLandrushWaterRoute
+          ? CameraControlsImpl.ACTION.TOUCH_ROTATE
+          : isPreviewMode
+            ? CameraControlsImpl.ACTION.TOUCH_TRUCK
+            : isInteracting
+              ? CameraControlsImpl.ACTION.NONE
+              : CameraControlsImpl.ACTION.TOUCH_ROTATE
 
     return {
       one: oneFingerAction,
