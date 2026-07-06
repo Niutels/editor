@@ -3,6 +3,7 @@
 
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
+import { getMaterialRendererBackend } from '@pascal-app/viewer'
 import { type RefObject, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   BufferAttribute,
@@ -11,6 +12,8 @@ import {
   DoubleSide,
   type InstancedMesh,
   Matrix4,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
   NearestFilter,
   Object3D,
   PlaneGeometry,
@@ -224,6 +227,14 @@ function TreeBodies({
   meshRef: RefObject<InstancedMesh | null>
 }) {
   const material = useMemo(() => {
+    if (getMaterialRendererBackend() === 'webgl') {
+      return new MeshStandardMaterial({
+        color,
+        depthWrite: false,
+        roughness: 0.92,
+        transparent: true,
+      })
+    }
     const nextMaterial = new MeshStandardNodeMaterial({
       color,
       depthWrite: false,
@@ -268,6 +279,18 @@ function FoliageInstances({
 }) {
   const count = billboards.length
   const material = useMemo(() => {
+    if (getMaterialRendererBackend() === 'webgl') {
+      return new MeshBasicMaterial({
+        alphaMap,
+        alphaTest: 0.035,
+        depthWrite: false,
+        opacity,
+        side: DoubleSide,
+        toneMapped: false,
+        transparent: true,
+        vertexColors: true,
+      })
+    }
     const nextMaterial = new MeshBasicNodeMaterial({
       alphaMap,
       alphaTest: 0.035,

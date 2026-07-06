@@ -95,11 +95,6 @@ function GPUDeviceWatcher() {
       return
     }
 
-    console.log('[viewer] WebGPU device ready', {
-      label: device.label,
-      features: Array.from(device.features ?? []),
-    })
-
     device.lost.then((info: WebGPUDeviceLossInfo) => {
       console.error(
         `[viewer] WebGPU device lost: reason="${info.reason ?? 'unknown'}", message="${info.message ?? ''}". ` +

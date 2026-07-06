@@ -12,7 +12,7 @@ import {
   type LandrushWorldNode,
   LandrushWorldNode as LandrushWorldNodeSchema,
   type LevelNode,
-  type PascalWaterNode,
+  type PascalWaterNode as LandrushIslandNode,
   sceneRegistry,
   useInteractive,
   useLiveNodeOverrides,
@@ -35,12 +35,12 @@ import {
   useSidebarStore,
 } from '@pascal-app/editor'
 import {
-  createPascalWaterLandSurface,
-  createPascalWaterSmoothedPerimeter,
+  createPascalWaterLandSurface as createLandrushIslandLandSurface,
+  createPascalWaterSmoothedPerimeter as createLandrushIslandSmoothedPerimeter,
   LANDRUSH_WATER_SURFACE_PARAMETERS,
   type LandrushWaterSurfaceParameters,
-  PASCAL_WATER_LOW_ELEVATION,
-  type PascalWaterLandSurface,
+  PASCAL_WATER_LOW_ELEVATION as LANDRUSH_ISLAND_LOW_ELEVATION,
+  type PascalWaterLandSurface as LandrushIslandLandSurface,
 } from '@pascal-app/nodes'
 import {
   LANDRUSH_ROBOT_HOVER_RESPONSE,
@@ -50,12 +50,19 @@ import {
   type LandrushRobotPresentationMode,
   resolveLandrushRobotHoverOffset,
 } from '@pascal-app/nodes/landrush-world/robot'
-import { GRID_LAYER, getLevelHeight, renderScheduler, useViewer } from '@pascal-app/viewer'
+import {
+  getMaterialRendererBackend,
+  GRID_LAYER,
+  getLevelHeight,
+  renderScheduler,
+  useViewer,
+} from '@pascal-app/viewer'
 import { Html, KeyboardControls, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { type RootState, useFrame, useThree } from '@react-three/fiber'
 import {
   ChevronDown,
   ChevronRight,
+  Eye,
   Hammer,
   Layers,
   Map as MapIcon,
@@ -136,6 +143,10 @@ import {
   type ParcelStreetNetwork,
   type ParcelStreetSegment,
 } from './parcel-streets'
+import {
+  LandrushIslandPlacedTvScreens,
+  type LandrushIslandTvMediaSettings,
+} from './landrush-island-tv-screens'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import {
   clearLandrushRobotScreenRevealMask,
@@ -179,30 +190,30 @@ import {
 } from './world-multiplayer-spatial-audio'
 import { SpatialVoiceRangeRing } from './world-multiplayer-spatial-voice-range'
 
-const PASCAL_WATER_SITE_ID = 'site_pascal-water-debug'
-const PASCAL_WATER_BUILDING_ID = 'building_pascal-water-debug'
-const PASCAL_WATER_LEVEL_ID = 'level_pascal-water-debug'
-const PASCAL_WATER_NODE_ID = 'pascal-water_debug-water'
-const PASCAL_WATER_LAYOUT_NODE_ID = 'landrush-world_pascal-water-layout'
+const LANDRUSH_ISLAND_SITE_ID = 'site_landrush-island-debug'
+const LANDRUSH_ISLAND_BUILDING_ID = 'building_landrush-island-debug'
+const LANDRUSH_ISLAND_LEVEL_ID = 'level_landrush-island-debug'
+const LANDRUSH_ISLAND_NODE_ID = 'pascal-water_debug-water'
+const LANDRUSH_ISLAND_LAYOUT_NODE_ID = 'landrush-world_landrush-island-layout'
 const PASCAL_MULTIPLAYER_ISLAND_LAYOUT_NODE_ID = 'landrush-layout_pascal-multiplayer-island-layout'
-const PASCAL_WATER_CAMERA_POSITION = [88, 86, 94] as const
-const PASCAL_WATER_CAMERA_TARGET = [0, 0, 0] as const
-const PASCAL_WATER_CAMERA_ZOOM = 7.8
-const PASCAL_WATER_MATERIAL_PARAMETERS = {
+const LANDRUSH_ISLAND_CAMERA_POSITION = [88, 86, 94] as const
+const LANDRUSH_ISLAND_CAMERA_TARGET = [0, 0, 0] as const
+const LANDRUSH_ISLAND_CAMERA_ZOOM = 7.8
+const LANDRUSH_ISLAND_MATERIAL_PARAMETERS = {
   ...LANDRUSH_WATER_SURFACE_PARAMETERS,
 } satisfies LandrushWaterSurfaceParameters
-const PASCAL_WATER_GAMEPAD_BUILD_MODES = [
+const LANDRUSH_ISLAND_GAMEPAD_BUILD_MODES = [
   'select',
   'build',
   'material-paint',
   'delete',
-] as const satisfies readonly PascalWaterGamepadBuildMode[]
-const PASCAL_WATER_ELEVATION_PARAMETERS = {
+] as const satisfies readonly LandrushIslandGamepadBuildMode[]
+const LANDRUSH_ISLAND_ELEVATION_PARAMETERS = {
   ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
   cliffColorAverageRatio: 0.92,
   cliffToneVariation: 0.12,
 } satisfies IslandElevationParameters
-const PASCAL_WATER_PARCEL_PARAMETERS = {
+const LANDRUSH_ISLAND_PARCEL_PARAMETERS = {
   maxEdges: 15,
   parcelCount: 12,
   shoreSetbackMeters: 0,
@@ -210,18 +221,18 @@ const PASCAL_WATER_PARCEL_PARAMETERS = {
   splitJitter: 0.12,
   squareness: 0.82,
 } as const
-const PASCAL_WATER_PARCEL_OVERLAY_COLOR = '#e0a35a'
-const PASCAL_WATER_DIRT_ROAD_WIDTH_METERS =
+const LANDRUSH_ISLAND_PARCEL_OVERLAY_COLOR = '#e0a35a'
+const LANDRUSH_ISLAND_DIRT_ROAD_WIDTH_METERS =
   (DEFAULT_PARCEL_STREET_WIDTH_METERS +
     PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS +
     PARCEL_STREET_CURB_EXTRA_WIDTH_METERS) /
   2.35
-const PASCAL_WATER_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
-const PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 64
-const PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION = GRASS_FIELD_RESOLUTION
-const PASCAL_WATER_GRASS_TEXTURE_TILE_METERS = 5
-const PASCAL_WATER_GROUND_GRASS_BLOCKERS: readonly GrassFieldBlocker[] = []
-const PASCAL_WATER_GRASS_TUNING = {
+const LANDRUSH_ISLAND_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
+const LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 64
+const LANDRUSH_ISLAND_INTERACTIVE_GRASS_FIELD_RESOLUTION = GRASS_FIELD_RESOLUTION
+const LANDRUSH_ISLAND_GRASS_TEXTURE_TILE_METERS = 5
+const LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS: readonly GrassFieldBlocker[] = []
+const LANDRUSH_ISLAND_GRASS_TUNING = {
   ...DEFAULT_GRASS_BLADE_TUNING,
   colorPatchScale: 0.7,
   colorVariation: 0.5,
@@ -240,197 +251,203 @@ const PASCAL_WATER_GRASS_TUNING = {
   windSpeed: 2,
   windStrength: 0.25,
 } satisfies GrassBladeTuning
-const PASCAL_WATER_MULTIPLAYER_ROOM_ID = 'landrush-lab-world-multiplayer'
-const PASCAL_WATER_VISUAL_PLAYER_GROUND_Y = 0.04
-const PASCAL_WATER_LOCAL_STATE_SEND_INTERVAL_MS = 80
-const PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED = 2.75
-const PASCAL_WATER_ROBOT_WALK_SPEED = PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED / 1.5
-const PASCAL_WATER_ROBOT_RUN_SPEED = PASCAL_WATER_ROBOT_PREVIOUS_WALK_SPEED * 2.48
-const PASCAL_WATER_ROBOT_ACCELERATION = 18
-const PASCAL_WATER_ROBOT_DECELERATION = 24
-const PASCAL_WATER_ROBOT_FALL_UP_SPEED = 6.8
-const PASCAL_WATER_ROBOT_FALL_EDGE_TOLERANCE_METERS = 0.08
-const PASCAL_WATER_ROBOT_FALL_MIN_FORWARD_SPEED = 1.85
-const PASCAL_WATER_ROBOT_FALL_FORWARD_MOMENTUM_MULTIPLIER = 1.5
-const PASCAL_WATER_ROBOT_FALL_GRAVITY = 9.2
-const PASCAL_WATER_ROBOT_FALL_RESPAWN_DROP_METERS = 18
-const PASCAL_WATER_ROBOT_FALL_RESPAWN_FALLBACK_AFTER_HIT_SECONDS = 2
-const PASCAL_WATER_ROBOT_FALL_WATER_HOLD_SECONDS = 0.5
-const PASCAL_WATER_ROBOT_FALL_WIGGLE_DELAY_SECONDS = 0.5
-const PASCAL_WATER_ROBOT_FALL_WIGGLE_RAMP_SECONDS = 1.15
-const PASCAL_WATER_ROBOT_FALL_INITIAL_SLOW_MOTION_FACTOR = 0.48
-const PASCAL_WATER_ROBOT_FALL_WATER_SLOW_MOTION_FACTOR = 0.12
-const PASCAL_WATER_ROBOT_FALL_CLIFF_LEDGE_METERS = 0.7
-const PASCAL_WATER_ROBOT_FALL_CLIFF_LEDGE_MAX_FRACTION = 0.35
-const PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ROTATIONS_PER_SECOND = 3
-const PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED =
-  Math.PI * 2 * PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ROTATIONS_PER_SECOND
-const PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_ACCELERATION =
-  PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED / 2
-const PASCAL_WATER_ROBOT_FALL_POINTER_DEADZONE_PX = 8
-const PASCAL_WATER_ROBOT_FALL_POINTER_FULL_INPUT_PX = 96
-const PASCAL_WATER_ROBOT_LOCAL_POSITION_RESPONSE = 26
-const PASCAL_WATER_ROBOT_TURN_RESPONSE = 12
-const PASCAL_WATER_ROBOT_GROUND_CLEARANCE = 0.04
-const PASCAL_WATER_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS = 0.35
-const PASCAL_WATER_ROBOT_FALL_COLLIDER_MESHES: Mesh[] = []
-const PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT = 1.28
-const PASCAL_WATER_ROBOT_CAMERA_FOLLOW_RESPONSE = 16
-const PASCAL_WATER_ISOMETRIC_CAMERA_DISTANCE = 18
-const PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE = 10
-const PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE = 34
-const PASCAL_WATER_ISOMETRIC_CAMERA_PITCH = MathUtils.degToRad(54)
-const PASCAL_WATER_ISOMETRIC_CAMERA_MIN_PITCH = MathUtils.degToRad(14)
-const PASCAL_WATER_ISOMETRIC_CAMERA_MAX_PITCH = MathUtils.degToRad(74)
-const PASCAL_WATER_ISOMETRIC_CAMERA_PITCH_DRAG_SPEED = 0.006
-const PASCAL_WATER_ISOMETRIC_CAMERA_YAW_DRAG_SPEED = 0.006
-const PASCAL_WATER_ISOMETRIC_CAMERA_INITIAL_YAW = MathUtils.degToRad(135)
-const PASCAL_WATER_ISOMETRIC_CAMERA_YAW_RESPONSE = 8
-const PASCAL_WATER_ISOMETRIC_CAMERA_YAW_SPEED = MathUtils.degToRad(88)
-const PASCAL_WATER_BUILD_CAMERA_MOUSE_PITCH_DRAG_SPEED = 0.004
-const PASCAL_WATER_BUILD_CAMERA_MOUSE_ROTATE_DRAG_SPEED = 0.006
-const PASCAL_WATER_BUILD_GAMEPAD_CURSOR_SPEED_METERS = 6.25
-const PASCAL_WATER_BUILD_GAMEPAD_CURSOR_MIN_MOVE_METERS = 0.004
-const PASCAL_WATER_BUILD_GAMEPAD_CURSOR_MAX_RADIUS_METERS = 0.42
-const PASCAL_WATER_BUILD_GAMEPAD_CURSOR_MIN_RADIUS_METERS = 0.14
-const PASCAL_WATER_BUILD_GAMEPAD_CURSOR_RENDER_ORDER = 1200
-const PASCAL_WATER_BUILD_GAMEPAD_CURSOR_SCREEN_SCALE = 0.014
-const PASCAL_WATER_BUILD_GAMEPAD_PAN_SPEED_METERS = 8
-const PASCAL_WATER_BUILD_GAMEPAD_TRIGGER_DEADZONE = 0.05
-const PASCAL_WATER_BUILD_GAMEPAD_WALL_CURSOR_MAX_DISTANCE_METERS = 0.9
-const PASCAL_WATER_BUILD_GAMEPAD_WALL_TARGET_TOOLS = new Set(['door', 'window'])
-const PASCAL_WATER_BUILD_GAMEPAD_WINDOW_LOCAL_Y = 1.5
-const PASCAL_WATER_BUILD_GAMEPAD_ZOOM_SPEED_METERS = 18
-const PASCAL_WATER_GAMEPAD_CAMERA_YAW_SPEED = MathUtils.degToRad(120)
-const PASCAL_WATER_GAMEPAD_CAMERA_PITCH_SPEED = MathUtils.degToRad(86)
-const PASCAL_WATER_ISOMETRIC_CAMERA_ZOOM_STEP = 0.0006
-const PASCAL_WATER_ROBOT_MESH_WIDTH_METERS = 0.46
-const PASCAL_WATER_CLICK_MOVE_STOP_RADIUS = 0.35
-const PASCAL_WATER_CLICK_MOVE_PROJECTED_STOP_RADIUS = PASCAL_WATER_CLICK_MOVE_STOP_RADIUS * 1.75
-const PASCAL_WATER_CLICK_MOVE_WAYPOINT_RADIUS = 0.36
-const PASCAL_WATER_CLICK_MOVE_FULL_SPEED_DISTANCE = 1.75
-const PASCAL_WATER_CLICK_MOVE_MIN_SPEED_SCALE = 0.08
-const PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE = PASCAL_WATER_ROBOT_MESH_WIDTH_METERS * 4
-const PASCAL_WATER_CLICK_MOVE_PROGRESS_EPSILON_METERS = 0.04
-const PASCAL_WATER_CLICK_MOVE_STALL_MS = 650
-const PASCAL_WATER_CLICK_MOVE_NO_PROGRESS_RETRY_MS = 1400
-const PASCAL_WATER_CLICK_MOVE_STALL_SPEED = 0.12
-const PASCAL_WATER_CLICK_MOVE_RETRY_MS = 520
-const PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS = 0.78
-const PASCAL_WATER_CLICK_MOVE_RECOVERY_FORWARD_METERS = 0.42
-const PASCAL_WATER_CLICK_MOVE_LOCAL_RETRY_MAX = 6
-const PASCAL_WATER_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX = 8
-const PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS = 0.48
-const PASCAL_WATER_NAVIGATION_SLIDE_RADIUS_METERS =
-  PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS + PASCAL_WATER_ROBOT_MESH_WIDTH_METERS * 0.5
-const PASCAL_WATER_NAVIGATION_SLIDE_MIN_INWARD_DOT = 0.025
-const PASCAL_WATER_NAVIGATION_TARGET_NUDGE_METERS = 0.08
-const PASCAL_WATER_NAVIGATION_VERTEX_OFFSET_METERS = 0.35
-const PASCAL_WATER_NAVIGATION_MAX_GRAPH_POINTS = 96
-const PASCAL_WATER_NAVIGATION_DEBUG_TRACE_POINTS = 180
-const PASCAL_WATER_NAVIGATION_DEBUG_UPDATE_MS = 90
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID = 'wall_landrush-nav-live-door' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_DOOR_ID = 'door_landrush-nav-live-door' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_ROOM_EAST_WALL_ID =
+const LANDRUSH_ISLAND_MULTIPLAYER_ROOM_ID = 'landrush-lab-world-multiplayer'
+const LANDRUSH_ISLAND_VISUAL_PLAYER_GROUND_Y = 0.04
+const LANDRUSH_ISLAND_LOCAL_STATE_SEND_INTERVAL_MS = 80
+const LANDRUSH_ISLAND_ROBOT_PREVIOUS_WALK_SPEED = 2.75
+const LANDRUSH_ISLAND_ROBOT_WALK_SPEED = LANDRUSH_ISLAND_ROBOT_PREVIOUS_WALK_SPEED / 1.5
+const LANDRUSH_ISLAND_ROBOT_RUN_SPEED = LANDRUSH_ISLAND_ROBOT_PREVIOUS_WALK_SPEED * 2.48
+const LANDRUSH_ISLAND_ROBOT_ACCELERATION = 18
+const LANDRUSH_ISLAND_ROBOT_DECELERATION = 24
+const LANDRUSH_ISLAND_ROBOT_FALL_UP_SPEED = 6.8
+const LANDRUSH_ISLAND_ROBOT_FALL_EDGE_TOLERANCE_METERS = 0.08
+const LANDRUSH_ISLAND_ROBOT_FALL_MIN_FORWARD_SPEED = 1.85
+const LANDRUSH_ISLAND_ROBOT_FALL_FORWARD_MOMENTUM_MULTIPLIER = 1.5
+const LANDRUSH_ISLAND_ROBOT_FALL_GRAVITY = 9.2
+const LANDRUSH_ISLAND_ROBOT_FALL_RESPAWN_DROP_METERS = 18
+const LANDRUSH_ISLAND_ROBOT_FALL_RESPAWN_FALLBACK_AFTER_HIT_SECONDS = 2
+const LANDRUSH_ISLAND_ROBOT_FALL_WATER_HOLD_SECONDS = 0.5
+const LANDRUSH_ISLAND_ROBOT_FALL_WIGGLE_DELAY_SECONDS = 0.5
+const LANDRUSH_ISLAND_ROBOT_FALL_WIGGLE_RAMP_SECONDS = 1.15
+const LANDRUSH_ISLAND_ROBOT_FALL_INITIAL_SLOW_MOTION_FACTOR = 0.48
+const LANDRUSH_ISLAND_ROBOT_FALL_WATER_SLOW_MOTION_FACTOR = 0.12
+const LANDRUSH_ISLAND_ROBOT_FALL_CLIFF_LEDGE_METERS = 0.7
+const LANDRUSH_ISLAND_ROBOT_FALL_CLIFF_LEDGE_MAX_FRACTION = 0.35
+const LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ROTATIONS_PER_SECOND = 3
+const LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED =
+  Math.PI * 2 * LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ROTATIONS_PER_SECOND
+const LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_ACCELERATION =
+  LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED / 2
+const LANDRUSH_ISLAND_ROBOT_FALL_POINTER_DEADZONE_PX = 8
+const LANDRUSH_ISLAND_ROBOT_FALL_POINTER_FULL_INPUT_PX = 96
+const LANDRUSH_ISLAND_ROBOT_LOCAL_POSITION_RESPONSE = 26
+const LANDRUSH_ISLAND_ROBOT_TURN_RESPONSE = 12
+const LANDRUSH_ISLAND_ROBOT_GROUND_CLEARANCE = 0.04
+const LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS = 0.35
+const LANDRUSH_ISLAND_ROBOT_FALL_COLLIDER_MESHES: Mesh[] = []
+const LANDRUSH_ISLAND_ROBOT_CAMERA_TARGET_HEIGHT = 1.28
+const LANDRUSH_ISLAND_ROBOT_CAMERA_FOLLOW_RESPONSE = 16
+const LANDRUSH_ISLAND_ROBOT_FPV_EYE_HEIGHT = 1.462
+const LANDRUSH_ISLAND_ROBOT_FPV_FORWARD_OFFSET = 0.08
+const LANDRUSH_ISLAND_ROBOT_FPV_MOUSE_YAW_SPEED = 0.0022
+const LANDRUSH_ISLAND_ROBOT_FPV_MOUSE_PITCH_SPEED = 0.002
+const LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT = MathUtils.degToRad(82)
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE = 18
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE = 10
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE = 34
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH = MathUtils.degToRad(54)
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH = MathUtils.degToRad(14)
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH = MathUtils.degToRad(74)
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH_DRAG_SPEED = 0.006
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_DRAG_SPEED = 0.006
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW = MathUtils.degToRad(135)
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_RESPONSE = 8
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_SPEED = MathUtils.degToRad(88)
+const LANDRUSH_ISLAND_BUILD_CAMERA_MOUSE_PITCH_DRAG_SPEED = 0.004
+const LANDRUSH_ISLAND_BUILD_CAMERA_MOUSE_ROTATE_DRAG_SPEED = 0.006
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_SPEED_METERS = 6.25
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_MIN_MOVE_METERS = 0.004
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_MAX_RADIUS_METERS = 0.42
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_MIN_RADIUS_METERS = 0.14
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_RENDER_ORDER = 1200
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_SCREEN_SCALE = 0.014
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_PAN_SPEED_METERS = 8
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_TRIGGER_DEADZONE = 0.05
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_WALL_CURSOR_MAX_DISTANCE_METERS = 0.9
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_WALL_TARGET_TOOLS = new Set(['door', 'window'])
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_WINDOW_LOCAL_Y = 1.5
+const LANDRUSH_ISLAND_BUILD_GAMEPAD_ZOOM_SPEED_METERS = 18
+const LANDRUSH_ISLAND_GAMEPAD_CAMERA_YAW_SPEED = MathUtils.degToRad(120)
+const LANDRUSH_ISLAND_GAMEPAD_CAMERA_PITCH_SPEED = MathUtils.degToRad(86)
+const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_ZOOM_STEP = 0.0006
+const LANDRUSH_ISLAND_ROBOT_MESH_WIDTH_METERS = 0.46
+const LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS = 0.35
+const LANDRUSH_ISLAND_CLICK_MOVE_PROJECTED_STOP_RADIUS =
+  LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS * 1.75
+const LANDRUSH_ISLAND_CLICK_MOVE_WAYPOINT_RADIUS = 0.36
+const LANDRUSH_ISLAND_CLICK_MOVE_FULL_SPEED_DISTANCE = 1.75
+const LANDRUSH_ISLAND_CLICK_MOVE_MIN_SPEED_SCALE = 0.08
+const LANDRUSH_ISLAND_CLICK_MOVE_RUN_DISTANCE = LANDRUSH_ISLAND_ROBOT_MESH_WIDTH_METERS * 4
+const LANDRUSH_ISLAND_CLICK_MOVE_PROGRESS_EPSILON_METERS = 0.04
+const LANDRUSH_ISLAND_CLICK_MOVE_STALL_MS = 650
+const LANDRUSH_ISLAND_CLICK_MOVE_NO_PROGRESS_RETRY_MS = 1400
+const LANDRUSH_ISLAND_CLICK_MOVE_STALL_SPEED = 0.12
+const LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS = 520
+const LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS = 0.78
+const LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_FORWARD_METERS = 0.42
+const LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX = 6
+const LANDRUSH_ISLAND_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX = 8
+const LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS = 0.48
+const LANDRUSH_ISLAND_NAVIGATION_SLIDE_RADIUS_METERS =
+  LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS + LANDRUSH_ISLAND_ROBOT_MESH_WIDTH_METERS * 0.5
+const LANDRUSH_ISLAND_NAVIGATION_SLIDE_MIN_INWARD_DOT = 0.025
+const LANDRUSH_ISLAND_NAVIGATION_TARGET_NUDGE_METERS = 0.08
+const LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS = 0.35
+const LANDRUSH_ISLAND_NAVIGATION_MAX_GRAPH_POINTS = 96
+const LANDRUSH_ISLAND_NAVIGATION_DEBUG_TRACE_POINTS = 180
+const LANDRUSH_ISLAND_NAVIGATION_DEBUG_UPDATE_MS = 90
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID = 'wall_landrush-nav-live-door' as const
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_DOOR_ID = 'door_landrush-nav-live-door' as const
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_ROOM_EAST_WALL_ID =
   'wall_landrush-nav-live-room-east' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_ROOM_NORTH_WALL_ID =
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_ROOM_NORTH_WALL_ID =
   'wall_landrush-nav-live-room-north' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_ROOM_SOUTH_WALL_ID =
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_ROOM_SOUTH_WALL_ID =
   'wall_landrush-nav-live-room-south' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_ID = 'stair_landrush-nav-live-stair' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID =
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_ID = 'stair_landrush-nav-live-stair' as const
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID =
   'sseg_landrush-nav-live-stair' as const
-const PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_TOP_SLAB_ID =
+const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_TOP_SLAB_ID =
   'slab_landrush-nav-live-stair-top' as const
-const PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS = 1.5
-const PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS = 0.24
-const PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS = 0.18
-const PASCAL_WATER_DOOR_CROSSING_TANGENT_MARGIN_METERS = 0.5
-const PASCAL_WATER_DOOR_CROSSING_MIN_INTENSITY = 0.68
-const PASCAL_WATER_DOOR_CROSSING_OPEN_MIN = 0.82
-const PASCAL_WATER_CONSTRAINED_CROSSING_LOOKAHEAD_METERS = 0.55
-const PASCAL_WATER_CONSTRAINED_CROSSING_FULL_SPEED_METERS = 0.95
-const PASCAL_WATER_CONSTRAINED_CROSSING_MIN_SPEED_SCALE = 0.28
-const PASCAL_WATER_CONSTRAINED_CROSSING_MAX_SPEED_SCALE = 0.82
-const PASCAL_WATER_CONSTRAINED_CROSSING_RUN_APPROACH_METERS =
-  PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS * 1.5
-const PASCAL_WATER_DOOR_OPEN_TRIGGER_METERS = 1.45
-const PASCAL_WATER_DOOR_OPEN_LOOKAHEAD_METERS = 4.8
-const PASCAL_WATER_DOOR_OPEN_PATH_CLEARANCE_METERS = 0.62
-const PASCAL_WATER_DOOR_OPEN_ANIMATION_MS = 520
-const PASCAL_WATER_DOOR_OPEN_SWING_ANGLE = Math.PI / 2
-const PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT = 0.8
-const PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS = 3.15
-const PASCAL_WATER_ROBOT_GRASS_IDLE_BEND_STRENGTH = 1
-const PASCAL_WATER_ROBOT_GRASS_FULL_BEND_SPEED = 5.8
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE = 1.5
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_FEATHER_EXPANSION_SCALE = 3
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE = 2
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_BASE_HEIGHT = 0.08
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT = 2.08
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_CENTER_BIAS = 0.76
-const PASCAL_WATER_ROBOT_SCREEN_REVEAL_HOVER_BOTTOM_SAFE_PX = 176
-const PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS = 0.16
-const PASCAL_WATER_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS = 0.08
-const PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS = 1.24
-const PASCAL_WATER_WALK_TARGET_MIN_NORMAL_Y = 0.35
-const PASCAL_WATER_BUILT_GRASS_PADDING_METERS = 1
-const PASCAL_WATER_BUILT_GRASS_FEATHER_METERS = 0.3
-const PASCAL_WATER_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
-const PASCAL_WATER_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
-const PASCAL_WATER_BUILD_GRID_STEP_METERS = 0.5
-const PASCAL_WATER_BUILD_GRID_SEGMENT_STEP_METERS = 1
-const PASCAL_WATER_BUILD_GRID_ELEVATION_OFFSET = 0.015
-const PASCAL_WATER_BUILD_GRID_FADE_METERS = 4
-const PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS = 1.35
-const PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS = 4.25
-const PASCAL_WATER_BUILD_GRID_PATH_CLEARANCE_METERS = 0.72
-const PASCAL_WATER_BUILD_GRID_PATH_FADE_METERS = 3
-const PASCAL_WATER_BUILD_GRID_PATH_WIDTH_SCALE = 1.08
-const PASCAL_WATER_BUILD_GRID_FADE_BUCKETS = 8
-const PASCAL_WATER_BUILD_GRID_RENDER_ORDER = 0.05
-const PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER = 0
-const PASCAL_WATER_BUILD_GRASS_BLADE_RENDER_ORDER = 0.1
-const PASCAL_WATER_BUILD_CAMERA_MIN_DISTANCE = 10
-const PASCAL_WATER_BUILD_CAMERA_MAX_DISTANCE = 22
-const PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT = 7
-const PASCAL_WATER_BUILD_CAMERA_MAX_HEIGHT = 15
-const PASCAL_WATER_CAMERA_TRANSITION_SECONDS = 2
-const PASCAL_WATER_CAMERA_TRANSITION_TICK_MS = 1000 / 120
-const PASCAL_WATER_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
-const PASCAL_WATER_RUNTIME_FRAME_GAP_MS = 34
-const PASCAL_WATER_LOADING_EXPECTED_MS = 18_000
-const PASCAL_WATER_LOADING_FADE_MS = 520
-const PASCAL_WATER_LOADING_MINIMUM_MS = 1_800
-const PASCAL_WATER_LOADING_QUIET_MS = 900
-const PASCAL_WATER_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
-const PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE = 1.014
-const PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE = 12
+const LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS = 1.5
+const LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS = 0.24
+const LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS = 0.18
+const LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS = 0.5
+const LANDRUSH_ISLAND_DOOR_CROSSING_MIN_INTENSITY = 0.68
+const LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN = 0.82
+const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_LOOKAHEAD_METERS = 0.55
+const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_FULL_SPEED_METERS = 0.95
+const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_MIN_SPEED_SCALE = 0.28
+const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_MAX_SPEED_SCALE = 0.82
+const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_RUN_APPROACH_METERS =
+  LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS * 1.5
+const LANDRUSH_ISLAND_DOOR_OPEN_TRIGGER_METERS = 1.45
+const LANDRUSH_ISLAND_DOOR_OPEN_LOOKAHEAD_METERS = 4.8
+const LANDRUSH_ISLAND_DOOR_OPEN_PATH_CLEARANCE_METERS = 0.62
+const LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS = 520
+const LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE = Math.PI / 2
+const LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT = 0.8
+const LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS = 3.15
+const LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH = 1
+const LANDRUSH_ISLAND_ROBOT_GRASS_FULL_BEND_SPEED = 5.8
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE = 1.5
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_EXPANSION_SCALE = 3
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE = 2
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_BASE_HEIGHT = 0.08
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT = 2.08
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS = 0.76
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HOVER_BOTTOM_SAFE_PX = 176
+const LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS = 0.16
+const LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS = 0.08
+const LANDRUSH_ISLAND_BUILD_ROBOT_EXIT_HOVER_RADIUS = 1.24
+const LANDRUSH_ISLAND_WALK_TARGET_MIN_NORMAL_Y = 0.35
+const LANDRUSH_ISLAND_BUILT_GRASS_PADDING_METERS = 1
+const LANDRUSH_ISLAND_BUILT_GRASS_FEATHER_METERS = 0.3
+const LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
+const LANDRUSH_ISLAND_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
+const LANDRUSH_ISLAND_BUILD_GRID_STEP_METERS = 0.5
+const LANDRUSH_ISLAND_BUILD_GRID_SEGMENT_STEP_METERS = 1
+const LANDRUSH_ISLAND_BUILD_GRID_ELEVATION_OFFSET = 0.015
+const LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS = 4
+const LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS = 1.35
+const LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_FADE_METERS = 4.25
+const LANDRUSH_ISLAND_BUILD_GRID_PATH_CLEARANCE_METERS = 0.72
+const LANDRUSH_ISLAND_BUILD_GRID_PATH_FADE_METERS = 3
+const LANDRUSH_ISLAND_BUILD_GRID_PATH_WIDTH_SCALE = 1.08
+const LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS = 8
+const LANDRUSH_ISLAND_BUILD_GRID_RENDER_ORDER = 0.05
+const LANDRUSH_ISLAND_BUILD_GRASS_GROUND_RENDER_ORDER = 0
+const LANDRUSH_ISLAND_BUILD_GRASS_BLADE_RENDER_ORDER = 0.1
+const LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE = 10
+const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_DISTANCE = 22
+const LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT = 7
+const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_HEIGHT = 15
+const LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS = 2
+const LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS = 1000 / 120
+const LANDRUSH_ISLAND_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
+const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
+const LANDRUSH_ISLAND_LOADING_EXPECTED_MS = 18_000
+const LANDRUSH_ISLAND_LOADING_FADE_MS = 520
+const LANDRUSH_ISLAND_LOADING_MINIMUM_MS = 1_800
+const LANDRUSH_ISLAND_LOADING_QUIET_MS = 900
+const LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
+const LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_HOVER_SCALE = 1.014
+const LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_RESPONSE = 12
 
-type PascalWaterClientExperience = 'pascal-water' | 'pascal-multiplayer-island'
-type PascalWaterFieldDebugMode = 'cached-worker'
-type PascalWaterLayoutNode = LandrushWorldNode | LandrushLayoutNode
-type PascalWaterLayoutNodeKind = PascalWaterLayoutNode['type']
+type LandrushIslandClientExperience = 'pascal-water' | 'pascal-multiplayer-island'
+type LandrushIslandFieldDebugMode = 'cached-worker'
+type LandrushIslandLayoutNode = LandrushWorldNode | LandrushLayoutNode
+type LandrushIslandLayoutNodeKind = LandrushIslandLayoutNode['type']
 
-type PascalWaterExperienceConfig = {
-  debugSource: PascalWaterClientExperience
+type LandrushIslandExperienceConfig = {
+  debugSource: LandrushIslandClientExperience
   layoutNodeId: string
-  layoutNodeKind: PascalWaterLayoutNodeKind
+  layoutNodeKind: LandrushIslandLayoutNodeKind
   layoutNodeMetadataSource: string
   layoutNodeName: string
   projectId: string
 }
 
-const PASCAL_WATER_EXPERIENCE_CONFIGS = {
+const LANDRUSH_ISLAND_EXPERIENCE_CONFIGS = {
   'pascal-water': {
     debugSource: 'pascal-water',
-    layoutNodeId: PASCAL_WATER_LAYOUT_NODE_ID,
+    layoutNodeId: LANDRUSH_ISLAND_LAYOUT_NODE_ID,
     layoutNodeKind: 'landrush-world',
     layoutNodeMetadataSource: 'world-multiplayer-dirt-copy-layout',
     layoutNodeName: 'World Multiplayer Layout',
-    projectId: 'pascal-water-debug',
+    projectId: 'landrush-island-debug',
   },
   'pascal-multiplayer-island': {
     debugSource: 'pascal-multiplayer-island',
@@ -440,50 +457,50 @@ const PASCAL_WATER_EXPERIENCE_CONFIGS = {
     layoutNodeName: 'Pascal Multiplayer Island Layout',
     projectId: 'pascal-multiplayer-island',
   },
-} satisfies Record<PascalWaterClientExperience, PascalWaterExperienceConfig>
-const PASCAL_WATER_PARCEL_MAP_BASE_COLOR = '#d3aa58'
-const PASCAL_WATER_PARCEL_MAP_HOVER_COLOR = '#f5cf78'
-const PASCAL_WATER_PARCEL_MAP_BASE_OPACITY = 0.19
-const PASCAL_WATER_PARCEL_MAP_DEFAULT_FILL_OPACITY_SCALE = 0.65
-const PASCAL_WATER_PARCEL_MAP_CONTOUR_OPACITY = 0.62
-const PASCAL_WATER_PARCEL_MAP_FREE_BADGE_OPACITY = 0.88
-const PASCAL_WATER_PARCEL_MAP_HOVER_OPACITY = 0.34
-const PASCAL_WATER_PARCEL_MAP_ROAD_TRIM_METERS = PASCAL_WATER_DIRT_ROAD_WIDTH_METERS * 0.56
-const PASCAL_WATER_MAP_CAMERA_POSITION = [0, 128, 0.01] as const
-const PASCAL_WATER_MAP_CAMERA_TARGET = [0, 0, 0] as const
-const PASCAL_WATER_MAP_CAMERA_ZOOM = 8.6
-const PASCAL_WATER_MAP_CAMERA_MIN_ZOOM = 3
-const PASCAL_WATER_MAP_CAMERA_MAX_ZOOM = 28
-const PASCAL_WATER_MAP_CAMERA_DISTANCE = distance3(
-  PASCAL_WATER_MAP_CAMERA_POSITION,
-  PASCAL_WATER_MAP_CAMERA_TARGET,
+} satisfies Record<LandrushIslandClientExperience, LandrushIslandExperienceConfig>
+const LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR = '#d3aa58'
+const LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR = '#f5cf78'
+const LANDRUSH_ISLAND_PARCEL_MAP_BASE_OPACITY = 0.19
+const LANDRUSH_ISLAND_PARCEL_MAP_DEFAULT_FILL_OPACITY_SCALE = 0.65
+const LANDRUSH_ISLAND_PARCEL_MAP_CONTOUR_OPACITY = 0.62
+const LANDRUSH_ISLAND_PARCEL_MAP_FREE_BADGE_OPACITY = 0.88
+const LANDRUSH_ISLAND_PARCEL_MAP_HOVER_OPACITY = 0.34
+const LANDRUSH_ISLAND_PARCEL_MAP_ROAD_TRIM_METERS = LANDRUSH_ISLAND_DIRT_ROAD_WIDTH_METERS * 0.56
+const LANDRUSH_ISLAND_MAP_CAMERA_POSITION = [0, 128, 0.01] as const
+const LANDRUSH_ISLAND_MAP_CAMERA_TARGET = [0, 0, 0] as const
+const LANDRUSH_ISLAND_MAP_CAMERA_ZOOM = 8.6
+const LANDRUSH_ISLAND_MAP_CAMERA_MIN_ZOOM = 3
+const LANDRUSH_ISLAND_MAP_CAMERA_MAX_ZOOM = 28
+const LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE = distance3(
+  LANDRUSH_ISLAND_MAP_CAMERA_POSITION,
+  LANDRUSH_ISLAND_MAP_CAMERA_TARGET,
 )
-const PASCAL_WATER_MAP_CAMERA_MIN_DISTANCE =
-  (PASCAL_WATER_MAP_CAMERA_DISTANCE * PASCAL_WATER_MAP_CAMERA_ZOOM) /
-  PASCAL_WATER_MAP_CAMERA_MAX_ZOOM
-const PASCAL_WATER_MAP_CAMERA_MAX_DISTANCE =
-  (PASCAL_WATER_MAP_CAMERA_DISTANCE * PASCAL_WATER_MAP_CAMERA_ZOOM) /
-  PASCAL_WATER_MAP_CAMERA_MIN_ZOOM
-const PASCAL_WATER_REMOTE_POSITION_RESPONSE = 12
-const PASCAL_WATER_REMOTE_HEADING_RESPONSE = 14
-const PASCAL_WATER_REMOTE_ROBOT_FRAME_PRIORITY = 1
-const PASCAL_WATER_REMOTE_BEACON_FRAME_PRIORITY = 2
-const PASCAL_WATER_LOCAL_ROBOT_FRAME_PRIORITY = 2
-const PASCAL_WATER_LOCAL_BEACON_FRAME_PRIORITY = 3
-const PASCAL_WATER_PRIMITIVE_ROBOT_GEOMETRY_CENTER_Y = 1.04
-const PASCAL_WATER_PERF_DEFAULT_DURATION_MS = 9000
-const PASCAL_WATER_PERF_MAX_FRAME_SAMPLES = 1200
-const PASCAL_WATER_PERF_SPIKE_THRESHOLD_MS = 24
-const PASCAL_WATER_PERF_START_DELAY_MS = 2500
-const PASCAL_WATER_FALLBACK_PROFILE = {
+const LANDRUSH_ISLAND_MAP_CAMERA_MIN_DISTANCE =
+  (LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE * LANDRUSH_ISLAND_MAP_CAMERA_ZOOM) /
+  LANDRUSH_ISLAND_MAP_CAMERA_MAX_ZOOM
+const LANDRUSH_ISLAND_MAP_CAMERA_MAX_DISTANCE =
+  (LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE * LANDRUSH_ISLAND_MAP_CAMERA_ZOOM) /
+  LANDRUSH_ISLAND_MAP_CAMERA_MIN_ZOOM
+const LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE = 12
+const LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE = 14
+const LANDRUSH_ISLAND_REMOTE_ROBOT_FRAME_PRIORITY = 1
+const LANDRUSH_ISLAND_REMOTE_BEACON_FRAME_PRIORITY = 2
+const LANDRUSH_ISLAND_LOCAL_ROBOT_FRAME_PRIORITY = 2
+const LANDRUSH_ISLAND_LOCAL_BEACON_FRAME_PRIORITY = 3
+const LANDRUSH_ISLAND_PRIMITIVE_ROBOT_GEOMETRY_CENTER_Y = 1.04
+const LANDRUSH_ISLAND_PERF_DEFAULT_DURATION_MS = 9000
+const LANDRUSH_ISLAND_PERF_MAX_FRAME_SAMPLES = 1200
+const LANDRUSH_ISLAND_PERF_SPIKE_THRESHOLD_MS = 24
+const LANDRUSH_ISLAND_PERF_START_DELAY_MS = 2500
+const LANDRUSH_ISLAND_FALLBACK_PROFILE = {
   color: '#7dd3fc',
-  id: 'pascal-water-pending',
+  id: 'landrush-island-pending',
   name: 'Builder',
 } satisfies LocalPlayerProfile
-const PASCAL_WATER_UP_AXIS = new Vector3(0, 1, 0)
-const PASCAL_WATER_IDENTITY_QUATERNION = new Quaternion()
+const LANDRUSH_ISLAND_UP_AXIS = new Vector3(0, 1, 0)
+const LANDRUSH_ISLAND_IDENTITY_QUATERNION = new Quaternion()
 
-const PASCAL_WATER_SIDEBAR_TABS = [
+const LANDRUSH_ISLAND_SIDEBAR_TABS = [
   {
     id: 'site',
     label: 'Scene',
@@ -510,11 +527,11 @@ const PASCAL_WATER_SIDEBAR_TABS = [
 type FieldSliderKey = keyof WaterFieldParameters
 type ElevationSliderKey = keyof IslandElevationParameters
 type IslandSliderKey = keyof WaterLabIslandParameters
-type PascalWaterTuningGroupId = 'grass' | 'island' | 'waterAreas' | 'waterEdge' | 'waterRipples'
-type PascalWaterIsland = ReturnType<typeof generateWaterLabIsland>
-type PascalWaterPerimeter = PascalWaterNode['perimeter']
-type PascalWaterViewMode = 'build' | 'map' | 'player'
-type PascalWaterGamepadButtonState = {
+type LandrushIslandTuningGroupId = 'grass' | 'island' | 'waterAreas' | 'waterEdge' | 'waterRipples'
+type LandrushIslandIsland = ReturnType<typeof generateWaterLabIsland>
+type LandrushIslandPerimeter = LandrushIslandNode['perimeter']
+type LandrushIslandViewMode = 'build' | 'map' | 'player'
+type LandrushIslandGamepadButtonState = {
   circle: boolean
   cross: boolean
   dpadDown: boolean
@@ -525,17 +542,17 @@ type PascalWaterGamepadButtonState = {
   square: boolean
   triangle: boolean
 }
-type PascalWaterGamepadBuildMode = 'build' | 'delete' | 'material-paint' | 'select'
-type PascalWaterGamepadBuildFocusRow = 'modes' | 'structure-tools'
-type PascalWaterMovementReferenceFrame = 'camera-forward' | 'screen-up'
-type PascalWaterModeTransitionFadeState = {
-  from: PascalWaterViewMode
+type LandrushIslandGamepadBuildMode = 'build' | 'delete' | 'material-paint' | 'select'
+type LandrushIslandGamepadBuildFocusRow = 'modes' | 'structure-tools'
+type LandrushIslandMovementReferenceFrame = 'camera-forward' | 'screen-up'
+type LandrushIslandModeTransitionFadeState = {
+  from: LandrushIslandViewMode
   id: number
-  to: PascalWaterViewMode
+  to: LandrushIslandViewMode
 }
-type PascalWaterParcelSelectionDirection = 'down' | 'left' | 'right' | 'up'
-type PascalWaterProfileMeasure = <T>(id: string, callback: () => T) => T
-type PascalWaterCameraPose = {
+type LandrushIslandParcelSelectionDirection = 'down' | 'left' | 'right' | 'up'
+type LandrushIslandProfileMeasure = <T>(id: string, callback: () => T) => T
+type LandrushIslandCameraPose = {
   distance: number
   pitch: number
   position: Vector3
@@ -544,30 +561,30 @@ type PascalWaterCameraPose = {
   yaw: number
   zoom?: number | null
 }
-type PascalWaterOrthographicCamera = Camera & {
+type LandrushIslandOrthographicCamera = Camera & {
   isOrthographicCamera: true
   updateProjectionMatrix: () => void
   zoom: number
 }
-type PascalWaterCameraPoseTransition = {
+type LandrushIslandCameraPoseTransition = {
   elapsed: number
   startPosition: Vector3
   startQuaternion: Quaternion
   startTarget: Vector3
-  targetPose: PascalWaterCameraPose
+  targetPose: LandrushIslandCameraPose
   targetQuaternion: Quaternion
 }
-type PascalWaterStartupProfileSpan = {
+type LandrushIslandStartupProfileSpan = {
   durationMs: number
   id: string
   startMs: number
 }
-type PascalWaterStartupLongTask = {
+type LandrushIslandStartupLongTask = {
   durationMs: number
   name: string
   startMs: number
 }
-type PascalWaterStartupAnimationFrameScript = {
+type LandrushIslandStartupAnimationFrameScript = {
   durationMs: number
   forcedStyleAndLayoutDurationMs: number
   invoker: string
@@ -579,16 +596,16 @@ type PascalWaterStartupAnimationFrameScript = {
   sourceURL: string
   windowAttribution: string
 }
-type PascalWaterStartupAnimationFrame = {
+type LandrushIslandStartupAnimationFrame = {
   blockingDurationMs: number
   durationMs: number
   firstUIEventTimestampMs: number
   renderStartMs: number
-  scripts: PascalWaterStartupAnimationFrameScript[]
+  scripts: LandrushIslandStartupAnimationFrameScript[]
   startMs: number
   styleAndLayoutStartMs: number
 }
-type PascalWaterStartupReactCommit = {
+type LandrushIslandStartupReactCommit = {
   actualDurationMs: number
   baseDurationMs: number
   commitMs: number
@@ -596,47 +613,47 @@ type PascalWaterStartupReactCommit = {
   phase: string
   startMs: number
 }
-type PascalWaterRuntimeReactCommitTotal = {
+type LandrushIslandRuntimeReactCommitTotal = {
   count: number
   id: string
   maxMs: number
   phase: string
   totalMs: number
 }
-type PascalWaterStartupProfile = {
-  animationFrames: PascalWaterStartupAnimationFrame[]
-  longTasks: PascalWaterStartupLongTask[]
-  reactCommits: PascalWaterStartupReactCommit[]
-  spans: PascalWaterStartupProfileSpan[]
+type LandrushIslandStartupProfile = {
+  animationFrames: LandrushIslandStartupAnimationFrame[]
+  longTasks: LandrushIslandStartupLongTask[]
+  reactCommits: LandrushIslandStartupReactCommit[]
+  spans: LandrushIslandStartupProfileSpan[]
   startedAt: number
 }
-type PascalWaterPerfRunOptions = {
+type LandrushIslandPerfRunOptions = {
   durationMs: number
   enabled: boolean
   speed: 'run' | 'walk'
 }
-type PascalWaterPerfFrameSample = {
+type LandrushIslandPerfFrameSample = {
   dt: number
   time: number
 }
-type PascalWaterPerfLongTaskSample = {
+type LandrushIslandPerfLongTaskSample = {
   durationMs: number
   name: string
   startMs: number
 }
-type PascalWaterPerfRunState = {
+type LandrushIslandPerfRunState = {
   completedAt: number | null
   durationMs: number
-  frames: PascalWaterPerfFrameSample[]
-  longTasks: PascalWaterPerfLongTaskSample[]
+  frames: LandrushIslandPerfFrameSample[]
+  longTasks: LandrushIslandPerfLongTaskSample[]
   speed: 'run' | 'walk'
   spikeThresholdMs: number
   startedAt: number | null
   status: 'done' | 'pending' | 'running'
 }
 
-type PascalWaterSceneStore = ReturnType<typeof useScene.getState>
-type PascalWaterInteractiveDoorAnimationRecord = Record<AnyNodeId, DoorAnimationState>
+type LandrushIslandSceneStore = ReturnType<typeof useScene.getState>
+type LandrushIslandInteractiveDoorAnimationRecord = Record<AnyNodeId, DoorAnimationState>
 type ProgressiveRenderValue<T> = {
   finalValue: T
   isSettling: boolean
@@ -652,7 +669,7 @@ type RobotMotion = {
   speed: number
   velocity: Vector3
 }
-type PascalWaterRobotFallState = {
+type LandrushIslandRobotFallState = {
   elapsedSeconds: number
   position: Vector3
   predictedWaterHitSeconds: number
@@ -662,13 +679,13 @@ type PascalWaterRobotFallState = {
   waterY: number
   waterReachedSeconds: number | null
 }
-type PascalWaterFallPresentationState = {
+type LandrushIslandFallPresentationState = {
   active: boolean
   amount: number
   slowMotionFactor: number
   wiggleAmount: number
 }
-type PascalWaterFallControlInput = {
+type LandrushIslandFallControlInput = {
   forward: number
   strafe: number
   strength: number
@@ -677,48 +694,48 @@ type RobotMovementInput = {
   doorId?: AnyNodeId
   heading: number
   intensity: number
-  navigationKind?: PascalWaterNavigationSteeringKind
+  navigationKind?: LandrushIslandNavigationSteeringKind
   runAmount: number
   steeringDistance?: number
   steeringPoint?: LandrushPoint2
   x: number
   z: number
 }
-type PascalWaterMoveTarget = {
+type LandrushIslandMoveTarget = {
   point: LandrushPoint2
-  route?: PascalWaterMoveRouteState
+  route?: LandrushIslandMoveRouteState
 }
-type PascalWaterMoveRouteState = {
+type LandrushIslandMoveRouteState = {
   bestDistance: number
-  doorCrossing: PascalWaterDoorCrossingState | null
+  doorCrossing: LandrushIslandDoorCrossingState | null
   lastProgressAt: number
   lastRobotPoint: LandrushPoint2
   lastSteeringPoint: LandrushPoint2 | null
   nextRetryAt: number
   recoveryCount: number
 }
-type PascalWaterNavigationDebugRobotPoint = LandrushPoint2 & { y: number }
-type PascalWaterNavigationDebugSnapshot = {
-  crossing: PascalWaterDoorCrossingState | null
-  doorPortals: readonly PascalWaterDoorPortal[]
-  kind: PascalWaterNavigationSteeringKind | 'manual' | null
-  obstacles: readonly PascalWaterNavigationObstacle[]
-  robot: PascalWaterNavigationDebugRobotPoint
-  stairPortals: readonly PascalWaterStairPortal[]
+type LandrushIslandNavigationDebugRobotPoint = LandrushPoint2 & { y: number }
+type LandrushIslandNavigationDebugSnapshot = {
+  crossing: LandrushIslandDoorCrossingState | null
+  doorPortals: readonly LandrushIslandDoorPortal[]
+  kind: LandrushIslandNavigationSteeringKind | 'manual' | null
+  obstacles: readonly LandrushIslandNavigationObstacle[]
+  robot: LandrushIslandNavigationDebugRobotPoint
+  stairPortals: readonly LandrushIslandStairPortal[]
   steeringPoint: LandrushPoint2 | null
   target: LandrushPoint2 | null
   trace: readonly LandrushPoint2[]
 }
-type PascalWaterNavigationLiveCapture = {
-  captures: Array<{ elapsedMs: number; snapshot: PascalWaterNavigationDebugSnapshot }>
-  scenario: PascalWaterNavigationLiveScenarioKind
+type LandrushIslandNavigationLiveCapture = {
+  captures: Array<{ elapsedMs: number; snapshot: LandrushIslandNavigationDebugSnapshot }>
+  scenario: LandrushIslandNavigationLiveScenarioKind
   startedAt: number
 }
-type PascalWaterNavigationTestBridge = {
+type LandrushIslandNavigationTestBridge = {
   getState: () => {
-    doorPortals: readonly PascalWaterDoorPortal[]
-    robot: PascalWaterNavigationDebugRobotPoint
-    stairPortals: readonly PascalWaterStairPortal[]
+    doorPortals: readonly LandrushIslandDoorPortal[]
+    robot: LandrushIslandNavigationDebugRobotPoint
+    stairPortals: readonly LandrushIslandStairPortal[]
   }
   projectPoint: (
     point: LandrushPoint2 & { y?: number },
@@ -731,18 +748,18 @@ type PascalWaterNavigationTestBridge = {
     target: LandrushPoint2
   }) => boolean
 }
-type PascalWaterDoorCrossingPhase = 'center' | 'entry' | 'exit'
-type PascalWaterConstrainedCrossingKind = 'door' | 'stair'
-type PascalWaterDoorCrossingState = {
+type LandrushIslandDoorCrossingPhase = 'center' | 'entry' | 'exit'
+type LandrushIslandConstrainedCrossingKind = 'door' | 'stair'
+type LandrushIslandDoorCrossingState = {
   center: LandrushPoint2
   doorId?: AnyNodeId
   entry: LandrushPoint2
   exit: LandrushPoint2
-  kind: PascalWaterConstrainedCrossingKind
+  kind: LandrushIslandConstrainedCrossingKind
   nodeId: AnyNodeId
-  phase: PascalWaterDoorCrossingPhase
+  phase: LandrushIslandDoorCrossingPhase
 }
-type PascalWaterRightHoldMove = {
+type LandrushIslandRightHoldMove = {
   id: number
   source: 'mouse' | 'touch'
   startX: number
@@ -750,9 +767,9 @@ type PascalWaterRightHoldMove = {
   x: number
   y: number
 }
-type PascalWaterRuntimeCameraSample = {
+type LandrushIslandRuntimeCameraSample = {
   dtMs: number | null
-  mode: PascalWaterViewMode | 'unknown'
+  mode: LandrushIslandViewMode | 'unknown'
   position: [number, number, number]
   progress: number | null
   quaternion: [number, number, number, number]
@@ -762,31 +779,31 @@ type PascalWaterRuntimeCameraSample = {
   timeMs: number
   zoom: number | null
 }
-type PascalWaterRuntimeCameraJump = PascalWaterRuntimeCameraSample & {
+type LandrushIslandRuntimeCameraJump = LandrushIslandRuntimeCameraSample & {
   distanceMeters: number
   targetDistanceMeters: number
 }
-type PascalWaterRuntimeFrameSample = {
+type LandrushIslandRuntimeFrameSample = {
   dtMs: number | null
-  mode: PascalWaterViewMode | 'unknown'
+  mode: LandrushIslandViewMode | 'unknown'
   source: 'raf' | 'r3f'
   timeMs: number
 }
-type PascalWaterRuntimeFrameGap = PascalWaterRuntimeFrameSample & {
+type LandrushIslandRuntimeFrameGap = LandrushIslandRuntimeFrameSample & {
   thresholdMs: number
 }
-type PascalWaterRuntimeLongTaskSample = {
+type LandrushIslandRuntimeLongTaskSample = {
   durationMs: number
   name: string
   startMs: number
 }
-type PascalWaterRuntimePhaseEvent = {
+type LandrushIslandRuntimePhaseEvent = {
   detail?: Record<string, unknown>
   name: string
   timeMs: number
 }
-type PascalWaterRuntimeReactCommit = PascalWaterStartupReactCommit
-type PascalWaterRuntimeGrassSample = {
+type LandrushIslandRuntimeReactCommit = LandrushIslandStartupReactCommit
+type LandrushIslandRuntimeGrassSample = {
   centerLagMeters: number
   moving: boolean
   physicsLagMeters: number
@@ -797,9 +814,9 @@ type PascalWaterRuntimeGrassSample = {
   strength: number
   timeMs: number
 }
-type PascalWaterRuntimeProbe = {
-  cameraJumps: PascalWaterRuntimeCameraJump[]
-  cameraSamples: PascalWaterRuntimeCameraSample[]
+type LandrushIslandRuntimeProbe = {
+  cameraJumps: LandrushIslandRuntimeCameraJump[]
+  cameraSamples: LandrushIslandRuntimeCameraSample[]
   claimFirstFreeParcel?: () => boolean
   enterFirstBuildParcel?: () => boolean
   parcelDiagnostics?: {
@@ -810,31 +827,31 @@ type PascalWaterRuntimeProbe = {
     parcelCount: number
     parcelWorldId: string
   }
-  frameGaps: PascalWaterRuntimeFrameGap[]
-  frameSamples: PascalWaterRuntimeFrameSample[]
+  frameGaps: LandrushIslandRuntimeFrameGap[]
+  frameSamples: LandrushIslandRuntimeFrameSample[]
   gridSamples: Record<string, unknown>[]
   grassEvents: Record<string, unknown>[]
-  grassSamples: PascalWaterRuntimeGrassSample[]
+  grassSamples: LandrushIslandRuntimeGrassSample[]
   inputEvents: Record<string, unknown>[]
-  lastCameraSamplesBySource: Record<string, PascalWaterRuntimeCameraSample>
-  longTasks: PascalWaterRuntimeLongTaskSample[]
+  lastCameraSamplesBySource: Record<string, LandrushIslandRuntimeCameraSample>
+  longTasks: LandrushIslandRuntimeLongTaskSample[]
   navigationEvents: Record<string, unknown>[]
   navigationSelfTest?: Record<string, unknown>
-  phaseEvents: PascalWaterRuntimePhaseEvent[]
-  reactCommits: PascalWaterRuntimeReactCommit[]
-  reactCommitTotals: Record<string, PascalWaterRuntimeReactCommitTotal>
+  phaseEvents: LandrushIslandRuntimePhaseEvent[]
+  reactCommits: LandrushIslandRuntimeReactCommit[]
+  reactCommitTotals: Record<string, LandrushIslandRuntimeReactCommitTotal>
   revealSamples: Record<string, unknown>[]
   lastRobotAnimationState?: LandrushRobotAnimationState
   robotAnimationSamples: Record<string, unknown>[]
   robotHoverSamples: Record<string, unknown>[]
   startedAt: number
 }
-type PascalWaterNavigationObstacle = {
-  kind?: PascalWaterNavigationSteeringKind | 'asset'
+type LandrushIslandNavigationObstacle = {
+  kind?: LandrushIslandNavigationSteeringKind | 'asset'
   nodeId?: AnyNodeId
   points: readonly LandrushPoint2[]
 }
-type PascalWaterDoorPortal = {
+type LandrushIslandDoorPortal = {
   center: LandrushPoint2
   doorId: AnyNodeId
   halfWidth: number
@@ -843,11 +860,11 @@ type PascalWaterDoorPortal = {
   sideB: LandrushPoint2
   tangent: LandrushPoint2
 }
-type PascalWaterParcelMapShape = {
+type LandrushIslandParcelMapShape = {
   centroid: LandrushPoint2
   points: readonly LandrushPoint2[]
 }
-type PascalWaterStairPortal = {
+type LandrushIslandStairPortal = {
   center: LandrushPoint2
   halfRun: number
   halfWidth: number
@@ -857,11 +874,11 @@ type PascalWaterStairPortal = {
   sideB: LandrushPoint2
   tangent: LandrushPoint2
 }
-type PascalWaterStairNode = Extract<AnyNode, { type: 'stair' }>
-type PascalWaterStairSegmentNode = Extract<AnyNode, { type: 'stair-segment' }>
-type PascalWaterRoofNode = Extract<AnyNode, { type: 'roof' }>
-type PascalWaterRoofSegmentNode = Extract<AnyNode, { type: 'roof-segment' }>
-type PascalWaterStairSegmentLayout = {
+type LandrushIslandStairNode = Extract<AnyNode, { type: 'stair' }>
+type LandrushIslandStairSegmentNode = Extract<AnyNode, { type: 'stair-segment' }>
+type LandrushIslandRoofNode = Extract<AnyNode, { type: 'roof' }>
+type LandrushIslandRoofSegmentNode = Extract<AnyNode, { type: 'roof-segment' }>
+type LandrushIslandStairSegmentLayout = {
   center: LandrushPoint2
   length: number
   normal: LandrushPoint2
@@ -869,23 +886,23 @@ type PascalWaterStairSegmentLayout = {
   tangent: LandrushPoint2
   width: number
 }
-type PascalWaterStairNavigationFootprint = {
+type LandrushIslandStairNavigationFootprint = {
   nodeId: AnyNodeId
   points: readonly LandrushPoint2[]
 }
-type PascalWaterNavigationSteeringKind = 'direct' | 'door' | 'graph' | 'recovery' | 'stair'
-type PascalWaterNavigationLiveScenarioKind = 'door' | 'room' | 'stair'
-type PascalWaterNavigationSteeringResult = {
-  doorCrossing?: PascalWaterDoorCrossingState
+type LandrushIslandNavigationSteeringKind = 'direct' | 'door' | 'graph' | 'recovery' | 'stair'
+type LandrushIslandNavigationLiveScenarioKind = 'door' | 'room' | 'stair'
+type LandrushIslandNavigationSteeringResult = {
+  doorCrossing?: LandrushIslandDoorCrossingState
   doorId?: AnyNodeId
-  kind: PascalWaterNavigationSteeringKind
+  kind: LandrushIslandNavigationSteeringKind
   point: LandrushPoint2
 }
-type PascalWaterRevealMaterialState = {
+type LandrushIslandRevealMaterialState = {
   clipIntersection: boolean
   clippingPlanes: Material['clippingPlanes']
 }
-type PascalWaterRobotScreenBounds = {
+type LandrushIslandRobotScreenBounds = {
   centerX: number
   centerY: number
   height: number
@@ -895,14 +912,14 @@ type PascalWaterRobotScreenBounds = {
   minY: number
   width: number
 }
-type PascalWaterRevealObjectState = {
+type LandrushIslandRevealObjectState = {
   clipIntersection: unknown
   clippingPlanes: unknown
   clipShadows: unknown
   enabled: unknown
   isClippingGroup: unknown
 }
-type PascalWaterRobotRevealOccluderContext = {
+type LandrushIslandRobotRevealOccluderContext = {
   cameraPoint: LandrushPoint2
   cameraY: number
   robotPoint: LandrushPoint2
@@ -912,7 +929,7 @@ type RobotWorldOrbitControls = {
   target: Vector3
   update: () => void
 }
-type PascalWaterCameraControls = {
+type LandrushIslandCameraControls = {
   getTarget?: (target: Vector3, receiveEndValue?: boolean) => Vector3
   setLookAt?: (
     positionX: number,
@@ -981,7 +998,7 @@ const ELEVATION_SLIDERS = [
   { key: 'cliffColorAverageRatio', label: 'color average', max: 1, min: 0, step: 0.01 },
 ] satisfies readonly LabSliderConfig<ElevationSliderKey>[]
 
-const PASCAL_WATER_GRASS_SLIDERS = [
+const LANDRUSH_ISLAND_GRASS_SLIDERS = [
   { key: 'density', label: 'density', max: 30_000, min: 0, step: 100 },
   { key: 'scale', label: 'scale', max: 3, min: 0.1, step: 0.05 },
   { key: 'heightVariation', label: 'height variation', max: 1, min: 0, step: 0.01 },
@@ -1003,9 +1020,9 @@ const PASCAL_WATER_GRASS_SLIDERS = [
 declare global {
   interface Window {
     __PASCAL_BENCH_ORBITING__?: boolean
-    __PASCAL_WATER_PERF_RUN__?: () => unknown
-    __PASCAL_WATER_STARTUP_PROFILE__?: PascalWaterStartupProfile
-    __PASCAL_WATER_DEBUG__?: {
+    __LANDRUSH_ISLAND_PERF_RUN__?: () => unknown
+    __LANDRUSH_ISLAND_STARTUP_PROFILE__?: LandrushIslandStartupProfile
+    __LANDRUSH_ISLAND_DEBUG__?: {
       features: readonly string[]
       layoutNodeId: string
       layoutNodeKind: string
@@ -1020,37 +1037,37 @@ declare global {
   }
 }
 
-function usePascalWaterPerfRunProbe(perfRun: PascalWaterPerfRunOptions) {
+function useLandrushIslandPerfRunProbe(perfRun: LandrushIslandPerfRunOptions) {
   useEffect(() => {
     if (!perfRun.enabled) {
       if (window.__LANDRUSH_STYLIZED_GRASS_PERF__?.enabled) {
         delete window.__LANDRUSH_STYLIZED_GRASS_PERF__
       }
-      delete window.__PASCAL_WATER_PERF_RUN__
-      delete document.documentElement.dataset.pascalWaterPerfRun
+      delete window.__LANDRUSH_ISLAND_PERF_RUN__
+      delete document.documentElement.dataset.landrushIslandPerfRun
       return
     }
 
     const grassProbe: StylizedGrassPerfProbe = { enabled: true, samples: [] }
-    const state: PascalWaterPerfRunState = {
+    const state: LandrushIslandPerfRunState = {
       completedAt: null,
       durationMs: perfRun.durationMs,
       frames: [],
       longTasks: [],
       speed: perfRun.speed,
-      spikeThresholdMs: PASCAL_WATER_PERF_SPIKE_THRESHOLD_MS,
+      spikeThresholdMs: LANDRUSH_ISLAND_PERF_SPIKE_THRESHOLD_MS,
       startedAt: null,
       status: 'pending',
     }
     window.__LANDRUSH_STYLIZED_GRASS_PERF__ = grassProbe
 
     const publishSummary = () => {
-      const summary = summarizePascalWaterPerfRun(state, grassProbe)
-      document.documentElement.dataset.pascalWaterPerfRun = JSON.stringify(summary)
+      const summary = summarizeLandrushIslandPerfRun(state, grassProbe)
+      document.documentElement.dataset.landrushIslandPerfRun = JSON.stringify(summary)
       return summary
     }
 
-    window.__PASCAL_WATER_PERF_RUN__ = publishSummary
+    window.__LANDRUSH_ISLAND_PERF_RUN__ = publishSummary
 
     let raf = 0
     let longTaskObserver: PerformanceObserver | null = null
@@ -1085,8 +1102,8 @@ function usePascalWaterPerfRunProbe(perfRun: PascalWaterPerfRunOptions) {
         const dt = now - previous
         previous = now
         state.frames.push({ dt, time })
-        if (state.frames.length > PASCAL_WATER_PERF_MAX_FRAME_SAMPLES) {
-          state.frames.splice(0, state.frames.length - PASCAL_WATER_PERF_MAX_FRAME_SAMPLES)
+        if (state.frames.length > LANDRUSH_ISLAND_PERF_MAX_FRAME_SAMPLES) {
+          state.frames.splice(0, state.frames.length - LANDRUSH_ISLAND_PERF_MAX_FRAME_SAMPLES)
         }
 
         if (time < perfRun.durationMs) {
@@ -1100,7 +1117,7 @@ function usePascalWaterPerfRunProbe(perfRun: PascalWaterPerfRunOptions) {
       }
 
       raf = window.requestAnimationFrame(tick)
-    }, PASCAL_WATER_PERF_START_DELAY_MS)
+    }, LANDRUSH_ISLAND_PERF_START_DELAY_MS)
 
     return () => {
       window.clearTimeout(startTimer)
@@ -1110,28 +1127,30 @@ function usePascalWaterPerfRunProbe(perfRun: PascalWaterPerfRunOptions) {
       if (window.__LANDRUSH_STYLIZED_GRASS_PERF__ === grassProbe) {
         delete window.__LANDRUSH_STYLIZED_GRASS_PERF__
       }
-      if (window.__PASCAL_WATER_PERF_RUN__ === publishSummary) {
-        delete window.__PASCAL_WATER_PERF_RUN__
+      if (window.__LANDRUSH_ISLAND_PERF_RUN__ === publishSummary) {
+        delete window.__LANDRUSH_ISLAND_PERF_RUN__
       }
-      delete document.documentElement.dataset.pascalWaterPerfRun
+      delete document.documentElement.dataset.landrushIslandPerfRun
     }
   }, [perfRun])
 }
 
-function createPascalWaterPerfRunOptions(searchParams: { get: (key: string) => string | null }) {
+function createLandrushIslandPerfRunOptions(searchParams: { get: (key: string) => string | null }) {
   const enabled = searchParams.get('perfRun') === 'straight'
   const requestedDuration = Number(searchParams.get('perfDurationMs'))
   const durationMs = MathUtils.clamp(
-    Number.isFinite(requestedDuration) ? requestedDuration : PASCAL_WATER_PERF_DEFAULT_DURATION_MS,
+    Number.isFinite(requestedDuration)
+      ? requestedDuration
+      : LANDRUSH_ISLAND_PERF_DEFAULT_DURATION_MS,
     4000,
     20_000,
   )
   const speed = searchParams.get('perfSpeed') === 'walk' ? 'walk' : 'run'
-  return { durationMs, enabled, speed } satisfies PascalWaterPerfRunOptions
+  return { durationMs, enabled, speed } satisfies LandrushIslandPerfRunOptions
 }
 
-function summarizePascalWaterPerfRun(
-  state: PascalWaterPerfRunState,
+function summarizeLandrushIslandPerfRun(
+  state: LandrushIslandPerfRunState,
   grassProbe: StylizedGrassPerfProbe,
 ) {
   const frameDts = state.frames.map((frame) => frame.dt)
@@ -1158,9 +1177,9 @@ function summarizePascalWaterPerfRun(
       })),
     },
     grass: {
-      attributes: summarizePascalWaterGrassPerfSamples(attributeSamples),
-      builds: summarizePascalWaterGrassPerfSamples(buildSamples),
-      matrices: summarizePascalWaterGrassPerfSamples(matrixSamples),
+      attributes: summarizeLandrushIslandGrassPerfSamples(attributeSamples),
+      builds: summarizeLandrushIslandGrassPerfSamples(buildSamples),
+      matrices: summarizeLandrushIslandGrassPerfSamples(matrixSamples),
       streamUpdates: streamSamples.map((sample) => ({
         time: roundPerf(sample.time - (state.startedAt ?? sample.time)),
         x: roundPerf(sample.centerX ?? 0),
@@ -1186,7 +1205,7 @@ function summarizePascalWaterPerfRun(
   }
 }
 
-function summarizePascalWaterGrassPerfSamples(samples: StylizedGrassPerfProbe['samples']) {
+function summarizeLandrushIslandGrassPerfSamples(samples: StylizedGrassPerfProbe['samples']) {
   const durations = samples.map((sample) => sample.durationMs)
   return {
     count: samples.length,
@@ -1217,7 +1236,7 @@ function roundPerf(value: number) {
   return Math.round(value * 1000) / 1000
 }
 
-function createPascalWaterFallPresentationState(): PascalWaterFallPresentationState {
+function createLandrushIslandFallPresentationState(): LandrushIslandFallPresentationState {
   return {
     active: false,
     amount: 0,
@@ -1229,26 +1248,26 @@ function createPascalWaterFallPresentationState(): PascalWaterFallPresentationSt
 declare global {
   interface Window {
     __PASCAL_CAMERA_DRAGGING__?: boolean
-    __PASCAL_WATER_FLUSH_RUNTIME_PROBE__?: () => string | null
-    __PASCAL_WATER_NAV_DEBUG__?: PascalWaterNavigationDebugSnapshot
-    __PASCAL_WATER_NAV_LIVE_CAPTURE__?: PascalWaterNavigationLiveCapture
-    __PASCAL_WATER_NAV_TEST__?: PascalWaterNavigationTestBridge
-    __PASCAL_WATER_RUNTIME_PROBE__?: PascalWaterRuntimeProbe
+    __LANDRUSH_ISLAND_FLUSH_RUNTIME_PROBE__?: () => string | null
+    __LANDRUSH_ISLAND_NAV_DEBUG__?: LandrushIslandNavigationDebugSnapshot
+    __LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__?: LandrushIslandNavigationLiveCapture
+    __LANDRUSH_ISLAND_NAV_TEST__?: LandrushIslandNavigationTestBridge
+    __LANDRUSH_ISLAND_RUNTIME_PROBE__?: LandrushIslandRuntimeProbe
   }
 }
 
-function setPascalWaterCameraDragging(dragging: boolean) {
+function setLandrushIslandCameraDragging(dragging: boolean) {
   if (typeof window !== 'undefined') {
     window.__PASCAL_CAMERA_DRAGGING__ = dragging
   }
   useViewer.getState().setCameraDragging(dragging)
 }
 
-function getPascalWaterRuntimeProbe() {
+function getLandrushIslandRuntimeProbe() {
   if (typeof window === 'undefined') return null
   if (!new URLSearchParams(window.location.search).has('landrushProbe')) return null
 
-  window.__PASCAL_WATER_RUNTIME_PROBE__ ??= {
+  window.__LANDRUSH_ISLAND_RUNTIME_PROBE__ ??= {
     cameraJumps: [],
     cameraSamples: [],
     frameGaps: [],
@@ -1260,7 +1279,7 @@ function getPascalWaterRuntimeProbe() {
     lastCameraSamplesBySource: {},
     longTasks: [],
     navigationEvents: [],
-    navigationSelfTest: runPascalWaterNavigationSelfTest(),
+    navigationSelfTest: runLandrushIslandNavigationSelfTest(),
     phaseEvents: [],
     reactCommits: [],
     reactCommitTotals: {},
@@ -1269,92 +1288,92 @@ function getPascalWaterRuntimeProbe() {
     robotHoverSamples: [],
     startedAt: performance.now(),
   }
-  return window.__PASCAL_WATER_RUNTIME_PROBE__
+  return window.__LANDRUSH_ISLAND_RUNTIME_PROBE__
 }
 
-function pushPascalWaterProbeSample<T>(samples: T[], sample: T, maxSamples = 800) {
+function pushLandrushIslandProbeSample<T>(samples: T[], sample: T, maxSamples = 800) {
   samples.push(sample)
   if (samples.length > maxSamples) samples.splice(0, samples.length - maxSamples)
 }
 
-function recordPascalWaterInputProbe(event: Record<string, unknown>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandInputProbe(event: Record<string, unknown>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
-  pushPascalWaterProbeSample(probe.inputEvents, {
+  pushLandrushIslandProbeSample(probe.inputEvents, {
     ...event,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
 }
 
-function recordPascalWaterNavigationProbe(event: Record<string, unknown>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandNavigationProbe(event: Record<string, unknown>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
-  pushPascalWaterProbeSample(probe.navigationEvents, {
+  pushLandrushIslandProbeSample(probe.navigationEvents, {
     ...event,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
 }
 
-function recordPascalWaterGrassEventProbe(event: Record<string, unknown>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandGrassEventProbe(event: Record<string, unknown>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
-  pushPascalWaterProbeSample(probe.grassEvents, {
+  pushLandrushIslandProbeSample(probe.grassEvents, {
     ...event,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
 }
 
-function recordPascalWaterGridProbe(event: Record<string, unknown>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandGridProbe(event: Record<string, unknown>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
-  pushPascalWaterProbeSample(probe.gridSamples, {
+  pushLandrushIslandProbeSample(probe.gridSamples, {
     ...event,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
 }
 
-function recordPascalWaterFrameProbe(sample: Omit<PascalWaterRuntimeFrameSample, 'timeMs'>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandFrameProbe(sample: Omit<LandrushIslandRuntimeFrameSample, 'timeMs'>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
-  const framedSample: PascalWaterRuntimeFrameSample = {
+  const framedSample: LandrushIslandRuntimeFrameSample = {
     ...sample,
     dtMs: sample.dtMs === null ? null : roundPerf(sample.dtMs),
     timeMs: roundPerf(performance.now() - probe.startedAt),
   }
-  pushPascalWaterProbeSample(probe.frameSamples, framedSample, 20_000)
-  if (framedSample.dtMs !== null && framedSample.dtMs >= PASCAL_WATER_RUNTIME_FRAME_GAP_MS) {
-    pushPascalWaterProbeSample(probe.frameGaps, {
+  pushLandrushIslandProbeSample(probe.frameSamples, framedSample, 20_000)
+  if (framedSample.dtMs !== null && framedSample.dtMs >= LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS) {
+    pushLandrushIslandProbeSample(probe.frameGaps, {
       ...framedSample,
-      thresholdMs: PASCAL_WATER_RUNTIME_FRAME_GAP_MS,
+      thresholdMs: LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS,
     })
   }
 }
 
-function recordPascalWaterLongTaskProbe(entry: PerformanceEntry) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandLongTaskProbe(entry: PerformanceEntry) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
-  pushPascalWaterProbeSample(probe.longTasks, {
+  pushLandrushIslandProbeSample(probe.longTasks, {
     durationMs: roundPerf(entry.duration),
     name: entry.name,
     startMs: roundPerf(entry.startTime - probe.startedAt),
   })
 }
 
-function recordPascalWaterPhaseProbe(name: string, detail?: Record<string, unknown>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandPhaseProbe(name: string, detail?: Record<string, unknown>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
-  pushPascalWaterProbeSample(probe.phaseEvents, {
+  pushLandrushIslandProbeSample(probe.phaseEvents, {
     detail,
     name,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
 }
 
-function recordPascalWaterReactCommitProbe(commit: PascalWaterRuntimeReactCommit) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandReactCommitProbe(commit: LandrushIslandRuntimeReactCommit) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
   const key = `${commit.id}|${commit.phase}`
@@ -1374,23 +1393,23 @@ function recordPascalWaterReactCommitProbe(commit: PascalWaterRuntimeReactCommit
   total.maxMs = Math.max(total.maxMs, commit.actualDurationMs)
 
   if (commit.actualDurationMs > 5) {
-    pushPascalWaterProbeSample(probe.reactCommits, commit, 1200)
+    pushLandrushIslandProbeSample(probe.reactCommits, commit, 1200)
   }
 }
 
-function recordPascalWaterRevealProbe(event: Record<string, unknown>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandRevealProbe(event: Record<string, unknown>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
-  pushPascalWaterProbeSample(probe.revealSamples, {
+  pushLandrushIslandProbeSample(probe.revealSamples, {
     ...event,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
 }
 
-function recordPascalWaterGrassProbe(sample: Omit<PascalWaterRuntimeGrassSample, 'timeMs'>) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandGrassProbe(sample: Omit<LandrushIslandRuntimeGrassSample, 'timeMs'>) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
-  pushPascalWaterProbeSample(probe.grassSamples, {
+  pushLandrushIslandProbeSample(probe.grassSamples, {
     ...sample,
     centerLagMeters: roundPerf(sample.centerLagMeters),
     physicsLagMeters: roundPerf(sample.physicsLagMeters),
@@ -1401,8 +1420,8 @@ function recordPascalWaterGrassProbe(sample: Omit<PascalWaterRuntimeGrassSample,
   })
 }
 
-function recordPascalWaterRobotAnimationProbe(state: LandrushRobotAnimationState) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandRobotAnimationProbe(state: LandrushRobotAnimationState) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
   const previous = probe.lastRobotAnimationState
@@ -1418,7 +1437,7 @@ function recordPascalWaterRobotAnimationProbe(state: LandrushRobotAnimationState
   )
   const discontinuity = walkStep.unexpectedReset || runStep.unexpectedReset
   probe.lastRobotAnimationState = state
-  pushPascalWaterProbeSample(probe.robotAnimationSamples, {
+  pushLandrushIslandProbeSample(probe.robotAnimationSamples, {
     discontinuity,
     runClip: state.runClip,
     runDuration: state.runClipDuration,
@@ -1438,11 +1457,11 @@ function recordPascalWaterRobotAnimationProbe(state: LandrushRobotAnimationState
   })
 }
 
-function recordPascalWaterRobotHoverPoseProbe(sample: LandrushRobotHoverPoseSample) {
-  const probe = getPascalWaterRuntimeProbe()
+function recordLandrushIslandRobotHoverPoseProbe(sample: LandrushRobotHoverPoseSample) {
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
-  pushPascalWaterProbeSample(probe.robotHoverSamples, {
+  pushLandrushIslandProbeSample(probe.robotHoverSamples, {
     ...sample,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
@@ -1468,7 +1487,7 @@ function resolveRobotAnimationProbeStep(
   }
 }
 
-function recordPascalWaterCameraProbe({
+function recordLandrushIslandCameraProbe({
   camera,
   mode,
   progress = null,
@@ -1476,17 +1495,17 @@ function recordPascalWaterCameraProbe({
   target,
 }: {
   camera: Camera
-  mode: PascalWaterRuntimeCameraSample['mode']
+  mode: LandrushIslandRuntimeCameraSample['mode']
   progress?: number | null
   source: string
   target: Vector3
 }) {
-  const probe = getPascalWaterRuntimeProbe()
+  const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
 
   const now = performance.now()
   const previous = probe.lastCameraSamplesBySource[source]
-  const sample: PascalWaterRuntimeCameraSample = {
+  const sample: LandrushIslandRuntimeCameraSample = {
     dtMs: previous ? roundPerf(now - probe.startedAt - previous.timeMs) : null,
     mode,
     position: [
@@ -1509,9 +1528,9 @@ function recordPascalWaterCameraProbe({
     source,
     target: [roundPerf(target.x), roundPerf(target.y), roundPerf(target.z)],
     timeMs: roundPerf(now - probe.startedAt),
-    zoom: isPascalWaterOrthographicCamera(camera) ? roundPerf(camera.zoom) : null,
+    zoom: isLandrushIslandOrthographicCamera(camera) ? roundPerf(camera.zoom) : null,
   }
-  pushPascalWaterProbeSample(probe.cameraSamples, sample, 6000)
+  pushLandrushIslandProbeSample(probe.cameraSamples, sample, 6000)
 
   if (
     previous &&
@@ -1523,7 +1542,7 @@ function recordPascalWaterCameraProbe({
     const distanceMeters = distance3(sample.position, previous.position)
     const targetDistanceMeters = distance3(sample.target, previous.target)
     if (distanceMeters > 3 || targetDistanceMeters > 2) {
-      pushPascalWaterProbeSample(probe.cameraJumps, {
+      pushLandrushIslandProbeSample(probe.cameraJumps, {
         ...sample,
         distanceMeters: roundPerf(distanceMeters),
         targetDistanceMeters: roundPerf(targetDistanceMeters),
@@ -1546,26 +1565,26 @@ function distanceSq2(first: LandrushPoint2, second: LandrushPoint2) {
   return dx * dx + dz * dz
 }
 
-function createPascalWaterParcelMapShapes(
+function createLandrushIslandParcelMapShapes(
   parcels: readonly ParcelAllocationParcel[],
   roads: readonly LandrushRoadSegment[],
 ) {
   return new Map(
-    parcels.map((parcel) => [parcel.id, createPascalWaterParcelMapShape(parcel, roads)]),
+    parcels.map((parcel) => [parcel.id, createLandrushIslandParcelMapShape(parcel, roads)]),
   )
 }
 
-function createPascalWaterParcelMapShape(
+function createLandrushIslandParcelMapShape(
   parcel: ParcelAllocationParcel,
   roads: readonly LandrushRoadSegment[],
-): PascalWaterParcelMapShape {
+): LandrushIslandParcelMapShape {
   const connectedRoads = roads.filter((road) => road.connectsParcelIds.includes(parcel.id))
   if (connectedRoads.length === 0) {
     return { centroid: parcel.centroid, points: parcel.points }
   }
 
   const trimMeters = Math.max(
-    PASCAL_WATER_PARCEL_MAP_ROAD_TRIM_METERS,
+    LANDRUSH_ISLAND_PARCEL_MAP_ROAD_TRIM_METERS,
     ...connectedRoads.map((road) => road.width * 0.52),
   )
   const points = parcel.points.map((point) => {
@@ -1586,7 +1605,7 @@ function createPascalWaterParcelMapShape(
     : { centroid: parcel.centroid, points: parcel.points }
 }
 
-function canClaimPascalWaterParcel({
+function canClaimLandrushIslandParcel({
   localOwnership,
   localProfile,
   ownership,
@@ -1595,17 +1614,17 @@ function canClaimPascalWaterParcel({
   localProfile: LocalPlayerProfile
   ownership: ParcelOwnership | undefined
 }) {
-  return !ownership && !localOwnership && localProfile.id !== PASCAL_WATER_FALLBACK_PROFILE.id
+  return !ownership && !localOwnership && localProfile.id !== LANDRUSH_ISLAND_FALLBACK_PROFILE.id
 }
 
-function getPascalWaterParcelMapCentroid(
+function getLandrushIslandParcelMapCentroid(
   parcel: ParcelAllocationParcel,
-  shapes: ReadonlyMap<string, PascalWaterParcelMapShape>,
+  shapes: ReadonlyMap<string, LandrushIslandParcelMapShape>,
 ) {
   return shapes.get(parcel.id)?.centroid ?? parcel.centroid
 }
 
-function resolvePascalWaterBuildingLevels(
+function resolveLandrushIslandBuildingLevels(
   nodes: ReturnType<typeof useScene.getState>['nodes'],
   buildingId: AnyNodeId | null,
 ) {
@@ -1619,7 +1638,7 @@ function resolvePascalWaterBuildingLevels(
     .sort((first, second) => first.level - second.level)
 }
 
-function resolvePascalWaterActiveLevelBaseY(
+function resolveLandrushIslandActiveLevelBaseY(
   nodes: ReturnType<typeof useScene.getState>['nodes'],
   selectedLevelId: LevelNode['id'] | null,
 ) {
@@ -1629,7 +1648,7 @@ function resolvePascalWaterActiveLevelBaseY(
   if (selectedLevel?.type !== 'level') return 0
 
   let baseY = 0
-  const levels = resolvePascalWaterBuildingLevels(
+  const levels = resolveLandrushIslandBuildingLevels(
     nodes,
     (selectedLevel.parentId as AnyNodeId | null) ?? null,
   )
@@ -1641,18 +1660,21 @@ function resolvePascalWaterActiveLevelBaseY(
   return 0
 }
 
-function resolvePascalWaterRobotLevelId(
+function resolveLandrushIslandRobotLevelId(
   nodes: ReturnType<typeof useScene.getState>['nodes'],
   robotWorldY: number,
   groundY: number,
 ) {
-  const levels = resolvePascalWaterBuildingLevels(nodes, PASCAL_WATER_BUILDING_ID as AnyNodeId)
-  if (levels.length === 0) return PASCAL_WATER_LEVEL_ID as LevelNode['id']
+  const levels = resolveLandrushIslandBuildingLevels(
+    nodes,
+    LANDRUSH_ISLAND_BUILDING_ID as AnyNodeId,
+  )
+  if (levels.length === 0) return LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id']
 
   let baseY = groundY
   let currentLevelId = levels[0]!.id
   for (const level of levels) {
-    if (robotWorldY + PASCAL_WATER_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS >= baseY) {
+    if (robotWorldY + LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS >= baseY) {
       currentLevelId = level.id
     }
     baseY += getLevelHeight(level.id, nodes)
@@ -1661,21 +1683,21 @@ function resolvePascalWaterRobotLevelId(
   return currentLevelId
 }
 
-function resolvePascalWaterDefaultParcelSelection({
+function resolveLandrushIslandDefaultParcelSelection({
   camera,
   parcels,
   shapes,
 }: {
   camera: Camera
   parcels: readonly ParcelAllocationParcel[]
-  shapes: ReadonlyMap<string, PascalWaterParcelMapShape>
+  shapes: ReadonlyMap<string, LandrushIslandParcelMapShape>
 }) {
   let bestParcel: ParcelAllocationParcel | null = null
   let bestDistanceSq = Number.POSITIVE_INFINITY
   const center = { x: camera.position.x, z: camera.position.z }
 
   for (const parcel of parcels) {
-    const centroid = getPascalWaterParcelMapCentroid(parcel, shapes)
+    const centroid = getLandrushIslandParcelMapCentroid(parcel, shapes)
     const distanceSq = distanceSq2(center, centroid)
     if (distanceSq >= bestDistanceSq) continue
     bestDistanceSq = distanceSq
@@ -1685,7 +1707,7 @@ function resolvePascalWaterDefaultParcelSelection({
   return bestParcel
 }
 
-function resolvePascalWaterDirectionalParcelSelection({
+function resolveLandrushIslandDirectionalParcelSelection({
   camera,
   currentParcelId,
   direction,
@@ -1694,26 +1716,26 @@ function resolvePascalWaterDirectionalParcelSelection({
 }: {
   camera: Camera
   currentParcelId: string | null
-  direction: PascalWaterParcelSelectionDirection
+  direction: LandrushIslandParcelSelectionDirection
   parcels: readonly ParcelAllocationParcel[]
-  shapes: ReadonlyMap<string, PascalWaterParcelMapShape>
+  shapes: ReadonlyMap<string, LandrushIslandParcelMapShape>
 }) {
   if (parcels.length === 0) return null
 
   const currentParcel = parcels.find((parcel) => parcel.id === currentParcelId) ?? null
   if (!currentParcel) {
-    return resolvePascalWaterDefaultParcelSelection({ camera, parcels, shapes })
+    return resolveLandrushIslandDefaultParcelSelection({ camera, parcels, shapes })
   }
 
-  const currentCentroid = getPascalWaterParcelMapCentroid(currentParcel, shapes)
-  const directionVector = resolvePascalWaterMapSelectionDirection(camera, direction)
+  const currentCentroid = getLandrushIslandParcelMapCentroid(currentParcel, shapes)
+  const directionVector = resolveLandrushIslandMapSelectionDirection(camera, direction)
   let bestParcel: ParcelAllocationParcel | null = null
   let bestScore = Number.POSITIVE_INFINITY
 
   for (const parcel of parcels) {
     if (parcel.id === currentParcel.id) continue
 
-    const centroid = getPascalWaterParcelMapCentroid(parcel, shapes)
+    const centroid = getLandrushIslandParcelMapCentroid(parcel, shapes)
     const delta = {
       x: centroid.x - currentCentroid.x,
       z: centroid.z - currentCentroid.z,
@@ -1734,77 +1756,77 @@ function resolvePascalWaterDirectionalParcelSelection({
   return bestParcel
 }
 
-function resolvePascalWaterMapSelectionDirection(
+function resolveLandrushIslandMapSelectionDirection(
   camera: Camera,
-  direction: PascalWaterParcelSelectionDirection,
+  direction: LandrushIslandParcelSelectionDirection,
 ) {
-  const axes = resolvePascalWaterCameraScreenAxes(camera)
+  const axes = resolveLandrushIslandCameraScreenAxes(camera)
   if (direction === 'up') return axes.up
   if (direction === 'down') return { x: -axes.up.x, z: -axes.up.z }
   if (direction === 'right') return axes.right
   return { x: -axes.right.x, z: -axes.right.z }
 }
 
-function runPascalWaterNavigationSelfTest() {
+function runLandrushIslandNavigationSelfTest() {
   const surface = [
     { x: -6, z: -6 },
     { x: 6, z: -6 },
     { x: 6, z: 6 },
     { x: -6, z: 6 },
   ]
-  const doorPortal: PascalWaterDoorPortal = {
+  const doorPortal: LandrushIslandDoorPortal = {
     center: { x: 0, z: 0 },
     doorId: 'door_navigation_self_test' as AnyNodeId,
     halfWidth: 0.5,
     normal: { x: 1, z: 0 },
-    sideA: { x: PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS, z: 0 },
-    sideB: { x: -PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS, z: 0 },
+    sideA: { x: LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS, z: 0 },
+    sideB: { x: -LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS, z: 0 },
     tangent: { x: 0, z: 1 },
   }
   const stairId = 'stair_navigation_self_test' as AnyNodeId
-  const stairPortal: PascalWaterStairPortal = {
+  const stairPortal: LandrushIslandStairPortal = {
     center: { x: 0, z: 0 },
     halfRun: 1.5,
     halfWidth: 0.5,
     nodeId: stairId,
     normal: { x: 0, z: 1 },
-    sideA: { x: 0, z: 1.5 + PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS },
-    sideB: { x: 0, z: -1.5 - PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS },
+    sideA: { x: 0, z: 1.5 + LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS },
+    sideB: { x: 0, z: -1.5 - LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS },
     tangent: { x: 1, z: 0 },
   }
-  const stairObstacle: PascalWaterNavigationObstacle = {
+  const stairObstacle: LandrushIslandNavigationObstacle = {
     kind: 'stair',
     nodeId: stairId,
     points: rectFootprintFromAxes({
       center: stairPortal.center,
-      depth: stairPortal.halfRun * 2 + PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS * 2,
+      depth: stairPortal.halfRun * 2 + LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS * 2,
       normal: stairPortal.normal,
       tangent: stairPortal.tangent,
-      width: stairPortal.halfWidth * 2 + PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS * 2,
+      width: stairPortal.halfWidth * 2 + LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS * 2,
     }),
   }
-  const doorRoute = resolvePascalWaterNavigationSteeringPoint(
+  const doorRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: -4, z: 0 },
     { x: 4, z: 0 },
     [],
     [doorPortal],
     surface,
   )
-  const doorCenterRoute = resolvePascalWaterNavigationSteeringPoint(
+  const doorCenterRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: 0, z: 0 },
     { x: 4, z: 0 },
     [],
     [doorPortal],
     surface,
   )
-  const doorNearCenterRoute = resolvePascalWaterNavigationSteeringPoint(
-    { x: -PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS * 0.7, z: 0 },
+  const doorNearCenterRoute = resolveLandrushIslandNavigationSteeringPoint(
+    { x: -LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS * 0.7, z: 0 },
     { x: 4, z: 0 },
     [],
     [doorPortal],
     surface,
   )
-  const stairCrossRoute = resolvePascalWaterNavigationSteeringPoint(
+  const stairCrossRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: 0, z: -4 },
     { x: 0, z: 4 },
     [stairObstacle],
@@ -1812,12 +1834,12 @@ function runPascalWaterNavigationSelfTest() {
     surface,
     [stairPortal],
   )
-  const stairClickTarget = resolvePascalWaterStairConnectorTarget(
+  const stairClickTarget = resolveLandrushIslandStairConnectorTarget(
     { x: 0, z: -4 },
     { x: 0, z: 0.45 },
     [stairPortal],
   )
-  const stairClickRoute = resolvePascalWaterNavigationSteeringPoint(
+  const stairClickRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: 0, z: -4 },
     stairClickTarget,
     [stairObstacle],
@@ -1825,7 +1847,7 @@ function runPascalWaterNavigationSelfTest() {
     surface,
     [stairPortal],
   )
-  const stairExitRoute = resolvePascalWaterNavigationSteeringPoint(
+  const stairExitRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: 0, z: 0 },
     { x: 0, z: 4 },
     [stairObstacle],
@@ -1833,7 +1855,7 @@ function runPascalWaterNavigationSelfTest() {
     surface,
     [stairPortal],
   )
-  const recovery = resolvePascalWaterNavigationRecoverySteeringPoint(
+  const recovery = resolveLandrushIslandNavigationRecoverySteeringPoint(
     { x: 0, z: 0 },
     { x: 3, z: 0 },
     { x: 1, z: 0 },
@@ -1850,7 +1872,7 @@ function runPascalWaterNavigationSelfTest() {
     [],
     surface,
   )
-  const projectedArrival = segmentReachedPascalWaterNavigationPoint(
+  const projectedArrival = segmentReachedLandrushIslandNavigationPoint(
     { x: 0, z: 0 },
     { x: 1, z: 0 },
     { x: 0.72, z: 0.08 },
@@ -1861,40 +1883,40 @@ function runPascalWaterNavigationSelfTest() {
       doorRoute?.kind === 'door' ? roundPerf(Math.abs(doorRoute.point.x)) : null,
     doorCenterAdvancesToExit:
       doorCenterRoute?.kind === 'door' &&
-      doorCenterRoute.point.x >= PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
+      doorCenterRoute.point.x >= LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
     doorNearCenterAdvancesToExit:
       doorNearCenterRoute?.kind === 'door' &&
-      doorNearCenterRoute.point.x >= PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
+      doorNearCenterRoute.point.x >= LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
     doorOpensBeforeCenter:
       doorRoute?.kind === 'door' &&
       doorRoute.doorId === doorPortal.doorId &&
-      doorRoute.point.x <= -PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS + 0.001,
+      doorRoute.point.x <= -LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS + 0.001,
     projectedArrival,
     recoveryAvailable: recovery?.kind === 'recovery',
     recoveryPoint: recovery ? [roundPerf(recovery.point.x), roundPerf(recovery.point.z)] : null,
     stairClickOnRun:
       stairClickRoute?.kind === 'stair' &&
-      stairClickRoute.point.z <= -1.5 - PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS + 0.001 &&
-      stairClickTarget.z >= 1.5 + PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
+      stairClickRoute.point.z <= -1.5 - LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS + 0.001 &&
+      stairClickTarget.z >= 1.5 + LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
     stairCrossUsesEntry:
       stairCrossRoute?.kind === 'stair' &&
-      stairCrossRoute.point.z <= -1.5 - PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS + 0.001,
+      stairCrossRoute.point.z <= -1.5 - LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS + 0.001,
     stairExitFollowsRun:
       stairExitRoute?.kind === 'stair' &&
-      stairExitRoute.point.z >= 1.5 + PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
+      stairExitRoute.point.z >= 1.5 + LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
   }
 }
 
-function resolvePascalWaterNavigationLiveScenario(
+function resolveLandrushIslandNavigationLiveScenario(
   value: string | null,
-): PascalWaterNavigationLiveScenarioKind | null {
+): LandrushIslandNavigationLiveScenarioKind | null {
   if (value === '1' || value === 'door') return 'door'
   if (value === 'room') return 'room'
   if (value === 'stair') return 'stair'
   return null
 }
 
-function PascalWaterStartupReactProfiler({
+function LandrushIslandStartupReactProfiler({
   children,
   enabled,
   id,
@@ -1913,11 +1935,11 @@ function PascalWaterStartupReactProfiler({
   )
 }
 
-function syncPascalWaterBuildEditorMode(buildMode: boolean) {
+function syncLandrushIslandBuildEditorMode(buildMode: boolean) {
   return measureLandrushFrameSlice(
     buildMode
-      ? 'pascal-water.editor-store.sync-build-mode'
-      : 'pascal-water.editor-store.sync-select-mode',
+      ? 'landrush-island.editor-store.sync-build-mode'
+      : 'landrush-island.editor-store.sync-select-mode',
     () => {
       const editor = useEditor.getState()
       if (buildMode) {
@@ -1956,7 +1978,7 @@ function syncPascalWaterBuildEditorMode(buildMode: boolean) {
   )
 }
 
-function createPascalWaterGamepadButtonState(): PascalWaterGamepadButtonState {
+function createLandrushIslandGamepadButtonState(): LandrushIslandGamepadButtonState {
   return {
     circle: false,
     cross: false,
@@ -1970,10 +1992,10 @@ function createPascalWaterGamepadButtonState(): PascalWaterGamepadButtonState {
   }
 }
 
-function readPascalWaterGamepadButtonState(
+function readLandrushIslandGamepadButtonState(
   input: LandrushGamepadInput | null,
-): PascalWaterGamepadButtonState {
-  if (!input) return createPascalWaterGamepadButtonState()
+): LandrushIslandGamepadButtonState {
+  if (!input) return createLandrushIslandGamepadButtonState()
   return {
     circle: input.circle,
     cross: input.cross,
@@ -1987,7 +2009,7 @@ function readPascalWaterGamepadButtonState(
   }
 }
 
-function isPascalWaterGamepadInputUsed(input: LandrushGamepadInput | null) {
+function isLandrushIslandGamepadInputUsed(input: LandrushGamepadInput | null) {
   if (!input) return false
   return (
     input.circle ||
@@ -2009,15 +2031,15 @@ function isPascalWaterGamepadInputUsed(input: LandrushGamepadInput | null) {
   )
 }
 
-function wasPascalWaterGamepadButtonPressed(
-  current: PascalWaterGamepadButtonState,
-  previous: PascalWaterGamepadButtonState,
-  button: keyof PascalWaterGamepadButtonState,
+function wasLandrushIslandGamepadButtonPressed(
+  current: LandrushIslandGamepadButtonState,
+  previous: LandrushIslandGamepadButtonState,
+  button: keyof LandrushIslandGamepadButtonState,
 ) {
   return current[button] && !previous[button]
 }
 
-function resolvePascalWaterCurrentGamepadBuildMode(): PascalWaterGamepadBuildMode {
+function resolveLandrushIslandCurrentGamepadBuildMode(): LandrushIslandGamepadBuildMode {
   const editor = useEditor.getState()
   if (editor.mode === 'delete') return 'delete'
   if (editor.mode === 'material-paint') return 'material-paint'
@@ -2031,16 +2053,19 @@ function resolvePascalWaterCurrentGamepadBuildMode(): PascalWaterGamepadBuildMod
   return 'select'
 }
 
-function cyclePascalWaterGamepadBuildMode(current: PascalWaterGamepadBuildMode, direction: -1 | 1) {
-  const currentIndex = PASCAL_WATER_GAMEPAD_BUILD_MODES.indexOf(current)
+function cycleLandrushIslandGamepadBuildMode(
+  current: LandrushIslandGamepadBuildMode,
+  direction: -1 | 1,
+) {
+  const currentIndex = LANDRUSH_ISLAND_GAMEPAD_BUILD_MODES.indexOf(current)
   const safeIndex = currentIndex >= 0 ? currentIndex : 0
   const nextIndex =
-    (safeIndex + direction + PASCAL_WATER_GAMEPAD_BUILD_MODES.length) %
-    PASCAL_WATER_GAMEPAD_BUILD_MODES.length
-  return PASCAL_WATER_GAMEPAD_BUILD_MODES[nextIndex] ?? 'select'
+    (safeIndex + direction + LANDRUSH_ISLAND_GAMEPAD_BUILD_MODES.length) %
+    LANDRUSH_ISLAND_GAMEPAD_BUILD_MODES.length
+  return LANDRUSH_ISLAND_GAMEPAD_BUILD_MODES[nextIndex] ?? 'select'
 }
 
-function focusPascalWaterGamepadBuildMode(mode: PascalWaterGamepadBuildMode) {
+function focusLandrushIslandGamepadBuildMode(mode: LandrushIslandGamepadBuildMode) {
   if (typeof document === 'undefined') return
 
   const element = document.querySelector<HTMLButtonElement>(`[data-editor-control-mode="${mode}"]`)
@@ -2050,40 +2075,40 @@ function focusPascalWaterGamepadBuildMode(mode: PascalWaterGamepadBuildMode) {
   element.scrollIntoView({ block: 'nearest', inline: 'center' })
 }
 
-function schedulePascalWaterGamepadBuildModeFocus(mode: PascalWaterGamepadBuildMode) {
+function scheduleLandrushIslandGamepadBuildModeFocus(mode: LandrushIslandGamepadBuildMode) {
   if (typeof window === 'undefined') return
-  window.requestAnimationFrame(() => focusPascalWaterGamepadBuildMode(mode))
+  window.requestAnimationFrame(() => focusLandrushIslandGamepadBuildMode(mode))
 }
 
-function getPascalWaterGamepadStructureToolButtons() {
+function getLandrushIslandGamepadStructureToolButtons() {
   if (typeof document === 'undefined') return []
   return [...document.querySelectorAll<HTMLButtonElement>('[data-editor-structure-tool]')].filter(
     (element) => !element.disabled,
   )
 }
 
-function focusPascalWaterGamepadStructureToolButton(button: HTMLButtonElement) {
+function focusLandrushIslandGamepadStructureToolButton(button: HTMLButtonElement) {
   button.focus({ preventScroll: true })
   button.scrollIntoView({ block: 'nearest', inline: 'center' })
 }
 
-function focusPascalWaterCurrentGamepadStructureTool() {
-  const buttons = getPascalWaterGamepadStructureToolButtons()
+function focusLandrushIslandCurrentGamepadStructureTool() {
+  const buttons = getLandrushIslandGamepadStructureToolButtons()
   if (buttons.length === 0) return
 
   const activeTool = useEditor.getState().tool
   const activeButton =
     buttons.find((button) => button.dataset.editorStructureTool === activeTool) ?? buttons[0]
-  if (activeButton) focusPascalWaterGamepadStructureToolButton(activeButton)
+  if (activeButton) focusLandrushIslandGamepadStructureToolButton(activeButton)
 }
 
-function schedulePascalWaterCurrentGamepadStructureToolFocus() {
+function scheduleLandrushIslandCurrentGamepadStructureToolFocus() {
   if (typeof window === 'undefined') return
-  window.requestAnimationFrame(focusPascalWaterCurrentGamepadStructureTool)
+  window.requestAnimationFrame(focusLandrushIslandCurrentGamepadStructureTool)
 }
 
-function selectPascalWaterAdjacentGamepadStructureTool(direction: -1 | 1) {
-  const buttons = getPascalWaterGamepadStructureToolButtons()
+function selectLandrushIslandAdjacentGamepadStructureTool(direction: -1 | 1) {
+  const buttons = getLandrushIslandGamepadStructureToolButtons()
   if (buttons.length === 0) return
 
   const activeElement = document.activeElement
@@ -2096,25 +2121,25 @@ function selectPascalWaterAdjacentGamepadStructureTool(direction: -1 | 1) {
   const nextButton = buttons[nextIndex]
   if (!nextButton) return
 
-  focusPascalWaterGamepadStructureToolButton(nextButton)
+  focusLandrushIslandGamepadStructureToolButton(nextButton)
   nextButton.click()
 }
 
-function enterPascalWaterGamepadStructureToolRow(focusRowRef: {
-  current: PascalWaterGamepadBuildFocusRow
+function enterLandrushIslandGamepadStructureToolRow(focusRowRef: {
+  current: LandrushIslandGamepadBuildFocusRow
 }) {
   focusRowRef.current = 'structure-tools'
-  schedulePascalWaterCurrentGamepadStructureToolFocus()
+  scheduleLandrushIslandCurrentGamepadStructureToolFocus()
 }
 
-function leavePascalWaterGamepadStructureToolRow(focusRowRef: {
-  current: PascalWaterGamepadBuildFocusRow
+function leaveLandrushIslandGamepadStructureToolRow(focusRowRef: {
+  current: LandrushIslandGamepadBuildFocusRow
 }) {
   focusRowRef.current = 'modes'
-  focusPascalWaterGamepadBuildMode('build')
+  focusLandrushIslandGamepadBuildMode('build')
 }
 
-function applyPascalWaterGamepadBuildMode(mode: PascalWaterGamepadBuildMode) {
+function applyLandrushIslandGamepadBuildMode(mode: LandrushIslandGamepadBuildMode) {
   const editor = useEditor.getState()
   if (mode === 'select') {
     editor.setMode('select')
@@ -2137,14 +2162,14 @@ function applyPascalWaterGamepadBuildMode(mode: PascalWaterGamepadBuildMode) {
   editor.setMode('delete')
 }
 
-function runPascalWaterGamepadUndo(undoBaselineRef: { current: number | null }) {
+function runLandrushIslandGamepadUndo(undoBaselineRef: { current: number | null }) {
   const temporal = useScene.temporal.getState()
   const baseline = undoBaselineRef.current ?? temporal.pastStates.length
   undoBaselineRef.current = baseline
   if (temporal.pastStates.length <= baseline) return
 
   const nextState = temporal.pastStates.at(-1)
-  if (!isPascalWaterGamepadUndoStateSafe(nextState)) {
+  if (!isLandrushIslandGamepadUndoStateSafe(nextState)) {
     undoBaselineRef.current = temporal.pastStates.length
     return
   }
@@ -2158,7 +2183,7 @@ function runPascalWaterGamepadUndo(undoBaselineRef: { current: number | null }) 
   }
 }
 
-function isPascalWaterGamepadUndoStateSafe(state: unknown) {
+function isLandrushIslandGamepadUndoStateSafe(state: unknown) {
   if (!state || typeof state !== 'object') return false
   const nodes = (state as { nodes?: unknown }).nodes
   if (!nodes || typeof nodes !== 'object') return false
@@ -2166,8 +2191,8 @@ function isPascalWaterGamepadUndoStateSafe(state: unknown) {
   const currentNodes = useScene.getState().nodes
   let checkedProtectedNodeCount = 0
   for (const id of [
-    PASCAL_WATER_NODE_ID,
-    PASCAL_WATER_LAYOUT_NODE_ID,
+    LANDRUSH_ISLAND_NODE_ID,
+    LANDRUSH_ISLAND_LAYOUT_NODE_ID,
     PASCAL_MULTIPLAYER_ISLAND_LAYOUT_NODE_ID,
   ]) {
     const currentNode = currentNodes[id as AnyNodeId]
@@ -2181,25 +2206,25 @@ function isPascalWaterGamepadUndoStateSafe(state: unknown) {
   return checkedProtectedNodeCount > 0
 }
 
-function cancelPascalWaterGamepadWallDraft(wallDraftActiveRef: { current: boolean }) {
+function cancelLandrushIslandGamepadWallDraft(wallDraftActiveRef: { current: boolean }) {
   emitter.emit('tool:cancel')
   wallDraftActiveRef.current = false
   renderScheduler.requestFrame('selection:changed')
 }
 
-export function PascalWaterClient({
+export function LandrushIslandClient({
   experience = 'pascal-water',
   waterFieldDebugMode,
 }: {
-  experience?: PascalWaterClientExperience
-  waterFieldDebugMode?: PascalWaterFieldDebugMode
+  experience?: LandrushIslandClientExperience
+  waterFieldDebugMode?: LandrushIslandFieldDebugMode
 } = {}) {
-  const experienceConfig = PASCAL_WATER_EXPERIENCE_CONFIGS[experience]
+  const experienceConfig = LANDRUSH_ISLAND_EXPERIENCE_CONFIGS[experience]
   const searchParams = useSearchParams()
   const runtimeProbeEnabled = searchParams.has('landrushProbe')
   const navigationDebugEnabled =
     searchParams.get('navDebug') === '1' || searchParams.get('landrushNavDebug') === '1'
-  const navigationLiveScenario = resolvePascalWaterNavigationLiveScenario(
+  const navigationLiveScenario = resolveLandrushIslandNavigationLiveScenario(
     searchParams.get('navDebugLiveScenario') ?? searchParams.get('landrushNavLiveScenario'),
   )
   const navigationLiveScenarioImmediate =
@@ -2239,23 +2264,23 @@ export function PascalWaterClient({
     4,
     160,
   )
-  const perfRun = useMemo(() => createPascalWaterPerfRunOptions(searchParams), [searchParams])
-  const startupProfileRef = useRef<PascalWaterStartupProfile | null>(null)
+  const perfRun = useMemo(() => createLandrushIslandPerfRunOptions(searchParams), [searchParams])
+  const startupProfileRef = useRef<LandrushIslandStartupProfile | null>(null)
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
   const localMotionRef = useRef<RobotMotion | null>(null)
-  const playerCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
-  const buildCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
-  const mapCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
-  const mapTransitionStartPoseRef = useRef<PascalWaterCameraPose | null>(null)
-  const mapReturnCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
-  const playerReturnCameraPoseRef = useRef<PascalWaterCameraPose | null>(null)
+  const playerCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
+  const buildCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
+  const mapCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
+  const mapTransitionStartPoseRef = useRef<LandrushIslandCameraPose | null>(null)
+  const mapReturnCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
+  const playerReturnCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
   const modeTransitionFadeIdRef = useRef(0)
   const lastAppliedBuildSnapshotSignatureRef = useRef(new Map<string, string>())
   const lastSyncedBuildSnapshotSignatureRef = useRef<string | null>(null)
   const initialViewModeAppliedRef = useRef(false)
-  const previousGamepadButtonsRef = useRef(createPascalWaterGamepadButtonState())
-  const gamepadBuildModeRef = useRef<PascalWaterGamepadBuildMode>('select')
-  const gamepadBuildFocusRowRef = useRef<PascalWaterGamepadBuildFocusRow>('modes')
+  const previousGamepadButtonsRef = useRef(createLandrushIslandGamepadButtonState())
+  const gamepadBuildModeRef = useRef<LandrushIslandGamepadBuildMode>('select')
+  const gamepadBuildFocusRowRef = useRef<LandrushIslandGamepadBuildFocusRow>('modes')
   const gamepadBuildWallDraftActiveRef = useRef(false)
   const gamepadBuildUndoBaselineRef = useRef<number | null>(null)
   if (startupProfileEnabled && !startupProfileRef.current && typeof performance !== 'undefined') {
@@ -2268,9 +2293,9 @@ export function PascalWaterClient({
     }
   }
   if (startupProfileEnabled && startupProfileRef.current && typeof window !== 'undefined') {
-    window.__PASCAL_WATER_STARTUP_PROFILE__ = startupProfileRef.current
+    window.__LANDRUSH_ISLAND_STARTUP_PROFILE__ = startupProfileRef.current
   }
-  const startupProfileMeasure = useCallback<PascalWaterProfileMeasure>((id, callback) => {
+  const startupProfileMeasure = useCallback<LandrushIslandProfileMeasure>((id, callback) => {
     const profile = startupProfileRef.current
     if (!profile || typeof performance === 'undefined') return callback()
 
@@ -2303,10 +2328,10 @@ export function PascalWaterClient({
   )
   const handleRuntimeReactRender = useCallback<ProfilerOnRenderCallback>(
     (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
-      const probe = getPascalWaterRuntimeProbe()
+      const probe = getLandrushIslandRuntimeProbe()
       if (!probe) return
 
-      recordPascalWaterReactCommitProbe({
+      recordLandrushIslandReactCommitProbe({
         actualDurationMs: roundPerf(actualDuration),
         baseDurationMs: roundPerf(baseDuration),
         commitMs: roundPerf(commitTime - probe.startedAt),
@@ -2326,15 +2351,15 @@ export function PascalWaterClient({
       editorRuntimeReactProfileEnabled
         ? {
             enabled: true,
-            idPrefix: 'runtime.pascal-water.editor',
+            idPrefix: 'runtime.landrush-island.editor',
             onRender: handleRuntimeReactRender,
           }
         : undefined,
     [editorRuntimeReactProfileEnabled, handleRuntimeReactRender],
   )
   const [loadingActive, setLoadingActive] = useState(true)
-  const fallPresentationRef = useRef<PascalWaterFallPresentationState>(
-    createPascalWaterFallPresentationState(),
+  const fallPresentationRef = useRef<LandrushIslandFallPresentationState>(
+    createLandrushIslandFallPresentationState(),
   )
   const stylizedGroundTextureRequired =
     !startupProfileNoLandLayers && !startupProfileNoStylizedGround
@@ -2354,8 +2379,9 @@ export function PascalWaterClient({
     useState<EditorCameraInitialPose | null>(null)
   const [buildCameraControlsReady, setBuildCameraControlsReady] = useState(false)
   const [mapView, setMapView] = useState(false)
+  const [fpvView, setFpvView] = useState(false)
   const [modeTransitionFade, setModeTransitionFade] =
-    useState<PascalWaterModeTransitionFadeState | null>(null)
+    useState<LandrushIslandModeTransitionFadeState | null>(null)
   const [gamepadHintsActive, setGamepadHintsActive] = useState(false)
   const gamepadHintsActiveRef = useRef(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
@@ -2371,15 +2397,15 @@ export function PascalWaterClient({
     ...WATER_LAB_DEFAULT_FIELD_PARAMETERS,
   }))
   const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
-    ...PASCAL_WATER_ELEVATION_PARAMETERS,
+    ...LANDRUSH_ISLAND_ELEVATION_PARAMETERS,
   }))
   const [materialParameters, setMaterialParameters] = useState<LandrushWaterSurfaceParameters>(
     () => ({
-      ...PASCAL_WATER_MATERIAL_PARAMETERS,
+      ...LANDRUSH_ISLAND_MATERIAL_PARAMETERS,
     }),
   )
   const [grassTuning, setGrassTuning] = useState<GrassBladeTuning>(() => ({
-    ...PASCAL_WATER_GRASS_TUNING,
+    ...LANDRUSH_ISLAND_GRASS_TUNING,
   }))
   const [terrainFieldResolution, setTerrainFieldResolution] = useState(WATER_FIELD_RESOLUTION)
   const showDepthReference = false
@@ -2388,18 +2414,18 @@ export function PascalWaterClient({
   const benchmarkOrbiting =
     searchParams.get('benchOrbiting') === '1' || searchParams.get('benchmark') === '1'
   const roomId = useMemo(
-    () => sanitizeRoomId(searchParams.get('room') ?? PASCAL_WATER_MULTIPLAYER_ROOM_ID),
+    () => sanitizeRoomId(searchParams.get('room') ?? LANDRUSH_ISLAND_MULTIPLAYER_ROOM_ID),
     [searchParams],
   )
   const multiplayer = useLandrushWorldMultiplayer({
     enabled: !offline && Boolean(localProfile),
-    localProfile: localProfile ?? PASCAL_WATER_FALLBACK_PROFILE,
+    localProfile: localProfile ?? LANDRUSH_ISLAND_FALLBACK_PROFILE,
     onVoiceSignal: handleVoiceSignal,
     persistOfflineState: !clean,
     roomId,
     spectator: false,
   })
-  const resolvedLocalProfile = localProfile ?? PASCAL_WATER_FALLBACK_PROFILE
+  const resolvedLocalProfile = localProfile ?? LANDRUSH_ISLAND_FALLBACK_PROFILE
   const multiplayerStatus: ConnectionStatus = offline ? 'offline' : multiplayer.status
   const spatialVoice = useLandrushSpatialVoice({
     available: !offline && multiplayer.status === 'connected',
@@ -2410,7 +2436,8 @@ export function PascalWaterClient({
     roomId,
     sendSignal: multiplayer.sendVoiceSignal,
   })
-  const viewMode: PascalWaterViewMode = buildMode ? 'build' : mapView ? 'map' : 'player'
+  const viewMode: LandrushIslandViewMode = buildMode ? 'build' : mapView ? 'map' : 'player'
+  const fpvActive = viewMode === 'player' && fpvView
   const mapPresentationProgressRef = useRef(viewMode === 'map' ? 1 : 0)
   const loadingAssetsReady = !stylizedGroundTextureRequired || stylizedGroundTextureReady
 
@@ -2418,23 +2445,23 @@ export function PascalWaterClient({
     setStylizedGroundTextureReady(!stylizedGroundTextureRequired)
   }, [stylizedGroundTextureRequired])
 
-  usePascalWaterPerfRunProbe(activePerfRun)
+  useLandrushIslandPerfRunProbe(activePerfRun)
   useEffect(() => {
-    const probe = getPascalWaterRuntimeProbe()
+    const probe = getLandrushIslandRuntimeProbe()
     if (!probe) return
 
     const probeOutput = document.createElement('pre')
     probeOutput.hidden = true
-    probeOutput.dataset.pascalWaterRuntimeProbe = '1'
+    probeOutput.dataset.landrushIslandRuntimeProbe = '1'
     document.body.appendChild(probeOutput)
     const flushProbeOutput = () => {
-      const latestProbe = window.__PASCAL_WATER_RUNTIME_PROBE__ ?? probe
+      const latestProbe = window.__LANDRUSH_ISLAND_RUNTIME_PROBE__ ?? probe
       const serialized = JSON.stringify(latestProbe)
       probeOutput.textContent = serialized
-      probeOutput.dataset.pascalWaterRuntimeProbeFlushedAt = String(performance.now())
+      probeOutput.dataset.landrushIslandRuntimeProbeFlushedAt = String(performance.now())
       return serialized
     }
-    window.__PASCAL_WATER_FLUSH_RUNTIME_PROBE__ = flushProbeOutput
+    window.__LANDRUSH_ISLAND_FLUSH_RUNTIME_PROBE__ = flushProbeOutput
     const handleFlushProbeOutput = () => {
       flushProbeOutput()
     }
@@ -2444,22 +2471,22 @@ export function PascalWaterClient({
     return () => {
       if (intervalId !== null) window.clearInterval(intervalId)
       window.removeEventListener('pascal-water-runtime-probe:flush', handleFlushProbeOutput)
-      if (window.__PASCAL_WATER_FLUSH_RUNTIME_PROBE__ === flushProbeOutput) {
-        delete window.__PASCAL_WATER_FLUSH_RUNTIME_PROBE__
+      if (window.__LANDRUSH_ISLAND_FLUSH_RUNTIME_PROBE__ === flushProbeOutput) {
+        delete window.__LANDRUSH_ISLAND_FLUSH_RUNTIME_PROBE__
       }
       probeOutput.remove()
     }
   }, [runtimeProbeDomOutput])
 
   const prepareCameraHandoff = useCallback(
-    (nextViewMode: PascalWaterViewMode) => {
-      recordPascalWaterPhaseProbe('camera-handoff:start', {
+    (nextViewMode: LandrushIslandViewMode) => {
+      recordLandrushIslandPhaseProbe('camera-handoff:start', {
         from: viewMode,
         to: nextViewMode,
       })
       if (nextViewMode !== viewMode) {
         modeTransitionFadeIdRef.current += 1
-        recordPascalWaterPhaseProbe('camera-handoff:fade', {
+        recordLandrushIslandPhaseProbe('camera-handoff:fade', {
           from: viewMode,
           id: modeTransitionFadeIdRef.current,
           to: nextViewMode,
@@ -2470,7 +2497,7 @@ export function PascalWaterClient({
           to: nextViewMode,
         })
         if (nextViewMode === 'map' || viewMode === 'map') {
-          setPascalWaterCameraDragging(true)
+          setLandrushIslandCameraDragging(true)
         }
       }
 
@@ -2480,36 +2507,36 @@ export function PascalWaterClient({
           const currentNonPlayerPose =
             viewMode === 'map' ? mapCameraPoseRef.current : buildCameraPoseRef.current
           if (currentNonPlayerPose && viewMode === 'build') {
-            buildCameraPoseRef.current = clonePascalWaterCameraPose(currentNonPlayerPose)
+            buildCameraPoseRef.current = cloneLandrushIslandCameraPose(currentNonPlayerPose)
           }
           if (viewMode === 'map') {
-            mapReturnCameraPoseRef.current = clonePascalWaterCameraPose(currentNonPlayerPose)
+            mapReturnCameraPoseRef.current = cloneLandrushIslandCameraPose(currentNonPlayerPose)
           }
-          playerReturnCameraPoseRef.current = clonePascalWaterCameraPose(
+          playerReturnCameraPoseRef.current = cloneLandrushIslandCameraPose(
             playerCameraPoseRef.current,
           )
         }
         mapTransitionStartPoseRef.current = null
-        recordPascalWaterPhaseProbe('camera-handoff:player-ready', { from: viewMode })
+        recordLandrushIslandPhaseProbe('camera-handoff:player-ready', { from: viewMode })
         return
       }
 
       playerReturnCameraPoseRef.current = null
       mapReturnCameraPoseRef.current = null
       if (nextViewMode === 'map') {
-        mapTransitionStartPoseRef.current = clonePascalWaterCameraPose(
+        mapTransitionStartPoseRef.current = cloneLandrushIslandCameraPose(
           viewMode === 'build' ? buildCameraPoseRef.current : playerCameraPoseRef.current,
         )
-        recordPascalWaterPhaseProbe('camera-handoff:map-ready', { from: viewMode })
+        recordLandrushIslandPhaseProbe('camera-handoff:map-ready', { from: viewMode })
         return
       }
 
       mapTransitionStartPoseRef.current = null
       if (viewMode === 'player') buildCameraPoseRef.current = null
       if (viewMode === 'map') {
-        buildCameraPoseRef.current = clonePascalWaterCameraPose(mapCameraPoseRef.current)
+        buildCameraPoseRef.current = cloneLandrushIslandCameraPose(mapCameraPoseRef.current)
       }
-      recordPascalWaterPhaseProbe('camera-handoff:build-ready', { from: viewMode })
+      recordLandrushIslandPhaseProbe('camera-handoff:build-ready', { from: viewMode })
     },
     [viewMode],
   )
@@ -2528,8 +2555,8 @@ export function PascalWaterClient({
     const tick = () => {
       const now = performance.now()
       const elapsed = Math.max(0, (now - startedAt) / 1000)
-      const nextProgress = clamp01(elapsed / PASCAL_WATER_CAMERA_TRANSITION_SECONDS)
-      mapPresentationProgressRef.current = resolvePascalWaterMapPresentationProgress(
+      const nextProgress = clamp01(elapsed / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS)
+      mapPresentationProgressRef.current = resolveLandrushIslandMapPresentationProgress(
         viewMode,
         modeTransitionFade,
         nextProgress,
@@ -2541,12 +2568,12 @@ export function PascalWaterClient({
       }
     }
 
-    mapPresentationProgressRef.current = resolvePascalWaterMapPresentationProgress(
+    mapPresentationProgressRef.current = resolveLandrushIslandMapPresentationProgress(
       viewMode,
       modeTransitionFade,
       0,
     )
-    intervalId = window.setInterval(tick, PASCAL_WATER_CAMERA_TRANSITION_TICK_MS)
+    intervalId = window.setInterval(tick, LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS)
     tick()
     return () => window.clearInterval(intervalId)
   }, [handleModeTransitionFadeDone, modeTransitionFade, viewMode])
@@ -2556,76 +2583,128 @@ export function PascalWaterClient({
       modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
     if (!mapTransitionActive) return
 
-    setPascalWaterCameraDragging(true)
-    return () => setPascalWaterCameraDragging(false)
+    setLandrushIslandCameraDragging(true)
+    return () => setLandrushIslandCameraDragging(false)
   }, [modeTransitionFade])
 
   const mapPresentationVisible =
     viewMode === 'map' || modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
 
   const enterPlayerView = useCallback(() => {
-    measureLandrushFrameSlice('pascal-water.view.enter-player', () => {
-      recordPascalWaterPhaseProbe('view:enter-player:start', { from: viewMode })
-      measureLandrushFrameSlice('pascal-water.view.enter-player.prepare-camera-handoff', () =>
+    measureLandrushFrameSlice('landrush-island.view.enter-player', () => {
+      recordLandrushIslandPhaseProbe('view:enter-player:start', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.enter-player.prepare-camera-handoff', () =>
         prepareCameraHandoff('player'),
       )
-      measureLandrushFrameSlice('pascal-water.view.enter-player.set-build-mode', () =>
+      measureLandrushFrameSlice('landrush-island.view.enter-player.set-build-mode', () =>
         setBuildMode(false),
       )
-      measureLandrushFrameSlice('pascal-water.view.enter-player.set-build-parcel', () =>
+      measureLandrushFrameSlice('landrush-island.view.enter-player.set-build-parcel', () =>
         setBuildParcelId(null),
       )
-      measureLandrushFrameSlice('pascal-water.view.enter-player.set-map-view', () =>
+      measureLandrushFrameSlice('landrush-island.view.enter-player.set-map-view', () =>
         setMapView(false),
       )
-      recordPascalWaterPhaseProbe('view:enter-player:state-dispatched', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.enter-player.set-fpv-view', () =>
+        setFpvView(false),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-player.release-pointer-lock', () =>
+        releaseLandrushIslandPointerLock(),
+      )
+      recordLandrushIslandPhaseProbe('view:enter-player:state-dispatched', { from: viewMode })
     })
   }, [prepareCameraHandoff, viewMode])
 
-  const enterMapView = useCallback(() => {
-    measureLandrushFrameSlice('pascal-water.view.enter-map', () => {
-      recordPascalWaterPhaseProbe('view:enter-map:start', { from: viewMode })
-      measureLandrushFrameSlice('pascal-water.view.enter-map.prepare-camera-handoff', () =>
-        prepareCameraHandoff('map'),
+  const enterFpvView = useCallback(() => {
+    measureLandrushFrameSlice('landrush-island.view.enter-fpv', () => {
+      recordLandrushIslandPhaseProbe('view:enter-fpv:start', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.enter-fpv.prepare-camera-handoff', () =>
+        prepareCameraHandoff('player'),
       )
-      measureLandrushFrameSlice('pascal-water.view.enter-map.set-build-mode', () =>
+      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-build-mode', () =>
         setBuildMode(false),
       )
-      measureLandrushFrameSlice('pascal-water.view.enter-map.set-build-parcel', () =>
+      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-build-parcel', () =>
         setBuildParcelId(null),
       )
-      measureLandrushFrameSlice('pascal-water.view.enter-map.set-map-view', () => setMapView(true))
-      measureLandrushFrameSlice('pascal-water.view.enter-map.release-pointer-lock', () =>
-        releasePascalWaterPointerLock(),
+      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-map-view', () =>
+        setMapView(false),
       )
-      recordPascalWaterPhaseProbe('view:enter-map:state-dispatched', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-fpv-view', () =>
+        setFpvView(true),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-fpv.request-pointer-lock', () =>
+        requestLandrushIslandPointerLock(),
+      )
+      recordLandrushIslandPhaseProbe('view:enter-fpv:state-dispatched', { from: viewMode })
+    })
+  }, [prepareCameraHandoff, viewMode])
+
+  const exitFpvView = useCallback(() => {
+    measureLandrushFrameSlice('landrush-island.view.exit-fpv', () => {
+      recordLandrushIslandPhaseProbe('view:exit-fpv:start', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.exit-fpv.set-fpv-view', () =>
+        setFpvView(false),
+      )
+      measureLandrushFrameSlice('landrush-island.view.exit-fpv.release-pointer-lock', () =>
+        releaseLandrushIslandPointerLock(),
+      )
+      recordLandrushIslandPhaseProbe('view:exit-fpv:state-dispatched', { from: viewMode })
+    })
+  }, [viewMode])
+
+  const enterMapView = useCallback(() => {
+    measureLandrushFrameSlice('landrush-island.view.enter-map', () => {
+      recordLandrushIslandPhaseProbe('view:enter-map:start', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.enter-map.prepare-camera-handoff', () =>
+        prepareCameraHandoff('map'),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-map.set-build-mode', () =>
+        setBuildMode(false),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-map.set-build-parcel', () =>
+        setBuildParcelId(null),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-map.set-map-view', () =>
+        setMapView(true),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-map.set-fpv-view', () =>
+        setFpvView(false),
+      )
+      measureLandrushFrameSlice('landrush-island.view.enter-map.release-pointer-lock', () =>
+        releaseLandrushIslandPointerLock(),
+      )
+      recordLandrushIslandPhaseProbe('view:enter-map:state-dispatched', { from: viewMode })
     })
   }, [prepareCameraHandoff, viewMode])
 
   const enterBuildView = useCallback(
     (parcelId: string) => {
-      measureLandrushFrameSlice('pascal-water.view.enter-build', () => {
-        recordPascalWaterPhaseProbe('view:enter-build:start', { from: viewMode })
+      measureLandrushFrameSlice('landrush-island.view.enter-build', () => {
+        recordLandrushIslandPhaseProbe('view:enter-build:start', { from: viewMode })
         gamepadBuildUndoBaselineRef.current = useScene.temporal.getState().pastStates.length
-        measureLandrushFrameSlice('pascal-water.view.enter-build.prepare-camera-handoff', () =>
+        measureLandrushFrameSlice('landrush-island.view.enter-build.prepare-camera-handoff', () =>
           prepareCameraHandoff('build'),
         )
-        measureLandrushFrameSlice('pascal-water.view.enter-build.set-build-parcel', () =>
+        measureLandrushFrameSlice('landrush-island.view.enter-build.set-build-parcel', () =>
           setBuildParcelId(parcelId),
         )
-        measureLandrushFrameSlice('pascal-water.view.enter-build.sync-editor-mode', () =>
-          syncPascalWaterBuildEditorMode(true),
+        measureLandrushFrameSlice('landrush-island.view.enter-build.sync-editor-mode', () =>
+          syncLandrushIslandBuildEditorMode(true),
         )
-        measureLandrushFrameSlice('pascal-water.view.enter-build.set-build-mode', () =>
+        measureLandrushFrameSlice('landrush-island.view.enter-build.set-build-mode', () =>
           setBuildMode(true),
         )
-        measureLandrushFrameSlice('pascal-water.view.enter-build.set-map-view', () =>
+        measureLandrushFrameSlice('landrush-island.view.enter-build.set-map-view', () =>
           setMapView(false),
         )
-        measureLandrushFrameSlice('pascal-water.view.enter-build.release-pointer-lock', () =>
-          releasePascalWaterPointerLock(),
+        measureLandrushFrameSlice('landrush-island.view.enter-build.set-fpv-view', () =>
+          setFpvView(false),
         )
-        recordPascalWaterPhaseProbe('view:enter-build:state-dispatched', { from: viewMode })
+        measureLandrushFrameSlice('landrush-island.view.enter-build.release-pointer-lock', () =>
+          releaseLandrushIslandPointerLock(),
+        )
+        recordLandrushIslandPhaseProbe('view:enter-build:state-dispatched', { from: viewMode })
       })
     },
     [prepareCameraHandoff, viewMode],
@@ -2658,29 +2737,35 @@ export function PascalWaterClient({
     : terrainFieldResolutionRender.finalValue
   const liveIsland = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.generate-island', () =>
-        generateWaterLabIsland(renderIslandParameters),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.generate-island',
+        () => generateWaterLabIsland(renderIslandParameters),
       ),
     [activeProfileMeasure, renderIslandParameters],
   )
   const livePerimeter = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.create-perimeter', () =>
-        createPascalWaterPerimeter(liveIsland),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.create-perimeter',
+        () => createLandrushIslandPerimeter(liveIsland),
       ),
     [activeProfileMeasure, liveIsland],
   )
   const liveSmoothedShorelinePoints = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.smooth-perimeter', () =>
-        createPascalWaterSmoothedPerimeter(livePerimeter.points),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.smooth-perimeter',
+        () => createLandrushIslandSmoothedPerimeter(livePerimeter.points),
       ),
     [activeProfileMeasure, livePerimeter.points],
   )
   const liveLandSurface = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.land-surface', () =>
-        createPascalWaterLandSurface({
+      measureLandrushIslandSetup(activeProfileMeasure, 'setup.landrush-island.land-surface', () =>
+        createLandrushIslandLandSurface({
           elevationParameters: renderElevationParameters,
           shorelinePoints: liveSmoothedShorelinePoints,
           waterPlaneSize: WATER_PLANE_SIZE,
@@ -2690,20 +2775,22 @@ export function PascalWaterClient({
   )
   const liveParcelOptions = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.parcel-options', () =>
-        createPascalWaterParcelOptions(liveIsland.seed),
+      measureLandrushIslandSetup(activeProfileMeasure, 'setup.landrush-island.parcel-options', () =>
+        createLandrushIslandParcelOptions(liveIsland.seed),
       ),
     [activeProfileMeasure, liveIsland.seed],
   )
   const liveParcelAllocation = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.allocate-parcels', () =>
-        allocateParcels(liveLandSurface.grassSurfacePoints, liveParcelOptions),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.allocate-parcels',
+        () => allocateParcels(liveLandSurface.grassSurfacePoints, liveParcelOptions),
       ),
     [activeProfileMeasure, liveLandSurface.grassSurfacePoints, liveParcelOptions],
   )
   const parcelWorldId = useMemo(
-    () => createPascalWaterParcelOwnershipWorldId(liveParcelOptions),
+    () => createLandrushIslandParcelOwnershipWorldId(liveParcelOptions),
     [liveParcelOptions],
   )
   const localParcelOwnership = useMemo(
@@ -2732,15 +2819,17 @@ export function PascalWaterClient({
   )
   const selectedLevelId = useViewer((state) => state.selection.levelId)
   const activeBuildLevelBaseY = useScene((state) =>
-    resolvePascalWaterActiveLevelBaseY(
+    resolveLandrushIslandActiveLevelBaseY(
       state.nodes,
-      selectedLevelId ?? (PASCAL_WATER_LEVEL_ID as LevelNode['id']),
+      selectedLevelId ?? (LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id']),
     ),
   )
   const liveViewerLandSurface = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.viewer-land-surface', () =>
-        createPascalWaterViewerLandSurface(liveLandSurface),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.viewer-land-surface',
+        () => createLandrushIslandViewerLandSurface(liveLandSurface),
       ),
     [activeProfileMeasure, liveLandSurface],
   )
@@ -2751,28 +2840,31 @@ export function PascalWaterClient({
         profileBladeSubdivisions ?? Number.POSITIVE_INFINITY,
         isGrassFieldPreviewing
           ? Math.min(
-              PASCAL_WATER_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS,
+              LANDRUSH_ISLAND_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS,
               resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
             )
           : resolveGrassWebGpuBladeSubdivisions(renderGrassTuning.density),
       ),
     [isGrassFieldPreviewing, profileBladeSubdivisions, renderGrassTuning.density],
   )
-  const pascalWaterScene = useMemo(
+  const landrushIslandScene = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.initial-scene-graph', () =>
-        createPascalWaterSceneGraph({
-          elevationParameters: PASCAL_WATER_ELEVATION_PARAMETERS,
-          fieldParameters: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
-          islandParameters: WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
-          layoutConfig: experienceConfig,
-          materialParameters: PASCAL_WATER_MATERIAL_PARAMETERS,
-          omitWaterNode: startupProfileNoWaterNode,
-          profilePlainWaterMaterial,
-          showDepthReference: false,
-          terrainFieldResolution: WATER_FIELD_RESOLUTION,
-          waterFieldDebugMode,
-        }),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.initial-scene-graph',
+        () =>
+          createLandrushIslandSceneGraph({
+            elevationParameters: LANDRUSH_ISLAND_ELEVATION_PARAMETERS,
+            fieldParameters: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
+            islandParameters: WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
+            layoutConfig: experienceConfig,
+            materialParameters: LANDRUSH_ISLAND_MATERIAL_PARAMETERS,
+            omitWaterNode: startupProfileNoWaterNode,
+            profilePlainWaterMaterial,
+            showDepthReference: false,
+            terrainFieldResolution: WATER_FIELD_RESOLUTION,
+            waterFieldDebugMode,
+          }),
       ),
     [
       activeProfileMeasure,
@@ -2784,11 +2876,11 @@ export function PascalWaterClient({
   )
   const liveWaterNode = useMemo(
     () =>
-      measurePascalWaterSetup(
+      measureLandrushIslandSetup(
         activeProfileMeasure,
-        'setup.pascal-water.live-water-node',
+        'setup.landrush-island.live-water-node',
         () =>
-          createPascalWaterNode({
+          createLandrushIslandNode({
             elevationParameters: renderElevationParameters,
             fieldParameters: renderFieldParameters,
             materialParameters,
@@ -2814,34 +2906,42 @@ export function PascalWaterClient({
   )
   const liveLayoutNode = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.live-layout-node', () =>
-        createPascalWaterLayoutNode({
-          allocation: liveParcelAllocation,
-          island: liveIsland,
-          landSurface: liveLandSurface,
-          layoutConfig: experienceConfig,
-        }),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.live-layout-node',
+        () =>
+          createLandrushIslandLayoutNode({
+            allocation: liveParcelAllocation,
+            island: liveIsland,
+            landSurface: liveLandSurface,
+            layoutConfig: experienceConfig,
+          }),
       ),
     [activeProfileMeasure, experienceConfig, liveIsland, liveLandSurface, liveParcelAllocation],
   )
   const liveGrassRoads = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.grass-roads', () =>
-        createPascalWaterGrassRoadSegments(liveLayoutNode.roads.segments),
+      measureLandrushIslandSetup(activeProfileMeasure, 'setup.landrush-island.grass-roads', () =>
+        createLandrushIslandGrassRoadSegments(liveLayoutNode.roads.segments),
       ),
     [activeProfileMeasure, liveLayoutNode.roads.segments],
   )
-  const hasLiveWaterNode = useScene((state) => Boolean(state.nodes[PASCAL_WATER_NODE_ID as never]))
+  const hasLiveWaterNode = useScene((state) =>
+    Boolean(state.nodes[LANDRUSH_ISLAND_NODE_ID as never]),
+  )
   const hasLiveLayoutNode = useScene((state) =>
     Boolean(state.nodes[experienceConfig.layoutNodeId as never]),
   )
   const sceneNodesForGrassBlockers = useScene((state) => (buildMode ? null : state.nodes))
   const builtGrassBlockers = useMemo(
     () =>
-      measurePascalWaterSetup(activeProfileMeasure, 'setup.pascal-water.built-grass-blockers', () =>
-        createPascalWaterBuiltGrassBlockers(
-          sceneNodesForGrassBlockers ?? useScene.getState().nodes,
-        ),
+      measureLandrushIslandSetup(
+        activeProfileMeasure,
+        'setup.landrush-island.built-grass-blockers',
+        () =>
+          createLandrushIslandBuiltGrassBlockers(
+            sceneNodesForGrassBlockers ?? useScene.getState().nodes,
+          ),
       ),
     [activeProfileMeasure, sceneNodesForGrassBlockers],
   )
@@ -2853,15 +2953,15 @@ export function PascalWaterClient({
 
     if (buildMode) {
       if (!wasBuildMode) {
-        recordPascalWaterGrassEventProbe({
+        recordLandrushIslandGrassEventProbe({
           blockers: builtGrassBlockers.length,
           kind: 'build-enter-freeze-blockers',
         })
       }
     } else if (wasBuildMode) {
-      const latestBlockers = createPascalWaterBuiltGrassBlockers(useScene.getState().nodes)
+      const latestBlockers = createLandrushIslandBuiltGrassBlockers(useScene.getState().nodes)
       setVisibleBladeGrassBlockers(latestBlockers)
-      recordPascalWaterGrassEventProbe({
+      recordLandrushIslandGrassEventProbe({
         visibleBlockers: latestBlockers.length,
         kind: 'build-exit-apply-blockers-with-fade',
       })
@@ -2872,28 +2972,28 @@ export function PascalWaterClient({
     previousGrassBlockerBuildModeRef.current = buildMode
   }, [buildMode, builtGrassBlockers])
   // Built objects only clear vertical blades; the flat ground texture stays stable below walls.
-  const grassBlockers = PASCAL_WATER_GROUND_GRASS_BLOCKERS
-  const bladeGrassBlockers = PASCAL_WATER_GROUND_GRASS_BLOCKERS
+  const grassBlockers = LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS
+  const bladeGrassBlockers = LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS
   const bladeGrassFadeBlockers = useMemo(() => {
     const fadeBlockers: GrassFieldBlocker[] = visibleBladeGrassBlockers.map(
-      createPascalWaterHiddenBladeFadeBlocker,
+      createLandrushIslandHiddenBladeFadeBlocker,
     )
     if (buildMode && activeBuildParcel) {
       fadeBlockers.push({
-        featherMeters: PASCAL_WATER_BUILD_PARCEL_BLADE_FEATHER_METERS,
+        featherMeters: LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS,
         initialVisibility: 1,
         points: activeBuildParcel.points,
       })
     }
     return fadeBlockers
   }, [activeBuildParcel, buildMode, visibleBladeGrassBlockers])
-  const handleLoad = useCallback(async () => pascalWaterScene.sceneGraph, [pascalWaterScene])
+  const handleLoad = useCallback(async () => landrushIslandScene.sceneGraph, [landrushIslandScene])
   const activeBuildCameraControlsInitialPose =
     buildMode && buildCameraControlsReady && !buildCameraControlsInitialPose
-      ? maybePascalWaterCameraPoseToEditorInitialPose(buildCameraPoseRef.current)
+      ? maybeLandrushIslandCameraPoseToEditorInitialPose(buildCameraPoseRef.current)
       : buildCameraControlsInitialPose
-  const handleBuildCameraSettled = useCallback((pose: PascalWaterCameraPose) => {
-    setBuildCameraControlsInitialPose(pascalWaterCameraPoseToEditorInitialPose(pose))
+  const handleBuildCameraSettled = useCallback((pose: LandrushIslandCameraPose) => {
+    setBuildCameraControlsInitialPose(landrushIslandCameraPoseToEditorInitialPose(pose))
     setBuildCameraControlsReady(true)
   }, [])
 
@@ -2909,15 +3009,15 @@ export function PascalWaterClient({
 
   useEffect(() => {
     if (!startupProfileEnabled || !startupProfileRef.current) {
-      delete window.__PASCAL_WATER_STARTUP_PROFILE__
+      delete window.__LANDRUSH_ISLAND_STARTUP_PROFILE__
       return
     }
 
     const profile = startupProfileRef.current
-    window.__PASCAL_WATER_STARTUP_PROFILE__ = profile
+    window.__LANDRUSH_ISLAND_STARTUP_PROFILE__ = profile
     const profileOutput = document.createElement('pre')
     profileOutput.hidden = true
-    profileOutput.dataset.pascalWaterStartupProfile = '1'
+    profileOutput.dataset.landrushIslandStartupProfile = '1'
     document.body.appendChild(profileOutput)
     const flushProfileOutput = () => {
       profileOutput.textContent = JSON.stringify(profile)
@@ -2929,7 +3029,7 @@ export function PascalWaterClient({
       return () => {
         window.clearInterval(intervalId)
         profileOutput.remove()
-        delete window.__PASCAL_WATER_STARTUP_PROFILE__
+        delete window.__LANDRUSH_ISLAND_STARTUP_PROFILE__
       }
     }
 
@@ -3006,7 +3106,7 @@ export function PascalWaterClient({
       observer?.disconnect()
       animationFrameObserver?.disconnect()
       profileOutput.remove()
-      delete window.__PASCAL_WATER_STARTUP_PROFILE__
+      delete window.__LANDRUSH_ISLAND_STARTUP_PROFILE__
     }
   }, [startupProfileEnabled])
 
@@ -3025,7 +3125,7 @@ export function PascalWaterClient({
 
     setBuildMode(initialBuildMode)
     setMapView(!initialBuildMode && initialMapView)
-    if (initialBuildMode || initialMapView) releasePascalWaterPointerLock()
+    if (initialBuildMode || initialMapView) releaseLandrushIslandPointerLock()
   }, [searchParams])
 
   useEffect(() => {
@@ -3046,7 +3146,7 @@ export function PascalWaterClient({
     let deleteQueued = false
     const enforceOwnedParcel = () => {
       const scene = useScene.getState()
-      const invalidIds = createPascalWaterInvalidBuildNodeIds(scene.nodes, activeBuildParcel)
+      const invalidIds = createLandrushIslandInvalidBuildNodeIds(scene.nodes, activeBuildParcel)
       if (invalidIds.length === 0) return
 
       for (const id of invalidIds) pendingDeleteIds.add(id)
@@ -3076,12 +3176,12 @@ export function PascalWaterClient({
     }
 
     const syncOwnedParcelBuildNodes = () => {
-      const nodes = createPascalWaterSyncedBuildNodes({
+      const nodes = createLandrushIslandSyncedBuildNodes({
         nodes: useScene.getState().nodes,
         parcel: localOwnedParcel,
         parcelWorldId,
       })
-      const signature = signatureForPascalWaterBuildNodes(nodes)
+      const signature = signatureForLandrushIslandBuildNodes(nodes)
       if (signature === lastSyncedBuildSnapshotSignatureRef.current) return
 
       lastSyncedBuildSnapshotSignatureRef.current = signature
@@ -3091,6 +3191,13 @@ export function PascalWaterClient({
     syncOwnedParcelBuildNodes()
     return useScene.subscribe(syncOwnedParcelBuildNodes)
   }, [localOwnedParcel, multiplayer.syncParcelBuildNodes, parcelWorldId])
+
+  const handleTvMediaStateChange = useCallback(
+    (parcelId: string, tvId: string, media: LandrushIslandTvMediaSettings) => {
+      multiplayer.syncTvMediaState(parcelWorldId, parcelId, tvId, media)
+    },
+    [multiplayer.syncTvMediaState, parcelWorldId],
+  )
 
   useEffect(() => {
     const snapshots = multiplayer.parcelBuildNodes.filter(
@@ -3106,13 +3213,13 @@ export function PascalWaterClient({
       if (!parcel) continue
       if (buildMode && build.updatedBy === resolvedLocalProfile.id) continue
 
-      const nodes = sanitizePascalWaterIncomingBuildNodes(build, parcelWorldId, parcel)
-      const signature = signatureForPascalWaterBuildNodes(nodes)
+      const nodes = sanitizeLandrushIslandIncomingBuildNodes(build, parcelWorldId, parcel)
+      const signature = signatureForLandrushIslandBuildNodes(nodes)
       const snapshotKey = `${build.worldId}:${build.parcelId}`
       if (lastAppliedBuildSnapshotSignatureRef.current.get(snapshotKey) === signature) continue
 
       lastAppliedBuildSnapshotSignatureRef.current.set(snapshotKey, signature)
-      applyPascalWaterBuildSnapshot(scene, build.parcelId, nodes)
+      applyLandrushIslandBuildSnapshot(scene, build.parcelId, nodes)
     }
   }, [
     buildMode,
@@ -3151,14 +3258,13 @@ export function PascalWaterClient({
     viewer.setColorPreset('clay')
     viewer.setShading('rendered')
     viewer.setTextures(true)
-    viewer.setLevelMode('stacked')
     viewer.setShowGrid(false)
     viewer.setShadows(false)
     viewer.setWallMode('up')
     viewer.resetSelection()
     viewer.setSelection({
-      buildingId: PASCAL_WATER_BUILDING_ID as never,
-      levelId: PASCAL_WATER_LEVEL_ID as never,
+      buildingId: LANDRUSH_ISLAND_BUILDING_ID as never,
+      levelId: LANDRUSH_ISLAND_LEVEL_ID as never,
       selectedIds: [],
       zoneId: null,
     })
@@ -3178,50 +3284,63 @@ export function PascalWaterClient({
   }, [])
 
   useEffect(() => {
-    measureLandrushFrameSlice('pascal-water.effect.sync-build-mode', () => {
-      syncPascalWaterBuildEditorMode(buildMode)
+    measureLandrushFrameSlice('landrush-island.effect.sync-build-mode', () => {
+      syncLandrushIslandBuildEditorMode(buildMode)
       renderScheduler.requestFrame('geometry:changed')
     })
   }, [buildMode])
 
   useEffect(() => {
     if (!hasLiveLayoutNode) return
-    measureLandrushFrameSlice('pascal-water.effect.sync-build-mode-after-scene-load', () => {
-      syncPascalWaterBuildEditorMode(buildMode)
+    measureLandrushFrameSlice('landrush-island.effect.sync-build-mode-after-scene-load', () => {
+      syncLandrushIslandBuildEditorMode(buildMode)
       renderScheduler.requestFrame('geometry:changed')
     })
   }, [buildMode, hasLiveLayoutNode])
 
   useEffect(() => {
-    if (viewMode === 'player') return
-    releasePascalWaterPointerLock()
-  }, [viewMode])
+    if (fpvActive) {
+      if (useEditor.getState().isFirstPersonMode) useEditor.getState().setFirstPersonMode(false)
+      return
+    }
+    releaseLandrushIslandPointerLock()
+  }, [fpvActive])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      measureLandrushFrameSlice('pascal-water.input.mode-keydown', () => {
+      measureLandrushFrameSlice('landrush-island.input.mode-keydown', () => {
         if (event.defaultPrevented || isEditableTarget(event.target) || event.repeat) return
+        if (event.code === 'Escape' && fpvActive) {
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
+          measureLandrushFrameSlice('landrush-island.input.mode-keydown.exit-fpv', exitFpvView)
+          return
+        }
         if (event.code === 'Escape' && mapView) {
           event.preventDefault()
           event.stopPropagation()
-          measureLandrushFrameSlice('pascal-water.input.mode-keydown.enter-player', enterPlayerView)
+          measureLandrushFrameSlice(
+            'landrush-island.input.mode-keydown.enter-player',
+            enterPlayerView,
+          )
           return
         }
         if (event.code === 'KeyM') {
           event.preventDefault()
           event.stopPropagation()
           if (buildMode) {
-            measureLandrushFrameSlice('pascal-water.input.mode-keydown.enter-map', enterMapView)
+            measureLandrushFrameSlice('landrush-island.input.mode-keydown.enter-map', enterMapView)
             return
           }
           if (mapView) {
             measureLandrushFrameSlice(
-              'pascal-water.input.mode-keydown.enter-player',
+              'landrush-island.input.mode-keydown.enter-player',
               enterPlayerView,
             )
             return
           }
-          measureLandrushFrameSlice('pascal-water.input.mode-keydown.enter-map', enterMapView)
+          measureLandrushFrameSlice('landrush-island.input.mode-keydown.enter-map', enterMapView)
           return
         }
         if (event.code === 'KeyB') {
@@ -3229,15 +3348,26 @@ export function PascalWaterClient({
           event.stopPropagation()
           if (buildMode) {
             measureLandrushFrameSlice(
-              'pascal-water.input.mode-keydown.enter-player',
+              'landrush-island.input.mode-keydown.enter-player',
               enterPlayerView,
             )
             return
           }
           if (!localOwnedParcel) return
-          measureLandrushFrameSlice('pascal-water.input.mode-keydown.enter-build', () =>
+          measureLandrushFrameSlice('landrush-island.input.mode-keydown.enter-build', () =>
             enterBuildView(localOwnedParcel.id),
           )
+          return
+        }
+        if (event.code === 'KeyF') {
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
+          if (fpvActive) {
+            measureLandrushFrameSlice('landrush-island.input.mode-keydown.exit-fpv', exitFpvView)
+            return
+          }
+          measureLandrushFrameSlice('landrush-island.input.mode-keydown.enter-fpv', enterFpvView)
           return
         }
         if (event.code === 'KeyP') {
@@ -3256,8 +3386,11 @@ export function PascalWaterClient({
   }, [
     buildMode,
     enterBuildView,
+    enterFpvView,
     enterMapView,
     enterPlayerView,
+    exitFpvView,
+    fpvActive,
     localOwnedParcel,
     mapView,
     spatialVoice,
@@ -3268,72 +3401,72 @@ export function PascalWaterClient({
 
     const tick = () => {
       const input = readLandrushGamepadInput()
-      if (!gamepadHintsActiveRef.current && isPascalWaterGamepadInputUsed(input)) {
+      if (!gamepadHintsActiveRef.current && isLandrushIslandGamepadInputUsed(input)) {
         gamepadHintsActiveRef.current = true
         setGamepadHintsActive(true)
       }
 
-      const buttons = readPascalWaterGamepadButtonState(input)
+      const buttons = readLandrushIslandGamepadButtonState(input)
       const previous = previousGamepadButtonsRef.current
-      const squarePressed = wasPascalWaterGamepadButtonPressed(buttons, previous, 'square')
-      const circlePressed = wasPascalWaterGamepadButtonPressed(buttons, previous, 'circle')
-      const trianglePressed = wasPascalWaterGamepadButtonPressed(buttons, previous, 'triangle')
-      const crossPressed = wasPascalWaterGamepadButtonPressed(buttons, previous, 'cross')
-      const voicePressed = wasPascalWaterGamepadButtonPressed(buttons, previous, 'leftShoulder')
+      const squarePressed = wasLandrushIslandGamepadButtonPressed(buttons, previous, 'square')
+      const circlePressed = wasLandrushIslandGamepadButtonPressed(buttons, previous, 'circle')
+      const trianglePressed = wasLandrushIslandGamepadButtonPressed(buttons, previous, 'triangle')
+      const crossPressed = wasLandrushIslandGamepadButtonPressed(buttons, previous, 'cross')
+      const voicePressed = wasLandrushIslandGamepadButtonPressed(buttons, previous, 'leftShoulder')
       const nextModePressed =
-        wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadRight') ||
-        wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadDown')
+        wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadRight') ||
+        wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadDown')
       const previousModePressed =
-        wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadLeft') ||
-        wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadUp')
+        wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadLeft') ||
+        wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadUp')
 
       previousGamepadButtonsRef.current = buttons
 
       if (voicePressed && (spatialVoice.available || spatialVoice.desired)) {
-        measureLandrushFrameSlice('pascal-water.input.gamepad.toggle-voice', spatialVoice.toggle)
+        measureLandrushFrameSlice('landrush-island.input.gamepad.toggle-voice', spatialVoice.toggle)
       }
 
       if (squarePressed) {
         if (buildMode) {
           gamepadBuildFocusRowRef.current = 'modes'
           gamepadBuildWallDraftActiveRef.current = false
-          measureLandrushFrameSlice('pascal-water.input.gamepad.leave-build', enterPlayerView)
+          measureLandrushFrameSlice('landrush-island.input.gamepad.leave-build', enterPlayerView)
         } else if (localOwnedParcel) {
           gamepadBuildFocusRowRef.current = 'modes'
           gamepadBuildWallDraftActiveRef.current = false
-          measureLandrushFrameSlice('pascal-water.input.gamepad.enter-build', () =>
+          measureLandrushFrameSlice('landrush-island.input.gamepad.enter-build', () =>
             enterBuildView(localOwnedParcel.id),
           )
-          gamepadBuildModeRef.current = resolvePascalWaterCurrentGamepadBuildMode()
-          schedulePascalWaterGamepadBuildModeFocus(gamepadBuildModeRef.current)
+          gamepadBuildModeRef.current = resolveLandrushIslandCurrentGamepadBuildMode()
+          scheduleLandrushIslandGamepadBuildModeFocus(gamepadBuildModeRef.current)
         }
       }
 
       if (trianglePressed) {
         measureLandrushFrameSlice(
           mapView && !buildMode
-            ? 'pascal-water.input.gamepad.leave-map'
-            : 'pascal-water.input.gamepad.enter-map',
+            ? 'landrush-island.input.gamepad.leave-map'
+            : 'landrush-island.input.gamepad.enter-map',
           mapView && !buildMode ? enterPlayerView : enterMapView,
         )
       }
 
       if (circlePressed) {
         if (mapView && !buildMode) {
-          measureLandrushFrameSlice('pascal-water.input.gamepad.leave-map', enterPlayerView)
+          measureLandrushFrameSlice('landrush-island.input.gamepad.leave-map', enterPlayerView)
         } else if (buildMode && gamepadBuildFocusRowRef.current === 'structure-tools') {
           if (gamepadBuildWallDraftActiveRef.current) {
-            measureLandrushFrameSlice('pascal-water.input.gamepad.cancel-wall-draft', () =>
-              cancelPascalWaterGamepadWallDraft(gamepadBuildWallDraftActiveRef),
+            measureLandrushFrameSlice('landrush-island.input.gamepad.cancel-wall-draft', () =>
+              cancelLandrushIslandGamepadWallDraft(gamepadBuildWallDraftActiveRef),
             )
           } else {
-            measureLandrushFrameSlice('pascal-water.input.gamepad.leave-structure-tools', () =>
-              leavePascalWaterGamepadStructureToolRow(gamepadBuildFocusRowRef),
+            measureLandrushFrameSlice('landrush-island.input.gamepad.leave-structure-tools', () =>
+              leaveLandrushIslandGamepadStructureToolRow(gamepadBuildFocusRowRef),
             )
           }
         } else if (buildMode) {
-          measureLandrushFrameSlice('pascal-water.input.gamepad.undo-build', () =>
-            runPascalWaterGamepadUndo(gamepadBuildUndoBaselineRef),
+          measureLandrushFrameSlice('landrush-island.input.gamepad.undo-build', () =>
+            runLandrushIslandGamepadUndo(gamepadBuildUndoBaselineRef),
           )
         }
       }
@@ -3341,8 +3474,8 @@ export function PascalWaterClient({
       if (buildMode) {
         if (gamepadBuildFocusRowRef.current === 'structure-tools') {
           if (nextModePressed || previousModePressed) {
-            measureLandrushFrameSlice('pascal-water.input.gamepad.select-structure-tool', () => {
-              selectPascalWaterAdjacentGamepadStructureTool(nextModePressed ? 1 : -1)
+            measureLandrushFrameSlice('landrush-island.input.gamepad.select-structure-tool', () => {
+              selectLandrushIslandAdjacentGamepadStructureTool(nextModePressed ? 1 : -1)
               if (useEditor.getState().tool !== 'wall') {
                 gamepadBuildWallDraftActiveRef.current = false
               }
@@ -3354,18 +3487,19 @@ export function PascalWaterClient({
 
         if (nextModePressed || previousModePressed) {
           const currentMode =
-            gamepadBuildModeRef.current || resolvePascalWaterCurrentGamepadBuildMode()
-          gamepadBuildModeRef.current = cyclePascalWaterGamepadBuildMode(
+            gamepadBuildModeRef.current || resolveLandrushIslandCurrentGamepadBuildMode()
+          gamepadBuildModeRef.current = cycleLandrushIslandGamepadBuildMode(
             currentMode,
             nextModePressed ? 1 : -1,
           )
-          focusPascalWaterGamepadBuildMode(gamepadBuildModeRef.current)
+          focusLandrushIslandGamepadBuildMode(gamepadBuildModeRef.current)
         }
         if (crossPressed) {
-          measureLandrushFrameSlice('pascal-water.input.gamepad.apply-build-mode', () => {
+          measureLandrushFrameSlice('landrush-island.input.gamepad.apply-build-mode', () => {
             const mode = gamepadBuildModeRef.current
-            applyPascalWaterGamepadBuildMode(mode)
-            if (mode === 'build') enterPascalWaterGamepadStructureToolRow(gamepadBuildFocusRowRef)
+            applyLandrushIslandGamepadBuildMode(mode)
+            if (mode === 'build')
+              enterLandrushIslandGamepadStructureToolRow(gamepadBuildFocusRowRef)
           })
         }
       }
@@ -3395,32 +3529,32 @@ export function PascalWaterClient({
       return
     }
     gamepadBuildUndoBaselineRef.current ??= useScene.temporal.getState().pastStates.length
-    gamepadBuildModeRef.current = resolvePascalWaterCurrentGamepadBuildMode()
-    schedulePascalWaterGamepadBuildModeFocus(gamepadBuildModeRef.current)
+    gamepadBuildModeRef.current = resolveLandrushIslandCurrentGamepadBuildMode()
+    scheduleLandrushIslandGamepadBuildModeFocus(gamepadBuildModeRef.current)
   }, [buildMode])
 
   useEffect(() => {
     const scene = useScene.getState()
     if (hasLiveWaterNode) {
-      const existingWaterNode = scene.nodes[PASCAL_WATER_NODE_ID as never] as
-        | PascalWaterNode
+      const existingWaterNode = scene.nodes[LANDRUSH_ISLAND_NODE_ID as never] as
+        | LandrushIslandNode
         | undefined
       const skipIdenticalDebugWaterNode =
         waterFieldDebugMode === 'cached-worker' &&
         existingWaterNode &&
-        createPascalWaterNodeRenderSignature(existingWaterNode) ===
-          createPascalWaterNodeRenderSignature(liveWaterNode)
+        createLandrushIslandNodeRenderSignature(existingWaterNode) ===
+          createLandrushIslandNodeRenderSignature(liveWaterNode)
       if (!skipIdenticalDebugWaterNode) {
-        scene.updateNode(PASCAL_WATER_NODE_ID as never, liveWaterNode as never)
+        scene.updateNode(LANDRUSH_ISLAND_NODE_ID as never, liveWaterNode as never)
       }
     }
     if (hasLiveLayoutNode) {
       scene.updateNode(experienceConfig.layoutNodeId as never, liveLayoutNode as never)
     }
-    window.__PASCAL_WATER_DEBUG__ = {
+    window.__LANDRUSH_ISLAND_DEBUG__ = {
       features: [
         'pascal-editor-canvas',
-        'pascal-water-node',
+        'landrush-island-water-node',
         'pascal-landrush-layout-node',
         'pascal-build-grid-aligned-to-grass-plane',
         'build-chrome-hidden-until-toggle',
@@ -3455,7 +3589,7 @@ export function PascalWaterClient({
     renderScheduler.requestFrame('geometry:changed')
 
     return () => {
-      delete window.__PASCAL_WATER_DEBUG__
+      delete window.__LANDRUSH_ISLAND_DEBUG__
     }
   }, [
     experienceConfig,
@@ -3469,9 +3603,9 @@ export function PascalWaterClient({
   const resetParameters = () => {
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
     setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
-    setElevationParameters({ ...PASCAL_WATER_ELEVATION_PARAMETERS })
-    setMaterialParameters({ ...PASCAL_WATER_MATERIAL_PARAMETERS })
-    setGrassTuning({ ...PASCAL_WATER_GRASS_TUNING })
+    setElevationParameters({ ...LANDRUSH_ISLAND_ELEVATION_PARAMETERS })
+    setMaterialParameters({ ...LANDRUSH_ISLAND_MATERIAL_PARAMETERS })
+    setGrassTuning({ ...LANDRUSH_ISLAND_GRASS_TUNING })
     setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
   }
   const handleLoadingLoaded = useCallback(() => setLoadingActive(false), [])
@@ -3487,14 +3621,14 @@ export function PascalWaterClient({
             : 'scale-100 blur-0 brightness-100',
         ].join(' ')}
       >
-        <PascalWaterStartupReactProfiler
+        <LandrushIslandStartupReactProfiler
           enabled={runtimeProbeEnabled}
-          id="runtime.pascal-water.editor"
+          id="runtime.landrush-island.editor"
           onRender={handleRuntimeReactRender}
         >
-          <PascalWaterStartupReactProfiler
+          <LandrushIslandStartupReactProfiler
             enabled={startupProfileEnabled}
-            id="pascal-water.editor"
+            id="landrush-island.editor"
             onRender={handleStartupReactRender}
           >
             <Editor
@@ -3511,28 +3645,29 @@ export function PascalWaterClient({
               viewerPostProcessing={false}
               viewerRendererBackend={viewerRendererBackend}
               viewerSceneChildren={
-                <PascalWaterStartupReactProfiler
+                <LandrushIslandStartupReactProfiler
                   enabled={runtimeProbeEnabled}
-                  id="runtime.pascal-water.viewer-scene-children"
+                  id="runtime.landrush-island.viewer-scene-children"
                   onRender={handleRuntimeReactRender}
                 >
-                  <PascalWaterStartupReactProfiler
+                  <LandrushIslandStartupReactProfiler
                     enabled={startupProfileEnabled}
-                    id="pascal-water.viewer-scene-children"
+                    id="landrush-island.viewer-scene-children"
                     onRender={handleStartupReactRender}
                   >
                     <color args={['#164a77']} attach="background" />
                     <FrameLoadProfilerProbe enabled={frameProfile} />
-                    <PascalWaterEditorOverlayLayerBridge enabled={buildMode} />
-                    <PascalWaterStartupReactProfiler
+                    <LandrushIslandEditorOverlayLayerBridge enabled={buildMode} />
+                    <LandrushIslandStartupReactProfiler
                       enabled={runtimeProbeEnabled}
-                      id="runtime.pascal-water.player-layer"
+                      id="runtime.landrush-island.player-layer"
                       onRender={handleRuntimeReactRender}
                     >
-                      <PascalWaterPlayerLayer
+                      <LandrushIslandPlayerLayer
                         baseNode={liveLayoutNode}
                         buildCameraPoseRef={buildCameraPoseRef}
                         fallPresentationRef={fallPresentationRef}
+                        fpvActive={fpvActive}
                         grassInteractionRef={grassInteractionRef}
                         localMotionRef={localMotionRef}
                         localProfile={resolvedLocalProfile}
@@ -3560,22 +3695,24 @@ export function PascalWaterClient({
                         surface={liveViewerLandSurface}
                         viewMode={viewMode}
                         voiceRangeVisible={spatialVoice.desired && spatialVoice.status === 'live'}
-                        waterY={PASCAL_WATER_LOW_ELEVATION - liveLandSurface.grassSurfaceElevation}
+                        waterY={
+                          LANDRUSH_ISLAND_LOW_ELEVATION - liveLandSurface.grassSurfaceElevation
+                        }
                       />
-                    </PascalWaterStartupReactProfiler>
+                    </LandrushIslandStartupReactProfiler>
                     {revealProof ? (
-                      <PascalWaterRevealProofOccluder
+                      <LandrushIslandRevealProofOccluder
                         motionRef={localMotionRef}
                         presentationMode={viewMode === 'build' ? 'hover' : 'default'}
                         visible={viewMode !== 'map'}
                       />
                     ) : null}
-                    <PascalWaterStartupReactProfiler
+                    <LandrushIslandStartupReactProfiler
                       enabled={runtimeProbeEnabled}
-                      id="runtime.pascal-water.parcel-ownership-layer"
+                      id="runtime.landrush-island.parcel-ownership-layer"
                       onRender={handleRuntimeReactRender}
                     >
-                      <PascalWaterParcelOwnershipLayer
+                      <LandrushIslandParcelOwnershipLayer
                         allocation={liveParcelAllocation}
                         buildParcelId={buildParcelId}
                         buildMode={buildMode}
@@ -3594,18 +3731,18 @@ export function PascalWaterClient({
                         surface={liveViewerLandSurface}
                         watchParcelWorld={multiplayer.watchParcelWorld}
                       />
-                    </PascalWaterStartupReactProfiler>
-                    <PascalWaterBuildParcelGuardLayer
+                    </LandrushIslandStartupReactProfiler>
+                    <LandrushIslandBuildParcelGuardLayer
                       buildMode={buildMode}
                       groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                     />
-                    <PascalWaterStartupReactProfiler
+                    <LandrushIslandStartupReactProfiler
                       enabled={runtimeProbeEnabled}
-                      id="runtime.pascal-water.build-camera-rig"
+                      id="runtime.landrush-island.build-camera-rig"
                       onRender={handleRuntimeReactRender}
                     >
-                      <PascalWaterBuildCameraRig
+                      <LandrushIslandBuildCameraRig
                         buildCameraPoseRef={buildCameraPoseRef}
                         captureEditorCameraPose={buildCameraControlsReady}
                         groundY={activeBuildGroundY}
@@ -3614,14 +3751,14 @@ export function PascalWaterClient({
                         playerCameraPoseRef={playerCameraPoseRef}
                         visible={buildMode}
                       />
-                    </PascalWaterStartupReactProfiler>
-                    <PascalWaterBuildCameraMouseOrbitController
+                    </LandrushIslandStartupReactProfiler>
+                    <LandrushIslandBuildCameraMouseOrbitController
                       buildCameraPoseRef={buildCameraPoseRef}
                       groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                       visible={buildMode}
                     />
-                    <PascalWaterBuildGamepadPlacementController
+                    <LandrushIslandBuildGamepadPlacementController
                       buildCameraPoseRef={buildCameraPoseRef}
                       focusRowRef={gamepadBuildFocusRowRef}
                       groundY={activeBuildGroundY}
@@ -3629,20 +3766,20 @@ export function PascalWaterClient({
                       visible={buildMode}
                       wallDraftActiveRef={gamepadBuildWallDraftActiveRef}
                     />
-                    <PascalWaterRobotLevelSelectionTracker
+                    <LandrushIslandRobotLevelSelectionTracker
                       enabled={!buildMode}
                       groundY={liveViewerLandSurface.grassSurfaceElevation}
                       localMotionRef={localMotionRef}
                     />
                     {!startupProfileNoLandLayers ? (
-                      <PascalWaterStartupReactProfiler
+                      <LandrushIslandStartupReactProfiler
                         enabled={runtimeProbeEnabled}
-                        id="runtime.pascal-water.land-layers"
+                        id="runtime.landrush-island.land-layers"
                         onRender={handleRuntimeReactRender}
                       >
-                        <PascalWaterStartupReactProfiler
+                        <LandrushIslandStartupReactProfiler
                           enabled={startupProfileEnabled}
-                          id="pascal-water.land-layers"
+                          id="landrush-island.land-layers"
                           onRender={handleStartupReactRender}
                         >
                           <Suspense fallback={null}>
@@ -3650,19 +3787,21 @@ export function PascalWaterClient({
                               bladeFadeBlockers={bladeGrassFadeBlockers}
                               bladeSubdivisions={bladeSubdivisions}
                               bladeGrassBlockers={bladeGrassBlockers}
-                              fieldResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                              fieldResolution={LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
                               finalFieldResolution={
                                 isGrassFieldPreviewing
-                                  ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
-                                  : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
+                                  ? LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                                  : LANDRUSH_ISLAND_INTERACTIVE_GRASS_FIELD_RESOLUTION
                               }
                               finalSpawnResolution={
                                 isGrassFieldPreviewing
-                                  ? PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION
-                                  : PASCAL_WATER_INTERACTIVE_GRASS_FIELD_RESOLUTION
+                                  ? LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION
+                                  : LANDRUSH_ISLAND_INTERACTIVE_GRASS_FIELD_RESOLUTION
                               }
                               bladeRenderOrder={
-                                buildMode ? PASCAL_WATER_BUILD_GRASS_BLADE_RENDER_ORDER : undefined
+                                buildMode
+                                  ? LANDRUSH_ISLAND_BUILD_GRASS_BLADE_RENDER_ORDER
+                                  : undefined
                               }
                               grassDebugState={{
                                 buildMode,
@@ -3671,7 +3810,9 @@ export function PascalWaterClient({
                               grassInteractionRef={grassInteractionRef}
                               grassBlockers={grassBlockers}
                               groundRenderOrder={
-                                buildMode ? PASCAL_WATER_BUILD_GRASS_GROUND_RENDER_ORDER : undefined
+                                buildMode
+                                  ? LANDRUSH_ISLAND_BUILD_GRASS_GROUND_RENDER_ORDER
+                                  : undefined
                               }
                               onStylizedGroundTextureReady={setStylizedGroundTextureReady}
                               profileMeasure={activeProfileMeasure}
@@ -3679,10 +3820,10 @@ export function PascalWaterClient({
                               showBlades={!startupProfileNoStylizedBlades}
                               showGround
                               showTrees={!startupProfileNoStylizedTrees}
-                              spawnResolution={PASCAL_WATER_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
+                              spawnResolution={LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
                               stylizedGroundTexture={!startupProfileNoStylizedGround}
                               stylizedGroundTextureWorldSizeMeters={
-                                PASCAL_WATER_GRASS_TEXTURE_TILE_METERS
+                                LANDRUSH_ISLAND_GRASS_TEXTURE_TILE_METERS
                               }
                               stylizedSceneLayout
                               surface={liveViewerLandSurface}
@@ -3690,24 +3831,30 @@ export function PascalWaterClient({
                               tuning={renderGrassTuning}
                             />
                           </Suspense>
-                        </PascalWaterStartupReactProfiler>
-                      </PascalWaterStartupReactProfiler>
+                        </LandrushIslandStartupReactProfiler>
+                      </LandrushIslandStartupReactProfiler>
                     ) : null}
-                    <PascalWaterBuildGridOverlay
+                    <LandrushIslandBuildGridOverlay
                       buildableBoundaryPoints={liveParcelAllocation.boundary}
                       groundY={activeBuildGroundY}
                       parcel={activeBuildParcel}
                       roads={liveGrassRoads}
                       visible={buildMode}
                     />
-                    <PascalWaterRuntimeCameraProbeRecorder mode={viewMode} />
-                  </PascalWaterStartupReactProfiler>
-                </PascalWaterStartupReactProfiler>
+                    <LandrushIslandPlacedTvScreens
+                      enabled={experience === 'pascal-multiplayer-island'}
+                      localMotionRef={localMotionRef}
+                      mediaStates={multiplayer.tvMediaStates}
+                      onMediaStateChange={handleTvMediaStateChange}
+                    />
+                    <LandrushIslandRuntimeCameraProbeRecorder mode={viewMode} />
+                  </LandrushIslandStartupReactProfiler>
+                </LandrushIslandStartupReactProfiler>
               }
               viewerUseBvh={false}
             />
-          </PascalWaterStartupReactProfiler>
-        </PascalWaterStartupReactProfiler>
+          </LandrushIslandStartupReactProfiler>
+        </LandrushIslandStartupReactProfiler>
         <MultiplayerStatusPanel
           connection={multiplayer.connection}
           localPlayerIncluded={!offline}
@@ -3721,7 +3868,7 @@ export function PascalWaterClient({
           <button
             aria-label="Map mode"
             aria-pressed={mapView && !buildMode}
-            className={pascalWaterModeButtonClass(mapView && !buildMode)}
+            className={landrushIslandModeButtonClass(mapView && !buildMode)}
             data-landrush-map-toggle
             onClick={() => {
               if (buildMode) {
@@ -3739,36 +3886,63 @@ export function PascalWaterClient({
             <MapIcon aria-hidden className="size-5" />
             <span className="hidden text-lg md:inline">{gamepadHintsActive ? '△' : 'M'}</span>
           </button>
-          <button
-            aria-label="Build mode"
-            aria-pressed={buildMode}
-            className={pascalWaterModeButtonClass(buildMode)}
-            data-landrush-build-toggle
-            onClick={() => {
-              if (buildMode) {
-                enterPlayerView()
-                return
-              }
-              if (!localOwnedParcel) return
-              enterBuildView(localOwnedParcel.id)
-            }}
-            type="button"
-          >
-            <Hammer aria-hidden className="size-5" />
-            <span className="hidden text-lg md:inline">{gamepadHintsActive ? '□' : 'B'}</span>
-          </button>
-          <PascalWaterVoiceModeButton
+          {mapView && !buildMode ? (
+            <button
+              aria-label="Build mode"
+              aria-pressed={buildMode}
+              className={landrushIslandModeButtonClass(buildMode)}
+              data-landrush-build-toggle
+              onClick={() => {
+                if (buildMode) {
+                  enterPlayerView()
+                  return
+                }
+                if (!localOwnedParcel) return
+                enterBuildView(localOwnedParcel.id)
+              }}
+              type="button"
+            >
+              <Hammer aria-hidden className="size-5" />
+              <span className="hidden text-lg md:inline">{gamepadHintsActive ? '□' : 'B'}</span>
+            </button>
+          ) : null}
+          <LandrushIslandVoiceModeButton
             gamepadHintsActive={gamepadHintsActive}
             voice={spatialVoice}
           />
-          <PascalWaterLevelModeControls />
-          <div className={pascalWaterModeHintClass()} title="Right click to move">
+          <button
+            aria-label={fpvActive ? 'Exit FPV mode' : 'FPV mode'}
+            aria-pressed={fpvActive}
+            className={landrushIslandModeButtonClass(fpvActive)}
+            onClick={() => {
+              if (fpvActive) {
+                exitFpvView()
+                return
+              }
+              enterFpvView()
+            }}
+            title={fpvActive ? 'Exit FPV mode' : 'FPV mode'}
+            type="button"
+          >
+            <Eye aria-hidden className="size-5" />
+            <span className="hidden text-lg md:inline">F</span>
+          </button>
+          <div className={landrushIslandModeHintClass()} title="Right click to move">
             <MouseRight aria-hidden className="size-6 text-white/82" />
             <span>Move</span>
           </div>
         </div>
+        {buildMode && !showTunePanel ? (
+          <div
+            className="pointer-events-auto absolute top-16 right-5 z-[82] hidden md:block"
+            data-landrush-ui
+            data-landrush-ui-interactive
+          >
+            <LandrushIslandLevelModeControls />
+          </div>
+        ) : null}
         {showTunePanel ? (
-          <PascalWaterTunePanel
+          <LandrushIslandTunePanel
             elevationParameters={elevationParameters}
             fieldParameters={fieldParameters}
             grassTuning={grassTuning}
@@ -3807,18 +3981,21 @@ export function PascalWaterClient({
           </button>
         )}
       </div>
-      <PascalWaterLoadingOverlay assetsReady={loadingAssetsReady} onLoaded={handleLoadingLoaded} />
-      <PascalWaterFallScreenEffect presentationRef={fallPresentationRef} />
+      <LandrushIslandLoadingOverlay
+        assetsReady={loadingAssetsReady}
+        onLoaded={handleLoadingLoaded}
+      />
+      <LandrushIslandFallScreenEffect presentationRef={fallPresentationRef} />
     </main>
   )
 }
 
-function PascalWaterFallScreenEffect({
+function LandrushIslandFallScreenEffect({
   presentationRef,
 }: {
-  presentationRef: { current: PascalWaterFallPresentationState }
+  presentationRef: { current: LandrushIslandFallPresentationState }
 }) {
-  const [snapshot, setSnapshot] = useState(() => createPascalWaterFallPresentationState())
+  const [snapshot, setSnapshot] = useState(() => createLandrushIslandFallPresentationState())
 
   useEffect(() => {
     let frameId: number | null = null
@@ -3864,27 +4041,27 @@ function PascalWaterFallScreenEffect({
   )
 }
 
-function resolvePascalWaterMapPresentationProgress(
-  viewMode: PascalWaterViewMode,
-  transition: PascalWaterModeTransitionFadeState | null,
+function resolveLandrushIslandMapPresentationProgress(
+  viewMode: LandrushIslandViewMode,
+  transition: LandrushIslandModeTransitionFadeState | null,
   progress: number,
 ) {
   if (!transition) return viewMode === 'map' ? 1 : 0
 
-  const amount = easePascalWaterCameraTransition(progress, transition.to)
+  const amount = easeLandrushIslandCameraTransition(progress, transition.to)
   if (transition.to === 'map') return amount
   if (transition.from === 'map') return 1 - amount
   return viewMode === 'map' ? 1 : 0
 }
 
-function PascalWaterLoadingOverlay({
+function LandrushIslandLoadingOverlay({
   assetsReady,
   onLoaded,
 }: {
   assetsReady: boolean
   onLoaded: () => void
 }) {
-  const { progress, visible } = usePascalWaterLoadingProgress(assetsReady)
+  const { progress, visible } = useLandrushIslandLoadingProgress(assetsReady)
   const percent = Math.round(clamp(progress, 0, 100))
   const complete = percent >= 100
 
@@ -3922,7 +4099,7 @@ function PascalWaterLoadingOverlay({
   )
 }
 
-function PascalWaterTunePanel({
+function LandrushIslandTunePanel({
   elevationParameters,
   fieldParameters,
   grassTuning,
@@ -3953,16 +4130,16 @@ function PascalWaterTunePanel({
   onTerrainFieldResolutionChange: (value: number) => void
   terrainFieldResolution: number
 }) {
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<PascalWaterTuningGroupId, boolean>>(
-    {
-      grass: true,
-      island: true,
-      waterAreas: true,
-      waterEdge: true,
-      waterRipples: false,
-    },
-  )
-  const toggleGroup = (group: PascalWaterTuningGroupId) => {
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Record<LandrushIslandTuningGroupId, boolean>
+  >({
+    grass: true,
+    island: true,
+    waterAreas: true,
+    waterEdge: true,
+    waterRipples: false,
+  })
+  const toggleGroup = (group: LandrushIslandTuningGroupId) => {
     setCollapsedGroups((current) => ({ ...current, [group]: !current[group] }))
   }
 
@@ -3992,20 +4169,20 @@ function PascalWaterTunePanel({
         </div>
       </div>
       <div className="mt-4 grid gap-3">
-        <PascalWaterTuningGroup
+        <LandrushIslandTuningGroup
           collapsed={collapsedGroups.island}
           onToggle={() => toggleGroup('island')}
           title="Water island"
         >
           {WATER_LAB_ISLAND_SLIDERS.map(({ key, ...slider }) => (
-            <PascalWaterTuneSlider
+            <LandrushIslandTuneSlider
               key={key}
               {...slider}
               onChange={(value) => onIslandChange(key, value)}
               value={islandParameters[key]}
             />
           ))}
-          <PascalWaterTuneSlider
+          <LandrushIslandTuneSlider
             label="field resolution"
             max={WATER_FIELD_RESOLUTION}
             min={128}
@@ -4013,69 +4190,69 @@ function PascalWaterTunePanel({
             step={64}
             value={terrainFieldResolution}
           />
-        </PascalWaterTuningGroup>
-        <PascalWaterTuningGroup
+        </LandrushIslandTuningGroup>
+        <LandrushIslandTuningGroup
           collapsed={collapsedGroups.waterAreas}
           onToggle={() => toggleGroup('waterAreas')}
           title="Water areas"
         >
           {FIELD_SLIDERS.map(({ key, ...slider }) => (
-            <PascalWaterTuneSlider
+            <LandrushIslandTuneSlider
               key={key}
               {...slider}
               onChange={(value) => onFieldChange(key, value)}
               value={fieldParameters[key]}
             />
           ))}
-        </PascalWaterTuningGroup>
-        <PascalWaterTuningGroup
+        </LandrushIslandTuningGroup>
+        <LandrushIslandTuningGroup
           collapsed={collapsedGroups.waterEdge}
           onToggle={() => toggleGroup('waterEdge')}
           title="Raised edge"
         >
           {ELEVATION_SLIDERS.map(({ key, ...slider }) => (
-            <PascalWaterTuneSlider
+            <LandrushIslandTuneSlider
               key={key}
               {...slider}
               onChange={(value) => onElevationChange(key, value)}
               value={elevationParameters[key]}
             />
           ))}
-        </PascalWaterTuningGroup>
-        <PascalWaterTuningGroup
+        </LandrushIslandTuningGroup>
+        <LandrushIslandTuningGroup
           collapsed={collapsedGroups.waterRipples}
           onToggle={() => toggleGroup('waterRipples')}
           title="Water ripples"
         >
           {WATER_MATERIAL_SLIDERS.map(({ key, ...slider }) => (
-            <PascalWaterTuneSlider
+            <LandrushIslandTuneSlider
               key={key}
               {...slider}
               onChange={(value) => onMaterialChange(key, value)}
               value={materialParameters[key]}
             />
           ))}
-        </PascalWaterTuningGroup>
-        <PascalWaterTuningGroup
+        </LandrushIslandTuningGroup>
+        <LandrushIslandTuningGroup
           collapsed={collapsedGroups.grass}
           onToggle={() => toggleGroup('grass')}
           title="Grass and trees"
         >
-          {PASCAL_WATER_GRASS_SLIDERS.map(({ key, ...slider }) => (
-            <PascalWaterTuneSlider
+          {LANDRUSH_ISLAND_GRASS_SLIDERS.map(({ key, ...slider }) => (
+            <LandrushIslandTuneSlider
               key={key}
               {...slider}
               onChange={(value) => onGrassChange(key, value)}
               value={grassTuning[key]}
             />
           ))}
-        </PascalWaterTuningGroup>
+        </LandrushIslandTuningGroup>
       </div>
     </section>
   )
 }
 
-function PascalWaterTuningGroup({
+function LandrushIslandTuningGroup({
   children,
   collapsed,
   onToggle,
@@ -4105,7 +4282,7 @@ function PascalWaterTuningGroup({
   )
 }
 
-function PascalWaterTuneSlider({
+function LandrushIslandTuneSlider({
   label,
   max,
   min,
@@ -4155,7 +4332,7 @@ function formatTuningValue(value: number, step = 0.01) {
   return String(Math.round(value))
 }
 
-function pascalWaterModeButtonClass(active: boolean, disabled = false) {
+function landrushIslandModeButtonClass(active: boolean, disabled = false) {
   return [
     'inline-flex size-11 items-center justify-center rounded-md border text-2xl font-black leading-none shadow-xl backdrop-blur transition md:h-14 md:w-28 md:gap-3 md:px-3',
     active
@@ -4165,56 +4342,83 @@ function pascalWaterModeButtonClass(active: boolean, disabled = false) {
   ].join(' ')
 }
 
-function pascalWaterModeHintClass() {
+function landrushIslandModeHintClass() {
   return [
     'pointer-events-none hidden h-14 w-28 items-center justify-center gap-3 rounded-md border border-white/18 bg-slate-950/54 px-3 text-base font-black uppercase leading-none text-white/76 shadow-xl backdrop-blur md:inline-flex',
   ].join(' ')
 }
 
-const PASCAL_WATER_LEVEL_MODE_OPTIONS = [
+const LANDRUSH_ISLAND_LEVEL_MODE_OPTIONS = [
   { label: 'Stack', mode: 'stacked' },
   { label: 'Explode', mode: 'exploded' },
   { label: 'Solo', mode: 'solo' },
 ] as const
 
-function pascalWaterLevelModeButtonClass(active: boolean) {
+function landrushIslandLevelModeButtonClass(active: boolean) {
   return [
-    'inline-flex h-8 min-w-0 items-center justify-center gap-1 rounded border px-1.5 font-black text-[9px] uppercase leading-none shadow-lg transition md:h-9 md:w-full md:px-2 md:text-[10px]',
+    'inline-flex h-9 min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md border px-2 font-black text-[10px] uppercase leading-none shadow-lg transition md:h-10 md:min-w-[7.25rem] md:px-3 md:text-[11px]',
     active
       ? 'border-sky-100/70 bg-sky-300 text-slate-950 shadow-[0_0_18px_rgba(125,211,252,0.2)]'
       : 'border-white/18 bg-slate-950/64 text-white/74 hover:border-white/38 hover:bg-slate-900/84 hover:text-white',
   ].join(' ')
 }
 
-function PascalWaterLevelModeControls() {
+function LandrushIslandLevelModeControls() {
   const levelMode = useViewer((state) => state.levelMode)
   const setLevelMode = useViewer((state) => state.setLevelMode)
+  const [open, setOpen] = useState(false)
+  const activeOption =
+    LANDRUSH_ISLAND_LEVEL_MODE_OPTIONS.find((option) => option.mode === levelMode) ??
+    LANDRUSH_ISLAND_LEVEL_MODE_OPTIONS[0]!
 
   return (
-    <div className="grid grid-cols-3 gap-1 border-white/12 border-t pt-1 md:grid-cols-1">
-      {PASCAL_WATER_LEVEL_MODE_OPTIONS.map((option) => (
-        <button
-          aria-label={`Level mode: ${option.label}`}
-          aria-pressed={levelMode === option.mode}
-          className={pascalWaterLevelModeButtonClass(levelMode === option.mode)}
-          key={option.mode}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            setLevelMode(option.mode)
-          }}
-          title={`Levels: ${option.label}`}
-          type="button"
-        >
-          <Layers aria-hidden className="hidden size-3.5 md:block" />
-          <span>{option.label}</span>
-        </button>
-      ))}
+    <div className="relative">
+      <button
+        aria-expanded={open}
+        aria-label={`Level mode: ${activeOption.label}`}
+        className={landrushIslandLevelModeButtonClass(true)}
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setOpen((current) => !current)
+        }}
+        title={`Levels: ${activeOption.label}`}
+        type="button"
+      >
+        <Layers aria-hidden className="size-3.5" />
+        <span>{activeOption.label}</span>
+        <ChevronDown
+          aria-hidden
+          className={`size-3 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open ? (
+        <div className="absolute top-full right-0 z-[90] mt-1 grid min-w-full gap-1 rounded-md border border-white/16 bg-slate-950/88 p-1 shadow-2xl backdrop-blur-md">
+          {LANDRUSH_ISLAND_LEVEL_MODE_OPTIONS.map((option) => (
+            <button
+              aria-label={`Level mode: ${option.label}`}
+              aria-pressed={levelMode === option.mode}
+              className={landrushIslandLevelModeButtonClass(levelMode === option.mode)}
+              key={option.mode}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setLevelMode(option.mode)
+                setOpen(false)
+              }}
+              title={`Levels: ${option.label}`}
+              type="button"
+            >
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
 
-function PascalWaterVoiceModeButton({
+function LandrushIslandVoiceModeButton({
   gamepadHintsActive,
   voice,
 }: {
@@ -4239,7 +4443,7 @@ function PascalWaterVoiceModeButton({
       aria-label={title}
       aria-pressed={active}
       className={[
-        pascalWaterModeButtonClass(active, blocked),
+        landrushIslandModeButtonClass(active, blocked),
         active ? 'border-emerald-200/70 bg-emerald-300 text-slate-950' : '',
         voice.status === 'error' ? 'border-rose-200/55 text-rose-100' : '',
       ].join(' ')}
@@ -4258,7 +4462,7 @@ function PascalWaterVoiceModeButton({
   )
 }
 
-function PascalWaterEditorOverlayLayerBridge({ enabled }: { enabled: boolean }) {
+function LandrushIslandEditorOverlayLayerBridge({ enabled }: { enabled: boolean }) {
   const { camera, raycaster } = useThree()
 
   useEffect(() => {
@@ -4270,7 +4474,7 @@ function PascalWaterEditorOverlayLayerBridge({ enabled }: { enabled: boolean }) 
   return null
 }
 
-function PascalWaterBuildParcelGuardLayer({
+function LandrushIslandBuildParcelGuardLayer({
   buildMode,
   groundY,
   parcel,
@@ -4287,11 +4491,11 @@ function PascalWaterBuildParcelGuardLayer({
     if (!buildMode) return
 
     const canvas = gl.domElement
-    const eventTarget = getPascalWaterCanvasEventTarget(canvas, events.connected)
+    const eventTarget = getLandrushIslandCanvasEventTarget(canvas, events.connected)
     const isInsideParcel = (event: MouseEvent | PointerEvent) => {
       if (!parcel) return false
 
-      const point = pickPascalWaterBuildGroundPoint({
+      const point = pickLandrushIslandBuildGroundPoint({
         camera,
         canvas,
         event,
@@ -4303,8 +4507,8 @@ function PascalWaterBuildParcelGuardLayer({
     }
     const blockOutsideParcel = (event: MouseEvent | PointerEvent) => {
       if (
-        !pointerEventInPascalWaterCanvas(event, canvas) ||
-        isPascalWaterInteractivePointerTarget(event.target)
+        !pointerEventInLandrushIslandCanvas(event, canvas) ||
+        isLandrushIslandInteractivePointerTarget(event.target)
       ) {
         return
       }
@@ -4327,7 +4531,7 @@ function PascalWaterBuildParcelGuardLayer({
   return null
 }
 
-function PascalWaterBuildCameraRig({
+function LandrushIslandBuildCameraRig({
   buildCameraPoseRef,
   captureEditorCameraPose,
   groundY,
@@ -4336,12 +4540,12 @@ function PascalWaterBuildCameraRig({
   playerCameraPoseRef,
   visible,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   captureEditorCameraPose: boolean
   groundY: number
-  onSettled: (pose: PascalWaterCameraPose) => void
+  onSettled: (pose: LandrushIslandCameraPose) => void
   parcel: ParcelAllocationParcel | null
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
   visible: boolean
 }) {
   const controlsTarget = useMemo(() => new Vector3(), [])
@@ -4358,17 +4562,18 @@ function PascalWaterBuildCameraRig({
   useFrame((state, delta) => {
     if (!visible || !parcel || !captureEditorCameraPose) return
 
-    const controls = getPascalWaterCameraControls(state)
-    const target = readPascalWaterCameraControlsTarget(controls, controlsTarget) ?? controlsTarget
-    writePascalWaterCameraPose(buildCameraPoseRef, state.camera, target)
+    const controls = getLandrushIslandCameraControls(state)
+    const target =
+      readLandrushIslandCameraControlsTarget(controls, controlsTarget) ?? controlsTarget
+    writeLandrushIslandCameraPose(buildCameraPoseRef, state.camera, target)
   })
 
   if (!visible || !parcel) return null
 
   return (
     <>
-      <PascalWaterPoseCamera fallbackPosition={initialPosition} pose={initialPose} />
-      <PascalWaterBuildCameraTransition
+      <LandrushIslandPoseCamera fallbackPosition={initialPosition} pose={initialPose} />
+      <LandrushIslandBuildCameraTransition
         controlsTarget={controlsTarget}
         groundY={groundY}
         buildCameraPoseRef={buildCameraPoseRef}
@@ -4381,13 +4586,13 @@ function PascalWaterBuildCameraRig({
   )
 }
 
-function PascalWaterBuildCameraMouseOrbitController({
+function LandrushIslandBuildCameraMouseOrbitController({
   buildCameraPoseRef,
   groundY,
   parcel,
   visible,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   groundY: number
   parcel: ParcelAllocationParcel | null
   visible: boolean
@@ -4422,7 +4627,7 @@ function PascalWaterBuildCameraMouseOrbitController({
         suppressClickUntilRef.current = performance.now() + 350
       }
       if (drag.dragged) {
-        setPascalWaterCameraDragging(false)
+        setLandrushIslandCameraDragging(false)
         renderScheduler.requestFrame('camera:end')
       }
     }
@@ -4435,13 +4640,13 @@ function PascalWaterBuildCameraMouseOrbitController({
       if (
         event.defaultPrevented ||
         event.button !== 0 ||
-        !pointerEventInPascalWaterCanvas(event, canvas) ||
-        isPascalWaterInteractivePointerTarget(event.target)
+        !pointerEventInLandrushIslandCanvas(event, canvas) ||
+        isLandrushIslandInteractivePointerTarget(event.target)
       ) {
         return
       }
       if (dragRef.current) return
-      if (getPascalWaterCameraControls(getThreeState())) return
+      if (getLandrushIslandCameraControls(getThreeState())) return
 
       dragRef.current = {
         dragged: false,
@@ -4470,18 +4675,22 @@ function PascalWaterBuildCameraMouseOrbitController({
 
       event.preventDefault()
       event.stopPropagation()
-      setPascalWaterCameraDragging(true)
+      setLandrushIslandCameraDragging(true)
 
       const target = targetRef.current.set(parcel.centroid.x, groundY + 0.35, parcel.centroid.z)
       const offset = offsetRef.current.copy(camera.position).sub(target)
       if (offset.lengthSq() < 0.0001) {
-        offset.set(0, PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT, PASCAL_WATER_BUILD_CAMERA_MIN_DISTANCE)
+        offset.set(
+          0,
+          LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT,
+          LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE,
+        )
       }
 
       const spherical = sphericalRef.current.setFromVector3(offset)
-      spherical.theta -= deltaX * PASCAL_WATER_BUILD_CAMERA_MOUSE_ROTATE_DRAG_SPEED
+      spherical.theta -= deltaX * LANDRUSH_ISLAND_BUILD_CAMERA_MOUSE_ROTATE_DRAG_SPEED
       spherical.phi = clamp(
-        spherical.phi - deltaY * PASCAL_WATER_BUILD_CAMERA_MOUSE_PITCH_DRAG_SPEED,
+        spherical.phi - deltaY * LANDRUSH_ISLAND_BUILD_CAMERA_MOUSE_PITCH_DRAG_SPEED,
         0.2,
         Math.PI / 2 - 0.08,
       )
@@ -4489,7 +4698,7 @@ function PascalWaterBuildCameraMouseOrbitController({
       camera.position.copy(target).add(offset)
       camera.lookAt(target)
       camera.updateMatrixWorld()
-      writePascalWaterCameraPose(buildCameraPoseRef, camera, target)
+      writeLandrushIslandCameraPose(buildCameraPoseRef, camera, target)
       renderScheduler.requestFrame('camera:move')
     }
 
@@ -4526,7 +4735,7 @@ function PascalWaterBuildCameraMouseOrbitController({
     window.addEventListener('mouseup', handleMouseUp, { capture: true })
     window.addEventListener('click', handleClick, { capture: true })
     return () => {
-      if (dragRef.current?.dragged) setPascalWaterCameraDragging(false)
+      if (dragRef.current?.dragged) setLandrushIslandCameraDragging(false)
       dragRef.current = null
       window.removeEventListener('pointerdown', handlePointerDown, true)
       window.removeEventListener('pointermove', handlePointerMove, true)
@@ -4542,7 +4751,7 @@ function PascalWaterBuildCameraMouseOrbitController({
   return null
 }
 
-function PascalWaterBuildGamepadPlacementController({
+function LandrushIslandBuildGamepadPlacementController({
   buildCameraPoseRef,
   focusRowRef,
   groundY,
@@ -4550,8 +4759,8 @@ function PascalWaterBuildGamepadPlacementController({
   visible,
   wallDraftActiveRef,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
-  focusRowRef: { current: PascalWaterGamepadBuildFocusRow }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  focusRowRef: { current: LandrushIslandGamepadBuildFocusRow }
   groundY: number
   parcel: ParcelAllocationParcel | null
   visible: boolean
@@ -4562,7 +4771,7 @@ function PascalWaterBuildGamepadPlacementController({
   const cursorRef = useRef<LandrushPoint2 | null>(null)
   const emittedCursorRef = useRef<LandrushPoint2 | null>(null)
   const crossHeldRef = useRef(false)
-  const previousFocusRowRef = useRef<PascalWaterGamepadBuildFocusRow>(focusRowRef.current)
+  const previousFocusRowRef = useRef<LandrushIslandGamepadBuildFocusRow>(focusRowRef.current)
   const hoveredWallIdRef = useRef<string | null>(null)
   const wallTargetToolRef = useRef<string | null>(null)
   const cursorVisualRef = useRef<Mesh>(null)
@@ -4576,9 +4785,9 @@ function PascalWaterBuildGamepadPlacementController({
     crossHeldRef.current = false
     wallDraftActiveRef.current = false
     wallTargetToolRef.current = null
-    hidePascalWaterGamepadBuildCursorVisual(cursorVisualRef)
-    clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
-    return () => clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+    hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
+    clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
+    return () => clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
   }, [parcel, wallDraftActiveRef])
 
   useFrame((state, delta) => {
@@ -4586,8 +4795,8 @@ function PascalWaterBuildGamepadPlacementController({
       crossHeldRef.current = false
       wallDraftActiveRef.current = false
       wallTargetToolRef.current = null
-      hidePascalWaterGamepadBuildCursorVisual(cursorVisualRef)
-      clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+      hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
+      clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
       return
     }
 
@@ -4595,8 +4804,8 @@ function PascalWaterBuildGamepadPlacementController({
     if (!input) {
       crossHeldRef.current = false
       wallTargetToolRef.current = null
-      hidePascalWaterGamepadBuildCursorVisual(cursorVisualRef)
-      clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+      hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
+      clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
       return
     }
 
@@ -4606,9 +4815,9 @@ function PascalWaterBuildGamepadPlacementController({
       emittedCursorRef.current = null
     }
 
-    const controls = getPascalWaterCameraControls(state)
+    const controls = getLandrushIslandCameraControls(state)
     if (input.lookStrength > 0) {
-      rotatePascalWaterBuildCameraWithGamepad({
+      rotateLandrushIslandBuildCameraWithGamepad({
         buildCameraPoseRef,
         camera,
         controls,
@@ -4623,9 +4832,10 @@ function PascalWaterBuildGamepadPlacementController({
     }
 
     if (
-      Math.abs(input.rightTrigger - input.leftTrigger) > PASCAL_WATER_BUILD_GAMEPAD_TRIGGER_DEADZONE
+      Math.abs(input.rightTrigger - input.leftTrigger) >
+      LANDRUSH_ISLAND_BUILD_GAMEPAD_TRIGGER_DEADZONE
     ) {
-      zoomPascalWaterBuildCameraWithGamepad({
+      zoomLandrushIslandBuildCameraWithGamepad({
         buildCameraPoseRef,
         camera,
         controls,
@@ -4640,7 +4850,7 @@ function PascalWaterBuildGamepadPlacementController({
 
     const cameraPanning = input.rightShoulder && input.strength > 0
     if (cameraPanning) {
-      panPascalWaterBuildCameraWithGamepad({
+      panLandrushIslandBuildCameraWithGamepad({
         buildCameraPoseRef,
         camera,
         controls,
@@ -4657,14 +4867,14 @@ function PascalWaterBuildGamepadPlacementController({
       crossHeldRef.current = input.cross
       if (useEditor.getState().tool !== 'wall') wallDraftActiveRef.current = false
       wallTargetToolRef.current = null
-      hidePascalWaterGamepadBuildCursorVisual(cursorVisualRef)
-      clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+      hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
+      clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
       return
     }
 
     if (cameraPanning) {
       crossHeldRef.current = input.cross
-      updatePascalWaterGamepadBuildCursorVisual({
+      updateLandrushIslandGamepadBuildCursorVisual({
         camera,
         point: {
           x: cursorRef.current?.x ?? parcel.centroid.x,
@@ -4677,7 +4887,7 @@ function PascalWaterBuildGamepadPlacementController({
     }
 
     const current = cursorRef.current ?? parcel.centroid
-    const nextCursor = movePascalWaterGamepadBuildCursor({
+    const nextCursor = moveLandrushIslandGamepadBuildCursor({
       camera,
       current,
       delta,
@@ -4686,23 +4896,23 @@ function PascalWaterBuildGamepadPlacementController({
     })
     cursorRef.current = nextCursor
 
-    const snappedCursor = snapPascalWaterGamepadBuildCursor(nextCursor, gridSnapStep)
+    const snappedCursor = snapLandrushIslandGamepadBuildCursor(nextCursor, gridSnapStep)
     const activeTool = useEditor.getState().tool
 
-    if (isPascalWaterGamepadWallTargetTool(activeTool)) {
+    if (isLandrushIslandGamepadWallTargetTool(activeTool)) {
       if (wallTargetToolRef.current !== activeTool) {
-        clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+        clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
         wallTargetToolRef.current = activeTool
       }
 
       emittedCursorRef.current = null
-      const wallTarget = resolvePascalWaterGamepadBuildWallTarget({
+      const wallTarget = resolveLandrushIslandGamepadBuildWallTarget({
         groundY,
-        localY: activeTool === 'window' ? PASCAL_WATER_BUILD_GAMEPAD_WINDOW_LOCAL_Y : 0,
+        localY: activeTool === 'window' ? LANDRUSH_ISLAND_BUILD_GAMEPAD_WINDOW_LOCAL_Y : 0,
         parcel,
         point: nextCursor,
       })
-      updatePascalWaterGamepadBuildCursorVisual({
+      updateLandrushIslandGamepadBuildCursorVisual({
         camera,
         point: wallTarget
           ? {
@@ -4717,20 +4927,20 @@ function PascalWaterBuildGamepadPlacementController({
             },
         visualRef: cursorVisualRef,
       })
-      emitPascalWaterGamepadBuildWallHover(hoveredWallIdRef, wallTarget)
+      emitLandrushIslandGamepadBuildWallHover(hoveredWallIdRef, wallTarget)
 
       const crossPressed = input.cross && !crossHeldRef.current
       crossHeldRef.current = input.cross
       if (crossPressed && wallTarget) {
-        emitPascalWaterGamepadBuildWallEvent('click', wallTarget)
+        emitLandrushIslandGamepadBuildWallEvent('click', wallTarget)
         renderScheduler.requestFrame('selection:changed')
       }
       return
     }
 
     wallTargetToolRef.current = null
-    clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
-    updatePascalWaterGamepadBuildCursorVisual({
+    clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
+    updateLandrushIslandGamepadBuildCursorVisual({
       camera,
       point: {
         x: snappedCursor.x,
@@ -4744,18 +4954,18 @@ function PascalWaterBuildGamepadPlacementController({
     const moved =
       !previous ||
       Math.hypot(previous.x - snappedCursor.x, previous.z - snappedCursor.z) >
-        PASCAL_WATER_BUILD_GAMEPAD_CURSOR_MIN_MOVE_METERS
+        LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_MIN_MOVE_METERS
 
     if (moved || useEditor.getState().mode === 'build') {
       emittedCursorRef.current = snappedCursor
-      emitPascalWaterGamepadBuildGridEvent('move', snappedCursor, groundY)
+      emitLandrushIslandGamepadBuildGridEvent('move', snappedCursor, groundY)
     }
 
     const crossPressed = input.cross && !crossHeldRef.current
     crossHeldRef.current = input.cross
     if (!crossPressed) return
 
-    emitPascalWaterGamepadBuildGridEvent('click', snappedCursor, groundY)
+    emitLandrushIslandGamepadBuildGridEvent('click', snappedCursor, groundY)
     wallDraftActiveRef.current = activeTool === 'wall'
     renderScheduler.requestFrame('selection:changed')
   })
@@ -4764,7 +4974,7 @@ function PascalWaterBuildGamepadPlacementController({
     <mesh
       frustumCulled={false}
       ref={cursorVisualRef}
-      renderOrder={PASCAL_WATER_BUILD_GAMEPAD_CURSOR_RENDER_ORDER}
+      renderOrder={LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_RENDER_ORDER}
       visible={false}
     >
       <circleGeometry args={[1, 32]} />
@@ -4780,11 +4990,11 @@ function PascalWaterBuildGamepadPlacementController({
   )
 }
 
-function hidePascalWaterGamepadBuildCursorVisual(visualRef: { current: Mesh | null }) {
+function hideLandrushIslandGamepadBuildCursorVisual(visualRef: { current: Mesh | null }) {
   if (visualRef.current) visualRef.current.visible = false
 }
 
-function updatePascalWaterGamepadBuildCursorVisual({
+function updateLandrushIslandGamepadBuildCursorVisual({
   camera,
   point,
   visualRef,
@@ -4800,14 +5010,14 @@ function updatePascalWaterGamepadBuildCursorVisual({
   visual.position.set(point.x, point.y, point.z)
   visual.quaternion.copy(camera.quaternion)
   const radius = clamp(
-    camera.position.distanceTo(visual.position) * PASCAL_WATER_BUILD_GAMEPAD_CURSOR_SCREEN_SCALE,
-    PASCAL_WATER_BUILD_GAMEPAD_CURSOR_MIN_RADIUS_METERS,
-    PASCAL_WATER_BUILD_GAMEPAD_CURSOR_MAX_RADIUS_METERS,
+    camera.position.distanceTo(visual.position) * LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_SCREEN_SCALE,
+    LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_MIN_RADIUS_METERS,
+    LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_MAX_RADIUS_METERS,
   )
   visual.scale.setScalar(radius)
 }
 
-function rotatePascalWaterBuildCameraWithGamepad({
+function rotateLandrushIslandBuildCameraWithGamepad({
   buildCameraPoseRef,
   camera,
   controls,
@@ -4819,9 +5029,9 @@ function rotatePascalWaterBuildCameraWithGamepad({
   spherical,
   target,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   camera: Camera
-  controls: PascalWaterCameraControls | undefined
+  controls: LandrushIslandCameraControls | undefined
   delta: number
   groundY: number
   input: LandrushGamepadInput
@@ -4831,7 +5041,7 @@ function rotatePascalWaterBuildCameraWithGamepad({
   target: Vector3
 }) {
   const fallbackTarget = target.set(parcel.centroid.x, groundY + 0.35, parcel.centroid.z)
-  resolvePascalWaterBuildCameraTarget({
+  resolveLandrushIslandBuildCameraTarget({
     buildCameraPoseRef,
     controls,
     fallbackTarget,
@@ -4839,20 +5049,24 @@ function rotatePascalWaterBuildCameraWithGamepad({
   })
   offset.copy(camera.position).sub(target)
   if (offset.lengthSq() < 0.0001) {
-    offset.set(0, PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT, PASCAL_WATER_BUILD_CAMERA_MIN_DISTANCE)
+    offset.set(
+      0,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE,
+    )
   }
 
   spherical.setFromVector3(offset)
-  spherical.theta -= input.lookX * PASCAL_WATER_GAMEPAD_CAMERA_YAW_SPEED * delta
+  spherical.theta -= input.lookX * LANDRUSH_ISLAND_GAMEPAD_CAMERA_YAW_SPEED * delta
   spherical.phi = clamp(
-    spherical.phi - input.lookY * PASCAL_WATER_GAMEPAD_CAMERA_PITCH_SPEED * delta,
+    spherical.phi - input.lookY * LANDRUSH_ISLAND_GAMEPAD_CAMERA_PITCH_SPEED * delta,
     0.2,
     Math.PI / 2 - 0.08,
   )
   offset.setFromSpherical(spherical)
   offset.add(target)
 
-  applyPascalWaterBuildGamepadCameraLookAt({
+  applyLandrushIslandBuildGamepadCameraLookAt({
     buildCameraPoseRef,
     camera,
     controls,
@@ -4862,7 +5076,7 @@ function rotatePascalWaterBuildCameraWithGamepad({
   })
 }
 
-function zoomPascalWaterBuildCameraWithGamepad({
+function zoomLandrushIslandBuildCameraWithGamepad({
   buildCameraPoseRef,
   camera,
   controls,
@@ -4873,9 +5087,9 @@ function zoomPascalWaterBuildCameraWithGamepad({
   parcel,
   target,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   camera: Camera
-  controls: PascalWaterCameraControls | undefined
+  controls: LandrushIslandCameraControls | undefined
   delta: number
   groundY: number
   input: LandrushGamepadInput
@@ -4886,10 +5100,10 @@ function zoomPascalWaterBuildCameraWithGamepad({
   const rawZoomInput = input.rightTrigger - input.leftTrigger
   const zoomInput =
     Math.sign(rawZoomInput) *
-    ((Math.abs(rawZoomInput) - PASCAL_WATER_BUILD_GAMEPAD_TRIGGER_DEADZONE) /
-      (1 - PASCAL_WATER_BUILD_GAMEPAD_TRIGGER_DEADZONE))
+    ((Math.abs(rawZoomInput) - LANDRUSH_ISLAND_BUILD_GAMEPAD_TRIGGER_DEADZONE) /
+      (1 - LANDRUSH_ISLAND_BUILD_GAMEPAD_TRIGGER_DEADZONE))
   const fallbackTarget = target.set(parcel.centroid.x, groundY + 0.35, parcel.centroid.z)
-  resolvePascalWaterBuildCameraTarget({
+  resolveLandrushIslandBuildCameraTarget({
     buildCameraPoseRef,
     controls,
     fallbackTarget,
@@ -4898,18 +5112,22 @@ function zoomPascalWaterBuildCameraWithGamepad({
 
   offset.copy(camera.position).sub(target)
   if (offset.lengthSq() < 0.0001) {
-    offset.set(0, PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT, PASCAL_WATER_BUILD_CAMERA_MIN_DISTANCE)
+    offset.set(
+      0,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE,
+    )
   }
   offset.setLength(
     clamp(
-      offset.length() - zoomInput * PASCAL_WATER_BUILD_GAMEPAD_ZOOM_SPEED_METERS * delta,
-      PASCAL_WATER_BUILD_CAMERA_MIN_DISTANCE,
-      PASCAL_WATER_BUILD_CAMERA_MAX_DISTANCE,
+      offset.length() - zoomInput * LANDRUSH_ISLAND_BUILD_GAMEPAD_ZOOM_SPEED_METERS * delta,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MAX_DISTANCE,
     ),
   )
   offset.add(target)
 
-  applyPascalWaterBuildGamepadCameraLookAt({
+  applyLandrushIslandBuildGamepadCameraLookAt({
     buildCameraPoseRef,
     camera,
     controls,
@@ -4919,7 +5137,7 @@ function zoomPascalWaterBuildCameraWithGamepad({
   })
 }
 
-function panPascalWaterBuildCameraWithGamepad({
+function panLandrushIslandBuildCameraWithGamepad({
   buildCameraPoseRef,
   camera,
   controls,
@@ -4930,9 +5148,9 @@ function panPascalWaterBuildCameraWithGamepad({
   parcel,
   target,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   camera: Camera
-  controls: PascalWaterCameraControls | undefined
+  controls: LandrushIslandCameraControls | undefined
   delta: number
   groundY: number
   input: LandrushGamepadInput
@@ -4941,15 +5159,15 @@ function panPascalWaterBuildCameraWithGamepad({
   target: Vector3
 }) {
   const fallbackTarget = target.set(parcel.centroid.x, groundY + 0.35, parcel.centroid.z)
-  resolvePascalWaterBuildCameraTarget({
+  resolveLandrushIslandBuildCameraTarget({
     buildCameraPoseRef,
     controls,
     fallbackTarget,
     target,
   })
 
-  const axes = resolvePascalWaterCameraScreenAxes(camera)
-  const distance = input.strength * PASCAL_WATER_BUILD_GAMEPAD_PAN_SPEED_METERS * delta
+  const axes = resolveLandrushIslandCameraScreenAxes(camera)
+  const distance = input.strength * LANDRUSH_ISLAND_BUILD_GAMEPAD_PAN_SPEED_METERS * delta
   const moveX = (axes.right.x * input.strafe + axes.up.x * input.forward) * distance
   const moveZ = (axes.right.z * input.strafe + axes.up.z * input.forward) * distance
 
@@ -4959,7 +5177,7 @@ function panPascalWaterBuildCameraWithGamepad({
   position.x += moveX
   position.z += moveZ
 
-  applyPascalWaterBuildGamepadCameraLookAt({
+  applyLandrushIslandBuildGamepadCameraLookAt({
     buildCameraPoseRef,
     camera,
     controls,
@@ -4969,24 +5187,24 @@ function panPascalWaterBuildCameraWithGamepad({
   })
 }
 
-function resolvePascalWaterBuildCameraTarget({
+function resolveLandrushIslandBuildCameraTarget({
   buildCameraPoseRef,
   controls,
   fallbackTarget,
   target,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
-  controls: PascalWaterCameraControls | undefined
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  controls: LandrushIslandCameraControls | undefined
   fallbackTarget: Vector3
   target: Vector3
 }) {
-  if (readPascalWaterCameraControlsTarget(controls, target)) return target
+  if (readLandrushIslandCameraControlsTarget(controls, target)) return target
   const poseTarget = buildCameraPoseRef.current?.target
   if (poseTarget) return target.copy(poseTarget)
   return target.copy(fallbackTarget)
 }
 
-function applyPascalWaterBuildGamepadCameraLookAt({
+function applyLandrushIslandBuildGamepadCameraLookAt({
   buildCameraPoseRef,
   camera,
   controls,
@@ -4994,9 +5212,9 @@ function applyPascalWaterBuildGamepadCameraLookAt({
   position,
   target,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   camera: Camera
-  controls: PascalWaterCameraControls | undefined
+  controls: LandrushIslandCameraControls | undefined
   delta: number
   position: Vector3
   target: Vector3
@@ -5010,11 +5228,11 @@ function applyPascalWaterBuildGamepadCameraLookAt({
     camera.updateMatrixWorld()
   }
 
-  writePascalWaterCameraPose(buildCameraPoseRef, camera, target)
+  writeLandrushIslandCameraPose(buildCameraPoseRef, camera, target)
   renderScheduler.requestFrame('camera:move')
 }
 
-function movePascalWaterGamepadBuildCursor({
+function moveLandrushIslandGamepadBuildCursor({
   camera,
   current,
   delta,
@@ -5029,16 +5247,16 @@ function movePascalWaterGamepadBuildCursor({
 }) {
   if (input.strength <= 0) return current
 
-  const axes = resolvePascalWaterCameraScreenAxes(camera)
-  const distance = input.strength * PASCAL_WATER_BUILD_GAMEPAD_CURSOR_SPEED_METERS * delta
+  const axes = resolveLandrushIslandCameraScreenAxes(camera)
+  const distance = input.strength * LANDRUSH_ISLAND_BUILD_GAMEPAD_CURSOR_SPEED_METERS * delta
   const next = {
     x: current.x + (axes.right.x * input.strafe + axes.up.x * input.forward) * distance,
     z: current.z + (axes.right.z * input.strafe + axes.up.z * input.forward) * distance,
   }
-  return constrainPascalWaterGamepadBuildCursorToParcel(next, current, parcel.points)
+  return constrainLandrushIslandGamepadBuildCursorToParcel(next, current, parcel.points)
 }
 
-function constrainPascalWaterGamepadBuildCursorToParcel(
+function constrainLandrushIslandGamepadBuildCursorToParcel(
   next: LandrushPoint2,
   current: LandrushPoint2,
   polygon: readonly LandrushPoint2[],
@@ -5054,7 +5272,7 @@ function constrainPascalWaterGamepadBuildCursorToParcel(
   return current
 }
 
-function snapPascalWaterGamepadBuildCursor(point: LandrushPoint2, gridSnapStep: number) {
+function snapLandrushIslandGamepadBuildCursor(point: LandrushPoint2, gridSnapStep: number) {
   const step = Math.max(0.01, gridSnapStep)
   return {
     x: Math.round(point.x / step) * step,
@@ -5062,7 +5280,7 @@ function snapPascalWaterGamepadBuildCursor(point: LandrushPoint2, gridSnapStep: 
   }
 }
 
-type PascalWaterGamepadBuildWallTarget = {
+type LandrushIslandGamepadBuildWallTarget = {
   localPosition: [number, number, number]
   node: Extract<AnyNode, { type: 'wall' }>
   normal: [number, number, number]
@@ -5070,11 +5288,11 @@ type PascalWaterGamepadBuildWallTarget = {
   position: [number, number, number]
 }
 
-function isPascalWaterGamepadWallTargetTool(tool: unknown): tool is string {
-  return typeof tool === 'string' && PASCAL_WATER_BUILD_GAMEPAD_WALL_TARGET_TOOLS.has(tool)
+function isLandrushIslandGamepadWallTargetTool(tool: unknown): tool is string {
+  return typeof tool === 'string' && LANDRUSH_ISLAND_BUILD_GAMEPAD_WALL_TARGET_TOOLS.has(tool)
 }
 
-function resolvePascalWaterGamepadBuildWallTarget({
+function resolveLandrushIslandGamepadBuildWallTarget({
   groundY,
   localY,
   parcel,
@@ -5084,7 +5302,7 @@ function resolvePascalWaterGamepadBuildWallTarget({
   localY: number
   parcel: ParcelAllocationParcel
   point: LandrushPoint2
-}): PascalWaterGamepadBuildWallTarget | null {
+}): LandrushIslandGamepadBuildWallTarget | null {
   const viewerSelection = useViewer.getState().selection
   const levelId = viewerSelection.levelId
   if (!levelId) return null
@@ -5103,8 +5321,8 @@ function resolvePascalWaterGamepadBuildWallTarget({
     planPoint: LandrushPoint2
   } | null = null
   let bestDistanceSq =
-    PASCAL_WATER_BUILD_GAMEPAD_WALL_CURSOR_MAX_DISTANCE_METERS *
-    PASCAL_WATER_BUILD_GAMEPAD_WALL_CURSOR_MAX_DISTANCE_METERS
+    LANDRUSH_ISLAND_BUILD_GAMEPAD_WALL_CURSOR_MAX_DISTANCE_METERS *
+    LANDRUSH_ISLAND_BUILD_GAMEPAD_WALL_CURSOR_MAX_DISTANCE_METERS
 
   for (const node of Object.values(useScene.getState().nodes)) {
     if (
@@ -5116,7 +5334,7 @@ function resolvePascalWaterGamepadBuildWallTarget({
       continue
     }
 
-    const frame = resolvePascalWaterWallFrame(node)
+    const frame = resolveLandrushIslandWallFrame(node)
     if (!frame) continue
 
     const cursorFromStartX = localCursor.x - node.start[0]
@@ -5126,7 +5344,7 @@ function resolvePascalWaterGamepadBuildWallTarget({
       0,
       frame.length,
     )
-    const planPoint = pointOnPascalWaterWall(node, frame, localX)
+    const planPoint = pointOnLandrushIslandWall(node, frame, localX)
     if (!pointInPolygonOrNearEdge(planPoint, parcel.points)) continue
 
     const distanceSq =
@@ -5164,26 +5382,26 @@ function resolvePascalWaterGamepadBuildWallTarget({
   }
 }
 
-function emitPascalWaterGamepadBuildWallHover(
+function emitLandrushIslandGamepadBuildWallHover(
   hoveredWallIdRef: { current: string | null },
-  target: PascalWaterGamepadBuildWallTarget | null,
+  target: LandrushIslandGamepadBuildWallTarget | null,
 ) {
   if (!target) {
-    clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+    clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
     return
   }
 
   if (hoveredWallIdRef.current !== target.node.id) {
-    clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef)
+    clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
     hoveredWallIdRef.current = target.node.id
-    emitPascalWaterGamepadBuildWallEvent('enter', target)
+    emitLandrushIslandGamepadBuildWallEvent('enter', target)
     return
   }
 
-  emitPascalWaterGamepadBuildWallEvent('move', target)
+  emitLandrushIslandGamepadBuildWallEvent('move', target)
 }
 
-function clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef: { current: string | null }) {
+function clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef: { current: string | null }) {
   const wallId = hoveredWallIdRef.current
   if (!wallId) return
 
@@ -5193,7 +5411,7 @@ function clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef: { current: stri
 
   const payload = {
     localPosition: [0, 0, 0],
-    nativeEvent: createPascalWaterGamepadGridNativeEvent(),
+    nativeEvent: createLandrushIslandGamepadGridNativeEvent(),
     node,
     normal: [0, 0, 1],
     position: [0, 0, 0],
@@ -5203,14 +5421,14 @@ function clearPascalWaterGamepadBuildWallHover(hoveredWallIdRef: { current: stri
   emitter.emit('wall:leave', payload)
 }
 
-function emitPascalWaterGamepadBuildWallEvent(
+function emitLandrushIslandGamepadBuildWallEvent(
   suffix: 'click' | 'enter' | 'move',
-  target: PascalWaterGamepadBuildWallTarget,
+  target: LandrushIslandGamepadBuildWallTarget,
 ) {
   const payload: WallEvent = {
     faceIndex: undefined,
     localPosition: target.localPosition,
-    nativeEvent: createPascalWaterGamepadGridNativeEvent() as WallEvent['nativeEvent'],
+    nativeEvent: createLandrushIslandGamepadGridNativeEvent() as WallEvent['nativeEvent'],
     node: target.node,
     normal: target.normal,
     object: target.object,
@@ -5220,7 +5438,7 @@ function emitPascalWaterGamepadBuildWallEvent(
   emitter.emit(`wall:${suffix}`, payload)
 }
 
-function emitPascalWaterGamepadBuildGridEvent(
+function emitLandrushIslandGamepadBuildGridEvent(
   suffix: 'click' | 'move',
   point: LandrushPoint2,
   groundY: number,
@@ -5231,13 +5449,13 @@ function emitPascalWaterGamepadBuildGridEvent(
   const localPoint = buildingMesh ? buildingMesh.worldToLocal(worldPoint.clone()) : worldPoint
   const payload: GridEvent = {
     localPosition: [localPoint.x, localPoint.y, localPoint.z],
-    nativeEvent: createPascalWaterGamepadGridNativeEvent(),
+    nativeEvent: createLandrushIslandGamepadGridNativeEvent(),
     position: [worldPoint.x, worldPoint.y, worldPoint.z],
   }
   emitter.emit(`grid:${suffix}`, payload)
 }
 
-function createPascalWaterGamepadGridNativeEvent(): GridEvent['nativeEvent'] {
+function createLandrushIslandGamepadGridNativeEvent(): GridEvent['nativeEvent'] {
   return {
     altKey: false,
     button: 0,
@@ -5252,31 +5470,31 @@ function createPascalWaterGamepadGridNativeEvent(): GridEvent['nativeEvent'] {
   } as unknown as GridEvent['nativeEvent']
 }
 
-function PascalWaterCameraPoseSeed({
+function LandrushIslandCameraPoseSeed({
   pose,
   zoom,
 }: {
-  pose: PascalWaterCameraPose | null
+  pose: LandrushIslandCameraPose | null
   zoom?: number
 }) {
   const camera = useThree((state) => state.camera)
 
   useLayoutEffect(() => {
     if (!pose) return
-    applyPascalWaterCameraPose(camera, pose)
+    applyLandrushIslandCameraPose(camera, pose)
     const targetZoom = zoom ?? pose.zoom
-    if (typeof targetZoom === 'number') setPascalWaterMapCameraZoom(camera, targetZoom)
+    if (typeof targetZoom === 'number') setLandrushIslandMapCameraZoom(camera, targetZoom)
     camera.updateMatrixWorld()
   }, [camera, pose, zoom])
 
   return null
 }
 
-function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterViewMode }) {
+function LandrushIslandRuntimeCameraProbeRecorder({ mode }: { mode: LandrushIslandViewMode }) {
   const getThreeState = useThree((state) => state.get)
   const targetRef = useRef(new Vector3())
   const forwardRef = useRef(new Vector3())
-  const modeRef = useRef<PascalWaterViewMode>(mode)
+  const modeRef = useRef<LandrushIslandViewMode>(mode)
   const lastR3fFrameAtRef = useRef<number | null>(null)
 
   modeRef.current = mode
@@ -5285,7 +5503,7 @@ function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterView
     const now = performance.now()
     const previousFrameAt = lastR3fFrameAtRef.current
     lastR3fFrameAtRef.current = now
-    recordPascalWaterFrameProbe({
+    recordLandrushIslandFrameProbe({
       dtMs: previousFrameAt === null ? null : now - previousFrameAt,
       mode,
       source: 'r3f',
@@ -5293,7 +5511,7 @@ function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterView
     const target = targetRef.current
       .copy(state.camera.position)
       .add(state.camera.getWorldDirection(forwardRef.current).multiplyScalar(10))
-    recordPascalWaterCameraProbe({
+    recordLandrushIslandCameraProbe({
       camera: state.camera,
       mode,
       source: 'runtime-camera',
@@ -5302,12 +5520,12 @@ function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterView
   })
 
   useEffect(() => {
-    if (!getPascalWaterRuntimeProbe()) return
+    if (!getLandrushIslandRuntimeProbe()) return
 
     let animationFrameId = 0
     let lastRafAt: number | null = null
     const recordRafFrame = (now: number) => {
-      recordPascalWaterFrameProbe({
+      recordLandrushIslandFrameProbe({
         dtMs: lastRafAt === null ? null : now - lastRafAt,
         mode: modeRef.current,
         source: 'raf',
@@ -5319,7 +5537,7 @@ function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterView
     let longTaskObserver: PerformanceObserver | null = null
     if (typeof PerformanceObserver !== 'undefined') {
       longTaskObserver = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) recordPascalWaterLongTaskProbe(entry)
+        for (const entry of list.getEntries()) recordLandrushIslandLongTaskProbe(entry)
       })
       try {
         longTaskObserver.observe({ entryTypes: ['longtask'] })
@@ -5334,7 +5552,7 @@ function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterView
       const target = targetRef.current
         .copy(state.camera.position)
         .add(state.camera.getWorldDirection(forwardRef.current).multiplyScalar(10))
-      recordPascalWaterCameraProbe({
+      recordLandrushIslandCameraProbe({
         camera: state.camera,
         mode: modeRef.current,
         source: 'runtime-camera-interval',
@@ -5355,16 +5573,16 @@ function PascalWaterRuntimeCameraProbeRecorder({ mode }: { mode: PascalWaterView
   return null
 }
 
-function PascalWaterPoseCamera({
+function LandrushIslandPoseCamera({
   fallbackPosition,
-  fallbackTarget = PASCAL_WATER_CAMERA_TARGET,
+  fallbackTarget = LANDRUSH_ISLAND_CAMERA_TARGET,
   makeDefault = true,
   pose,
 }: {
   fallbackPosition: readonly [number, number, number]
   fallbackTarget?: readonly [number, number, number]
   makeDefault?: boolean
-  pose: PascalWaterCameraPose | null
+  pose: LandrushIslandCameraPose | null
 }) {
   const initialPoseRef = useRef(pose)
   const initialPositionRef = useRef(
@@ -5376,7 +5594,7 @@ function PascalWaterPoseCamera({
     (camera: Camera) => {
       if (seededRef.current) return
       seededRef.current = true
-      applyPascalWaterCameraPose(camera, initialPoseRef.current, fallbackTarget)
+      applyLandrushIslandCameraPose(camera, initialPoseRef.current, fallbackTarget)
     },
     [fallbackTarget],
   )
@@ -5393,7 +5611,7 @@ function PascalWaterPoseCamera({
   )
 }
 
-function PascalWaterBuildCameraTransition({
+function LandrushIslandBuildCameraTransition({
   buildCameraPoseRef,
   controlsTarget,
   groundY,
@@ -5401,12 +5619,12 @@ function PascalWaterBuildCameraTransition({
   parcel,
   playerCameraPoseRef,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   controlsTarget: Vector3
   groundY: number
-  onSettled: (pose: PascalWaterCameraPose) => void
+  onSettled: (pose: LandrushIslandCameraPose) => void
   parcel: ParcelAllocationParcel
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
   const directionRef = useRef<Vector3 | null>(null)
   const settledRef = useRef(false)
@@ -5440,7 +5658,7 @@ function PascalWaterBuildCameraTransition({
         state.camera.lookAt(rememberedPose.target)
       } else {
         startPositionRef.current.copy(state.camera.position)
-        resolvePascalWaterBuildCameraStartTarget(
+        resolveLandrushIslandBuildCameraStartTarget(
           state.camera,
           target.y,
           startTargetRef.current,
@@ -5462,13 +5680,13 @@ function PascalWaterBuildCameraTransition({
 
     const distance = clamp(
       parcelRadius * 1.28,
-      PASCAL_WATER_BUILD_CAMERA_MIN_DISTANCE,
-      PASCAL_WATER_BUILD_CAMERA_MAX_DISTANCE,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MAX_DISTANCE,
     )
     const height = clamp(
       parcelRadius * 0.72,
-      PASCAL_WATER_BUILD_CAMERA_MIN_HEIGHT,
-      PASCAL_WATER_BUILD_CAMERA_MAX_HEIGHT,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT,
+      LANDRUSH_ISLAND_BUILD_CAMERA_MAX_HEIGHT,
     )
     const desired = desiredRef.current.copy(target).addScaledVector(directionRef.current, distance)
     desired.y = target.y + height
@@ -5485,8 +5703,8 @@ function PascalWaterBuildCameraTransition({
     }
 
     const elapsed = Math.max(0, (performance.now() - startedAtRef.current) / 1000)
-    const progress = clamp01(elapsed / PASCAL_WATER_CAMERA_TRANSITION_SECONDS)
-    const amount = easePascalWaterCameraTransition(progress, 'build')
+    const progress = clamp01(elapsed / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS)
+    const amount = easeLandrushIslandCameraTransition(progress, 'build')
     state.camera.position.lerpVectors(startPositionRef.current, desired, amount)
     controlsTarget.lerpVectors(startTargetRef.current, target, amount)
 
@@ -5496,8 +5714,8 @@ function PascalWaterBuildCameraTransition({
       amount,
     )
     state.camera.updateMatrixWorld()
-    writePascalWaterCameraPose(buildCameraPoseRef, state.camera, controlsTarget)
-    recordPascalWaterCameraProbe({
+    writeLandrushIslandCameraPose(buildCameraPoseRef, state.camera, controlsTarget)
+    recordLandrushIslandCameraProbe({
       camera: state.camera,
       mode: 'build',
       progress,
@@ -5510,11 +5728,11 @@ function PascalWaterBuildCameraTransition({
       controlsTarget.copy(target)
       state.camera.quaternion.copy(endQuaternionRef.current)
       state.camera.updateMatrixWorld()
-      writePascalWaterCameraPose(buildCameraPoseRef, state.camera, target)
+      writeLandrushIslandCameraPose(buildCameraPoseRef, state.camera, target)
       settledRef.current = true
       const finalPose =
-        clonePascalWaterCameraPose(buildCameraPoseRef.current) ??
-        createPascalWaterCameraPose(state.camera, target)
+        cloneLandrushIslandCameraPose(buildCameraPoseRef.current) ??
+        createLandrushIslandCameraPose(state.camera, target)
       onSettled(finalPose)
       renderScheduler.requestFrame('camera:end')
     }
@@ -5523,7 +5741,7 @@ function PascalWaterBuildCameraTransition({
   return null
 }
 
-function resolvePascalWaterBuildCameraStartTarget(
+function resolveLandrushIslandBuildCameraStartTarget(
   camera: Camera,
   targetY: number,
   target: Vector3,
@@ -5541,7 +5759,7 @@ function resolvePascalWaterBuildCameraStartTarget(
   return target.copy(camera.position).addScaledVector(forward, 10)
 }
 
-function PascalWaterBuildGridOverlay({
+function LandrushIslandBuildGridOverlay({
   buildableBoundaryPoints,
   groundY,
   parcel,
@@ -5567,7 +5785,7 @@ function PascalWaterBuildGridOverlay({
   })
   const geometries = useMemo(
     () =>
-      createPascalWaterBuildGridGeometries(
+      createLandrushIslandBuildGridGeometries(
         renderParcel,
         gridSnapStep,
         buildableBoundaryPoints,
@@ -5575,7 +5793,7 @@ function PascalWaterBuildGridOverlay({
       ),
     [buildableBoundaryPoints, gridSnapStep, renderParcel, roads],
   )
-  const materials = useMemo(() => createPascalWaterBuildGridMaterials(), [])
+  const materials = useMemo(() => createLandrushIslandBuildGridMaterials(), [])
   const lastProbeAtRef = useRef(-Infinity)
   const renderParcelRef = useRef(renderParcel)
 
@@ -5602,27 +5820,27 @@ function PascalWaterBuildGridOverlay({
       const now = performance.now()
       const fade = fadeRef.current
       const progress = clamp01(
-        (now - fade.startedAt) / (PASCAL_WATER_CAMERA_TRANSITION_SECONDS * 1000),
+        (now - fade.startedAt) / (LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS * 1000),
       )
       const opacity = MathUtils.lerp(
         fade.from,
         fade.to,
-        easePascalWaterCameraTransition(progress, fade.to > fade.from ? 'build' : 'player'),
+        easeLandrushIslandCameraTransition(progress, fade.to > fade.from ? 'build' : 'player'),
       )
       fade.opacity = opacity
-      setPascalWaterBuildGridMaterialsOpacity(materials, opacity)
+      setLandrushIslandBuildGridMaterialsOpacity(materials, opacity)
       invalidate()
 
       if (now - lastProbeAtRef.current > 120) {
         lastProbeAtRef.current = now
         const currentParcel = renderParcelRef.current
-        recordPascalWaterGridProbe({
+        recordLandrushIslandGridProbe({
           fadeTarget: fade.to,
           opacity: roundPerf(opacity),
           parcelId: currentParcel?.id ?? null,
           progress: roundPerf(progress),
           gridStep: gridSnapStep,
-          renderOrder: PASCAL_WATER_BUILD_GRID_RENDER_ORDER,
+          renderOrder: LANDRUSH_ISLAND_BUILD_GRID_RENDER_ORDER,
           visible: opacity > 0.002 && Boolean(currentParcel),
         })
       }
@@ -5652,7 +5870,7 @@ function PascalWaterBuildGridOverlay({
 
   return (
     <group
-      position={[0, groundY + PASCAL_WATER_BUILD_GRID_ELEVATION_OFFSET, 0]}
+      position={[0, groundY + LANDRUSH_ISLAND_BUILD_GRID_ELEVATION_OFFSET, 0]}
       visible={renderVisible && Boolean(renderParcel)}
     >
       {geometries.map((geometry, index) => (
@@ -5661,30 +5879,30 @@ function PascalWaterBuildGridOverlay({
           key={index}
           layers={GRID_LAYER}
           material={materials[index]}
-          renderOrder={PASCAL_WATER_BUILD_GRID_RENDER_ORDER}
+          renderOrder={LANDRUSH_ISLAND_BUILD_GRID_RENDER_ORDER}
         />
       ))}
     </group>
   )
 }
 
-function setPascalWaterBuildGridMaterialsOpacity(
+function setLandrushIslandBuildGridMaterialsOpacity(
   materials: readonly LineBasicMaterial[],
   opacity: number,
 ) {
   for (const material of materials) {
     const baseOpacity =
-      typeof material.userData.pascalWaterBuildGridBaseOpacity === 'number'
-        ? material.userData.pascalWaterBuildGridBaseOpacity
+      typeof material.userData.landrushIslandBuildGridBaseOpacity === 'number'
+        ? material.userData.landrushIslandBuildGridBaseOpacity
         : material.opacity
-    material.userData.pascalWaterBuildGridBaseOpacity = baseOpacity
+    material.userData.landrushIslandBuildGridBaseOpacity = baseOpacity
     material.opacity = baseOpacity * opacity
   }
 }
 
-function createPascalWaterBuildGridMaterials() {
-  return Array.from({ length: PASCAL_WATER_BUILD_GRID_FADE_BUCKETS }, (_, index) => {
-    const alpha = ((index + 1) / PASCAL_WATER_BUILD_GRID_FADE_BUCKETS) ** 1.15
+function createLandrushIslandBuildGridMaterials() {
+  return Array.from({ length: LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS }, (_, index) => {
+    const alpha = ((index + 1) / LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS) ** 1.15
     const material = new LineBasicMaterial({
       color: '#ffffff',
       depthTest: true,
@@ -5692,22 +5910,22 @@ function createPascalWaterBuildGridMaterials() {
       opacity: 0.42 * alpha,
       transparent: true,
     })
-    material.userData.pascalWaterBuildGridBaseOpacity = material.opacity
+    material.userData.landrushIslandBuildGridBaseOpacity = material.opacity
     material.toneMapped = false
     return material
   })
 }
 
-function createPascalWaterBuildGridGeometries(
+function createLandrushIslandBuildGridGeometries(
   parcel: ParcelAllocationParcel | null,
-  gridStep = PASCAL_WATER_BUILD_GRID_STEP_METERS,
+  gridStep = LANDRUSH_ISLAND_BUILD_GRID_STEP_METERS,
   buildableBoundaryPoints: readonly LandrushPoint2[] = [],
   roads: readonly LandrushRoadSegment[] = [],
 ) {
   const resolvedGridStep =
-    Number.isFinite(gridStep) && gridStep > 0 ? gridStep : PASCAL_WATER_BUILD_GRID_STEP_METERS
+    Number.isFinite(gridStep) && gridStep > 0 ? gridStep : LANDRUSH_ISLAND_BUILD_GRID_STEP_METERS
   const bucketVertices = Array.from(
-    { length: PASCAL_WATER_BUILD_GRID_FADE_BUCKETS },
+    { length: LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS },
     () => [] as number[],
   )
   if (parcel) {
@@ -5717,23 +5935,23 @@ function createPascalWaterBuildGridGeometries(
       roads,
     }
     const bounds = boundsForPoints(mask.parcelRing)
-    const segmentStep = Math.max(resolvedGridStep, PASCAL_WATER_BUILD_GRID_SEGMENT_STEP_METERS)
+    const segmentStep = Math.max(resolvedGridStep, LANDRUSH_ISLAND_BUILD_GRID_SEGMENT_STEP_METERS)
     const minX =
-      Math.floor((bounds.minX - PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      Math.floor((bounds.minX - LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
       resolvedGridStep
     const maxX =
-      Math.ceil((bounds.maxX + PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      Math.ceil((bounds.maxX + LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
       resolvedGridStep
     const minZ =
-      Math.floor((bounds.minZ - PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      Math.floor((bounds.minZ - LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
       resolvedGridStep
     const maxZ =
-      Math.ceil((bounds.maxZ + PASCAL_WATER_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
+      Math.ceil((bounds.maxZ + LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
       resolvedGridStep
 
     for (let x = minX; x <= maxX + 0.0001; x += resolvedGridStep) {
       for (let z = minZ; z < maxZ - 0.0001; z += segmentStep) {
-        pushPascalWaterBuildGridSegment(
+        pushLandrushIslandBuildGridSegment(
           bucketVertices,
           mask,
           x,
@@ -5745,7 +5963,7 @@ function createPascalWaterBuildGridGeometries(
     }
     for (let z = minZ; z <= maxZ + 0.0001; z += resolvedGridStep) {
       for (let x = minX; x < maxX - 0.0001; x += segmentStep) {
-        pushPascalWaterBuildGridSegment(
+        pushLandrushIslandBuildGridSegment(
           bucketVertices,
           mask,
           x,
@@ -5764,7 +5982,7 @@ function createPascalWaterBuildGridGeometries(
   })
 }
 
-function pushPascalWaterBuildGridSegment(
+function pushLandrushIslandBuildGridSegment(
   bucketVertices: number[][],
   mask: {
     islandRing: readonly LandrushPoint2[]
@@ -5776,7 +5994,7 @@ function pushPascalWaterBuildGridSegment(
   endX: number,
   endZ: number,
 ) {
-  const alpha = pascalWaterBuildGridAlphaAtPoint(
+  const alpha = landrushIslandBuildGridAlphaAtPoint(
     {
       x: (startX + endX) / 2,
       z: (startZ + endZ) / 2,
@@ -5786,13 +6004,13 @@ function pushPascalWaterBuildGridSegment(
   if (alpha <= 0.015) return
 
   const bucket = Math.min(
-    PASCAL_WATER_BUILD_GRID_FADE_BUCKETS - 1,
-    Math.max(0, Math.floor(alpha * PASCAL_WATER_BUILD_GRID_FADE_BUCKETS)),
+    LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS - 1,
+    Math.max(0, Math.floor(alpha * LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS)),
   )
   bucketVertices[bucket]?.push(startX, 0, startZ, endX, 0, endZ)
 }
 
-function pascalWaterBuildGridAlphaAtPoint(
+function landrushIslandBuildGridAlphaAtPoint(
   point: LandrushPoint2,
   mask: {
     islandRing: readonly LandrushPoint2[]
@@ -5800,47 +6018,50 @@ function pascalWaterBuildGridAlphaAtPoint(
     roads: readonly LandrushRoadSegment[]
   },
 ) {
-  const parcelAlpha = pascalWaterBuildGridParcelAlphaAtPoint(point, mask.parcelRing)
+  const parcelAlpha = landrushIslandBuildGridParcelAlphaAtPoint(point, mask.parcelRing)
   if (parcelAlpha <= 0) return 0
 
-  const islandAlpha = pascalWaterBuildGridIslandAlphaAtPoint(point, mask.islandRing)
+  const islandAlpha = landrushIslandBuildGridIslandAlphaAtPoint(point, mask.islandRing)
   if (islandAlpha <= 0) return 0
 
-  const pathAlpha = pascalWaterBuildGridPathAlphaAtPoint(point, mask.roads)
+  const pathAlpha = landrushIslandBuildGridPathAlphaAtPoint(point, mask.roads)
   return Math.min(parcelAlpha, islandAlpha, pathAlpha)
 }
 
-function pascalWaterBuildGridParcelAlphaAtPoint(
+function landrushIslandBuildGridParcelAlphaAtPoint(
   point: LandrushPoint2,
   parcelRing: readonly LandrushPoint2[],
 ) {
   if (parcelRing.length < 3) return 0
-  if (pointInPascalWaterBuildGridRing(point, parcelRing)) return 1
-  const distance = distanceToPascalWaterBuildGridRing(point, parcelRing)
-  return clamp01(1 - distance / PASCAL_WATER_BUILD_GRID_FADE_METERS)
+  if (pointInLandrushIslandBuildGridRing(point, parcelRing)) return 1
+  const distance = distanceToLandrushIslandBuildGridRing(point, parcelRing)
+  return clamp01(1 - distance / LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS)
 }
 
-function pascalWaterBuildGridIslandAlphaAtPoint(
+function landrushIslandBuildGridIslandAlphaAtPoint(
   point: LandrushPoint2,
   islandRing: readonly LandrushPoint2[],
 ) {
   if (islandRing.length < 3) return 1
-  const distance = distanceToPascalWaterBuildGridRing(point, islandRing)
+  const distance = distanceToLandrushIslandBuildGridRing(point, islandRing)
   if (
     distance >
-    PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS +
-      PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS
+    LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS +
+      LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_FADE_METERS
   ) {
     return 1
   }
-  if (!pointInPascalWaterBuildGridRing(point, islandRing)) return 0
+  if (!pointInLandrushIslandBuildGridRing(point, islandRing)) return 0
   return clamp01(
-    (distance - PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS) /
-      PASCAL_WATER_BUILD_GRID_ISLAND_EDGE_FADE_METERS,
+    (distance - LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS) /
+      LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_FADE_METERS,
   )
 }
 
-function pointInPascalWaterBuildGridRing(point: LandrushPoint2, ring: readonly LandrushPoint2[]) {
+function pointInLandrushIslandBuildGridRing(
+  point: LandrushPoint2,
+  ring: readonly LandrushPoint2[],
+) {
   let inside = false
   for (let index = 0, previousIndex = ring.length - 1; index < ring.length; index += 1) {
     const current = ring[index]
@@ -5856,7 +6077,7 @@ function pointInPascalWaterBuildGridRing(point: LandrushPoint2, ring: readonly L
   return inside
 }
 
-function distanceToPascalWaterBuildGridRing(
+function distanceToLandrushIslandBuildGridRing(
   point: LandrushPoint2,
   ring: readonly LandrushPoint2[],
 ) {
@@ -5869,7 +6090,7 @@ function distanceToPascalWaterBuildGridRing(
   return best
 }
 
-function pascalWaterBuildGridPathAlphaAtPoint(
+function landrushIslandBuildGridPathAlphaAtPoint(
   point: LandrushPoint2,
   roads: readonly LandrushRoadSegment[],
 ) {
@@ -5877,19 +6098,19 @@ function pascalWaterBuildGridPathAlphaAtPoint(
   for (const road of roads) {
     const distance = distanceToOpenPolyline(point, road.points)
     const clearance =
-      (Math.max(0.1, road.width) * PASCAL_WATER_BUILD_GRID_PATH_WIDTH_SCALE) / 2 +
-      PASCAL_WATER_BUILD_GRID_PATH_CLEARANCE_METERS
+      (Math.max(0.1, road.width) * LANDRUSH_ISLAND_BUILD_GRID_PATH_WIDTH_SCALE) / 2 +
+      LANDRUSH_ISLAND_BUILD_GRID_PATH_CLEARANCE_METERS
     if (distance <= clearance) return 0
     alpha = Math.min(
       alpha,
-      clamp01((distance - clearance) / PASCAL_WATER_BUILD_GRID_PATH_FADE_METERS),
+      clamp01((distance - clearance) / LANDRUSH_ISLAND_BUILD_GRID_PATH_FADE_METERS),
     )
     if (alpha <= 0.015) return 0
   }
   return alpha
 }
 
-const PASCAL_WATER_PHYSICS_COLLIDER_NODE_TYPES = new Set([
+const LANDRUSH_ISLAND_PHYSICS_COLLIDER_NODE_TYPES = new Set([
   'wall',
   'fence',
   'slab',
@@ -5902,18 +6123,18 @@ const PASCAL_WATER_PHYSICS_COLLIDER_NODE_TYPES = new Set([
   'item',
 ])
 
-const PASCAL_WATER_GROUND_COLLIDER_MATERIAL = new MeshBasicMaterial({
+const LANDRUSH_ISLAND_GROUND_COLLIDER_MATERIAL = new MeshBasicMaterial({
   side: DoubleSide,
   visible: false,
 })
 
-function pascalWaterStairColliderGeometryReady() {
+function landrushIslandStairColliderGeometryReady() {
   const nodes = useScene.getState().nodes
   for (const node of Object.values(nodes)) {
     if (
       node.type !== 'stair' ||
       node.visible === false ||
-      !isPascalWaterBuildLevelId(node.parentId, nodes) ||
+      !isLandrushIslandBuildLevelId(node.parentId, nodes) ||
       (node.stairType ?? 'straight') !== 'straight' ||
       (node.children?.length ?? 0) === 0
     ) {
@@ -5928,10 +6149,12 @@ function pascalWaterStairColliderGeometryReady() {
   return true
 }
 
-function usePascalWaterBuiltColliderWorlds() {
-  const physicsSignature = useScene((state) => createPascalWaterPhysicsNodeSignature(state.nodes))
+function useLandrushIslandBuiltColliderWorlds() {
+  const physicsSignature = useScene((state) =>
+    createLandrushIslandPhysicsNodeSignature(state.nodes),
+  )
   const doorAnimationSignature = useInteractive((state) =>
-    createPascalWaterDoorAnimationSignature(state.doorAnimations),
+    createLandrushIslandDoorAnimationSignature(state.doorAnimations),
   )
   const [runtimeColliderVersion, setRuntimeColliderVersion] = useState(0)
   const [worlds, setWorlds] = useState<{
@@ -5989,7 +6212,7 @@ function usePascalWaterBuiltColliderWorlds() {
     let attempts = 0
     const rebuildWhenReady = () => {
       attempts += 1
-      if (!pascalWaterStairColliderGeometryReady() && attempts < 90) {
+      if (!landrushIslandStairColliderGeometryReady() && attempts < 90) {
         frame = window.requestAnimationFrame(rebuildWhenReady)
         return
       }
@@ -6031,8 +6254,8 @@ function usePascalWaterBuiltColliderWorlds() {
   return worlds
 }
 
-function createPascalWaterDoorAnimationSignature(
-  doorAnimations: PascalWaterInteractiveDoorAnimationRecord,
+function createLandrushIslandDoorAnimationSignature(
+  doorAnimations: LandrushIslandInteractiveDoorAnimationRecord,
 ) {
   return Object.entries(doorAnimations)
     .map(([doorId, animation]) => `${doorId}:${animation.field}:${animation.to}`)
@@ -6040,16 +6263,19 @@ function createPascalWaterDoorAnimationSignature(
     .join('|')
 }
 
-function createPascalWaterPhysicsNodeSignature(nodes: PascalWaterSceneStore['nodes']) {
+function createLandrushIslandPhysicsNodeSignature(nodes: LandrushIslandSceneStore['nodes']) {
   const entries: string[] = []
   for (const node of Object.values(nodes) as AnyNode[]) {
-    if (!PASCAL_WATER_PHYSICS_COLLIDER_NODE_TYPES.has(node.type)) continue
+    if (!LANDRUSH_ISLAND_PHYSICS_COLLIDER_NODE_TYPES.has(node.type)) continue
     entries.push(`${node.id}:${node.type}:${JSON.stringify(node)}`)
   }
   return entries.sort().join('|')
 }
 
-function createPascalWaterGroundColliderMesh(points: readonly LandrushPoint2[], groundY: number) {
+function createLandrushIslandGroundColliderMesh(
+  points: readonly LandrushPoint2[],
+  groundY: number,
+) {
   const geometry = new BufferGeometry()
   const contour = points.map((point) => new Vector2(point.x, point.z))
   const triangles = ShapeUtils.triangulateShape(contour, [])
@@ -6082,7 +6308,7 @@ function createPascalWaterGroundColliderMesh(points: readonly LandrushPoint2[], 
   ;(bvhGeometry as any).disposeBoundsTree = disposeBoundsTree
   bvhGeometry.computeBoundsTree()
 
-  const mesh = new Mesh(bvhGeometry, PASCAL_WATER_GROUND_COLLIDER_MATERIAL)
+  const mesh = new Mesh(bvhGeometry, LANDRUSH_ISLAND_GROUND_COLLIDER_MATERIAL)
   mesh.raycast = acceleratedRaycast
   mesh.visible = true
   mesh.userData = {
@@ -6096,7 +6322,7 @@ function createPascalWaterGroundColliderMesh(points: readonly LandrushPoint2[], 
   return mesh
 }
 
-function disposePascalWaterGroundColliderMesh(mesh: Mesh) {
+function disposeLandrushIslandGroundColliderMesh(mesh: Mesh) {
   const geometry = mesh.geometry as BufferGeometry & {
     disposeBoundsTree?: typeof disposeBoundsTree
   }
@@ -6104,10 +6330,11 @@ function disposePascalWaterGroundColliderMesh(mesh: Mesh) {
   geometry.dispose()
 }
 
-function PascalWaterPlayerLayer({
+function LandrushIslandPlayerLayer({
   baseNode,
   buildCameraPoseRef,
   fallPresentationRef,
+  fpvActive,
   grassInteractionRef,
   localMotionRef,
   localProfile,
@@ -6133,36 +6360,37 @@ function PascalWaterPlayerLayer({
   voiceRangeVisible,
   waterY,
 }: {
-  baseNode: PascalWaterLayoutNode
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
-  fallPresentationRef: { current: PascalWaterFallPresentationState }
+  baseNode: LandrushIslandLayoutNode
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  fallPresentationRef: { current: LandrushIslandFallPresentationState }
+  fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
-  mapCameraPoseRef: { current: PascalWaterCameraPose | null }
+  mapCameraPoseRef: { current: LandrushIslandCameraPose | null }
   mapPresentationProgressRef: { current: number }
   mapPresentationVisible: boolean
-  mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
-  mapTransitionStartPoseRef: { current: PascalWaterCameraPose | null }
+  mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  mapTransitionStartPoseRef: { current: LandrushIslandCameraPose | null }
   navigationDebugEnabled: boolean
-  navigationLiveScenario: PascalWaterNavigationLiveScenarioKind | null
+  navigationLiveScenario: LandrushIslandNavigationLiveScenarioKind | null
   navigationLiveScenarioAutoRun: boolean
   navigationLiveScenarioReady: boolean
   onExitBuildMode: () => void
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
-  perfRun: PascalWaterPerfRunOptions
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
-  playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  perfRun: LandrushIslandPerfRunOptions
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   remoteVoicePeerIds: readonly string[]
   robotScreenRevealEnabled: boolean
-  surface: PascalWaterLandSurface
-  viewMode: PascalWaterViewMode
+  surface: LandrushIslandLandSurface
+  viewMode: LandrushIslandViewMode
   voiceRangeVisible: boolean
   waterY: number
 }) {
   const spawn = useMemo(() => centroidForPolygon(surface.grassSurfacePoints), [surface])
-  const groundY = surface.grassSurfaceElevation + PASCAL_WATER_ROBOT_GROUND_CLEARANCE
+  const groundY = surface.grassSurfaceElevation + LANDRUSH_ISLAND_ROBOT_GROUND_CLEARANCE
   const mapVisible = viewMode === 'map'
   const movementEnabled = viewMode !== 'build'
   const cameraEnabled = viewMode === 'player'
@@ -6171,22 +6399,23 @@ function PascalWaterPlayerLayer({
     viewMode === 'build' ? 'hover' : 'default'
   const remoteVoicePeerIdSet = useMemo(() => new Set(remoteVoicePeerIds), [remoteVoicePeerIds])
   const cliffFallBoundaryPoints = useMemo(
-    () => createPascalWaterRobotCliffFallBoundaryPoints(surface),
+    () => createLandrushIslandRobotCliffFallBoundaryPoints(surface),
     [surface],
   )
 
   return (
-    <group>
-      <PascalWaterMapCameraRig
+    <group userData={{ pascalExcludeFromToolConeTarget: true }}>
+      <LandrushIslandMapCameraRig
         active={mapVisible}
         mapCameraPoseRef={mapCameraPoseRef}
         mapTransitionStartPoseRef={mapTransitionStartPoseRef}
         playerCameraPoseRef={playerCameraPoseRef}
       />
-      <LocalPascalWaterRobot
+      <LocalLandrushIslandRobot
         baseNode={baseNode}
         fallSurfacePoints={cliffFallBoundaryPoints}
         fallPresentationRef={fallPresentationRef}
+        fpvActive={fpvActive}
         grassInteractionRef={grassInteractionRef}
         groundY={groundY}
         localMotionRef={localMotionRef}
@@ -6217,7 +6446,7 @@ function PascalWaterPlayerLayer({
         visible={voiceRangeVisible}
       />
       {remotePlayers.map((player) => (
-        <RemotePascalWaterRobot
+        <RemoteLandrushIslandRobot
           baseNode={baseNode}
           groundY={groundY}
           key={player.id}
@@ -6233,13 +6462,13 @@ function PascalWaterPlayerLayer({
           visible={voiceRangeVisible && remoteVoicePeerIdSet.has(player.id)}
         />
       ))}
-      <PascalWaterRobotScreenRevealClipper
+      <LandrushIslandRobotScreenRevealClipper
         motionRef={localMotionRef}
         presentationMode={robotPresentationMode}
         visualRootRef={localRobotVisualRootRef}
-        visible={robotScreenRevealEnabled && viewMode !== 'map'}
+        visible={robotScreenRevealEnabled && viewMode !== 'map' && !fpvActive}
       />
-      <PascalWaterMapPlayerMarker
+      <LandrushIslandMapPlayerMarker
         color={localProfile.color}
         groundY={groundY}
         motionRef={localMotionRef}
@@ -6247,7 +6476,7 @@ function PascalWaterPlayerLayer({
         visible={mapPresentationVisible}
       />
       {remotePlayers.map((player) => (
-        <PascalWaterRemoteMapPlayerMarker
+        <LandrushIslandRemoteMapPlayerMarker
           groundY={groundY}
           key={`map-${player.id}`}
           opacityRef={mapPresentationProgressRef}
@@ -6259,7 +6488,7 @@ function PascalWaterPlayerLayer({
   )
 }
 
-function PascalWaterRevealProofOccluder({
+function LandrushIslandRevealProofOccluder({
   motionRef,
   presentationMode,
   visible,
@@ -6275,6 +6504,16 @@ function PascalWaterRevealProofOccluder({
   const hoverAmountRef = useRef(0)
   const geometry = useMemo(() => new PlaneGeometry(2.6, 3.15), [])
   const material = useMemo(() => {
+    if (getMaterialRendererBackend() === 'webgl') {
+      return new MeshBasicMaterial({
+        color: '#111827',
+        depthTest: true,
+        depthWrite: false,
+        side: DoubleSide,
+        toneMapped: false,
+        transparent: true,
+      })
+    }
     const nextMaterial = new MeshBasicNodeMaterial({
       color: '#111827',
       depthTest: true,
@@ -6314,7 +6553,7 @@ function PascalWaterRevealProofOccluder({
     cameraPositionRef.current.setFromMatrixPosition(camera.matrixWorld)
     occluderCenterRef.current.set(
       motion.position.x,
-      motion.position.y + hoverOffset + PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT,
+      motion.position.y + hoverOffset + LANDRUSH_ISLAND_ROBOT_CAMERA_TARGET_HEIGHT,
       motion.position.z,
     )
     cameraDirectionRef.current
@@ -6338,7 +6577,7 @@ function PascalWaterRevealProofOccluder({
   )
 }
 
-function PascalWaterRobotLevelSelectionTracker({
+function LandrushIslandRobotLevelSelectionTracker({
   enabled,
   groundY,
   localMotionRef,
@@ -6359,7 +6598,7 @@ function PascalWaterRobotLevelSelectionTracker({
     if (!motion) return
 
     const nodes = useScene.getState().nodes
-    const levelId = resolvePascalWaterRobotLevelId(nodes, motion.position.y, groundY)
+    const levelId = resolveLandrushIslandRobotLevelId(nodes, motion.position.y, groundY)
     if (levelId === lastLevelIdRef.current) return
 
     const viewer = useViewer.getState()
@@ -6370,7 +6609,7 @@ function PascalWaterRobotLevelSelectionTracker({
 
     lastLevelIdRef.current = levelId
     viewer.setSelection({
-      buildingId: PASCAL_WATER_BUILDING_ID as never,
+      buildingId: LANDRUSH_ISLAND_BUILDING_ID as never,
       levelId,
       selectedIds: [],
       zoneId: null,
@@ -6380,7 +6619,7 @@ function PascalWaterRobotLevelSelectionTracker({
   return null
 }
 
-function PascalWaterParcelOwnershipLayer({
+function LandrushIslandParcelOwnershipLayer({
   allocation,
   buildMode,
   buildParcelId,
@@ -6410,16 +6649,14 @@ function PascalWaterParcelOwnershipLayer({
   parcelOwnerships: readonly ParcelOwnership[]
   parcelWorldId: string
   roads: readonly LandrushRoadSegment[]
-  surface: PascalWaterLandSurface
+  surface: LandrushIslandLandSurface
   watchParcelWorld: (worldId: string) => void
 }) {
   const { camera, gl } = useThree()
   const [hoveredParcelId, setHoveredParcelId] = useState<string | null>(null)
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null)
-  const [insideOwnedParcelId, setInsideOwnedParcelId] = useState<string | null>(null)
-  const previousParcelGamepadButtonsRef = useRef(createPascalWaterGamepadButtonState())
+  const previousParcelGamepadButtonsRef = useRef(createLandrushIslandGamepadButtonState())
   const selectedParcelIdRef = useRef<string | null>(null)
-  const insideCheckAtRef = useRef(0)
   const mapPickNdc = useMemo(() => new Vector2(), [])
   const mapPickRaycaster = useMemo(() => new Raycaster(), [])
   const ownershipMap = useMemo(() => {
@@ -6433,15 +6670,16 @@ function PascalWaterParcelOwnershipLayer({
     () => [...ownershipMap.values()].find((ownership) => ownership.owner.id === localProfile.id),
     [localProfile.id, ownershipMap],
   )
-  const groundY = surface.grassSurfaceElevation + PASCAL_WATER_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET
+  const groundY =
+    surface.grassSurfaceElevation + LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET
   const parcelMapShapes = useMemo(
-    () => createPascalWaterParcelMapShapes(allocation.parcels, roads),
+    () => createLandrushIslandParcelMapShapes(allocation.parcels, roads),
     [allocation.parcels, roads],
   )
   const claimMapParcel = useCallback(
     (parcel: ParcelAllocationParcel) => {
       const ownership = ownershipMap.get(parcel.id)
-      if (!canClaimPascalWaterParcel({ localOwnership, localProfile, ownership })) return false
+      if (!canClaimLandrushIslandParcel({ localOwnership, localProfile, ownership })) return false
       return claimParcel(parcelWorldId, parcel.id)
     },
     [claimParcel, localOwnership, localProfile, ownershipMap, parcelWorldId],
@@ -6456,7 +6694,7 @@ function PascalWaterParcelOwnershipLayer({
   }, [parcelWorldId, watchParcelWorld])
 
   useEffect(() => {
-    const probe = getPascalWaterRuntimeProbe()
+    const probe = getLandrushIslandRuntimeProbe()
     if (!probe) return
 
     const claimFirstFreeParcel = () => {
@@ -6582,27 +6820,27 @@ function PascalWaterParcelOwnershipLayer({
 
   useFrame((state) => {
     if (!mapView || buildMode) {
-      previousParcelGamepadButtonsRef.current = createPascalWaterGamepadButtonState()
+      previousParcelGamepadButtonsRef.current = createLandrushIslandGamepadButtonState()
       return
     }
 
-    const buttons = readPascalWaterGamepadButtonState(readLandrushGamepadInput())
+    const buttons = readLandrushIslandGamepadButtonState(readLandrushGamepadInput())
     const previous = previousParcelGamepadButtonsRef.current
     previousParcelGamepadButtonsRef.current = buttons
 
-    const direction: PascalWaterParcelSelectionDirection | null =
-      wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadUp')
+    const direction: LandrushIslandParcelSelectionDirection | null =
+      wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadUp')
         ? 'up'
-        : wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadDown')
+        : wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadDown')
           ? 'down'
-          : wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadLeft')
+          : wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadLeft')
             ? 'left'
-            : wasPascalWaterGamepadButtonPressed(buttons, previous, 'dpadRight')
+            : wasLandrushIslandGamepadButtonPressed(buttons, previous, 'dpadRight')
               ? 'right'
               : null
 
     if (direction) {
-      const parcel = resolvePascalWaterDirectionalParcelSelection({
+      const parcel = resolveLandrushIslandDirectionalParcelSelection({
         camera: state.camera,
         currentParcelId: selectedParcelIdRef.current,
         direction,
@@ -6617,11 +6855,11 @@ function PascalWaterParcelOwnershipLayer({
       }
     }
 
-    if (!wasPascalWaterGamepadButtonPressed(buttons, previous, 'cross')) return
+    if (!wasLandrushIslandGamepadButtonPressed(buttons, previous, 'cross')) return
 
     const parcel =
       allocation.parcels.find((candidate) => candidate.id === selectedParcelIdRef.current) ??
-      resolvePascalWaterDefaultParcelSelection({
+      resolveLandrushIslandDefaultParcelSelection({
         camera: state.camera,
         parcels: allocation.parcels,
         shapes: parcelMapShapes,
@@ -6634,35 +6872,12 @@ function PascalWaterParcelOwnershipLayer({
     if (claimMapParcel(parcel)) renderScheduler.requestFrame('selection:changed')
   })
 
-  useFrame((state) => {
-    if (mapView || !localOwnership || buildMode) {
-      if (insideOwnedParcelId !== null) setInsideOwnedParcelId(null)
-      return
-    }
-
-    const elapsed = state.clock.elapsedTime
-    if (elapsed - insideCheckAtRef.current < 0.12) return
-    insideCheckAtRef.current = elapsed
-
-    const motion = localMotionRef.current
-    const parcel = allocation.parcels.find((candidate) => candidate.id === localOwnership.parcelId)
-    const nextInsideParcelId =
-      motion &&
-      parcel &&
-      pointInPolygon({ x: motion.position.x, z: motion.position.z }, parcel.points)
-        ? parcel.id
-        : null
-    setInsideOwnedParcelId((current) =>
-      current === nextInsideParcelId ? current : nextInsideParcelId,
-    )
-  })
-
   return (
     <>
       {!buildMode
         ? allocation.parcels.map((parcel) => (
-            <PascalWaterParcelClaimMesh
-              canClaim={canClaimPascalWaterParcel({
+            <LandrushIslandParcelClaimMesh
+              canClaim={canClaimLandrushIslandParcel({
                 localOwnership,
                 localProfile,
                 ownership: ownershipMap.get(parcel.id),
@@ -6689,7 +6904,7 @@ function PascalWaterParcelOwnershipLayer({
         ? allocation.parcels
             .filter((parcel) => parcel.id === localOwnership.parcelId)
             .map((parcel) => (
-              <PascalWaterParcelBuildMarker
+              <LandrushIslandParcelBuildMarker
                 groundY={groundY}
                 key={parcel.id}
                 mapPresentationVisible={mapPresentationVisible}
@@ -6698,10 +6913,7 @@ function PascalWaterParcelOwnershipLayer({
                 onBuild={onBuildParcel}
                 parcel={parcel}
                 shape={parcelMapShapes.get(parcel.id)}
-                visible={
-                  !buildMode &&
-                  (mapPresentationVisible || mapView || insideOwnedParcelId === parcel.id)
-                }
+                visible={!buildMode && (mapPresentationVisible || mapView)}
               />
             ))
         : null}
@@ -6709,7 +6921,7 @@ function PascalWaterParcelOwnershipLayer({
   )
 }
 
-function PascalWaterParcelClaimMesh({
+function LandrushIslandParcelClaimMesh({
   canClaim,
   groundY,
   hovered,
@@ -6732,14 +6944,14 @@ function PascalWaterParcelClaimMesh({
   owned: boolean
   parcel: ParcelAllocationParcel
   selected: boolean
-  shape?: PascalWaterParcelMapShape
+  shape?: LandrushIslandParcelMapShape
 }) {
   const groupRef = useRef<Group>(null!)
   const freeBadgeRef = useRef<HTMLButtonElement | null>(null)
   const materialRef = useRef<MeshBasicMaterial>(null!)
   const contourMaterialRef = useRef<LineBasicMaterial>(null!)
   const parcelShape = useMemo(
-    () => shape ?? createPascalWaterParcelMapShape(parcel, []),
+    () => shape ?? createLandrushIslandParcelMapShape(parcel, []),
     [parcel, shape],
   )
   const geometry = useMemo(
@@ -6751,8 +6963,8 @@ function PascalWaterParcelClaimMesh({
     [parcel, parcelShape],
   )
   const claimLabelExpanded = canClaim && selected
-  const baseColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_BASE_COLOR), [])
-  const hoverColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_HOVER_COLOR), [])
+  const baseColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR), [])
+  const hoverColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR), [])
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => contourGeometry.dispose(), [contourGeometry])
@@ -6766,28 +6978,28 @@ function PascalWaterParcelClaimMesh({
     const opacityAmount = clamp01(mapOpacityRef.current)
     const mapVisible = opacityAmount > 0.002
     const emphasis = mapVisible && mapView && (hovered || selected || owned)
-    const targetScale = emphasis ? PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE : 1
+    const targetScale = emphasis ? LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_HOVER_SCALE : 1
     const scale = MathUtils.damp(
       group.scale.x,
       targetScale,
-      PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE,
+      LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_RESPONSE,
       delta,
     )
     group.scale.setScalar(scale)
 
     const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 3.1 + parcel.index * 0.61) * 0.5
     const targetOpacity = emphasis
-      ? opacityAmount * (PASCAL_WATER_PARCEL_MAP_HOVER_OPACITY + pulse * 0.018)
+      ? opacityAmount * (LANDRUSH_ISLAND_PARCEL_MAP_HOVER_OPACITY + pulse * 0.018)
       : opacityAmount *
-        PASCAL_WATER_PARCEL_MAP_BASE_OPACITY *
-        PASCAL_WATER_PARCEL_MAP_DEFAULT_FILL_OPACITY_SCALE
+        LANDRUSH_ISLAND_PARCEL_MAP_BASE_OPACITY *
+        LANDRUSH_ISLAND_PARCEL_MAP_DEFAULT_FILL_OPACITY_SCALE
     material.opacity = targetOpacity
     material.color.lerpColors(baseColor, hoverColor, emphasis ? 0.72 : 0.12)
     contourMaterial.opacity = mapVisible
-      ? opacityAmount * (PASCAL_WATER_PARCEL_MAP_CONTOUR_OPACITY + pulse * 0.018)
+      ? opacityAmount * (LANDRUSH_ISLAND_PARCEL_MAP_CONTOUR_OPACITY + pulse * 0.018)
       : 0
     const badgeOpacity =
-      !owned && mapVisible ? opacityAmount * PASCAL_WATER_PARCEL_MAP_FREE_BADGE_OPACITY : 0
+      !owned && mapVisible ? opacityAmount * LANDRUSH_ISLAND_PARCEL_MAP_FREE_BADGE_OPACITY : 0
     if (freeBadgeRef.current) freeBadgeRef.current.style.opacity = String(badgeOpacity)
     group.visible = targetOpacity > 0.002 || contourMaterial.opacity > 0.002 || badgeOpacity > 0.002
   })
@@ -6809,7 +7021,7 @@ function PascalWaterParcelClaimMesh({
       >
         <primitive attach="geometry" object={geometry} />
         <meshBasicMaterial
-          color={PASCAL_WATER_PARCEL_MAP_BASE_COLOR}
+          color={LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR}
           depthTest={false}
           depthWrite={false}
           opacity={0}
@@ -6821,7 +7033,7 @@ function PascalWaterParcelClaimMesh({
       <lineSegments renderOrder={77} rotation={[-Math.PI / 2, 0, 0]}>
         <primitive attach="geometry" object={contourGeometry} />
         <lineBasicMaterial
-          color={PASCAL_WATER_PARCEL_MAP_HOVER_COLOR}
+          color={LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR}
           depthTest={false}
           depthWrite={false}
           opacity={0}
@@ -6894,7 +7106,7 @@ function PascalWaterParcelClaimMesh({
   )
 }
 
-function PascalWaterParcelBuildMarker({
+function LandrushIslandParcelBuildMarker({
   groundY,
   mapOpacityRef,
   mapPresentationVisible,
@@ -6910,7 +7122,7 @@ function PascalWaterParcelBuildMarker({
   mapView: boolean
   onBuild: (parcel: ParcelAllocationParcel) => void
   parcel: ParcelAllocationParcel
-  shape?: PascalWaterParcelMapShape
+  shape?: LandrushIslandParcelMapShape
   visible: boolean
 }) {
   const mapButtonRef = useRef<HTMLDivElement | null>(null)
@@ -6934,7 +7146,7 @@ function PascalWaterParcelBuildMarker({
 
   return (
     <>
-      <PascalWaterParcelBuildGlow
+      <LandrushIslandParcelBuildGlow
         groundY={groundY}
         opacityRef={mapOpacityRef}
         parcel={parcel}
@@ -6992,7 +7204,7 @@ function PascalWaterParcelBuildMarker({
   )
 }
 
-function PascalWaterParcelBuildGlow({
+function LandrushIslandParcelBuildGlow({
   groundY,
   opacityRef,
   parcel,
@@ -7002,21 +7214,21 @@ function PascalWaterParcelBuildGlow({
   groundY: number
   opacityRef: { current: number }
   parcel: ParcelAllocationParcel
-  shape?: PascalWaterParcelMapShape
+  shape?: LandrushIslandParcelMapShape
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
   const materialRef = useRef<MeshBasicMaterial>(null!)
   const parcelShape = useMemo(
-    () => shape ?? createPascalWaterParcelMapShape(parcel, []),
+    () => shape ?? createLandrushIslandParcelMapShape(parcel, []),
     [parcel, shape],
   )
   const geometry = useMemo(
     () => createCenteredParcelGeometry(parcel, parcelShape.points, parcelShape.centroid),
     [parcel, parcelShape],
   )
-  const baseColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_BASE_COLOR), [])
-  const hoverColor = useMemo(() => new Color(PASCAL_WATER_PARCEL_MAP_HOVER_COLOR), [])
+  const baseColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR), [])
+  const hoverColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR), [])
 
   useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -7030,15 +7242,15 @@ function PascalWaterParcelBuildGlow({
     if (!group.visible) return
 
     const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 2.2 + parcel.index * 0.61) * 0.5
-    const targetScale = PASCAL_WATER_PARCEL_MAP_OVERLAY_HOVER_SCALE * 0.998
+    const targetScale = LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_HOVER_SCALE * 0.998
     const scale = MathUtils.damp(
       group.scale.x,
       targetScale,
-      PASCAL_WATER_PARCEL_MAP_OVERLAY_RESPONSE,
+      LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_RESPONSE,
       delta,
     )
     group.scale.setScalar(scale)
-    material.opacity = opacity * (PASCAL_WATER_PARCEL_MAP_BASE_OPACITY * 0.62 + pulse * 0.01)
+    material.opacity = opacity * (LANDRUSH_ISLAND_PARCEL_MAP_BASE_OPACITY * 0.62 + pulse * 0.01)
     material.color.lerpColors(baseColor, hoverColor, 0.16 + pulse * 0.05)
   })
 
@@ -7050,7 +7262,7 @@ function PascalWaterParcelBuildGlow({
       <mesh renderOrder={76} rotation={[-Math.PI / 2, 0, 0]}>
         <primitive attach="geometry" object={geometry} />
         <meshBasicMaterial
-          color={PASCAL_WATER_PARCEL_MAP_BASE_COLOR}
+          color={LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR}
           depthTest={false}
           depthWrite={false}
           opacity={0}
@@ -7063,7 +7275,7 @@ function PascalWaterParcelBuildGlow({
   )
 }
 
-const PASCAL_WATER_ROBOT_REVEAL_OCCLUDER_NODE_TYPES = [
+const LANDRUSH_ISLAND_ROBOT_REVEAL_OCCLUDER_NODE_TYPES = [
   'wall',
   'fence',
   'door',
@@ -7078,7 +7290,7 @@ const PASCAL_WATER_ROBOT_REVEAL_OCCLUDER_NODE_TYPES = [
   'roof',
 ] as const
 
-function PascalWaterRobotScreenRevealClipper({
+function LandrushIslandRobotScreenRevealClipper({
   motionRef,
   presentationMode,
   visualRootRef,
@@ -7091,19 +7303,19 @@ function PascalWaterRobotScreenRevealClipper({
 }) {
   const { camera, gl, scene } = useThree()
   const occludersRef = useRef<Object3D[]>([])
-  const objectStatesRef = useRef(new Map<Object3D, PascalWaterRevealObjectState>())
+  const objectStatesRef = useRef(new Map<Object3D, LandrushIslandRevealObjectState>())
   const activeObjectsRef = useRef(new Set<Object3D>())
   const materialsRef = useRef<Material[]>([])
-  const materialStatesRef = useRef(new Map<Material, PascalWaterRevealMaterialState>())
+  const materialStatesRef = useRef(new Map<Material, LandrushIslandRevealMaterialState>())
   const activeMaterialsRef = useRef(new Set<Material>())
   const lastRefreshAtRef = useRef(-Infinity)
   const lastProbeAtRef = useRef(-Infinity)
   const revealActiveRef = useRef(false)
   const clippingPlanesRef = useRef(
-    Array.from({ length: PASCAL_WATER_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Plane()),
+    Array.from({ length: LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Plane()),
   )
   const boundaryPointsRef = useRef(
-    Array.from({ length: PASCAL_WATER_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Vector3()),
+    Array.from({ length: LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Vector3()),
   )
   const cameraPositionRef = useRef(new Vector3())
   const robotVisualRootRef = useRef(new Vector3())
@@ -7124,7 +7336,7 @@ function PascalWaterRobotScreenRevealClipper({
   const restoreClipping = useCallback(() => {
     clearLandrushRobotScreenRevealMask()
     for (const [object, state] of objectStatesRef.current) {
-      restorePascalWaterRevealObjectState(object, state)
+      restoreLandrushIslandRevealObjectState(object, state)
     }
     objectStatesRef.current.clear()
     activeObjectsRef.current.clear()
@@ -7167,7 +7379,7 @@ function PascalWaterRobotScreenRevealClipper({
       isWebGLRenderer?: boolean
       localClippingEnabled?: boolean
     }
-    const revealPath = resolvePascalWaterRevealClippingPath(renderer)
+    const revealPath = resolveLandrushIslandRevealClippingPath(renderer)
     if (revealPath === 'none') {
       if (revealActiveRef.current) restoreClipping()
       return
@@ -7185,7 +7397,7 @@ function PascalWaterRobotScreenRevealClipper({
       ? robotVisualRootRef.current.setFromMatrixPosition(visualRoot.matrixWorld)
       : null
     const robotScreenBounds = visualRoot
-      ? projectPascalWaterObjectScreenBounds({
+      ? projectLandrushIslandObjectScreenBounds({
           bounds: robotVisualBoundsRef.current,
           camera,
           corners: robotVisualBoundsCornersRef.current,
@@ -7203,38 +7415,38 @@ function PascalWaterRobotScreenRevealClipper({
     cameraPositionRef.current.setFromMatrixPosition(camera.matrixWorld)
     if (clock.elapsedTime - lastRefreshAtRef.current > 0.35) {
       lastRefreshAtRef.current = clock.elapsedTime
-      occludersRef.current = collectPascalWaterRobotRevealOccluders(scene, {
+      occludersRef.current = collectLandrushIslandRobotRevealOccluders(scene, {
         cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
         cameraY: cameraPositionRef.current.y,
         robotPoint,
         robotY: robotVisualY,
       })
-      materialsRef.current = collectPascalWaterRobotRevealMaterials(occludersRef.current)
+      materialsRef.current = collectLandrushIslandRobotRevealMaterials(occludersRef.current)
     }
     const robotBase = robotBaseRef.current.set(
       robotX,
-      robotVisualY + PASCAL_WATER_ROBOT_SCREEN_REVEAL_BASE_HEIGHT,
+      robotVisualY + LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_BASE_HEIGHT,
       robotZ,
     )
     const robotHead = robotHeadRef.current.set(
       robotX,
-      robotVisualY + PASCAL_WATER_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT,
+      robotVisualY + LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT,
       robotZ,
     )
     const robotCenter = robotScreenBounds
       ? robotVisualBoundsRef.current.getCenter(robotVisualBoundsCenterRef.current)
       : robotCenterRef.current
           .copy(robotBase)
-          .lerp(robotHead, PASCAL_WATER_ROBOT_SCREEN_REVEAL_CENTER_BIAS)
+          .lerp(robotHead, LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS)
     const robotNdc = robotNdcRef.current.copy(robotCenter).project(camera)
     if (robotNdc.z < -1 || robotNdc.z > 1) {
       if (revealActiveRef.current) restoreClipping()
       return
     }
 
-    const baseScreen = projectPascalWaterScreenPoint(robotBase.project(camera), width, height)
-    const headScreen = projectPascalWaterScreenPoint(robotHead.project(camera), width, height)
-    const projectedCenterScreen = projectPascalWaterScreenPoint(robotNdc, width, height)
+    const baseScreen = projectLandrushIslandScreenPoint(robotBase.project(camera), width, height)
+    const headScreen = projectLandrushIslandScreenPoint(robotHead.project(camera), width, height)
+    const projectedCenterScreen = projectLandrushIslandScreenPoint(robotNdc, width, height)
     const robotScreen = robotScreenBounds
       ? { x: robotScreenBounds.centerX, y: robotScreenBounds.centerY }
       : projectedCenterScreen
@@ -7244,15 +7456,15 @@ function PascalWaterRobotScreenRevealClipper({
       ? Math.max(robotScreenBounds.width, robotScreenBounds.height)
       : Math.hypot(headScreen.x - baseScreen.x, headScreen.y - baseScreen.y)
     const baseRevealRadiusPx = Math.max(
-      PASCAL_WATER_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX,
-      robotScreenHeight * PASCAL_WATER_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE * 0.5,
+      LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX,
+      robotScreenHeight * LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE * 0.5,
     )
     const revealRadiusPx = baseRevealRadiusPx
     const revealOuterRadiusPx =
       revealRadiusPx +
       baseRevealRadiusPx *
-        (PASCAL_WATER_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE - 1) *
-        PASCAL_WATER_ROBOT_SCREEN_REVEAL_FEATHER_EXPANSION_SCALE
+        (LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE - 1) *
+        LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_EXPANSION_SCALE
     const revealScreen = revealScreenRef.current
     revealScreen.x = robotScreen.x
     revealScreen.y = robotScreen.y
@@ -7267,7 +7479,9 @@ function PascalWaterRobotScreenRevealClipper({
         height -
         Math.max(
           revealClampMarginPx,
-          presentationMode === 'hover' ? PASCAL_WATER_ROBOT_SCREEN_REVEAL_HOVER_BOTTOM_SAFE_PX : 0,
+          presentationMode === 'hover'
+            ? LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HOVER_BOTTOM_SAFE_PX
+            : 0,
         )
       revealScreen.x = MathUtils.clamp(
         revealScreen.x,
@@ -7284,7 +7498,7 @@ function PascalWaterRobotScreenRevealClipper({
       outerRadius: revealOuterRadiusPx,
       width,
     })
-    updatePascalWaterRobotRevealClippingPlanes({
+    updateLandrushIslandRobotRevealClippingPlanes({
       camera,
       cameraPosition: cameraPositionRef.current,
       height,
@@ -7300,7 +7514,7 @@ function PascalWaterRobotScreenRevealClipper({
     const now = performance.now()
     if (now - lastProbeAtRef.current > 160) {
       lastProbeAtRef.current = now
-      recordPascalWaterRevealProbe({
+      recordLandrushIslandRevealProbe({
         mask: readLandrushRobotScreenRevealMaskSnapshot(),
         occluderCount: occludersRef.current.length,
         path: revealPath,
@@ -7324,13 +7538,13 @@ function PascalWaterRobotScreenRevealClipper({
         screenSource: robotScreenBounds ? 'visual-root-bounds' : 'visual-root-segment',
         robotScreen: [roundPerf(robotScreen.x), roundPerf(robotScreen.y)],
         robotScreenInsideViewport,
-        softMaterialCount: materialsRef.current.filter(isPascalWaterSoftRevealMaterial).length,
+        softMaterialCount: materialsRef.current.filter(isLandrushIslandSoftRevealMaterial).length,
       })
     }
 
     if (revealPath === 'object') {
-      restorePascalWaterRevealMaterialClipping(materialStatesRef.current)
-      applyPascalWaterRevealObjectClipping({
+      restoreLandrushIslandRevealMaterialClipping(materialStatesRef.current)
+      applyLandrushIslandRevealObjectClipping({
         activeObjects: activeObjectsRef.current,
         objectStates: objectStatesRef.current,
         objects: occludersRef.current,
@@ -7339,7 +7553,7 @@ function PascalWaterRobotScreenRevealClipper({
       return
     }
 
-    restorePascalWaterRevealObjectClipping(objectStatesRef.current)
+    restoreLandrushIslandRevealObjectClipping(objectStatesRef.current)
     if (rendererClippingRef.current?.renderer !== renderer) {
       rendererClippingRef.current = {
         localClippingEnabled: renderer.localClippingEnabled,
@@ -7379,7 +7593,7 @@ function PascalWaterRobotScreenRevealClipper({
   return null
 }
 
-function resolvePascalWaterRevealClippingPath(renderer: {
+function resolveLandrushIslandRevealClippingPath(renderer: {
   backend?: { device?: unknown }
   constructor?: { name?: string }
   isWebGPURenderer?: boolean
@@ -7399,21 +7613,21 @@ function resolvePascalWaterRevealClippingPath(renderer: {
   return 'none'
 }
 
-function applyPascalWaterRevealObjectClipping({
+function applyLandrushIslandRevealObjectClipping({
   activeObjects,
   objectStates,
   objects,
   planes,
 }: {
   activeObjects: Set<Object3D>
-  objectStates: Map<Object3D, PascalWaterRevealObjectState>
+  objectStates: Map<Object3D, LandrushIslandRevealObjectState>
   objects: readonly Object3D[]
   planes: Plane[]
 }) {
   activeObjects.clear()
   for (const object of objects) {
-    if (objectHasPascalWaterSoftRevealMaterial(object)) continue
-    const target = resolvePascalWaterRevealClippingObject(object)
+    if (objectHasLandrushIslandSoftRevealMaterial(object)) continue
+    const target = resolveLandrushIslandRevealClippingObject(object)
     if (!target) continue
     activeObjects.add(target)
     const clippingTarget = target as Object3D & {
@@ -7441,23 +7655,23 @@ function applyPascalWaterRevealObjectClipping({
 
   for (const [object, state] of objectStates) {
     if (activeObjects.has(object)) continue
-    restorePascalWaterRevealObjectState(object, state)
+    restoreLandrushIslandRevealObjectState(object, state)
     objectStates.delete(object)
   }
 }
 
-function restorePascalWaterRevealObjectClipping(
-  objectStates: Map<Object3D, PascalWaterRevealObjectState>,
+function restoreLandrushIslandRevealObjectClipping(
+  objectStates: Map<Object3D, LandrushIslandRevealObjectState>,
 ) {
   for (const [object, state] of objectStates) {
-    restorePascalWaterRevealObjectState(object, state)
+    restoreLandrushIslandRevealObjectState(object, state)
   }
   objectStates.clear()
 }
 
-function restorePascalWaterRevealObjectState(
+function restoreLandrushIslandRevealObjectState(
   object: Object3D,
-  state: PascalWaterRevealObjectState,
+  state: LandrushIslandRevealObjectState,
 ) {
   const target = object as Object3D & {
     clipIntersection?: unknown
@@ -7466,14 +7680,14 @@ function restorePascalWaterRevealObjectState(
     enabled?: unknown
     isClippingGroup?: unknown
   }
-  restorePascalWaterOptionalProperty(target, 'isClippingGroup', state.isClippingGroup)
-  restorePascalWaterOptionalProperty(target, 'clippingPlanes', state.clippingPlanes)
-  restorePascalWaterOptionalProperty(target, 'enabled', state.enabled)
-  restorePascalWaterOptionalProperty(target, 'clipIntersection', state.clipIntersection)
-  restorePascalWaterOptionalProperty(target, 'clipShadows', state.clipShadows)
+  restoreLandrushIslandOptionalProperty(target, 'isClippingGroup', state.isClippingGroup)
+  restoreLandrushIslandOptionalProperty(target, 'clippingPlanes', state.clippingPlanes)
+  restoreLandrushIslandOptionalProperty(target, 'enabled', state.enabled)
+  restoreLandrushIslandOptionalProperty(target, 'clipIntersection', state.clipIntersection)
+  restoreLandrushIslandOptionalProperty(target, 'clipShadows', state.clipShadows)
 }
 
-function restorePascalWaterOptionalProperty<
+function restoreLandrushIslandOptionalProperty<
   Key extends 'clipIntersection' | 'clipShadows' | 'clippingPlanes' | 'enabled' | 'isClippingGroup',
 >(target: Partial<Record<Key, unknown>>, key: Key, value: unknown) {
   if (value === undefined) {
@@ -7483,13 +7697,13 @@ function restorePascalWaterOptionalProperty<
   target[key] = value
 }
 
-function resolvePascalWaterRevealClippingObject(object: Object3D) {
+function resolveLandrushIslandRevealClippingObject(object: Object3D) {
   const target = object as Object3D & { isGroup?: boolean; isMesh?: boolean }
   return target.isGroup === true || target.isMesh === true ? object : null
 }
 
-function restorePascalWaterRevealMaterialClipping(
-  materialStates: Map<Material, PascalWaterRevealMaterialState>,
+function restoreLandrushIslandRevealMaterialClipping(
+  materialStates: Map<Material, LandrushIslandRevealMaterialState>,
 ) {
   for (const [material, state] of materialStates) {
     material.clippingPlanes = state.clippingPlanes
@@ -7499,7 +7713,7 @@ function restorePascalWaterRevealMaterialClipping(
   materialStates.clear()
 }
 
-function updatePascalWaterRobotRevealClippingPlanes({
+function updateLandrushIslandRobotRevealClippingPlanes({
   camera,
   cameraPosition,
   height,
@@ -7550,17 +7764,17 @@ function updatePascalWaterRobotRevealClippingPlanes({
   }
 }
 
-function collectPascalWaterRobotRevealOccluders(
+function collectLandrushIslandRobotRevealOccluders(
   scene: Object3D,
-  context: PascalWaterRobotRevealOccluderContext,
+  context: LandrushIslandRobotRevealOccluderContext,
 ) {
   const occluders = new Set<Object3D>()
   const registryByType = sceneRegistry.byType as Record<string, Set<string> | undefined>
-  for (const type of PASCAL_WATER_ROBOT_REVEAL_OCCLUDER_NODE_TYPES) {
+  for (const type of LANDRUSH_ISLAND_ROBOT_REVEAL_OCCLUDER_NODE_TYPES) {
     const nodeIds = registryByType[type]
     if (!nodeIds) continue
     for (const nodeId of nodeIds) {
-      if (shouldSkipPascalWaterRobotRevealOccluder(nodeId as AnyNodeId, context)) continue
+      if (shouldSkipLandrushIslandRobotRevealOccluder(nodeId as AnyNodeId, context)) continue
       const object = sceneRegistry.nodes.get(nodeId as AnyNodeId)
       if (object) occluders.add(object)
     }
@@ -7571,45 +7785,46 @@ function collectPascalWaterRobotRevealOccluders(
   return [...occluders]
 }
 
-function shouldSkipPascalWaterRobotRevealOccluder(
+function shouldSkipLandrushIslandRobotRevealOccluder(
   nodeId: AnyNodeId,
-  context: PascalWaterRobotRevealOccluderContext,
+  context: LandrushIslandRobotRevealOccluderContext,
 ) {
   const node = useScene.getState().nodes[nodeId]
   if (!node) return false
 
   if (node.type === 'stair') {
-    return pointInPascalWaterRevealStairFootprint(node, context.robotPoint)
+    return pointInLandrushIslandRevealStairFootprint(node, context.robotPoint)
   }
 
   if (node.type === 'stair-segment') {
     const parentId = (node as { parentId?: AnyNodeId | null }).parentId
     const parent = parentId ? useScene.getState().nodes[parentId] : null
     return (
-      parent?.type === 'stair' && pointInPascalWaterRevealStairFootprint(parent, context.robotPoint)
+      parent?.type === 'stair' &&
+      pointInLandrushIslandRevealStairFootprint(parent, context.robotPoint)
     )
   }
 
   if (node.type === 'slab') {
-    if (isPascalWaterRobotRevealSupportSlab(node, context)) return true
-    return !shouldCutPascalWaterRobotRevealSurface(node, context)
+    if (isLandrushIslandRobotRevealSupportSlab(node, context)) return true
+    return !shouldCutLandrushIslandRobotRevealSurface(node, context)
   }
 
   if (node.type === 'ceiling' || node.type === 'roof') {
-    return !shouldCutPascalWaterRobotRevealSurface(node, context)
+    return !shouldCutLandrushIslandRobotRevealSurface(node, context)
   }
 
   return false
 }
 
-function pointInPascalWaterRevealStairFootprint(
+function pointInLandrushIslandRevealStairFootprint(
   node: Extract<AnyNode, { type: 'stair' }>,
   point: LandrushPoint2,
 ) {
   const nodes = useScene.getState().nodes
-  const footprint = createPascalWaterBuildNodeFootprint(
+  const footprint = createLandrushIslandBuildNodeFootprint(
     node,
-    PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
+    LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
     nodes,
   )
   return Boolean(
@@ -7617,49 +7832,49 @@ function pointInPascalWaterRevealStairFootprint(
       pointInPolygonOrNearEdge(
         point,
         footprint,
-        PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
+        LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
       ),
   )
 }
 
-function isPascalWaterRobotRevealSupportSlab(
+function isLandrushIslandRobotRevealSupportSlab(
   node: Extract<AnyNode, { type: 'slab' }>,
-  context: PascalWaterRobotRevealOccluderContext,
+  context: LandrushIslandRobotRevealOccluderContext,
 ) {
-  const footprint = createPascalWaterBuildNodeFootprint(node, 0, useScene.getState().nodes)
+  const footprint = createLandrushIslandBuildNodeFootprint(node, 0, useScene.getState().nodes)
   if (
     !footprint ||
     !pointInPolygonOrNearEdge(
       context.robotPoint,
       footprint,
-      PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
+      LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
     )
   ) {
     return false
   }
   return (
-    Math.abs(resolvePascalWaterRobotRevealSurfaceY(node) - context.robotY) <=
-    PASCAL_WATER_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    Math.abs(resolveLandrushIslandRobotRevealSurfaceY(node) - context.robotY) <=
+    LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
   )
 }
 
-function shouldCutPascalWaterRobotRevealSurface(
+function shouldCutLandrushIslandRobotRevealSurface(
   node: Extract<AnyNode, { type: 'ceiling' | 'roof' | 'slab' }>,
-  context: PascalWaterRobotRevealOccluderContext,
+  context: LandrushIslandRobotRevealOccluderContext,
 ) {
   const nodes = useScene.getState().nodes
-  const footprints = createPascalWaterBuildNodeFootprints(node, 0, nodes)
+  const footprints = createLandrushIslandBuildNodeFootprints(node, 0, nodes)
   if (footprints.length === 0) return true
 
   const coversRobot = footprints.some((footprint) =>
     pointInPolygonOrNearEdge(
       context.robotPoint,
       footprint,
-      PASCAL_WATER_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
+      LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
     ),
   )
   const crossesCameraPath = footprints.some((footprint) =>
-    pascalWaterNavigationSegmentIntersectsPolygon(
+    landrushIslandNavigationSegmentIntersectsPolygon(
       context.cameraPoint,
       context.robotPoint,
       footprint,
@@ -7669,10 +7884,10 @@ function shouldCutPascalWaterRobotRevealSurface(
 
   if (node.type === 'roof') return true
 
-  const surfaceY = resolvePascalWaterRobotRevealSurfaceY(node)
+  const surfaceY = resolveLandrushIslandRobotRevealSurfaceY(node)
   if (
     coversRobot &&
-    surfaceY > context.robotY + PASCAL_WATER_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    surfaceY > context.robotY + LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
   ) {
     return true
   }
@@ -7681,12 +7896,12 @@ function shouldCutPascalWaterRobotRevealSurface(
   const maxViewY = Math.max(context.cameraY, context.robotY)
   return (
     crossesCameraPath &&
-    surfaceY >= minViewY - PASCAL_WATER_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS &&
-    surfaceY <= maxViewY + PASCAL_WATER_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    surfaceY >= minViewY - LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS &&
+    surfaceY <= maxViewY + LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
   )
 }
 
-function resolvePascalWaterRobotRevealSurfaceY(
+function resolveLandrushIslandRobotRevealSurfaceY(
   node: Extract<AnyNode, { type: 'ceiling' | 'slab' }>,
 ) {
   if (node.type === 'ceiling') return node.height ?? 2.5
@@ -7694,49 +7909,51 @@ function resolvePascalWaterRobotRevealSurfaceY(
   return elevation < 0 ? 0 : elevation
 }
 
-function collectPascalWaterRobotRevealMaterials(occluders: readonly Object3D[]) {
+function collectLandrushIslandRobotRevealMaterials(occluders: readonly Object3D[]) {
   const materials = new Set<Material>()
   for (const object of occluders) {
-    collectPascalWaterObjectMaterials(object, materials)
+    collectLandrushIslandObjectMaterials(object, materials)
   }
   return [...materials]
 }
 
-function collectPascalWaterObjectMaterials(object: Object3D, materials: Set<Material>) {
+function collectLandrushIslandObjectMaterials(object: Object3D, materials: Set<Material>) {
   object.traverse((child) => {
     const mesh = child as { isMesh?: boolean; material?: unknown }
     if (!mesh.isMesh) return
-    for (const material of getPascalWaterMaterials(mesh.material)) {
+    for (const material of getLandrushIslandMaterials(mesh.material)) {
       materials.add(material)
     }
   })
 }
 
-function getPascalWaterMaterials(material: unknown): Material[] {
-  if (Array.isArray(material)) return material.filter(isPascalWaterMaterial)
-  return isPascalWaterMaterial(material) ? [material] : []
+function getLandrushIslandMaterials(material: unknown): Material[] {
+  if (Array.isArray(material)) return material.filter(isLandrushIslandMaterial)
+  return isLandrushIslandMaterial(material) ? [material] : []
 }
 
-function isPascalWaterMaterial(material: unknown): material is Material {
+function isLandrushIslandMaterial(material: unknown): material is Material {
   return Boolean(material && typeof material === 'object' && 'needsUpdate' in material)
 }
 
-function isPascalWaterSoftRevealMaterial(material: Material) {
+function isLandrushIslandSoftRevealMaterial(material: Material) {
   return material.userData?.landrushRobotScreenRevealSoftMask === true
 }
 
-function objectHasPascalWaterSoftRevealMaterial(object: Object3D) {
+function objectHasLandrushIslandSoftRevealMaterial(object: Object3D) {
   let hasSoftRevealMaterial = false
   object.traverse((child) => {
     if (hasSoftRevealMaterial) return
     const material = (child as { material?: Material | Material[] }).material
     if (!material) return
-    hasSoftRevealMaterial = getPascalWaterMaterials(material).some(isPascalWaterSoftRevealMaterial)
+    hasSoftRevealMaterial = getLandrushIslandMaterials(material).some(
+      isLandrushIslandSoftRevealMaterial,
+    )
   })
   return hasSoftRevealMaterial
 }
 
-function projectPascalWaterObjectScreenBounds({
+function projectLandrushIslandObjectScreenBounds({
   bounds,
   camera,
   corners,
@@ -7750,7 +7967,7 @@ function projectPascalWaterObjectScreenBounds({
   height: number
   object: Object3D
   width: number
-}): PascalWaterRobotScreenBounds | null {
+}): LandrushIslandRobotScreenBounds | null {
   bounds.setFromObject(object)
   if (bounds.isEmpty()) return null
 
@@ -7780,7 +7997,7 @@ function projectPascalWaterObjectScreenBounds({
     ) {
       continue
     }
-    const screen = projectPascalWaterScreenPoint(projected, width, height)
+    const screen = projectLandrushIslandScreenPoint(projected, width, height)
     if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y)) continue
     minX = Math.min(minX, screen.x)
     minY = Math.min(minY, screen.y)
@@ -7802,47 +8019,47 @@ function projectPascalWaterObjectScreenBounds({
   }
 }
 
-function setPascalWaterGroupMaterialOpacity(group: Group, opacity: number) {
+function setLandrushIslandGroupMaterialOpacity(group: Group, opacity: number) {
   group.visible = opacity > 0.002
   group.traverse((object) => {
     const material = (object as { material?: Material | Material[] }).material
     if (!material) return
 
-    for (const candidate of getPascalWaterMaterials(material)) {
+    for (const candidate of getLandrushIslandMaterials(material)) {
       const baseOpacity =
-        typeof candidate.userData.pascalWaterBaseOpacity === 'number'
-          ? candidate.userData.pascalWaterBaseOpacity
+        typeof candidate.userData.landrushIslandBaseOpacity === 'number'
+          ? candidate.userData.landrushIslandBaseOpacity
           : candidate.opacity
-      candidate.userData.pascalWaterBaseOpacity = baseOpacity
+      candidate.userData.landrushIslandBaseOpacity = baseOpacity
       candidate.opacity = baseOpacity * opacity
       candidate.transparent = true
     }
   })
 }
 
-function projectPascalWaterScreenPoint(ndc: Vector3, width: number, height: number) {
+function projectLandrushIslandScreenPoint(ndc: Vector3, width: number, height: number) {
   return {
     x: (ndc.x * 0.5 + 0.5) * width,
     y: (-ndc.y * 0.5 + 0.5) * height,
   }
 }
 
-const _pascalWaterScreenProjectionVector = new Vector3()
-const _pascalWaterScreenProjectionPoint = new Vector2()
-const _pascalWaterCameraPoseLookAtMatrix = new Matrix4()
-const _pascalWaterCameraPoseUp = new Vector3(0, 1, 0)
+const _landrushIslandScreenProjectionVector = new Vector3()
+const _landrushIslandScreenProjectionPoint = new Vector2()
+const _landrushIslandCameraPoseLookAtMatrix = new Matrix4()
+const _landrushIslandCameraPoseUp = new Vector3(0, 1, 0)
 
-function projectVectorToPascalWaterScreenPoint(
+function projectVectorToLandrushIslandScreenPoint(
   point: Vector3,
   camera: Camera,
   viewport: { height: number; width: number },
 ) {
-  const projected = _pascalWaterScreenProjectionVector.copy(point).project(camera)
-  const screen = projectPascalWaterScreenPoint(projected, viewport.width, viewport.height)
-  return _pascalWaterScreenProjectionPoint.set(screen.x, screen.y)
+  const projected = _landrushIslandScreenProjectionVector.copy(point).project(camera)
+  const screen = projectLandrushIslandScreenPoint(projected, viewport.width, viewport.height)
+  return _landrushIslandScreenProjectionPoint.set(screen.x, screen.y)
 }
 
-function distanceSqToPascalWaterScreenSegment(point: Vector2, start: Vector2, end: Vector2) {
+function distanceSqToLandrushIslandScreenSegment(point: Vector2, start: Vector2, end: Vector2) {
   const segmentX = end.x - start.x
   const segmentY = end.y - start.y
   const segmentLengthSq = segmentX * segmentX + segmentY * segmentY
@@ -7859,12 +8076,13 @@ function distanceSqToPascalWaterScreenSegment(point: Vector2, start: Vector2, en
   return dx * dx + dy * dy
 }
 
-function LocalPascalWaterRobot({
+function LocalLandrushIslandRobot({
   baseNode,
   buildCameraPoseRef,
   cameraEnabled,
   fallSurfacePoints,
   fallPresentationRef,
+  fpvActive,
   grassInteractionRef,
   groundY,
   localMotionRef,
@@ -7886,39 +8104,40 @@ function LocalPascalWaterRobot({
   surfacePoints,
   waterY,
 }: {
-  baseNode: PascalWaterLayoutNode
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  baseNode: LandrushIslandLayoutNode
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraEnabled: boolean
   fallSurfacePoints: readonly LandrushPoint2[]
-  fallPresentationRef: { current: PascalWaterFallPresentationState }
+  fallPresentationRef: { current: LandrushIslandFallPresentationState }
+  fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   groundY: number
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
   localRobotVisualRootRef: { current: Group | null }
-  mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   movementEnabled: boolean
   navigationDebugEnabled: boolean
-  navigationLiveScenario: PascalWaterNavigationLiveScenarioKind | null
+  navigationLiveScenario: LandrushIslandNavigationLiveScenarioKind | null
   navigationLiveScenarioAutoRun: boolean
   navigationLiveScenarioReady: boolean
   onExitBuildMode: () => void
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
-  perfRun: PascalWaterPerfRunOptions
+  perfRun: LandrushIslandPerfRunOptions
   presentationMode: LandrushRobotPresentationMode
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
-  playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   spawn: LandrushPoint2
   surfacePoints: readonly LandrushPoint2[]
   waterY: number
 }) {
   const { camera, gl } = useThree()
-  const builtColliderWorlds = usePascalWaterBuiltColliderWorlds()
+  const builtColliderWorlds = useLandrushIslandBuiltColliderWorlds()
   const sceneNodesForNavigation = useScene((state) => (movementEnabled ? state.nodes : null))
   const pressedKeysRef = useRef(new Set<string>())
-  const clickMoveTargetRef = useRef<PascalWaterMoveTarget | null>(null)
-  const rightHoldMoveRef = useRef<PascalWaterRightHoldMove | null>(null)
-  const fallStateRef = useRef<PascalWaterRobotFallState | null>(null)
+  const clickMoveTargetRef = useRef<LandrushIslandMoveTarget | null>(null)
+  const rightHoldMoveRef = useRef<LandrushIslandRightHoldMove | null>(null)
+  const fallStateRef = useRef<LandrushIslandRobotFallState | null>(null)
   const fallControlQuaternionRef = useRef(new Quaternion())
   const fallControlAngularVelocityRef = useRef(new Vector3())
   const fallControlTargetAngularVelocityRef = useRef(new Vector3())
@@ -7940,7 +8159,7 @@ function LocalPascalWaterRobot({
   const clickMovePointerNdc = useMemo(() => new Vector2(), [])
   const clickMoveRaycaster = useMemo(() => new Raycaster(), [])
   const groundColliderMesh = useMemo(
-    () => createPascalWaterGroundColliderMesh(fallSurfacePoints, groundY),
+    () => createLandrushIslandGroundColliderMesh(fallSurfacePoints, groundY),
     [fallSurfacePoints, groundY],
   )
   const colliderMeshes = useMemo(
@@ -7955,34 +8174,34 @@ function LocalPascalWaterRobot({
   const navigationObstacles = useMemo(
     () =>
       movementEnabled && sceneNodesForNavigation
-        ? createPascalWaterNavigationObstacles(sceneNodesForNavigation)
+        ? createLandrushIslandNavigationObstacles(sceneNodesForNavigation)
         : [],
     [movementEnabled, sceneNodesForNavigation],
   )
   const doorPortals = useMemo(
     () =>
       movementEnabled && sceneNodesForNavigation
-        ? createPascalWaterDoorPortals(sceneNodesForNavigation)
+        ? createLandrushIslandDoorPortals(sceneNodesForNavigation)
         : [],
     [movementEnabled, sceneNodesForNavigation],
   )
   const stairPortals = useMemo(
     () =>
       movementEnabled && sceneNodesForNavigation
-        ? createPascalWaterStairPortals(sceneNodesForNavigation)
+        ? createLandrushIslandStairPortals(sceneNodesForNavigation)
         : [],
     [movementEnabled, sceneNodesForNavigation],
   )
   const nodeRef = useRef<LandrushWorldNode>(
-    createPascalWaterRobotActorNode(baseNode, localProfile.id, spawn, groundY),
+    createLandrushIslandRobotActorNode(baseNode, localProfile.id, spawn, groundY),
   )
   const [buildRobotHovered, setBuildRobotHovered] = useState(false)
   const [fallPresentationActive, setFallPresentationActive] = useState(false)
   const [fallPresentation, setFallPresentation] = useState(() =>
-    createPascalWaterFallPresentationState(),
+    createLandrushIslandFallPresentationState(),
   )
   const [navigationDebugSnapshot, setNavigationDebugSnapshot] =
-    useState<PascalWaterNavigationDebugSnapshot | null>(null)
+    useState<LandrushIslandNavigationDebugSnapshot | null>(null)
   const motionRef = useRef<RobotMotion>({
     cameraSnapVersion: 0,
     falling: false,
@@ -7994,7 +8213,7 @@ function LocalPascalWaterRobot({
     velocity: new Vector3(),
   })
   const activeNavigationDebugRef = useRef<{
-    kind: PascalWaterNavigationSteeringKind | 'manual' | null
+    kind: LandrushIslandNavigationSteeringKind | 'manual' | null
     steeringPoint: LandrushPoint2 | null
   }>({ kind: null, steeringPoint: null })
   const navigationTraceRef = useRef<LandrushPoint2[]>([])
@@ -8004,7 +8223,7 @@ function LocalPascalWaterRobot({
   const navigationLiveScenarioDefinition = useMemo(
     () =>
       navigationLiveScenario
-        ? createPascalWaterNavigationLiveScenarioDefinition(spawn, navigationLiveScenario)
+        ? createLandrushIslandNavigationLiveScenarioDefinition(spawn, navigationLiveScenario)
         : null,
     [navigationLiveScenario, spawn],
   )
@@ -8019,7 +8238,7 @@ function LocalPascalWaterRobot({
   }, [presentationMode])
 
   const updateFallPresentation = useCallback(
-    (next: PascalWaterFallPresentationState) => {
+    (next: LandrushIslandFallPresentationState) => {
       fallPresentationRef.current = next
       setFallPresentation((current) => {
         if (
@@ -8038,8 +8257,8 @@ function LocalPascalWaterRobot({
 
   useEffect(
     () => () => {
-      disposePascalWaterGroundColliderMesh(groundColliderMesh)
-      updateFallPresentation(createPascalWaterFallPresentationState())
+      disposeLandrushIslandGroundColliderMesh(groundColliderMesh)
+      updateFallPresentation(createLandrushIslandFallPresentationState())
     },
     [groundColliderMesh, updateFallPresentation],
   )
@@ -8055,7 +8274,7 @@ function LocalPascalWaterRobot({
   const publishCurrentPlayer = useCallback(() => {
     const motion = motionRef.current
     onLocalPlayerChange(
-      createPascalWaterPlayerSnapshot({
+      createLandrushIslandPlayerSnapshot({
         heading: motion.heading,
         localProfile,
         moving: motion.isMoving,
@@ -8070,7 +8289,7 @@ function LocalPascalWaterRobot({
   const resetToSpawn = useCallback(() => {
     const motion = motionRef.current
     fallStateRef.current = null
-    resetPascalWaterFallControlRotation(
+    resetLandrushIslandFallControlRotation(
       fallControlQuaternionRef.current,
       fallControlAngularVelocityRef.current,
     )
@@ -8093,36 +8312,36 @@ function LocalPascalWaterRobot({
     activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
     setNavigationDebugSnapshot(null)
     setFallPresentationActive(false)
-    updateFallPresentation(createPascalWaterFallPresentationState())
+    updateFallPresentation(createLandrushIslandFallPresentationState())
     physicsControllerRef.current?.setPaused(false)
     const physicsGroup = physicsControllerRef.current?.group
     if (physicsGroup) {
       physicsGroup.position.set(
         spawn.x,
-        groundY + PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT,
+        groundY + LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT,
         spawn.z,
       )
       physicsControllerRef.current?.resetLinVel()
       physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
     }
     grassInteractionRef.current = {
-      radius: PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS,
+      radius: LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS,
       speed: 0,
-      strength: PASCAL_WATER_ROBOT_GRASS_IDLE_BEND_STRENGTH,
+      strength: LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH,
       x: motion.position.x,
       z: motion.position.z,
     }
-    recordPascalWaterGrassProbe({
+    recordLandrushIslandGrassProbe({
       centerLagMeters: 0,
       moving: false,
       physicsLagMeters: 0,
       position: [motion.position.x, motion.position.z],
-      radius: PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS,
+      radius: LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS,
       source: 'reset-spawn',
       speed: 0,
-      strength: PASCAL_WATER_ROBOT_GRASS_IDLE_BEND_STRENGTH,
+      strength: LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH,
     })
-    writeMotionToPascalWaterRobotNode(nodeRef.current, motion)
+    writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
     publishCurrentPlayerRef.current()
   }, [grassInteractionRef, groundY, spawn, updateFallPresentation])
 
@@ -8131,7 +8350,7 @@ function LocalPascalWaterRobot({
       const startY = start.y ?? groundY
       const motion = motionRef.current
       fallStateRef.current = null
-      resetPascalWaterFallControlRotation(
+      resetLandrushIslandFallControlRotation(
         fallControlQuaternionRef.current,
         fallControlAngularVelocityRef.current,
       )
@@ -8152,31 +8371,31 @@ function LocalPascalWaterRobot({
       activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
       setNavigationDebugSnapshot(null)
       setFallPresentationActive(false)
-      updateFallPresentation(createPascalWaterFallPresentationState())
+      updateFallPresentation(createLandrushIslandFallPresentationState())
       physicsControllerRef.current?.setPaused(false)
       const physicsGroup = physicsControllerRef.current?.group
       if (physicsGroup) {
         physicsGroup.position.set(
           start.x,
-          startY + PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT,
+          startY + LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT,
           start.z,
         )
         physicsControllerRef.current?.resetLinVel()
         physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
       }
       if (typeof window !== 'undefined') {
-        window.__PASCAL_WATER_NAV_LIVE_CAPTURE__ = {
+        window.__LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__ = {
           captures: [],
           scenario: navigationLiveScenario ?? 'room',
           startedAt: performance.now(),
         }
       }
-      recordPascalWaterInputProbe({
+      recordLandrushIslandInputProbe({
         kind: 'nav-test-setup-start',
         label,
         start: [roundPerf(start.x), roundPerf(startY), roundPerf(start.z)],
       })
-      writeMotionToPascalWaterRobotNode(nodeRef.current, motion)
+      writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
       publishCurrentPlayerRef.current()
       return true
     },
@@ -8197,21 +8416,21 @@ function LocalPascalWaterRobot({
     }) => {
       const resolvedTarget =
         mode === 'stair-resolved'
-          ? resolvePascalWaterStairConnectorTarget(start, target, stairPortals)
+          ? resolveLandrushIslandStairConnectorTarget(start, target, stairPortals)
           : target
       setupNavigationTestStart({ label, start })
       const motion = motionRef.current
       motion.heading = Math.atan2(resolvedTarget.x - start.x, resolvedTarget.z - start.z)
       physicsHeadingRef.current = motion.heading
       clickMoveTargetRef.current = { point: resolvedTarget }
-      recordPascalWaterInputProbe({
+      recordLandrushIslandInputProbe({
         kind: 'nav-test-start-move',
         label,
         mode,
         resolvedTarget: [roundPerf(resolvedTarget.x), roundPerf(resolvedTarget.z)],
         target: [roundPerf(target.x), roundPerf(target.z)],
       })
-      writeMotionToPascalWaterRobotNode(nodeRef.current, motion)
+      writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
       publishCurrentPlayerRef.current()
       return true
     },
@@ -8242,29 +8461,29 @@ function LocalPascalWaterRobot({
   )
 
   useEffect(() => {
-    nodeRef.current = createPascalWaterRobotActorNode(baseNode, localProfile.id, spawn, groundY)
+    nodeRef.current = createLandrushIslandRobotActorNode(baseNode, localProfile.id, spawn, groundY)
     resetToSpawn()
   }, [baseNode, groundY, localProfile.id, resetToSpawn, spawn])
 
   useEffect(() => {
     if (!navigationDebugEnabled && !navigationLiveScenario) return
-    const bridge: PascalWaterNavigationTestBridge = {
+    const bridge: LandrushIslandNavigationTestBridge = {
       getState: () => ({
-        doorPortals: doorPortals.map(clonePascalWaterDoorPortal),
+        doorPortals: doorPortals.map(cloneLandrushIslandDoorPortal),
         robot: {
           x: motionRef.current.position.x,
           y: motionRef.current.position.y,
           z: motionRef.current.position.z,
         },
-        stairPortals: stairPortals.map(clonePascalWaterStairPortal),
+        stairPortals: stairPortals.map(cloneLandrushIslandStairPortal),
       }),
       projectPoint: projectNavigationTestPoint,
       setupStart: setupNavigationTestStart,
       startMove: startNavigationTestMove,
     }
-    window.__PASCAL_WATER_NAV_TEST__ = bridge
+    window.__LANDRUSH_ISLAND_NAV_TEST__ = bridge
     return () => {
-      if (window.__PASCAL_WATER_NAV_TEST__ === bridge) delete window.__PASCAL_WATER_NAV_TEST__
+      if (window.__LANDRUSH_ISLAND_NAV_TEST__ === bridge) delete window.__LANDRUSH_ISLAND_NAV_TEST__
     }
   }, [
     doorPortals,
@@ -8285,14 +8504,14 @@ function LocalPascalWaterRobot({
     lastFallDirectionRef.current = { x: 0, z: 1 }
     activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
     fallStateRef.current = null
-    resetPascalWaterFallControlRotation(
+    resetLandrushIslandFallControlRotation(
       fallControlQuaternionRef.current,
       fallControlAngularVelocityRef.current,
     )
     motionRef.current.falling = false
     motionRef.current.runRequested = false
     setFallPresentationActive(false)
-    updateFallPresentation(createPascalWaterFallPresentationState())
+    updateFallPresentation(createLandrushIslandFallPresentationState())
     physicsControllerRef.current?.setPaused(false)
     physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
     physicsControllerRef.current?.resetLinVel()
@@ -8305,20 +8524,20 @@ function LocalPascalWaterRobot({
         window.clearTimeout(navigationLiveScenarioTimerRef.current)
         navigationLiveScenarioTimerRef.current = null
       }
-      if (typeof window !== 'undefined') delete window.__PASCAL_WATER_NAV_LIVE_CAPTURE__
+      if (typeof window !== 'undefined') delete window.__LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__
       return
     }
 
-    applyPascalWaterNavigationLiveScenarioNodes(navigationLiveScenarioDefinition.nodes)
+    applyLandrushIslandNavigationLiveScenarioNodes(navigationLiveScenarioDefinition.nodes)
     navigationTraceRef.current = [{ x: spawn.x, z: spawn.z }]
     if (typeof window !== 'undefined') {
-      window.__PASCAL_WATER_NAV_LIVE_CAPTURE__ = {
+      window.__LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__ = {
         captures: [],
         scenario: navigationLiveScenario,
         startedAt: performance.now(),
       }
     }
-    recordPascalWaterNavigationProbe({
+    recordLandrushIslandNavigationProbe({
       kind: 'nav-live-scenario-seeded',
       scenario: navigationLiveScenario,
     })
@@ -8338,12 +8557,12 @@ function LocalPascalWaterRobot({
     const hasRequiredPortal =
       navigationLiveScenario === 'door' || navigationLiveScenario === 'room'
         ? doorPortals.some(
-            (portal) => portal.doorId === PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_DOOR_ID,
+            (portal) => portal.doorId === LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_DOOR_ID,
           )
         : stairPortals.some(
             (portal) =>
-              portal.nodeId === PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID ||
-              portal.nodeId === PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_ID,
+              portal.nodeId === LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID ||
+              portal.nodeId === LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_ID,
           )
     if (!hasRequiredPortal) return
 
@@ -8367,18 +8586,22 @@ function LocalPascalWaterRobot({
       navigationTraceRef.current = [{ x: spawn.x, z: spawn.z }]
       const resolvedTarget =
         navigationLiveScenario === 'stair'
-          ? resolvePascalWaterStairConnectorTarget({ x: spawn.x, z: spawn.z }, target, stairPortals)
+          ? resolveLandrushIslandStairConnectorTarget(
+              { x: spawn.x, z: spawn.z },
+              target,
+              stairPortals,
+            )
           : target
       clickMoveTargetRef.current = { point: resolvedTarget }
       activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
       if (typeof window !== 'undefined') {
-        window.__PASCAL_WATER_NAV_LIVE_CAPTURE__ = {
+        window.__LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__ = {
           captures: [],
           scenario: navigationLiveScenario,
           startedAt: performance.now(),
         }
       }
-      recordPascalWaterInputProbe({
+      recordLandrushIslandInputProbe({
         kind: 'nav-live-scenario-target',
         scenario: navigationLiveScenario,
         target: [roundPerf(resolvedTarget.x), roundPerf(resolvedTarget.z)],
@@ -8410,7 +8633,7 @@ function LocalPascalWaterRobot({
         pressedKeysRef.current.delete('KeyW')
         pressedKeysRef.current.delete('ShiftLeft')
       }, perfRun.durationMs)
-    }, PASCAL_WATER_PERF_START_DELAY_MS)
+    }, LANDRUSH_ISLAND_PERF_START_DELAY_MS)
 
     return () => {
       window.clearTimeout(startTimer)
@@ -8443,8 +8666,8 @@ function LocalPascalWaterRobot({
       if (
         event.defaultPrevented ||
         (!desktopRightPress && !touchScreenPress) ||
-        !pointerEventInPascalWaterCanvas(event, canvas) ||
-        isPascalWaterInteractivePointerTarget(event.target)
+        !pointerEventInLandrushIslandCanvas(event, canvas) ||
+        isLandrushIslandInteractivePointerTarget(event.target)
       ) {
         return
       }
@@ -8463,7 +8686,7 @@ function LocalPascalWaterRobot({
       try {
         canvas.setPointerCapture(event.pointerId)
       } catch {}
-      recordPascalWaterInputProbe({
+      recordLandrushIslandInputProbe({
         kind: 'right-click-down',
         source: touchScreenPress ? 'mobile-touch' : 'mouse',
       })
@@ -8490,15 +8713,15 @@ function LocalPascalWaterRobot({
         canvas.releasePointerCapture(active.id)
       } catch {}
       const dragDistance = Math.hypot(active.x - active.startX, active.y - active.startY)
-      if (dragDistance > PASCAL_WATER_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX) {
-        recordPascalWaterInputProbe({
+      if (dragDistance > LANDRUSH_ISLAND_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX) {
+        recordLandrushIslandInputProbe({
           dragDistance: roundPerf(dragDistance),
           kind: 'right-click-hold-end',
         })
         return
       }
 
-      const point = pickPascalWaterWalkTargetPoint({
+      const point = pickLandrushIslandWalkTargetPoint({
         camera,
         canvas,
         colliderMeshes,
@@ -8512,10 +8735,10 @@ function LocalPascalWaterRobot({
         z: motionRef.current.position.z,
       }
       const rawResolvedPoint = point
-        ? resolvePascalWaterStairConnectorTarget(start, point, stairPortals)
+        ? resolveLandrushIslandStairConnectorTarget(start, point, stairPortals)
         : null
       const resolvedPoint = rawResolvedPoint
-        ? resolvePascalWaterWalkableNavigationTargetPoint(
+        ? resolveLandrushIslandWalkableNavigationTargetPoint(
             rawResolvedPoint,
             navigationObstacles,
             surfacePointsRef.current,
@@ -8523,7 +8746,7 @@ function LocalPascalWaterRobot({
         : null
       const accepted = Boolean(resolvedPoint)
       clickMoveTargetRef.current = accepted && resolvedPoint ? { point: resolvedPoint } : null
-      recordPascalWaterInputProbe({
+      recordLandrushIslandInputProbe({
         accepted,
         dragDistance: roundPerf(dragDistance),
         kind: 'right-click-move-target',
@@ -8550,7 +8773,7 @@ function LocalPascalWaterRobot({
       }
     }
     const handleContextMenu = (event: MouseEvent) => {
-      if (!pointerEventInPascalWaterCanvas(event, canvas)) return
+      if (!pointerEventInLandrushIslandCanvas(event, canvas)) return
       event.preventDefault()
       event.stopPropagation()
     }
@@ -8619,7 +8842,7 @@ function LocalPascalWaterRobot({
     const gamepadJumpPressed = cameraEnabled && Boolean(gamepadInput?.jump)
     const jumpRequested = !falling && gamepadJumpPressed && !gamepadJumpHeldRef.current
     gamepadJumpHeldRef.current = gamepadJumpPressed
-    const movementReferenceFrame: PascalWaterMovementReferenceFrame = cameraEnabled
+    const movementReferenceFrame: LandrushIslandMovementReferenceFrame = cameraEnabled
       ? 'camera-forward'
       : 'screen-up'
     const movement = movementEnabled
@@ -8663,7 +8886,7 @@ function LocalPascalWaterRobot({
         : null
     const activeMovement = movement ?? rightHoldMovement ?? clickMovement
     const physicsMovement = activeMovement
-      ? resolvePascalWaterObstacleSlideMovement(
+      ? resolveLandrushIslandObstacleSlideMovement(
           { x: motion.position.x, z: motion.position.z },
           activeMovement,
           navigationObstacles,
@@ -8695,16 +8918,16 @@ function LocalPascalWaterRobot({
 
     if (physicsMovement) {
       if (physicsMovement.doorId) {
-        const openState = openPascalWaterDoor(physicsMovement.doorId)
+        const openState = openLandrushIslandDoor(physicsMovement.doorId)
         if (openState === 'started') {
-          recordPascalWaterNavigationProbe({
+          recordLandrushIslandNavigationProbe({
             doorId: physicsMovement.doorId,
             kind: 'door-open-before-cross',
             steeringDistance: roundPerf(physicsMovement.steeringDistance ?? 0),
           })
         }
       }
-      openApproachingPascalWaterDoorPortal(motion.position, physicsMovement, doorPortals)
+      openApproachingLandrushIslandDoorPortal(motion.position, physicsMovement, doorPortals)
       physicsHeadingRef.current = physicsMovement.heading
       const runRequested =
         isRunPressed(pressedKeysRef.current) ||
@@ -8745,20 +8968,20 @@ function LocalPascalWaterRobot({
     const outsideSurface = !pointInPolygonOrNearEdge(
       rawNext,
       fallSurfacePointsRef.current,
-      PASCAL_WATER_ROBOT_FALL_EDGE_TOLERANCE_METERS,
+      LANDRUSH_ISLAND_ROBOT_FALL_EDGE_TOLERANCE_METERS,
     )
     if (!fallStateRef.current && outsideSurface) {
-      const fallDirection = resolvePascalWaterFallBurstDirection(
+      const fallDirection = resolveLandrushIslandFallBurstDirection(
         rawNext,
         lastFallDirectionRef.current,
         fallSurfacePointsRef.current,
       )
       const startRootPosition = new Vector3(
         physicsGroup.position.x,
-        physicsGroup.position.y - PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT,
+        physicsGroup.position.y - LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT,
         physicsGroup.position.z,
       )
-      const launchVelocity = resolvePascalWaterFallLaunchVelocity({
+      const launchVelocity = resolveLandrushIslandFallLaunchVelocity({
         controllerVelocity: physicsControllerRef.current?.getLinVel(new Vector3()) ?? null,
         fallbackDirection: fallDirection,
         measuredVelocity: new Vector3(
@@ -8770,7 +8993,7 @@ function LocalPascalWaterRobot({
       fallStateRef.current = {
         elapsedSeconds: 0,
         position: startRootPosition,
-        predictedWaterHitSeconds: predictPascalWaterFallWaterHitSeconds({
+        predictedWaterHitSeconds: predictLandrushIslandFallWaterHitSeconds({
           startRootY: startRootPosition.y,
           velocityY: launchVelocity.y,
           waterY,
@@ -8781,7 +9004,7 @@ function LocalPascalWaterRobot({
         waterY,
         waterReachedSeconds: null,
       }
-      resetPascalWaterFallControlRotation(
+      resetLandrushIslandFallControlRotation(
         fallControlQuaternionRef.current,
         fallControlAngularVelocityRef.current,
       )
@@ -8798,10 +9021,10 @@ function LocalPascalWaterRobot({
       updateFallPresentation({
         active: true,
         amount: 0,
-        slowMotionFactor: PASCAL_WATER_ROBOT_FALL_INITIAL_SLOW_MOTION_FACTOR,
+        slowMotionFactor: LANDRUSH_ISLAND_ROBOT_FALL_INITIAL_SLOW_MOTION_FACTOR,
         wiggleAmount: 0,
       })
-      recordPascalWaterInputProbe({
+      recordLandrushIslandInputProbe({
         direction: [roundPerf(fallDirection.x), roundPerf(fallDirection.z)],
         forwardSpeed: roundPerf(Math.hypot(launchVelocity.x, launchVelocity.z)),
         kind: 'island-edge-fall-start',
@@ -8813,10 +9036,10 @@ function LocalPascalWaterRobot({
       })
     }
     const fallState = fallStateRef.current
-    let rootY = physicsGroup.position.y - PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT
+    let rootY = physicsGroup.position.y - LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT
     if (fallState) {
       fallState.elapsedSeconds += frameDelta
-      updatePascalWaterFallControlRotation({
+      updateLandrushIslandFallControlRotation({
         angularVelocity: fallControlAngularVelocityRef.current,
         axis: fallControlAxisRef.current,
         camera: state.camera,
@@ -8826,7 +9049,7 @@ function LocalPascalWaterRobot({
         deltaQuaternion: fallControlDeltaQuaternionRef.current,
         frameDelta,
         input: movementEnabled
-          ? resolvePascalWaterFallControlInput({
+          ? resolveLandrushIslandFallControlInput({
               gamepadInput: readLandrushGamepadInput(),
               keys: pressedKeysRef.current,
               pointer: rightHoldMoveRef.current,
@@ -8835,16 +9058,16 @@ function LocalPascalWaterRobot({
         quaternion: fallControlQuaternionRef.current,
         targetAngularVelocity: fallControlTargetAngularVelocityRef.current,
       })
-      const previousFallAmount = resolvePascalWaterFallAltitudeAmount(
+      const previousFallAmount = resolveLandrushIslandFallAltitudeAmount(
         fallState.position.y,
         fallState.startRootY,
         fallState.waterY,
       )
-      const stepSlowMotionFactor = resolvePascalWaterFallSlowMotionFactor(previousFallAmount)
+      const stepSlowMotionFactor = resolveLandrushIslandFallSlowMotionFactor(previousFallAmount)
       if (fallState.waterReachedSeconds === null) {
         const simulatedDelta = frameDelta * stepSlowMotionFactor
         fallState.simulatedSeconds += simulatedDelta
-        fallState.velocity.y -= PASCAL_WATER_ROBOT_FALL_GRAVITY * simulatedDelta
+        fallState.velocity.y -= LANDRUSH_ISLAND_ROBOT_FALL_GRAVITY * simulatedDelta
         fallState.position.addScaledVector(fallState.velocity, simulatedDelta)
         if (fallState.position.y <= fallState.waterY) {
           fallState.position.y = fallState.waterY
@@ -8853,13 +9076,13 @@ function LocalPascalWaterRobot({
       }
       physicsGroup.position.set(
         fallState.position.x,
-        fallState.position.y + PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT,
+        fallState.position.y + LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT,
         fallState.position.z,
       )
       rawNext.x = fallState.position.x
       rawNext.z = fallState.position.z
       rootY = fallState.position.y
-      const altitudeFallAmount = resolvePascalWaterFallAltitudeAmount(
+      const altitudeFallAmount = resolveLandrushIslandFallAltitudeAmount(
         rootY,
         fallState.startRootY,
         fallState.waterY,
@@ -8868,26 +9091,26 @@ function LocalPascalWaterRobot({
         fallState.elapsedSeconds / Math.max(0.001, fallState.predictedWaterHitSeconds),
       )
       const fallAmount = Math.max(altitudeFallAmount, timeFallAmount)
-      const slowMotionFactor = resolvePascalWaterFallSlowMotionFactor(fallAmount)
+      const slowMotionFactor = resolveLandrushIslandFallSlowMotionFactor(fallAmount)
       updateFallPresentation({
         active: true,
         amount: fallAmount,
         slowMotionFactor,
-        wiggleAmount: resolvePascalWaterFallWiggleAmount(fallState.elapsedSeconds),
+        wiggleAmount: resolveLandrushIslandFallWiggleAmount(fallState.elapsedSeconds),
       })
       const waterHoldComplete =
         fallState.waterReachedSeconds !== null &&
         fallState.elapsedSeconds - fallState.waterReachedSeconds >=
-          PASCAL_WATER_ROBOT_FALL_WATER_HOLD_SECONDS
+          LANDRUSH_ISLAND_ROBOT_FALL_WATER_HOLD_SECONDS
       const predictedHitExpired =
         fallState.elapsedSeconds >=
         fallState.predictedWaterHitSeconds +
-          PASCAL_WATER_ROBOT_FALL_WATER_HOLD_SECONDS +
-          PASCAL_WATER_ROBOT_FALL_RESPAWN_FALLBACK_AFTER_HIT_SECONDS
+          LANDRUSH_ISLAND_ROBOT_FALL_WATER_HOLD_SECONDS +
+          LANDRUSH_ISLAND_ROBOT_FALL_RESPAWN_FALLBACK_AFTER_HIT_SECONDS
       if (
         waterHoldComplete ||
         predictedHitExpired ||
-        rootY <= groundY - PASCAL_WATER_ROBOT_FALL_RESPAWN_DROP_METERS
+        rootY <= groundY - LANDRUSH_ISLAND_ROBOT_FALL_RESPAWN_DROP_METERS
       ) {
         resetToSpawn()
         return
@@ -8903,7 +9126,7 @@ function LocalPascalWaterRobot({
     } else {
       motion.position.lerp(
         targetMotionPositionRef.current,
-        1 - Math.exp(-PASCAL_WATER_ROBOT_LOCAL_POSITION_RESPONSE * frameDelta),
+        1 - Math.exp(-LANDRUSH_ISLAND_ROBOT_LOCAL_POSITION_RESPONSE * frameDelta),
       )
     }
     motion.velocity.set(
@@ -8917,16 +9140,16 @@ function LocalPascalWaterRobot({
     motion.heading = lerpAngle(
       motion.heading,
       motion.isMoving ? physicsHeadingRef.current : motion.heading,
-      clamp01(frameDelta * PASCAL_WATER_ROBOT_TURN_RESPONSE),
+      clamp01(frameDelta * LANDRUSH_ISLAND_ROBOT_TURN_RESPONSE),
     )
     const now = window.performance.now()
     const grassInteraction = {
-      radius: PASCAL_WATER_ROBOT_GRASS_INTERACTION_RADIUS,
+      radius: LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS,
       speed: motion.isMoving ? motion.speed : 0,
       strength: clamp01(
-        PASCAL_WATER_ROBOT_GRASS_IDLE_BEND_STRENGTH +
-          (motion.speed / PASCAL_WATER_ROBOT_GRASS_FULL_BEND_SPEED) *
-            (1 - PASCAL_WATER_ROBOT_GRASS_IDLE_BEND_STRENGTH),
+        LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH +
+          (motion.speed / LANDRUSH_ISLAND_ROBOT_GRASS_FULL_BEND_SPEED) *
+            (1 - LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH),
       ),
       x: motion.position.x,
       z: motion.position.z,
@@ -8934,7 +9157,7 @@ function LocalPascalWaterRobot({
     grassInteractionRef.current = grassInteraction
     if (now - lastGrassProbeAtRef.current >= 250) {
       lastGrassProbeAtRef.current = now
-      recordPascalWaterGrassProbe({
+      recordLandrushIslandGrassProbe({
         centerLagMeters: Math.hypot(
           grassInteraction.x - motion.position.x,
           grassInteraction.z - motion.position.z,
@@ -8958,14 +9181,14 @@ function LocalPascalWaterRobot({
           0.04
       ) {
         trace.push({ x: motion.position.x, z: motion.position.z })
-        if (trace.length > PASCAL_WATER_NAVIGATION_DEBUG_TRACE_POINTS) {
-          trace.splice(0, trace.length - PASCAL_WATER_NAVIGATION_DEBUG_TRACE_POINTS)
+        if (trace.length > LANDRUSH_ISLAND_NAVIGATION_DEBUG_TRACE_POINTS) {
+          trace.splice(0, trace.length - LANDRUSH_ISLAND_NAVIGATION_DEBUG_TRACE_POINTS)
         }
       }
 
-      if (now - lastNavigationDebugAtRef.current >= PASCAL_WATER_NAVIGATION_DEBUG_UPDATE_MS) {
+      if (now - lastNavigationDebugAtRef.current >= LANDRUSH_ISLAND_NAVIGATION_DEBUG_UPDATE_MS) {
         lastNavigationDebugAtRef.current = now
-        const snapshot = createPascalWaterNavigationDebugSnapshot({
+        const snapshot = createLandrushIslandNavigationDebugSnapshot({
           active: activeNavigationDebugRef.current,
           clickTarget: clickMoveTargetRef.current,
           doorPortals,
@@ -8975,12 +9198,12 @@ function LocalPascalWaterRobot({
           trace,
         })
         setNavigationDebugSnapshot(snapshot)
-        window.__PASCAL_WATER_NAV_DEBUG__ = snapshot
+        window.__LANDRUSH_ISLAND_NAV_DEBUG__ = snapshot
         if (
           navigationLiveScenario &&
-          window.__PASCAL_WATER_NAV_LIVE_CAPTURE__?.scenario === navigationLiveScenario
+          window.__LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__?.scenario === navigationLiveScenario
         ) {
-          const capture = window.__PASCAL_WATER_NAV_LIVE_CAPTURE__
+          const capture = window.__LANDRUSH_ISLAND_NAV_LIVE_CAPTURE__
           capture.captures.push({
             elapsedMs: roundPerf(now - capture.startedAt),
             snapshot,
@@ -8989,7 +9212,7 @@ function LocalPascalWaterRobot({
             capture.captures.splice(0, capture.captures.length - 360)
           }
         }
-        recordPascalWaterNavigationProbe({
+        recordLandrushIslandNavigationProbe({
           crossing: snapshot.crossing
             ? {
                 center: [
@@ -9021,9 +9244,9 @@ function LocalPascalWaterRobot({
       setNavigationDebugSnapshot(null)
     }
 
-    writeMotionToPascalWaterRobotNode(nodeRef.current, motion)
+    writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
 
-    if (now - lastSentAtRef.current >= PASCAL_WATER_LOCAL_STATE_SEND_INTERVAL_MS) {
+    if (now - lastSentAtRef.current >= LANDRUSH_ISLAND_LOCAL_STATE_SEND_INTERVAL_MS) {
       lastSentAtRef.current = now
       publishCurrentPlayer()
     }
@@ -9040,17 +9263,17 @@ function LocalPascalWaterRobot({
     <>
       <KeyboardControls map={[]}>
         <BVHEcctrl
-          acceleration={PASCAL_WATER_ROBOT_ACCELERATION}
+          acceleration={LANDRUSH_ISLAND_ROBOT_ACCELERATION}
           airDragFactor={0.3}
           colliderCapsuleArgs={[0.25, 0.8, 4, 8]}
           colliderMeshes={
-            fallPresentationActive ? PASCAL_WATER_ROBOT_FALL_COLLIDER_MESHES : colliderMeshes
+            fallPresentationActive ? LANDRUSH_ISLAND_ROBOT_FALL_COLLIDER_MESHES : colliderMeshes
           }
           collisionCheckIteration={3}
           collisionPushBackDamping={0.1}
           collisionPushBackThreshold={0.001}
           debug={false}
-          deceleration={PASCAL_WATER_ROBOT_DECELERATION}
+          deceleration={LANDRUSH_ISLAND_ROBOT_DECELERATION}
           delay={0}
           fallGravityFactor={4}
           floatCheckType="BOTH"
@@ -9061,72 +9284,86 @@ function LocalPascalWaterRobot({
           floatSpringK={1200}
           gravity={9.81}
           jumpVel={6}
-          maxRunSpeed={PASCAL_WATER_ROBOT_RUN_SPEED}
+          maxRunSpeed={LANDRUSH_ISLAND_ROBOT_RUN_SPEED}
           maxSlope={1.2}
-          maxWalkSpeed={PASCAL_WATER_ROBOT_WALK_SPEED}
+          maxWalkSpeed={LANDRUSH_ISLAND_ROBOT_WALK_SPEED}
           paused={!movementEnabled || fallPresentationActive}
-          position={[spawn.x, groundY + PASCAL_WATER_ROBOT_PHYSICS_CENTER_FROM_ROOT, spawn.z]}
+          position={[spawn.x, groundY + LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT, spawn.z]}
           ref={physicsControllerRef}
           slowMotionFactor={fallPresentationActive ? fallPresentation.slowMotionFactor : 1}
         />
       </KeyboardControls>
       {cameraEnabled ? (
-        <PascalWaterThirdPersonCameraRig
-          buildCameraPoseRef={buildCameraPoseRef}
-          controllerEnabled={movementEnabled}
-          mapReturnCameraPoseRef={mapReturnCameraPoseRef}
-          motionRef={motionRef}
-          playerCameraPoseRef={playerCameraPoseRef}
-          playerReturnCameraPoseRef={playerReturnCameraPoseRef}
-        />
+        fpvActive ? (
+          <LandrushIslandFirstPersonCameraRig
+            buildCameraPoseRef={buildCameraPoseRef}
+            mapReturnCameraPoseRef={mapReturnCameraPoseRef}
+            motionRef={motionRef}
+            playerCameraPoseRef={playerCameraPoseRef}
+            playerReturnCameraPoseRef={playerReturnCameraPoseRef}
+          />
+        ) : (
+          <LandrushIslandThirdPersonCameraRig
+            buildCameraPoseRef={buildCameraPoseRef}
+            controllerEnabled={movementEnabled}
+            mapReturnCameraPoseRef={mapReturnCameraPoseRef}
+            motionRef={motionRef}
+            playerCameraPoseRef={playerCameraPoseRef}
+            playerReturnCameraPoseRef={playerReturnCameraPoseRef}
+          />
+        )
       ) : null}
-      <Suspense
-        fallback={
-          effectivePresentationMode === 'hover' ? null : (
-            <PascalWaterRobotNodePrimitiveActor
-              color={localProfile.color}
-              fallControlRotation={fallControlQuaternionRef.current}
-              fallIntensity={fallPresentation.wiggleAmount}
-              fallMotionScale={fallPresentation.slowMotionFactor}
-              node={nodeRef.current}
-              presentationMode={effectivePresentationMode}
-            />
-          )
-        }
-      >
-        <LandrushRobot
-          framePriority={PASCAL_WATER_LOCAL_ROBOT_FRAME_PRIORITY}
-          hoverOutlineWidthScale={buildRobotHovered ? 2 : 1}
-          fallControlRotation={fallControlQuaternionRef.current}
-          fallIntensity={fallPresentation.wiggleAmount}
-          fallMotionScale={fallPresentation.slowMotionFactor}
-          node={nodeRef.current}
-          onAnimationState={recordPascalWaterRobotAnimationProbe}
-          onHoverPoseSample={recordPascalWaterRobotHoverPoseProbe}
-          presentationMode={effectivePresentationMode}
-          visualRootRef={localRobotVisualRootRef}
-        />
-      </Suspense>
+      {fpvActive ? null : (
+        <Suspense
+          fallback={
+            effectivePresentationMode === 'hover' ? null : (
+              <LandrushIslandRobotNodePrimitiveActor
+                color={localProfile.color}
+                fallControlRotation={fallControlQuaternionRef.current}
+                fallIntensity={fallPresentation.wiggleAmount}
+                fallMotionScale={fallPresentation.slowMotionFactor}
+                node={nodeRef.current}
+                presentationMode={effectivePresentationMode}
+              />
+            )
+          }
+        >
+          <LandrushRobot
+            framePriority={LANDRUSH_ISLAND_LOCAL_ROBOT_FRAME_PRIORITY}
+            hoverOutlineWidthScale={buildRobotHovered ? 2 : 1}
+            fallControlRotation={fallControlQuaternionRef.current}
+            fallIntensity={fallPresentation.wiggleAmount}
+            fallMotionScale={fallPresentation.slowMotionFactor}
+            node={nodeRef.current}
+            onAnimationState={recordLandrushIslandRobotAnimationProbe}
+            onHoverPoseSample={recordLandrushIslandRobotHoverPoseProbe}
+            presentationMode={effectivePresentationMode}
+            visualRootRef={localRobotVisualRootRef}
+          />
+        </Suspense>
+      )}
       <LandrushRobotFootstepAudio
         groundY={groundY}
         motionRef={motionRef}
-        runSpeed={PASCAL_WATER_ROBOT_RUN_SPEED}
-        walkSpeed={PASCAL_WATER_ROBOT_WALK_SPEED}
+        runSpeed={LANDRUSH_ISLAND_ROBOT_RUN_SPEED}
+        walkSpeed={LANDRUSH_ISLAND_ROBOT_WALK_SPEED}
       />
-      <PascalWaterRobotPlayerBeacon
-        color={localProfile.color}
-        framePriority={PASCAL_WATER_LOCAL_BEACON_FRAME_PRIORITY}
-        node={nodeRef.current}
-        presentationMode={effectivePresentationMode}
-        visualRootRef={localRobotVisualRootRef}
-      />
-      <PascalWaterBuildRobotExitHotspot
+      {fpvActive ? null : (
+        <LandrushIslandRobotPlayerBeacon
+          color={localProfile.color}
+          framePriority={LANDRUSH_ISLAND_LOCAL_BEACON_FRAME_PRIORITY}
+          node={nodeRef.current}
+          presentationMode={effectivePresentationMode}
+          visualRootRef={localRobotVisualRootRef}
+        />
+      )}
+      <LandrushIslandBuildRobotExitHotspot
         motionRef={motionRef}
         onExitBuildMode={onExitBuildMode}
         onHoverChange={setBuildRobotHovered}
         visible={effectivePresentationMode === 'hover'}
       />
-      <PascalWaterNavigationDebugOverlay
+      <LandrushIslandNavigationDebugOverlay
         enabled={navigationDebugEnabled}
         snapshot={navigationDebugSnapshot}
       />
@@ -9134,7 +9371,7 @@ function LocalPascalWaterRobot({
   )
 }
 
-function createPascalWaterNavigationDebugSnapshot({
+function createLandrushIslandNavigationDebugSnapshot({
   active,
   clickTarget,
   doorPortals,
@@ -9144,34 +9381,34 @@ function createPascalWaterNavigationDebugSnapshot({
   trace,
 }: {
   active: {
-    kind: PascalWaterNavigationSteeringKind | 'manual' | null
+    kind: LandrushIslandNavigationSteeringKind | 'manual' | null
     steeringPoint: LandrushPoint2 | null
   }
-  clickTarget: PascalWaterMoveTarget | null
-  doorPortals: readonly PascalWaterDoorPortal[]
-  navigationObstacles: readonly PascalWaterNavigationObstacle[]
-  robot: PascalWaterNavigationDebugRobotPoint
-  stairPortals: readonly PascalWaterStairPortal[]
+  clickTarget: LandrushIslandMoveTarget | null
+  doorPortals: readonly LandrushIslandDoorPortal[]
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[]
+  robot: LandrushIslandNavigationDebugRobotPoint
+  stairPortals: readonly LandrushIslandStairPortal[]
   trace: readonly LandrushPoint2[]
-}): PascalWaterNavigationDebugSnapshot {
+}): LandrushIslandNavigationDebugSnapshot {
   return {
     crossing: clickTarget?.route?.doorCrossing
-      ? clonePascalWaterDoorCrossingState(clickTarget.route.doorCrossing)
+      ? cloneLandrushIslandDoorCrossingState(clickTarget.route.doorCrossing)
       : null,
-    doorPortals: doorPortals.map(clonePascalWaterDoorPortal),
+    doorPortals: doorPortals.map(cloneLandrushIslandDoorPortal),
     kind: active.kind,
-    obstacles: navigationObstacles.map(clonePascalWaterNavigationObstacle),
-    robot: clonePascalWaterNavigationDebugRobotPoint(robot),
-    stairPortals: stairPortals.map(clonePascalWaterStairPortal),
+    obstacles: navigationObstacles.map(cloneLandrushIslandNavigationObstacle),
+    robot: cloneLandrushIslandNavigationDebugRobotPoint(robot),
+    stairPortals: stairPortals.map(cloneLandrushIslandStairPortal),
     steeringPoint: active.steeringPoint ? clonePoint2(active.steeringPoint) : null,
     target: clickTarget ? clonePoint2(clickTarget.point) : null,
     trace: trace.map(clonePoint2),
   }
 }
 
-function clonePascalWaterNavigationDebugRobotPoint(
-  point: PascalWaterNavigationDebugRobotPoint,
-): PascalWaterNavigationDebugRobotPoint {
+function cloneLandrushIslandNavigationDebugRobotPoint(
+  point: LandrushIslandNavigationDebugRobotPoint,
+): LandrushIslandNavigationDebugRobotPoint {
   return {
     x: point.x,
     y: point.y,
@@ -9179,9 +9416,9 @@ function clonePascalWaterNavigationDebugRobotPoint(
   }
 }
 
-function clonePascalWaterNavigationObstacle(
-  obstacle: PascalWaterNavigationObstacle,
-): PascalWaterNavigationObstacle {
+function cloneLandrushIslandNavigationObstacle(
+  obstacle: LandrushIslandNavigationObstacle,
+): LandrushIslandNavigationObstacle {
   return {
     kind: obstacle.kind,
     nodeId: obstacle.nodeId,
@@ -9189,7 +9426,7 @@ function clonePascalWaterNavigationObstacle(
   }
 }
 
-function clonePascalWaterDoorPortal(portal: PascalWaterDoorPortal): PascalWaterDoorPortal {
+function cloneLandrushIslandDoorPortal(portal: LandrushIslandDoorPortal): LandrushIslandDoorPortal {
   return {
     center: clonePoint2(portal.center),
     doorId: portal.doorId,
@@ -9201,7 +9438,9 @@ function clonePascalWaterDoorPortal(portal: PascalWaterDoorPortal): PascalWaterD
   }
 }
 
-function clonePascalWaterStairPortal(portal: PascalWaterStairPortal): PascalWaterStairPortal {
+function cloneLandrushIslandStairPortal(
+  portal: LandrushIslandStairPortal,
+): LandrushIslandStairPortal {
   return {
     center: clonePoint2(portal.center),
     halfRun: portal.halfRun,
@@ -9214,9 +9453,9 @@ function clonePascalWaterStairPortal(portal: PascalWaterStairPortal): PascalWate
   }
 }
 
-function createPascalWaterNavigationLiveScenarioDefinition(
+function createLandrushIslandNavigationLiveScenarioDefinition(
   spawn: LandrushPoint2,
-  scenario: PascalWaterNavigationLiveScenarioKind,
+  scenario: LandrushIslandNavigationLiveScenarioKind,
 ) {
   if (scenario === 'room') {
     const doorX = spawn.x + 7
@@ -9229,13 +9468,13 @@ function createPascalWaterNavigationLiveScenarioDefinition(
     const nodes: AnyNode[] = [
       {
         backSide: 'unknown',
-        children: [PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_DOOR_ID],
+        children: [LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_DOOR_ID],
         frontSide: 'unknown',
         height: 2.5,
-        id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID,
+        id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID,
         metadata: { landrushNavigationLiveScenario: true },
         object: 'node',
-        parentId: PASCAL_WATER_LEVEL_ID,
+        parentId: LANDRUSH_ISLAND_LEVEL_ID,
         start: [doorX, roomSouthZ],
         end: [doorX, roomNorthZ],
         thickness: 0.2,
@@ -9247,10 +9486,10 @@ function createPascalWaterNavigationLiveScenarioDefinition(
         children: [],
         frontSide: 'unknown',
         height: 2.5,
-        id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_ROOM_EAST_WALL_ID,
+        id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_ROOM_EAST_WALL_ID,
         metadata: { landrushNavigationLiveScenario: true },
         object: 'node',
-        parentId: PASCAL_WATER_LEVEL_ID,
+        parentId: LANDRUSH_ISLAND_LEVEL_ID,
         start: [roomEastX, roomSouthZ],
         end: [roomEastX, roomNorthZ],
         thickness: 0.2,
@@ -9262,10 +9501,10 @@ function createPascalWaterNavigationLiveScenarioDefinition(
         children: [],
         frontSide: 'unknown',
         height: 2.5,
-        id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_ROOM_SOUTH_WALL_ID,
+        id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_ROOM_SOUTH_WALL_ID,
         metadata: { landrushNavigationLiveScenario: true },
         object: 'node',
-        parentId: PASCAL_WATER_LEVEL_ID,
+        parentId: LANDRUSH_ISLAND_LEVEL_ID,
         start: [doorX, roomSouthZ],
         end: [roomEastX, roomSouthZ],
         thickness: 0.2,
@@ -9277,10 +9516,10 @@ function createPascalWaterNavigationLiveScenarioDefinition(
         children: [],
         frontSide: 'unknown',
         height: 2.5,
-        id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_ROOM_NORTH_WALL_ID,
+        id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_ROOM_NORTH_WALL_ID,
         metadata: { landrushNavigationLiveScenario: true },
         object: 'node',
-        parentId: PASCAL_WATER_LEVEL_ID,
+        parentId: LANDRUSH_ISLAND_LEVEL_ID,
         start: [doorX, roomNorthZ],
         end: [roomEastX, roomNorthZ],
         thickness: 0.2,
@@ -9302,7 +9541,7 @@ function createPascalWaterNavigationLiveScenarioDefinition(
         handleSide: 'right',
         height: 2.1,
         hingesSide: 'left',
-        id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_DOOR_ID,
+        id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_DOOR_ID,
         leafCount: 1,
         metadata: { landrushNavigationLiveScenario: true },
         object: 'node',
@@ -9314,7 +9553,7 @@ function createPascalWaterNavigationLiveScenarioDefinition(
         operationState: 0,
         panicBar: false,
         panicBarHeight: 1,
-        parentId: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID,
+        parentId: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID,
         position: [roomHalfWidth, 1.05, 0],
         rotation: [0, 0, 0],
         segments: [
@@ -9343,7 +9582,7 @@ function createPascalWaterNavigationLiveScenarioDefinition(
         trackStyle: 'none',
         type: 'door',
         visible: true,
-        wallId: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID,
+        wallId: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID,
         width: 1.4,
       } as AnyNode,
     ]
@@ -9363,13 +9602,13 @@ function createPascalWaterNavigationLiveScenarioDefinition(
   const nodes: AnyNode[] = [
     {
       backSide: 'unknown',
-      children: [PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_DOOR_ID],
+      children: [LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_DOOR_ID],
       frontSide: 'unknown',
       height: 2.5,
-      id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID,
+      id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID,
       metadata: { landrushNavigationLiveScenario: true },
       object: 'node',
-      parentId: PASCAL_WATER_LEVEL_ID,
+      parentId: LANDRUSH_ISLAND_LEVEL_ID,
       start: [doorX, doorZ - wallHalfLength],
       end: [doorX, doorZ + wallHalfLength],
       thickness: 0.2,
@@ -9391,7 +9630,7 @@ function createPascalWaterNavigationLiveScenarioDefinition(
       handleSide: 'right',
       height: 2.1,
       hingesSide: 'left',
-      id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_DOOR_ID,
+      id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_DOOR_ID,
       leafCount: 1,
       metadata: { landrushNavigationLiveScenario: true },
       object: 'node',
@@ -9403,7 +9642,7 @@ function createPascalWaterNavigationLiveScenarioDefinition(
       operationState: 0,
       panicBar: false,
       panicBarHeight: 1,
-      parentId: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID,
+      parentId: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID,
       position: [wallHalfLength, 1.05, 0],
       rotation: [0, 0, 0],
       segments: [
@@ -9432,19 +9671,19 @@ function createPascalWaterNavigationLiveScenarioDefinition(
       trackStyle: 'none',
       type: 'door',
       visible: true,
-      wallId: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_WALL_ID,
+      wallId: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_WALL_ID,
       width: 1,
     } as AnyNode,
     {
-      children: [PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID],
+      children: [LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID],
       fillToFloor: true,
       fromLevelId: null,
-      id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_ID,
+      id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_ID,
       innerRadius: 0.9,
       metadata: { landrushNavigationLiveScenario: true },
       object: 'node',
       openingOffset: 0,
-      parentId: PASCAL_WATER_LEVEL_ID,
+      parentId: LANDRUSH_ISLAND_LEVEL_ID,
       position: [stairX, 0, stairZ],
       railingHeight: 0.92,
       railingMode: 'none',
@@ -9468,11 +9707,11 @@ function createPascalWaterNavigationLiveScenarioDefinition(
       attachmentSide: 'front',
       fillToFloor: true,
       height: 0.8,
-      id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID,
+      id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_SEGMENT_ID,
       length: 3,
       metadata: { landrushNavigationLiveScenario: true },
       object: 'node',
-      parentId: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_ID,
+      parentId: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_ID,
       position: [0, 0, 0],
       rotation: 0,
       segmentType: 'stair',
@@ -9487,10 +9726,10 @@ function createPascalWaterNavigationLiveScenarioDefinition(
       elevation: 0.8,
       holeMetadata: [],
       holes: [],
-      id: PASCAL_WATER_NAVIGATION_LIVE_SCENARIO_STAIR_TOP_SLAB_ID,
+      id: LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_TOP_SLAB_ID,
       metadata: { landrushNavigationLiveScenario: true },
       object: 'node',
-      parentId: PASCAL_WATER_LEVEL_ID,
+      parentId: LANDRUSH_ISLAND_LEVEL_ID,
       polygon: [
         [stairX - 2.2, stairZ + 3.08],
         [stairX + 2.2, stairZ + 3.08],
@@ -9509,7 +9748,7 @@ function createPascalWaterNavigationLiveScenarioDefinition(
   }
 }
 
-function applyPascalWaterNavigationLiveScenarioNodes(nodes: readonly AnyNode[]) {
+function applyLandrushIslandNavigationLiveScenarioNodes(nodes: readonly AnyNode[]) {
   const scene = useScene.getState()
   const incomingIds = new Set(nodes.map((node) => node.id as AnyNodeId))
   const deleteIds = Object.values(scene.nodes)
@@ -9538,19 +9777,19 @@ function applyPascalWaterNavigationLiveScenarioNodes(nodes: readonly AnyNode[]) 
   renderScheduler.requestFrame('geometry:changed')
 }
 
-function PascalWaterNavigationDebugOverlay({
+function LandrushIslandNavigationDebugOverlay({
   enabled,
   snapshot,
 }: {
   enabled: boolean
-  snapshot: PascalWaterNavigationDebugSnapshot | null
+  snapshot: LandrushIslandNavigationDebugSnapshot | null
 }) {
   if (!enabled || !snapshot) return null
 
   const width = 430
   const height = 320
   const padding = 24
-  const project = createPascalWaterNavigationDebugProjector(snapshot, width, height, padding)
+  const project = createLandrushIslandNavigationDebugProjector(snapshot, width, height, padding)
   const tracePoints = svgPoints(snapshot.trace, project)
   const crossingRoute = snapshot.crossing
     ? svgPoints(
@@ -9714,13 +9953,13 @@ function DebugPoint({
   )
 }
 
-function createPascalWaterNavigationDebugProjector(
-  snapshot: PascalWaterNavigationDebugSnapshot,
+function createLandrushIslandNavigationDebugProjector(
+  snapshot: LandrushIslandNavigationDebugSnapshot,
   width: number,
   height: number,
   padding: number,
 ) {
-  const points = collectPascalWaterNavigationDebugPoints(snapshot)
+  const points = collectLandrushIslandNavigationDebugPoints(snapshot)
   const bounds = boundsForPoints(points)
   const centerX = (bounds.minX + bounds.maxX) / 2
   const centerZ = (bounds.minZ + bounds.maxZ) / 2
@@ -9738,8 +9977,8 @@ function createPascalWaterNavigationDebugProjector(
   })
 }
 
-function collectPascalWaterNavigationDebugPoints(
-  snapshot: PascalWaterNavigationDebugSnapshot,
+function collectLandrushIslandNavigationDebugPoints(
+  snapshot: LandrushIslandNavigationDebugSnapshot,
 ): readonly LandrushPoint2[] {
   const points: LandrushPoint2[] = [snapshot.robot]
   if (snapshot.target) points.push(snapshot.target)
@@ -9768,29 +10007,29 @@ function svgPoints(
     .join(' ')
 }
 
-function navigationDebugObstacleFill(kind: PascalWaterNavigationObstacle['kind']) {
+function navigationDebugObstacleFill(kind: LandrushIslandNavigationObstacle['kind']) {
   if (kind === 'stair') return 'rgba(168,85,247,0.18)'
   if (kind === 'asset') return 'rgba(148,163,184,0.14)'
   return 'rgba(100,116,139,0.2)'
 }
 
-function navigationDebugObstacleStroke(kind: PascalWaterNavigationObstacle['kind']) {
+function navigationDebugObstacleStroke(kind: LandrushIslandNavigationObstacle['kind']) {
   if (kind === 'stair') return '#a855f7'
   if (kind === 'asset') return '#94a3b8'
   return '#64748b'
 }
 
-function RemotePascalWaterRobot({
+function RemoteLandrushIslandRobot({
   baseNode,
   groundY,
   player,
 }: {
-  baseNode: PascalWaterLayoutNode
+  baseNode: LandrushIslandLayoutNode
   groundY: number
   player: MultiplayerPlayerSnapshot
 }) {
   const nodeRef = useRef<LandrushWorldNode>(
-    createPascalWaterRobotActorNode(baseNode, player.id, snapshotPoint(player), groundY),
+    createLandrushIslandRobotActorNode(baseNode, player.id, snapshotPoint(player), groundY),
   )
   const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
@@ -9811,8 +10050,8 @@ function RemotePascalWaterRobot({
 
   useFrame((_, delta) => {
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-    const positionAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_POSITION_RESPONSE * frameDelta)
-    const headingAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_HEADING_RESPONSE * frameDelta)
+    const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
+    const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
 
     positionRef.current.lerp(targetPositionRef.current, positionAmount)
     headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
@@ -9832,7 +10071,7 @@ function RemotePascalWaterRobot({
     <>
       <Suspense
         fallback={
-          <PascalWaterRobotNodePrimitiveActor
+          <LandrushIslandRobotNodePrimitiveActor
             color={player.color}
             node={nodeRef.current}
             presentationMode={presentationMode}
@@ -9840,15 +10079,15 @@ function RemotePascalWaterRobot({
         }
       >
         <LandrushRobot
-          framePriority={PASCAL_WATER_REMOTE_ROBOT_FRAME_PRIORITY}
+          framePriority={LANDRUSH_ISLAND_REMOTE_ROBOT_FRAME_PRIORITY}
           node={nodeRef.current}
           presentationMode={presentationMode}
           visualRootRef={visualRootRef}
         />
       </Suspense>
-      <PascalWaterRobotPlayerBeacon
+      <LandrushIslandRobotPlayerBeacon
         color={player.color}
-        framePriority={PASCAL_WATER_REMOTE_BEACON_FRAME_PRIORITY}
+        framePriority={LANDRUSH_ISLAND_REMOTE_BEACON_FRAME_PRIORITY}
         node={nodeRef.current}
         presentationMode={presentationMode}
         visualRootRef={visualRootRef}
@@ -9857,28 +10096,28 @@ function RemotePascalWaterRobot({
   )
 }
 
-function PascalWaterMapCameraRig({
+function LandrushIslandMapCameraRig({
   active,
   mapCameraPoseRef,
   mapTransitionStartPoseRef,
   playerCameraPoseRef,
 }: {
   active: boolean
-  mapCameraPoseRef: { current: PascalWaterCameraPose | null }
-  mapTransitionStartPoseRef: { current: PascalWaterCameraPose | null }
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
+  mapCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  mapTransitionStartPoseRef: { current: LandrushIslandCameraPose | null }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
-  const controlsTarget = useMemo(() => new Vector3(...PASCAL_WATER_MAP_CAMERA_TARGET), [])
+  const controlsTarget = useMemo(() => new Vector3(...LANDRUSH_ISLAND_MAP_CAMERA_TARGET), [])
   const [controlsEnabled, setControlsEnabled] = useState(false)
   const transitionStartPose = mapTransitionStartPoseRef.current
   const initialPose = transitionStartPose ?? mapCameraPoseRef.current ?? playerCameraPoseRef.current
   const initialPosition = initialPose
     ? ([initialPose.position.x, initialPose.position.y, initialPose.position.z] as const)
-    : PASCAL_WATER_MAP_CAMERA_POSITION
+    : LANDRUSH_ISLAND_MAP_CAMERA_POSITION
   const transitionUsesPerspectiveCamera = active && transitionStartPose !== null && !controlsEnabled
   const handleMapCameraSettled = useCallback(
-    (pose: PascalWaterCameraPose) => {
-      mapCameraPoseRef.current = clonePascalWaterCameraPose(pose)
+    (pose: LandrushIslandCameraPose) => {
+      mapCameraPoseRef.current = cloneLandrushIslandCameraPose(pose)
       mapTransitionStartPoseRef.current = null
       setControlsEnabled(true)
     },
@@ -9894,8 +10133,12 @@ function PascalWaterMapCameraRig({
 
     const controls = getRobotWorldOrbitControls(state)
     if (controls) controlsTarget.copy(controls.target)
-    writePascalWaterCameraPose(mapCameraPoseRef, state.camera, controls?.target ?? controlsTarget)
-    recordPascalWaterCameraProbe({
+    writeLandrushIslandCameraPose(
+      mapCameraPoseRef,
+      state.camera,
+      controls?.target ?? controlsTarget,
+    )
+    recordLandrushIslandCameraProbe({
       camera: state.camera,
       mode: 'map',
       source: 'map-camera',
@@ -9907,23 +10150,23 @@ function PascalWaterMapCameraRig({
     <>
       {transitionUsesPerspectiveCamera ? (
         <>
-          <PascalWaterPoseCamera
+          <LandrushIslandPoseCamera
             fallbackPosition={initialPosition}
-            fallbackTarget={PASCAL_WATER_MAP_CAMERA_TARGET}
+            fallbackTarget={LANDRUSH_ISLAND_MAP_CAMERA_TARGET}
             makeDefault={active}
             pose={initialPose}
           />
-          {active ? <PascalWaterCameraPoseSeed pose={initialPose} /> : null}
+          {active ? <LandrushIslandCameraPoseSeed pose={initialPose} /> : null}
         </>
       ) : (
         <>
-          <PascalWaterMapCamera
+          <LandrushIslandMapCamera
             fallbackPosition={initialPosition}
-            fallbackTarget={PASCAL_WATER_MAP_CAMERA_TARGET}
+            fallbackTarget={LANDRUSH_ISLAND_MAP_CAMERA_TARGET}
             makeDefault={active}
             pose={initialPose}
           />
-          {active ? <PascalWaterCameraPoseSeed pose={initialPose} /> : null}
+          {active ? <LandrushIslandCameraPoseSeed pose={initialPose} /> : null}
         </>
       )}
       {active && controlsEnabled ? (
@@ -9934,8 +10177,8 @@ function PascalWaterMapCameraRig({
           enableRotate={false}
           enableZoom
           makeDefault
-          maxDistance={PASCAL_WATER_MAP_CAMERA_MAX_DISTANCE}
-          minDistance={PASCAL_WATER_MAP_CAMERA_MIN_DISTANCE}
+          maxDistance={LANDRUSH_ISLAND_MAP_CAMERA_MAX_DISTANCE}
+          minDistance={LANDRUSH_ISLAND_MAP_CAMERA_MIN_DISTANCE}
           onChange={() => renderScheduler.requestFrame('camera:move')}
           onEnd={() => renderScheduler.requestFrame('camera:end')}
           onStart={() => renderScheduler.requestFrame('camera:start')}
@@ -9943,7 +10186,7 @@ function PascalWaterMapCameraRig({
           zoomSpeed={0.0375}
         />
       ) : null}
-      <PascalWaterMapCameraTransition
+      <LandrushIslandMapCameraTransition
         active={active}
         controlsTarget={controlsTarget}
         mapCameraPoseRef={mapCameraPoseRef}
@@ -9955,7 +10198,7 @@ function PascalWaterMapCameraRig({
   )
 }
 
-function PascalWaterMapCamera({
+function LandrushIslandMapCamera({
   fallbackPosition,
   fallbackTarget,
   makeDefault = true,
@@ -9964,7 +10207,7 @@ function PascalWaterMapCamera({
   fallbackPosition: readonly [number, number, number]
   fallbackTarget: readonly [number, number, number]
   makeDefault?: boolean
-  pose: PascalWaterCameraPose | null
+  pose: LandrushIslandCameraPose | null
 }) {
   const initialPoseRef = useRef(pose)
   const initialPositionRef = useRef(
@@ -9976,7 +10219,7 @@ function PascalWaterMapCamera({
     (camera: Camera) => {
       if (seededRef.current) return
       seededRef.current = true
-      applyPascalWaterCameraPose(camera, initialPoseRef.current, fallbackTarget)
+      applyLandrushIslandCameraPose(camera, initialPoseRef.current, fallbackTarget)
     },
     [fallbackTarget],
   )
@@ -9993,7 +10236,7 @@ function PascalWaterMapCamera({
   )
 }
 
-function usePascalWaterExplicitCameraTransitionClock({
+function useLandrushIslandExplicitCameraTransitionClock({
   active,
   onFrame,
   onInactive,
@@ -10041,7 +10284,7 @@ function usePascalWaterExplicitCameraTransitionClock({
   }, -1)
 }
 
-function createPascalWaterCameraPoseTransition({
+function createLandrushIslandCameraPoseTransition({
   camera,
   startPosition,
   startTarget,
@@ -10050,8 +10293,8 @@ function createPascalWaterCameraPoseTransition({
   camera: Camera
   startPosition: Vector3
   startTarget: Vector3
-  targetPose: PascalWaterCameraPose
-}): PascalWaterCameraPoseTransition {
+  targetPose: LandrushIslandCameraPose
+}): LandrushIslandCameraPoseTransition {
   const currentPosition = camera.position.clone()
   const currentQuaternion = camera.quaternion.clone()
 
@@ -10072,12 +10315,12 @@ function createPascalWaterCameraPoseTransition({
     startPosition: startPosition.clone(),
     startQuaternion,
     startTarget: startTarget.clone(),
-    targetPose: clonePascalWaterCameraPose(targetPose) ?? targetPose,
+    targetPose: cloneLandrushIslandCameraPose(targetPose) ?? targetPose,
     targetQuaternion,
   }
 }
 
-function stepPascalWaterCameraPoseTransition({
+function stepLandrushIslandCameraPoseTransition({
   camera,
   elapsedSeconds,
   mode,
@@ -10088,20 +10331,20 @@ function stepPascalWaterCameraPoseTransition({
 }: {
   camera: Camera
   elapsedSeconds: number
-  mode: PascalWaterRuntimeCameraSample['mode']
-  poseRef: { current: PascalWaterCameraPose | null }
+  mode: LandrushIslandRuntimeCameraSample['mode']
+  poseRef: { current: LandrushIslandCameraPose | null }
   source: string
   target: Vector3
-  transition: PascalWaterCameraPoseTransition
+  transition: LandrushIslandCameraPoseTransition
 }) {
   const nextElapsed = elapsedSeconds
   transition.elapsed =
-    PASCAL_WATER_CAMERA_TRANSITION_SECONDS - nextElapsed <=
-    PASCAL_WATER_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS
-      ? PASCAL_WATER_CAMERA_TRANSITION_SECONDS
+    LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS - nextElapsed <=
+    LANDRUSH_ISLAND_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS
+      ? LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS
       : nextElapsed
-  const progress = clamp01(transition.elapsed / PASCAL_WATER_CAMERA_TRANSITION_SECONDS)
-  const amount = easePascalWaterCameraTransition(progress, mode)
+  const progress = clamp01(transition.elapsed / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS)
+  const amount = easeLandrushIslandCameraTransition(progress, mode)
   camera.position.lerpVectors(transition.startPosition, transition.targetPose.position, amount)
   target.lerpVectors(transition.startTarget, transition.targetPose.target, amount)
   camera.quaternion.slerpQuaternions(
@@ -10111,8 +10354,8 @@ function stepPascalWaterCameraPoseTransition({
   )
   camera.updateMatrixWorld()
 
-  writePascalWaterCameraPose(poseRef, camera, target)
-  recordPascalWaterCameraProbe({
+  writeLandrushIslandCameraPose(poseRef, camera, target)
+  recordLandrushIslandCameraProbe({
     camera,
     mode,
     progress,
@@ -10123,25 +10366,25 @@ function stepPascalWaterCameraPoseTransition({
   return progress
 }
 
-function finishPascalWaterCameraPoseTransition({
+function finishLandrushIslandCameraPoseTransition({
   camera,
   poseRef,
   target,
   transition,
 }: {
   camera: Camera
-  poseRef: { current: PascalWaterCameraPose | null }
+  poseRef: { current: LandrushIslandCameraPose | null }
   target: Vector3
-  transition: PascalWaterCameraPoseTransition
+  transition: LandrushIslandCameraPoseTransition
 }) {
   camera.position.copy(transition.targetPose.position)
   target.copy(transition.targetPose.target)
   camera.quaternion.copy(transition.targetQuaternion)
   camera.updateMatrixWorld()
-  writePascalWaterCameraPose(poseRef, camera, target)
+  writeLandrushIslandCameraPose(poseRef, camera, target)
 }
 
-function PascalWaterMapCameraTransition({
+function LandrushIslandMapCameraTransition({
   active,
   controlsTarget,
   mapCameraPoseRef,
@@ -10151,17 +10394,17 @@ function PascalWaterMapCameraTransition({
 }: {
   active: boolean
   controlsTarget: Vector3
-  mapCameraPoseRef: { current: PascalWaterCameraPose | null }
-  mapTransitionStartPoseRef: { current: PascalWaterCameraPose | null }
-  onSettled: (pose: PascalWaterCameraPose) => void
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
+  mapCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  mapTransitionStartPoseRef: { current: LandrushIslandCameraPose | null }
+  onSettled: (pose: LandrushIslandCameraPose) => void
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
   const settledRef = useRef(false)
   const startTargetRef = useRef(new Vector3())
-  const desiredRef = useRef(new Vector3(...PASCAL_WATER_MAP_CAMERA_POSITION))
-  const targetRef = useRef(new Vector3(...PASCAL_WATER_MAP_CAMERA_TARGET))
+  const desiredRef = useRef(new Vector3(...LANDRUSH_ISLAND_MAP_CAMERA_POSITION))
+  const targetRef = useRef(new Vector3(...LANDRUSH_ISLAND_MAP_CAMERA_TARGET))
   const forwardRef = useRef(new Vector3())
-  const transitionRef = useRef<PascalWaterCameraPoseTransition | null>(null)
+  const transitionRef = useRef<LandrushIslandCameraPoseTransition | null>(null)
 
   const resetTransition = useCallback(() => {
     settledRef.current = false
@@ -10181,7 +10424,7 @@ function PascalWaterMapCameraTransition({
         const startPosition = rememberedPose?.position.clone() ?? state.camera.position.clone()
         const startTarget = rememberedPose
           ? rememberedPose.target.clone()
-          : resolvePascalWaterBuildCameraStartTarget(
+          : resolveLandrushIslandBuildCameraStartTarget(
               state.camera,
               target.y,
               startTargetRef.current,
@@ -10191,12 +10434,12 @@ function PascalWaterMapCameraTransition({
         const currentQuaternion = state.camera.quaternion.clone()
         state.camera.position.copy(desiredRef.current)
         state.camera.lookAt(target)
-        const targetPose = createPascalWaterCameraPose(state.camera, target)
+        const targetPose = createLandrushIslandCameraPose(state.camera, target)
         state.camera.position.copy(currentPosition)
         state.camera.quaternion.copy(currentQuaternion)
         state.camera.updateMatrixWorld()
 
-        transition = createPascalWaterCameraPoseTransition({
+        transition = createLandrushIslandCameraPoseTransition({
           camera: state.camera,
           startPosition,
           startTarget,
@@ -10204,10 +10447,10 @@ function PascalWaterMapCameraTransition({
         })
         transitionRef.current = transition
         controlsTarget.copy(startTarget)
-        writePascalWaterCameraPose(mapCameraPoseRef, state.camera, controlsTarget)
+        writeLandrushIslandCameraPose(mapCameraPoseRef, state.camera, controlsTarget)
       }
 
-      const progress = stepPascalWaterCameraPoseTransition({
+      const progress = stepLandrushIslandCameraPoseTransition({
         camera: state.camera,
         elapsedSeconds,
         mode: 'map',
@@ -10219,7 +10462,7 @@ function PascalWaterMapCameraTransition({
 
       if (progress < 1) return false
 
-      finishPascalWaterCameraPoseTransition({
+      finishLandrushIslandCameraPoseTransition({
         camera: state.camera,
         poseRef: mapCameraPoseRef,
         target: controlsTarget,
@@ -10228,8 +10471,8 @@ function PascalWaterMapCameraTransition({
       settledRef.current = true
       transitionRef.current = null
       const finalPose =
-        clonePascalWaterCameraPose(mapCameraPoseRef.current) ??
-        createPascalWaterCameraPose(state.camera, controlsTarget)
+        cloneLandrushIslandCameraPose(mapCameraPoseRef.current) ??
+        createLandrushIslandCameraPose(state.camera, controlsTarget)
       onSettled(finalPose)
       renderScheduler.requestFrame('camera:end')
       return true
@@ -10237,7 +10480,7 @@ function PascalWaterMapCameraTransition({
     [controlsTarget, mapCameraPoseRef, mapTransitionStartPoseRef, onSettled, playerCameraPoseRef],
   )
 
-  usePascalWaterExplicitCameraTransitionClock({
+  useLandrushIslandExplicitCameraTransitionClock({
     active,
     onFrame: stepTransition,
     onInactive: resetTransition,
@@ -10246,7 +10489,7 @@ function PascalWaterMapCameraTransition({
   return null
 }
 
-function PascalWaterThirdPersonCameraRig({
+function LandrushIslandThirdPersonCameraRig({
   buildCameraPoseRef,
   controllerEnabled,
   mapReturnCameraPoseRef,
@@ -10254,12 +10497,12 @@ function PascalWaterThirdPersonCameraRig({
   playerCameraPoseRef,
   playerReturnCameraPoseRef,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   controllerEnabled: boolean
-  mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   motionRef: { current: RobotMotion }
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
-  playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
   const initialPose =
     mapReturnCameraPoseRef.current ??
@@ -10276,16 +10519,19 @@ function PascalWaterThirdPersonCameraRig({
   return (
     <>
       {controllerEnabled ? (
-        <PascalWaterControllerOwnedCamera fallbackPosition={initialPosition} pose={initialPose} />
+        <LandrushIslandControllerOwnedCamera
+          fallbackPosition={initialPosition}
+          pose={initialPose}
+        />
       ) : (
         <>
-          <PascalWaterPoseCamera fallbackPosition={initialPosition} pose={initialPose} />
-          <PascalWaterCameraPoseSeed pose={initialPose} />
+          <LandrushIslandPoseCamera fallbackPosition={initialPosition} pose={initialPose} />
+          <LandrushIslandCameraPoseSeed pose={initialPose} />
         </>
       )}
       {controllerEnabled ? (
         <>
-          <PascalWaterThirdPersonCameraController
+          <LandrushIslandThirdPersonCameraController
             buildCameraPoseRef={buildCameraPoseRef}
             mapReturnCameraPoseRef={mapReturnCameraPoseRef}
             motionRef={motionRef}
@@ -10299,14 +10545,173 @@ function PascalWaterThirdPersonCameraRig({
   )
 }
 
-function PascalWaterControllerOwnedCamera({
+function LandrushIslandFirstPersonCameraRig({
+  buildCameraPoseRef,
+  mapReturnCameraPoseRef,
+  motionRef,
+  playerCameraPoseRef,
+  playerReturnCameraPoseRef,
+}: {
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  motionRef: { current: RobotMotion }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
+}) {
+  const motion = motionRef.current
+  const initialYaw = motion.heading
+  const initialPosition = [
+    motion.position.x + Math.sin(initialYaw) * LANDRUSH_ISLAND_ROBOT_FPV_FORWARD_OFFSET,
+    motion.position.y + LANDRUSH_ISLAND_ROBOT_FPV_EYE_HEIGHT,
+    motion.position.z + Math.cos(initialYaw) * LANDRUSH_ISLAND_ROBOT_FPV_FORWARD_OFFSET,
+  ] as const
+  const initialTarget = [
+    initialPosition[0] + Math.sin(initialYaw),
+    initialPosition[1],
+    initialPosition[2] + Math.cos(initialYaw),
+  ] as const
+
+  return (
+    <>
+      <LandrushIslandControllerOwnedCamera
+        fallbackPosition={initialPosition}
+        fallbackTarget={initialTarget}
+        pose={null}
+      />
+      <LandrushIslandFirstPersonCameraController
+        buildCameraPoseRef={buildCameraPoseRef}
+        mapReturnCameraPoseRef={mapReturnCameraPoseRef}
+        motionRef={motionRef}
+        playerCameraPoseRef={playerCameraPoseRef}
+        playerReturnCameraPoseRef={playerReturnCameraPoseRef}
+      />
+    </>
+  )
+}
+
+function LandrushIslandFirstPersonCameraController({
+  buildCameraPoseRef,
+  mapReturnCameraPoseRef,
+  motionRef,
+  playerCameraPoseRef,
+  playerReturnCameraPoseRef,
+}: {
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  motionRef: { current: RobotMotion }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
+}) {
+  const { gl } = useThree()
+  const seededRef = useRef(false)
+  const targetYawRef = useRef(0)
+  const targetPitchRef = useRef(0)
+  const forwardRef = useRef(new Vector3())
+  const targetRef = useRef(new Vector3())
+  const cameraPositionRef = useRef(new Vector3())
+
+  useEffect(() => {
+    buildCameraPoseRef.current = null
+    mapReturnCameraPoseRef.current = null
+    playerReturnCameraPoseRef.current = null
+    requestLandrushIslandPointerLock(gl.domElement)
+  }, [buildCameraPoseRef, gl, mapReturnCameraPoseRef, playerReturnCameraPoseRef])
+
+  useEffect(() => {
+    const canvas = gl.domElement
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        !pointerEventInLandrushIslandCanvas(event, canvas) ||
+        isLandrushIslandInteractivePointerTarget(event.target)
+      ) {
+        return
+      }
+
+      requestLandrushIslandPointerLock(canvas)
+    }
+    const handleMouseMove = (event: MouseEvent) => {
+      if (document.pointerLockElement !== canvas) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      targetYawRef.current -= event.movementX * LANDRUSH_ISLAND_ROBOT_FPV_MOUSE_YAW_SPEED
+      targetPitchRef.current = clamp(
+        targetPitchRef.current - event.movementY * LANDRUSH_ISLAND_ROBOT_FPV_MOUSE_PITCH_SPEED,
+        -LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT,
+        LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT,
+      )
+      renderScheduler.requestFrame('camera:move')
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: false })
+    window.addEventListener('mousemove', handleMouseMove, { capture: true, passive: false })
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+      window.removeEventListener('mousemove', handleMouseMove, true)
+    }
+  }, [gl])
+
+  useFrame((state, delta) => {
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    const motion = motionRef.current
+
+    if (!seededRef.current) {
+      targetYawRef.current = motion.heading
+      targetPitchRef.current = 0
+      seededRef.current = true
+    }
+
+    const gamepadInput = readLandrushGamepadInput()
+    if (gamepadInput && gamepadInput.lookStrength > 0) {
+      targetYawRef.current -=
+        gamepadInput.lookX * LANDRUSH_ISLAND_GAMEPAD_CAMERA_YAW_SPEED * frameDelta
+      targetPitchRef.current = clamp(
+        targetPitchRef.current +
+          gamepadInput.lookY * LANDRUSH_ISLAND_GAMEPAD_CAMERA_PITCH_SPEED * frameDelta,
+        -LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT,
+        LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT,
+      )
+    }
+
+    const yaw = targetYawRef.current
+    const pitch = targetPitchRef.current
+    const pitchCos = Math.cos(pitch)
+    forwardRef.current.set(Math.sin(yaw) * pitchCos, Math.sin(pitch), Math.cos(yaw) * pitchCos)
+    cameraPositionRef.current.set(
+      motion.position.x + Math.sin(yaw) * LANDRUSH_ISLAND_ROBOT_FPV_FORWARD_OFFSET,
+      motion.position.y + LANDRUSH_ISLAND_ROBOT_FPV_EYE_HEIGHT,
+      motion.position.z + Math.cos(yaw) * LANDRUSH_ISLAND_ROBOT_FPV_FORWARD_OFFSET,
+    )
+    targetRef.current.copy(cameraPositionRef.current).add(forwardRef.current)
+
+    state.camera.up.set(0, 1, 0)
+    state.camera.position.copy(cameraPositionRef.current)
+    state.camera.lookAt(targetRef.current)
+    state.camera.updateMatrixWorld()
+    writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, targetRef.current)
+
+    if (motion.isMoving || gamepadInput?.lookStrength) renderScheduler.requestFrame('camera:move')
+    recordLandrushIslandCameraProbe({
+      camera: state.camera,
+      mode: 'player',
+      source: 'fpv-camera',
+      target: targetRef.current,
+    })
+  }, 2)
+
+  return null
+}
+
+function LandrushIslandControllerOwnedCamera({
   fallbackPosition,
-  fallbackTarget = PASCAL_WATER_CAMERA_TARGET,
+  fallbackTarget = LANDRUSH_ISLAND_CAMERA_TARGET,
   pose,
 }: {
   fallbackPosition: readonly [number, number, number]
   fallbackTarget?: readonly [number, number, number]
-  pose: PascalWaterCameraPose | null
+  pose: LandrushIslandCameraPose | null
 }) {
   const initialPoseRef = useRef(pose)
   const initialPositionRef = useRef(
@@ -10318,7 +10723,7 @@ function PascalWaterControllerOwnedCamera({
       if (seededRef.current) return
       seededRef.current = true
       const initialPose = initialPoseRef.current
-      applyPascalWaterCameraPose(camera, initialPose, fallbackTarget)
+      applyLandrushIslandCameraPose(camera, initialPose, fallbackTarget)
     },
     [fallbackTarget],
   )
@@ -10335,7 +10740,7 @@ function PascalWaterControllerOwnedCamera({
   )
 }
 
-function PascalWaterThirdPersonCameraController({
+function LandrushIslandThirdPersonCameraController({
   buildCameraPoseRef,
   mapReturnCameraPoseRef,
   motionRef,
@@ -10343,19 +10748,19 @@ function PascalWaterThirdPersonCameraController({
   playerCameraPoseRef,
   playerReturnCameraPoseRef,
 }: {
-  buildCameraPoseRef: { current: PascalWaterCameraPose | null }
-  mapReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   motionRef: { current: RobotMotion }
   onReturnSettled: () => void
-  playerCameraPoseRef: { current: PascalWaterCameraPose | null }
-  playerReturnCameraPoseRef: { current: PascalWaterCameraPose | null }
+  playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
   const { gl } = useThree()
-  const cameraDistanceRef = useRef(PASCAL_WATER_ISOMETRIC_CAMERA_DISTANCE)
-  const cameraPitchRef = useRef(PASCAL_WATER_ISOMETRIC_CAMERA_PITCH)
-  const targetCameraPitchRef = useRef(PASCAL_WATER_ISOMETRIC_CAMERA_PITCH)
-  const cameraYawRef = useRef(PASCAL_WATER_ISOMETRIC_CAMERA_INITIAL_YAW)
-  const targetCameraYawRef = useRef(PASCAL_WATER_ISOMETRIC_CAMERA_INITIAL_YAW)
+  const cameraDistanceRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE)
+  const cameraPitchRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH)
+  const targetCameraPitchRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH)
+  const cameraYawRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW)
+  const targetCameraYawRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW)
   const orbitKeysRef = useRef({ clockwise: false, counterClockwise: false })
   const pitchDragRef = useRef<{
     id: number
@@ -10373,7 +10778,7 @@ function PascalWaterThirdPersonCameraController({
   const previousTargetRef = useRef<Vector3 | null>(null)
   const returnTargetRef = useRef(new Vector3())
   const returnForwardRef = useRef(new Vector3())
-  const returnTransitionRef = useRef<PascalWaterCameraPoseTransition | null>(null)
+  const returnTransitionRef = useRef<LandrushIslandCameraPoseTransition | null>(null)
   const returnTransitionRunningRef = useRef(false)
   const cameraMotionActiveRef = useRef(false)
   const snapVersionRef = useRef<number | null>(null)
@@ -10418,11 +10823,12 @@ function PascalWaterThirdPersonCameraController({
       event.preventDefault()
       event.stopPropagation()
       const nextDistance =
-        cameraDistanceRef.current * Math.exp(event.deltaY * PASCAL_WATER_ISOMETRIC_CAMERA_ZOOM_STEP)
+        cameraDistanceRef.current *
+        Math.exp(event.deltaY * LANDRUSH_ISLAND_ISOMETRIC_CAMERA_ZOOM_STEP)
       cameraDistanceRef.current = clamp(
         nextDistance,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
       )
     }
 
@@ -10463,8 +10869,8 @@ function PascalWaterThirdPersonCameraController({
         pinchZoomRef.current.cameraDistance * (pinchZoomRef.current.distance / distance)
       cameraDistanceRef.current = clamp(
         nextDistance,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
       )
       renderScheduler.requestFrame('camera:move')
     }
@@ -10492,8 +10898,8 @@ function PascalWaterThirdPersonCameraController({
         event.defaultPrevented ||
         event.button !== 0 ||
         event.pointerType === 'touch' ||
-        !pointerEventInPascalWaterCanvas(event, canvas) ||
-        isPascalWaterInteractivePointerTarget(event.target)
+        !pointerEventInLandrushIslandCanvas(event, canvas) ||
+        isLandrushIslandInteractivePointerTarget(event.target)
       ) {
         return
       }
@@ -10513,14 +10919,14 @@ function PascalWaterThirdPersonCameraController({
 
       event.preventDefault()
       const nextPitch =
-        drag.pitch + (event.clientY - drag.y) * PASCAL_WATER_ISOMETRIC_CAMERA_PITCH_DRAG_SPEED
+        drag.pitch + (event.clientY - drag.y) * LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH_DRAG_SPEED
       const nextYaw =
-        drag.yaw - (event.clientX - drag.x) * PASCAL_WATER_ISOMETRIC_CAMERA_YAW_DRAG_SPEED
+        drag.yaw - (event.clientX - drag.x) * LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_DRAG_SPEED
       targetCameraYawRef.current = nextYaw
       targetCameraPitchRef.current = clamp(
         nextPitch,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_PITCH,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_PITCH,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
       )
       renderScheduler.requestFrame('camera:move')
     }
@@ -10554,7 +10960,7 @@ function PascalWaterThirdPersonCameraController({
       const motion = motionRef.current
       const target = targetRef.current.set(
         motion.position.x,
-        motion.position.y + PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT,
+        motion.position.y + LANDRUSH_ISLAND_ROBOT_CAMERA_TARGET_HEIGHT,
         motion.position.z,
       )
       let transition = returnTransitionRef.current
@@ -10566,27 +10972,27 @@ function PascalWaterThirdPersonCameraController({
           return true
         }
 
-        const buildPose = clonePascalWaterCameraPose(
+        const buildPose = cloneLandrushIslandCameraPose(
           mapReturnCameraPoseRef.current ?? buildCameraPoseRef.current,
         )
         const startTarget =
           buildPose?.target.clone() ??
-          resolvePascalWaterBuildCameraStartTarget(
+          resolveLandrushIslandBuildCameraStartTarget(
             state.camera,
             target.y,
             returnTargetRef.current,
             returnForwardRef.current,
           ).clone()
         const targetPose = mapReturnCameraPoseRef.current
-          ? resolvePascalWaterPlayerReturnTargetPose(
+          ? resolveLandrushIslandPlayerReturnTargetPose(
               returnPose,
               target,
               desiredCameraPositionRef.current,
             )
-          : (clonePascalWaterCameraPose(returnPose) ??
-            createPascalWaterCameraPose(state.camera, target))
+          : (cloneLandrushIslandCameraPose(returnPose) ??
+            createLandrushIslandCameraPose(state.camera, target))
 
-        transition = createPascalWaterCameraPoseTransition({
+        transition = createLandrushIslandCameraPoseTransition({
           camera: state.camera,
           startPosition: buildPose?.position.clone() ?? state.camera.position.clone(),
           startTarget,
@@ -10598,11 +11004,11 @@ function PascalWaterThirdPersonCameraController({
         state.camera.position.copy(transition.startPosition)
         state.camera.quaternion.copy(transition.startQuaternion)
         state.camera.updateMatrixWorld()
-        writePascalWaterCameraPose(playerCameraPoseRef, state.camera, transition.startTarget)
+        writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, transition.startTarget)
       }
 
       renderScheduler.requestFrame('camera:move')
-      const progress = stepPascalWaterCameraPoseTransition({
+      const progress = stepLandrushIslandCameraPoseTransition({
         camera: state.camera,
         elapsedSeconds,
         mode: 'player',
@@ -10614,7 +11020,7 @@ function PascalWaterThirdPersonCameraController({
 
       if (progress < 1) return false
 
-      finishPascalWaterCameraPoseTransition({
+      finishLandrushIslandCameraPoseTransition({
         camera: state.camera,
         poseRef: playerCameraPoseRef,
         target: returnTargetRef.current,
@@ -10631,8 +11037,8 @@ function PascalWaterThirdPersonCameraController({
       targetCameraPitchRef.current = cameraPitchRef.current
       cameraDistanceRef.current = clamp(
         cameraDistanceRef.current,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
       )
       previousTargetRef.current = transition.targetPose.target.clone()
       snapVersionRef.current = motion.cameraSnapVersion
@@ -10658,7 +11064,7 @@ function PascalWaterThirdPersonCameraController({
   const returnTransitionActive =
     playerReturnCameraPoseRef.current !== null || returnTransitionRunningRef.current
 
-  usePascalWaterExplicitCameraTransitionClock({
+  useLandrushIslandExplicitCameraTransitionClock({
     active: returnTransitionActive,
     onFrame: stepReturnTransition,
     onInactive: resetReturnTransition,
@@ -10670,7 +11076,7 @@ function PascalWaterThirdPersonCameraController({
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const target = targetRef.current.set(
       motion.position.x,
-      motion.position.y + PASCAL_WATER_ROBOT_CAMERA_TARGET_HEIGHT,
+      motion.position.y + LANDRUSH_ISLAND_ROBOT_CAMERA_TARGET_HEIGHT,
       motion.position.z,
     )
     const returnPose = playerReturnCameraPoseRef.current
@@ -10687,17 +11093,17 @@ function PascalWaterThirdPersonCameraController({
       const yaw =
         typeof storedYaw === 'number' && Number.isFinite(storedYaw)
           ? storedYaw
-          : PASCAL_WATER_ISOMETRIC_CAMERA_INITIAL_YAW
+          : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW
       const storedDistance = playerCameraPoseRef.current?.distance
       const storedPitch = playerCameraPoseRef.current?.pitch
       const pitch =
         typeof storedPitch === 'number' && Number.isFinite(storedPitch)
           ? clamp(
               storedPitch,
-              PASCAL_WATER_ISOMETRIC_CAMERA_MIN_PITCH,
-              PASCAL_WATER_ISOMETRIC_CAMERA_MAX_PITCH,
+              LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
+              LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
             )
-          : PASCAL_WATER_ISOMETRIC_CAMERA_PITCH
+          : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH
       cameraYawRef.current = yaw
       targetCameraYawRef.current = yaw
       cameraPitchRef.current = pitch
@@ -10706,10 +11112,10 @@ function PascalWaterThirdPersonCameraController({
         typeof storedDistance === 'number' && Number.isFinite(storedDistance)
           ? clamp(
               storedDistance,
-              PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-              PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+              LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+              LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
             )
-          : PASCAL_WATER_ISOMETRIC_CAMERA_DISTANCE
+          : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE
       const desiredCameraPosition = resolveThirdPersonCameraPosition(
         target,
         cameraYawRef.current,
@@ -10721,46 +11127,47 @@ function PascalWaterThirdPersonCameraController({
       state.camera.lookAt(target)
       previousTargetRef.current = target.clone()
       snapVersionRef.current = motion.cameraSnapVersion
-      writePascalWaterCameraPose(playerCameraPoseRef, state.camera, target)
+      writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, target)
       setCameraMotionActive(true)
       renderScheduler.requestFrame('camera:move')
       return
     }
 
-    const followAmount = 1 - Math.exp(-PASCAL_WATER_ROBOT_CAMERA_FOLLOW_RESPONSE * frameDelta)
+    const followAmount = 1 - Math.exp(-LANDRUSH_ISLAND_ROBOT_CAMERA_FOLLOW_RESPONSE * frameDelta)
     const yawInput =
       Number(orbitKeysRef.current.counterClockwise) - Number(orbitKeysRef.current.clockwise)
     const gamepadInput = readLandrushGamepadInput()
     const gamepadLookActive = Boolean(gamepadInput && gamepadInput.lookStrength > 0)
     const targetShiftSq = previousTarget.distanceToSquared(target)
     if (yawInput !== 0) {
-      targetCameraYawRef.current += yawInput * PASCAL_WATER_ISOMETRIC_CAMERA_YAW_SPEED * frameDelta
+      targetCameraYawRef.current +=
+        yawInput * LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_SPEED * frameDelta
     }
     if (gamepadLookActive && gamepadInput) {
       targetCameraYawRef.current -=
-        gamepadInput.lookX * PASCAL_WATER_GAMEPAD_CAMERA_YAW_SPEED * frameDelta
+        gamepadInput.lookX * LANDRUSH_ISLAND_GAMEPAD_CAMERA_YAW_SPEED * frameDelta
       targetCameraPitchRef.current = clamp(
         targetCameraPitchRef.current +
-          gamepadInput.lookY * PASCAL_WATER_GAMEPAD_CAMERA_PITCH_SPEED * frameDelta,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_PITCH,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_PITCH,
+          gamepadInput.lookY * LANDRUSH_ISLAND_GAMEPAD_CAMERA_PITCH_SPEED * frameDelta,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
       )
     }
     cameraYawRef.current = lerpAngle(
       cameraYawRef.current,
       targetCameraYawRef.current,
-      1 - Math.exp(-PASCAL_WATER_ISOMETRIC_CAMERA_YAW_RESPONSE * frameDelta),
+      1 - Math.exp(-LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_RESPONSE * frameDelta),
     )
     cameraPitchRef.current = MathUtils.damp(
       cameraPitchRef.current,
       targetCameraPitchRef.current,
-      PASCAL_WATER_ISOMETRIC_CAMERA_YAW_RESPONSE,
+      LANDRUSH_ISLAND_ISOMETRIC_CAMERA_YAW_RESPONSE,
       frameDelta,
     )
     cameraDistanceRef.current = clamp(
       cameraDistanceRef.current,
-      PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-      PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+      LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+      LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
     )
     previousTarget.lerp(target, followAmount)
     const desiredCameraPosition = resolveThirdPersonCameraPosition(
@@ -10774,7 +11181,7 @@ function PascalWaterThirdPersonCameraController({
     state.camera.position.lerp(desiredCameraPosition, followAmount)
 
     state.camera.lookAt(previousTarget)
-    writePascalWaterCameraPose(playerCameraPoseRef, state.camera, previousTarget)
+    writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, previousTarget)
     const yawSettling = Math.abs(
       Math.atan2(
         Math.sin(cameraYawRef.current - targetCameraYawRef.current),
@@ -10794,7 +11201,7 @@ function PascalWaterThirdPersonCameraController({
       pitchSettling > 0.0001
     setCameraMotionActive(activeCameraMotion)
     if (activeCameraMotion) renderScheduler.requestFrame('camera:move')
-    recordPascalWaterCameraProbe({
+    recordLandrushIslandCameraProbe({
       camera: state.camera,
       mode: 'player',
       source: 'player-camera',
@@ -10805,7 +11212,7 @@ function PascalWaterThirdPersonCameraController({
   return null
 }
 
-function PascalWaterRobotNodePrimitiveActor({
+function LandrushIslandRobotNodePrimitiveActor({
   color,
   fallControlRotation,
   fallIntensity = 1,
@@ -10866,11 +11273,14 @@ function PascalWaterRobotNodePrimitiveActor({
     )
     const fallPivot = fallPivotRef.current
     if (fallPivot) {
-      headingQuaternionRef.current.setFromAxisAngle(PASCAL_WATER_UP_AXIS, node.playerHeading ?? 0)
+      headingQuaternionRef.current.setFromAxisAngle(
+        LANDRUSH_ISLAND_UP_AXIS,
+        node.playerHeading ?? 0,
+      )
       fallControlQuaternionRef.current.copy(
         presentationMode === 'fall' && fallControlRotation
           ? fallControlRotation
-          : PASCAL_WATER_IDENTITY_QUATERNION,
+          : LANDRUSH_ISLAND_IDENTITY_QUATERNION,
       )
       fallProceduralEulerRef.current.set(fallPitch, fallYaw, fallRoll, 'XYZ')
       fallProceduralQuaternionRef.current.setFromEuler(fallProceduralEulerRef.current)
@@ -10887,11 +11297,11 @@ function PascalWaterRobotNodePrimitiveActor({
       ref={groupRef}
     >
       <group
-        position={[0, PASCAL_WATER_PRIMITIVE_ROBOT_GEOMETRY_CENTER_Y, 0]}
+        position={[0, LANDRUSH_ISLAND_PRIMITIVE_ROBOT_GEOMETRY_CENTER_Y, 0]}
         ref={fallPivotRef}
         rotation={[0, node.playerHeading ?? 0, 0]}
       >
-        <group position={[0, -PASCAL_WATER_PRIMITIVE_ROBOT_GEOMETRY_CENTER_Y, 0]}>
+        <group position={[0, -LANDRUSH_ISLAND_PRIMITIVE_ROBOT_GEOMETRY_CENTER_Y, 0]}>
           <mesh position={[0, 0.9, 0]}>
             <boxGeometry args={[0.46, 1.28, 0.32]} />
             <meshStandardMaterial color="#dce8ea" roughness={0.78} />
@@ -10906,7 +11316,7 @@ function PascalWaterRobotNodePrimitiveActor({
   )
 }
 
-function PascalWaterRobotPlayerBeacon({
+function LandrushIslandRobotPlayerBeacon({
   color,
   framePriority = 0,
   node,
@@ -10958,7 +11368,7 @@ function PascalWaterRobotPlayerBeacon({
   )
 }
 
-function PascalWaterBuildRobotExitHotspot({
+function LandrushIslandBuildRobotExitHotspot({
   motionRef,
   onExitBuildMode,
   onHoverChange,
@@ -11053,27 +11463,28 @@ function PascalWaterBuildRobotExitHotspot({
       )
       if (
         distanceSq <=
-        PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS * PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS
+        LANDRUSH_ISLAND_BUILD_ROBOT_EXIT_HOVER_RADIUS *
+          LANDRUSH_ISLAND_BUILD_ROBOT_EXIT_HOVER_RADIUS
       ) {
         return true
       }
 
       hoverScreenPointer.set(event.clientX - rect.left, event.clientY - rect.top)
-      hoverScreenStart.copy(projectVectorToPascalWaterScreenPoint(segmentStart, camera, rect))
-      hoverScreenEnd.copy(projectVectorToPascalWaterScreenPoint(segmentEnd, camera, rect))
+      hoverScreenStart.copy(projectVectorToLandrushIslandScreenPoint(segmentStart, camera, rect))
+      hoverScreenEnd.copy(projectVectorToLandrushIslandScreenPoint(segmentEnd, camera, rect))
       hoverScreenMid.copy(segmentStart).lerp(segmentEnd, 0.5)
       hoverScreenRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
       hoverScreenRadiusPoint
         .copy(hoverScreenMid)
-        .addScaledVector(hoverScreenRight, PASCAL_WATER_BUILD_ROBOT_EXIT_HOVER_RADIUS)
+        .addScaledVector(hoverScreenRight, LANDRUSH_ISLAND_BUILD_ROBOT_EXIT_HOVER_RADIUS)
       const hoverScreenRadius = Math.max(
         36,
         hoverScreenStart.distanceTo(
-          projectVectorToPascalWaterScreenPoint(hoverScreenRadiusPoint, camera, rect),
+          projectVectorToLandrushIslandScreenPoint(hoverScreenRadiusPoint, camera, rect),
         ),
       )
       return (
-        distanceSqToPascalWaterScreenSegment(
+        distanceSqToLandrushIslandScreenSegment(
           hoverScreenPointer,
           hoverScreenStart,
           hoverScreenEnd,
@@ -11180,7 +11591,7 @@ function PascalWaterBuildRobotExitHotspot({
   )
 }
 
-function PascalWaterMapPlayerMarker({
+function LandrushIslandMapPlayerMarker({
   color,
   groundY,
   motionRef,
@@ -11204,7 +11615,7 @@ function PascalWaterMapPlayerMarker({
 
     const targetOpacity = visible && motion ? clamp01(opacityRef.current) : 0
     materialOpacityRef.current = targetOpacity
-    setPascalWaterGroupMaterialOpacity(group, materialOpacityRef.current)
+    setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
     if (labelRef.current) labelRef.current.style.opacity = String(materialOpacityRef.current)
     if (!motion || targetOpacity <= 0.002) return
 
@@ -11213,11 +11624,11 @@ function PascalWaterMapPlayerMarker({
   })
 
   return (
-    <PascalWaterMapBadgeMarker color={color} groupRef={groupRef} label="P" labelRef={labelRef} />
+    <LandrushIslandMapBadgeMarker color={color} groupRef={groupRef} label="P" labelRef={labelRef} />
   )
 }
 
-function PascalWaterRemoteMapPlayerMarker({
+function LandrushIslandRemoteMapPlayerMarker({
   groundY,
   opacityRef,
   player,
@@ -11249,12 +11660,12 @@ function PascalWaterRemoteMapPlayerMarker({
     if (!group) return
 
     materialOpacityRef.current = visible ? clamp01(opacityRef.current) : 0
-    setPascalWaterGroupMaterialOpacity(group, materialOpacityRef.current)
+    setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
     if (materialOpacityRef.current <= 0.002) return
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-    const positionAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_POSITION_RESPONSE * frameDelta)
-    const headingAmount = 1 - Math.exp(-PASCAL_WATER_REMOTE_HEADING_RESPONSE * frameDelta)
+    const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
+    const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
     positionRef.current.lerp(targetPositionRef.current, positionAmount)
     headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
 
@@ -11262,10 +11673,10 @@ function PascalWaterRemoteMapPlayerMarker({
     group.rotation.y = headingRef.current
   })
 
-  return <PascalWaterMapBadgeMarker color={player.color} groupRef={groupRef} scale={1.28} />
+  return <LandrushIslandMapBadgeMarker color={player.color} groupRef={groupRef} scale={1.28} />
 }
 
-function PascalWaterMapBadgeMarker({
+function LandrushIslandMapBadgeMarker({
   color,
   groupRef,
   label,
@@ -11289,7 +11700,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.52 }}
+          userData={{ landrushIslandBaseOpacity: 0.52 }}
         />
       </mesh>
       <mesh
@@ -11306,7 +11717,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.52 }}
+          userData={{ landrushIslandBaseOpacity: 0.52 }}
         />
       </mesh>
       <mesh renderOrder={92} rotation={[-Math.PI / 2, 0, 0]} scale={1.03}>
@@ -11318,7 +11729,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.9 }}
+          userData={{ landrushIslandBaseOpacity: 0.9 }}
         />
       </mesh>
       <mesh
@@ -11335,7 +11746,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.9 }}
+          userData={{ landrushIslandBaseOpacity: 0.9 }}
         />
       </mesh>
       <mesh renderOrder={93} rotation={[-Math.PI / 2, 0, 0]} scale={0.9}>
@@ -11347,7 +11758,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.98 }}
+          userData={{ landrushIslandBaseOpacity: 0.98 }}
         />
       </mesh>
       <mesh
@@ -11364,7 +11775,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.98 }}
+          userData={{ landrushIslandBaseOpacity: 0.98 }}
         />
       </mesh>
       <mesh
@@ -11381,7 +11792,7 @@ function PascalWaterMapBadgeMarker({
           opacity={0}
           toneMapped={false}
           transparent
-          userData={{ pascalWaterBaseOpacity: 0.98 }}
+          userData={{ landrushIslandBaseOpacity: 0.98 }}
         />
       </mesh>
       {label ? (
@@ -11407,7 +11818,7 @@ function PascalWaterMapBadgeMarker({
   )
 }
 
-function createPascalWaterPlayerSnapshot({
+function createLandrushIslandPlayerSnapshot({
   heading,
   localProfile,
   moving,
@@ -11448,15 +11859,15 @@ function progressiveRenderValue<T>(renderValue: ProgressiveRenderValue<T>) {
   return renderValue.isSettling ? renderValue.previewValue : renderValue.finalValue
 }
 
-function measurePascalWaterSetup<T>(
-  profileMeasure: PascalWaterProfileMeasure | undefined,
+function measureLandrushIslandSetup<T>(
+  profileMeasure: LandrushIslandProfileMeasure | undefined,
   id: string,
   callback: () => T,
 ) {
   return profileMeasure ? profileMeasure(id, callback) : callback()
 }
 
-function usePascalWaterLoadingProgress(assetsReady: boolean) {
+function useLandrushIslandLoadingProgress(assetsReady: boolean) {
   const [progressState, setProgressState] = useState({ progress: 0, visible: true })
   const assetsReadyRef = useRef(assetsReady)
 
@@ -11485,7 +11896,7 @@ function usePascalWaterLoadingProgress(assetsReady: boolean) {
       setProgressState({ progress: 100, visible: true })
       hideTimeoutId = window.setTimeout(() => {
         setProgressState({ progress: 100, visible: false })
-      }, PASCAL_WATER_LOADING_FADE_MS)
+      }, LANDRUSH_ISLAND_LOADING_FADE_MS)
     }
 
     if (typeof PerformanceObserver !== 'undefined') {
@@ -11507,13 +11918,13 @@ function usePascalWaterLoadingProgress(assetsReady: boolean) {
 
       const now = performance.now()
       const elapsed = now - startedAt
-      const target = Math.min(96, (elapsed / PASCAL_WATER_LOADING_EXPECTED_MS) * 96)
+      const target = Math.min(96, (elapsed / LANDRUSH_ISLAND_LOADING_EXPECTED_MS) * 96)
       const quietFor = now - lastLongTaskAt
       const canComplete =
         assetsReadyRef.current &&
         document.readyState !== 'loading' &&
-        elapsed >= PASCAL_WATER_LOADING_MINIMUM_MS &&
-        quietFor >= PASCAL_WATER_LOADING_QUIET_MS
+        elapsed >= LANDRUSH_ISLAND_LOADING_MINIMUM_MS &&
+        quietFor >= LANDRUSH_ISLAND_LOADING_QUIET_MS
       const nextTarget = canComplete ? 100 : target
       const step = canComplete
         ? Math.max(1.2, (100 - progress) * 0.18)
@@ -11580,8 +11991,8 @@ function useProgressiveRenderValue<T>(value: T, settleMs: number): ProgressiveRe
   return { finalValue, isSettling, previewValue: value }
 }
 
-function createPascalWaterRobotActorNode(
-  baseNode: PascalWaterLayoutNode,
+function createLandrushIslandRobotActorNode(
+  baseNode: LandrushIslandLayoutNode,
   id: string,
   spawn: LandrushPoint2,
   groundY: number,
@@ -11589,7 +12000,7 @@ function createPascalWaterRobotActorNode(
   return {
     ...baseNode,
     focusParcelId: null,
-    id: pascalWaterRobotNodeId(id),
+    id: landrushIslandRobotNodeId(id),
     landrushMode: 'walk',
     name: id,
     playerHeading: 0,
@@ -11603,34 +12014,36 @@ function createPascalWaterRobotActorNode(
   }
 }
 
-function pascalWaterRobotNodeId(id: string): `landrush-world_${string}` {
-  return `landrush-world_pascal-water-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+function landrushIslandRobotNodeId(id: string): `landrush-world_${string}` {
+  return `landrush-world_landrush-island-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
-function writeMotionToPascalWaterRobotNode(node: LandrushWorldNode, motion: RobotMotion) {
+function writeMotionToLandrushIslandRobotNode(node: LandrushWorldNode, motion: RobotMotion) {
   node.playerPosition = [motion.position.x, motion.position.y, motion.position.z]
   node.playerHeading = motion.heading
   node.playerMoving = !motion.falling && motion.isMoving
   node.playerSpeed =
     !motion.falling && motion.runRequested && motion.speed > 0.2
-      ? Math.max(motion.speed, PASCAL_WATER_ROBOT_RUN_SPEED)
+      ? Math.max(motion.speed, LANDRUSH_ISLAND_ROBOT_RUN_SPEED)
       : motion.speed
 }
 
-function setPascalWaterMapCameraZoom(camera: Camera, zoom: number) {
-  if (!isPascalWaterOrthographicCamera(camera)) return
+function setLandrushIslandMapCameraZoom(camera: Camera, zoom: number) {
+  if (!isLandrushIslandOrthographicCamera(camera)) return
   camera.zoom = zoom
   camera.updateProjectionMatrix()
 }
 
-function isPascalWaterOrthographicCamera(camera: Camera): camera is PascalWaterOrthographicCamera {
-  return (camera as Partial<PascalWaterOrthographicCamera>).isOrthographicCamera === true
+function isLandrushIslandOrthographicCamera(
+  camera: Camera,
+): camera is LandrushIslandOrthographicCamera {
+  return (camera as Partial<LandrushIslandOrthographicCamera>).isOrthographicCamera === true
 }
 
-function applyPascalWaterCameraPose(
+function applyLandrushIslandCameraPose(
   camera: Camera,
-  pose: PascalWaterCameraPose | null,
-  fallbackTarget: readonly [number, number, number] = PASCAL_WATER_CAMERA_TARGET,
+  pose: LandrushIslandCameraPose | null,
+  fallbackTarget: readonly [number, number, number] = LANDRUSH_ISLAND_CAMERA_TARGET,
 ) {
   camera.up.set(0, 1, 0)
   if (pose) {
@@ -11642,23 +12055,23 @@ function applyPascalWaterCameraPose(
   camera.updateMatrixWorld()
 }
 
-function createPascalWaterCameraPose(camera: Camera, target: Vector3): PascalWaterCameraPose {
-  const pose: PascalWaterCameraPose = {
+function createLandrushIslandCameraPose(camera: Camera, target: Vector3): LandrushIslandCameraPose {
+  const pose: LandrushIslandCameraPose = {
     distance: 0,
     pitch: 0,
     position: camera.position.clone(),
     quaternion: camera.quaternion.clone(),
     target: target.clone(),
     yaw: 0,
-    zoom: isPascalWaterOrthographicCamera(camera) ? camera.zoom : null,
+    zoom: isLandrushIslandOrthographicCamera(camera) ? camera.zoom : null,
   }
-  updatePascalWaterCameraPoseOrbit(pose)
+  updateLandrushIslandCameraPoseOrbit(pose)
   return pose
 }
 
-function clonePascalWaterCameraPose(
-  pose: PascalWaterCameraPose | null,
-): PascalWaterCameraPose | null {
+function cloneLandrushIslandCameraPose(
+  pose: LandrushIslandCameraPose | null,
+): LandrushIslandCameraPose | null {
   if (!pose) return null
   return {
     distance: pose.distance,
@@ -11671,8 +12084,8 @@ function clonePascalWaterCameraPose(
   }
 }
 
-function pascalWaterCameraPoseToEditorInitialPose(
-  pose: PascalWaterCameraPose,
+function landrushIslandCameraPoseToEditorInitialPose(
+  pose: LandrushIslandCameraPose,
 ): EditorCameraInitialPose {
   return {
     position: [pose.position.x, pose.position.y, pose.position.z],
@@ -11680,14 +12093,14 @@ function pascalWaterCameraPoseToEditorInitialPose(
   }
 }
 
-function maybePascalWaterCameraPoseToEditorInitialPose(
-  pose: PascalWaterCameraPose | null,
+function maybeLandrushIslandCameraPoseToEditorInitialPose(
+  pose: LandrushIslandCameraPose | null,
 ): EditorCameraInitialPose | null {
-  return pose ? pascalWaterCameraPoseToEditorInitialPose(pose) : null
+  return pose ? landrushIslandCameraPoseToEditorInitialPose(pose) : null
 }
 
-function writePascalWaterCameraPose(
-  poseRef: { current: PascalWaterCameraPose | null },
+function writeLandrushIslandCameraPose(
+  poseRef: { current: LandrushIslandCameraPose | null },
   camera: Camera,
   target: Vector3,
 ) {
@@ -11707,11 +12120,11 @@ function writePascalWaterCameraPose(
   pose.position.copy(camera.position)
   pose.quaternion.copy(camera.quaternion)
   pose.target.copy(target)
-  pose.zoom = isPascalWaterOrthographicCamera(camera) ? camera.zoom : null
-  updatePascalWaterCameraPoseOrbit(pose)
+  pose.zoom = isLandrushIslandOrthographicCamera(camera) ? camera.zoom : null
+  updateLandrushIslandCameraPoseOrbit(pose)
 }
 
-function updatePascalWaterCameraPoseOrbit(pose: PascalWaterCameraPose) {
+function updateLandrushIslandCameraPoseOrbit(pose: LandrushIslandCameraPose) {
   const offsetX = pose.position.x - pose.target.x
   const offsetY = pose.position.y - pose.target.y
   const offsetZ = pose.position.z - pose.target.z
@@ -11735,38 +12148,38 @@ function syncThirdPersonCameraOrbitRefs(
   yawRef.current = Math.atan2(offsetX, offsetZ)
   pitchRef.current = MathUtils.clamp(
     Math.atan2(offsetY, horizontalDistance),
-    PASCAL_WATER_ISOMETRIC_CAMERA_MIN_PITCH,
-    PASCAL_WATER_ISOMETRIC_CAMERA_MAX_PITCH,
+    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
+    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
   )
   distanceRef.current = MathUtils.clamp(
     Math.hypot(horizontalDistance, offsetY),
-    PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-    PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
   )
 }
 
-function resolvePascalWaterPlayerReturnTargetPose(
-  sourcePose: PascalWaterCameraPose,
+function resolveLandrushIslandPlayerReturnTargetPose(
+  sourcePose: LandrushIslandCameraPose,
   target: Vector3,
   outputPosition: Vector3,
-): PascalWaterCameraPose {
+): LandrushIslandCameraPose {
   const yaw = Number.isFinite(sourcePose.yaw)
     ? sourcePose.yaw
-    : PASCAL_WATER_ISOMETRIC_CAMERA_INITIAL_YAW
+    : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW
   const pitch = Number.isFinite(sourcePose.pitch)
     ? clamp(
         sourcePose.pitch,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MIN_PITCH,
-        PASCAL_WATER_ISOMETRIC_CAMERA_MAX_PITCH,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
       )
-    : PASCAL_WATER_ISOMETRIC_CAMERA_PITCH
+    : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH
   const sourceDistance = Number.isFinite(sourcePose.distance)
     ? sourcePose.distance
     : sourcePose.position.distanceTo(sourcePose.target)
   const distance = clamp(
     sourceDistance,
-    PASCAL_WATER_ISOMETRIC_CAMERA_MIN_DISTANCE,
-    PASCAL_WATER_ISOMETRIC_CAMERA_MAX_DISTANCE,
+    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
   )
 
   const position = resolveThirdPersonCameraPosition(
@@ -11781,25 +12194,25 @@ function resolvePascalWaterPlayerReturnTargetPose(
     distance,
     pitch,
     position,
-    quaternion: resolvePascalWaterCameraPoseQuaternion(position, target, new Quaternion()),
+    quaternion: resolveLandrushIslandCameraPoseQuaternion(position, target, new Quaternion()),
     target: target.clone(),
     yaw,
     zoom: null,
   }
 }
 
-function resolvePascalWaterCameraPoseQuaternion(
+function resolveLandrushIslandCameraPoseQuaternion(
   position: Vector3,
   target: Vector3,
   output: Quaternion,
 ) {
-  _pascalWaterCameraPoseLookAtMatrix.lookAt(position, target, _pascalWaterCameraPoseUp)
-  return output.setFromRotationMatrix(_pascalWaterCameraPoseLookAtMatrix)
+  _landrushIslandCameraPoseLookAtMatrix.lookAt(position, target, _landrushIslandCameraPoseUp)
+  return output.setFromRotationMatrix(_landrushIslandCameraPoseLookAtMatrix)
 }
 
-function easePascalWaterCameraTransition(
+function easeLandrushIslandCameraTransition(
   progress: number,
-  _targetMode: PascalWaterRuntimeCameraSample['mode'],
+  _targetMode: LandrushIslandRuntimeCameraSample['mode'],
 ) {
   const t = clamp01(progress)
   return t * t * (3 - 2 * t)
@@ -11827,9 +12240,9 @@ function getRobotWorldOrbitControls(state: unknown) {
   return controls
 }
 
-function getPascalWaterCameraControls(state: unknown) {
+function getLandrushIslandCameraControls(state: unknown) {
   const controls = (state as { controls?: unknown }).controls
-  if (!isPascalWaterCameraControls(controls)) return undefined
+  if (!isLandrushIslandCameraControls(controls)) return undefined
   return controls
 }
 
@@ -11843,14 +12256,16 @@ function isRobotWorldOrbitControls(controls: unknown): controls is RobotWorldOrb
   )
 }
 
-function isPascalWaterCameraControls(controls: unknown): controls is PascalWaterCameraControls {
+function isLandrushIslandCameraControls(
+  controls: unknown,
+): controls is LandrushIslandCameraControls {
   if (!controls || typeof controls !== 'object') return false
-  const candidate = controls as Partial<PascalWaterCameraControls>
+  const candidate = controls as Partial<LandrushIslandCameraControls>
   return typeof candidate.setLookAt === 'function' || typeof candidate.getTarget === 'function'
 }
 
-function readPascalWaterCameraControlsTarget(
-  controls: PascalWaterCameraControls | undefined,
+function readLandrushIslandCameraControlsTarget(
+  controls: LandrushIslandCameraControls | undefined,
   output: Vector3,
 ) {
   if (controls?.getTarget) {
@@ -11878,19 +12293,19 @@ function resolveRightHoldMovement({
   camera: Camera
   canvas: HTMLCanvasElement
   colliderMeshes: Mesh[]
-  doorPortals: readonly PascalWaterDoorPortal[]
+  doorPortals: readonly LandrushIslandDoorPortal[]
   groundY: number
   motion: RobotMotion
-  navigationObstacles: readonly PascalWaterNavigationObstacle[]
-  pointer: PascalWaterRightHoldMove | null
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[]
+  pointer: LandrushIslandRightHoldMove | null
   pointerNdc: Vector2
   raycaster: Raycaster
-  stairPortals: readonly PascalWaterStairPortal[]
+  stairPortals: readonly LandrushIslandStairPortal[]
   surfacePoints: readonly LandrushPoint2[]
 }): RobotMovementInput | null {
   if (!pointer) return null
 
-  const point = pickPascalWaterWalkTargetPoint({
+  const point = pickLandrushIslandWalkTargetPoint({
     camera,
     canvas,
     colliderMeshes,
@@ -11901,10 +12316,10 @@ function resolveRightHoldMovement({
   })
   const start = { x: motion.position.x, z: motion.position.z }
   const rawTargetPoint = point
-    ? resolvePascalWaterStairConnectorTarget(start, point, stairPortals)
+    ? resolveLandrushIslandStairConnectorTarget(start, point, stairPortals)
     : null
   const targetPoint = rawTargetPoint
-    ? resolvePascalWaterWalkableNavigationTargetPoint(
+    ? resolveLandrushIslandWalkableNavigationTargetPoint(
         rawTargetPoint,
         navigationObstacles,
         surfacePoints,
@@ -11912,7 +12327,7 @@ function resolveRightHoldMovement({
     : null
   if (!targetPoint) return null
 
-  const steeringPoint = resolvePascalWaterNavigationSteeringPoint(
+  const steeringPoint = resolveLandrushIslandNavigationSteeringPoint(
     start,
     targetPoint,
     navigationObstacles,
@@ -11921,13 +12336,13 @@ function resolveRightHoldMovement({
     stairPortals,
   )
   if (!steeringPoint) return null
-  openPascalWaterDoorPortalsAlongSegment(start, targetPoint, doorPortals)
+  openLandrushIslandDoorPortalsAlongSegment(start, targetPoint, doorPortals)
   const dx = targetPoint.x - motion.position.x
   const dz = targetPoint.z - motion.position.z
   const distance = Math.hypot(dx, dz)
-  if (distance <= PASCAL_WATER_CLICK_MOVE_STOP_RADIUS) return null
+  if (distance <= LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS) return null
 
-  const movement = resolvePascalWaterNavigationMovementVector(start, steeringPoint, distance)
+  const movement = resolveLandrushIslandNavigationMovementVector(start, steeringPoint, distance)
   return {
     x: movement.x,
     z: movement.z,
@@ -11943,10 +12358,10 @@ function resolveRightHoldMovement({
 
 function resolveClickMoveMovement(
   motion: RobotMotion,
-  targetRef: { current: PascalWaterMoveTarget | null },
-  navigationObstacles: readonly PascalWaterNavigationObstacle[],
-  doorPortals: readonly PascalWaterDoorPortal[],
-  stairPortals: readonly PascalWaterStairPortal[],
+  targetRef: { current: LandrushIslandMoveTarget | null },
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
+  stairPortals: readonly LandrushIslandStairPortal[],
   surfacePoints: readonly LandrushPoint2[],
 ): RobotMovementInput | null {
   const target = targetRef.current
@@ -11955,40 +12370,40 @@ function resolveClickMoveMovement(
   const now = performance.now()
   const start = { x: motion.position.x, z: motion.position.z }
   const distance = Math.hypot(target.point.x - start.x, target.point.z - start.z)
-  target.route ??= createPascalWaterMoveRouteState(start, distance, now)
+  target.route ??= createLandrushIslandMoveRouteState(start, distance, now)
   const crossingInProgress = target.route.doorCrossing !== null
 
   const projectedFinalReached =
     !crossingInProgress &&
-    segmentReachedPascalWaterNavigationPoint(
+    segmentReachedLandrushIslandNavigationPoint(
       target.route.lastRobotPoint,
       start,
       target.point,
-      PASCAL_WATER_CLICK_MOVE_STOP_RADIUS,
+      LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS,
     )
   if (
     !crossingInProgress &&
-    (distance <= PASCAL_WATER_CLICK_MOVE_STOP_RADIUS ||
-      (projectedFinalReached && distance <= PASCAL_WATER_CLICK_MOVE_PROJECTED_STOP_RADIUS))
+    (distance <= LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS ||
+      (projectedFinalReached && distance <= LANDRUSH_ISLAND_CLICK_MOVE_PROJECTED_STOP_RADIUS))
   ) {
-    recordPascalWaterNavigationProbe({
+    recordLandrushIslandNavigationProbe({
       distance: roundPerf(distance),
       kind: 'click-arrived',
-      projected: distance > PASCAL_WATER_CLICK_MOVE_STOP_RADIUS,
+      projected: distance > LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS,
     })
     targetRef.current = null
     return null
   }
   if (projectedFinalReached) {
-    recordPascalWaterNavigationProbe({
+    recordLandrushIslandNavigationProbe({
       distance: roundPerf(distance),
       kind: 'click-arrival-projection-ignored',
-      projectedStopRadius: roundPerf(PASCAL_WATER_CLICK_MOVE_PROJECTED_STOP_RADIUS),
+      projectedStopRadius: roundPerf(LANDRUSH_ISLAND_CLICK_MOVE_PROJECTED_STOP_RADIUS),
     })
   }
 
-  target.route = updatePascalWaterMoveRouteProgress(target.route, start, distance, now)
-  let doorCrossingResolution = resolvePascalWaterActiveDoorCrossingSteering(
+  target.route = updateLandrushIslandMoveRouteProgress(target.route, start, distance, now)
+  let doorCrossingResolution = resolveLandrushIslandActiveDoorCrossingSteering(
     target.route,
     start,
     now,
@@ -12002,15 +12417,15 @@ function resolveClickMoveMovement(
     return null
   }
   const completedDoorCrossing = doorCrossingResolution?.completed === true
-  let activeSteering: PascalWaterNavigationSteeringResult | null =
+  let activeSteering: LandrushIslandNavigationSteeringResult | null =
     doorCrossingResolution?.steering ?? null
   const noProgressMs = now - target.route.lastProgressAt
   const hasStalled =
-    noProgressMs >= PASCAL_WATER_CLICK_MOVE_STALL_MS &&
-    (motion.speed <= PASCAL_WATER_CLICK_MOVE_STALL_SPEED ||
-      noProgressMs >= PASCAL_WATER_CLICK_MOVE_NO_PROGRESS_RETRY_MS)
+    noProgressMs >= LANDRUSH_ISLAND_CLICK_MOVE_STALL_MS &&
+    (motion.speed <= LANDRUSH_ISLAND_CLICK_MOVE_STALL_SPEED ||
+      noProgressMs >= LANDRUSH_ISLAND_CLICK_MOVE_NO_PROGRESS_RETRY_MS)
   if (!activeSteering && hasStalled) {
-    const recovery = resolvePascalWaterNavigationRecoverySteeringPoint(
+    const recovery = resolveLandrushIslandNavigationRecoverySteeringPoint(
       start,
       target.point,
       target.route.lastSteeringPoint ?? target.point,
@@ -12023,14 +12438,14 @@ function resolveClickMoveMovement(
     target.route.recoveryCount += 1
     if (recovery) {
       activeSteering = recovery
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         distance: roundPerf(distance),
         kind: 'click-stall-recovery',
         recoveryCount: target.route.recoveryCount,
         steering: [roundPerf(recovery.point.x), roundPerf(recovery.point.z)],
       })
     } else {
-      const retry = resolvePascalWaterNavigationLocalRetrySteeringPoint(
+      const retry = resolveLandrushIslandNavigationLocalRetrySteeringPoint(
         start,
         target.point,
         target.route.lastSteeringPoint ?? target.point,
@@ -12040,17 +12455,17 @@ function resolveClickMoveMovement(
       )
       if (retry) {
         activeSteering = retry
-        recordPascalWaterNavigationProbe({
+        recordLandrushIslandNavigationProbe({
           distance: roundPerf(distance),
           kind: 'click-stall-local-retry',
           noProgressMs: roundPerf(noProgressMs),
           recoveryCount: target.route.recoveryCount,
           steering: [roundPerf(retry.point.x), roundPerf(retry.point.z)],
         })
-      } else if (target.route.recoveryCount < PASCAL_WATER_CLICK_MOVE_LOCAL_RETRY_MAX) {
-        target.route.nextRetryAt = now + PASCAL_WATER_CLICK_MOVE_RETRY_MS
+      } else if (target.route.recoveryCount < LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX) {
+        target.route.nextRetryAt = now + LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS
       }
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         distance: roundPerf(distance),
         kind: 'click-stall-replan',
         noProgressMs: roundPerf(noProgressMs),
@@ -12060,7 +12475,7 @@ function resolveClickMoveMovement(
   }
 
   if (!activeSteering) {
-    activeSteering = resolvePascalWaterNavigationSteeringPoint(
+    activeSteering = resolveLandrushIslandNavigationSteeringPoint(
       start,
       target.point,
       navigationObstacles,
@@ -12069,7 +12484,7 @@ function resolveClickMoveMovement(
       stairPortals,
     )
     if (!activeSteering) {
-      activeSteering = resolvePascalWaterNavigationEscapeSteeringPoint(
+      activeSteering = resolveLandrushIslandNavigationEscapeSteeringPoint(
         start,
         target.point,
         navigationObstacles,
@@ -12081,7 +12496,7 @@ function resolveClickMoveMovement(
         target.route.lastProgressAt = now
         target.route.nextRetryAt = 0
         target.route.recoveryCount += 1
-        recordPascalWaterNavigationProbe({
+        recordLandrushIslandNavigationProbe({
           distance: roundPerf(distance),
           kind: 'click-route-recovery',
           recoveryCount: target.route.recoveryCount,
@@ -12089,7 +12504,7 @@ function resolveClickMoveMovement(
           target: [roundPerf(target.point.x), roundPerf(target.point.z)],
         })
       } else {
-        const retryRecovery = resolvePascalWaterNavigationRecoverySteeringPoint(
+        const retryRecovery = resolveLandrushIslandNavigationRecoverySteeringPoint(
           start,
           target.point,
           target.route.lastSteeringPoint ?? target.point,
@@ -12102,7 +12517,7 @@ function resolveClickMoveMovement(
           activeSteering = retryRecovery
           target.route.nextRetryAt = 0
           target.route.recoveryCount += 1
-          recordPascalWaterNavigationProbe({
+          recordLandrushIslandNavigationProbe({
             distance: roundPerf(distance),
             kind: 'click-no-route-recovery',
             recoveryCount: target.route.recoveryCount,
@@ -12111,7 +12526,7 @@ function resolveClickMoveMovement(
           })
         } else {
           target.route.recoveryCount += 1
-          const localRetry = resolvePascalWaterNavigationLocalRetrySteeringPoint(
+          const localRetry = resolveLandrushIslandNavigationLocalRetrySteeringPoint(
             start,
             target.point,
             target.route.lastSteeringPoint ?? target.point,
@@ -12122,7 +12537,7 @@ function resolveClickMoveMovement(
           if (localRetry) {
             activeSteering = localRetry
             target.route.nextRetryAt = 0
-            recordPascalWaterNavigationProbe({
+            recordLandrushIslandNavigationProbe({
               distance: roundPerf(distance),
               kind: 'click-no-route-local-retry',
               recoveryCount: target.route.recoveryCount,
@@ -12130,12 +12545,12 @@ function resolveClickMoveMovement(
               target: [roundPerf(target.point.x), roundPerf(target.point.z)],
             })
           } else {
-            target.route.nextRetryAt = now + PASCAL_WATER_CLICK_MOVE_RETRY_MS
-            recordPascalWaterNavigationProbe({
+            target.route.nextRetryAt = now + LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS
+            recordLandrushIslandNavigationProbe({
               distance: roundPerf(distance),
               kind: 'click-no-route-retry',
               recoveryCount: target.route.recoveryCount,
-              retryMs: PASCAL_WATER_CLICK_MOVE_RETRY_MS,
+              retryMs: LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS,
               target: [roundPerf(target.point.x), roundPerf(target.point.z)],
             })
             return null
@@ -12143,7 +12558,7 @@ function resolveClickMoveMovement(
         }
       }
     } else if (completedDoorCrossing) {
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         distance: roundPerf(distance),
         kind: 'door-crossing-resume-target',
       })
@@ -12151,8 +12566,8 @@ function resolveClickMoveMovement(
   }
 
   if (activeSteering.doorCrossing && !target.route.doorCrossing) {
-    target.route.doorCrossing = clonePascalWaterDoorCrossingState(activeSteering.doorCrossing)
-    recordPascalWaterNavigationProbe({
+    target.route.doorCrossing = cloneLandrushIslandDoorCrossingState(activeSteering.doorCrossing)
+    recordLandrushIslandNavigationProbe({
       doorId: activeSteering.doorId,
       entry: [
         roundPerf(target.route.doorCrossing.entry.x),
@@ -12166,7 +12581,11 @@ function resolveClickMoveMovement(
       nodeId: target.route.doorCrossing.nodeId,
       phase: target.route.doorCrossing.phase,
     })
-    doorCrossingResolution = resolvePascalWaterActiveDoorCrossingSteering(target.route, start, now)
+    doorCrossingResolution = resolveLandrushIslandActiveDoorCrossingSteering(
+      target.route,
+      start,
+      now,
+    )
     if (doorCrossingResolution?.waiting) {
       target.route.lastRobotPoint = start
       return null
@@ -12174,11 +12593,11 @@ function resolveClickMoveMovement(
     activeSteering = doorCrossingResolution?.steering ?? activeSteering
   }
 
-  openPascalWaterDoorPortalsAlongSegment(start, target.point, doorPortals)
+  openLandrushIslandDoorPortalsAlongSegment(start, target.point, doorPortals)
   if (activeSteering.doorId) {
-    const openState = openPascalWaterDoor(activeSteering.doorId)
+    const openState = openLandrushIslandDoor(activeSteering.doorId)
     if (openState === 'started') {
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         doorId: activeSteering.doorId,
         kind: 'door-open-on-route',
         navigationKind: activeSteering.kind,
@@ -12194,10 +12613,10 @@ function resolveClickMoveMovement(
       activeSteering.point.x - start.x,
       activeSteering.point.z - start.z,
     )
-    const waypointRadius = PASCAL_WATER_CLICK_MOVE_WAYPOINT_RADIUS
+    const waypointRadius = LANDRUSH_ISLAND_CLICK_MOVE_WAYPOINT_RADIUS
     const reached =
       steeringDistance <= waypointRadius ||
-      segmentReachedPascalWaterNavigationPoint(
+      segmentReachedLandrushIslandNavigationPoint(
         target.route.lastRobotPoint,
         start,
         activeSteering.point,
@@ -12208,12 +12627,12 @@ function resolveClickMoveMovement(
     target.route.lastProgressAt = now
     target.route.lastRobotPoint = start
     target.route.lastSteeringPoint = activeSteering.point
-    recordPascalWaterNavigationProbe({
+    recordLandrushIslandNavigationProbe({
       kind: 'click-waypoint-reached',
       navigationKind: activeSteering.kind,
       steeringDistance: roundPerf(steeringDistance),
     })
-    const nextSteering = resolvePascalWaterNavigationSteeringPoint(
+    const nextSteering = resolveLandrushIslandNavigationSteeringPoint(
       start,
       target.point,
       navigationObstacles,
@@ -12230,7 +12649,7 @@ function resolveClickMoveMovement(
         ) <= 0.001)
     ) {
       if (activeSteering.kind === 'direct') {
-        recordPascalWaterNavigationProbe({
+        recordLandrushIslandNavigationProbe({
           distance: roundPerf(distance),
           kind: 'click-arrived',
           projected: true,
@@ -12242,7 +12661,7 @@ function resolveClickMoveMovement(
     activeSteering = nextSteering
   }
 
-  const movement = resolvePascalWaterNavigationMovementVector(start, activeSteering, distance)
+  const movement = resolveLandrushIslandNavigationMovementVector(start, activeSteering, distance)
   const lastSteeringPoint = target.route.lastSteeringPoint
   const steeringPointChanged =
     !lastSteeringPoint ||
@@ -12251,7 +12670,7 @@ function resolveClickMoveMovement(
       movement.steeringPoint.z - lastSteeringPoint.z,
     ) > 0.05
   if (activeSteering.doorId && steeringPointChanged) {
-    recordPascalWaterNavigationProbe({
+    recordLandrushIslandNavigationProbe({
       doorId: activeSteering.doorId,
       kind: 'door-route-selected',
       steeringDistance: roundPerf(movement.steeringDistance),
@@ -12274,13 +12693,13 @@ function resolveClickMoveMovement(
   }
 }
 
-function resolvePascalWaterNavigationMovementVector(
+function resolveLandrushIslandNavigationMovementVector(
   start: LandrushPoint2,
-  activeSteering: PascalWaterNavigationSteeringResult,
+  activeSteering: LandrushIslandNavigationSteeringResult,
   targetDistance: number,
 ) {
   const constrained = activeSteering.doorCrossing
-    ? resolvePascalWaterConstrainedCrossingMovement(
+    ? resolveLandrushIslandConstrainedCrossingMovement(
         start,
         activeSteering.doorCrossing,
         targetDistance,
@@ -12297,25 +12716,25 @@ function resolvePascalWaterNavigationMovementVector(
     heading: Math.atan2(direction.x, direction.z),
     intensity:
       constrained?.intensity ??
-      resolvePascalWaterNavigationMoveIntensity(
+      resolveLandrushIslandNavigationMoveIntensity(
         activeSteering.kind,
         steeringDistance,
         targetDistance,
       ),
     runAmount:
-      constrained?.runAmount ?? (targetDistance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE ? 1 : 0),
+      constrained?.runAmount ?? (targetDistance > LANDRUSH_ISLAND_CLICK_MOVE_RUN_DISTANCE ? 1 : 0),
     steeringDistance,
     steeringPoint,
   }
 }
 
-function resolvePascalWaterWalkableNavigationTargetPoint(
+function resolveLandrushIslandWalkableNavigationTargetPoint(
   target: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
   surfacePoints: readonly LandrushPoint2[],
 ): LandrushPoint2 | null {
   if (!pointInPolygon(target, surfacePoints)) return null
-  if (!pointInPascalWaterBlockingNavigationObstacle(target, obstacles)) return target
+  if (!pointInLandrushIslandBlockingNavigationObstacle(target, obstacles)) return target
 
   let best: { distance: number; point: LandrushPoint2 } | null = null
   for (const obstacle of obstacles) {
@@ -12326,9 +12745,9 @@ function resolvePascalWaterWalkableNavigationTargetPoint(
     const normal = normalize2(boundary.x - centroid.x, boundary.z - centroid.z)
     const tangent = normalize2(-normal.z, normal.x)
     const distances = [
-      PASCAL_WATER_NAVIGATION_TARGET_NUDGE_METERS,
-      PASCAL_WATER_CLICK_MOVE_STOP_RADIUS,
-      PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
+      LANDRUSH_ISLAND_NAVIGATION_TARGET_NUDGE_METERS,
+      LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS,
+      LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
     ] as const
 
     for (const distance of distances) {
@@ -12337,14 +12756,14 @@ function resolvePascalWaterWalkableNavigationTargetPoint(
           x:
             boundary.x +
             normal.x * distance +
-            tangent.x * side * PASCAL_WATER_NAVIGATION_TARGET_NUDGE_METERS,
+            tangent.x * side * LANDRUSH_ISLAND_NAVIGATION_TARGET_NUDGE_METERS,
           z:
             boundary.z +
             normal.z * distance +
-            tangent.z * side * PASCAL_WATER_NAVIGATION_TARGET_NUDGE_METERS,
+            tangent.z * side * LANDRUSH_ISLAND_NAVIGATION_TARGET_NUDGE_METERS,
         }
         if (!pointInPolygon(candidate, surfacePoints)) continue
-        if (pointInPascalWaterBlockingNavigationObstacle(candidate, obstacles)) continue
+        if (pointInLandrushIslandBlockingNavigationObstacle(candidate, obstacles)) continue
         const candidateDistance = Math.hypot(candidate.x - target.x, candidate.z - target.z)
         if (!best || candidateDistance < best.distance) {
           best = { distance: candidateDistance, point: candidate }
@@ -12356,18 +12775,18 @@ function resolvePascalWaterWalkableNavigationTargetPoint(
   return best?.point ?? null
 }
 
-function resolvePascalWaterObstacleSlideMovement(
+function resolveLandrushIslandObstacleSlideMovement(
   start: LandrushPoint2,
   movement: RobotMovementInput,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
 ): RobotMovementInput {
   if (movement.navigationKind === 'door' || movement.navigationKind === 'stair') return movement
 
-  const contact = resolvePascalWaterNavigationSlideContact(start, movement, obstacles)
+  const contact = resolveLandrushIslandNavigationSlideContact(start, movement, obstacles)
   if (!contact) return movement
 
   const inwardDot = movement.x * contact.normal.x + movement.z * contact.normal.z
-  if (inwardDot >= -PASCAL_WATER_NAVIGATION_SLIDE_MIN_INWARD_DOT) return movement
+  if (inwardDot >= -LANDRUSH_ISLAND_NAVIGATION_SLIDE_MIN_INWARD_DOT) return movement
 
   const slideX = movement.x - contact.normal.x * inwardDot
   const slideZ = movement.z - contact.normal.z * inwardDot
@@ -12387,10 +12806,10 @@ function resolvePascalWaterObstacleSlideMovement(
   }
 }
 
-function resolvePascalWaterNavigationSlideContact(
+function resolveLandrushIslandNavigationSlideContact(
   start: LandrushPoint2,
   movement: RobotMovementInput,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
 ) {
   let best: { distance: number; normal: LandrushPoint2; tangent: LandrushPoint2 } | null = null
 
@@ -12401,7 +12820,7 @@ function resolvePascalWaterNavigationSlideContact(
 
     const inside = pointInPolygon(start, obstacle.points)
     const distance = Math.hypot(start.x - boundary.x, start.z - boundary.z)
-    if (!inside && distance > PASCAL_WATER_NAVIGATION_SLIDE_RADIUS_METERS) continue
+    if (!inside && distance > LANDRUSH_ISLAND_NAVIGATION_SLIDE_RADIUS_METERS) continue
 
     const centroid = centroidForPolygon(obstacle.points)
     let normal = normalize2(boundary.x - centroid.x, boundary.z - centroid.z)
@@ -12413,7 +12832,7 @@ function resolvePascalWaterNavigationSlideContact(
     }
 
     const inwardAmount = -(movement.x * normal.x + movement.z * normal.z)
-    if (inwardAmount <= PASCAL_WATER_NAVIGATION_SLIDE_MIN_INWARD_DOT) continue
+    if (inwardAmount <= LANDRUSH_ISLAND_NAVIGATION_SLIDE_MIN_INWARD_DOT) continue
 
     const score = inside ? distance * 0.5 : distance
     if (!best || score < best.distance) {
@@ -12428,9 +12847,9 @@ function resolvePascalWaterNavigationSlideContact(
   return best
 }
 
-function resolvePascalWaterConstrainedCrossingMovement(
+function resolveLandrushIslandConstrainedCrossingMovement(
   start: LandrushPoint2,
-  crossing: PascalWaterDoorCrossingState,
+  crossing: LandrushIslandDoorCrossingState,
   targetDistance: number,
 ) {
   const routeX = crossing.exit.x - crossing.entry.x
@@ -12453,12 +12872,12 @@ function resolvePascalWaterConstrainedCrossingMovement(
     crossing.phase === 'entry' ? 0 : crossing.phase === 'center' ? centerProgress : routeLength
   const phaseRadius =
     crossing.phase === 'center'
-      ? PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS
-      : PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+      ? LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS
+      : LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
   const phasePlaneReached = progressFromEntry >= phaseProgress - phaseRadius
   const steeringProgress = clamp(
     phasePlaneReached && Math.abs(lateralFromRoute) <= phaseRadius
-      ? progressFromEntry + PASCAL_WATER_CONSTRAINED_CROSSING_LOOKAHEAD_METERS
+      ? progressFromEntry + LANDRUSH_ISLAND_CONSTRAINED_CROSSING_LOOKAHEAD_METERS
       : phaseProgress,
     0,
     routeLength,
@@ -12470,19 +12889,19 @@ function resolvePascalWaterConstrainedCrossingMovement(
   const steeringDistance = Math.hypot(steeringPoint.x - start.x, steeringPoint.z - start.z)
   const crossingDistance = Math.max(steeringDistance, Math.abs(lateralFromRoute) * 0.75)
   const rawIntensity = clamp01(
-    crossingDistance / PASCAL_WATER_CONSTRAINED_CROSSING_FULL_SPEED_METERS,
+    crossingDistance / LANDRUSH_ISLAND_CONSTRAINED_CROSSING_FULL_SPEED_METERS,
   )
   const intensity = MathUtils.clamp(
     rawIntensity,
-    PASCAL_WATER_CONSTRAINED_CROSSING_MIN_SPEED_SCALE,
-    PASCAL_WATER_CONSTRAINED_CROSSING_MAX_SPEED_SCALE,
+    LANDRUSH_ISLAND_CONSTRAINED_CROSSING_MIN_SPEED_SCALE,
+    LANDRUSH_ISLAND_CONSTRAINED_CROSSING_MAX_SPEED_SCALE,
   )
   const distanceBeforeEntry = Math.max(0, -progressFromEntry)
   const runAmount =
     crossing.phase === 'entry' &&
     Math.max(distanceBeforeEntry, steeringDistance) >
-      PASCAL_WATER_CONSTRAINED_CROSSING_RUN_APPROACH_METERS &&
-    targetDistance > PASCAL_WATER_CLICK_MOVE_RUN_DISTANCE
+      LANDRUSH_ISLAND_CONSTRAINED_CROSSING_RUN_APPROACH_METERS &&
+    targetDistance > LANDRUSH_ISLAND_CLICK_MOVE_RUN_DISTANCE
       ? 1
       : 0
 
@@ -12493,11 +12912,11 @@ function resolvePascalWaterConstrainedCrossingMovement(
   }
 }
 
-function createPascalWaterMoveRouteState(
+function createLandrushIslandMoveRouteState(
   point: LandrushPoint2,
   distance: number,
   now: number,
-): PascalWaterMoveRouteState {
+): LandrushIslandMoveRouteState {
   return {
     bestDistance: distance,
     doorCrossing: null,
@@ -12509,13 +12928,13 @@ function createPascalWaterMoveRouteState(
   }
 }
 
-function updatePascalWaterMoveRouteProgress(
-  route: PascalWaterMoveRouteState,
+function updateLandrushIslandMoveRouteProgress(
+  route: LandrushIslandMoveRouteState,
   point: LandrushPoint2,
   distance: number,
   now: number,
 ) {
-  if (distance < route.bestDistance - PASCAL_WATER_CLICK_MOVE_PROGRESS_EPSILON_METERS) {
+  if (distance < route.bestDistance - LANDRUSH_ISLAND_CLICK_MOVE_PROGRESS_EPSILON_METERS) {
     route.bestDistance = distance
     route.lastProgressAt = now
   }
@@ -12523,51 +12942,51 @@ function updatePascalWaterMoveRouteProgress(
   return route
 }
 
-function resolvePascalWaterClickMoveIntensity(distance: number) {
-  const normalized = clamp01(distance / PASCAL_WATER_CLICK_MOVE_FULL_SPEED_DISTANCE)
-  return MathUtils.clamp(normalized * normalized, PASCAL_WATER_CLICK_MOVE_MIN_SPEED_SCALE, 1)
+function resolveLandrushIslandClickMoveIntensity(distance: number) {
+  const normalized = clamp01(distance / LANDRUSH_ISLAND_CLICK_MOVE_FULL_SPEED_DISTANCE)
+  return MathUtils.clamp(normalized * normalized, LANDRUSH_ISLAND_CLICK_MOVE_MIN_SPEED_SCALE, 1)
 }
 
-function resolvePascalWaterNavigationMoveIntensity(
-  kind: PascalWaterNavigationSteeringKind,
+function resolveLandrushIslandNavigationMoveIntensity(
+  kind: LandrushIslandNavigationSteeringKind,
   steeringDistance: number,
   targetDistance: number,
 ) {
   const constrainedCrossing = kind === 'door' || kind === 'stair'
   const speedDistance = constrainedCrossing ? targetDistance : steeringDistance
-  const intensity = resolvePascalWaterClickMoveIntensity(speedDistance)
+  const intensity = resolveLandrushIslandClickMoveIntensity(speedDistance)
   return constrainedCrossing
-    ? Math.max(PASCAL_WATER_DOOR_CROSSING_MIN_INTENSITY, intensity)
+    ? Math.max(LANDRUSH_ISLAND_DOOR_CROSSING_MIN_INTENSITY, intensity)
     : intensity
 }
 
-function resolvePascalWaterActiveDoorCrossingSteering(
-  route: PascalWaterMoveRouteState,
+function resolveLandrushIslandActiveDoorCrossingSteering(
+  route: LandrushIslandMoveRouteState,
   start: LandrushPoint2,
   now: number,
 ): {
   completed: boolean
-  steering: PascalWaterNavigationSteeringResult | null
+  steering: LandrushIslandNavigationSteeringResult | null
   waiting: boolean
 } | null {
   const crossing = route.doorCrossing
   if (!crossing) return null
 
   for (let advance = 0; advance < 3; advance += 1) {
-    const point = pointForPascalWaterDoorCrossingPhase(crossing)
+    const point = pointForLandrushIslandDoorCrossingPhase(crossing)
     const radius =
       crossing.phase === 'center'
-        ? PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS
-        : PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+        ? LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS
+        : LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
     const distance = Math.hypot(point.x - start.x, point.z - start.z)
     const reached =
       distance <= radius ||
-      segmentReachedPascalWaterNavigationPoint(route.lastRobotPoint, start, point, radius)
+      segmentReachedLandrushIslandNavigationPoint(route.lastRobotPoint, start, point, radius)
     if (!reached) {
       return {
         completed: false,
         steering: {
-          doorCrossing: clonePascalWaterDoorCrossingState(crossing),
+          doorCrossing: cloneLandrushIslandDoorCrossingState(crossing),
           doorId: crossing.doorId,
           kind: crossing.kind,
           point,
@@ -12580,17 +12999,17 @@ function resolvePascalWaterActiveDoorCrossingSteering(
       crossing.kind === 'door' &&
       crossing.doorId &&
       crossing.phase === 'entry' &&
-      getPascalWaterDoorOpenRatio(crossing.doorId) < PASCAL_WATER_DOOR_CROSSING_OPEN_MIN
+      getLandrushIslandDoorOpenRatio(crossing.doorId) < LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN
     ) {
-      const openState = openPascalWaterDoor(crossing.doorId)
+      const openState = openLandrushIslandDoor(crossing.doorId)
       route.lastProgressAt = now
       route.lastSteeringPoint = point
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         distance: roundPerf(distance),
         doorId: crossing.doorId,
         kind: 'door-crossing-wait-open',
         nodeId: crossing.nodeId,
-        openRatio: roundPerf(getPascalWaterDoorOpenRatio(crossing.doorId)),
+        openRatio: roundPerf(getLandrushIslandDoorOpenRatio(crossing.doorId)),
         openState,
         phase: crossing.phase,
       })
@@ -12599,20 +13018,20 @@ function resolvePascalWaterActiveDoorCrossingSteering(
 
     route.lastProgressAt = now
     route.lastSteeringPoint = point
-    recordPascalWaterNavigationProbe({
+    recordLandrushIslandNavigationProbe({
       distance: roundPerf(distance),
       doorId: crossing.doorId,
       kind: `${crossing.kind}-crossing-waypoint`,
       nodeId: crossing.nodeId,
       phase: crossing.phase,
-      signedDistance: roundPerf(signedPascalWaterDoorCrossingDistance(start, crossing)),
-      tangentDistance: roundPerf(tangentPascalWaterDoorCrossingDistance(start, crossing)),
+      signedDistance: roundPerf(signedLandrushIslandDoorCrossingDistance(start, crossing)),
+      tangentDistance: roundPerf(tangentLandrushIslandDoorCrossingDistance(start, crossing)),
     })
 
-    const nextPhase = nextPascalWaterDoorCrossingPhase(crossing.phase)
+    const nextPhase = nextLandrushIslandDoorCrossingPhase(crossing.phase)
     if (!nextPhase) {
       route.doorCrossing = null
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         doorId: crossing.doorId,
         kind: `${crossing.kind}-crossing-complete`,
         nodeId: crossing.nodeId,
@@ -12622,11 +13041,11 @@ function resolvePascalWaterActiveDoorCrossingSteering(
     crossing.phase = nextPhase
   }
 
-  const point = pointForPascalWaterDoorCrossingPhase(crossing)
+  const point = pointForLandrushIslandDoorCrossingPhase(crossing)
   return {
     completed: false,
     steering: {
-      doorCrossing: clonePascalWaterDoorCrossingState(crossing),
+      doorCrossing: cloneLandrushIslandDoorCrossingState(crossing),
       doorId: crossing.doorId,
       kind: crossing.kind,
       point,
@@ -12635,23 +13054,23 @@ function resolvePascalWaterActiveDoorCrossingSteering(
   }
 }
 
-function pointForPascalWaterDoorCrossingPhase(crossing: PascalWaterDoorCrossingState) {
+function pointForLandrushIslandDoorCrossingPhase(crossing: LandrushIslandDoorCrossingState) {
   if (crossing.phase === 'entry') return crossing.entry
   if (crossing.phase === 'center') return crossing.center
   return crossing.exit
 }
 
-function nextPascalWaterDoorCrossingPhase(
-  phase: PascalWaterDoorCrossingPhase,
-): PascalWaterDoorCrossingPhase | null {
+function nextLandrushIslandDoorCrossingPhase(
+  phase: LandrushIslandDoorCrossingPhase,
+): LandrushIslandDoorCrossingPhase | null {
   if (phase === 'entry') return 'center'
   if (phase === 'center') return 'exit'
   return null
 }
 
-function clonePascalWaterDoorCrossingState(
-  crossing: PascalWaterDoorCrossingState,
-): PascalWaterDoorCrossingState {
+function cloneLandrushIslandDoorCrossingState(
+  crossing: LandrushIslandDoorCrossingState,
+): LandrushIslandDoorCrossingState {
   return {
     center: clonePoint2(crossing.center),
     doorId: crossing.doorId,
@@ -12667,9 +13086,9 @@ function clonePoint2(point: LandrushPoint2): LandrushPoint2 {
   return { x: point.x, z: point.z }
 }
 
-function signedPascalWaterDoorCrossingDistance(
+function signedLandrushIslandDoorCrossingDistance(
   point: LandrushPoint2,
-  crossing: PascalWaterDoorCrossingState,
+  crossing: LandrushIslandDoorCrossingState,
 ) {
   const normal = normalize2(
     crossing.entry.x - crossing.center.x,
@@ -12678,9 +13097,9 @@ function signedPascalWaterDoorCrossingDistance(
   return (point.x - crossing.center.x) * normal.x + (point.z - crossing.center.z) * normal.z
 }
 
-function tangentPascalWaterDoorCrossingDistance(
+function tangentLandrushIslandDoorCrossingDistance(
   point: LandrushPoint2,
-  crossing: PascalWaterDoorCrossingState,
+  crossing: LandrushIslandDoorCrossingState,
 ) {
   const normal = normalize2(
     crossing.entry.x - crossing.center.x,
@@ -12689,7 +13108,7 @@ function tangentPascalWaterDoorCrossingDistance(
   return (point.x - crossing.center.x) * -normal.z + (point.z - crossing.center.z) * normal.x
 }
 
-function getPascalWaterDoorOpenRatio(doorId: AnyNodeId) {
+function getLandrushIslandDoorOpenRatio(doorId: AnyNodeId) {
   const node = useScene.getState().nodes[doorId]
   if (node?.type !== 'door') return 1
   if (node.openingKind === 'opening') return 1
@@ -12710,11 +13129,11 @@ function getPascalWaterDoorOpenRatio(doorId: AnyNodeId) {
     (interactiveDoor?.swingAngle ??
       (activeAnimation?.field === 'swingAngle' ? activeAnimation.to : undefined) ??
       node.swingAngle ??
-      0) / PASCAL_WATER_DOOR_OPEN_SWING_ANGLE,
+      0) / LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE,
   )
 }
 
-function segmentReachedPascalWaterNavigationPoint(
+function segmentReachedLandrushIslandNavigationPoint(
   previous: LandrushPoint2,
   current: LandrushPoint2,
   target: LandrushPoint2,
@@ -12732,16 +13151,16 @@ function segmentReachedPascalWaterNavigationPoint(
   )
 }
 
-function resolvePascalWaterNavigationRecoverySteeringPoint(
+function resolveLandrushIslandNavigationRecoverySteeringPoint(
   start: LandrushPoint2,
   target: LandrushPoint2,
   blockedPoint: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  doorPortals: readonly PascalWaterDoorPortal[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
   surfacePoints: readonly LandrushPoint2[],
-  stairPortals: readonly PascalWaterStairPortal[] = [],
-): PascalWaterNavigationSteeringResult | null {
-  const escapeSteering = resolvePascalWaterNavigationEscapeSteeringPoint(
+  stairPortals: readonly LandrushIslandStairPortal[] = [],
+): LandrushIslandNavigationSteeringResult | null {
+  const escapeSteering = resolveLandrushIslandNavigationEscapeSteeringPoint(
     start,
     target,
     obstacles,
@@ -12758,34 +13177,35 @@ function resolvePascalWaterNavigationRecoverySteeringPoint(
     {
       x:
         start.x +
-        forward.x * PASCAL_WATER_CLICK_MOVE_RECOVERY_FORWARD_METERS +
-        right.x * PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
+        forward.x * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_FORWARD_METERS +
+        right.x * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
       z:
         start.z +
-        forward.z * PASCAL_WATER_CLICK_MOVE_RECOVERY_FORWARD_METERS +
-        right.z * PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
+        forward.z * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_FORWARD_METERS +
+        right.z * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
     },
     {
       x:
         start.x +
-        forward.x * PASCAL_WATER_CLICK_MOVE_RECOVERY_FORWARD_METERS -
-        right.x * PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
+        forward.x * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_FORWARD_METERS -
+        right.x * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
       z:
         start.z +
-        forward.z * PASCAL_WATER_CLICK_MOVE_RECOVERY_FORWARD_METERS -
-        right.z * PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
+        forward.z * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_FORWARD_METERS -
+        right.z * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
     },
     {
-      x: start.x - blockedDirection.x * PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
-      z: start.z - blockedDirection.z * PASCAL_WATER_CLICK_MOVE_RECOVERY_SIDE_METERS,
+      x: start.x - blockedDirection.x * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
+      z: start.z - blockedDirection.z * LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS,
     },
   ]
 
   for (const candidate of candidates) {
     if (!pointInPolygon(candidate, surfacePoints)) continue
-    if (pointInPascalWaterNavigationObstacle(candidate, obstacles)) continue
-    if (!pascalWaterNavigationSegmentPassable(start, candidate, obstacles, surfacePoints)) continue
-    const onward = resolvePascalWaterNavigationSteeringPoint(
+    if (pointInLandrushIslandNavigationObstacle(candidate, obstacles)) continue
+    if (!landrushIslandNavigationSegmentPassable(start, candidate, obstacles, surfacePoints))
+      continue
+    const onward = resolveLandrushIslandNavigationSteeringPoint(
       candidate,
       target,
       obstacles,
@@ -12799,15 +13219,15 @@ function resolvePascalWaterNavigationRecoverySteeringPoint(
   return null
 }
 
-function resolvePascalWaterNavigationLocalRetrySteeringPoint(
+function resolveLandrushIslandNavigationLocalRetrySteeringPoint(
   start: LandrushPoint2,
   target: LandrushPoint2,
   blockedPoint: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
   surfacePoints: readonly LandrushPoint2[],
   attempt: number,
-): PascalWaterNavigationSteeringResult | null {
-  const contact = resolvePascalWaterNavigationLocalRetryContact(start, obstacles)
+): LandrushIslandNavigationSteeringResult | null {
+  const contact = resolveLandrushIslandNavigationLocalRetryContact(start, obstacles)
   const forward = normalize2(target.x - start.x, target.z - start.z)
   const blockedDirection = normalize2(blockedPoint.x - start.x, blockedPoint.z - start.z)
   const fallbackRight = { x: -blockedDirection.z, z: blockedDirection.x }
@@ -12836,10 +13256,10 @@ function resolvePascalWaterNavigationLocalRetrySteeringPoint(
         z: start.z + direction.z * distance,
       }
       if (!pointInPolygon(candidate, surfacePoints)) continue
-      if (pointInPascalWaterBlockingNavigationObstacle(candidate, obstacles)) continue
+      if (pointInLandrushIslandBlockingNavigationObstacle(candidate, obstacles)) continue
       if (contact) {
         if (
-          pascalWaterNavigationSegmentBlockedByOtherObstacles(
+          landrushIslandNavigationSegmentBlockedByOtherObstacles(
             start,
             candidate,
             obstacles,
@@ -12849,7 +13269,7 @@ function resolvePascalWaterNavigationLocalRetrySteeringPoint(
           continue
         }
       } else if (
-        !pascalWaterNavigationSegmentPassable(start, candidate, obstacles, surfacePoints)
+        !landrushIslandNavigationSegmentPassable(start, candidate, obstacles, surfacePoints)
       ) {
         continue
       }
@@ -12860,14 +13280,14 @@ function resolvePascalWaterNavigationLocalRetrySteeringPoint(
   return null
 }
 
-function resolvePascalWaterNavigationLocalRetryContact(
+function resolveLandrushIslandNavigationLocalRetryContact(
   start: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
 ) {
   let best: {
     distance: number
     normal: LandrushPoint2
-    obstacle: PascalWaterNavigationObstacle
+    obstacle: LandrushIslandNavigationObstacle
     tangent: LandrushPoint2
   } | null = null
 
@@ -12878,7 +13298,7 @@ function resolvePascalWaterNavigationLocalRetryContact(
 
     const inside = pointInPolygon(start, obstacle.points)
     const distance = Math.hypot(start.x - boundary.x, start.z - boundary.z)
-    if (!inside && distance > PASCAL_WATER_NAVIGATION_SLIDE_RADIUS_METERS * 1.35) continue
+    if (!inside && distance > LANDRUSH_ISLAND_NAVIGATION_SLIDE_RADIUS_METERS * 1.35) continue
 
     const centroid = centroidForPolygon(obstacle.points)
     let normal = normalize2(boundary.x - centroid.x, boundary.z - centroid.z)
@@ -12902,25 +13322,34 @@ function resolvePascalWaterNavigationLocalRetryContact(
   return best
 }
 
-function resolvePascalWaterNavigationEscapeSteeringPoint(
+function resolveLandrushIslandNavigationEscapeSteeringPoint(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  doorPortals: readonly PascalWaterDoorPortal[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
   surfacePoints: readonly LandrushPoint2[],
-  stairPortals: readonly PascalWaterStairPortal[] = [],
-): PascalWaterNavigationSteeringResult | null {
+  stairPortals: readonly LandrushIslandStairPortal[] = [],
+): LandrushIslandNavigationSteeringResult | null {
   for (const obstacle of obstacles) {
     if (!pointInPolygon(start, obstacle.points)) continue
-    for (const candidate of createPascalWaterNavigationEscapeCandidates(start, target, obstacle)) {
+    for (const candidate of createLandrushIslandNavigationEscapeCandidates(
+      start,
+      target,
+      obstacle,
+    )) {
       if (!pointInPolygon(candidate, surfacePoints)) continue
-      if (pointInPascalWaterNavigationObstacle(candidate, obstacles)) continue
+      if (pointInLandrushIslandNavigationObstacle(candidate, obstacles)) continue
       if (
-        pascalWaterNavigationSegmentBlockedByOtherObstacles(start, candidate, obstacles, obstacle)
+        landrushIslandNavigationSegmentBlockedByOtherObstacles(
+          start,
+          candidate,
+          obstacles,
+          obstacle,
+        )
       ) {
         continue
       }
-      const onward = resolvePascalWaterNavigationSteeringPoint(
+      const onward = resolveLandrushIslandNavigationSteeringPoint(
         candidate,
         target,
         obstacles,
@@ -12935,10 +13364,10 @@ function resolvePascalWaterNavigationEscapeSteeringPoint(
   return null
 }
 
-function createPascalWaterNavigationEscapeCandidates(
+function createLandrushIslandNavigationEscapeCandidates(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  obstacle: PascalWaterNavigationObstacle,
+  obstacle: LandrushIslandNavigationObstacle,
 ) {
   const boundary = closestPointOnClosedPolyline(start, obstacle.points) ?? start
   const centroid = centroidForPolygon(obstacle.points)
@@ -12946,8 +13375,8 @@ function createPascalWaterNavigationEscapeCandidates(
   const targetDirection = normalize2(target.x - start.x, target.z - start.z)
   const right = { x: -targetDirection.z, z: targetDirection.x }
   const escapeDistance = Math.max(
-    PASCAL_WATER_NAVIGATION_VERTEX_OFFSET_METERS,
-    PASCAL_WATER_CLICK_MOVE_WAYPOINT_RADIUS + PASCAL_WATER_CLICK_MOVE_PROGRESS_EPSILON_METERS,
+    LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS,
+    LANDRUSH_ISLAND_CLICK_MOVE_WAYPOINT_RADIUS + LANDRUSH_ISLAND_CLICK_MOVE_PROGRESS_EPSILON_METERS,
   )
 
   return [
@@ -12966,15 +13395,15 @@ function createPascalWaterNavigationEscapeCandidates(
   ]
 }
 
-function pascalWaterNavigationSegmentBlockedByOtherObstacles(
+function landrushIslandNavigationSegmentBlockedByOtherObstacles(
   start: LandrushPoint2,
   end: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  ignoredObstacle: PascalWaterNavigationObstacle,
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  ignoredObstacle: LandrushIslandNavigationObstacle,
 ) {
   for (const obstacle of obstacles) {
     if (obstacle === ignoredObstacle) continue
-    if (pascalWaterNavigationSegmentIntersectsPolygon(start, end, obstacle.points)) return true
+    if (landrushIslandNavigationSegmentIntersectsPolygon(start, end, obstacle.points)) return true
   }
   return false
 }
@@ -12983,7 +13412,7 @@ function resolveCameraRelativeMovement(
   keys: ReadonlySet<string>,
   camera: Camera,
   gamepadInput: LandrushGamepadInput | null = null,
-  referenceFrame: PascalWaterMovementReferenceFrame = 'camera-forward',
+  referenceFrame: LandrushIslandMovementReferenceFrame = 'camera-forward',
 ): RobotMovementInput | null {
   const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
@@ -13000,7 +13429,7 @@ function resolveCameraRelativeMovement(
 
   const forward =
     referenceFrame === 'screen-up'
-      ? resolvePascalWaterCameraScreenAxes(camera).up
+      ? resolveLandrushIslandCameraScreenAxes(camera).up
       : resolveCameraForwardXZ(camera)
   const right = { x: -forward.z, z: forward.x }
   const direction = normalize2(
@@ -13022,7 +13451,7 @@ function resolveCameraForwardXZ(camera: Camera) {
   return { x: forward.x, z: forward.z }
 }
 
-function resolvePascalWaterCameraScreenAxes(camera: Camera) {
+function resolveLandrushIslandCameraScreenAxes(camera: Camera) {
   camera.updateMatrixWorld()
   const elements = camera.matrixWorld.elements
   const right = normalize2(elements[0] ?? 1, elements[2] ?? 0)
@@ -13030,7 +13459,7 @@ function resolvePascalWaterCameraScreenAxes(camera: Camera) {
   return { right, up }
 }
 
-function resolvePascalWaterFallDirection(
+function resolveLandrushIslandFallDirection(
   point: LandrushPoint2,
   surfacePoints: readonly LandrushPoint2[],
 ) {
@@ -13038,12 +13467,12 @@ function resolvePascalWaterFallDirection(
   return normalize2(point.x - center.x, point.z - center.z)
 }
 
-function resolvePascalWaterFallBurstDirection(
+function resolveLandrushIslandFallBurstDirection(
   point: LandrushPoint2,
   movementDirection: LandrushPoint2,
   surfacePoints: readonly LandrushPoint2[],
 ) {
-  const radialDirection = resolvePascalWaterFallDirection(point, surfacePoints)
+  const radialDirection = resolveLandrushIslandFallDirection(point, surfacePoints)
   const movementLength = Math.hypot(movementDirection.x, movementDirection.z)
   if (movementLength <= 0.001) return radialDirection
 
@@ -13052,7 +13481,7 @@ function resolvePascalWaterFallBurstDirection(
   return normalizedMovement
 }
 
-function resolvePascalWaterFallLaunchVelocity({
+function resolveLandrushIslandFallLaunchVelocity({
   controllerVelocity,
   fallbackDirection,
   measuredVelocity,
@@ -13073,30 +13502,30 @@ function resolvePascalWaterFallLaunchVelocity({
       ? normalize2(inheritedVelocity.x, inheritedVelocity.z)
       : normalize2(fallbackDirection.x, fallbackDirection.z)
   const forwardSpeed =
-    Math.max(inheritedSpeed, PASCAL_WATER_ROBOT_FALL_MIN_FORWARD_SPEED) *
-    PASCAL_WATER_ROBOT_FALL_FORWARD_MOMENTUM_MULTIPLIER
+    Math.max(inheritedSpeed, LANDRUSH_ISLAND_ROBOT_FALL_MIN_FORWARD_SPEED) *
+    LANDRUSH_ISLAND_ROBOT_FALL_FORWARD_MOMENTUM_MULTIPLIER
 
   return new Vector3(
     horizontalDirection.x * forwardSpeed,
-    PASCAL_WATER_ROBOT_FALL_UP_SPEED,
+    LANDRUSH_ISLAND_ROBOT_FALL_UP_SPEED,
     horizontalDirection.z * forwardSpeed,
   )
 }
 
-function resetPascalWaterFallControlRotation(quaternion: Quaternion, angularVelocity: Vector3) {
+function resetLandrushIslandFallControlRotation(quaternion: Quaternion, angularVelocity: Vector3) {
   quaternion.identity()
   angularVelocity.set(0, 0, 0)
 }
 
-function resolvePascalWaterFallControlInput({
+function resolveLandrushIslandFallControlInput({
   gamepadInput,
   keys,
   pointer,
 }: {
   gamepadInput: LandrushGamepadInput | null
   keys: ReadonlySet<string>
-  pointer: PascalWaterRightHoldMove | null
-}): PascalWaterFallControlInput | null {
+  pointer: LandrushIslandRightHoldMove | null
+}): LandrushIslandFallControlInput | null {
   let forward = 0
   let strafe = 0
 
@@ -13110,7 +13539,7 @@ function resolvePascalWaterFallControlInput({
     strafe += gamepadInput.strafe
   }
 
-  const pointerInput = resolvePascalWaterPointerFallControlInput(pointer)
+  const pointerInput = resolveLandrushIslandPointerFallControlInput(pointer)
   if (pointerInput) {
     forward += pointerInput.forward
     strafe += pointerInput.strafe
@@ -13127,19 +13556,20 @@ function resolvePascalWaterFallControlInput({
   }
 }
 
-function resolvePascalWaterPointerFallControlInput(
-  pointer: PascalWaterRightHoldMove | null,
-): PascalWaterFallControlInput | null {
+function resolveLandrushIslandPointerFallControlInput(
+  pointer: LandrushIslandRightHoldMove | null,
+): LandrushIslandFallControlInput | null {
   if (!pointer) return null
 
   const dx = pointer.x - pointer.startX
   const dy = pointer.y - pointer.startY
   const distance = Math.hypot(dx, dy)
-  if (distance <= PASCAL_WATER_ROBOT_FALL_POINTER_DEADZONE_PX) return null
+  if (distance <= LANDRUSH_ISLAND_ROBOT_FALL_POINTER_DEADZONE_PX) return null
 
   const strength = clamp01(
-    (distance - PASCAL_WATER_ROBOT_FALL_POINTER_DEADZONE_PX) /
-      (PASCAL_WATER_ROBOT_FALL_POINTER_FULL_INPUT_PX - PASCAL_WATER_ROBOT_FALL_POINTER_DEADZONE_PX),
+    (distance - LANDRUSH_ISLAND_ROBOT_FALL_POINTER_DEADZONE_PX) /
+      (LANDRUSH_ISLAND_ROBOT_FALL_POINTER_FULL_INPUT_PX -
+        LANDRUSH_ISLAND_ROBOT_FALL_POINTER_DEADZONE_PX),
   )
   return {
     forward: (-dy / distance) * strength,
@@ -13148,7 +13578,7 @@ function resolvePascalWaterPointerFallControlInput(
   }
 }
 
-function updatePascalWaterFallControlRotation({
+function updateLandrushIslandFallControlRotation({
   angularVelocity,
   axis,
   camera,
@@ -13169,7 +13599,7 @@ function updatePascalWaterFallControlRotation({
   cameraUp: Vector3
   deltaQuaternion: Quaternion
   frameDelta: number
-  input: PascalWaterFallControlInput | null
+  input: LandrushIslandFallControlInput | null
   quaternion: Quaternion
   targetAngularVelocity: Vector3
 }) {
@@ -13193,7 +13623,7 @@ function updatePascalWaterFallControlRotation({
     if (targetAngularVelocity.lengthSq() > 0.000001) {
       targetAngularVelocity
         .normalize()
-        .multiplyScalar(PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED * inputStrength)
+        .multiplyScalar(LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED * inputStrength)
     }
   }
 
@@ -13201,11 +13631,11 @@ function updatePascalWaterFallControlRotation({
   moveVectorToward(
     angularVelocity,
     targetAngularVelocity,
-    PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_ACCELERATION * accelerationScale * frameDelta,
+    LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_ACCELERATION * accelerationScale * frameDelta,
   )
 
-  if (angularVelocity.lengthSq() > PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED ** 2) {
-    angularVelocity.setLength(PASCAL_WATER_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED)
+  if (angularVelocity.lengthSq() > LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED ** 2) {
+    angularVelocity.setLength(LANDRUSH_ISLAND_ROBOT_FALL_CONTROL_MAX_ANGULAR_SPEED)
   }
 
   const angularSpeed = angularVelocity.length()
@@ -13226,14 +13656,14 @@ function moveVectorToward(current: Vector3, target: Vector3, maxDelta: number) {
     return
   }
   current.addScaledVector(
-    _pascalWaterMoveVectorTowardDelta.set(deltaX, deltaY, deltaZ),
+    _landrushIslandMoveVectorTowardDelta.set(deltaX, deltaY, deltaZ),
     maxDelta / distance,
   )
 }
 
-const _pascalWaterMoveVectorTowardDelta = new Vector3()
+const _landrushIslandMoveVectorTowardDelta = new Vector3()
 
-function predictPascalWaterFallWaterHitSeconds({
+function predictLandrushIslandFallWaterHitSeconds({
   startRootY,
   velocityY,
   waterY,
@@ -13248,9 +13678,9 @@ function predictPascalWaterFallWaterHitSeconds({
   const frameStep = 1 / 120
 
   while (elapsedSeconds < 30 && rootY > waterY) {
-    const fallAmount = resolvePascalWaterFallAltitudeAmount(rootY, startRootY, waterY)
-    const simulatedDelta = frameStep * resolvePascalWaterFallSlowMotionFactor(fallAmount)
-    verticalVelocity -= PASCAL_WATER_ROBOT_FALL_GRAVITY * simulatedDelta
+    const fallAmount = resolveLandrushIslandFallAltitudeAmount(rootY, startRootY, waterY)
+    const simulatedDelta = frameStep * resolveLandrushIslandFallSlowMotionFactor(fallAmount)
+    verticalVelocity -= LANDRUSH_ISLAND_ROBOT_FALL_GRAVITY * simulatedDelta
     rootY += verticalVelocity * simulatedDelta
     elapsedSeconds += frameStep
   }
@@ -13258,29 +13688,34 @@ function predictPascalWaterFallWaterHitSeconds({
   return elapsedSeconds
 }
 
-function resolvePascalWaterFallAltitudeAmount(rootY: number, startRootY: number, waterY: number) {
+function resolveLandrushIslandFallAltitudeAmount(
+  rootY: number,
+  startRootY: number,
+  waterY: number,
+) {
   const fallDistance = Math.max(1, startRootY - waterY)
   return clamp01((startRootY - rootY) / fallDistance)
 }
 
-function resolvePascalWaterFallSlowMotionFactor(amount: number) {
+function resolveLandrushIslandFallSlowMotionFactor(amount: number) {
   return MathUtils.lerp(
-    PASCAL_WATER_ROBOT_FALL_INITIAL_SLOW_MOTION_FACTOR,
-    PASCAL_WATER_ROBOT_FALL_WATER_SLOW_MOTION_FACTOR,
+    LANDRUSH_ISLAND_ROBOT_FALL_INITIAL_SLOW_MOTION_FACTOR,
+    LANDRUSH_ISLAND_ROBOT_FALL_WATER_SLOW_MOTION_FACTOR,
     MathUtils.smoothstep(clamp01(amount), 0, 1),
   )
 }
 
-function resolvePascalWaterFallWiggleAmount(elapsedSeconds: number) {
+function resolveLandrushIslandFallWiggleAmount(elapsedSeconds: number) {
   return MathUtils.smoothstep(
     elapsedSeconds,
-    PASCAL_WATER_ROBOT_FALL_WIGGLE_DELAY_SECONDS,
-    PASCAL_WATER_ROBOT_FALL_WIGGLE_DELAY_SECONDS + PASCAL_WATER_ROBOT_FALL_WIGGLE_RAMP_SECONDS,
+    LANDRUSH_ISLAND_ROBOT_FALL_WIGGLE_DELAY_SECONDS,
+    LANDRUSH_ISLAND_ROBOT_FALL_WIGGLE_DELAY_SECONDS +
+      LANDRUSH_ISLAND_ROBOT_FALL_WIGGLE_RAMP_SECONDS,
   )
 }
 
-function createPascalWaterRobotCliffFallBoundaryPoints(
-  surface: PascalWaterLandSurface,
+function createLandrushIslandRobotCliffFallBoundaryPoints(
+  surface: LandrushIslandLandSurface,
 ): readonly LandrushPoint2[] {
   if (!surface.hasElevation || surface.plateauPoints.length < 3) return surface.grassSurfacePoints
 
@@ -13298,10 +13733,10 @@ function createPascalWaterRobotCliffFallBoundaryPoints(
     const ledgeDistance =
       lowerDistance > 0.001
         ? Math.min(
-            PASCAL_WATER_ROBOT_FALL_CLIFF_LEDGE_METERS,
-            lowerDistance * PASCAL_WATER_ROBOT_FALL_CLIFF_LEDGE_MAX_FRACTION,
+            LANDRUSH_ISLAND_ROBOT_FALL_CLIFF_LEDGE_METERS,
+            lowerDistance * LANDRUSH_ISLAND_ROBOT_FALL_CLIFF_LEDGE_MAX_FRACTION,
           )
-        : PASCAL_WATER_ROBOT_FALL_CLIFF_LEDGE_METERS
+        : LANDRUSH_ISLAND_ROBOT_FALL_CLIFF_LEDGE_METERS
     return {
       x: point.x + lowerDirection.x * ledgeDistance,
       z: point.z + lowerDirection.z * ledgeDistance,
@@ -13481,7 +13916,7 @@ function pointInPolygon(point: LandrushPoint2, polygon: readonly LandrushPoint2[
   return inside
 }
 
-function pickPascalWaterWalkTargetPoint({
+function pickLandrushIslandWalkTargetPoint({
   camera,
   canvas,
   colliderMeshes,
@@ -13509,11 +13944,11 @@ function pickPascalWaterWalkTargetPoint({
   for (const hit of hits) {
     if (!hit.face) continue
     const normalY = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y
-    if (normalY < PASCAL_WATER_WALK_TARGET_MIN_NORMAL_Y) continue
+    if (normalY < LANDRUSH_ISLAND_WALK_TARGET_MIN_NORMAL_Y) continue
     return { x: hit.point.x, z: hit.point.z }
   }
 
-  return pickPascalWaterBuildGroundPoint({
+  return pickLandrushIslandBuildGroundPoint({
     camera,
     canvas,
     event,
@@ -13523,7 +13958,7 @@ function pickPascalWaterWalkTargetPoint({
   })
 }
 
-function pickPascalWaterBuildGroundPoint({
+function pickLandrushIslandBuildGroundPoint({
   camera,
   canvas,
   event,
@@ -13557,7 +13992,7 @@ function pickPascalWaterBuildGroundPoint({
   }
 }
 
-function pointerEventInPascalWaterCanvas(
+function pointerEventInLandrushIslandCanvas(
   event: MouseEvent | PointerEvent,
   canvas: HTMLCanvasElement,
 ) {
@@ -13570,21 +14005,28 @@ function pointerEventInPascalWaterCanvas(
   )
 }
 
-function getPascalWaterCanvasEventTarget(canvas: HTMLCanvasElement, connected: unknown) {
+function getLandrushIslandCanvasEventTarget(canvas: HTMLCanvasElement, connected: unknown) {
   return connected instanceof HTMLElement ? connected : canvas
 }
 
-function isPascalWaterInteractivePointerTarget(target: EventTarget | null) {
+function isLandrushIslandInteractivePointerTarget(target: EventTarget | null) {
   if (!(target instanceof Element)) return false
   if (target instanceof HTMLCanvasElement) return false
-  return Boolean(
-    target.closest(
-      'button,a,input,textarea,select,[role="button"],[role="menuitem"],[data-landrush-ui]',
-    ),
+  const interactiveTarget = target.closest(
+    'button,a,input,textarea,select,[role="button"],[role="menuitem"],[data-landrush-ui-interactive]',
+  )
+  if (interactiveTarget) return true
+
+  const landrushUi = target.closest('[data-landrush-ui]')
+  if (!(landrushUi instanceof HTMLElement)) return false
+  const style = window.getComputedStyle(landrushUi)
+  return (
+    style.pointerEvents !== 'none' &&
+    landrushUi.matches('button,[role="button"],input,textarea,select,a')
   )
 }
 
-function createPascalWaterSyncedBuildNodes({
+function createLandrushIslandSyncedBuildNodes({
   nodes,
   parcel,
   parcelWorldId,
@@ -13593,14 +14035,14 @@ function createPascalWaterSyncedBuildNodes({
   parcel: ParcelAllocationParcel
   parcelWorldId: string
 }) {
-  const buildNodes = collectPascalWaterBuildNodesInsideParcel(nodes, parcel)
+  const buildNodes = collectLandrushIslandBuildNodesInsideParcel(nodes, parcel)
   const syncedIds = new Set(buildNodes.map((node) => node.id as AnyNodeId))
   return buildNodes.map((node) =>
-    sanitizePascalWaterBuildNodeForSync(node, parcelWorldId, parcel.id, syncedIds),
+    sanitizeLandrushIslandBuildNodeForSync(node, parcelWorldId, parcel.id, syncedIds),
   )
 }
 
-function sanitizePascalWaterIncomingBuildNodes(
+function sanitizeLandrushIslandIncomingBuildNodes(
   build: ParcelBuildNodesSnapshot,
   parcelWorldId: string,
   parcel: ParcelAllocationParcel,
@@ -13609,14 +14051,14 @@ function sanitizePascalWaterIncomingBuildNodes(
     string,
     AnyNode
   >
-  const buildNodes = collectPascalWaterBuildNodesInsideParcel(nodes, parcel)
+  const buildNodes = collectLandrushIslandBuildNodesInsideParcel(nodes, parcel)
   const syncedIds = new Set(buildNodes.map((node) => node.id as AnyNodeId))
   return buildNodes.map((node) =>
-    sanitizePascalWaterBuildNodeForSync(node, parcelWorldId, parcel.id, syncedIds),
+    sanitizeLandrushIslandBuildNodeForSync(node, parcelWorldId, parcel.id, syncedIds),
   )
 }
 
-function collectPascalWaterBuildNodesInsideParcel(
+function collectLandrushIslandBuildNodesInsideParcel(
   nodes: Record<string, AnyNode>,
   parcel: ParcelAllocationParcel,
 ) {
@@ -13652,7 +14094,7 @@ function collectPascalWaterBuildNodesInsideParcel(
     const visited = new Set<AnyNodeId>()
 
     while (parentId && !visited.has(parentId)) {
-      if (parentId === PASCAL_WATER_LEVEL_ID) return
+      if (parentId === LANDRUSH_ISLAND_LEVEL_ID) return
       visited.add(parentId)
       const parent = nodes[parentId]
       if (!parent) return
@@ -13663,8 +14105,8 @@ function collectPascalWaterBuildNodesInsideParcel(
   }
 
   for (const node of Object.values(nodes)) {
-    if (!isPascalWaterBuildObjectNode(node, nodes)) continue
-    if (!isPascalWaterBuildNodeInsideParcel(node, parcel, nodes)) continue
+    if (!isLandrushIslandBuildObjectNode(node, nodes)) continue
+    if (!isLandrushIslandBuildNodeInsideParcel(node, parcel, nodes)) continue
 
     collectBuildAncestors(node.id as AnyNodeId)
     collectDescendants(node.id as AnyNodeId)
@@ -13675,13 +14117,13 @@ function collectPascalWaterBuildNodesInsideParcel(
     .filter((node): node is AnyNode => Boolean(node))
     .sort((first, second) => {
       const depthDiff =
-        pascalWaterBuildNodeParentDepth(first, nodes) -
-        pascalWaterBuildNodeParentDepth(second, nodes)
+        landrushIslandBuildNodeParentDepth(first, nodes) -
+        landrushIslandBuildNodeParentDepth(second, nodes)
       return depthDiff || first.id.localeCompare(second.id)
     })
 }
 
-function sanitizePascalWaterBuildNodeForSync(
+function sanitizeLandrushIslandBuildNodeForSync(
   node: AnyNode,
   parcelWorldId: string,
   parcelId: string,
@@ -13707,14 +14149,14 @@ function sanitizePascalWaterBuildNodeForSync(
   return clone as AnyNode
 }
 
-function pascalWaterBuildNodeParentDepth(node: AnyNode, nodes: Record<string, AnyNode>) {
+function landrushIslandBuildNodeParentDepth(node: AnyNode, nodes: Record<string, AnyNode>) {
   let depth = 0
   let parentId = node.parentId as string | null
   const visited = new Set<string>()
 
   while (
     parentId &&
-    parentId !== PASCAL_WATER_BUILDING_ID &&
+    parentId !== LANDRUSH_ISLAND_BUILDING_ID &&
     nodes[parentId] &&
     !visited.has(parentId)
   ) {
@@ -13727,12 +14169,12 @@ function pascalWaterBuildNodeParentDepth(node: AnyNode, nodes: Record<string, An
   return depth
 }
 
-function isPascalWaterBuildNodeInsideParcel(
+function isLandrushIslandBuildNodeInsideParcel(
   node: AnyNode,
   parcel: ParcelAllocationParcel,
   nodes: Record<string, AnyNode>,
 ) {
-  const footprints = createPascalWaterBuildNodeFootprints(node, 0, nodes)
+  const footprints = createLandrushIslandBuildNodeFootprints(node, 0, nodes)
   return (
     footprints.length > 0 &&
     footprints.every((footprint) =>
@@ -13741,14 +14183,14 @@ function isPascalWaterBuildNodeInsideParcel(
   )
 }
 
-function applyPascalWaterBuildSnapshot(
-  scene: PascalWaterSceneStore,
+function applyLandrushIslandBuildSnapshot(
+  scene: LandrushIslandSceneStore,
   parcelId: string,
   nodes: readonly AnyNode[],
 ) {
   const incomingIds = new Set(nodes.map((node) => node.id as AnyNodeId))
   const deleteIds = Object.values(scene.nodes)
-    .filter((node) => isPascalWaterSyncedBuildNodeForParcel(node, parcelId))
+    .filter((node) => isLandrushIslandSyncedBuildNodeForParcel(node, parcelId))
     .map((node) => node.id as AnyNodeId)
     .filter((id) => !incomingIds.has(id))
   const createNodes: { node: AnyNode; parentId?: AnyNodeId }[] = []
@@ -13759,8 +14201,8 @@ function applyPascalWaterBuildSnapshot(
     const existing = scene.nodes[id]
     if (existing) {
       if (
-        isPascalWaterSyncedBuildNodeForParcel(existing, parcelId) ||
-        isPascalWaterSyncedBuildNodeForParcel(node, parcelId)
+        isLandrushIslandSyncedBuildNodeForParcel(existing, parcelId) ||
+        isLandrushIslandSyncedBuildNodeForParcel(node, parcelId)
       ) {
         updateNodes.push({ data: node, id })
       }
@@ -13771,9 +14213,9 @@ function applyPascalWaterBuildSnapshot(
       parentId:
         node.parentId && incomingIds.has(node.parentId as AnyNodeId)
           ? (node.parentId as AnyNodeId)
-          : isPascalWaterBuildLevelNode(node)
-            ? (PASCAL_WATER_BUILDING_ID as AnyNodeId)
-            : (PASCAL_WATER_LEVEL_ID as AnyNodeId),
+          : isLandrushIslandBuildLevelNode(node)
+            ? (LANDRUSH_ISLAND_BUILDING_ID as AnyNodeId)
+            : (LANDRUSH_ISLAND_LEVEL_ID as AnyNodeId),
     })
   }
 
@@ -13786,26 +14228,26 @@ function applyPascalWaterBuildSnapshot(
   renderScheduler.requestFrame('geometry:changed')
 }
 
-function isPascalWaterSyncedBuildNodeForParcel(node: AnyNode, parcelId: string) {
+function isLandrushIslandSyncedBuildNodeForParcel(node: AnyNode, parcelId: string) {
   const metadata = node.metadata as
     | { landrushBuildSynced?: boolean; landrushParcelId?: string }
     | undefined
   return metadata?.landrushBuildSynced === true && metadata.landrushParcelId === parcelId
 }
 
-function signatureForPascalWaterBuildNodes(nodes: readonly AnyNode[]) {
+function signatureForLandrushIslandBuildNodes(nodes: readonly AnyNode[]) {
   return JSON.stringify(nodes)
 }
 
-function createPascalWaterBuiltGrassBlockers(
+function createLandrushIslandBuiltGrassBlockers(
   nodes: Record<string, AnyNode>,
 ): readonly GrassFieldBlocker[] {
   const blockers: GrassFieldBlocker[] = []
   for (const node of Object.values(nodes)) {
-    for (const footprint of createPascalWaterBuildNodeFootprints(node, 0, nodes)) {
+    for (const footprint of createLandrushIslandBuildNodeFootprints(node, 0, nodes)) {
       blockers.push({
-        clearanceMeters: PASCAL_WATER_BUILT_GRASS_PADDING_METERS,
-        featherMeters: PASCAL_WATER_BUILT_GRASS_FEATHER_METERS,
+        clearanceMeters: LANDRUSH_ISLAND_BUILT_GRASS_PADDING_METERS,
+        featherMeters: LANDRUSH_ISLAND_BUILT_GRASS_FEATHER_METERS,
         points: footprint,
       })
     }
@@ -13813,24 +14255,24 @@ function createPascalWaterBuiltGrassBlockers(
   return blockers
 }
 
-function createPascalWaterHiddenBladeFadeBlocker(blocker: GrassFieldBlocker): GrassFieldBlocker {
+function createLandrushIslandHiddenBladeFadeBlocker(blocker: GrassFieldBlocker): GrassFieldBlocker {
   return {
     ...blocker,
     initialVisibility: 0,
   }
 }
 
-function createPascalWaterNavigationObstacles(
+function createLandrushIslandNavigationObstacles(
   nodes: Record<string, AnyNode>,
-): readonly PascalWaterNavigationObstacle[] {
-  const obstacles: PascalWaterNavigationObstacle[] = []
+): readonly LandrushIslandNavigationObstacle[] {
+  const obstacles: LandrushIslandNavigationObstacle[] = []
   for (const node of Object.values(nodes)) {
-    if (!isPascalWaterNavigationObstacleNode(node, nodes)) continue
+    if (!isLandrushIslandNavigationObstacleNode(node, nodes)) continue
     if (node.type === 'wall') {
-      for (const footprint of createPascalWaterWallNavigationFootprints(
+      for (const footprint of createLandrushIslandWallNavigationFootprints(
         node,
         nodes,
-        PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS,
+        LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS,
       )) {
         obstacles.push({ kind: 'graph', nodeId: node.id as AnyNodeId, points: footprint })
       }
@@ -13838,19 +14280,19 @@ function createPascalWaterNavigationObstacles(
     }
 
     if (node.type === 'stair') {
-      for (const footprint of createPascalWaterStairNavigationFootprints(
+      for (const footprint of createLandrushIslandStairNavigationFootprints(
         node,
         nodes,
-        PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS,
+        LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS,
       )) {
         obstacles.push({ kind: 'stair', nodeId: footprint.nodeId, points: footprint.points })
       }
       continue
     }
 
-    const footprint = createPascalWaterBuildNodeFootprint(
+    const footprint = createLandrushIslandBuildNodeFootprint(
       node,
-      PASCAL_WATER_NAVIGATION_OBSTACLE_PADDING_METERS,
+      LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS,
       nodes,
     )
     if (!footprint) continue
@@ -13863,20 +14305,20 @@ function createPascalWaterNavigationObstacles(
   return obstacles
 }
 
-function createPascalWaterDoorPortals(
+function createLandrushIslandDoorPortals(
   nodes: Record<string, AnyNode>,
-): readonly PascalWaterDoorPortal[] {
-  const portals: PascalWaterDoorPortal[] = []
+): readonly LandrushIslandDoorPortal[] {
+  const portals: LandrushIslandDoorPortal[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'door') continue
     const wallId = node.wallId ?? node.parentId
     const wall = wallId ? nodes[wallId as AnyNodeId] : undefined
     if (wall?.type !== 'wall') continue
-    const wallFrame = resolvePascalWaterWallFrame(wall)
+    const wallFrame = resolveLandrushIslandWallFrame(wall)
     if (!wallFrame) continue
 
     const centerX = MathUtils.clamp(node.position[0], 0, wallFrame.length)
-    const crossingDistance = PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS
+    const crossingDistance = LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS
     const center = {
       x: wall.start[0] + wallFrame.dir.x * centerX,
       z: wall.start[1] + wallFrame.dir.z * centerX,
@@ -13900,28 +14342,28 @@ function createPascalWaterDoorPortals(
   return portals
 }
 
-function createPascalWaterStairPortals(
+function createLandrushIslandStairPortals(
   nodes: Record<string, AnyNode>,
-): readonly PascalWaterStairPortal[] {
-  const portals: PascalWaterStairPortal[] = []
+): readonly LandrushIslandStairPortal[] {
+  const portals: LandrushIslandStairPortal[] = []
   for (const node of Object.values(nodes)) {
-    if (node.type !== 'stair' || !isPascalWaterBuildObjectNode(node, nodes)) continue
-    portals.push(...createPascalWaterStairNavigationPortals(node, nodes))
+    if (node.type !== 'stair' || !isLandrushIslandBuildObjectNode(node, nodes)) continue
+    portals.push(...createLandrushIslandStairNavigationPortals(node, nodes))
   }
   return portals
 }
 
-function createPascalWaterStairNavigationFootprints(
-  stair: PascalWaterStairNode,
+function createLandrushIslandStairNavigationFootprints(
+  stair: LandrushIslandStairNode,
   nodes: Record<string, AnyNode>,
   padding: number,
-): readonly PascalWaterStairNavigationFootprint[] {
-  const layouts = createPascalWaterStraightStairSegmentLayouts(stair, nodes)
+): readonly LandrushIslandStairNavigationFootprint[] {
+  const layouts = createLandrushIslandStraightStairSegmentLayouts(stair, nodes)
   if (layouts.length === 0) {
     return [
       {
         nodeId: stair.id as AnyNodeId,
-        points: createPascalWaterFallbackStairFootprint(stair, padding),
+        points: createLandrushIslandFallbackStairFootprint(stair, padding),
       },
     ]
   }
@@ -13938,15 +14380,15 @@ function createPascalWaterStairNavigationFootprints(
   }))
 }
 
-function createPascalWaterStairNavigationPortals(
-  stair: PascalWaterStairNode,
+function createLandrushIslandStairNavigationPortals(
+  stair: LandrushIslandStairNode,
   nodes: Record<string, AnyNode>,
-): readonly PascalWaterStairPortal[] {
-  const layouts = createPascalWaterStraightStairSegmentLayouts(stair, nodes)
-  if (layouts.length === 0) return [createPascalWaterFallbackStairPortal(stair)]
+): readonly LandrushIslandStairPortal[] {
+  const layouts = createLandrushIslandStraightStairSegmentLayouts(stair, nodes)
+  if (layouts.length === 0) return [createLandrushIslandFallbackStairPortal(stair)]
 
   return layouts.map((layout) => {
-    const sideDistance = layout.length / 2 + PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS
+    const sideDistance = layout.length / 2 + LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS
     return {
       center: layout.center,
       halfRun: layout.length / 2,
@@ -13966,16 +14408,16 @@ function createPascalWaterStairNavigationPortals(
   })
 }
 
-function createPascalWaterStraightStairSegmentLayouts(
-  stair: PascalWaterStairNode,
+function createLandrushIslandStraightStairSegmentLayouts(
+  stair: LandrushIslandStairNode,
   nodes: Record<string, AnyNode>,
-): readonly PascalWaterStairSegmentLayout[] {
+): readonly LandrushIslandStairSegmentLayout[] {
   if ((stair.stairType ?? 'straight') !== 'straight') return []
 
   const segments = (stair.children ?? [])
-    .map((childId) => nodes[childId as AnyNodeId] as PascalWaterStairSegmentNode | undefined)
+    .map((childId) => nodes[childId as AnyNodeId] as LandrushIslandStairSegmentNode | undefined)
     .filter(
-      (segment): segment is PascalWaterStairSegmentNode =>
+      (segment): segment is LandrushIslandStairSegmentNode =>
         segment?.type === 'stair-segment' && segment.visible !== false,
     )
   const entry = buildFloorplanStairEntry(stair, segments)
@@ -14008,12 +14450,14 @@ function createPascalWaterStraightStairSegmentLayouts(
   })
 }
 
-function createPascalWaterFallbackStairPortal(stair: PascalWaterStairNode): PascalWaterStairPortal {
-  const footprint = createPascalWaterFallbackStairFootprint(stair, 0)
+function createLandrushIslandFallbackStairPortal(
+  stair: LandrushIslandStairNode,
+): LandrushIslandStairPortal {
+  const footprint = createLandrushIslandFallbackStairFootprint(stair, 0)
   const center = polygonCentroid(footprint)
   const normal = normalize2(Math.sin(stair.rotation ?? 0), Math.cos(stair.rotation ?? 0))
   const run = Math.max(0.8, stair.stepCount * 0.28 + stair.topLandingDepth)
-  const sideDistance = run / 2 + PASCAL_WATER_DOOR_CROSSING_CLEARANCE_METERS
+  const sideDistance = run / 2 + LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS
   return {
     center,
     halfRun: run / 2,
@@ -14032,8 +14476,8 @@ function createPascalWaterFallbackStairPortal(stair: PascalWaterStairNode): Pasc
   }
 }
 
-function createPascalWaterFallbackStairFootprint(
-  stair: PascalWaterStairNode,
+function createLandrushIslandFallbackStairFootprint(
+  stair: LandrushIslandStairNode,
   padding: number,
 ): readonly LandrushPoint2[] {
   const run = Math.max(0.8, stair.stepCount * 0.28 + stair.topLandingDepth)
@@ -14047,15 +14491,15 @@ function createPascalWaterFallbackStairFootprint(
   })
 }
 
-function createPascalWaterWallNavigationFootprints(
+function createLandrushIslandWallNavigationFootprints(
   wall: Extract<AnyNode, { type: 'wall' }>,
   nodes: Record<string, AnyNode>,
   padding: number,
 ): readonly (readonly LandrushPoint2[])[] {
-  const wallFrame = resolvePascalWaterWallFrame(wall)
+  const wallFrame = resolveLandrushIslandWallFrame(wall)
   if (!wallFrame) return []
 
-  const openings = collectPascalWaterWallDoorOpenings(wall, nodes)
+  const openings = collectLandrushIslandWallDoorOpenings(wall, nodes)
   if (openings.length === 0) {
     return [
       segmentFootprint(
@@ -14072,8 +14516,8 @@ function createPascalWaterWallNavigationFootprints(
     if (opening.start - cursor > 0.08) {
       footprints.push(
         segmentFootprint(
-          pointOnPascalWaterWall(wall, wallFrame, cursor),
-          pointOnPascalWaterWall(wall, wallFrame, opening.start),
+          pointOnLandrushIslandWall(wall, wallFrame, cursor),
+          pointOnLandrushIslandWall(wall, wallFrame, opening.start),
           (wall.thickness ?? 0.18) + padding * 2,
         ),
       )
@@ -14083,8 +14527,8 @@ function createPascalWaterWallNavigationFootprints(
   if (wallFrame.length - cursor > 0.08) {
     footprints.push(
       segmentFootprint(
-        pointOnPascalWaterWall(wall, wallFrame, cursor),
-        pointOnPascalWaterWall(wall, wallFrame, wallFrame.length),
+        pointOnLandrushIslandWall(wall, wallFrame, cursor),
+        pointOnLandrushIslandWall(wall, wallFrame, wallFrame.length),
         (wall.thickness ?? 0.18) + padding * 2,
       ),
     )
@@ -14092,11 +14536,11 @@ function createPascalWaterWallNavigationFootprints(
   return footprints
 }
 
-function collectPascalWaterWallDoorOpenings(
+function collectLandrushIslandWallDoorOpenings(
   wall: Extract<AnyNode, { type: 'wall' }>,
   nodes: Record<string, AnyNode>,
 ) {
-  const wallFrame = resolvePascalWaterWallFrame(wall)
+  const wallFrame = resolveLandrushIslandWallFrame(wall)
   if (!wallFrame) return []
 
   const openings: { end: number; start: number }[] = []
@@ -14121,7 +14565,7 @@ function collectPascalWaterWallDoorOpenings(
   return openings.sort((first, second) => first.start - second.start)
 }
 
-function resolvePascalWaterWallFrame(wall: Extract<AnyNode, { type: 'wall' }>) {
+function resolveLandrushIslandWallFrame(wall: Extract<AnyNode, { type: 'wall' }>) {
   const dx = wall.end[0] - wall.start[0]
   const dz = wall.end[1] - wall.start[1]
   const length = Math.hypot(dx, dz)
@@ -14135,9 +14579,9 @@ function resolvePascalWaterWallFrame(wall: Extract<AnyNode, { type: 'wall' }>) {
   }
 }
 
-function pointOnPascalWaterWall(
+function pointOnLandrushIslandWall(
   wall: Extract<AnyNode, { type: 'wall' }>,
-  frame: NonNullable<ReturnType<typeof resolvePascalWaterWallFrame>>,
+  frame: NonNullable<ReturnType<typeof resolveLandrushIslandWallFrame>>,
   localX: number,
 ) {
   return {
@@ -14146,14 +14590,14 @@ function pointOnPascalWaterWall(
   }
 }
 
-function createPascalWaterInvalidBuildNodeIds(
+function createLandrushIslandInvalidBuildNodeIds(
   nodes: Record<string, AnyNode>,
   parcel: ParcelAllocationParcel,
 ) {
   const invalidIds: string[] = []
   for (const node of Object.values(nodes)) {
-    if (!isPascalWaterBuildObjectNode(node, nodes)) continue
-    const footprints = createPascalWaterBuildNodeFootprints(node, 0, nodes)
+    if (!isLandrushIslandBuildObjectNode(node, nodes)) continue
+    const footprints = createLandrushIslandBuildNodeFootprints(node, 0, nodes)
     if (footprints.length === 0) continue
     if (
       footprints.every((footprint) =>
@@ -14167,20 +14611,20 @@ function createPascalWaterInvalidBuildNodeIds(
   return invalidIds
 }
 
-function createPascalWaterBuildNodeFootprints(
+function createLandrushIslandBuildNodeFootprints(
   node: AnyNode,
   padding: number,
   nodes: Record<string, AnyNode>,
 ): readonly (readonly LandrushPoint2[])[] {
-  if (!isPascalWaterBuildObjectNode(node, nodes)) return []
-  if (node.type === 'roof') return createPascalWaterRoofBuildFootprints(node, padding, nodes)
+  if (!isLandrushIslandBuildObjectNode(node, nodes)) return []
+  if (node.type === 'roof') return createLandrushIslandRoofBuildFootprints(node, padding, nodes)
 
-  const footprint = createPascalWaterBuildNodeFootprint(node, padding, nodes)
+  const footprint = createLandrushIslandBuildNodeFootprint(node, padding, nodes)
   return footprint ? [footprint] : []
 }
 
-function createPascalWaterRoofBuildFootprints(
-  roof: PascalWaterRoofNode,
+function createLandrushIslandRoofBuildFootprints(
+  roof: LandrushIslandRoofNode,
   padding: number,
   nodes: Record<string, AnyNode>,
 ): readonly (readonly LandrushPoint2[])[] {
@@ -14191,7 +14635,7 @@ function createPascalWaterRoofBuildFootprints(
       .map((node) => node.id as AnyNodeId),
   ])
   const footprints: Array<readonly LandrushPoint2[]> = [...childIds].flatMap((childId) => {
-    const segment = nodes[childId] as PascalWaterRoofSegmentNode | undefined
+    const segment = nodes[childId] as LandrushIslandRoofSegmentNode | undefined
     if (segment?.type !== 'roof-segment' || segment.visible === false) return []
     const overhang = segment.overhang ?? 0
     return [
@@ -14219,12 +14663,12 @@ function createPascalWaterRoofBuildFootprints(
   ]
 }
 
-function createPascalWaterBuildNodeFootprint(
+function createLandrushIslandBuildNodeFootprint(
   node: AnyNode,
   padding: number,
   nodes?: Record<string, AnyNode>,
 ): readonly LandrushPoint2[] | null {
-  if (!isPascalWaterBuildObjectNode(node, nodes)) return null
+  if (!isLandrushIslandBuildObjectNode(node, nodes)) return null
 
   if (node.type === 'wall' || node.type === 'fence') {
     return segmentFootprint(
@@ -14291,22 +14735,22 @@ function createPascalWaterBuildNodeFootprint(
   return null
 }
 
-function isPascalWaterBuildLevelNode(node: AnyNode | undefined): node is LevelNode {
-  return node?.type === 'level' && node.parentId === PASCAL_WATER_BUILDING_ID
+function isLandrushIslandBuildLevelNode(node: AnyNode | undefined): node is LevelNode {
+  return node?.type === 'level' && node.parentId === LANDRUSH_ISLAND_BUILDING_ID
 }
 
-function isPascalWaterBuildLevelId(
+function isLandrushIslandBuildLevelId(
   levelId: AnyNodeId | string | null | undefined,
   nodes?: Record<string, AnyNode>,
 ) {
   if (!levelId) return false
-  if (levelId === PASCAL_WATER_LEVEL_ID) return true
+  if (levelId === LANDRUSH_ISLAND_LEVEL_ID) return true
   if (!nodes) return false
-  return isPascalWaterBuildLevelNode(nodes[levelId as AnyNodeId])
+  return isLandrushIslandBuildLevelNode(nodes[levelId as AnyNodeId])
 }
 
-function isPascalWaterBuildObjectNode(node: AnyNode, nodes?: Record<string, AnyNode>) {
-  if (node.visible === false || !isPascalWaterBuildLevelId(node.parentId, nodes)) return false
+function isLandrushIslandBuildObjectNode(node: AnyNode, nodes?: Record<string, AnyNode>) {
+  if (node.visible === false || !isLandrushIslandBuildLevelId(node.parentId, nodes)) return false
   const metadata = node.metadata as { isTransient?: boolean } | undefined
   if (metadata?.isTransient) return false
   return (
@@ -14323,8 +14767,8 @@ function isPascalWaterBuildObjectNode(node: AnyNode, nodes?: Record<string, AnyN
   )
 }
 
-function isPascalWaterNavigationObstacleNode(node: AnyNode, nodes: Record<string, AnyNode>) {
-  if (node.visible === false || !isPascalWaterBuildLevelId(node.parentId, nodes)) return false
+function isLandrushIslandNavigationObstacleNode(node: AnyNode, nodes: Record<string, AnyNode>) {
+  if (node.visible === false || !isLandrushIslandBuildLevelId(node.parentId, nodes)) return false
   const metadata = node.metadata as { isTransient?: boolean } | undefined
   if (metadata?.isTransient) return false
   return (
@@ -14338,21 +14782,21 @@ function isPascalWaterNavigationObstacleNode(node: AnyNode, nodes: Record<string
   )
 }
 
-function resolvePascalWaterNavigationSteeringPoint(
+function resolveLandrushIslandNavigationSteeringPoint(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  doorPortals: readonly PascalWaterDoorPortal[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
   surfacePoints: readonly LandrushPoint2[],
-  stairPortals: readonly PascalWaterStairPortal[] = [],
-): PascalWaterNavigationSteeringResult | null {
-  const directPassable = pascalWaterNavigationSegmentPassable(
+  stairPortals: readonly LandrushIslandStairPortal[] = [],
+): LandrushIslandNavigationSteeringResult | null {
+  const directPassable = landrushIslandNavigationSegmentPassable(
     start,
     target,
     obstacles,
     surfacePoints,
   )
-  const doorCrossingPoint = resolvePascalWaterDoorCrossingSteeringPoint(
+  const doorCrossingPoint = resolveLandrushIslandDoorCrossingSteeringPoint(
     start,
     target,
     obstacles,
@@ -14361,7 +14805,7 @@ function resolvePascalWaterNavigationSteeringPoint(
     directPassable,
   )
   if (doorCrossingPoint) return doorCrossingPoint
-  const stairCrossingPoint = resolvePascalWaterStairCrossingSteeringPoint(
+  const stairCrossingPoint = resolveLandrushIslandStairCrossingSteeringPoint(
     start,
     target,
     obstacles,
@@ -14372,7 +14816,7 @@ function resolvePascalWaterNavigationSteeringPoint(
   if (stairCrossingPoint) return stairCrossingPoint
   if (directPassable) return { kind: 'direct', point: target }
 
-  const candidates = collectPascalWaterNavigationCandidates(
+  const candidates = collectLandrushIslandNavigationCandidates(
     start,
     target,
     obstacles,
@@ -14408,7 +14852,10 @@ function resolvePascalWaterNavigationSteeringPoint(
     for (let nextIndex = 1; nextIndex < points.length; nextIndex += 1) {
       if (visited.has(nextIndex)) continue
       const next = points[nextIndex]
-      if (!next || !pascalWaterNavigationSegmentPassable(current, next, obstacles, surfacePoints)) {
+      if (
+        !next ||
+        !landrushIslandNavigationSegmentPassable(current, next, obstacles, surfacePoints)
+      ) {
         continue
       }
       const nextDistance = currentDistance + Math.hypot(next.x - current.x, next.z - current.z)
@@ -14431,29 +14878,29 @@ function resolvePascalWaterNavigationSteeringPoint(
   return point ? { kind: 'graph', point } : null
 }
 
-function resolvePascalWaterDoorCrossingSteeringPoint(
+function resolveLandrushIslandDoorCrossingSteeringPoint(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  doorPortals: readonly PascalWaterDoorPortal[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
   surfacePoints: readonly LandrushPoint2[],
   directPassable: boolean,
-): PascalWaterNavigationSteeringResult | null {
-  let best: { point: PascalWaterNavigationSteeringResult; score: number } | null = null
+): LandrushIslandNavigationSteeringResult | null {
+  let best: { point: LandrushIslandNavigationSteeringResult; score: number } | null = null
 
   for (const portal of doorPortals) {
-    const startSigned = signedPascalWaterDoorPortalDistance(start, portal)
-    const targetSigned = signedPascalWaterDoorPortalDistance(target, portal)
-    const startTangent = tangentPascalWaterDoorPortalDistance(start, portal)
-    const targetTangent = tangentPascalWaterDoorPortalDistance(target, portal)
-    const tangentLimit = portal.halfWidth + PASCAL_WATER_DOOR_CROSSING_TANGENT_MARGIN_METERS
+    const startSigned = signedLandrushIslandDoorPortalDistance(start, portal)
+    const targetSigned = signedLandrushIslandDoorPortalDistance(target, portal)
+    const startTangent = tangentLandrushIslandDoorPortalDistance(start, portal)
+    const targetTangent = tangentLandrushIslandDoorPortalDistance(target, portal)
+    const tangentLimit = portal.halfWidth + LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS
     const startNearCenter =
-      Math.abs(startSigned) <= PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS &&
+      Math.abs(startSigned) <= LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS &&
       Math.abs(startTangent) <= tangentLimit
     const targetNearCenter =
-      Math.abs(targetSigned) <= PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS &&
+      Math.abs(targetSigned) <= LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS &&
       Math.abs(targetTangent) <= tangentLimit
-    const segmentCrossing = resolvePascalWaterDoorSegmentCrossing(start, target, portal)
+    const segmentCrossing = resolveLandrushIslandDoorSegmentCrossing(start, target, portal)
     const directPathUsesDoor = Boolean(
       segmentCrossing && Math.abs(segmentCrossing.tangent) <= tangentLimit,
     )
@@ -14478,8 +14925,8 @@ function resolvePascalWaterDoorCrossingSteeringPoint(
 
     if (!route.every((point) => pointInPolygonOrNearEdge(point, surfacePoints))) continue
     if (
-      !pascalWaterNavigationSegmentPassable(entry, portal.center, obstacles, surfacePoints) ||
-      !pascalWaterNavigationSegmentPassable(portal.center, exit, obstacles, surfacePoints)
+      !landrushIslandNavigationSegmentPassable(entry, portal.center, obstacles, surfacePoints) ||
+      !landrushIslandNavigationSegmentPassable(portal.center, exit, obstacles, surfacePoints)
     ) {
       continue
     }
@@ -14487,27 +14934,27 @@ function resolvePascalWaterDoorCrossingSteeringPoint(
     if (!directPassable) {
       const startToEntryReached =
         Math.hypot(start.x - entry.x, start.z - entry.z) <=
-        PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+        LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
       const exitToTargetReached =
         Math.hypot(target.x - exit.x, target.z - exit.z) <=
-        PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+        LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
       if (
         !startToEntryReached &&
-        !pascalWaterNavigationSegmentPassable(start, entry, obstacles, surfacePoints)
+        !landrushIslandNavigationSegmentPassable(start, entry, obstacles, surfacePoints)
       ) {
         continue
       }
       if (
         !exitToTargetReached &&
-        !pascalWaterNavigationSegmentPassable(exit, target, obstacles, surfacePoints)
+        !landrushIslandNavigationSegmentPassable(exit, target, obstacles, surfacePoints)
       ) {
         continue
       }
     }
 
-    const nextPoint = nextPascalWaterDoorCrossingWaypoint(start, entry, portal.center, exit)
+    const nextPoint = nextLandrushIslandDoorCrossingWaypoint(start, entry, portal.center, exit)
     if (!nextPoint) continue
-    const phase = pascalWaterDoorCrossingPhaseForPoint(nextPoint, entry, portal.center, exit)
+    const phase = landrushIslandDoorCrossingPhaseForPoint(nextPoint, entry, portal.center, exit)
     const score =
       Math.hypot(start.x - entry.x, start.z - entry.z) +
       Math.hypot(entry.x - portal.center.x, entry.z - portal.center.z) +
@@ -14537,29 +14984,29 @@ function resolvePascalWaterDoorCrossingSteeringPoint(
   return best?.point ?? null
 }
 
-function resolvePascalWaterStairCrossingSteeringPoint(
+function resolveLandrushIslandStairCrossingSteeringPoint(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  stairPortals: readonly PascalWaterStairPortal[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  stairPortals: readonly LandrushIslandStairPortal[],
   surfacePoints: readonly LandrushPoint2[],
   directPassable: boolean,
-): PascalWaterNavigationSteeringResult | null {
-  let best: { point: PascalWaterNavigationSteeringResult; score: number } | null = null
+): LandrushIslandNavigationSteeringResult | null {
+  let best: { point: LandrushIslandNavigationSteeringResult; score: number } | null = null
 
   for (const portal of stairPortals) {
-    const crossingObstacles = pascalWaterNavigationObstaclesWithoutNode(obstacles, portal.nodeId)
-    const startSigned = signedPascalWaterStairPortalDistance(start, portal)
-    const targetSigned = signedPascalWaterStairPortalDistance(target, portal)
-    const startTangent = tangentPascalWaterStairPortalDistance(start, portal)
-    const targetTangent = tangentPascalWaterStairPortalDistance(target, portal)
-    const tangentLimit = portal.halfWidth + PASCAL_WATER_DOOR_CROSSING_TANGENT_MARGIN_METERS
-    const runLimit = portal.halfRun + PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS
+    const crossingObstacles = landrushIslandNavigationObstaclesWithoutNode(obstacles, portal.nodeId)
+    const startSigned = signedLandrushIslandStairPortalDistance(start, portal)
+    const targetSigned = signedLandrushIslandStairPortalDistance(target, portal)
+    const startTangent = tangentLandrushIslandStairPortalDistance(start, portal)
+    const targetTangent = tangentLandrushIslandStairPortalDistance(target, portal)
+    const tangentLimit = portal.halfWidth + LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS
+    const runLimit = portal.halfRun + LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS
     const startWithinStair =
       Math.abs(startSigned) <= runLimit && Math.abs(startTangent) <= tangentLimit
     const targetWithinStair =
       Math.abs(targetSigned) <= runLimit && Math.abs(targetTangent) <= tangentLimit
-    const segmentCrossing = resolvePascalWaterStairSegmentCrossing(start, target, portal)
+    const segmentCrossing = resolveLandrushIslandStairSegmentCrossing(start, target, portal)
     const directPathUsesStair = Boolean(
       segmentCrossing && Math.abs(segmentCrossing.tangent) <= tangentLimit,
     )
@@ -14583,13 +15030,18 @@ function resolvePascalWaterStairCrossingSteeringPoint(
 
     if (!route.every((point) => pointInPolygonOrNearEdge(point, surfacePoints))) continue
     if (
-      !pascalWaterNavigationSegmentPassable(
+      !landrushIslandNavigationSegmentPassable(
         entry,
         portal.center,
         crossingObstacles,
         surfacePoints,
       ) ||
-      !pascalWaterNavigationSegmentPassable(portal.center, exit, crossingObstacles, surfacePoints)
+      !landrushIslandNavigationSegmentPassable(
+        portal.center,
+        exit,
+        crossingObstacles,
+        surfacePoints,
+      )
     ) {
       continue
     }
@@ -14597,28 +15049,28 @@ function resolvePascalWaterStairCrossingSteeringPoint(
     if (!directPassable) {
       const startToEntryReached =
         Math.hypot(start.x - entry.x, start.z - entry.z) <=
-        PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+        LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
       const exitToTargetReached =
         targetWithinStair ||
         Math.hypot(target.x - exit.x, target.z - exit.z) <=
-          PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS
+          LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
       if (
         !startToEntryReached &&
-        !pascalWaterNavigationSegmentPassable(start, entry, crossingObstacles, surfacePoints)
+        !landrushIslandNavigationSegmentPassable(start, entry, crossingObstacles, surfacePoints)
       ) {
         continue
       }
       if (
         !exitToTargetReached &&
-        !pascalWaterNavigationSegmentPassable(exit, target, crossingObstacles, surfacePoints)
+        !landrushIslandNavigationSegmentPassable(exit, target, crossingObstacles, surfacePoints)
       ) {
         continue
       }
     }
 
-    const nextPoint = nextPascalWaterDoorCrossingWaypoint(start, entry, portal.center, exit)
+    const nextPoint = nextLandrushIslandDoorCrossingWaypoint(start, entry, portal.center, exit)
     if (!nextPoint) continue
-    const phase = pascalWaterDoorCrossingPhaseForPoint(nextPoint, entry, portal.center, exit)
+    const phase = landrushIslandDoorCrossingPhaseForPoint(nextPoint, entry, portal.center, exit)
     const score =
       Math.hypot(start.x - entry.x, start.z - entry.z) +
       Math.hypot(entry.x - portal.center.x, entry.z - portal.center.z) +
@@ -14646,15 +15098,18 @@ function resolvePascalWaterStairCrossingSteeringPoint(
   return best?.point ?? null
 }
 
-function signedPascalWaterDoorPortalDistance(point: LandrushPoint2, portal: PascalWaterDoorPortal) {
+function signedLandrushIslandDoorPortalDistance(
+  point: LandrushPoint2,
+  portal: LandrushIslandDoorPortal,
+) {
   return (
     (point.x - portal.center.x) * portal.normal.x + (point.z - portal.center.z) * portal.normal.z
   )
 }
 
-function tangentPascalWaterDoorPortalDistance(
+function tangentLandrushIslandDoorPortalDistance(
   point: LandrushPoint2,
-  portal: PascalWaterDoorPortal,
+  portal: LandrushIslandDoorPortal,
 ) {
   return (
     (point.x - portal.center.x) * portal.tangent.x + (point.z - portal.center.z) * portal.tangent.z
@@ -14662,52 +15117,52 @@ function tangentPascalWaterDoorPortalDistance(
 }
 
 function portalSideForSignedDistance(distance: number) {
-  if (distance > PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS) return 1
-  if (distance < -PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS) return -1
+  if (distance > LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS) return 1
+  if (distance < -LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS) return -1
   return 0
 }
 
-function portalPointForSide(portal: PascalWaterDoorPortal, side: number) {
+function portalPointForSide(portal: LandrushIslandDoorPortal, side: number) {
   return side >= 0 ? portal.sideA : portal.sideB
 }
 
-function signedPascalWaterStairPortalDistance(
+function signedLandrushIslandStairPortalDistance(
   point: LandrushPoint2,
-  portal: PascalWaterStairPortal,
+  portal: LandrushIslandStairPortal,
 ) {
   return (
     (point.x - portal.center.x) * portal.normal.x + (point.z - portal.center.z) * portal.normal.z
   )
 }
 
-function tangentPascalWaterStairPortalDistance(
+function tangentLandrushIslandStairPortalDistance(
   point: LandrushPoint2,
-  portal: PascalWaterStairPortal,
+  portal: LandrushIslandStairPortal,
 ) {
   return (
     (point.x - portal.center.x) * portal.tangent.x + (point.z - portal.center.z) * portal.tangent.z
   )
 }
 
-function stairPortalPointForSide(portal: PascalWaterStairPortal, side: number) {
+function stairPortalPointForSide(portal: LandrushIslandStairPortal, side: number) {
   return side >= 0 ? portal.sideA : portal.sideB
 }
 
-function resolvePascalWaterStairConnectorTarget(
+function resolveLandrushIslandStairConnectorTarget(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  stairPortals: readonly PascalWaterStairPortal[],
+  stairPortals: readonly LandrushIslandStairPortal[],
 ): LandrushPoint2 {
   let best: { point: LandrushPoint2; score: number } | null = null
 
   for (const portal of stairPortals) {
-    const targetSigned = signedPascalWaterStairPortalDistance(target, portal)
-    const targetTangent = tangentPascalWaterStairPortalDistance(target, portal)
-    const tangentLimit = portal.halfWidth + PASCAL_WATER_DOOR_CROSSING_TANGENT_MARGIN_METERS
-    const runLimit = portal.halfRun + PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS
+    const targetSigned = signedLandrushIslandStairPortalDistance(target, portal)
+    const targetTangent = tangentLandrushIslandStairPortalDistance(target, portal)
+    const tangentLimit = portal.halfWidth + LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS
+    const runLimit = portal.halfRun + LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS
     if (Math.abs(targetSigned) > runLimit || Math.abs(targetTangent) > tangentLimit) continue
 
-    const startSigned = signedPascalWaterStairPortalDistance(start, portal)
+    const startSigned = signedLandrushIslandStairPortalDistance(start, portal)
     const startSide = portalSideForSignedDistance(startSigned)
     const targetSide = portalSideForSignedDistance(targetSigned)
     const exitSide = startSide ? -startSide : targetSide || 1
@@ -14719,13 +15174,13 @@ function resolvePascalWaterStairConnectorTarget(
   return best?.point ?? target
 }
 
-function resolvePascalWaterDoorSegmentCrossing(
+function resolveLandrushIslandDoorSegmentCrossing(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  portal: PascalWaterDoorPortal,
+  portal: LandrushIslandDoorPortal,
 ) {
-  const startSigned = signedPascalWaterDoorPortalDistance(start, portal)
-  const targetSigned = signedPascalWaterDoorPortalDistance(target, portal)
+  const startSigned = signedLandrushIslandDoorPortalDistance(start, portal)
+  const targetSigned = signedLandrushIslandDoorPortalDistance(target, portal)
   const denominator = startSigned - targetSigned
   if (Math.abs(denominator) <= 0.000001) return null
   const t = startSigned / denominator
@@ -14736,17 +15191,17 @@ function resolvePascalWaterDoorSegmentCrossing(
   }
   return {
     point,
-    tangent: tangentPascalWaterDoorPortalDistance(point, portal),
+    tangent: tangentLandrushIslandDoorPortalDistance(point, portal),
   }
 }
 
-function resolvePascalWaterStairSegmentCrossing(
+function resolveLandrushIslandStairSegmentCrossing(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  portal: PascalWaterStairPortal,
+  portal: LandrushIslandStairPortal,
 ) {
-  const startSigned = signedPascalWaterStairPortalDistance(start, portal)
-  const targetSigned = signedPascalWaterStairPortalDistance(target, portal)
+  const startSigned = signedLandrushIslandStairPortalDistance(start, portal)
+  const targetSigned = signedLandrushIslandStairPortalDistance(target, portal)
   const denominator = startSigned - targetSigned
   if (Math.abs(denominator) <= 0.000001) return null
   const t = startSigned / denominator
@@ -14757,11 +15212,11 @@ function resolvePascalWaterStairSegmentCrossing(
   }
   return {
     point,
-    tangent: tangentPascalWaterStairPortalDistance(point, portal),
+    tangent: tangentLandrushIslandStairPortalDistance(point, portal),
   }
 }
 
-function nextPascalWaterDoorCrossingWaypoint(
+function nextLandrushIslandDoorCrossingWaypoint(
   start: LandrushPoint2,
   entry: LandrushPoint2,
   center: LandrushPoint2,
@@ -14783,17 +15238,17 @@ function nextPascalWaterDoorCrossingWaypoint(
   const centerDistance = Math.hypot(start.x - center.x, start.z - center.z)
   const exitDistance = Math.hypot(start.x - exit.x, start.z - exit.z)
   const entryAligned =
-    entryDistance <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS ||
-    (progressFromEntry >= -PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS &&
-      lateralFromRoute <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS)
+    entryDistance <= LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS ||
+    (progressFromEntry >= -LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS &&
+      lateralFromRoute <= LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS)
   const centerAligned =
-    centerDistance <= PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS ||
-    (progressFromEntry >= centerFromEntry - PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS &&
-      lateralFromRoute <= PASCAL_WATER_DOOR_CROSSING_CENTER_RADIUS)
+    centerDistance <= LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS ||
+    (progressFromEntry >= centerFromEntry - LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS &&
+      lateralFromRoute <= LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS)
   const exitAligned =
-    exitDistance <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS ||
-    (progressFromEntry >= routeLength - PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS &&
-      lateralFromRoute <= PASCAL_WATER_DOOR_CROSSING_WAYPOINT_RADIUS)
+    exitDistance <= LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS ||
+    (progressFromEntry >= routeLength - LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS &&
+      lateralFromRoute <= LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS)
 
   if (!entryAligned) {
     return entry
@@ -14807,50 +15262,50 @@ function nextPascalWaterDoorCrossingWaypoint(
   return null
 }
 
-function pascalWaterDoorCrossingPhaseForPoint(
+function landrushIslandDoorCrossingPhaseForPoint(
   point: LandrushPoint2,
   entry: LandrushPoint2,
   center: LandrushPoint2,
   exit: LandrushPoint2,
-): PascalWaterDoorCrossingPhase {
+): LandrushIslandDoorCrossingPhase {
   if (Math.hypot(point.x - entry.x, point.z - entry.z) <= 0.001) return 'entry'
   if (Math.hypot(point.x - center.x, point.z - center.z) <= 0.001) return 'center'
   if (Math.hypot(point.x - exit.x, point.z - exit.z) <= 0.001) return 'exit'
   return 'entry'
 }
 
-function collectPascalWaterNavigationCandidates(
+function collectLandrushIslandNavigationCandidates(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
-  doorPortals: readonly PascalWaterDoorPortal[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
   surfacePoints: readonly LandrushPoint2[],
-  stairPortals: readonly PascalWaterStairPortal[] = [],
+  stairPortals: readonly LandrushIslandStairPortal[] = [],
 ) {
   const candidates: LandrushPoint2[] = []
   for (const portal of doorPortals) {
     for (const point of [portal.sideA, portal.center, portal.sideB]) {
       if (!pointInPolygon(point, surfacePoints)) continue
-      if (pointInPascalWaterNavigationObstacle(point, obstacles)) continue
+      if (pointInLandrushIslandNavigationObstacle(point, obstacles)) continue
       candidates.push(point)
     }
   }
   for (const portal of stairPortals) {
     for (const point of [portal.sideA, portal.center, portal.sideB]) {
       if (!pointInPolygon(point, surfacePoints)) continue
-      if (pointInPascalWaterNavigationObstacle(point, obstacles)) continue
+      if (pointInLandrushIslandNavigationObstacle(point, obstacles)) continue
       candidates.push(point)
     }
   }
   for (const obstacle of obstacles) {
     for (const vertex of obstacle.points) {
-      const candidate = offsetPascalWaterNavigationCandidate(
+      const candidate = offsetLandrushIslandNavigationCandidate(
         vertex,
         obstacle.points,
-        PASCAL_WATER_NAVIGATION_VERTEX_OFFSET_METERS,
+        LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS,
       )
       if (!pointInPolygon(candidate, surfacePoints)) continue
-      if (pointInPascalWaterNavigationObstacle(candidate, obstacles)) continue
+      if (pointInLandrushIslandNavigationObstacle(candidate, obstacles)) continue
       candidates.push(candidate)
     }
   }
@@ -14861,7 +15316,7 @@ function collectPascalWaterNavigationCandidates(
         navigationCandidateScore(first, start, target) -
         navigationCandidateScore(second, start, target),
     )
-    .slice(0, PASCAL_WATER_NAVIGATION_MAX_GRAPH_POINTS)
+    .slice(0, LANDRUSH_ISLAND_NAVIGATION_MAX_GRAPH_POINTS)
 }
 
 function navigationCandidateScore(
@@ -14875,7 +15330,7 @@ function navigationCandidateScore(
   )
 }
 
-function offsetPascalWaterNavigationCandidate(
+function offsetLandrushIslandNavigationCandidate(
   point: LandrushPoint2,
   polygon: readonly LandrushPoint2[],
   distance: number,
@@ -14888,19 +15343,19 @@ function offsetPascalWaterNavigationCandidate(
   }
 }
 
-function pascalWaterNavigationSegmentPassable(
+function landrushIslandNavigationSegmentPassable(
   start: LandrushPoint2,
   end: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
   surfacePoints: readonly LandrushPoint2[],
 ) {
   return (
-    pascalWaterNavigationSegmentInSurface(start, end, surfacePoints) &&
-    !pascalWaterNavigationSegmentBlocked(start, end, obstacles)
+    landrushIslandNavigationSegmentInSurface(start, end, surfacePoints) &&
+    !landrushIslandNavigationSegmentBlocked(start, end, obstacles)
   )
 }
 
-function pascalWaterNavigationSegmentInSurface(
+function landrushIslandNavigationSegmentInSurface(
   start: LandrushPoint2,
   end: LandrushPoint2,
   surfacePoints: readonly LandrushPoint2[],
@@ -14921,27 +15376,27 @@ function pascalWaterNavigationSegmentInSurface(
   return true
 }
 
-function pascalWaterNavigationSegmentBlocked(
+function landrushIslandNavigationSegmentBlocked(
   start: LandrushPoint2,
   end: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
 ) {
   for (const obstacle of obstacles) {
-    if (pascalWaterNavigationSegmentIntersectsPolygon(start, end, obstacle.points)) return true
+    if (landrushIslandNavigationSegmentIntersectsPolygon(start, end, obstacle.points)) return true
   }
   return false
 }
 
-function pascalWaterNavigationObstaclesWithoutNode(
-  obstacles: readonly PascalWaterNavigationObstacle[],
+function landrushIslandNavigationObstaclesWithoutNode(
+  obstacles: readonly LandrushIslandNavigationObstacle[],
   nodeId: AnyNodeId,
 ) {
   return obstacles.filter((obstacle) => obstacle.nodeId !== nodeId)
 }
 
-function pointInPascalWaterNavigationObstacle(
+function pointInLandrushIslandNavigationObstacle(
   point: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
 ) {
   for (const obstacle of obstacles) {
     if (pointInPolygon(point, obstacle.points)) return true
@@ -14949,9 +15404,9 @@ function pointInPascalWaterNavigationObstacle(
   return false
 }
 
-function pointInPascalWaterBlockingNavigationObstacle(
+function pointInLandrushIslandBlockingNavigationObstacle(
   point: LandrushPoint2,
-  obstacles: readonly PascalWaterNavigationObstacle[],
+  obstacles: readonly LandrushIslandNavigationObstacle[],
 ) {
   for (const obstacle of obstacles) {
     if (obstacle.kind === 'stair') continue
@@ -14960,45 +15415,45 @@ function pointInPascalWaterBlockingNavigationObstacle(
   return false
 }
 
-function openApproachingPascalWaterDoorPortal(
+function openApproachingLandrushIslandDoorPortal(
   position: Vector3,
   movement: RobotMovementInput,
-  doorPortals: readonly PascalWaterDoorPortal[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
 ) {
-  openNearbyPascalWaterDoorPortal(position, doorPortals)
+  openNearbyLandrushIslandDoorPortal(position, doorPortals)
 
   const start = { x: position.x, z: position.z }
   const end = {
-    x: start.x + movement.x * PASCAL_WATER_DOOR_OPEN_LOOKAHEAD_METERS,
-    z: start.z + movement.z * PASCAL_WATER_DOOR_OPEN_LOOKAHEAD_METERS,
+    x: start.x + movement.x * LANDRUSH_ISLAND_DOOR_OPEN_LOOKAHEAD_METERS,
+    z: start.z + movement.z * LANDRUSH_ISLAND_DOOR_OPEN_LOOKAHEAD_METERS,
   }
   for (const portal of doorPortals) {
-    const ahead = nearestForwardPascalWaterDoorPortalDistance(start, movement, portal)
-    if (!Number.isFinite(ahead) || ahead > PASCAL_WATER_DOOR_OPEN_LOOKAHEAD_METERS) continue
+    const ahead = nearestForwardLandrushIslandDoorPortalDistance(start, movement, portal)
+    if (!Number.isFinite(ahead) || ahead > LANDRUSH_ISLAND_DOOR_OPEN_LOOKAHEAD_METERS) continue
     const distanceToPath = Math.min(
       distanceToSegment2(portal.center, start, end),
       distanceToSegment2(portal.sideA, start, end),
       distanceToSegment2(portal.sideB, start, end),
     )
-    if (distanceToPath <= PASCAL_WATER_DOOR_OPEN_PATH_CLEARANCE_METERS) {
-      openPascalWaterDoor(portal.doorId)
+    if (distanceToPath <= LANDRUSH_ISLAND_DOOR_OPEN_PATH_CLEARANCE_METERS) {
+      openLandrushIslandDoor(portal.doorId)
     }
   }
 }
 
-function openPascalWaterDoorPortalsAlongSegment(
+function openLandrushIslandDoorPortalsAlongSegment(
   start: LandrushPoint2,
   target: LandrushPoint2,
-  doorPortals: readonly PascalWaterDoorPortal[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
 ) {
   for (const portal of doorPortals) {
-    const crossing = resolvePascalWaterDoorSegmentCrossing(start, target, portal)
+    const crossing = resolveLandrushIslandDoorSegmentCrossing(start, target, portal)
     if (!crossing) continue
-    const tangentLimit = portal.halfWidth + PASCAL_WATER_DOOR_CROSSING_TANGENT_MARGIN_METERS
+    const tangentLimit = portal.halfWidth + LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS
     if (Math.abs(crossing.tangent) > tangentLimit) continue
-    const openState = openPascalWaterDoor(portal.doorId)
+    const openState = openLandrushIslandDoor(portal.doorId)
     if (openState === 'started') {
-      recordPascalWaterNavigationProbe({
+      recordLandrushIslandNavigationProbe({
         doorId: portal.doorId,
         kind: 'door-open-on-segment',
         tangent: roundPerf(crossing.tangent),
@@ -15007,10 +15462,10 @@ function openPascalWaterDoorPortalsAlongSegment(
   }
 }
 
-function nearestForwardPascalWaterDoorPortalDistance(
+function nearestForwardLandrushIslandDoorPortalDistance(
   start: LandrushPoint2,
   movement: RobotMovementInput,
-  portal: PascalWaterDoorPortal,
+  portal: LandrushIslandDoorPortal,
 ) {
   let nearest = Number.POSITIVE_INFINITY
   for (const point of [portal.sideA, portal.center, portal.sideB]) {
@@ -15020,9 +15475,9 @@ function nearestForwardPascalWaterDoorPortalDistance(
   return nearest
 }
 
-function openNearbyPascalWaterDoorPortal(
+function openNearbyLandrushIslandDoorPortal(
   position: Vector3,
-  doorPortals: readonly PascalWaterDoorPortal[],
+  doorPortals: readonly LandrushIslandDoorPortal[],
 ) {
   const point = { x: position.x, z: position.z }
   for (const portal of doorPortals) {
@@ -15031,13 +15486,13 @@ function openNearbyPascalWaterDoorPortal(
       Math.hypot(point.x - portal.sideA.x, point.z - portal.sideA.z),
       Math.hypot(point.x - portal.sideB.x, point.z - portal.sideB.z),
     )
-    if (distance <= PASCAL_WATER_DOOR_OPEN_TRIGGER_METERS) {
-      openPascalWaterDoor(portal.doorId)
+    if (distance <= LANDRUSH_ISLAND_DOOR_OPEN_TRIGGER_METERS) {
+      openLandrushIslandDoor(portal.doorId)
     }
   }
 }
 
-function openPascalWaterDoor(doorId: AnyNodeId) {
+function openLandrushIslandDoor(doorId: AnyNodeId) {
   const node = useScene.getState().nodes[doorId]
   if (node?.type !== 'door' || node.openingKind === 'opening') return 'ignored'
 
@@ -15054,7 +15509,7 @@ function openPascalWaterDoor(doorId: AnyNodeId) {
       0
     if (currentOpenAmount >= 0.82) return 'already-open'
     interactive.startDoorAnimation(doorId, {
-      durationMs: PASCAL_WATER_DOOR_OPEN_ANIMATION_MS,
+      durationMs: LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS,
       field: 'operationState',
       from: currentOpenAmount,
       persist: false,
@@ -15067,7 +15522,7 @@ function openPascalWaterDoor(doorId: AnyNodeId) {
   const activeAnimation = interactive.doorAnimations[doorId]
   if (
     activeAnimation?.field === 'swingAngle' &&
-    activeAnimation.to >= PASCAL_WATER_DOOR_OPEN_SWING_ANGLE * 0.98
+    activeAnimation.to >= LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE * 0.98
   ) {
     return 'already-open'
   }
@@ -15076,19 +15531,19 @@ function openPascalWaterDoor(doorId: AnyNodeId) {
     (activeAnimation?.field === 'swingAngle' ? activeAnimation.to : undefined) ??
     node.swingAngle ??
     0
-  if (currentSwingAngle >= PASCAL_WATER_DOOR_OPEN_SWING_ANGLE * 0.82) return 'already-open'
+  if (currentSwingAngle >= LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE * 0.82) return 'already-open'
   interactive.startDoorAnimation(doorId, {
-    durationMs: PASCAL_WATER_DOOR_OPEN_ANIMATION_MS,
+    durationMs: LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS,
     field: 'swingAngle',
     from: currentSwingAngle,
     persist: false,
     startedAt: null,
-    to: PASCAL_WATER_DOOR_OPEN_SWING_ANGLE,
+    to: LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE,
   })
   return 'started'
 }
 
-function pascalWaterNavigationSegmentIntersectsPolygon(
+function landrushIslandNavigationSegmentIntersectsPolygon(
   start: LandrushPoint2,
   end: LandrushPoint2,
   polygon: readonly LandrushPoint2[],
@@ -15249,7 +15704,7 @@ function rotateFootprintPoint(
 function pointInPolygonOrNearEdge(
   point: LandrushPoint2,
   polygon: readonly LandrushPoint2[],
-  tolerance = PASCAL_WATER_BUILD_PARCEL_EDGE_TOLERANCE_METERS,
+  tolerance = LANDRUSH_ISLAND_BUILD_PARCEL_EDGE_TOLERANCE_METERS,
 ) {
   return pointInPolygon(point, polygon) || distanceToClosedPolyline(point, polygon) <= tolerance
 }
@@ -15325,15 +15780,38 @@ function snapshotPoint(player: MultiplayerPlayerSnapshot): LandrushPoint2 {
   return { x: player.position[0], z: player.position[2] }
 }
 
-function releasePascalWaterPointerLock() {
+function releaseLandrushIslandPointerLock() {
   if (!(document.pointerLockElement instanceof HTMLCanvasElement)) return false
   document.exitPointerLock()
   return true
 }
 
-function createPascalWaterViewerLandSurface(
-  surface: PascalWaterLandSurface,
-): PascalWaterLandSurface {
+function requestLandrushIslandPointerLock(canvas?: HTMLCanvasElement | null) {
+  if (typeof document === 'undefined') return false
+  const target = canvas ?? findLandrushIslandPointerLockCanvas()
+  if (!(target instanceof HTMLCanvasElement)) return false
+  if (document.pointerLockElement === target) return true
+  void Promise.resolve(target.requestPointerLock()).catch(() => undefined)
+  return true
+}
+
+function findLandrushIslandPointerLockCanvas() {
+  const canvases = Array.from(document.querySelectorAll('canvas'))
+  return (
+    canvases
+      .map((canvas) => ({ canvas, rect: canvas.getBoundingClientRect() }))
+      .filter(({ canvas, rect }) => {
+        if (rect.width < 16 || rect.height < 16) return false
+        return window.getComputedStyle(canvas).pointerEvents !== 'none'
+      })
+      .sort((a, b) => b.rect.width * b.rect.height - a.rect.width * a.rect.height)[0]?.canvas ??
+    null
+  )
+}
+
+function createLandrushIslandViewerLandSurface(
+  surface: LandrushIslandLandSurface,
+): LandrushIslandLandSurface {
   const elevationOffset = surface.grassSurfaceElevation
   return {
     ...surface,
@@ -15342,13 +15820,13 @@ function createPascalWaterViewerLandSurface(
   }
 }
 
-function createPascalWaterGrassRoadSegments(
+function createLandrushIslandGrassRoadSegments(
   segments: LandrushWorldNode['roads']['segments'],
 ): readonly LandrushRoadSegment[] {
   return segments.map((segment) => ({
     connectsParcelIds: segment.connectsParcelIds,
     fromNodeId: segment.fromNodeId,
-    id: `pascal-water-grass-${segment.id}`,
+    id: `landrush-island-grass-${segment.id}`,
     kind: segment.kind === 'driveway' ? 'driveway' : 'spine',
     points: segment.points,
     r3fPoints: segment.points.map((point) => [point.x, 0, point.z] satisfies LandrushVec3),
@@ -15357,7 +15835,7 @@ function createPascalWaterGrassRoadSegments(
   }))
 }
 
-function createPascalWaterPerimeter(island: PascalWaterIsland): PascalWaterPerimeter {
+function createLandrushIslandPerimeter(island: LandrushIslandIsland): LandrushIslandPerimeter {
   return {
     bounds: island.perimeter.bounds,
     closed: island.perimeter.closed,
@@ -15365,7 +15843,7 @@ function createPascalWaterPerimeter(island: PascalWaterIsland): PascalWaterPerim
   }
 }
 
-function createPascalWaterNodeRenderSignature(node: PascalWaterNode) {
+function createLandrushIslandNodeRenderSignature(node: LandrushIslandNode) {
   return JSON.stringify({
     elevationParameters: node.elevationParameters,
     fieldParameters: node.fieldParameters,
@@ -15379,7 +15857,7 @@ function createPascalWaterNodeRenderSignature(node: PascalWaterNode) {
   })
 }
 
-function createPascalWaterNode({
+function createLandrushIslandNode({
   elevationParameters,
   fieldParameters,
   materialParameters,
@@ -15393,24 +15871,24 @@ function createPascalWaterNode({
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
   materialParameters: LandrushWaterSurfaceParameters
-  perimeter: PascalWaterPerimeter
+  perimeter: LandrushIslandPerimeter
   profilePlainWaterMaterial?: boolean
   showDepthReference: boolean
   terrainFieldResolution: number
-  waterFieldDebugMode?: PascalWaterFieldDebugMode
+  waterFieldDebugMode?: LandrushIslandFieldDebugMode
   waterLabSeed: string
 }) {
-  const landSurface = createPascalWaterLandSurface({
+  const landSurface = createLandrushIslandLandSurface({
     elevationParameters,
     shorelinePoints: perimeter.points,
     waterPlaneSize: WATER_PLANE_SIZE,
   })
-  const waterNode: PascalWaterNode = {
+  const waterNode: LandrushIslandNode = {
     object: 'node',
-    id: PASCAL_WATER_NODE_ID as never,
+    id: LANDRUSH_ISLAND_NODE_ID as never,
     type: 'pascal-water',
-    name: 'Pascal Water',
-    parentId: null,
+    name: 'Landrush Island Water',
+    parentId: LANDRUSH_ISLAND_LEVEL_ID,
     visible: true,
     position: [0, -landSurface.grassSurfaceElevation, 0],
     planeSize: WATER_PLANE_SIZE,
@@ -15431,7 +15909,7 @@ function createPascalWaterNode({
     metadata: {
       grassSurfaceElevation: landSurface.grassSurfaceElevation,
       ...(profilePlainWaterMaterial ? { profilePlainWaterMaterial: true } : {}),
-      source: 'pascal-water-debug',
+      source: 'landrush-island-debug',
       ...(waterFieldDebugMode ? { waterFieldDebugMode } : {}),
       waterLabSeed,
     },
@@ -15440,35 +15918,35 @@ function createPascalWaterNode({
   return { waterNode }
 }
 
-function createPascalWaterLayoutNode({
+function createLandrushIslandLayoutNode({
   allocation,
   island,
   landSurface,
   layoutConfig,
 }: {
   allocation: ParcelAllocationResult
-  island: PascalWaterIsland
-  landSurface: PascalWaterLandSurface
-  layoutConfig: PascalWaterExperienceConfig
-}): PascalWaterLayoutNode {
+  island: LandrushIslandIsland
+  landSurface: LandrushIslandLandSurface
+  layoutConfig: LandrushIslandExperienceConfig
+}): LandrushIslandLayoutNode {
   const streetNetwork = generateParcelEdgeStreets(allocation, {
     loopiness: 0,
-    roadWidthMeters: PASCAL_WATER_DIRT_ROAD_WIDTH_METERS,
-    seed: `${island.seed}:world-streets:${PASCAL_WATER_PARCEL_PARAMETERS.parcelCount}`,
+    roadWidthMeters: LANDRUSH_ISLAND_DIRT_ROAD_WIDTH_METERS,
+    seed: `${island.seed}:world-streets:${LANDRUSH_ISLAND_PARCEL_PARAMETERS.parcelCount}`,
   })
   const perimeterPoints = openPointRing(landSurface.grassSurfacePoints)
   const bounds = boundsForPoints(perimeterPoints)
   const center = polygonCentroid(perimeterPoints)
-  const roadNodes = createPascalWaterRoadNodes(streetNetwork)
+  const roadNodes = createLandrushIslandRoadNodes(streetNetwork)
   const roadSegments = streetNetwork.segments.map((segment) =>
-    createPascalWaterRoadSegment(segment),
+    createLandrushIslandRoadSegment(segment),
   )
   const layoutNode = {
     object: 'node',
     id: layoutConfig.layoutNodeId as never,
     type: layoutConfig.layoutNodeKind,
     name: layoutConfig.layoutNodeName,
-    parentId: null,
+    parentId: LANDRUSH_ISLAND_LEVEL_ID,
     visible: true,
     position: [0, 0, 0],
     seed: island.seed,
@@ -15479,10 +15957,10 @@ function createPascalWaterLayoutNode({
       id: 'world-multiplayer-grass-surface',
       points: closedPointRing(perimeterPoints),
     },
-    parcels: allocation.parcels.map(createPascalWaterParcel),
+    parcels: allocation.parcels.map(createLandrushIslandParcel),
     ownerParcelId: '',
     roads: {
-      adjacency: createPascalWaterRoadAdjacency(roadSegments),
+      adjacency: createLandrushIslandRoadAdjacency(roadSegments),
       connected: streetNetwork.roadConnected,
       connectedParcelIds: [...streetNetwork.connectedParcelIds],
       nodes: roadNodes,
@@ -15490,8 +15968,8 @@ function createPascalWaterLayoutNode({
       sidewalks: [],
     },
     trees: [],
-    playerStart: [center.x, PASCAL_WATER_VISUAL_PLAYER_GROUND_Y, center.z],
-    playerPosition: [center.x, PASCAL_WATER_VISUAL_PLAYER_GROUND_Y, center.z],
+    playerStart: [center.x, LANDRUSH_ISLAND_VISUAL_PLAYER_GROUND_Y, center.z],
+    playerPosition: [center.x, LANDRUSH_ISLAND_VISUAL_PLAYER_GROUND_Y, center.z],
     playerHeading: 0,
     playerMoving: false,
     playerSpeed: 0,
@@ -15503,7 +15981,7 @@ function createPascalWaterLayoutNode({
       checks: [
         {
           check: 'world-multiplayer parcel allocation',
-          pass: allocation.parcels.length === PASCAL_WATER_PARCEL_PARAMETERS.parcelCount,
+          pass: allocation.parcels.length === LANDRUSH_ISLAND_PARCEL_PARAMETERS.parcelCount,
           value: allocation.parcels.length,
         },
         {
@@ -15558,102 +16036,102 @@ function createPascalWaterLayoutNode({
   })
 }
 
-function createPascalWaterSceneGraph(options: {
+function createLandrushIslandSceneGraph(options: {
   elevationParameters: IslandElevationParameters
   fieldParameters: WaterFieldParameters
   islandParameters: WaterLabIslandParameters
-  layoutConfig: PascalWaterExperienceConfig
+  layoutConfig: LandrushIslandExperienceConfig
   materialParameters: LandrushWaterSurfaceParameters
   omitWaterNode?: boolean
   profilePlainWaterMaterial?: boolean
   showDepthReference: boolean
   terrainFieldResolution: number
-  waterFieldDebugMode?: PascalWaterFieldDebugMode
+  waterFieldDebugMode?: LandrushIslandFieldDebugMode
 }): {
-  landrushLayoutNode: PascalWaterLayoutNode
+  landrushLayoutNode: LandrushIslandLayoutNode
   sceneGraph: SceneGraph
-  waterNode: PascalWaterNode
+  waterNode: LandrushIslandNode
 } {
   const island = generateWaterLabIsland(options.islandParameters)
-  const landSurface = createPascalWaterLandSurface({
+  const landSurface = createLandrushIslandLandSurface({
     elevationParameters: options.elevationParameters,
-    shorelinePoints: createPascalWaterSmoothedPerimeter(island.perimeter.points),
+    shorelinePoints: createLandrushIslandSmoothedPerimeter(island.perimeter.points),
     waterPlaneSize: WATER_PLANE_SIZE,
   })
-  const { waterNode } = createPascalWaterNode({
+  const { waterNode } = createLandrushIslandNode({
     elevationParameters: options.elevationParameters,
     fieldParameters: options.fieldParameters,
     materialParameters: options.materialParameters,
-    perimeter: createPascalWaterPerimeter(island),
+    perimeter: createLandrushIslandPerimeter(island),
     profilePlainWaterMaterial: options.profilePlainWaterMaterial,
     showDepthReference: options.showDepthReference,
     terrainFieldResolution: options.terrainFieldResolution,
     waterFieldDebugMode: options.waterFieldDebugMode,
     waterLabSeed: island.seed,
   })
-  const landrushLayoutNode = createPascalWaterLayoutNode({
+  const landrushLayoutNode = createLandrushIslandLayoutNode({
     allocation: allocateParcels(
       landSurface.grassSurfacePoints,
-      createPascalWaterParcelOptions(island.seed),
+      createLandrushIslandParcelOptions(island.seed),
     ),
     island,
     landSurface,
     layoutConfig: options.layoutConfig,
   })
-  const contextRootNodeIds = options.omitWaterNode
+  const levelChildren = options.omitWaterNode
     ? [landrushLayoutNode.id]
     : [waterNode.id, landrushLayoutNode.id]
   const level: LevelNode & { camera?: unknown } = {
     object: 'node',
-    id: PASCAL_WATER_LEVEL_ID,
+    id: LANDRUSH_ISLAND_LEVEL_ID,
     type: 'level',
-    name: 'Pascal Water Level',
-    parentId: PASCAL_WATER_BUILDING_ID,
+    name: 'Landrush Island Level',
+    parentId: LANDRUSH_ISLAND_BUILDING_ID,
     visible: true,
     camera: {
       mode: 'orthographic',
-      position: [...PASCAL_WATER_CAMERA_POSITION],
-      target: [...PASCAL_WATER_CAMERA_TARGET],
-      zoom: PASCAL_WATER_CAMERA_ZOOM,
+      position: [...LANDRUSH_ISLAND_CAMERA_POSITION],
+      target: [...LANDRUSH_ISLAND_CAMERA_TARGET],
+      zoom: LANDRUSH_ISLAND_CAMERA_ZOOM,
     },
-    children: [],
+    children: levelChildren,
     level: 0,
-    metadata: { source: 'pascal-water-debug' },
+    metadata: { source: 'landrush-island-debug' },
   }
 
   return {
     landrushLayoutNode,
     waterNode,
     sceneGraph: {
-      rootNodeIds: [PASCAL_WATER_SITE_ID, ...contextRootNodeIds],
+      rootNodeIds: [LANDRUSH_ISLAND_SITE_ID],
       nodes: {
-        [PASCAL_WATER_SITE_ID]: {
+        [LANDRUSH_ISLAND_SITE_ID]: {
           object: 'node',
-          id: PASCAL_WATER_SITE_ID,
+          id: LANDRUSH_ISLAND_SITE_ID,
           type: 'site',
-          name: 'Pascal Water Site',
+          name: 'Landrush Island Site',
           parentId: null,
           visible: false,
-          metadata: { source: 'pascal-water-debug' },
+          metadata: { source: 'landrush-island-debug' },
           polygon: {
             points: [],
             type: 'polygon',
           },
-          children: [PASCAL_WATER_BUILDING_ID],
+          children: [LANDRUSH_ISLAND_BUILDING_ID],
         },
-        [PASCAL_WATER_BUILDING_ID]: {
+        [LANDRUSH_ISLAND_BUILDING_ID]: {
           object: 'node',
-          id: PASCAL_WATER_BUILDING_ID,
+          id: LANDRUSH_ISLAND_BUILDING_ID,
           type: 'building',
-          name: 'Pascal Water Context',
-          parentId: PASCAL_WATER_SITE_ID,
+          name: 'Landrush Island Context',
+          parentId: LANDRUSH_ISLAND_SITE_ID,
           visible: true,
-          metadata: { source: 'pascal-water-debug' },
-          children: [PASCAL_WATER_LEVEL_ID],
+          metadata: { source: 'landrush-island-debug' },
+          children: [LANDRUSH_ISLAND_LEVEL_ID],
           position: [0, 0, 0],
           rotation: [0, 0, 0],
         },
-        [PASCAL_WATER_LEVEL_ID]: level,
+        [LANDRUSH_ISLAND_LEVEL_ID]: level,
         [landrushLayoutNode.id]: landrushLayoutNode,
         ...(options.omitWaterNode ? {} : { [waterNode.id]: waterNode }),
       },
@@ -15661,22 +16139,22 @@ function createPascalWaterSceneGraph(options: {
   }
 }
 
-function createPascalWaterParcelOptions(seed: string): ParcelAllocationOptions {
+function createLandrushIslandParcelOptions(seed: string): ParcelAllocationOptions {
   return {
-    count: PASCAL_WATER_PARCEL_PARAMETERS.parcelCount,
-    maxEdges: PASCAL_WATER_PARCEL_PARAMETERS.maxEdges,
-    seed: `${seed}:world-parcels:${PASCAL_WATER_PARCEL_PARAMETERS.parcelCount}`,
-    shoreSetbackMeters: PASCAL_WATER_PARCEL_PARAMETERS.shoreSetbackMeters,
-    simplifyToleranceMeters: PASCAL_WATER_PARCEL_PARAMETERS.simplifyToleranceMeters,
-    splitJitter: PASCAL_WATER_PARCEL_PARAMETERS.splitJitter,
-    squareness: PASCAL_WATER_PARCEL_PARAMETERS.squareness,
+    count: LANDRUSH_ISLAND_PARCEL_PARAMETERS.parcelCount,
+    maxEdges: LANDRUSH_ISLAND_PARCEL_PARAMETERS.maxEdges,
+    seed: `${seed}:world-parcels:${LANDRUSH_ISLAND_PARCEL_PARAMETERS.parcelCount}`,
+    shoreSetbackMeters: LANDRUSH_ISLAND_PARCEL_PARAMETERS.shoreSetbackMeters,
+    simplifyToleranceMeters: LANDRUSH_ISLAND_PARCEL_PARAMETERS.simplifyToleranceMeters,
+    splitJitter: LANDRUSH_ISLAND_PARCEL_PARAMETERS.splitJitter,
+    squareness: LANDRUSH_ISLAND_PARCEL_PARAMETERS.squareness,
   }
 }
 
-function createPascalWaterParcelOwnershipWorldId(options: ParcelAllocationOptions) {
+function createLandrushIslandParcelOwnershipWorldId(options: ParcelAllocationOptions) {
   return [
     'landrush-world',
-    'pascal-water',
+    'landrush-island',
     options.seed,
     options.count,
     options.maxEdges,
@@ -15690,7 +16168,7 @@ function createPascalWaterParcelOwnershipWorldId(options: ParcelAllocationOption
     .slice(0, 240)
 }
 
-function createPascalWaterParcel(
+function createLandrushIslandParcel(
   parcel: ParcelAllocationParcel,
 ): LandrushWorldNode['parcels'][number] {
   return {
@@ -15708,14 +16186,14 @@ function createPascalWaterParcel(
       }
     }),
     entryPoint: parcel.centroid,
-    fillColor: PASCAL_WATER_PARCEL_OVERLAY_COLOR,
+    fillColor: LANDRUSH_ISLAND_PARCEL_OVERLAY_COLOR,
     id: parcel.id,
     index: parcel.index,
     kind: 'neighbor',
     label: `Parcel ${parcel.index + 1}`,
     outline: [...parcel.points],
     owner: {
-      accentColor: PASCAL_WATER_PARCEL_OVERLAY_COLOR,
+      accentColor: LANDRUSH_ISLAND_PARCEL_OVERLAY_COLOR,
       id: 'unclaimed',
       label: 'Unclaimed',
     },
@@ -15724,7 +16202,7 @@ function createPascalWaterParcel(
   }
 }
 
-function createPascalWaterRoadNodes(network: ParcelStreetNetwork) {
+function createLandrushIslandRoadNodes(network: ParcelStreetNetwork) {
   const nodes = new Map<string, LandrushWorldNode['roads']['nodes'][number]>()
 
   for (const segment of network.segments) {
@@ -15749,7 +16227,7 @@ function createPascalWaterRoadNodes(network: ParcelStreetNetwork) {
   return [...nodes.values()]
 }
 
-function createPascalWaterRoadSegment(
+function createLandrushIslandRoadSegment(
   segment: ParcelStreetSegment,
 ): LandrushWorldNode['roads']['segments'][number] {
   const start = segment.points[0] ?? { x: 0, z: 0 }
@@ -15765,7 +16243,7 @@ function createPascalWaterRoadSegment(
   }
 }
 
-function createPascalWaterRoadAdjacency(
+function createLandrushIslandRoadAdjacency(
   segments: readonly LandrushWorldNode['roads']['segments'][number][],
 ) {
   const adjacency: Record<string, string[]> = {}

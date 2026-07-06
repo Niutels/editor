@@ -13,6 +13,7 @@ import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { CameraActions } from './camera-actions'
 import { ControlModes } from './control-modes'
+import { FurnishItemTools, FurnishTools } from './furnish-tools'
 import { StructureTools } from './structure-tools'
 import { GridSnapControl, SecondaryToggles } from './view-toggles'
 
@@ -122,7 +123,7 @@ export const ActionMenu = memo(function ActionMenu({
     <TooltipProvider>
       <motion.div
         className={cn(
-          'left-1/2 z-50 -translate-x-1/2',
+          'pointer-events-none left-1/2 z-[220] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden',
           isMobile
             ? 'absolute w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] origin-bottom scale-90'
             : 'fixed bottom-6',
@@ -145,7 +146,9 @@ export const ActionMenu = memo(function ActionMenu({
                 paddingBottom: 8,
                 borderBottomWidth: 1,
               }}
-              className={cn('max-h-20 overflow-hidden border-border border-b px-2 py-2')}
+              className={cn(
+                'pointer-events-auto max-h-20 w-[min(42rem,calc(100vw-2rem))] overflow-hidden border-border border-b px-2 py-2',
+              )}
               exit={{
                 opacity: 0,
                 maxHeight: 0,
@@ -174,6 +177,89 @@ export const ActionMenu = memo(function ActionMenu({
         </AnimatePresence>
 
         <AnimatePresence>
+          {phase === 'furnish' && mode === 'build' && (
+            <motion.div
+              animate={{
+                opacity: 1,
+                maxHeight: 96,
+                paddingTop: 8,
+                paddingBottom: 8,
+                borderBottomWidth: 1,
+              }}
+              className={cn(
+                'pointer-events-auto max-h-24 w-[min(42rem,calc(100vw-2rem))] overflow-hidden border-border border-b px-2 py-2',
+              )}
+              exit={{
+                opacity: 0,
+                maxHeight: 0,
+                paddingTop: 0,
+                paddingBottom: 0,
+                borderBottomWidth: 0,
+              }}
+              initial={{
+                opacity: 0,
+                maxHeight: 0,
+                paddingTop: 0,
+                paddingBottom: 0,
+                borderBottomWidth: 0,
+              }}
+              transition={transition}
+            >
+              <div className="no-scrollbar max-w-full overflow-x-auto overscroll-x-contain [touch-action:pan-x]">
+                <div className="w-max">
+                  <ActionMenuReactProfiler
+                    config={reactProfiler}
+                    id="action-menu.furnish-item-tools"
+                  >
+                    <FurnishItemTools />
+                  </ActionMenuReactProfiler>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {phase === 'furnish' && mode === 'build' && (
+            <motion.div
+              animate={{
+                opacity: 1,
+                maxHeight: 80,
+                paddingTop: 8,
+                paddingBottom: 8,
+                borderBottomWidth: 1,
+              }}
+              className={cn(
+                'pointer-events-auto max-h-20 w-[min(42rem,calc(100vw-2rem))] overflow-hidden border-border border-b px-2 py-2',
+              )}
+              exit={{
+                opacity: 0,
+                maxHeight: 0,
+                paddingTop: 0,
+                paddingBottom: 0,
+                borderBottomWidth: 0,
+              }}
+              initial={{
+                opacity: 0,
+                maxHeight: 0,
+                paddingTop: 0,
+                paddingBottom: 0,
+                borderBottomWidth: 0,
+              }}
+              transition={transition}
+            >
+              <div className="no-scrollbar max-w-full overflow-x-auto overscroll-x-contain [touch-action:pan-x]">
+                <div className="w-max">
+                  <ActionMenuReactProfiler config={reactProfiler} id="action-menu.furnish-tools">
+                    <FurnishTools />
+                  </ActionMenuReactProfiler>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
           {showPaintTray && (
             <motion.div
               animate={{
@@ -183,7 +269,7 @@ export const ActionMenu = memo(function ActionMenu({
                 paddingBottom: 8,
                 borderBottomWidth: 1,
               }}
-              className={cn('overflow-hidden border-border border-b px-3')}
+              className={cn('pointer-events-auto overflow-hidden border-border border-b px-3')}
               exit={{
                 opacity: 0,
                 maxHeight: 0,
@@ -207,7 +293,7 @@ export const ActionMenu = memo(function ActionMenu({
           )}
         </AnimatePresence>
         {isMobile ? (
-          <div className="px-2 py-1.5">
+          <div className="pointer-events-auto px-2 py-1.5">
             <div className="no-scrollbar flex max-w-full items-center gap-1 overflow-x-auto overscroll-x-contain [touch-action:pan-x]">
               <div className="w-max shrink-0">
                 <ActionMenuReactProfiler config={reactProfiler} id="action-menu.control-modes">
@@ -228,7 +314,7 @@ export const ActionMenu = memo(function ActionMenu({
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center gap-1 px-2 py-1.5">
+          <div className="pointer-events-auto flex items-center justify-center gap-1 px-2 py-1.5">
             <ActionMenuReactProfiler config={reactProfiler} id="action-menu.control-modes">
               <ControlModes />
             </ActionMenuReactProfiler>

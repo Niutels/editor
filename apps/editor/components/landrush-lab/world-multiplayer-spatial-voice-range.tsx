@@ -27,18 +27,20 @@ export function SpatialVoiceRangeRing({
   groundY,
   motionRef,
   position,
+  radiusMeters = SPATIAL_VOICE_RANGE_VISUAL_RADIUS,
   visible,
 }: {
   color?: string
   groundY: number
   motionRef?: { current: SpatialVoiceRangeMotion | null }
   position?: readonly [number, number, number] | null
+  radiusMeters?: number
   visible: boolean
 }) {
   const lineRef = useRef<LineSegments | null>(null)
   const materialRef = useRef<LineBasicMaterial | null>(null)
   const colorValue = useMemo(() => new Color(color), [color])
-  const geometry = useMemo(() => createSpatialVoiceRangeGeometry(), [])
+  const geometry = useMemo(() => createSpatialVoiceRangeGeometry(radiusMeters), [radiusMeters])
 
   useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -75,19 +77,19 @@ export function SpatialVoiceRangeRing({
   )
 }
 
-function createSpatialVoiceRangeGeometry() {
+function createSpatialVoiceRangeGeometry(radiusMeters: number) {
   const positions: number[] = []
   for (let index = 0; index < SPATIAL_VOICE_RANGE_DASHES; index += 1) {
     const startAngle = (index / SPATIAL_VOICE_RANGE_DASHES) * Math.PI * 2
     const endAngle =
       ((index + SPATIAL_VOICE_RANGE_DASH_FILL) / SPATIAL_VOICE_RANGE_DASHES) * Math.PI * 2
     positions.push(
-      Math.cos(startAngle) * SPATIAL_VOICE_RANGE_VISUAL_RADIUS,
+      Math.cos(startAngle) * radiusMeters,
       0,
-      Math.sin(startAngle) * SPATIAL_VOICE_RANGE_VISUAL_RADIUS,
-      Math.cos(endAngle) * SPATIAL_VOICE_RANGE_VISUAL_RADIUS,
+      Math.sin(startAngle) * radiusMeters,
+      Math.cos(endAngle) * radiusMeters,
       0,
-      Math.sin(endAngle) * SPATIAL_VOICE_RANGE_VISUAL_RADIUS,
+      Math.sin(endAngle) * radiusMeters,
     )
   }
 

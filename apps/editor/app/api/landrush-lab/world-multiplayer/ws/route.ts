@@ -40,6 +40,17 @@ type ParcelBuildNodesSnapshot = {
   worldId: string
 }
 
+type TvMediaStateSnapshot = {
+  muted: boolean
+  parcelId: string
+  tvId: string
+  updatedAt: number
+  updatedBy: string
+  url: string
+  userVolume: number
+  worldId: string
+}
+
 type VoiceSignalPayload =
   | { description: { sdp: string; type: 'answer' | 'offer' }; type: 'description' }
   | { candidate: Record<string, unknown>; type: 'ice-candidate' }
@@ -56,6 +67,15 @@ type ClientMessage =
       nodes: unknown[]
       parcelId: string
       type: 'sync-parcel-build-nodes'
+      worldId: string
+    }
+  | {
+      muted?: boolean
+      parcelId: string
+      tvId: string
+      type: 'sync-tv-media-state'
+      url: string
+      userVolume?: number
       worldId: string
     }
   | { type: 'leave' }
@@ -116,6 +136,19 @@ type ServerMessage =
       roomId: string
       serverTime: number
       type: 'parcel-build-nodes-synced' | 'parcel-build-nodes-updated'
+    }
+  | {
+      roomId: string
+      serverTime: number
+      tvs: TvMediaStateSnapshot[]
+      type: 'tv-media-state-snapshot'
+      worldId: string
+    }
+  | {
+      roomId: string
+      serverTime: number
+      tv: TvMediaStateSnapshot
+      type: 'tv-media-state-synced' | 'tv-media-state-updated'
     }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
@@ -186,6 +219,7 @@ const PEER_STALE_MS = 15_000
 const rooms = new Map<string, Room>()
 const parcelBuildNodesByWorld = new Map<string, Map<string, ParcelBuildNodesSnapshot>>()
 const parcelOwnershipByWorld = new Map<string, Map<string, ParcelOwnership>>()
+const tvMediaStateByWorld = new Map<string, Map<string, TvMediaStateSnapshot>>()
 
 export async function GET(request: Request) {
   if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
@@ -267,6 +301,7 @@ export async function GET(request: Request) {
         const roomId = sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
         sendParcelOwnershipSnapshot(socket, roomId, worldId)
         sendParcelBuildNodesSnapshot(socket, roomId, worldId)
+        sendTvMediaStateSnapshot(socket, roomId, worldId)
         return
       }
 
@@ -302,6 +337,38 @@ export async function GET(request: Request) {
             roomId: peer.roomId,
             serverTime: now,
             type: 'parcel-build-nodes-updated',
+          },
+          peer.id,
+        )
+        return
+      }
+
+      if (message.type === 'sync-tv-media-state') {
+        if (!peer) {
+          sendError(socket, 'not-joined', 'Join a room before syncing TV media')
+          return
+        }
+
+        peer.lastSeenAt = now
+        const synced = syncTvMediaState(peer, message, now)
+        if (!synced.ok) {
+          sendError(socket, synced.code, synced.message)
+          return
+        }
+
+        send(socket, {
+          roomId: peer.roomId,
+          serverTime: now,
+          tv: synced.tv,
+          type: 'tv-media-state-synced',
+        })
+        broadcast(
+          peer.roomId,
+          {
+            roomId: peer.roomId,
+            serverTime: now,
+            tv: synced.tv,
+            type: 'tv-media-state-updated',
           },
           peer.id,
         )
@@ -616,6 +683,16 @@ function sendParcelBuildNodesSnapshot(socket: WebSocket, roomId: string, worldId
   })
 }
 
+function sendTvMediaStateSnapshot(socket: WebSocket, roomId: string, worldId: string) {
+  send(socket, {
+    roomId,
+    serverTime: Date.now(),
+    tvs: tvMediaStateSnapshot(worldId),
+    type: 'tv-media-state-snapshot',
+    worldId,
+  })
+}
+
 function syncParcelBuildNodes(
   peer: Peer,
   worldIdValue: string,
@@ -646,6 +723,36 @@ function syncParcelBuildNodes(
   }
   getParcelBuildNodes(worldId).set(parcelId, build)
   return { build, ok: true }
+}
+
+function syncTvMediaState(
+  peer: Peer,
+  message: Extract<ClientMessage, { type: 'sync-tv-media-state' }>,
+  now: number,
+): { ok: true; tv: TvMediaStateSnapshot } | { code: string; message: string; ok: false } {
+  const worldId = sanitizeParcelWorldId(message.worldId)
+  const parcelId = sanitizeParcelId(message.parcelId)
+  const ownership = getParcelOwnerships(worldId).get(parcelId)
+  if (!ownership || ownership.owner.id !== peer.id) {
+    return {
+      code: 'tv-media-not-owned',
+      message: 'Only the parcel owner can sync TV media',
+      ok: false,
+    }
+  }
+
+  const tv = {
+    muted: Boolean(message.muted),
+    parcelId,
+    tvId: sanitizeParcelKey(message.tvId, 'tv', 120),
+    updatedAt: now,
+    updatedBy: peer.id,
+    url: sanitizeText(message.url, '', 2048),
+    userVolume: clamp01(finiteNumber(message.userVolume, 0.8)),
+    worldId,
+  }
+  getTvMediaStates(worldId).set(tv.tvId, tv)
+  return { ok: true, tv }
 }
 
 function sendParcelClaimRejected(
@@ -687,6 +794,15 @@ function getParcelBuildNodes(worldId: string) {
   return builds
 }
 
+function getTvMediaStates(worldId: string) {
+  let tvs = tvMediaStateByWorld.get(worldId)
+  if (!tvs) {
+    tvs = new Map()
+    tvMediaStateByWorld.set(worldId, tvs)
+  }
+  return tvs
+}
+
 function parcelOwnershipSnapshot(worldId: string) {
   return [...(parcelOwnershipByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
     first.parcelId.localeCompare(second.parcelId),
@@ -696,6 +812,12 @@ function parcelOwnershipSnapshot(worldId: string) {
 function parcelBuildNodesSnapshot(worldId: string) {
   return [...(parcelBuildNodesByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
     first.parcelId.localeCompare(second.parcelId),
+  )
+}
+
+function tvMediaStateSnapshot(worldId: string) {
+  return [...(tvMediaStateByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
+    first.tvId.localeCompare(second.tvId),
   )
 }
 
@@ -769,6 +891,15 @@ function parseClientMessage(data: WebSocketData): ClientMessage | null {
       typeof raw.worldId === 'string' &&
       typeof raw.parcelId === 'string' &&
       Array.isArray(raw.nodes)
+    ) {
+      return raw
+    }
+    if (
+      raw?.type === 'sync-tv-media-state' &&
+      typeof raw.worldId === 'string' &&
+      typeof raw.parcelId === 'string' &&
+      typeof raw.tvId === 'string' &&
+      typeof raw.url === 'string'
     ) {
       return raw
     }
@@ -931,4 +1062,8 @@ function finiteNumber(value: number | undefined, fallback: number): number
 function finiteNumber(value: number | undefined, fallback: undefined): number | undefined
 function finiteNumber(value: number | undefined, fallback: number | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value))
 }

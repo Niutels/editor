@@ -113,7 +113,7 @@ type VoiceLocalGraph = {
 }
 
 export const SPATIAL_VOICE_MAX_DISTANCE = 5.6
-const SPATIAL_VOICE_FULL_VOLUME_DISTANCE = 1.2
+export const SPATIAL_VOICE_FULL_VOLUME_DISTANCE = 1.2
 const SPATIAL_VOICE_REFERENCE_DISTANCE = 0.9
 const SPATIAL_VOICE_ROLLOFF = 2.4
 const SPATIAL_VOICE_UPDATE_INTERVAL_MS = 80
@@ -571,6 +571,11 @@ export function useLandrushSpatialVoice({
     }
   }, [localMotionRef, publishStats, reconcilePeers, status])
 
+  const getLocalDebugPosition = useCallback(
+    () => localMotionRef.current?.position ?? null,
+    [localMotionRef],
+  )
+
   useEffect(
     () =>
       setMultiplayerDebugHandle('voice', () => ({
@@ -579,7 +584,7 @@ export function useLandrushSpatialVoice({
         error,
         peers: [...peersRef.current.values()].map((peer) => {
           const remotePlayer = remotePlayersRef.current.find((player) => player.id === peer.id)
-          const localPosition = localMotionRef.current?.position
+          const localPosition = getLocalDebugPosition()
           const distanceMeters =
             remotePlayer && localPosition
               ? measureSpatialVoiceDistance(localPosition, remotePlayer)
@@ -634,7 +639,7 @@ export function useLandrushSpatialVoice({
         stats,
         status,
       })),
-    [available, desired, error, remoteVoicePeerIds, roomId, stats, status],
+    [available, desired, error, getLocalDebugPosition, remoteVoicePeerIds, roomId, stats, status],
   )
 
   useEffect(
@@ -1009,13 +1014,17 @@ function measureSpatialVoiceDistance(
   )
 }
 
-function resolveSpatialVoiceGain(distance: number) {
-  if (distance >= SPATIAL_VOICE_MAX_DISTANCE) return 0
-  if (distance <= SPATIAL_VOICE_FULL_VOLUME_DISTANCE) return 1
+export function resolveSpatialVoiceGain(
+  distance: number,
+  {
+    fullVolumeDistance = SPATIAL_VOICE_FULL_VOLUME_DISTANCE,
+    maxDistance = SPATIAL_VOICE_MAX_DISTANCE,
+  }: { fullVolumeDistance?: number; maxDistance?: number } = {},
+) {
+  if (distance >= maxDistance) return 0
+  if (distance <= fullVolumeDistance) return 1
 
-  const fadeProgress =
-    (distance - SPATIAL_VOICE_FULL_VOLUME_DISTANCE) /
-    (SPATIAL_VOICE_MAX_DISTANCE - SPATIAL_VOICE_FULL_VOLUME_DISTANCE)
+  const fadeProgress = (distance - fullVolumeDistance) / (maxDistance - fullVolumeDistance)
   const smoothFade = fadeProgress * fadeProgress * (3 - 2 * fadeProgress)
   return Math.max(0, Math.min(1, 1 - smoothFade))
 }

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { Suspense } from 'react'
 import { PascalNavigationDebugControls } from '@/components/landrush-lab/pascal-navigation-debug-controls'
-import { PascalWaterClient } from '@/components/landrush-lab/pascal-water-client'
+import { LandrushIslandClient } from '@/components/landrush-lab/landrush-island-client'
 
 type PascalNavigationDebugPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>
@@ -34,7 +34,7 @@ export default async function PascalMultiplayerIslandNavigationDebugPage({
 
   return (
     <Suspense fallback={null}>
-      <PascalWaterClient experience="pascal-multiplayer-island" />
+      <LandrushIslandClient experience="pascal-multiplayer-island" />
       <PascalNavigationDebugControls />
     </Suspense>
   )

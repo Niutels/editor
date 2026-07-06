@@ -1,10 +1,10 @@
 import { Suspense } from 'react'
-import { PascalWaterClient } from '@/components/landrush-lab/pascal-water-client'
+import { LandrushIslandClient } from '@/components/landrush-lab/landrush-island-client'
 
-export default function PascalWaterPage() {
+export default function LandrushIslandPage() {
   return (
     <Suspense fallback={null}>
-      <PascalWaterClient />
+      <LandrushIslandClient />
     </Suspense>
   )
 }

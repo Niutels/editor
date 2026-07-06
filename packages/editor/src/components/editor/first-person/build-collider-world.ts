@@ -319,7 +319,7 @@ export function buildFirstPersonColliderWorldFromRegistry(
   ;(bvhGeometry as any).computeBoundsTree = computeBoundsTree
   ;(bvhGeometry as any).disposeBoundsTree = disposeBoundsTree
   bvhGeometry.computeBoundsTree?.({
-    maxLeafTris: 12,
+    maxLeafSize: 12,
     strategy: 0,
   } as never)
   bvhGeometry.computeBoundingBox()

@@ -43,13 +43,6 @@ function loadBuiltinsSync(): void {
   }
 
   if (isDev()) {
-    const kinds = Array.from(nodeRegistry.entries(), ([k]) => k)
-    if (typeof console !== 'undefined') {
-      // biome-ignore lint/suspicious/noConsole: dev-only verification log
-      console.info(
-        `[pascal:registry] loaded ${builtinPlugin.id} v${builtinPlugin.apiVersion} (${kinds.length} kinds: ${kinds.join(', ') || '∅'})`,
-      )
-    }
     // Expose the registry on globalThis for ad-hoc dev inspection. In
     // prod the registry is reachable through @pascal-app/core's
     // exports only.
@@ -72,10 +65,6 @@ export async function loadExternalPlugins(): Promise<void> {
   const externals = await discoverPlugins()
   for (const plugin of externals) {
     await loadPlugin(plugin)
-  }
-  if (isDev() && externals.length > 0 && typeof console !== 'undefined') {
-    // biome-ignore lint/suspicious/noConsole: dev-only verification log
-    console.info(`[pascal:registry] + ${externals.length} discovered plugin(s)`)
   }
 }
 

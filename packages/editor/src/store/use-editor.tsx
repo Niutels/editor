@@ -382,6 +382,57 @@ function normalizeModeForPhase(phase: Phase, mode: Mode | undefined): Mode {
   return mode === 'build' || mode === 'delete' || mode === 'material-paint' ? mode : 'select'
 }
 
+export function isBuildToolValidForPhase(
+  phase: Phase,
+  tool: Tool | null,
+  structureLayer: StructureLayer,
+) {
+  if (!tool) return false
+  if (phase === 'site') return tool === 'property-line'
+  if (phase === 'furnish') return tool === 'item'
+  if (structureLayer === 'zones') return tool === 'zone'
+  return tool !== 'property-line' && tool !== 'zone'
+}
+
+function resolveBuildToolState({
+  catalogCategory,
+  phase,
+  structureLayer,
+  tool,
+}: {
+  catalogCategory: CatalogCategory | null
+  phase: Phase
+  structureLayer: StructureLayer
+  tool: Tool | null
+}): {
+  catalogCategory: CatalogCategory | null
+  structureLayer: StructureLayer
+  tool: Tool
+} {
+  if (phase === 'site') {
+    return { catalogCategory: null, structureLayer, tool: 'property-line' }
+  }
+
+  if (phase === 'furnish') {
+    return {
+      catalogCategory: catalogCategory ?? 'furniture',
+      structureLayer: 'elements',
+      tool: 'item',
+    }
+  }
+
+  if (structureLayer === 'zones') {
+    return { catalogCategory: null, structureLayer, tool: 'zone' }
+  }
+
+  const structureTool = tool && isBuildToolValidForPhase(phase, tool, structureLayer) ? tool : 'wall'
+  return {
+    catalogCategory: structureTool === 'item' ? catalogCategory : null,
+    structureLayer,
+    tool: structureTool,
+  }
+}
+
 function normalizeFloorplanPaneRatio(value: unknown): number {
   if (!(typeof value === 'number' && Number.isFinite(value))) {
     return DEFAULT_FLOORPLAN_PANE_RATIO
@@ -561,24 +612,22 @@ const useEditor = create<EditorState>()(
         const currentPhase = get().phase
         if (currentPhase === phase) return
 
-        set({ phase })
-
-        const { mode, structureLayer } = get()
+        const { catalogCategory, mode, structureLayer, tool } = get()
 
         if (mode === 'build') {
-          // Stay in build mode, select the first tool for the new phase
-          if (phase === 'site') {
-            set({ tool: 'property-line', catalogCategory: null })
-          } else if (phase === 'structure' && structureLayer === 'zones') {
-            set({ tool: 'zone', catalogCategory: null })
-          } else if (phase === 'structure') {
-            set({ tool: 'wall', catalogCategory: null })
-          } else if (phase === 'furnish') {
-            set({ tool: 'item', catalogCategory: 'furniture' })
-          }
+          set({
+            phase,
+            ...resolveBuildToolState({ catalogCategory, phase, structureLayer, tool }),
+          })
         } else {
           // Reset to select mode and clear tool/catalog when switching phases
-          set({ mode: 'select', tool: null, catalogCategory: null })
+          set({
+            phase,
+            mode: 'select',
+            tool: null,
+            catalogCategory: null,
+            ...(phase === 'furnish' ? { structureLayer: 'elements' as const } : {}),
+          })
         }
 
         const viewer = useViewer.getState()
@@ -595,34 +644,25 @@ const useEditor = create<EditorState>()(
 
           case 'furnish':
             selectDefaultBuildingAndLevel()
-            // Furnish mode only supports elements layer, not zones
-            set({ structureLayer: 'elements' })
             break
         }
       },
       mode: DEFAULT_PERSISTED_EDITOR_UI_STATE.mode,
       setMode: (mode) => {
-        set({ mode })
-
-        const { phase, structureLayer, tool } = get()
+        const { catalogCategory, phase, structureLayer, tool } = get()
 
         if (mode === 'build') {
-          // Ensure a tool is selected in build mode
-          if (!tool) {
-            if (phase === 'structure' && structureLayer === 'zones') {
-              set({ tool: 'zone' })
-            } else if (phase === 'structure' && structureLayer === 'elements') {
-              set({ tool: 'wall' })
-            } else if (phase === 'furnish') {
-              set({ tool: 'item', catalogCategory: 'furniture' })
-            }
-          }
+          set({
+            mode,
+            ...resolveBuildToolState({ catalogCategory, phase, structureLayer, tool }),
+          })
         } else if (mode === 'material-paint') {
+          set({ mode })
           get().primeMaterialPaintFromSelection()
         }
         // When leaving build mode, clear tool
-        else if (tool) {
-          set({ tool: null })
+        else {
+          set({ mode, tool: null, catalogCategory: null })
         }
       },
       tool: DEFAULT_PERSISTED_EDITOR_UI_STATE.tool,
@@ -640,13 +680,28 @@ const useEditor = create<EditorState>()(
         }),
       structureLayer: DEFAULT_PERSISTED_EDITOR_UI_STATE.structureLayer,
       setStructureLayer: (layer) => {
-        const { mode } = get()
+        const { catalogCategory, mode, phase, tool } = get()
 
-        if (mode === 'build') {
-          const tool = layer === 'zones' ? 'zone' : 'wall'
-          set({ structureLayer: layer, tool })
+        if (phase === 'furnish') {
+          const structureLayer = 'elements'
+          set(
+            mode === 'build'
+              ? {
+                  ...resolveBuildToolState({
+                    catalogCategory,
+                    phase,
+                    structureLayer,
+                    tool,
+                  }),
+                }
+              : { structureLayer, mode: 'select', tool: null, catalogCategory: null },
+          )
+        } else if (mode === 'build') {
+          set({
+            ...resolveBuildToolState({ catalogCategory, phase, structureLayer: layer, tool }),
+          })
         } else {
-          set({ structureLayer: layer, mode: 'select', tool: null })
+          set({ structureLayer: layer, mode: 'select', tool: null, catalogCategory: null })
         }
 
         const viewer = useViewer.getState()

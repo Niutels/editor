@@ -2,6 +2,7 @@
 
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
+import { getMaterialRendererBackend } from '@pascal-app/viewer'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   type BufferGeometry,
@@ -11,7 +12,7 @@ import {
   type InstancedMesh,
   type Material,
   type Mesh,
-  type MeshStandardMaterial,
+  MeshStandardMaterial,
   Object3D,
   RepeatWrapping,
   SRGBColorSpace,
@@ -714,18 +715,7 @@ function StylizedSceneTree({
     return measureStylizedScene(profileMeasure, 'setup.stylized-tree.leaves-material', () => {
       alphaMap.flipY = false
       alphaMap.needsUpdate = true
-      const material = new MeshStandardNodeMaterial({
-        alphaMap,
-        alphaTest: 0.1,
-        color: '#4a6b27',
-        metalness: 0,
-        roughness: 0.8,
-        side: DoubleSide,
-        transparent: true,
-      })
-      material.opacityNode = createLandrushRobotScreenRevealOpacityNode()
-      material.userData.landrushRobotScreenRevealSoftMask = true
-      return material
+      return createStylizedTreeLeavesMaterial(alphaMap)
     })
   }, [alphaMap, profileMeasure])
   const bushesRef = useRef<InstancedMesh>(null!)
@@ -810,25 +800,48 @@ function StylizedSceneTree({
   )
 }
 
+function createStylizedTreeLeavesMaterial(alphaMap: Texture) {
+  const params = {
+    alphaMap,
+    alphaTest: 0.1,
+    color: '#4a6b27',
+    metalness: 0,
+    roughness: 0.8,
+    side: DoubleSide,
+    transparent: true,
+  }
+  if (getMaterialRendererBackend() === 'webgl') {
+    return new MeshStandardMaterial(params)
+  }
+  const material = new MeshStandardNodeMaterial(params)
+  material.opacityNode = createLandrushRobotScreenRevealOpacityNode()
+  material.userData.landrushRobotScreenRevealSoftMask = true
+  return material
+}
+
 function createStylizedTreeSoftRevealMaterial(
   material: Material | Material[],
   fallbackColor: string,
 ) {
   const source = Array.isArray(material) ? material[0] : material
   const standardSource = source as MeshStandardMaterial | undefined
-  const nextMaterial = new MeshStandardNodeMaterial({
+  const params = {
     alphaMap: standardSource?.alphaMap ?? null,
     alphaTest: standardSource?.alphaTest ?? 0,
     color: standardSource?.color?.clone() ?? fallbackColor,
     map: standardSource?.map ?? null,
     metalness: standardSource?.metalness ?? 0,
+    opacity: standardSource?.opacity ?? 1,
     roughness: standardSource?.roughness ?? 0.85,
     side: standardSource?.side ?? DoubleSide,
     transparent: true,
-  })
-  nextMaterial.opacityNode = createLandrushRobotScreenRevealOpacityNode(
-    float(standardSource?.opacity ?? 1),
-  )
+  }
+  if (getMaterialRendererBackend() === 'webgl') {
+    return new MeshStandardMaterial(params)
+  }
+  const { opacity, ...nodeParams } = params
+  const nextMaterial = new MeshStandardNodeMaterial(nodeParams)
+  nextMaterial.opacityNode = createLandrushRobotScreenRevealOpacityNode(float(opacity))
   nextMaterial.userData.landrushRobotScreenRevealSoftMask = true
   return nextMaterial
 }
@@ -1379,6 +1392,20 @@ function createStylizedGrassNodeMaterial(
   tuning: StylizedSceneResolvedGrassTuning,
 ) {
   if (!geometry) return null
+
+  if (getMaterialRendererBackend() === 'webgl') {
+    const material = new MeshStandardMaterial({
+      color: '#7fb13f',
+      roughness: 0.85,
+      side: DoubleSide,
+      transparent: true,
+    })
+    material.depthWrite = false
+    return {
+      material,
+      uniforms: { interaction: { value: new Vector4() }, time: { value: 0 } },
+    }
+  }
 
   geometry.computeBoundingBox()
   const bounds = geometry.boundingBox

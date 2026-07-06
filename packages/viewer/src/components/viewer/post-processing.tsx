@@ -307,21 +307,6 @@ const PostProcessingPasses = ({
     const inkRadius = 1
     const inkOpacity = edges === 'strong' ? 1 : 0.5
 
-    console.log('[viewer/post-processing] Building pipeline', {
-      version: pipelineVersion,
-      ssgi: ssgiEnabled,
-      denoise: denoiseEnabled,
-      outline: outlineEnabled,
-      perfDisable,
-      postFxVariant: staticPostFxVariant,
-      hoverHighlightMode,
-      projectId,
-      shading,
-      rendererCtor: (renderer as any).constructor?.name,
-      width,
-      height,
-    })
-
     hasPipelineErrorRef.current = false
 
     if (bypassesPostFxPipeline || perfDisable.postFx) {
@@ -539,14 +524,12 @@ const PostProcessingPasses = ({
   }, [
     camera,
     hoverHiddenColor,
-    hoverHighlightMode,
     hoverPulseMix,
     hoverStrength,
     hoverVisibleColor,
     edges,
     pipelineVersion,
     staticPostFxVariant,
-    projectId,
     renderer,
     scene,
     shading,

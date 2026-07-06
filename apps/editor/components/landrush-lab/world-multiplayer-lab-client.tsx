@@ -116,9 +116,25 @@ export type ParcelBuildNodesSnapshot = {
   worldId: string
 }
 
+export type TvMediaStateSnapshot = {
+  muted: boolean
+  parcelId: string
+  tvId: string
+  updatedAt: number
+  updatedBy: string
+  url: string
+  userVolume: number
+  worldId: string
+}
+
 type OfflineParcelStateStore = Record<
   string,
-  { builds?: ParcelBuildNodesSnapshot[]; ownerships?: ParcelOwnership[] } | undefined
+  | {
+      builds?: ParcelBuildNodesSnapshot[]
+      ownerships?: ParcelOwnership[]
+      tvMediaStates?: TvMediaStateSnapshot[]
+    }
+  | undefined
 >
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'offline' | 'reconnecting'
@@ -181,6 +197,19 @@ type ServerMessage =
       roomId: string
       serverTime: number
       type: 'parcel-build-nodes-synced' | 'parcel-build-nodes-updated'
+    }
+  | {
+      roomId: string
+      serverTime: number
+      tvs: TvMediaStateSnapshot[]
+      type: 'tv-media-state-snapshot'
+      worldId: string
+    }
+  | {
+      roomId: string
+      serverTime: number
+      tv: TvMediaStateSnapshot
+      type: 'tv-media-state-synced' | 'tv-media-state-updated'
     }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
@@ -1767,8 +1796,6 @@ function ParcelOwnershipLayer({
   const { camera, gl } = useThree()
   const [hoveredParcelId, setHoveredParcelId] = useState<string | null>(null)
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null)
-  const [insideOwnedParcelId, setInsideOwnedParcelId] = useState<string | null>(null)
-  const insideCheckAtRef = useRef(0)
   const mapPickNdc = useMemo(() => new Vector2(), [])
   const mapPickRaycaster = useMemo(() => new Raycaster(), [])
   const ownershipMap = useMemo(() => {
@@ -1859,29 +1886,6 @@ function ParcelOwnershipLayer({
     }
   }, [allocation, buildParcelId, camera, gl, groundY, mapPickNdc, mapPickRaycaster, mapView])
 
-  useFrame((state) => {
-    if (!allocation || mapView || !localOwnership) {
-      if (insideOwnedParcelId !== null) setInsideOwnedParcelId(null)
-      return
-    }
-
-    const elapsed = state.clock.elapsedTime
-    if (elapsed - insideCheckAtRef.current < 0.12) return
-    insideCheckAtRef.current = elapsed
-
-    const motion = localMotionRef.current
-    const parcel = allocation.parcels.find((candidate) => candidate.id === localOwnership.parcelId)
-    const nextInsideParcelId =
-      motion &&
-      parcel &&
-      pointInPolygon({ x: motion.position.x, z: motion.position.z }, parcel.points)
-        ? parcel.id
-        : null
-    setInsideOwnedParcelId((current) =>
-      current === nextInsideParcelId ? current : nextInsideParcelId,
-    )
-  })
-
   if (!allocation) return null
 
   return (
@@ -1928,7 +1932,7 @@ function ParcelOwnershipLayer({
                   })
                 }
                 parcel={parcel}
-                visible={!buildParcelId && (mapView || insideOwnedParcelId === parcel.id)}
+                visible={!buildParcelId && mapView}
               />
             ))
         : null}
@@ -2631,8 +2635,12 @@ export function useLandrushWorldMultiplayer({
   const [parcelBuildNodeMap, setParcelBuildNodeMap] = useState<
     Map<string, ParcelBuildNodesSnapshot>
   >(() => new Map())
+  const [tvMediaStateMap, setTvMediaStateMap] = useState<Map<string, TvMediaStateSnapshot>>(
+    () => new Map(),
+  )
   const parcelOwnershipMapRef = useRef(parcelOwnershipMap)
   const parcelBuildNodeMapRef = useRef(parcelBuildNodeMap)
+  const tvMediaStateMapRef = useRef(tvMediaStateMap)
   const remotePlayers = useMemo(
     () =>
       [...remotePlayerMap.values()].sort((first, second) => first.name.localeCompare(second.name)),
@@ -2652,6 +2660,11 @@ export function useLandrushWorldMultiplayer({
       ),
     [parcelBuildNodeMap],
   )
+  const tvMediaStates = useMemo(
+    () =>
+      [...tvMediaStateMap.values()].sort((first, second) => first.tvId.localeCompare(second.tvId)),
+    [tvMediaStateMap],
+  )
 
   useEffect(() => {
     parcelOwnershipMapRef.current = parcelOwnershipMap
@@ -2660,6 +2673,10 @@ export function useLandrushWorldMultiplayer({
   useEffect(() => {
     parcelBuildNodeMapRef.current = parcelBuildNodeMap
   }, [parcelBuildNodeMap])
+
+  useEffect(() => {
+    tvMediaStateMapRef.current = tvMediaStateMap
+  }, [tvMediaStateMap])
 
   useEffect(() => {
     onVoiceSignalRef.current = onVoiceSignal
@@ -2729,10 +2746,15 @@ export function useLandrushWorldMultiplayer({
         const nextBuildNodeMap = offlineState
           ? new Map(offlineState.builds.map((build) => [build.parcelId, build]))
           : new Map<string, ParcelBuildNodesSnapshot>()
+        const nextTvMediaStateMap = offlineState
+          ? new Map(offlineState.tvMediaStates.map((tv) => [tv.tvId, tv]))
+          : new Map<string, TvMediaStateSnapshot>()
         parcelOwnershipMapRef.current = nextOwnershipMap
         parcelBuildNodeMapRef.current = nextBuildNodeMap
+        tvMediaStateMapRef.current = nextTvMediaStateMap
         setParcelOwnershipMap(nextOwnershipMap)
         setParcelBuildNodeMap(nextBuildNodeMap)
+        setTvMediaStateMap(nextTvMediaStateMap)
       }
       if (!enabled) return
       sendMessage({ roomId, type: 'watch-parcels', worldId })
@@ -2760,6 +2782,7 @@ export function useLandrushWorldMultiplayer({
             worldId,
             [...parcelOwnershipMapRef.current.values()],
             [...nextBuildNodeMap.values()],
+            [...tvMediaStateMapRef.current.values()],
           )
         }
         return true
@@ -2770,6 +2793,61 @@ export function useLandrushWorldMultiplayer({
         setConnection((current) => ({
           ...current,
           lastError: 'Connect before syncing build nodes',
+        }))
+      }
+      return Boolean(sent)
+    },
+    [enabled, localProfile.id, persistOfflineState, sendMessage],
+  )
+
+  const syncTvMediaState = useCallback(
+    (
+      worldId: string,
+      parcelId: string,
+      tvId: string,
+      media: { muted: boolean; url: string; userVolume: number },
+    ) => {
+      watchedParcelWorldIdRef.current = worldId
+      const tv = {
+        muted: Boolean(media.muted),
+        parcelId,
+        tvId,
+        updatedAt: Date.now(),
+        updatedBy: localProfile.id,
+        url: media.url,
+        userVolume: Math.max(0, Math.min(1, media.userVolume)),
+        worldId,
+      } satisfies TvMediaStateSnapshot
+      const nextTvMediaStateMap = new Map(tvMediaStateMapRef.current)
+      nextTvMediaStateMap.set(tvId, tv)
+      tvMediaStateMapRef.current = nextTvMediaStateMap
+      setTvMediaStateMap(nextTvMediaStateMap)
+
+      if (!enabled) {
+        if (persistOfflineState) {
+          writeOfflineParcelWorldState(
+            worldId,
+            [...parcelOwnershipMapRef.current.values()],
+            [...parcelBuildNodeMapRef.current.values()],
+            [...nextTvMediaStateMap.values()],
+          )
+        }
+        return true
+      }
+
+      const sent = sendMessage({
+        muted: tv.muted,
+        parcelId,
+        tvId,
+        type: 'sync-tv-media-state',
+        url: tv.url,
+        userVolume: tv.userVolume,
+        worldId,
+      })
+      if (!sent) {
+        setConnection((current) => ({
+          ...current,
+          lastError: 'Connect before syncing TV media',
         }))
       }
       return Boolean(sent)
@@ -2824,6 +2902,7 @@ export function useLandrushWorldMultiplayer({
             worldId,
             [...nextOwnershipMap.values()],
             [...parcelBuildNodeMapRef.current.values()],
+            [...tvMediaStateMapRef.current.values()],
           )
         }
         return true
@@ -2858,10 +2937,15 @@ export function useLandrushWorldMultiplayer({
       const nextBuildNodeMap = offlineState
         ? new Map(offlineState.builds.map((build) => [build.parcelId, build]))
         : new Map<string, ParcelBuildNodesSnapshot>()
+      const nextTvMediaStateMap = offlineState
+        ? new Map(offlineState.tvMediaStates.map((tv) => [tv.tvId, tv]))
+        : new Map<string, TvMediaStateSnapshot>()
       parcelOwnershipMapRef.current = nextOwnershipMap
       parcelBuildNodeMapRef.current = nextBuildNodeMap
+      tvMediaStateMapRef.current = nextTvMediaStateMap
       setParcelBuildNodeMap(nextBuildNodeMap)
       setParcelOwnershipMap(nextOwnershipMap)
+      setTvMediaStateMap(nextTvMediaStateMap)
       setConnection(createConnectionDetails())
       return
     }
@@ -2998,6 +3082,12 @@ export function useLandrushWorldMultiplayer({
           return
         }
 
+        if (message.type === 'tv-media-state-snapshot') {
+          if (message.worldId !== watchedParcelWorldIdRef.current) return
+          setTvMediaStateMap(new Map(message.tvs.map((tv) => [tv.tvId, tv])))
+          return
+        }
+
         if (
           message.type === 'parcel-build-nodes-synced' ||
           message.type === 'parcel-build-nodes-updated'
@@ -3006,6 +3096,16 @@ export function useLandrushWorldMultiplayer({
           setParcelBuildNodeMap((current) => {
             const next = new Map(current)
             next.set(message.build.parcelId, message.build)
+            return next
+          })
+          return
+        }
+
+        if (message.type === 'tv-media-state-synced' || message.type === 'tv-media-state-updated') {
+          if (message.tv.worldId !== watchedParcelWorldIdRef.current) return
+          setTvMediaStateMap((current) => {
+            const next = new Map(current)
+            next.set(message.tv.tvId, message.tv)
             return next
           })
           return
@@ -3120,7 +3220,9 @@ export function useLandrushWorldMultiplayer({
     remotePlayers,
     sendVoiceSignal,
     syncParcelBuildNodes,
+    syncTvMediaState,
     status,
+    tvMediaStates,
     watchParcelWorld,
   }
 }
@@ -3576,7 +3678,7 @@ export function readLocalPlayerProfile(): LocalPlayerProfile {
 function readOfflineParcelWorldState(worldId: string | null) {
   if (!worldId) return null
   const state = readOfflineParcelStateStore()[worldId]
-  if (!state) return { builds: [], ownerships: [] }
+  if (!state) return { builds: [], ownerships: [], tvMediaStates: [] }
 
   return {
     builds: Array.isArray(state.builds)
@@ -3589,6 +3691,9 @@ function readOfflineParcelWorldState(worldId: string | null) {
           (ownership) => ownership?.worldId === worldId && typeof ownership.parcelId === 'string',
         )
       : [],
+    tvMediaStates: Array.isArray(state.tvMediaStates)
+      ? state.tvMediaStates.filter((tv) => tv?.worldId === worldId && typeof tv.tvId === 'string')
+      : [],
   }
 }
 
@@ -3596,11 +3701,13 @@ function writeOfflineParcelWorldState(
   worldId: string,
   ownerships: readonly ParcelOwnership[],
   builds: readonly ParcelBuildNodesSnapshot[],
+  tvMediaStates: readonly TvMediaStateSnapshot[],
 ) {
   const store = readOfflineParcelStateStore()
   store[worldId] = {
     builds: builds.filter((build) => build.worldId === worldId),
     ownerships: ownerships.filter((ownership) => ownership.worldId === worldId),
+    tvMediaStates: tvMediaStates.filter((tv) => tv.worldId === worldId),
   }
   try {
     window.localStorage.setItem(OFFLINE_PARCEL_STATE_STORAGE_KEY, JSON.stringify(store))
@@ -3724,10 +3831,26 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       return message
     }
     if (
+      message?.type === 'tv-media-state-snapshot' &&
+      typeof message.roomId === 'string' &&
+      typeof message.worldId === 'string' &&
+      Array.isArray(message.tvs) &&
+      message.tvs.every(isTvMediaStateSnapshot)
+    ) {
+      return message
+    }
+    if (
       (message?.type === 'parcel-build-nodes-synced' ||
         message?.type === 'parcel-build-nodes-updated') &&
       typeof message.roomId === 'string' &&
       isParcelBuildNodesSnapshot(message.build)
+    ) {
+      return message
+    }
+    if (
+      (message?.type === 'tv-media-state-synced' || message?.type === 'tv-media-state-updated') &&
+      typeof message.roomId === 'string' &&
+      isTvMediaStateSnapshot(message.tv)
     ) {
       return message
     }
@@ -3787,6 +3910,20 @@ function isParcelBuildNodesSnapshot(value: unknown): value is ParcelBuildNodesSn
     typeof build.worldId === 'string' &&
     Array.isArray(build.nodes) &&
     build.nodes.every(isSyncedBuildNode)
+  )
+}
+
+function isTvMediaStateSnapshot(value: unknown): value is TvMediaStateSnapshot {
+  const tv = value as TvMediaStateSnapshot
+  return (
+    typeof tv?.muted === 'boolean' &&
+    typeof tv.parcelId === 'string' &&
+    typeof tv.tvId === 'string' &&
+    typeof tv.updatedAt === 'number' &&
+    typeof tv.updatedBy === 'string' &&
+    typeof tv.url === 'string' &&
+    typeof tv.userVolume === 'number' &&
+    typeof tv.worldId === 'string'
   )
 }
 
