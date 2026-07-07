@@ -91,10 +91,12 @@ function MobilePanelLayer({
   node,
   panel,
   isReference,
+  showSelectionBar,
 }: {
   node: AnyNode | null
   panel: React.ReactNode
   isReference: boolean
+  showSelectionBar: boolean
 }) {
   const setSelection = useViewer((s) => s.setSelection)
   const setSelectedReferenceId = useEditor((s) => s.setSelectedReferenceId)
@@ -107,6 +109,10 @@ function MobilePanelLayer({
   useEffect(() => {
     setIsSheetOpen(false)
   }, [selectionKey])
+
+  useEffect(() => {
+    if (!showSelectionBar) setIsSheetOpen(false)
+  }, [showSelectionBar])
 
   const clearSelection = useCallback(() => {
     setSelection({ selectedIds: [] })
@@ -148,18 +154,20 @@ function MobilePanelLayer({
   return (
     <>
       {node && (
-        <MobileSelectionBar
-          node={node}
-          onDelete={handleDelete}
-          onDuplicate={handleDuplicate}
-          onEdit={() => setIsSheetOpen((v) => !v)}
-          onMove={handleMove}
-        />
+        showSelectionBar && (
+          <MobileSelectionBar
+            node={node}
+            onDelete={handleDelete}
+            onDuplicate={handleDuplicate}
+            onEdit={() => setIsSheetOpen((v) => !v)}
+            onMove={handleMove}
+          />
+        )
       )}
       <MobilePanelSheet
         icon={display.icon}
         onClose={() => setIsSheetOpen(false)}
-        open={isSheetOpen}
+        open={showSelectionBar && isSheetOpen}
         title={display.label}
       >
         {panel}
@@ -168,7 +176,13 @@ function MobilePanelLayer({
   )
 }
 
-export function PanelManager({ inspectorFooter }: { inspectorFooter?: React.ReactNode }) {
+export function PanelManager({
+  inspectorFooter,
+  showMobileSelectionBar = true,
+}: {
+  inspectorFooter?: React.ReactNode
+  showMobileSelectionBar?: boolean
+}) {
   const isMobile = useIsMobile()
   const selectedIds = useViewer((s) => s.selection.selectedIds)
   const selectedReferenceId = useEditor((s) => s.selectedReferenceId)
@@ -190,13 +204,21 @@ export function PanelManager({ inspectorFooter }: { inspectorFooter?: React.Reac
 
   if (isMobile) {
     if (selectedReferenceId) {
-      return <MobilePanelLayer isReference={true} node={null} panel={<ReferencePanel />} />
+      return (
+        <MobilePanelLayer
+          isReference={true}
+          node={null}
+          panel={<ReferencePanel />}
+          showSelectionBar={showMobileSelectionBar}
+        />
+      )
     }
     return (
       <MobilePanelLayer
         isReference={false}
         node={selectedNode}
         panel={panelForType(selectedNodeType)}
+        showSelectionBar={showMobileSelectionBar}
       />
     )
   }

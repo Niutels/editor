@@ -3637,6 +3637,7 @@ export function LandrushIslandClient({
               projectId={experienceConfig.projectId}
               reactProfiler={editorRuntimeReactProfiler}
               showEditorChrome={buildMode}
+              showMobileSelectionBar={false}
               sidebarTabs={[]}
               viewerCameraControls={buildMode}
               viewerCameraInitialPose={activeBuildCameraControlsInitialPose}

@@ -135,6 +135,7 @@ export interface EditorProps {
   viewerToolbarLeft?: ReactNode
   viewerToolbarRight?: ReactNode
   showEditorChrome?: boolean
+  showMobileSelectionBar?: boolean
   /**
    * Docked below the node inspector (v2). Hosts mount the "save as preset"
    * affordance here so it reads as part of the inspector surface and shows
@@ -1141,6 +1142,7 @@ export default function Editor({
   viewerToolbarLeft,
   viewerToolbarRight,
   showEditorChrome = true,
+  showMobileSelectionBar = true,
   inspectorFooter,
   projectId,
   onLoad,
@@ -1410,7 +1412,10 @@ export default function Editor({
                     {showEditorChrome && !(isVersionPreviewMode || isCaptureMode) ? (
                       <EditorReactProfiler config={reactProfiler} id="layout.panel-manager">
                         <div className="pointer-events-auto">
-                          <PanelManager inspectorFooter={inspectorFooter} />
+                          <PanelManager
+                            inspectorFooter={inspectorFooter}
+                            showMobileSelectionBar={showMobileSelectionBar}
+                          />
                         </div>
                       </EditorReactProfiler>
                     ) : null}
@@ -1505,7 +1510,7 @@ export default function Editor({
               <ActionMenu reactProfiler={reactProfiler} />
             </div>
             <div className="pointer-events-auto">
-              <PanelManager />
+              <PanelManager showMobileSelectionBar={showMobileSelectionBar} />
             </div>
             <div className="pointer-events-auto">
               <HelperManager />
