@@ -7,12 +7,12 @@ import {
   emitter,
   type GridEvent,
   isOperationDoorType,
+  type PascalWaterNode as LandrushIslandNode,
   type LandrushLayoutNode,
   LandrushLayoutNode as LandrushLayoutNodeSchema,
   type LandrushWorldNode,
   LandrushWorldNode as LandrushWorldNodeSchema,
   type LevelNode,
-  type PascalWaterNode as LandrushIslandNode,
   sceneRegistry,
   useInteractive,
   useLiveNodeOverrides,
@@ -37,10 +37,10 @@ import {
 import {
   createPascalWaterLandSurface as createLandrushIslandLandSurface,
   createPascalWaterSmoothedPerimeter as createLandrushIslandSmoothedPerimeter,
-  LANDRUSH_WATER_SURFACE_PARAMETERS,
-  type LandrushWaterSurfaceParameters,
   PASCAL_WATER_LOW_ELEVATION as LANDRUSH_ISLAND_LOW_ELEVATION,
+  LANDRUSH_WATER_SURFACE_PARAMETERS,
   type PascalWaterLandSurface as LandrushIslandLandSurface,
+  type LandrushWaterSurfaceParameters,
 } from '@pascal-app/nodes'
 import {
   LANDRUSH_ROBOT_HOVER_RESPONSE,
@@ -51,9 +51,9 @@ import {
   resolveLandrushRobotHoverOffset,
 } from '@pascal-app/nodes/landrush-world/robot'
 import {
-  getMaterialRendererBackend,
   GRID_LAYER,
   getLevelHeight,
+  getMaterialRendererBackend,
   renderScheduler,
   useViewer,
 } from '@pascal-app/viewer'
@@ -129,6 +129,10 @@ import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-mater
 import { GrassWaterLandLayers } from './grass-water-layers'
 import { type LandrushGamepadInput, readLandrushGamepadInput } from './landrush-gamepad-input'
 import {
+  LandrushIslandPlacedTvScreens,
+  type LandrushIslandTvMediaSettings,
+} from './landrush-island-tv-screens'
+import {
   allocateParcels,
   type ParcelAllocationOptions,
   type ParcelAllocationParcel,
@@ -143,10 +147,6 @@ import {
   type ParcelStreetNetwork,
   type ParcelStreetSegment,
 } from './parcel-streets'
-import {
-  LandrushIslandPlacedTvScreens,
-  type LandrushIslandTvMediaSettings,
-} from './landrush-island-tv-screens'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import {
   clearLandrushRobotScreenRevealMask,
@@ -176,6 +176,7 @@ import {
   type ConnectionStatus,
   type LocalPlayerProfile,
   type MultiplayerPlayerSnapshot,
+  type MultiplayerRemotePlayerStore,
   MultiplayerStatusPanel,
   type ParcelBuildNodesSnapshot,
   type ParcelOwnership,
@@ -376,7 +377,13 @@ const LANDRUSH_ISLAND_DOOR_OPEN_LOOKAHEAD_METERS = 4.8
 const LANDRUSH_ISLAND_DOOR_OPEN_PATH_CLEARANCE_METERS = 0.62
 const LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS = 520
 const LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE = Math.PI / 2
-const LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT = 0.8
+const LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS = 0.25
+const LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_LENGTH = 0.8
+const LANDRUSH_ISLAND_ROBOT_CONTROLLER_FLOAT_HEIGHT = 0.5
+const LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT =
+  LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_LENGTH / 2 +
+  LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS +
+  LANDRUSH_ISLAND_ROBOT_CONTROLLER_FLOAT_HEIGHT
 const LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS = 3.15
 const LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH = 1
 const LANDRUSH_ISLAND_ROBOT_GRASS_FULL_BEND_SPEED = 5.8
@@ -919,6 +926,10 @@ type LandrushIslandRevealObjectState = {
   enabled: unknown
   isClippingGroup: unknown
 }
+type LandrushIslandRobotRevealOccluder = {
+  hasSoftRevealMaterial: boolean
+  object: Object3D
+}
 type LandrushIslandRobotRevealOccluderContext = {
   cameraPoint: LandrushPoint2
   cameraY: number
@@ -1263,9 +1274,24 @@ function setLandrushIslandCameraDragging(dragging: boolean) {
   useViewer.getState().setCameraDragging(dragging)
 }
 
+let cachedLandrushIslandRuntimeProbeSearch: string | null = null
+let cachedLandrushIslandRuntimeProbeEnabled = false
+
+function landrushIslandRuntimeProbeIsEnabled() {
+  if (typeof window === 'undefined') return false
+  if (window.location.search === cachedLandrushIslandRuntimeProbeSearch) {
+    return cachedLandrushIslandRuntimeProbeEnabled
+  }
+  cachedLandrushIslandRuntimeProbeSearch = window.location.search
+  cachedLandrushIslandRuntimeProbeEnabled = new URLSearchParams(window.location.search).has(
+    'landrushProbe',
+  )
+  return cachedLandrushIslandRuntimeProbeEnabled
+}
+
 function getLandrushIslandRuntimeProbe() {
   if (typeof window === 'undefined') return null
-  if (!new URLSearchParams(window.location.search).has('landrushProbe')) return null
+  if (!landrushIslandRuntimeProbeIsEnabled()) return null
 
   window.__LANDRUSH_ISLAND_RUNTIME_PROBE__ ??= {
     cameraJumps: [],
@@ -2432,6 +2458,7 @@ export function LandrushIslandClient({
     incomingSignals: incomingVoiceSignals,
     localMotionRef,
     localProfile: resolvedLocalProfile,
+    remotePlayerStore: multiplayer.remotePlayerStore,
     remotePlayers: multiplayer.remotePlayers,
     roomId,
     sendSignal: multiplayer.sendVoiceSignal,
@@ -2963,7 +2990,7 @@ export function LandrushIslandClient({
       setVisibleBladeGrassBlockers(latestBlockers)
       recordLandrushIslandGrassEventProbe({
         visibleBlockers: latestBlockers.length,
-        kind: 'build-exit-apply-blockers-with-fade',
+        kind: 'build-exit-apply-blade-blockers',
       })
     } else {
       setVisibleBladeGrassBlockers(builtGrassBlockers)
@@ -2973,11 +3000,17 @@ export function LandrushIslandClient({
   }, [buildMode, builtGrassBlockers])
   // Built objects only clear vertical blades; the flat ground texture stays stable below walls.
   const grassBlockers = LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS
-  const bladeGrassBlockers = LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS
+  // Stable built footprints are structural blade blockers. The active build parcel
+  // is fade-only so entering build mode does not rebuild grass instances mid-animation.
+  const bladeGrassBlockers = useMemo(
+    () =>
+      visibleBladeGrassBlockers.length === 0
+        ? LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS
+        : [...LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS, ...visibleBladeGrassBlockers],
+    [visibleBladeGrassBlockers],
+  )
   const bladeGrassFadeBlockers = useMemo(() => {
-    const fadeBlockers: GrassFieldBlocker[] = visibleBladeGrassBlockers.map(
-      createLandrushIslandHiddenBladeFadeBlocker,
-    )
+    const fadeBlockers: GrassFieldBlocker[] = []
     if (buildMode && activeBuildParcel) {
       fadeBlockers.push({
         featherMeters: LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS,
@@ -2986,7 +3019,14 @@ export function LandrushIslandClient({
       })
     }
     return fadeBlockers
-  }, [activeBuildParcel, buildMode, visibleBladeGrassBlockers])
+  }, [activeBuildParcel, buildMode])
+  const treeGrassBlockers = useMemo(
+    () =>
+      bladeGrassFadeBlockers.length === 0
+        ? bladeGrassBlockers
+        : [...bladeGrassBlockers, ...bladeGrassFadeBlockers],
+    [bladeGrassBlockers, bladeGrassFadeBlockers],
+  )
   const handleLoad = useCallback(async () => landrushIslandScene.sceneGraph, [landrushIslandScene])
   const activeBuildCameraControlsInitialPose =
     buildMode && buildCameraControlsReady && !buildCameraControlsInitialPose
@@ -3690,6 +3730,7 @@ export function LandrushIslandClient({
                         perfRun={activePerfRun}
                         playerCameraPoseRef={playerCameraPoseRef}
                         playerReturnCameraPoseRef={playerReturnCameraPoseRef}
+                        remotePlayerStore={multiplayer.remotePlayerStore}
                         remotePlayers={multiplayer.remotePlayers}
                         remoteVoicePeerIds={spatialVoice.remoteVoicePeerIds}
                         robotScreenRevealEnabled={robotScreenRevealEnabled}
@@ -3828,7 +3869,7 @@ export function LandrushIslandClient({
                               }
                               stylizedSceneLayout
                               surface={liveViewerLandSurface}
-                              treeBlockers={bladeGrassFadeBlockers}
+                              treeBlockers={treeGrassBlockers}
                               tuning={renderGrassTuning}
                             />
                           </Suspense>
@@ -6353,6 +6394,7 @@ function LandrushIslandPlayerLayer({
   perfRun,
   playerCameraPoseRef,
   playerReturnCameraPoseRef,
+  remotePlayerStore,
   remotePlayers,
   remoteVoicePeerIds,
   robotScreenRevealEnabled,
@@ -6382,6 +6424,7 @@ function LandrushIslandPlayerLayer({
   perfRun: LandrushIslandPerfRunOptions
   playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
   playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  remotePlayerStore: MultiplayerRemotePlayerStore
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   remoteVoicePeerIds: readonly string[]
   robotScreenRevealEnabled: boolean
@@ -6452,14 +6495,16 @@ function LandrushIslandPlayerLayer({
           groundY={groundY}
           key={player.id}
           player={player}
+          remotePlayerStore={remotePlayerStore}
         />
       ))}
       {remotePlayers.map((player) => (
-        <SpatialVoiceRangeRing
+        <RemoteSpatialVoiceRangeRing
           color={player.color}
           groundY={surface.grassSurfaceElevation}
           key={`voice-range-${player.id}`}
-          position={player.position}
+          playerId={player.id}
+          remotePlayerStore={remotePlayerStore}
           visible={voiceRangeVisible && remoteVoicePeerIdSet.has(player.id)}
         />
       ))}
@@ -6482,6 +6527,7 @@ function LandrushIslandPlayerLayer({
           key={`map-${player.id}`}
           opacityRef={mapPresentationProgressRef}
           player={player}
+          remotePlayerStore={remotePlayerStore}
           visible={mapPresentationVisible}
         />
       ))}
@@ -7303,7 +7349,7 @@ function LandrushIslandRobotScreenRevealClipper({
   visible: boolean
 }) {
   const { camera, gl, scene } = useThree()
-  const occludersRef = useRef<Object3D[]>([])
+  const occludersRef = useRef<LandrushIslandRobotRevealOccluder[]>([])
   const objectStatesRef = useRef(new Map<Object3D, LandrushIslandRevealObjectState>())
   const activeObjectsRef = useRef(new Set<Object3D>())
   const materialsRef = useRef<Material[]>([])
@@ -7622,12 +7668,12 @@ function applyLandrushIslandRevealObjectClipping({
 }: {
   activeObjects: Set<Object3D>
   objectStates: Map<Object3D, LandrushIslandRevealObjectState>
-  objects: readonly Object3D[]
+  objects: readonly LandrushIslandRobotRevealOccluder[]
   planes: Plane[]
 }) {
   activeObjects.clear()
-  for (const object of objects) {
-    if (objectHasLandrushIslandSoftRevealMaterial(object)) continue
+  for (const { hasSoftRevealMaterial, object } of objects) {
+    if (hasSoftRevealMaterial) continue
     const target = resolveLandrushIslandRevealClippingObject(object)
     if (!target) continue
     activeObjects.add(target)
@@ -7783,7 +7829,10 @@ function collectLandrushIslandRobotRevealOccluders(
   scene.traverse((object) => {
     if (object.userData?.landrushRobotOccluder === true) occluders.add(object)
   })
-  return [...occluders]
+  return [...occluders].map((object) => ({
+    hasSoftRevealMaterial: objectHasLandrushIslandSoftRevealMaterial(object),
+    object,
+  }))
 }
 
 function shouldSkipLandrushIslandRobotRevealOccluder(
@@ -7910,9 +7959,11 @@ function resolveLandrushIslandRobotRevealSurfaceY(
   return elevation < 0 ? 0 : elevation
 }
 
-function collectLandrushIslandRobotRevealMaterials(occluders: readonly Object3D[]) {
+function collectLandrushIslandRobotRevealMaterials(
+  occluders: readonly LandrushIslandRobotRevealOccluder[],
+) {
   const materials = new Set<Material>()
-  for (const object of occluders) {
+  for (const { object } of occluders) {
     collectLandrushIslandObjectMaterials(object, materials)
   }
   return [...materials]
@@ -9266,7 +9317,12 @@ function LocalLandrushIslandRobot({
         <BVHEcctrl
           acceleration={LANDRUSH_ISLAND_ROBOT_ACCELERATION}
           airDragFactor={0.3}
-          colliderCapsuleArgs={[0.25, 0.8, 4, 8]}
+          colliderCapsuleArgs={[
+            LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS,
+            LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_LENGTH,
+            4,
+            8,
+          ]}
           colliderMeshes={
             fallPresentationActive ? LANDRUSH_ISLAND_ROBOT_FALL_COLLIDER_MESHES : colliderMeshes
           }
@@ -9279,7 +9335,7 @@ function LocalLandrushIslandRobot({
           fallGravityFactor={4}
           floatCheckType="BOTH"
           floatDampingC={36}
-          floatHeight={0.5}
+          floatHeight={LANDRUSH_ISLAND_ROBOT_CONTROLLER_FLOAT_HEIGHT}
           floatPullBackHeight={0.35}
           floatSensorRadius={0.15}
           floatSpringK={1200}
@@ -10020,14 +10076,47 @@ function navigationDebugObstacleStroke(kind: LandrushIslandNavigationObstacle['k
   return '#64748b'
 }
 
+function RemoteSpatialVoiceRangeRing({
+  color,
+  groundY,
+  playerId,
+  remotePlayerStore,
+  visible,
+}: {
+  color: string
+  groundY: number
+  playerId: string
+  remotePlayerStore: MultiplayerRemotePlayerStore
+  visible: boolean
+}) {
+  const positionRef = useRef<readonly [number, number, number] | null>(
+    remotePlayerStore.getSnapshot(playerId)?.position ?? null,
+  )
+
+  useFrame(() => {
+    positionRef.current = remotePlayerStore.getSnapshot(playerId)?.position ?? null
+  })
+
+  return (
+    <SpatialVoiceRangeRing
+      color={color}
+      groundY={groundY}
+      positionRef={positionRef}
+      visible={visible}
+    />
+  )
+}
+
 function RemoteLandrushIslandRobot({
   baseNode,
   groundY,
   player,
+  remotePlayerStore,
 }: {
   baseNode: LandrushIslandLayoutNode
   groundY: number
   player: MultiplayerPlayerSnapshot
+  remotePlayerStore: MultiplayerRemotePlayerStore
 }) {
   const nodeRef = useRef<LandrushWorldNode>(
     createLandrushIslandRobotActorNode(baseNode, player.id, snapshotPoint(player), groundY),
@@ -10050,6 +10139,14 @@ function RemoteLandrushIslandRobot({
   }, [groundY, player])
 
   useFrame((_, delta) => {
+    const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
+    targetPositionRef.current.set(
+      livePlayer.position[0],
+      livePlayer.position[1] || groundY,
+      livePlayer.position[2],
+    )
+    targetHeadingRef.current = livePlayer.heading
+
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
     const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
@@ -10064,8 +10161,8 @@ function RemoteLandrushIslandRobot({
       positionRef.current.z,
     ]
     node.playerHeading = headingRef.current
-    node.playerMoving = player.moving
-    node.playerSpeed = player.speed
+    node.playerMoving = livePlayer.moving
+    node.playerSpeed = livePlayer.speed
   })
 
   return (
@@ -11633,11 +11730,13 @@ function LandrushIslandRemoteMapPlayerMarker({
   groundY,
   opacityRef,
   player,
+  remotePlayerStore,
   visible,
 }: {
   groundY: number
   opacityRef: { current: number }
   player: MultiplayerPlayerSnapshot
+  remotePlayerStore: MultiplayerRemotePlayerStore
   visible: boolean
 }) {
   const groupRef = useRef<Group>(null!)
@@ -11663,6 +11762,14 @@ function LandrushIslandRemoteMapPlayerMarker({
     materialOpacityRef.current = visible ? clamp01(opacityRef.current) : 0
     setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
     if (materialOpacityRef.current <= 0.002) return
+
+    const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
+    targetPositionRef.current.set(
+      livePlayer.position[0],
+      livePlayer.position[1] || groundY,
+      livePlayer.position[2],
+    )
+    targetHeadingRef.current = livePlayer.heading
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
@@ -14254,13 +14361,6 @@ function createLandrushIslandBuiltGrassBlockers(
     }
   }
   return blockers
-}
-
-function createLandrushIslandHiddenBladeFadeBlocker(blocker: GrassFieldBlocker): GrassFieldBlocker {
-  return {
-    ...blocker,
-    initialVisibility: 0,
-  }
 }
 
 function createLandrushIslandNavigationObstacles(

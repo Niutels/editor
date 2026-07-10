@@ -25,7 +25,26 @@ export type LandrushGamepadInput = {
 const GAMEPAD_STICK_DEADZONE = 0.18
 const GAMEPAD_BUTTON_THRESHOLD = 0.35
 
+let cachedLandrushGamepadInput: LandrushGamepadInput | null | undefined
+let landrushGamepadInputCacheClearQueued = false
+
 export function readLandrushGamepadInput(): LandrushGamepadInput | null {
+  if (cachedLandrushGamepadInput !== undefined) {
+    return cachedLandrushGamepadInput
+  }
+
+  cachedLandrushGamepadInput = readCurrentLandrushGamepadInput()
+  if (!landrushGamepadInputCacheClearQueued) {
+    landrushGamepadInputCacheClearQueued = true
+    queueMicrotask(() => {
+      cachedLandrushGamepadInput = undefined
+      landrushGamepadInputCacheClearQueued = false
+    })
+  }
+  return cachedLandrushGamepadInput
+}
+
+function readCurrentLandrushGamepadInput(): LandrushGamepadInput | null {
   if (typeof navigator === 'undefined' || !navigator.getGamepads) return null
 
   for (const gamepad of navigator.getGamepads()) {

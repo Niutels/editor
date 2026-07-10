@@ -8,7 +8,7 @@ type FrameLimiterProps = {
   idleFps?: number
 }
 
-const FrameLimiter: React.FC<FrameLimiterProps> = ({ fps = 50, idleFps = 20 }) => {
+const FrameLimiter: React.FC<FrameLimiterProps> = ({ fps = 60, idleFps = 20 }) => {
   const { advance, set, frameloop: initFrameloop } = useThree()
 
   useLayoutEffect(() => {

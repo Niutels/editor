@@ -9,6 +9,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { type ComponentType, lazy, Suspense } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { shouldAutoSelectPlacedNode } from '../../hooks/use-mobile'
 import useEditor, { isBuildToolValidForPhase, type Phase, type Tool } from '../../store/use-editor'
 import { ColumnTool } from './column/column-tool'
 import { ElevatorTool } from './elevator/elevator-tool'
@@ -126,8 +127,7 @@ export const ToolManager: React.FC = () => {
     !showCeilingBoundaryEditor
 
   // Show build tools when in build mode
-  const showBuildTool =
-    mode === 'build' && isBuildToolValidForPhase(phase, tool, structureLayer)
+  const showBuildTool = mode === 'build' && isBuildToolValidForPhase(phase, tool, structureLayer)
   const activeBuildTool = showBuildTool ? tool : null
 
   // Registry-first: if the active tool's kind has a NodeDefinition with a
@@ -138,12 +138,14 @@ export const ToolManager: React.FC = () => {
   const BuildToolComponent =
     activeBuildTool && !useRegistryTool ? tools[phase]?.[activeBuildTool] : null
   const handlePlacedNodeSelected = (nodeId: AnyNodeId) => {
+    if (!shouldAutoSelectPlacedNode()) return
     setSelection({ selectedIds: [nodeId] })
   }
   const handlePlacedElevatorSelected = (
     nodeId: AnyNodeId,
     elevatorBuildingId: BuildingNode['id'],
   ) => {
+    if (!shouldAutoSelectPlacedNode()) return
     setSelection({ buildingId: elevatorBuildingId, selectedIds: [nodeId] })
   }
 

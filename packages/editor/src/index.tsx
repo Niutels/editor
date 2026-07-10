@@ -5,17 +5,17 @@
 export { useScene } from '@pascal-app/core'
 export { useViewer } from '@pascal-app/viewer'
 export type { EditorProps } from './components/editor'
-export type { EditorCameraInitialPose } from './components/editor/custom-camera-controls'
 export { default as Editor } from './components/editor'
+export type { EditorCameraInitialPose } from './components/editor/custom-camera-controls'
+export {
+  buildFirstPersonColliderWorldFromRegistry,
+  type FirstPersonColliderWorld,
+} from './components/editor/first-person/build-collider-world'
 export {
   BVHEcctrl,
   type BVHEcctrlApi,
   type MovementInput,
 } from './components/editor/first-person/bvh-ecctrl'
-export {
-  buildFirstPersonColliderWorldFromRegistry,
-  type FirstPersonColliderWorld,
-} from './components/editor/first-person/build-collider-world'
 // Headless component aliases: the implementation files keep their
 // internal names (`ParametricInspector`, `FloatingActionMenu`) because
 // they're referenced throughout the editor's own internals; the public
@@ -168,6 +168,10 @@ export type { SaveStatus } from './hooks/use-auto-save'
 export { type UseDragActionArgs, useDragAction } from './hooks/use-drag-action'
 // Phase 5 Stage D — extras for kind-owned placement tools (FenceTool etc.).
 export { markToolCancelConsumed } from './hooks/use-keyboard'
+export {
+  shouldAutoSelectPlacedNode,
+  suppressMobilePlacedNodeSelection,
+} from './hooks/use-mobile'
 export { type Selection, useSelection } from './hooks/use-selection'
 export { EDITOR_LAYER } from './lib/constants'
 // Helper libs used by the kind-owned roof / stair / elevator panels.

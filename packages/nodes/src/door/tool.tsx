@@ -14,7 +14,9 @@ import {
   EDITOR_LAYER,
   getSideFromNormal,
   isValidWallSideFace,
+  shouldAutoSelectPlacedNode,
   snapToHalf,
+  suppressMobilePlacedNodeSelection,
   triggerSFX,
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
@@ -276,7 +278,10 @@ const DoorTool: React.FC = () => {
       })
 
       useScene.getState().createNode(node, event.node.id as AnyNodeId)
-      useViewer.getState().setSelection({ selectedIds: [node.id] })
+      suppressMobilePlacedNodeSelection()
+      if (shouldAutoSelectPlacedNode()) {
+        useViewer.getState().setSelection({ selectedIds: [node.id] })
+      }
       useScene.temporal.getState().pause()
       triggerSFX('sfx:item-place')
 

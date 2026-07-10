@@ -33,6 +33,7 @@ import {
 } from 'three'
 import { distance, smoothstep, uv, vec2 } from 'three/tsl'
 import { LineBasicNodeMaterial, MeshBasicNodeMaterial } from 'three/webgpu'
+import { suppressMobilePlacedNodeSelection } from '../../../hooks/use-mobile'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import useEditor from '../../../store/use-editor'
@@ -649,6 +650,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       }
 
       draftNode.commit(result.nodeUpdate)
+      suppressMobilePlacedNodeSelection()
       if (configRef.current.onCommitted()) {
         draftNode.create(gridPosition.current, asset, currentRotation)
         const previewBounds = expandBoundsToGrid(
@@ -807,6 +809,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
         useLiveTransforms.getState().clear(draftNode.current.id)
       }
       draftNode.commit(result.nodeUpdate)
+      suppressMobilePlacedNodeSelection()
       if (result.dirtyNodeId) {
         useScene.getState().dirtyNodes.add(result.dirtyNodeId)
       }
@@ -1009,6 +1012,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
                 useLiveTransforms.getState().clear(draftNode.current.id)
               }
               draftNode.commit(result.nodeUpdate)
+              suppressMobilePlacedNodeSelection()
               if (configRef.current.onCommitted()) {
                 const enterResult = shelfSurfaceStrategy.enter(ctx, synthetic as never)
                 if (enterResult) {
@@ -1035,6 +1039,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
                 useLiveTransforms.getState().clear(draftNode.current.id)
               }
               draftNode.commit(result.nodeUpdate)
+              suppressMobilePlacedNodeSelection()
               if (configRef.current.onCommitted()) {
                 const enterResult = itemSurfaceStrategy.enter(ctx, synthetic)
                 if (enterResult) {
@@ -1064,6 +1069,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
                 useLiveTransforms.getState().clear(draftNode.current.id)
               }
               draftNode.commit(result.nodeUpdate)
+              suppressMobilePlacedNodeSelection()
               if (configRef.current.onCommitted()) {
                 const nodes = useScene.getState().nodes
                 const enterResult = ceilingStrategy.enter(
@@ -1094,6 +1100,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
         useLiveTransforms.getState().clear(draftNode.current.id)
       }
       draftNode.commit(result.nodeUpdate)
+      suppressMobilePlacedNodeSelection()
 
       if (configRef.current.onCommitted()) {
         // Try to set up next draft on the same surface
@@ -1186,6 +1193,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
         useLiveTransforms.getState().clear(draftNode.current.id)
       }
       draftNode.commit(result.nodeUpdate)
+      suppressMobilePlacedNodeSelection()
 
       if (configRef.current.onCommitted()) {
         const nodes = useScene.getState().nodes
@@ -1311,6 +1319,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
         useLiveTransforms.getState().clear(draftNode.current.id)
       }
       draftNode.commit(result.nodeUpdate)
+      suppressMobilePlacedNodeSelection()
 
       if (configRef.current.onCommitted()) {
         const enterResult = shelfSurfaceStrategy.enter(getContext(), event)

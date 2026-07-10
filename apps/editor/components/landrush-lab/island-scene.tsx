@@ -12,7 +12,7 @@ type IslandSceneProps = {
   preset: IslandViewPreset
 }
 
-const GRASS_COLORS = ['#5f8f42', '#80a84e', '#3f7a3d', '#a9bd63'] as const
+const GRASS_COLORS = ['#99954b', '#96924e', '#999355', '#8d9052'] as const
 
 export function IslandScene({ island, preset }: IslandSceneProps) {
   return (
@@ -77,7 +77,7 @@ function IslandMeshes({ island }: { island: LandrushIsland }) {
 
       <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <shapeGeometry args={[baseShape]} />
-        <meshStandardMaterial color="#638f40" roughness={0.88} side={DoubleSide} />
+        <meshStandardMaterial color="#96924e" roughness={0.88} side={DoubleSide} />
       </mesh>
 
       {grassPatches.map((patch, index) => (

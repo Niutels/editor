@@ -1,8 +1,8 @@
 'use client'
 
+import { getMaterialRendererBackend } from '@pascal-app/viewer'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { getMaterialRendererBackend } from '@pascal-app/viewer'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   type BufferGeometry,
@@ -1935,6 +1935,21 @@ function getStylizedGrassPerfProbe() {
   return probe?.enabled ? probe : null
 }
 
+let cachedStylizedGrassRuntimeProbeSearch: string | null = null
+let cachedStylizedGrassRuntimeProbeEnabled = false
+
+function stylizedGrassRuntimeProbeIsEnabled() {
+  if (typeof window === 'undefined') return false
+  if (window.location.search === cachedStylizedGrassRuntimeProbeSearch) {
+    return cachedStylizedGrassRuntimeProbeEnabled
+  }
+  cachedStylizedGrassRuntimeProbeSearch = window.location.search
+  cachedStylizedGrassRuntimeProbeEnabled = new URLSearchParams(window.location.search).has(
+    'landrushProbe',
+  )
+  return cachedStylizedGrassRuntimeProbeEnabled
+}
+
 function takeStylizedGrassCacheStats(stats: StylizedGrassCacheStats) {
   const snapshot = {
     clears: stats.clears,
@@ -1997,7 +2012,7 @@ function recordStylizedGrassFadeRuntimeProbe({
 
 function ensureStylizedGrassRuntimeProbe() {
   if (typeof window === 'undefined') return null
-  if (!new URLSearchParams(window.location.search).has('landrushProbe')) return null
+  if (!stylizedGrassRuntimeProbeIsEnabled()) return null
   const scopedWindow = window as unknown as {
     __PASCAL_WATER_RUNTIME_PROBE__?: {
       cameraJumps?: unknown[]

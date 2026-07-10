@@ -43,6 +43,7 @@ import {
 } from '@pascal-app/viewer'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { type BufferGeometry, Color, type Material, type Mesh, type Object3D } from 'three'
+import { consumeMobilePlacedNodeSelectionSuppression } from '../../hooks/use-mobile'
 import {
   type ActivePaintMaterial,
   buildRoofSegmentSurfaceMaterialPatch,
@@ -1237,6 +1238,14 @@ export const SelectionManager = () => {
     const onClick = (event: NodeEvent) => {
       // Skip if box-select just completed (drag ended over a node)
       if (boxSelectHandled) return
+      if (consumeMobilePlacedNodeSelectionSuppression()) {
+        event.stopPropagation()
+        clickHandledRef.current = true
+        setTimeout(() => {
+          clickHandledRef.current = false
+        }, 50)
+        return
+      }
 
       const node = event.node
       let currentPhase = useEditor.getState().phase

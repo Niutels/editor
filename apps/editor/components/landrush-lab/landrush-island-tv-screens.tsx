@@ -1,14 +1,14 @@
 'use client'
 
 import {
-  sceneRegistry,
   type AnyNode,
   type AnyNodeId,
   type ItemNode,
+  sceneRegistry,
   useScene,
 } from '@pascal-app/core'
 import { Html } from '@react-three/drei'
-import { useFrame, useThree } from '@react-three/fiber'
+import { createPortal, useFrame, useThree } from '@react-three/fiber'
 import {
   type CSSProperties,
   type FormEvent,
@@ -48,6 +48,9 @@ type LandrushIslandTvEmbed = {
 export type LandrushIslandTvMediaState = {
   muted: boolean
   parcelId: string
+  playbackSeconds: number
+  playbackUpdatedAt: number
+  playing: boolean
   tvId: string
   updatedAt: number
   updatedBy: string
@@ -58,12 +61,18 @@ export type LandrushIslandTvMediaState = {
 
 export type LandrushIslandTvMediaSettings = {
   muted: boolean
+  playbackSeconds: number
+  playbackUpdatedAt: number
+  playing: boolean
   url: string
   userVolume: number
 }
 
 const LANDRUSH_ISLAND_TV_DEFAULT_MEDIA = {
   muted: false,
+  playbackSeconds: 0,
+  playbackUpdatedAt: 0,
+  playing: false,
   url: '',
   userVolume: 0.8,
 } satisfies LandrushIslandTvMediaSettings
@@ -98,6 +107,12 @@ const LANDRUSH_ISLAND_TV_SOUND_FULL_VOLUME_DISTANCE =
 const LANDRUSH_ISLAND_TV_VOLUME_SEND_INTERVAL_SECONDS = 0.22
 const LANDRUSH_ISLAND_TV_VOLUME_EPSILON = 0.025
 const LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS = 420
+const LANDRUSH_ISLAND_TV_PLAYBACK_DRIFT_SEEK_SECONDS = 1.25
+const LANDRUSH_ISLAND_TV_PLAYBACK_SEEK_PUBLISH_SECONDS = 1.5
+const LANDRUSH_ISLAND_TV_PLAYBACK_CORRECTION_INTERVAL_MS = 8000
+const LANDRUSH_ISLAND_TV_LOCAL_PLAY_GAIN_EPSILON = 0.001
+const LANDRUSH_ISLAND_TV_OCCLUSION_CANDIDATE_REFRESH_SECONDS = 0.35
+const LANDRUSH_ISLAND_TV_SCREEN_OCCLUSION_INTERVAL_SECONDS = 0.1
 
 const playerSlotStyle = {
   background: '#020617',
@@ -190,12 +205,20 @@ export function LandrushIslandTvScreens({
 }) {
   const [media, setMedia] = useState<LandrushIslandTvMediaSettings>(() => ({
     ...LANDRUSH_ISLAND_TV_DEFAULT_MEDIA,
+    playbackUpdatedAt: Date.now(),
+    playing: Boolean(videoUrlOrId),
     url: videoUrlOrId,
   }))
   const embed = useMemo(() => resolveLandrushIslandTvEmbed(media.url), [media.url])
 
   useEffect(() => {
-    setMedia((current) => ({ ...current, url: videoUrlOrId }))
+    setMedia((current) => ({
+      ...current,
+      playbackSeconds: 0,
+      playbackUpdatedAt: Date.now(),
+      playing: Boolean(videoUrlOrId),
+      url: videoUrlOrId,
+    }))
   }, [videoUrlOrId])
 
   if (!enabled) return null
@@ -222,6 +245,7 @@ function LandrushIslandTvScreen({
   scale,
   occlusionRootRef,
   interactionBounds,
+  rangeVisible = true,
   screenPosition = LANDRUSH_ISLAND_TV_SCREEN_POSITION,
 }: {
   embed: LandrushIslandTvEmbed | null
@@ -237,6 +261,7 @@ function LandrushIslandTvScreen({
     position: readonly [number, number, number]
     size: readonly [number, number, number]
   }
+  rangeVisible?: boolean
   screenPosition?: readonly [number, number, number]
 }) {
   const { gl, camera, scene } = useThree()
@@ -244,12 +269,14 @@ function LandrushIslandTvScreen({
   const screenMeshRef = useRef<Mesh | null>(null)
   const interactionMeshRef = useRef<Mesh | null>(null)
   const playerIframeRef = useRef<HTMLIFrameElement | null>(null)
-  const playerLayerRef = useRef<HTMLDivElement | null>(null)
-  const playerLayerFrameRef = useRef<number | null>(null)
+  const playerHostFrameRef = useRef<number | null>(null)
   const screenPlayerSlotRef = useRef<HTMLDivElement | null>(null)
   const panelPlayerSlotRef = useRef<HTMLDivElement | null>(null)
   const raycasterRef = useRef(new Raycaster())
   const occlusionDirectionRef = useRef(new Vector3())
+  const occlusionCandidatesRef = useRef<Object3D[]>([])
+  const lastOcclusionCandidateRefreshAtRef = useRef(Number.NEGATIVE_INFINITY)
+  const lastScreenOcclusionCheckAtRef = useRef(Number.NEGATIVE_INFINITY)
   const mediaRef = useRef(media)
   const spatialGainRef = useRef(0)
   const tvWorldPositionRef = useRef(new Vector3())
@@ -266,6 +293,19 @@ function LandrushIslandTvScreen({
   const lastSentVolumeAtRef = useRef(0)
   const lastYoutubePlaybackSecondsRef = useRef(0)
   const lastYoutubePlayingRef = useRef(true)
+  const lastLocalYoutubePlayingRef = useRef(false)
+  const lastYoutubePlayerStateRef = useRef<number | null>(null)
+  const lastObservedYoutubePlaybackRef = useRef<{
+    observedAt: number
+    playing: boolean
+    seconds: number
+  } | null>(null)
+  const lastPublishedYoutubePlaybackRef = useRef<{
+    playbackUpdatedAt: number
+    playing: boolean
+    seconds: number
+  }>({ playbackUpdatedAt: 0, playing: false, seconds: 0 })
+  const suppressYoutubePlaybackPublishUntilRef = useRef(0)
   const [aimed, setAimed] = useState(false)
   const [promptVisible, setPromptVisible] = useState(false)
   const [screenOccluded, setScreenOccluded] = useState(false)
@@ -286,63 +326,60 @@ function LandrushIslandTvScreen({
   const scheduleYoutubePlaybackRestore = useCallback(() => {
     if (embed?.kind !== 'youtube') return
     const iframe = playerIframeRef.current
-    const playbackSeconds = lastYoutubePlaybackSecondsRef.current
-    if (!iframe || playbackSeconds <= 0.25) return
-    const shouldPlay = lastYoutubePlayingRef.current
+    if (!iframe) return
 
     window.setTimeout(() => {
       if (playerIframeRef.current !== iframe) return
-      sendLandrushIslandYoutubeSeek(iframe, playbackSeconds)
+      const media = mediaRef.current
+      const playbackSeconds = resolveLandrushIslandTvEffectivePlaybackSeconds(media)
+      const shouldPlay = shouldLandrushIslandTvPlayLocally(
+        media,
+        spatialGainRef.current,
+        interactingRef.current,
+      )
+      suppressYoutubePlaybackPublishUntilRef.current =
+        Date.now() + LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS
+      if (shouldPlay) sendLandrushIslandYoutubeSeek(iframe, playbackSeconds)
       sendLandrushIslandYoutubePlayback(iframe, shouldPlay)
+      lastLocalYoutubePlayingRef.current = shouldPlay
+      if (!shouldPlay) sendLandrushIslandYoutubeVolume(iframe, 0, true)
     }, LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS)
   }, [embed?.kind])
 
-  const updatePlayerLayerLayout = useCallback(() => {
-    const layer = playerLayerRef.current
-    if (!layer) return
-
+  const syncPlayerHost = useCallback(() => {
     const iframe = playerIframeRef.current
     const target = interactingRef.current ? panelPlayerSlotRef.current : screenPlayerSlotRef.current
-    if (!iframe || !target) {
-      layer.style.visibility = 'hidden'
-      layer.style.pointerEvents = 'none'
-      return
+    if (!iframe || !target) return
+
+    if (iframe.parentElement !== target) {
+      target.appendChild(iframe)
+      scheduleYoutubePlaybackRestore()
     }
+    iframe.style.pointerEvents = interactingRef.current ? 'auto' : 'none'
+  }, [scheduleYoutubePlaybackRestore])
 
-    const rect = target.getBoundingClientRect()
-    const visible =
-      rect.width > 2 && rect.height > 2 && (interactingRef.current || !screenOccludedRef.current)
-    layer.style.left = `${rect.left}px`
-    layer.style.top = `${rect.top}px`
-    layer.style.width = `${rect.width}px`
-    layer.style.height = `${rect.height}px`
-    layer.style.zIndex = interactingRef.current ? '10002' : '30'
-    layer.style.pointerEvents = interactingRef.current ? 'auto' : 'none'
-    layer.style.visibility = visible ? 'visible' : 'hidden'
-  }, [])
-
-  const schedulePlayerLayerLayout = useCallback(() => {
-    if (playerLayerFrameRef.current !== null) return
-    playerLayerFrameRef.current = window.requestAnimationFrame(() => {
-      playerLayerFrameRef.current = null
-      updatePlayerLayerLayout()
+  const schedulePlayerHostSync = useCallback(() => {
+    if (playerHostFrameRef.current !== null) return
+    playerHostFrameRef.current = window.requestAnimationFrame(() => {
+      playerHostFrameRef.current = null
+      syncPlayerHost()
     })
-  }, [updatePlayerLayerLayout])
+  }, [syncPlayerHost])
 
   const assignScreenPlayerSlot = useCallback(
     (node: HTMLDivElement | null) => {
       screenPlayerSlotRef.current = node
-      schedulePlayerLayerLayout()
+      schedulePlayerHostSync()
     },
-    [schedulePlayerLayerLayout],
+    [schedulePlayerHostSync],
   )
 
   const assignPanelPlayerSlot = useCallback(
     (node: HTMLDivElement | null) => {
       panelPlayerSlotRef.current = node
-      schedulePlayerLayerLayout()
+      schedulePlayerHostSync()
     },
-    [schedulePlayerLayerLayout],
+    [schedulePlayerHostSync],
   )
 
   const openInteraction = useCallback(() => {
@@ -370,13 +407,36 @@ function LandrushIslandTvScreen({
         return
       }
       setUrlError(null)
-      onMediaStateChange({ ...mediaRef.current, url: nextUrl })
+      const now = Date.now()
+      const nextMedia = {
+        ...mediaRef.current,
+        playbackSeconds: 0,
+        playbackUpdatedAt: now,
+        playing: true,
+        url: nextUrl,
+      }
+      lastYoutubePlaybackSecondsRef.current = 0
+      lastYoutubePlayingRef.current = true
+      lastPublishedYoutubePlaybackRef.current = {
+        playbackUpdatedAt: now,
+        playing: true,
+        seconds: 0,
+      }
+      mediaRef.current = nextMedia
+      onMediaStateChange(nextMedia)
     },
     [draftUrl, onMediaStateChange],
   )
 
   useEffect(() => {
     mediaRef.current = media
+    lastYoutubePlaybackSecondsRef.current = resolveLandrushIslandTvEffectivePlaybackSeconds(media)
+    lastYoutubePlayingRef.current = media.playing
+    lastPublishedYoutubePlaybackRef.current = {
+      playbackUpdatedAt: Date.now(),
+      playing: media.playing,
+      seconds: lastYoutubePlaybackSecondsRef.current,
+    }
   }, [media])
 
   useEffect(() => {
@@ -385,56 +445,29 @@ function LandrushIslandTvScreen({
 
   useEffect(() => {
     interactingRef.current = interacting
-    schedulePlayerLayerLayout()
-  }, [interacting, schedulePlayerLayerLayout])
+    schedulePlayerHostSync()
+  }, [interacting, schedulePlayerHostSync])
 
   useEffect(() => {
     if (interacting) setDraftUrl(media.url)
   }, [interacting, media.url])
 
   useEffect(() => {
-    const layer = document.createElement('div')
-    layer.dataset.landrushTvPlayerLayer = '1'
-    Object.assign(layer.style, {
-      background: '#020617',
-      display: 'block',
-      height: '0px',
-      left: '0px',
-      overflow: 'hidden',
-      pointerEvents: 'none',
-      position: 'fixed',
-      top: '0px',
-      visibility: 'hidden',
-      width: '0px',
-      zIndex: '30',
-    })
-    document.body.appendChild(layer)
-    playerLayerRef.current = layer
-
-    if (playerIframeRef.current) {
-      layer.appendChild(playerIframeRef.current)
-      schedulePlayerLayerLayout()
-    }
-
-    return () => {
-      if (playerLayerFrameRef.current !== null) {
-        window.cancelAnimationFrame(playerLayerFrameRef.current)
-        playerLayerFrameRef.current = null
-      }
-      layer.remove()
-      if (playerLayerRef.current === layer) playerLayerRef.current = null
-    }
-  }, [schedulePlayerLayerLayout])
-
-  useEffect(() => {
-    const handleLayoutChange = () => schedulePlayerLayerLayout()
+    const handleLayoutChange = () => schedulePlayerHostSync()
     window.addEventListener('resize', handleLayoutChange)
-    window.addEventListener('scroll', handleLayoutChange, true)
     return () => {
       window.removeEventListener('resize', handleLayoutChange)
-      window.removeEventListener('scroll', handleLayoutChange, true)
     }
-  }, [schedulePlayerLayerLayout])
+  }, [schedulePlayerHostSync])
+
+  useEffect(() => {
+    return () => {
+      if (playerHostFrameRef.current !== null) {
+        window.cancelAnimationFrame(playerHostFrameRef.current)
+        playerHostFrameRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -461,7 +494,8 @@ function LandrushIslandTvScreen({
     if (!embed) {
       playerIframeRef.current?.remove()
       playerIframeRef.current = null
-      schedulePlayerLayerLayout()
+      lastLocalYoutubePlayingRef.current = false
+      schedulePlayerHostSync()
       return
     }
 
@@ -475,12 +509,14 @@ function LandrushIslandTvScreen({
     iframe.addEventListener('load', handleLoad)
     Object.assign(iframe.style, playerSlotStyle)
     playerIframeRef.current = iframe
-    playerLayerRef.current?.appendChild(iframe)
     lastSentVolumeRef.current = -1
     lastSentMutedRef.current = false
-    lastYoutubePlaybackSecondsRef.current = 0
-    lastYoutubePlayingRef.current = true
-    schedulePlayerLayerLayout()
+    lastYoutubePlaybackSecondsRef.current = resolveLandrushIslandTvEffectivePlaybackSeconds(
+      mediaRef.current,
+    )
+    lastYoutubePlayingRef.current = mediaRef.current.playing
+    lastLocalYoutubePlayingRef.current = false
+    schedulePlayerHostSync()
 
     return () => {
       iframe.removeEventListener('load', handleLoad)
@@ -488,42 +524,130 @@ function LandrushIslandTvScreen({
       if (playerIframeRef.current === iframe) {
         playerIframeRef.current = null
       }
-      schedulePlayerLayerLayout()
+      schedulePlayerHostSync()
     }
-  }, [embed, schedulePlayerLayerLayout, scheduleYoutubePlaybackRestore])
+  }, [embed, schedulePlayerHostSync, scheduleYoutubePlaybackRestore])
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const iframeWindow = playerIframeRef.current?.contentWindow
-      if (!iframeWindow || event.source !== iframeWindow || !interactingRef.current) return
+      if (!iframeWindow || event.source !== iframeWindow) return
 
       const info = parseLandrushIslandYoutubeInfoDelivery(event.data)
       if (!info) return
 
+      const now = Date.now()
+      let playbackChangedByInteraction = false
       if (typeof info.currentTime === 'number') {
-        lastYoutubePlaybackSecondsRef.current = info.currentTime
+        const nextSeconds = Math.max(0, info.currentTime)
+        const previousObservation = lastObservedYoutubePlaybackRef.current
+        if (previousObservation) {
+          const expectedSeconds = previousObservation.playing
+            ? previousObservation.seconds + (now - previousObservation.observedAt) / 1000
+            : previousObservation.seconds
+          playbackChangedByInteraction =
+            interactingRef.current &&
+            Math.abs(nextSeconds - expectedSeconds) >=
+              LANDRUSH_ISLAND_TV_PLAYBACK_SEEK_PUBLISH_SECONDS
+        }
+        lastYoutubePlaybackSecondsRef.current = nextSeconds
       }
       if (typeof info.playerState === 'number') {
-        lastYoutubePlayingRef.current = info.playerState === 1 || info.playerState === 3
+        const nextPlaying = isLandrushIslandYoutubePlayerStatePlaying(info.playerState)
+        if (
+          lastYoutubePlayerStateRef.current !== null &&
+          nextPlaying !== lastYoutubePlayingRef.current
+        ) {
+          playbackChangedByInteraction = interactingRef.current
+        }
+        lastYoutubePlayerStateRef.current = info.playerState
+        lastYoutubePlayingRef.current = nextPlaying
+      }
+      if (typeof info.currentTime === 'number') {
+        lastObservedYoutubePlaybackRef.current = {
+          observedAt: now,
+          playing: lastYoutubePlayingRef.current,
+          seconds: lastYoutubePlaybackSecondsRef.current,
+        }
       }
 
       const current = mediaRef.current
-      const nextMedia = {
+      const volumeMedia = {
         ...current,
-        muted: typeof info.muted === 'boolean' ? info.muted : current.muted,
+        muted:
+          interactingRef.current && typeof info.muted === 'boolean' ? info.muted : current.muted,
         userVolume:
-          typeof info.volume === 'number'
+          interactingRef.current && typeof info.volume === 'number'
             ? clampLandrushIslandTvVolume(info.volume / 100)
             : current.userVolume,
       }
-      if (areLandrushIslandTvMediaSettingsEqual(current, nextMedia)) return
+      const volumeOrMuteChanged = !areLandrushIslandTvVolumeSettingsEqual(current, volumeMedia)
+      const lastPublished = lastPublishedYoutubePlaybackRef.current
+      const expectedPublishedSeconds = lastPublished.playing
+        ? lastPublished.seconds + (now - lastPublished.playbackUpdatedAt) / 1000
+        : lastPublished.seconds
+      const correctionDue =
+        interactingRef.current &&
+        lastYoutubePlayingRef.current &&
+        now - lastPublished.playbackUpdatedAt >=
+          LANDRUSH_ISLAND_TV_PLAYBACK_CORRECTION_INTERVAL_MS &&
+        Math.abs(lastYoutubePlaybackSecondsRef.current - expectedPublishedSeconds) >= 0.75
+      const shouldPublishPlayback =
+        now >= suppressYoutubePlaybackPublishUntilRef.current &&
+        (playbackChangedByInteraction || correctionDue)
+      if (!volumeOrMuteChanged && !shouldPublishPlayback) return
+
+      const nextMedia = shouldPublishPlayback
+        ? {
+            ...volumeMedia,
+            playbackSeconds: lastYoutubePlaybackSecondsRef.current,
+            playbackUpdatedAt: now,
+            playing: lastYoutubePlayingRef.current,
+          }
+        : volumeMedia
       mediaRef.current = nextMedia
+      if (shouldPublishPlayback) {
+        lastPublishedYoutubePlaybackRef.current = {
+          playbackUpdatedAt: now,
+          playing: nextMedia.playing,
+          seconds: nextMedia.playbackSeconds,
+        }
+      }
       onMediaStateChange(nextMedia)
     }
 
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, [onMediaStateChange])
+
+  useEffect(() => {
+    if (embed?.kind !== 'youtube') return
+
+    const iframe = playerIframeRef.current
+    if (!iframe) return
+
+    const targetSeconds = resolveLandrushIslandTvEffectivePlaybackSeconds(media)
+    const currentSeconds = lastYoutubePlaybackSecondsRef.current
+    const shouldPlay = shouldLandrushIslandTvPlayLocally(
+      media,
+      spatialGainRef.current,
+      interactingRef.current,
+    )
+    suppressYoutubePlaybackPublishUntilRef.current =
+      Date.now() + LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS
+
+    if (
+      shouldPlay &&
+      Math.abs(targetSeconds - currentSeconds) >= LANDRUSH_ISLAND_TV_PLAYBACK_DRIFT_SEEK_SECONDS
+    ) {
+      sendLandrushIslandYoutubeSeek(iframe, targetSeconds)
+      lastYoutubePlaybackSecondsRef.current = targetSeconds
+    }
+    sendLandrushIslandYoutubePlayback(iframe, shouldPlay)
+    lastLocalYoutubePlayingRef.current = shouldPlay
+    if (!shouldPlay) sendLandrushIslandYoutubeVolume(iframe, 0, true)
+    lastYoutubePlayingRef.current = media.playing
+  }, [embed?.kind, media])
 
   useFrame(({ clock }) => {
     const screenMesh = screenMeshRef.current
@@ -539,23 +663,37 @@ function LandrushIslandTvScreen({
     }
 
     const raycaster = raycasterRef.current
+    if (
+      clock.elapsedTime - lastOcclusionCandidateRefreshAtRef.current >=
+      LANDRUSH_ISLAND_TV_OCCLUSION_CANDIDATE_REFRESH_SECONDS
+    ) {
+      occlusionCandidatesRef.current = collectLandrushIslandTvOcclusionCandidates(scene)
+      lastOcclusionCandidateRefreshAtRef.current = clock.elapsedTime
+    }
+
     const screenDistance = camera.position.distanceTo(tvWorldPositionRef.current)
-    const screenOcclusionHit = firstLandrushIslandTvOcclusionHit({
-      direction: occlusionDirectionRef.current
-        .copy(tvWorldPositionRef.current)
-        .sub(camera.position)
-        .normalize(),
-      distance: screenDistance,
-      ignoredRoots: [tvGroupRef.current, occlusionRootRef?.current ?? null],
-      raycaster,
-      scene,
-      source: camera.position,
-    })
-    const nextScreenOccluded =
-      screenOcclusionHit !== null && screenOcclusionHit.distance < screenDistance - 0.04
-    if (nextScreenOccluded !== screenOccludedRef.current) {
-      screenOccludedRef.current = nextScreenOccluded
-      setScreenOccluded(nextScreenOccluded)
+    if (
+      clock.elapsedTime - lastScreenOcclusionCheckAtRef.current >=
+      LANDRUSH_ISLAND_TV_SCREEN_OCCLUSION_INTERVAL_SECONDS
+    ) {
+      lastScreenOcclusionCheckAtRef.current = clock.elapsedTime
+      const screenOcclusionHit = firstLandrushIslandTvOcclusionHit({
+        candidates: occlusionCandidatesRef.current,
+        direction: occlusionDirectionRef.current
+          .copy(tvWorldPositionRef.current)
+          .sub(camera.position)
+          .normalize(),
+        distance: screenDistance,
+        ignoredRoots: [tvGroupRef.current, occlusionRootRef?.current ?? null],
+        raycaster,
+        source: camera.position,
+      })
+      const nextScreenOccluded =
+        screenOcclusionHit !== null && screenOcclusionHit.distance < screenDistance - 0.04
+      if (nextScreenOccluded !== screenOccludedRef.current) {
+        screenOccludedRef.current = nextScreenOccluded
+        setScreenOccluded(nextScreenOccluded)
+      }
     }
 
     raycaster.setFromCamera(centerScreenPoint, camera)
@@ -563,11 +701,11 @@ function LandrushIslandTvScreen({
     const hit = raycaster.intersectObject(interactionMesh, false)[0]
     const aimOcclusionHit = hit
       ? firstLandrushIslandTvOcclusionHit({
+          candidates: occlusionCandidatesRef.current,
           direction: raycaster.ray.direction,
           distance: hit.distance,
           ignoredRoots: [tvGroupRef.current, occlusionRootRef?.current ?? null],
           raycaster,
-          scene,
           source: raycaster.ray.origin,
         })
       : null
@@ -603,12 +741,30 @@ function LandrushIslandTvScreen({
           })
         : 0
     spatialGainRef.current = gain
-    const nextVolume = resolveLandrushIslandTvEffectiveVolume(
-      mediaRef.current,
-      gain,
-      interactingRef.current,
-    )
-    const nextMuted = mediaRef.current.muted || nextVolume <= 0
+    const shouldPlayLocally =
+      embed?.kind === 'youtube' &&
+      shouldLandrushIslandTvPlayLocally(mediaRef.current, gain, interactingRef.current)
+    if (embed?.kind === 'youtube' && shouldPlayLocally !== lastLocalYoutubePlayingRef.current) {
+      const iframe = playerIframeRef.current
+      lastLocalYoutubePlayingRef.current = shouldPlayLocally
+      suppressYoutubePlaybackPublishUntilRef.current =
+        Date.now() + LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS
+      if (shouldPlayLocally) {
+        const targetSeconds = resolveLandrushIslandTvEffectivePlaybackSeconds(mediaRef.current)
+        if (
+          Math.abs(targetSeconds - lastYoutubePlaybackSecondsRef.current) >=
+          LANDRUSH_ISLAND_TV_PLAYBACK_DRIFT_SEEK_SECONDS
+        ) {
+          sendLandrushIslandYoutubeSeek(iframe, targetSeconds)
+          lastYoutubePlaybackSecondsRef.current = targetSeconds
+        }
+      }
+      sendLandrushIslandYoutubePlayback(iframe, shouldPlayLocally)
+    }
+    const nextVolume = shouldPlayLocally
+      ? resolveLandrushIslandTvEffectiveVolume(mediaRef.current, gain, interactingRef.current)
+      : 0
+    const nextMuted = mediaRef.current.muted || !shouldPlayLocally || nextVolume <= 0
     const elapsedSinceVolumeSend = clock.elapsedTime - lastSentVolumeAtRef.current
     if (
       embed?.kind === 'youtube' &&
@@ -622,17 +778,16 @@ function LandrushIslandTvScreen({
       lastSentMutedRef.current = nextMuted
       sendLandrushIslandYoutubeVolume(playerIframeRef.current, nextVolume, nextMuted)
     }
-    if (embed) schedulePlayerLayerLayout()
+    if (embed) schedulePlayerHostSync()
   })
 
   useEffect(() => {
     if (embed?.kind !== 'youtube') return
-    const nextVolume = resolveLandrushIslandTvEffectiveVolume(
-      media,
-      spatialGainRef.current,
-      interacting,
-    )
-    const nextMuted = media.muted || nextVolume <= 0
+    const shouldPlay = shouldLandrushIslandTvPlayLocally(media, spatialGainRef.current, interacting)
+    const nextVolume = shouldPlay
+      ? resolveLandrushIslandTvEffectiveVolume(media, spatialGainRef.current, interacting)
+      : 0
+    const nextMuted = media.muted || !shouldPlay || nextVolume <= 0
     lastSentVolumeRef.current = nextVolume
     lastSentMutedRef.current = nextMuted
     sendLandrushIslandYoutubeVolume(playerIframeRef.current, nextVolume, nextMuted)
@@ -680,16 +835,10 @@ function LandrushIslandTvScreen({
           ref={interactionMeshRef}
           renderOrder={12}
           userData={{ pascalExcludeFromToolConeTarget: true }}
+          visible={false}
         >
           <boxGeometry args={interactionBounds.size} />
-          <meshBasicMaterial
-            color="#a855f7"
-            depthWrite={false}
-            opacity={0.55}
-            side={DoubleSide}
-            transparent
-            wireframe
-          />
+          <meshBasicMaterial side={DoubleSide} />
         </mesh>
       ) : null}
       <mesh
@@ -739,13 +888,16 @@ function LandrushIslandTvScreen({
 
   return (
     <>
-      <SpatialVoiceRangeRing
-        color="#38bdf8"
-        groundY={rangeGroundY}
-        motionRef={tvRingMotionRef}
-        radiusMeters={LANDRUSH_ISLAND_TV_SOUND_MAX_DISTANCE}
-        visible={Boolean(embed)}
-      />
+      {createPortal(
+        <SpatialVoiceRangeRing
+          color="#38bdf8"
+          groundY={rangeGroundY}
+          motionRef={tvRingMotionRef}
+          radiusMeters={LANDRUSH_ISLAND_TV_SOUND_MAX_DISTANCE}
+          visible={rangeVisible && Boolean(embed)}
+        />,
+        scene,
+      )}
       {screen}
       {interacting ? (
         <LandrushIslandTvInteractionPanel
@@ -781,8 +933,10 @@ function LandrushIslandPlacedTvScreen({
   const [localMedia, setLocalMedia] = useState<LandrushIslandTvMediaSettings>(
     LANDRUSH_ISLAND_TV_DEFAULT_MEDIA,
   )
+  const [itemVisible, setItemVisible] = useState(false)
   const itemWorldGroupRef = useRef<Group | null>(null)
   const itemSceneObjectRef = useRef<Object3D | null>(null)
+  const itemVisibleRef = useRef(false)
   const parcelId = resolveLandrushIslandTvParcelId(item)
   const media = useMemo(
     () => (mediaState ? mediaSettingsFromTvState(mediaState) : localMedia),
@@ -818,6 +972,10 @@ function LandrushIslandPlacedTvScreen({
     if (!target) {
       itemSceneObjectRef.current = null
       group.visible = false
+      if (itemVisibleRef.current) {
+        itemVisibleRef.current = false
+        setItemVisible(false)
+      }
       return
     }
 
@@ -825,7 +983,12 @@ function LandrushIslandPlacedTvScreen({
     target.updateWorldMatrix(true, false)
     group.matrix.copy(target.matrixWorld)
     group.matrixWorldNeedsUpdate = true
-    group.visible = isLandrushIslandTvObjectVisibleInHierarchy(target)
+    const nextVisible = isLandrushIslandTvObjectVisibleInHierarchy(target)
+    group.visible = nextVisible
+    if (nextVisible !== itemVisibleRef.current) {
+      itemVisibleRef.current = nextVisible
+      setItemVisible(nextVisible)
+    }
   })
 
   return (
@@ -839,6 +1002,7 @@ function LandrushIslandPlacedTvScreen({
         occlusionRootRef={itemSceneObjectRef}
         onMediaStateChange={handleMediaStateChange}
         position={item.asset.offset}
+        rangeVisible={itemVisible}
         rotation={item.asset.rotation}
         scale={assetScale}
         screenPosition={screenPosition}
@@ -945,18 +1109,18 @@ function isLandrushIslandTvObjectVisibleInHierarchy(object: Object3D) {
 }
 
 function firstLandrushIslandTvOcclusionHit({
+  candidates,
   direction,
   distance,
   ignoredRoots,
   raycaster,
-  scene,
   source,
 }: {
+  candidates: Object3D[]
   direction: Vector3
   distance: number
   ignoredRoots: readonly (Object3D | null)[]
   raycaster: Raycaster
-  scene: Object3D
   source: Vector3
 }) {
   if (!Number.isFinite(distance) || distance <= 0) return null
@@ -966,11 +1130,39 @@ function firstLandrushIslandTvOcclusionHit({
   raycaster.set(source, direction)
   const hit =
     raycaster
-      .intersectObjects(scene.children, true)
+      .intersectObjects(candidates, false)
       .find((candidate) => isLandrushIslandTvOcclusionObject(candidate.object, ignoredRoots)) ??
     null
   raycaster.far = previousFar
   return hit
+}
+
+function collectLandrushIslandTvOcclusionCandidates(scene: Object3D) {
+  const candidates: Object3D[] = []
+  scene.traverse((object) => {
+    if (isLandrushIslandTvPotentialOcclusionCandidate(object)) candidates.push(object)
+  })
+  return candidates
+}
+
+function isLandrushIslandTvPotentialOcclusionCandidate(object: Object3D) {
+  const candidate = object as Object3D & {
+    isInstancedMesh?: boolean
+    isMesh?: boolean
+  }
+  if (candidate.isMesh !== true && candidate.isInstancedMesh !== true) return false
+  if (!object.visible) return false
+
+  let hasSceneNodeIdentity = false
+  let current: Object3D | null = object
+  while (current) {
+    if (current.userData?.pascalExcludeFromToolConeTarget) return false
+    if (current.userData?.landrushRobotOccluder === true) return false
+    if (typeof current.userData?.nodeId === 'string') hasSceneNodeIdentity = true
+    current = current.parent
+  }
+  if (!hasSceneNodeIdentity && isLandrushIslandTvTransparentVisualObject(object)) return false
+  return true
 }
 
 function isLandrushIslandTvOcclusionObject(
@@ -1018,6 +1210,9 @@ function mediaSettingsFromTvState(
 ): LandrushIslandTvMediaSettings {
   return {
     muted: state.muted,
+    playbackSeconds: Math.max(0, finiteLandrushIslandTvNumber(state.playbackSeconds, 0)),
+    playbackUpdatedAt: Math.max(0, finiteLandrushIslandTvNumber(state.playbackUpdatedAt, 0)),
+    playing: state.playing,
     url: state.url,
     userVolume: clampLandrushIslandTvVolume(state.userVolume),
   }
@@ -1174,7 +1369,7 @@ function resolveLandrushIslandTvEmbed(value: string): LandrushIslandTvEmbed | nu
   if (videoId) {
     return {
       kind: 'youtube',
-      screenSrc: createLandrushIslandYoutubeEmbedSrc(videoId, { autoplay: true, muted: false }),
+      screenSrc: createLandrushIslandYoutubeEmbedSrc(videoId, { autoplay: false, muted: true }),
       title: `YouTube ${videoId}`,
     }
   }
@@ -1291,19 +1486,40 @@ function resolveLandrushIslandTvEffectiveVolume(
   return clampLandrushIslandTvVolume(media.userVolume * (interacting ? 1 : spatialGain))
 }
 
+function shouldLandrushIslandTvPlayLocally(
+  media: LandrushIslandTvMediaSettings,
+  spatialGain: number,
+  interacting: boolean,
+) {
+  return media.playing && (interacting || spatialGain > LANDRUSH_ISLAND_TV_LOCAL_PLAY_GAIN_EPSILON)
+}
+
 function clampLandrushIslandTvVolume(value: number) {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0
 }
 
-function areLandrushIslandTvMediaSettingsEqual(
+function resolveLandrushIslandTvEffectivePlaybackSeconds(
+  media: LandrushIslandTvMediaSettings,
+  at = Date.now(),
+) {
+  const base = Math.max(0, finiteLandrushIslandTvNumber(media.playbackSeconds, 0))
+  if (!media.playing || media.playbackUpdatedAt <= 0) return base
+  return Math.max(0, base + Math.max(0, at - media.playbackUpdatedAt) / 1000)
+}
+
+function isLandrushIslandYoutubePlayerStatePlaying(playerState: number) {
+  return playerState === 1 || playerState === 3
+}
+
+function finiteLandrushIslandTvNumber(value: number | undefined, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function areLandrushIslandTvVolumeSettingsEqual(
   first: LandrushIslandTvMediaSettings,
   second: LandrushIslandTvMediaSettings,
 ) {
-  return (
-    first.url === second.url &&
-    first.muted === second.muted &&
-    Math.abs(first.userVolume - second.userVolume) < 0.005
-  )
+  return first.muted === second.muted && Math.abs(first.userVolume - second.userVolume) < 0.005
 }
 
 function parseLandrushIslandYoutubeInfoDelivery(

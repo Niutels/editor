@@ -9,6 +9,7 @@ import type {
 } from 'three/webgpu'
 import * as THREE from 'three/webgpu'
 import { getSceneTheme } from '../../lib/scene-themes'
+import { renderScheduler } from '../../runtime/render-scheduler'
 import useViewer from '../../store/use-viewer'
 
 // Diagnostic toggle: `?disable=shadows` skips the shadow-map render pass
@@ -38,10 +39,6 @@ const MAX_SHADOW_INTENSITY = 0.55
 // `site` nodes (the ground/site plane, which can be arbitrarily large) are
 // excluded so they don't blow the frustum up to cover the whole lot.
 const SHADOW_EXCLUDED_TYPES = ['site'] as const
-// How often (seconds) to recompute building bounds. Bounds only change while
-// editing, so we throttle the (subtree-walking) union instead of doing it every
-// frame.
-const BOUNDS_REFRESH_INTERVAL = 0.4
 // Extra coverage around the building bounds — the "and a bit nearby" margin so
 // shadows don't get clipped right at the walls. Scales with building size.
 const SHADOW_MARGIN_SCALE = 1.15
@@ -61,13 +58,14 @@ export function Lights() {
   // Initial ortho half-size; overridden each refresh to fit the building.
   const shadowCameraSize = 50
 
-  // Building bounds the shadow frustum is fit to, recomputed on an interval.
+  // Building bounds the shadow frustum is fit to when scene geometry changes.
   const shadowFocus = useRef(new THREE.Vector3()) // sphere centre
   const shadowRadius = useRef(SHADOW_FALLBACK_RADIUS) // sphere radius
   const shadowDir = useRef(new THREE.Vector3()) // scratch: per-light direction
   const boundsBox = useRef(new THREE.Box3()) // scratch: union AABB
   const boundsSphere = useRef(new THREE.Sphere()) // scratch: fitted sphere
-  const lastBoundsTime = useRef(-1) // last refresh timestamp (-1 = never)
+  const shadowBoundsInitialized = useRef(false)
+  const lastShadowBoundsReasons = useRef(renderScheduler.getSnapshot().reasonsThisFrame)
 
   const hemiRef = useRef<HemisphereLight>(null)
   const ambientRef = useRef<AmbientLight>(null)
@@ -84,20 +82,29 @@ export function Lights() {
     [],
   )
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     // clamp delta to avoid huge jumps on tab switch
     const dt = Math.min(delta, 0.1) * 4
 
     // Fit each shadow-casting light's frustum to the BUILDING geometry rather
-    // than the camera. We refresh the union bounds on an interval (cheap enough,
-    // and bounds only change while editing), fit a sphere, and size + place the
-    // ortho shadow camera so the building (plus a margin) is fully covered from
-    // the light's direction. The light DIRECTION stays exactly as the theme
-    // specifies; only its position/distance and the frustum extents change.
-    if (shadows) {
-      const now = state.clock.elapsedTime
-      if (now - lastBoundsTime.current >= BOUNDS_REFRESH_INTERVAL) {
-        lastBoundsTime.current = now
+    // than the camera. The union bounds refresh on initial mount and when the
+    // render scheduler drains geometry/theme changes; the light DIRECTION stays
+    // exactly as the theme specifies.
+    const shadowsActive = shadows && !SHADOWS_DISABLED
+    if (shadowsActive) {
+      const schedulerSnapshot = renderScheduler.getSnapshot()
+      const shadowBoundsReasons = schedulerSnapshot.reasonsThisFrame
+      const shadowBoundsReasonsChanged = shadowBoundsReasons !== lastShadowBoundsReasons.current
+      const shadowBoundsDirty =
+        !shadowBoundsInitialized.current ||
+        (shadowBoundsReasonsChanged &&
+          shadowBoundsReasons.some(
+            (reason) => reason === 'geometry:changed' || reason === 'theme:changed',
+          ))
+      lastShadowBoundsReasons.current = shadowBoundsReasons
+
+      if (shadowBoundsDirty) {
+        shadowBoundsInitialized.current = true
         const box = boundsBox.current.makeEmpty()
         for (const [id, obj] of sceneRegistry.nodes) {
           if (SHADOW_EXCLUDED_TYPES.some((t) => sceneRegistry.byType[t]!.has(id))) continue

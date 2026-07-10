@@ -3,7 +3,11 @@
 import { Mic, MicOff } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Vector3 } from 'three'
-import type { LocalPlayerProfile, MultiplayerPlayerSnapshot } from './world-multiplayer-lab-client'
+import type {
+  LocalPlayerProfile,
+  MultiplayerPlayerSnapshot,
+  MultiplayerRemotePlayerStore,
+} from './world-multiplayer-lab-client'
 
 declare global {
   interface Window {
@@ -64,6 +68,7 @@ type UseLandrushSpatialVoiceOptions = {
   incomingSignals: readonly SpatialVoiceSignalMessage[]
   localMotionRef: { readonly current: SpatialAudioMotion | null }
   localProfile: LocalPlayerProfile
+  remotePlayerStore?: MultiplayerRemotePlayerStore
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   roomId: string
   sendSignal: (to: string, signal: SpatialVoiceSignalPayload) => boolean
@@ -146,6 +151,7 @@ export function useLandrushSpatialVoice({
   incomingSignals,
   localMotionRef,
   localProfile,
+  remotePlayerStore,
   remotePlayers,
   roomId,
   sendSignal,
@@ -161,10 +167,12 @@ export function useLandrushSpatialVoice({
   const pendingSignalsRef = useRef<SpatialVoiceSignalMessage[]>([])
   const peersRef = useRef(new Map<string, VoicePeer>())
   const processedSignalKeysRef = useRef(new Set<string>())
+  const remotePlayerStoreRef = useRef(remotePlayerStore)
   const remotePlayersRef = useRef(remotePlayers)
   const sendSignalRef = useRef(sendSignal)
   const remotePlayerKey = remotePlayers.map((player) => player.id).join('|')
 
+  remotePlayerStoreRef.current = remotePlayerStore
   remotePlayersRef.current = remotePlayers
   sendSignalRef.current = sendSignal
 
@@ -313,7 +321,11 @@ export function useLandrushSpatialVoice({
   const syncPeers = useCallback(() => {
     if (!localStreamRef.current) return
 
-    const remoteIds = new Set(remotePlayersRef.current.map((player) => player.id))
+    const remoteIds = new Set(
+      readSpatialVoiceRemotePlayers(remotePlayerStoreRef, remotePlayersRef).map(
+        (player) => player.id,
+      ),
+    )
     for (const peerId of remoteIds) {
       const peer = createPeer(peerId)
       if (!voicePeerIsComplete(peer)) {
@@ -555,7 +567,11 @@ export function useLandrushSpatialVoice({
 
     const updateTimer = window.setInterval(() => {
       updateListener(audioContextRef.current, localMotionRef.current)
-      updatePeerPositions(peersRef.current, remotePlayersRef.current, localMotionRef.current)
+      updatePeerPositions(
+        peersRef.current,
+        readSpatialVoiceRemotePlayers(remotePlayerStoreRef, remotePlayersRef),
+        localMotionRef.current,
+      )
     }, SPATIAL_VOICE_UPDATE_INTERVAL_MS)
     const statsTimer = window.setInterval(publishStats, SPATIAL_VOICE_STATS_INTERVAL_MS)
     const reconcileTimer = window.setInterval(reconcilePeers, SPATIAL_VOICE_RECONCILE_INTERVAL_MS)
@@ -583,7 +599,11 @@ export function useLandrushSpatialVoice({
         desired,
         error,
         peers: [...peersRef.current.values()].map((peer) => {
-          const remotePlayer = remotePlayersRef.current.find((player) => player.id === peer.id)
+          const currentRemotePlayers = readSpatialVoiceRemotePlayers(
+            remotePlayerStoreRef,
+            remotePlayersRef,
+          )
+          const remotePlayer = currentRemotePlayers.find((player) => player.id === peer.id)
           const localPosition = getLocalDebugPosition()
           const distanceMeters =
             remotePlayer && localPosition
@@ -633,7 +653,9 @@ export function useLandrushSpatialVoice({
               peer.unhealthySince === null ? null : Math.max(0, Date.now() - peer.unhealthySince),
           }
         }),
-        remotePlayerIds: remotePlayersRef.current.map((player) => player.id),
+        remotePlayerIds: readSpatialVoiceRemotePlayers(remotePlayerStoreRef, remotePlayersRef).map(
+          (player) => player.id,
+        ),
         remoteVoicePeerIds,
         roomId,
         stats,
@@ -681,6 +703,13 @@ export function useLandrushSpatialVoice({
     status,
     toggle,
   }
+}
+
+function readSpatialVoiceRemotePlayers(
+  storeRef: { current: MultiplayerRemotePlayerStore | undefined },
+  fallbackRef: { current: readonly MultiplayerPlayerSnapshot[] },
+) {
+  return storeRef.current?.getSnapshots() ?? fallbackRef.current
 }
 
 export function SpatialVoiceControl({ voice }: { voice: SpatialVoiceController }) {

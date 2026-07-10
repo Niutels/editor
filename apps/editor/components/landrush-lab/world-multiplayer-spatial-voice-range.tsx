@@ -27,6 +27,7 @@ export function SpatialVoiceRangeRing({
   groundY,
   motionRef,
   position,
+  positionRef,
   radiusMeters = SPATIAL_VOICE_RANGE_VISUAL_RADIUS,
   visible,
 }: {
@@ -34,6 +35,7 @@ export function SpatialVoiceRangeRing({
   groundY: number
   motionRef?: { current: SpatialVoiceRangeMotion | null }
   position?: readonly [number, number, number] | null
+  positionRef?: { current: readonly [number, number, number] | null }
   radiusMeters?: number
   visible: boolean
 }) {
@@ -50,8 +52,9 @@ export function SpatialVoiceRangeRing({
     const motion = motionRef?.current
     if (!line || !material) return
 
-    const positionX = motion?.position.x ?? position?.[0]
-    const positionZ = motion?.position.z ?? position?.[2]
+    const livePosition = positionRef?.current ?? position
+    const positionX = motion?.position.x ?? livePosition?.[0]
+    const positionZ = motion?.position.z ?? livePosition?.[2]
     const hasPosition = typeof positionX === 'number' && typeof positionZ === 'number'
     const targetOpacity = visible && hasPosition ? 0.72 : 0
     const alpha = 1 - Math.exp(-SPATIAL_VOICE_RANGE_RESPONSE * delta)

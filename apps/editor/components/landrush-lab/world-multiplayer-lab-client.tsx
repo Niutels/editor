@@ -94,6 +94,11 @@ export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
   updatedAt: number
 }
 
+export type MultiplayerRemotePlayerStore = {
+  getSnapshot: (id: string) => MultiplayerPlayerSnapshot | null
+  getSnapshots: () => MultiplayerPlayerSnapshot[]
+}
+
 export type ParcelOwnership = {
   claimedAt: number
   owner: LocalPlayerProfile
@@ -119,6 +124,9 @@ export type ParcelBuildNodesSnapshot = {
 export type TvMediaStateSnapshot = {
   muted: boolean
   parcelId: string
+  playbackSeconds: number
+  playbackUpdatedAt: number
+  playing: boolean
   tvId: string
   updatedAt: number
   updatedBy: string
@@ -2371,6 +2379,8 @@ export function MultiplayerStatusPanel({
     connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
   const statusLabel = compactStatusLabel(status)
   const latencyLabel = connection.latencyMs === null ? '--ms' : `${connection.latencyMs}ms`
+  const browserFps = useBrowserRafFps()
+  const fpsLabel = browserFps === null ? '--fps' : `${browserFps}fps`
 
   return (
     <section className="pointer-events-auto absolute top-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur">
@@ -2383,6 +2393,8 @@ export function MultiplayerStatusPanel({
       <span>{displayedPlayerCount}p</span>
       <span className="text-white/35">/</span>
       <span>{latencyLabel}</span>
+      <span className="text-white/35">/</span>
+      <span>{fpsLabel}</span>
       {voice ? (
         <>
           <span className="text-white/35">/</span>
@@ -2391,6 +2403,42 @@ export function MultiplayerStatusPanel({
       ) : null}
     </section>
   )
+}
+
+function useBrowserRafFps() {
+  const [fps, setFps] = useState<number | null>(null)
+
+  useEffect(() => {
+    let animationFrame = 0
+    let frameCount = 0
+    let windowStartedAt = performance.now()
+
+    const tick = (now: number) => {
+      frameCount += 1
+      const elapsedMs = now - windowStartedAt
+      if (elapsedMs >= 1000) {
+        setFps(Math.round((frameCount * 1000) / elapsedMs))
+        frameCount = 0
+        windowStartedAt = now
+      }
+      animationFrame = window.requestAnimationFrame(tick)
+    }
+
+    const handleVisibilityChange = () => {
+      frameCount = 0
+      windowStartedAt = performance.now()
+      if (document.visibilityState !== 'visible') setFps(null)
+    }
+
+    animationFrame = window.requestAnimationFrame(tick)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
+  return fps
 }
 
 function compactStatusLabel(status: ConnectionStatus) {
@@ -2597,6 +2645,17 @@ function isMobileCameraOrbitTarget(target: EventTarget | null) {
   )
 }
 
+function sortedRemotePlayerSnapshots(map: ReadonlyMap<string, MultiplayerPlayerSnapshot>) {
+  return [...map.values()].sort((first, second) => first.name.localeCompare(second.name))
+}
+
+function remotePlayerRosterChanged(
+  previous: MultiplayerPlayerSnapshot,
+  next: MultiplayerPlayerSnapshot,
+) {
+  return previous.name !== next.name || previous.color !== next.color || previous.pose !== next.pose
+}
+
 export function useLandrushWorldMultiplayer({
   enabled,
   localProfile,
@@ -2622,12 +2681,13 @@ export function useLandrushWorldMultiplayer({
   const onVoiceSignalRef = useRef(onVoiceSignal)
   const voiceSignalSequenceRef = useRef(0)
   const watchedParcelWorldIdRef = useRef<string | null>(null)
+  const remotePlayerMapRef = useRef<Map<string, MultiplayerPlayerSnapshot>>(new Map())
   const [connection, setConnection] =
     useState<MultiplayerConnectionDetails>(createConnectionDetails)
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? 'connecting' : 'offline')
-  const [remotePlayerMap, setRemotePlayerMap] = useState<Map<string, MultiplayerPlayerSnapshot>>(
-    () => new Map(),
-  )
+  const [remotePlayerRosterMap, setRemotePlayerRosterMap] = useState<
+    Map<string, MultiplayerPlayerSnapshot>
+  >(() => new Map())
   const [parcelClaimError, setParcelClaimError] = useState<ParcelClaimError | null>(null)
   const [parcelOwnershipMap, setParcelOwnershipMap] = useState<Map<string, ParcelOwnership>>(
     () => new Map(),
@@ -2642,9 +2702,15 @@ export function useLandrushWorldMultiplayer({
   const parcelBuildNodeMapRef = useRef(parcelBuildNodeMap)
   const tvMediaStateMapRef = useRef(tvMediaStateMap)
   const remotePlayers = useMemo(
-    () =>
-      [...remotePlayerMap.values()].sort((first, second) => first.name.localeCompare(second.name)),
-    [remotePlayerMap],
+    () => sortedRemotePlayerSnapshots(remotePlayerRosterMap),
+    [remotePlayerRosterMap],
+  )
+  const remotePlayerStore = useMemo<MultiplayerRemotePlayerStore>(
+    () => ({
+      getSnapshot: (id) => remotePlayerMapRef.current.get(id) ?? null,
+      getSnapshots: () => sortedRemotePlayerSnapshots(remotePlayerMapRef.current),
+    }),
+    [],
   )
   const parcelOwnerships = useMemo(
     () =>
@@ -2805,14 +2871,25 @@ export function useLandrushWorldMultiplayer({
       worldId: string,
       parcelId: string,
       tvId: string,
-      media: { muted: boolean; url: string; userVolume: number },
+      media: {
+        muted: boolean
+        playbackSeconds: number
+        playbackUpdatedAt: number
+        playing: boolean
+        url: string
+        userVolume: number
+      },
     ) => {
       watchedParcelWorldIdRef.current = worldId
+      const now = Date.now()
       const tv = {
         muted: Boolean(media.muted),
         parcelId,
+        playbackSeconds: Math.max(0, finiteNumber(media.playbackSeconds, 0)),
+        playbackUpdatedAt: now,
+        playing: Boolean(media.playing),
         tvId,
-        updatedAt: Date.now(),
+        updatedAt: now,
         updatedBy: localProfile.id,
         url: media.url,
         userVolume: Math.max(0, Math.min(1, media.userVolume)),
@@ -2838,6 +2915,8 @@ export function useLandrushWorldMultiplayer({
       const sent = sendMessage({
         muted: tv.muted,
         parcelId,
+        playbackSeconds: tv.playbackSeconds,
+        playing: tv.playing,
         tvId,
         type: 'sync-tv-media-state',
         url: tv.url,
@@ -2925,7 +3004,8 @@ export function useLandrushWorldMultiplayer({
   useEffect(() => {
     if (!enabled || (!spectator && localProfile.id === FALLBACK_LOCAL_PROFILE.id)) {
       setStatus(enabled ? 'connecting' : 'offline')
-      setRemotePlayerMap(new Map())
+      remotePlayerMapRef.current = new Map()
+      setRemotePlayerRosterMap(new Map())
       setParcelClaimError(null)
       const offlineState =
         !enabled && persistOfflineState
@@ -3084,7 +3164,15 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'tv-media-state-snapshot') {
           if (message.worldId !== watchedParcelWorldIdRef.current) return
-          setTvMediaStateMap(new Map(message.tvs.map((tv) => [tv.tvId, tv])))
+          const receivedAt = Date.now()
+          setTvMediaStateMap(
+            new Map(
+              message.tvs.map((tv) => {
+                const normalized = normalizeTvMediaStateSnapshot(tv, message.serverTime, receivedAt)
+                return [normalized.tvId, normalized]
+              }),
+            ),
+          )
           return
         }
 
@@ -3103,9 +3191,10 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'tv-media-state-synced' || message.type === 'tv-media-state-updated') {
           if (message.tv.worldId !== watchedParcelWorldIdRef.current) return
+          const normalized = normalizeTvMediaStateSnapshot(message.tv, message.serverTime)
           setTvMediaStateMap((current) => {
             const next = new Map(current)
-            next.set(message.tv.tvId, message.tv)
+            next.set(normalized.tvId, normalized)
             return next
           })
           return
@@ -3121,13 +3210,13 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'snapshot') {
           setStatus('connected')
-          setRemotePlayerMap(
-            new Map(
-              message.players
-                .filter((player) => player.id !== localProfile.id)
-                .map((player) => [player.id, player]),
-            ),
+          const nextRemotePlayerMap = new Map(
+            message.players
+              .filter((player) => player.id !== localProfile.id)
+              .map((player) => [player.id, player]),
           )
+          remotePlayerMapRef.current = nextRemotePlayerMap
+          setRemotePlayerRosterMap(new Map(nextRemotePlayerMap))
           setConnection((current) => ({
             ...current,
             serverPlayerCount: message.players.length + (spectator ? 0 : 1),
@@ -3137,20 +3226,17 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'player-joined' || message.type === 'player-state') {
           if (message.player.id === localProfile.id) return
-          setRemotePlayerMap((current) => {
-            const next = new Map(current)
-            next.set(message.player.id, message.player)
-            return next
-          })
+          const previous = remotePlayerMapRef.current.get(message.player.id)
+          remotePlayerMapRef.current.set(message.player.id, message.player)
+          if (!previous || remotePlayerRosterChanged(previous, message.player)) {
+            setRemotePlayerRosterMap(new Map(remotePlayerMapRef.current))
+          }
           return
         }
 
         if (message.type === 'player-left') {
-          setRemotePlayerMap((current) => {
-            const next = new Map(current)
-            next.delete(message.id)
-            return next
-          })
+          remotePlayerMapRef.current.delete(message.id)
+          setRemotePlayerRosterMap(new Map(remotePlayerMapRef.current))
         }
       })
 
@@ -3200,12 +3286,14 @@ export function useLandrushWorldMultiplayer({
     const interval = window.setInterval(() => {
       if (status === 'connected') return
       const cutoff = Date.now() - REMOTE_PLAYER_STALE_MS
-      setRemotePlayerMap((current) => {
-        const next = new Map(
-          [...current.entries()].filter(([, player]) => player.updatedAt >= cutoff),
-        )
-        return next.size === current.size ? current : next
-      })
+      const next = new Map(
+        [...remotePlayerMapRef.current.entries()].filter(
+          ([, player]) => player.updatedAt >= cutoff,
+        ),
+      )
+      if (next.size === remotePlayerMapRef.current.size) return
+      remotePlayerMapRef.current = next
+      setRemotePlayerRosterMap(new Map(next))
     }, 3000)
     return () => window.clearInterval(interval)
   }, [status])
@@ -3217,6 +3305,7 @@ export function useLandrushWorldMultiplayer({
     parcelClaimError,
     parcelOwnerships,
     publishLocalPlayer,
+    remotePlayerStore,
     remotePlayers,
     sendVoiceSignal,
     syncParcelBuildNodes,
@@ -3607,6 +3696,10 @@ function clamp01(value: number) {
   return Math.min(1, Math.max(0, value))
 }
 
+function finiteNumber(value: number | undefined, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
@@ -3692,7 +3785,9 @@ function readOfflineParcelWorldState(worldId: string | null) {
         )
       : [],
     tvMediaStates: Array.isArray(state.tvMediaStates)
-      ? state.tvMediaStates.filter((tv) => tv?.worldId === worldId && typeof tv.tvId === 'string')
+      ? state.tvMediaStates
+          .filter((tv) => tv?.worldId === worldId && typeof tv.tvId === 'string')
+          .map((tv) => normalizeTvMediaStateSnapshot(tv, Date.now()))
       : [],
   }
 }
@@ -3833,6 +3928,7 @@ function parseServerMessage(data: unknown): ServerMessage | null {
     if (
       message?.type === 'tv-media-state-snapshot' &&
       typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
       typeof message.worldId === 'string' &&
       Array.isArray(message.tvs) &&
       message.tvs.every(isTvMediaStateSnapshot)
@@ -3850,6 +3946,7 @@ function parseServerMessage(data: unknown): ServerMessage | null {
     if (
       (message?.type === 'tv-media-state-synced' || message?.type === 'tv-media-state-updated') &&
       typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
       isTvMediaStateSnapshot(message.tv)
     ) {
       return message
@@ -3913,11 +4010,37 @@ function isParcelBuildNodesSnapshot(value: unknown): value is ParcelBuildNodesSn
   )
 }
 
+function normalizeTvMediaStateSnapshot(
+  value: TvMediaStateSnapshot,
+  serverTime: number,
+  receivedAt = Date.now(),
+): TvMediaStateSnapshot {
+  const tv = value as TvMediaStateSnapshot & Partial<TvMediaStateSnapshot>
+  const playbackUpdatedAt = finiteNumber(tv.playbackUpdatedAt, serverTime)
+  const playbackSeconds = Math.max(0, finiteNumber(tv.playbackSeconds, 0))
+  const playing = typeof tv.playing === 'boolean' ? tv.playing : Boolean(tv.url)
+  const elapsedSeconds =
+    playing && playbackUpdatedAt > 0 ? Math.max(0, serverTime - playbackUpdatedAt) / 1000 : 0
+
+  return {
+    ...value,
+    playbackSeconds: playbackSeconds + elapsedSeconds,
+    playbackUpdatedAt: receivedAt,
+    playing,
+  }
+}
+
 function isTvMediaStateSnapshot(value: unknown): value is TvMediaStateSnapshot {
   const tv = value as TvMediaStateSnapshot
+  const playbackSeconds = (tv as Partial<TvMediaStateSnapshot>).playbackSeconds
+  const playbackUpdatedAt = (tv as Partial<TvMediaStateSnapshot>).playbackUpdatedAt
+  const playing = (tv as Partial<TvMediaStateSnapshot>).playing
   return (
     typeof tv?.muted === 'boolean' &&
     typeof tv.parcelId === 'string' &&
+    (playbackSeconds === undefined || typeof playbackSeconds === 'number') &&
+    (playbackUpdatedAt === undefined || typeof playbackUpdatedAt === 'number') &&
+    (playing === undefined || typeof playing === 'boolean') &&
     typeof tv.tvId === 'string' &&
     typeof tv.updatedAt === 'number' &&
     typeof tv.updatedBy === 'string' &&

@@ -11,7 +11,11 @@ import {
   snapPointToGrid,
   useScene,
 } from '@pascal-app/core'
-import { triggerSFX } from '@pascal-app/editor'
+import {
+  shouldAutoSelectPlacedNode,
+  suppressMobilePlacedNodeSelection,
+  triggerSFX,
+} from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef } from 'react'
 import { type Group, Vector3 } from 'three'
@@ -132,7 +136,10 @@ const ShelfTool = () => {
         rotation: [0, 0, 0],
       })
       useScene.getState().createNode(shelf, activeLevelId)
-      useViewer.getState().setSelection({ selectedIds: [shelf.id] })
+      suppressMobilePlacedNodeSelection()
+      if (shouldAutoSelectPlacedNode()) {
+        useViewer.getState().setSelection({ selectedIds: [shelf.id] })
+      }
       triggerSFX('sfx:structure-build')
 
       const native = (event as { nativeEvent?: unknown }).nativeEvent

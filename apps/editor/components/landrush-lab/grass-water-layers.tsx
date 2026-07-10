@@ -1,6 +1,5 @@
 'use client'
 
-import { useTexture } from '@react-three/drei'
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import {
   CanvasTexture,
@@ -21,6 +20,22 @@ import {
   type GrassFieldBlocker,
 } from './grass-field-texture'
 import type { GrassBladeTuning } from './grass-material'
+import {
+  type GrassPattern,
+  getOrganicGrassPattern,
+  sampleOrganicGrassPattern,
+} from './organic-grass-pattern'
+import {
+  canUseProceduralStylizedGrassGround,
+  ProceduralStylizedGrassGround,
+  type StylizedGrassGroundDebugMode,
+} from './stylized-grass-ground-material'
+import {
+  STYLIZED_PATH_SIDEWALK_SEAM_METERS,
+  STYLIZED_PATH_SIDEWALK_WIDTH_METERS,
+  STYLIZED_PATH_WIDTH_SCALE,
+  StylizedPathNetworkLayer,
+} from './stylized-path-network-layer'
 import {
   type StylizedGrassInteractionRef,
   StylizedSceneLandLayer,
@@ -47,6 +62,7 @@ type GrassWaterLandLayersProps = {
   showTrees?: boolean
   spawnResolution?: number
   stylizedGroundTexture?: boolean
+  stylizedGroundDebugMode?: StylizedGrassGroundDebugMode
   stylizedSceneLayout?: boolean
   stylizedGroundTextureWorldSizeMeters?: number
   surface: WaterLandSurface
@@ -61,6 +77,7 @@ type GrassGroundLayerProps = {
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
   stylizedTexture: boolean
+  stylizedTextureDebugMode: StylizedGrassGroundDebugMode
   stylizedTextureWorldSizeMeters: number
   texture: Texture
 }
@@ -92,6 +109,8 @@ type DisposableGpuResource = {
   dispose: () => void
 }
 
+type RgbByte = readonly [number, number, number]
+
 function disposeGrassWaterGpuResourceLater(resource: DisposableGpuResource | null | undefined) {
   if (!resource) return
   if (typeof requestAnimationFrame !== 'function') {
@@ -103,35 +122,26 @@ function disposeGrassWaterGpuResourceLater(resource: DisposableGpuResource | nul
   })
 }
 const EMPTY_GRASS_ROADS: readonly LandrushRoadSegment[] = []
-const STYLIZED_GRASS_TEXTURE_PATH =
-  '/landrush-lab/stylized-scene/grass_texture/grass_05_basecolor_1k.webp'
-const STYLIZED_DIRT_TEXTURE_PATH =
-  '/landrush-lab/stylized-scene/ground_texture/ground_07_4k/ground_07__basecolor_1k.webp'
-const STYLIZED_DIRT_AO_TEXTURE_PATH =
-  '/landrush-lab/stylized-scene/ground_texture/ground_07_4k/ground_07__ambientocclusion_1k.webp'
-const STYLIZED_DIRT_HEIGHT_TEXTURE_PATH =
-  '/landrush-lab/stylized-scene/ground_texture/ground_07_4k/ground_07__height_1k.webp'
+const EMPTY_GRASS_BLOCKERS: readonly GrassFieldBlocker[] = []
 const DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 5
 const MIN_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 0.001
 const STYLIZED_GROUND_PREVIEW_TEXTURE_RESOLUTION = 512
 const STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION = 2048
-const STYLIZED_DIRT_TEXTURE_DETAIL_SCALE = 1.85
-const STYLIZED_PATH_EDGE_FEATHER_METERS = 0.48
-const STYLIZED_PATH_EDGE_NOISE_METERS = 0.18
-const STYLIZED_PATH_WIDTH_SCALE = 1.08
+const STYLIZED_PATH_EDGE_FEATHER_METERS = 0.14
+const STYLIZED_PATH_EDGE_NOISE_METERS = 0.02
 const GRASS_GROUND_RENDER_ORDER = 12
 const GRASS_BLADE_RENDER_ORDER = 13
 const STYLIZED_GRASS_BLADE_RENDER_ORDER = 14
 
 export function GrassWaterLandLayers({
-  bladeFadeBlockers = [],
+  bladeFadeBlockers = EMPTY_GRASS_BLOCKERS,
   bladeSubdivisions,
   bladeGrassBlockers,
   bladeRenderOrder,
   fieldResolution,
   finalFieldResolution,
   finalSpawnResolution,
-  grassBlockers = [],
+  grassBlockers = EMPTY_GRASS_BLOCKERS,
   grassDebugState,
   grassInteractionRef,
   groundRenderOrder = GRASS_GROUND_RENDER_ORDER,
@@ -143,6 +153,7 @@ export function GrassWaterLandLayers({
   showTrees = true,
   spawnResolution,
   stylizedGroundTexture = false,
+  stylizedGroundDebugMode = 'final',
   stylizedSceneLayout = false,
   stylizedGroundTextureWorldSizeMeters = DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS,
   surface,
@@ -290,11 +301,20 @@ export function GrassWaterLandLayers({
           elevation={surface.grassSurfaceElevation}
           profileMeasure={profileMeasure}
           renderOrder={groundRenderOrder}
-          roads={roads}
+          roads={stylizedGroundTexture ? EMPTY_GRASS_ROADS : roads}
           onTextureReady={onStylizedGroundTextureReady}
           stylizedTexture={stylizedGroundTexture}
+          stylizedTextureDebugMode={stylizedGroundDebugMode}
           stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
           texture={renderedGroundField.texture}
+        />
+      ) : null}
+      {showGround && stylizedGroundTexture && roads.length > 0 ? (
+        <StylizedPathNetworkLayer
+          elevation={surface.grassSurfaceElevation}
+          perimeter={surface.grassSurfacePoints}
+          renderOrder={groundRenderOrder + 1}
+          roads={roads}
         />
       ) : null}
       {stylizedSceneLayout ? (
@@ -578,6 +598,7 @@ export function GrassGroundLayer({
   renderOrder,
   roads,
   stylizedTexture,
+  stylizedTextureDebugMode,
   stylizedTextureWorldSizeMeters,
   texture,
 }: GrassGroundLayerProps) {
@@ -593,6 +614,7 @@ export function GrassGroundLayer({
         profileMeasure={profileMeasure}
         renderOrder={renderOrder}
         roads={roads}
+        debugMode={stylizedTextureDebugMode}
         texture={texture}
         textureWorldSizeMeters={stylizedTextureWorldSizeMeters}
       />
@@ -610,6 +632,50 @@ export function GrassGroundLayer({
 }
 
 function StylizedGrassGroundLayer({
+  debugMode,
+  elevation,
+  profileMeasure,
+  renderOrder,
+  roads,
+  onTextureReady,
+  texture,
+  textureWorldSizeMeters,
+}: {
+  debugMode: StylizedGrassGroundDebugMode
+  elevation: number
+  onTextureReady?: (ready: boolean) => void
+  profileMeasure?: ProfileMeasure
+  renderOrder: number
+  roads: readonly LandrushRoadSegment[]
+  texture: Texture
+  textureWorldSizeMeters: number
+}) {
+  if (canUseProceduralStylizedGrassGround()) {
+    return (
+      <ProceduralStylizedGrassGround
+        debugMode={debugMode}
+        elevation={elevation}
+        maskTexture={texture}
+        onReady={onTextureReady}
+        renderOrder={renderOrder}
+      />
+    )
+  }
+
+  return (
+    <CanvasStylizedGrassGroundLayer
+      elevation={elevation}
+      onTextureReady={onTextureReady}
+      profileMeasure={profileMeasure}
+      renderOrder={renderOrder}
+      roads={roads}
+      texture={texture}
+      textureWorldSizeMeters={textureWorldSizeMeters}
+    />
+  )
+}
+
+function CanvasStylizedGrassGroundLayer({
   elevation,
   profileMeasure,
   renderOrder,
@@ -626,32 +692,14 @@ function StylizedGrassGroundLayer({
   texture: Texture
   textureWorldSizeMeters: number
 }) {
-  const [grassTexture, dirtTexture, dirtAOTexture, dirtHeightTexture] = useTexture([
-    STYLIZED_GRASS_TEXTURE_PATH,
-    STYLIZED_DIRT_TEXTURE_PATH,
-    STYLIZED_DIRT_AO_TEXTURE_PATH,
-    STYLIZED_DIRT_HEIGHT_TEXTURE_PATH,
-  ]) as Texture[]
   const textureOptions = useMemo(
     () => ({
-      dirtAOTexture: dirtAOTexture!,
-      dirtHeightTexture: dirtHeightTexture!,
-      dirtTexture: dirtTexture!,
       fieldSize: GRASS_FIELD_PLANE_SIZE,
-      grassTexture: grassTexture!,
       maskTexture: texture,
       roads,
       textureWorldSizeMeters,
     }),
-    [
-      dirtAOTexture,
-      dirtHeightTexture,
-      dirtTexture,
-      grassTexture,
-      roads,
-      texture,
-      textureWorldSizeMeters,
-    ],
+    [roads, texture, textureWorldSizeMeters],
   )
   const previewGroundTexture = useMemo(
     () =>
@@ -732,11 +780,7 @@ function GrassGroundMesh({
 }
 
 type StylizedGroundTextureOptions = {
-  dirtAOTexture: Texture
-  dirtHeightTexture: Texture
-  dirtTexture: Texture
   fieldSize: number
-  grassTexture: Texture
   maskTexture: Texture
   roads: readonly LandrushRoadSegment[]
   textureWorldSizeMeters: number
@@ -758,23 +802,13 @@ type StylizedPathGrid = {
   fieldSize: number
 }
 
-type TextureImageData = {
-  data: Uint8ClampedArray
-  height: number
-  width: number
-}
-
 type PreparedStylizedGroundTexture = {
-  dirtAOSource: TextureImageData
-  dirtHeightSource: TextureImageData
-  dirtSource: TextureImageData
   fieldSize: number
-  grassSource: TextureImageData
+  grainRepeat: number
+  grassPattern: GrassPattern
   maskData: Uint8Array
   maskSize: number
   pathGrid: StylizedPathGrid | null
-  dirtTextureRepeat: number
-  textureRepeat: number
 }
 
 function useDeferredStylizedGrassGroundTexture({
@@ -850,11 +884,7 @@ function useDeferredStylizedGrassGroundTexture({
 }
 
 function prepareStylizedGroundTexture({
-  dirtAOTexture,
-  dirtHeightTexture,
-  dirtTexture,
   fieldSize,
-  grassTexture,
   maskTexture,
   roads,
   textureWorldSizeMeters,
@@ -867,141 +897,38 @@ function prepareStylizedGroundTexture({
   const maskSize = maskImage?.width ?? 0
   if (!maskData || maskSize <= 1 || maskImage?.height !== maskSize) return null
 
-  const grassSource = imageDataFromTexture(grassTexture)
-  const dirtSource = imageDataFromTexture(dirtTexture)
-  const dirtAOSource = imageDataFromTexture(dirtAOTexture)
-  const dirtHeightSource = imageDataFromTexture(dirtHeightTexture)
-  if (!grassSource || !dirtSource || !dirtAOSource || !dirtHeightSource) return null
-
-  const textureRepeat = fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters)
-
   return {
-    dirtAOSource,
-    dirtHeightSource,
-    dirtSource,
     fieldSize,
-    grassSource,
+    grainRepeat: fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters),
+    grassPattern: getOrganicGrassPattern(),
     maskData,
     maskSize,
     pathGrid: createStylizedPathGrid(roads, fieldSize),
-    dirtTextureRepeat: textureRepeat * STYLIZED_DIRT_TEXTURE_DETAIL_SCALE,
-    textureRepeat,
   }
 }
 
 function createStylizedGrassGroundTexture(
-  {
-    dirtAOTexture,
-    dirtHeightTexture,
-    dirtTexture,
-    fieldSize,
-    grassTexture,
-    maskTexture,
-    roads,
-    textureWorldSizeMeters,
-  }: StylizedGroundTextureOptions,
+  options: StylizedGroundTextureOptions,
   outputSizeOverride?: number,
 ): Texture {
-  if (typeof document === 'undefined') return maskTexture
-  const maskImage = maskTexture.image as
-    | { data?: Uint8Array; height?: number; width?: number }
-    | undefined
-  const maskData = maskImage?.data
-  const maskSize = maskImage?.width ?? 0
-  if (!maskData || maskSize <= 1 || maskImage?.height !== maskSize) return maskTexture
-
-  const grassSource = imageDataFromTexture(grassTexture)
-  const dirtSource = imageDataFromTexture(dirtTexture)
-  const dirtAOSource = imageDataFromTexture(dirtAOTexture)
-  const dirtHeightSource = imageDataFromTexture(dirtHeightTexture)
-  if (!grassSource || !dirtSource || !dirtAOSource || !dirtHeightSource) return maskTexture
-  const pathGrid = createStylizedPathGrid(roads, fieldSize)
-  const textureRepeat = fieldSize / normalizedStylizedTextureWorldSize(textureWorldSizeMeters)
-  const dirtTextureRepeat = textureRepeat * STYLIZED_DIRT_TEXTURE_DETAIL_SCALE
-  const outputSize = outputSizeOverride ?? stylizedGroundTextureOutputSize(maskSize)
+  if (typeof document === 'undefined') return options.maskTexture
+  const prepared = prepareStylizedGroundTexture(options)
+  if (!prepared) return options.maskTexture
+  const outputSize = outputSizeOverride ?? stylizedGroundTextureOutputSize(prepared.maskSize)
 
   const canvas = document.createElement('canvas')
   canvas.width = outputSize
   canvas.height = outputSize
   const context = canvas.getContext('2d')
-  if (!context) return maskTexture
+  if (!context) return options.maskTexture
   const output = context.createImageData(outputSize, outputSize)
 
   for (let y = 0; y < outputSize; y += 1) {
-    for (let x = 0; x < outputSize; x += 1) {
-      const index = (y * outputSize + x) * 4
-      const u = x / (outputSize - 1)
-      const v = y / (outputSize - 1)
-      const mask = sampleMaskRgba(maskData, maskSize, u, v)
-      const alpha = mask[3]
-      if (alpha <= 0) {
-        const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, 0, 0)
-        const color = stylizedGrassGroundColor(rawGrass, [128, 164, 82], u, v)
-        output.data[index] = byte255(color[0])
-        output.data[index + 1] = byte255(color[1])
-        output.data[index + 2] = byte255(color[2])
-        output.data[index + 3] = 0
-        continue
-      }
-
-      const worldPoint = {
-        x: (u - 0.5) * fieldSize,
-        z: (v - 0.5) * fieldSize,
-      }
-      const warpX = (stylizedGroundNoise(u * 7.1 + 2.4, v * 7.1 - 1.7) - 0.5) * 0.045
-      const warpY = (stylizedGroundNoise(u * 6.4 - 4.1, v * 6.4 + 5.9) - 0.5) * 0.045
-      const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, warpX, warpY)
-      const grassColor = stylizedGrassGroundColor(rawGrass, [mask[0], mask[1], mask[2]], u, v)
-      const pathWeight = stylizedPathWeight(worldPoint, pathGrid, u, v)
-      let color = grassColor
-
-      if (pathWeight > 0.001) {
-        const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.016
-        const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.016
-        const rawDirt = sampleRepeatedRgb(dirtSource, u, v, dirtTextureRepeat, dirtWarpX, dirtWarpY)
-        const dirtAO = sampleRepeatedChannel(
-          dirtAOSource,
-          u,
-          v,
-          dirtTextureRepeat,
-          dirtWarpX,
-          dirtWarpY,
-        )
-        const dirtHeight = sampleRepeatedChannel(
-          dirtHeightSource,
-          u,
-          v,
-          dirtTextureRepeat,
-          dirtWarpX,
-          dirtWarpY,
-        )
-        const dirtColor = stylizedDirtGroundColor(rawDirt, dirtAO, dirtHeight, u, v)
-        color = mixRgbBytes(
-          grassColor,
-          dirtColor,
-          stylizedHeightAdjustedPathWeight(pathWeight, dirtHeight),
-        )
-      }
-
-      output.data[index] = byte255(color[0])
-      output.data[index + 1] = byte255(color[1])
-      output.data[index + 2] = byte255(color[2])
-      output.data[index + 3] = alpha
-    }
+    paintStylizedGroundTextureRow(output.data, y, outputSize, prepared)
   }
 
   context.putImageData(output, 0, 0)
-  const texture = new CanvasTexture(canvas)
-  texture.colorSpace = SRGBColorSpace
-  texture.flipY = true
-  texture.magFilter = LinearFilter
-  texture.minFilter = LinearMipmapLinearFilter
-  texture.wrapS = ClampToEdgeWrapping
-  texture.wrapT = ClampToEdgeWrapping
-  texture.generateMipmaps = true
-  texture.userData.landrushGeneratedStylizedGrassGround = true
-  texture.needsUpdate = true
-  return texture
+  return createStylizedGroundTextureFromCanvas(canvas)
 }
 
 function paintStylizedGroundTextureRow(
@@ -1010,18 +937,7 @@ function paintStylizedGroundTextureRow(
   outputSize: number,
   prepared: PreparedStylizedGroundTexture,
 ) {
-  const {
-    dirtAOSource,
-    dirtHeightSource,
-    dirtSource,
-    fieldSize,
-    grassSource,
-    maskData,
-    maskSize,
-    pathGrid,
-    dirtTextureRepeat,
-    textureRepeat,
-  } = prepared
+  const { fieldSize, grainRepeat, grassPattern, maskData, maskSize, pathGrid } = prepared
 
   for (let x = 0; x < outputSize; x += 1) {
     const index = (y * outputSize + x) * 4
@@ -1030,8 +946,7 @@ function paintStylizedGroundTextureRow(
     const mask = sampleMaskRgba(maskData, maskSize, u, v)
     const alpha = mask[3]
     if (alpha <= 0) {
-      const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, 0, 0)
-      const color = stylizedGrassGroundColor(rawGrass, [128, 164, 82], u, v)
+      const color = stylizedGrassGroundColor(u, v, grassPattern)
       output[index] = byte255(color[0])
       output[index + 1] = byte255(color[1])
       output[index + 2] = byte255(color[2])
@@ -1043,39 +958,19 @@ function paintStylizedGroundTextureRow(
       x: (u - 0.5) * fieldSize,
       z: (v - 0.5) * fieldSize,
     }
-    const warpX = (stylizedGroundNoise(u * 7.1 + 2.4, v * 7.1 - 1.7) - 0.5) * 0.045
-    const warpY = (stylizedGroundNoise(u * 6.4 - 4.1, v * 6.4 + 5.9) - 0.5) * 0.045
-    const rawGrass = sampleRepeatedRgb(grassSource, u, v, textureRepeat, warpX, warpY)
-    const grassColor = stylizedGrassGroundColor(rawGrass, [mask[0], mask[1], mask[2]], u, v)
-    const pathWeight = stylizedPathWeight(worldPoint, pathGrid, u, v)
+    const grassColor = stylizedGrassGroundColor(u, v, grassPattern)
+    const pathDistance = stylizedPathSignedDistance(worldPoint, pathGrid, u, v)
+    const pathWeight = stylizedPathWeightFromDistance(pathDistance)
     let color = grassColor
 
     if (pathWeight > 0.001) {
-      const dirtWarpX = (stylizedGroundNoise(u * 4.8 - 6.2, v * 4.8 + 3.5) - 0.5) * 0.016
-      const dirtWarpY = (stylizedGroundNoise(u * 5.5 + 8.9, v * 5.5 - 1.2) - 0.5) * 0.016
-      const rawDirt = sampleRepeatedRgb(dirtSource, u, v, dirtTextureRepeat, dirtWarpX, dirtWarpY)
-      const dirtAO = sampleRepeatedChannel(
-        dirtAOSource,
-        u,
-        v,
-        dirtTextureRepeat,
-        dirtWarpX,
-        dirtWarpY,
-      )
-      const dirtHeight = sampleRepeatedChannel(
-        dirtHeightSource,
-        u,
-        v,
-        dirtTextureRepeat,
-        dirtWarpX,
-        dirtWarpY,
-      )
-      const dirtColor = stylizedDirtGroundColor(rawDirt, dirtAO, dirtHeight, u, v)
-      color = mixRgbBytes(
-        grassColor,
-        dirtColor,
-        stylizedHeightAdjustedPathWeight(pathWeight, dirtHeight),
-      )
+      const stoneColor = stylizedStonePathColor(pathDistance, u, v, grainRepeat)
+      color = mixRgbBytes(grassColor, stoneColor, pathWeight)
+    }
+
+    const curbShadow = stylizedPathOuterCurbShadowFromDistance(pathDistance)
+    if (curbShadow > 0.001) {
+      color = mixRgbBytes(color, [82, 78, 58], curbShadow)
     }
 
     output[index] = byte255(color[0])
@@ -1099,34 +994,6 @@ function createStylizedGroundTextureFromCanvas(canvas: HTMLCanvasElement) {
   return texture
 }
 
-function imageDataFromTexture(texture: Texture): TextureImageData | null {
-  const image = texture.image as CanvasImageSource | undefined
-  if (!image) return null
-  const imageSize = imageCanvasSize(image)
-  if (imageSize.width <= 1 || imageSize.height <= 1) return null
-
-  const canvas = document.createElement('canvas')
-  canvas.width = imageSize.width
-  canvas.height = imageSize.height
-  const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) return null
-  context.drawImage(image, 0, 0, imageSize.width, imageSize.height)
-  return { ...imageSize, data: context.getImageData(0, 0, imageSize.width, imageSize.height).data }
-}
-
-function imageCanvasSize(image: CanvasImageSource) {
-  const sizedImage = image as {
-    height?: number
-    naturalHeight?: number
-    naturalWidth?: number
-    width?: number
-  }
-  return {
-    height: Math.max(0, Math.round(sizedImage.naturalHeight ?? sizedImage.height ?? 0)),
-    width: Math.max(0, Math.round(sizedImage.naturalWidth ?? sizedImage.width ?? 0)),
-  }
-}
-
 function stylizedGroundTextureOutputSize(maskSize: number) {
   return maskSize >= 512
     ? STYLIZED_GROUND_FINAL_TEXTURE_RESOLUTION
@@ -1139,59 +1006,49 @@ function normalizedStylizedTextureWorldSize(value: number) {
     : DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS
 }
 
-type RgbByte = readonly [number, number, number]
-
-function stylizedGrassGroundColor(raw: RgbByte, mask: RgbByte, u: number, v: number): RgbByte {
-  const referenceRoot: RgbByte = [106, 161, 79]
-  const referenceTip: RgbByte = [161, 204, 51]
-  const referenceWarm: RgbByte = [232, 232, 79]
-  const referenceCool: RgbByte = [116, 160, 34]
-  const lightNoise =
-    stylizedGroundNoise(u * 5.2 + 1.8, v * 5.2 - 3.5) * 0.65 +
-    stylizedGroundNoise(u * 15.4 - 2.2, v * 14.2 + 8.1) * 0.35
-  let color = mixRgbBytes(raw, referenceRoot, 0.18)
-  color = mixRgbBytes(color, referenceTip, Math.max(0, lightNoise - 0.36) * 0.24)
-  color = mixRgbBytes(color, referenceWarm, Math.max(0, lightNoise - 0.68) * 0.18)
-  color = mixRgbBytes(color, referenceCool, Math.max(0, 0.32 - lightNoise) * 0.14)
-  color = mixRgbBytes(color, mask, 0.06)
-  return scaleRgbBytes(color, 1.08)
+function stylizedGrassGroundColor(u: number, v: number, pattern: GrassPattern): RgbByte {
+  return sampleOrganicGrassPattern(pattern, u, v)
 }
 
-function stylizedDirtGroundColor(
-  raw: RgbByte,
-  ambientOcclusion: number,
-  height: number,
+function stylizedStonePathColor(
+  distance: number,
   u: number,
   v: number,
+  grainRepeat: number,
 ): RgbByte {
-  const warmTan: RgbByte = [214, 164, 121]
-  const sunlitTan: RgbByte = [236, 197, 153]
-  const coolShadow: RgbByte = [143, 116, 88]
-  const ao = clamp01(ambientOcclusion / 255)
-  const heightValue = clamp01(height / 255)
-  const broadNoise =
-    stylizedGroundNoise(u * 3.2 + 11.7, v * 3.2 - 4.3) * 0.7 +
-    stylizedGroundNoise(u * 11.6 - 5.8, v * 10.9 + 7.2) * 0.3
-  const fineNoise = stylizedGroundNoise(u * 38.2 + 1.4, v * 39.8 - 9.1)
-  const crackShadow = (1 - smoothstep(0.26, 0.54, heightValue)) * (1 - ao * 0.45)
-  const stoneHighlight = smoothstep(0.54, 0.86, heightValue)
-  const ambientShade = lerp(0.5, 1.05, ao)
-  const heightShade = lerp(0.78, 1.16, heightValue)
-  let color = mixRgbBytes(raw, warmTan, 0.08)
-  color = scaleRgbBytes(color, ambientShade * heightShade * (1 + (fineNoise - 0.5) * 0.05))
-  color = mixRgbBytes(
-    color,
-    coolShadow,
-    clamp01(crackShadow * 0.58 + Math.max(0, 0.42 - broadNoise) * 0.12),
-  )
-  color = mixRgbBytes(color, sunlitTan, stoneHighlight * Math.max(0, broadNoise - 0.42) * 0.16)
-  return color
+  const stoneBase: RgbByte = [211, 202, 176]
+  const stoneRoadbed: RgbByte = [196, 186, 160]
+  const stoneSunlit: RgbByte = [229, 221, 197]
+  const stoneSeam: RgbByte = [176, 166, 141]
+  const stoneShadow: RgbByte = [146, 137, 115]
+  const edgeDepth = Math.max(0, -distance)
+  const sidewalkEnd = STYLIZED_PATH_SIDEWALK_WIDTH_METERS
+  const seamEnd = sidewalkEnd + STYLIZED_PATH_SIDEWALK_SEAM_METERS
+  const sidewalk = 1 - smoothstep(sidewalkEnd - 0.04, sidewalkEnd + 0.01, edgeDepth)
+  const outerLip = 1 - smoothstep(0.03, 0.14, edgeDepth)
+  const seam =
+    smoothstep(sidewalkEnd - 0.02, sidewalkEnd + 0.01, edgeDepth) *
+    (1 - smoothstep(seamEnd, seamEnd + 0.04, edgeDepth))
+  const roadbedStart = seamEnd + 0.06
+  const roadbed = smoothstep(roadbedStart, roadbedStart + 0.16, edgeDepth)
+  const roadDropShadow =
+    smoothstep(roadbedStart - 0.035, roadbedStart + 0.02, edgeDepth) *
+    (1 - smoothstep(roadbedStart + 0.1, roadbedStart + 0.22, edgeDepth))
+  const broad = stylizedGroundNoise(u * 3.4 + 11.7, v * 3.4 - 4.3)
+  const grain = stylizedGroundNoise(u * grainRepeat * 0.35 + 5.1, v * grainRepeat * 0.35 - 7.7)
+  let color = mixRgbBytes(stoneBase, stoneSunlit, 0.2 + (broad - 0.5) * 0.24)
+  color = mixRgbBytes(color, stoneRoadbed, roadbed * 0.5)
+  color = mixRgbBytes(color, stoneSunlit, sidewalk * 0.68)
+  color = mixRgbBytes(color, stoneSunlit, outerLip * 0.24)
+  color = mixRgbBytes(color, stoneSeam, seam * 0.82)
+  color = mixRgbBytes(color, stoneShadow, roadDropShadow * 0.28 + roadbed * 0.05)
+  return scaleRgbBytes(color, 1 + (grain - 0.5) * 0.018 + outerLip * 0.03 - seam * 0.035)
 }
 
-function stylizedHeightAdjustedPathWeight(pathWeight: number, height: number) {
-  const heightValue = clamp01(height / 255)
-  const edgeFactor = 1 - Math.abs(pathWeight * 2 - 1)
-  return clamp01(pathWeight + (heightValue - 0.5) * 0.32 * edgeFactor)
+function stylizedPathOuterCurbShadowFromDistance(distance: number) {
+  if (!Number.isFinite(distance)) return 0
+  const outsideShadow = smoothstep(0.02, 0.1, distance) * (1 - smoothstep(0.24, 0.52, distance))
+  return clamp01(outsideShadow * 0.16)
 }
 
 function sampleMaskRgba(
@@ -1216,56 +1073,6 @@ function sampleMaskRgba(
   ]
 }
 
-function sampleRepeatedRgb(
-  source: TextureImageData,
-  u: number,
-  v: number,
-  repeat: number,
-  warpX: number,
-  warpY: number,
-): RgbByte {
-  const { tx, ty, x0, x1, y0, y1 } = repeatedTextureSample(source, u, v, repeat, warpX, warpY)
-  return [
-    sampleBilinearChannel(source.data, source.width, source.height, x0, y0, x1, y1, tx, ty, 0),
-    sampleBilinearChannel(source.data, source.width, source.height, x0, y0, x1, y1, tx, ty, 1),
-    sampleBilinearChannel(source.data, source.width, source.height, x0, y0, x1, y1, tx, ty, 2),
-  ]
-}
-
-function sampleRepeatedChannel(
-  source: TextureImageData,
-  u: number,
-  v: number,
-  repeat: number,
-  warpX: number,
-  warpY: number,
-) {
-  const { tx, ty, x0, x1, y0, y1 } = repeatedTextureSample(source, u, v, repeat, warpX, warpY)
-  return sampleBilinearChannel(source.data, source.width, source.height, x0, y0, x1, y1, tx, ty, 0)
-}
-
-function repeatedTextureSample(
-  source: TextureImageData,
-  u: number,
-  v: number,
-  repeat: number,
-  warpX: number,
-  warpY: number,
-) {
-  const sampleX = fractional(u * repeat + warpX) * (source.width - 1)
-  const sampleY = fractional(v * repeat + warpY) * (source.height - 1)
-  const x0 = Math.floor(sampleX)
-  const y0 = Math.floor(sampleY)
-  return {
-    tx: sampleX - x0,
-    ty: sampleY - y0,
-    x0,
-    x1: Math.min(source.width - 1, x0 + 1),
-    y0,
-    y1: Math.min(source.height - 1, y0 + 1),
-  }
-}
-
 function sampleBilinearChannel(
   source: Uint8Array | Uint8ClampedArray,
   width: number,
@@ -1285,28 +1092,33 @@ function sampleBilinearChannel(
   return lerp(lerp(topLeft, topRight, tx), lerp(bottomLeft, bottomRight, tx), ty)
 }
 
-function stylizedPathWeight(
+function stylizedPathSignedDistance(
   point: { x: number; z: number },
   pathGrid: StylizedPathGrid | null,
   u: number,
   v: number,
 ) {
-  if (!pathGrid) return 0
+  if (!pathGrid) return Number.POSITIVE_INFINITY
 
   const spans = stylizedPathSpansNearPoint(point, pathGrid)
-  if (spans.length === 0) return 0
+  if (spans.length === 0) return Number.POSITIVE_INFINITY
 
   const signedDistance = signedDistanceToStylizedSpans(point, spans)
-  if (!Number.isFinite(signedDistance)) return 0
+  if (!Number.isFinite(signedDistance)) return Number.POSITIVE_INFINITY
 
   const edgeNoise =
     (stylizedGroundNoise(u * 18.2 + 4.6, v * 18.9 - 8.4) - 0.5) * STYLIZED_PATH_EDGE_NOISE_METERS
+  return signedDistance + edgeNoise
+}
+
+function stylizedPathWeightFromDistance(distance: number) {
+  if (!Number.isFinite(distance)) return 0
   return (
     1 -
     smoothstep(
       -STYLIZED_PATH_EDGE_FEATHER_METERS * 0.35,
       STYLIZED_PATH_EDGE_FEATHER_METERS,
-      signedDistance + edgeNoise,
+      distance,
     )
   )
 }
@@ -1408,10 +1220,6 @@ function scaleRgbBytes(color: RgbByte, scale: number): RgbByte {
 
 function byte255(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)))
-}
-
-function fractional(value: number) {
-  return value - Math.floor(value)
 }
 
 function stylizedGroundNoise(x: number, z: number) {

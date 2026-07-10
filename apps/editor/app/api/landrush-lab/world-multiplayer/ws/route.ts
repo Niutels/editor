@@ -43,6 +43,9 @@ type ParcelBuildNodesSnapshot = {
 type TvMediaStateSnapshot = {
   muted: boolean
   parcelId: string
+  playbackSeconds: number
+  playbackUpdatedAt: number
+  playing: boolean
   tvId: string
   updatedAt: number
   updatedBy: string
@@ -72,6 +75,8 @@ type ClientMessage =
   | {
       muted?: boolean
       parcelId: string
+      playbackSeconds?: number
+      playing?: boolean
       tvId: string
       type: 'sync-tv-media-state'
       url: string
@@ -741,13 +746,17 @@ function syncTvMediaState(
     }
   }
 
+  const url = sanitizeText(message.url, '', 2048)
   const tv = {
     muted: Boolean(message.muted),
     parcelId,
+    playbackSeconds: Math.max(0, finiteNumber(message.playbackSeconds, 0)),
+    playbackUpdatedAt: now,
+    playing: typeof message.playing === 'boolean' ? message.playing : Boolean(url),
     tvId: sanitizeParcelKey(message.tvId, 'tv', 120),
     updatedAt: now,
     updatedBy: peer.id,
-    url: sanitizeText(message.url, '', 2048),
+    url,
     userVolume: clamp01(finiteNumber(message.userVolume, 0.8)),
     worldId,
   }

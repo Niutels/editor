@@ -7,10 +7,10 @@ export const GRASS_FIELD_PREVIEW_RESOLUTION = 256
 export const GRASS_FIELD_PLANE_SIZE = 132
 
 const GRASS_COLORS = [
-  [118, 156, 72],
-  [150, 176, 89],
-  [91, 145, 68],
-  [176, 194, 104],
+  [153, 149, 75],
+  [150, 146, 78],
+  [153, 147, 85],
+  [141, 144, 82],
 ] as const
 const GRASS_REGION_CORE_SHARPNESS = 5.2
 const GRASS_REGION_BLEND_SHARPNESS = 2.15

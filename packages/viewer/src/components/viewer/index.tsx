@@ -322,7 +322,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               enabled: true,
             }}
           >
-            <FrameLimiter fps={50} />
+            <FrameLimiter fps={60} />
             <RenderSchedulerBridge />
             {defaultCamera ? <ViewerCamera /> : null}
             <GPUDeviceWatcher />
