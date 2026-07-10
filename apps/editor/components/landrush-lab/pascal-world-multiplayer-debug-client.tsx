@@ -1,24 +1,35 @@
 'use client'
 
-import { type LevelNode, PascalWaterNode, type SceneGraph, useScene } from '@pascal-app/core'
+import {
+  type LevelNode,
+  PascalWaterNode,
+  pauseSceneHistory,
+  resumeSceneHistory,
+  type SceneGraph,
+  useScene,
+} from '@pascal-app/core'
 import {
   createPascalWaterLandSurface,
   createPascalWaterSmoothedPerimeter,
   LANDRUSH_WATER_SURFACE_PARAMETERS,
   type LandrushWaterSurfaceParameters,
+  PASCAL_WATER_LOW_ELEVATION,
   type PascalWaterLandSurface,
 } from '@pascal-app/nodes'
 import { renderScheduler, useViewer, Viewer } from '@pascal-app/viewer'
 import { OrbitControls } from '@react-three/drei'
 import { useThree } from '@react-three/fiber'
-import { Suspense, useEffect, useMemo } from 'react'
-import { Vector3 } from 'three'
+import { Check, Copy } from 'lucide-react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, Shape, Vector3 } from 'three'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, GRASS_SPAWN_FIELD_RESOLUTION } from './grass-field-texture'
 import { GRASS_WATER_DEFAULT_TUNING } from './grass-water-defaults'
 import { GrassWaterLandLayers } from './grass-water-layers'
 import {
   generateWaterLabIsland,
+  type IslandElevationParameters,
+  type LabSliderConfig,
   WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
   WATER_LAB_DEFAULT_FIELD_PARAMETERS,
   WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
@@ -31,13 +42,388 @@ const PASCAL_GRASS_WATER_LEVEL_ID = 'level_pascal-grass-water-debug'
 const PASCAL_GRASS_WATER_CAMERA_POSITION = [88, 86, 94] as const
 const PASCAL_GRASS_WATER_CAMERA_TARGET = [0, 0, 0] as const
 const PASCAL_GRASS_WATER_CAMERA_ZOOM = 7.8
+const PASCAL_GRASS_WATER_CAMERA_MIN_ZOOM = 2.8
+const PASCAL_GRASS_WATER_CAMERA_REFERENCE_ASPECT = 1280 / 720
+const PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT = 0.08
+const PASCAL_CLIFF_EXPERIMENT_LIGHT_NORMAL_Y = 0.55
+const PASCAL_CLIFF_EXPERIMENT_SHADE_NORMAL_Y = -0.12
+const PASCAL_CLIFF_FAMILY_CUBE_SIZE = 3.2
+const PASCAL_CLIFF_FAMILY_CUBE_SPACING = 4.6
+const PASCAL_CLIFF_FAMILY_CUBE_LIFT = 4.2
+const PASCAL_CLIFF_MAX_FAMILY_VARIATIONS = 8
+
+type PascalCliffPendingGeometryDisposal = { cancelled: boolean }
+type PascalCliffGpuQueue = { onSubmittedWorkDone?: () => Promise<void> }
+
+const pascalCliffPendingGeometryDisposals = new WeakMap<
+  BufferGeometry,
+  PascalCliffPendingGeometryDisposal
+>()
+
+function usePascalCliffGeometryLifecycle(
+  resource: BufferGeometry | readonly BufferGeometry[] | null,
+) {
+  const renderer = useThree((state) => state.gl)
+
+  useEffect(() => {
+    const geometries = Array.isArray(resource) ? resource : resource ? [resource] : []
+    for (const geometry of geometries) {
+      const pending = pascalCliffPendingGeometryDisposals.get(geometry)
+      if (pending) {
+        pending.cancelled = true
+        pascalCliffPendingGeometryDisposals.delete(geometry)
+      }
+    }
+    renderScheduler.requestFrame('geometry:changed')
+
+    return () => {
+      for (const geometry of geometries) {
+        disposePascalCliffGeometryLater(geometry, renderer)
+      }
+    }
+  }, [renderer, resource])
+}
+
+function disposePascalCliffGeometryLater(geometry: BufferGeometry, renderer: unknown) {
+  const pending: PascalCliffPendingGeometryDisposal = { cancelled: false }
+  pascalCliffPendingGeometryDisposals.set(geometry, pending)
+  const dispose = () => {
+    if (pending.cancelled || pascalCliffPendingGeometryDisposals.get(geometry) !== pending) return
+    pascalCliffPendingGeometryDisposals.delete(geometry)
+    geometry.dispose()
+  }
+  const waitForGpu = () => {
+    const queue = (
+      renderer as { backend?: { device?: { queue?: PascalCliffGpuQueue } } } | null | undefined
+    )?.backend?.device?.queue
+    if (queue?.onSubmittedWorkDone) {
+      void queue.onSubmittedWorkDone().then(dispose, dispose)
+      return
+    }
+    dispose()
+  }
+
+  if (typeof requestAnimationFrame !== 'function') {
+    waitForGpu()
+    return
+  }
+  requestAnimationFrame(() => requestAnimationFrame(waitForGpu))
+}
+
+type PascalCliffExperimentMode = 'baseline' | 'rock-field' | 'terraced' | 'combined'
+type PascalCliffCopyStatus = 'copied' | 'failed' | 'idle'
+type PascalCliffExperimentColor = [number, number, number]
+type PascalCliffExperimentFamily = {
+  dim: PascalCliffExperimentColor
+  light: PascalCliffExperimentColor
+  shade: PascalCliffExperimentColor
+  weight: number
+}
+type PascalCliffTuningSliderKey =
+  | 'cliffColorFamilyVariationCount'
+  | 'cliffColorFamilyDistribution'
+  | 'cliffAverageSlope'
+  | 'cliffSlopeVariation'
+  | 'cliffSlopeVariationDistribution'
+  | 'cliffLayer1ExtrusionAverageMeters'
+  | 'cliffLayer1ExtrusionVariationMeters'
+  | 'cliffLayer1ExtrusionVariationDistribution'
+  | 'cliffLayer2ExtrusionAverageMeters'
+  | 'cliffLayer2Density'
+  | 'cliffLayer2ExtrusionVariationMeters'
+  | 'cliffLayer2ExtrusionVariationDistribution'
+  | 'cliffLayer3ExtrusionAverageMeters'
+  | 'cliffLayer3Density'
+  | 'cliffLayer3ExtrusionVariationMeters'
+  | 'cliffLayer3ExtrusionVariationDistribution'
+  | 'cliffLayer2AltitudeRatio'
+  | 'cliffLayer2AltitudeVariation'
+  | 'cliffLayer2AltitudeVariationDistribution'
+  | 'cliffLayer3AltitudeRatio'
+  | 'cliffLayer3AltitudeVariation'
+  | 'cliffLayer3AltitudeVariationDistribution'
+  | 'cliffLayer1BlockWidthMeters'
+  | 'cliffLayer1BlockWidthVariationMeters'
+  | 'cliffLayer1BlockWidthVariationDistribution'
+  | 'cliffLayer2BlockWidthMeters'
+  | 'cliffLayer2BlockWidthVariationMeters'
+  | 'cliffLayer2BlockWidthVariationDistribution'
+  | 'cliffLayer3BlockWidthMeters'
+  | 'cliffLayer3BlockWidthVariationMeters'
+  | 'cliffLayer3BlockWidthVariationDistribution'
+type PascalCliffExperimentVector = { x: number; y: number; z: number }
+type PascalCliffExperimentGridPoint = PascalCliffExperimentVector & {
+  outwardX: number
+  outwardZ: number
+  station: number
+  u: number
+  v: number
+}
+
+const PASCAL_CLIFF_EXPERIMENT_MODES = [
+  { id: 'baseline', label: 'Baseline' },
+  { id: 'rock-field', label: 'Rock Field' },
+  { id: 'terraced', label: 'Terraced Mesh' },
+  { id: 'combined', label: 'Combined' },
+] as const satisfies readonly { id: PascalCliffExperimentMode; label: string }[]
+
+function pascalCliffExperimentSrgbColor(
+  red: number,
+  green: number,
+  blue: number,
+): PascalCliffExperimentColor {
+  return [
+    pascalCliffExperimentSrgbChannelToLinear(red / 255),
+    pascalCliffExperimentSrgbChannelToLinear(green / 255),
+    pascalCliffExperimentSrgbChannelToLinear(blue / 255),
+  ]
+}
+
+function pascalCliffExperimentSrgbChannelToLinear(value: number) {
+  const clamped = Math.min(1, Math.max(0, value))
+  return clamped <= 0.04045 ? clamped / 12.92 : ((clamped + 0.055) / 1.055) ** 2.4
+}
+
+const PASCAL_CLIFF_EXPERIMENT_FAMILIES: readonly PascalCliffExperimentFamily[] = [
+  {
+    dim: pascalCliffExperimentSrgbColor(0x5d, 0x5d, 0x62),
+    light: pascalCliffExperimentSrgbColor(0xb1, 0x9a, 0x8c),
+    shade: pascalCliffExperimentSrgbColor(0x46, 0x46, 0x4f),
+    weight: 2 / 3,
+  },
+  {
+    dim: pascalCliffExperimentSrgbColor(0x73, 0x62, 0x5d),
+    light: pascalCliffExperimentSrgbColor(0x9d, 0x81, 0x72),
+    shade: pascalCliffExperimentSrgbColor(0x42, 0x3e, 0x45),
+    weight: 1 / 3,
+  },
+]
+const PASCAL_CLIFF_EXPERIMENT_FAMILY_RAMPS = Array.from(
+  { length: PASCAL_CLIFF_MAX_FAMILY_VARIATIONS + 1 },
+  (_, variationCount) => createPascalCliffExperimentFamilyRamp(variationCount),
+)
+const PASCAL_CLIFF_FAMILY_CUBE_GEOMETRY_CACHE = new WeakMap<
+  readonly PascalCliffExperimentFamily[],
+  readonly BufferGeometry[]
+>()
+
+const PASCAL_CLIFF_TUNING_SLIDERS = [
+  {
+    key: 'cliffColorFamilyVariationCount',
+    label: 'family variations',
+    max: PASCAL_CLIFF_MAX_FAMILY_VARIATIONS,
+    min: 0,
+    step: 1,
+  },
+  {
+    key: 'cliffColorFamilyDistribution',
+    label: 'family distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffAverageSlope', label: 'avg slope', max: 1.4, min: 0, step: 0.01 },
+  { key: 'cliffSlopeVariation', label: 'slope variability', max: 0.9, min: 0, step: 0.01 },
+  {
+    key: 'cliffSlopeVariationDistribution',
+    label: 'slope distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer1ExtrusionAverageMeters',
+    label: '1st avg extrusion',
+    max: 3.5,
+    min: 0.05,
+    step: 0.05,
+  },
+  {
+    key: 'cliffLayer1ExtrusionVariationMeters',
+    label: '1st extrusion variability',
+    max: 2.4,
+    min: 0,
+    step: 0.05,
+  },
+  {
+    key: 'cliffLayer1ExtrusionVariationDistribution',
+    label: '1st extrusion distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer2ExtrusionAverageMeters',
+    label: '2nd avg extrusion',
+    max: 3.5,
+    min: 0.05,
+    step: 0.05,
+  },
+  {
+    key: 'cliffLayer2ExtrusionVariationMeters',
+    label: '2nd extrusion variability',
+    max: 2.4,
+    min: 0,
+    step: 0.05,
+  },
+  {
+    key: 'cliffLayer2ExtrusionVariationDistribution',
+    label: '2nd extrusion distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffLayer2Density', label: '2nd layer density', max: 1, min: 0, step: 0.01 },
+  {
+    key: 'cliffLayer3ExtrusionAverageMeters',
+    label: '3rd avg extrusion',
+    max: 3.5,
+    min: 0.05,
+    step: 0.05,
+  },
+  {
+    key: 'cliffLayer3ExtrusionVariationMeters',
+    label: '3rd extrusion variability',
+    max: 2.4,
+    min: 0,
+    step: 0.05,
+  },
+  {
+    key: 'cliffLayer3ExtrusionVariationDistribution',
+    label: '3rd extrusion distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffLayer3Density', label: '3rd layer density', max: 1, min: 0, step: 0.01 },
+  {
+    key: 'cliffLayer2AltitudeRatio',
+    label: '2nd layer altitude',
+    max: 0.95,
+    min: 0.08,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer2AltitudeVariation',
+    label: '2nd altitude span',
+    max: 0.5,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer2AltitudeVariationDistribution',
+    label: '2nd altitude distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer3AltitudeRatio',
+    label: '3rd layer altitude',
+    max: 0.86,
+    min: 0.04,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer3AltitudeVariation',
+    label: '3rd altitude span',
+    max: 0.45,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffLayer3AltitudeVariationDistribution',
+    label: '3rd altitude distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffLayer1BlockWidthMeters', label: '1st block width', max: 14, min: 0.9, step: 0.1 },
+  {
+    key: 'cliffLayer1BlockWidthVariationMeters',
+    label: '1st width variability',
+    max: 8,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'cliffLayer1BlockWidthVariationDistribution',
+    label: '1st width distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffLayer2BlockWidthMeters', label: '2nd block width', max: 14, min: 0.9, step: 0.1 },
+  {
+    key: 'cliffLayer2BlockWidthVariationMeters',
+    label: '2nd width variability',
+    max: 8,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'cliffLayer2BlockWidthVariationDistribution',
+    label: '2nd width distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffLayer3BlockWidthMeters', label: '3rd block width', max: 14, min: 0.9, step: 0.1 },
+  {
+    key: 'cliffLayer3BlockWidthVariationMeters',
+    label: '3rd width variability',
+    max: 8,
+    min: 0,
+    step: 0.1,
+  },
+  {
+    key: 'cliffLayer3BlockWidthVariationDistribution',
+    label: '3rd width distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+] satisfies readonly LabSliderConfig<PascalCliffTuningSliderKey>[]
+
+const PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS = {
+  ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
+  cliffAverageSlope: 0.14,
+  cliffColorAverageRatio: 0.92,
+  cliffColorFamilyDistribution: 0.19,
+  cliffColorFamilyVariationCount: 8,
+  cliffLayer2AltitudeVariationDistribution: 1,
+  cliffLayer2Density: 1,
+  cliffLayer3AltitudeVariation: 0.17,
+  cliffLayer3AltitudeVariationDistribution: 1,
+  cliffLayer3BlockWidthMeters: 0.9,
+  cliffLayer3BlockWidthVariationMeters: 1.4,
+  cliffLayer3Density: 1,
+  cliffSlopeVariation: 0.05,
+  cliffSlopeVariationDistribution: 0,
+  cliffToneVariation: 0.12,
+} satisfies IslandElevationParameters
+const PASCAL_CLIFF_EXPERIMENT_WATER_ELEVATION_PARAMETERS =
+  createPascalExperimentWaterElevationParameters(PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS)
+
+function pascalCliffElevationParametersEqual(
+  first: IslandElevationParameters,
+  second: IslandElevationParameters,
+) {
+  for (const key of Object.keys(first) as (keyof IslandElevationParameters)[]) {
+    if (first[key] !== second[key]) return false
+  }
+  return true
+}
 
 declare global {
   interface Window {
     __PASCAL_BENCH_ORBITING__?: boolean
     __LANDRUSH_WORLD_MULTIPLAYER_PASCAL_DEBUG__?: {
+      cliffColorFamilyCount: number
+      cliffExperimentMode: PascalCliffExperimentMode
       features: readonly string[]
       grassSurfacePointCount: number
+      grassVisible: boolean
       nodeCount: number
       rootNodeIds: readonly string[]
       source: string
@@ -47,34 +433,64 @@ declare global {
 }
 
 export function PascalWorldMultiplayerDebugClient() {
-  const pascalGrassWaterScene = useMemo(createPascalGrassWaterSceneGraph, [])
-  const { landSurface, sceneGraph, waterNode } = pascalGrassWaterScene
+  const [copyStatus, setCopyStatus] = useState<PascalCliffCopyStatus>('idle')
+  const [draftElevationParameters, setDraftElevationParameters] =
+    useState<IslandElevationParameters>(() => ({
+      ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS,
+    }))
+  const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
+    ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS,
+  }))
+  useEffect(() => {
+    if (pascalCliffElevationParametersEqual(draftElevationParameters, elevationParameters)) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setElevationParameters({ ...draftElevationParameters })
+    }, 220)
+
+    return () => window.clearTimeout(timeout)
+  }, [draftElevationParameters, elevationParameters])
+
+  const pascalGrassWaterScene = useMemo(
+    () => createPascalGrassWaterSceneGraph(PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS),
+    [],
+  )
+  const { sceneGraph, shorelinePoints, waterNode } = pascalGrassWaterScene
+  const [cliffExperimentMode, setCliffExperimentMode] =
+    useState<PascalCliffExperimentMode>('baseline')
+  const [showGrass, setShowGrass] = useState(false)
+  const landSurface = useMemo(
+    () =>
+      createPascalWaterLandSurface({
+        elevationParameters,
+        shorelinePoints,
+        waterPlaneSize: WATER_PLANE_SIZE,
+      }),
+    [elevationParameters, shorelinePoints],
+  )
+  const activeWaterElevationParameters =
+    cliffExperimentMode === 'baseline'
+      ? elevationParameters
+      : PASCAL_CLIFF_EXPERIMENT_WATER_ELEVATION_PARAMETERS
+  const activeWaterNode = useMemo(
+    () =>
+      createPascalWaterNodeForCliffMode(
+        waterNode,
+        cliffExperimentMode,
+        activeWaterElevationParameters,
+      ),
+    [activeWaterElevationParameters, cliffExperimentMode, waterNode],
+  )
   const bladeSubdivisions = useMemo(
     () => resolveGrassWebGpuBladeSubdivisions(GRASS_WATER_DEFAULT_TUNING.density),
     [],
   )
 
   useEffect(() => {
-    const viewer = useViewer.getState()
-
-    window.__LANDRUSH_WORLD_MULTIPLAYER_PASCAL_DEBUG__ = {
-      features: [
-        'pascal-viewer-canvas',
-        'pascal-scene-store',
-        'pascal-water-node',
-        'world-multiplayer-water-material',
-        'grass-water-land-layers',
-        'grass-water-ground-field',
-        'grass-water-blades',
-        'grass-water-trees',
-      ],
-      grassSurfacePointCount: landSurface.grassSurfacePoints.length,
-      nodeCount: Object.keys(sceneGraph.nodes).length,
-      rootNodeIds: sceneGraph.rootNodeIds,
-      source: 'pascal-grass-water-debug',
-      waterNodeId: waterNode.id,
-    }
     useScene.getState().setScene(sceneGraph.nodes as never, sceneGraph.rootNodeIds as never)
+    const viewer = useViewer.getState()
     viewer.setProjectId('pascal-grass-water-debug')
     viewer.setCameraMode('orthographic')
     viewer.setShowGrid(false)
@@ -94,7 +510,81 @@ export function PascalWorldMultiplayerDebugClient() {
       delete window.__PASCAL_BENCH_ORBITING__
       useScene.getState().unloadScene()
     }
-  }, [landSurface, sceneGraph, waterNode])
+  }, [sceneGraph])
+
+  useEffect(() => {
+    const scene = useScene.getState()
+    const currentWaterNode = scene.nodes[activeWaterNode.id]
+    if (
+      currentWaterNode?.type !== 'pascal-water' ||
+      (currentWaterNode.elevationParameters === activeWaterNode.elevationParameters &&
+        currentWaterNode.metadata === activeWaterNode.metadata)
+    ) {
+      return
+    }
+
+    pauseSceneHistory(useScene)
+    try {
+      scene.updateNode(activeWaterNode.id, {
+        elevationParameters: activeWaterNode.elevationParameters,
+        metadata: activeWaterNode.metadata,
+      } as never)
+    } finally {
+      resumeSceneHistory(useScene)
+    }
+    renderScheduler.requestFrame('geometry:changed')
+  }, [activeWaterNode])
+
+  useEffect(() => {
+    window.__LANDRUSH_WORLD_MULTIPLAYER_PASCAL_DEBUG__ = {
+      cliffColorFamilyCount: pascalCliffExperimentFamilyRamp(
+        elevationParameters.cliffColorFamilyVariationCount,
+      ).length,
+      cliffExperimentMode,
+      features: [
+        'pascal-viewer-canvas',
+        'pascal-scene-store',
+        'pascal-water-node',
+        'world-multiplayer-water-material',
+        'pascal-multiplayer-cliff-parameters',
+        'debug-cliff-experiment-overlay',
+        'grass-water-land-layers',
+        'grass-water-ground-field',
+        'grass-water-blades',
+        'grass-water-trees',
+      ],
+      grassSurfacePointCount: landSurface.grassSurfacePoints.length,
+      grassVisible: showGrass,
+      nodeCount: Object.keys(sceneGraph.nodes).length,
+      rootNodeIds: sceneGraph.rootNodeIds,
+      source: 'pascal-grass-water-debug',
+      waterNodeId: waterNode.id,
+    }
+  }, [
+    cliffExperimentMode,
+    elevationParameters.cliffColorFamilyVariationCount,
+    landSurface,
+    sceneGraph,
+    showGrass,
+    waterNode.id,
+  ])
+
+  const copyCliffParameters = async () => {
+    const parameters = Object.fromEntries(
+      PASCAL_CLIFF_TUNING_SLIDERS.map((slider) => [
+        slider.key,
+        draftElevationParameters[slider.key],
+      ]),
+    )
+    const text = JSON.stringify({ mode: cliffExperimentMode, parameters }, null, 2)
+    try {
+      await copyPascalCliffText(text)
+      setCopyStatus('copied')
+    } catch {
+      setCopyStatus('failed')
+    }
+    window.setTimeout(() => setCopyStatus('idle'), 1400)
+  }
 
   return (
     <main
@@ -110,35 +600,464 @@ export function PascalWorldMultiplayerDebugClient() {
         useBvh={false}
       >
         <PascalGrassWaterCameraRig />
-        <Suspense fallback={null}>
-          <GrassWaterLandLayers
-            bladeSubdivisions={bladeSubdivisions}
-            fieldResolution={GRASS_FIELD_RESOLUTION}
-            spawnResolution={GRASS_SPAWN_FIELD_RESOLUTION}
-            surface={landSurface}
-            tuning={GRASS_WATER_DEFAULT_TUNING}
-          />
-        </Suspense>
+        <PascalCliffExperimentOverlay
+          elevationParameters={elevationParameters}
+          mode={cliffExperimentMode}
+          surface={landSurface}
+        />
+        <PascalCliffFamilyColorCubes
+          familyVariationCount={elevationParameters.cliffColorFamilyVariationCount}
+          surface={landSurface}
+        />
+        {showGrass ? (
+          <Suspense fallback={null}>
+            <GrassWaterLandLayers
+              bladeSubdivisions={bladeSubdivisions}
+              fieldResolution={GRASS_FIELD_RESOLUTION}
+              spawnResolution={GRASS_SPAWN_FIELD_RESOLUTION}
+              surface={landSurface}
+              tuning={GRASS_WATER_DEFAULT_TUNING}
+            />
+          </Suspense>
+        ) : null}
       </Viewer>
+      <PascalCliffExperimentPanel
+        copyStatus={copyStatus}
+        elevationParameters={draftElevationParameters}
+        mode={cliffExperimentMode}
+        onCopy={() => void copyCliffParameters()}
+        onElevationParameterChange={(key, value) =>
+          setDraftElevationParameters((current) => ({ ...current, [key]: value }))
+        }
+        onModeChange={setCliffExperimentMode}
+        onResetElevationParameters={() => {
+          setDraftElevationParameters({ ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS })
+          setElevationParameters({ ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS })
+        }}
+        onShowGrassChange={setShowGrass}
+        showGrass={showGrass}
+      />
     </main>
   )
+}
+
+async function copyPascalCliffText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.append(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    textarea.remove()
+    if (!copied) throw new Error('Clipboard copy failed')
+  }
+}
+
+function createPascalWaterNodeForCliffMode(
+  waterNode: PascalWaterNode,
+  mode: PascalCliffExperimentMode,
+  elevationParameters: IslandElevationParameters,
+): PascalWaterNode {
+  if (
+    mode === 'baseline' &&
+    pascalCliffElevationParametersEqual(waterNode.elevationParameters, elevationParameters)
+  ) {
+    return waterNode
+  }
+  const metadata =
+    waterNode.metadata &&
+    typeof waterNode.metadata === 'object' &&
+    !Array.isArray(waterNode.metadata)
+      ? waterNode.metadata
+      : {}
+
+  return {
+    ...waterNode,
+    elevationParameters,
+    metadata:
+      mode === 'baseline'
+        ? metadata
+        : {
+            ...metadata,
+            cliffExperimentBase: 'flat-water-node',
+            cliffExperimentMode: mode,
+          },
+  }
+}
+
+function createPascalExperimentWaterElevationParameters(
+  elevationParameters: IslandElevationParameters,
+): IslandElevationParameters {
+  return {
+    ...elevationParameters,
+    cliffBlockDepthMaxMeters: 0,
+    cliffBlockDepthMinMeters: 0,
+    edgeLiftMeters: 0,
+    innerContourMeters: 0,
+    outerContourMeters: 0,
+  }
+}
+
+function PascalCliffExperimentPanel({
+  copyStatus,
+  elevationParameters,
+  mode,
+  onCopy,
+  onElevationParameterChange,
+  onModeChange,
+  onResetElevationParameters,
+  onShowGrassChange,
+  showGrass,
+}: {
+  copyStatus: PascalCliffCopyStatus
+  elevationParameters: IslandElevationParameters
+  mode: PascalCliffExperimentMode
+  onCopy: () => void
+  onElevationParameterChange: (key: PascalCliffTuningSliderKey, value: number) => void
+  onModeChange: (mode: PascalCliffExperimentMode) => void
+  onResetElevationParameters: () => void
+  onShowGrassChange: (showGrass: boolean) => void
+  showGrass: boolean
+}) {
+  const CopyIcon = copyStatus === 'copied' ? Check : Copy
+  const copyLabel = copyStatus === 'copied' ? 'Copied' : copyStatus === 'failed' ? 'Failed' : 'Copy'
+
+  return (
+    <section className="pointer-events-auto absolute left-4 top-4 z-10 max-h-[40vh] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-white/12 bg-slate-950/78 px-3 py-3 text-xs text-slate-100 shadow-2xl shadow-black/25 backdrop-blur sm:max-h-[calc(100vh-2rem)]">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="font-medium uppercase tracking-[0.16em] text-slate-300">Cliff Lab</div>
+        <div className="flex items-center gap-1.5">
+          <button
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/14 bg-white/8 px-2 text-[11px] font-medium text-slate-200 transition hover:bg-white/14"
+            onClick={onCopy}
+            type="button"
+          >
+            <CopyIcon aria-hidden className="size-3.5" />
+            {copyLabel}
+          </button>
+          <button
+            className="h-7 rounded-md border border-white/14 bg-white/8 px-2 text-[11px] font-medium text-slate-200 transition hover:bg-white/14"
+            onClick={onResetElevationParameters}
+            type="button"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Cliff experiment mode">
+        {PASCAL_CLIFF_EXPERIMENT_MODES.map((option) => (
+          <button
+            aria-pressed={mode === option.id}
+            className={`h-8 rounded-md border px-2.5 text-[11px] font-medium transition ${
+              mode === option.id
+                ? 'border-cyan-300/80 bg-cyan-300 text-slate-950'
+                : 'border-white/14 bg-white/8 text-slate-200 hover:bg-white/14'
+            }`}
+            key={option.id}
+            onClick={() => onModeChange(option.id)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {PASCAL_CLIFF_TUNING_SLIDERS.map((slider) => (
+          <label className="grid gap-1" key={slider.key}>
+            <span className="flex items-center justify-between gap-3 text-[11px] font-medium text-slate-300">
+              <span>{slider.label}</span>
+              <span className="tabular-nums text-slate-100">
+                {formatPascalCliffSliderValue(elevationParameters[slider.key], slider.step)}
+              </span>
+            </span>
+            <input
+              aria-label={slider.label}
+              className="h-4 w-full accent-cyan-300"
+              data-cliff-slider={slider.key}
+              max={slider.max}
+              min={slider.min}
+              onInput={(event) =>
+                onElevationParameterChange(slider.key, Number(event.currentTarget.value))
+              }
+              step={slider.step}
+              type="range"
+              value={elevationParameters[slider.key]}
+            />
+          </label>
+        ))}
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-[11px] font-medium text-slate-300">
+        <input
+          checked={showGrass}
+          className="size-3.5 accent-cyan-300"
+          onChange={(event) => onShowGrassChange(event.currentTarget.checked)}
+          type="checkbox"
+        />
+        Grass layer
+      </label>
+    </section>
+  )
+}
+
+function formatPascalCliffSliderValue(value: number, step: number) {
+  if (step >= 1) return Math.round(value).toString()
+  return Math.abs(value) >= 10 ? value.toFixed(1) : value.toFixed(2)
+}
+
+function PascalCliffFamilyColorCubes({
+  familyVariationCount,
+  surface,
+}: {
+  familyVariationCount: number
+  surface: PascalWaterLandSurface
+}) {
+  const families = useMemo(
+    () => pascalCliffExperimentFamilyRamp(familyVariationCount),
+    [familyVariationCount],
+  )
+  const geometries = pascalCliffFamilyCubeGeometries(families)
+  const placement = useMemo(
+    () => createPascalCliffFamilyCubePlacement(surface, families.length),
+    [families.length, surface],
+  )
+
+  if (!placement) {
+    return null
+  }
+
+  return (
+    <group renderOrder={90}>
+      {geometries.map((geometry, index) => {
+        const position = placement.positions[index]
+        if (!position) {
+          return null
+        }
+
+        return (
+          <mesh
+            key={`cliff-family-color-cube-${index}`}
+            position={position}
+            renderOrder={90}
+            rotation={[0, placement.rotationY, 0]}
+          >
+            <primitive attach="geometry" dispose={null} object={geometry} />
+            <meshBasicMaterial side={DoubleSide} toneMapped={false} vertexColors />
+          </mesh>
+        )
+      })}
+    </group>
+  )
+}
+
+function PascalCliffExperimentOverlay({
+  elevationParameters,
+  mode,
+  surface,
+}: {
+  elevationParameters: IslandElevationParameters
+  mode: PascalCliffExperimentMode
+  surface: PascalWaterLandSurface
+}) {
+  const geometry = useMemo(() => {
+    if (mode === 'baseline') {
+      return null
+    }
+    return createPascalCliffExperimentGeometry(surface, mode, elevationParameters)
+  }, [elevationParameters, mode, surface])
+  const plateauShape = useMemo(
+    () => createPascalCliffShape(surface.plateauPoints),
+    [surface.plateauPoints],
+  )
+  usePascalCliffGeometryLifecycle(geometry)
+
+  if (!geometry) {
+    return null
+  }
+
+  return (
+    <group renderOrder={80}>
+      <mesh renderOrder={82}>
+        <primitive attach="geometry" dispose={null} object={geometry} />
+        <meshStandardMaterial
+          metalness={0.01}
+          polygonOffset
+          polygonOffsetFactor={-2}
+          polygonOffsetUnits={-2}
+          roughness={0.96}
+          side={DoubleSide}
+          vertexColors
+        />
+      </mesh>
+      <mesh
+        position={[0, surface.plateauElevation + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT, 0]}
+        renderOrder={81}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <shapeGeometry args={[plateauShape]} />
+        <meshStandardMaterial color="#75a84d" roughness={0.9} side={DoubleSide} />
+      </mesh>
+    </group>
+  )
+}
+
+function createPascalCliffFamilyCubeGeometry(family: PascalCliffExperimentFamily) {
+  const half = PASCAL_CLIFF_FAMILY_CUBE_SIZE / 2
+  const positions: number[] = []
+  const colors: number[] = []
+  const indices: number[] = []
+
+  const addFace = (
+    vertices: readonly PascalCliffExperimentVector[],
+    color: PascalCliffExperimentColor,
+  ) => {
+    const base = positions.length / 3
+    for (const vertex of vertices) {
+      positions.push(vertex.x, vertex.y, vertex.z)
+      colors.push(color[0], color[1], color[2])
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
+  }
+
+  addFace(
+    [
+      { x: -half, y: half, z: -half },
+      { x: half, y: half, z: -half },
+      { x: half, y: half, z: half },
+      { x: -half, y: half, z: half },
+    ],
+    family.light,
+  )
+  addFace(
+    [
+      { x: -half, y: -half, z: half },
+      { x: half, y: -half, z: half },
+      { x: half, y: half, z: half },
+      { x: -half, y: half, z: half },
+    ],
+    family.dim,
+  )
+  addFace(
+    [
+      { x: half, y: -half, z: -half },
+      { x: half, y: -half, z: half },
+      { x: half, y: half, z: half },
+      { x: half, y: half, z: -half },
+    ],
+    family.shade,
+  )
+  addFace(
+    [
+      { x: -half, y: -half, z: half },
+      { x: -half, y: -half, z: -half },
+      { x: -half, y: half, z: -half },
+      { x: -half, y: half, z: half },
+    ],
+    family.shade,
+  )
+  addFace(
+    [
+      { x: half, y: -half, z: -half },
+      { x: -half, y: -half, z: -half },
+      { x: -half, y: half, z: -half },
+      { x: half, y: half, z: -half },
+    ],
+    family.dim,
+  )
+  addFace(
+    [
+      { x: -half, y: -half, z: -half },
+      { x: half, y: -half, z: -half },
+      { x: half, y: -half, z: half },
+      { x: -half, y: -half, z: half },
+    ],
+    family.shade,
+  )
+
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
+  geometry.setIndex(indices)
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+function pascalCliffFamilyCubeGeometries(
+  families: readonly PascalCliffExperimentFamily[],
+): readonly BufferGeometry[] {
+  const cached = PASCAL_CLIFF_FAMILY_CUBE_GEOMETRY_CACHE.get(families)
+  if (cached) return cached
+  const geometries = families.map(createPascalCliffFamilyCubeGeometry)
+  PASCAL_CLIFF_FAMILY_CUBE_GEOMETRY_CACHE.set(families, geometries)
+  return geometries
+}
+
+function createPascalCliffFamilyCubePlacement(
+  surface: PascalWaterLandSurface,
+  familyCount: number,
+): {
+  positions: [number, number, number][]
+  rotationY: number
+} | null {
+  const points = openPascalCliffRing(surface.plateauPoints)
+  if (points.length < 3) {
+    return null
+  }
+
+  const center = centerPascalCliffPoints(points)
+  const cameraOutward = normalizePascalCliffPoint2(
+    PASCAL_GRASS_WATER_CAMERA_POSITION[0] - PASCAL_GRASS_WATER_CAMERA_TARGET[0],
+    PASCAL_GRASS_WATER_CAMERA_POSITION[2] - PASCAL_GRASS_WATER_CAMERA_TARGET[2],
+  )
+  const tangent = { x: cameraOutward.z, z: -cameraOutward.x }
+  const radius = averagePascalCliffPointRadius(points, center)
+  const forwardOffset = Math.min(Math.max(radius * 0.42, 6), Math.max(6, radius * 0.62))
+  const baseY =
+    surface.plateauElevation + PASCAL_CLIFF_FAMILY_CUBE_LIFT + PASCAL_CLIFF_FAMILY_CUBE_SIZE / 2
+  const positions = Array.from({ length: familyCount }, (_, index) => {
+    const sideOffset = (index - (familyCount - 1) / 2) * PASCAL_CLIFF_FAMILY_CUBE_SPACING
+    return [
+      center.x + cameraOutward.x * forwardOffset + tangent.x * sideOffset,
+      baseY,
+      center.z + cameraOutward.z * forwardOffset + tangent.z * sideOffset,
+    ] as [number, number, number]
+  })
+
+  return {
+    positions,
+    rotationY: Math.atan2(cameraOutward.x, cameraOutward.z),
+  }
 }
 
 function PascalGrassWaterCameraRig() {
   const camera = useThree((state) => state.camera)
   const invalidate = useThree((state) => state.invalidate)
+  const size = useThree((state) => state.size)
   const target = useMemo(() => new Vector3(...PASCAL_GRASS_WATER_CAMERA_TARGET), [])
 
   useEffect(() => {
+    const aspect = size.width / Math.max(size.height, 1)
+    const responsiveZoom = Math.max(
+      PASCAL_GRASS_WATER_CAMERA_MIN_ZOOM,
+      Math.min(
+        PASCAL_GRASS_WATER_CAMERA_ZOOM,
+        PASCAL_GRASS_WATER_CAMERA_ZOOM * (aspect / PASCAL_GRASS_WATER_CAMERA_REFERENCE_ASPECT),
+      ),
+    )
+
     camera.position.set(...PASCAL_GRASS_WATER_CAMERA_POSITION)
     camera.lookAt(target)
     if ('zoom' in camera && typeof camera.zoom === 'number') {
-      camera.zoom = PASCAL_GRASS_WATER_CAMERA_ZOOM
+      camera.zoom = responsiveZoom
     }
     camera.updateProjectionMatrix()
     invalidate()
     renderScheduler.requestFrame('camera:move')
-  }, [camera, invalidate, target])
+  }, [camera, invalidate, size.height, size.width, target])
 
   return (
     <OrbitControls
@@ -152,18 +1071,13 @@ function PascalGrassWaterCameraRig() {
   )
 }
 
-function createPascalGrassWaterSceneGraph(): {
-  landSurface: PascalWaterLandSurface
+function createPascalGrassWaterSceneGraph(elevationParameters: IslandElevationParameters): {
   sceneGraph: SceneGraph
+  shorelinePoints: PascalWaterLandSurface['shorelinePoints']
   waterNode: PascalWaterNode
 } {
   const island = generateWaterLabIsland(WATER_LAB_DEFAULT_ISLAND_PARAMETERS)
   const shorelinePoints = createPascalWaterSmoothedPerimeter(island.perimeter.points)
-  const landSurface = createPascalWaterLandSurface({
-    elevationParameters: WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
-    shorelinePoints,
-    waterPlaneSize: WATER_PLANE_SIZE,
-  })
   const waterNode = PascalWaterNode.parse({
     name: 'Pascal Grass Water',
     parentId: PASCAL_GRASS_WATER_LEVEL_ID,
@@ -174,7 +1088,7 @@ function createPascalGrassWaterSceneGraph(): {
       points: [...island.perimeter.points],
     },
     fieldParameters: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
-    elevationParameters: WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
+    elevationParameters,
     materialParameters: {
       ...LANDRUSH_WATER_SURFACE_PARAMETERS,
       depthExponent: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthExponent,
@@ -211,7 +1125,7 @@ function createPascalGrassWaterSceneGraph(): {
   }
 
   return {
-    landSurface,
+    shorelinePoints,
     waterNode,
     sceneGraph: {
       rootNodeIds: [PASCAL_GRASS_WATER_SITE_ID],
@@ -222,7 +1136,7 @@ function createPascalGrassWaterSceneGraph(): {
           type: 'site',
           name: 'Pascal Grass Water Site',
           parentId: null,
-          visible: true,
+          visible: false,
           metadata: { source: 'pascal-grass-water-debug' },
           polygon: {
             points: sitePolygon,
@@ -247,4 +1161,405 @@ function createPascalGrassWaterSceneGraph(): {
       },
     },
   }
+}
+
+function createPascalCliffExperimentGeometry(
+  surface: PascalWaterLandSurface,
+  mode: Exclude<PascalCliffExperimentMode, 'baseline'>,
+  elevationParameters: IslandElevationParameters,
+): BufferGeometry {
+  const outer = openPascalCliffRing(surface.slopeStartPoints)
+  const inner = openPascalCliffRing(surface.plateauPoints)
+  const pointCount = Math.min(outer.length, inner.length)
+  const geometry = new BufferGeometry()
+
+  if (pointCount < 3) {
+    return geometry
+  }
+
+  const rowCount = mode === 'rock-field' ? 6 : 9
+  const positions: number[] = []
+  const colors: number[] = []
+  const uvs: number[] = []
+  const grid: PascalCliffExperimentGridPoint[][] = []
+  const stations = createPascalCliffStations(outer, inner, pointCount)
+  const families = pascalCliffExperimentFamilyRamp(
+    elevationParameters.cliffColorFamilyVariationCount,
+  )
+  const topElevation = surface.plateauElevation + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT
+  const toeElevation = PASCAL_WATER_LOW_ELEVATION + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT
+
+  for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+    const outerPoint = outer[pointIndex]!
+    const innerPoint = inner[pointIndex]!
+    const outwardX = outerPoint.x - innerPoint.x
+    const outwardZ = outerPoint.z - innerPoint.z
+    const width = Math.max(Math.hypot(outwardX, outwardZ), 0.001)
+    const normalX = outwardX / width
+    const normalZ = outwardZ / width
+    const station = stations[pointIndex] ?? 0
+    const sector = hashUnit(Math.floor(station / 9.5), 18.73)
+    const broadPulse = Math.sin(station * 0.23 + sector * Math.PI * 2)
+    const column: PascalCliffExperimentGridPoint[] = []
+
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+      const ratio = rowIndex / (rowCount - 1)
+      const heightRatio = smoothstep(0, 1, ratio)
+      const baseX = lerp(outerPoint.x, innerPoint.x, ratio)
+      const baseZ = lerp(outerPoint.z, innerPoint.z, ratio)
+      const ledge =
+        mode === 'rock-field' ? 0 : createPascalCliffLedgeOffset(ratio, width, elevationParameters)
+      const fracture =
+        mode === 'rock-field' ? 0 : (hashUnit(pointIndex * 3.13, rowIndex * 7.7) - 0.5) * 0.16
+      const roughOutward =
+        mode === 'rock-field'
+          ? 0
+          : (Math.sin(station * 0.41 + ratio * 7.9) * 0.12 + broadPulse * 0.08 + fracture) *
+            (1 - Math.abs(ratio - 0.5))
+      const lift =
+        mode === 'rock-field'
+          ? 0
+          : Math.sin(station * 0.34 + ratio * 11.2) * 0.08 * (1 - Math.abs(ratio - 0.5))
+      const x = baseX + normalX * (ledge + roughOutward)
+      const y = lerp(toeElevation, topElevation, heightRatio) + lift
+      const z = baseZ + normalZ * (ledge + roughOutward)
+
+      column.push({
+        outwardX: normalX,
+        outwardZ: normalZ,
+        station,
+        u: station / 6,
+        v: heightRatio * 2,
+        x,
+        y,
+        z,
+      })
+    }
+
+    grid.push(column)
+  }
+
+  for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+    const nextPointIndex = (pointIndex + 1) % pointCount
+    for (let rowIndex = 0; rowIndex < rowCount - 1; rowIndex += 1) {
+      const a = grid[pointIndex]?.[rowIndex]
+      const b = grid[nextPointIndex]?.[rowIndex]
+      const c = grid[nextPointIndex]?.[rowIndex + 1]
+      const d = grid[pointIndex]?.[rowIndex + 1]
+      if (!(a && b && c && d)) continue
+
+      const family = pickPascalCliffExperimentFamily(
+        (a.station + b.station) * 0.5,
+        families,
+        elevationParameters.cliffColorFamilyDistribution,
+      )
+      const hint = {
+        x: a.outwardX + b.outwardX,
+        y: 0.2,
+        z: a.outwardZ + b.outwardZ,
+      }
+      addPascalCliffExperimentTriangle(positions, colors, uvs, [a, b, d], hint, family)
+      addPascalCliffExperimentTriangle(positions, colors, uvs, [b, c, d], hint, family)
+    }
+  }
+
+  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
+  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function createPascalCliffLedgeOffset(
+  ratio: number,
+  width: number,
+  elevationParameters: IslandElevationParameters,
+): number {
+  const lowerShelf = Math.exp(-(((ratio - 0.24) / 0.08) ** 2)) * 0.18
+  const undercut = Math.exp(-(((ratio - 0.48) / 0.12) ** 2)) * -0.22
+  const upperLip = Math.exp(-(((ratio - 0.78) / 0.1) ** 2)) * 0.16
+  const averageExtrusion =
+    (elevationParameters.cliffLayer1ExtrusionAverageMeters +
+      elevationParameters.cliffLayer2ExtrusionAverageMeters +
+      elevationParameters.cliffLayer3ExtrusionAverageMeters) /
+    3
+  return (lowerShelf + undercut + upperLip) * Math.min(width, 4.2 + averageExtrusion)
+}
+
+function addPascalCliffExperimentTriangle(
+  positions: number[],
+  colors: number[],
+  uvs: number[],
+  vertices: readonly [
+    PascalCliffExperimentGridPoint,
+    PascalCliffExperimentGridPoint,
+    PascalCliffExperimentGridPoint,
+  ],
+  hint: PascalCliffExperimentVector,
+  family: PascalCliffExperimentFamily,
+) {
+  let normal = normalForPascalCliffExperimentTriangle(vertices)
+  let oriented = vertices
+  if (dotPascalCliffExperimentVector(normal, hint) < 0) {
+    oriented = [vertices[0], vertices[2], vertices[1]]
+    normal = { x: -normal.x, y: -normal.y, z: -normal.z }
+  }
+
+  const color = pascalCliffExperimentExposureColor(family, normal)
+  for (const vertex of oriented) {
+    positions.push(vertex.x, vertex.y, vertex.z)
+    colors.push(color[0], color[1], color[2])
+    uvs.push(vertex.u, vertex.v)
+  }
+}
+
+function pascalCliffExperimentExposureColor(
+  family: PascalCliffExperimentFamily,
+  normal: PascalCliffExperimentVector,
+): PascalCliffExperimentColor {
+  if (normal.y >= PASCAL_CLIFF_EXPERIMENT_LIGHT_NORMAL_Y) {
+    return family.light
+  }
+  if (normal.y <= PASCAL_CLIFF_EXPERIMENT_SHADE_NORMAL_Y) {
+    return family.shade
+  }
+  return family.dim
+}
+
+function createPascalCliffExperimentFamilyRamp(
+  variationCount: number,
+): readonly PascalCliffExperimentFamily[] {
+  const first = PASCAL_CLIFF_EXPERIMENT_FAMILIES[0]!
+  const last = PASCAL_CLIFF_EXPERIMENT_FAMILIES[1]!
+  const familyCount = variationCount + 2
+  const families = Array.from({ length: familyCount }, (_, index) => {
+    const t = index / Math.max(1, familyCount - 1)
+    return {
+      dim: mixPascalCliffExperimentSrgbColor(first.dim, last.dim, t),
+      light: mixPascalCliffExperimentSrgbColor(first.light, last.light, t),
+      shade: mixPascalCliffExperimentSrgbColor(first.shade, last.shade, t),
+      weight: lerp(first.weight, last.weight, t),
+    }
+  })
+  const totalWeight = families.reduce((total, family) => total + family.weight, 0)
+  return families.map((family) => ({ ...family, weight: family.weight / totalWeight }))
+}
+
+function pascalCliffExperimentFamilyRamp(variationCount: number) {
+  const index = Math.min(
+    PASCAL_CLIFF_MAX_FAMILY_VARIATIONS,
+    Math.max(0, Math.round(variationCount)),
+  )
+  return PASCAL_CLIFF_EXPERIMENT_FAMILY_RAMPS[index] ?? PASCAL_CLIFF_EXPERIMENT_FAMILIES
+}
+
+function mixPascalCliffExperimentSrgbColor(
+  first: PascalCliffExperimentColor,
+  second: PascalCliffExperimentColor,
+  t: number,
+): PascalCliffExperimentColor {
+  return [0, 1, 2].map((channel) => {
+    const firstSrgb = pascalCliffExperimentLinearChannelToSrgb(first[channel] ?? 0)
+    const secondSrgb = pascalCliffExperimentLinearChannelToSrgb(second[channel] ?? 0)
+    return pascalCliffExperimentSrgbChannelToLinear(lerp(firstSrgb, secondSrgb, t))
+  }) as PascalCliffExperimentColor
+}
+
+function pascalCliffExperimentLinearChannelToSrgb(value: number) {
+  const clamped = Math.min(1, Math.max(0, value))
+  return clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * clamped ** (1 / 2.4) - 0.055
+}
+
+function pickPascalCliffExperimentFamily(
+  station: number,
+  families: readonly PascalCliffExperimentFamily[],
+  distribution: number,
+): PascalCliffExperimentFamily {
+  const rockIndex = Math.floor(station / 5.75)
+  const pick = pascalCliffExperimentFamilyDistributionSample(rockIndex, 41.19, distribution)
+  let accumulated = 0
+  for (const family of families) {
+    accumulated += family.weight
+    if (pick <= accumulated) {
+      return family
+    }
+  }
+  return families[0]!
+}
+
+function pascalCliffExperimentFamilyDistributionSample(
+  seed: number,
+  salt: number,
+  distribution: number,
+) {
+  const uniform = hashUnit(seed, salt)
+  const weight = Number.isFinite(distribution) ? clamp01(distribution) : 0
+  if (weight <= 0) return uniform
+
+  const centered =
+    (hashUnit(seed, salt + 17.17) + hashUnit(seed, salt + 31.31) + hashUnit(seed, salt + 43.43)) / 3
+  return lerp(uniform, centered, weight)
+}
+
+function normalForPascalCliffExperimentTriangle(
+  vertices: readonly [
+    PascalCliffExperimentVector,
+    PascalCliffExperimentVector,
+    PascalCliffExperimentVector,
+  ],
+): PascalCliffExperimentVector {
+  const [first, second, third] = vertices
+  const normal = crossPascalCliffExperimentVector(
+    subtractPascalCliffExperimentVector(second, first),
+    subtractPascalCliffExperimentVector(third, first),
+  )
+  const length = Math.hypot(normal.x, normal.y, normal.z)
+  if (length <= 0.000001) {
+    return { x: 0, y: 1, z: 0 }
+  }
+  return {
+    x: normal.x / length,
+    y: normal.y / length,
+    z: normal.z / length,
+  }
+}
+
+function subtractPascalCliffExperimentVector(
+  first: PascalCliffExperimentVector,
+  second: PascalCliffExperimentVector,
+): PascalCliffExperimentVector {
+  return {
+    x: first.x - second.x,
+    y: first.y - second.y,
+    z: first.z - second.z,
+  }
+}
+
+function crossPascalCliffExperimentVector(
+  first: PascalCliffExperimentVector,
+  second: PascalCliffExperimentVector,
+): PascalCliffExperimentVector {
+  return {
+    x: first.y * second.z - first.z * second.y,
+    y: first.z * second.x - first.x * second.z,
+    z: first.x * second.y - first.y * second.x,
+  }
+}
+
+function dotPascalCliffExperimentVector(
+  first: PascalCliffExperimentVector,
+  second: PascalCliffExperimentVector,
+) {
+  return first.x * second.x + first.y * second.y + first.z * second.z
+}
+
+function createPascalCliffStations(
+  outer: readonly { x: number; z: number }[],
+  inner: readonly { x: number; z: number }[],
+  pointCount: number,
+): number[] {
+  const stations = new Array<number>(pointCount).fill(0)
+  for (let pointIndex = 1; pointIndex < pointCount; pointIndex += 1) {
+    const previousOuter = outer[pointIndex - 1]!
+    const previousInner = inner[pointIndex - 1]!
+    const currentOuter = outer[pointIndex]!
+    const currentInner = inner[pointIndex]!
+    const previous = {
+      x: (previousOuter.x + previousInner.x) * 0.5,
+      z: (previousOuter.z + previousInner.z) * 0.5,
+    }
+    const current = {
+      x: (currentOuter.x + currentInner.x) * 0.5,
+      z: (currentOuter.z + currentInner.z) * 0.5,
+    }
+    stations[pointIndex] =
+      (stations[pointIndex - 1] ?? 0) + Math.hypot(current.x - previous.x, current.z - previous.z)
+  }
+  return stations
+}
+
+function createPascalCliffShape(points: readonly { x: number; z: number }[]): Shape {
+  const shape = new Shape()
+  const first = points[0]
+  if (!first) {
+    return shape
+  }
+
+  shape.moveTo(first.x, -first.z)
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index]
+    if (point) {
+      shape.lineTo(point.x, -point.z)
+    }
+  }
+  shape.closePath()
+  return shape
+}
+
+function openPascalCliffRing<T extends { x: number; z: number }>(
+  points: readonly T[],
+): readonly T[] {
+  if (points.length < 2) {
+    return points
+  }
+  const first = points[0]!
+  const last = points[points.length - 1]!
+  return Math.hypot(first.x - last.x, first.z - last.z) < 0.001 ? points.slice(0, -1) : points
+}
+
+function centerPascalCliffPoints(points: readonly { x: number; z: number }[]) {
+  let x = 0
+  let z = 0
+  for (const point of points) {
+    x += point.x
+    z += point.z
+  }
+  return {
+    x: x / Math.max(1, points.length),
+    z: z / Math.max(1, points.length),
+  }
+}
+
+function averagePascalCliffPointRadius(
+  points: readonly { x: number; z: number }[],
+  center: { x: number; z: number },
+) {
+  if (points.length === 0) {
+    return 0
+  }
+
+  let radius = 0
+  for (const point of points) {
+    radius += Math.hypot(point.x - center.x, point.z - center.z)
+  }
+  return radius / points.length
+}
+
+function normalizePascalCliffPoint2(x: number, z: number) {
+  const length = Math.hypot(x, z)
+  if (length <= 0.000001) {
+    return { x: 0, z: 1 }
+  }
+  return { x: x / length, z: z / length }
+}
+
+function lerp(start: number, end: number, ratio: number): number {
+  return start + (end - start) * ratio
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  const ratio = clamp01((value - edge0) / (edge1 - edge0))
+  return ratio * ratio * (3 - 2 * ratio)
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value))
+}
+
+function hashUnit(x: number, y: number): number {
+  return fract(Math.sin(x * 127.1 + y * 311.7) * 43758.5453123)
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value)
 }

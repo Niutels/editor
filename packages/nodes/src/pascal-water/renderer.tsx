@@ -5,12 +5,13 @@ import { renderScheduler } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  DoubleSide,
   type DataTexture,
+  DoubleSide,
   type Group,
   LineBasicMaterial,
   type Material,
   MeshBasicMaterial,
+  ShapeGeometry,
   Line as ThreeLine,
 } from 'three'
 import type { WebGPURenderer } from 'three/webgpu'
@@ -23,7 +24,9 @@ import {
 } from '../landrush-world/water-surface'
 import {
   createPascalWaterBounds,
+  createPascalWaterCliffFootprintGeometry,
   createPascalWaterCliffRingGeometry,
+  createPascalWaterCliffSandCoveragePerimeter,
   createPascalWaterLandSurface,
   lineLoopGeometryFromPoints,
   PASCAL_WATER_LOW_ELEVATION,
@@ -116,16 +119,74 @@ type PascalWaterDisposableGpuResource = {
   dispose: () => void
 }
 
+type PascalWaterGpuQueue = {
+  onSubmittedWorkDone?: () => Promise<void>
+}
+
+type PascalWaterPendingGpuDisposal = {
+  cancelled: boolean
+}
+
+const pascalWaterPendingGpuDisposals = new WeakMap<
+  PascalWaterDisposableGpuResource,
+  PascalWaterPendingGpuDisposal
+>()
+
+function usePascalWaterGpuResourceLifecycle(
+  resource: PascalWaterDisposableGpuResource | null | undefined,
+  renderer?: unknown,
+) {
+  useEffect(() => {
+    if (!resource) return
+
+    // Development effect replay retains memoized resources after invoking cleanup once.
+    const pendingDisposal = pascalWaterPendingGpuDisposals.get(resource)
+    if (pendingDisposal) {
+      pendingDisposal.cancelled = true
+      pascalWaterPendingGpuDisposals.delete(resource)
+    }
+
+    return () => disposePascalWaterGpuResourceLater(resource, renderer)
+  }, [renderer, resource])
+}
+
 function disposePascalWaterGpuResourceLater(
   resource: PascalWaterDisposableGpuResource | null | undefined,
+  renderer?: unknown,
 ) {
   if (!resource) return
-  if (typeof requestAnimationFrame !== 'function') {
+  const pendingDisposal: PascalWaterPendingGpuDisposal = { cancelled: false }
+  pascalWaterPendingGpuDisposals.set(resource, pendingDisposal)
+  const dispose = () => {
+    if (
+      pendingDisposal.cancelled ||
+      pascalWaterPendingGpuDisposals.get(resource) !== pendingDisposal
+    ) {
+      return
+    }
+    pascalWaterPendingGpuDisposals.delete(resource)
     resource.dispose()
+  }
+  const disposeAfterRender = () => {
+    const queue = (
+      renderer as { backend?: { device?: { queue?: PascalWaterGpuQueue } } } | null | undefined
+    )?.backend?.device?.queue
+    if (queue?.onSubmittedWorkDone) {
+      void queue.onSubmittedWorkDone().then(dispose, dispose)
+      return
+    }
+    dispose()
+  }
+  disposePascalWaterGpuResourceAfterFrames(disposeAfterRender)
+}
+
+function disposePascalWaterGpuResourceAfterFrames(dispose: () => void) {
+  if (typeof requestAnimationFrame !== 'function') {
+    dispose()
     return
   }
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => resource.dispose())
+    requestAnimationFrame(dispose)
   })
 }
 
@@ -202,7 +263,9 @@ function loadPascalWaterDebugFieldTextureData(
     const worker = new Worker(PASCAL_WATER_FIELD_WORKER_URL)
 
     worker.onmessage = (
-      event: MessageEvent<PascalWaterFieldWorkerCompleteMessage | PascalWaterFieldWorkerErrorMessage>,
+      event: MessageEvent<
+        PascalWaterFieldWorkerCompleteMessage | PascalWaterFieldWorkerErrorMessage
+      >,
     ) => {
       const message = event.data
       if (!message || message.id !== cacheKey) return
@@ -351,28 +414,27 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     planeSize: node.planeSize,
     resolution: node.terrainFieldResolution,
   })
-  const waterField = useMemo(
-    () => {
-      if (waterFieldDebugMode === PASCAL_WATER_DEBUG_FIELD_WORKER_MODE) return debugWaterField
+  const waterField = useMemo(() => {
+    if (waterFieldDebugMode === PASCAL_WATER_DEBUG_FIELD_WORKER_MODE) return debugWaterField
 
-      return measurePascalWaterRendererStartup('setup.pascal-water.renderer.water-field-texture', () =>
+    return measurePascalWaterRendererStartup(
+      'setup.pascal-water.renderer.water-field-texture',
+      () =>
         createPascalWaterFieldTexture({
           parameters: waterFieldTextureParameters,
           perimeter: shorelinePoints,
           planeSize: node.planeSize,
           resolution: node.terrainFieldResolution,
         }),
-      )
-    },
-    [
-      debugWaterField,
-      node.planeSize,
-      node.terrainFieldResolution,
-      shorelinePoints,
-      waterFieldDebugMode,
-      waterFieldTextureParameters,
-    ],
-  )
+    )
+  }, [
+    debugWaterField,
+    node.planeSize,
+    node.terrainFieldResolution,
+    shorelinePoints,
+    waterFieldDebugMode,
+    waterFieldTextureParameters,
+  ])
   const waterBounds = useMemo(() => createPascalWaterBounds(node.planeSize), [node.planeSize])
   const materialParameters = useMemo(
     () =>
@@ -428,6 +490,9 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     () => shapeFromPoints(landSurface.plateauPoints),
     [landSurface.plateauPoints],
   )
+  const beachGeometry = useMemo(() => new ShapeGeometry(beachShape), [beachShape])
+  const islandGeometry = useMemo(() => new ShapeGeometry(islandShape), [islandShape])
+  const plateauGeometry = useMemo(() => new ShapeGeometry(plateauShape), [plateauShape])
   const cliffGeometry = useMemo(
     () =>
       createPascalWaterCliffRingGeometry(
@@ -443,6 +508,32 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
       landSurface.slopeStartPoints,
       node.elevationParameters,
     ],
+  )
+  const cliffSandCoveragePoints = useMemo(
+    () =>
+      createPascalWaterCliffSandCoveragePerimeter({
+        innerElevation: landSurface.plateauElevation,
+        outerElevation: PASCAL_WATER_LOW_ELEVATION,
+        parameters: node.elevationParameters,
+        plateauPoints: landSurface.plateauPoints,
+        shorelinePoints,
+        slopeStartPoints: landSurface.slopeStartPoints,
+      }),
+    [
+      landSurface.plateauElevation,
+      landSurface.plateauPoints,
+      landSurface.slopeStartPoints,
+      node.elevationParameters,
+      shorelinePoints,
+    ],
+  )
+  const cliffSandCoverageGeometry = useMemo(
+    () => new ShapeGeometry(shapeFromPoints(cliffSandCoveragePoints)),
+    [cliffSandCoveragePoints],
+  )
+  const cliffSandFootprintGeometry = useMemo(
+    () => createPascalWaterCliffFootprintGeometry(cliffGeometry),
+    [cliffGeometry],
   )
   const useSmoothCliffMaterial =
     Math.max(
@@ -470,11 +561,11 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     return line
   }, [depthReferenceGeometry, depthReferenceMaterial])
 
-  useEffect(() => () => disposePascalWaterGpuResourceLater(waterField), [waterField])
-  useEffect(() => {
-    if (waterMaterial === PASCAL_WATER_FALLBACK_MATERIAL) return
-    return () => disposePascalWaterGpuResourceLater(waterMaterial)
-  }, [waterMaterial])
+  usePascalWaterGpuResourceLifecycle(waterField, renderer)
+  usePascalWaterGpuResourceLifecycle(
+    waterMaterial === PASCAL_WATER_FALLBACK_MATERIAL ? null : waterMaterial,
+    renderer,
+  )
   useEffect(() => {
     // TSL/WebGPU water binds generated noise render targets more reliably after mount.
     setMaterialReady(true)
@@ -499,15 +590,14 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     appliedMaterialRef.current = waterMaterial as LandrushWaterSurfaceMaterial
     appliedMaterialParametersRef.current = materialParameters
   }, [materialParameters, waterMaterial])
-  useEffect(() => () => disposePascalWaterGpuResourceLater(cliffGeometry), [cliffGeometry])
-  useEffect(
-    () => () => disposePascalWaterGpuResourceLater(depthReferenceGeometry),
-    [depthReferenceGeometry],
-  )
-  useEffect(
-    () => () => disposePascalWaterGpuResourceLater(depthReferenceMaterial),
-    [depthReferenceMaterial],
-  )
+  usePascalWaterGpuResourceLifecycle(beachGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(islandGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(plateauGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(cliffGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(cliffSandCoverageGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(cliffSandFootprintGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(depthReferenceGeometry, renderer)
+  usePascalWaterGpuResourceLifecycle(depthReferenceMaterial, renderer)
   useEffect(() => {
     renderScheduler.requestFrame('geometry:changed')
   }, [])
@@ -549,37 +639,44 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
       </mesh>
 
       <mesh position={[0, -0.12, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[beachShape]} />
+        <primitive attach="geometry" object={beachGeometry} />
         <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
       </mesh>
 
       <mesh position={[0, PASCAL_WATER_SAND_ELEVATION, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[islandShape]} />
+        <primitive attach="geometry" object={islandGeometry} />
         <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
       </mesh>
 
       {landSurface.hasElevation ? (
         <>
-          <mesh geometry={cliffGeometry}>
+          <mesh
+            position={[0, PASCAL_WATER_SAND_ELEVATION + 0.002, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <primitive attach="geometry" object={cliffSandCoverageGeometry} />
+            <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
+          </mesh>
+          <mesh position={[0, PASCAL_WATER_SAND_ELEVATION + 0.004, 0]}>
+            <primitive attach="geometry" object={cliffSandFootprintGeometry} />
+            <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
+          </mesh>
+          <mesh>
+            <primitive attach="geometry" object={cliffGeometry} />
             {useSmoothCliffMaterial ? (
               <meshBasicMaterial color="#8f8774" side={DoubleSide} />
             ) : (
-              <meshStandardMaterial
-                color="#ffffff"
-                roughness={0.98}
-                side={DoubleSide}
-                vertexColors
-              />
+              <meshBasicMaterial side={DoubleSide} toneMapped={false} vertexColors />
             )}
           </mesh>
           <mesh position={[0, landSurface.plateauElevation, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <shapeGeometry args={[plateauShape]} />
+            <primitive attach="geometry" object={plateauGeometry} />
             <meshStandardMaterial color="#6f9844" roughness={0.9} side={DoubleSide} />
           </mesh>
         </>
       ) : (
         <mesh position={[0, PASCAL_WATER_LOW_ELEVATION, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <shapeGeometry args={[islandShape]} />
+          <primitive attach="geometry" object={islandGeometry} />
           <meshStandardMaterial color="#6f9844" roughness={0.9} side={DoubleSide} />
         </mesh>
       )}

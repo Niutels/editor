@@ -3,11 +3,42 @@ import type { LandrushIsland } from '@/components/landrush/types'
 import type { WaterFieldParameters } from './water-field-texture'
 
 export type IslandElevationParameters = {
+  cliffAverageSlope: number
   cliffBandMergeThresholdMeters: number
   cliffBlockDepthMaxMeters: number
   cliffBlockDepthMinMeters: number
   cliffColorAverageRatio: number
+  cliffColorFamilyVariationCount: number
+  cliffColorFamilyDistribution: number
   cliffContrast: number
+  cliffLayer1BlockWidthMeters: number
+  cliffLayer1BlockWidthVariationMeters: number
+  cliffLayer1BlockWidthVariationDistribution: number
+  cliffLayer1ExtrusionAverageMeters: number
+  cliffLayer1ExtrusionVariationMeters: number
+  cliffLayer1ExtrusionVariationDistribution: number
+  cliffLayer2AltitudeRatio: number
+  cliffLayer2AltitudeVariation: number
+  cliffLayer2AltitudeVariationDistribution: number
+  cliffLayer2BlockWidthMeters: number
+  cliffLayer2Density: number
+  cliffLayer2BlockWidthVariationMeters: number
+  cliffLayer2BlockWidthVariationDistribution: number
+  cliffLayer2ExtrusionAverageMeters: number
+  cliffLayer2ExtrusionVariationMeters: number
+  cliffLayer2ExtrusionVariationDistribution: number
+  cliffLayer3AltitudeRatio: number
+  cliffLayer3AltitudeVariation: number
+  cliffLayer3AltitudeVariationDistribution: number
+  cliffLayer3BlockWidthMeters: number
+  cliffLayer3Density: number
+  cliffLayer3BlockWidthVariationMeters: number
+  cliffLayer3BlockWidthVariationDistribution: number
+  cliffLayer3ExtrusionAverageMeters: number
+  cliffLayer3ExtrusionVariationMeters: number
+  cliffLayer3ExtrusionVariationDistribution: number
+  cliffSlopeVariation: number
+  cliffSlopeVariationDistribution: number
   cliffToneVariation: number
   contourNoiseFrequency: number
   contourVariationMeters: number
@@ -57,11 +88,42 @@ export const WATER_LAB_DEFAULT_FIELD_PARAMETERS = {
 } satisfies WaterFieldParameters
 
 export const WATER_LAB_DEFAULT_ELEVATION_PARAMETERS = {
+  cliffAverageSlope: 0.42,
   cliffBandMergeThresholdMeters: 3.6,
   cliffBlockDepthMaxMeters: 2.1,
   cliffBlockDepthMinMeters: 0.5,
   cliffColorAverageRatio: 0.75,
+  cliffColorFamilyVariationCount: 0,
+  cliffColorFamilyDistribution: 0,
   cliffContrast: 0.41,
+  cliffLayer1BlockWidthMeters: 5.4,
+  cliffLayer1BlockWidthVariationMeters: 1.8,
+  cliffLayer1BlockWidthVariationDistribution: 0,
+  cliffLayer1ExtrusionAverageMeters: 0.95,
+  cliffLayer1ExtrusionVariationMeters: 0.28,
+  cliffLayer1ExtrusionVariationDistribution: 0,
+  cliffLayer2AltitudeRatio: 0.64,
+  cliffLayer2AltitudeVariation: 0.14,
+  cliffLayer2AltitudeVariationDistribution: 0,
+  cliffLayer2BlockWidthMeters: 4.2,
+  cliffLayer2Density: 1,
+  cliffLayer2BlockWidthVariationMeters: 1.5,
+  cliffLayer2BlockWidthVariationDistribution: 0,
+  cliffLayer2ExtrusionAverageMeters: 0.95,
+  cliffLayer2ExtrusionVariationMeters: 0.28,
+  cliffLayer2ExtrusionVariationDistribution: 0,
+  cliffLayer3AltitudeRatio: 0.36,
+  cliffLayer3AltitudeVariation: 0.12,
+  cliffLayer3AltitudeVariationDistribution: 0,
+  cliffLayer3BlockWidthMeters: 3.1,
+  cliffLayer3Density: 1,
+  cliffLayer3BlockWidthVariationMeters: 1.15,
+  cliffLayer3BlockWidthVariationDistribution: 0,
+  cliffLayer3ExtrusionAverageMeters: 0.95,
+  cliffLayer3ExtrusionVariationMeters: 0.28,
+  cliffLayer3ExtrusionVariationDistribution: 0,
+  cliffSlopeVariation: 0.14,
+  cliffSlopeVariationDistribution: 0,
   cliffToneVariation: 0.35,
   contourNoiseFrequency: 0.08,
   contourVariationMeters: 3.5,
