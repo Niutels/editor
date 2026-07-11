@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./landrush-world/robot": {
+      "types": "./dist/landrush-world/landrush-robot.d.ts",
+      "import": "./dist/landrush-world/landrush-robot.js",
+      "default": "./dist/landrush-world/landrush-robot.js"
     }
   },
   "files": [

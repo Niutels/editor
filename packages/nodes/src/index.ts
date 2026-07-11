@@ -18,9 +18,12 @@ import { guideDefinition } from './guide'
 import { gutterDefinition } from './gutter'
 import { hvacEquipmentDefinition } from './hvac-equipment'
 import { itemDefinition } from './item'
+import { landrushLayoutDefinition } from './landrush-layout'
+import { landrushWorldDefinition } from './landrush-world'
 import { levelDefinition } from './level'
 import { linesetDefinition } from './lineset'
 import { liquidLineDefinition } from './liquid-line'
+import { pascalWaterDefinition } from './pascal-water'
 import { pipeFittingDefinition } from './pipe-fitting'
 import { pipeSegmentDefinition } from './pipe-segment'
 import { pipeTrapDefinition } from './pipe-trap'
@@ -85,6 +88,9 @@ export const builtinPlugin: Plugin = {
     levelDefinition as unknown as AnyNodeDefinition,
     guideDefinition as unknown as AnyNodeDefinition,
     scanDefinition as unknown as AnyNodeDefinition,
+    landrushLayoutDefinition as unknown as AnyNodeDefinition,
+    landrushWorldDefinition as unknown as AnyNodeDefinition,
+    pascalWaterDefinition as unknown as AnyNodeDefinition,
     // Roof-mounted accessories (custom renderer + bespoke roof-event tool).
     boxVentDefinition as unknown as AnyNodeDefinition,
     ridgeVentDefinition as unknown as AnyNodeDefinition,
@@ -130,9 +136,37 @@ export { guideDefinition } from './guide'
 export { gutterDefinition } from './gutter'
 export { hvacEquipmentDefinition } from './hvac-equipment'
 export { itemDefinition } from './item'
+export { landrushLayoutDefinition } from './landrush-layout'
+export { landrushWorldDefinition } from './landrush-world'
+export {
+  createLandrushWaterBodyMaterial,
+  LANDRUSH_WATER_BODY_SURFACE_PARAMETERS,
+  type LandrushWaterBodySurfaceMaterial,
+  type LandrushWaterBodySurfaceParameters,
+} from './landrush-world/water-body-surface'
+export {
+  createLandrushIncomingWaterMaterial,
+  createLandrushWaterMaterial,
+  LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION,
+  LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS,
+  LANDRUSH_WATER_SURFACE_ELEVATION,
+  LANDRUSH_WATER_SURFACE_PARAMETERS,
+  LANDRUSH_WATER_SURFACE_THICKNESS,
+  type LandrushIncomingWaterSurfaceMaterial,
+  type LandrushIncomingWaterSurfaceParameters,
+  type LandrushWaterSurfaceMaterial,
+  type LandrushWaterSurfaceParameters,
+} from './landrush-world/water-surface'
 export { levelDefinition } from './level'
 export { linesetDefinition } from './lineset'
 export { liquidLineDefinition, useLiquidLineToolOptions } from './liquid-line'
+export { pascalWaterDefinition } from './pascal-water'
+export {
+  createPascalWaterLandSurface,
+  PASCAL_WATER_LOW_ELEVATION,
+  type PascalWaterLandSurface,
+} from './pascal-water/surface-geometry'
+export { createPascalWaterSmoothedPerimeter } from './pascal-water/water-field'
 export { pipeFittingDefinition } from './pipe-fitting'
 export { pipeSegmentDefinition } from './pipe-segment'
 export { pipeTrapDefinition } from './pipe-trap'

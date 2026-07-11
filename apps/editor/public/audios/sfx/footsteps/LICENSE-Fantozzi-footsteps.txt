@@ -1,0 +1,8 @@
+Fantozzi's Footsteps - Grass/Sand & Stone
+
+Author: Fantozzi
+Source: https://opengameart.org/content/fantozzis-footsteps-grasssand-stone
+License: CC0 1.0 Universal Public Domain Dedication
+
+The sand-l*.ogg, sand-r*.ogg, stone-l*.ogg, and stone-r*.ogg files in this
+directory are copied from the original OGG files in Fantozzi-footsteps.7z.

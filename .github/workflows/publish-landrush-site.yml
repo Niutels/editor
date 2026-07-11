@@ -1,0 +1,90 @@
+name: Publish Landrush site
+
+on:
+  push:
+    branches:
+      - pascal-landrush
+  workflow_dispatch:
+
+concurrency:
+  group: publish-landrush-site-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'Niutels/editor'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout editor
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+
+      - name: Install editor dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare build environment
+        run: touch .env.local
+
+      - name: Build editor Landrush routes
+        run: bun run build
+
+      - name: Checkout Landrush site
+        uses: actions/checkout@v4
+        with:
+          repository: Niutels/landrush-site
+          ref: main
+          path: landrush-site
+          token: ${{ secrets.LANDRUSH_SITE_PUSH_TOKEN }}
+
+      - name: Refresh Landrush static bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          site="landrush-site"
+
+          rm -rf "$site/_next" "$site/landrush-lab" "$site/navigation" "$site/audios"
+          mkdir -p "$site/_next"
+
+          cp -R apps/editor/.next/static "$site/_next/static"
+          cp -R apps/editor/public/landrush-lab "$site/landrush-lab"
+          cp -R apps/editor/public/navigation "$site/navigation"
+          cp -R apps/editor/public/audios "$site/audios"
+
+          for route in world world-multiplayer pascal-multiplayer-island pascal-paths-grass-debug; do
+            mkdir -p "$site/landrush-lab/$route"
+            cp "apps/editor/.next/server/app/landrush-lab/$route.html" "$site/landrush-lab/$route/index.html"
+          done
+
+      - name: Validate Landrush site
+        working-directory: landrush-site
+        run: |
+          npm run check
+          npm run build
+
+      - name: Commit and push Landrush site
+        working-directory: landrush-site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No Landrush site changes to publish."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit \
+            -m "Publish Landrush from editor ${GITHUB_SHA::7}" \
+            -m "Source: Niutels/editor@${GITHUB_SHA}"
+          git push origin main

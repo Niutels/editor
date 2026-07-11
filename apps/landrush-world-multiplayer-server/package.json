@@ -1,0 +1,17 @@
+{
+  "name": "@pascal-app/landrush-world-multiplayer-server",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test voice-signal.test.mjs",
+    "check": "node --check server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

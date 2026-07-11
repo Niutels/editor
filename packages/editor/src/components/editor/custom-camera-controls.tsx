@@ -11,7 +11,7 @@ import {
 import { GRID_LAYER, useViewer, ZONE_LAYER } from '@pascal-app/viewer'
 import { CameraControls, CameraControlsImpl } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   Box3,
   type Camera,
@@ -46,6 +46,12 @@ const NAVIGATION_SYNC_VIEW_WIDTH_EPSILON = 0.001
 const KEYBOARD_PAN_VIEW_WIDTH_PER_SECOND = 0.65
 const KEYBOARD_PAN_MIN_SPEED = 2
 const KEYBOARD_PAN_MAX_SPEED = 55
+
+export type EditorCameraInitialPose = {
+  position: [number, number, number]
+  target: [number, number, number]
+}
+
 type CameraMode = ReturnType<typeof useViewer.getState>['cameraMode']
 type CameraPoseSnapshot = {
   mode: CameraMode
@@ -345,7 +351,11 @@ function useFirstPersonCameraPoseRestore(
   return useCallback(() => isRestoring.current, [])
 }
 
-export const CustomCameraControls = () => {
+export const CustomCameraControls = ({
+  initialPose,
+}: {
+  initialPose?: EditorCameraInitialPose | null
+} = {}) => {
   const controls = useRef<CameraControlsImpl | null>(null)
   const keyboardPanKeys = useRef<KeyboardPanState>({
     forward: false,
@@ -366,6 +376,7 @@ export const CustomCameraControls = () => {
   )
   const currentLevelId = selection.levelId
   const firstLoad = useRef(true)
+  const initialPoseAppliedRef = useRef(false)
   const lastPublishedNavigationSync = useRef<NavigationCameraPoseSnapshot | null>(null)
   const pendingFloorplanNavigationPose = useRef<PendingNavigationCameraPoseSnapshot | null>(null)
   const lastApplied2dNavigationRevision = useRef(0)
@@ -391,8 +402,43 @@ export const CustomCameraControls = () => {
     raycaster.layers.enable(ZONE_LAYER)
   }, [camera, raycaster])
 
+  const applyInitialPose = useCallback(() => {
+    if (!initialPose || !controls.current || initialPoseAppliedRef.current) return false
+
+    initialPoseAppliedRef.current = true
+    firstLoad.current = false
+    controls.current.setLookAt(
+      initialPose.position[0],
+      initialPose.position[1],
+      initialPose.position[2],
+      initialPose.target[0],
+      initialPose.target[1],
+      initialPose.target[2],
+      false,
+    )
+    return true
+  }, [initialPose])
+
+  const handleControlsRef = useCallback(
+    (instance: CameraControlsImpl | null) => {
+      controls.current = instance
+      applyInitialPose()
+    },
+    [applyInitialPose],
+  )
+
+  useLayoutEffect(() => {
+    if (!initialPose || applyInitialPose()) return
+
+    const frameId = requestAnimationFrame(() => {
+      applyInitialPose()
+    })
+    return () => cancelAnimationFrame(frameId)
+  }, [applyInitialPose, initialPose])
+
   useEffect(() => {
     if (isPreviewMode || isFirstPersonMode || isRestoringFirstPersonPose()) return
+    if (initialPose) return
     let targetY = 0
     if (currentLevelId) {
       const levelMesh = sceneRegistry.nodes.get(currentLevelId)
@@ -412,6 +458,7 @@ export const CustomCameraControls = () => {
   }, [
     clearPendingFloorplanNavigationPose,
     currentLevelId,
+    initialPose,
     isPreviewMode,
     isFirstPersonMode,
     isRestoringFirstPersonPose,
@@ -1201,7 +1248,7 @@ export const CustomCameraControls = () => {
       onRest={onRest}
       onSleep={onRest}
       onTransitionStart={onTransitionStart}
-      ref={controls}
+      ref={handleControlsRef}
       restThreshold={0.01}
       touches={touches}
     />

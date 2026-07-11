@@ -68,6 +68,7 @@ export function EditorLayoutMobile({
   const [middleBottomFromViewport, setMiddleBottomFromViewport] = useState(0)
   const [committedSheetH, setCommittedSheetH] = useState(0)
 
+  const hasSidebarTabs = sidebarTabs.length > 0
   const currentTab = sidebarTabs.find((t) => t.id === activePanel)
 
   // Keep active panel valid
@@ -120,16 +121,25 @@ export function EditorLayoutMobile({
   // Initialise sheet to current tab default once we know the middle height
   const didInit = useRef(false)
   useEffect(() => {
+    if (!hasSidebarTabs) {
+      didInit.current = false
+      setCommittedSheetH(0)
+      return
+    }
     if (didInit.current || middleH <= 0) return
     didInit.current = true
     const targetPx = getDefaultSnap(currentTab) * middleH
     setCommittedSheetH(targetPx)
     sheetRef.current?.snapTo(targetPx)
-  }, [middleH, currentTab])
+  }, [hasSidebarTabs, middleH, currentTab])
 
   // When middle height changes (rotation / resize), keep sheet in proportion
   const prevMiddleH = useRef(0)
   useEffect(() => {
+    if (!hasSidebarTabs) {
+      prevMiddleH.current = middleH
+      return
+    }
     if (middleH <= 0) return
     if (prevMiddleH.current === 0) {
       prevMiddleH.current = middleH
@@ -141,7 +151,7 @@ export function EditorLayoutMobile({
     prevMiddleH.current = middleH
     setCommittedSheetH(nextPx)
     sheetRef.current?.snapTo(nextPx)
-  }, [middleH, committedSheetH])
+  }, [hasSidebarTabs, middleH, committedSheetH])
 
   const handleTabPress = useCallback(
     (id: string) => {
@@ -177,18 +187,19 @@ export function EditorLayoutMobile({
   const panelPenetrationInMiddle = Math.max(0, panelSheetHeight - middleBottomFromViewport)
   // The effective "sheet height" that the viewer sits above is the larger of
   // the primary sidebar sheet and the secondary panel sheet's penetration.
-  const effectiveSheetH = Math.max(committedSheetH, panelPenetrationInMiddle)
+  const effectiveSheetH = hasSidebarTabs ? Math.max(committedSheetH, panelPenetrationInMiddle) : 0
 
   // In capture mode the sheet and tab bar are hidden — the viewer should fill
   // the entire middle area regardless of the stored sheet height.
   // Otherwise, the viewer extends SHEET_OVERLAP_PX behind the sheet's rounded
   // corners so the curve reveals viewer content underneath.
   const baseViewerHeight = Math.max(0, middleH - effectiveSheetH)
-  const viewerHeight = isCaptureMode
-    ? middleH
-    : baseViewerHeight === 0
-      ? 0
-      : Math.min(middleH, baseViewerHeight + SHEET_OVERLAP_PX)
+  const viewerHeight =
+    isCaptureMode || !hasSidebarTabs
+      ? middleH
+      : baseViewerHeight === 0
+        ? 0
+        : Math.min(middleH, baseViewerHeight + SHEET_OVERLAP_PX)
 
   // While the panel sheet is open, collapse the primary sheet to its handle so
   // it doesn't peek above. Remember the previous height and restore it on close.
@@ -241,7 +252,7 @@ export function EditorLayoutMobile({
         </div>
 
         {/* Bottom sheet: overlays the lower part of the middle area */}
-        {!isCaptureMode && sidebarTabs.length > 0 && (
+        {!isCaptureMode && hasSidebarTabs && (
           <BottomSheet
             initialHeightPx={SHEET_HANDLE_PX}
             onCommit={setCommittedSheetH}
@@ -256,7 +267,7 @@ export function EditorLayoutMobile({
         )}
       </div>
 
-      {!isCaptureMode && sidebarTabs.length > 0 && (
+      {!isCaptureMode && hasSidebarTabs && (
         <MobileTabBar activeTab={activePanel} onTabPress={handleTabPress} tabs={sidebarTabs} />
       )}
     </div>

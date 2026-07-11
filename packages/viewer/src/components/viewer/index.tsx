@@ -16,12 +16,18 @@ import {
   useRef,
   useState,
 } from 'react'
+import { WebGLRenderer } from 'three'
 import * as THREE from 'three/webgpu'
 import { hasDrawableGeometry } from '../../lib/drawable-geometry'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
-import type { ColorPreset, RenderShading } from '../../lib/materials'
+import {
+  type ColorPreset,
+  type MaterialRendererBackend,
+  type RenderShading,
+  setMaterialRendererBackend,
+} from '../../lib/materials'
 import { getSceneTheme } from '../../lib/scene-themes'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
 import { FloorElevationSystem } from '../../systems/floor-elevation/floor-elevation-system'
@@ -33,6 +39,7 @@ import { Lights } from './lights'
 import { PerfMonitor } from './perf-monitor'
 import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
 import { RegisteredSystems } from './registered-systems'
+import { RenderSchedulerBridge } from './render-scheduler-bridge'
 import { SceneBvh } from './scene-bvh'
 import { SelectionManager } from './selection-manager'
 import { ViewerCamera } from './viewer-camera'
@@ -65,7 +72,17 @@ extend(THREE as any)
 // We cache the in-flight Promise (not just the resolved renderer) so two
 // concurrent configure() calls await the same init instead of creating two
 // renderers in parallel and only caching the second.
-const WEBGPU_RENDERER_CACHE = new WeakMap<HTMLCanvasElement, Promise<THREE.WebGPURenderer>>()
+const VIEWER_RENDERER_CACHE = new WeakMap<
+  HTMLCanvasElement,
+  Map<MaterialRendererBackend, Promise<THREE.WebGPURenderer | WebGLRenderer>>
+>()
+
+function createWebGLRenderer(props: { canvas?: HTMLCanvasElement }) {
+  const renderer = new WebGLRenderer({ ...(props as any), alpha: true })
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = getSceneTheme(useViewer.getState().sceneTheme).toneMappingExposure
+  return renderer
+}
 const SCENE_READY_SETTLED_FRAMES = 2
 const SCENE_READY_MAX_WAIT_FRAMES = 180
 const DIRTY_BUILD_KINDS = new Set([
@@ -381,6 +398,8 @@ interface ViewerProps {
    * `?disable=postFx` diagnostic URL flag, but host-controlled.
    */
   disablePostFx?: boolean
+  defaultCamera?: boolean
+  rendererBackend?: MaterialRendererBackend
 }
 
 /** Imperative handle exposed via `ref` on `<Viewer>`. */
@@ -409,9 +428,15 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     onSceneReadyChange,
     sceneReadyMaxWaitMs,
     disablePostFx = false,
+    defaultCamera = true,
+    rendererBackend = 'webgpu',
   },
   ref,
 ) {
+  useLayoutEffect(() => {
+    setMaterialRendererBackend(rendererBackend)
+  }, [rendererBackend])
+
   useImperativeHandle(
     ref,
     () => ({
@@ -518,9 +543,15 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       gl={
         ((props: { canvas?: HTMLCanvasElement }) => {
           const canvas = props.canvas
-          const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined
+          const cached = canvas
+            ? VIEWER_RENDERER_CACHE.get(canvas)?.get(rendererBackend)
+            : undefined
           if (cached) return cached
           const promise = (async () => {
+            if (rendererBackend === 'webgl') {
+              return createWebGLRenderer(props)
+            }
+
             try {
               const renderer = new THREE.WebGPURenderer({ ...(props as any), alpha: true })
               renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -531,16 +562,23 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               installEmptyDrawGuard(renderer)
               return renderer
             } catch (err) {
-              // Drop the failed promise from the cache so a future Canvas
-              // mount on the same DOM can retry instead of inheriting the
-              // rejection forever.
-              if (canvas) WEBGPU_RENDERER_CACHE.delete(canvas)
-              console.error('[viewer] WebGPURenderer init failed', err)
-              setRendererInitFailed(true)
-              throw err
+              console.warn('[viewer] WebGPURenderer init failed; falling back to WebGL', err)
+              try {
+                setMaterialRendererBackend('webgl')
+                return createWebGLRenderer(props)
+              } catch (fallbackError) {
+                if (canvas) VIEWER_RENDERER_CACHE.delete(canvas)
+                console.error('[viewer] Renderer initialization failed', fallbackError)
+                setRendererInitFailed(true)
+                throw fallbackError
+              }
             }
           })()
-          if (canvas) WEBGPU_RENDERER_CACHE.set(canvas, promise)
+          if (canvas) {
+            const cache = VIEWER_RENDERER_CACHE.get(canvas) ?? new Map()
+            cache.set(rendererBackend, promise)
+            VIEWER_RENDERER_CACHE.set(canvas, cache)
+          }
           return promise
         }) as any
       }
@@ -553,7 +591,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       }}
     >
       <FrameLimiter fps={50} />
-      <ViewerCamera />
+      <RenderSchedulerBridge />
+      {defaultCamera ? <ViewerCamera /> : null}
       <GPUDeviceWatcher />
       <ToneMappingExposure />
       <SceneReadyTracker

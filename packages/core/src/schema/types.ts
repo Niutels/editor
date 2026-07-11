@@ -18,9 +18,12 @@ import { GuideNode } from './nodes/guide'
 import { GutterNode } from './nodes/gutter'
 import { HvacEquipmentNode } from './nodes/hvac-equipment'
 import { ItemNode } from './nodes/item'
+import { LandrushLayoutNode } from './nodes/landrush-layout'
+import { LandrushWorldNode } from './nodes/landrush-world'
 import { LevelNode } from './nodes/level'
 import { LinesetNode } from './nodes/lineset'
 import { LiquidLineNode } from './nodes/liquid-line'
+import { PascalWaterNode } from './nodes/pascal-water'
 import { PipeFittingNode } from './nodes/pipe-fitting'
 import { PipeSegmentNode } from './nodes/pipe-segment'
 import { PipeTrapNode } from './nodes/pipe-trap'
@@ -50,6 +53,8 @@ export const AnyNode = z.discriminatedUnion('type', [
   WallNode,
   FenceNode,
   ItemNode,
+  LandrushLayoutNode,
+  LandrushWorldNode,
   ZoneNode,
   SlabNode,
   CeilingNode,
@@ -61,6 +66,7 @@ export const AnyNode = z.discriminatedUnion('type', [
   ScanNode,
   GuideNode,
   SpawnNode,
+  PascalWaterNode,
   WindowNode,
   DoorNode,
   BoxVentNode,

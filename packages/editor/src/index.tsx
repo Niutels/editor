@@ -3,7 +3,7 @@
 // don't have to learn three separate package imports. The canonical
 // definitions still live in `@pascal-app/core` / `@pascal-app/viewer`.
 export { useScene } from '@pascal-app/core'
-export { useViewer } from '@pascal-app/viewer'
+export { BVHEcctrl, type BVHEcctrlApi, useViewer } from '@pascal-app/viewer'
 export type { EditorProps } from './components/editor'
 export { default as Editor } from './components/editor'
 // Headless component aliases: the implementation files keep their
@@ -12,6 +12,11 @@ export { default as Editor } from './components/editor'
 // surface uses the shorter, shell-friendly names from the unified
 // preset-system spec.
 export { BakeExporter } from './components/editor/bake-exporter'
+export type { EditorCameraInitialPose } from './components/editor/custom-camera-controls'
+export {
+  buildFirstPersonColliderWorldFromRegistry,
+  type FirstPersonColliderWorld,
+} from './components/editor/first-person/build-collider-world'
 export { FloatingActionMenu as FloatingMenu } from './components/editor/floating-action-menu'
 // Embed surface — the editor's real in-canvas affordances, so a host can mount
 // authentic selection handles, interactive build tools, and the mover on top

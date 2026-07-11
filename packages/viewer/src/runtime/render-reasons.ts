@@ -1,0 +1,11 @@
+export type RenderReason =
+  | 'camera:start'
+  | 'camera:move'
+  | 'camera:end'
+  | 'geometry:changed'
+  | 'selection:changed'
+  | 'hover:changed'
+  | 'theme:changed'
+  | 'thumbnail'
+  | 'export'
+  | 'debug'

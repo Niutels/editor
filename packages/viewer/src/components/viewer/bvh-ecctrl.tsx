@@ -13,8 +13,10 @@ export type MovementInput = {
   leftward?: boolean
   rightward?: boolean
   joystick?: { x: number; y: number }
+  worldDirection?: { x: number; z: number } | null
   run?: boolean
   jump?: boolean
+  speedScale?: number
 }
 
 export type CharacterAnimationStatus =
@@ -31,8 +33,10 @@ export type FloatCheckType = 'RAYCAST' | 'SHAPECAST' | 'BOTH'
 export interface BVHEcctrlApi {
   group: THREE.Group | null
   model: THREE.Group | null
+  getLinVel: (target?: THREE.Vector3) => THREE.Vector3
   resetLinVel: () => void
   addLinVel: (v: THREE.Vector3) => void
+  setPaused: (paused: boolean) => void
   setLinVel: (v: THREE.Vector3) => void
   setMovement: (input: MovementInput) => void
 }
@@ -180,8 +184,12 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
     const leftwardState = useRef(false)
     const rightwardState = useRef(false)
     const joystickState = useRef(new THREE.Vector2())
+    const worldDirectionState = useRef(new THREE.Vector2())
+    const hasWorldDirectionState = useRef(false)
     const runState = useRef(false)
     const jumpState = useRef(false)
+    const speedScaleState = useRef(1)
+    const imperativePaused = useRef(false)
     const isOnGround = useRef(false)
     const prevIsOnGround = useRef(false)
     const prevAnimation = useRef<CharacterAnimationStatus>('IDLE')
@@ -295,8 +303,17 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         leftward?: boolean
         rightward?: boolean
         joystick?: THREE.Vector2
+        worldDirection?: THREE.Vector2 | null
       }) => {
         inputDir.current.set(0, 0, 0)
+
+        if (dir.worldDirection) {
+          inputDir.current
+            .set(dir.worldDirection.x, 0, dir.worldDirection.y)
+            .projectOnPlane(upAxis.current)
+            .normalize()
+          return
+        }
 
         camera.getWorldDirection(camProjDir.current)
         camProjDir.current.projectOnPlane(upAxis.current).normalize()
@@ -337,7 +354,7 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
             )
           }
 
-          const maxSpeed = run ? maxRunSpeed : maxWalkSpeed
+          const maxSpeed = (run ? maxRunSpeed : maxWalkSpeed) * speedScaleState.current
           wantToMoveVel.current.copy(inputDir.current).multiplyScalar(maxSpeed)
           const dot = movingDir.current.dot(inputDir.current)
 
@@ -708,18 +725,37 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
       (velocity: THREE.Vector3) => currentLinVel.current.add(velocity),
       [],
     )
+    const getLinVel = useCallback((target = new THREE.Vector3()) => {
+      return target.copy(currentLinVel.current)
+    }, [])
     const setLinVel = useCallback(
       (velocity: THREE.Vector3) => currentLinVel.current.copy(velocity),
       [],
     )
+    const setPaused = useCallback((nextPaused: boolean) => {
+      imperativePaused.current = nextPaused
+    }, [])
     const setMovement = useCallback((movement: MovementInput) => {
       if (movement.forward !== undefined) forwardState.current = movement.forward
       if (movement.backward !== undefined) backwardState.current = movement.backward
       if (movement.leftward !== undefined) leftwardState.current = movement.leftward
       if (movement.rightward !== undefined) rightwardState.current = movement.rightward
       if (movement.joystick) joystickState.current.set(movement.joystick.x, movement.joystick.y)
+      if ('worldDirection' in movement) {
+        hasWorldDirectionState.current = movement.worldDirection != null
+        if (movement.worldDirection) {
+          worldDirectionState.current.set(movement.worldDirection.x, movement.worldDirection.z)
+        } else {
+          worldDirectionState.current.set(0, 0)
+        }
+      }
       if (movement.run !== undefined) runState.current = movement.run
       if (movement.jump !== undefined) jumpState.current = movement.jump
+      if (movement.speedScale !== undefined) {
+        speedScaleState.current = clamp(movement.speedScale, 0, 1)
+      } else if (movement.worldDirection === null) {
+        speedScaleState.current = 1
+      }
     }, [])
 
     useImperativeHandle(
@@ -731,12 +767,14 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         get model() {
           return characterModelRef.current
         },
+        getLinVel,
         resetLinVel,
         addLinVel,
+        setPaused,
         setLinVel,
         setMovement,
       }),
-      [addLinVel, resetLinVel, setLinVel, setMovement],
+      [addLinVel, getLinVel, resetLinVel, setLinVel, setMovement, setPaused],
     )
 
     const updateDebugger = useCallback(() => {
@@ -761,7 +799,7 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
 
     useFrame((_, delta) => {
       elapsedRef.current += delta
-      if (paused || elapsedRef.current < delay) return
+      if (paused || imperativePaused.current || elapsedRef.current < delay) return
 
       const deltaTime = Math.min(1 / 45, delta) * slowMotionFactor
       const keys = getKeys() ?? presetKeys
@@ -778,6 +816,7 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         leftward,
         rightward,
         joystick: joystickState.current,
+        worldDirection: hasWorldDirectionState.current ? worldDirectionState.current : null,
       })
       handleCharacterMovement(run, deltaTime)
       if (jump && isOnGround.current) currentLinVel.current.y = jumpVel

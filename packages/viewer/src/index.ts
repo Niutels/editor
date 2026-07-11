@@ -88,7 +88,9 @@ export {
   DEFAULT_WALL_MATERIAL,
   DEFAULT_WINDOW_MATERIAL,
   disposeMaterial,
+  getMaterialRendererBackend,
   glassMaterial,
+  type MaterialRendererBackend,
   MONO_PALETTE,
   PRESET_PALETTES,
   type RenderShading,
@@ -105,6 +107,9 @@ export {
   SCENE_THEMES,
   type SceneTheme,
 } from './lib/scene-themes'
+export type { RenderProfile } from './runtime/render-profiles'
+export type { RenderReason } from './runtime/render-reasons'
+export { type RenderSchedulerSnapshot, renderScheduler } from './runtime/render-scheduler'
 export { useItemLightPool } from './store/use-item-light-pool'
 export { default as useViewer } from './store/use-viewer'
 export { CeilingSystem } from './systems/ceiling/ceiling-system'
