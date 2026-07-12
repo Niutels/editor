@@ -147,6 +147,10 @@ import {
   type ParcelStreetNetwork,
   type ParcelStreetSegment,
 } from './parcel-streets'
+import {
+  PASCAL_WORLD_ELEVATION_PARAMETERS,
+  PASCAL_WORLD_WATER_MATERIAL_PARAMETERS,
+} from './pascal-world-visual-defaults'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import {
   clearLandrushRobotScreenRevealMask,
@@ -2246,6 +2250,15 @@ export function LandrushIslandClient({
   waterFieldDebugMode?: LandrushIslandFieldDebugMode
 } = {}) {
   const experienceConfig = LANDRUSH_ISLAND_EXPERIENCE_CONFIGS[experience]
+  const defaultElevationParameters =
+    experience === 'pascal-multiplayer-island'
+      ? PASCAL_WORLD_ELEVATION_PARAMETERS
+      : LANDRUSH_ISLAND_ELEVATION_PARAMETERS
+  const defaultMaterialParameters =
+    experience === 'pascal-multiplayer-island'
+      ? PASCAL_WORLD_WATER_MATERIAL_PARAMETERS
+      : LANDRUSH_ISLAND_MATERIAL_PARAMETERS
+  const defaultGrassTuning = LANDRUSH_ISLAND_GRASS_TUNING
   const searchParams = useSearchParams()
   const runtimeProbeEnabled = searchParams.has('landrushProbe')
   const navigationDebugEnabled =
@@ -2423,15 +2436,15 @@ export function LandrushIslandClient({
     ...WATER_LAB_DEFAULT_FIELD_PARAMETERS,
   }))
   const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
-    ...LANDRUSH_ISLAND_ELEVATION_PARAMETERS,
+    ...defaultElevationParameters,
   }))
   const [materialParameters, setMaterialParameters] = useState<LandrushWaterSurfaceParameters>(
     () => ({
-      ...LANDRUSH_ISLAND_MATERIAL_PARAMETERS,
+      ...defaultMaterialParameters,
     }),
   )
   const [grassTuning, setGrassTuning] = useState<GrassBladeTuning>(() => ({
-    ...LANDRUSH_ISLAND_GRASS_TUNING,
+    ...defaultGrassTuning,
   }))
   const [terrainFieldResolution, setTerrainFieldResolution] = useState(WATER_FIELD_RESOLUTION)
   const showDepthReference = false
@@ -2881,11 +2894,11 @@ export function LandrushIslandClient({
         'setup.landrush-island.initial-scene-graph',
         () =>
           createLandrushIslandSceneGraph({
-            elevationParameters: LANDRUSH_ISLAND_ELEVATION_PARAMETERS,
+            elevationParameters: defaultElevationParameters,
             fieldParameters: WATER_LAB_DEFAULT_FIELD_PARAMETERS,
             islandParameters: WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
             layoutConfig: experienceConfig,
-            materialParameters: LANDRUSH_ISLAND_MATERIAL_PARAMETERS,
+            materialParameters: defaultMaterialParameters,
             omitWaterNode: startupProfileNoWaterNode,
             profilePlainWaterMaterial,
             showDepthReference: false,
@@ -2895,6 +2908,8 @@ export function LandrushIslandClient({
       ),
     [
       activeProfileMeasure,
+      defaultElevationParameters,
+      defaultMaterialParameters,
       experienceConfig,
       profilePlainWaterMaterial,
       startupProfileNoWaterNode,
@@ -3643,9 +3658,9 @@ export function LandrushIslandClient({
   const resetParameters = () => {
     setIslandParameters({ ...WATER_LAB_DEFAULT_ISLAND_PARAMETERS })
     setFieldParameters({ ...WATER_LAB_DEFAULT_FIELD_PARAMETERS })
-    setElevationParameters({ ...LANDRUSH_ISLAND_ELEVATION_PARAMETERS })
-    setMaterialParameters({ ...LANDRUSH_ISLAND_MATERIAL_PARAMETERS })
-    setGrassTuning({ ...LANDRUSH_ISLAND_GRASS_TUNING })
+    setElevationParameters({ ...defaultElevationParameters })
+    setMaterialParameters({ ...defaultMaterialParameters })
+    setGrassTuning({ ...defaultGrassTuning })
     setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
   }
   const handleLoadingLoaded = useCallback(() => setLoadingActive(false), [])

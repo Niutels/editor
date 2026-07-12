@@ -9,12 +9,14 @@ import {
   useScene,
 } from '@pascal-app/core'
 import {
+  clearPascalWaterMaterialParameterOverrides,
   createPascalWaterLandSurface,
   createPascalWaterSmoothedPerimeter,
   LANDRUSH_WATER_SURFACE_PARAMETERS,
   type LandrushWaterSurfaceParameters,
   PASCAL_WATER_LOW_ELEVATION,
   type PascalWaterLandSurface,
+  setPascalWaterMaterialParameters,
 } from '@pascal-app/nodes'
 import { renderScheduler, useViewer, Viewer } from '@pascal-app/viewer'
 import { OrbitControls } from '@react-three/drei'
@@ -24,8 +26,14 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, Shape, Vector3 } from 'three'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, GRASS_SPAWN_FIELD_RESOLUTION } from './grass-field-texture'
-import { GRASS_WATER_DEFAULT_TUNING } from './grass-water-defaults'
 import { GrassWaterLandLayers } from './grass-water-layers'
+import {
+  PASCAL_WORLD_ELEVATION_PARAMETERS,
+  PASCAL_WORLD_GRASS_TUNING,
+  PASCAL_WORLD_WATER_MATERIAL_PARAMETERS,
+  PASCAL_WORLD_WATER_MOTION_TUNING,
+  type PascalWorldWaterMotionTuning,
+} from './pascal-world-visual-defaults'
 import {
   generateWaterLabIsland,
   type IslandElevationParameters,
@@ -51,20 +59,6 @@ const PASCAL_CLIFF_FAMILY_CUBE_SIZE = 3.2
 const PASCAL_CLIFF_FAMILY_CUBE_SPACING = 4.6
 const PASCAL_CLIFF_FAMILY_CUBE_LIFT = 4.2
 const PASCAL_CLIFF_MAX_FAMILY_VARIATIONS = 8
-type PascalWaterMotionTuning = {
-  coastalFoamFarDistance: number
-  coastalFoamNearDistance: number
-  coastalFoamWashReach: number
-  frontCyanShallowDepthResponseRate: number
-  frontCyanShallowDepthThreshold: number
-}
-const DEFAULT_PASCAL_WATER_MOTION_TUNING = {
-  coastalFoamFarDistance: 0.4,
-  coastalFoamNearDistance: 0.06,
-  coastalFoamWashReach: 0.13,
-  frontCyanShallowDepthResponseRate: 11,
-  frontCyanShallowDepthThreshold: 0.34,
-} satisfies PascalWaterMotionTuning
 type PascalWaterMotionLayerKey =
   | 'coastalFoamVisibility'
   | 'frontCyanDepthContourVisibility'
@@ -87,33 +81,6 @@ const DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY = {
   ripplesCrestVisibility: true,
   ripplesFrontColorVisibility: true,
 } satisfies PascalWaterMotionLayerVisibility
-const PASCAL_WATER_MOTION_DEBUG_MATERIAL_PARAMETERS = {
-  ...DEFAULT_PASCAL_WATER_MOTION_TUNING,
-  coastalFoamStrength: 0.95,
-  ripplesBackColorRatioMax: 2.5,
-  ripplesBackColorRatioMin: 1,
-  ripplesBackColorStrength: 0.8,
-  ripplesBreakupFrequency: 0.018,
-  ripplesBreakupSize: 0.68,
-  ripplesFrontColorRatio: 0.5,
-  ripplesFrontColorStrength: 0.8,
-  ripplesNoiseStrength: 0.12,
-  ripplesRatio: 0.94,
-  windTimeFrequency: 0.18,
-} satisfies Record<string, number>
-
-const PASCAL_WATER_MOTION_DEBUG_ELEVATION_PARAMETERS = {
-  ...PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS,
-  cliffCornerChipAngleAverage: 1,
-  cliffCornerChipAngleDensity: 1,
-  cliffCornerChipAngleDistribution: 1,
-  cliffCornerChipAngleVariation: 1,
-  cliffCornerChipAverage: 1,
-  cliffCornerChipDensity: 1,
-  cliffCornerChipDistribution: 1,
-  cliffCornerChipVariation: 1,
-} satisfies IslandElevationParameters
-
 type PascalCliffPendingGeometryDisposal = { cancelled: boolean }
 type PascalCliffGpuQueue = { onSubmittedWorkDone?: () => Promise<void> }
 type PascalWorldMultiplayerDebugClientProps = { waterMotionDebug?: boolean }
@@ -746,7 +713,7 @@ export function PascalWorldMultiplayerDebugClient({
   waterMotionDebug = false,
 }: PascalWorldMultiplayerDebugClientProps = {}) {
   const defaultElevationParameters = waterMotionDebug
-    ? PASCAL_WATER_MOTION_DEBUG_ELEVATION_PARAMETERS
+    ? PASCAL_WORLD_ELEVATION_PARAMETERS
     : PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS
   const [copyStatus, setCopyStatus] = useState<PascalCliffCopyStatus>('idle')
   const [draftElevationParameters, setDraftElevationParameters] =
@@ -779,8 +746,8 @@ export function PascalWorldMultiplayerDebugClient({
   const [cliffExperimentMode, setCliffExperimentMode] =
     useState<PascalCliffExperimentMode>('baseline')
   const [showGrass, setShowGrass] = useState(false)
-  const [waterMotionTuning, setWaterMotionTuning] = useState<PascalWaterMotionTuning>(() => ({
-    ...DEFAULT_PASCAL_WATER_MOTION_TUNING,
+  const [waterMotionTuning, setWaterMotionTuning] = useState<PascalWorldWaterMotionTuning>(() => ({
+    ...PASCAL_WORLD_WATER_MOTION_TUNING,
   }))
   const [waterMotionLayerVisibility, setWaterMotionLayerVisibility] =
     useState<PascalWaterMotionLayerVisibility>(() => ({
@@ -800,30 +767,18 @@ export function PascalWorldMultiplayerDebugClient({
       ? elevationParameters
       : PASCAL_CLIFF_EXPERIMENT_WATER_ELEVATION_PARAMETERS
   const activeWaterNode = useMemo(() => {
-    const cliffWaterNode = createPascalWaterNodeForCliffMode(
+    return createPascalWaterNodeForCliffMode(
       waterNode,
       cliffExperimentMode,
       activeWaterElevationParameters,
     )
-    if (!waterMotionDebug) return cliffWaterNode
-
-    return {
-      ...cliffWaterNode,
-      materialParameters: {
-        ...cliffWaterNode.materialParameters,
-        ...createPascalWaterMotionLayerParameters(waterMotionLayerVisibility, waterMotionTuning),
-      },
-    }
-  }, [
-    activeWaterElevationParameters,
-    cliffExperimentMode,
-    waterMotionDebug,
-    waterMotionLayerVisibility,
-    waterMotionTuning,
-    waterNode,
-  ])
+  }, [activeWaterElevationParameters, cliffExperimentMode, waterNode])
+  const waterMotionMaterialParameters = useMemo(
+    () => createPascalWaterMotionLayerParameters(waterMotionLayerVisibility, waterMotionTuning),
+    [waterMotionLayerVisibility, waterMotionTuning],
+  )
   const bladeSubdivisions = useMemo(
-    () => resolveGrassWebGpuBladeSubdivisions(GRASS_WATER_DEFAULT_TUNING.density),
+    () => resolveGrassWebGpuBladeSubdivisions(PASCAL_WORLD_GRASS_TUNING.density),
     [],
   )
 
@@ -875,6 +830,16 @@ export function PascalWorldMultiplayerDebugClient({
     }
     renderScheduler.requestFrame('geometry:changed')
   }, [activeWaterNode])
+
+  useEffect(() => {
+    if (!waterMotionDebug) return
+    setPascalWaterMaterialParameters(waterNode.id, waterMotionMaterialParameters)
+  }, [waterMotionDebug, waterMotionMaterialParameters, waterNode.id])
+
+  useEffect(() => {
+    if (!waterMotionDebug) return
+    return () => clearPascalWaterMaterialParameterOverrides(waterNode.id)
+  }, [waterMotionDebug, waterNode.id])
 
   useEffect(() => {
     window.__LANDRUSH_WORLD_MULTIPLAYER_PASCAL_DEBUG__ = {
@@ -973,7 +938,7 @@ export function PascalWorldMultiplayerDebugClient({
               fieldResolution={GRASS_FIELD_RESOLUTION}
               spawnResolution={GRASS_SPAWN_FIELD_RESOLUTION}
               surface={landSurface}
-              tuning={GRASS_WATER_DEFAULT_TUNING}
+              tuning={PASCAL_WORLD_GRASS_TUNING}
             />
           </Suspense>
         ) : null}
@@ -991,7 +956,7 @@ export function PascalWorldMultiplayerDebugClient({
         onResetElevationParameters={() => {
           setDraftElevationParameters({ ...defaultElevationParameters })
           setElevationParameters({ ...defaultElevationParameters })
-          setWaterMotionTuning({ ...DEFAULT_PASCAL_WATER_MOTION_TUNING })
+          setWaterMotionTuning({ ...PASCAL_WORLD_WATER_MOTION_TUNING })
           setWaterMotionLayerVisibility({ ...DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY })
         }}
         onShowGrassChange={setShowGrass}
@@ -1000,7 +965,16 @@ export function PascalWorldMultiplayerDebugClient({
       {waterMotionDebug ? (
         <PascalWaterMotionPanel
           onWaterMotionTuningChange={(key, value) =>
-            setWaterMotionTuning((current) => ({ ...current, [key]: value }))
+            setWaterMotionTuning((current) => {
+              const next = { ...current, [key]: value }
+              if (key === 'coastalFoamNearDistance' && next.coastalFoamFarDistance < value) {
+                next.coastalFoamFarDistance = value
+              }
+              if (key === 'coastalFoamFarDistance') {
+                next.coastalFoamFarDistance = Math.max(value, current.coastalFoamNearDistance)
+              }
+              return next
+            })
           }
           onWaterMotionLayerToggle={(key) =>
             setWaterMotionLayerVisibility((current) => ({
@@ -1067,8 +1041,11 @@ function createPascalWaterNodeForCliffMode(
 
 function createPascalWaterMotionLayerParameters(
   visibility: PascalWaterMotionLayerVisibility,
-  tuning: PascalWaterMotionTuning,
-): Pick<LandrushWaterSurfaceParameters, PascalWaterMotionLayerKey | keyof PascalWaterMotionTuning> {
+  tuning: PascalWorldWaterMotionTuning,
+): Pick<
+  LandrushWaterSurfaceParameters,
+  PascalWaterMotionLayerKey | keyof PascalWorldWaterMotionTuning
+> {
   return {
     ...tuning,
     coastalFoamVisibility: visibility.coastalFoamVisibility ? 1 : 0,
@@ -1215,9 +1192,9 @@ function PascalWaterMotionPanel({
   waterMotionTuning,
 }: {
   onWaterMotionLayerToggle: (key: PascalWaterMotionLayerKey) => void
-  onWaterMotionTuningChange: (key: keyof PascalWaterMotionTuning, value: number) => void
+  onWaterMotionTuningChange: (key: keyof PascalWorldWaterMotionTuning, value: number) => void
   waterMotionLayerVisibility: PascalWaterMotionLayerVisibility
-  waterMotionTuning: PascalWaterMotionTuning
+  waterMotionTuning: PascalWorldWaterMotionTuning
 }) {
   return (
     <section className="pointer-events-auto absolute right-4 top-4 z-10 max-h-[calc(100vh-2rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-white/12 bg-slate-950/78 px-3 py-3 text-xs text-slate-100 shadow-2xl shadow-black/25 backdrop-blur">
@@ -1242,14 +1219,36 @@ function PascalWaterMotionPanel({
           />
           <PascalWaterMotionSlider
             accentClassName="accent-fuchsia-400"
-            description="Higher values make the speed and breakup change more abruptly per unit of depth."
-            label="Depth response rate"
+            description="Controls the shared travel speed of the white crest, front cyan, and cyan tail."
+            label="Main wave speed"
+            max={8}
+            min={0}
+            onChange={onWaterMotionTuningChange}
+            step={0.01}
+            tuningKey="ripplesTimeSpeed"
+            value={waterMotionTuning.ripplesTimeSpeed}
+          />
+          <PascalWaterMotionSlider
+            accentClassName="accent-fuchsia-400"
+            description="Higher values make inward acceleration ramp more abruptly at the shallow contour."
+            label="Speed response rate"
             max={30}
             min={2}
             onChange={onWaterMotionTuningChange}
             step={1}
-            tuningKey="frontCyanShallowDepthResponseRate"
-            value={waterMotionTuning.frontCyanShallowDepthResponseRate}
+            tuningKey="frontCyanShallowSpeedResponseRate"
+            value={waterMotionTuning.frontCyanShallowSpeedResponseRate}
+          />
+          <PascalWaterMotionSlider
+            accentClassName="accent-fuchsia-400"
+            description="Higher values make the cyan break into segments more abruptly at the shallow contour."
+            label="Breakup response rate"
+            max={160}
+            min={2}
+            onChange={onWaterMotionTuningChange}
+            step={1}
+            tuningKey="frontCyanShallowBreakupResponseRate"
+            value={waterMotionTuning.frontCyanShallowBreakupResponseRate}
           />
         </div>
       </section>
@@ -1269,7 +1268,17 @@ function PascalWaterMotionPanel({
             value={waterMotionTuning.coastalFoamWashReach}
           />
           <PascalWaterMotionSlider
-            description="Sets the inner edge of the broken mini-wave band."
+            description="Retracts the shore wash's inner contour beneath the coastal border."
+            label="Shore wash inward offset"
+            max={0.18}
+            min={0}
+            onChange={onWaterMotionTuningChange}
+            step={0.005}
+            tuningKey="coastalFoamWashInwardOffset"
+            value={waterMotionTuning.coastalFoamWashInwardOffset}
+          />
+          <PascalWaterMotionSlider
+            description="Places the near mini-wave contour at this distance from shore without changing its scale."
             label="Mini-wave near distance"
             max={0.25}
             min={0.02}
@@ -1279,14 +1288,34 @@ function PascalWaterMotionPanel({
             value={waterMotionTuning.coastalFoamNearDistance}
           />
           <PascalWaterMotionSlider
-            description="Sets the outer edge of the broken mini-wave band. Distances are normalized: 0 is shore, 1 is deep water."
+            description="Places the far mini-wave contour at this distance from shore without changing its scale."
             label="Mini-wave far distance"
             max={0.65}
-            min={0.15}
+            min={waterMotionTuning.coastalFoamNearDistance}
             onChange={onWaterMotionTuningChange}
-            step={0.01}
+            step={0.001}
             tuningKey="coastalFoamFarDistance"
             value={waterMotionTuning.coastalFoamFarDistance}
+          />
+          <PascalWaterMotionSlider
+            description="Maximum normalized distance the far mini-wave moves inward and outward around its selected distance."
+            label="Far-wave oscillation amplitude"
+            max={0.5}
+            min={0}
+            onChange={onWaterMotionTuningChange}
+            step={0.001}
+            tuningKey="coastalFoamFarDistanceOscillationAmplitude"
+            value={waterMotionTuning.coastalFoamFarDistanceOscillationAmplitude}
+          />
+          <PascalWaterMotionSlider
+            description="Time in seconds for one complete inward-and-outward far-wave oscillation."
+            label="Far-wave oscillation period"
+            max={120}
+            min={0.1}
+            onChange={onWaterMotionTuningChange}
+            step={0.05}
+            tuningKey="coastalFoamFarDistanceOscillationPeriodSeconds"
+            value={waterMotionTuning.coastalFoamFarDistanceOscillationPeriodSeconds}
           />
         </div>
       </section>
@@ -1339,9 +1368,9 @@ function PascalWaterMotionSlider({
   label: string
   max: number
   min: number
-  onChange: (key: keyof PascalWaterMotionTuning, value: number) => void
+  onChange: (key: keyof PascalWorldWaterMotionTuning, value: number) => void
   step: number
-  tuningKey: keyof PascalWaterMotionTuning
+  tuningKey: keyof PascalWorldWaterMotionTuning
   value: number
 }) {
   return (
@@ -1349,7 +1378,7 @@ function PascalWaterMotionSlider({
       <span className="flex items-center justify-between gap-3 text-[11px] font-medium text-slate-300">
         <span>{label}</span>
         <span className="tabular-nums text-slate-100">
-          {step >= 1 ? value.toFixed(0) : value.toFixed(2)}
+          {formatPascalWaterMotionSliderValue(value, step)}
         </span>
       </span>
       <input
@@ -1366,6 +1395,12 @@ function PascalWaterMotionSlider({
       <span className="text-[10px] leading-4 text-slate-500">{description}</span>
     </label>
   )
+}
+
+function formatPascalWaterMotionSliderValue(value: number, step: number) {
+  if (step >= 1) return value.toFixed(0)
+  const decimalPlaces = Math.min(4, Math.max(2, Math.ceil(-Math.log10(step))))
+  return value.toFixed(decimalPlaces)
 }
 
 function formatPascalCliffSliderValue(value: number, step: number) {
@@ -1663,7 +1698,7 @@ function createPascalGrassWaterSceneGraph(
       depthNoiseStrength: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthNoiseStrength,
       depthReach: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthReach,
       edgeFadeDistance: WATER_LAB_DEFAULT_FIELD_PARAMETERS.edgeFadeDistance,
-      ...(waterMotionDebug ? PASCAL_WATER_MOTION_DEBUG_MATERIAL_PARAMETERS : {}),
+      ...(waterMotionDebug ? PASCAL_WORLD_WATER_MATERIAL_PARAMETERS : {}),
     } satisfies Partial<LandrushWaterSurfaceParameters>,
     terrainFieldResolution: 1024,
     metadata: {

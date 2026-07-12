@@ -13,8 +13,10 @@ import {
   MeshBasicMaterial,
   ShapeGeometry,
   Line as ThreeLine,
+  Vector2,
 } from 'three'
-import type { WebGPURenderer } from 'three/webgpu'
+import { color, float, positionWorld, texture, uniform } from 'three/tsl'
+import { MeshBasicNodeMaterial, type WebGPURenderer } from 'three/webgpu'
 import {
   createLandrushWaterMaterial,
   LANDRUSH_WATER_SURFACE_ELEVATION,
@@ -22,6 +24,7 @@ import {
   type LandrushWaterSurfaceMaterial,
   type LandrushWaterSurfaceParameters,
 } from '../landrush-world/water-surface'
+import { registerPascalWaterMaterialControls } from './material-controls'
 import {
   createPascalWaterBounds,
   createPascalWaterCliffFootprintGeometry,
@@ -54,7 +57,9 @@ const PASCAL_WATER_FALLBACK_MATERIAL = new MeshBasicMaterial({
 PASCAL_WATER_FALLBACK_MATERIAL.userData.__pascalSkipMaterialHighlight = true
 
 const PASCAL_WATER_DEBUG_FIELD_WORKER_MODE = 'cached-worker'
-const PASCAL_WATER_FIELD_WORKER_URL = '/landrush-lab/pascal-water-field-worker.js'
+const PASCAL_WATER_FIELD_WORKER_URL =
+  '/landrush-lab/pascal-water-field-worker.js?continuous-coastal-depth=1'
+const PASCAL_WATER_COASTAL_FOAM_OVERLAY_REACH_METERS = 2.5
 
 type PascalWaterStartupProfileLike = {
   spans: Array<{ durationMs: number; id: string; startMs: number }>
@@ -62,6 +67,7 @@ type PascalWaterStartupProfileLike = {
 }
 
 type PascalWaterFieldTextureRequest = {
+  interiorDepthIsDeep?: boolean
   parameters: Partial<PascalWaterFieldParameters>
   perimeter: readonly PascalWaterPoint2[]
   planeSize: number
@@ -209,6 +215,54 @@ function usesPascalWaterPlainMaterial(node: PascalWaterNode) {
   return metadata?.profilePlainWaterMaterial === true
 }
 
+function createPascalWaterCoastalFoamOverlayMaterial(
+  coastalFoamField: DataTexture,
+  bounds: ReturnType<typeof createPascalWaterBounds>,
+  parameters: LandrushWaterSurfaceParameters,
+) {
+  const boundsMin = uniform(new Vector2(bounds.minX, bounds.minZ))
+  const boundsSize = uniform(new Vector2(bounds.width, bounds.depth))
+  const inwardOffset = uniform(parameters.coastalFoamWashInwardOffset)
+  const strength = uniform(parameters.coastalFoamStrength)
+  const visibility = uniform(parameters.coastalFoamVisibility)
+  const textureUv = positionWorld.xz.sub(boundsMin).div(boundsSize).clamp(0, 1)
+  const shoreField = texture(coastalFoamField, textureUv).a
+  const inwardRatio = inwardOffset
+    .mul(10)
+    .div(PASCAL_WATER_COASTAL_FOAM_OVERLAY_REACH_METERS)
+    .clamp(0, 1)
+  const inwardProfile = inwardRatio.mul(inwardRatio).mul(float(3).sub(inwardRatio.mul(2)))
+  const alphaThreshold = float(1).sub(inwardProfile)
+  const overlayAlpha = shoreField
+    .smoothstep(alphaThreshold.sub(0.09), alphaThreshold.add(0.04))
+    .mul(strength.clamp(0, 1))
+    .mul(visibility.clamp(0, 1))
+    .mul(0.96)
+  const material = new MeshBasicNodeMaterial({
+    colorNode: color('#f7f3df'),
+    depthTest: true,
+    depthWrite: false,
+    opacityNode: overlayAlpha,
+    side: DoubleSide,
+    transparent: true,
+  })
+  material.userData.__pascalSkipMaterialHighlight = true
+  material.userData.pascalCoastalFoamOverlay = {
+    setParameters: (nextParameters: Partial<LandrushWaterSurfaceParameters>) => {
+      if (typeof nextParameters.coastalFoamWashInwardOffset === 'number') {
+        inwardOffset.value = nextParameters.coastalFoamWashInwardOffset
+      }
+      if (typeof nextParameters.coastalFoamStrength === 'number') {
+        strength.value = nextParameters.coastalFoamStrength
+      }
+      if (typeof nextParameters.coastalFoamVisibility === 'number') {
+        visibility.value = nextParameters.coastalFoamVisibility
+      }
+    },
+  }
+  return material
+}
+
 function isPascalWaterWebGpuRenderer(renderer: unknown) {
   const backend = (
     renderer as {
@@ -228,6 +282,7 @@ function isPascalWaterWebGpuRenderer(renderer: unknown) {
 
 function createPascalWaterFieldTextureRequestKey(request: PascalWaterFieldTextureRequest) {
   return JSON.stringify({
+    interiorDepthIsDeep: request.interiorDepthIsDeep,
     parameters: request.parameters,
     perimeter: request.perimeter,
     planeSize: request.planeSize,
@@ -303,6 +358,7 @@ function loadPascalWaterDebugFieldTextureData(
 
     worker.postMessage({
       id: cacheKey,
+      interiorDepthIsDeep: request.interiorDepthIsDeep,
       parameters: request.parameters,
       perimeter: request.perimeter,
       planeSize: request.planeSize,
@@ -324,14 +380,15 @@ function loadPascalWaterDebugFieldTextureData(
 
 function usePascalWaterDebugFieldTexture({
   enabled,
+  interiorDepthIsDeep,
   parameters,
   perimeter,
   planeSize,
   resolution,
 }: PascalWaterFieldTextureRequest & { enabled: boolean }) {
   const request = useMemo(
-    () => ({ parameters, perimeter, planeSize, resolution }),
-    [parameters, perimeter, planeSize, resolution],
+    () => ({ interiorDepthIsDeep, parameters, perimeter, planeSize, resolution }),
+    [interiorDepthIsDeep, parameters, perimeter, planeSize, resolution],
   )
   const cacheKey = useMemo(() => createPascalWaterFieldTextureRequestKey(request), [request])
   const [texture, setTexture] = useState<DataTexture | null>(null)
@@ -405,6 +462,61 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
       }),
     [landSurfaceElevationParameters, node.planeSize, shorelinePoints],
   )
+  const cliffSandCoverageParameters = useMemo(
+    () => ({
+      cliffAverageSlope: node.elevationParameters.cliffAverageSlope,
+      cliffLayer1ExtrusionAverageMeters: node.elevationParameters.cliffLayer1ExtrusionAverageMeters,
+      cliffLayer1ExtrusionVariationMeters:
+        node.elevationParameters.cliffLayer1ExtrusionVariationMeters,
+      cliffLayer1ExtrusionVariationDistribution:
+        node.elevationParameters.cliffLayer1ExtrusionVariationDistribution,
+      cliffLayer2ExtrusionAverageMeters: node.elevationParameters.cliffLayer2ExtrusionAverageMeters,
+      cliffLayer2ExtrusionVariationMeters:
+        node.elevationParameters.cliffLayer2ExtrusionVariationMeters,
+      cliffLayer2ExtrusionVariationDistribution:
+        node.elevationParameters.cliffLayer2ExtrusionVariationDistribution,
+      cliffLayer3ExtrusionAverageMeters: node.elevationParameters.cliffLayer3ExtrusionAverageMeters,
+      cliffLayer3ExtrusionVariationMeters:
+        node.elevationParameters.cliffLayer3ExtrusionVariationMeters,
+      cliffLayer3ExtrusionVariationDistribution:
+        node.elevationParameters.cliffLayer3ExtrusionVariationDistribution,
+      cliffSlopeVariation: node.elevationParameters.cliffSlopeVariation,
+    }),
+    [
+      node.elevationParameters.cliffAverageSlope,
+      node.elevationParameters.cliffLayer1ExtrusionAverageMeters,
+      node.elevationParameters.cliffLayer1ExtrusionVariationMeters,
+      node.elevationParameters.cliffLayer1ExtrusionVariationDistribution,
+      node.elevationParameters.cliffLayer2ExtrusionAverageMeters,
+      node.elevationParameters.cliffLayer2ExtrusionVariationMeters,
+      node.elevationParameters.cliffLayer2ExtrusionVariationDistribution,
+      node.elevationParameters.cliffLayer3ExtrusionAverageMeters,
+      node.elevationParameters.cliffLayer3ExtrusionVariationMeters,
+      node.elevationParameters.cliffLayer3ExtrusionVariationDistribution,
+      node.elevationParameters.cliffSlopeVariation,
+    ],
+  )
+  const cliffSandCoveragePoints = useMemo(
+    () =>
+      createPascalWaterCliffSandCoveragePerimeter({
+        innerElevation: landSurface.plateauElevation,
+        outerElevation: PASCAL_WATER_LOW_ELEVATION,
+        parameters: cliffSandCoverageParameters,
+        plateauPoints: landSurface.plateauPoints,
+        shorelinePoints,
+        slopeStartPoints: landSurface.slopeStartPoints,
+      }),
+    [
+      landSurface.plateauElevation,
+      landSurface.plateauPoints,
+      landSurface.slopeStartPoints,
+      cliffSandCoverageParameters,
+      shorelinePoints,
+    ],
+  )
+  const waterMaskPerimeterPoints = landSurface.hasElevation
+    ? cliffSandCoveragePoints
+    : depthReferencePoints
   const waterFieldTextureParameters = useMemo(
     () => ({
       depthContourCollapseMeters: node.fieldParameters.depthContourCollapseMeters,
@@ -458,6 +570,50 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     waterFieldDebugMode,
     waterFieldTextureParameters,
   ])
+  const coastalFoamFieldTextureParameters = useMemo(
+    () => ({
+      ...waterFieldTextureParameters,
+      depthContourCollapseMeters: 0,
+      depthContourOffsetMeters: 0,
+      depthContourVariationMeters: 0,
+      shoreBandMeters: 0,
+      shoreFeatherMeters: PASCAL_WATER_COASTAL_FOAM_OVERLAY_REACH_METERS,
+      shoreVariationMeters: 0,
+    }),
+    [waterFieldTextureParameters],
+  )
+  const debugCoastalFoamField = usePascalWaterDebugFieldTexture({
+    enabled: waterFieldDebugMode === PASCAL_WATER_DEBUG_FIELD_WORKER_MODE,
+    interiorDepthIsDeep: false,
+    parameters: coastalFoamFieldTextureParameters,
+    perimeter: waterMaskPerimeterPoints,
+    planeSize: node.planeSize,
+    resolution: node.terrainFieldResolution,
+  })
+  const coastalFoamField = useMemo(() => {
+    if (waterFieldDebugMode === PASCAL_WATER_DEBUG_FIELD_WORKER_MODE) {
+      return debugCoastalFoamField
+    }
+
+    return measurePascalWaterRendererStartup(
+      'setup.pascal-water.renderer.coastal-foam-field-texture',
+      () =>
+        createPascalWaterFieldTexture({
+          interiorDepthIsDeep: false,
+          parameters: coastalFoamFieldTextureParameters,
+          perimeter: waterMaskPerimeterPoints,
+          planeSize: node.planeSize,
+          resolution: node.terrainFieldResolution,
+        }),
+    )
+  }, [
+    coastalFoamFieldTextureParameters,
+    debugCoastalFoamField,
+    node.planeSize,
+    node.terrainFieldResolution,
+    waterFieldDebugMode,
+    waterMaskPerimeterPoints,
+  ])
   const waterBounds = useMemo(() => createPascalWaterBounds(node.planeSize), [node.planeSize])
   const materialParameters = useMemo(
     () =>
@@ -475,12 +631,23 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
   )
   const materialParametersRef = useRef(materialParameters)
   materialParametersRef.current = materialParameters
+  const coastalFoamOverlayMaterial = useMemo(
+    () =>
+      coastalFoamField
+        ? createPascalWaterCoastalFoamOverlayMaterial(
+            coastalFoamField,
+            waterBounds,
+            materialParametersRef.current,
+          )
+        : null,
+    [coastalFoamField, waterBounds],
+  )
   const preservedWindTimeRef = useRef(0)
   const waterMaterial = useMemo<Material>(
     () =>
       measurePascalWaterRendererStartup('setup.pascal-water.renderer.water-material-memo', () => {
         const isWebGpu = isPascalWaterWebGpuRenderer(renderer)
-        if (plainWaterMaterial || !isWebGpu || !materialReady || !waterField) {
+        if (plainWaterMaterial || !isWebGpu || !materialReady || !waterField || !coastalFoamField) {
           return PASCAL_WATER_FALLBACK_MATERIAL
         }
 
@@ -492,13 +659,14 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
               waterField,
               waterBounds,
               materialParametersRef.current,
+              coastalFoamField,
             ),
         )
         material.userData.__pascalSkipMaterialHighlight = true
         material.userData.landrushWater.wind.localTime.value = preservedWindTimeRef.current
         return material
       }),
-    [materialReady, plainWaterMaterial, renderer, waterBounds, waterField],
+    [coastalFoamField, materialReady, plainWaterMaterial, renderer, waterBounds, waterField],
   )
   const appliedMaterialRef = useRef<LandrushWaterSurfaceMaterial | null>(null)
   const appliedMaterialParametersRef = useRef<LandrushWaterSurfaceParameters | null>(null)
@@ -528,69 +696,13 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
       node.elevationParameters,
     ],
   )
-  const cliffSandCoverageParameters = useMemo(
-    () => ({
-      cliffAverageSlope: node.elevationParameters.cliffAverageSlope,
-      cliffLayer1ExtrusionAverageMeters: node.elevationParameters.cliffLayer1ExtrusionAverageMeters,
-      cliffLayer1ExtrusionVariationMeters:
-        node.elevationParameters.cliffLayer1ExtrusionVariationMeters,
-      cliffLayer1ExtrusionVariationDistribution:
-        node.elevationParameters.cliffLayer1ExtrusionVariationDistribution,
-      cliffLayer2ExtrusionAverageMeters: node.elevationParameters.cliffLayer2ExtrusionAverageMeters,
-      cliffLayer2ExtrusionVariationMeters:
-        node.elevationParameters.cliffLayer2ExtrusionVariationMeters,
-      cliffLayer2ExtrusionVariationDistribution:
-        node.elevationParameters.cliffLayer2ExtrusionVariationDistribution,
-      cliffLayer3ExtrusionAverageMeters: node.elevationParameters.cliffLayer3ExtrusionAverageMeters,
-      cliffLayer3ExtrusionVariationMeters:
-        node.elevationParameters.cliffLayer3ExtrusionVariationMeters,
-      cliffLayer3ExtrusionVariationDistribution:
-        node.elevationParameters.cliffLayer3ExtrusionVariationDistribution,
-      cliffSlopeVariation: node.elevationParameters.cliffSlopeVariation,
-    }),
-    [
-      node.elevationParameters.cliffAverageSlope,
-      node.elevationParameters.cliffLayer1ExtrusionAverageMeters,
-      node.elevationParameters.cliffLayer1ExtrusionVariationMeters,
-      node.elevationParameters.cliffLayer1ExtrusionVariationDistribution,
-      node.elevationParameters.cliffLayer2ExtrusionAverageMeters,
-      node.elevationParameters.cliffLayer2ExtrusionVariationMeters,
-      node.elevationParameters.cliffLayer2ExtrusionVariationDistribution,
-      node.elevationParameters.cliffLayer3ExtrusionAverageMeters,
-      node.elevationParameters.cliffLayer3ExtrusionVariationMeters,
-      node.elevationParameters.cliffLayer3ExtrusionVariationDistribution,
-      node.elevationParameters.cliffSlopeVariation,
-    ],
-  )
-  const cliffSandCoveragePoints = useMemo(
-    () =>
-      createPascalWaterCliffSandCoveragePerimeter({
-        innerElevation: landSurface.plateauElevation,
-        outerElevation: PASCAL_WATER_LOW_ELEVATION,
-        parameters: cliffSandCoverageParameters,
-        plateauPoints: landSurface.plateauPoints,
-        shorelinePoints,
-        slopeStartPoints: landSurface.slopeStartPoints,
-      }),
-    [
-      landSurface.plateauElevation,
-      landSurface.plateauPoints,
-      landSurface.slopeStartPoints,
-      cliffSandCoverageParameters,
-      shorelinePoints,
-    ],
-  )
   const cliffSandCoverageGeometry = useMemo(
     () => new ShapeGeometry(shapeFromPoints(cliffSandCoveragePoints)),
     [cliffSandCoveragePoints],
   )
   const maskedWaterShape = useMemo(
-    () =>
-      waterShapeWithHole(
-        landSurface.hasElevation ? cliffSandCoveragePoints : depthReferencePoints,
-        node.planeSize,
-      ),
-    [cliffSandCoveragePoints, depthReferencePoints, landSurface.hasElevation, node.planeSize],
+    () => waterShapeWithHole(waterMaskPerimeterPoints, node.planeSize),
+    [node.planeSize, waterMaskPerimeterPoints],
   )
   const cliffSandFootprintGeometry = useMemo(
     () => createPascalWaterCliffFootprintGeometry(cliffGeometry),
@@ -623,6 +735,8 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
   }, [depthReferenceGeometry, depthReferenceMaterial])
 
   usePascalWaterGpuResourceLifecycle(waterField, renderer)
+  usePascalWaterGpuResourceLifecycle(coastalFoamField, renderer)
+  usePascalWaterGpuResourceLifecycle(coastalFoamOverlayMaterial, renderer)
   usePascalWaterGpuResourceLifecycle(
     waterMaterial === PASCAL_WATER_FALLBACK_MATERIAL ? null : waterMaterial,
     renderer,
@@ -651,6 +765,23 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     appliedMaterialRef.current = waterMaterial as LandrushWaterSurfaceMaterial
     appliedMaterialParametersRef.current = materialParameters
   }, [materialParameters, waterMaterial])
+  useEffect(() => {
+    const overlayControls = coastalFoamOverlayMaterial?.userData?.pascalCoastalFoamOverlay
+    overlayControls?.setParameters(materialParameters)
+  }, [coastalFoamOverlayMaterial, materialParameters])
+  useEffect(() => {
+    if (waterMaterial === PASCAL_WATER_FALLBACK_MATERIAL) return
+    const waterControls = (waterMaterial as LandrushWaterSurfaceMaterial).userData?.landrushWater
+    if (!waterControls) return
+    const overlayControls = coastalFoamOverlayMaterial?.userData?.pascalCoastalFoamOverlay
+
+    return registerPascalWaterMaterialControls(node.id, {
+      setParameters: (parameters) => {
+        waterControls.setParameters(parameters)
+        overlayControls?.setParameters(parameters)
+      },
+    })
+  }, [coastalFoamOverlayMaterial, node.id, waterMaterial])
   usePascalWaterGpuResourceLifecycle(beachGeometry, renderer)
   usePascalWaterGpuResourceLifecycle(islandGeometry, renderer)
   usePascalWaterGpuResourceLifecycle(plateauGeometry, renderer)
@@ -720,6 +851,16 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
           >
             <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
           </mesh>
+          {coastalFoamOverlayMaterial ? (
+            <mesh
+              geometry={cliffSandCoverageGeometry}
+              material={coastalFoamOverlayMaterial}
+              position={[0, PASCAL_WATER_SAND_ELEVATION + 0.003, 0]}
+              renderOrder={3}
+              rotation={[-Math.PI / 2, 0, 0]}
+              userData={{ __pascalSkipMaterialHighlight: true }}
+            />
+          ) : null}
           <mesh
             geometry={cliffSandFootprintGeometry}
             position={[0, PASCAL_WATER_SAND_ELEVATION + 0.004, 0]}

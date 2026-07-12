@@ -51,6 +51,7 @@ const WATER_FIELD_DEPTH_EXACT_DISTANCE_METERS =
   PASCAL_WATER_FIELD_DEFAULT_PARAMETERS.depthReach * BRUNO_DEPTH_FIELD_SCALE
 
 type WaterFieldOptions = {
+  interiorDepthIsDeep?: boolean
   parameters?: Partial<PascalWaterFieldParameters>
   perimeter: readonly PascalWaterPoint2[]
   planeSize: number
@@ -64,6 +65,7 @@ export type PascalWaterFieldTextureData = {
 }
 
 export function createPascalWaterFieldTextureData({
+  interiorDepthIsDeep = true,
   parameters,
   perimeter,
   planeSize,
@@ -110,9 +112,10 @@ export function createPascalWaterFieldTextureData({
         : distanceToIndexedPolyline(world, depthDistanceIndex)
       const signedShoreDistance = inside ? -shoreDistance : shoreDistance
       const edgeDistance = Math.max(0, Math.min(half - Math.abs(world.x), half - Math.abs(world.z)))
-      const depthDistanceRatio = inside
-        ? 1
-        : Math.min(1, depthDistance / WATER_FIELD_DEPTH_DISTANCE_MAX_METERS)
+      const depthDistanceRatio =
+        inside && interiorDepthIsDeep
+          ? 1
+          : Math.min(1, depthDistance / WATER_FIELD_DEPTH_DISTANCE_MAX_METERS)
       const packedDepthDistance = packUnit16(depthDistanceRatio)
       const shoreNoise = fbm(
         world.x * params.shoreNoiseFrequency,

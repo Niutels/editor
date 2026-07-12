@@ -31,6 +31,7 @@ self.onmessage = (event) => {
 
   try {
     const result = createPascalWaterFieldTextureData({
+      interiorDepthIsDeep: message.interiorDepthIsDeep,
       parameters: message.parameters,
       perimeter: message.perimeter || [],
       planeSize: message.planeSize,
@@ -57,6 +58,7 @@ self.onmessage = (event) => {
 }
 
 function createPascalWaterFieldTextureData({
+  interiorDepthIsDeep = true,
   parameters,
   perimeter,
   planeSize,
@@ -104,7 +106,7 @@ function createPascalWaterFieldTextureData({
         : distanceToIndexedPolyline(world, depthDistanceIndex)
       const signedShoreDistance = inside ? -shoreDistance : shoreDistance
       const edgeDistance = Math.max(0, Math.min(half - Math.abs(world.x), half - Math.abs(world.z)))
-      const depthDistanceRatio = inside
+      const depthDistanceRatio = inside && interiorDepthIsDeep
         ? 1
         : Math.min(1, depthDistance / WATER_FIELD_DEPTH_DISTANCE_MAX_METERS)
       const packedDepthDistance = packUnit16(depthDistanceRatio)

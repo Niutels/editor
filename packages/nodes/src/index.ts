@@ -160,7 +160,11 @@ export {
 export { levelDefinition } from './level'
 export { linesetDefinition } from './lineset'
 export { liquidLineDefinition, useLiquidLineToolOptions } from './liquid-line'
-export { pascalWaterDefinition } from './pascal-water'
+export {
+  clearPascalWaterMaterialParameterOverrides,
+  pascalWaterDefinition,
+  setPascalWaterMaterialParameters,
+} from './pascal-water'
 export {
   createPascalWaterLandSurface,
   PASCAL_WATER_LOW_ELEVATION,

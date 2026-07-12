@@ -151,10 +151,6 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
 
   const handlers = useNodeEvents(node, 'site')
 
-  if (!(node && lineGeometry)) {
-    return null
-  }
-
   return (
     <group ref={ref} {...handlers}>
       {/* Render children (buildings and items) */}
@@ -174,10 +170,12 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
       )}
 
       {/* Simple boundary line */}
-      {/* @ts-ignore */}
-      <line frustumCulled={false} geometry={lineGeometry} renderOrder={9}>
-        <lineBasicMaterial color="#f59e0b" linewidth={2} opacity={0.6} transparent />
-      </line>
+      {lineGeometry ? (
+        /* @ts-expect-error */
+        <line frustumCulled={false} geometry={lineGeometry} renderOrder={9}>
+          <lineBasicMaterial color="#f59e0b" linewidth={2} opacity={0.6} transparent />
+        </line>
+      ) : null}
     </group>
   )
 }

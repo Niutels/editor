@@ -13,6 +13,7 @@ import {
   positionWorld,
   screenUV,
   select,
+  sin,
   texture,
   uniform,
   vec2,
@@ -55,9 +56,12 @@ export const LANDRUSH_WATER_SURFACE_THICKNESS = 0.013
 export type LandrushWaterSurfaceParameters = {
   blurStrength: number
   coastalFoamFarDistance: number
+  coastalFoamFarDistanceOscillationAmplitude: number
+  coastalFoamFarDistanceOscillationPeriodSeconds: number
   coastalFoamNearDistance: number
   coastalFoamStrength: number
   coastalFoamVisibility: number
+  coastalFoamWashInwardOffset: number
   coastalFoamWashReach: number
   depthExponent: number
   depthNoiseFrequency: number
@@ -66,8 +70,9 @@ export type LandrushWaterSurfaceParameters = {
   depthReferenceReach: number
   edgeFadeDistance: number
   frontCyanDepthContourVisibility: number
-  frontCyanShallowDepthResponseRate: number
+  frontCyanShallowBreakupResponseRate: number
   frontCyanShallowDepthThreshold: number
+  frontCyanShallowSpeedResponseRate: number
   hasBlurredUnderlay: boolean
   iceNoiseFrequency: number
   iceRatio: number
@@ -91,6 +96,7 @@ export type LandrushWaterSurfaceParameters = {
   ripplesReachStart: number
   ripplesRatio: number
   ripplesSlopeFrequency: number
+  ripplesTimeSpeed: number
   shoreEdge: number
   splashesEdgeAttenuationHigh: number
   splashesEdgeAttenuationLow: number
@@ -111,11 +117,14 @@ export type LandrushIncomingWaterSurfaceParameters = LandrushWaterSurfaceParamet
 
 export const LANDRUSH_WATER_SURFACE_PARAMETERS = {
   blurStrength: 0.01,
-  coastalFoamFarDistance: 0.4,
-  coastalFoamNearDistance: 0.06,
+  coastalFoamFarDistance: 0.056,
+  coastalFoamFarDistanceOscillationAmplitude: 0.098,
+  coastalFoamFarDistanceOscillationPeriodSeconds: 21.35,
+  coastalFoamNearDistance: 0.03,
   coastalFoamStrength: 0,
   coastalFoamVisibility: 1,
-  coastalFoamWashReach: 0.13,
+  coastalFoamWashInwardOffset: 0,
+  coastalFoamWashReach: 0.04,
   depthExponent: 0.52,
   depthNoiseFrequency: 0.03,
   depthNoiseStrength: 0,
@@ -123,8 +132,9 @@ export const LANDRUSH_WATER_SURFACE_PARAMETERS = {
   depthReferenceReach: 70,
   edgeFadeDistance: 18,
   frontCyanDepthContourVisibility: 0,
-  frontCyanShallowDepthResponseRate: 11,
-  frontCyanShallowDepthThreshold: 0.34,
+  frontCyanShallowBreakupResponseRate: 160,
+  frontCyanShallowDepthThreshold: 0.44,
+  frontCyanShallowSpeedResponseRate: 2,
   hasBlurredUnderlay: true,
   iceNoiseFrequency: 0.3,
   iceRatio: 0,
@@ -148,6 +158,7 @@ export const LANDRUSH_WATER_SURFACE_PARAMETERS = {
   ripplesReachStart: 0.39,
   ripplesRatio: 1,
   ripplesSlopeFrequency: 6.5,
+  ripplesTimeSpeed: 0.42,
   shoreEdge: 0.55,
   splashesEdgeAttenuationHigh: 1,
   splashesEdgeAttenuationLow: 0.14,
@@ -196,10 +207,12 @@ export function createLandrushWaterMaterial(
   terrainFieldTexture: Texture,
   bounds: LandrushWorldNode['perimeter']['bounds'],
   parameters: Partial<LandrushWaterSurfaceParameters> = {},
+  coastalFoamFieldTexture: Texture = terrainFieldTexture,
 ): LandrushWaterSurfaceMaterial {
   return createLandrushWaterMaterialInternal(
     renderer,
     terrainFieldTexture,
+    coastalFoamFieldTexture,
     bounds,
     {
       ...LANDRUSH_WATER_SURFACE_PARAMETERS,
@@ -220,6 +233,7 @@ export function createLandrushIncomingWaterMaterial(
   return createLandrushWaterMaterialInternal(
     renderer,
     terrainFieldTexture,
+    terrainFieldTexture,
     bounds,
     { ...LANDRUSH_INCOMING_WATER_SURFACE_PARAMETERS, ...parameters },
     'incoming',
@@ -229,6 +243,7 @@ export function createLandrushIncomingWaterMaterial(
 function createLandrushWaterMaterialInternal(
   renderer: THREE.WebGPURenderer,
   terrainFieldTexture: Texture,
+  coastalFoamFieldTexture: Texture,
   bounds: LandrushWorldNode['perimeter']['bounds'],
   params: LandrushIncomingWaterSurfaceParameters,
   ripplePhase: 'incoming' | 'shore',
@@ -236,6 +251,8 @@ function createLandrushWaterMaterialInternal(
   return measureLandrushWaterMaterialStartup('setup.landrush-water.material.internal', () => {
     terrainFieldTexture.wrapS = ClampToEdgeWrapping
     terrainFieldTexture.wrapT = ClampToEdgeWrapping
+    coastalFoamFieldTexture.wrapS = ClampToEdgeWrapping
+    coastalFoamFieldTexture.wrapT = ClampToEdgeWrapping
 
     const noises = measureLandrushWaterMaterialStartup(
       'setup.landrush-water.material.create-noises',
@@ -255,6 +272,7 @@ function createLandrushWaterMaterialInternal(
       () =>
         createLandrushBrunoWaterContext({
           bounds,
+          coastalFoamFieldTexture,
           noises,
           params,
           terrainFieldTexture,
@@ -292,9 +310,16 @@ function createLandrushWaterMaterialFromContext({
   wind: LandrushBrunoWaterWind
 }): LandrushIncomingWaterSurfaceMaterial {
   const coastalFoamFarDistance = uniform(params.coastalFoamFarDistance)
+  const coastalFoamFarDistanceOscillationAmplitude = uniform(
+    params.coastalFoamFarDistanceOscillationAmplitude,
+  )
+  const coastalFoamFarDistanceOscillationPeriodSeconds = uniform(
+    params.coastalFoamFarDistanceOscillationPeriodSeconds,
+  )
   const coastalFoamNearDistance = uniform(params.coastalFoamNearDistance)
   const coastalFoamStrength = uniform(params.coastalFoamStrength)
   const coastalFoamVisibility = uniform(params.coastalFoamVisibility)
+  const coastalFoamWashInwardOffset = uniform(params.coastalFoamWashInwardOffset)
   const coastalFoamWashReach = uniform(params.coastalFoamWashReach)
   const depthExponent = uniform(params.depthExponent)
   const depthNoiseFrequency = uniform(params.depthNoiseFrequency)
@@ -303,8 +328,9 @@ function createLandrushWaterMaterialFromContext({
   const depthReferenceReach = uniform(params.depthReferenceReach)
   const edgeFadeDistance = uniform(params.edgeFadeDistance)
   const frontCyanDepthContourVisibility = uniform(params.frontCyanDepthContourVisibility)
-  const frontCyanShallowDepthResponseRate = uniform(params.frontCyanShallowDepthResponseRate)
+  const frontCyanShallowBreakupResponseRate = uniform(params.frontCyanShallowBreakupResponseRate)
   const frontCyanShallowDepthThreshold = uniform(params.frontCyanShallowDepthThreshold)
+  const frontCyanShallowSpeedResponseRate = uniform(params.frontCyanShallowSpeedResponseRate)
   const ripplesRatio = uniform(params.ripplesRatio)
   const ripplesSlopeFrequency = uniform(params.ripplesSlopeFrequency)
   const ripplesBreakupEnd = uniform(params.ripplesBreakupEnd)
@@ -324,6 +350,7 @@ function createLandrushWaterMaterialFromContext({
   const ripplesNoiseStrength = uniform(params.ripplesNoiseStrength)
   const ripplesReachEnd = uniform(params.ripplesReachEnd)
   const ripplesReachStart = uniform(params.ripplesReachStart)
+  const ripplesTimeSpeed = uniform(params.ripplesTimeSpeed)
   const iceRatio = uniform(params.iceRatio)
   const iceNoiseFrequency = uniform(params.iceNoiseFrequency)
   const splashesRatio = uniform(params.splashesRatio)
@@ -336,11 +363,16 @@ function createLandrushWaterMaterialFromContext({
   const windTimeFrequency = uniform(params.windTimeFrequency)
   const waveDepthSlowdown = uniform(params.waveDepthSlowdown)
   const waveShoreWrap = uniform(params.waveShoreWrap)
+  const coastalFoamTime = uniform(0)
+  const crestTime = uniform(0)
   const parameterUniforms = {
     coastalFoamFarDistance,
+    coastalFoamFarDistanceOscillationAmplitude,
+    coastalFoamFarDistanceOscillationPeriodSeconds,
     coastalFoamNearDistance,
     coastalFoamStrength,
     coastalFoamVisibility,
+    coastalFoamWashInwardOffset,
     coastalFoamWashReach,
     depthExponent,
     depthNoiseFrequency,
@@ -349,8 +381,9 @@ function createLandrushWaterMaterialFromContext({
     depthReferenceReach,
     edgeFadeDistance,
     frontCyanDepthContourVisibility,
-    frontCyanShallowDepthResponseRate,
+    frontCyanShallowBreakupResponseRate,
     frontCyanShallowDepthThreshold,
+    frontCyanShallowSpeedResponseRate,
     iceNoiseFrequency,
     iceRatio,
     ripplesBreakupEnd,
@@ -372,6 +405,7 @@ function createLandrushWaterMaterialFromContext({
     ripplesReachEnd,
     ripplesReachStart,
     ripplesSlopeFrequency,
+    ripplesTimeSpeed,
     shoreEdge,
     splashesEdgeAttenuationHigh,
     splashesEdgeAttenuationLow,
@@ -442,52 +476,108 @@ function createLandrushWaterMaterialFromContext({
     return leadingEdge.mul(trailingEdge)
   })
 
-  const coastalFoamNode = Fn(([terrainData]) => {
-    const shoreDepthField = shoreDepthFieldNode(terrainData)
+  const coastalFoamNode = Fn(() => {
+    const coastalFoamTerrainData = context.terrain.coastalFoamTerrainNode(positionWorld.xz)
+    const shoreDepthField = shoreDepthFromTerrainNode(coastalFoamTerrainData, positionWorld.xz)
     const waterDepth = shoreDepthField.oneMinus()
     const macroNoise = texture(noises.perlin, positionWorld.xz.mul(0.045).add(vec2(3.7, 8.1))).r
     const detailNoise = texture(noises.perlin, positionWorld.xz.mul(0.135).add(vec2(-5.2, 1.9))).r
     const foamNearDistance = coastalFoamNearDistance.clamp(0.01, 0.6)
-    const foamFarDistance = max(coastalFoamFarDistance, foamNearDistance.add(0.04)).clamp(
-      0.05,
-      0.85,
-    )
-    const foamDistanceSpan = foamFarDistance.sub(foamNearDistance)
-    const foamBandProgress = foamFarDistance
-      .sub(waterDepth)
-      .div(max(foamDistanceSpan, float(0.04)))
-      .clamp(0, 1)
-    const foamCoordinate = foamBandProgress
-      .mul(2.4)
-      .sub(wind.localTime.mul(0.5))
-      .add(macroNoise.sub(0.5).mul(0.4))
-      .add(detailNoise.sub(0.5).mul(0.08))
-      .add(1000)
-    const foamEvent = foamCoordinate.floor()
-    const foamPhase = foamCoordinate.fract()
-    const eventOffset = vec2(hash(foamEvent.mul(2.17)), hash(foamEvent.mul(5.31))).mul(37)
-    const segmentMacro = texture(noises.perlin, positionWorld.xz.mul(0.055).add(eventOffset)).r
-    const segmentDetail = texture(
+    const foamFarDistance = coastalFoamFarDistance.clamp(0.01, 0.85)
+    const farDistanceOscillation = sin(
+      coastalFoamTime
+        .div(max(coastalFoamFarDistanceOscillationPeriodSeconds, float(0.1)))
+        .mul(Math.PI * 2),
+    ).mul(coastalFoamFarDistanceOscillationAmplitude.clamp(0, 0.5))
+    const oscillatingFarDistance = foamFarDistance
+      .add(farDistanceOscillation)
+      .clamp(foamNearDistance, 0.85)
+    const foamTime = wind.localTime
+    const nearSegmentDrift = wind.direction.mul(foamTime.mul(1.15))
+    const nearDetailDrift = wind.direction.mul(foamTime.mul(0.75))
+    const farSegmentDrift = wind.direction.mul(foamTime.mul(0.95))
+    const farDetailDrift = wind.direction.mul(foamTime.mul(0.65))
+    const nearSegmentMacro = texture(
       noises.perlin,
-      positionWorld.xz.mul(0.135).add(eventOffset.mul(0.37)),
+      positionWorld.xz.mul(0.055).add(nearSegmentDrift).add(vec2(7.3, -3.1)),
     ).r
-    const segmentField = mix(segmentMacro, segmentDetail, 0.32)
-    const segmentMask = segmentField.smoothstep(0.46, 0.64)
-    const miniWaveBand = phaseBandNode(foamPhase, float(0.42), float(0.56), float(0.04))
-    const nearShoreZone = waterDepth
-      .smoothstep(foamNearDistance.sub(0.025), foamNearDistance.add(0.025))
-      .mul(waterDepth.smoothstep(foamFarDistance.sub(0.035), foamFarDistance.add(0.035)).oneMinus())
-    const miniWaves = miniWaveBand.mul(nearShoreZone).mul(segmentMask)
+    const nearSegmentDetail = texture(
+      noises.perlin,
+      positionWorld.xz.mul(0.135).sub(nearDetailDrift).add(vec2(-5.2, 1.9)),
+    ).r
+    const farSegmentMacro = texture(
+      noises.perlin,
+      positionWorld.xz.mul(0.055).sub(farSegmentDrift).add(vec2(-11.7, 8.6)),
+    ).r
+    const farSegmentDetail = texture(
+      noises.perlin,
+      positionWorld.xz.mul(0.135).add(farDetailDrift).add(vec2(13.4, -6.8)),
+    ).r
+    const nearContourNoise = mix(
+      texture(
+        noises.perlin,
+        positionWorld.xz
+          .mul(0.04)
+          .add(wind.direction.mul(foamTime.mul(1.6)))
+          .add(vec2(19.1, -7.4)),
+      ).r,
+      texture(
+        noises.perlin,
+        positionWorld.xz
+          .mul(0.11)
+          .sub(wind.direction.mul(foamTime.mul(0.9)))
+          .add(vec2(-2.4, 6.8)),
+      ).r,
+      0.35,
+    )
+    const farContourNoise = mix(
+      texture(
+        noises.perlin,
+        positionWorld.xz
+          .mul(0.032)
+          .add(wind.direction.mul(foamTime.mul(1.25)))
+          .add(vec2(-14.6, 11.8)),
+      ).r,
+      texture(
+        noises.perlin,
+        positionWorld.xz
+          .mul(0.095)
+          .sub(wind.direction.mul(foamTime.mul(0.72)))
+          .add(vec2(8.1, -4.2)),
+      ).r,
+      0.35,
+    )
+    const nearSegmentMask = mix(nearSegmentMacro, nearSegmentDetail, 0.32).smoothstep(0.46, 0.64)
+    const farSegmentMask = mix(farSegmentMacro, farSegmentDetail, 0.32).smoothstep(0.46, 0.64)
+    const miniWaveHalfWidth = float(0.01)
+    const miniWaveFeather = float(0.004)
+    const nearMiniWaveDepth = waterDepth.add(nearContourNoise.sub(0.5).mul(0.018))
+    const farMiniWaveDepth = waterDepth.add(farContourNoise.sub(0.5).mul(0.022))
+    const nearMiniWave = phaseBandNode(
+      nearMiniWaveDepth,
+      foamNearDistance.sub(miniWaveHalfWidth),
+      foamNearDistance.add(miniWaveHalfWidth),
+      miniWaveFeather,
+    ).mul(nearSegmentMask)
+    const farMiniWave = phaseBandNode(
+      farMiniWaveDepth,
+      oscillatingFarDistance.sub(miniWaveHalfWidth),
+      oscillatingFarDistance.add(miniWaveHalfWidth),
+      miniWaveFeather,
+    ).mul(farSegmentMask)
+    const miniWaves = max(nearMiniWave, farMiniWave)
     const washNoise = mix(macroNoise, detailNoise, 0.35).smoothstep(0.35, 0.72)
     const washVariation = mix(float(0.45), float(1), washNoise)
+    const shoreWashVariation = mix(float(1), washVariation, waterDepth.smoothstep(0.025, 0.1))
     const warpedWashWaterDepth = waterDepth
       .sub(macroNoise.sub(0.5).mul(0.045))
       .sub(detailNoise.sub(0.5).mul(0.015))
     const washReach = coastalFoamWashReach.clamp(0.02, 0.35)
     const shoreWash = warpedWashWaterDepth
+      .add(coastalFoamWashInwardOffset.clamp(0, 0.18))
       .smoothstep(washReach.mul(0.62), washReach)
       .oneMinus()
-      .mul(washVariation)
+      .mul(shoreWashVariation)
 
     return max(miniWaves, shoreWash.mul(0.9))
       .mul(coastalFoamStrength.clamp(0, 1))
@@ -567,7 +657,7 @@ function createLandrushWaterMaterialFromContext({
     const shoreDepthField = shoreDepthFieldNode(terrainData)
     const rippleVisibilityDepth = rippleVisibilityDepthNode(terrainData)
     const rippleMask = rippleVisibilityDepth.smoothstep(ripplesReachStart, ripplesReachEnd)
-    const rippleTime = wind.localTime.mul(0.5)
+    const rippleTime = crestTime.mul(0.5)
     const baseRipple =
       ripplePhase === 'incoming'
         ? mix(
@@ -598,35 +688,44 @@ function createLandrushWaterMaterialFromContext({
     const waveWidth = crestStart.clamp(0.035, 0.12)
     const frontCyanWaterDepth = shoreDepthField.oneMinus()
     const frontCyanDepthThreshold = frontCyanShallowDepthThreshold.clamp(0.03, 0.95)
-    const frontCyanDepthResponseWidth = float(0.5)
-      .div(frontCyanShallowDepthResponseRate.clamp(2, 30))
+    const frontCyanSpeedResponseWidth = float(0.5)
+      .div(frontCyanShallowSpeedResponseRate.clamp(2, 30))
       .clamp(0.015, 0.2)
-    const frontCyanTransitionSpan = frontCyanDepthResponseWidth.mul(2)
-    const frontCyanTransitionStart = float(1)
-      .sub(frontCyanDepthThreshold.add(frontCyanDepthResponseWidth))
+    const frontCyanSpeedTransitionSpan = frontCyanSpeedResponseWidth.mul(2)
+    const frontCyanSpeedTransitionStart = float(1)
+      .sub(frontCyanDepthThreshold.add(frontCyanSpeedResponseWidth))
       .clamp(0, 1)
-    const frontCyanShallowTravel = max(shoreDepthField.sub(frontCyanTransitionStart), float(0))
-    const frontCyanTransitionProgress = frontCyanShallowTravel
-      .div(max(frontCyanTransitionSpan, float(0.001)))
+    const frontCyanSpeedShallowTravel = max(
+      shoreDepthField.sub(frontCyanSpeedTransitionStart),
+      float(0),
+    )
+    const frontCyanSpeedTransitionProgress = frontCyanSpeedShallowTravel
+      .div(max(frontCyanSpeedTransitionSpan, float(0.001)))
       .clamp(0, 1)
-    const frontCyanShallowProgress = frontCyanTransitionProgress.smoothstep(0, 1)
-    const frontCyanIntegratedResponse = frontCyanTransitionSpan
+    const frontCyanIntegratedSpeedResponse = frontCyanSpeedTransitionSpan
       .mul(
-        frontCyanTransitionProgress
-          .mul(frontCyanTransitionProgress)
-          .mul(frontCyanTransitionProgress)
+        frontCyanSpeedTransitionProgress
+          .mul(frontCyanSpeedTransitionProgress)
+          .mul(frontCyanSpeedTransitionProgress)
           .sub(
-            frontCyanTransitionProgress
-              .mul(frontCyanTransitionProgress)
-              .mul(frontCyanTransitionProgress)
-              .mul(frontCyanTransitionProgress)
+            frontCyanSpeedTransitionProgress
+              .mul(frontCyanSpeedTransitionProgress)
+              .mul(frontCyanSpeedTransitionProgress)
+              .mul(frontCyanSpeedTransitionProgress)
               .mul(0.5),
           ),
       )
-      .add(max(frontCyanShallowTravel.sub(frontCyanTransitionSpan), float(0)))
+      .add(max(frontCyanSpeedShallowTravel.sub(frontCyanSpeedTransitionSpan), float(0)))
     const frontCyanWrappedRipple = wrappedBaseRipple.sub(
-      frontCyanIntegratedResponse.mul(ripplesSlopeFrequency).mul(0.62),
+      frontCyanIntegratedSpeedResponse.mul(ripplesSlopeFrequency).mul(0.62),
     )
+    const frontCyanBreakupRate = frontCyanShallowBreakupResponseRate.sub(2).div(158).clamp(0, 1)
+    const frontCyanBreakupSpan = mix(float(0.28), float(0.1), frontCyanBreakupRate)
+    const frontCyanBreakupDepth = max(frontCyanDepthThreshold.sub(frontCyanWaterDepth), float(0))
+    const frontCyanShallowBreakupProgress = frontCyanBreakupDepth
+      .div(frontCyanBreakupSpan)
+      .clamp(0, 1)
+      .smoothstep(0, 1)
     const frontCyanEventIndex = frontCyanWrappedRipple.floor()
     const frontCyanBasePhase = frontCyanWrappedRipple.fract()
     const frontCyanSourceBreakup = rippleBreakupNode(
@@ -642,21 +741,29 @@ function createLandrushWaterMaterialFromContext({
     const frontCyanPhase = frontCyanBasePhase.add(frontCyanRippleNoise)
     const frontCyanSegmentMacro = texture(
       noises.perlin,
-      positionWorld.xz
-        .add(vec2(frontCyanEventIndex.mul(11.7), frontCyanEventIndex.mul(23.9)))
-        .mul(0.055),
+      positionWorld.xz.mul(0.055).add(vec2(11.7, 23.9)),
     ).r
     const frontCyanSegmentDetail = texture(
       noises.perlin,
-      positionWorld.xz
-        .add(vec2(frontCyanEventIndex.mul(4.3), frontCyanEventIndex.mul(7.1)))
-        .mul(0.14),
+      positionWorld.xz.mul(0.14).add(vec2(4.3, 7.1)),
     ).r
-    const frontCyanSegments = mix(frontCyanSegmentMacro, frontCyanSegmentDetail, 0.3).smoothstep(
-      0.44,
-      0.63,
+    const frontCyanSegmentCells = hash(positionWorld.xz.mul(0.32).floor())
+    const frontCyanSegmentField = mix(
+      mix(frontCyanSegmentMacro, frontCyanSegmentDetail, 0.3),
+      frontCyanSegmentCells,
+      0.24,
     )
-    const frontCyanShallowBreakup = mix(float(1), frontCyanSegments, frontCyanShallowProgress)
+    const frontCyanFragmentOnset = frontCyanShallowBreakupProgress.smoothstep(0.02, 0.28)
+    const frontCyanErosionProgress = frontCyanShallowBreakupProgress.smoothstep(0.12, 0.92)
+    const frontCyanErosionThreshold = mix(float(0.4), float(0.74), frontCyanErosionProgress)
+    const frontCyanSegments = frontCyanSegmentField.smoothstep(
+      frontCyanErosionThreshold.sub(0.04),
+      frontCyanErosionThreshold.add(0.04),
+    )
+    const frontCyanTerminalVisibility = frontCyanWaterDepth.smoothstep(0.015, 0.075)
+    const frontCyanShallowBreakup = mix(float(1), frontCyanSegments, frontCyanFragmentOnset).mul(
+      frontCyanTerminalVisibility,
+    )
     const shoreTakeover = crestStart.smoothstep(0, 0.12).oneMinus()
     const shoreFrontPhase = max(crestStart.sub(frontCyanRippleNoise), float(0))
     const shoreBackPhase = shoreFrontPhase.mul(shoreTakeover.oneMinus())
@@ -843,7 +950,7 @@ function createLandrushWaterMaterialFromContext({
     }
 
     if (hasCoastalFoam) {
-      waterColor.assign(mix(waterColor, color('#f7f3df'), coastalFoamNode(terrainData)))
+      waterColor.assign(mix(waterColor, color('#f7f3df'), coastalFoamNode()))
     }
 
     const finalWaterColor = mix(waterColor, color(0xffffff), details).toVar()
@@ -923,7 +1030,12 @@ function createLandrushWaterMaterialFromContext({
         wind.timeFrequency = nextParameters.windTimeFrequency
       }
     },
-    update: (deltaSeconds: number) => wind.update(deltaSeconds),
+    update: (deltaSeconds: number) => {
+      wind.update(deltaSeconds)
+      coastalFoamTime.value += deltaSeconds
+      crestTime.value +=
+        deltaSeconds * wind.timeFrequency * wind.strength.value * ripplesTimeSpeed.value
+    },
     wind,
   }
 
@@ -932,12 +1044,14 @@ function createLandrushWaterMaterialFromContext({
 
 function createLandrushBrunoWaterContext({
   bounds,
+  coastalFoamFieldTexture,
   noises,
   params,
   terrainFieldTexture,
   wind,
 }: {
   bounds: LandrushWorldNode['perimeter']['bounds']
+  coastalFoamFieldTexture: Texture
   noises: LandrushBrunoWaterNoises
   params: LandrushWaterSurfaceParameters
   terrainFieldTexture: Texture
@@ -951,6 +1065,10 @@ function createLandrushBrunoWaterContext({
   const terrainNode = Fn(([position]) => {
     const textureUv = position.sub(boundsMin).div(boundsSize).clamp(0, 1)
     return texture(terrainFieldTexture, textureUv)
+  })
+  const coastalFoamTerrainNode = Fn(([position]) => {
+    const textureUv = position.sub(boundsMin).div(boundsSize).clamp(0, 1)
+    return texture(coastalFoamFieldTexture, textureUv)
   })
 
   const colorNode = Fn(([terrainData]) => {
@@ -992,6 +1110,7 @@ function createLandrushBrunoWaterContext({
       thickness: float(1),
     },
     terrain: {
+      coastalFoamTerrainNode,
       colorNode,
       terrainNode,
     },
