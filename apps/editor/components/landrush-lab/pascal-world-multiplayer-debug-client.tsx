@@ -9,12 +9,14 @@ import {
   useScene,
 } from '@pascal-app/core'
 import {
+  clearPascalWaterMaterialParameterOverrides,
   createPascalWaterLandSurface,
   createPascalWaterSmoothedPerimeter,
   LANDRUSH_WATER_SURFACE_PARAMETERS,
   type LandrushWaterSurfaceParameters,
   PASCAL_WATER_LOW_ELEVATION,
   type PascalWaterLandSurface,
+  setPascalWaterMaterialParameters,
 } from '@pascal-app/nodes'
 import { renderScheduler, useViewer, Viewer } from '@pascal-app/viewer'
 import { OrbitControls } from '@react-three/drei'
@@ -24,13 +26,19 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute, Shape, Vector3 } from 'three'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, GRASS_SPAWN_FIELD_RESOLUTION } from './grass-field-texture'
-import { GRASS_WATER_DEFAULT_TUNING } from './grass-water-defaults'
 import { GrassWaterLandLayers } from './grass-water-layers'
+import {
+  PASCAL_WORLD_ELEVATION_PARAMETERS,
+  PASCAL_WORLD_GRASS_TUNING,
+  PASCAL_WORLD_WATER_MATERIAL_PARAMETERS,
+  PASCAL_WORLD_WATER_MOTION_TUNING,
+  type PascalWorldWaterMotionTuning,
+} from './pascal-world-visual-defaults'
 import {
   generateWaterLabIsland,
   type IslandElevationParameters,
   type LabSliderConfig,
-  WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
+  PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS,
   WATER_LAB_DEFAULT_FIELD_PARAMETERS,
   WATER_LAB_DEFAULT_ISLAND_PARAMETERS,
 } from './water-lab-parameters'
@@ -51,9 +59,31 @@ const PASCAL_CLIFF_FAMILY_CUBE_SIZE = 3.2
 const PASCAL_CLIFF_FAMILY_CUBE_SPACING = 4.6
 const PASCAL_CLIFF_FAMILY_CUBE_LIFT = 4.2
 const PASCAL_CLIFF_MAX_FAMILY_VARIATIONS = 8
+type PascalWaterMotionLayerKey =
+  | 'coastalFoamVisibility'
+  | 'frontCyanDepthContourVisibility'
+  | 'ripplesBackColorVisibility'
+  | 'ripplesCrestVisibility'
+  | 'ripplesFrontColorVisibility'
+type PascalWaterMotionLayerVisibility = Record<PascalWaterMotionLayerKey, boolean>
 
+const PASCAL_WATER_MOTION_LAYER_OPTIONS = [
+  { key: 'coastalFoamVisibility', label: 'Coastal foam' },
+  { key: 'ripplesCrestVisibility', label: 'White crest' },
+  { key: 'ripplesFrontColorVisibility', label: 'Front cyan' },
+  { key: 'ripplesBackColorVisibility', label: 'Cyan tail' },
+  { key: 'frontCyanDepthContourVisibility', label: 'Depth contour' },
+] as const satisfies readonly { key: PascalWaterMotionLayerKey; label: string }[]
+const DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY = {
+  coastalFoamVisibility: true,
+  frontCyanDepthContourVisibility: false,
+  ripplesBackColorVisibility: true,
+  ripplesCrestVisibility: true,
+  ripplesFrontColorVisibility: true,
+} satisfies PascalWaterMotionLayerVisibility
 type PascalCliffPendingGeometryDisposal = { cancelled: boolean }
 type PascalCliffGpuQueue = { onSubmittedWorkDone?: () => Promise<void> }
+type PascalWorldMultiplayerDebugClientProps = { waterMotionDebug?: boolean }
 
 const pascalCliffPendingGeometryDisposals = new WeakMap<
   BufferGeometry,
@@ -122,6 +152,27 @@ type PascalCliffExperimentFamily = {
 type PascalCliffTuningSliderKey =
   | 'cliffColorFamilyVariationCount'
   | 'cliffColorFamilyDistribution'
+  | 'cliffCornerChipAngleAverage'
+  | 'cliffCornerChipAngleDensity'
+  | 'cliffCornerChipAngleDistribution'
+  | 'cliffCornerChipAngleVariation'
+  | 'cliffCornerChipAverage'
+  | 'cliffCornerChipDensity'
+  | 'cliffCornerChipDistribution'
+  | 'cliffCornerChipVariation'
+  | 'cliffFrontPaintColorCount'
+  | 'cliffFrontPaintColorDistance'
+  | 'cliffFrontPaintDensity'
+  | 'cliffFrontPaintSplashHeightRatio'
+  | 'cliffFrontPaintSplashHeightVariation'
+  | 'cliffFrontPaintSplashHeightVariationDistribution'
+  | 'cliffFrontPaintSplashVerticalSpreadRatio'
+  | 'cliffFrontPaintSplashVerticalSpreadVariation'
+  | 'cliffFrontPaintSplashVerticalSpreadVariationDistribution'
+  | 'cliffFrontPaintSplashWidthRatio'
+  | 'cliffFrontPaintSplashWidthVariation'
+  | 'cliffFrontPaintSplashWidthVariationDistribution'
+  | 'edgeLiftMeters'
   | 'cliffAverageSlope'
   | 'cliffSlopeVariation'
   | 'cliffSlopeVariationDistribution'
@@ -151,6 +202,11 @@ type PascalCliffTuningSliderKey =
   | 'cliffLayer3BlockWidthMeters'
   | 'cliffLayer3BlockWidthVariationMeters'
   | 'cliffLayer3BlockWidthVariationDistribution'
+type PascalCliffTuningSliderGroup = {
+  id: string
+  keys: readonly PascalCliffTuningSliderKey[]
+  label: string
+}
 type PascalCliffExperimentVector = { x: number; y: number; z: number }
 type PascalCliffExperimentGridPoint = PascalCliffExperimentVector & {
   outwardX: number
@@ -221,6 +277,141 @@ const PASCAL_CLIFF_TUNING_SLIDERS = [
     max: 1,
     min: 0,
     step: 0.01,
+  },
+  { key: 'cliffCornerChipAverage', label: 'avg chip', max: 1, min: 0, step: 0.01 },
+  {
+    key: 'cliffCornerChipVariation',
+    label: 'chip variability',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffCornerChipDistribution',
+    label: 'chip distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  { key: 'cliffCornerChipDensity', label: 'chip density', max: 1, min: 0, step: 0.01 },
+  {
+    key: 'cliffCornerChipAngleAverage',
+    label: 'avg chip angle',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffCornerChipAngleVariation',
+    label: 'angle variability',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffCornerChipAngleDistribution',
+    label: 'angle distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffCornerChipAngleDensity',
+    label: 'angle density',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintColorCount',
+    label: 'front paint colors',
+    max: 5,
+    min: 1,
+    step: 1,
+  },
+  {
+    key: 'cliffFrontPaintDensity',
+    label: 'painted rock density',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintColorDistance',
+    label: 'paint color distance',
+    max: 2,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashHeightRatio',
+    label: 'splash bottom height',
+    max: 0.9,
+    min: 0.05,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashHeightVariation',
+    label: 'height variability',
+    max: 0.6,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashHeightVariationDistribution',
+    label: 'height distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashWidthRatio',
+    label: 'splash width',
+    max: 1,
+    min: 0.1,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashWidthVariation',
+    label: 'width variability',
+    max: 0.6,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashWidthVariationDistribution',
+    label: 'width distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashVerticalSpreadRatio',
+    label: 'splash vertical spread',
+    max: 0.65,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashVerticalSpreadVariation',
+    label: 'spread variability',
+    max: 0.5,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffFrontPaintSplashVerticalSpreadVariationDistribution',
+    label: 'spread distribution',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'edgeLiftMeters',
+    label: 'base island top altitude',
+    max: 12,
+    min: 0.5,
+    step: 0.1,
   },
   { key: 'cliffAverageSlope', label: 'avg slope', max: 1.4, min: 0, step: 0.01 },
   { key: 'cliffSlopeVariation', label: 'slope variability', max: 0.9, min: 0, step: 0.01 },
@@ -385,25 +576,109 @@ const PASCAL_CLIFF_TUNING_SLIDERS = [
   },
 ] satisfies readonly LabSliderConfig<PascalCliffTuningSliderKey>[]
 
-const PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS = {
-  ...WATER_LAB_DEFAULT_ELEVATION_PARAMETERS,
-  cliffAverageSlope: 0.14,
-  cliffColorAverageRatio: 0.92,
-  cliffColorFamilyDistribution: 0.19,
-  cliffColorFamilyVariationCount: 8,
-  cliffLayer2AltitudeVariationDistribution: 1,
-  cliffLayer2Density: 1,
-  cliffLayer3AltitudeVariation: 0.17,
-  cliffLayer3AltitudeVariationDistribution: 1,
-  cliffLayer3BlockWidthMeters: 0.9,
-  cliffLayer3BlockWidthVariationMeters: 1.4,
-  cliffLayer3Density: 1,
-  cliffSlopeVariation: 0.05,
-  cliffSlopeVariationDistribution: 0,
-  cliffToneVariation: 0.12,
-} satisfies IslandElevationParameters
+const PASCAL_CLIFF_TUNING_SLIDER_GROUPS = [
+  {
+    id: 'color-families',
+    keys: ['cliffColorFamilyVariationCount', 'cliffColorFamilyDistribution'],
+    label: 'Color families',
+  },
+  {
+    id: 'front-paint',
+    keys: ['cliffFrontPaintColorCount', 'cliffFrontPaintDensity', 'cliffFrontPaintColorDistance'],
+    label: 'Front paint',
+  },
+  {
+    id: 'corner-chips',
+    keys: [
+      'cliffCornerChipAverage',
+      'cliffCornerChipVariation',
+      'cliffCornerChipDistribution',
+      'cliffCornerChipDensity',
+      'cliffCornerChipAngleAverage',
+      'cliffCornerChipAngleVariation',
+      'cliffCornerChipAngleDistribution',
+      'cliffCornerChipAngleDensity',
+    ],
+    label: 'Corner chips',
+  },
+  {
+    id: 'paint-splash',
+    keys: [
+      'cliffFrontPaintSplashHeightRatio',
+      'cliffFrontPaintSplashHeightVariation',
+      'cliffFrontPaintSplashHeightVariationDistribution',
+      'cliffFrontPaintSplashWidthRatio',
+      'cliffFrontPaintSplashWidthVariation',
+      'cliffFrontPaintSplashWidthVariationDistribution',
+      'cliffFrontPaintSplashVerticalSpreadRatio',
+      'cliffFrontPaintSplashVerticalSpreadVariation',
+      'cliffFrontPaintSplashVerticalSpreadVariationDistribution',
+    ],
+    label: 'Paint splash',
+  },
+  {
+    id: 'shared-shape',
+    keys: [
+      'edgeLiftMeters',
+      'cliffAverageSlope',
+      'cliffSlopeVariation',
+      'cliffSlopeVariationDistribution',
+    ],
+    label: 'Shared shape',
+  },
+  {
+    id: 'layer-1',
+    keys: [
+      'cliffLayer1ExtrusionAverageMeters',
+      'cliffLayer1ExtrusionVariationMeters',
+      'cliffLayer1ExtrusionVariationDistribution',
+      'cliffLayer1BlockWidthMeters',
+      'cliffLayer1BlockWidthVariationMeters',
+      'cliffLayer1BlockWidthVariationDistribution',
+    ],
+    label: 'Layer 1',
+  },
+  {
+    id: 'layer-2',
+    keys: [
+      'cliffLayer2Density',
+      'cliffLayer2AltitudeRatio',
+      'cliffLayer2AltitudeVariation',
+      'cliffLayer2AltitudeVariationDistribution',
+      'cliffLayer2ExtrusionAverageMeters',
+      'cliffLayer2ExtrusionVariationMeters',
+      'cliffLayer2ExtrusionVariationDistribution',
+      'cliffLayer2BlockWidthMeters',
+      'cliffLayer2BlockWidthVariationMeters',
+      'cliffLayer2BlockWidthVariationDistribution',
+    ],
+    label: 'Layer 2',
+  },
+  {
+    id: 'layer-3',
+    keys: [
+      'cliffLayer3Density',
+      'cliffLayer3AltitudeRatio',
+      'cliffLayer3AltitudeVariation',
+      'cliffLayer3AltitudeVariationDistribution',
+      'cliffLayer3ExtrusionAverageMeters',
+      'cliffLayer3ExtrusionVariationMeters',
+      'cliffLayer3ExtrusionVariationDistribution',
+      'cliffLayer3BlockWidthMeters',
+      'cliffLayer3BlockWidthVariationMeters',
+      'cliffLayer3BlockWidthVariationDistribution',
+    ],
+    label: 'Layer 3',
+  },
+] satisfies readonly PascalCliffTuningSliderGroup[]
+
+const PASCAL_CLIFF_TUNING_SLIDER_BY_KEY = new Map<
+  PascalCliffTuningSliderKey,
+  LabSliderConfig<PascalCliffTuningSliderKey>
+>(PASCAL_CLIFF_TUNING_SLIDERS.map((slider) => [slider.key, slider]))
+
 const PASCAL_CLIFF_EXPERIMENT_WATER_ELEVATION_PARAMETERS =
-  createPascalExperimentWaterElevationParameters(PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS)
+  createPascalExperimentWaterElevationParameters(PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS)
 
 function pascalCliffElevationParametersEqual(
   first: IslandElevationParameters,
@@ -424,22 +699,29 @@ declare global {
       features: readonly string[]
       grassSurfacePointCount: number
       grassVisible: boolean
+      frontCyanShallowDepthThreshold: number | null
       nodeCount: number
       rootNodeIds: readonly string[]
       source: string
+      waterMotionLayerVisibility: PascalWaterMotionLayerVisibility | null
       waterNodeId: string
     }
   }
 }
 
-export function PascalWorldMultiplayerDebugClient() {
+export function PascalWorldMultiplayerDebugClient({
+  waterMotionDebug = false,
+}: PascalWorldMultiplayerDebugClientProps = {}) {
+  const defaultElevationParameters = waterMotionDebug
+    ? PASCAL_WORLD_ELEVATION_PARAMETERS
+    : PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS
   const [copyStatus, setCopyStatus] = useState<PascalCliffCopyStatus>('idle')
   const [draftElevationParameters, setDraftElevationParameters] =
     useState<IslandElevationParameters>(() => ({
-      ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS,
+      ...defaultElevationParameters,
     }))
   const [elevationParameters, setElevationParameters] = useState<IslandElevationParameters>(() => ({
-    ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS,
+    ...defaultElevationParameters,
   }))
   useEffect(() => {
     if (pascalCliffElevationParametersEqual(draftElevationParameters, elevationParameters)) {
@@ -454,13 +736,23 @@ export function PascalWorldMultiplayerDebugClient() {
   }, [draftElevationParameters, elevationParameters])
 
   const pascalGrassWaterScene = useMemo(
-    () => createPascalGrassWaterSceneGraph(PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS),
-    [],
+    () =>
+      createPascalGrassWaterSceneGraph(defaultElevationParameters, {
+        waterMotionDebug,
+      }),
+    [defaultElevationParameters, waterMotionDebug],
   )
   const { sceneGraph, shorelinePoints, waterNode } = pascalGrassWaterScene
   const [cliffExperimentMode, setCliffExperimentMode] =
     useState<PascalCliffExperimentMode>('baseline')
   const [showGrass, setShowGrass] = useState(false)
+  const [waterMotionTuning, setWaterMotionTuning] = useState<PascalWorldWaterMotionTuning>(() => ({
+    ...PASCAL_WORLD_WATER_MOTION_TUNING,
+  }))
+  const [waterMotionLayerVisibility, setWaterMotionLayerVisibility] =
+    useState<PascalWaterMotionLayerVisibility>(() => ({
+      ...DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY,
+    }))
   const landSurface = useMemo(
     () =>
       createPascalWaterLandSurface({
@@ -474,17 +766,19 @@ export function PascalWorldMultiplayerDebugClient() {
     cliffExperimentMode === 'baseline'
       ? elevationParameters
       : PASCAL_CLIFF_EXPERIMENT_WATER_ELEVATION_PARAMETERS
-  const activeWaterNode = useMemo(
-    () =>
-      createPascalWaterNodeForCliffMode(
-        waterNode,
-        cliffExperimentMode,
-        activeWaterElevationParameters,
-      ),
-    [activeWaterElevationParameters, cliffExperimentMode, waterNode],
+  const activeWaterNode = useMemo(() => {
+    return createPascalWaterNodeForCliffMode(
+      waterNode,
+      cliffExperimentMode,
+      activeWaterElevationParameters,
+    )
+  }, [activeWaterElevationParameters, cliffExperimentMode, waterNode])
+  const waterMotionMaterialParameters = useMemo(
+    () => createPascalWaterMotionLayerParameters(waterMotionLayerVisibility, waterMotionTuning),
+    [waterMotionLayerVisibility, waterMotionTuning],
   )
   const bladeSubdivisions = useMemo(
-    () => resolveGrassWebGpuBladeSubdivisions(GRASS_WATER_DEFAULT_TUNING.density),
+    () => resolveGrassWebGpuBladeSubdivisions(PASCAL_WORLD_GRASS_TUNING.density),
     [],
   )
 
@@ -518,6 +812,7 @@ export function PascalWorldMultiplayerDebugClient() {
     if (
       currentWaterNode?.type !== 'pascal-water' ||
       (currentWaterNode.elevationParameters === activeWaterNode.elevationParameters &&
+        currentWaterNode.materialParameters === activeWaterNode.materialParameters &&
         currentWaterNode.metadata === activeWaterNode.metadata)
     ) {
       return
@@ -527,6 +822,7 @@ export function PascalWorldMultiplayerDebugClient() {
     try {
       scene.updateNode(activeWaterNode.id, {
         elevationParameters: activeWaterNode.elevationParameters,
+        materialParameters: activeWaterNode.materialParameters,
         metadata: activeWaterNode.metadata,
       } as never)
     } finally {
@@ -534,6 +830,16 @@ export function PascalWorldMultiplayerDebugClient() {
     }
     renderScheduler.requestFrame('geometry:changed')
   }, [activeWaterNode])
+
+  useEffect(() => {
+    if (!waterMotionDebug) return
+    setPascalWaterMaterialParameters(waterNode.id, waterMotionMaterialParameters)
+  }, [waterMotionDebug, waterMotionMaterialParameters, waterNode.id])
+
+  useEffect(() => {
+    if (!waterMotionDebug) return
+    return () => clearPascalWaterMaterialParameterOverrides(waterNode.id)
+  }, [waterMotionDebug, waterNode.id])
 
   useEffect(() => {
     window.__LANDRUSH_WORLD_MULTIPLAYER_PASCAL_DEBUG__ = {
@@ -552,12 +858,24 @@ export function PascalWorldMultiplayerDebugClient() {
         'grass-water-ground-field',
         'grass-water-blades',
         'grass-water-trees',
+        ...(waterMotionDebug
+          ? [
+              'asymmetric-water-crest-color',
+              'coastal-foam-mini-waves',
+              'front-cyan-shallow-depth-threshold',
+              'wave-layer-isolation-controls',
+            ]
+          : []),
       ],
       grassSurfacePointCount: landSurface.grassSurfacePoints.length,
       grassVisible: showGrass,
+      frontCyanShallowDepthThreshold: waterMotionDebug
+        ? waterMotionTuning.frontCyanShallowDepthThreshold
+        : null,
       nodeCount: Object.keys(sceneGraph.nodes).length,
       rootNodeIds: sceneGraph.rootNodeIds,
-      source: 'pascal-grass-water-debug',
+      source: waterMotionDebug ? 'pascal-water-motion-debug' : 'pascal-grass-water-debug',
+      waterMotionLayerVisibility: waterMotionDebug ? waterMotionLayerVisibility : null,
       waterNodeId: waterNode.id,
     }
   }, [
@@ -566,7 +884,10 @@ export function PascalWorldMultiplayerDebugClient() {
     landSurface,
     sceneGraph,
     showGrass,
+    waterMotionLayerVisibility,
+    waterMotionTuning,
     waterNode.id,
+    waterMotionDebug,
   ])
 
   const copyCliffParameters = async () => {
@@ -590,10 +911,11 @@ export function PascalWorldMultiplayerDebugClient() {
     <main
       className="h-screen w-screen overflow-hidden bg-[#0f1720]"
       data-landrush-pascal-grass-water-debug
+      data-landrush-water-motion-debug={waterMotionDebug || undefined}
     >
       <Viewer
         defaultRender={{ colorPreset: 'clay', shading: 'rendered', textures: true }}
-        postProcessing={false}
+        disablePostFx
         renderContext="viewer"
         rendererBackend="webgpu"
         selectionManager="custom"
@@ -616,7 +938,7 @@ export function PascalWorldMultiplayerDebugClient() {
               fieldResolution={GRASS_FIELD_RESOLUTION}
               spawnResolution={GRASS_SPAWN_FIELD_RESOLUTION}
               surface={landSurface}
-              tuning={GRASS_WATER_DEFAULT_TUNING}
+              tuning={PASCAL_WORLD_GRASS_TUNING}
             />
           </Suspense>
         ) : null}
@@ -624,6 +946,7 @@ export function PascalWorldMultiplayerDebugClient() {
       <PascalCliffExperimentPanel
         copyStatus={copyStatus}
         elevationParameters={draftElevationParameters}
+        labTitle="Cliff Lab"
         mode={cliffExperimentMode}
         onCopy={() => void copyCliffParameters()}
         onElevationParameterChange={(key, value) =>
@@ -631,12 +954,38 @@ export function PascalWorldMultiplayerDebugClient() {
         }
         onModeChange={setCliffExperimentMode}
         onResetElevationParameters={() => {
-          setDraftElevationParameters({ ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS })
-          setElevationParameters({ ...PASCAL_MULTIPLAYER_ISLAND_ELEVATION_PARAMETERS })
+          setDraftElevationParameters({ ...defaultElevationParameters })
+          setElevationParameters({ ...defaultElevationParameters })
+          setWaterMotionTuning({ ...PASCAL_WORLD_WATER_MOTION_TUNING })
+          setWaterMotionLayerVisibility({ ...DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY })
         }}
         onShowGrassChange={setShowGrass}
         showGrass={showGrass}
       />
+      {waterMotionDebug ? (
+        <PascalWaterMotionPanel
+          onWaterMotionTuningChange={(key, value) =>
+            setWaterMotionTuning((current) => {
+              const next = { ...current, [key]: value }
+              if (key === 'coastalFoamNearDistance' && next.coastalFoamFarDistance < value) {
+                next.coastalFoamFarDistance = value
+              }
+              if (key === 'coastalFoamFarDistance') {
+                next.coastalFoamFarDistance = Math.max(value, current.coastalFoamNearDistance)
+              }
+              return next
+            })
+          }
+          onWaterMotionLayerToggle={(key) =>
+            setWaterMotionLayerVisibility((current) => ({
+              ...current,
+              [key]: !current[key],
+            }))
+          }
+          waterMotionLayerVisibility={waterMotionLayerVisibility}
+          waterMotionTuning={waterMotionTuning}
+        />
+      ) : null}
     </main>
   )
 }
@@ -690,6 +1039,23 @@ function createPascalWaterNodeForCliffMode(
   }
 }
 
+function createPascalWaterMotionLayerParameters(
+  visibility: PascalWaterMotionLayerVisibility,
+  tuning: PascalWorldWaterMotionTuning,
+): Pick<
+  LandrushWaterSurfaceParameters,
+  PascalWaterMotionLayerKey | keyof PascalWorldWaterMotionTuning
+> {
+  return {
+    ...tuning,
+    coastalFoamVisibility: visibility.coastalFoamVisibility ? 1 : 0,
+    frontCyanDepthContourVisibility: visibility.frontCyanDepthContourVisibility ? 1 : 0,
+    ripplesBackColorVisibility: visibility.ripplesBackColorVisibility ? 1 : 0,
+    ripplesCrestVisibility: visibility.ripplesCrestVisibility ? 1 : 0,
+    ripplesFrontColorVisibility: visibility.ripplesFrontColorVisibility ? 1 : 0,
+  }
+}
+
 function createPascalExperimentWaterElevationParameters(
   elevationParameters: IslandElevationParameters,
 ): IslandElevationParameters {
@@ -706,6 +1072,7 @@ function createPascalExperimentWaterElevationParameters(
 function PascalCliffExperimentPanel({
   copyStatus,
   elevationParameters,
+  labTitle,
   mode,
   onCopy,
   onElevationParameterChange,
@@ -716,6 +1083,7 @@ function PascalCliffExperimentPanel({
 }: {
   copyStatus: PascalCliffCopyStatus
   elevationParameters: IslandElevationParameters
+  labTitle: string
   mode: PascalCliffExperimentMode
   onCopy: () => void
   onElevationParameterChange: (key: PascalCliffTuningSliderKey, value: number) => void
@@ -730,7 +1098,7 @@ function PascalCliffExperimentPanel({
   return (
     <section className="pointer-events-auto absolute left-4 top-4 z-10 max-h-[40vh] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-white/12 bg-slate-950/78 px-3 py-3 text-xs text-slate-100 shadow-2xl shadow-black/25 backdrop-blur sm:max-h-[calc(100vh-2rem)]">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="font-medium uppercase tracking-[0.16em] text-slate-300">Cliff Lab</div>
+        <div className="font-medium uppercase tracking-[0.16em] text-slate-300">{labTitle}</div>
         <div className="flex items-center gap-1.5">
           <button
             className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/14 bg-white/8 px-2 text-[11px] font-medium text-slate-200 transition hover:bg-white/14"
@@ -766,29 +1134,42 @@ function PascalCliffExperimentPanel({
           </button>
         ))}
       </div>
-      <div className="mt-3 space-y-2.5">
-        {PASCAL_CLIFF_TUNING_SLIDERS.map((slider) => (
-          <label className="grid gap-1" key={slider.key}>
-            <span className="flex items-center justify-between gap-3 text-[11px] font-medium text-slate-300">
-              <span>{slider.label}</span>
-              <span className="tabular-nums text-slate-100">
-                {formatPascalCliffSliderValue(elevationParameters[slider.key], slider.step)}
-              </span>
-            </span>
-            <input
-              aria-label={slider.label}
-              className="h-4 w-full accent-cyan-300"
-              data-cliff-slider={slider.key}
-              max={slider.max}
-              min={slider.min}
-              onInput={(event) =>
-                onElevationParameterChange(slider.key, Number(event.currentTarget.value))
-              }
-              step={slider.step}
-              type="range"
-              value={elevationParameters[slider.key]}
-            />
-          </label>
+      <div className="mt-3 space-y-4">
+        {PASCAL_CLIFF_TUNING_SLIDER_GROUPS.map((group) => (
+          <section key={group.id}>
+            <h3 className="mb-2 border-b border-white/12 pb-1 text-[10px] font-semibold uppercase text-slate-400">
+              {group.label}
+            </h3>
+            <div className="space-y-2.5">
+              {group.keys.map((key) => {
+                const slider = PASCAL_CLIFF_TUNING_SLIDER_BY_KEY.get(key)
+                if (!slider) return null
+                return (
+                  <label className="grid gap-1" key={slider.key}>
+                    <span className="flex items-center justify-between gap-3 text-[11px] font-medium text-slate-300">
+                      <span>{slider.label}</span>
+                      <span className="tabular-nums text-slate-100">
+                        {formatPascalCliffSliderValue(elevationParameters[slider.key], slider.step)}
+                      </span>
+                    </span>
+                    <input
+                      aria-label={slider.label}
+                      className="h-4 w-full accent-cyan-300"
+                      data-cliff-slider={slider.key}
+                      max={slider.max}
+                      min={slider.min}
+                      onInput={(event) =>
+                        onElevationParameterChange(slider.key, Number(event.currentTarget.value))
+                      }
+                      step={slider.step}
+                      type="range"
+                      value={elevationParameters[slider.key]}
+                    />
+                  </label>
+                )
+              })}
+            </div>
+          </section>
         ))}
       </div>
       <label className="mt-3 flex items-center gap-2 text-[11px] font-medium text-slate-300">
@@ -802,6 +1183,224 @@ function PascalCliffExperimentPanel({
       </label>
     </section>
   )
+}
+
+function PascalWaterMotionPanel({
+  onWaterMotionLayerToggle,
+  onWaterMotionTuningChange,
+  waterMotionLayerVisibility,
+  waterMotionTuning,
+}: {
+  onWaterMotionLayerToggle: (key: PascalWaterMotionLayerKey) => void
+  onWaterMotionTuningChange: (key: keyof PascalWorldWaterMotionTuning, value: number) => void
+  waterMotionLayerVisibility: PascalWaterMotionLayerVisibility
+  waterMotionTuning: PascalWorldWaterMotionTuning
+}) {
+  return (
+    <section className="pointer-events-auto absolute right-4 top-4 z-10 max-h-[calc(100vh-2rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-white/12 bg-slate-950/78 px-3 py-3 text-xs text-slate-100 shadow-2xl shadow-black/25 backdrop-blur">
+      <div className="mb-3 font-medium uppercase tracking-[0.16em] text-slate-300">
+        Water Motion
+      </div>
+      <section className="mb-3 rounded-md border border-white/10 bg-black/15 p-2.5">
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+          Front cyan behavior
+        </h3>
+        <div className="grid gap-3">
+          <PascalWaterMotionSlider
+            accentClassName="accent-fuchsia-400"
+            description="Below this normalized depth, Front cyan accelerates and breaks into segments."
+            label="Shallow depth threshold"
+            max={0.7}
+            min={0.05}
+            onChange={onWaterMotionTuningChange}
+            step={0.01}
+            tuningKey="frontCyanShallowDepthThreshold"
+            value={waterMotionTuning.frontCyanShallowDepthThreshold}
+          />
+          <PascalWaterMotionSlider
+            accentClassName="accent-fuchsia-400"
+            description="Controls the shared travel speed of the white crest, front cyan, and cyan tail."
+            label="Main wave speed"
+            max={8}
+            min={0}
+            onChange={onWaterMotionTuningChange}
+            step={0.01}
+            tuningKey="ripplesTimeSpeed"
+            value={waterMotionTuning.ripplesTimeSpeed}
+          />
+          <PascalWaterMotionSlider
+            accentClassName="accent-fuchsia-400"
+            description="Higher values make inward acceleration ramp more abruptly at the shallow contour."
+            label="Speed response rate"
+            max={30}
+            min={2}
+            onChange={onWaterMotionTuningChange}
+            step={1}
+            tuningKey="frontCyanShallowSpeedResponseRate"
+            value={waterMotionTuning.frontCyanShallowSpeedResponseRate}
+          />
+          <PascalWaterMotionSlider
+            accentClassName="accent-fuchsia-400"
+            description="Higher values make the cyan break into segments more abruptly at the shallow contour."
+            label="Breakup response rate"
+            max={160}
+            min={2}
+            onChange={onWaterMotionTuningChange}
+            step={1}
+            tuningKey="frontCyanShallowBreakupResponseRate"
+            value={waterMotionTuning.frontCyanShallowBreakupResponseRate}
+          />
+        </div>
+      </section>
+      <section className="mb-3 rounded-md border border-white/10 bg-black/15 p-2.5">
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+          Coastal foam distance
+        </h3>
+        <div className="grid gap-3">
+          <PascalWaterMotionSlider
+            description="Controls how far the continuous shore wash reaches into the water."
+            label="Shore wash reach"
+            max={0.25}
+            min={0.03}
+            onChange={onWaterMotionTuningChange}
+            step={0.01}
+            tuningKey="coastalFoamWashReach"
+            value={waterMotionTuning.coastalFoamWashReach}
+          />
+          <PascalWaterMotionSlider
+            description="Retracts the shore wash's inner contour beneath the coastal border."
+            label="Shore wash inward offset"
+            max={0.18}
+            min={0}
+            onChange={onWaterMotionTuningChange}
+            step={0.005}
+            tuningKey="coastalFoamWashInwardOffset"
+            value={waterMotionTuning.coastalFoamWashInwardOffset}
+          />
+          <PascalWaterMotionSlider
+            description="Places the near mini-wave contour at this distance from shore without changing its scale."
+            label="Mini-wave near distance"
+            max={0.25}
+            min={0.02}
+            onChange={onWaterMotionTuningChange}
+            step={0.01}
+            tuningKey="coastalFoamNearDistance"
+            value={waterMotionTuning.coastalFoamNearDistance}
+          />
+          <PascalWaterMotionSlider
+            description="Places the far mini-wave contour at this distance from shore without changing its scale."
+            label="Mini-wave far distance"
+            max={0.65}
+            min={waterMotionTuning.coastalFoamNearDistance}
+            onChange={onWaterMotionTuningChange}
+            step={0.001}
+            tuningKey="coastalFoamFarDistance"
+            value={waterMotionTuning.coastalFoamFarDistance}
+          />
+          <PascalWaterMotionSlider
+            description="Maximum normalized distance the far mini-wave moves inward and outward around its selected distance."
+            label="Far-wave oscillation amplitude"
+            max={0.5}
+            min={0}
+            onChange={onWaterMotionTuningChange}
+            step={0.001}
+            tuningKey="coastalFoamFarDistanceOscillationAmplitude"
+            value={waterMotionTuning.coastalFoamFarDistanceOscillationAmplitude}
+          />
+          <PascalWaterMotionSlider
+            description="Time in seconds for one complete inward-and-outward far-wave oscillation."
+            label="Far-wave oscillation period"
+            max={120}
+            min={0.1}
+            onChange={onWaterMotionTuningChange}
+            step={0.05}
+            tuningKey="coastalFoamFarDistanceOscillationPeriodSeconds"
+            value={waterMotionTuning.coastalFoamFarDistanceOscillationPeriodSeconds}
+          />
+        </div>
+      </section>
+      <section className="rounded-md border border-white/10 bg-black/15 p-2.5">
+        <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+          Water layers
+        </h3>
+        <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Water layer visibility">
+          {PASCAL_WATER_MOTION_LAYER_OPTIONS.map((option) => {
+            const visible = waterMotionLayerVisibility[option.key]
+            return (
+              <button
+                aria-pressed={visible}
+                className={`flex min-h-9 items-center justify-between gap-2 rounded-md border px-2 text-left text-[10px] font-medium transition ${
+                  visible
+                    ? 'border-cyan-300/70 bg-cyan-300/18 text-cyan-100 hover:bg-cyan-300/24'
+                    : 'border-white/10 bg-white/5 text-slate-500 hover:bg-white/9 hover:text-slate-300'
+                }`}
+                data-water-layer={option.key}
+                key={option.key}
+                onClick={() => onWaterMotionLayerToggle(option.key)}
+                type="button"
+              >
+                <span>{option.label}</span>
+                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide">
+                  {visible ? 'On' : 'Off'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+    </section>
+  )
+}
+
+function PascalWaterMotionSlider({
+  accentClassName = 'accent-cyan-300',
+  description,
+  label,
+  max,
+  min,
+  onChange,
+  step,
+  tuningKey,
+  value,
+}: {
+  accentClassName?: string
+  description: string
+  label: string
+  max: number
+  min: number
+  onChange: (key: keyof PascalWorldWaterMotionTuning, value: number) => void
+  step: number
+  tuningKey: keyof PascalWorldWaterMotionTuning
+  value: number
+}) {
+  return (
+    <label className="grid gap-1.5">
+      <span className="flex items-center justify-between gap-3 text-[11px] font-medium text-slate-300">
+        <span>{label}</span>
+        <span className="tabular-nums text-slate-100">
+          {formatPascalWaterMotionSliderValue(value, step)}
+        </span>
+      </span>
+      <input
+        aria-label={label}
+        className={`h-4 w-full ${accentClassName}`}
+        data-water-tuning={tuningKey}
+        max={max}
+        min={min}
+        onInput={(event) => onChange(tuningKey, Number(event.currentTarget.value))}
+        step={step}
+        type="range"
+        value={value}
+      />
+      <span className="text-[10px] leading-4 text-slate-500">{description}</span>
+    </label>
+  )
+}
+
+function formatPascalWaterMotionSliderValue(value: number, step: number) {
+  if (step >= 1) return value.toFixed(0)
+  const decimalPlaces = Math.min(4, Math.max(2, Math.ceil(-Math.log10(step))))
+  return value.toFixed(decimalPlaces)
 }
 
 function formatPascalCliffSliderValue(value: number, step: number) {
@@ -1071,7 +1670,10 @@ function PascalGrassWaterCameraRig() {
   )
 }
 
-function createPascalGrassWaterSceneGraph(elevationParameters: IslandElevationParameters): {
+function createPascalGrassWaterSceneGraph(
+  elevationParameters: IslandElevationParameters,
+  { waterMotionDebug = false }: PascalWorldMultiplayerDebugClientProps = {},
+): {
   sceneGraph: SceneGraph
   shorelinePoints: PascalWaterLandSurface['shorelinePoints']
   waterNode: PascalWaterNode
@@ -1096,10 +1698,12 @@ function createPascalGrassWaterSceneGraph(elevationParameters: IslandElevationPa
       depthNoiseStrength: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthNoiseStrength,
       depthReach: WATER_LAB_DEFAULT_FIELD_PARAMETERS.depthReach,
       edgeFadeDistance: WATER_LAB_DEFAULT_FIELD_PARAMETERS.edgeFadeDistance,
+      ...(waterMotionDebug ? PASCAL_WORLD_WATER_MATERIAL_PARAMETERS : {}),
     } satisfies Partial<LandrushWaterSurfaceParameters>,
     terrainFieldResolution: 1024,
     metadata: {
       source: 'pascal-grass-water-debug',
+      waterMotionDebug,
       waterLabSeed: island.seed,
     },
   })

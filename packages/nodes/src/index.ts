@@ -120,7 +120,11 @@ export {
   type LandrushWaterSurfaceParameters,
 } from './landrush-world/water-surface'
 export { levelDefinition } from './level'
-export { pascalWaterDefinition } from './pascal-water'
+export {
+  clearPascalWaterMaterialParameterOverrides,
+  pascalWaterDefinition,
+  setPascalWaterMaterialParameters,
+} from './pascal-water'
 export {
   createPascalWaterLandSurface,
   PASCAL_WATER_LOW_ELEVATION,
