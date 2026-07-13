@@ -155,6 +155,7 @@ export interface EditorProps {
   viewerToolbarLeft?: ReactNode
   viewerToolbarRight?: ReactNode
   showEditorChrome?: boolean
+  showFullActionMenu?: boolean
   showMobileSelectionBar?: boolean
   /**
    * Full-bleed surface swapped in over the 3D canvas (v2) — e.g. the studio
@@ -1195,6 +1196,7 @@ export default function Editor({
   viewerToolbarLeft,
   viewerToolbarRight,
   showEditorChrome = true,
+  showFullActionMenu = false,
   showMobileSelectionBar = true,
   stageOverlay,
   inspectorFooter,
@@ -1518,7 +1520,7 @@ export default function Editor({
                   ) : null}
                   {showEditorChrome && !(isVersionPreviewMode || isCaptureMode || isStudioMode) && (
                     <div className="pointer-events-auto">
-                      <ActionMenu />
+                      <ActionMenu showFullToolset={showFullActionMenu} />
                     </div>
                   )}
                   {showEditorChrome && !(isVersionPreviewMode || isCaptureMode || isStudioMode) && (
@@ -1610,7 +1612,7 @@ export default function Editor({
             {showEditorChrome ? (
               <>
                 <div className="pointer-events-auto">
-                  <ActionMenu />
+                  <ActionMenu showFullToolset={showFullActionMenu} />
                 </div>
                 <div className="pointer-events-auto">
                   <PanelManager showMobileSelectionBar={showMobileSelectionBar} />

@@ -1,4 +1,8 @@
-import type { CatalogCategory, StructureTool } from '../../../store/use-editor'
+'use client'
+
+import { cn } from '../../../lib/utils'
+import useEditor, { type CatalogCategory, type StructureTool } from '../../../store/use-editor'
+import { ActionButton } from './action-button'
 
 export type ToolConfig = {
   id: StructureTool
@@ -7,9 +11,8 @@ export type ToolConfig = {
   catalogCategory?: CatalogCategory
 }
 
-// Shared structure-tool metadata (icons + labels). The build palette now lives
-// in the community Build sidebar; this list survives only as the lookup table
-// for cursor/floorplan indicators. Roof-mounted accessories are intentionally
+// Shared structure-tool metadata for the Build sidebar, cursor indicators,
+// and hosts that opt into the full bottom action menu. Roof-mounted accessories are intentionally
 // absent — they're placed from the roof inspector's "Add element" section.
 export const tools: ToolConfig[] = [
   { id: 'wall', iconSrc: '/icons/wall.webp', label: 'Wall' },
@@ -35,3 +38,52 @@ export const tools: ToolConfig[] = [
   { id: 'lineset', iconSrc: '/icons/lineset.webp', label: 'Lineset' },
   { id: 'liquid-line', iconSrc: '/icons/lineset.webp', label: 'Liquid Line' },
 ]
+
+export function StructureTools() {
+  const activeTool = useEditor((state) => state.tool)
+  const catalogCategory = useEditor((state) => state.catalogCategory)
+  const structureLayer = useEditor((state) => state.structureLayer)
+  const setTool = useEditor((state) => state.setTool)
+  const setCatalogCategory = useEditor((state) => state.setCatalogCategory)
+
+  const visibleTools =
+    structureLayer === 'zones'
+      ? tools.filter((tool) => tool.id === 'zone')
+      : tools.filter((tool) => tool.id !== 'zone')
+
+  return (
+    <div className="flex items-center gap-1 px-1 md:gap-1.5">
+      {visibleTools.map((tool, index) => {
+        const isActive =
+          activeTool === tool.id &&
+          (tool.catalogCategory ? catalogCategory === tool.catalogCategory : true)
+
+        return (
+          <ActionButton
+            className={cn(
+              'h-10 w-10 shrink-0 rounded-lg duration-300 md:h-11 md:w-11',
+              isActive
+                ? 'z-10 scale-110 bg-black/40 hover:bg-black/40'
+                : 'scale-95 bg-transparent opacity-60 grayscale hover:bg-black/20 hover:opacity-100 hover:grayscale-0',
+            )}
+            data-editor-structure-tool={tool.id}
+            key={`${tool.id}-${tool.catalogCategory ?? index}`}
+            label={tool.label}
+            onClick={() => {
+              if (isActive) return
+              setTool(tool.id)
+              setCatalogCategory(tool.catalogCategory ?? null)
+              if (useEditor.getState().mode !== 'build') {
+                useEditor.getState().setMode('build')
+              }
+            }}
+            size="icon"
+            variant="ghost"
+          >
+            <img alt={tool.label} className="size-full object-contain" src={tool.iconSrc} />
+          </ActionButton>
+        )
+      })}
+    </div>
+  )
+}

@@ -1743,6 +1743,7 @@ export function LandrushIslandProgressiveClient({
             onLoad={handleLoad}
             projectId={experienceConfig.projectId}
             showEditorChrome={buildMode}
+            showFullActionMenu
             sidebarTabs={[]}
             viewerCameraControls={buildMode && buildCameraControlsReady}
             viewerCameraInitialPose={activeBuildCameraControlsInitialPose}
