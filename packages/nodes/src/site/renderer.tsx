@@ -4,19 +4,27 @@ import {
   type AnyNodeId,
   type SiteNode,
   type SlabNode,
+  useLiveNodeOverrides,
   useRegistry,
   useScene,
 } from '@pascal-app/core'
 import {
-  createDefaultMaterial,
   getSceneTheme,
   NodeRenderer,
   unionPolygons,
   useNodeEvents,
   useViewer,
 } from '@pascal-app/viewer'
-import { useMemo, useRef } from 'react'
-import { BufferGeometry, Float32BufferAttribute, type Group, Path, Shape } from 'three'
+import { useEffect, useMemo, useRef } from 'react'
+import {
+  BufferGeometry,
+  Float32BufferAttribute,
+  type Group,
+  Path,
+  Shape,
+  ShapeGeometry,
+} from 'three'
+import { MeshLambertNodeMaterial } from 'three/webgpu'
 
 const Y_OFFSET = 0.01
 
@@ -51,12 +59,16 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
   useRegistry(node.id, 'site', ref)
 
   const bgColor = useViewer((state) => getSceneTheme(state.sceneTheme).ground)
+  const livePolygon = useLiveNodeOverrides(
+    (state) => (state.overrides.get(node.id)?.polygon as SiteNode['polygon'] | undefined) ?? null,
+  )
+  const polygonPoints = livePolygon?.points ?? node.polygon?.points
 
   // Lit (not Basic) so the site ground receives the directional shadow — Basic
   // is unlit, which is why shadows used to stop dead at the slab edge. polygonOffset
   // keeps it tucked behind the grid/slab as before.
   const groundMaterial = useMemo(() => {
-    const material = createDefaultMaterial(bgColor, 0.9, 'solid')
+    const material = new MeshLambertNodeMaterial({ color: bgColor })
     material.polygonOffset = true
     material.polygonOffsetFactor = 1
     material.polygonOffsetUnits = 1
@@ -102,9 +114,9 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
 
   // Ground shape: site polygon with slab footprints punched as holes
   const groundShape = useMemo(() => {
-    if (!node?.polygon?.points || node.polygon.points.length < 3) return null
+    if (!polygonPoints || polygonPoints.length < 3) return null
 
-    const pts = node.polygon.points
+    const pts = polygonPoints
     const shape = new Shape()
     shape.moveTo(pts[0]![0], -pts[0]![1])
     for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i]![0], -pts[i]![1])
@@ -122,42 +134,44 @@ export const SiteRenderer = ({ node }: { node: SiteNode }) => {
     }
 
     return shape
-  }, [node?.polygon?.points, slabPolygons])
+  }, [polygonPoints, slabPolygons])
 
   // Create boundary line geometry
   const lineGeometry = useMemo(() => {
-    if (!node?.polygon?.points || node.polygon.points.length < 2) return null
-    return createBoundaryLineGeometry(node.polygon.points)
-  }, [node?.polygon?.points])
+    if (!polygonPoints || polygonPoints.length < 2) return null
+    return createBoundaryLineGeometry(polygonPoints)
+  }, [polygonPoints])
+  useEffect(() => () => lineGeometry?.dispose(), [lineGeometry])
+
+  const groundGeometry = useMemo(() => {
+    if (!groundShape) return null
+    return new ShapeGeometry(groundShape)
+  }, [groundShape])
+  useEffect(() => () => groundGeometry?.dispose(), [groundGeometry])
 
   const handlers = useNodeEvents(node, 'site')
-  const showSiteSurface = node.visible !== false
-
-  if (!node) {
-    return null
-  }
 
   return (
     <group ref={ref} {...handlers}>
       {/* Render children (buildings and items) */}
-      {node.children.map((childId) => (
+      {(node.children ?? []).map((childId) => (
         <NodeRenderer key={childId} nodeId={childId as AnyNodeId} />
       ))}
 
       {/* Ground fill: site polygon with slab holes, occludes below-grade geometry */}
-      {showSiteSurface && groundShape && (
+      {groundGeometry && (
         <mesh
+          geometry={groundGeometry}
           material={groundMaterial}
           position={[0, -0.05, 0]}
           receiveShadow
           rotation={[-Math.PI / 2, 0, 0]}
-        >
-          <shapeGeometry args={[groundShape]} />
-        </mesh>
+        />
       )}
 
-      {showSiteSurface && lineGeometry ? (
-        // @ts-expect-error
+      {/* Simple boundary line */}
+      {lineGeometry ? (
+        /* @ts-expect-error */
         <line frustumCulled={false} geometry={lineGeometry} renderOrder={9}>
           <lineBasicMaterial color="#f59e0b" linewidth={2} opacity={0.6} transparent />
         </line>

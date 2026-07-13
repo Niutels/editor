@@ -1,28 +1,28 @@
 // @ts-nocheck -- Adapted from Bruno Simon folio-2025 TSL/WebGPU source; see BRUNO_SIMON_LICENSE.md.
-import * as THREE from 'three/webgpu'
+
 import {
   ceil,
   dot,
+  Fn,
   float,
   floor,
-  Fn,
   fract,
   If,
   int,
-  length,
   Loop,
+  length,
   mix,
   mod,
   mul,
   sin,
   smoothstep,
-  texture,
   uv,
   vec2,
   vec3,
   vec4,
   viewportUV,
 } from 'three/tsl'
+import * as THREE from 'three/webgpu'
 
 export const LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION = 128
 
@@ -284,9 +284,8 @@ export class LandrushBrunoWaterNoises {
 
       this.renderer.setPixelRatio(1)
       this.renderer.setRenderTarget(renderTarget)
-      measureLandrushWaterNoiseStartup(
-        `setup.landrush-water.noises.${profileId}.quad-render`,
-        () => this.quadMesh.render(this.renderer),
+      measureLandrushWaterNoiseStartup(`setup.landrush-water.noises.${profileId}.quad-render`, () =>
+        this.quadMesh.render(this.renderer),
       )
       this.renderer.setRenderTarget(null)
 

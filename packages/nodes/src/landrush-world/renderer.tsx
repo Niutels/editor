@@ -407,7 +407,9 @@ export default function LandrushWorldRenderer({ node }: { node: LandrushWorldNod
           )}
         </>
       ) : null}
-      {showRoads && !useWorldMultiplayerDirtCopyLayout && hasGeometryPositions(ribbonGeometries.roadCrowns) ? (
+      {showRoads &&
+      !useWorldMultiplayerDirtCopyLayout &&
+      hasGeometryPositions(ribbonGeometries.roadCrowns) ? (
         <mesh geometry={ribbonGeometries.roadCrowns} renderOrder={18}>
           <primitive attach="material" object={materials.roadCrown} />
         </mesh>

@@ -11,6 +11,26 @@ export type IslandElevationParameters = {
   cliffColorFamilyVariationCount: number
   cliffColorFamilyDistribution: number
   cliffContrast: number
+  cliffCornerChipAngleAverage: number
+  cliffCornerChipAngleDensity: number
+  cliffCornerChipAngleDistribution: number
+  cliffCornerChipAngleVariation: number
+  cliffCornerChipAverage: number
+  cliffCornerChipDensity: number
+  cliffCornerChipDistribution: number
+  cliffCornerChipVariation: number
+  cliffFrontPaintColorCount: number
+  cliffFrontPaintColorDistance: number
+  cliffFrontPaintDensity: number
+  cliffFrontPaintSplashHeightRatio: number
+  cliffFrontPaintSplashHeightVariation: number
+  cliffFrontPaintSplashHeightVariationDistribution: number
+  cliffFrontPaintSplashVerticalSpreadRatio: number
+  cliffFrontPaintSplashVerticalSpreadVariation: number
+  cliffFrontPaintSplashVerticalSpreadVariationDistribution: number
+  cliffFrontPaintSplashWidthRatio: number
+  cliffFrontPaintSplashWidthVariation: number
+  cliffFrontPaintSplashWidthVariationDistribution: number
   cliffLayer1BlockWidthMeters: number
   cliffLayer1BlockWidthVariationMeters: number
   cliffLayer1BlockWidthVariationDistribution: number
@@ -96,6 +116,26 @@ export const WATER_LAB_DEFAULT_ELEVATION_PARAMETERS = {
   cliffColorFamilyVariationCount: 0,
   cliffColorFamilyDistribution: 0,
   cliffContrast: 0.41,
+  cliffCornerChipAngleAverage: 0.5,
+  cliffCornerChipAngleDensity: 1,
+  cliffCornerChipAngleDistribution: 0.5,
+  cliffCornerChipAngleVariation: 0,
+  cliffCornerChipAverage: 0,
+  cliffCornerChipDensity: 0,
+  cliffCornerChipDistribution: 0.5,
+  cliffCornerChipVariation: 0,
+  cliffFrontPaintColorCount: 1,
+  cliffFrontPaintColorDistance: 0.45,
+  cliffFrontPaintDensity: 1,
+  cliffFrontPaintSplashHeightRatio: 0.32,
+  cliffFrontPaintSplashHeightVariation: 0.14,
+  cliffFrontPaintSplashHeightVariationDistribution: 0.55,
+  cliffFrontPaintSplashVerticalSpreadRatio: 0.24,
+  cliffFrontPaintSplashVerticalSpreadVariation: 0.12,
+  cliffFrontPaintSplashVerticalSpreadVariationDistribution: 0.55,
+  cliffFrontPaintSplashWidthRatio: 0.72,
+  cliffFrontPaintSplashWidthVariation: 0.18,
+  cliffFrontPaintSplashWidthVariationDistribution: 0.55,
   cliffLayer1BlockWidthMeters: 5.4,
   cliffLayer1BlockWidthVariationMeters: 1.8,
   cliffLayer1BlockWidthVariationDistribution: 0,

@@ -1,9 +1,9 @@
 // @ts-nocheck -- Adapted from Bruno Simon folio-2025 TSL/WebGPU source; see BRUNO_SIMON_LICENSE.md.
-import * as THREE from 'three/webgpu'
+
 import {
   color,
-  float,
   Fn,
+  float,
   frontFacing,
   If,
   max,
@@ -13,6 +13,7 @@ import {
   vec3,
   vec4,
 } from 'three/tsl'
+import * as THREE from 'three/webgpu'
 
 export class LandrushBrunoMeshDefaultMaterial extends THREE.MeshLambertNodeMaterial {
   static revealDiscardNodeBuilder = (context, outputColor) => {

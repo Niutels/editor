@@ -437,21 +437,71 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
     () => createPascalWaterDepthReferencePerimeter(shorelinePoints, node.fieldParameters),
     [node.fieldParameters, shorelinePoints],
   )
+  const landSurfaceElevationParameters = useMemo(
+    () => ({
+      contourNoiseFrequency: node.elevationParameters.contourNoiseFrequency,
+      contourVariationMeters: node.elevationParameters.contourVariationMeters,
+      edgeLiftMeters: node.elevationParameters.edgeLiftMeters,
+      innerContourMeters: node.elevationParameters.innerContourMeters,
+      outerContourMeters: node.elevationParameters.outerContourMeters,
+    }),
+    [
+      node.elevationParameters.contourNoiseFrequency,
+      node.elevationParameters.contourVariationMeters,
+      node.elevationParameters.edgeLiftMeters,
+      node.elevationParameters.innerContourMeters,
+      node.elevationParameters.outerContourMeters,
+    ],
+  )
   const landSurface = useMemo(
     () =>
       createPascalWaterLandSurface({
-        elevationParameters: node.elevationParameters,
+        elevationParameters: landSurfaceElevationParameters,
         shorelinePoints,
         waterPlaneSize: node.planeSize,
       }),
-    [node.elevationParameters, node.planeSize, shorelinePoints],
+    [landSurfaceElevationParameters, node.planeSize, shorelinePoints],
+  )
+  const cliffSandCoverageParameters = useMemo(
+    () => ({
+      cliffAverageSlope: node.elevationParameters.cliffAverageSlope,
+      cliffLayer1ExtrusionAverageMeters: node.elevationParameters.cliffLayer1ExtrusionAverageMeters,
+      cliffLayer1ExtrusionVariationMeters:
+        node.elevationParameters.cliffLayer1ExtrusionVariationMeters,
+      cliffLayer1ExtrusionVariationDistribution:
+        node.elevationParameters.cliffLayer1ExtrusionVariationDistribution,
+      cliffLayer2ExtrusionAverageMeters: node.elevationParameters.cliffLayer2ExtrusionAverageMeters,
+      cliffLayer2ExtrusionVariationMeters:
+        node.elevationParameters.cliffLayer2ExtrusionVariationMeters,
+      cliffLayer2ExtrusionVariationDistribution:
+        node.elevationParameters.cliffLayer2ExtrusionVariationDistribution,
+      cliffLayer3ExtrusionAverageMeters: node.elevationParameters.cliffLayer3ExtrusionAverageMeters,
+      cliffLayer3ExtrusionVariationMeters:
+        node.elevationParameters.cliffLayer3ExtrusionVariationMeters,
+      cliffLayer3ExtrusionVariationDistribution:
+        node.elevationParameters.cliffLayer3ExtrusionVariationDistribution,
+      cliffSlopeVariation: node.elevationParameters.cliffSlopeVariation,
+    }),
+    [
+      node.elevationParameters.cliffAverageSlope,
+      node.elevationParameters.cliffLayer1ExtrusionAverageMeters,
+      node.elevationParameters.cliffLayer1ExtrusionVariationMeters,
+      node.elevationParameters.cliffLayer1ExtrusionVariationDistribution,
+      node.elevationParameters.cliffLayer2ExtrusionAverageMeters,
+      node.elevationParameters.cliffLayer2ExtrusionVariationMeters,
+      node.elevationParameters.cliffLayer2ExtrusionVariationDistribution,
+      node.elevationParameters.cliffLayer3ExtrusionAverageMeters,
+      node.elevationParameters.cliffLayer3ExtrusionVariationMeters,
+      node.elevationParameters.cliffLayer3ExtrusionVariationDistribution,
+      node.elevationParameters.cliffSlopeVariation,
+    ],
   )
   const cliffSandCoveragePoints = useMemo(
     () =>
       createPascalWaterCliffSandCoveragePerimeter({
         innerElevation: landSurface.plateauElevation,
         outerElevation: PASCAL_WATER_LOW_ELEVATION,
-        parameters: node.elevationParameters,
+        parameters: cliffSandCoverageParameters,
         plateauPoints: landSurface.plateauPoints,
         shorelinePoints,
         slopeStartPoints: landSurface.slopeStartPoints,
@@ -460,7 +510,7 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
       landSurface.plateauElevation,
       landSurface.plateauPoints,
       landSurface.slopeStartPoints,
-      node.elevationParameters,
+      cliffSandCoverageParameters,
       shorelinePoints,
     ],
   )
