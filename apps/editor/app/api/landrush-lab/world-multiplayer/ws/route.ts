@@ -200,6 +200,7 @@ const LANDRUSH_BUILD_NODE_TYPES = new Set([
   'elevator',
   'fence',
   'item',
+  'level',
   'ridge-vent',
   'roof',
   'roof-segment',

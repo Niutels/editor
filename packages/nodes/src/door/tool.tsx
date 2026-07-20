@@ -23,6 +23,7 @@ import {
   useAlignmentGuides,
   useEditor,
   useFacingPose,
+  usePlacementPreview,
 } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -32,6 +33,10 @@ import {
   clearOpeningGuides3D,
   publishOpeningGuidesForWallEvent,
 } from '../shared/opening-guides-runtime'
+import {
+  createPlacementCommitGuard,
+  type PlacementCommitPointerSample,
+} from '../shared/placement-commit-guard'
 import {
   getRoofWallOpeningCursorPose,
   type RoofWallOpeningTarget,
@@ -68,7 +73,7 @@ type HostKind = 'wall' | 'roof' | null
  *
  * The ghost follows the cursor everywhere (like moving an item): over open
  * floor it floats as an invalid (unplaceable) ghost; the moment the cursor
- * ray hovers a wall (or roof-segment face) the real draft snaps onto it.
+ * ray hovers a wall (or roof-segment face) a local wireframe snaps onto it.
  * Snapping engages only on an actual mesh hover — no proximity magnet — since
  * the wall side faces are big raycast targets.
  */
@@ -122,6 +127,26 @@ const DoorTool: React.FC = () => {
     // Last open-floor cursor point (level-local X/Z) so an R-flip while
     // free-following can re-render the floating ghost with the new facing.
     let lastFloorPoint: [number, number, number] | null = null
+    const placementCommitGuard = createPlacementCommitGuard()
+
+    const onPlacementPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      const isPlacementSurface =
+        target instanceof HTMLCanvasElement ||
+        (target instanceof Element && target.closest('[data-floorplan-scene]') !== null)
+      if (event.button !== 0 || !isPlacementSurface) {
+        placementCommitGuard.clear()
+        return
+      }
+      placementCommitGuard.arm(event)
+    }
+
+    const clearPlacementCommitArm = () => {
+      placementCommitGuard.clear()
+    }
+
+    const consumePlacementCommitArm = (event: WallEvent | RoofEvent) =>
+      placementCommitGuard.consume(event.nativeEvent as PlacementCommitPointerSample)
 
     const getLevelId = () => useViewer.getState().selection.levelId
     const getLevelYOffset = () => {
@@ -136,11 +161,7 @@ const DoorTool: React.FC = () => {
     }
 
     const destroyDraft = () => {
-      if (!draftRef.current) return
-      const wallId = draftRef.current.parentId
-      useScene.getState().deleteNode(draftRef.current.id)
       draftRef.current = null
-      if (wallId) markHostDirty(wallId)
     }
 
     const hideCursor = () => {
@@ -149,6 +170,7 @@ const DoorTool: React.FC = () => {
       clearOpeningGuides3D()
       setFallbackPose(null)
       useFacingPose.getState().clear()
+      usePlacementPreview.getState().clear()
     }
 
     // Alignment candidates — anchors of every alignable object; refreshed
@@ -192,6 +214,7 @@ const DoorTool: React.FC = () => {
         rotationY: sideFlip ? Math.PI : 0,
         side: sideFlip ? 'back' : 'front',
       })
+      usePlacementPreview.getState().clear()
       useAlignmentGuides.getState().clear()
       clearOpeningGuides3D()
       // Off-host (invalid) floating ghost — no direction triangle.
@@ -233,10 +256,7 @@ const DoorTool: React.FC = () => {
       return { clampedX, clampedY, valid }
     }
 
-    // Shared create/update path for the wall draft — used by the direct
-    // wall-mesh hover and the floor proximity snap. Reuses the existing draft
-    // (reparenting only on an actual wall change to avoid churning the host's
-    // children array, which flashes 0-vertex wall geometry in WebGPU).
+    // Settle the local wall preview without inserting it into the scene graph.
     const applyWallTarget = (args: {
       wall: WallNode
       rawLocalX: number
@@ -250,16 +270,13 @@ const DoorTool: React.FC = () => {
       const height = draftRef.current?.height ?? 2.1
 
       if (!draftRef.current) {
-        const node = DoorNode.parse({
+        draftRef.current = DoorNode.parse({
           position: [0, height / 2, 0],
           rotation: [0, itemRotation, 0],
           side,
           wallId: wall.id,
           parentId: wall.id,
-          metadata: { isTransient: true },
         })
-        useScene.getState().createNode(node, wall.id as AnyNodeId)
-        draftRef.current = node
       }
 
       const { clampedX, clampedY, valid } = resolveWallPlacement(
@@ -271,25 +288,14 @@ const DoorTool: React.FC = () => {
         draftRef.current.id,
       )
 
-      if (wall.id === draftRef.current.parentId) {
-        useScene.getState().updateNode(draftRef.current.id, {
-          position: [clampedX, clampedY, 0],
-          rotation: [0, itemRotation, 0],
-          side,
-        })
-        markHostDirty(wall.id)
-      } else {
-        useScene.getState().updateNode(draftRef.current.id, {
-          position: [clampedX, clampedY, 0],
-          rotation: [0, itemRotation, 0],
-          side,
-          parentId: wall.id,
-          wallId: wall.id,
-          // The draft may arrive from a roof-segment face hover.
-          roofSegmentId: undefined,
-          roofFace: undefined,
-        })
-      }
+      draftRef.current.position = [clampedX, clampedY, 0]
+      draftRef.current.rotation = [0, itemRotation, 0]
+      draftRef.current.side = side
+      draftRef.current.parentId = wall.id
+      draftRef.current.wallId = wall.id
+      draftRef.current.roofSegmentId = undefined
+      draftRef.current.roofFace = undefined
+      usePlacementPreview.getState().set(draftRef.current, wall)
 
       updateCursor(
         wallLocalToWorld(
@@ -334,7 +340,6 @@ const DoorTool: React.FC = () => {
       draftRef.current = null
       hostKind = null
 
-      useScene.getState().deleteNode(draft.id)
       useScene.temporal.getState().resume()
 
       const levelId = getLevelId()
@@ -377,10 +382,12 @@ const DoorTool: React.FC = () => {
       })
 
       useScene.getState().createNode(node, wall.id as AnyNodeId)
+      markHostDirty(wall.id)
       useViewer.getState().setSelection({ selectedIds: [node.id] })
       triggerSFX('sfx:structure-build')
       useAlignmentGuides.getState().clear()
       clearOpeningGuides3D()
+      usePlacementPreview.getState().clear()
       if (useEditor.getState().getContinuation('point') === 'repeat') {
         useScene.temporal.getState().pause()
         alignmentCandidates = collectWallOpeningAlignmentCandidates(useScene.getState().nodes, '')
@@ -423,7 +430,7 @@ const DoorTool: React.FC = () => {
     }
 
     const onWallClick = (event: WallEvent) => {
-      if (!draftRef.current) return
+      if (!draftRef.current || !consumePlacementCommitArm(event)) return
       if (
         !isValidWallSideFace(event.normal) ||
         isCurvedWall(event.node) ||
@@ -512,24 +519,24 @@ const DoorTool: React.FC = () => {
 
       if (draftRef.current && draftRef.current.parentId !== segment.id) destroyDraft()
       if (draftRef.current) {
-        useScene.getState().updateNode(draftRef.current.id, {
-          position,
-          rotation: [0, 0, 0],
-          roofFace: face.id,
-        })
+        draftRef.current.position = position
+        draftRef.current.rotation = [0, 0, 0]
+        draftRef.current.side = 'front'
+        draftRef.current.parentId = segment.id
+        draftRef.current.wallId = undefined
+        draftRef.current.roofSegmentId = segment.id
+        draftRef.current.roofFace = face.id
       } else {
-        const node = DoorNode.parse({
+        draftRef.current = DoorNode.parse({
           position,
           rotation: [0, 0, 0],
           side: 'front',
           roofSegmentId: segment.id,
           roofFace: face.id,
           parentId: segment.id,
-          metadata: { isTransient: true },
         })
-        useScene.getState().createNode(node, segment.id as AnyNodeId)
-        draftRef.current = node
       }
+      usePlacementPreview.getState().clear()
       // Opening guides are wall-specific; clear them while over a roof face.
       clearOpeningGuides3D()
       updateRoofCursor(target, event.node as RoofNode)
@@ -537,7 +544,7 @@ const DoorTool: React.FC = () => {
     }
 
     const onRoofClick = (event: RoofEvent) => {
-      if (!draftRef.current?.roofSegmentId) return
+      if (!draftRef.current?.roofSegmentId || !consumePlacementCommitArm(event)) return
       const target = resolveRoofTarget(event)
       // Alt force-places over a colliding roof-face target (see onWallClick).
       if (!target) return
@@ -548,7 +555,6 @@ const DoorTool: React.FC = () => {
       draftRef.current = null
       hostKind = null
 
-      useScene.getState().deleteNode(draft.id)
       useScene.temporal.getState().resume()
 
       const state = useScene.getState()
@@ -649,6 +655,9 @@ const DoorTool: React.FC = () => {
     emitter.on('roof:leave', onRoofLeave)
     emitter.on('grid:move', onGridFreeFollow)
     emitter.on('tool:cancel', onCancel)
+    window.addEventListener('pointerdown', onPlacementPointerDown, true)
+    window.addEventListener('click', clearPlacementCommitArm)
+    window.addEventListener('pointercancel', clearPlacementCommitArm, true)
     window.addEventListener('keydown', onKeyDown)
 
     return () => {
@@ -667,6 +676,9 @@ const DoorTool: React.FC = () => {
       emitter.off('roof:leave', onRoofLeave)
       emitter.off('grid:move', onGridFreeFollow)
       emitter.off('tool:cancel', onCancel)
+      window.removeEventListener('pointerdown', onPlacementPointerDown, true)
+      window.removeEventListener('click', clearPlacementCommitArm)
+      window.removeEventListener('pointercancel', clearPlacementCommitArm, true)
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [])

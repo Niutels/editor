@@ -147,6 +147,7 @@ export function useFloorplanBackgroundPlacement({
             node: closest.wall,
             point: { x: closest.point[0], y: 0, z: closest.point[1] },
             localPosition: [distance, floorplanOpeningLocalY, 0],
+            nativeEvent: event,
             normal: closest.normal,
             stopPropagation: () => {},
           } as any)
@@ -392,7 +393,6 @@ export function useFloorplanBackgroundPlacement({
       isOpeningPlacementActive,
       isPolygonBuildActive,
       isRoofBuildActive,
-      isSlabBuildActive,
       isWallBuildActive,
       isZoneBuildActive,
       levelId,

@@ -33,6 +33,7 @@ export const Grid = ({
   sectionColor = '#000000',
   fadeDistance = 100,
   fadeStrength = 1,
+  renderVisual = true,
   revealRadius = 10,
 }: {
   cellSize?: number
@@ -43,6 +44,7 @@ export const Grid = ({
   sectionColor?: string
   fadeDistance?: number
   fadeStrength?: number
+  renderVisual?: boolean
   revealRadius?: number
 }) => {
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
@@ -293,7 +295,7 @@ export const Grid = ({
     baseAlphaUniform.value = 0
     cellSizeUniform.value = useEditor.getState().gridSnapStep
     patchAlphaUniform.value = 1.5
-    gridRef.current.visible = snapPatchVisible
+    gridRef.current.visible = renderVisual && snapPatchVisible
   })
 
   // Pass the geometry as a prop instead of a JSX child so the mesh

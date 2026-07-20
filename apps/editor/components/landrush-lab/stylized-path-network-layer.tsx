@@ -20,6 +20,9 @@ export const STYLIZED_PATH_ROADBED_INSET_METERS =
 export const STYLIZED_PATH_WIDTH_SCALE = 2.05
 export const STYLIZED_PATH_ROADBED_COLOR = '#d5bea1'
 export const STYLIZED_PATH_SIDEWALK_COLOR = '#dbc5a8'
+export const STYLIZED_PATH_OUTER_CURB_COLOR = '#b2a187'
+export const STYLIZED_PATH_ROADBED_WALL_COLOR = '#746f69'
+export const STYLIZED_PATH_SEAM_COLOR = '#c7b89e'
 
 const STYLIZED_PATH_SIDEWALK_LIFT_METERS = 0.095
 const STYLIZED_PATH_SEAM_LIFT_METERS = 0.088
@@ -82,7 +85,11 @@ export function StylizedPathNetworkLayer({
           name="stylized-path-outer-curb-walls"
           renderOrder={renderOrder}
         >
-          <meshBasicMaterial color="#b2a187" side={DoubleSide} toneMapped={false} />
+          <meshBasicMaterial
+            color={STYLIZED_PATH_OUTER_CURB_COLOR}
+            side={DoubleSide}
+            toneMapped={false}
+          />
         </mesh>
       ) : null}
       {hasGeometryPositions(geometries.sidewalks) ? (
@@ -104,12 +111,20 @@ export function StylizedPathNetworkLayer({
           name="stylized-path-roadbed-walls"
           renderOrder={renderOrder + 2}
         >
-          <meshBasicMaterial color="#746f69" side={DoubleSide} toneMapped={false} />
+          <meshBasicMaterial
+            color={STYLIZED_PATH_ROADBED_WALL_COLOR}
+            side={DoubleSide}
+            toneMapped={false}
+          />
         </mesh>
       ) : null}
       {hasGeometryPositions(geometries.seams) ? (
         <mesh geometry={geometries.seams} name="stylized-path-seams" renderOrder={renderOrder + 3}>
-          <meshBasicMaterial color="#c7b89e" side={DoubleSide} toneMapped={false} />
+          <meshBasicMaterial
+            color={STYLIZED_PATH_SEAM_COLOR}
+            side={DoubleSide}
+            toneMapped={false}
+          />
         </mesh>
       ) : null}
       {hasGeometryPositions(geometries.roadbeds) ? (

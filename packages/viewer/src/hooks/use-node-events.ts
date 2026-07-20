@@ -8,6 +8,8 @@ import {
 import type { ThreeEvent } from '@react-three/fiber'
 import useViewer from '../store/use-viewer'
 
+const SYNTHETIC_CLICK_TOLERANCE_PX = 6
+
 // Derive `{ node, event }` per kind directly from the `AnyNode`
 // discriminated union — no hand-maintained kind→type map. Adding a new
 // kind to `AnyNode` automatically makes it valid here; removing one
@@ -16,6 +18,12 @@ import useViewer from '../store/use-viewer'
 type NodeByKind<K extends AnyNodeType> = Extract<AnyNode, { type: K }>
 
 export function useNodeEvents<K extends AnyNodeType>(node: NodeByKind<K>, type: K) {
+  let pointerDown: {
+    clientX: number
+    clientY: number
+    pointerId: number
+  } | null = null
+
   const emit = (suffix: EventSuffix, e: ThreeEvent<PointerEvent>) => {
     const eventKey = `${type}:${suffix}` as `${K}:${EventSuffix}`
     const localPoint = e.object.worldToLocal(e.point.clone())
@@ -56,16 +64,26 @@ export function useNodeEvents<K extends AnyNodeType>(node: NodeByKind<K>, type: 
 
   return {
     onPointerDown: (e: ThreeEvent<PointerEvent>) => {
-      if (selectionSuppressed()) return
-      if (e.button !== 0) return
+      if (selectionSuppressed() || e.button !== 0) {
+        pointerDown = null
+        return
+      }
+      pointerDown = {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        pointerId: e.pointerId,
+      }
       emit('pointerdown', e)
     },
     onPointerUp: (e: ThreeEvent<PointerEvent>) => {
-      if (selectionSuppressed()) return
-      if (e.button !== 0) return
+      const pointerStart = pointerDown
+      pointerDown = null
+      if (selectionSuppressed() || e.button !== 0) return
       emit('pointerup', e)
-      // Synthesize a click event on pointer up to be more forgiving than R3F's default onClick
-      // which often fails if the mouse moves even 1 pixel.
+      if (!pointerStart || pointerStart.pointerId !== e.pointerId) return
+      const deltaX = e.clientX - pointerStart.clientX
+      const deltaY = e.clientY - pointerStart.clientY
+      if (deltaX * deltaX + deltaY * deltaY > SYNTHETIC_CLICK_TOLERANCE_PX ** 2) return
       emit('click', e)
     },
     onClick: (_e: ThreeEvent<PointerEvent>) => {
@@ -82,6 +100,13 @@ export function useNodeEvents<K extends AnyNodeType>(node: NodeByKind<K>, type: 
     },
     onPointerMove: (e: ThreeEvent<PointerEvent>) => {
       if (spatialSuppressed()) return
+      if (pointerDown?.pointerId === e.pointerId) {
+        const deltaX = e.clientX - pointerDown.clientX
+        const deltaY = e.clientY - pointerDown.clientY
+        if (deltaX * deltaX + deltaY * deltaY > SYNTHETIC_CLICK_TOLERANCE_PX ** 2) {
+          pointerDown = null
+        }
+      }
       emit('move', e)
     },
     onDoubleClick: (e: ThreeEvent<PointerEvent>) => {

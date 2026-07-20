@@ -33,6 +33,7 @@ import { GRASS_FIELD_PLANE_SIZE } from './grass-field-texture'
 import { ORGANIC_GRASS_PALETTE } from './organic-grass-pattern'
 
 export type StylizedGrassGroundDebugMode = 'final' | 'footprint' | 'hierarchy' | 'macro'
+export type StylizedGrassGroundTextureReadyHandler = (ready: boolean, texture?: Texture) => void
 
 const STYLIZED_GRASS_GROUND_BAKE_RESOLUTION = 1024
 // Cut the island edge mid-ramp: near-zero thresholds trace the mask's outer
@@ -44,16 +45,18 @@ export function canUseProceduralStylizedGrassGround() {
 }
 
 export function ProceduralStylizedGrassGround({
+  color = '#ffffff',
   debugMode = 'final',
   elevation,
   maskTexture,
   onReady,
   renderOrder,
 }: {
+  color?: string
   debugMode?: StylizedGrassGroundDebugMode
   elevation: number
   maskTexture: Texture
-  onReady?: (ready: boolean) => void
+  onReady?: StylizedGrassGroundTextureReadyHandler
   renderOrder: number
 }) {
   const renderer = useThree((state) => state.gl) as unknown as WebGPURenderer
@@ -80,7 +83,7 @@ export function ProceduralStylizedGrassGround({
         bake.render(renderer)
         if (!active) return
         setBaked({ bake, texture: bake.texture })
-        onReady?.(true)
+        onReady?.(true, bake.texture)
         invalidate()
       } catch (error) {
         console.warn('[landrush] Falling back to live procedural grass ground.', error)
@@ -107,6 +110,7 @@ export function ProceduralStylizedGrassGround({
       {bakedTexture ? (
         <meshBasicMaterial
           alphaTest={STYLIZED_GRASS_GROUND_EDGE_ALPHA_TEST}
+          color={color}
           depthWrite
           map={bakedTexture}
           side={FrontSide}

@@ -9,15 +9,27 @@
 // `loaded` guard inside `../lib/bootstrap` keeps the side effect
 // idempotent under HMR.
 import '../lib/bootstrap'
-import { type ReactNode, useEffect } from 'react'
+import { type ComponentType, type ReactNode, useEffect, useState } from 'react'
 
 export function ClientBootstrap({ children }: { children: ReactNode }) {
+  const [AgentationComponent, setAgentationComponent] = useState<ComponentType | null>(null)
+
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return
-    // Loaded here (not via a `<Script>` tag in <head>) to avoid React's
-    // "script inside a React component" hydration warning. The package
-    // is already a direct dep, so we don't need the CDN auto-global.
-    import('react-scan').then(({ scan }) => scan({ enabled: true }))
+
+    const searchParams = new URLSearchParams(window.location.search)
+    if (searchParams.get('reactScan') === '1') {
+      void import('react-scan').then(({ scan }) => scan({ enabled: true }))
+    }
+    if (searchParams.get('agentation') === '1') {
+      void import('agentation').then(({ Agentation }) => setAgentationComponent(() => Agentation))
+    }
   }, [])
-  return children
+
+  return (
+    <>
+      {children}
+      {AgentationComponent ? <AgentationComponent /> : null}
+    </>
+  )
 }

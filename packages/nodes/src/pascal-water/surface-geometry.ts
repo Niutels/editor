@@ -11,8 +11,6 @@ import type { PascalWaterPoint2 } from './water-field'
 export const PASCAL_WATER_LOW_ELEVATION = -0.04
 export const PASCAL_WATER_SAND_ELEVATION = -0.1
 
-const CLIFF_MIN_QUAD_AREA_METERS = 0.01
-const CLIFF_MIN_QUAD_EDGE_METERS = 0.04
 const CLIFF_INITIAL_VERTICES_PER_POINT = 160
 const CLIFF_SAND_COVERAGE_MARGIN_METERS = 0.2
 const CLIFF_RIM_GRASS_OVERLAP_METERS = 0.16
@@ -32,6 +30,7 @@ export type PascalWaterElevationParameters = {
   cliffCornerChipAngleDistribution: number
   cliffCornerChipAngleVariation: number
   cliffCornerChipAverage: number
+  cliffCornerChipDarkening: number
   cliffCornerChipDensity: number
   cliffCornerChipDistribution: number
   cliffCornerChipVariation: number
@@ -281,6 +280,11 @@ export function createPascalWaterCliffFootprintGeometry(cliffGeometry: BufferGeo
   }
 
   geometry.setAttribute('position', new BufferAttribute(positions, 3))
+  // Preserve the source layout so WebGPU geometry swaps cannot leave a cached
+  // render pipeline without one of the vertex streams it was built against.
+  for (const [name, attribute] of Object.entries(cliffGeometry.attributes)) {
+    if (name !== 'position') geometry.setAttribute(name, attribute.clone())
+  }
   const sourceIndex = cliffGeometry.getIndex()
   if (sourceIndex) geometry.setIndex(sourceIndex.clone())
   geometry.computeBoundingSphere()
@@ -455,6 +459,11 @@ const CLIFF_FACET_JITTER_METERS = 0.3
 const CLIFF_FACET_ANCHOR_STEP = 3
 const CLIFF_EXPOSURE_LIGHT_NORMAL_Y = 0.55
 const CLIFF_EXPOSURE_SHADE_NORMAL_Y = -0.12
+const CLIFF_CORNER_CHIP_MAX_EDGE_RATIO = 0.5
+const CLIFF_CORNER_CHIP_MAX_ANGLE_RADIANS = Math.PI / 8
+const CLIFF_CORNER_CHIP_MAX_CAP_DEPTH_RATIO = 0.92
+const CLIFF_CORNER_CHIP_MAX_HEIGHT_RATIO = 0.92
+const CLIFF_CORNER_CHIP_MAX_SURFACE_DARKENING = 0.45
 const CLIFF_FRONT_PAINT_MAX_COLOR_DISTANCE = 2
 const CLIFF_FRONT_PAINT_MAX_COLORS = 5
 const CLIFF_FRONT_PAINT_MAX_SUBDIVISIONS = 8
@@ -482,6 +491,7 @@ const CLIFF_REFERENCE_FAMILY_RAMPS = Array.from(
 )
 const CLIFF_GRASS_RIM_COLOR = srgbCliffColorToLinear(srgbCliffColor(0xa5, 0x9f, 0x5c))
 const CLIFF_PROFILE_EPSILON = 0.001
+const CLIFF_SEAM_COINCIDENT_EPSILON = 0.000001
 
 type CliffGeometrySink = {
   colors: Float32Array
@@ -558,11 +568,12 @@ type StylizedCliffPaintStyle = {
 
 type StylizedCliffCornerChip = {
   amount: number
-  angle: number
+  angleTilt: number
 }
 
 type StylizedCliffColumn = {
   brightness: number
+  chipDarkening: number
   cornerChips: readonly [StylizedCliffCornerChip, StylizedCliffCornerChip]
   enabled: boolean
   family: CliffColorFamily
@@ -974,6 +985,7 @@ function createStylizedCliffColumn(
 
   return {
     brightness: stylizedCliffBrightness(seed, parameters),
+    chipDarkening: clamp01(parameters.cliffCornerChipDarkening),
     cornerChips: createStylizedCliffCornerChips(seed, parameters),
     enabled:
       stylizedCliffLayerBlockEnabled(layerIndex, seed, parameters) &&
@@ -1000,11 +1012,21 @@ function createStylizedCliffCornerChips(
   const enabled = density > 0 && (density >= 1 || hashUnit(seed, 223.17) < density)
 
   const chip = (corner: number): StylizedCliffCornerChip => {
-    if (!enabled) return { amount: 0, angle: 0.5 }
+    if (!enabled) return { amount: 0, angleTilt: 0 }
     const salt = corner * 71.31
     const angleDensity = clamp01(parameters.cliffCornerChipAngleDensity)
     const angled =
       angleDensity > 0 && (angleDensity >= 1 || hashUnit(seed, 257.41 + salt) < angleDensity)
+    const angleMagnitude = angled
+      ? resolveStylizedCliffUnitParameter(
+          seed,
+          271.19 + salt,
+          parameters.cliffCornerChipAngleAverage,
+          parameters.cliffCornerChipAngleVariation,
+          parameters.cliffCornerChipAngleDistribution,
+        )
+      : 0
+    const angleDirection = hashUnit(seed, 293.87 + salt) < 0.5 ? -1 : 1
     return {
       amount: resolveStylizedCliffUnitParameter(
         seed,
@@ -1013,15 +1035,7 @@ function createStylizedCliffCornerChips(
         parameters.cliffCornerChipVariation,
         parameters.cliffCornerChipDistribution,
       ),
-      angle: angled
-        ? resolveStylizedCliffUnitParameter(
-            seed,
-            271.19 + salt,
-            parameters.cliffCornerChipAngleAverage,
-            parameters.cliffCornerChipAngleVariation,
-            parameters.cliffCornerChipAngleDistribution,
-          )
-        : 0.5,
+      angleTilt: angleMagnitude * angleDirection,
     }
   }
 
@@ -1035,7 +1049,11 @@ function resolveStylizedCliffUnitParameter(
   variation: number,
   distribution: number,
 ) {
-  return clamp01(average + stylizedCliffVariationOffset(seed, salt, variation, distribution))
+  const center = clamp01(average)
+  const variability = clamp01(variation)
+  if (variability <= 0) return center
+  const sample = stylizedCliffDistributionSample(seed, salt, distribution) * 0.5 + 0.5
+  return lerp(center, sample, variability)
 }
 
 function createStylizedCliffPaintStyle(
@@ -1281,11 +1299,9 @@ function stylizedCliffColumnEdgeOffsets(
   column: StylizedCliffColumn,
   index: number,
   cliffHeight: number,
-  step: number,
 ): { bottoms: number[]; tops: number[] } {
   const tops: number[] = []
   const bottoms: number[] = []
-  const chip = stylizedCliffColumnChipAtStep(column, step)
 
   for (let stratum = 0; stratum < column.strata.length; stratum += 1) {
     const spec = column.strata[stratum]
@@ -1305,35 +1321,11 @@ function stylizedCliffColumnEdgeOffsets(
     let bottom = top + spec.slopeFactor * stratumHeight
     if (previousTop !== undefined) bottom = Math.max(top, Math.min(bottom, previousTop - 0.01))
 
-    const depthCapacity = Math.min(column.widthMeters * 0.28, Math.max(0, top - floor) * 0.72)
-    const depthWeight = lerp(1, 0.2, chip.angle)
-    top = Math.max(floor, top - chip.amount * depthWeight * depthCapacity)
-
     tops.push(top)
     bottoms.push(bottom)
   }
 
   return { bottoms, tops }
-}
-
-function stylizedCliffColumnChipAtStep(column: StylizedCliffColumn, step: number) {
-  const progress = clamp01(step / Math.max(1, column.segmentCount))
-  let amount = 0
-  let angle = 0.5
-
-  for (let corner = 0; corner < column.cornerChips.length; corner += 1) {
-    const chip = column.cornerChips[corner]
-    if (!chip || chip.amount <= 0) continue
-    const distance = corner === 0 ? progress : 1 - progress
-    const span = lerp(0.08, 0.36, chip.amount)
-    const influence = 1 - smoothstep(0, span, distance)
-    const weightedAmount = chip.amount * influence
-    if (weightedAmount <= amount) continue
-    amount = weightedAmount
-    angle = chip.angle
-  }
-
-  return { amount, angle }
 }
 
 function stylizedCliffColumnTops(column: StylizedCliffColumn, index: number): number[] {
@@ -1351,24 +1343,12 @@ function stylizedCliffColumnDrops(
   column: StylizedCliffColumn,
   index: number,
   cliffHeight: number,
-  step: number,
 ): number[] {
-  const chip = stylizedCliffColumnChipAtStep(column, step)
-  let previousTopFraction = 0
-  return column.strata.map((spec, stratum) => {
-    const baseDrop =
-      stratum === column.strata.length - 1
-        ? anchorCliffRimDrop(index, cliffHeight)
-        : anchorCliffLedgeDrop(stratum, index, cliffHeight)
-    const stratumHeight = Math.max(0.2, (spec.topFraction - previousTopFraction) * cliffHeight)
-    previousTopFraction = spec.topFraction
-    const heightCapacity = Math.min(column.widthMeters * 0.28, stratumHeight * 0.32)
-    const heightWeight = lerp(0.2, 1, chip.angle)
-    return Math.min(
-      baseDrop + chip.amount * heightWeight * heightCapacity,
-      Math.max(baseDrop, stratumHeight * 0.34),
-    )
-  })
+  return column.strata.map((_, stratum) =>
+    stratum === column.strata.length - 1
+      ? anchorCliffRimDrop(index, cliffHeight)
+      : anchorCliffLedgeDrop(stratum, index, cliffHeight),
+  )
 }
 
 function anchorCliffLedgeDrop(stratum: number, index: number, cliffHeight: number) {
@@ -1423,8 +1403,8 @@ function createStylizedCliffColumnProfile(
   anchorSteps.push(steps)
 
   const anchorIndices = anchorSteps.map((step) => (column.startIndex + step) % pointCount)
-  const anchorEdges = anchorIndices.map((index, anchor) =>
-    stylizedCliffColumnEdgeOffsets(column, index, cliffHeight, anchorSteps[anchor] ?? 0),
+  const anchorEdges = anchorIndices.map((index) =>
+    stylizedCliffColumnEdgeOffsets(column, index, cliffHeight),
   )
   const anchorMidOffsets = anchorIndices.map((index, anchor) => {
     const edges = anchorEdges[anchor]
@@ -1436,8 +1416,8 @@ function createStylizedCliffColumnProfile(
     })
   })
   const anchorTops = anchorIndices.map((index) => stylizedCliffColumnTops(column, index))
-  const anchorDrops = anchorIndices.map((index, anchor) =>
-    stylizedCliffColumnDrops(column, index, cliffHeight, anchorSteps[anchor] ?? 0),
+  const anchorDrops = anchorIndices.map((index) =>
+    stylizedCliffColumnDrops(column, index, cliffHeight),
   )
 
   const bottomOffsets: number[][] = []
@@ -1658,6 +1638,46 @@ function offsetStylizedCliffProfile(
   })
 }
 
+type StylizedCliffCornerCutBoundary = {
+  down: CliffVertex
+  inward: CliffVertex
+  inwardRatio: number
+}
+
+type StylizedCliffCornerCut = StylizedCliffCornerCutBoundary & {
+  along: CliffVertex
+  corner: 0 | 1
+  edgeDistanceMeters: number
+  hint: CliffNormal
+}
+
+type StylizedCliffColumnCornerCuts = {
+  end: StylizedCliffCornerCut | null
+  start: StylizedCliffCornerCut | null
+  totalEdgeLengthMeters: number
+}
+
+type StylizedCliffTopEdgeStation = {
+  capInner: CliffVertex
+  distanceMeters: number
+  frame: CliffStationFrame
+  mid: CliffVertex
+  upper: CliffVertex
+}
+
+type StylizedCliffFrontProfile = {
+  lower: CliffVertex
+  mid: CliffVertex
+  upper: CliffVertex
+}
+
+type StylizedCliffSegmentSurfaceSlice = {
+  capOuter: CliffVertex
+  frontUpper: CliffVertex
+  grassRatio: number
+  ratio: number
+}
+
 function emitStylizedCliffColumn(
   sink: CliffGeometrySink,
   frames: readonly CliffStationFrame[],
@@ -1669,6 +1689,15 @@ function emitStylizedCliffColumn(
   innerElevation: number,
 ) {
   const columnTopFraction = Math.max(0.01, column.strata.at(-1)?.topFraction ?? 1)
+  const topEdgeStations = createStylizedCliffColumnTopEdgeStations(
+    frames,
+    column,
+    profile,
+    pointCount,
+    outerElevation,
+    innerElevation,
+  )
+  const cornerCuts = createStylizedCliffColumnCornerCuts(column, topEdgeStations)
 
   for (let step = 0; step < column.segmentCount; step += 1) {
     const index = (column.startIndex + step) % pointCount
@@ -1688,6 +1717,8 @@ function emitStylizedCliffColumn(
     const stepDrops = profile.drops[step] ?? []
     const nextStepDrops = profile.drops[step + 1] ?? stepDrops
     const lastStratum = column.strata.length - 1
+    const edgeStation0 = topEdgeStations[step]
+    const edgeStation1 = topEdgeStations[step + 1]
 
     for (let stratum = 0; stratum < column.strata.length; stratum += 1) {
       const spec = column.strata[stratum]
@@ -1746,7 +1777,58 @@ function emitStylizedCliffColumn(
         -nextTopDrop,
       )
 
-      emitStylizedCliffFrontFace(
+      let capInner0: CliffVertex
+      let capInner1: CliffVertex
+      if (stratum < lastStratum) {
+        const upperOffset = bottomOffsets[stratum + 1] ?? 0.08
+        const nextUpperOffset = nextBottomOffsets[stratum + 1] ?? 0.08
+        capInner0 = stylizedCliffPoint(frame, highT, upperOffset, outerElevation, innerElevation)
+        capInner1 = stylizedCliffPoint(
+          nextFrame,
+          nextHighT,
+          nextUpperOffset,
+          outerElevation,
+          innerElevation,
+        )
+      } else {
+        const plateauOffset = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_METERS : 0
+        const plateauDrop = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_DROP_METERS : 0
+        capInner0 =
+          column.layerIndex === 0
+            ? stylizedCliffPoint(
+                frame,
+                1,
+                plateauOffset,
+                outerElevation,
+                innerElevation,
+                plateauDrop,
+              )
+            : stylizedCliffPoint(frame, highT, 0, outerElevation, innerElevation)
+        capInner1 =
+          column.layerIndex === 0
+            ? stylizedCliffPoint(
+                nextFrame,
+                1,
+                plateauOffset,
+                outerElevation,
+                innerElevation,
+                plateauDrop,
+              )
+            : stylizedCliffPoint(nextFrame, nextHighT, 0, outerElevation, innerElevation)
+      }
+
+      const surfaceSlices =
+        stratum === lastStratum && edgeStation0 && edgeStation1
+          ? createStylizedCliffSegmentSurfaceSlices(
+              upper0,
+              upper1,
+              edgeStation0.distanceMeters,
+              edgeStation1.distanceMeters,
+              cornerCuts,
+            )
+          : createPlainStylizedCliffSegmentSurfaceSlices(upper0, upper1)
+
+      emitStylizedCliffFrontWithCornerCuts(
         sink,
         { lower: lower0, mid: mid0, upper: upper0 },
         { lower: lower1, mid: mid1, upper: upper1 },
@@ -1761,6 +1843,7 @@ function emitStylizedCliffColumn(
         paintVisibleStarts[step + 1] ?? paintVisibleStarts[step] ?? 0,
         step,
         stratum,
+        surfaceSlices,
       )
 
       const ledgeHint: CliffNormal = {
@@ -1769,103 +1852,15 @@ function emitStylizedCliffColumn(
         z: wallHint.z * 0.35,
       }
 
-      if (stratum < lastStratum) {
-        const upperOffset = bottomOffsets[stratum + 1] ?? 0.08
-        const nextUpperOffset = nextBottomOffsets[stratum + 1] ?? 0.08
-        const ledgeInner0 = stylizedCliffPoint(
-          frame,
-          highT,
-          upperOffset,
-          outerElevation,
-          innerElevation,
-        )
-        const ledgeInner1 = stylizedCliffPoint(
-          nextFrame,
-          nextHighT,
-          nextUpperOffset,
-          outerElevation,
-          innerElevation,
-        )
-        addStylizedCliffTriangle(
-          sink,
-          [upper0, upper1, ledgeInner1],
-          ledgeHint,
-          column.family,
-          'light',
-          column.brightness,
-        )
-        addStylizedCliffTriangle(
-          sink,
-          [upper0, ledgeInner1, ledgeInner0],
-          ledgeHint,
-          column.family,
-          'light',
-          column.brightness,
-        )
-      } else {
-        // Tuck the base rim under the plateau so rasterization cannot expose a dark crack.
-        const plateauOffset = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_METERS : 0
-        const plateauDrop = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_DROP_METERS : 0
-        const plateau0 =
-          column.layerIndex === 0
-            ? stylizedCliffPoint(
-                frame,
-                1,
-                plateauOffset,
-                outerElevation,
-                innerElevation,
-                plateauDrop,
-              )
-            : stylizedCliffPoint(frame, highT, 0, outerElevation, innerElevation)
-        const plateau1 =
-          column.layerIndex === 0
-            ? stylizedCliffPoint(
-                nextFrame,
-                1,
-                plateauOffset,
-                outerElevation,
-                innerElevation,
-                plateauDrop,
-              )
-            : stylizedCliffPoint(nextFrame, nextHighT, 0, outerElevation, innerElevation)
-        if (column.layerIndex === 0) {
-          const rockColor = stylizedCliffExposureColor(
-            ledgeHint,
-            column.family,
-            'light',
-            column.brightness,
-          )
-          addStylizedCliffTransitionTriangle(
-            sink,
-            [upper0, upper1, plateau1],
-            [rockColor, rockColor, CLIFF_GRASS_RIM_COLOR],
-            ledgeHint,
-          )
-          addStylizedCliffTransitionTriangle(
-            sink,
-            [upper0, plateau1, plateau0],
-            [rockColor, CLIFF_GRASS_RIM_COLOR, CLIFF_GRASS_RIM_COLOR],
-            ledgeHint,
-          )
-        } else {
-          addStylizedCliffTriangle(
-            sink,
-            [upper0, upper1, plateau1],
-            ledgeHint,
-            column.family,
-            'light',
-            column.brightness,
-          )
-          addStylizedCliffTriangle(
-            sink,
-            [upper0, plateau1, plateau0],
-            ledgeHint,
-            column.family,
-            'light',
-            column.brightness,
-          )
-        }
-      }
+      emitStylizedCliffTopCap(
+        sink,
+        capInner0,
+        capInner1,
+        surfaceSlices,
+        ledgeHint,
+        column,
+        stratum === lastStratum && column.layerIndex === 0,
+      )
 
       if (stratum === 0) {
         const skirt0: CliffVertex = {
@@ -1898,12 +1893,384 @@ function emitStylizedCliffColumn(
       }
     }
   }
+
+  if (cornerCuts.start) emitStylizedCliffCornerCut(sink, cornerCuts.start, column)
+  if (cornerCuts.end) emitStylizedCliffCornerCut(sink, cornerCuts.end, column)
 }
 
-type StylizedCliffFrontProfile = {
-  lower: CliffVertex
-  mid: CliffVertex
-  upper: CliffVertex
+function createStylizedCliffColumnTopEdgeStations(
+  frames: readonly CliffStationFrame[],
+  column: StylizedCliffColumn,
+  profile: StylizedCliffColumnProfile,
+  pointCount: number,
+  outerElevation: number,
+  innerElevation: number,
+): StylizedCliffTopEdgeStation[] {
+  const lastStratum = column.strata.length - 1
+  const spec = column.strata[lastStratum]
+  if (!spec) return []
+
+  const stations: StylizedCliffTopEdgeStation[] = []
+  let distanceMeters = 0
+  for (let step = 0; step <= column.segmentCount; step += 1) {
+    const frame = frames[(column.startIndex + step) % pointCount]
+    if (!frame) continue
+    const stratumTops = profile.stratumTops[step] ?? []
+    const lowT = lastStratum === 0 ? 0 : (stratumTops[lastStratum - 1] ?? 0.36)
+    const highT = spec.topFraction
+    const midT = (lowT + highT) / 2
+    const offset = profile.topOffsets[step]?.[lastStratum] ?? 0.1
+    const midOffset = profile.midOffsets[step]?.[lastStratum] ?? offset
+    const topDrop = profile.drops[step]?.[lastStratum] ?? 0.12
+    const mid = stylizedCliffPoint(frame, midT, midOffset, outerElevation, innerElevation)
+    const upper = stylizedCliffPoint(frame, highT, offset, outerElevation, innerElevation, -topDrop)
+    const capInner =
+      column.layerIndex === 0
+        ? stylizedCliffPoint(
+            frame,
+            1,
+            -CLIFF_RIM_GRASS_OVERLAP_METERS,
+            outerElevation,
+            innerElevation,
+            -CLIFF_RIM_GRASS_OVERLAP_DROP_METERS,
+          )
+        : stylizedCliffPoint(frame, highT, 0, outerElevation, innerElevation)
+    const previous = stations.at(-1)
+    if (previous) distanceMeters += distance3(previous.upper, upper)
+    stations.push({ capInner, distanceMeters, frame, mid, upper })
+  }
+
+  return stations
+}
+
+function sampleStylizedCliffTopEdge(
+  stations: readonly StylizedCliffTopEdgeStation[],
+  distanceMeters: number,
+) {
+  const first = stations[0]
+  const last = stations.at(-1)
+  if (!first || !last) return null
+  if (distanceMeters <= 0) return first.upper
+  if (distanceMeters >= last.distanceMeters) return last.upper
+
+  for (let index = 0; index < stations.length - 1; index += 1) {
+    const current = stations[index]
+    const next = stations[index + 1]
+    if (!(current && next) || distanceMeters > next.distanceMeters) continue
+    const span = next.distanceMeters - current.distanceMeters
+    const ratio =
+      span <= CLIFF_PROFILE_EPSILON ? 0 : (distanceMeters - current.distanceMeters) / span
+    return lerpCliffVertex(current.upper, next.upper, ratio)
+  }
+
+  return last.upper
+}
+
+function createStylizedCliffColumnCornerCuts(
+  column: StylizedCliffColumn,
+  stations: readonly StylizedCliffTopEdgeStation[],
+): StylizedCliffColumnCornerCuts {
+  const first = stations[0]
+  const last = stations.at(-1)
+  const totalEdgeLengthMeters = last?.distanceMeters ?? 0
+  if (!(first && last) || totalEdgeLengthMeters <= CLIFF_PROFILE_EPSILON) {
+    return { end: null, start: null, totalEdgeLengthMeters }
+  }
+
+  const createCut = (corner: 0 | 1): StylizedCliffCornerCut | null => {
+    const chip = column.cornerChips[corner]
+    if (!chip || chip.amount <= CLIFF_PROFILE_EPSILON) return null
+    const endpoint = corner === 0 ? first : last
+    const adjacent = corner === 0 ? stations[1] : stations.at(-2)
+    if (!adjacent) return null
+    const edgeDistanceMeters =
+      totalEdgeLengthMeters * CLIFF_CORNER_CHIP_MAX_EDGE_RATIO * chip.amount
+    const boundary = createStylizedCliffCornerCutBoundary(
+      column,
+      corner,
+      endpoint.upper,
+      endpoint.capInner,
+      Math.max(0, endpoint.upper.y - endpoint.mid.y),
+      edgeDistanceMeters,
+    )
+    const along = sampleStylizedCliffTopEdge(
+      stations,
+      corner === 0 ? edgeDistanceMeters : totalEdgeLengthMeters - edgeDistanceMeters,
+    )
+    if (!(boundary && along)) return null
+
+    const sideDirection = normalize2(
+      endpoint.upper.x - adjacent.upper.x,
+      endpoint.upper.z - adjacent.upper.z,
+    )
+    return {
+      ...boundary,
+      along,
+      corner,
+      edgeDistanceMeters,
+      hint: {
+        x: endpoint.frame.outward.x + sideDirection.x * 0.45,
+        y: 1,
+        z: endpoint.frame.outward.z + sideDirection.z * 0.45,
+      },
+    }
+  }
+
+  return {
+    end: createCut(1),
+    start: createCut(0),
+    totalEdgeLengthMeters,
+  }
+}
+
+function createStylizedCliffCornerCutBoundary(
+  column: StylizedCliffColumn,
+  corner: 0 | 1,
+  upper: CliffVertex,
+  capInner: CliffVertex,
+  verticalCapacity: number,
+  sizeMeters: number,
+): StylizedCliffCornerCutBoundary | null {
+  const chip = column.cornerChips[corner]
+  if (!column.enabled || !chip || chip.amount <= CLIFF_PROFILE_EPSILON) return null
+
+  const capDepthMeters = distance3(upper, capInner)
+  const tiltRadians = chip.angleTilt * CLIFF_CORNER_CHIP_MAX_ANGLE_RADIANS
+  const depthMeters = sizeMeters * Math.tan(Math.PI / 4 - tiltRadians)
+  const targetHeightMeters = sizeMeters * Math.tan(Math.PI / 4 + tiltRadians)
+  const inwardRatio = Math.min(
+    CLIFF_CORNER_CHIP_MAX_CAP_DEPTH_RATIO,
+    depthMeters / Math.max(CLIFF_PROFILE_EPSILON, capDepthMeters),
+  )
+  const heightMeters = Math.min(
+    verticalCapacity * CLIFF_CORNER_CHIP_MAX_HEIGHT_RATIO,
+    targetHeightMeters,
+  )
+  if (
+    sizeMeters <= CLIFF_PROFILE_EPSILON ||
+    inwardRatio <= CLIFF_PROFILE_EPSILON ||
+    heightMeters <= CLIFF_PROFILE_EPSILON
+  ) {
+    return null
+  }
+
+  return {
+    down: { x: upper.x, y: upper.y - heightMeters, z: upper.z },
+    inward: lerpCliffVertex(upper, capInner, inwardRatio),
+    inwardRatio,
+  }
+}
+
+function createPlainStylizedCliffSegmentSurfaceSlices(
+  firstUpper: CliffVertex,
+  secondUpper: CliffVertex,
+): readonly [StylizedCliffSegmentSurfaceSlice, StylizedCliffSegmentSurfaceSlice] {
+  return [
+    { capOuter: firstUpper, frontUpper: firstUpper, grassRatio: 0, ratio: 0 },
+    { capOuter: secondUpper, frontUpper: secondUpper, grassRatio: 0, ratio: 1 },
+  ]
+}
+
+function createStylizedCliffSegmentSurfaceSlices(
+  firstUpper: CliffVertex,
+  secondUpper: CliffVertex,
+  segmentStartDistance: number,
+  segmentEndDistance: number,
+  cornerCuts: StylizedCliffColumnCornerCuts,
+): StylizedCliffSegmentSurfaceSlice[] {
+  const segmentLength = segmentEndDistance - segmentStartDistance
+  if (segmentLength <= CLIFF_PROFILE_EPSILON) {
+    return [...createPlainStylizedCliffSegmentSurfaceSlices(firstUpper, secondUpper)]
+  }
+
+  const ratios = [0, 1]
+  const addCutBoundary = (distanceMeters: number) => {
+    if (
+      distanceMeters <= segmentStartDistance + CLIFF_PROFILE_EPSILON ||
+      distanceMeters >= segmentEndDistance - CLIFF_PROFILE_EPSILON
+    ) {
+      return
+    }
+    const ratio = (distanceMeters - segmentStartDistance) / segmentLength
+    if (!ratios.some((candidate) => Math.abs(candidate - ratio) <= CLIFF_PROFILE_EPSILON)) {
+      ratios.push(ratio)
+    }
+  }
+  if (cornerCuts.start) addCutBoundary(cornerCuts.start.edgeDistanceMeters)
+  if (cornerCuts.end) {
+    addCutBoundary(cornerCuts.totalEdgeLengthMeters - cornerCuts.end.edgeDistanceMeters)
+  }
+  ratios.sort((first, second) => first - second)
+
+  return ratios.map((ratio) => {
+    const edgeDistance = lerp(segmentStartDistance, segmentEndDistance, ratio)
+    const originalUpper = lerpCliffVertex(firstUpper, secondUpper, ratio)
+    let cut: StylizedCliffCornerCut | null = null
+    if (
+      cornerCuts.start &&
+      edgeDistance <= cornerCuts.start.edgeDistanceMeters + CLIFF_PROFILE_EPSILON
+    ) {
+      cut = cornerCuts.start
+    } else if (
+      cornerCuts.end &&
+      cornerCuts.totalEdgeLengthMeters - edgeDistance <=
+        cornerCuts.end.edgeDistanceMeters + CLIFF_PROFILE_EPSILON
+    ) {
+      cut = cornerCuts.end
+    }
+    if (!cut) {
+      return {
+        capOuter: originalUpper,
+        frontUpper: originalUpper,
+        grassRatio: 0,
+        ratio,
+      }
+    }
+
+    const distanceFromCorner =
+      cut.corner === 0 ? edgeDistance : cornerCuts.totalEdgeLengthMeters - edgeDistance
+    const cutProgress = clamp01(
+      distanceFromCorner / Math.max(CLIFF_PROFILE_EPSILON, cut.edgeDistanceMeters),
+    )
+    return {
+      capOuter: lerpCliffVertex(cut.inward, cut.along, cutProgress),
+      frontUpper: lerpCliffVertex(cut.down, cut.along, cutProgress),
+      grassRatio: cut.inwardRatio * (1 - cutProgress),
+      ratio,
+    }
+  })
+}
+
+function emitStylizedCliffFrontWithCornerCuts(
+  sink: CliffGeometrySink,
+  first: StylizedCliffFrontProfile,
+  second: StylizedCliffFrontProfile,
+  wallHint: CliffNormal,
+  column: StylizedCliffColumn,
+  contourIndex: number,
+  firstColumnLow: number,
+  firstColumnHigh: number,
+  secondColumnLow: number,
+  secondColumnHigh: number,
+  firstVisibleStart: number,
+  secondVisibleStart: number,
+  step: number,
+  stratum: number,
+  surfaceSlices: readonly StylizedCliffSegmentSurfaceSlice[],
+) {
+  for (let sliceIndex = 0; sliceIndex < surfaceSlices.length - 1; sliceIndex += 1) {
+    const firstSlice = surfaceSlices[sliceIndex]
+    const secondSlice = surfaceSlices[sliceIndex + 1]
+    if (
+      !(firstSlice && secondSlice) ||
+      secondSlice.ratio - firstSlice.ratio <= CLIFF_PROFILE_EPSILON
+    ) {
+      continue
+    }
+    const firstProfile = {
+      ...lerpStylizedCliffFrontProfile(first, second, firstSlice.ratio),
+      upper: firstSlice.frontUpper,
+    }
+    const secondProfile = {
+      ...lerpStylizedCliffFrontProfile(first, second, secondSlice.ratio),
+      upper: secondSlice.frontUpper,
+    }
+
+    emitStylizedCliffFrontFace(
+      sink,
+      firstProfile,
+      secondProfile,
+      wallHint,
+      column,
+      contourIndex,
+      lerp(firstColumnLow, secondColumnLow, firstSlice.ratio),
+      lerp(firstColumnHigh, secondColumnHigh, firstSlice.ratio),
+      lerp(firstColumnLow, secondColumnLow, secondSlice.ratio),
+      lerp(firstColumnHigh, secondColumnHigh, secondSlice.ratio),
+      lerp(firstVisibleStart, secondVisibleStart, firstSlice.ratio),
+      lerp(firstVisibleStart, secondVisibleStart, secondSlice.ratio),
+      step + firstSlice.ratio,
+      step + secondSlice.ratio,
+      stratum,
+    )
+  }
+}
+
+function emitStylizedCliffTopCap(
+  sink: CliffGeometrySink,
+  capInner0: CliffVertex,
+  capInner1: CliffVertex,
+  surfaceSlices: readonly StylizedCliffSegmentSurfaceSlice[],
+  ledgeHint: CliffNormal,
+  column: StylizedCliffColumn,
+  grassRim: boolean,
+) {
+  const rockColor = grassRim
+    ? stylizedCliffExposureColor(ledgeHint, column.family, 'light', column.brightness)
+    : null
+  const colorFor = (grassRatio: number) =>
+    rockColor
+      ? mixColor(rockColor, CLIFF_GRASS_RIM_COLOR, clamp01(grassRatio))
+      : column.family.light
+
+  for (let index = 0; index < surfaceSlices.length - 1; index += 1) {
+    const first = surfaceSlices[index]
+    const second = surfaceSlices[index + 1]
+    if (!(first && second) || second.ratio - first.ratio <= CLIFF_PROFILE_EPSILON) continue
+    const inner0 = lerpCliffVertex(capInner0, capInner1, first.ratio)
+    const inner1 = lerpCliffVertex(capInner0, capInner1, second.ratio)
+    const triangles: readonly [CliffTriangle, CliffTriangle] = [
+      [first.capOuter, second.capOuter, inner1],
+      [first.capOuter, inner1, inner0],
+    ]
+    if (grassRim) {
+      addStylizedCliffTransitionTriangle(
+        sink,
+        triangles[0],
+        [colorFor(first.grassRatio), colorFor(second.grassRatio), colorFor(1)],
+        ledgeHint,
+      )
+      addStylizedCliffTransitionTriangle(
+        sink,
+        triangles[1],
+        [colorFor(first.grassRatio), colorFor(1), colorFor(1)],
+        ledgeHint,
+      )
+    } else {
+      addStylizedCliffTriangle(
+        sink,
+        triangles[0],
+        ledgeHint,
+        column.family,
+        'light',
+        column.brightness,
+      )
+      addStylizedCliffTriangle(
+        sink,
+        triangles[1],
+        ledgeHint,
+        column.family,
+        'light',
+        column.brightness,
+      )
+    }
+  }
+}
+
+function emitStylizedCliffCornerCut(
+  sink: CliffGeometrySink,
+  cut: StylizedCliffCornerCut,
+  column: StylizedCliffColumn,
+) {
+  addStylizedCliffTriangle(
+    sink,
+    [cut.along, cut.inward, cut.down],
+    cut.hint,
+    column.family,
+    'light',
+    column.brightness,
+    1 - column.chipDarkening * CLIFF_CORNER_CHIP_MAX_SURFACE_DARKENING,
+  )
 }
 
 function emitStylizedCliffFrontFace(
@@ -1919,7 +2286,8 @@ function emitStylizedCliffFrontFace(
   secondColumnHigh: number,
   firstVisibleStart: number,
   secondVisibleStart: number,
-  step: number,
+  segmentStart: number,
+  segmentEnd: number,
   stratum: number,
 ) {
   if (!column.paint.enabled) {
@@ -1943,8 +2311,10 @@ function emitStylizedCliffFrontFace(
     const rightBlend = (subdivision + 1) / subdivisionCount
     const left = lerpStylizedCliffFrontProfile(first, second, leftBlend)
     const right = lerpStylizedCliffFrontProfile(first, second, rightBlend)
-    const leftProgress = (step + leftBlend) / Math.max(1, column.segmentCount)
-    const rightProgress = (step + rightBlend) / Math.max(1, column.segmentCount)
+    const leftProgress =
+      lerp(segmentStart, segmentEnd, leftBlend) / Math.max(1, column.segmentCount)
+    const rightProgress =
+      lerp(segmentStart, segmentEnd, rightBlend) / Math.max(1, column.segmentCount)
     const leftColumnStart = lerp(firstColumnLow, secondColumnLow, leftBlend)
     const rightColumnStart = lerp(firstColumnLow, secondColumnLow, rightBlend)
     const leftColumnEnd = lerp(firstColumnHigh, secondColumnHigh, leftBlend)
@@ -2018,7 +2388,7 @@ function emitStylizedCliffFrontFace(
         wallHint,
         column,
         band,
-        column.paint.seed + step * 17.3 + subdivision * 31.7 + band * 47.9 + stratum * 71.3,
+        column.paint.seed + segmentStart * 17.3 + subdivision * 31.7 + band * 47.9 + stratum * 71.3,
       )
     }
 
@@ -2037,7 +2407,7 @@ function emitStylizedCliffFrontFace(
       wallHint,
       column,
       null,
-      column.paint.seed + step * 13.7 + subdivision * 37.1 + stratum * 83.9,
+      column.paint.seed + segmentStart * 13.7 + subdivision * 37.1 + stratum * 83.9,
     )
   }
 }
@@ -2286,21 +2656,14 @@ function emitStylizedCliffSeam(
   for (let index = 0; index < breakpoints.length - 1; index += 1) {
     const y0 = breakpoints[index]
     const y1 = breakpoints[index + 1]
-    if (y0 === undefined || y1 === undefined || y1 - y0 <= CLIFF_PROFILE_EPSILON) continue
+    if (y0 === undefined || y1 === undefined || y1 - y0 <= CLIFF_SEAM_COINCIDENT_EPSILON) {
+      continue
+    }
 
     const currentBottom = sampleStylizedCliffSideProfile(currentProfile, y0)
     const currentTop = sampleStylizedCliffSideProfile(currentProfile, y1)
     const nextBottom = sampleStylizedCliffSideProfile(nextProfile, y0)
     const nextTop = sampleStylizedCliffSideProfile(nextProfile, y1)
-    const stripDelta =
-      (currentBottom.outwardOffset +
-        currentTop.outwardOffset -
-        nextBottom.outwardOffset -
-        nextTop.outwardOffset) /
-      2
-    const stripSign = stripDelta >= 0 ? 1 : -1
-    const seamHint: CliffNormal = { x: tangent.x * stripSign, y: 0, z: tangent.z * stripSign }
-    const seamColumn = stripSign >= 0 ? column : nextColumn
 
     emitStylizedCliffProfileStrip(
       sink,
@@ -2308,10 +2671,9 @@ function emitStylizedCliffSeam(
       currentTop,
       nextBottom,
       nextTop,
-      seamHint,
-      seamColumn.family,
-      'shade',
-      seamColumn.brightness,
+      tangent,
+      column,
+      nextColumn,
     )
   }
 }
@@ -2360,21 +2722,34 @@ function createStylizedCliffSideProfile(
     const bottomOffset = bottomOffsets[stratum] ?? offset
     const midOffset = midOffsets[stratum] ?? offset
     const topDrop = drops[stratum] ?? 0.12
+    const lowerPoint = stylizedCliffProfilePoint(
+      frame,
+      lowT,
+      bottomOffset,
+      outerElevation,
+      innerElevation,
+    )
+    const midPoint = stylizedCliffProfilePoint(
+      frame,
+      midT,
+      midOffset,
+      outerElevation,
+      innerElevation,
+    )
+    const upperPoint = stylizedCliffProfilePoint(
+      frame,
+      highT,
+      offset,
+      outerElevation,
+      innerElevation,
+      -topDrop,
+    )
 
-    pushStylizedCliffProfilePoint(
-      points,
-      stylizedCliffProfilePoint(frame, lowT, bottomOffset, outerElevation, innerElevation),
-    )
-    pushStylizedCliffProfilePoint(
-      points,
-      stylizedCliffProfilePoint(frame, midT, midOffset, outerElevation, innerElevation),
-    )
-    pushStylizedCliffProfilePoint(
-      points,
-      stylizedCliffProfilePoint(frame, highT, offset, outerElevation, innerElevation, -topDrop),
-    )
+    pushStylizedCliffProfilePoint(points, lowerPoint)
+    pushStylizedCliffProfilePoint(points, midPoint)
 
     if (stratum < lastStratum) {
+      pushStylizedCliffProfilePoint(points, upperPoint)
       pushStylizedCliffProfilePoint(
         points,
         stylizedCliffProfilePoint(
@@ -2385,22 +2760,65 @@ function createStylizedCliffSideProfile(
           innerElevation,
         ),
       )
-    } else if (includeTopCap) {
-      const ledgeT = column.layerIndex === 0 ? 1 : highT
-      const ledgeOffset = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_METERS : 0
-      const ledgeDrop = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_DROP_METERS : 0
-      pushStylizedCliffProfilePoint(
-        points,
-        stylizedCliffProfilePoint(
-          frame,
-          ledgeT,
-          ledgeOffset,
-          outerElevation,
-          innerElevation,
-          ledgeDrop,
-        ),
-      )
+      continue
     }
+
+    if (!includeTopCap) {
+      pushStylizedCliffProfilePoint(points, upperPoint)
+      continue
+    }
+
+    const ledgeT = column.layerIndex === 0 ? 1 : highT
+    const ledgeOffset = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_METERS : 0
+    const ledgeDrop = column.layerIndex === 0 ? -CLIFF_RIM_GRASS_OVERLAP_DROP_METERS : 0
+    const ledgePoint = stylizedCliffProfilePoint(
+      frame,
+      ledgeT,
+      ledgeOffset,
+      outerElevation,
+      innerElevation,
+      ledgeDrop,
+    )
+    const corner: 0 | 1 | null = step === 0 ? 0 : step === column.segmentCount ? 1 : null
+    const topEdgeLengthMeters =
+      createStylizedCliffColumnTopEdgeStations(
+        frames,
+        column,
+        columnProfile,
+        pointCount,
+        outerElevation,
+        innerElevation,
+      ).at(-1)?.distanceMeters ?? column.widthMeters
+    const chipSizeMeters =
+      corner === null
+        ? 0
+        : topEdgeLengthMeters *
+          CLIFF_CORNER_CHIP_MAX_EDGE_RATIO *
+          (column.cornerChips[corner]?.amount ?? 0)
+    const cut =
+      corner === null
+        ? null
+        : createStylizedCliffCornerCutBoundary(
+            column,
+            corner,
+            upperPoint.vertex,
+            ledgePoint.vertex,
+            Math.max(0, upperPoint.vertex.y - midPoint.vertex.y),
+            chipSizeMeters,
+          )
+    if (cut) {
+      pushStylizedCliffProfilePoint(points, {
+        outwardOffset: offset,
+        vertex: cut.down,
+      })
+      pushStylizedCliffProfilePoint(points, {
+        outwardOffset: lerp(offset, ledgeOffset, cut.inwardRatio),
+        vertex: cut.inward,
+      })
+    } else {
+      pushStylizedCliffProfilePoint(points, upperPoint)
+    }
+    pushStylizedCliffProfilePoint(points, ledgePoint)
   }
 
   return points.length >= 2 ? { frame, points } : null
@@ -2427,8 +2845,8 @@ function pushStylizedCliffProfilePoint(
   const previous = points.at(-1)
   if (
     previous &&
-    distance3(previous.vertex, point.vertex) <= CLIFF_PROFILE_EPSILON &&
-    Math.abs(previous.outwardOffset - point.outwardOffset) <= CLIFF_PROFILE_EPSILON
+    distance3(previous.vertex, point.vertex) <= CLIFF_SEAM_COINCIDENT_EPSILON &&
+    Math.abs(previous.outwardOffset - point.outwardOffset) <= CLIFF_SEAM_COINCIDENT_EPSILON
   ) {
     return
   }
@@ -2449,7 +2867,9 @@ function createStylizedCliffProfileBreakpoints(
   for (let index = 0; index < breakpoints.length - 1; index += 1) {
     const y0 = breakpoints[index]
     const y1 = breakpoints[index + 1]
-    if (y0 === undefined || y1 === undefined || y1 - y0 <= CLIFF_PROFILE_EPSILON) continue
+    if (y0 === undefined || y1 === undefined || y1 - y0 <= CLIFF_SEAM_COINCIDENT_EPSILON) {
+      continue
+    }
 
     const delta0 =
       sampleStylizedCliffSideProfile(currentProfile, y0).outwardOffset -
@@ -2457,7 +2877,10 @@ function createStylizedCliffProfileBreakpoints(
     const delta1 =
       sampleStylizedCliffSideProfile(currentProfile, y1).outwardOffset -
       sampleStylizedCliffSideProfile(nextProfile, y1).outwardOffset
-    if (Math.abs(delta0) <= CLIFF_PROFILE_EPSILON || Math.abs(delta1) <= CLIFF_PROFILE_EPSILON) {
+    if (
+      Math.abs(delta0) <= CLIFF_SEAM_COINCIDENT_EPSILON ||
+      Math.abs(delta1) <= CLIFF_SEAM_COINCIDENT_EPSILON
+    ) {
       continue
     }
     if (delta0 * delta1 >= 0) continue
@@ -2475,7 +2898,7 @@ function uniqueSortedProfileBreakpoints(values: readonly number[]) {
   const unique: number[] = []
   for (const value of sorted) {
     const previous = unique.at(-1)
-    if (previous === undefined || Math.abs(value - previous) > CLIFF_PROFILE_EPSILON) {
+    if (previous === undefined || Math.abs(value - previous) > CLIFF_SEAM_COINCIDENT_EPSILON) {
       unique.push(value)
     }
   }
@@ -2491,8 +2914,8 @@ function sampleStylizedCliffSideProfile(
   if (!first || !last) {
     return { outwardOffset: 0, vertex: { x: 0, y, z: 0 } }
   }
-  if (y <= first.vertex.y + CLIFF_PROFILE_EPSILON) return first
-  if (y >= last.vertex.y - CLIFF_PROFILE_EPSILON) return last
+  if (y <= first.vertex.y + CLIFF_SEAM_COINCIDENT_EPSILON) return first
+  if (y >= last.vertex.y - CLIFF_SEAM_COINCIDENT_EPSILON) return last
 
   for (let index = 0; index < profile.points.length - 1; index += 1) {
     const lower = profile.points[index]
@@ -2500,10 +2923,12 @@ function sampleStylizedCliffSideProfile(
     if (!(lower && upper)) continue
     const minY = Math.min(lower.vertex.y, upper.vertex.y)
     const maxY = Math.max(lower.vertex.y, upper.vertex.y)
-    if (y < minY - CLIFF_PROFILE_EPSILON || y > maxY + CLIFF_PROFILE_EPSILON) continue
+    if (y < minY - CLIFF_SEAM_COINCIDENT_EPSILON || y > maxY + CLIFF_SEAM_COINCIDENT_EPSILON) {
+      continue
+    }
 
     const span = upper.vertex.y - lower.vertex.y
-    const t = Math.abs(span) <= CLIFF_PROFILE_EPSILON ? 0 : (y - lower.vertex.y) / span
+    const t = Math.abs(span) <= CLIFF_SEAM_COINCIDENT_EPSILON ? 0 : (y - lower.vertex.y) / span
     return {
       outwardOffset: lerp(lower.outwardOffset, upper.outwardOffset, t),
       vertex: lerpCliffVertex(lower.vertex, upper.vertex, t),
@@ -2521,48 +2946,132 @@ function lerpCliffVertex(first: CliffVertex, second: CliffVertex, t: number): Cl
   }
 }
 
+function lerpStylizedCliffProfilePoint(
+  first: StylizedCliffProfilePoint,
+  second: StylizedCliffProfilePoint,
+  t: number,
+): StylizedCliffProfilePoint {
+  return {
+    outwardOffset: lerp(first.outwardOffset, second.outwardOffset, t),
+    vertex: lerpCliffVertex(first.vertex, second.vertex, t),
+  }
+}
+
 function emitStylizedCliffProfileStrip(
   sink: CliffGeometrySink,
   currentBottom: StylizedCliffProfilePoint,
   currentTop: StylizedCliffProfilePoint,
   nextBottom: StylizedCliffProfilePoint,
   nextTop: StylizedCliffProfilePoint,
-  seamHint: CliffNormal,
-  family: CliffColorFamily,
-  exposure: CliffExposure,
-  brightness: number,
+  tangent: PascalWaterPoint2,
+  column: StylizedCliffColumn,
+  nextColumn: StylizedCliffColumn,
 ) {
   const bottomGap = currentBottom.outwardOffset - nextBottom.outwardOffset
   const topGap = currentTop.outwardOffset - nextTop.outwardOffset
-  if (Math.abs(bottomGap) <= CLIFF_PROFILE_EPSILON && Math.abs(topGap) <= CLIFF_PROFILE_EPSILON) {
+  if (
+    distance3(currentBottom.vertex, nextBottom.vertex) <= CLIFF_SEAM_COINCIDENT_EPSILON &&
+    distance3(currentTop.vertex, nextTop.vertex) <= CLIFF_SEAM_COINCIDENT_EPSILON
+  ) {
     return
   }
-  if (bottomGap * topGap < -CLIFF_PROFILE_EPSILON) return
 
-  addStylizedCliffTriangle(
+  if (bottomGap * topGap < 0) {
+    const crossingRatio = Math.abs(bottomGap) / (Math.abs(bottomGap) + Math.abs(topGap))
+    const currentCrossing = lerpStylizedCliffProfilePoint(currentBottom, currentTop, crossingRatio)
+    const nextCrossing = lerpStylizedCliffProfilePoint(nextBottom, nextTop, crossingRatio)
+    emitStylizedCliffProfileStripSection(
+      sink,
+      currentBottom,
+      currentCrossing,
+      nextBottom,
+      nextCrossing,
+      tangent,
+      bottomGap,
+      column,
+      nextColumn,
+    )
+    emitStylizedCliffProfileStripSection(
+      sink,
+      currentCrossing,
+      currentTop,
+      nextCrossing,
+      nextTop,
+      tangent,
+      topGap,
+      column,
+      nextColumn,
+    )
+    return
+  }
+
+  const averageGap = (bottomGap + topGap) / 2
+  const dominantGap =
+    Math.abs(averageGap) > CLIFF_SEAM_COINCIDENT_EPSILON
+      ? averageGap
+      : Math.abs(bottomGap) >= Math.abs(topGap)
+        ? bottomGap
+        : topGap
+  emitStylizedCliffProfileStripSection(
     sink,
-    [currentBottom.vertex, nextBottom.vertex, nextTop.vertex],
-    seamHint,
-    family,
-    exposure,
-    brightness,
-  )
-  addStylizedCliffTriangle(
-    sink,
-    [currentBottom.vertex, nextTop.vertex, currentTop.vertex],
-    seamHint,
-    family,
-    exposure,
-    brightness,
+    currentBottom,
+    currentTop,
+    nextBottom,
+    nextTop,
+    tangent,
+    dominantGap,
+    column,
+    nextColumn,
   )
 }
 
-function addStylizedCliffTriangle(
+function emitStylizedCliffProfileStripSection(
+  sink: CliffGeometrySink,
+  currentBottom: StylizedCliffProfilePoint,
+  currentTop: StylizedCliffProfilePoint,
+  nextBottom: StylizedCliffProfilePoint,
+  nextTop: StylizedCliffProfilePoint,
+  tangent: PascalWaterPoint2,
+  gap: number,
+  column: StylizedCliffColumn,
+  nextColumn: StylizedCliffColumn,
+) {
+  if (
+    distance3(currentBottom.vertex, nextBottom.vertex) <= CLIFF_SEAM_COINCIDENT_EPSILON &&
+    distance3(currentTop.vertex, nextTop.vertex) <= CLIFF_SEAM_COINCIDENT_EPSILON
+  ) {
+    return
+  }
+
+  const stripSign = gap >= 0 ? 1 : -1
+  const seamHint: CliffNormal = {
+    x: tangent.x * stripSign,
+    y: 0,
+    z: tangent.z * stripSign,
+  }
+  const seamColumn = stripSign >= 0 ? column : nextColumn
+
+  addStylizedCliffSeamTriangle(
+    sink,
+    [currentBottom.vertex, nextBottom.vertex, nextTop.vertex],
+    seamHint,
+    seamColumn.family,
+    seamColumn.brightness,
+  )
+  addStylizedCliffSeamTriangle(
+    sink,
+    [currentBottom.vertex, nextTop.vertex, currentTop.vertex],
+    seamHint,
+    seamColumn.family,
+    seamColumn.brightness,
+  )
+}
+
+function addStylizedCliffSeamTriangle(
   sink: CliffGeometrySink,
   vertices: CliffTriangle,
   hint: CliffNormal,
   family: CliffColorFamily,
-  exposure: CliffExposure,
   brightness: number,
 ) {
   let normal = normalForRenderableTriangle(vertices)
@@ -2575,7 +3084,36 @@ function addStylizedCliffTriangle(
     geometryNormal = normalForTriangle(oriented)
   }
 
-  const color = stylizedCliffExposureColor(normal, family, exposure, brightness)
+  addColoredTriangle(
+    sink,
+    oriented,
+    stylizedCliffExposureColor(normal, family, 'shade', brightness),
+    geometryNormal,
+  )
+}
+
+function addStylizedCliffTriangle(
+  sink: CliffGeometrySink,
+  vertices: CliffTriangle,
+  hint: CliffNormal,
+  family: CliffColorFamily,
+  exposure: CliffExposure,
+  brightness: number,
+  surfaceToneScale = 1,
+) {
+  let normal = normalForRenderableTriangle(vertices)
+  if (!normal) return
+  let oriented = vertices
+  let geometryNormal = normal
+  if (dot3(normal, hint) < 0) {
+    oriented = [vertices[0], vertices[2], vertices[1]] as CliffTriangle
+    normal = { x: -normal.x, y: -normal.y, z: -normal.z }
+    geometryNormal = normalForTriangle(oriented)
+  }
+
+  const exposureColor = stylizedCliffExposureColor(normal, family, exposure, brightness)
+  const color =
+    surfaceToneScale === 1 ? exposureColor : scaleSrgbColor(exposureColor, surfaceToneScale)
   addColoredTriangle(sink, oriented, color, geometryNormal)
 }
 
@@ -2854,11 +3392,11 @@ function normalForRenderableTriangle(vertices: CliffTriangle): CliffNormal | nul
     distanceSquared3(second, third),
     distanceSquared3(third, first),
   )
-  if (shortestEdgeSquared < CLIFF_MIN_QUAD_EDGE_METERS ** 2) return null
+  if (shortestEdgeSquared <= CLIFF_SEAM_COINCIDENT_EPSILON ** 2) return null
 
   const normal = cross3(subtract3(second, first), subtract3(third, first))
   const length = Math.hypot(normal.x, normal.y, normal.z)
-  if (length * 0.5 < CLIFF_MIN_QUAD_AREA_METERS * 0.5) return null
+  if (length <= CLIFF_SEAM_COINCIDENT_EPSILON ** 2) return null
 
   return {
     x: normal.x / length,

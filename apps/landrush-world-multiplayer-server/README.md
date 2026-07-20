@@ -15,6 +15,15 @@ Default local URL:
 ws://localhost:3003/api/landrush-lab/world-multiplayer/ws
 ```
 
+Parcel ownership, Pascal build nodes, and TV state are restored automatically from:
+
+```text
+<repo>/.landrush-local/world-multiplayer-state.json
+```
+
+Set `LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE` to use another path, or to `off` to disable local
+persistence. The default is disabled on Render unless an explicit path is configured.
+
 ## Render
 
 The repo root `render.yaml` deploys this folder as a Render web service.

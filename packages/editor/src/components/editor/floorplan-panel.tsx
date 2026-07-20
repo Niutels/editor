@@ -9237,9 +9237,8 @@ export function FloorplanPanel({
           } else {
             emitter.emit('wall:move', wallEvent as any)
           }
-          // Snapped to a wall — the real on-wall draft is the preview; drop
-          // the loose free-follow ghost.
-          usePlacementPreview.getState().clear()
+          // The opening tool publishes its resolved wall-local ghost after
+          // applying clamp/alignment, so hover never needs a scene node.
         } else {
           if (hoveredWallIdRef.current) {
             emitFloorplanWallLeave(hoveredWallIdRef.current)

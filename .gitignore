@@ -38,6 +38,10 @@ dist
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+/.codex-*
+/.landrush-validation/
+/tmp/
+/NUL
 
 # Misc
 .DS_Store
@@ -48,6 +52,9 @@ og-test
 
 # Worktrees
 .worktrees
+
+# Local Landrush world saves
+/.landrush-local/
 
 # Local IDE/agent configs
 .claude/launch.json

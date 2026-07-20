@@ -74,11 +74,11 @@ extend(THREE as any)
 // renderers in parallel and only caching the second.
 const VIEWER_RENDERER_CACHE = new WeakMap<
   HTMLCanvasElement,
-  Map<MaterialRendererBackend, Promise<THREE.WebGPURenderer | WebGLRenderer>>
+  Map<string, Promise<THREE.WebGPURenderer | WebGLRenderer>>
 >()
 
-function createWebGLRenderer(props: { canvas?: HTMLCanvasElement }) {
-  const renderer = new WebGLRenderer({ ...(props as any), alpha: true })
+function createWebGLRenderer(props: { canvas?: HTMLCanvasElement }, antialias: boolean) {
+  const renderer = new WebGLRenderer({ ...(props as any), alpha: true, antialias })
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = getSceneTheme(useViewer.getState().sceneTheme).toneMappingExposure
   return renderer
@@ -354,6 +354,7 @@ function SceneReadyTracker({
 }
 
 interface ViewerProps {
+  antialias?: boolean
   children?: React.ReactNode
   hoverStyles?: HoverStyles
   selectionManager?: 'default' | 'custom'
@@ -415,6 +416,7 @@ export type ViewerHandle = {
 
 const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   {
+    antialias = false,
     children,
     hoverStyles = DEFAULT_HOVER_STYLES,
     selectionManager = 'default',
@@ -543,17 +545,22 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       gl={
         ((props: { canvas?: HTMLCanvasElement }) => {
           const canvas = props.canvas
+          const rendererCacheKey = `${rendererBackend}:${antialias ? 'aa' : 'no-aa'}`
           const cached = canvas
-            ? VIEWER_RENDERER_CACHE.get(canvas)?.get(rendererBackend)
+            ? VIEWER_RENDERER_CACHE.get(canvas)?.get(rendererCacheKey)
             : undefined
           if (cached) return cached
           const promise = (async () => {
             if (rendererBackend === 'webgl') {
-              return createWebGLRenderer(props)
+              return createWebGLRenderer(props, antialias)
             }
 
             try {
-              const renderer = new THREE.WebGPURenderer({ ...(props as any), alpha: true })
+              const renderer = new THREE.WebGPURenderer({
+                ...(props as any),
+                alpha: true,
+                antialias,
+              })
               renderer.toneMapping = THREE.ACESFilmicToneMapping
               renderer.toneMappingExposure = getSceneTheme(
                 useViewer.getState().sceneTheme,
@@ -565,7 +572,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               console.warn('[viewer] WebGPURenderer init failed; falling back to WebGL', err)
               try {
                 setMaterialRendererBackend('webgl')
-                return createWebGLRenderer(props)
+                return createWebGLRenderer(props, antialias)
               } catch (fallbackError) {
                 if (canvas) VIEWER_RENDERER_CACHE.delete(canvas)
                 console.error('[viewer] Renderer initialization failed', fallbackError)
@@ -576,7 +583,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           })()
           if (canvas) {
             const cache = VIEWER_RENDERER_CACHE.get(canvas) ?? new Map()
-            cache.set(rendererBackend, promise)
+            cache.set(rendererCacheKey, promise)
             VIEWER_RENDERER_CACHE.set(canvas, cache)
           }
           return promise

@@ -14,6 +14,7 @@ export type GrassBladeTuning = {
   density: number
   flutter: number
   foliageOpacity: number
+  greenTint: number
   gustScale: number
   height: number
   heightNoiseScale: number
@@ -42,6 +43,7 @@ export const DEFAULT_GRASS_BLADE_TUNING: GrassBladeTuning = {
   density: 0.82,
   flutter: 0.28,
   foliageOpacity: 1,
+  greenTint: 0,
   gustScale: 0.5,
   height: 0.6,
   heightNoiseScale: 0.15,

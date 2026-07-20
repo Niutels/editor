@@ -16,6 +16,7 @@ export type IslandElevationParameters = {
   cliffCornerChipAngleDistribution: number
   cliffCornerChipAngleVariation: number
   cliffCornerChipAverage: number
+  cliffCornerChipDarkening: number
   cliffCornerChipDensity: number
   cliffCornerChipDistribution: number
   cliffCornerChipVariation: number
@@ -121,6 +122,7 @@ export const WATER_LAB_DEFAULT_ELEVATION_PARAMETERS = {
   cliffCornerChipAngleDistribution: 0.5,
   cliffCornerChipAngleVariation: 0,
   cliffCornerChipAverage: 0,
+  cliffCornerChipDarkening: 0.12,
   cliffCornerChipDensity: 0,
   cliffCornerChipDistribution: 0.5,
   cliffCornerChipVariation: 0,
@@ -183,6 +185,7 @@ export const PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS = {
   cliffCornerChipAngleDistribution: 0.65,
   cliffCornerChipAngleVariation: 0.35,
   cliffCornerChipAverage: 0.35,
+  cliffCornerChipDarkening: 0.12,
   cliffCornerChipDensity: 0.65,
   cliffCornerChipDistribution: 0.65,
   cliffCornerChipVariation: 0.2,

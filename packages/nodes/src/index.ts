@@ -166,6 +166,7 @@ export {
   setPascalWaterMaterialParameters,
 } from './pascal-water'
 export {
+  createPascalWaterCliffRingGeometry,
   createPascalWaterLandSurface,
   PASCAL_WATER_LOW_ELEVATION,
   type PascalWaterLandSurface,

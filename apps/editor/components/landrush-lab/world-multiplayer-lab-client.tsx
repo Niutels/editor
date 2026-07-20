@@ -319,6 +319,7 @@ const LOCAL_STATE_HEADING_EPSILON = 0.02
 const LOCAL_STATE_POSITION_EPSILON = 0.03
 const LOCAL_STATE_SPEED_EPSILON = 0.05
 const REMOTE_PLAYER_STALE_MS = 12_000
+const MULTIPLAYER_LATENCY_EVENT = 'landrush-multiplayer-latency'
 const ROBOT_PREVIOUS_WALK_SPEED = 2.75
 const ROBOT_WALK_SPEED = ROBOT_PREVIOUS_WALK_SPEED / 1.5
 const ROBOT_RUN_SPEED = ROBOT_PREVIOUS_WALK_SPEED * 2.48
@@ -2375,12 +2376,26 @@ export function MultiplayerStatusPanel({
   status: ConnectionStatus
   voice?: SpatialVoiceController
 }) {
+  const latencyLabelRef = useRef<HTMLSpanElement>(null)
   const displayedPlayerCount =
     connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
   const statusLabel = compactStatusLabel(status)
   const latencyLabel = connection.latencyMs === null ? '--ms' : `${connection.latencyMs}ms`
   const browserFps = useBrowserRafFps()
   const fpsLabel = browserFps === null ? '--fps' : `${browserFps}fps`
+
+  useEffect(() => {
+    const element = latencyLabelRef.current
+    if (!element) return
+    element.textContent = latencyLabel
+
+    const handleLatency = (event: Event) => {
+      const latencyMs = (event as CustomEvent<number>).detail
+      if (Number.isFinite(latencyMs)) element.textContent = `${latencyMs}ms`
+    }
+    window.addEventListener(MULTIPLAYER_LATENCY_EVENT, handleLatency)
+    return () => window.removeEventListener(MULTIPLAYER_LATENCY_EVENT, handleLatency)
+  }, [latencyLabel])
 
   return (
     <section className="pointer-events-auto absolute top-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur">
@@ -2392,7 +2407,7 @@ export function MultiplayerStatusPanel({
       <span className="text-white/35">/</span>
       <span>{displayedPlayerCount}p</span>
       <span className="text-white/35">/</span>
-      <span>{latencyLabel}</span>
+      <span ref={latencyLabelRef}>{latencyLabel}</span>
       <span className="text-white/35">/</span>
       <span>{fpsLabel}</span>
       {voice ? (
@@ -2695,6 +2710,7 @@ export function useLandrushWorldMultiplayer({
   const [parcelBuildNodeMap, setParcelBuildNodeMap] = useState<
     Map<string, ParcelBuildNodesSnapshot>
   >(() => new Map())
+  const [parcelBuildSnapshotWorldId, setParcelBuildSnapshotWorldId] = useState<string | null>(null)
   const [tvMediaStateMap, setTvMediaStateMap] = useState<Map<string, TvMediaStateSnapshot>>(
     () => new Map(),
   )
@@ -2818,6 +2834,7 @@ export function useLandrushWorldMultiplayer({
         parcelOwnershipMapRef.current = nextOwnershipMap
         parcelBuildNodeMapRef.current = nextBuildNodeMap
         tvMediaStateMapRef.current = nextTvMediaStateMap
+        setParcelBuildSnapshotWorldId(enabled ? null : worldId)
         setParcelOwnershipMap(nextOwnershipMap)
         setParcelBuildNodeMap(nextBuildNodeMap)
         setTvMediaStateMap(nextTvMediaStateMap)
@@ -3023,6 +3040,7 @@ export function useLandrushWorldMultiplayer({
       parcelOwnershipMapRef.current = nextOwnershipMap
       parcelBuildNodeMapRef.current = nextBuildNodeMap
       tvMediaStateMapRef.current = nextTvMediaStateMap
+      setParcelBuildSnapshotWorldId(enabled ? null : watchedParcelWorldIdRef.current)
       setParcelBuildNodeMap(nextBuildNodeMap)
       setParcelOwnershipMap(nextOwnershipMap)
       setTvMediaStateMap(nextTvMediaStateMap)
@@ -3041,6 +3059,7 @@ export function useLandrushWorldMultiplayer({
 
     const connect = () => {
       if (cancelled) return
+      setParcelBuildSnapshotWorldId(null)
       setStatus(reconnectDelayRef.current > 1000 ? 'reconnecting' : 'connecting')
       setConnection((current) => ({
         ...current,
@@ -3101,15 +3120,24 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'heartbeat') {
           const receivedAt = Date.now()
-          setConnection((current) => ({
-            ...current,
-            lastError: null,
-            latencyMs:
-              typeof message.sentAt === 'number'
-                ? Math.max(0, receivedAt - message.sentAt)
-                : current.latencyMs,
-            serverPlayerCount: message.playerCount ?? current.serverPlayerCount,
-          }))
+          if (typeof message.sentAt === 'number') {
+            window.dispatchEvent(
+              new CustomEvent<number>(MULTIPLAYER_LATENCY_EVENT, {
+                detail: Math.max(0, receivedAt - message.sentAt),
+              }),
+            )
+          }
+          setConnection((current) => {
+            const serverPlayerCount = message.playerCount ?? current.serverPlayerCount
+            if (current.lastError === null && current.serverPlayerCount === serverPlayerCount) {
+              return current
+            }
+            return {
+              ...current,
+              lastError: null,
+              serverPlayerCount,
+            }
+          })
           return
         }
 
@@ -3159,6 +3187,7 @@ export function useLandrushWorldMultiplayer({
         if (message.type === 'parcel-build-nodes-snapshot') {
           if (message.worldId !== watchedParcelWorldIdRef.current) return
           setParcelBuildNodeMap(new Map(message.builds.map((build) => [build.parcelId, build])))
+          setParcelBuildSnapshotWorldId(message.worldId)
           return
         }
 
@@ -3201,10 +3230,11 @@ export function useLandrushWorldMultiplayer({
         }
 
         if (message.type === 'room-state') {
-          setConnection((current) => ({
-            ...current,
-            serverPlayerCount: message.playerCount,
-          }))
+          setConnection((current) =>
+            current.serverPlayerCount === message.playerCount
+              ? current
+              : { ...current, serverPlayerCount: message.playerCount },
+          )
           return
         }
 
@@ -3217,10 +3247,12 @@ export function useLandrushWorldMultiplayer({
           )
           remotePlayerMapRef.current = nextRemotePlayerMap
           setRemotePlayerRosterMap(new Map(nextRemotePlayerMap))
-          setConnection((current) => ({
-            ...current,
-            serverPlayerCount: message.players.length + (spectator ? 0 : 1),
-          }))
+          setConnection((current) => {
+            const serverPlayerCount = message.players.length + (spectator ? 0 : 1)
+            return current.serverPlayerCount === serverPlayerCount
+              ? current
+              : { ...current, serverPlayerCount }
+          })
           return
         }
 
@@ -3302,6 +3334,7 @@ export function useLandrushWorldMultiplayer({
     claimParcel,
     connection,
     parcelBuildNodes,
+    parcelBuildSnapshotWorldId,
     parcelClaimError,
     parcelOwnerships,
     publishLocalPlayer,

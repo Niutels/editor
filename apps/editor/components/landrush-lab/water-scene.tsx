@@ -67,12 +67,14 @@ type WaterSceneProps = {
   preset: WaterViewPreset
   previewTerrainFieldResolution?: number
   progressiveField?: boolean
+  renderDefaultLand?: boolean
   renderLandOverlay?: (surface: WaterLandSurface) => ReactNode
   terrainFieldResolution: number
   showDepthReference: boolean
   toneMapping?: ToneMapping
   waterFieldIsland: LandrushIsland
   waterMaterialFactory?: WaterMaterialFactory
+  waterPaused?: boolean
   waveDepthTextureEnabled?: boolean
 }
 
@@ -156,12 +158,14 @@ export function WaterScene({
   preset,
   previewTerrainFieldResolution,
   progressiveField = false,
+  renderDefaultLand = true,
   renderLandOverlay,
   terrainFieldResolution,
   showDepthReference,
   toneMapping = ACESFilmicToneMapping,
   waterFieldIsland,
   waterMaterialFactory = createLandrushWaterMaterial,
+  waterPaused = false,
   waveDepthTextureEnabled = false,
 }: WaterSceneProps) {
   const controlsTarget = useMemo(() => new Vector3(...preset.camera.target), [preset.camera.target])
@@ -209,11 +213,13 @@ export function WaterScene({
         materialParameters={materialParameters}
         previewTerrainFieldResolution={previewTerrainFieldResolution}
         progressiveField={progressiveField}
+        renderDefaultLand={renderDefaultLand}
         renderLandOverlay={renderLandOverlay}
         terrainFieldResolution={terrainFieldResolution}
         showDepthReference={showDepthReference}
         waterFieldIsland={waterFieldIsland}
         waterMaterialFactory={waterMaterialFactory}
+        waterPaused={waterPaused}
         waveDepthTextureEnabled={waveDepthTextureEnabled}
       />
     </Canvas>
@@ -262,11 +268,13 @@ function WaterMeshes({
   materialParameters,
   previewTerrainFieldResolution,
   progressiveField,
+  renderDefaultLand,
   renderLandOverlay,
   terrainFieldResolution,
   showDepthReference,
   waterFieldIsland,
   waterMaterialFactory,
+  waterPaused,
   waveDepthTextureEnabled,
 }: {
   artifactDiagnostics: WaterArtifactDiagnostics
@@ -278,11 +286,13 @@ function WaterMeshes({
   materialParameters: WaterSceneMaterialParameters
   previewTerrainFieldResolution?: number
   progressiveField: boolean
+  renderDefaultLand: boolean
   renderLandOverlay?: (surface: WaterLandSurface) => ReactNode
   terrainFieldResolution: number
   showDepthReference: boolean
   waterFieldIsland: LandrushIsland
   waterMaterialFactory: WaterMaterialFactory
+  waterPaused: boolean
   waveDepthTextureEnabled: boolean
 }) {
   const renderer = useThree((state) => state.gl)
@@ -578,7 +588,7 @@ function WaterMeshes({
   useEffect(() => () => depthReferenceLine.material.dispose(), [depthReferenceLine])
   useEffect(() => () => cliffGeometry.dispose(), [cliffGeometry])
 
-  useWaterMaterialAnimation(materialRef, preservedWindTimeRef)
+  useWaterMaterialAnimation(materialRef, preservedWindTimeRef, waterPaused)
 
   return (
     <group>
@@ -598,37 +608,41 @@ function WaterMeshes({
       ) : null}
 
       <group position={[0, landLiftMeters, 0]}>
-        <mesh position={[0, -0.12, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <shapeGeometry args={[beachShape]} />
-          <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
-        </mesh>
-
-        <mesh position={[0, ISLAND_SAND_ELEVATION, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <shapeGeometry args={[islandShape]} />
-          <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
-        </mesh>
-
-        {hasElevation ? (
+        {renderDefaultLand ? (
           <>
-            <mesh geometry={cliffGeometry}>
-              <meshStandardMaterial
-                color="#ffffff"
-                roughness={0.98}
-                side={DoubleSide}
-                vertexColors
-              />
+            <mesh position={[0, -0.12, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <shapeGeometry args={[beachShape]} />
+              <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
             </mesh>
-            <mesh position={[0, plateauElevation, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <shapeGeometry args={[plateauShape]} />
-              <meshStandardMaterial color="#6f9844" roughness={0.9} side={DoubleSide} />
+
+            <mesh position={[0, ISLAND_SAND_ELEVATION, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <shapeGeometry args={[islandShape]} />
+              <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
             </mesh>
+
+            {hasElevation ? (
+              <>
+                <mesh geometry={cliffGeometry}>
+                  <meshStandardMaterial
+                    color="#ffffff"
+                    roughness={0.98}
+                    side={DoubleSide}
+                    vertexColors
+                  />
+                </mesh>
+                <mesh position={[0, plateauElevation, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                  <shapeGeometry args={[plateauShape]} />
+                  <meshStandardMaterial color="#6f9844" roughness={0.9} side={DoubleSide} />
+                </mesh>
+              </>
+            ) : (
+              <mesh position={[0, ISLAND_LOW_ELEVATION, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                <shapeGeometry args={[islandShape]} />
+                <meshStandardMaterial color="#6f9844" roughness={0.9} side={DoubleSide} />
+              </mesh>
+            )}
           </>
-        ) : (
-          <mesh position={[0, ISLAND_LOW_ELEVATION, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <shapeGeometry args={[islandShape]} />
-            <meshStandardMaterial color="#6f9844" roughness={0.9} side={DoubleSide} />
-          </mesh>
-        )}
+        ) : null}
 
         {renderLandOverlay ? renderLandOverlay(landSurface) : null}
       </group>
@@ -833,6 +847,7 @@ function diffWaterMaterialParameters(
 function useWaterMaterialAnimation(
   materialRef: RefObject<LandrushWaterSurfaceMaterial>,
   preservedWindTimeRef: MutableRefObject<number>,
+  paused: boolean,
 ) {
   const advance = useThree((state) => state.advance)
 
@@ -850,7 +865,7 @@ function useWaterMaterialAnimation(
         const water = materialRef.current?.userData.landrushWater
         if (!water) return
 
-        water.update(deltaSeconds)
+        if (!paused) water.update(deltaSeconds)
         preservedWindTimeRef.current = water.wind.localTime.value
       })
 
@@ -860,7 +875,7 @@ function useWaterMaterialAnimation(
 
     animationFrame = window.requestAnimationFrame(update)
     return () => window.cancelAnimationFrame(animationFrame)
-  }, [advance, materialRef, preservedWindTimeRef])
+  }, [advance, materialRef, paused, preservedWindTimeRef])
 }
 
 function shapeFromPoints(points: readonly LandrushPoint2[]) {

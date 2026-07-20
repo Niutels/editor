@@ -816,7 +816,9 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
 
   return (
     <group position={node.position} ref={ref} visible={node.visible !== false}>
+      {/* Three r184 retains stale vertex buffers when an existing mesh exchanges geometry. */}
       <mesh
+        key={`water:${node.maskLandWater ? cliffSandCoverageGeometry.uuid : node.planeSize}`}
         material={waterMaterial}
         position={[0, LANDRUSH_WATER_SURFACE_ELEVATION, 0]}
         renderOrder={1}
@@ -830,30 +832,42 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
         )}
       </mesh>
 
-      <mesh geometry={beachGeometry} position={[0, -0.12, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
+      <mesh
+        geometry={beachGeometry}
+        key={`beach:${beachGeometry.uuid}`}
+        position={[0, -0.12, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <meshBasicMaterial color="#d8cb90" name="pascal-water-beach" side={DoubleSide} />
       </mesh>
 
       <mesh
         geometry={islandGeometry}
+        key={`island-sand:${islandGeometry.uuid}`}
         position={[0, PASCAL_WATER_SAND_ELEVATION, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
       >
-        <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
+        <meshBasicMaterial color="#d8cb90" name="pascal-water-island" side={DoubleSide} />
       </mesh>
 
       {landSurface.hasElevation ? (
         <>
           <mesh
             geometry={cliffSandCoverageGeometry}
+            key={`cliff-sand-coverage:${cliffSandCoverageGeometry.uuid}`}
             position={[0, PASCAL_WATER_SAND_ELEVATION + 0.002, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
-            <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
+            <meshBasicMaterial
+              color="#d8cb90"
+              name="pascal-water-cliff-sand-coverage"
+              side={DoubleSide}
+            />
           </mesh>
           {coastalFoamOverlayMaterial ? (
             <mesh
               geometry={cliffSandCoverageGeometry}
+              key={`coastal-foam:${cliffSandCoverageGeometry.uuid}:${coastalFoamOverlayMaterial.uuid}`}
               material={coastalFoamOverlayMaterial}
               position={[0, PASCAL_WATER_SAND_ELEVATION + 0.003, 0]}
               renderOrder={3}
@@ -863,19 +877,34 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
           ) : null}
           <mesh
             geometry={cliffSandFootprintGeometry}
+            key={`cliff-footprint:${cliffSandFootprintGeometry.uuid}`}
             position={[0, PASCAL_WATER_SAND_ELEVATION + 0.004, 0]}
           >
-            <meshBasicMaterial color="#d8cb90" side={DoubleSide} />
+            <meshBasicMaterial
+              color="#d8cb90"
+              name="pascal-water-cliff-footprint"
+              side={DoubleSide}
+            />
           </mesh>
-          <mesh geometry={cliffGeometry}>
+          <mesh geometry={cliffGeometry} key={`cliff:${cliffGeometry.uuid}`}>
             {useSmoothCliffMaterial ? (
-              <meshBasicMaterial color="#8f8774" side={DoubleSide} />
+              <meshBasicMaterial
+                color="#8f8774"
+                name="pascal-water-cliff-smooth"
+                side={DoubleSide}
+              />
             ) : (
-              <meshBasicMaterial side={DoubleSide} toneMapped={false} vertexColors />
+              <meshBasicMaterial
+                name="pascal-water-cliff-stylized"
+                side={DoubleSide}
+                toneMapped={false}
+                vertexColors
+              />
             )}
           </mesh>
           <mesh
             geometry={plateauGeometry}
+            key={`plateau:${plateauGeometry.uuid}`}
             position={[0, landSurface.plateauElevation, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
@@ -885,6 +914,7 @@ function PascalWaterRenderer({ node }: { node: PascalWaterNode }) {
       ) : (
         <mesh
           geometry={islandGeometry}
+          key={`island-grass:${islandGeometry.uuid}`}
           position={[0, PASCAL_WATER_LOW_ELEVATION, 0]}
           rotation={[-Math.PI / 2, 0, 0]}
         >

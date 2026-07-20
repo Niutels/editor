@@ -35,6 +35,7 @@ describe('PascalWaterNode cliff corner chips', () => {
   test('defaults chips off and validates normalized chip controls', () => {
     const defaults = PascalWaterNode.parse({}).elevationParameters
     expect(defaults.cliffCornerChipAverage).toBe(0)
+    expect(defaults.cliffCornerChipDarkening).toBe(0.12)
     expect(defaults.cliffCornerChipDensity).toBe(0)
     expect(defaults.cliffCornerChipAngleAverage).toBe(0.5)
     expect(defaults.cliffCornerChipAngleDensity).toBe(1)
@@ -43,6 +44,13 @@ describe('PascalWaterNode cliff corner chips', () => {
     ).toBe(true)
     expect(
       PascalWaterNode.safeParse({ elevationParameters: { cliffCornerChipAverage: 1.01 } }).success,
+    ).toBe(false)
+    expect(
+      PascalWaterNode.safeParse({ elevationParameters: { cliffCornerChipDarkening: 1 } }).success,
+    ).toBe(true)
+    expect(
+      PascalWaterNode.safeParse({ elevationParameters: { cliffCornerChipDarkening: -0.01 } })
+        .success,
     ).toBe(false)
     expect(
       PascalWaterNode.safeParse({ elevationParameters: { cliffCornerChipAngleAverage: -0.01 } })

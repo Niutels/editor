@@ -155,6 +155,7 @@ export interface EditorProps {
   viewerToolbarLeft?: ReactNode
   viewerToolbarRight?: ReactNode
   showEditorChrome?: boolean
+  showSidebarRail?: boolean
   showFullActionMenu?: boolean
   showMobileSelectionBar?: boolean
   /**
@@ -197,7 +198,10 @@ export interface EditorProps {
   viewerCameraControls?: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerDefaultCamera?: boolean
+  /** Controls the grid mesh only; placement-plane pointer events remain active for editor tools. */
+  viewerEditorGrid?: boolean
   viewerEditorSystems?: boolean
+  viewerSceneEnvironment?: boolean
   viewerPostProcessing?: boolean
   viewerRendererBackend?: MaterialRendererBackend
   viewerSceneChildren?: ReactNode
@@ -747,9 +751,17 @@ function PaintCursorBadge({
 // Subscribes to `gridSnapStep` so the visible grid cell size matches whatever
 // the wall draft tool snaps to — otherwise the cursor lands between visible
 // grid lines when the user picks a finer snap (0.25 / 0.1 / 0.05).
-function SnapAwareGrid() {
+function SnapAwareGrid({ renderVisual }: { renderVisual: boolean }) {
   const gridSnapStep = useEditor((s) => s.gridSnapStep)
-  return <Grid cellColor="#aaa" cellSize={gridSnapStep} fadeDistance={500} sectionColor="#ccc" />
+  return (
+    <Grid
+      cellColor="#aaa"
+      cellSize={gridSnapStep}
+      fadeDistance={500}
+      renderVisual={renderVisual}
+      sectionColor="#ccc"
+    />
+  )
 }
 
 // ── Viewer scene content: memoized so <Viewer> doesn't re-render on mode/viewMode changes ──
@@ -764,7 +776,9 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   showEditorChrome,
   viewerCameraControls,
   viewerCameraInitialPose,
+  viewerEditorGrid,
   viewerEditorSystems,
+  viewerSceneEnvironment,
   viewerSceneChildren,
 }: {
   isVersionPreviewMode: boolean
@@ -776,7 +790,9 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   showEditorChrome: boolean
   viewerCameraControls: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
+  viewerEditorGrid: boolean
   viewerEditorSystems: boolean
+  viewerSceneEnvironment: boolean
   viewerSceneChildren?: ReactNode
 }) {
   // Studio mode is a clean render/snapshot surface — no selection or editing
@@ -788,7 +804,7 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   const noEditing = isVersionPreviewMode || isFirstPersonMode || isStudioMode || isCaptureMode
   return (
     <>
-      {viewerEditorSystems ? <SceneEnvironment /> : null}
+      {viewerEditorSystems && viewerSceneEnvironment ? <SceneEnvironment /> : null}
       {viewerEditorSystems && !(isFirstPersonMode || isStudioMode || isCaptureMode) ? (
         <SelectionManager />
       ) : null}
@@ -811,7 +827,9 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       {viewerEditorSystems && !noEditing ? <SelectionAffordanceManager /> : null}
       {viewerEditorSystems ? <RoofEditSystem /> : null}
       {viewerEditorSystems ? <StairEditSystem /> : null}
-      {showEditorChrome && !(isLoading || isFirstPersonMode) ? <SnapAwareGrid /> : null}
+      {showEditorChrome && !(isLoading || isFirstPersonMode) ? (
+        <SnapAwareGrid renderVisual={viewerEditorGrid} />
+      ) : null}
       {showEditorChrome && !(isLoading || noEditing) ? <ToolManager /> : null}
       {isFirstPersonMode && <FirstPersonControls />}
       {viewerCameraControls ? <CustomCameraControls initialPose={viewerCameraInitialPose} /> : null}
@@ -1010,7 +1028,9 @@ const ViewerCanvas = memo(function ViewerCanvas({
   viewerCameraControls,
   viewerCameraInitialPose,
   viewerDefaultCamera,
+  viewerEditorGrid,
   viewerEditorSystems,
+  viewerSceneEnvironment,
   viewerPostProcessing,
   viewerRendererBackend,
   viewerSceneChildren,
@@ -1030,7 +1050,9 @@ const ViewerCanvas = memo(function ViewerCanvas({
   viewerCameraControls: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerDefaultCamera?: boolean
+  viewerEditorGrid: boolean
   viewerEditorSystems: boolean
+  viewerSceneEnvironment: boolean
   viewerPostProcessing?: boolean
   viewerRendererBackend?: MaterialRendererBackend
   viewerSceneChildren?: ReactNode
@@ -1173,7 +1195,9 @@ const ViewerCanvas = memo(function ViewerCanvas({
                 showEditorChrome={showEditorChrome}
                 viewerCameraControls={viewerCameraControls}
                 viewerCameraInitialPose={viewerCameraInitialPose}
+                viewerEditorGrid={viewerEditorGrid}
                 viewerEditorSystems={viewerEditorSystems}
+                viewerSceneEnvironment={viewerSceneEnvironment}
                 viewerSceneChildren={viewerSceneChildren}
               />
             </Viewer>
@@ -1196,6 +1220,7 @@ export default function Editor({
   viewerToolbarLeft,
   viewerToolbarRight,
   showEditorChrome = true,
+  showSidebarRail = true,
   showFullActionMenu = false,
   showMobileSelectionBar = true,
   stageOverlay,
@@ -1214,7 +1239,9 @@ export default function Editor({
   viewerCameraControls = true,
   viewerCameraInitialPose,
   viewerDefaultCamera,
+  viewerEditorGrid = true,
   viewerEditorSystems = true,
+  viewerSceneEnvironment = true,
   viewerPostProcessing,
   viewerRendererBackend,
   viewerSceneChildren,
@@ -1434,7 +1461,9 @@ export default function Editor({
       viewerCameraControls={viewerCameraControls}
       viewerCameraInitialPose={viewerCameraInitialPose}
       viewerDefaultCamera={viewerDefaultCamera}
+      viewerEditorGrid={viewerEditorGrid}
       viewerEditorSystems={viewerEditorSystems}
+      viewerSceneEnvironment={viewerSceneEnvironment}
       viewerPostProcessing={viewerPostProcessing}
       viewerRendererBackend={viewerRendererBackend}
       viewerSceneChildren={viewerSceneChildren}
@@ -1549,7 +1578,7 @@ export default function Editor({
               }
               renderTabContent={renderTabContent}
               sidebarOverlay={sidebarOverlay}
-              sidebarTabs={showEditorChrome ? tabBarTabs : []}
+              sidebarTabs={showEditorChrome && showSidebarRail ? tabBarTabs : []}
               stageOverlay={stageOverlay}
               viewerContent={viewerCanvas}
               viewerToolbarLeft={showEditorChrome ? viewerToolbarLeft : undefined}

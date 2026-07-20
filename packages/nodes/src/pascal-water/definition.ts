@@ -3,7 +3,7 @@ import { PascalWaterNode } from './schema'
 
 export const pascalWaterDefinition: NodeDefinition<typeof PascalWaterNode> = {
   kind: 'pascal-water',
-  schemaVersion: 1,
+  schemaVersion: 2,
   schema: PascalWaterNode,
   category: 'site',
 

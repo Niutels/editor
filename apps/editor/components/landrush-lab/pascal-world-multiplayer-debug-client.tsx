@@ -10,6 +10,7 @@ import {
 } from '@pascal-app/core'
 import {
   clearPascalWaterMaterialParameterOverrides,
+  createPascalWaterCliffRingGeometry,
   createPascalWaterLandSurface,
   createPascalWaterSmoothedPerimeter,
   LANDRUSH_WATER_SURFACE_PARAMETERS,
@@ -27,6 +28,17 @@ import { BufferGeometry, DoubleSide, Float32BufferAttribute, Shape, Vector3 } fr
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, GRASS_SPAWN_FIELD_RESOLUTION } from './grass-field-texture'
 import { GrassWaterLandLayers } from './grass-water-layers'
+import {
+  DEFAULT_MEDITERRANEAN_EROSION_CLIFF_PARAMETERS,
+  EMPTY_MEDITERRANEAN_EROSION_CLIFF_STATS,
+  type MediterraneanCliffCameraBookmark,
+  type MediterraneanCliffDebugMode,
+  type MediterraneanCliffQuality,
+  MediterraneanErosionCliffPanel,
+  type MediterraneanErosionCliffParameters,
+  type MediterraneanErosionCliffStats,
+  MediterraneanErosionCliffs,
+} from './mediterranean-erosion-cliffs'
 import {
   PASCAL_WORLD_ELEVATION_PARAMETERS,
   PASCAL_WORLD_GRASS_TUNING,
@@ -59,6 +71,30 @@ const PASCAL_CLIFF_FAMILY_CUBE_SIZE = 3.2
 const PASCAL_CLIFF_FAMILY_CUBE_SPACING = 4.6
 const PASCAL_CLIFF_FAMILY_CUBE_LIFT = 4.2
 const PASCAL_CLIFF_MAX_FAMILY_VARIATIONS = 8
+const PASCAL_CLIFF_CAMERA_BOOKMARKS = {
+  design: {
+    position: PASCAL_GRASS_WATER_CAMERA_POSITION,
+    target: PASCAL_GRASS_WATER_CAMERA_TARGET,
+    zoom: PASCAL_GRASS_WATER_CAMERA_ZOOM,
+  },
+  far: {
+    position: [118, 116, 132] as const,
+    target: PASCAL_GRASS_WATER_CAMERA_TARGET,
+    zoom: 5.2,
+  },
+  near: {
+    position: [56, 48, 64] as const,
+    target: [0, 2.5, 0] as const,
+    zoom: 11.6,
+  },
+} satisfies Record<
+  MediterraneanCliffCameraBookmark,
+  {
+    position: readonly [number, number, number]
+    target: readonly [number, number, number]
+    zoom: number
+  }
+>
 type PascalWaterMotionLayerKey =
   | 'coastalFoamVisibility'
   | 'frontCyanDepthContourVisibility'
@@ -83,7 +119,10 @@ const DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY = {
 } satisfies PascalWaterMotionLayerVisibility
 type PascalCliffPendingGeometryDisposal = { cancelled: boolean }
 type PascalCliffGpuQueue = { onSubmittedWorkDone?: () => Promise<void> }
-type PascalWorldMultiplayerDebugClientProps = { waterMotionDebug?: boolean }
+type PascalWorldMultiplayerDebugClientProps = {
+  erosionCliffDebug?: boolean
+  waterMotionDebug?: boolean
+}
 
 const pascalCliffPendingGeometryDisposals = new WeakMap<
   BufferGeometry,
@@ -141,6 +180,7 @@ function disposePascalCliffGeometryLater(geometry: BufferGeometry, renderer: unk
 }
 
 type PascalCliffExperimentMode = 'baseline' | 'rock-field' | 'terraced' | 'combined'
+type PascalWaterCliffMode = PascalCliffExperimentMode | 'erosion-rebuild'
 type PascalCliffCopyStatus = 'copied' | 'failed' | 'idle'
 type PascalCliffExperimentColor = [number, number, number]
 type PascalCliffExperimentFamily = {
@@ -157,6 +197,7 @@ type PascalCliffTuningSliderKey =
   | 'cliffCornerChipAngleDistribution'
   | 'cliffCornerChipAngleVariation'
   | 'cliffCornerChipAverage'
+  | 'cliffCornerChipDarkening'
   | 'cliffCornerChipDensity'
   | 'cliffCornerChipDistribution'
   | 'cliffCornerChipVariation'
@@ -282,6 +323,13 @@ const PASCAL_CLIFF_TUNING_SLIDERS = [
   {
     key: 'cliffCornerChipVariation',
     label: 'chip variability',
+    max: 1,
+    min: 0,
+    step: 0.01,
+  },
+  {
+    key: 'cliffCornerChipDarkening',
+    label: 'chip darkening',
     max: 1,
     min: 0,
     step: 0.01,
@@ -592,6 +640,7 @@ const PASCAL_CLIFF_TUNING_SLIDER_GROUPS = [
     keys: [
       'cliffCornerChipAverage',
       'cliffCornerChipVariation',
+      'cliffCornerChipDarkening',
       'cliffCornerChipDistribution',
       'cliffCornerChipDensity',
       'cliffCornerChipAngleAverage',
@@ -710,6 +759,7 @@ declare global {
 }
 
 export function PascalWorldMultiplayerDebugClient({
+  erosionCliffDebug = false,
   waterMotionDebug = false,
 }: PascalWorldMultiplayerDebugClientProps = {}) {
   const defaultElevationParameters = waterMotionDebug
@@ -746,6 +796,23 @@ export function PascalWorldMultiplayerDebugClient({
   const [cliffExperimentMode, setCliffExperimentMode] =
     useState<PascalCliffExperimentMode>('baseline')
   const [showGrass, setShowGrass] = useState(false)
+  const [erosionCliffParameters, setErosionCliffParameters] =
+    useState<MediterraneanErosionCliffParameters>(() => ({
+      ...DEFAULT_MEDITERRANEAN_EROSION_CLIFF_PARAMETERS,
+    }))
+  const [erosionCliffDebugMode, setErosionCliffDebugMode] =
+    useState<MediterraneanCliffDebugMode>('final')
+  const [showPlanarSphereSamples, setShowPlanarSphereSamples] = useState(false)
+  const erosionCliffFaceIsolation = erosionCliffDebug && erosionCliffDebugMode !== 'final'
+  const [erosionCliffQuality, setErosionCliffQuality] =
+    useState<MediterraneanCliffQuality>('design')
+  const [erosionCliffCameraBookmark, setErosionCliffCameraBookmark] =
+    useState<MediterraneanCliffCameraBookmark>('design')
+  const [erosionCliffStats, setErosionCliffStats] = useState<MediterraneanErosionCliffStats>(
+    () => ({
+      ...EMPTY_MEDITERRANEAN_EROSION_CLIFF_STATS,
+    }),
+  )
   const [waterMotionTuning, setWaterMotionTuning] = useState<PascalWorldWaterMotionTuning>(() => ({
     ...PASCAL_WORLD_WATER_MOTION_TUNING,
   }))
@@ -753,26 +820,45 @@ export function PascalWorldMultiplayerDebugClient({
     useState<PascalWaterMotionLayerVisibility>(() => ({
       ...DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY,
     }))
+  const landSurfaceElevationParameters = useMemo(
+    () => ({
+      contourNoiseFrequency: elevationParameters.contourNoiseFrequency,
+      contourVariationMeters: elevationParameters.contourVariationMeters,
+      edgeLiftMeters: elevationParameters.edgeLiftMeters,
+      innerContourMeters: elevationParameters.innerContourMeters,
+      outerContourMeters: elevationParameters.outerContourMeters,
+    }),
+    [
+      elevationParameters.contourNoiseFrequency,
+      elevationParameters.contourVariationMeters,
+      elevationParameters.edgeLiftMeters,
+      elevationParameters.innerContourMeters,
+      elevationParameters.outerContourMeters,
+    ],
+  )
   const landSurface = useMemo(
     () =>
       createPascalWaterLandSurface({
-        elevationParameters,
+        elevationParameters: landSurfaceElevationParameters,
         shorelinePoints,
         waterPlaneSize: WATER_PLANE_SIZE,
       }),
-    [elevationParameters, shorelinePoints],
+    [landSurfaceElevationParameters, shorelinePoints],
   )
+  const activeCliffMode: PascalWaterCliffMode = erosionCliffDebug
+    ? 'erosion-rebuild'
+    : cliffExperimentMode
   const activeWaterElevationParameters =
-    cliffExperimentMode === 'baseline'
+    activeCliffMode === 'baseline'
       ? elevationParameters
       : PASCAL_CLIFF_EXPERIMENT_WATER_ELEVATION_PARAMETERS
   const activeWaterNode = useMemo(() => {
     return createPascalWaterNodeForCliffMode(
       waterNode,
-      cliffExperimentMode,
+      activeCliffMode,
       activeWaterElevationParameters,
     )
-  }, [activeWaterElevationParameters, cliffExperimentMode, waterNode])
+  }, [activeCliffMode, activeWaterElevationParameters, waterNode])
   const waterMotionMaterialParameters = useMemo(
     () => createPascalWaterMotionLayerParameters(waterMotionLayerVisibility, waterMotionTuning),
     [waterMotionLayerVisibility, waterMotionTuning],
@@ -832,6 +918,28 @@ export function PascalWorldMultiplayerDebugClient({
   }, [activeWaterNode])
 
   useEffect(() => {
+    if (!erosionCliffDebug) return
+    const scene = useScene.getState()
+    pauseSceneHistory(useScene)
+    try {
+      if (erosionCliffFaceIsolation) {
+        scene.setScene({} as never, [] as never)
+      } else {
+        scene.setScene(
+          {
+            ...sceneGraph.nodes,
+            [activeWaterNode.id]: activeWaterNode,
+          } as never,
+          sceneGraph.rootNodeIds as never,
+        )
+      }
+    } finally {
+      resumeSceneHistory(useScene)
+    }
+    renderScheduler.requestFrame('geometry:changed')
+  }, [activeWaterNode, erosionCliffDebug, erosionCliffFaceIsolation, sceneGraph])
+
+  useEffect(() => {
     if (!waterMotionDebug) return
     setPascalWaterMaterialParameters(waterNode.id, waterMotionMaterialParameters)
   }, [waterMotionDebug, waterMotionMaterialParameters, waterNode.id])
@@ -852,8 +960,15 @@ export function PascalWorldMultiplayerDebugClient({
         'pascal-scene-store',
         'pascal-water-node',
         'world-multiplayer-water-material',
-        'pascal-multiplayer-cliff-parameters',
-        'debug-cliff-experiment-overlay',
+        ...(erosionCliffDebug
+          ? [
+              'mediterranean-erosion-cliff-mesh',
+              'shared-erosion-field-bundle',
+              'cliff-field-diagnostics',
+              'deterministic-cliff-seed',
+              'quality-tier-controls',
+            ]
+          : ['pascal-multiplayer-cliff-parameters', 'debug-cliff-experiment-overlay']),
         'grass-water-land-layers',
         'grass-water-ground-field',
         'grass-water-blades',
@@ -868,19 +983,25 @@ export function PascalWorldMultiplayerDebugClient({
           : []),
       ],
       grassSurfacePointCount: landSurface.grassSurfacePoints.length,
-      grassVisible: showGrass,
+      grassVisible: showGrass && !erosionCliffFaceIsolation,
       frontCyanShallowDepthThreshold: waterMotionDebug
         ? waterMotionTuning.frontCyanShallowDepthThreshold
         : null,
       nodeCount: Object.keys(sceneGraph.nodes).length,
       rootNodeIds: sceneGraph.rootNodeIds,
-      source: waterMotionDebug ? 'pascal-water-motion-debug' : 'pascal-grass-water-debug',
+      source: erosionCliffDebug
+        ? 'pascal-mediterranean-erosion-cliff-debug'
+        : waterMotionDebug
+          ? 'pascal-water-motion-debug'
+          : 'pascal-grass-water-debug',
       waterMotionLayerVisibility: waterMotionDebug ? waterMotionLayerVisibility : null,
       waterNodeId: waterNode.id,
     }
   }, [
     cliffExperimentMode,
     elevationParameters.cliffColorFamilyVariationCount,
+    erosionCliffDebug,
+    erosionCliffFaceIsolation,
     landSurface,
     sceneGraph,
     showGrass,
@@ -911,6 +1032,7 @@ export function PascalWorldMultiplayerDebugClient({
     <main
       className="h-screen w-screen overflow-hidden bg-[#0f1720]"
       data-landrush-pascal-grass-water-debug
+      data-landrush-pascal-mediterranean-erosion-cliff-debug={erosionCliffDebug || undefined}
       data-landrush-water-motion-debug={waterMotionDebug || undefined}
     >
       <Viewer
@@ -921,17 +1043,32 @@ export function PascalWorldMultiplayerDebugClient({
         selectionManager="custom"
         useBvh={false}
       >
-        <PascalGrassWaterCameraRig />
-        <PascalCliffExperimentOverlay
-          elevationParameters={elevationParameters}
-          mode={cliffExperimentMode}
-          surface={landSurface}
+        <PascalGrassWaterCameraRig
+          bookmark={erosionCliffDebug ? erosionCliffCameraBookmark : 'design'}
         />
-        <PascalCliffFamilyColorCubes
-          familyVariationCount={elevationParameters.cliffColorFamilyVariationCount}
-          surface={landSurface}
-        />
-        {showGrass ? (
+        {erosionCliffDebug ? (
+          <MediterraneanErosionCliffs
+            debugMode={erosionCliffDebugMode}
+            onStatsChange={setErosionCliffStats}
+            parameters={erosionCliffParameters}
+            quality={erosionCliffQuality}
+            showPlanarSphereSamples={showPlanarSphereSamples}
+            surface={landSurface}
+          />
+        ) : (
+          <>
+            <PascalCliffExperimentOverlay
+              elevationParameters={elevationParameters}
+              mode={cliffExperimentMode}
+              surface={landSurface}
+            />
+            <PascalCliffFamilyColorCubes
+              familyVariationCount={elevationParameters.cliffColorFamilyVariationCount}
+              surface={landSurface}
+            />
+          </>
+        )}
+        {showGrass && !erosionCliffFaceIsolation ? (
           <Suspense fallback={null}>
             <GrassWaterLandLayers
               bladeSubdivisions={bladeSubdivisions}
@@ -943,25 +1080,53 @@ export function PascalWorldMultiplayerDebugClient({
           </Suspense>
         ) : null}
       </Viewer>
-      <PascalCliffExperimentPanel
-        copyStatus={copyStatus}
-        elevationParameters={draftElevationParameters}
-        labTitle="Cliff Lab"
-        mode={cliffExperimentMode}
-        onCopy={() => void copyCliffParameters()}
-        onElevationParameterChange={(key, value) =>
-          setDraftElevationParameters((current) => ({ ...current, [key]: value }))
-        }
-        onModeChange={setCliffExperimentMode}
-        onResetElevationParameters={() => {
-          setDraftElevationParameters({ ...defaultElevationParameters })
-          setElevationParameters({ ...defaultElevationParameters })
-          setWaterMotionTuning({ ...PASCAL_WORLD_WATER_MOTION_TUNING })
-          setWaterMotionLayerVisibility({ ...DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY })
-        }}
-        onShowGrassChange={setShowGrass}
-        showGrass={showGrass}
-      />
+      {erosionCliffDebug ? (
+        <MediterraneanErosionCliffPanel
+          cameraBookmark={erosionCliffCameraBookmark}
+          debugMode={erosionCliffDebugMode}
+          onCameraBookmarkChange={setErosionCliffCameraBookmark}
+          onDebugModeChange={setErosionCliffDebugMode}
+          onParameterChange={(key, value) =>
+            setErosionCliffParameters((current) => ({ ...current, [key]: value }))
+          }
+          onQualityChange={setErosionCliffQuality}
+          onReset={() => {
+            setErosionCliffParameters({ ...DEFAULT_MEDITERRANEAN_EROSION_CLIFF_PARAMETERS })
+            setErosionCliffDebugMode('final')
+            setErosionCliffQuality('design')
+            setErosionCliffCameraBookmark('design')
+            setShowGrass(false)
+            setShowPlanarSphereSamples(false)
+          }}
+          onShowGrassChange={setShowGrass}
+          onShowPlanarSphereSamplesChange={setShowPlanarSphereSamples}
+          parameters={erosionCliffParameters}
+          quality={erosionCliffQuality}
+          showGrass={showGrass}
+          showPlanarSphereSamples={showPlanarSphereSamples}
+          stats={erosionCliffStats}
+        />
+      ) : (
+        <PascalCliffExperimentPanel
+          copyStatus={copyStatus}
+          elevationParameters={draftElevationParameters}
+          labTitle="Cliff Lab"
+          mode={cliffExperimentMode}
+          onCopy={() => void copyCliffParameters()}
+          onElevationParameterChange={(key, value) =>
+            setDraftElevationParameters((current) => ({ ...current, [key]: value }))
+          }
+          onModeChange={setCliffExperimentMode}
+          onResetElevationParameters={() => {
+            setDraftElevationParameters({ ...defaultElevationParameters })
+            setElevationParameters({ ...defaultElevationParameters })
+            setWaterMotionTuning({ ...PASCAL_WORLD_WATER_MOTION_TUNING })
+            setWaterMotionLayerVisibility({ ...DEFAULT_PASCAL_WATER_MOTION_LAYER_VISIBILITY })
+          }}
+          onShowGrassChange={setShowGrass}
+          showGrass={showGrass}
+        />
+      )}
       {waterMotionDebug ? (
         <PascalWaterMotionPanel
           onWaterMotionTuningChange={(key, value) =>
@@ -1009,7 +1174,7 @@ async function copyPascalCliffText(text: string) {
 
 function createPascalWaterNodeForCliffMode(
   waterNode: PascalWaterNode,
-  mode: PascalCliffExperimentMode,
+  mode: PascalWaterCliffMode,
   elevationParameters: IslandElevationParameters,
 ): PascalWaterNode {
   if (
@@ -1480,10 +1645,11 @@ function PascalCliffExperimentOverlay({
 
   return (
     <group renderOrder={80}>
-      <mesh renderOrder={82}>
+      <mesh key={`cliff-experiment:${geometry.uuid}`} renderOrder={82}>
         <primitive attach="geometry" dispose={null} object={geometry} />
         <meshStandardMaterial
           metalness={0.01}
+          name="pascal-cliff-experiment"
           polygonOffset
           polygonOffsetFactor={-2}
           polygonOffsetUnits={-2}
@@ -1493,12 +1659,18 @@ function PascalCliffExperimentOverlay({
         />
       </mesh>
       <mesh
+        key={`cliff-experiment-plateau:${plateauShape.uuid}`}
         position={[0, surface.plateauElevation + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT, 0]}
         renderOrder={81}
         rotation={[-Math.PI / 2, 0, 0]}
       >
         <shapeGeometry args={[plateauShape]} />
-        <meshStandardMaterial color="#75a84d" roughness={0.9} side={DoubleSide} />
+        <meshStandardMaterial
+          color="#75a84d"
+          name="pascal-cliff-experiment-plateau"
+          roughness={0.9}
+          side={DoubleSide}
+        />
       </mesh>
     </group>
   )
@@ -1632,23 +1804,25 @@ function createPascalCliffFamilyCubePlacement(
   }
 }
 
-function PascalGrassWaterCameraRig() {
+function PascalGrassWaterCameraRig({
+  bookmark = 'design',
+}: {
+  bookmark?: MediterraneanCliffCameraBookmark
+}) {
   const camera = useThree((state) => state.camera)
   const invalidate = useThree((state) => state.invalidate)
   const size = useThree((state) => state.size)
-  const target = useMemo(() => new Vector3(...PASCAL_GRASS_WATER_CAMERA_TARGET), [])
+  const view = PASCAL_CLIFF_CAMERA_BOOKMARKS[bookmark]
+  const target = useMemo(() => new Vector3(...view.target), [view])
 
   useEffect(() => {
     const aspect = size.width / Math.max(size.height, 1)
     const responsiveZoom = Math.max(
       PASCAL_GRASS_WATER_CAMERA_MIN_ZOOM,
-      Math.min(
-        PASCAL_GRASS_WATER_CAMERA_ZOOM,
-        PASCAL_GRASS_WATER_CAMERA_ZOOM * (aspect / PASCAL_GRASS_WATER_CAMERA_REFERENCE_ASPECT),
-      ),
+      Math.min(view.zoom, view.zoom * (aspect / PASCAL_GRASS_WATER_CAMERA_REFERENCE_ASPECT)),
     )
 
-    camera.position.set(...PASCAL_GRASS_WATER_CAMERA_POSITION)
+    camera.position.set(view.position[0], view.position[1], view.position[2])
     camera.lookAt(target)
     if ('zoom' in camera && typeof camera.zoom === 'number') {
       camera.zoom = responsiveZoom
@@ -1656,7 +1830,7 @@ function PascalGrassWaterCameraRig() {
     camera.updateProjectionMatrix()
     invalidate()
     renderScheduler.requestFrame('camera:move')
-  }, [camera, invalidate, size.height, size.width, target])
+  }, [camera, invalidate, size.height, size.width, target, view])
 
   return (
     <OrbitControls
@@ -1781,7 +1955,19 @@ function createPascalCliffExperimentGeometry(
     return geometry
   }
 
-  const rowCount = mode === 'rock-field' ? 6 : 9
+  const topElevation = surface.plateauElevation + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT
+  const toeElevation = PASCAL_WATER_LOW_ELEVATION + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT
+  if (mode !== 'rock-field') {
+    return createPascalWaterCliffRingGeometry(
+      outer,
+      inner,
+      toeElevation,
+      topElevation,
+      elevationParameters,
+    )
+  }
+
+  const rowCount = 6
   const positions: number[] = []
   const colors: number[] = []
   const uvs: number[] = []
@@ -1790,9 +1976,6 @@ function createPascalCliffExperimentGeometry(
   const families = pascalCliffExperimentFamilyRamp(
     elevationParameters.cliffColorFamilyVariationCount,
   )
-  const topElevation = surface.plateauElevation + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT
-  const toeElevation = PASCAL_WATER_LOW_ELEVATION + PASCAL_CLIFF_EXPERIMENT_OVERLAY_LIFT
-
   for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
     const outerPoint = outer[pointIndex]!
     const innerPoint = inner[pointIndex]!
@@ -1802,8 +1985,6 @@ function createPascalCliffExperimentGeometry(
     const normalX = outwardX / width
     const normalZ = outwardZ / width
     const station = stations[pointIndex] ?? 0
-    const sector = hashUnit(Math.floor(station / 9.5), 18.73)
-    const broadPulse = Math.sin(station * 0.23 + sector * Math.PI * 2)
     const column: PascalCliffExperimentGridPoint[] = []
 
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
@@ -1811,22 +1992,9 @@ function createPascalCliffExperimentGeometry(
       const heightRatio = smoothstep(0, 1, ratio)
       const baseX = lerp(outerPoint.x, innerPoint.x, ratio)
       const baseZ = lerp(outerPoint.z, innerPoint.z, ratio)
-      const ledge =
-        mode === 'rock-field' ? 0 : createPascalCliffLedgeOffset(ratio, width, elevationParameters)
-      const fracture =
-        mode === 'rock-field' ? 0 : (hashUnit(pointIndex * 3.13, rowIndex * 7.7) - 0.5) * 0.16
-      const roughOutward =
-        mode === 'rock-field'
-          ? 0
-          : (Math.sin(station * 0.41 + ratio * 7.9) * 0.12 + broadPulse * 0.08 + fracture) *
-            (1 - Math.abs(ratio - 0.5))
-      const lift =
-        mode === 'rock-field'
-          ? 0
-          : Math.sin(station * 0.34 + ratio * 11.2) * 0.08 * (1 - Math.abs(ratio - 0.5))
-      const x = baseX + normalX * (ledge + roughOutward)
-      const y = lerp(toeElevation, topElevation, heightRatio) + lift
-      const z = baseZ + normalZ * (ledge + roughOutward)
+      const x = baseX
+      const y = lerp(toeElevation, topElevation, heightRatio)
+      const z = baseZ
 
       column.push({
         outwardX: normalX,
@@ -1872,22 +2040,6 @@ function createPascalCliffExperimentGeometry(
   geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
   geometry.computeVertexNormals()
   return geometry
-}
-
-function createPascalCliffLedgeOffset(
-  ratio: number,
-  width: number,
-  elevationParameters: IslandElevationParameters,
-): number {
-  const lowerShelf = Math.exp(-(((ratio - 0.24) / 0.08) ** 2)) * 0.18
-  const undercut = Math.exp(-(((ratio - 0.48) / 0.12) ** 2)) * -0.22
-  const upperLip = Math.exp(-(((ratio - 0.78) / 0.1) ** 2)) * 0.16
-  const averageExtrusion =
-    (elevationParameters.cliffLayer1ExtrusionAverageMeters +
-      elevationParameters.cliffLayer2ExtrusionAverageMeters +
-      elevationParameters.cliffLayer3ExtrusionAverageMeters) /
-    3
-  return (lowerShelf + undercut + upperLip) * Math.min(width, 4.2 + averageExtrusion)
 }
 
 function addPascalCliffExperimentTriangle(

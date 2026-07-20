@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   CanvasTexture,
   ClampToEdgeWrapping,
@@ -29,6 +29,7 @@ import {
   canUseProceduralStylizedGrassGround,
   ProceduralStylizedGrassGround,
   type StylizedGrassGroundDebugMode,
+  type StylizedGrassGroundTextureReadyHandler,
 } from './stylized-grass-ground-material'
 import {
   STYLIZED_PATH_SIDEWALK_SEAM_METERS,
@@ -37,6 +38,7 @@ import {
   StylizedPathNetworkLayer,
 } from './stylized-path-network-layer'
 import {
+  DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   type StylizedGrassInteractionRef,
   StylizedSceneLandLayer,
 } from './stylized-scene-land-layers'
@@ -53,9 +55,11 @@ type GrassWaterLandLayersProps = {
   grassBlockers?: readonly GrassFieldBlocker[]
   grassDebugState?: GrassLifecycleDebugState
   grassInteractionRef?: StylizedGrassInteractionRef
+  grassStreamingPaused?: boolean
   groundRenderOrder?: number
   onStylizedGroundTextureReady?: (ready: boolean) => void
   profileMeasure?: ProfileMeasure
+  renderStylizedPathNetwork?: boolean
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
   showGround?: boolean
@@ -64,7 +68,9 @@ type GrassWaterLandLayersProps = {
   stylizedGroundTexture?: boolean
   stylizedGroundDebugMode?: StylizedGrassGroundDebugMode
   stylizedSceneLayout?: boolean
+  stylizedGroundTint?: string
   stylizedGroundTextureWorldSizeMeters?: number
+  stylizedGrassGroundTintCap?: number
   surface: WaterLandSurface
   treeBlockers?: readonly GrassFieldBlocker[]
   tuning: GrassBladeTuning
@@ -72,12 +78,13 @@ type GrassWaterLandLayersProps = {
 
 type GrassGroundLayerProps = {
   elevation: number
-  onTextureReady?: (ready: boolean) => void
+  onTextureReady?: StylizedGrassGroundTextureReadyHandler
   profileMeasure?: ProfileMeasure
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
   stylizedTexture: boolean
   stylizedTextureDebugMode: StylizedGrassGroundDebugMode
+  stylizedTextureTint: string
   stylizedTextureWorldSizeMeters: number
   texture: Texture
 }
@@ -144,9 +151,11 @@ export function GrassWaterLandLayers({
   grassBlockers = EMPTY_GRASS_BLOCKERS,
   grassDebugState,
   grassInteractionRef,
+  grassStreamingPaused = false,
   groundRenderOrder = GRASS_GROUND_RENDER_ORDER,
   onStylizedGroundTextureReady,
   profileMeasure,
+  renderStylizedPathNetwork = true,
   roads = EMPTY_GRASS_ROADS,
   showBlades = true,
   showGround = true,
@@ -155,7 +164,9 @@ export function GrassWaterLandLayers({
   stylizedGroundTexture = false,
   stylizedGroundDebugMode = 'final',
   stylizedSceneLayout = false,
+  stylizedGroundTint = '#ffffff',
   stylizedGroundTextureWorldSizeMeters = DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS,
+  stylizedGrassGroundTintCap = DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   surface,
   treeBlockers,
   tuning,
@@ -175,6 +186,14 @@ export function GrassWaterLandLayers({
   const resolvedBladeRenderOrder =
     bladeRenderOrder ??
     (stylizedSceneLayout ? STYLIZED_GRASS_BLADE_RENDER_ORDER : GRASS_BLADE_RENDER_ORDER)
+  const [stylizedGroundColorTexture, setStylizedGroundColorTexture] = useState<Texture | null>(null)
+  const handleStylizedGroundTextureReady = useCallback<StylizedGrassGroundTextureReadyHandler>(
+    (ready, texture) => {
+      setStylizedGroundColorTexture(ready ? (texture ?? null) : null)
+      onStylizedGroundTextureReady?.(ready)
+    },
+    [onStylizedGroundTextureReady],
+  )
   const groundField = useMemo(
     () =>
       measure(profileMeasure, 'setup.grass.ground-field-texture', () =>
@@ -302,14 +321,15 @@ export function GrassWaterLandLayers({
           profileMeasure={profileMeasure}
           renderOrder={groundRenderOrder}
           roads={stylizedGroundTexture ? EMPTY_GRASS_ROADS : roads}
-          onTextureReady={onStylizedGroundTextureReady}
+          onTextureReady={handleStylizedGroundTextureReady}
           stylizedTexture={stylizedGroundTexture}
           stylizedTextureDebugMode={stylizedGroundDebugMode}
+          stylizedTextureTint={stylizedGroundTint}
           stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
           texture={renderedGroundField.texture}
         />
       ) : null}
-      {showGround && stylizedGroundTexture && roads.length > 0 ? (
+      {showGround && stylizedGroundTexture && renderStylizedPathNetwork && roads.length > 0 ? (
         <StylizedPathNetworkLayer
           elevation={surface.grassSurfaceElevation}
           perimeter={surface.grassSurfacePoints}
@@ -321,6 +341,8 @@ export function GrassWaterLandLayers({
         <Suspense fallback={null}>
           <StylizedSceneLandLayer
             elevation={surface.grassSurfaceElevation}
+            groundColorTexture={stylizedGroundColorTexture}
+            groundTintCap={stylizedGrassGroundTintCap}
             grassFadeBlockers={bladeFadeBlockers}
             grassDebugState={{
               ...grassDebugState,
@@ -334,6 +356,7 @@ export function GrassWaterLandLayers({
             grassRenderOrder={resolvedBladeRenderOrder}
             showBlades={showBlades}
             showTrees={showTrees}
+            streamingPaused={grassStreamingPaused}
             surfacePoints={surface.grassSurfacePoints}
             treeBlockers={resolvedTreeBlockers}
             tuning={tuning}
@@ -599,6 +622,7 @@ export function GrassGroundLayer({
   roads,
   stylizedTexture,
   stylizedTextureDebugMode,
+  stylizedTextureTint,
   stylizedTextureWorldSizeMeters,
   texture,
 }: GrassGroundLayerProps) {
@@ -615,6 +639,7 @@ export function GrassGroundLayer({
         renderOrder={renderOrder}
         roads={roads}
         debugMode={stylizedTextureDebugMode}
+        tint={stylizedTextureTint}
         texture={texture}
         textureWorldSizeMeters={stylizedTextureWorldSizeMeters}
       />
@@ -638,15 +663,17 @@ function StylizedGrassGroundLayer({
   renderOrder,
   roads,
   onTextureReady,
+  tint,
   texture,
   textureWorldSizeMeters,
 }: {
   debugMode: StylizedGrassGroundDebugMode
   elevation: number
-  onTextureReady?: (ready: boolean) => void
+  onTextureReady?: StylizedGrassGroundTextureReadyHandler
   profileMeasure?: ProfileMeasure
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
+  tint: string
   texture: Texture
   textureWorldSizeMeters: number
 }) {
@@ -658,6 +685,7 @@ function StylizedGrassGroundLayer({
         maskTexture={texture}
         onReady={onTextureReady}
         renderOrder={renderOrder}
+        color={tint}
       />
     )
   }
@@ -669,6 +697,7 @@ function StylizedGrassGroundLayer({
       profileMeasure={profileMeasure}
       renderOrder={renderOrder}
       roads={roads}
+      tint={tint}
       texture={texture}
       textureWorldSizeMeters={textureWorldSizeMeters}
     />
@@ -681,14 +710,16 @@ function CanvasStylizedGrassGroundLayer({
   renderOrder,
   roads,
   onTextureReady,
+  tint,
   texture,
   textureWorldSizeMeters,
 }: {
   elevation: number
-  onTextureReady?: (ready: boolean) => void
+  onTextureReady?: StylizedGrassGroundTextureReadyHandler
   profileMeasure?: ProfileMeasure
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
+  tint: string
   texture: Texture
   textureWorldSizeMeters: number
 }) {
@@ -719,7 +750,7 @@ function CanvasStylizedGrassGroundLayer({
   const groundTexture = finalGroundTexture ?? previewGroundTexture
 
   useEffect(() => {
-    onTextureReady?.(Boolean(finalGroundTexture))
+    onTextureReady?.(Boolean(finalGroundTexture), finalGroundTexture ?? undefined)
   }, [finalGroundTexture, onTextureReady])
 
   useEffect(
@@ -741,6 +772,7 @@ function CanvasStylizedGrassGroundLayer({
 
   return (
     <GrassGroundMesh
+      color={tint}
       elevation={elevation}
       opacity={0.96}
       renderOrder={renderOrder}
@@ -750,11 +782,13 @@ function CanvasStylizedGrassGroundLayer({
 }
 
 function GrassGroundMesh({
+  color = '#ffffff',
   elevation,
   opacity,
   renderOrder,
   texture,
 }: {
+  color?: string
   elevation: number
   opacity: number
   renderOrder: number
@@ -768,6 +802,7 @@ function GrassGroundMesh({
     >
       <planeGeometry args={[GRASS_FIELD_PLANE_SIZE, GRASS_FIELD_PLANE_SIZE, 1, 1]} />
       <meshBasicMaterial
+        color={color}
         depthWrite={false}
         map={texture}
         opacity={opacity}

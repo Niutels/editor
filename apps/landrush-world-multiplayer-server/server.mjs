@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
 
 const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
@@ -14,6 +17,7 @@ const LANDRUSH_BUILD_NODE_TYPES = new Set([
   'elevator',
   'fence',
   'item',
+  'level',
   'ridge-vent',
   'roof',
   'roof-segment',
@@ -34,12 +38,19 @@ const MIN_STATE_INTERVAL_MS = 40
 const PEER_STALE_MS = 15_000
 const PORT = Number(process.env.PORT ?? process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PORT ?? 3003)
 const WS_PATH = process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PATH ?? '/api/landrush-lab/world-multiplayer/ws'
+const PERSISTENT_STATE_SCHEMA_VERSION = 1
+const PERSISTENT_STATE_FILE = resolvePersistentStateFile()
 
 const rooms = new Map()
 const parcelBuildNodesByWorld = new Map()
 const parcelOwnershipByWorld = new Map()
 const tvMediaStateByWorld = new Map()
+let persistentStateRequestedRevision = 0
+let persistentStateWrittenRevision = 0
+let persistentStateWriteRunning = false
 const startedAt = Date.now()
+
+await restorePersistentWorldState()
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
@@ -526,6 +537,7 @@ function claimParcel(peer, worldIdValue, parcelIdValue, now) {
     worldId,
   }
   ownerships.set(parcelId, ownership)
+  queuePersistentWorldStateWrite()
   return { ok: true, ownership }
 }
 
@@ -582,6 +594,7 @@ function syncParcelBuildNodes(peer, worldIdValue, parcelIdValue, nodesValue, now
     worldId,
   }
   getParcelBuildNodes(worldId).set(parcelId, build)
+  queuePersistentWorldStateWrite()
   return { build, ok: true }
 }
 
@@ -612,6 +625,7 @@ function syncTvMediaState(peer, message, now) {
     worldId,
   }
   getTvMediaStates(worldId).set(tv.tvId, tv)
+  queuePersistentWorldStateWrite()
   return { ok: true, tv }
 }
 
@@ -670,6 +684,212 @@ function parcelOwnershipSnapshot(worldId) {
   return [...(parcelOwnershipByWorld.get(worldId)?.values() ?? [])].sort((first, second) =>
     first.parcelId.localeCompare(second.parcelId),
   )
+}
+
+function resolvePersistentStateFile() {
+  const configuredPath = process.env.LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE?.trim()
+  if (configuredPath?.toLowerCase() === 'off') return null
+  if (configuredPath) return resolve(configuredPath)
+  if (process.env.RENDER) return null
+  return resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../.landrush-local/world-multiplayer-state.json',
+  )
+}
+
+async function restorePersistentWorldState() {
+  if (!PERSISTENT_STATE_FILE) return
+  let encoded
+  try {
+    encoded = await readFile(PERSISTENT_STATE_FILE, 'utf8')
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return
+    console.warn(`Could not read Landrush local save: ${errorMessage(error)}`)
+    return
+  }
+
+  try {
+    const snapshot = JSON.parse(encoded)
+    if (
+      snapshot?.schemaVersion !== PERSISTENT_STATE_SCHEMA_VERSION ||
+      !Array.isArray(snapshot.worlds)
+    ) {
+      throw new Error('Unsupported local-save schema')
+    }
+
+    let buildCount = 0
+    let ownershipCount = 0
+    let tvCount = 0
+    for (const candidate of snapshot.worlds) {
+      if (!candidate || typeof candidate !== 'object' || typeof candidate.worldId !== 'string') {
+        continue
+      }
+      const worldId = sanitizeParcelWorldId(candidate.worldId)
+      const ownerships = new Map()
+      for (const value of Array.isArray(candidate.ownerships) ? candidate.ownerships : []) {
+        const ownership = sanitizePersistentParcelOwnership(value, worldId)
+        if (ownership) ownerships.set(ownership.parcelId, ownership)
+      }
+      const builds = new Map()
+      for (const value of Array.isArray(candidate.builds) ? candidate.builds : []) {
+        const build = sanitizePersistentParcelBuild(value, worldId)
+        if (build) builds.set(build.parcelId, build)
+      }
+      const tvs = new Map()
+      for (const value of Array.isArray(candidate.tvMediaStates) ? candidate.tvMediaStates : []) {
+        const tv = sanitizePersistentTvMediaState(value, worldId)
+        if (tv) tvs.set(tv.tvId, tv)
+      }
+
+      if (ownerships.size > 0) parcelOwnershipByWorld.set(worldId, ownerships)
+      if (builds.size > 0) parcelBuildNodesByWorld.set(worldId, builds)
+      if (tvs.size > 0) tvMediaStateByWorld.set(worldId, tvs)
+      ownershipCount += ownerships.size
+      buildCount += builds.size
+      tvCount += tvs.size
+    }
+    console.log(
+      `Restored Landrush local save (${ownershipCount} parcels, ${buildCount} builds, ${tvCount} TVs)`,
+    )
+  } catch (error) {
+    console.warn(`Could not restore Landrush local save: ${errorMessage(error)}`)
+  }
+}
+
+function queuePersistentWorldStateWrite() {
+  if (!PERSISTENT_STATE_FILE) return
+  persistentStateRequestedRevision += 1
+  void flushPersistentWorldState()
+}
+
+async function flushPersistentWorldState() {
+  if (persistentStateWriteRunning) return
+  persistentStateWriteRunning = true
+  try {
+    while (persistentStateWrittenRevision < persistentStateRequestedRevision) {
+      const targetRevision = persistentStateRequestedRevision
+      try {
+        await writePersistentWorldState(createPersistentWorldStateSnapshot())
+        persistentStateWrittenRevision = targetRevision
+      } catch (error) {
+        console.error(`Could not write Landrush local save: ${errorMessage(error)}`)
+        break
+      }
+    }
+  } finally {
+    persistentStateWriteRunning = false
+    if (persistentStateWrittenRevision < persistentStateRequestedRevision) {
+      const retry = setTimeout(() => void flushPersistentWorldState(), 1000)
+      retry.unref()
+    }
+  }
+}
+
+function createPersistentWorldStateSnapshot() {
+  const worldIds = new Set([
+    ...parcelOwnershipByWorld.keys(),
+    ...parcelBuildNodesByWorld.keys(),
+    ...tvMediaStateByWorld.keys(),
+  ])
+  return {
+    savedAt: Date.now(),
+    schemaVersion: PERSISTENT_STATE_SCHEMA_VERSION,
+    worlds: [...worldIds]
+      .sort((first, second) => first.localeCompare(second))
+      .map((worldId) => ({
+        builds: parcelBuildNodesSnapshot(worldId),
+        ownerships: parcelOwnershipSnapshot(worldId),
+        tvMediaStates: tvMediaStateSnapshot(worldId),
+        worldId,
+      })),
+  }
+}
+
+async function writePersistentWorldState(snapshot) {
+  if (!PERSISTENT_STATE_FILE) return
+  const temporaryFile = `${PERSISTENT_STATE_FILE}.${process.pid}.tmp`
+  await mkdir(dirname(PERSISTENT_STATE_FILE), { recursive: true })
+  try {
+    await writeFile(temporaryFile, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8')
+    await rename(temporaryFile, PERSISTENT_STATE_FILE)
+  } catch (error) {
+    await rm(temporaryFile, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
+function sanitizePersistentParcelOwnership(value, worldId) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    typeof value.parcelId !== 'string' ||
+    !value.parcelId.trim() ||
+    typeof value.owner?.id !== 'string' ||
+    !value.owner.id.trim()
+  ) {
+    return null
+  }
+  return {
+    claimedAt: Math.max(0, finiteNumber(value.claimedAt, 0)),
+    owner: {
+      color: sanitizeColor(value.owner.color),
+      id: sanitizeText(value.owner.id, '', 80),
+      name: sanitizeText(value.owner.name, 'Player', 32),
+    },
+    parcelId: sanitizeParcelId(value.parcelId),
+    worldId,
+  }
+}
+
+function sanitizePersistentParcelBuild(value, worldId) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    typeof value.parcelId !== 'string' ||
+    !value.parcelId.trim()
+  ) {
+    return null
+  }
+  const nodes = sanitizeBuildNodes(value.nodes)
+  if (!nodes.ok) return null
+  return {
+    nodes: nodes.nodes,
+    parcelId: sanitizeParcelId(value.parcelId),
+    updatedAt: Math.max(0, finiteNumber(value.updatedAt, 0)),
+    updatedBy: sanitizeText(value.updatedBy, 'local-save', 80),
+    worldId,
+  }
+}
+
+function sanitizePersistentTvMediaState(value, worldId) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    typeof value.parcelId !== 'string' ||
+    !value.parcelId.trim() ||
+    typeof value.tvId !== 'string' ||
+    !value.tvId.trim()
+  ) {
+    return null
+  }
+  const url = sanitizeText(value.url, '', 2048)
+  return {
+    muted: Boolean(value.muted),
+    parcelId: sanitizeParcelId(value.parcelId),
+    playbackSeconds: Math.max(0, finiteNumber(value.playbackSeconds, 0)),
+    playbackUpdatedAt: Math.max(0, finiteNumber(value.playbackUpdatedAt, value.updatedAt ?? 0)),
+    playing: typeof value.playing === 'boolean' ? value.playing : Boolean(url),
+    tvId: sanitizeParcelKey(value.tvId, 'tv', 120),
+    updatedAt: Math.max(0, finiteNumber(value.updatedAt, 0)),
+    updatedBy: sanitizeText(value.updatedBy, 'local-save', 80),
+    url,
+    userVolume: clamp01(finiteNumber(value.userVolume, 0.8)),
+    worldId,
+  }
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function broadcast(roomId, message, exceptPeerId) {
