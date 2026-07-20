@@ -1,10 +1,9 @@
 'use client'
 
 import { emitter } from '@pascal-app/core'
-import Image from 'next/image'
+import { RotateCcw, RotateCw, Scan } from 'lucide-react'
 import useEditor from '../../../store/use-editor'
 import { ActionButton } from './action-button'
-import { ACTION_MENU_ICON_URLS } from './icon-assets'
 
 export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
   // Orbit stays useful in 2D-only (it spins the synced floorplan view), but
@@ -35,13 +34,7 @@ export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
             size="icon"
             variant="ghost"
           >
-            <Image
-              alt="Orbit Left"
-              className="h-[28px] w-[28px] -scale-x-100 object-contain opacity-70 transition-opacity group-hover:opacity-100"
-              height={28}
-              src={ACTION_MENU_ICON_URLS.rotate}
-              width={28}
-            />
+            <RotateCcw aria-hidden className="h-5 w-5 opacity-70 group-hover:opacity-100" />
           </ActionButton>
 
           {/* Orbit CW */}
@@ -52,13 +45,7 @@ export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
             size="icon"
             variant="ghost"
           >
-            <Image
-              alt="Orbit Right"
-              className="h-[28px] w-[28px] object-contain opacity-70 transition-opacity group-hover:opacity-100"
-              height={28}
-              src={ACTION_MENU_ICON_URLS.rotate}
-              width={28}
-            />
+            <RotateCw aria-hidden className="h-5 w-5 opacity-70 group-hover:opacity-100" />
           </ActionButton>
         </>
       )}
@@ -72,13 +59,7 @@ export function CameraActions({ hideOrbit = false }: { hideOrbit?: boolean }) {
           size="icon"
           variant="ghost"
         >
-          <Image
-            alt="Top View"
-            className="h-[28px] w-[28px] object-contain opacity-70 transition-opacity group-hover:opacity-100"
-            height={28}
-            src={ACTION_MENU_ICON_URLS.topview}
-            width={28}
-          />
+          <Scan aria-hidden className="h-5 w-5 opacity-70 group-hover:opacity-100" />
         </ActionButton>
       )}
     </div>

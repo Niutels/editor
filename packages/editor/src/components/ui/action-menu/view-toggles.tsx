@@ -9,7 +9,19 @@ import {
   useScene,
 } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { Check, ChevronDown, Eye, EyeOff, Layers2, Plus, Trash2, Waypoints } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Images,
+  Layers2,
+  type LucideIcon,
+  Plus,
+  ScanSearch,
+  Trash2,
+  Waypoints,
+} from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { getLevelDisplayName } from '@pascal-app/core'
@@ -20,7 +32,6 @@ import { useUploadStore } from '../../../store/use-upload'
 import { SliderControl } from '../controls/slider-control'
 import { Popover, PopoverContent, PopoverTrigger } from '../primitives/popover'
 import { ActionButton } from './action-button'
-import { ACTION_MENU_ICON_URLS } from './icon-assets'
 
 const MAX_FILE_SIZE = 200 * 1024 * 1024 // 200MB
 const ACCEPTED_FILE_TYPES = '.glb,.gltf,image/jpeg,image/png,image/webp,image/gif'
@@ -217,11 +228,7 @@ function GuidesControl() {
           variant="ghost"
         >
           <div className="relative">
-            <img
-              alt="Guides"
-              className="h-[28px] w-[28px] object-contain"
-              src={ACTION_MENU_ICON_URLS.floorplan}
-            />
+            <Images aria-hidden className="h-5 w-5" />
             <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-white/20 px-[3px] text-center font-medium text-[9px] text-white/70 leading-[14px]">
               {guides.length}
             </span>
@@ -259,7 +266,7 @@ function GuidesControl() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background/80">
-              <img alt="" className="h-4 w-4 object-contain" src={ACTION_MENU_ICON_URLS.floorplan} />
+              <Images aria-hidden className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="font-medium text-foreground text-sm">Guide images</p>
@@ -296,11 +303,7 @@ function GuidesControl() {
                       onClick={() => handleSelectGuide(guide.id)}
                       type="button"
                     >
-                      <img
-                        alt=""
-                        className="h-3.5 w-3.5 shrink-0 object-contain opacity-70"
-                        src={ACTION_MENU_ICON_URLS.floorplan}
-                      />
+                      <Images aria-hidden className="h-3.5 w-3.5 shrink-0 opacity-70" />
                       <p className="truncate font-medium text-foreground text-sm">
                         {guide.name || `Guide image ${index + 1}`}
                       </p>
@@ -396,7 +399,7 @@ function ScansControl() {
           variant="ghost"
         >
           <div className="relative">
-            <img alt="Scans" className="h-[28px] w-[28px] object-contain" src={ACTION_MENU_ICON_URLS.mesh} />
+            <ScanSearch aria-hidden className="h-5 w-5" />
             <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-white/20 px-[3px] text-center font-medium text-[9px] text-white/70 leading-[14px]">
               {scans.length}
             </span>
@@ -434,7 +437,7 @@ function ScansControl() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background/80">
-              <img alt="" className="h-4 w-4 object-contain" src={ACTION_MENU_ICON_URLS.mesh} />
+              <ScanSearch aria-hidden className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
               <p className="font-medium text-foreground text-sm">Scans</p>
@@ -471,11 +474,7 @@ function ScansControl() {
                       onClick={() => handleSelectScan(scan.id)}
                       type="button"
                     >
-                      <img
-                        alt=""
-                        className="h-3.5 w-3.5 shrink-0 object-contain opacity-70"
-                        src={ACTION_MENU_ICON_URLS.mesh}
-                      />
+                      <ScanSearch aria-hidden className="h-3.5 w-3.5 shrink-0 opacity-70" />
                       <p className="truncate font-medium text-foreground text-sm">
                         {scan.name || `Scan ${index + 1}`}
                       </p>
@@ -529,7 +528,7 @@ function ScansControl() {
 
 function ReferenceListSection({
   title,
-  iconSrc,
+  icon: Icon,
   noun,
   emptyText,
   nodes,
@@ -538,7 +537,7 @@ function ReferenceListSection({
   onError,
 }: {
   title: string
-  iconSrc: string
+  icon: LucideIcon
   noun: string
   emptyText: string
   nodes: (GuideNode | ScanNode)[]
@@ -566,7 +565,7 @@ function ReferenceListSection({
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-background/80">
-          <img alt="" className="h-4 w-4 object-contain" src={iconSrc} />
+          <Icon aria-hidden className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-medium text-foreground text-sm">{title}</p>
@@ -606,11 +605,7 @@ function ReferenceListSection({
                   onClick={() => handleSelect(node.id)}
                   type="button"
                 >
-                  <img
-                    alt=""
-                    className="h-3.5 w-3.5 shrink-0 object-contain opacity-70"
-                    src={iconSrc}
-                  />
+                  <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 opacity-70" />
                   <p className="truncate font-medium text-foreground text-sm">
                     {node.name || `${noun.charAt(0).toUpperCase()}${noun.slice(1)} ${index + 1}`}
                   </p>
@@ -692,11 +687,7 @@ function ReferencesControl() {
           variant="ghost"
         >
           <div className="relative">
-            <img
-              alt="References"
-              className="h-[28px] w-[28px] object-contain"
-              src={ACTION_MENU_ICON_URLS.floorplan}
-            />
+            <Images aria-hidden className="h-5 w-5" />
             <span className="absolute -right-1.5 -bottom-1 min-w-[14px] rounded-full bg-white/20 px-[3px] text-center font-medium text-[9px] text-white/70 leading-[14px]">
               {total}
             </span>
@@ -738,7 +729,7 @@ function ReferencesControl() {
           )}
           <ReferenceListSection
             emptyText={REFERENCES_EMPTY_TEXT}
-            iconSrc={ACTION_MENU_ICON_URLS.mesh}
+            icon={ScanSearch}
             nodes={scans}
             noun="scan"
             onError={setUploadError}
@@ -749,7 +740,7 @@ function ReferencesControl() {
           <div className="h-px bg-border/45" />
           <ReferenceListSection
             emptyText={REFERENCES_EMPTY_TEXT}
-            iconSrc={ACTION_MENU_ICON_URLS.floorplan}
+            icon={Images}
             nodes={guides}
             noun="guide image"
             onError={setUploadError}

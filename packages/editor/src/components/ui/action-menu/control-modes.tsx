@@ -2,12 +2,19 @@
 
 import { type LevelNode, useScene } from '@pascal-app/core'
 import { useViewer } from '@pascal-app/viewer'
-import { type LucideIcon, SquareDashedMousePointer, Trash2 } from 'lucide-react'
-import Image from 'next/image'
+import {
+  Hammer,
+  Map,
+  MousePointer2,
+  Paintbrush,
+  Shapes,
+  type LucideIcon,
+  SquareDashedMousePointer,
+  Trash2,
+} from 'lucide-react'
 import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { ActionButton } from './action-button'
-import { ACTION_MENU_ICON_URLS } from './icon-assets'
 
 type ControlId =
   | 'select'
@@ -20,8 +27,7 @@ type ControlId =
 
 type ControlConfig = {
   id: ControlId
-  icon?: LucideIcon
-  imageSrc?: string
+  icon: LucideIcon
   label: string
   shortcut?: string
   color: string
@@ -31,7 +37,7 @@ type ControlConfig = {
 const compactControls: ControlConfig[] = [
   {
     id: 'select',
-    imageSrc: ACTION_MENU_ICON_URLS.select,
+    icon: MousePointer2,
     label: 'Select',
     shortcut: 'V',
     color: 'hover:bg-blue-500/20 hover:text-blue-400',
@@ -39,7 +45,7 @@ const compactControls: ControlConfig[] = [
   },
   {
     id: 'zone',
-    imageSrc: ACTION_MENU_ICON_URLS.zone,
+    icon: Shapes,
     label: 'Zone',
     shortcut: 'Z',
     color: 'hover:bg-green-500/20 hover:text-green-400',
@@ -66,14 +72,14 @@ const fullControls: ControlConfig[] = [
   },
   {
     id: 'site-edit',
-    imageSrc: ACTION_MENU_ICON_URLS.site,
+    icon: Map,
     label: 'Edit site',
     color: 'hover:bg-white/5',
     activeColor: 'bg-white/10 hover:bg-white/10',
   },
   {
     id: 'build',
-    imageSrc: ACTION_MENU_ICON_URLS.build,
+    icon: Hammer,
     label: 'Build',
     shortcut: 'B',
     color: 'hover:bg-green-500/20 hover:text-green-400',
@@ -81,7 +87,7 @@ const fullControls: ControlConfig[] = [
   },
   {
     id: 'material-paint',
-    imageSrc: ACTION_MENU_ICON_URLS.paint,
+    icon: Paintbrush,
     label: 'Material Paint',
     shortcut: 'P',
     color: 'hover:bg-amber-500/20 hover:text-amber-400',
@@ -185,7 +191,6 @@ export function ControlModes({ full = false }: { full?: boolean }) {
     <div className="flex items-center gap-1">
       {controls.map((control) => {
         const ModeIcon = control.icon
-        const isImageMode = Boolean(control.imageSrc)
         const isSiteButton = control.id === 'site-edit'
         const isActive = getIsActive(control.id)
         const isDisabled = isSiteButton && !canEnterSiteEdit
@@ -200,10 +205,8 @@ export function ControlModes({ full = false }: { full?: boolean }) {
                   : canEnterSiteEdit
                     ? 'opacity-60 grayscale hover:bg-white/5 hover:opacity-100 hover:grayscale-0'
                     : 'cursor-not-allowed opacity-35 grayscale'
-                : !(isImageMode || isActive) && control.color,
-              !(isSiteButton || isImageMode) && isActive && control.activeColor,
-              !isSiteButton && isImageMode && isActive && 'bg-white/10 hover:bg-white/10',
-              !isSiteButton && isImageMode && !isActive && 'hover:bg-white/5',
+                : !isActive && control.color,
+              !isSiteButton && isActive && control.activeColor,
             )}
             data-editor-control-mode={control.id}
             disabled={isDisabled}
@@ -222,22 +225,7 @@ export function ControlModes({ full = false }: { full?: boolean }) {
             size="icon"
             variant="ghost"
           >
-            {control.imageSrc ? (
-              <Image
-                alt={control.label}
-                className={cn(
-                  'h-[28px] w-[28px] object-contain transition-[opacity,filter] duration-200',
-                  isActive
-                    ? 'opacity-100 grayscale-0'
-                    : 'opacity-60 grayscale group-hover:opacity-100 group-hover:grayscale-0',
-                )}
-                height={28}
-                src={control.imageSrc}
-                width={28}
-              />
-            ) : (
-              ModeIcon && <ModeIcon className="h-5 w-5" />
-            )}
+            <ModeIcon aria-hidden className="h-5 w-5" />
           </ActionButton>
         )
       })}

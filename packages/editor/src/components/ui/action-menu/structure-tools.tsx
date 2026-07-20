@@ -1,5 +1,26 @@
 'use client'
 
+import {
+  AirVent,
+  BrickWall,
+  Building2,
+  Cable,
+  ChartNoAxesColumnIncreasing,
+  Columns3,
+  DoorOpen,
+  Fan,
+  Fence,
+  GitFork,
+  House,
+  Layers3,
+  MapPin,
+  PanelsTopLeft,
+  Rows3,
+  Square,
+  type LucideIcon,
+  Wind,
+  Workflow,
+} from 'lucide-react'
 import { cn } from '../../../lib/utils'
 import useEditor, { type CatalogCategory, type StructureTool } from '../../../store/use-editor'
 import { ActionButton } from './action-button'
@@ -7,6 +28,7 @@ import { ACTION_MENU_ICON_URLS } from './icon-assets'
 
 export type ToolConfig = {
   id: StructureTool
+  icon: LucideIcon
   iconSrc: string
   label: string
   catalogCategory?: CatalogCategory
@@ -16,28 +38,83 @@ export type ToolConfig = {
 // and hosts that opt into the full bottom action menu. Roof-mounted accessories are intentionally
 // absent — they're placed from the roof inspector's "Add element" section.
 export const tools: ToolConfig[] = [
-  { id: 'wall', iconSrc: ACTION_MENU_ICON_URLS.wall, label: 'Wall' },
-  { id: 'door', iconSrc: ACTION_MENU_ICON_URLS.door, label: 'Door' },
-  { id: 'window', iconSrc: ACTION_MENU_ICON_URLS.window, label: 'Window' },
-  { id: 'stair', iconSrc: ACTION_MENU_ICON_URLS.stairs, label: 'Stairs' },
-  { id: 'roof', iconSrc: ACTION_MENU_ICON_URLS.roof, label: 'Gable Roof' },
-  { id: 'fence', iconSrc: ACTION_MENU_ICON_URLS.fence, label: 'Fence' },
-  { id: 'column', iconSrc: ACTION_MENU_ICON_URLS.column, label: 'Column' },
-  { id: 'elevator', iconSrc: ACTION_MENU_ICON_URLS.elevator, label: 'Elevator' },
-  { id: 'slab', iconSrc: ACTION_MENU_ICON_URLS.floor, label: 'Slab' },
-  { id: 'ceiling', iconSrc: ACTION_MENU_ICON_URLS.ceiling, label: 'Ceiling' },
-  { id: 'zone', iconSrc: ACTION_MENU_ICON_URLS.zone, label: 'Zone' },
-  { id: 'spawn', iconSrc: ACTION_MENU_ICON_URLS.spawnPoint, label: 'Spawn Point' },
-  { id: 'shelf', iconSrc: ACTION_MENU_ICON_URLS.shelf, label: 'Shelf' },
-  { id: 'duct-segment', iconSrc: ACTION_MENU_ICON_URLS.duct, label: 'Duct' },
-  { id: 'duct-fitting', iconSrc: ACTION_MENU_ICON_URLS.ductFitting, label: 'Duct Fitting' },
-  { id: 'duct-terminal', iconSrc: ACTION_MENU_ICON_URLS.registers, label: 'Register' },
-  { id: 'hvac-equipment', iconSrc: ACTION_MENU_ICON_URLS.hvac, label: 'HVAC Unit' },
-  { id: 'pipe-segment', iconSrc: ACTION_MENU_ICON_URLS.dwvPipes, label: 'DWV Pipe' },
-  { id: 'pipe-trap', iconSrc: ACTION_MENU_ICON_URLS.dwvPipes, label: 'Trap' },
-  { id: 'pipe-fitting', iconSrc: ACTION_MENU_ICON_URLS.ductFitting, label: 'Pipe Fitting' },
-  { id: 'lineset', iconSrc: ACTION_MENU_ICON_URLS.lineset, label: 'Lineset' },
-  { id: 'liquid-line', iconSrc: ACTION_MENU_ICON_URLS.lineset, label: 'Liquid Line' },
+  { id: 'wall', icon: BrickWall, iconSrc: ACTION_MENU_ICON_URLS.wall, label: 'Wall' },
+  { id: 'door', icon: DoorOpen, iconSrc: ACTION_MENU_ICON_URLS.door, label: 'Door' },
+  { id: 'window', icon: PanelsTopLeft, iconSrc: ACTION_MENU_ICON_URLS.window, label: 'Window' },
+  {
+    id: 'stair',
+    icon: ChartNoAxesColumnIncreasing,
+    iconSrc: ACTION_MENU_ICON_URLS.stairs,
+    label: 'Stairs',
+  },
+  { id: 'roof', icon: House, iconSrc: ACTION_MENU_ICON_URLS.roof, label: 'Gable Roof' },
+  { id: 'fence', icon: Fence, iconSrc: ACTION_MENU_ICON_URLS.fence, label: 'Fence' },
+  { id: 'column', icon: Columns3, iconSrc: ACTION_MENU_ICON_URLS.column, label: 'Column' },
+  {
+    id: 'elevator',
+    icon: Building2,
+    iconSrc: ACTION_MENU_ICON_URLS.elevator,
+    label: 'Elevator',
+  },
+  { id: 'slab', icon: Square, iconSrc: ACTION_MENU_ICON_URLS.floor, label: 'Slab' },
+  {
+    id: 'ceiling',
+    icon: Layers3,
+    iconSrc: ACTION_MENU_ICON_URLS.ceiling,
+    label: 'Ceiling',
+  },
+  { id: 'zone', icon: MapPin, iconSrc: ACTION_MENU_ICON_URLS.zone, label: 'Zone' },
+  {
+    id: 'spawn',
+    icon: MapPin,
+    iconSrc: ACTION_MENU_ICON_URLS.spawnPoint,
+    label: 'Spawn Point',
+  },
+  { id: 'shelf', icon: Rows3, iconSrc: ACTION_MENU_ICON_URLS.shelf, label: 'Shelf' },
+  { id: 'duct-segment', icon: Wind, iconSrc: ACTION_MENU_ICON_URLS.duct, label: 'Duct' },
+  {
+    id: 'duct-fitting',
+    icon: GitFork,
+    iconSrc: ACTION_MENU_ICON_URLS.ductFitting,
+    label: 'Duct Fitting',
+  },
+  {
+    id: 'duct-terminal',
+    icon: AirVent,
+    iconSrc: ACTION_MENU_ICON_URLS.registers,
+    label: 'Register',
+  },
+  {
+    id: 'hvac-equipment',
+    icon: Fan,
+    iconSrc: ACTION_MENU_ICON_URLS.hvac,
+    label: 'HVAC Unit',
+  },
+  {
+    id: 'pipe-segment',
+    icon: Workflow,
+    iconSrc: ACTION_MENU_ICON_URLS.dwvPipes,
+    label: 'DWV Pipe',
+  },
+  {
+    id: 'pipe-trap',
+    icon: Workflow,
+    iconSrc: ACTION_MENU_ICON_URLS.dwvPipes,
+    label: 'Trap',
+  },
+  {
+    id: 'pipe-fitting',
+    icon: GitFork,
+    iconSrc: ACTION_MENU_ICON_URLS.ductFitting,
+    label: 'Pipe Fitting',
+  },
+  { id: 'lineset', icon: Cable, iconSrc: ACTION_MENU_ICON_URLS.lineset, label: 'Lineset' },
+  {
+    id: 'liquid-line',
+    icon: Cable,
+    iconSrc: ACTION_MENU_ICON_URLS.lineset,
+    label: 'Liquid Line',
+  },
 ]
 
 export function StructureTools() {
@@ -55,6 +132,7 @@ export function StructureTools() {
   return (
     <div className="flex items-center gap-1 px-1 md:gap-1.5">
       {visibleTools.map((tool, index) => {
+        const ToolIcon = tool.icon
         const isActive =
           activeTool === tool.id &&
           (tool.catalogCategory ? catalogCategory === tool.catalogCategory : true)
@@ -81,7 +159,7 @@ export function StructureTools() {
             size="icon"
             variant="ghost"
           >
-            <img alt={tool.label} className="size-full object-contain" src={tool.iconSrc} />
+            <ToolIcon aria-hidden className="size-6 stroke-[1.7]" />
           </ActionButton>
         )
       })}
