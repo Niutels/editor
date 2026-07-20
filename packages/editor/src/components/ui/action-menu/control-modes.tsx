@@ -7,6 +7,7 @@ import Image from 'next/image'
 import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { ActionButton } from './action-button'
+import { ACTION_MENU_ICON_URLS } from './icon-assets'
 
 type ControlId =
   | 'select'
@@ -30,7 +31,7 @@ type ControlConfig = {
 const compactControls: ControlConfig[] = [
   {
     id: 'select',
-    imageSrc: '/icons/select.webp',
+    imageSrc: ACTION_MENU_ICON_URLS.select,
     label: 'Select',
     shortcut: 'V',
     color: 'hover:bg-blue-500/20 hover:text-blue-400',
@@ -38,7 +39,7 @@ const compactControls: ControlConfig[] = [
   },
   {
     id: 'zone',
-    imageSrc: '/icons/zone.webp',
+    imageSrc: ACTION_MENU_ICON_URLS.zone,
     label: 'Zone',
     shortcut: 'Z',
     color: 'hover:bg-green-500/20 hover:text-green-400',
@@ -65,14 +66,14 @@ const fullControls: ControlConfig[] = [
   },
   {
     id: 'site-edit',
-    imageSrc: '/icons/site.webp',
+    imageSrc: ACTION_MENU_ICON_URLS.site,
     label: 'Edit site',
     color: 'hover:bg-white/5',
     activeColor: 'bg-white/10 hover:bg-white/10',
   },
   {
     id: 'build',
-    imageSrc: '/icons/build.webp',
+    imageSrc: ACTION_MENU_ICON_URLS.build,
     label: 'Build',
     shortcut: 'B',
     color: 'hover:bg-green-500/20 hover:text-green-400',
@@ -80,7 +81,7 @@ const fullControls: ControlConfig[] = [
   },
   {
     id: 'material-paint',
-    imageSrc: '/icons/paint.webp',
+    imageSrc: ACTION_MENU_ICON_URLS.paint,
     label: 'Material Paint',
     shortcut: 'P',
     color: 'hover:bg-amber-500/20 hover:text-amber-400',

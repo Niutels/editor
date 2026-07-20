@@ -3,6 +3,7 @@
 import { cn } from '../../../lib/utils'
 import useEditor, { type CatalogCategory, type StructureTool } from '../../../store/use-editor'
 import { ActionButton } from './action-button'
+import { ACTION_MENU_ICON_URLS } from './icon-assets'
 
 export type ToolConfig = {
   id: StructureTool
@@ -15,28 +16,28 @@ export type ToolConfig = {
 // and hosts that opt into the full bottom action menu. Roof-mounted accessories are intentionally
 // absent — they're placed from the roof inspector's "Add element" section.
 export const tools: ToolConfig[] = [
-  { id: 'wall', iconSrc: '/icons/wall.webp', label: 'Wall' },
-  { id: 'door', iconSrc: '/icons/door.webp', label: 'Door' },
-  { id: 'window', iconSrc: '/icons/window.webp', label: 'Window' },
-  { id: 'stair', iconSrc: '/icons/stairs.webp', label: 'Stairs' },
-  { id: 'roof', iconSrc: '/icons/roof.webp', label: 'Gable Roof' },
-  { id: 'fence', iconSrc: '/icons/fence.webp', label: 'Fence' },
-  { id: 'column', iconSrc: '/icons/column.webp', label: 'Column' },
-  { id: 'elevator', iconSrc: '/icons/elevator.webp', label: 'Elevator' },
-  { id: 'slab', iconSrc: '/icons/floor.webp', label: 'Slab' },
-  { id: 'ceiling', iconSrc: '/icons/ceiling.webp', label: 'Ceiling' },
-  { id: 'zone', iconSrc: '/icons/zone.webp', label: 'Zone' },
-  { id: 'spawn', iconSrc: '/icons/spawn-point.webp', label: 'Spawn Point' },
-  { id: 'shelf', iconSrc: '/icons/shelf.webp', label: 'Shelf' },
-  { id: 'duct-segment', iconSrc: '/icons/duct.webp', label: 'Duct' },
-  { id: 'duct-fitting', iconSrc: '/icons/duct-fitting.webp', label: 'Duct Fitting' },
-  { id: 'duct-terminal', iconSrc: '/icons/registers.webp', label: 'Register' },
-  { id: 'hvac-equipment', iconSrc: '/icons/HVAC.webp', label: 'HVAC Unit' },
-  { id: 'pipe-segment', iconSrc: '/icons/dwv-pipes.webp', label: 'DWV Pipe' },
-  { id: 'pipe-trap', iconSrc: '/icons/dwv-pipes.webp', label: 'Trap' },
-  { id: 'pipe-fitting', iconSrc: '/icons/duct-fitting.webp', label: 'Pipe Fitting' },
-  { id: 'lineset', iconSrc: '/icons/lineset.webp', label: 'Lineset' },
-  { id: 'liquid-line', iconSrc: '/icons/lineset.webp', label: 'Liquid Line' },
+  { id: 'wall', iconSrc: ACTION_MENU_ICON_URLS.wall, label: 'Wall' },
+  { id: 'door', iconSrc: ACTION_MENU_ICON_URLS.door, label: 'Door' },
+  { id: 'window', iconSrc: ACTION_MENU_ICON_URLS.window, label: 'Window' },
+  { id: 'stair', iconSrc: ACTION_MENU_ICON_URLS.stairs, label: 'Stairs' },
+  { id: 'roof', iconSrc: ACTION_MENU_ICON_URLS.roof, label: 'Gable Roof' },
+  { id: 'fence', iconSrc: ACTION_MENU_ICON_URLS.fence, label: 'Fence' },
+  { id: 'column', iconSrc: ACTION_MENU_ICON_URLS.column, label: 'Column' },
+  { id: 'elevator', iconSrc: ACTION_MENU_ICON_URLS.elevator, label: 'Elevator' },
+  { id: 'slab', iconSrc: ACTION_MENU_ICON_URLS.floor, label: 'Slab' },
+  { id: 'ceiling', iconSrc: ACTION_MENU_ICON_URLS.ceiling, label: 'Ceiling' },
+  { id: 'zone', iconSrc: ACTION_MENU_ICON_URLS.zone, label: 'Zone' },
+  { id: 'spawn', iconSrc: ACTION_MENU_ICON_URLS.spawnPoint, label: 'Spawn Point' },
+  { id: 'shelf', iconSrc: ACTION_MENU_ICON_URLS.shelf, label: 'Shelf' },
+  { id: 'duct-segment', iconSrc: ACTION_MENU_ICON_URLS.duct, label: 'Duct' },
+  { id: 'duct-fitting', iconSrc: ACTION_MENU_ICON_URLS.ductFitting, label: 'Duct Fitting' },
+  { id: 'duct-terminal', iconSrc: ACTION_MENU_ICON_URLS.registers, label: 'Register' },
+  { id: 'hvac-equipment', iconSrc: ACTION_MENU_ICON_URLS.hvac, label: 'HVAC Unit' },
+  { id: 'pipe-segment', iconSrc: ACTION_MENU_ICON_URLS.dwvPipes, label: 'DWV Pipe' },
+  { id: 'pipe-trap', iconSrc: ACTION_MENU_ICON_URLS.dwvPipes, label: 'Trap' },
+  { id: 'pipe-fitting', iconSrc: ACTION_MENU_ICON_URLS.ductFitting, label: 'Pipe Fitting' },
+  { id: 'lineset', iconSrc: ACTION_MENU_ICON_URLS.lineset, label: 'Lineset' },
+  { id: 'liquid-line', iconSrc: ACTION_MENU_ICON_URLS.lineset, label: 'Liquid Line' },
 ]
 
 export function StructureTools() {
