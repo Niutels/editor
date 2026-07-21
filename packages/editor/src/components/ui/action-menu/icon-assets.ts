@@ -33,7 +33,8 @@ import wall from './assets/wall.webp'
 import window from './assets/window.webp'
 import zone from './assets/zone.webp'
 
-const url = (asset: { src: string }): string => asset.src
+const url = (asset: string | { src: string }): string =>
+  typeof asset === 'string' ? asset : asset.src
 
 // Package-owned imports keep the action menu independent of a host app's public directory.
 export const ACTION_MENU_ICON_URLS = {
