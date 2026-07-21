@@ -168,6 +168,7 @@ import {
   DEFAULT_PROCEDURAL_ROCK_TONE_CONTROLS,
   type ProceduralBeachControls,
   ProceduralRockCliffs,
+  type ProceduralRockCliffRuntimeMetrics,
   type ProceduralRockCliffWallControls,
   type ProceduralRockOffshoreControls,
   type ProceduralRockToneControls,
@@ -462,6 +463,10 @@ const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_DISTANCE = 22
 const LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT = 7
 const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_HEIGHT = 15
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS = 2
+const LANDRUSH_ISLAND_MAP_TO_BUILD_GRASS_REVEAL_DELAY_SECONDS = Math.max(
+  0,
+  LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS - LANDRUSH_ISLAND_BUILD_GRID_FADE_SECONDS,
+)
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS = 1000 / 120
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
 const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
@@ -513,15 +518,19 @@ const LANDRUSH_ISLAND_PARCEL_MAP_CONTOUR_OPACITY = 0.62
 const LANDRUSH_ISLAND_PARCEL_MAP_FREE_BADGE_OPACITY = 0.88
 const LANDRUSH_ISLAND_PARCEL_MAP_HOVER_OPACITY = 0.34
 const LANDRUSH_ISLAND_PARCEL_MAP_ROAD_TRIM_METERS = LANDRUSH_ISLAND_DIRT_ROAD_WIDTH_METERS * 0.56
-const LANDRUSH_ISLAND_MAP_CAMERA_POSITION = [0, 128, 0.01] as const
-const LANDRUSH_ISLAND_MAP_CAMERA_TARGET = [0, 0, 0] as const
+const LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE = 136
+const LANDRUSH_ISLAND_MAP_CAMERA_PITCH_RADIANS = MathUtils.degToRad(60)
+const LANDRUSH_ISLAND_MAP_CAMERA_TARGET = [0, 0, 10] as const
+const LANDRUSH_ISLAND_MAP_CAMERA_POSITION = [
+  LANDRUSH_ISLAND_MAP_CAMERA_TARGET[0],
+  LANDRUSH_ISLAND_MAP_CAMERA_TARGET[1] +
+    Math.sin(LANDRUSH_ISLAND_MAP_CAMERA_PITCH_RADIANS) * LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE,
+  LANDRUSH_ISLAND_MAP_CAMERA_TARGET[2] +
+    Math.cos(LANDRUSH_ISLAND_MAP_CAMERA_PITCH_RADIANS) * LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE,
+] as const
 const LANDRUSH_ISLAND_MAP_CAMERA_ZOOM = 8.6
 const LANDRUSH_ISLAND_MAP_CAMERA_MIN_ZOOM = 3
 const LANDRUSH_ISLAND_MAP_CAMERA_MAX_ZOOM = 28
-const LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE = distance3(
-  LANDRUSH_ISLAND_MAP_CAMERA_POSITION,
-  LANDRUSH_ISLAND_MAP_CAMERA_TARGET,
-)
 const LANDRUSH_ISLAND_MAP_CAMERA_MIN_DISTANCE =
   (LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE * LANDRUSH_ISLAND_MAP_CAMERA_ZOOM) /
   LANDRUSH_ISLAND_MAP_CAMERA_MAX_ZOOM
@@ -1133,6 +1142,7 @@ const LANDRUSH_ISLAND_GRASS_SLIDERS = [
 declare global {
   interface Window {
     __PASCAL_BENCH_ORBITING__?: boolean
+    __LANDRUSH_ISLAND_CLIFF_RUNTIME_METRICS__?: ProceduralRockCliffRuntimeMetrics
     __LANDRUSH_ISLAND_PERF_RUN__?: () => unknown
     __LANDRUSH_ISLAND_STARTUP_PROFILE__?: LandrushIslandStartupProfile
     __LANDRUSH_ISLAND_DEBUG__?: {
@@ -2694,6 +2704,9 @@ export function LandrushIslandClient({
   const startupProfileNoStylizedGround = searchParams.get('profileNoStylizedGround') === '1'
   const startupProfileNoStylizedTrees = searchParams.get('profileNoStylizedTrees') === '1'
   const startupProfileNoWaterNode = searchParams.get('profileNoWaterNode') === '1'
+  const profileNoOcean = searchParams.get('profileNoOcean') === '1'
+  const profileNoCliffs = searchParams.get('profileNoCliffs') === '1'
+  const profileRuntimeMetrics = searchParams.get('profileRuntimeMetrics') === '1'
   const profilePlainWaterMaterial = searchParams.get('profilePlainWaterMaterial') === '1'
   const revealProofMode = searchParams.get('revealProof')
   const revealProof =
@@ -2759,6 +2772,11 @@ export function LandrushIslandClient({
     }
   }, [])
   const activeProfileMeasure = startupProfileEnabled ? startupProfileMeasure : undefined
+  const handleCliffRuntimeMetrics = useCallback((metrics: ProceduralRockCliffRuntimeMetrics) => {
+    if (typeof window !== 'undefined') {
+      window.__LANDRUSH_ISLAND_CLIFF_RUNTIME_METRICS__ = metrics
+    }
+  }, [])
   const handleStartupReactRender = useCallback<ProfilerOnRenderCallback>(
     (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
       const profile = startupProfileRef.current
@@ -2830,6 +2848,9 @@ export function LandrushIslandClient({
   const [fpvView, setFpvView] = useState(false)
   const [modeTransitionFade, setModeTransitionFade] =
     useState<LandrushIslandModeTransitionFadeState | null>(null)
+  const [mapToBuildGrassRevealTransitionId, setMapToBuildGrassRevealTransitionId] = useState<
+    number | null
+  >(null)
   const [gamepadHintsActive, setGamepadHintsActive] = useState(false)
   const gamepadHintsActiveRef = useRef(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
@@ -3069,9 +3090,28 @@ export function LandrushIslandClient({
     return () => setLandrushIslandCameraDragging(false)
   }, [modeTransitionFade])
 
+  useEffect(() => {
+    if (modeTransitionFade?.from !== 'map' || modeTransitionFade.to !== 'build') return
+
+    const transitionId = modeTransitionFade.id
+    const timeoutId = window.setTimeout(() => {
+      setMapToBuildGrassRevealTransitionId(transitionId)
+      recordLandrushIslandGrassEventProbe({
+        kind: 'map-to-build-reveal-start',
+        transitionId,
+      })
+    }, LANDRUSH_ISLAND_MAP_TO_BUILD_GRASS_REVEAL_DELAY_SECONDS * 1000)
+    return () => window.clearTimeout(timeoutId)
+  }, [modeTransitionFade])
+
   const mapPresentationVisible =
     viewMode === 'map' || modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
-  const grassStreamingPaused = mapPresentationVisible
+  const mapToBuildGrassRevealStarted =
+    modeTransitionFade?.from === 'map' &&
+    modeTransitionFade.to === 'build' &&
+    mapToBuildGrassRevealTransitionId === modeTransitionFade.id
+  const mapGrassSuppressionActive = mapPresentationVisible && !mapToBuildGrassRevealStarted
+  const grassStreamingPaused = mapGrassSuppressionActive
   const mapLabelsVisible = viewMode === 'map' && modeTransitionFade === null
 
   const enterPlayerView = useCallback(() => {
@@ -3506,7 +3546,7 @@ export function LandrushIslandClient({
         : [...LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS, ...visibleBladeGrassBlockers],
     [visibleBladeGrassBlockers],
   )
-  const bladeGrassFadeBlockers = useMemo(() => {
+  const activeBuildParcelGrassFadeBlockers = useMemo(() => {
     const fadeBlockers: GrassFieldBlocker[] = []
     if (buildMode && activeBuildParcel) {
       fadeBlockers.push({
@@ -3517,12 +3557,25 @@ export function LandrushIslandClient({
     }
     return fadeBlockers
   }, [activeBuildParcel, buildMode])
+  const bladeGrassFadeBlockers = useMemo(() => {
+    if (!mapGrassSuppressionActive) return activeBuildParcelGrassFadeBlockers
+    return [
+      {
+        initialVisibility: 0,
+        points: liveViewerLandSurface.grassSurfacePoints,
+      },
+    ] satisfies readonly GrassFieldBlocker[]
+  }, [
+    activeBuildParcelGrassFadeBlockers,
+    liveViewerLandSurface.grassSurfacePoints,
+    mapGrassSuppressionActive,
+  ])
   const treeGrassBlockers = useMemo(
     () =>
-      bladeGrassFadeBlockers.length === 0
+      activeBuildParcelGrassFadeBlockers.length === 0
         ? bladeGrassBlockers
-        : [...bladeGrassBlockers, ...bladeGrassFadeBlockers],
-    [bladeGrassBlockers, bladeGrassFadeBlockers],
+        : [...bladeGrassBlockers, ...activeBuildParcelGrassFadeBlockers],
+    [activeBuildParcelGrassFadeBlockers, bladeGrassBlockers],
   )
   const handleLoad = useCallback(async () => landrushIslandScene.sceneGraph, [landrushIslandScene])
   const handleBuildParcel = useCallback(
@@ -4260,33 +4313,42 @@ export function LandrushIslandClient({
                     <color args={['#164a77']} attach="background" />
                     {multiplayerNaturalEnvironment ? (
                       <>
-                        <StandaloneOceanWorld
-                          animated={multiplayerOceanAnimated}
-                          cameraPreset="design"
-                          debugMode="final"
-                          elevation={liveOceanElevation}
-                          parameters={multiplayerOceanParameters}
-                          quality="balanced"
-                          resetRevision={0}
-                          submergedRockRefraction
-                          waterlineInteractionField={multiplayerWaterlineInteractionField}
-                        />
-                        <ProceduralRockCliffs
-                          beachControls={multiplayerBeachControls}
-                          cutCount={multiplayerRockCutCount}
-                          debugMode="final"
-                          offshoreControls={multiplayerRockOffshoreControls}
-                          onWaterlineInteractionField={setMultiplayerWaterlineInteractionField}
-                          quality="balanced"
-                          rockRenderOrder={-10}
-                          rockScale={multiplayerRockScale}
-                          seed={PASCAL_MULTIPLAYER_ISLAND_ROCK_CLIFF_SEED}
-                          showGround={false}
-                          surface={liveViewerLandSurface}
-                          toneControls={multiplayerRockToneControls}
-                          wallControls={multiplayerViewerRockWallControls}
-                          waterSurfaceElevation={liveOceanElevation}
-                        />
+                        {!profileNoOcean ? (
+                          <StandaloneOceanWorld
+                            animated={multiplayerOceanAnimated}
+                            cameraPreset="design"
+                            debugMode="final"
+                            elevation={liveOceanElevation}
+                            parameters={multiplayerOceanParameters}
+                            profileMeasure={activeProfileMeasure}
+                            quality="balanced"
+                            resetRevision={0}
+                            submergedRockRefraction
+                            waterlineInteractionField={multiplayerWaterlineInteractionField}
+                          />
+                        ) : null}
+                        {!profileNoCliffs ? (
+                          <ProceduralRockCliffs
+                            beachControls={multiplayerBeachControls}
+                            cutCount={multiplayerRockCutCount}
+                            debugMode="final"
+                            offshoreControls={multiplayerRockOffshoreControls}
+                            onRuntimeMetrics={
+                              profileRuntimeMetrics ? handleCliffRuntimeMetrics : undefined
+                            }
+                            onWaterlineInteractionField={setMultiplayerWaterlineInteractionField}
+                            profileMeasure={activeProfileMeasure}
+                            quality="balanced"
+                            rockRenderOrder={-10}
+                            rockScale={multiplayerRockScale}
+                            seed={PASCAL_MULTIPLAYER_ISLAND_ROCK_CLIFF_SEED}
+                            showGround={false}
+                            surface={liveViewerLandSurface}
+                            toneControls={multiplayerRockToneControls}
+                            wallControls={multiplayerViewerRockWallControls}
+                            waterSurfaceElevation={liveOceanElevation}
+                          />
+                        ) : null}
                       </>
                     ) : null}
                     <FrameLoadProfilerProbe enabled={frameProfile} />
@@ -7919,8 +7981,6 @@ function LandrushIslandParcelOwnershipLayer({
       const parcel = pickParcel(event)
       if (!parcel) return
 
-      event.preventDefault()
-      event.stopPropagation()
       setSelectedParcelId(parcel.id)
     }
 
@@ -11519,7 +11579,7 @@ function LandrushIslandMapCameraRig({
           dampingFactor={0.08}
           enableDamping
           enablePan
-          enableRotate={false}
+          enableRotate
           enableZoom
           makeDefault
           maxDistance={LANDRUSH_ISLAND_MAP_CAMERA_MAX_DISTANCE}

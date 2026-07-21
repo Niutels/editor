@@ -1,10 +1,11 @@
 'use client'
 
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas, type RootState, useFrame, useThree } from '@react-three/fiber'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { ACESFilmicToneMapping, type Mesh, PlaneGeometry, SphereGeometry, Vector3 } from 'three'
 import * as THREE from 'three/webgpu'
+import { measureLandrushFrameSlice } from './frame-load-profiler'
 import {
   createDefaultStandaloneOceanParameters,
   createStandaloneOceanMaterials,
@@ -736,6 +737,7 @@ export function StandaloneOceanWorld({
   debugMode,
   elevation = 0,
   parameters,
+  profileMeasure,
   quality,
   resetRevision,
   submergedRockRefraction = false,
@@ -746,6 +748,7 @@ export function StandaloneOceanWorld({
   debugMode: StandaloneOceanDebugMode
   elevation?: number
   parameters: StandaloneOceanParameters
+  profileMeasure?: <T>(id: string, callback: () => T) => T
   quality: StandaloneOceanQuality
   resetRevision: number
   submergedRockRefraction?: boolean
@@ -767,15 +770,24 @@ export function StandaloneOceanWorld({
   parametersRef.current = parameters
   const submergedRockRefractionActive = submergedRockRefraction && parameters.underwaterRocksEnabled
   const materials = useMemo(
-    () =>
-      createStandaloneOceanMaterials(
-        parametersRef.current,
-        debugMode,
-        STANDALONE_OCEAN_PLANE_SIZE / qualitySettings.segments,
-        waterlineInteractionField,
-        submergedRockRefractionActive,
-      ),
-    [debugMode, qualitySettings.segments, submergedRockRefractionActive, waterlineInteractionField],
+    () => {
+      const build = () =>
+        createStandaloneOceanMaterials(
+          parametersRef.current,
+          debugMode,
+          STANDALONE_OCEAN_PLANE_SIZE / qualitySettings.segments,
+          waterlineInteractionField,
+          submergedRockRefractionActive,
+        )
+      return profileMeasure ? profileMeasure('setup.ocean.materials', build) : build()
+    },
+    [
+      debugMode,
+      profileMeasure,
+      qualitySettings.segments,
+      submergedRockRefractionActive,
+      waterlineInteractionField,
+    ],
   )
   const timeRef = useRef(0)
   const resetRevisionRef = useRef(resetRevision)
@@ -819,7 +831,7 @@ export function StandaloneOceanWorld({
   useEffect(() => () => planeGeometry.dispose(), [planeGeometry])
   useEffect(() => () => skyGeometry.dispose(), [skyGeometry])
 
-  useFrame((state, delta) => {
+  function runOceanFrame(state: RootState, delta: number) {
     renderer.toneMapping = ACESFilmicToneMapping
     renderer.toneMappingExposure = 1
     if (animated) timeRef.current += Math.min(delta, 0.05)
@@ -862,6 +874,12 @@ export function StandaloneOceanWorld({
       seed: parameters.seed,
       timeSeconds: timeRef.current,
     }
+  }
+
+  useFrame((state, delta) => {
+    measureLandrushFrameSlice('scene.ocean.frame-update', () => {
+      runOceanFrame(state, delta)
+    })
   })
 
   return (

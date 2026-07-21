@@ -316,6 +316,7 @@ const STYLIZED_SCENE_GRASS_SEED = 15_173
 const STYLIZED_SCENE_INTERACTION_FULL_SPEED = 5.8
 const STYLIZED_SCENE_INTERACTION_MAX_BEND = 1.55
 const STYLIZED_SCENE_GRASS_FADE_SECONDS = 1.375
+const STYLIZED_SCENE_GRASS_FADE_MAX_DELTA_SECONDS = 0.25
 const STYLIZED_SCENE_GRASS_EDGE_FILL_DENSITY_MULTIPLIER = 5
 const STYLIZED_SCENE_GRASS_EDGE_FILL_ROOT_WIDTH_MULTIPLIER = 1.8
 const STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE = 0.5
@@ -773,6 +774,7 @@ function StylizedSceneGrassLayer({
   })
   const residentInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
   const fadeZonesRef = useRef<StylizedGrassFadeZone[]>([])
+  const lastFadeFrameAtRef = useRef<number | null>(null)
   const lastFadeSummaryRef = useRef<StylizedGrassFadeSummary>(EMPTY_STYLIZED_GRASS_FADE_SUMMARY)
   const smoothedInteractionRef = useRef(new Vector4())
   const profiledStartupFramesRef = useRef(0)
@@ -856,6 +858,14 @@ function StylizedSceneGrassLayer({
 
   useFrame(({ clock }, delta) => {
     const runFrame = () => {
+      const fadeFrameAt = performance.now()
+      const previousFadeFrameAt = lastFadeFrameAtRef.current
+      lastFadeFrameAtRef.current = fadeFrameAt
+      // The viewer advances R3F with a synthetic clock, so wall time keeps fades at their authored duration.
+      const fadeDelta =
+        previousFadeFrameAt === null
+          ? Math.max(0, delta)
+          : Math.max(0, (fadeFrameAt - previousFadeFrameAt) / 1000)
       const mesh = meshRef.current
       const residentInstances = residentInstancesRef.current
       const residentInstanceCount = residentStateRef.current.slotById.size
@@ -905,7 +915,7 @@ function StylizedSceneGrassLayer({
       // Fade zones must remain visual-only. Converting a converged fade zone into a
       // structural blocker rebuilds the instanced grass buffers at fade-end, which
       // can flash the old buffer contents for a frame across the whole field.
-      const fadeChanged = advanceStylizedGrassFadeZones(fadeZonesRef.current, delta)
+      const fadeChanged = advanceStylizedGrassFadeZones(fadeZonesRef.current, fadeDelta)
       if (fadeChanged || (!hadFadeZones && fadeZonesRef.current.length > 0)) {
         lastFadeSummaryRef.current = applyStylizedGrassFadeAttributes(
           geometry,
@@ -2279,7 +2289,9 @@ function updateStylizedGrassFadeZones(
 function advanceStylizedGrassFadeZones(zones: StylizedGrassFadeZone[], delta: number): boolean {
   if (zones.length === 0) return false
 
-  const step = Math.max(0, Math.min(delta, 0.05)) / STYLIZED_SCENE_GRASS_FADE_SECONDS
+  const step =
+    Math.max(0, Math.min(delta, STYLIZED_SCENE_GRASS_FADE_MAX_DELTA_SECONDS)) /
+    STYLIZED_SCENE_GRASS_FADE_SECONDS
   let changed = false
   for (const zone of zones) {
     const previousVisibility = zone.visibility

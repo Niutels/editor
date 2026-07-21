@@ -51,6 +51,7 @@ export function ProceduralRockCliffs({
   onMetrics,
   onRuntimeMetrics,
   onWaterlineInteractionField,
+  profileMeasure,
   quality,
   rockRenderOrder = 9,
   rockScale,
@@ -68,6 +69,7 @@ export function ProceduralRockCliffs({
   onMetrics?: (metrics: ProceduralRockCliffMetrics) => void
   onRuntimeMetrics?: (metrics: ProceduralRockCliffRuntimeMetrics) => void
   onWaterlineInteractionField?: (field: WaterlineInteractionField | null) => void
+  profileMeasure?: <T>(id: string, callback: () => T) => T
   quality: ProceduralRockCliffQuality
   rockRenderOrder?: number
   rockScale: number
@@ -79,23 +81,27 @@ export function ProceduralRockCliffs({
   waterSurfaceElevation?: number
 }) {
   const plan = useMemo(
-    () =>
-      createProceduralRockCliffPlan({
-        beachControls,
-        cutCount,
-        offshoreControls,
-        quality,
-        rockScale,
-        seed,
-        surface,
-        toneControls,
-        wallControls,
-        waterSurfaceElevation,
-      }),
+    () => {
+      const build = () =>
+        createProceduralRockCliffPlan({
+          beachControls,
+          cutCount,
+          offshoreControls,
+          quality,
+          rockScale,
+          seed,
+          surface,
+          toneControls,
+          wallControls,
+          waterSurfaceElevation,
+        })
+      return profileMeasure ? profileMeasure('setup.cliffs.geometry-plan', build) : build()
+    },
     [
       beachControls,
       cutCount,
       offshoreControls,
+      profileMeasure,
       quality,
       rockScale,
       seed,
@@ -121,19 +127,21 @@ export function ProceduralRockCliffs({
     [showGround, surface.grassSurfacePoints],
   )
   const waterlineInteractionField = useMemo(
-    () =>
-      onWaterlineInteractionField
-        ? createWaterlineInteractionField(
-            plan.geometry,
-            waterSurfaceElevation ?? LANDRUSH_WATER_SURFACE_ELEVATION,
-            {
-              elevationRangeMeters: 2.5,
-              maximumDistanceMeters: 6,
-              resolution: quality === 'dense' ? 1280 : 1024,
-            },
-          )
-        : null,
-    [onWaterlineInteractionField, plan.geometry, quality, waterSurfaceElevation],
+    () => {
+      if (!onWaterlineInteractionField) return null
+      const build = () =>
+        createWaterlineInteractionField(
+          plan.geometry,
+          waterSurfaceElevation ?? LANDRUSH_WATER_SURFACE_ELEVATION,
+          {
+            elevationRangeMeters: 2.5,
+            maximumDistanceMeters: 6,
+            resolution: quality === 'dense' ? 1280 : 1024,
+          },
+        )
+      return profileMeasure ? profileMeasure('setup.cliffs.waterline-sdf', build) : build()
+    },
+    [onWaterlineInteractionField, plan.geometry, profileMeasure, quality, waterSurfaceElevation],
   )
   const toonGradient = useMemo(createRockToonGradientTexture, [])
 
