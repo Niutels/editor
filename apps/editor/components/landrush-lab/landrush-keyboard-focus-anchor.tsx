@@ -6,6 +6,13 @@ export function LandrushKeyboardFocusAnchor() {
   const anchorRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof HTMLCanvasElement)) return
+
+      if (!target.hasAttribute('tabindex')) target.tabIndex = -1
+      target.focus({ preventScroll: true })
+    }
     const frame = window.requestAnimationFrame(() => {
       const activeElement = document.activeElement
       if (
@@ -18,7 +25,11 @@ export function LandrushKeyboardFocusAnchor() {
       anchorRef.current?.focus({ preventScroll: true })
     })
 
-    return () => window.cancelAnimationFrame(frame)
+    window.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('pointerdown', handlePointerDown, true)
+    }
   }, [])
 
   return (

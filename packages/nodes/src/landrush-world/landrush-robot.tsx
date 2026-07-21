@@ -182,14 +182,22 @@ export function LandrushRobot({
       const center = measure('setup.robot-glb.compute-transform.read-center', () =>
         bounds.getCenter(new Vector3()),
       )
+      const geometryCenter = measure(
+        'setup.robot-glb.compute-transform.read-skinned-geometry-center',
+        () => new Box3().setFromObject(clonedScene, true).getCenter(new Vector3()),
+      )
       const scale = measure('setup.robot-glb.compute-transform.resolve-scale', () =>
         Number.isFinite(size.y) && size.y > 0 ? LANDRUSH_ROBOT_TARGET_HEIGHT / size.y : 1,
       )
       const visualScale = scale * LANDRUSH_ROBOT_GLB_VISUAL_SCALE
-      const fallPivotY = (center.y - bounds.min.y) * visualScale
+      const fallPivot = [
+        (geometryCenter.x - center.x) * visualScale,
+        (geometryCenter.y - bounds.min.y) * visualScale,
+        (geometryCenter.z - center.z) * visualScale,
+      ] as const
       return measure('setup.robot-glb.compute-transform.build-offset', () => ({
-        fallPivot: [0, fallPivotY, 0] as const,
-        fallPivotInverse: [0, -fallPivotY, 0] as const,
+        fallPivot,
+        fallPivotInverse: [-fallPivot[0], -fallPivot[1], -fallPivot[2]] as const,
         offset: [-center.x, -bounds.min.y, -center.z] as const,
         scale: visualScale,
       }))
