@@ -1,3 +1,5 @@
+/// <reference path="../../../assets.d.ts" />
+
 import appliance from './assets/appliance.webp'
 import bathroom from './assets/bathroom.webp'
 import build from './assets/build.webp'
