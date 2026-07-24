@@ -69,6 +69,15 @@ export class BridgeClient {
     return result.events
   }
 
+  /** Cursor-explicit event read that does NOT advance the shared pump cursor —
+   * for a second consumer (e.g. the executor's self-checks). */
+  async eventsAt(cursor) {
+    return this.page.evaluate(
+      (c) => window.__PASCAL_BENCH__?.getEventsSince(c) ?? { cursor: c, events: [] },
+      cursor,
+    )
+  }
+
   async mark(label) {
     await this.page.evaluate((l) => window.__PASCAL_BENCH__?.mark(l), label)
   }
