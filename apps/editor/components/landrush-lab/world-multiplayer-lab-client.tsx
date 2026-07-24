@@ -2367,12 +2367,14 @@ export function MultiplayerStatusPanel({
   connection,
   localPlayerIncluded,
   remotePlayerCount,
+  renderedFpsRef,
   status,
   voice,
 }: {
   connection: MultiplayerConnectionDetails
   localPlayerIncluded: boolean
   remotePlayerCount: number
+  renderedFpsRef?: RefObject<number | null>
   status: ConnectionStatus
   voice?: SpatialVoiceController
 }) {
@@ -2381,8 +2383,8 @@ export function MultiplayerStatusPanel({
     connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
   const statusLabel = compactStatusLabel(status)
   const latencyLabel = connection.latencyMs === null ? '--ms' : `${connection.latencyMs}ms`
-  const browserFps = useBrowserRafFps()
-  const fpsLabel = browserFps === null ? '--fps' : `${browserFps}fps`
+  const measuredFps = useMeasuredFps(renderedFpsRef)
+  const fpsLabel = measuredFps === null ? '--fps' : `${measuredFps}fps`
 
   useEffect(() => {
     const element = latencyLabelRef.current
@@ -2420,10 +2422,23 @@ export function MultiplayerStatusPanel({
   )
 }
 
-function useBrowserRafFps() {
+function useMeasuredFps(renderedFpsRef?: RefObject<number | null>) {
   const [fps, setFps] = useState<number | null>(null)
 
   useEffect(() => {
+    if (renderedFpsRef) {
+      const updateRenderedFps = () => {
+        setFps(document.visibilityState === 'visible' ? renderedFpsRef.current : null)
+      }
+      updateRenderedFps()
+      const interval = window.setInterval(updateRenderedFps, 250)
+      document.addEventListener('visibilitychange', updateRenderedFps)
+      return () => {
+        window.clearInterval(interval)
+        document.removeEventListener('visibilitychange', updateRenderedFps)
+      }
+    }
+
     let animationFrame = 0
     let frameCount = 0
     let windowStartedAt = performance.now()
@@ -2451,7 +2466,7 @@ function useBrowserRafFps() {
       window.cancelAnimationFrame(animationFrame)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [])
+  }, [renderedFpsRef])
 
   return fps
 }

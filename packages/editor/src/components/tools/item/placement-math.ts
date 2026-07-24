@@ -94,11 +94,9 @@ export function calculateCursorRotation(
   // Wall direction angle in world XZ plane
   const wallAngle = Math.atan2(wallEnd[1] - wallStart[1], wallEnd[0] - wallStart[0])
 
-  // In local wall space, front face has normal.z < 0, back face has normal.z > 0
-  if (normal[2] < 0) {
-    return -wallAngle
-  }
-  return Math.PI - wallAngle
+  // Match the wall-local convention used by item rotation and side selection:
+  // +Z is the front face, and -Z is the back face.
+  return normal[2] >= 0 ? -wallAngle : Math.PI - wallAngle
 }
 
 /**

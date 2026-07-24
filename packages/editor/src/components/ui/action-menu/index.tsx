@@ -13,8 +13,9 @@ import { cn } from './../../../lib/utils'
 import useEditor from './../../../store/use-editor'
 import { CameraActions } from './camera-actions'
 import { ControlModes } from './control-modes'
+import { FurnishTools } from './furnish-tools'
 import { StructureTools } from './structure-tools'
-import { SecondaryToggles } from './view-toggles'
+import { GridSnapControl, SecondaryToggles } from './view-toggles'
 
 const MOBILE_BOTTOM_OFFSET = 24
 const CONTEXTUAL_TABS = new Set(['ai', 'items', 'studio'])
@@ -73,6 +74,7 @@ export function ActionMenu({
     : { type: 'spring' as const, bounce: 0.2, duration: 0.4 }
   const showStructureTools =
     showFullToolset && phase === 'structure' && (mode === 'select' || mode === 'build')
+  const showFurnishTools = showFullToolset && phase === 'furnish' && mode === 'build'
   const showPaintTray = showFullToolset && mode === 'material-paint'
 
   return (
@@ -91,6 +93,22 @@ export function ActionMenu({
         style={isMobile ? { bottom: MOBILE_BOTTOM_OFFSET } : undefined}
         transition={transition}
       >
+        <AnimatePresence>
+          {showFurnishTools ? (
+            <motion.div
+              animate={{ opacity: 1, maxHeight: 80, paddingTop: 8, paddingBottom: 8 }}
+              className="pointer-events-auto max-h-20 overflow-hidden border-border border-b px-2"
+              exit={{ opacity: 0, maxHeight: 0, paddingTop: 0, paddingBottom: 0 }}
+              initial={{ opacity: 0, maxHeight: 0, paddingTop: 0, paddingBottom: 0 }}
+              transition={transition}
+            >
+              <div className="mx-auto w-max">
+                <FurnishTools />
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+
         <AnimatePresence>
           {showStructureTools ? (
             <motion.div
@@ -130,6 +148,11 @@ export function ActionMenu({
                 <ControlModes full={showFullToolset} />
               </div>
               <div className="mx-1 h-5 w-px shrink-0 bg-border" />
+              {showFullToolset ? (
+                <div className="shrink-0">
+                  <GridSnapControl />
+                </div>
+              ) : null}
               <div className="shrink-0">
                 <SecondaryToggles />
               </div>
@@ -139,6 +162,7 @@ export function ActionMenu({
           <div className="pointer-events-auto flex items-center justify-center gap-1 px-2 py-1.5">
             <ControlModes full={showFullToolset} />
             <div className="mx-1 h-5 w-px bg-border" />
+            {showFullToolset ? <GridSnapControl /> : null}
             <SecondaryToggles />
             <div className="mx-1 h-5 w-px bg-border" />
             <CameraActions />

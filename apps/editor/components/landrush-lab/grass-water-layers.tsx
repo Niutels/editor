@@ -40,6 +40,7 @@ import {
 import {
   DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   type StylizedGrassInteractionRef,
+  type StylizedGrassVisibilityRef,
   StylizedSceneLandLayer,
 } from './stylized-scene-land-layers'
 import type { WaterLandSurface } from './water-scene'
@@ -49,6 +50,8 @@ type GrassWaterLandLayersProps = {
   bladeSubdivisions?: number
   bladeGrassBlockers?: readonly GrassFieldBlocker[]
   bladeRenderOrder?: number
+  bladeVisibilityRef?: StylizedGrassVisibilityRef
+  bladesVisible?: boolean
   fieldResolution?: number
   finalFieldResolution?: number
   finalSpawnResolution?: number
@@ -145,6 +148,8 @@ export function GrassWaterLandLayers({
   bladeSubdivisions,
   bladeGrassBlockers,
   bladeRenderOrder,
+  bladeVisibilityRef,
+  bladesVisible = true,
   fieldResolution,
   finalFieldResolution,
   finalSpawnResolution,
@@ -340,6 +345,7 @@ export function GrassWaterLandLayers({
       {stylizedSceneLayout ? (
         <Suspense fallback={null}>
           <StylizedSceneLandLayer
+            bladesVisible={bladesVisible}
             elevation={surface.grassSurfaceElevation}
             groundColorTexture={stylizedGroundColorTexture}
             groundTintCap={stylizedGrassGroundTintCap}
@@ -354,6 +360,7 @@ export function GrassWaterLandLayers({
             profileMeasure={profileMeasure}
             roads={roads}
             grassRenderOrder={resolvedBladeRenderOrder}
+            grassVisibilityRef={bladeVisibilityRef}
             showBlades={showBlades}
             showTrees={showTrees}
             streamingPaused={grassStreamingPaused}

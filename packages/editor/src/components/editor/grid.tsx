@@ -35,6 +35,8 @@ export const Grid = ({
   fadeStrength = 1,
   renderVisual = true,
   revealRadius = 10,
+  baseY,
+  visualOffset = 0.001,
 }: {
   cellSize?: number
   cellThickness?: number
@@ -46,6 +48,8 @@ export const Grid = ({
   fadeStrength?: number
   renderVisual?: boolean
   revealRadius?: number
+  baseY?: number
+  visualOffset?: number
 }) => {
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
 
@@ -258,11 +262,11 @@ export const Grid = ({
       // origin follows the surface height (floor / shelf top). Snap directly —
       // the old lerp made the grid visibly drift up to a new floor height.
       // Cursor uniform tracks the world cursor (mirrored on Z for the flat plane).
-      const targetY = surfacePoint ? surfacePoint.y : levelY
-      // Visual mesh rides 1mm above the surface: at exactly the surface Y the
+      const targetY = surfacePoint ? surfacePoint.y : (baseY ?? levelY)
+      // Visual mesh rides just above the surface: at exactly the surface Y the
       // lattice is coplanar with the slab top and z-fights it. The event plane
       // (`gridY` → useGridEvents) stays at the true surface height.
-      gridMesh.position.set(0, targetY + 0.001, 0)
+      gridMesh.position.set(0, targetY + visualOffset, 0)
       gridMesh.quaternion.copy(HORIZONTAL_QUATERNION)
       const world = lastWorldCursorRef.current
       if (world) {

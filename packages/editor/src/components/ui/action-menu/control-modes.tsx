@@ -14,6 +14,7 @@ type ControlId =
   | 'site-edit'
   | 'build'
   | 'material-paint'
+  | 'furnish'
   | 'zone'
   | 'delete'
 
@@ -86,6 +87,14 @@ const fullControls: ControlConfig[] = [
     color: 'hover:bg-amber-500/20 hover:text-amber-400',
     activeColor: 'bg-amber-500/20 text-amber-400',
   },
+  {
+    id: 'furnish',
+    imageSrc: ACTION_MENU_ICON_URLS.couch,
+    label: 'Furnish',
+    shortcut: 'F',
+    color: 'hover:bg-green-500/20 hover:text-green-400',
+    activeColor: 'bg-green-500/20 text-green-400',
+  },
   compactControls[1]!,
   compactControls[2]!,
 ]
@@ -121,6 +130,7 @@ export function ControlModes({ full = false }: { full?: boolean }) {
     if (id === 'build')
       return mode === 'build' && phase === 'structure' && structureLayer === 'elements'
     if (id === 'material-paint') return mode === 'material-paint'
+    if (id === 'furnish') return mode === 'build' && phase === 'furnish'
     if (id === 'zone')
       return mode === 'build' && phase === 'structure' && structureLayer === 'zones'
     return mode === id
@@ -166,6 +176,18 @@ export function ControlModes({ full = false }: { full?: boolean }) {
         setPhase('structure')
         setStructureLayer('elements')
         setMode('material-paint')
+      }
+    } else if (id === 'furnish') {
+      if (getIsActive('furnish')) {
+        setMode('select')
+      } else {
+        useEditor.setState({
+          catalogCategory: 'furniture',
+          mode: 'build',
+          phase: 'furnish',
+          structureLayer: 'elements',
+          tool: 'item',
+        })
       }
     } else if (id === 'zone') {
       if (getIsActive('zone')) {

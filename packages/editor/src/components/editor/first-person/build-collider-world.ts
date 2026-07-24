@@ -5,6 +5,8 @@ import {
   getGarageVisibleOpeningRatio,
   isOperationDoorType,
   nodeRegistry,
+  type StairNode,
+  type StairSegmentNode,
   sceneRegistry,
   useInteractive,
   useScene,
@@ -12,11 +14,12 @@ import {
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh'
+import { computeFloorplanStairSegmentTransforms } from '../../../lib/floorplan/stairs'
 import { computeSceneBoundsXZ } from '../../../lib/scene-bounds'
 
 const SKIPPED_MESH_NAMES = new Set(['cutout', 'collision-mesh'])
 const COLLIDER_NODE_CATEGORIES = new Set(['structure', 'furnish'])
-const DEDICATED_COLLIDER_NODE_TYPES = new Set<AnyNode['type']>(['elevator'])
+const DEDICATED_COLLIDER_NODE_TYPES = new Set<AnyNode['type']>(['elevator', 'stair-segment'])
 const COLLIDER_MATERIAL = new THREE.MeshBasicMaterial()
 const DOWN = new THREE.Vector3(0, -1, 0)
 const UP = new THREE.Vector3(0, 1, 0)
@@ -309,6 +312,97 @@ function createDoorLeafColliderGeometry(root: THREE.Object3D, node: DoorNode) {
   return geometry
 }
 
+function createStraightStairRampColliderGeometry(
+  segment: StairSegmentNode,
+  absoluteHeight: number,
+) {
+  const width = Math.max(0.01, segment.width)
+  const length = Math.max(0.01, segment.length)
+  const height = segment.segmentType === 'stair' ? Math.max(0, segment.height) : 0
+  const shape = new THREE.Shape()
+  shape.moveTo(0, 0)
+  shape.lineTo(length, height)
+
+  if (segment.fillToFloor) {
+    const fillDepth = Math.max(absoluteHeight, segment.thickness, LEVEL_FALLBACK_FLOOR_THICKNESS)
+    shape.lineTo(length, -fillDepth)
+    shape.lineTo(0, -fillDepth)
+  } else {
+    const slopeAngle = Math.atan2(height, length)
+    const verticalThickness = segment.thickness / Math.max(0.01, Math.cos(slopeAngle))
+    shape.lineTo(length, height - verticalThickness)
+    shape.lineTo(0, -verticalThickness)
+  }
+  shape.closePath()
+
+  const sourceGeometry = new THREE.ExtrudeGeometry(shape, {
+    bevelEnabled: false,
+    depth: width,
+    steps: 1,
+  })
+  sourceGeometry.applyMatrix4(
+    new THREE.Matrix4().makeRotationY(-Math.PI / 2).setPosition(width / 2, 0, 0),
+  )
+  sourceGeometry.computeVertexNormals()
+
+  const workingGeometry = sourceGeometry.index ? sourceGeometry.toNonIndexed() : sourceGeometry
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', toFloat32Attribute(workingGeometry.getAttribute('position')))
+  geometry.setAttribute('normal', toFloat32Attribute(workingGeometry.getAttribute('normal')))
+  if (workingGeometry !== sourceGeometry) sourceGeometry.dispose()
+  workingGeometry.dispose()
+  return geometry
+}
+
+function collectStraightStairColliderGeometries(
+  root: THREE.Object3D,
+  stair: StairNode,
+  nodes: SceneNodes,
+  visitedMeshes: WeakSet<THREE.Object3D>,
+  registeredObjectIds: Map<THREE.Object3D, string>,
+  registeredColliderNodeIds: Set<string>,
+) {
+  if (stair.stairType !== 'straight') return null
+
+  const segments = (stair.children ?? [])
+    .map((childId) => nodes[childId as AnyNodeId])
+    .filter((node): node is StairSegmentNode => node?.type === 'stair-segment')
+  if (segments.length === 0) return null
+
+  root.updateMatrixWorld(true)
+  const transforms = computeFloorplanStairSegmentTransforms(segments)
+  const geometries: THREE.BufferGeometry[] = []
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index]
+    const transform = transforms[index]
+    if (!segment || !transform || segment.visible === false) continue
+
+    const geometry = createStraightStairRampColliderGeometry(segment, transform.position[1])
+    geometry.applyMatrix4(
+      new THREE.Matrix4()
+        .makeRotationY(transform.rotation)
+        .setPosition(transform.position[0], transform.position[1], transform.position[2]),
+    )
+    geometry.applyMatrix4(root.matrixWorld)
+    geometries.push(geometry)
+  }
+  if (geometries.length === 0) return null
+
+  const railingRoot = root.getObjectByName('stair-railing')
+  if (railingRoot && isEffectivelyVisible(railingRoot)) {
+    geometries.push(
+      ...collectColliderGeometriesFromNode(
+        railingRoot,
+        stair.id,
+        visitedMeshes,
+        registeredObjectIds,
+        registeredColliderNodeIds,
+      ),
+    )
+  }
+  return geometries
+}
+
 function buildRegisteredColliderNodeIds(nodes: SceneNodes) {
   const nodeIds = new Set<string>()
 
@@ -394,6 +488,21 @@ export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonCollider
         geometries.push(doorGeometry)
       }
       continue
+    }
+
+    if (node.type === 'stair') {
+      const stairGeometries = collectStraightStairColliderGeometries(
+        root,
+        node,
+        nodes,
+        visitedMeshes,
+        registeredObjectIds,
+        registeredColliderNodeIds,
+      )
+      if (stairGeometries) {
+        geometries.push(...stairGeometries)
+        continue
+      }
     }
 
     root.updateMatrixWorld(true)

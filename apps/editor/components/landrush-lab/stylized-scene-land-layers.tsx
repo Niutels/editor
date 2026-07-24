@@ -56,6 +56,8 @@ type StylizedSceneLandLayerProps = {
   grassFadeBlockers?: readonly StylizedGrassBlocker[]
   grassInteractionRef?: StylizedGrassInteractionRef
   grassRenderOrder?: number
+  grassVisibilityRef?: StylizedGrassVisibilityRef
+  bladesVisible?: boolean
   groundColorTexture?: Texture | null
   groundTintCap?: number
   profileMeasure?: StylizedSceneProfileMeasure
@@ -276,6 +278,10 @@ export type StylizedGrassInteractionRef = {
   current: StylizedGrassInteraction | null
 }
 
+export type StylizedGrassVisibilityRef = {
+  current: number
+}
+
 export type StylizedGrassPerfKind = 'attributes' | 'build' | 'fade' | 'matrix' | 'stream'
 
 export type StylizedGrassPerfSample = {
@@ -429,6 +435,8 @@ export function StylizedSceneLandLayer({
   grassFadeBlockers = [],
   grassInteractionRef,
   grassRenderOrder = STYLIZED_GRASS_RENDER_ORDER,
+  grassVisibilityRef,
+  bladesVisible = true,
   groundColorTexture = null,
   groundTintCap = DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   profileMeasure,
@@ -455,6 +463,7 @@ export function StylizedSceneLandLayer({
       {showBlades ? (
         <StylizedSceneGrassLayer
           elevation={elevation}
+          bladesVisible={bladesVisible}
           grassFadeBlockers={grassFadeBlockers}
           grassDebugState={grassDebugState}
           grassBlockers={grassBlockers}
@@ -467,6 +476,7 @@ export function StylizedSceneLandLayer({
           streamingPaused={streamingPaused}
           surfacePoints={surfacePoints}
           tuning={tuning}
+          visibilityRef={grassVisibilityRef}
         />
       ) : null}
       {showTrees
@@ -489,6 +499,7 @@ export function StylizedSceneLandLayer({
 }
 
 function StylizedSceneGrassLayer({
+  bladesVisible,
   elevation,
   grassBlockers,
   grassDebugState,
@@ -502,7 +513,9 @@ function StylizedSceneGrassLayer({
   streamingPaused,
   surfacePoints,
   tuning,
+  visibilityRef,
 }: {
+  bladesVisible: boolean
   elevation: number
   grassBlockers: readonly StylizedGrassBlocker[]
   grassDebugState?: StylizedGrassDebugState
@@ -516,6 +529,7 @@ function StylizedSceneGrassLayer({
   streamingPaused: boolean
   surfacePoints: readonly LandrushPoint2[]
   tuning?: GrassBladeTuning
+  visibilityRef?: StylizedGrassVisibilityRef
 }) {
   const { scene } = useGLTF(STYLIZED_SCENE_PATHS.grassBlades)
   const pathMask = useTexture(STYLIZED_SCENE_PATHS.pathMask) as Texture
@@ -553,11 +567,13 @@ function StylizedSceneGrassLayer({
     () => measureStylizedGrassRootRadius(sourceGeometry),
     [sourceGeometry],
   )
+  const grassWorkPaused = streamingPaused || !bladesVisible
   const lod = useStylizedGrassLod({
     anchor: lodAnchor,
     bladeHeight: sourceBladeHeight * resolvedTuning.scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE,
     elevation,
     interactionRef,
+    streamingPaused: grassWorkPaused,
   })
   const bladeWorldHeight =
     sourceBladeHeight * resolvedTuning.scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE
@@ -580,7 +596,7 @@ function StylizedSceneGrassLayer({
     bladeHeight: bladeWorldHeight,
     elevation,
     interactionRef,
-    streamingPaused,
+    streamingPaused: grassWorkPaused,
     surfaceBounds,
   })
   const grassClusterRadius = grassRootRadius * resolvedTuning.scale
@@ -786,7 +802,13 @@ function StylizedSceneGrassLayer({
 
   useLayoutEffect(() => {
     const mesh = meshRef.current
-    if (!mesh || !geometry || !material) return
+    if (!mesh) return
+    mesh.visible = bladesVisible
+    if (!bladesVisible) {
+      mesh.count = 0
+      return
+    }
+    if (!geometry || !material) return
 
     measureStylizedScene(profileMeasure, 'setup.stylized-grass.apply-layout', () => {
       mesh.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -835,6 +857,7 @@ function StylizedSceneGrassLayer({
     })
   }, [
     exactVisibleCellKeysRef,
+    bladesVisible,
     geometry,
     instanceCapacity,
     material,
@@ -844,6 +867,7 @@ function StylizedSceneGrassLayer({
   ])
 
   useLayoutEffect(() => {
+    if (!bladesVisible) return
     const hadFadeZones = fadeZonesRef.current.length > 0
     updateStylizedGrassFadeZones(fadeZonesRef.current, grassFadeBlockers)
     if (geometry && (hadFadeZones || fadeZonesRef.current.length > 0)) {
@@ -854,9 +878,20 @@ function StylizedSceneGrassLayer({
         hadFadeZones,
       )
     }
-  }, [geometry, grassFadeBlockers])
+  }, [bladesVisible, geometry, grassFadeBlockers])
 
   useFrame(({ clock }, delta) => {
+    const mesh = meshRef.current
+    const visibility = clamp01(visibilityRef?.current ?? 1)
+    if (materialBundle) materialBundle.uniforms.visibility.value = visibility
+    if (material instanceof MeshStandardMaterial) material.opacity = visibility
+    const renderBlades = bladesVisible && visibility > 0.002
+    if (mesh) mesh.visible = renderBlades
+    if (!renderBlades) {
+      lastFadeFrameAtRef.current = performance.now()
+      return
+    }
+
     const runFrame = () => {
       const fadeFrameAt = performance.now()
       const previousFadeFrameAt = lastFadeFrameAtRef.current
@@ -963,6 +998,7 @@ function StylizedSceneGrassLayer({
       position={[0, elevation + 0.03, 0]}
       ref={meshRef}
       renderOrder={renderOrder}
+      visible={bladesVisible}
     />
   )
 }
@@ -1369,11 +1405,13 @@ function useStylizedGrassLod({
   bladeHeight,
   elevation,
   interactionRef,
+  streamingPaused,
 }: {
   anchor: StylizedGrassRenderCenter
   bladeHeight: number
   elevation: number
   interactionRef?: StylizedGrassInteractionRef
+  streamingPaused: boolean
 }): StylizedGrassLod {
   const camera = useThree((state) => state.camera)
   const size = useThree((state) => state.size)
@@ -1383,6 +1421,7 @@ function useStylizedGrassLod({
   const tip = useRef(new Vector3())
 
   useFrame(() => {
+    if (streamingPaused) return
     const interaction = interactionRef?.current
     const anchorX = interaction?.x ?? anchor.x
     const anchorZ = interaction?.z ?? anchor.z
@@ -2474,6 +2513,7 @@ function createStylizedGrassNodeMaterial(
   if (getMaterialRendererBackend() === 'webgl') {
     const color = new Color('#7fb13f').lerp(new Color('#5f9a3a'), clamp(tuning.greenTint, 0, 1))
     const material = new MeshStandardMaterial({
+      alphaHash: true,
       color,
       roughness: 0.85,
       side: DoubleSide,
@@ -2486,6 +2526,7 @@ function createStylizedGrassNodeMaterial(
         groundTintCap: { value: DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP },
         interaction: { value: new Vector4() },
         time: { value: 0 },
+        visibility: { value: 1 },
       },
     }
   }
@@ -2518,6 +2559,8 @@ function createStylizedGrassNodeMaterial(
   const instanceFade: TSLNode<'float'> = attribute<'float'>('aFade', 'float')
   const instanceStreamFade: TSLNode<'float'> = attribute<'float'>('aStreamFade', 'float')
   const combinedFade = instanceFade.mul(instanceStreamFade)
+  const globalVisibility = uniform(1)
+  const combinedOpacity = combinedFade.mul(globalVisibility)
   const grassTime = uniform(0)
   const grassInteraction = uniform(new Vector4())
   const groundTintCap = uniform(DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP)
@@ -2639,11 +2682,16 @@ function createStylizedGrassNodeMaterial(
     .mul(macroFactor)
     .add(translucency)
     .add(fresnelRim)
-  material.opacityNode = combinedFade
+  material.opacityNode = combinedOpacity
   material.depthWrite = true
   return {
     material,
-    uniforms: { groundTintCap, interaction: grassInteraction, time: grassTime },
+    uniforms: {
+      groundTintCap,
+      interaction: grassInteraction,
+      time: grassTime,
+      visibility: globalVisibility,
+    },
   }
 }
 

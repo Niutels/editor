@@ -1,14 +1,27 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Color, Layers, type Object3D, Scene, UnsignedByteType } from 'three'
+import {
+  Color,
+  HalfFloatType,
+  Layers,
+  type Object3D,
+  Scene,
+  UnsignedByteType,
+  Vector2,
+} from 'three'
 import { ssgi } from 'three/addons/tsl/display/SSGINode.js'
 import { denoise } from 'three/examples/jsm/tsl/display/DenoiseNode.js'
 import {
   add,
   colorToDirection,
+  convertToTexture,
   diffuseColor,
   directionToColor,
+  Fn,
   float,
+  int,
+  interleavedGradientNoise,
+  Loop,
   mix,
   mrt,
   normalView,
@@ -18,8 +31,12 @@ import {
   premultiplyAlpha,
   renderOutput,
   sample,
+  screenCoordinate,
   time,
   uniform,
+  uv,
+  vec2,
+  vec3,
   vec4,
 } from 'three/tsl'
 import { RenderPipeline, type WebGPURenderer } from 'three/webgpu'
@@ -102,6 +119,118 @@ const emptyScene = new Scene()
 
 const MAX_PIPELINE_RETRIES = 3
 const RETRY_DELAY_MS = 500
+const PRESENTATION_ZOOM_BLUR_PATH_FRACTION = 0.045
+const PRESENTATION_ZOOM_BLUR_RESOLUTION_SCALE = 0.5
+const PRESENTATION_ZOOM_BLUR_SAMPLE_COUNT = 12
+
+export type ViewerPresentationEffectDebugMode = 'contribution' | 'final' | 'mask'
+
+export type ViewerPresentationEffectState = {
+  zoomBlurAmount: number
+  zoomBlurCenter?: readonly [number, number]
+  zoomBlurDebugMode?: ViewerPresentationEffectDebugMode
+  zoomBlurDirection: number
+}
+
+export type ViewerPresentationEffectRef = {
+  current: ViewerPresentationEffectState
+}
+
+type DirectionalZoomBlurEffect = {
+  dispose: () => void
+  outputNode: any
+}
+
+function createDirectionalZoomBlurEffect({
+  amount,
+  aspect,
+  blurHeight,
+  blurWidth,
+  center,
+  debugMode,
+  direction,
+  textureNode,
+}: {
+  amount: any
+  aspect: number
+  blurHeight: number
+  blurWidth: number
+  center: any
+  debugMode: any
+  direction: any
+  textureNode: any
+}): DirectionalZoomBlurEffect {
+  const inputTexture = convertToTexture(textureNode)
+  const blurredColor = Fn(() => {
+    const sourceUv = vec2((inputTexture as any).uvNode || uv()).toConst()
+    const base = inputTexture.sample(sourceUv).toConst()
+    const centerDelta = center.sub(sourceUv).toConst()
+    const sampleStep = centerDelta
+      .mul(direction)
+      .mul(amount)
+      .mul(PRESENTATION_ZOOM_BLUR_PATH_FRACTION / PRESENTATION_ZOOM_BLUR_SAMPLE_COUNT)
+      .toConst()
+    const noise = interleavedGradientNoise(screenCoordinate)
+    const sampleUv = sourceUv.add(sampleStep.mul(noise)).toVar()
+    const accumulated = base.mul(0.26).toVar()
+    const accumulatedWeight = float(0.26).toVar()
+    const tapWeight = float(0.22).toVar()
+
+    Loop(
+      {
+        condition: '<',
+        end: int(PRESENTATION_ZOOM_BLUR_SAMPLE_COUNT),
+        start: int(0),
+        type: 'int',
+      },
+      () => {
+        sampleUv.addAssign(sampleStep)
+        accumulated.addAssign(inputTexture.sample(sampleUv).mul(tapWeight))
+        accumulatedWeight.addAssign(tapWeight)
+        tapWeight.mulAssign(0.92)
+      },
+    )
+
+    return accumulated.div(accumulatedWeight)
+  })()
+  const blurredTexture = convertToTexture(blurredColor, blurWidth, blurHeight, {
+    type: HalfFloatType,
+  })
+  if (blurredTexture.renderTarget) {
+    blurredTexture.renderTarget.depthBuffer = false
+  }
+  const outputNode = Fn(() => {
+    const sourceUv = vec2((inputTexture as any).uvNode || uv()).toConst()
+    const base = inputTexture.sample(sourceUv).toConst()
+    const blurred = blurredTexture.sample(sourceUv)
+    const centerDelta = center.sub(sourceUv).toConst()
+    const normalizedRadius = vec2(centerDelta.x.mul(aspect), centerDelta.y)
+      .length()
+      .div(Math.hypot(aspect * 0.5, 0.5))
+      .clamp(0, 1)
+    const effectMix = amount.clamp(0, 1)
+    const finalColor = mix(base, blurred, effectMix)
+    const maskView = vec4(vec3(effectMix.mul(normalizedRadius)), 1)
+    const contributionView = vec4(blurred.rgb.sub(base.rgb).abs().mul(5), 1)
+
+    return debugMode
+      .equal(1)
+      .select(maskView, debugMode.equal(2).select(contributionView, finalColor))
+  })()
+
+  return {
+    dispose: () => {
+      const disposeRttTexture = (texture: any) => {
+        if (!texture?.isRTTNode) return
+        texture.renderTarget?.dispose()
+        texture._quadMesh?.material?.dispose()
+      }
+      disposeRttTexture(blurredTexture)
+      if (inputTexture !== textureNode) disposeRttTexture(inputTexture)
+    },
+    outputNode,
+  }
+}
 
 export type HoverStyle = {
   visibleColor: number
@@ -143,13 +272,17 @@ function sanitizeOutlineObjects(objects: Object3D[]) {
 const PostProcessingPasses = ({
   hoverStyles = DEFAULT_HOVER_STYLES,
   disablePostFx = false,
+  presentationEffectRef,
 }: {
   hoverStyles?: HoverStyles
-  /** Host-controlled equivalent of `?disable=postFx` — see the Viewer prop. */
+  /** Host-controlled bypass for the normal viewer image pipeline. */
   disablePostFx?: boolean
+  presentationEffectRef?: ViewerPresentationEffectRef
 }) => {
-  const { gl: renderer, invalidate, scene, camera, size } = useThree()
+  const { gl: renderer, invalidate, scene, camera, size, viewport } = useThree()
   const renderPipelineRef = useRef<RenderPipeline | null>(null)
+  const presentationOnlyPipelineRef = useRef(false)
+  const presentationPrewarmPendingRef = useRef(false)
   const hasPipelineErrorRef = useRef(false)
   const retryCountRef = useRef(0)
   const rebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -161,6 +294,10 @@ const PostProcessingPasses = ({
   const bgUniform = useRef(uniform(new Color(initBg)))
   const bgCurrent = useRef(new Color(initBg))
   const bgTarget = useRef(new Color())
+  const presentationZoomAmount = useRef(uniform(0))
+  const presentationZoomCenter = useRef(uniform(new Vector2(0.5, 0.48)))
+  const presentationZoomDebugMode = useRef(uniform(0))
+  const presentationZoomDirection = useRef(uniform(1))
 
   // Ink-line colour follows the scene-theme background luminance (dark lines on
   // light scenes, light on dark), refreshed each frame like the background.
@@ -258,6 +395,8 @@ const PostProcessingPasses = ({
   useEffect(() => {
     const width = Math.floor(size.width)
     const height = Math.floor(size.height)
+    presentationOnlyPipelineRef.current = false
+    presentationPrewarmPendingRef.current = false
 
     if (!(renderer && scene && camera)) {
       console.warn('[viewer/post-processing] Skipping pipeline build — missing dependency.', {
@@ -283,12 +422,11 @@ const PostProcessingPasses = ({
     }
 
     const perfDisable = readPerfDisableFlags()
+    const presentationEffectEnabled = Boolean(presentationEffectRef) && !perfDisable.postFx
 
-    // postFx off (host prop or ?disable=postFx): never allocate the pipeline —
-    // useFrame's null-pipeline branch direct-renders. Before this check the
-    // URL flag only skipped the pipeline at render time; the build still
-    // allocated every pass.
-    if (disablePostFx || perfDisable.postFx) {
+    // The URL diagnostic bypasses every image-space pass. A host-level
+    // post-FX bypass may still opt into the lightweight presentation pipeline.
+    if (perfDisable.postFx || (disablePostFx && !presentationEffectEnabled)) {
       hasPipelineErrorRef.current = false
       if (renderPipelineRef.current) {
         renderPipelineRef.current.dispose()
@@ -319,6 +457,7 @@ const PostProcessingPasses = ({
       projectId,
       shading,
       transparentBackground,
+      presentationOnly: disablePostFx && presentationEffectEnabled,
       rendererCtor: (renderer as any).constructor?.name,
       width,
       height,
@@ -340,6 +479,63 @@ const PostProcessingPasses = ({
       renderPipelineRef.current = null
       return
     }
+    const presentationBlurWidth = Math.max(
+      1,
+      Math.floor(width * viewport.dpr * PRESENTATION_ZOOM_BLUR_RESOLUTION_SCALE),
+    )
+    const presentationBlurHeight = Math.max(
+      1,
+      Math.floor(height * viewport.dpr * PRESENTATION_ZOOM_BLUR_RESOLUTION_SCALE),
+    )
+
+    if (disablePostFx && presentationEffectEnabled) {
+      let presentationEffect: DirectionalZoomBlurEffect | null = null
+      let presentationScenePass: ReturnType<typeof pass> | null = null
+
+      try {
+        presentationScenePass = pass(scene, camera)
+        const sceneColor = presentationScenePass.getTextureNode('output')
+        presentationEffect = createDirectionalZoomBlurEffect({
+          amount: presentationZoomAmount.current,
+          aspect: width / height,
+          blurHeight: presentationBlurHeight,
+          blurWidth: presentationBlurWidth,
+          center: presentationZoomCenter.current,
+          debugMode: presentationZoomDebugMode.current,
+          direction: presentationZoomDirection.current,
+          textureNode: sceneColor,
+        })
+        const renderPipeline = new RenderPipeline(renderer as unknown as WebGPURenderer)
+        renderPipeline.outputColorTransform = true
+        renderPipeline.outputNode = presentationEffect.outputNode
+        renderPipelineRef.current = renderPipeline
+        presentationOnlyPipelineRef.current = true
+        presentationPrewarmPendingRef.current = true
+        hasPipelineErrorRef.current = false
+        retryCountRef.current = 0
+      } catch (error) {
+        hasPipelineErrorRef.current = true
+        console.error(
+          '[viewer/post-processing] Failed to set up the presentation effect. Rendering directly.',
+          error,
+        )
+        renderPipelineRef.current?.dispose()
+        presentationEffect?.dispose()
+        presentationScenePass?.dispose()
+        presentationEffect = null
+        presentationScenePass = null
+        renderPipelineRef.current = null
+      }
+
+      return () => {
+        renderPipelineRef.current?.dispose()
+        presentationEffect?.dispose()
+        presentationScenePass?.dispose()
+        renderPipelineRef.current = null
+        presentationOnlyPipelineRef.current = false
+        presentationPrewarmPendingRef.current = false
+      }
+    }
 
     // Clear outliner arrays synchronously to prevent stale Object3D refs
     // from the previous project leaking into the new pipeline's outline passes.
@@ -349,6 +545,7 @@ const PostProcessingPasses = ({
     outliner.selectedObjects.length = 0
     outliner.hoveredObjects.length = 0
 
+    let pipelinePresentationEffect: DirectionalZoomBlurEffect | null = null
     try {
       const scenePass = pass(scene, camera)
       scenePass.setLayers(sceneOnlyLayers)
@@ -519,6 +716,20 @@ const PostProcessingPasses = ({
         finalOutput = premultiplyAlpha(renderOutput(vec4(straightRgb, alpha)))
       }
 
+      if (presentationEffectEnabled) {
+        pipelinePresentationEffect = createDirectionalZoomBlurEffect({
+          amount: presentationZoomAmount.current,
+          aspect: width / height,
+          blurHeight: presentationBlurHeight,
+          blurWidth: presentationBlurWidth,
+          center: presentationZoomCenter.current,
+          debugMode: presentationZoomDebugMode.current,
+          direction: presentationZoomDirection.current,
+          textureNode: finalOutput,
+        })
+        finalOutput = pipelinePresentationEffect.outputNode
+      }
+
       const renderPipeline = new RenderPipeline(renderer as unknown as WebGPURenderer)
       renderPipeline.outputColorTransform = !transparentBackground
       renderPipeline.outputNode = finalOutput
@@ -538,6 +749,8 @@ const PostProcessingPasses = ({
       if (renderPipelineRef.current) {
         renderPipelineRef.current.dispose()
       }
+      pipelinePresentationEffect?.dispose()
+      pipelinePresentationEffect = null
       renderPipelineRef.current = null
     }
 
@@ -545,6 +758,7 @@ const PostProcessingPasses = ({
       if (renderPipelineRef.current) {
         renderPipelineRef.current.dispose()
       }
+      pipelinePresentationEffect?.dispose()
       renderPipelineRef.current = null
     }
   }, [
@@ -561,6 +775,7 @@ const PostProcessingPasses = ({
     edges,
     inkOpacityOverride,
     pipelineVersion,
+    presentationEffectRef,
     projectId,
     renderer,
     scene,
@@ -568,6 +783,7 @@ const PostProcessingPasses = ({
     transparentBackground,
     size.height,
     size.width,
+    viewport.dpr,
     zoneLayers,
     sceneOnlyLayers,
     overlayLayers,
@@ -606,12 +822,36 @@ const PostProcessingPasses = ({
     sanitizeOutlineObjects(outliner.selectedObjects)
     sanitizeOutlineObjects(outliner.hoveredObjects)
 
+    const presentationState = presentationEffectRef?.current
+    const presentationAmount = Math.max(0, Math.min(1, presentationState?.zoomBlurAmount ?? 0))
+    const presentationCenter = presentationState?.zoomBlurCenter
+    presentationZoomAmount.current.value = presentationAmount
+    presentationZoomDirection.current.value =
+      (presentationState?.zoomBlurDirection ?? 1) < 0 ? -1 : 1
+    presentationZoomDebugMode.current.value =
+      presentationState?.zoomBlurDebugMode === 'mask'
+        ? 1
+        : presentationState?.zoomBlurDebugMode === 'contribution'
+          ? 2
+          : 0
     if (
-      disablePostFx ||
+      presentationCenter &&
+      Number.isFinite(presentationCenter[0]) &&
+      Number.isFinite(presentationCenter[1])
+    ) {
+      presentationZoomCenter.current.value.set(presentationCenter[0], presentationCenter[1])
+    }
+
+    const presentationPipelineFrame =
+      presentationOnlyPipelineRef.current &&
+      (presentationAmount > 0.001 || presentationPrewarmPendingRef.current)
+    const renderPipeline = renderPipelineRef.current
+    const shouldDirectRender =
       PERF_POST_FX_DISABLED ||
       hasPipelineErrorRef.current ||
-      !renderPipelineRef.current
-    ) {
+      (disablePostFx && !presentationPipelineFrame)
+
+    if (!renderPipeline || shouldDirectRender) {
       try {
         if ((renderer as any).setClearAlpha) {
           ;(renderer as any).setClearAlpha(transparentBackground ? 0 : 1)
@@ -637,7 +877,10 @@ const PostProcessingPasses = ({
       // making scenePassColor.a a reliable geometry mask (geometry pixels write a=1 via output node).
       ;(renderer as any).setClearAlpha(0)
       const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
-      renderPipelineRef.current.render()
+      renderPipeline.render()
+      if (presentationOnlyPipelineRef.current) {
+        presentationPrewarmPendingRef.current = false
+      }
       if (PERF_OVERLAY_ENABLED) {
         // device.queue.onSubmittedWorkDone() resolves once the GPU has
         // finished the work we just submitted — the delta from our submit

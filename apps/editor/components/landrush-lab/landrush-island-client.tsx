@@ -53,10 +53,11 @@ import {
   resolveLandrushRobotHoverOffset,
 } from '@pascal-app/nodes/landrush-world/robot'
 import {
-  GRID_LAYER,
   getMaterialRendererBackend,
   renderScheduler,
   useViewer,
+  type ViewerPresentationEffectDebugMode,
+  type ViewerPresentationEffectState,
 } from '@pascal-app/viewer'
 import { Html, KeyboardControls, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { type RootState, useFrame, useThree } from '@react-three/fiber'
@@ -95,7 +96,6 @@ import {
   useState,
 } from 'react'
 import {
-  Box3,
   BufferAttribute,
   BufferGeometry,
   type Camera,
@@ -167,13 +167,14 @@ import {
   DEFAULT_PROCEDURAL_ROCK_OFFSHORE_CONTROLS,
   DEFAULT_PROCEDURAL_ROCK_TONE_CONTROLS,
   type ProceduralBeachControls,
-  ProceduralRockCliffs,
   type ProceduralRockCliffRuntimeMetrics,
+  ProceduralRockCliffs,
   type ProceduralRockCliffWallControls,
   type ProceduralRockOffshoreControls,
   type ProceduralRockToneControls,
 } from './procedural-rock-cliffs'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
+import { isLandrushRevealObjectOwnedByRoot } from './robot-reveal-mesh-ownership'
 import {
   clearLandrushRobotScreenRevealMask,
   createLandrushRobotScreenRevealOpacityNode,
@@ -427,7 +428,7 @@ const LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS = 3.15
 const LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH = 1
 const LANDRUSH_ISLAND_ROBOT_GRASS_FULL_BEND_SPEED = 5.8
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE = 1.5
-const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_EXPANSION_SCALE = 3
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DEPTH_BIAS_METERS = 0.2
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE = 2
@@ -443,30 +444,13 @@ const LANDRUSH_ISLAND_BUILT_GRASS_PADDING_METERS = 1
 const LANDRUSH_ISLAND_BUILT_GRASS_FEATHER_METERS = 0.3
 const LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
 const LANDRUSH_ISLAND_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
-const LANDRUSH_ISLAND_BUILD_GRID_STEP_METERS = 0.5
-const LANDRUSH_ISLAND_BUILD_GRID_SEGMENT_STEP_METERS = 1
-const LANDRUSH_ISLAND_BUILD_GRID_ELEVATION_OFFSET = 0.04
-const LANDRUSH_ISLAND_BUILD_GRID_LINE_WIDTH_METERS = 0.055
-const LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS = 4
-const LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS = 1.35
-const LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_FADE_METERS = 4.25
-const LANDRUSH_ISLAND_BUILD_GRID_PATH_CLEARANCE_METERS = 0.72
-const LANDRUSH_ISLAND_BUILD_GRID_PATH_FADE_METERS = 3
-const LANDRUSH_ISLAND_BUILD_GRID_PATH_WIDTH_SCALE = 1.08
-const LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS = 8
-const LANDRUSH_ISLAND_BUILD_GRID_FADE_SECONDS = 1.375
-const LANDRUSH_ISLAND_BUILD_GRID_RENDER_ORDER = 0.05
 const LANDRUSH_ISLAND_BUILD_GRASS_GROUND_RENDER_ORDER = 0
 const LANDRUSH_ISLAND_BUILD_GRASS_BLADE_RENDER_ORDER = 0.1
 const LANDRUSH_ISLAND_BUILD_CAMERA_MIN_DISTANCE = 10
 const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_DISTANCE = 22
 const LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT = 7
 const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_HEIGHT = 15
-const LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS = 2
-const LANDRUSH_ISLAND_MAP_TO_BUILD_GRASS_REVEAL_DELAY_SECONDS = Math.max(
-  0,
-  LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS - LANDRUSH_ISLAND_BUILD_GRID_FADE_SECONDS,
-)
+const LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS = 1.4
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS = 1000 / 120
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
 const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
@@ -612,6 +596,9 @@ type LandrushIslandModeTransitionFadeState = {
   from: LandrushIslandViewMode
   id: number
   to: LandrushIslandViewMode
+}
+type LandrushIslandModeTransitionPresentationState = ViewerPresentationEffectState & {
+  grassVisibility: number
 }
 type LandrushIslandParcelSelectionDirection = 'down' | 'left' | 'right' | 'up'
 type LandrushIslandProfileMeasure = <T>(id: string, callback: () => T) => T
@@ -985,6 +972,7 @@ type LandrushIslandNavigationLeg = {
   final: boolean
   key: string
   point: LandrushPoint2
+  stairPortals?: readonly LandrushIslandStairPortal[]
 }
 type LandrushIslandWalkTargetPoint = LandrushPoint2 & {
   levelId: LevelNode['id']
@@ -1018,16 +1006,6 @@ type LandrushIslandRevealMaterialState = {
   clipIntersection: boolean
   clippingPlanes: Material['clippingPlanes']
 }
-type LandrushIslandRobotScreenBounds = {
-  centerX: number
-  centerY: number
-  height: number
-  maxX: number
-  maxY: number
-  minX: number
-  minY: number
-  width: number
-}
 type LandrushIslandRevealObjectState = {
   clipIntersection: unknown
   clippingPlanes: unknown
@@ -1036,7 +1014,6 @@ type LandrushIslandRevealObjectState = {
   isClippingGroup: unknown
 }
 type LandrushIslandRobotRevealOccluder = {
-  hasSoftRevealMaterial: boolean
   object: Object3D
 }
 type LandrushIslandRobotRevealOccluderContext = {
@@ -1044,6 +1021,7 @@ type LandrushIslandRobotRevealOccluderContext = {
   cameraY: number
   robotPoint: LandrushPoint2
   robotY: number
+  stairTransitionTopY: number | null
   structureGroundY: number
 }
 type RobotWorldOrbitControls = {
@@ -1478,15 +1456,6 @@ function recordLandrushIslandGrassEventProbe(event: Record<string, unknown>) {
   const probe = getLandrushIslandRuntimeProbe()
   if (!probe) return
   pushLandrushIslandProbeSample(probe.grassEvents, {
-    ...event,
-    timeMs: roundPerf(performance.now() - probe.startedAt),
-  })
-}
-
-function recordLandrushIslandGridProbe(event: Record<string, unknown>) {
-  const probe = getLandrushIslandRuntimeProbe()
-  if (!probe) return
-  pushLandrushIslandProbeSample(probe.gridSamples, {
     ...event,
     timeMs: roundPerf(performance.now() - probe.startedAt),
   })
@@ -1983,6 +1952,7 @@ function resolveLandrushIslandNavigationLeg(
     final: false,
     key: `stair:${currentLevelId}:${targetLevelId}:${connector.nodeId}:${ascending ? 'up' : 'down'}`,
     point: ascending ? connector.toPoint : connector.fromPoint,
+    stairPortals: resolveLandrushIslandStairConnectorPortals(connector, ascending),
   }
 }
 
@@ -1994,13 +1964,36 @@ function resolveLandrushIslandClickMoveNavigationLeg(
 ): LandrushIslandNavigationLeg | null {
   const crossing = target.route?.doorCrossing
   if (crossing?.kind === 'stair') {
+    const connector = stairConnectors.find(
+      (candidate) =>
+        candidate.nodeId === crossing.nodeId ||
+        candidate.portals.some((portal) => portal.nodeId === crossing.nodeId),
+    )
+    const ascending = target.route!.legKey.endsWith(':up')
     return {
       final: false,
       key: target.route!.legKey,
       point: crossing.exit,
+      stairPortals: connector
+        ? resolveLandrushIslandStairConnectorPortals(connector, ascending)
+        : undefined,
     }
   }
   return resolveLandrushIslandNavigationLeg(start, currentLevelId, target, stairConnectors)
+}
+
+function resolveLandrushIslandStairConnectorPortals(
+  connector: LandrushIslandStairConnector,
+  ascending: boolean,
+) {
+  return ascending ? connector.portals : [...connector.portals].reverse()
+}
+
+function resolveLandrushIslandNavigationLegStairPortals(
+  leg: LandrushIslandNavigationLeg,
+  stairPortals: readonly LandrushIslandStairPortal[],
+) {
+  return leg.final ? [] : (leg.stairPortals ?? stairPortals)
 }
 
 function resolveLandrushIslandStairConnectorRoute(
@@ -2177,6 +2170,34 @@ function runLandrushIslandNavigationSelfTest() {
     }),
     stairId,
   }
+  const upperStairPortal: LandrushIslandStairPortal = {
+    ...stairPortal,
+    center: { x: 0, z: 3.2 },
+    halfRun: 1,
+    nodeId: 'sseg_navigation_self_test_upper' as AnyNodeId,
+    sideA: {
+      x: 0,
+      z: 4.2 + LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS,
+    },
+    sideB: {
+      x: 0,
+      z: 2.2 - LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS,
+    },
+  }
+  const upperStairObstacle: LandrushIslandNavigationObstacle = {
+    kind: 'stair',
+    levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    nodeId: upperStairPortal.nodeId,
+    points: rectFootprintFromAxes({
+      center: upperStairPortal.center,
+      depth: upperStairPortal.halfRun * 2 + LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS * 2,
+      normal: upperStairPortal.normal,
+      tangent: upperStairPortal.tangent,
+      width:
+        upperStairPortal.halfWidth * 2 + LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS * 2,
+    }),
+    stairId,
+  }
   const overlappingStairObstacle: LandrushIslandNavigationObstacle = {
     ...stairObstacle,
     nodeId: 'sseg_navigation_self_test_overlap' as AnyNodeId,
@@ -2273,6 +2294,11 @@ function runLandrushIslandNavigationSelfTest() {
     toLevelId: upperLevelId,
     toPoint: clonePoint2(stairPortal.sideA),
   }
+  const multiSegmentFloorConnector: LandrushIslandStairConnector = {
+    ...floorConnector,
+    portals: [stairPortal, upperStairPortal],
+    toPoint: clonePoint2(upperStairPortal.sideA),
+  }
   const upperFloorTarget: LandrushIslandMoveTarget = {
     levelId: upperLevelId,
     point: { x: 4, z: 4 },
@@ -2289,6 +2315,42 @@ function runLandrushIslandNavigationSelfTest() {
     upperLevelId,
     upperFloorTarget,
     [floorConnector],
+  )
+  const upperFloorFinalStairPortals = upperFloorFinalLeg
+    ? resolveLandrushIslandNavigationLegStairPortals(upperFloorFinalLeg, [stairPortal])
+    : [stairPortal]
+  const upperFloorFinalSteering = resolveLandrushIslandNavigationSteeringPoint(
+    floorConnector.toPoint,
+    { x: 0, z: -4 },
+    [stairObstacle],
+    [],
+    surface,
+    upperFloorFinalStairPortals,
+  )
+  const lowerFloorTarget: LandrushIslandMoveTarget = {
+    levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    point: { x: 0, z: -4 },
+    worldY: 0,
+  }
+  const lowerFloorStairLeg = resolveLandrushIslandNavigationLeg(
+    { x: 0, z: 5 },
+    upperLevelId,
+    lowerFloorTarget,
+    [multiSegmentFloorConnector],
+  )
+  const lowerFloorStairPortals = lowerFloorStairLeg
+    ? resolveLandrushIslandNavigationLegStairPortals(lowerFloorStairLeg, [
+        stairPortal,
+        upperStairPortal,
+      ])
+    : []
+  const lowerFloorStairSteering = resolveLandrushIslandNavigationSteeringPoint(
+    { x: 0, z: 5 },
+    lowerFloorTarget.point,
+    [stairObstacle, upperStairObstacle],
+    [],
+    surface,
+    lowerFloorStairPortals,
   )
   const crossingLockedTarget: LandrushIslandMoveTarget = {
     ...upperFloorTarget,
@@ -2352,6 +2414,16 @@ function runLandrushIslandNavigationSelfTest() {
     upperFloorRouteContinuesAfterStair:
       upperFloorFinalLeg?.final === true &&
       distanceSq2(upperFloorFinalLeg.point, upperFloorTarget.point) <= 0.000001,
+    upperFloorFinalRouteAvoidsStairReentry:
+      upperFloorFinalLeg?.final === true &&
+      upperFloorFinalStairPortals.length === 0 &&
+      upperFloorFinalSteering !== null &&
+      upperFloorFinalSteering.kind !== 'stair',
+    lowerFloorDescentStartsAtUpperStairPortal:
+      lowerFloorStairLeg?.final === false &&
+      lowerFloorStairPortals[0]?.nodeId === upperStairPortal.nodeId &&
+      lowerFloorStairSteering?.kind === 'stair' &&
+      lowerFloorStairSteering.doorCrossing?.nodeId === upperStairPortal.nodeId,
   }
 }
 
@@ -2697,6 +2769,11 @@ export function LandrushIslandClient({
       searchParams.get('landrushProbeOutput') === '1' ||
       searchParams.get('landrushProbeOutput') === 'dom' ||
       searchParams.get('landrushProbeOutput') === 'interval')
+  const transitionBlurDebugParam = searchParams.get('transitionBlurDebug')
+  const transitionBlurDebugMode: ViewerPresentationEffectDebugMode =
+    transitionBlurDebugParam === 'mask' || transitionBlurDebugParam === 'contribution'
+      ? transitionBlurDebugParam
+      : 'final'
   const startupProfileEnabled =
     searchParams.get('startupProfile') === '1' || searchParams.get('profileStartup') === '1'
   const startupProfileNoLandLayers = searchParams.get('profileNoLandLayers') === '1'
@@ -2736,6 +2813,11 @@ export function LandrushIslandClient({
   const mapReturnCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
   const playerReturnCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
   const modeTransitionFadeIdRef = useRef(0)
+  const modeTransitionPresentationRef = useRef(
+    createLandrushIslandModeTransitionPresentationState(transitionBlurDebugMode),
+  )
+  const grassVisibilityRef = useRef(1)
+  const renderedFpsRef = useRef<number | null>(null)
   const lastAppliedBuildSnapshotSignatureRef = useRef(new Map<string, string>())
   const lastSyncedBuildSnapshotSignatureRef = useRef<string | null>(null)
   const initialViewModeAppliedRef = useRef(false)
@@ -2848,9 +2930,6 @@ export function LandrushIslandClient({
   const [fpvView, setFpvView] = useState(false)
   const [modeTransitionFade, setModeTransitionFade] =
     useState<LandrushIslandModeTransitionFadeState | null>(null)
-  const [mapToBuildGrassRevealTransitionId, setMapToBuildGrassRevealTransitionId] = useState<
-    number | null
-  >(null)
   const [gamepadHintsActive, setGamepadHintsActive] = useState(false)
   const gamepadHintsActiveRef = useRef(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
@@ -2938,8 +3017,38 @@ export function LandrushIslandClient({
     sendSignal: multiplayer.sendVoiceSignal,
   })
   const viewMode: LandrushIslandViewMode = buildMode ? 'build' : mapView ? 'map' : 'player'
-  const buildEditorActive =
-    (buildMode && buildCameraControlsReady) || (!buildMode && modeTransitionFade?.from === 'build')
+  const buildSceneModeActive = buildMode && buildCameraControlsReady && modeTransitionFade === null
+  const buildSceneEntryViewModeRef = useRef<LandrushIslandViewMode>('player')
+  const sceneViewMode = buildMode
+    ? buildSceneModeActive
+      ? 'build'
+      : buildSceneEntryViewModeRef.current
+    : viewMode
+  const [buildEditorSystemsReady, setBuildEditorSystemsReady] = useState(false)
+  const [buildEditorChromeReady, setBuildEditorChromeReady] = useState(false)
+  const buildEditorSystemsActive =
+    (buildMode && buildEditorSystemsReady) || (!buildMode && modeTransitionFade?.from === 'build')
+  const buildEditorChromeActive =
+    (buildMode && buildEditorChromeReady) || (!buildMode && modeTransitionFade?.from === 'build')
+
+  useEffect(() => {
+    if (!buildMode) return
+
+    let chromeTimeoutId: number | null = null
+    const systemsTimeoutId = window.setTimeout(() => {
+      startTransition(() => setBuildEditorSystemsReady(true))
+      chromeTimeoutId = window.setTimeout(
+        () => startTransition(() => setBuildEditorChromeReady(true)),
+        0,
+      )
+    }, 0)
+
+    return () => {
+      window.clearTimeout(systemsTimeoutId)
+      if (chromeTimeoutId !== null) window.clearTimeout(chromeTimeoutId)
+    }
+  }, [buildMode])
+
   const fpvActive = viewMode === 'player' && fpvView
   const mapPresentationProgressRef = useRef(viewMode === 'map' ? 1 : 0)
   const loadingAssetsReady = !stylizedGroundTextureRequired || stylizedGroundTextureReady
@@ -2989,19 +3098,24 @@ export function LandrushIslandClient({
       })
       if (nextViewMode !== viewMode) {
         modeTransitionFadeIdRef.current += 1
+        const nextTransition = {
+          from: viewMode,
+          id: modeTransitionFadeIdRef.current,
+          to: nextViewMode,
+        }
         recordLandrushIslandPhaseProbe('camera-handoff:fade', {
           from: viewMode,
-          id: modeTransitionFadeIdRef.current,
+          id: nextTransition.id,
           to: nextViewMode,
         })
-        setModeTransitionFade({
-          from: viewMode,
-          id: modeTransitionFadeIdRef.current,
-          to: nextViewMode,
-        })
-        if (nextViewMode === 'map' || viewMode === 'map') {
-          setLandrushIslandCameraDragging(true)
-        }
+        updateLandrushIslandModeTransitionPresentation(
+          modeTransitionPresentationRef.current,
+          viewMode,
+          nextTransition,
+          0,
+        )
+        grassVisibilityRef.current = modeTransitionPresentationRef.current.grassVisibility
+        setModeTransitionFade(nextTransition)
       }
 
       if (nextViewMode === 'player') {
@@ -3043,13 +3157,29 @@ export function LandrushIslandClient({
     },
     [viewMode],
   )
-  const handleModeTransitionFadeDone = useCallback((transitionId: number) => {
-    setModeTransitionFade((current) => (current?.id === transitionId ? null : current))
-  }, [])
+  const handleModeTransitionFadeDone = useCallback(
+    (transition: LandrushIslandModeTransitionFadeState) => {
+      startTransition(() => {
+        setModeTransitionFade((current) => (current?.id === transition.id ? null : current))
+        if (transition.from === 'build') {
+          setBuildCameraControlsInitialPose(null)
+          setBuildCameraControlsReady(false)
+        }
+      })
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!modeTransitionFade) {
       mapPresentationProgressRef.current = viewMode === 'map' ? 1 : 0
+      updateLandrushIslandModeTransitionPresentation(
+        modeTransitionPresentationRef.current,
+        viewMode,
+        null,
+        1,
+      )
+      grassVisibilityRef.current = modeTransitionPresentationRef.current.grassVisibility
       return
     }
 
@@ -3059,6 +3189,13 @@ export function LandrushIslandClient({
       const now = performance.now()
       const elapsed = Math.max(0, (now - startedAt) / 1000)
       const nextProgress = clamp01(elapsed / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS)
+      updateLandrushIslandModeTransitionPresentation(
+        modeTransitionPresentationRef.current,
+        viewMode,
+        modeTransitionFade,
+        nextProgress,
+      )
+      grassVisibilityRef.current = modeTransitionPresentationRef.current.grassVisibility
       mapPresentationProgressRef.current = resolveLandrushIslandMapPresentationProgress(
         viewMode,
         modeTransitionFade,
@@ -3067,7 +3204,7 @@ export function LandrushIslandClient({
       renderScheduler.requestFrame('camera:move')
       if (nextProgress >= 1) {
         window.clearInterval(intervalId)
-        handleModeTransitionFadeDone(modeTransitionFade.id)
+        handleModeTransitionFadeDone(modeTransitionFade)
       }
     }
 
@@ -3081,57 +3218,32 @@ export function LandrushIslandClient({
     return () => window.clearInterval(intervalId)
   }, [handleModeTransitionFadeDone, modeTransitionFade, viewMode])
 
-  useEffect(() => {
-    const mapTransitionActive =
-      modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
-    if (!mapTransitionActive) return
-
-    setLandrushIslandCameraDragging(true)
-    return () => setLandrushIslandCameraDragging(false)
-  }, [modeTransitionFade])
-
-  useEffect(() => {
-    if (modeTransitionFade?.from !== 'map' || modeTransitionFade.to !== 'build') return
-
-    const transitionId = modeTransitionFade.id
-    const timeoutId = window.setTimeout(() => {
-      setMapToBuildGrassRevealTransitionId(transitionId)
-      recordLandrushIslandGrassEventProbe({
-        kind: 'map-to-build-reveal-start',
-        transitionId,
-      })
-    }, LANDRUSH_ISLAND_MAP_TO_BUILD_GRASS_REVEAL_DELAY_SECONDS * 1000)
-    return () => window.clearTimeout(timeoutId)
-  }, [modeTransitionFade])
-
   const mapPresentationVisible =
     viewMode === 'map' || modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
-  const mapToBuildGrassRevealStarted =
-    modeTransitionFade?.from === 'map' &&
-    modeTransitionFade.to === 'build' &&
-    mapToBuildGrassRevealTransitionId === modeTransitionFade.id
-  const mapGrassSuppressionActive = mapPresentationVisible && !mapToBuildGrassRevealStarted
-  const grassStreamingPaused = mapGrassSuppressionActive
+  const grassStreamingPaused = modeTransitionFade !== null || viewMode === 'map'
   const mapLabelsVisible = viewMode === 'map' && modeTransitionFade === null
+  const grassBladesVisible = !startupProfileNoStylizedBlades
 
   const enterPlayerView = useCallback(() => {
     measureLandrushFrameSlice('landrush-island.view.enter-player', () => {
       recordLandrushIslandPhaseProbe('view:enter-player:start', { from: viewMode })
-      measureLandrushFrameSlice('landrush-island.view.enter-player.prepare-camera-handoff', () =>
-        prepareCameraHandoff('player'),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-player.set-build-mode', () =>
-        setBuildMode(false),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-player.set-build-parcel', () =>
-        setBuildParcelId(null),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-player.set-map-view', () =>
-        setMapView(false),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-player.set-fpv-view', () =>
-        setFpvView(false),
-      )
+      startTransition(() => {
+        measureLandrushFrameSlice('landrush-island.view.enter-player.prepare-camera-handoff', () =>
+          prepareCameraHandoff('player'),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-player.set-build-mode', () =>
+          setBuildMode(false),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-player.set-build-parcel', () =>
+          setBuildParcelId(null),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-player.set-map-view', () =>
+          setMapView(false),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-player.set-fpv-view', () =>
+          setFpvView(false),
+        )
+      })
       measureLandrushFrameSlice('landrush-island.view.enter-player.release-pointer-lock', () =>
         releaseLandrushIslandPointerLock(),
       )
@@ -3142,21 +3254,23 @@ export function LandrushIslandClient({
   const enterFpvView = useCallback(() => {
     measureLandrushFrameSlice('landrush-island.view.enter-fpv', () => {
       recordLandrushIslandPhaseProbe('view:enter-fpv:start', { from: viewMode })
-      measureLandrushFrameSlice('landrush-island.view.enter-fpv.prepare-camera-handoff', () =>
-        prepareCameraHandoff('player'),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-build-mode', () =>
-        setBuildMode(false),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-build-parcel', () =>
-        setBuildParcelId(null),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-map-view', () =>
-        setMapView(false),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-fpv-view', () =>
-        setFpvView(true),
-      )
+      startTransition(() => {
+        measureLandrushFrameSlice('landrush-island.view.enter-fpv.prepare-camera-handoff', () =>
+          prepareCameraHandoff('player'),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-build-mode', () =>
+          setBuildMode(false),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-build-parcel', () =>
+          setBuildParcelId(null),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-map-view', () =>
+          setMapView(false),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-fpv.set-fpv-view', () =>
+          setFpvView(true),
+        )
+      })
       measureLandrushFrameSlice('landrush-island.view.enter-fpv.request-pointer-lock', () =>
         requestLandrushIslandPointerLock(),
       )
@@ -3180,21 +3294,23 @@ export function LandrushIslandClient({
   const enterMapView = useCallback(() => {
     measureLandrushFrameSlice('landrush-island.view.enter-map', () => {
       recordLandrushIslandPhaseProbe('view:enter-map:start', { from: viewMode })
-      measureLandrushFrameSlice('landrush-island.view.enter-map.prepare-camera-handoff', () =>
-        prepareCameraHandoff('map'),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-map.set-build-mode', () =>
-        setBuildMode(false),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-map.set-build-parcel', () =>
-        setBuildParcelId(null),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-map.set-map-view', () =>
-        setMapView(true),
-      )
-      measureLandrushFrameSlice('landrush-island.view.enter-map.set-fpv-view', () =>
-        setFpvView(false),
-      )
+      startTransition(() => {
+        measureLandrushFrameSlice('landrush-island.view.enter-map.prepare-camera-handoff', () =>
+          prepareCameraHandoff('map'),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-map.set-build-mode', () =>
+          setBuildMode(false),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-map.set-build-parcel', () =>
+          setBuildParcelId(null),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-map.set-map-view', () =>
+          setMapView(true),
+        )
+        measureLandrushFrameSlice('landrush-island.view.enter-map.set-fpv-view', () =>
+          setFpvView(false),
+        )
+      })
       measureLandrushFrameSlice('landrush-island.view.enter-map.release-pointer-lock', () =>
         releaseLandrushIslandPointerLock(),
       )
@@ -3206,25 +3322,25 @@ export function LandrushIslandClient({
     (parcelId: string) => {
       measureLandrushFrameSlice('landrush-island.view.enter-build', () => {
         recordLandrushIslandPhaseProbe('view:enter-build:start', { from: viewMode })
+        buildSceneEntryViewModeRef.current = viewMode
         gamepadBuildUndoBaselineRef.current = useScene.temporal.getState().pastStates.length
-        measureLandrushFrameSlice('landrush-island.view.enter-build.prepare-camera-handoff', () =>
-          prepareCameraHandoff('build'),
-        )
-        measureLandrushFrameSlice('landrush-island.view.enter-build.set-build-parcel', () =>
-          setBuildParcelId(parcelId),
-        )
-        measureLandrushFrameSlice('landrush-island.view.enter-build.sync-editor-mode', () =>
-          syncLandrushIslandBuildEditorMode(true),
-        )
-        measureLandrushFrameSlice('landrush-island.view.enter-build.set-build-mode', () =>
-          setBuildMode(true),
-        )
-        measureLandrushFrameSlice('landrush-island.view.enter-build.set-map-view', () =>
-          setMapView(false),
-        )
-        measureLandrushFrameSlice('landrush-island.view.enter-build.set-fpv-view', () =>
-          setFpvView(false),
-        )
+        startTransition(() => {
+          measureLandrushFrameSlice('landrush-island.view.enter-build.prepare-camera-handoff', () =>
+            prepareCameraHandoff('build'),
+          )
+          measureLandrushFrameSlice('landrush-island.view.enter-build.set-build-parcel', () =>
+            setBuildParcelId(parcelId),
+          )
+          measureLandrushFrameSlice('landrush-island.view.enter-build.set-build-mode', () =>
+            setBuildMode(true),
+          )
+          measureLandrushFrameSlice('landrush-island.view.enter-build.set-map-view', () =>
+            setMapView(false),
+          )
+          measureLandrushFrameSlice('landrush-island.view.enter-build.set-fpv-view', () =>
+            setFpvView(false),
+          )
+        })
         measureLandrushFrameSlice('landrush-island.view.enter-build.release-pointer-lock', () =>
           releaseLandrushIslandPointerLock(),
         )
@@ -3496,26 +3612,28 @@ export function LandrushIslandClient({
   const hasLiveLayoutNode = useScene((state) =>
     Boolean(state.nodes[experienceConfig.layoutNodeId as never]),
   )
-  const sceneNodesForGrassBlockers = useScene((state) => (buildMode ? null : state.nodes))
-  const builtGrassBlockers = useMemo(
-    () =>
-      measureLandrushIslandSetup(
-        activeProfileMeasure,
-        'setup.landrush-island.built-grass-blockers',
-        () =>
-          createLandrushIslandBuiltGrassBlockers(
-            sceneNodesForGrassBlockers ?? useScene.getState().nodes,
-          ),
-      ),
-    [activeProfileMeasure, sceneNodesForGrassBlockers],
+  const sceneNodesForGrassBlockers = useScene((state) =>
+    buildSceneModeActive ? null : state.nodes,
   )
-  const previousGrassBlockerBuildModeRef = useRef(buildMode)
+  const builtGrassBlockersRef = useRef<readonly GrassFieldBlocker[] | null>(null)
+  const builtGrassBlockers = useMemo(() => {
+    if (sceneNodesForGrassBlockers === null) return builtGrassBlockersRef.current ?? []
+
+    const nextBlockers = measureLandrushIslandSetup(
+      activeProfileMeasure,
+      'setup.landrush-island.built-grass-blockers',
+      () => createLandrushIslandBuiltGrassBlockers(sceneNodesForGrassBlockers),
+    )
+    builtGrassBlockersRef.current = nextBlockers
+    return nextBlockers
+  }, [activeProfileMeasure, sceneNodesForGrassBlockers])
+  const previousGrassBlockerBuildModeRef = useRef(buildSceneModeActive)
   const [visibleBladeGrassBlockers, setVisibleBladeGrassBlockers] =
     useState<readonly GrassFieldBlocker[]>(builtGrassBlockers)
   useLayoutEffect(() => {
     const wasBuildMode = previousGrassBlockerBuildModeRef.current
 
-    if (buildMode) {
+    if (buildSceneModeActive) {
       if (!wasBuildMode) {
         recordLandrushIslandGrassEventProbe({
           blockers: builtGrassBlockers.length,
@@ -3533,8 +3651,8 @@ export function LandrushIslandClient({
       setVisibleBladeGrassBlockers(builtGrassBlockers)
     }
 
-    previousGrassBlockerBuildModeRef.current = buildMode
-  }, [buildMode, builtGrassBlockers])
+    previousGrassBlockerBuildModeRef.current = buildSceneModeActive
+  }, [buildSceneModeActive, builtGrassBlockers])
   // Built objects only clear vertical blades; the flat ground texture stays stable below walls.
   const grassBlockers = LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS
   // Stable built footprints are structural blade blockers. The active build parcel
@@ -3548,7 +3666,7 @@ export function LandrushIslandClient({
   )
   const activeBuildParcelGrassFadeBlockers = useMemo(() => {
     const fadeBlockers: GrassFieldBlocker[] = []
-    if (buildMode && activeBuildParcel) {
+    if (buildSceneModeActive && activeBuildParcel) {
       fadeBlockers.push({
         featherMeters: LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS,
         initialVisibility: 1,
@@ -3556,20 +3674,8 @@ export function LandrushIslandClient({
       })
     }
     return fadeBlockers
-  }, [activeBuildParcel, buildMode])
-  const bladeGrassFadeBlockers = useMemo(() => {
-    if (!mapGrassSuppressionActive) return activeBuildParcelGrassFadeBlockers
-    return [
-      {
-        initialVisibility: 0,
-        points: liveViewerLandSurface.grassSurfacePoints,
-      },
-    ] satisfies readonly GrassFieldBlocker[]
-  }, [
-    activeBuildParcelGrassFadeBlockers,
-    liveViewerLandSurface.grassSurfacePoints,
-    mapGrassSuppressionActive,
-  ])
+  }, [activeBuildParcel, buildSceneModeActive])
+  const bladeGrassFadeBlockers = activeBuildParcelGrassFadeBlockers
   const treeGrassBlockers = useMemo(
     () =>
       activeBuildParcelGrassFadeBlockers.length === 0
@@ -3583,8 +3689,8 @@ export function LandrushIslandClient({
     [enterBuildView],
   )
   const stylizedGrassDebugState = useMemo(
-    () => ({ buildMode, source: 'pascal-multiplayer-island' }),
-    [buildMode],
+    () => ({ buildMode: buildSceneModeActive, source: 'pascal-multiplayer-island' }),
+    [buildSceneModeActive],
   )
   const activeBuildCameraControlsInitialPose =
     buildMode && buildCameraControlsReady && !buildCameraControlsInitialPose
@@ -3602,10 +3708,10 @@ export function LandrushIslandClient({
   }, [])
 
   useEffect(() => {
-    if (buildMode) return
+    if (buildMode || modeTransitionFade?.from === 'build') return
     setBuildCameraControlsInitialPose(null)
     setBuildCameraControlsReady(false)
-  }, [buildMode])
+  }, [buildMode, modeTransitionFade])
 
   useEffect(() => {
     if (!startupProfileEnabled || !startupProfileRef.current) {
@@ -3777,6 +3883,7 @@ export function LandrushIslandClient({
   )
 
   useEffect(() => {
+    if (!hasLiveLayoutNode) return
     const snapshots = multiplayer.parcelBuildNodes.filter(
       (build) => build.worldId === parcelWorldId,
     )
@@ -3806,6 +3913,7 @@ export function LandrushIslandClient({
     }
   }, [
     buildMode,
+    hasLiveLayoutNode,
     liveParcelAllocation.parcels,
     multiplayer.parcelBuildNodes,
     parcelWorldId,
@@ -3814,8 +3922,8 @@ export function LandrushIslandClient({
 
   useEffect(() => {
     if (
+      !hasLiveLayoutNode ||
       !localOwnedParcel ||
-      multiplayer.status !== 'connected' ||
       multiplayer.parcelBuildSnapshotWorldId !== parcelWorldId
     ) {
       lastSyncedBuildSnapshotSignatureRef.current = null
@@ -3839,9 +3947,9 @@ export function LandrushIslandClient({
     syncOwnedParcelBuildNodes()
     return useScene.subscribe(syncOwnedParcelBuildNodes)
   }, [
+    hasLiveLayoutNode,
     localOwnedParcel,
     multiplayer.parcelBuildSnapshotWorldId,
-    multiplayer.status,
     multiplayer.syncParcelBuildNodes,
     parcelWorldId,
   ])
@@ -3901,19 +4009,35 @@ export function LandrushIslandClient({
   }, [])
 
   useEffect(() => {
-    measureLandrushFrameSlice('landrush-island.effect.sync-build-mode', () => {
-      syncLandrushIslandBuildEditorMode(buildMode)
-      renderScheduler.requestFrame('geometry:changed')
-    })
-  }, [buildMode])
+    if (!buildEditorChromeActive) return
+    if (!buildMode && (modeTransitionFade === null || modeTransitionFade.from !== 'build')) return
+
+    const timeoutId = window.setTimeout(() => {
+      measureLandrushFrameSlice('landrush-island.effect.sync-build-mode', () => {
+        syncLandrushIslandBuildEditorMode(buildMode)
+        renderScheduler.requestFrame('geometry:changed')
+      })
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [buildEditorChromeActive, buildMode, modeTransitionFade])
 
   useEffect(() => {
-    if (!hasLiveLayoutNode) return
-    measureLandrushFrameSlice('landrush-island.effect.sync-build-mode-after-scene-load', () => {
-      syncLandrushIslandBuildEditorMode(buildMode)
-      renderScheduler.requestFrame('geometry:changed')
-    })
-  }, [buildMode, hasLiveLayoutNode])
+    if (
+      !hasLiveLayoutNode ||
+      !buildEditorChromeActive ||
+      (!buildMode && (modeTransitionFade === null || modeTransitionFade.from !== 'build'))
+    ) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      measureLandrushFrameSlice('landrush-island.effect.sync-build-mode-after-scene-load', () => {
+        syncLandrushIslandBuildEditorMode(buildMode)
+        renderScheduler.requestFrame('geometry:changed')
+      })
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [buildEditorChromeActive, buildMode, hasLiveLayoutNode, modeTransitionFade])
 
   useEffect(() => {
     if (fpvActive) {
@@ -4272,7 +4396,7 @@ export function LandrushIslandClient({
         ].join(' ')}
       >
         <LandrushIslandStartupReactProfiler
-          enabled={runtimeProbeEnabled}
+          enabled={editorRuntimeReactProfileEnabled}
           id="runtime.landrush-island.editor"
           onRender={handleRuntimeReactRender}
         >
@@ -4286,22 +4410,27 @@ export function LandrushIslandClient({
               onLoad={handleLoad}
               projectId={experienceConfig.projectId}
               reactProfiler={editorRuntimeReactProfiler}
-              showEditorChrome={buildEditorActive}
+              showEditorChrome={buildEditorChromeActive}
               showFullActionMenu
               showMobileSelectionBar={false}
               showSidebarRail={false}
               sidebarTabs={[]}
-              viewerCameraControls={buildMode && buildEditorActive && buildCameraControlsReady}
+              viewerCameraControls={
+                buildMode && buildEditorSystemsActive && buildCameraControlsReady
+              }
               viewerCameraInitialPose={activeBuildCameraControlsInitialPose}
               viewerDefaultCamera={false}
-              viewerEditorGrid={false}
-              viewerEditorSystems={buildEditorActive}
+              viewerEditorGrid={buildMode && buildEditorChromeActive}
+              viewerEditorGridVisualOffset={0.04}
+              viewerEditorGridY={activeBuildGroundY}
+              viewerEditorSystems={buildEditorSystemsActive}
               viewerSceneEnvironment={false}
               viewerPostProcessing={false}
+              viewerPresentationEffectRef={modeTransitionPresentationRef}
               viewerRendererBackend={viewerRendererBackend}
               viewerSceneChildren={
                 <LandrushIslandStartupReactProfiler
-                  enabled={runtimeProbeEnabled}
+                  enabled={editorRuntimeReactProfileEnabled}
                   id="runtime.landrush-island.viewer-scene-children"
                   onRender={handleRuntimeReactRender}
                 >
@@ -4352,9 +4481,9 @@ export function LandrushIslandClient({
                       </>
                     ) : null}
                     <FrameLoadProfilerProbe enabled={frameProfile} />
-                    <LandrushIslandEditorOverlayLayerBridge enabled={buildEditorActive} />
+                    <LandrushIslandEditorOverlayLayerBridge enabled={buildEditorChromeActive} />
                     <LandrushIslandStartupReactProfiler
-                      enabled={runtimeProbeEnabled}
+                      enabled={editorRuntimeReactProfileEnabled}
                       id="runtime.landrush-island.player-layer"
                       onRender={handleRuntimeReactRender}
                     >
@@ -4389,7 +4518,7 @@ export function LandrushIslandClient({
                         remoteVoicePeerIds={spatialVoice.remoteVoicePeerIds}
                         robotScreenRevealEnabled={robotScreenRevealEnabled}
                         surface={liveViewerLandSurface}
-                        viewMode={viewMode}
+                        viewMode={sceneViewMode}
                         voiceRangeVisible={spatialVoice.desired && spatialVoice.status === 'live'}
                         waterY={
                           LANDRUSH_ISLAND_LOW_ELEVATION - liveLandSurface.grassSurfaceElevation
@@ -4399,26 +4528,26 @@ export function LandrushIslandClient({
                     {revealProof ? (
                       <LandrushIslandRevealProofOccluder
                         motionRef={localMotionRef}
-                        presentationMode={viewMode === 'build' ? 'hover' : 'default'}
-                        visible={viewMode !== 'map'}
+                        presentationMode={sceneViewMode === 'build' ? 'hover' : 'default'}
+                        visible={sceneViewMode !== 'map'}
                       />
                     ) : null}
                     <LandrushIslandStartupReactProfiler
-                      enabled={runtimeProbeEnabled}
+                      enabled={editorRuntimeReactProfileEnabled}
                       id="runtime.landrush-island.parcel-ownership-layer"
                       onRender={handleRuntimeReactRender}
                     >
                       <MemoizedLandrushIslandParcelOwnershipLayer
                         allocation={liveParcelAllocation}
-                        buildParcelId={buildParcelId}
-                        buildMode={buildMode}
+                        buildParcelId={buildSceneModeActive ? buildParcelId : null}
+                        buildMode={buildSceneModeActive}
                         claimParcel={multiplayer.claimParcel}
                         localMotionRef={localMotionRef}
                         localProfile={resolvedLocalProfile}
                         mapPresentationProgressRef={mapPresentationProgressRef}
                         mapPresentationVisible={mapPresentationVisible}
                         mapLabelsVisible={mapLabelsVisible}
-                        mapView={viewMode === 'map'}
+                        mapView={sceneViewMode === 'map'}
                         onBuildParcel={handleBuildParcel}
                         parcelOwnerships={multiplayer.parcelOwnerships}
                         parcelWorldId={parcelWorldId}
@@ -4428,12 +4557,12 @@ export function LandrushIslandClient({
                       />
                     </LandrushIslandStartupReactProfiler>
                     <LandrushIslandBuildParcelGuardLayer
-                      buildMode={buildMode}
+                      buildMode={buildSceneModeActive}
                       groundY={activeBuildGroundY}
-                      parcel={activeBuildParcel}
+                      parcel={buildSceneModeActive ? activeBuildParcel : null}
                     />
                     <LandrushIslandStartupReactProfiler
-                      enabled={runtimeProbeEnabled}
+                      enabled={editorRuntimeReactProfileEnabled}
                       id="runtime.landrush-island.build-camera-rig"
                       onRender={handleRuntimeReactRender}
                     >
@@ -4450,25 +4579,25 @@ export function LandrushIslandClient({
                     <LandrushIslandBuildCameraMouseOrbitController
                       buildCameraPoseRef={buildCameraPoseRef}
                       groundY={activeBuildGroundY}
-                      parcel={activeBuildParcel}
-                      visible={buildMode}
+                      parcel={buildSceneModeActive ? activeBuildParcel : null}
+                      visible={buildSceneModeActive}
                     />
                     <LandrushIslandBuildGamepadPlacementController
                       buildCameraPoseRef={buildCameraPoseRef}
                       focusRowRef={gamepadBuildFocusRowRef}
                       groundY={activeBuildGroundY}
-                      parcel={activeBuildParcel}
-                      visible={buildMode}
+                      parcel={buildSceneModeActive ? activeBuildParcel : null}
+                      visible={buildSceneModeActive}
                       wallDraftActiveRef={gamepadBuildWallDraftActiveRef}
                     />
                     <LandrushIslandRobotLevelSelectionTracker
-                      enabled={!buildMode}
+                      enabled={!buildSceneModeActive}
                       groundY={liveViewerLandSurface.grassSurfaceElevation}
                       localMotionRef={localMotionRef}
                     />
                     {!startupProfileNoLandLayers ? (
                       <LandrushIslandStartupReactProfiler
-                        enabled={runtimeProbeEnabled}
+                        enabled={editorRuntimeReactProfileEnabled}
                         id="runtime.landrush-island.land-layers"
                         onRender={handleRuntimeReactRender}
                       >
@@ -4494,16 +4623,17 @@ export function LandrushIslandClient({
                                   : LANDRUSH_ISLAND_INTERACTIVE_GRASS_FIELD_RESOLUTION
                               }
                               bladeRenderOrder={
-                                buildMode
+                                buildSceneModeActive
                                   ? LANDRUSH_ISLAND_BUILD_GRASS_BLADE_RENDER_ORDER
                                   : undefined
                               }
+                              bladeVisibilityRef={grassVisibilityRef}
                               grassDebugState={stylizedGrassDebugState}
                               grassInteractionRef={grassInteractionRef}
                               grassStreamingPaused={grassStreamingPaused}
                               grassBlockers={grassBlockers}
                               groundRenderOrder={
-                                buildMode
+                                buildSceneModeActive
                                   ? LANDRUSH_ISLAND_BUILD_GRASS_GROUND_RENDER_ORDER
                                   : undefined
                               }
@@ -4511,6 +4641,7 @@ export function LandrushIslandClient({
                               profileMeasure={activeProfileMeasure}
                               renderStylizedPathNetwork={!multiplayerNaturalEnvironment}
                               roads={liveRenderedGrassRoads}
+                              bladesVisible={grassBladesVisible}
                               showBlades={!startupProfileNoStylizedBlades}
                               showGround
                               showTrees={!startupProfileNoStylizedTrees}
@@ -4537,20 +4668,16 @@ export function LandrushIslandClient({
                         </LandrushIslandStartupReactProfiler>
                       </LandrushIslandStartupReactProfiler>
                     ) : null}
-                    <LandrushIslandBuildGridOverlay
-                      buildableBoundaryPoints={liveParcelAllocation.boundary}
-                      groundY={activeBuildGroundY}
-                      parcel={activeBuildParcel}
-                      roads={liveGrassRoads}
-                      visible={buildMode}
-                    />
                     <LandrushIslandPlacedTvScreens
                       enabled={experience === 'pascal-multiplayer-island'}
                       localMotionRef={localMotionRef}
                       mediaStates={multiplayer.tvMediaStates}
                       onMediaStateChange={handleTvMediaStateChange}
                     />
-                    <LandrushIslandRuntimeCameraProbeRecorder mode={viewMode} />
+                    <LandrushIslandRuntimeCameraProbeRecorder
+                      mode={viewMode}
+                      renderedFpsRef={renderedFpsRef}
+                    />
                   </LandrushIslandStartupReactProfiler>
                 </LandrushIslandStartupReactProfiler>
               }
@@ -4562,6 +4689,7 @@ export function LandrushIslandClient({
           connection={multiplayer.connection}
           localPlayerIncluded={!offline}
           remotePlayerCount={multiplayer.remotePlayers.length}
+          renderedFpsRef={renderedFpsRef}
           status={multiplayerStatus}
         />
         <div
@@ -4766,6 +4894,51 @@ function LandrushIslandFallScreenEffect({
       }}
     />
   )
+}
+
+function createLandrushIslandModeTransitionPresentationState(
+  zoomBlurDebugMode: ViewerPresentationEffectDebugMode,
+): LandrushIslandModeTransitionPresentationState {
+  return {
+    grassVisibility: 1,
+    zoomBlurAmount: 0,
+    zoomBlurCenter: [0.5, 0.48],
+    zoomBlurDebugMode,
+    zoomBlurDirection: 1,
+  }
+}
+
+function updateLandrushIslandModeTransitionPresentation(
+  output: LandrushIslandModeTransitionPresentationState,
+  viewMode: LandrushIslandViewMode,
+  transition: LandrushIslandModeTransitionFadeState | null,
+  progress: number,
+) {
+  if (!transition) {
+    output.grassVisibility = viewMode === 'map' ? 0 : 1
+    output.zoomBlurAmount = 0
+    output.zoomBlurDirection = 1
+    return
+  }
+
+  const amount = clamp01(progress)
+  const normalizedCameraVelocity = 4 * amount * (1 - amount)
+  const blurIn = MathUtils.smoothstep(amount, 0.015, 0.14)
+  const blurOut = 1 - MathUtils.smoothstep(amount, 0.72, 0.98)
+  const conceal = MathUtils.smoothstep(amount, 0.16, 0.36)
+  const reveal = MathUtils.smoothstep(amount, 0.5, 0.7)
+  const fromVisibility = transition.from === 'map' ? 0 : 1
+  const targetVisibility = transition.to === 'map' ? 0 : 1
+
+  output.zoomBlurAmount = clamp01(normalizedCameraVelocity ** 0.72 * blurIn * blurOut)
+  output.zoomBlurDirection =
+    transition.to === 'map' || (transition.from === 'player' && transition.to === 'build') ? 1 : -1
+  output.grassVisibility =
+    fromVisibility === targetVisibility
+      ? clamp01(fromVisibility - conceal + reveal)
+      : fromVisibility > targetVisibility
+        ? 1 - conceal
+        : reveal
 }
 
 function resolveLandrushIslandMapPresentationProgress(
@@ -6572,12 +6745,19 @@ function createLandrushIslandGamepadGridNativeEvent(): GridEvent['nativeEvent'] 
   } as unknown as GridEvent['nativeEvent']
 }
 
-function LandrushIslandRuntimeCameraProbeRecorder({ mode }: { mode: LandrushIslandViewMode }) {
+function LandrushIslandRuntimeCameraProbeRecorder({
+  mode,
+  renderedFpsRef,
+}: {
+  mode: LandrushIslandViewMode
+  renderedFpsRef: RefObject<number | null>
+}) {
   const getThreeState = useThree((state) => state.get)
   const targetRef = useRef(new Vector3())
   const forwardRef = useRef(new Vector3())
   const modeRef = useRef<LandrushIslandViewMode>(mode)
   const lastR3fFrameAtRef = useRef<number | null>(null)
+  const renderedFpsWindowRef = useRef({ frameCount: 0, startedAt: performance.now() })
 
   modeRef.current = mode
 
@@ -6585,6 +6765,17 @@ function LandrushIslandRuntimeCameraProbeRecorder({ mode }: { mode: LandrushIsla
     const now = performance.now()
     const previousFrameAt = lastR3fFrameAtRef.current
     lastR3fFrameAtRef.current = now
+    const renderedFpsWindow = renderedFpsWindowRef.current
+    renderedFpsWindow.frameCount += 1
+    const renderedFpsElapsedMs = now - renderedFpsWindow.startedAt
+    if (renderedFpsElapsedMs >= 1000) {
+      renderedFpsRef.current =
+        renderedFpsElapsedMs > 2500
+          ? null
+          : Math.round((renderedFpsWindow.frameCount * 1000) / renderedFpsElapsedMs)
+      renderedFpsWindow.frameCount = 0
+      renderedFpsWindow.startedAt = now
+    }
     recordLandrushIslandFrameProbe({
       dtMs: previousFrameAt === null ? null : now - previousFrameAt,
       mode,
@@ -6876,399 +7067,6 @@ function resolveLandrushIslandBuildCameraStartTarget(
   }
 
   return target.copy(camera.position).addScaledVector(forward, 10)
-}
-
-function LandrushIslandBuildGridOverlay({
-  buildableBoundaryPoints,
-  groundY,
-  parcel,
-  roads,
-  visible,
-}: {
-  buildableBoundaryPoints: readonly LandrushPoint2[]
-  groundY: number
-  parcel: ParcelAllocationParcel | null
-  roads: readonly LandrushRoadSegment[]
-  visible: boolean
-}) {
-  const invalidate = useThree((state) => state.invalidate)
-  const gridSnapStep = useEditor((state) => state.gridSnapStep)
-  const targetVisible = visible && Boolean(parcel)
-  const [renderParcel, setRenderParcel] = useState(parcel)
-  const [renderVisible, setRenderVisible] = useState(targetVisible)
-  const fadeRef = useRef({
-    from: targetVisible ? 1 : 0,
-    opacity: targetVisible ? 1 : 0,
-    startedAt: 0,
-    to: targetVisible ? 1 : 0,
-  })
-  const geometries = useMemo(
-    () =>
-      createLandrushIslandBuildGridGeometries(
-        renderParcel,
-        gridSnapStep,
-        buildableBoundaryPoints,
-        roads,
-      ),
-    [buildableBoundaryPoints, gridSnapStep, renderParcel, roads],
-  )
-  const materials = useMemo(
-    () => createLandrushIslandBuildGridMaterials(fadeRef.current.opacity),
-    [],
-  )
-  const lastProbeAtRef = useRef(-Infinity)
-  const renderParcelRef = useRef(renderParcel)
-
-  useEffect(() => {
-    renderParcelRef.current = renderParcel
-  }, [renderParcel])
-
-  useLayoutEffect(() => {
-    if (parcel) {
-      renderParcelRef.current = parcel
-      setRenderParcel(parcel)
-    }
-    setLandrushIslandBuildGridMaterialsOpacity(materials, fadeRef.current.opacity)
-    if (targetVisible) setRenderVisible(true)
-    invalidate()
-    fadeRef.current = {
-      from: fadeRef.current.opacity,
-      opacity: fadeRef.current.opacity,
-      startedAt: performance.now(),
-      to: targetVisible ? 1 : 0,
-    }
-
-    let animationFrame = 0
-    const tick = () => {
-      const now = performance.now()
-      const fade = fadeRef.current
-      const progress = clamp01(
-        (now - fade.startedAt) / (LANDRUSH_ISLAND_BUILD_GRID_FADE_SECONDS * 1000),
-      )
-      const opacity = MathUtils.lerp(
-        fade.from,
-        fade.to,
-        easeLandrushIslandCameraTransition(progress, fade.to > fade.from ? 'build' : 'player'),
-      )
-      fade.opacity = opacity
-      setLandrushIslandBuildGridMaterialsOpacity(materials, opacity)
-      invalidate()
-
-      if (now - lastProbeAtRef.current > 120) {
-        lastProbeAtRef.current = now
-        const currentParcel = renderParcelRef.current
-        recordLandrushIslandGridProbe({
-          fadeTarget: fade.to,
-          opacity: roundPerf(opacity),
-          parcelId: currentParcel?.id ?? null,
-          progress: roundPerf(progress),
-          gridStep: gridSnapStep,
-          renderOrder: LANDRUSH_ISLAND_BUILD_GRID_RENDER_ORDER,
-          visible: opacity > 0.002 && Boolean(currentParcel),
-        })
-      }
-      if (opacity <= 0.002 && fade.to === 0) {
-        setRenderVisible(false)
-      }
-      if (progress < 1) {
-        animationFrame = window.requestAnimationFrame(tick)
-      }
-    }
-    animationFrame = window.requestAnimationFrame(tick)
-    return () => window.cancelAnimationFrame(animationFrame)
-  }, [gridSnapStep, invalidate, materials, parcel, targetVisible])
-
-  useEffect(() => {
-    invalidate()
-    return () => {
-      for (const geometry of geometries) geometry.dispose()
-    }
-  }, [geometries, invalidate])
-  useEffect(
-    () => () => {
-      for (const material of materials) material.dispose()
-    },
-    [materials],
-  )
-
-  return (
-    <group
-      position={[0, groundY + LANDRUSH_ISLAND_BUILD_GRID_ELEVATION_OFFSET, 0]}
-      visible={renderVisible && Boolean(renderParcel)}
-    >
-      {geometries.map((geometry, index) => (
-        <mesh
-          geometry={geometry}
-          key={index}
-          layers={GRID_LAYER}
-          material={materials[index]}
-          renderOrder={LANDRUSH_ISLAND_BUILD_GRID_RENDER_ORDER}
-        />
-      ))}
-    </group>
-  )
-}
-
-function setLandrushIslandBuildGridMaterialsOpacity(
-  materials: readonly MeshBasicMaterial[],
-  opacity: number,
-) {
-  for (const material of materials) {
-    const baseOpacity =
-      typeof material.userData.landrushIslandBuildGridBaseOpacity === 'number'
-        ? material.userData.landrushIslandBuildGridBaseOpacity
-        : material.opacity
-    material.userData.landrushIslandBuildGridBaseOpacity = baseOpacity
-    material.opacity = baseOpacity * opacity
-  }
-}
-
-function createLandrushIslandBuildGridMaterials(initialVisibility: number) {
-  return Array.from({ length: LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS }, (_, index) => {
-    const alpha = ((index + 1) / LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS) ** 1.15
-    const baseOpacity = 0.72 * alpha
-    const material = new MeshBasicMaterial({
-      color: '#ffffff',
-      depthTest: true,
-      depthWrite: false,
-      opacity: baseOpacity * clamp01(initialVisibility),
-      side: DoubleSide,
-      transparent: true,
-    })
-    material.userData.landrushIslandBuildGridBaseOpacity = baseOpacity
-    material.toneMapped = false
-    return material
-  })
-}
-
-function createLandrushIslandBuildGridGeometries(
-  parcel: ParcelAllocationParcel | null,
-  gridStep = LANDRUSH_ISLAND_BUILD_GRID_STEP_METERS,
-  buildableBoundaryPoints: readonly LandrushPoint2[] = [],
-  roads: readonly LandrushRoadSegment[] = [],
-) {
-  const resolvedGridStep =
-    Number.isFinite(gridStep) && gridStep > 0 ? gridStep : LANDRUSH_ISLAND_BUILD_GRID_STEP_METERS
-  const bucketVertices = Array.from(
-    { length: LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS },
-    () => [] as number[],
-  )
-  if (parcel) {
-    const mask = {
-      islandRing: openPointRing(buildableBoundaryPoints),
-      parcelRing: openPointRing(parcel.points),
-      roads,
-    }
-    const bounds = boundsForPoints(mask.parcelRing)
-    const segmentStep = Math.max(resolvedGridStep, LANDRUSH_ISLAND_BUILD_GRID_SEGMENT_STEP_METERS)
-    const minX =
-      Math.floor((bounds.minX - LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
-      resolvedGridStep
-    const maxX =
-      Math.ceil((bounds.maxX + LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
-      resolvedGridStep
-    const minZ =
-      Math.floor((bounds.minZ - LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
-      resolvedGridStep
-    const maxZ =
-      Math.ceil((bounds.maxZ + LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS) / resolvedGridStep) *
-      resolvedGridStep
-
-    for (let x = minX; x <= maxX + 0.0001; x += resolvedGridStep) {
-      for (let z = minZ; z < maxZ - 0.0001; z += segmentStep) {
-        pushLandrushIslandBuildGridSegment(
-          bucketVertices,
-          mask,
-          x,
-          z,
-          x,
-          Math.min(maxZ, z + segmentStep),
-        )
-      }
-    }
-    for (let z = minZ; z <= maxZ + 0.0001; z += resolvedGridStep) {
-      for (let x = minX; x < maxX - 0.0001; x += segmentStep) {
-        pushLandrushIslandBuildGridSegment(
-          bucketVertices,
-          mask,
-          x,
-          z,
-          Math.min(maxX, x + segmentStep),
-          z,
-        )
-      }
-    }
-  }
-
-  return bucketVertices.map((vertices) => {
-    const geometry = new BufferGeometry()
-    geometry.setAttribute('position', new BufferAttribute(new Float32Array(vertices), 3))
-    return geometry
-  })
-}
-
-function pushLandrushIslandBuildGridSegment(
-  bucketVertices: number[][],
-  mask: {
-    islandRing: readonly LandrushPoint2[]
-    parcelRing: readonly LandrushPoint2[]
-    roads: readonly LandrushRoadSegment[]
-  },
-  startX: number,
-  startZ: number,
-  endX: number,
-  endZ: number,
-) {
-  const alpha = landrushIslandBuildGridAlphaAtPoint(
-    {
-      x: (startX + endX) / 2,
-      z: (startZ + endZ) / 2,
-    },
-    mask,
-  )
-  if (alpha <= 0.015) return
-
-  const bucket = Math.min(
-    LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS - 1,
-    Math.max(0, Math.floor(alpha * LANDRUSH_ISLAND_BUILD_GRID_FADE_BUCKETS)),
-  )
-  const deltaX = endX - startX
-  const deltaZ = endZ - startZ
-  const length = Math.hypot(deltaX, deltaZ)
-  if (length <= 0.000001) return
-
-  const halfWidth = LANDRUSH_ISLAND_BUILD_GRID_LINE_WIDTH_METERS / 2
-  const offsetX = (-deltaZ / length) * halfWidth
-  const offsetZ = (deltaX / length) * halfWidth
-  const startLeftX = startX + offsetX
-  const startLeftZ = startZ + offsetZ
-  const startRightX = startX - offsetX
-  const startRightZ = startZ - offsetZ
-  const endLeftX = endX + offsetX
-  const endLeftZ = endZ + offsetZ
-  const endRightX = endX - offsetX
-  const endRightZ = endZ - offsetZ
-
-  bucketVertices[bucket]?.push(
-    startLeftX,
-    0,
-    startLeftZ,
-    endLeftX,
-    0,
-    endLeftZ,
-    startRightX,
-    0,
-    startRightZ,
-    startRightX,
-    0,
-    startRightZ,
-    endLeftX,
-    0,
-    endLeftZ,
-    endRightX,
-    0,
-    endRightZ,
-  )
-}
-
-function landrushIslandBuildGridAlphaAtPoint(
-  point: LandrushPoint2,
-  mask: {
-    islandRing: readonly LandrushPoint2[]
-    parcelRing: readonly LandrushPoint2[]
-    roads: readonly LandrushRoadSegment[]
-  },
-) {
-  const parcelAlpha = landrushIslandBuildGridParcelAlphaAtPoint(point, mask.parcelRing)
-  if (parcelAlpha <= 0) return 0
-
-  const islandAlpha = landrushIslandBuildGridIslandAlphaAtPoint(point, mask.islandRing)
-  if (islandAlpha <= 0) return 0
-
-  const pathAlpha = landrushIslandBuildGridPathAlphaAtPoint(point, mask.roads)
-  return Math.min(parcelAlpha, islandAlpha, pathAlpha)
-}
-
-function landrushIslandBuildGridParcelAlphaAtPoint(
-  point: LandrushPoint2,
-  parcelRing: readonly LandrushPoint2[],
-) {
-  if (parcelRing.length < 3) return 0
-  if (pointInLandrushIslandBuildGridRing(point, parcelRing)) return 1
-  const distance = distanceToLandrushIslandBuildGridRing(point, parcelRing)
-  return clamp01(1 - distance / LANDRUSH_ISLAND_BUILD_GRID_FADE_METERS)
-}
-
-function landrushIslandBuildGridIslandAlphaAtPoint(
-  point: LandrushPoint2,
-  islandRing: readonly LandrushPoint2[],
-) {
-  if (islandRing.length < 3) return 1
-  const distance = distanceToLandrushIslandBuildGridRing(point, islandRing)
-  if (
-    distance >
-    LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS +
-      LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_FADE_METERS
-  ) {
-    return 1
-  }
-  if (!pointInLandrushIslandBuildGridRing(point, islandRing)) return 0
-  return clamp01(
-    (distance - LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_CLEARANCE_METERS) /
-      LANDRUSH_ISLAND_BUILD_GRID_ISLAND_EDGE_FADE_METERS,
-  )
-}
-
-function pointInLandrushIslandBuildGridRing(
-  point: LandrushPoint2,
-  ring: readonly LandrushPoint2[],
-) {
-  let inside = false
-  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; index += 1) {
-    const current = ring[index]
-    const previous = ring[previousIndex]
-    if (!(current && previous)) continue
-    const crosses = current.z > point.z !== previous.z > point.z
-    const boundaryX =
-      ((previous.x - current.x) * (point.z - current.z)) / (previous.z - current.z || 0.000001) +
-      current.x
-    if (crosses && point.x < boundaryX) inside = !inside
-    previousIndex = index
-  }
-  return inside
-}
-
-function distanceToLandrushIslandBuildGridRing(
-  point: LandrushPoint2,
-  ring: readonly LandrushPoint2[],
-) {
-  let best = Number.POSITIVE_INFINITY
-  for (let index = 0; index < ring.length; index += 1) {
-    const start = ring[index]
-    const end = ring[(index + 1) % ring.length]
-    if (start && end) best = Math.min(best, distanceToSegment2(point, start, end))
-  }
-  return best
-}
-
-function landrushIslandBuildGridPathAlphaAtPoint(
-  point: LandrushPoint2,
-  roads: readonly LandrushRoadSegment[],
-) {
-  let alpha = 1
-  for (const road of roads) {
-    const distance = distanceToOpenPolyline(point, road.points)
-    const clearance =
-      (Math.max(0.1, road.width) * LANDRUSH_ISLAND_BUILD_GRID_PATH_WIDTH_SCALE) / 2 +
-      LANDRUSH_ISLAND_BUILD_GRID_PATH_CLEARANCE_METERS
-    if (distance <= clearance) return 0
-    alpha = Math.min(
-      alpha,
-      clamp01((distance - clearance) / LANDRUSH_ISLAND_BUILD_GRID_PATH_FADE_METERS),
-    )
-    if (alpha <= 0.015) return 0
-  }
-  return alpha
 }
 
 const LANDRUSH_ISLAND_PHYSICS_COLLIDER_NODE_TYPES = new Set([
@@ -8515,31 +8313,35 @@ function LandrushIslandRobotScreenRevealClipper({
   const materialsRef = useRef<Material[]>([])
   const materialStatesRef = useRef(new Map<Material, LandrushIslandRevealMaterialState>())
   const activeMaterialsRef = useRef(new Set<Material>())
+  const registeredNodeRootsRef = useRef(new Set<Object3D>())
   const lastRefreshAtRef = useRef(-Infinity)
+  const lastStairTransitionTopYRef = useRef<number | null>(null)
   const lastProbeAtRef = useRef(-Infinity)
   const revealActiveRef = useRef(false)
   const clippingPlanesRef = useRef(
-    Array.from({ length: LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Plane()),
+    Array.from(
+      { length: LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS + 1 },
+      () => new Plane(),
+    ),
   )
   const boundaryPointsRef = useRef(
     Array.from({ length: LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Vector3()),
   )
   const cameraPositionRef = useRef(new Vector3())
   const robotVisualRootRef = useRef(new Vector3())
-  const robotVisualBoundsRef = useRef(new Box3())
-  const robotVisualBoundsCenterRef = useRef(new Vector3())
-  const robotVisualBoundsCornersRef = useRef(Array.from({ length: 8 }, () => new Vector3()))
   const robotBaseRef = useRef(new Vector3())
   const robotHeadRef = useRef(new Vector3())
   const robotCenterRef = useRef(new Vector3())
   const robotNdcRef = useRef(new Vector3())
+  const robotViewPointRef = useRef(new Vector3())
+  const revealDepthNormalRef = useRef(new Vector3())
+  const revealDepthPointRef = useRef(new Vector3())
   const revealScreenRef = useRef({ x: 0, y: 0 })
   const hoverAmountRef = useRef(0)
   const rendererClippingRef = useRef<{
     localClippingEnabled?: boolean
     renderer: { localClippingEnabled?: boolean }
   } | null>(null)
-
   const restoreClipping = useCallback(() => {
     clearLandrushRobotScreenRevealMask()
     for (const [object, state] of objectStatesRef.current) {
@@ -8554,6 +8356,8 @@ function LandrushIslandRobotScreenRevealClipper({
     }
     materialStatesRef.current.clear()
     activeMaterialsRef.current.clear()
+    lastRefreshAtRef.current = -Infinity
+    lastStairTransitionTopYRef.current = null
     const rendererState = rendererClippingRef.current
     if (rendererState) {
       rendererState.renderer.localClippingEnabled = rendererState.localClippingEnabled
@@ -8603,16 +8407,6 @@ function LandrushIslandRobotScreenRevealClipper({
     const robotVisualRoot = visualRoot
       ? robotVisualRootRef.current.setFromMatrixPosition(visualRoot.matrixWorld)
       : null
-    const robotScreenBounds = visualRoot
-      ? projectLandrushIslandObjectScreenBounds({
-          bounds: robotVisualBoundsRef.current,
-          camera,
-          corners: robotVisualBoundsCornersRef.current,
-          height,
-          object: visualRoot,
-          width,
-        })
-      : null
     const robotVisualY =
       robotVisualRoot?.y ??
       motion.position.y + resolveLandrushRobotHoverOffset(hoverAmountRef.current, clock.elapsedTime)
@@ -8620,16 +8414,35 @@ function LandrushIslandRobotScreenRevealClipper({
     const robotZ = robotVisualRoot?.z ?? motion.position.z
     const robotPoint = { x: robotX, z: robotZ }
     cameraPositionRef.current.setFromMatrixPosition(camera.matrixWorld)
-    if (clock.elapsedTime - lastRefreshAtRef.current > 0.35) {
+    const nodes = useScene.getState().nodes
+    const registeredNodeRoots = registeredNodeRootsRef.current
+    const stairTransitionTopY = resolveLandrushIslandRobotRevealStairTransitionTopY(
+      nodes,
+      robotPoint,
+      structureGroundY,
+    )
+    const stairTransitionChanged =
+      stairTransitionTopY === null
+        ? lastStairTransitionTopYRef.current !== null
+        : lastStairTransitionTopYRef.current === null ||
+          Math.abs(stairTransitionTopY - lastStairTransitionTopYRef.current) > 0.001
+    if (stairTransitionChanged || clock.elapsedTime - lastRefreshAtRef.current > 0.35) {
       lastRefreshAtRef.current = clock.elapsedTime
+      lastStairTransitionTopYRef.current = stairTransitionTopY
+      registeredNodeRoots.clear()
+      for (const object of sceneRegistry.nodes.values()) registeredNodeRoots.add(object)
       occludersRef.current = collectLandrushIslandRobotRevealOccluders(scene, {
         cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
         cameraY: cameraPositionRef.current.y,
         robotPoint,
         robotY: robotVisualY,
+        stairTransitionTopY,
         structureGroundY,
       })
-      materialsRef.current = collectLandrushIslandRobotRevealMaterials(occludersRef.current)
+      materialsRef.current = collectLandrushIslandRobotRevealMaterials(
+        occludersRef.current,
+        registeredNodeRoots,
+      )
     }
     const robotBase = robotBaseRef.current.set(
       robotX,
@@ -8641,38 +8454,45 @@ function LandrushIslandRobotScreenRevealClipper({
       robotVisualY + LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT,
       robotZ,
     )
-    const robotCenter = robotScreenBounds
-      ? robotVisualBoundsRef.current.getCenter(robotVisualBoundsCenterRef.current)
-      : robotCenterRef.current
-          .copy(robotBase)
-          .lerp(robotHead, LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS)
+    const robotCenter = robotCenterRef.current
+      .copy(robotBase)
+      .lerp(robotHead, LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS)
     const robotNdc = robotNdcRef.current.copy(robotCenter).project(camera)
     if (robotNdc.z < -1 || robotNdc.z > 1) {
       if (revealActiveRef.current) restoreClipping()
       return
     }
+    const robotCenterViewDepth = -robotViewPointRef.current
+      .copy(robotCenter)
+      .applyMatrix4(camera.matrixWorldInverse).z
+    const robotNearDepth =
+      robotCenterViewDepth - LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DEPTH_BIAS_METERS
+    if (!Number.isFinite(robotNearDepth) || robotNearDepth <= 0) {
+      if (revealActiveRef.current) restoreClipping()
+      return
+    }
+    const revealDepthNormal = camera
+      .getWorldDirection(revealDepthNormalRef.current)
+      .normalize()
+      .negate()
+    const revealDepthPoint = revealDepthPointRef.current
+      .copy(cameraPositionRef.current)
+      .addScaledVector(revealDepthNormal, -robotNearDepth)
 
     const baseScreen = projectLandrushIslandScreenPoint(robotBase.project(camera), width, height)
     const headScreen = projectLandrushIslandScreenPoint(robotHead.project(camera), width, height)
     const projectedCenterScreen = projectLandrushIslandScreenPoint(robotNdc, width, height)
-    const robotScreen = robotScreenBounds
-      ? { x: robotScreenBounds.centerX, y: robotScreenBounds.centerY }
-      : projectedCenterScreen
+    const robotScreen = projectedCenterScreen
     const robotScreenInsideViewport =
       robotScreen.x >= 0 && robotScreen.x <= width && robotScreen.y >= 0 && robotScreen.y <= height
-    const robotScreenHeight = robotScreenBounds
-      ? Math.max(robotScreenBounds.width, robotScreenBounds.height)
-      : Math.hypot(headScreen.x - baseScreen.x, headScreen.y - baseScreen.y)
+    const robotScreenHeight = Math.hypot(headScreen.x - baseScreen.x, headScreen.y - baseScreen.y)
     const baseRevealRadiusPx = Math.max(
       LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX,
       robotScreenHeight * LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE * 0.5,
     )
     const revealRadiusPx = baseRevealRadiusPx
     const revealOuterRadiusPx =
-      revealRadiusPx +
-      baseRevealRadiusPx *
-        (LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE - 1) *
-        LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_EXPANSION_SCALE
+      revealRadiusPx * LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE
     const revealScreen = revealScreenRef.current
     revealScreen.x = robotScreen.x
     revealScreen.y = robotScreen.y
@@ -8704,11 +8524,14 @@ function LandrushIslandRobotScreenRevealClipper({
       height,
       innerRadius: revealRadiusPx,
       outerRadius: revealOuterRadiusPx,
+      robotNearDepth,
       width,
     })
     updateLandrushIslandRobotRevealClippingPlanes({
       camera,
       cameraPosition: cameraPositionRef.current,
+      depthPlaneNormal: revealDepthNormal,
+      depthPlanePoint: revealDepthPoint,
       height,
       ndcZ: robotNdc.z,
       planes: clippingPlanesRef.current,
@@ -8735,15 +8558,9 @@ function LandrushIslandRobotScreenRevealClipper({
         ],
         revealScreen: [roundPerf(revealScreen.x), roundPerf(revealScreen.y)],
         revealScreenClamped,
-        robotScreenBounds: robotScreenBounds
-          ? [
-              roundPerf(robotScreenBounds.minX),
-              roundPerf(robotScreenBounds.minY),
-              roundPerf(robotScreenBounds.maxX),
-              roundPerf(robotScreenBounds.maxY),
-            ]
-          : null,
-        screenSource: robotScreenBounds ? 'visual-root-bounds' : 'visual-root-segment',
+        robotScreenBounds: null,
+        screenSource: 'visual-root-segment',
+        stairTransitionTopY,
         robotScreen: [roundPerf(robotScreen.x), roundPerf(robotScreen.y)],
         robotScreenInsideViewport,
         softMaterialCount: materialsRef.current.filter(isLandrushIslandSoftRevealMaterial).length,
@@ -8757,6 +8574,7 @@ function LandrushIslandRobotScreenRevealClipper({
         objectStates: objectStatesRef.current,
         objects: occludersRef.current,
         planes: clippingPlanesRef.current,
+        registeredNodeRoots,
       })
       return
     }
@@ -8826,39 +8644,52 @@ function applyLandrushIslandRevealObjectClipping({
   objectStates,
   objects,
   planes,
+  registeredNodeRoots,
 }: {
   activeObjects: Set<Object3D>
   objectStates: Map<Object3D, LandrushIslandRevealObjectState>
   objects: readonly LandrushIslandRobotRevealOccluder[]
   planes: Plane[]
+  registeredNodeRoots: ReadonlySet<Object3D>
 }) {
   activeObjects.clear()
-  for (const { hasSoftRevealMaterial, object } of objects) {
-    if (hasSoftRevealMaterial) continue
-    const target = resolveLandrushIslandRevealClippingObject(object)
-    if (!target) continue
-    activeObjects.add(target)
-    const clippingTarget = target as Object3D & {
-      clipIntersection?: unknown
-      clippingPlanes?: unknown
-      clipShadows?: unknown
-      enabled?: unknown
-      isClippingGroup?: unknown
-    }
-    if (!objectStates.has(target)) {
-      objectStates.set(target, {
-        clipIntersection: clippingTarget.clipIntersection,
-        clippingPlanes: clippingTarget.clippingPlanes,
-        clipShadows: clippingTarget.clipShadows,
-        enabled: clippingTarget.enabled,
-        isClippingGroup: clippingTarget.isClippingGroup,
-      })
-    }
-    clippingTarget.isClippingGroup = true
-    clippingTarget.clippingPlanes = planes
-    clippingTarget.enabled = true
-    clippingTarget.clipIntersection = true
-    clippingTarget.clipShadows = false
+  for (const { object } of objects) {
+    object.traverse((child) => {
+      if ((child as { isMesh?: boolean }).isMesh !== true) return
+      const mesh = child as Mesh
+      if (
+        !isLandrushRevealObjectOwnedByRoot(mesh, object, registeredNodeRoots) ||
+        !isLandrushIslandSoftRevealMeshVisible(mesh, object) ||
+        !isLandrushIslandRevealMeshDrawable(mesh)
+      ) {
+        return
+      }
+      if (getLandrushIslandMaterials(mesh.material).some(isLandrushIslandSoftRevealMaterial)) return
+      const target = resolveLandrushIslandRevealClippingObject(child)
+      if (!target) return
+      activeObjects.add(target)
+      const clippingTarget = target as Object3D & {
+        clipIntersection?: unknown
+        clippingPlanes?: unknown
+        clipShadows?: unknown
+        enabled?: unknown
+        isClippingGroup?: unknown
+      }
+      if (!objectStates.has(target)) {
+        objectStates.set(target, {
+          clipIntersection: clippingTarget.clipIntersection,
+          clippingPlanes: clippingTarget.clippingPlanes,
+          clipShadows: clippingTarget.clipShadows,
+          enabled: clippingTarget.enabled,
+          isClippingGroup: clippingTarget.isClippingGroup,
+        })
+      }
+      clippingTarget.isClippingGroup = true
+      clippingTarget.clippingPlanes = planes
+      clippingTarget.enabled = true
+      clippingTarget.clipIntersection = true
+      clippingTarget.clipShadows = false
+    })
   }
 
   for (const [object, state] of objectStates) {
@@ -8921,9 +8752,27 @@ function restoreLandrushIslandRevealMaterialClipping(
   materialStates.clear()
 }
 
+function isLandrushIslandSoftRevealMeshVisible(mesh: Mesh, root: Object3D) {
+  let current: Object3D | null = mesh
+  while (current) {
+    if (!current.visible) return false
+    if (current === root) return true
+    current = current.parent
+  }
+  return false
+}
+
+function isLandrushIslandRevealMeshDrawable(mesh: Mesh) {
+  const positionCount = mesh.geometry.getAttribute('position')?.count ?? 0
+  const elementCount = mesh.geometry.index?.count ?? positionCount
+  return positionCount >= 3 && elementCount >= 3
+}
+
 function updateLandrushIslandRobotRevealClippingPlanes({
   camera,
   cameraPosition,
+  depthPlaneNormal,
+  depthPlanePoint,
   height,
   ndcZ,
   planes,
@@ -8935,6 +8784,8 @@ function updateLandrushIslandRobotRevealClippingPlanes({
 }: {
   camera: Camera
   cameraPosition: Vector3
+  depthPlaneNormal: Vector3
+  depthPlanePoint: Vector3
   height: number
   ndcZ: number
   planes: Plane[]
@@ -8950,8 +8801,8 @@ function updateLandrushIslandRobotRevealClippingPlanes({
   const radiusNdcX = (radiusPx / width) * 2
   const radiusNdcY = (radiusPx / height) * 2
 
-  for (let index = 0; index < planes.length; index += 1) {
-    const angle = (index / planes.length) * Math.PI * 2
+  for (let index = 0; index < points.length; index += 1) {
+    const angle = (index / points.length) * Math.PI * 2
     points[index]
       ?.set(
         centerNdcX + Math.cos(angle) * radiusNdcX,
@@ -8961,8 +8812,8 @@ function updateLandrushIslandRobotRevealClippingPlanes({
       .unproject(camera)
   }
 
-  for (let index = 0; index < planes.length; index += 1) {
-    const nextIndex = (index + 1) % planes.length
+  for (let index = 0; index < points.length; index += 1) {
+    const nextIndex = (index + 1) % points.length
     const point = points[index]
     const nextPoint = points[nextIndex]
     const plane = planes[index]
@@ -8970,6 +8821,7 @@ function updateLandrushIslandRobotRevealClippingPlanes({
     plane.setFromCoplanarPoints(cameraPosition, nextPoint, point)
     if (plane.distanceToPoint(robotCenter) > 0) plane.negate()
   }
+  planes[points.length]?.setFromNormalAndCoplanarPoint(depthPlaneNormal, depthPlanePoint)
 }
 
 function collectLandrushIslandRobotRevealOccluders(
@@ -8990,18 +8842,31 @@ function collectLandrushIslandRobotRevealOccluders(
   scene.traverse((object) => {
     if (object.userData?.landrushRobotOccluder === true) occluders.add(object)
   })
-  return [...occluders].map((object) => ({
-    hasSoftRevealMaterial: objectHasLandrushIslandSoftRevealMaterial(object),
-    object,
-  }))
+  return [...occluders].map((object) => ({ object }))
 }
 
 function shouldSkipLandrushIslandRobotRevealOccluder(
   nodeId: AnyNodeId,
   context: LandrushIslandRobotRevealOccluderContext,
 ) {
-  const node = useScene.getState().nodes[nodeId]
+  const nodes = useScene.getState().nodes
+  const node = nodes[nodeId]
   if (!node) return false
+  const metadata = node.metadata as { isTransient?: boolean } | undefined
+  if (metadata?.isTransient) return true
+
+  const levelId = resolveLandrushIslandNavigationNodeLevelId(node, nodes)
+  if (levelId) {
+    const levelBaseY =
+      context.structureGroundY + resolveLandrushIslandActiveLevelBaseY(nodes, levelId)
+    if (
+      context.stairTransitionTopY !== null &&
+      levelBaseY >=
+        context.stairTransitionTopY - LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    ) {
+      return true
+    }
+  }
 
   if (node.type === 'stair') {
     return pointInLandrushIslandRevealStairFootprint(node, context.robotPoint)
@@ -9017,7 +8882,20 @@ function shouldSkipLandrushIslandRobotRevealOccluder(
   }
 
   if (node.type === 'slab') {
-    if (isLandrushIslandRobotRevealSupportSlab(node, context)) return true
+    const surfaceY = resolveLandrushIslandRobotRevealSurfaceY(node, context, nodes)
+    if (
+      surfaceY <=
+      context.robotY + LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    ) {
+      return true
+    }
+    if (
+      context.stairTransitionTopY !== null &&
+      surfaceY >=
+        context.stairTransitionTopY - LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    ) {
+      return true
+    }
     return !shouldCutLandrushIslandRobotRevealSurface(node, context)
   }
 
@@ -9028,46 +8906,47 @@ function shouldSkipLandrushIslandRobotRevealOccluder(
   return false
 }
 
+function resolveLandrushIslandRobotRevealStairTransitionTopY(
+  nodes: Record<string, AnyNode>,
+  robotPoint: LandrushPoint2,
+  structureGroundY: number,
+) {
+  let transitionTopY: number | null = null
+  for (const node of Object.values(nodes)) {
+    if (
+      node.type !== 'stair' ||
+      node.visible === false ||
+      !pointInLandrushIslandRevealStairFootprint(node, robotPoint)
+    ) {
+      continue
+    }
+    const levelId = resolveLandrushIslandNavigationNodeLevelId(node, nodes)
+    const levelBaseY = resolveLandrushIslandActiveLevelBaseY(nodes, levelId)
+    const localY = node.position?.[1] ?? 0
+    const topY = structureGroundY + levelBaseY + localY + Math.max(0, node.totalRise ?? 0)
+    transitionTopY = transitionTopY === null ? topY : Math.max(transitionTopY, topY)
+  }
+  return transitionTopY
+}
+
 function pointInLandrushIslandRevealStairFootprint(
   node: Extract<AnyNode, { type: 'stair' }>,
   point: LandrushPoint2,
 ) {
   const nodes = useScene.getState().nodes
-  const footprint = createLandrushIslandBuildNodeFootprint(
+  const footprints = createLandrushIslandStairNavigationFootprints(
     node,
-    LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
     nodes,
+    LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
   )
-  return Boolean(
-    footprint &&
+  return footprints.some(({ points }) =>
+    Boolean(
       pointInPolygonOrNearEdge(
         point,
-        footprint,
+        points,
         LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
       ),
-  )
-}
-
-function isLandrushIslandRobotRevealSupportSlab(
-  node: Extract<AnyNode, { type: 'slab' }>,
-  context: LandrushIslandRobotRevealOccluderContext,
-) {
-  const footprint = createLandrushIslandBuildNodeFootprint(node, 0, useScene.getState().nodes)
-  if (
-    !footprint ||
-    !pointInPolygonOrNearEdge(
-      context.robotPoint,
-      footprint,
-      LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS,
-    )
-  ) {
-    return false
-  }
-  return (
-    Math.abs(
-      resolveLandrushIslandRobotRevealSurfaceY(node, context, useScene.getState().nodes) -
-        context.robotY,
-    ) <= LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS
+    ),
   )
 }
 
@@ -9128,18 +9007,24 @@ function resolveLandrushIslandRobotRevealSurfaceY(
 
 function collectLandrushIslandRobotRevealMaterials(
   occluders: readonly LandrushIslandRobotRevealOccluder[],
+  registeredNodeRoots: ReadonlySet<Object3D>,
 ) {
   const materials = new Set<Material>()
   for (const { object } of occluders) {
-    collectLandrushIslandObjectMaterials(object, materials)
+    collectLandrushIslandObjectMaterials(object, registeredNodeRoots, materials)
   }
   return [...materials]
 }
 
-function collectLandrushIslandObjectMaterials(object: Object3D, materials: Set<Material>) {
+function collectLandrushIslandObjectMaterials(
+  object: Object3D,
+  registeredNodeRoots: ReadonlySet<Object3D>,
+  materials: Set<Material>,
+) {
   object.traverse((child) => {
     const mesh = child as { isMesh?: boolean; material?: unknown }
     if (!mesh.isMesh) return
+    if (!isLandrushRevealObjectOwnedByRoot(child, object, registeredNodeRoots)) return
     for (const material of getLandrushIslandMaterials(mesh.material)) {
       materials.add(material)
     }
@@ -9157,85 +9042,6 @@ function isLandrushIslandMaterial(material: unknown): material is Material {
 
 function isLandrushIslandSoftRevealMaterial(material: Material) {
   return material.userData?.landrushRobotScreenRevealSoftMask === true
-}
-
-function objectHasLandrushIslandSoftRevealMaterial(object: Object3D) {
-  let hasSoftRevealMaterial = false
-  object.traverse((child) => {
-    if (hasSoftRevealMaterial) return
-    const material = (child as { material?: Material | Material[] }).material
-    if (!material) return
-    hasSoftRevealMaterial = getLandrushIslandMaterials(material).some(
-      isLandrushIslandSoftRevealMaterial,
-    )
-  })
-  return hasSoftRevealMaterial
-}
-
-function projectLandrushIslandObjectScreenBounds({
-  bounds,
-  camera,
-  corners,
-  height,
-  object,
-  width,
-}: {
-  bounds: Box3
-  camera: Camera
-  corners: Vector3[]
-  height: number
-  object: Object3D
-  width: number
-}): LandrushIslandRobotScreenBounds | null {
-  bounds.setFromObject(object)
-  if (bounds.isEmpty()) return null
-
-  const min = bounds.min
-  const max = bounds.max
-  corners[0]?.set(min.x, min.y, min.z)
-  corners[1]?.set(max.x, min.y, min.z)
-  corners[2]?.set(min.x, max.y, min.z)
-  corners[3]?.set(max.x, max.y, min.z)
-  corners[4]?.set(min.x, min.y, max.z)
-  corners[5]?.set(max.x, min.y, max.z)
-  corners[6]?.set(min.x, max.y, max.z)
-  corners[7]?.set(max.x, max.y, max.z)
-
-  let minX = Number.POSITIVE_INFINITY
-  let minY = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  let maxY = Number.NEGATIVE_INFINITY
-  let validCorners = 0
-
-  for (const corner of corners) {
-    const projected = corner.project(camera)
-    if (
-      !Number.isFinite(projected.x) ||
-      !Number.isFinite(projected.y) ||
-      !Number.isFinite(projected.z)
-    ) {
-      continue
-    }
-    const screen = projectLandrushIslandScreenPoint(projected, width, height)
-    if (!Number.isFinite(screen.x) || !Number.isFinite(screen.y)) continue
-    minX = Math.min(minX, screen.x)
-    minY = Math.min(minY, screen.y)
-    maxX = Math.max(maxX, screen.x)
-    maxY = Math.max(maxY, screen.y)
-    validCorners += 1
-  }
-
-  if (validCorners === 0 || maxX <= minX || maxY <= minY) return null
-  return {
-    centerX: (minX + maxX) / 2,
-    centerY: (minY + maxY) / 2,
-    height: maxY - minY,
-    maxX,
-    maxY,
-    minX,
-    minY,
-    width: maxX - minX,
-  }
 }
 
 function setLandrushIslandGroupMaterialOpacity(group: Group, opacity: number) {
@@ -13691,6 +13497,10 @@ function resolveRightHoldMovement({
     stairPortals,
     stairConnectors,
   )
+  const activeStairPortals = resolveLandrushIslandNavigationLegStairPortals(
+    leg,
+    activeNavigation.stairPortals,
+  )
 
   const steeringPoint = resolveLandrushIslandNavigationSteeringPoint(
     start,
@@ -13698,7 +13508,7 @@ function resolveRightHoldMovement({
     activeNavigation.navigationObstacles,
     activeNavigation.doorPortals,
     surfacePoints,
-    activeNavigation.stairPortals,
+    activeStairPortals,
   )
   if (!steeringPoint) return null
   openLandrushIslandDoorPortalsAlongSegment(start, leg.point, activeNavigation.doorPortals)
@@ -13743,7 +13553,7 @@ function resolveClickMoveMovement(
     stairConnectors,
   )
   if (!leg) return null
-  const activeStairPortals = leg.final ? [] : stairPortals
+  const activeStairPortals = resolveLandrushIslandNavigationLegStairPortals(leg, stairPortals)
   const navigationTarget = leg.point
   const distance = Math.hypot(navigationTarget.x - start.x, navigationTarget.z - start.z)
   if (target.route?.legKey !== leg.key) {
@@ -16898,6 +16708,7 @@ function landrushIslandNavigationObstaclesWithoutStairRun(
   return obstacles.filter(
     (obstacle) =>
       obstacle.nodeId !== portal.nodeId &&
+      !(obstacle.kind === 'stair' && obstacle.stairId === portal.stairId) &&
       !(obstacle.kind === 'stair' && pointInPolygonOrNearEdge(portal.center, obstacle.points)),
   )
 }

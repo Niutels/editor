@@ -35,6 +35,9 @@ const LANDRUSH_ROBOT_CLIP_BLEND_RESPONSE = 8
 const LANDRUSH_ROBOT_CLIP_TIME_SCALE_RESPONSE = 10
 const LANDRUSH_ROBOT_FALL_RESPONSE = 7
 const LANDRUSH_ROBOT_FALL_SPIN_SPEED = 1.35
+const LANDRUSH_ROBOT_FALL_JOINT_MOTION_AMPLITUDE = 28.8
+// Drei's mixer writes at 0 and post-processing renders at 1, so procedural bones own the gap.
+const LANDRUSH_ROBOT_SKELETAL_POSE_FRAME_PRIORITY = 0.5
 const LANDRUSH_ROBOT_UP_AXIS = new Vector3(0, 1, 0)
 const LANDRUSH_ROBOT_IDENTITY_QUATERNION = new Quaternion()
 export const LANDRUSH_ROBOT_HOVER_OFFSET = 1.524
@@ -232,6 +235,7 @@ export function LandrushRobot({
   const hoverAmountRef = useRef(0)
   const fallAmountRef = useRef(0)
   const fallSpinRef = useRef(0)
+  const fallJointMotionTimeRef = useRef(0)
   const headingQuaternionRef = useRef(new Quaternion())
   const fallControlQuaternionRef = useRef(new Quaternion())
   const fallProceduralEulerRef = useRef(new Euler())
@@ -309,6 +313,19 @@ export function LandrushRobot({
     walkAction,
   ])
 
+  useFrame(() => {
+    measure('frame.robot-glb.apply-hover-pose', () => {
+      applyLandrushRobotHoverPose(clonedScene, hoverAmountRef.current, hoverRestPose)
+      applyLandrushRobotFallPose(
+        clonedScene,
+        fallAmountRef.current,
+        hoverRestPose,
+        fallJointMotionTimeRef.current,
+        fallIntensityValue,
+      )
+    })
+  }, LANDRUSH_ROBOT_SKELETAL_POSE_FRAME_PRIORITY)
+
   useFrame(({ clock }, delta) => {
     measure('frame.robot-glb.total', () => {
       const frameDelta = Math.min(delta, 0.05)
@@ -336,8 +353,10 @@ export function LandrushRobot({
             fallMotionScaleValue *
             LANDRUSH_ROBOT_FALL_SPIN_SPEED *
             (0.35 + fallAmountRef.current)
+          fallJointMotionTimeRef.current += frameDelta
         } else {
           fallSpinRef.current = 0
+          fallJointMotionTimeRef.current = 0
         }
         return fallAmountRef.current
       })
@@ -454,17 +473,6 @@ export function LandrushRobot({
             .multiply(headingQuaternionRef.current)
             .multiply(fallProceduralQuaternionRef.current)
         }
-      })
-
-      measure('frame.robot-glb.apply-hover-pose', () => {
-        applyLandrushRobotHoverPose(clonedScene, hoverAmount, hoverRestPose)
-        applyLandrushRobotFallPose(
-          clonedScene,
-          fallAmount,
-          hoverRestPose,
-          fallSpinRef.current,
-          fallIntensityValue,
-        )
       })
 
       if (onHoverPoseSample) {
@@ -725,7 +733,7 @@ function applyLandrushRobotFallPose(
   root: Group,
   fallAmount: number,
   restPose: LandrushRobotRestPose,
-  spin: number,
+  jointMotionTime: number,
   fallIntensity: number,
 ) {
   if (fallAmount <= 0.0001) return
@@ -739,7 +747,7 @@ function applyLandrushRobotFallPose(
     const poseTarget = resolveLandrushRobotFallBonePose(
       child.name.toLowerCase(),
       restRotation,
-      spin,
+      jointMotionTime,
       fallIntensity,
     )
     if (!poseTarget) return
@@ -755,57 +763,86 @@ function applyLandrushRobotFallPose(
 function resolveLandrushRobotFallBonePose(
   name: string,
   restRotation: Euler,
-  spin: number,
+  jointMotionTime: number,
   fallIntensity: number,
 ) {
   const side = name.includes('left') ? 1 : name.includes('right') ? -1 : 0
   const looseAmount = MathUtils.smoothstep(fallIntensity, 0, 1)
-  const phase = landrushRobotBonePhase(name)
-  const wiggle = Math.sin(spin * 4.2 + phase) * looseAmount * 2.25
-  const counterWiggle = Math.sin(spin * 3.1 + phase * 0.73) * looseAmount * 2.1
+  const motionAmount =
+    MathUtils.lerp(0.35, 1, looseAmount) * LANDRUSH_ROBOT_FALL_JOINT_MOTION_AMPLITUDE
+  const xMotion = resolveLandrushRobotFallJointAxisMotion(name, 'x', jointMotionTime, motionAmount)
+  const yMotion = resolveLandrushRobotFallJointAxisMotion(name, 'y', jointMotionTime, motionAmount)
+  const zMotion = resolveLandrushRobotFallJointAxisMotion(name, 'z', jointMotionTime, motionAmount)
   if (name.includes('hips')) {
     return {
-      x: restRotation.x + 0.22 + wiggle * 0.07,
-      y: restRotation.y + counterWiggle * 0.05,
-      z: restRotation.z + 0.16 + wiggle * 0.08,
+      x: restRotation.x + 0.22 + xMotion * 0.025,
+      y: restRotation.y + yMotion * 0.02,
+      z: restRotation.z + 0.16 + zMotion * 0.03,
     }
   }
   if (name.includes('spine')) {
     return {
-      x: restRotation.x + 0.34 + wiggle * 0.1,
-      y: restRotation.y + counterWiggle * 0.08,
-      z: restRotation.z - 0.18 + wiggle * 0.1,
+      x: restRotation.x + 0.34 + xMotion * 0.04,
+      y: restRotation.y + yMotion * 0.035,
+      z: restRotation.z - 0.18 + zMotion * 0.045,
     }
   }
   if (name.includes('neck') || name.includes('head')) {
     return {
-      x: restRotation.x - 0.26 + counterWiggle * 0.09,
-      y: restRotation.y + wiggle * 0.08,
-      z: restRotation.z + 0.12 + wiggle * 0.08,
+      x: restRotation.x - 0.26 + xMotion * 0.045,
+      y: restRotation.y + yMotion * 0.04,
+      z: restRotation.z + 0.12 + zMotion * 0.04,
+    }
+  }
+  if (name.includes('shoulder')) {
+    return {
+      x: restRotation.x + 0.18 + xMotion * 0.055,
+      y: restRotation.y + side * 0.1 + yMotion * 0.06,
+      z: restRotation.z + (side || 1) * 0.25 + zMotion * 0.07,
     }
   }
   if (name.includes('arm') || name.includes('hand')) {
     return {
-      x: restRotation.x + 0.58 + wiggle * 0.2,
-      y: restRotation.y + side * 0.18 + counterWiggle * 0.14,
-      z: restRotation.z + (side || 1) * (0.95 + wiggle * 0.22),
+      x: restRotation.x + 0.58 + xMotion * 0.075,
+      y: restRotation.y + side * 0.18 + yMotion * 0.055,
+      z: restRotation.z + (side || 1) * 0.95 + zMotion * 0.09,
     }
   }
   if (name.includes('leg') || name.includes('thigh') || name.includes('calf')) {
     return {
-      x: restRotation.x - 0.42 + counterWiggle * 0.18,
-      y: restRotation.y + wiggle * 0.12,
-      z: restRotation.z + (side || 1) * (0.42 + counterWiggle * 0.16),
+      x: restRotation.x - 0.42 + xMotion * 0.07,
+      y: restRotation.y + yMotion * 0.045,
+      z: restRotation.z + (side || 1) * 0.42 + zMotion * 0.065,
     }
   }
   if (name.includes('foot') || name.includes('toe')) {
     return {
-      x: restRotation.x + 0.5 + wiggle * 0.14,
-      y: restRotation.y + counterWiggle * 0.1,
-      z: restRotation.z + (side || 1) * (0.26 + wiggle * 0.1),
+      x: restRotation.x + 0.5 + xMotion * 0.08,
+      y: restRotation.y + yMotion * 0.05,
+      z: restRotation.z + (side || 1) * 0.26 + zMotion * 0.055,
     }
   }
   return null
+}
+
+function resolveLandrushRobotFallJointAxisMotion(
+  name: string,
+  axis: 'x' | 'y' | 'z',
+  jointMotionTime: number,
+  motionAmount: number,
+) {
+  const phase = landrushRobotBonePhase(`${name}:${axis}:phase`)
+  const secondaryPhase = landrushRobotBonePhase(`${name}:${axis}:secondary-phase`)
+  const speedSeed = landrushRobotBonePhase(`${name}:${axis}:speed`) % 1
+  const ratioSeed = landrushRobotBonePhase(`${name}:${axis}:ratio`) % 1
+  const speed = MathUtils.lerp(0.48, 1, speedSeed)
+  const secondarySpeedRatio = MathUtils.lerp(1.31, 1.87, ratioSeed)
+  return (
+    ((Math.sin(jointMotionTime * speed + phase) +
+      Math.sin(jointMotionTime * speed * secondarySpeedRatio + secondaryPhase) * 0.38) /
+      1.38) *
+    motionAmount
+  )
 }
 
 function landrushRobotBonePhase(name: string) {

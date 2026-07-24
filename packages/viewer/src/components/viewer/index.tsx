@@ -37,7 +37,11 @@ import { SceneRenderer } from '../renderers/scene-renderer'
 import FrameLimiter from './frame-limiter'
 import { Lights } from './lights'
 import { PerfMonitor } from './perf-monitor'
-import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
+import PostProcessing, {
+  DEFAULT_HOVER_STYLES,
+  type HoverStyles,
+  type ViewerPresentationEffectRef,
+} from './post-processing'
 import { RegisteredSystems } from './registered-systems'
 import { RenderSchedulerBridge } from './render-scheduler-bridge'
 import { SceneBvh } from './scene-bvh'
@@ -395,11 +399,13 @@ interface ViewerProps {
    * Skip the TSL post-processing pipeline (SSGI/denoise/ink/outline) and render
    * the scene directly. For headless/capture surfaces (the bake page) where
    * frame quality is irrelevant: on a software-rasterised worker the pipeline
-   * consumes the whole CPU budget and bakes time out. Equivalent to the
-   * `?disable=postFx` diagnostic URL flag, but host-controlled.
+   * consumes the whole CPU budget and bakes time out. When
+   * `presentationEffectRef` is supplied, only its lightweight pass remains.
+   * The `?disable=postFx` diagnostic URL flag also bypasses that explicit pass.
    */
   disablePostFx?: boolean
   defaultCamera?: boolean
+  presentationEffectRef?: ViewerPresentationEffectRef
   rendererBackend?: MaterialRendererBackend
 }
 
@@ -431,6 +437,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     sceneReadyMaxWaitMs,
     disablePostFx = false,
     defaultCamera = true,
+    presentationEffectRef,
     rendererBackend = 'webgpu',
   },
   ref,
@@ -637,7 +644,11 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             kind's `def.system` is loaded via lazy() and rendered here,
             ordered by `system.priority`. */}
         <RegisteredSystems />
-        <PostProcessing disablePostFx={disablePostFx} hoverStyles={hoverStyles} />
+        <PostProcessing
+          disablePostFx={disablePostFx}
+          hoverStyles={hoverStyles}
+          presentationEffectRef={presentationEffectRef}
+        />
         {selectionManager === 'default' && <SelectionManager />}
         {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
         {children}

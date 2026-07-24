@@ -17,6 +17,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { createClickGestureDeduper } from '../../../lib/click-gesture-deduper'
 import { sfxEmitter } from '../../../lib/sfx-bus'
 import {
   resolveStairDestinationLevel,
@@ -230,6 +231,7 @@ export const StairTool: React.FC = () => {
     if (!currentLevelId) return
 
     const openingPreview = createSurfaceOpeningPreviewController()
+    const acceptPlacementClick = createClickGestureDeduper()
 
     // Reset rotation when tool activates
     rotationRef.current = 0
@@ -448,6 +450,7 @@ export const StairTool: React.FC = () => {
         ? lastCanonicalPositionRef.current
         : getAlignedGridPosition(event as GridEvent)
       if (!position) return
+      if (!acceptPlacementClick(event)) return
 
       commitStairPlacement(currentLevelId, position, rotationRef.current)
       openingPreview.clear()

@@ -17,6 +17,7 @@ import {
   SceneEnvironment,
   useViewer,
   Viewer,
+  type ViewerPresentationEffectRef,
 } from '@pascal-app/viewer'
 import {
   memo,
@@ -200,9 +201,12 @@ export interface EditorProps {
   viewerDefaultCamera?: boolean
   /** Controls the grid mesh only; placement-plane pointer events remain active for editor tools. */
   viewerEditorGrid?: boolean
+  viewerEditorGridVisualOffset?: number
+  viewerEditorGridY?: number
   viewerEditorSystems?: boolean
   viewerSceneEnvironment?: boolean
   viewerPostProcessing?: boolean
+  viewerPresentationEffectRef?: ViewerPresentationEffectRef
   viewerRendererBackend?: MaterialRendererBackend
   viewerSceneChildren?: ReactNode
   viewerUseBvh?: boolean
@@ -751,15 +755,25 @@ function PaintCursorBadge({
 // Subscribes to `gridSnapStep` so the visible grid cell size matches whatever
 // the wall draft tool snaps to — otherwise the cursor lands between visible
 // grid lines when the user picks a finer snap (0.25 / 0.1 / 0.05).
-function SnapAwareGrid({ renderVisual }: { renderVisual: boolean }) {
+function SnapAwareGrid({
+  baseY,
+  renderVisual,
+  visualOffset,
+}: {
+  baseY?: number
+  renderVisual: boolean
+  visualOffset?: number
+}) {
   const gridSnapStep = useEditor((s) => s.gridSnapStep)
   return (
     <Grid
+      baseY={baseY}
       cellColor="#aaa"
       cellSize={gridSnapStep}
       fadeDistance={500}
       renderVisual={renderVisual}
       sectionColor="#ccc"
+      visualOffset={visualOffset}
     />
   )
 }
@@ -777,6 +791,8 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   viewerCameraControls,
   viewerCameraInitialPose,
   viewerEditorGrid,
+  viewerEditorGridVisualOffset,
+  viewerEditorGridY,
   viewerEditorSystems,
   viewerSceneEnvironment,
   viewerSceneChildren,
@@ -791,6 +807,8 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
   viewerCameraControls: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerEditorGrid: boolean
+  viewerEditorGridVisualOffset?: number
+  viewerEditorGridY?: number
   viewerEditorSystems: boolean
   viewerSceneEnvironment: boolean
   viewerSceneChildren?: ReactNode
@@ -828,7 +846,11 @@ const ViewerSceneContent = memo(function ViewerSceneContent({
       {viewerEditorSystems ? <RoofEditSystem /> : null}
       {viewerEditorSystems ? <StairEditSystem /> : null}
       {showEditorChrome && !(isLoading || isFirstPersonMode) ? (
-        <SnapAwareGrid renderVisual={viewerEditorGrid} />
+        <SnapAwareGrid
+          baseY={viewerEditorGridY}
+          renderVisual={viewerEditorGrid}
+          visualOffset={viewerEditorGridVisualOffset}
+        />
       ) : null}
       {showEditorChrome && !(isLoading || noEditing) ? <ToolManager /> : null}
       {isFirstPersonMode && <FirstPersonControls />}
@@ -1029,9 +1051,12 @@ const ViewerCanvas = memo(function ViewerCanvas({
   viewerCameraInitialPose,
   viewerDefaultCamera,
   viewerEditorGrid,
+  viewerEditorGridVisualOffset,
+  viewerEditorGridY,
   viewerEditorSystems,
   viewerSceneEnvironment,
   viewerPostProcessing,
+  viewerPresentationEffectRef,
   viewerRendererBackend,
   viewerSceneChildren,
   viewerUseBvh,
@@ -1051,9 +1076,12 @@ const ViewerCanvas = memo(function ViewerCanvas({
   viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerDefaultCamera?: boolean
   viewerEditorGrid: boolean
+  viewerEditorGridVisualOffset?: number
+  viewerEditorGridY?: number
   viewerEditorSystems: boolean
   viewerSceneEnvironment: boolean
   viewerPostProcessing?: boolean
+  viewerPresentationEffectRef?: ViewerPresentationEffectRef
   viewerRendererBackend?: MaterialRendererBackend
   viewerSceneChildren?: ReactNode
   viewerUseBvh?: boolean
@@ -1179,6 +1207,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
               disablePostFx={viewerPostProcessing === false}
               hoverStyles={EDITOR_HOVER_STYLES}
               onSceneReadyChange={onSceneReadyChange}
+              presentationEffectRef={viewerPresentationEffectRef}
               renderContext="editor"
               rendererBackend={viewerRendererBackend}
               sceneReadyKey={sceneReadyKey}
@@ -1196,6 +1225,8 @@ const ViewerCanvas = memo(function ViewerCanvas({
                 viewerCameraControls={viewerCameraControls}
                 viewerCameraInitialPose={viewerCameraInitialPose}
                 viewerEditorGrid={viewerEditorGrid}
+                viewerEditorGridVisualOffset={viewerEditorGridVisualOffset}
+                viewerEditorGridY={viewerEditorGridY}
                 viewerEditorSystems={viewerEditorSystems}
                 viewerSceneEnvironment={viewerSceneEnvironment}
                 viewerSceneChildren={viewerSceneChildren}
@@ -1240,9 +1271,12 @@ export default function Editor({
   viewerCameraInitialPose,
   viewerDefaultCamera,
   viewerEditorGrid = true,
+  viewerEditorGridVisualOffset,
+  viewerEditorGridY,
   viewerEditorSystems = true,
   viewerSceneEnvironment = true,
   viewerPostProcessing,
+  viewerPresentationEffectRef,
   viewerRendererBackend,
   viewerSceneChildren,
   viewerUseBvh,
@@ -1427,6 +1461,7 @@ export default function Editor({
       defaultRender={EDITOR_DEFAULT_RENDER}
       disablePostFx={viewerPostProcessing === false}
       hoverStyles={EDITOR_HOVER_STYLES}
+      presentationEffectRef={viewerPresentationEffectRef}
       renderContext="editor"
       rendererBackend={viewerRendererBackend}
       selectionManager="default"
@@ -1462,9 +1497,12 @@ export default function Editor({
       viewerCameraInitialPose={viewerCameraInitialPose}
       viewerDefaultCamera={viewerDefaultCamera}
       viewerEditorGrid={viewerEditorGrid}
+      viewerEditorGridVisualOffset={viewerEditorGridVisualOffset}
+      viewerEditorGridY={viewerEditorGridY}
       viewerEditorSystems={viewerEditorSystems}
       viewerSceneEnvironment={viewerSceneEnvironment}
       viewerPostProcessing={viewerPostProcessing}
+      viewerPresentationEffectRef={viewerPresentationEffectRef}
       viewerRendererBackend={viewerRendererBackend}
       viewerSceneChildren={viewerSceneChildren}
       viewerUseBvh={viewerUseBvh}

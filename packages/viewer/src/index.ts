@@ -35,7 +35,13 @@ export {
   type GlbWalkthrough,
 } from './components/viewer/glb-scene'
 export { GlbWalkthroughController } from './components/viewer/glb-walkthrough-controller'
-export type { HoverStyle, HoverStyles } from './components/viewer/post-processing'
+export type {
+  HoverStyle,
+  HoverStyles,
+  ViewerPresentationEffectDebugMode,
+  ViewerPresentationEffectRef,
+  ViewerPresentationEffectState,
+} from './components/viewer/post-processing'
 export {
   DEFAULT_HOVER_STYLES,
   SSGI_PARAMS,

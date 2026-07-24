@@ -43,6 +43,7 @@ import {
   clearPlacementSurface,
   publishPlacementSurface,
 } from '../../../lib/active-placement-surface'
+import { createClickGestureDeduper } from '../../../lib/click-gesture-deduper'
 import { EDITOR_LAYER } from '../../../lib/constants'
 import { formatLinearMeasurement } from '../../../lib/measurements'
 import { sfxEmitter } from '../../../lib/sfx-bus'
@@ -430,6 +431,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     useScene.temporal.getState().pause()
 
     const validators = { canPlaceOnFloor, canPlaceOnWall, canPlaceOnCeiling }
+    const acceptPlacementClick = createClickGestureDeduper()
 
     // Lazily-gathered alignment candidates — the corner anchors of every
     // OTHER floor-placed node, excluding the draft. Computed on the first
@@ -958,6 +960,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
       useAlignmentGuides.getState().clear()
       const result = floorStrategy.click(getContext(), event, getActiveValidators())
       if (!result) return
+      if (!acceptPlacementClick(event)) return
 
       // Preserve cursor rotation for the next draft
       const currentRotation: [number, number, number] = [
@@ -1186,6 +1189,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     const onWallClick = (event: WallEvent) => {
       const result = wallStrategy.click(getContext(), event, getActiveValidators())
       if (!result) return
+      if (!acceptPlacementClick(event)) return
 
       event.stopPropagation()
       // Clear live transform before commit
@@ -1346,6 +1350,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     const onRoofWallClick = (event: RoofEvent) => {
       const result = roofWallStrategy.click(getContext(), event, altFreeRef.current)
       if (!result) return
+      if (!acceptPlacementClick(event)) return
 
       event.stopPropagation()
       if (draftNode.current) {
@@ -1591,6 +1596,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
             const synthetic = { ...event, node: shelfNode } as unknown as ItemEvent
             const result = shelfSurfaceStrategy.click(ctx, synthetic as never)
             if (result) {
+              if (!acceptPlacementClick(event)) return
               event.stopPropagation()
               if (draftNode.current) {
                 useLiveTransforms.getState().clear(draftNode.current.id)
@@ -1619,6 +1625,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
             const synthetic = { ...event, node: hostNode } as ItemEvent
             const result = itemSurfaceStrategy.click(ctx, synthetic)
             if (result) {
+              if (!acceptPlacementClick(event)) return
               event.stopPropagation()
               if (draftNode.current) {
                 useLiveTransforms.getState().clear(draftNode.current.id)
@@ -1650,6 +1657,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
             const synthetic = { ...event, node: ceilingNode } as unknown as CeilingEvent
             const result = ceilingStrategy.click(ctx, synthetic, getActiveValidators())
             if (result) {
+              if (!acceptPlacementClick(event)) return
               event.stopPropagation()
               if (draftNode.current) {
                 useLiveTransforms.getState().clear(draftNode.current.id)
@@ -1680,6 +1688,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
 
       const result = itemSurfaceStrategy.click(getContext(), event)
       if (!result) return
+      if (!acceptPlacementClick(event)) return
 
       event.stopPropagation()
       // Clear live transform before commit
@@ -1811,6 +1820,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     const onCeilingClick = (event: CeilingEvent) => {
       const result = ceilingStrategy.click(getContext(), event, getActiveValidators())
       if (!result) return
+      if (!acceptPlacementClick(event)) return
 
       event.stopPropagation()
       // Clear live transform before commit
@@ -1952,6 +1962,7 @@ export function usePlacementCoordinator(config: PlacementCoordinatorConfig): Rea
     const onShelfClick = (event: ShelfEvent) => {
       const result = shelfSurfaceStrategy.click(getContext(), event)
       if (!result) return
+      if (!acceptPlacementClick(event)) return
 
       event.stopPropagation()
       if (draftNode.current) {

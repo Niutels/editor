@@ -10,10 +10,12 @@ import {
   registerNode,
   ShelfNode,
   SiteNode,
+  StairNode,
+  StairSegmentNode,
   sceneRegistry,
   useScene,
 } from '@pascal-app/core'
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three'
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Raycaster, Vector3 } from 'three'
 import { buildFirstPersonColliderWorldFromRegistry } from './build-collider-world'
 
 function registerColliderDefinition(
@@ -145,6 +147,47 @@ describe('buildFirstPersonColliderWorldFromRegistry', () => {
     const world = buildFirstPersonColliderWorldFromRegistry()
 
     expect(world).toBeNull()
+  })
+
+  test('uses a continuous walkable ramp for straight stair flights', () => {
+    registerColliderDefinition('stair', StairNode, 'structure')
+    registerColliderDefinition('stair-segment', StairSegmentNode, 'structure')
+
+    const segment = StairSegmentNode.parse({
+      height: 0.8,
+      id: 'sseg_test',
+      length: 3,
+      stepCount: 6,
+      width: 1.2,
+    })
+    const stair = StairNode.parse({
+      children: [segment.id],
+      id: 'stair_test',
+      totalRise: 0.8,
+      width: 1.2,
+    })
+    setSceneNodes([stair, segment])
+
+    const stairGroup = new Group()
+    const literalSteps = new Mesh(new BoxGeometry(1.2, 0.8, 3), new MeshBasicMaterial())
+    literalSteps.name = 'merged-stair'
+    literalSteps.position.set(0, 0.4, 1.5)
+    stairGroup.add(literalSteps)
+    stairGroup.updateMatrixWorld(true)
+    sceneRegistry.nodes.set(stair.id, stairGroup)
+    sceneRegistry.byType[stair.type]!.add(stair.id)
+    mountNode(segment, [10, 10, 10], [20, 5, 0])
+
+    const world = buildFirstPersonColliderWorldFromRegistry()
+    const raycaster = new Raycaster(new Vector3(0, 5, 1.5), new Vector3(0, -1, 0))
+    const hit = world ? raycaster.intersectObject(world.mesh, false)[0] : undefined
+
+    expect(world).not.toBeNull()
+    expect(world?.bounds?.max.x).toBeCloseTo(0.6)
+    expect(hit?.point.y).toBeCloseTo(0.4, 2)
+    expect(hit?.face?.normal.y).toBeGreaterThan(0.9)
+    expect(Math.abs(hit?.face?.normal.z ?? 0)).toBeGreaterThan(0.2)
+    world?.dispose()
   })
 
   test('adds a fallback floor for a visible level with no slab', () => {

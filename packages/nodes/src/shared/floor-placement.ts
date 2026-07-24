@@ -9,6 +9,7 @@ import {
   sceneRegistry,
   snapPointToGrid,
 } from '@pascal-app/core'
+import { createClickGestureDeduper } from '@pascal-app/editor/click-gesture-deduper'
 import { Vector3 } from 'three'
 
 export const FLOOR_PLACEMENT_ALIGNMENT_THRESHOLD_M = 0.08
@@ -116,19 +117,24 @@ export function stopPlacementCommitPropagation(event: FloorPlacementClickTrigger
 export function subscribeFloorPlacementClicks(
   onClick: (event: FloorPlacementClickTriggerEvent) => void,
 ) {
-  emitter.on('grid:click', onClick)
+  const acceptClick = createClickGestureDeduper()
+  const handleClick = (event: FloorPlacementClickTriggerEvent) => {
+    if (acceptClick(event)) onClick(event)
+  }
+
+  emitter.on('grid:click', handleClick)
   type SuffixedKey<K extends string> = `${K}:${EventSuffix}`
   type ClickKey = SuffixedKey<(typeof FLOOR_PLACEMENT_CLICK_TRIGGER_KINDS)[number]>
   for (const kind of FLOOR_PLACEMENT_CLICK_TRIGGER_KINDS) {
     const key = `${kind}:click` as ClickKey
-    emitter.on(key, onClick as never)
+    emitter.on(key, handleClick as never)
   }
 
   return () => {
-    emitter.off('grid:click', onClick)
+    emitter.off('grid:click', handleClick)
     for (const kind of FLOOR_PLACEMENT_CLICK_TRIGGER_KINDS) {
       const key = `${kind}:click` as ClickKey
-      emitter.off(key, onClick as never)
+      emitter.off(key, handleClick as never)
     }
   }
 }

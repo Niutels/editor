@@ -82,31 +82,30 @@ const DoorTool: React.FC = () => {
   const cursorGroupRef = useRef<Group>(null!)
   const edgesRef = useRef<LineSegments>(null!)
 
-  // Off-host floating ghost: the real door geometry follows the cursor over
-  // the grid (tinted invalid). Mutually exclusive with the on-host draft —
-  // when a draft + wireframe is shown this is null and vice-versa. `side`
-  // carries the R-flip so the floating ghost faces the side that will be
-  // committed (its swing/hinge geometry depends on `side`).
-  const [fallbackPose, setFallbackPose] = useState<{
+  // The real door geometry follows the cursor for the whole placement: green
+  // on a valid host, red off-host or colliding. `side` carries the R-flip so
+  // the ghost's swing/hinge geometry matches the door that will be committed.
+  const [ghostPose, setGhostPose] = useState<{
     position: [number, number, number]
     rotationY: number
     side: DoorNode['side']
+    tint: 'valid' | 'invalid'
   } | null>(null)
 
   // Ghost preview node — zeroed transform + the live facing side (rebuilds on R).
-  const ghostStub = useMemo(
+  const ghostNode = useMemo(
     () =>
       DoorNode.parse({
         position: [0, 0, 0],
         rotation: [0, 0, 0],
-        side: fallbackPose?.side ?? 'front',
+        side: ghostPose?.side ?? 'front',
       }),
-    [fallbackPose?.side],
+    [ghostPose?.side],
   )
   // The frame depth is a fixed parse default (the `side` flip doesn't change
   // it); a ref lets the facing-pose publish inside the setup effect read it
   // without re-subscribing every event listener.
-  const frameDepthRef = useRef(ghostStub.frameDepth)
+  const frameDepthRef = useRef(ghostNode.frameDepth)
 
   useEffect(() => {
     useScene.temporal.getState().pause()
@@ -168,7 +167,7 @@ const DoorTool: React.FC = () => {
       if (cursorGroupRef.current) cursorGroupRef.current.visible = false
       useAlignmentGuides.getState().clear()
       clearOpeningGuides3D()
-      setFallbackPose(null)
+      setGhostPose(null)
       useFacingPose.getState().clear()
       usePlacementPreview.getState().clear()
     }
@@ -185,8 +184,15 @@ const DoorTool: React.FC = () => {
       cursorRotationY: number,
       valid: boolean,
       indicatorYOffset: number,
+      ghostRotationY: number,
+      side: DoorNode['side'],
     ) => {
-      setFallbackPose(null)
+      setGhostPose({
+        position: worldPosition,
+        rotationY: ghostRotationY,
+        side,
+        tint: valid ? 'valid' : 'invalid',
+      })
       const group = cursorGroupRef.current
       if (!group) return
       group.visible = true
@@ -209,10 +215,11 @@ const DoorTool: React.FC = () => {
     // ghost, and the door swing/hinge geometry reads `side`.
     const showGhostAt = (position: [number, number, number]) => {
       if (cursorGroupRef.current) cursorGroupRef.current.visible = false
-      setFallbackPose({
+      setGhostPose({
         position,
         rotationY: sideFlip ? Math.PI : 0,
         side: sideFlip ? 'back' : 'front',
+        tint: 'invalid',
       })
       usePlacementPreview.getState().clear()
       useAlignmentGuides.getState().clear()
@@ -297,18 +304,15 @@ const DoorTool: React.FC = () => {
       draftRef.current.roofFace = undefined
       usePlacementPreview.getState().set(draftRef.current, wall)
 
-      updateCursor(
-        wallLocalToWorld(
-          wall,
-          clampedX,
-          clampedY,
-          getLevelYOffset(),
-          getSlabElevationForWall(wall),
-        ),
-        cursorRotationY,
-        valid,
-        -clampedY,
+      const worldPosition = wallLocalToWorld(
+        wall,
+        clampedX,
+        clampedY,
+        getLevelYOffset(),
+        getSlabElevationForWall(wall),
       )
+      const wallAngle = Math.atan2(wall.end[1] - wall.start[1], wall.end[0] - wall.start[0])
+      updateCursor(worldPosition, cursorRotationY, valid, -clampedY, itemRotation - wallAngle, side)
 
       if (draftRef.current) {
         publishOpeningGuidesForWallEvent({
@@ -501,7 +505,16 @@ const DoorTool: React.FC = () => {
 
     const updateRoofCursor = (target: RoofWallOpeningTarget, roof: RoofNode) => {
       const pose = getRoofWallOpeningCursorPose(target, roof)
-      if (pose) updateCursor(pose.position, pose.rotationY, target.valid, -target.position[1])
+      if (pose) {
+        updateCursor(
+          pose.position,
+          pose.rotationY,
+          target.valid,
+          -target.position[1],
+          pose.rotationY,
+          'front',
+        )
+      }
     }
 
     const onRoofHover = (event: RoofEvent) => {
@@ -702,11 +715,16 @@ const DoorTool: React.FC = () => {
           layers={EDITOR_LAYER}
           material={edgeMaterial}
           ref={edgesRef}
+          renderOrder={999}
         />
       </group>
-      {fallbackPose && (
-        <group position={fallbackPose.position} rotation-y={fallbackPose.rotationY}>
-          <DoorPreview invalid node={ghostStub} />
+      {ghostPose && (
+        <group position={ghostPose.position} rotation-y={ghostPose.rotationY}>
+          <DoorPreview
+            invalid={ghostPose.tint === 'invalid'}
+            node={ghostNode}
+            valid={ghostPose.tint === 'valid'}
+          />
         </group>
       )}
     </>
