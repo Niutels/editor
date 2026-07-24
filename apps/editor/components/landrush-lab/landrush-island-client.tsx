@@ -126,6 +126,7 @@ import {
   computeBoundsTree,
   disposeBoundsTree,
 } from 'three-mesh-bvh/src/index.js'
+import { BenchBridgeProbe } from '@/components/bench/bench-bridge'
 import type { LandrushPoint2, LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
 import { FrameLoadProfilerProbe, measureLandrushFrameSlice } from './frame-load-profiler'
 import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
@@ -271,14 +272,14 @@ const LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 64
 const LANDRUSH_ISLAND_INTERACTIVE_GRASS_FIELD_RESOLUTION = GRASS_FIELD_RESOLUTION
 const LANDRUSH_ISLAND_GRASS_TEXTURE_TILE_METERS = 5
 const LANDRUSH_ISLAND_GROUND_GRASS_BLOCKERS: readonly GrassFieldBlocker[] = []
-const LANDRUSH_ISLAND_GRASS_GROUND_TINT_CAP_PERCENT = 80
+const LANDRUSH_ISLAND_GRASS_GROUND_TINT_CAP_PERCENT = 100
 const LANDRUSH_ISLAND_GRASS_TUNING = {
   ...DEFAULT_GRASS_BLADE_TUNING,
   colorPatchScale: 0.7,
   colorVariation: 0.5,
   density: 15_000,
   flutter: 0.28,
-  greenTint: 0.55,
+  greenTint: 0.17,
   gustScale: 0.5,
   heightNoiseScale: 0.15,
   heightVariation: 0.5,
@@ -452,6 +453,14 @@ const LANDRUSH_ISLAND_BUILD_CAMERA_MIN_HEIGHT = 7
 const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_HEIGHT = 15
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS = 1.4
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS = 1000 / 120
+const LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS = 0.07
+const LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_SETTLE_SECONDS = 0.5
+const LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_COMPLETE_PROGRESS =
+  1 -
+  LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_SETTLE_SECONDS / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS
+const LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_DEFAULT = 1
+const LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_MAX = 2
+const LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_STEP = 0.05
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
 const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
 const LANDRUSH_ISLAND_LOADING_EXPECTED_MS = 18_000
@@ -2920,6 +2929,8 @@ export function LandrushIslandClient({
   )
   const frameProfile =
     searchParams.get('frameProfile') === '1' || searchParams.get('profileFrame') === '1'
+  // bench-only: re-enable the full post-FX RenderPipeline for GPU-timing matrix runs
+  const benchPostFx = searchParams.get('benchPostFx') === '1'
   const viewerRendererBackend = searchParams.get('rendererBackend') === 'webgl' ? 'webgl' : 'webgpu'
   const [buildMode, setBuildMode] = useState(false)
   const [buildParcelId, setBuildParcelId] = useState<string | null>(null)
@@ -2933,6 +2944,9 @@ export function LandrushIslandClient({
   const [gamepadHintsActive, setGamepadHintsActive] = useState(false)
   const gamepadHintsActiveRef = useRef(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
+  const [transitionBlurStrength, setTransitionBlurStrength] = useState(
+    LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_DEFAULT,
+  )
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile | null>(null)
   const [incomingVoiceSignals, setIncomingVoiceSignals] = useState<SpatialVoiceSignalMessage[]>([])
   const handleVoiceSignal = useCallback((message: SpatialVoiceSignalMessage) => {
@@ -3220,9 +3234,14 @@ export function LandrushIslandClient({
 
   const mapPresentationVisible =
     viewMode === 'map' || modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
-  const grassStreamingPaused = modeTransitionFade !== null || viewMode === 'map'
+  const grassStreamingPaused =
+    viewMode === 'map' || (modeTransitionFade !== null && modeTransitionFade.from !== 'map')
   const mapLabelsVisible = viewMode === 'map' && modeTransitionFade === null
   const grassBladesVisible = !startupProfileNoStylizedBlades
+
+  useEffect(() => {
+    modeTransitionPresentationRef.current.zoomBlurStrength = transitionBlurStrength
+  }, [transitionBlurStrength])
 
   const enterPlayerView = useCallback(() => {
     measureLandrushFrameSlice('landrush-island.view.enter-player', () => {
@@ -4425,7 +4444,7 @@ export function LandrushIslandClient({
               viewerEditorGridY={activeBuildGroundY}
               viewerEditorSystems={buildEditorSystemsActive}
               viewerSceneEnvironment={false}
-              viewerPostProcessing={false}
+              viewerPostProcessing={benchPostFx}
               viewerPresentationEffectRef={modeTransitionPresentationRef}
               viewerRendererBackend={viewerRendererBackend}
               viewerSceneChildren={
@@ -4481,6 +4500,8 @@ export function LandrushIslandClient({
                       </>
                     ) : null}
                     <FrameLoadProfilerProbe enabled={frameProfile} />
+                    {/* bench-bridge mount — self-gated on ?bench=1 / ?benchGpu=1 */}
+                    <BenchBridgeProbe />
                     <LandrushIslandEditorOverlayLayerBridge enabled={buildEditorChromeActive} />
                     <LandrushIslandStartupReactProfiler
                       enabled={editorRuntimeReactProfileEnabled}
@@ -4768,6 +4789,25 @@ export function LandrushIslandClient({
             </div>
           ) : null}
         </div>
+        <label
+          className="pointer-events-auto absolute bottom-4 left-1/2 z-[85] flex -translate-x-1/2 items-center gap-3 rounded-md border border-white/20 bg-slate-950/75 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur"
+          data-landrush-ui-interactive
+        >
+          <span className="whitespace-nowrap">Blur strength</span>
+          <input
+            aria-label="Blur strength"
+            className="h-1.5 w-40 cursor-pointer accent-cyan-300 md:w-56"
+            max={LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_MAX}
+            min={0}
+            onChange={(event) => setTransitionBlurStrength(Number(event.currentTarget.value))}
+            step={LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_STEP}
+            type="range"
+            value={transitionBlurStrength}
+          />
+          <output className="w-10 text-right tabular-nums">
+            {transitionBlurStrength.toFixed(2)}×
+          </output>
+        </label>
         {showTunePanel ? (
           <LandrushIslandTunePanel
             beachControls={multiplayerBeachControls}
@@ -4905,6 +4945,7 @@ function createLandrushIslandModeTransitionPresentationState(
     zoomBlurCenter: [0.5, 0.48],
     zoomBlurDebugMode,
     zoomBlurDirection: 1,
+    zoomBlurStrength: LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_DEFAULT,
   }
 }
 
@@ -4923,10 +4964,15 @@ function updateLandrushIslandModeTransitionPresentation(
 
   const amount = clamp01(progress)
   const normalizedCameraVelocity = 4 * amount * (1 - amount)
-  const blurIn = MathUtils.smoothstep(amount, 0.015, 0.14)
+  const blurIn = MathUtils.smoothstep(amount, 0.0075, LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS)
   const blurOut = 1 - MathUtils.smoothstep(amount, 0.72, 0.98)
   const conceal = MathUtils.smoothstep(amount, 0.16, 0.36)
   const reveal = MathUtils.smoothstep(amount, 0.5, 0.7)
+  const mapExitGrassReveal = MathUtils.smoothstep(
+    amount,
+    LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS,
+    LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_COMPLETE_PROGRESS,
+  )
   const fromVisibility = transition.from === 'map' ? 0 : 1
   const targetVisibility = transition.to === 'map' ? 0 : 1
 
@@ -4938,7 +4984,7 @@ function updateLandrushIslandModeTransitionPresentation(
       ? clamp01(fromVisibility - conceal + reveal)
       : fromVisibility > targetVisibility
         ? 1 - conceal
-        : reveal
+        : mapExitGrassReveal
 }
 
 function resolveLandrushIslandMapPresentationProgress(

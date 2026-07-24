@@ -33,3 +33,239 @@ $ dotenv -e ../../.env.local -- bun scripts/dev-with-landrush-ws.mjs
 [browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
 [browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
 [browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_0"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Provider (<anonymous>)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_6"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m4[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_6"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_6"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m4[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [registry] re-registering node kind "trees:tree" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:flower" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:grass" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering plugin panel "pascal:trees:trees" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:103:25)
+[browser] [registry] re-registering node kind "trees:tree" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:flower" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:grass" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering plugin panel "pascal:trees:trees" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:103:25)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [registry] re-registering node kind "trees:tree" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:flower" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:grass" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering plugin panel "pascal:trees:trees" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:103:25)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_0"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of C:\Users\briss\package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * C:\Users\briss\Documents\Pascal Optimization\editor\bun.lock
+
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] ⨯ unhandledRejection: ChunkLoadError: Failed to load chunk /_next/static/chunks/Documents_Pascal%20Optimization_editor_packages_viewer_dist_components_1-ff6co._.js from module [project]/Documents/Pascal Optimization/editor/node_modules/.bun/next@16.2.9+7492c01c6988791b/node_modules/next/dist/compiled/react-server-dom-turbopack/cjs/react-server-dom-turbopack-client.browser.development.js [app-client] (ecmascript)
+[browser] [registry] re-registering node kind "trees:tree" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:flower" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering node kind "trees:grass" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:55:25)
+[browser] [registry] re-registering plugin panel "pascal:trees:trees" (HMR) (../../../../Pascal Optimization/editor/packages/core/dist/registry/registry.js:103:25)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_0"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_0"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] [viewer] WebGPU uncaptured error: Destroyed texture [Texture "procedural-stylized-grass-final"] used in a submit.
+ - While calling [Queue].Submit([[CommandBuffer from CommandEncoder "renderContext_0"]])
+ [object GPUValidationError] 
+    at GPUDeviceWatcher.useEffect.onUncapturedError (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+  139 |         // best). Pipe them to console.error so silent mobile crashes show up.
+  140 |         const onUncapturedError = (event) => {
+> 141 |             console.error('[viewer] WebGPU uncaptured error:', event?.error?.message, eve...
+      |                     ^
+  142 |         };
+  143 |         device.addEventListener?.('uncapturederror', onUncapturedError);
+  144 |         return () => { (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:141:21)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Provider (<anonymous>)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m3[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Provider (<anonymous>)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] Uncaught TypeError: Cannot read properties of null (reading 'addEventListener')
+    at Set.forEach (<anonymous>)
+    at Provider (<anonymous>)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m6[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] THREE.Clock: This module has been deprecated. Please use THREE.Timer instead.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m1[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)
+[browser] THREE.AttributeNode: Vertex attribute "uv2" not found on geometry.
+[browser] [editor] viewer scene readiness timed out; showing editor shell anyway { sceneReadyKey: [33m2[39m } (../../../../Pascal Optimization/editor/packages/editor/src/components/editor/index.tsx:1407:15)

@@ -1,0 +1,103 @@
+[
+  {
+    "cell": "island-idle",
+    "url": "http://localhost:3002/landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1",
+    "frames": 781,
+    "gpuSupported": true,
+    "dtMs": {
+      "n": 780,
+      "avg": 62.151410256409775,
+      "p50": 28.100000001490116,
+      "p95": 66.09999999962747,
+      "max": 11592
+    },
+    "gpu": {
+      "distinctResolves": 197,
+      "resolveRate": 0.25224071702944945,
+      "renderMs": {
+        "n": 197,
+        "avg": 2.268477076142133,
+        "p50": 1.3762560000000001,
+        "p95": 1.6383999999999999,
+        "max": 50.855936
+      },
+      "computeMs": {
+        "n": 0,
+        "avg": null,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "stalenessFrames": {
+        "n": 778,
+        "avg": 5.497429305912596,
+        "p50": 5,
+        "p95": 8,
+        "max": 9
+      },
+      "queryPressureMax": 24,
+      "passCount": {
+        "n": 197,
+        "avg": 260.71065989847716,
+        "p50": 260,
+        "p95": 494,
+        "max": 516
+      },
+      "workDoneDeltaMs": {
+        "n": 25,
+        "avg": 101.5239999999851,
+        "p50": 104.69999999925494,
+        "p95": 157.90000000037253,
+        "max": 166.90000000037253
+      },
+      "latestSample": {
+        "resolvedAtFrame": 775,
+        "threeFrames": [
+          952,
+          953,
+          954,
+          956
+        ],
+        "renderMs": 1.3762560000000001,
+        "computeMs": null,
+        "passes": [
+          {
+            "uid": "r:1:0:f952",
+            "ms": 0.917504
+          },
+          {
+            "uid": "r:2:1:f952",
+            "ms": 0.393216
+          },
+          {
+            "uid": "r:1:0:f953",
+            "ms": 0.917504
+          },
+          {
+            "uid": "r:2:1:f953",
+            "ms": 0.524288
+          },
+          {
+            "uid": "r:1:0:f954",
+            "ms": 0.917504
+          },
+          {
+            "uid": "r:2:1:f954",
+            "ms": 0.458752
+          },
+          {
+            "uid": "r:1:0:f956",
+            "ms": 0.98304
+          },
+          {
+            "uid": "r:2:1:f956",
+            "ms": 0.393216
+          }
+        ],
+        "passCount": 8,
+        "queryPressure": 16
+      }
+    },
+    "consoleErrors": []
+  }
+]

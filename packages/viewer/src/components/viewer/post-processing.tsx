@@ -119,7 +119,8 @@ const emptyScene = new Scene()
 
 const MAX_PIPELINE_RETRIES = 3
 const RETRY_DELAY_MS = 500
-const PRESENTATION_ZOOM_BLUR_PATH_FRACTION = 0.045
+const PRESENTATION_ZOOM_BLUR_PATH_FRACTION = 0.09
+const PRESENTATION_ZOOM_BLUR_MAX_STRENGTH = 2
 const PRESENTATION_ZOOM_BLUR_RESOLUTION_SCALE = 0.5
 const PRESENTATION_ZOOM_BLUR_SAMPLE_COUNT = 12
 
@@ -130,6 +131,7 @@ export type ViewerPresentationEffectState = {
   zoomBlurCenter?: readonly [number, number]
   zoomBlurDebugMode?: ViewerPresentationEffectDebugMode
   zoomBlurDirection: number
+  zoomBlurStrength: number
 }
 
 export type ViewerPresentationEffectRef = {
@@ -149,6 +151,7 @@ function createDirectionalZoomBlurEffect({
   center,
   debugMode,
   direction,
+  strength,
   textureNode,
 }: {
   amount: any
@@ -158,6 +161,7 @@ function createDirectionalZoomBlurEffect({
   center: any
   debugMode: any
   direction: any
+  strength: any
   textureNode: any
 }): DirectionalZoomBlurEffect {
   const inputTexture = convertToTexture(textureNode)
@@ -168,6 +172,7 @@ function createDirectionalZoomBlurEffect({
     const sampleStep = centerDelta
       .mul(direction)
       .mul(amount)
+      .mul(strength)
       .mul(PRESENTATION_ZOOM_BLUR_PATH_FRACTION / PRESENTATION_ZOOM_BLUR_SAMPLE_COUNT)
       .toConst()
     const noise = interleavedGradientNoise(screenCoordinate)
@@ -298,6 +303,7 @@ const PostProcessingPasses = ({
   const presentationZoomCenter = useRef(uniform(new Vector2(0.5, 0.48)))
   const presentationZoomDebugMode = useRef(uniform(0))
   const presentationZoomDirection = useRef(uniform(1))
+  const presentationZoomStrength = useRef(uniform(1))
 
   // Ink-line colour follows the scene-theme background luminance (dark lines on
   // light scenes, light on dark), refreshed each frame like the background.
@@ -503,6 +509,7 @@ const PostProcessingPasses = ({
           center: presentationZoomCenter.current,
           debugMode: presentationZoomDebugMode.current,
           direction: presentationZoomDirection.current,
+          strength: presentationZoomStrength.current,
           textureNode: sceneColor,
         })
         const renderPipeline = new RenderPipeline(renderer as unknown as WebGPURenderer)
@@ -725,6 +732,7 @@ const PostProcessingPasses = ({
           center: presentationZoomCenter.current,
           debugMode: presentationZoomDebugMode.current,
           direction: presentationZoomDirection.current,
+          strength: presentationZoomStrength.current,
           textureNode: finalOutput,
         })
         finalOutput = pipelinePresentationEffect.outputNode
@@ -828,6 +836,10 @@ const PostProcessingPasses = ({
     presentationZoomAmount.current.value = presentationAmount
     presentationZoomDirection.current.value =
       (presentationState?.zoomBlurDirection ?? 1) < 0 ? -1 : 1
+    presentationZoomStrength.current.value = Math.max(
+      0,
+      Math.min(PRESENTATION_ZOOM_BLUR_MAX_STRENGTH, presentationState?.zoomBlurStrength ?? 1),
+    )
     presentationZoomDebugMode.current.value =
       presentationState?.zoomBlurDebugMode === 'mask'
         ? 1

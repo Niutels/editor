@@ -1,0 +1,85 @@
+[
+  {
+    "cell": "island-postfx-off",
+    "url": "http://localhost:3002/landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1&benchmark=1&benchPostFx=1&disable=postFx",
+    "frames": 1126,
+    "gpuSupported": true,
+    "dtMs": {
+      "n": 1125,
+      "avg": 21.551555555555556,
+      "p50": 20.5,
+      "p95": 26.699999999254942,
+      "max": 383.59999999962747
+    },
+    "gpu": {
+      "distinctResolves": 768,
+      "resolveRate": 0.6820603907637656,
+      "renderMs": {
+        "n": 768,
+        "avg": 1.6396799999999991,
+        "p50": 1.572864,
+        "p95": 2.359296,
+        "max": 12.713984
+      },
+      "computeMs": {
+        "n": 0,
+        "avg": null,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "stalenessFrames": {
+        "n": 1123,
+        "avg": 1.9136242208370435,
+        "p50": 2,
+        "p95": 4,
+        "max": 6
+      },
+      "queryPressureMax": 16,
+      "passCount": {
+        "n": 768,
+        "avg": 2.9296875,
+        "p50": 2,
+        "p95": 4,
+        "max": 8
+      },
+      "workDoneDeltaMs": {
+        "n": 33,
+        "avg": 19.66060606045931,
+        "p50": 16,
+        "p95": 42.899999998509884,
+        "max": 48.09999999962747
+      },
+      "latestSample": {
+        "resolvedAtFrame": 1124,
+        "threeFrames": [
+          2988,
+          2991
+        ],
+        "renderMs": 1.572864,
+        "computeMs": null,
+        "passes": [
+          {
+            "uid": "r:1:0:f2988",
+            "ms": 1.31072
+          },
+          {
+            "uid": "r:2:1:f2988",
+            "ms": 0.393216
+          },
+          {
+            "uid": "r:1:0:f2991",
+            "ms": 1.179648
+          },
+          {
+            "uid": "r:2:1:f2991",
+            "ms": 0.393216
+          }
+        ],
+        "passCount": 4,
+        "queryPressure": 8
+      }
+    },
+    "consoleErrors": []
+  }
+]

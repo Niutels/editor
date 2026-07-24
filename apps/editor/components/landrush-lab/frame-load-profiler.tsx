@@ -60,9 +60,27 @@ export type LandrushFrameProfileApi = {
   compactReport: (options?: ReportOptions) => LandrushFrameProfileReport
   compactSlowFrames: (options?: SlowFrameReportOptions) => LandrushFrameProfileSlowFramesReport
   enabled: boolean
+  framesSince: (cursor: number) => LandrushFrameProfileFramesSince
   freeze: () => void
   report: (options?: ReportOptions) => LandrushFrameProfileReport
   reset: () => void
+}
+
+export type LandrushFrameProfileFrameSummary = {
+  activeWallMs: number
+  beginMs: number
+  index: number
+  intervalMs: number
+  measuredTopLevelMs: number
+  schedulerProfile: string
+  topLevel: { durationMs: number; id: string }[]
+  unmeasuredActiveMs: number
+  waitMs: number
+}
+
+export type LandrushFrameProfileFramesSince = {
+  cursor: number
+  frames: LandrushFrameProfileFrameSummary[]
 }
 
 export type LandrushFrameProfileReport = {
@@ -462,9 +480,37 @@ class LandrushFrameProfiler {
         topLevelOnly: options?.topLevelOnly ?? true,
       }),
     enabled: true,
+    framesSince: (cursor) => this.framesSince(cursor),
     freeze: () => this.freeze(),
     report: (options) => this.report(options),
     reset: () => this.reset(),
+  }
+
+  // Incremental cursor read of finalized frames, used by the bench bridge to
+  // merge CPU spans into its unified per-frame ledger without recomputing the
+  // aggregate reports. The returned cursor is `last finalized index + 1` — NOT
+  // `nextFrameIndex`, which counts the still-open frame and would put every
+  // finalized frame permanently behind the cursor.
+  framesSince(cursor: number): LandrushFrameProfileFramesSince {
+    // Frames are index-ordered; scan back from the tail so steady-state reads
+    // (cursor at end, 0-1 new frames) don't walk the whole 1800-frame ring.
+    let start = this.frames.length
+    while (start > 0 && this.frames[start - 1]!.index >= cursor) start -= 1
+    const frames = this.frames.slice(start).map((frame) => ({
+      activeWallMs: frame.activeWallMs,
+      beginMs: frame.beginMs,
+      index: frame.index,
+      intervalMs: frame.intervalMs,
+      measuredTopLevelMs: frame.measuredTopLevelMs,
+      schedulerProfile: frame.schedulerProfile,
+      topLevel: frame.slices
+        .filter((slice) => slice.parentIndex === null)
+        .map((slice) => ({ durationMs: slice.durationMs, id: slice.id })),
+      unmeasuredActiveMs: frame.unmeasuredActiveMs,
+      waitMs: frame.waitMs,
+    }))
+    const lastFinalized = this.frames.at(-1)
+    return { cursor: lastFinalized ? lastFinalized.index + 1 : cursor, frames }
   }
 
   reset() {

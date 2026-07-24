@@ -15,6 +15,7 @@ package-lock.json
 
 # Testing
 coverage
+tooling/bench/.chrome-profile/
 
 # Turbo
 .turbo
