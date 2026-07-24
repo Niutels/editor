@@ -11,7 +11,7 @@ import {
   LandrushRobot,
   type LandrushRobotAnimationState,
 } from '@pascal-app/nodes/landrush-world/robot'
-import { useViewer } from '@pascal-app/viewer'
+import { renderScheduler, useViewer } from '@pascal-app/viewer'
 import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import {
@@ -57,6 +57,13 @@ import {
 } from '@/components/landrush/pascal-landrush-scene'
 import type { LandrushPoint2 } from '@/components/landrush/types'
 import { type LandrushGamepadInput, readLandrushGamepadInput } from './landrush-gamepad-input'
+import {
+  frameIndependentResponseAmount,
+  REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS,
+  REMOTE_PRESENTATION_MOVEMENT_FRESH_MS,
+  shortestAngleDistance,
+  shouldContinueRemotePresentation,
+} from './multiplayer-presentation'
 import type { ParcelAllocationParcel, ParcelAllocationResult } from './parcel-allocation'
 import type { ParcelStreetNetwork } from './parcel-streets'
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
@@ -806,6 +813,7 @@ export function WorldMultiplayerLabClient({
         parcelOwnerships={multiplayer.parcelOwnerships}
         parcelWorldId={parcelWorldId}
         perfRun={perfRun}
+        remotePlayerStore={multiplayer.remotePlayerStore}
         remotePlayers={multiplayer.remotePlayers}
         remoteVoicePeerIds={spatialVoice.remoteVoicePeerIds}
         streetNetwork={streetNetwork}
@@ -824,6 +832,7 @@ export function WorldMultiplayerLabClient({
       multiplayer.parcelClaimError,
       multiplayer.parcelOwnerships,
       multiplayer.publishLocalPlayer,
+      multiplayer.remotePlayerStore,
       multiplayer.remotePlayers,
       multiplayer.watchParcelWorld,
       perfRun,
@@ -1045,6 +1054,7 @@ function LandrushWorldMultiplayerScene({
   parcelOwnerships,
   parcelWorldId,
   perfRun,
+  remotePlayerStore,
   remotePlayers,
   remoteVoicePeerIds,
   streetNetwork,
@@ -1067,6 +1077,7 @@ function LandrushWorldMultiplayerScene({
   parcelOwnerships: readonly ParcelOwnership[]
   parcelWorldId: string
   perfRun: MultiplayerPerfRunOptions
+  remotePlayerStore: MultiplayerRemotePlayerStore
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   remoteVoicePeerIds: readonly string[]
   streetNetwork: ParcelStreetNetwork | null
@@ -1104,7 +1115,12 @@ function LandrushWorldMultiplayerScene({
         </>
       )}
       {remotePlayers.map((player) => (
-        <RemoteMultiplayerRobot groundY={groundY} key={player.id} player={player} />
+        <RemoteMultiplayerRobot
+          groundY={groundY}
+          key={player.id}
+          player={player}
+          remotePlayerStore={remotePlayerStore}
+        />
       ))}
       {remotePlayers.map((player) => (
         <SpatialVoiceRangeRing
@@ -1416,9 +1432,11 @@ function LocalMultiplayerRobot({
 function RemoteMultiplayerRobot({
   groundY,
   player,
+  remotePlayerStore,
 }: {
   groundY: number
   player: MultiplayerPlayerSnapshot
+  remotePlayerStore: MultiplayerRemotePlayerStore
 }) {
   const nodeRef = useRef<LandrushWorldNode>(
     createRobotNode(player.id, snapshotPoint(player), groundY),
@@ -1427,6 +1445,9 @@ function RemoteMultiplayerRobot({
   const targetPositionRef = useRef(new Vector3(...player.position))
   const headingRef = useRef(player.heading)
   const targetHeadingRef = useRef(player.heading)
+  const animationSettleSecondsRef = useRef(0)
+  const lastSnapshotUpdatedAtRef = useRef(player.updatedAt)
+  const lastSnapshotReceivedAtRef = useRef<number | null>(null)
 
   useEffect(() => {
     targetPositionRef.current.set(player.position[0], player.position[1], player.position[2])
@@ -1434,12 +1455,36 @@ function RemoteMultiplayerRobot({
   }, [player])
 
   useFrame((_, delta) => {
+    const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
+    const now = performance.now()
+    if (
+      lastSnapshotReceivedAtRef.current === null ||
+      livePlayer.updatedAt !== lastSnapshotUpdatedAtRef.current
+    ) {
+      lastSnapshotUpdatedAtRef.current = livePlayer.updatedAt
+      lastSnapshotReceivedAtRef.current = now
+    }
+    targetPositionRef.current.set(
+      livePlayer.position[0],
+      livePlayer.position[1] || groundY,
+      livePlayer.position[2],
+    )
+    targetHeadingRef.current = livePlayer.heading
+
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-    const positionAmount = 1 - Math.exp(-REMOTE_POSITION_RESPONSE * frameDelta)
-    const headingAmount = 1 - Math.exp(-REMOTE_HEADING_RESPONSE * frameDelta)
+    const positionErrorSq = positionRef.current.distanceToSquared(targetPositionRef.current)
+    const headingErrorRadians = shortestAngleDistance(headingRef.current, targetHeadingRef.current)
+    const positionAmount = frameIndependentResponseAmount(REMOTE_POSITION_RESPONSE, frameDelta)
+    const headingAmount = frameIndependentResponseAmount(REMOTE_HEADING_RESPONSE, frameDelta)
+    const movementFresh =
+      livePlayer.moving &&
+      now - (lastSnapshotReceivedAtRef.current ?? now) <= REMOTE_PRESENTATION_MOVEMENT_FRESH_MS
 
     positionRef.current.lerp(targetPositionRef.current, positionAmount)
     headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+    animationSettleSecondsRef.current = movementFresh
+      ? REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS
+      : Math.max(0, animationSettleSecondsRef.current - frameDelta)
 
     const node = nodeRef.current
     node.playerPosition = [
@@ -1448,8 +1493,19 @@ function RemoteMultiplayerRobot({
       positionRef.current.z,
     ]
     node.playerHeading = headingRef.current
-    node.playerMoving = player.moving
-    node.playerSpeed = player.speed
+    node.playerMoving = movementFresh
+    node.playerSpeed = movementFresh ? livePlayer.speed : 0
+
+    if (
+      shouldContinueRemotePresentation({
+        animationSettleSeconds: animationSettleSecondsRef.current,
+        headingErrorRadians,
+        moving: movementFresh,
+        positionErrorSq,
+      })
+    ) {
+      renderScheduler.requestFrame('animation')
+    }
   })
 
   return (
@@ -3262,6 +3318,7 @@ export function useLandrushWorldMultiplayer({
           )
           remotePlayerMapRef.current = nextRemotePlayerMap
           setRemotePlayerRosterMap(new Map(nextRemotePlayerMap))
+          renderScheduler.requestFrame('animation')
           setConnection((current) => {
             const serverPlayerCount = message.players.length + (spectator ? 0 : 1)
             return current.serverPlayerCount === serverPlayerCount
@@ -3278,12 +3335,14 @@ export function useLandrushWorldMultiplayer({
           if (!previous || remotePlayerRosterChanged(previous, message.player)) {
             setRemotePlayerRosterMap(new Map(remotePlayerMapRef.current))
           }
+          renderScheduler.requestFrame('animation')
           return
         }
 
         if (message.type === 'player-left') {
           remotePlayerMapRef.current.delete(message.id)
           setRemotePlayerRosterMap(new Map(remotePlayerMapRef.current))
+          renderScheduler.requestFrame('animation')
         }
       })
 

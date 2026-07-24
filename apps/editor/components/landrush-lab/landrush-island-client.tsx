@@ -139,6 +139,14 @@ import {
   type LandrushIslandTvMediaSettings,
 } from './landrush-island-tv-screens'
 import {
+  frameIndependentResponseAmount,
+  REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS,
+  REMOTE_PRESENTATION_MOVEMENT_FRESH_MS,
+  shortestAngleDistance,
+  shouldContinueRemotePresentation,
+  viewAnglesFromDirection,
+} from './multiplayer-presentation'
+import {
   createNaturalRoadMaskSegments,
   createNaturalRoadPlan,
   NaturalRoadNetworkLayer,
@@ -334,6 +342,7 @@ const LANDRUSH_ISLAND_ROBOT_FPV_FORWARD_OFFSET = 0.08
 const LANDRUSH_ISLAND_ROBOT_FPV_MOUSE_YAW_SPEED = 0.0022
 const LANDRUSH_ISLAND_ROBOT_FPV_MOUSE_PITCH_SPEED = 0.002
 const LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT = MathUtils.degToRad(82)
+const LANDRUSH_ISLAND_ROBOT_FPV_CAMERA_TRANSITION_SECONDS = 0.24
 const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE = 18
 const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE = 10
 const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE = 34
@@ -10354,12 +10363,12 @@ function LocalLandrushIslandRobot({
     const previousMotionX = motion.position.x
     const previousMotionZ = motion.position.z
     targetMotionPositionRef.current.set(rawNext.x, rootY, rawNext.z)
-    if (fallStateRef.current || fpvActive) {
+    if (fallStateRef.current) {
       motion.position.copy(targetMotionPositionRef.current)
     } else {
       motion.position.lerp(
         targetMotionPositionRef.current,
-        1 - Math.exp(-LANDRUSH_ISLAND_ROBOT_LOCAL_POSITION_RESPONSE * frameDelta),
+        frameIndependentResponseAmount(LANDRUSH_ISLAND_ROBOT_LOCAL_POSITION_RESPONSE, frameDelta),
       )
     }
     motion.velocity.set(
@@ -11311,6 +11320,9 @@ function RemoteLandrushIslandRobot({
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
   const targetHeadingRef = useRef(player.heading)
+  const animationSettleSecondsRef = useRef(0)
+  const lastSnapshotUpdatedAtRef = useRef(player.updatedAt)
+  const lastSnapshotReceivedAtRef = useRef<number | null>(null)
   const visualRootRef = useRef<Group | null>(null)
   const presentationMode: LandrushRobotPresentationMode =
     player.pose === 'falling' ? 'fall' : 'default'
@@ -11326,6 +11338,14 @@ function RemoteLandrushIslandRobot({
 
   useFrame((_, delta) => {
     const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
+    const now = performance.now()
+    if (
+      lastSnapshotReceivedAtRef.current === null ||
+      livePlayer.updatedAt !== lastSnapshotUpdatedAtRef.current
+    ) {
+      lastSnapshotUpdatedAtRef.current = livePlayer.updatedAt
+      lastSnapshotReceivedAtRef.current = now
+    }
     targetPositionRef.current.set(
       livePlayer.position[0],
       livePlayer.position[1] || groundY,
@@ -11334,11 +11354,27 @@ function RemoteLandrushIslandRobot({
     targetHeadingRef.current = livePlayer.heading
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-    const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
-    const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
+    const positionErrorSq = positionRef.current.distanceToSquared(targetPositionRef.current)
+    const headingErrorRadians = shortestAngleDistance(headingRef.current, targetHeadingRef.current)
+    const positionAmount = frameIndependentResponseAmount(
+      LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE,
+      frameDelta,
+    )
+    const headingAmount = frameIndependentResponseAmount(
+      LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE,
+      frameDelta,
+    )
+    const snapshotFresh =
+      now - (lastSnapshotReceivedAtRef.current ?? now) <= REMOTE_PRESENTATION_MOVEMENT_FRESH_MS
+    const movementFresh = livePlayer.moving && snapshotFresh
+    const fallingFresh = livePlayer.pose === 'falling' && snapshotFresh
 
     positionRef.current.lerp(targetPositionRef.current, positionAmount)
     headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+    animationSettleSecondsRef.current =
+      movementFresh || fallingFresh
+        ? REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS
+        : Math.max(0, animationSettleSecondsRef.current - frameDelta)
 
     const node = nodeRef.current
     node.playerPosition = [
@@ -11347,8 +11383,19 @@ function RemoteLandrushIslandRobot({
       positionRef.current.z,
     ]
     node.playerHeading = headingRef.current
-    node.playerMoving = livePlayer.moving
-    node.playerSpeed = livePlayer.speed
+    node.playerMoving = movementFresh
+    node.playerSpeed = movementFresh ? livePlayer.speed : 0
+
+    if (
+      shouldContinueRemotePresentation({
+        animationSettleSeconds: animationSettleSecondsRef.current,
+        headingErrorRadians,
+        moving: movementFresh || fallingFresh,
+        positionErrorSq,
+      })
+    ) {
+      renderScheduler.requestFrame('animation')
+    }
   })
 
   return (
@@ -11768,23 +11815,58 @@ function LandrushIslandFirstPersonCameraController({
   playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
   playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
-  const { gl } = useThree()
+  const { camera, gl } = useThree()
   const seededRef = useRef(false)
   const targetYawRef = useRef(0)
   const targetPitchRef = useRef(0)
   const forwardRef = useRef(new Vector3())
   const targetRef = useRef(new Vector3())
   const cameraPositionRef = useRef(new Vector3())
+  const targetQuaternionRef = useRef(new Quaternion())
+  const entryStartPositionRef = useRef(new Vector3())
+  const entryStartQuaternionRef = useRef(new Quaternion())
+  const entryElapsedRef = useRef(0)
+  const entryCompleteRef = useRef(false)
+  const previousPlayerCameraPoseRef = useRef<LandrushIslandCameraPose | null>(
+    cloneLandrushIslandCameraPose(playerCameraPoseRef.current),
+  )
+
+  const syncLookFromCamera = useCallback((activeCamera: Camera) => {
+    activeCamera.getWorldDirection(forwardRef.current)
+    const angles = viewAnglesFromDirection(forwardRef.current)
+    targetYawRef.current = angles.yaw
+    targetPitchRef.current = clamp(
+      angles.pitch,
+      -LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT,
+      LANDRUSH_ISLAND_ROBOT_FPV_PITCH_LIMIT,
+    )
+  }, [])
 
   useEffect(() => {
     buildCameraPoseRef.current = null
     mapReturnCameraPoseRef.current = null
     playerReturnCameraPoseRef.current = null
     requestLandrushIslandPointerLock(gl.domElement)
-  }, [buildCameraPoseRef, gl, mapReturnCameraPoseRef, playerReturnCameraPoseRef])
+    return () => {
+      playerCameraPoseRef.current = cloneLandrushIslandCameraPose(
+        previousPlayerCameraPoseRef.current,
+      )
+    }
+  }, [
+    buildCameraPoseRef,
+    gl,
+    mapReturnCameraPoseRef,
+    playerCameraPoseRef,
+    playerReturnCameraPoseRef,
+  ])
 
   useEffect(() => {
     const canvas = gl.domElement
+    const handlePointerLockChange = () => {
+      if (document.pointerLockElement === canvas && seededRef.current && entryCompleteRef.current) {
+        syncLookFromCamera(camera)
+      }
+    }
     const handlePointerDown = (event: PointerEvent) => {
       if (
         event.defaultPrevented ||
@@ -11813,19 +11895,24 @@ function LandrushIslandFirstPersonCameraController({
 
     window.addEventListener('pointerdown', handlePointerDown, { capture: true, passive: false })
     window.addEventListener('mousemove', handleMouseMove, { capture: true, passive: false })
+    document.addEventListener('pointerlockchange', handlePointerLockChange)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown, true)
       window.removeEventListener('mousemove', handleMouseMove, true)
+      document.removeEventListener('pointerlockchange', handlePointerLockChange)
     }
-  }, [gl])
+  }, [camera, gl, syncLookFromCamera])
 
   useFrame((state, delta) => {
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
     const motion = motionRef.current
 
     if (!seededRef.current) {
-      targetYawRef.current = motion.heading
-      targetPitchRef.current = 0
+      syncLookFromCamera(state.camera)
+      entryStartPositionRef.current.copy(state.camera.position)
+      entryStartQuaternionRef.current.copy(state.camera.quaternion)
+      entryElapsedRef.current = 0
+      entryCompleteRef.current = false
       seededRef.current = true
     }
 
@@ -11853,16 +11940,41 @@ function LandrushIslandFirstPersonCameraController({
     targetRef.current.copy(cameraPositionRef.current).add(forwardRef.current)
 
     state.camera.up.set(0, 1, 0)
-    state.camera.position.copy(cameraPositionRef.current)
-    state.camera.lookAt(targetRef.current)
+    resolveLandrushIslandCameraPoseQuaternion(
+      cameraPositionRef.current,
+      targetRef.current,
+      targetQuaternionRef.current,
+    )
+    entryElapsedRef.current = Math.min(
+      LANDRUSH_ISLAND_ROBOT_FPV_CAMERA_TRANSITION_SECONDS,
+      entryElapsedRef.current + frameDelta,
+    )
+    const entryProgress = clamp01(
+      entryElapsedRef.current / LANDRUSH_ISLAND_ROBOT_FPV_CAMERA_TRANSITION_SECONDS,
+    )
+    const entryAmount = easeLandrushIslandCameraTransition(entryProgress, 'player')
+    state.camera.position.lerpVectors(
+      entryStartPositionRef.current,
+      cameraPositionRef.current,
+      entryAmount,
+    )
+    state.camera.quaternion.slerpQuaternions(
+      entryStartQuaternionRef.current,
+      targetQuaternionRef.current,
+      entryAmount,
+    )
+    entryCompleteRef.current = entryProgress >= 1
     state.camera.updateMatrixWorld()
     writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, targetRef.current)
 
-    if (motion.isMoving || gamepadInput?.lookStrength) renderScheduler.requestFrame('camera:move')
+    if (!entryCompleteRef.current || motion.isMoving || gamepadInput?.lookStrength) {
+      renderScheduler.requestFrame('camera:move')
+    }
     recordLandrushIslandCameraProbe({
       camera: state.camera,
       mode: 'player',
-      source: 'fpv-camera',
+      progress: entryCompleteRef.current ? undefined : entryProgress,
+      source: entryCompleteRef.current ? 'fpv-camera' : 'fpv-entry-transition',
       target: targetRef.current,
     })
   }, 2)
@@ -11915,6 +12027,12 @@ function LandrushIslandThirdPersonCameraController({
   const returnTransitionRunningRef = useRef(false)
   const cameraMotionActiveRef = useRef(false)
   const snapVersionRef = useRef<number | null>(null)
+  const entryTargetQuaternionRef = useRef(new Quaternion())
+  const entryTransitionRef = useRef<{
+    elapsed: number
+    startPosition: Vector3
+    startQuaternion: Quaternion
+  } | null>(null)
 
   const setCameraMotionActive = useCallback((active: boolean) => {
     if (cameraMotionActiveRef.current === active) return
@@ -12250,7 +12368,95 @@ function LandrushIslandThirdPersonCameraController({
     returnTransitionRef.current = null
     const previousTarget = previousTargetRef.current
 
-    if (!previousTarget || snapVersionRef.current !== motion.cameraSnapVersion) {
+    if (!previousTarget) {
+      let entryTransition = entryTransitionRef.current
+      if (!entryTransition) {
+        const storedYaw = playerCameraPoseRef.current?.yaw
+        const yaw =
+          typeof storedYaw === 'number' && Number.isFinite(storedYaw)
+            ? storedYaw
+            : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW
+        const storedDistance = playerCameraPoseRef.current?.distance
+        const storedPitch = playerCameraPoseRef.current?.pitch
+        const pitch =
+          typeof storedPitch === 'number' && Number.isFinite(storedPitch)
+            ? clamp(
+                storedPitch,
+                LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
+                LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
+              )
+            : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH
+        cameraYawRef.current = yaw
+        targetCameraYawRef.current = yaw
+        cameraPitchRef.current = pitch
+        targetCameraPitchRef.current = pitch
+        cameraDistanceRef.current =
+          typeof storedDistance === 'number' && Number.isFinite(storedDistance)
+            ? clamp(
+                storedDistance,
+                LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+                LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
+              )
+            : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE
+        entryTransition = {
+          elapsed: 0,
+          startPosition: state.camera.position.clone(),
+          startQuaternion: state.camera.quaternion.clone(),
+        }
+        entryTransitionRef.current = entryTransition
+      }
+
+      const desiredCameraPosition = resolveThirdPersonCameraPosition(
+        target,
+        cameraYawRef.current,
+        cameraPitchRef.current,
+        cameraDistanceRef.current,
+        desiredCameraPositionRef.current,
+      )
+      resolveLandrushIslandCameraPoseQuaternion(
+        desiredCameraPosition,
+        target,
+        entryTargetQuaternionRef.current,
+      )
+      entryTransition.elapsed = Math.min(
+        LANDRUSH_ISLAND_ROBOT_FPV_CAMERA_TRANSITION_SECONDS,
+        entryTransition.elapsed + frameDelta,
+      )
+      const entryProgress = clamp01(
+        entryTransition.elapsed / LANDRUSH_ISLAND_ROBOT_FPV_CAMERA_TRANSITION_SECONDS,
+      )
+      const entryAmount = easeLandrushIslandCameraTransition(entryProgress, 'player')
+      state.camera.position.lerpVectors(
+        entryTransition.startPosition,
+        desiredCameraPosition,
+        entryAmount,
+      )
+      state.camera.quaternion.slerpQuaternions(
+        entryTransition.startQuaternion,
+        entryTargetQuaternionRef.current,
+        entryAmount,
+      )
+      state.camera.updateMatrixWorld()
+      writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, target)
+      setCameraMotionActive(true)
+      renderScheduler.requestFrame('camera:move')
+      recordLandrushIslandCameraProbe({
+        camera: state.camera,
+        mode: 'player',
+        progress: entryProgress,
+        source: 'player-entry-transition',
+        target,
+      })
+
+      if (entryProgress >= 1) {
+        previousTargetRef.current = target.clone()
+        snapVersionRef.current = motion.cameraSnapVersion
+        entryTransitionRef.current = null
+      }
+      return
+    }
+
+    if (snapVersionRef.current !== motion.cameraSnapVersion) {
       const storedYaw = playerCameraPoseRef.current?.yaw
       const yaw =
         typeof storedYaw === 'number' && Number.isFinite(storedYaw)
@@ -12289,6 +12495,7 @@ function LandrushIslandThirdPersonCameraController({
       state.camera.lookAt(target)
       previousTargetRef.current = target.clone()
       snapVersionRef.current = motion.cameraSnapVersion
+      entryTransitionRef.current = null
       writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, target)
       setCameraMotionActive(true)
       renderScheduler.requestFrame('camera:move')

@@ -1,4 +1,5 @@
 export type RenderReason =
+  | 'animation'
   | 'camera:start'
   | 'camera:move'
   | 'camera:end'
