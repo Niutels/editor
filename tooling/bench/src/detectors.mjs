@@ -18,10 +18,24 @@ export class BeaconWatchdog {
     this.onAnomaly = onAnomaly
     this.stopped = false
     this.freezes = []
+    this.starvations = []
     this.lastFrameIdx = -1
     this.lastAdvanceAt = Date.now()
     this.screenshotCount = 0
     this.lastBeacon = null
+  }
+
+  recordStarvation({ evalMs, frameIdx }) {
+    // Merge bursts: one long task shows up on several consecutive polls.
+    const last = this.starvations.at(-1)
+    if (last && Date.now() - last.t < 1500) {
+      last.evalMs = Math.max(last.evalMs, Math.round(evalMs))
+      last.count += 1
+      return
+    }
+    const row = { t: Date.now(), frameIdx, evalMs: Math.round(evalMs), count: 1 }
+    this.starvations.push(row)
+    this.events?.write({ t: performance.now(), type: 'detector:task-starvation', data: row })
   }
 
   start() {
@@ -51,11 +65,16 @@ export class BeaconWatchdog {
 
       const stallMs = now - this.lastAdvanceAt
       const visible = this.lastBeacon?.visibility !== 'hidden'
-      if (visible && (evalMs > this.freezeThresholdMs || stallMs > this.freezeThresholdMs)) {
-        await this.recordFreeze({ evalMs, stallMs, frameIdx: this.lastFrameIdx })
+      if (visible && stallMs > this.freezeThresholdMs) {
+        // rAF starved — a true frame freeze.
+        await this.recordFreeze({ kind: 'freeze', evalMs, stallMs, frameIdx: this.lastFrameIdx })
         // Re-arm after capture so one long freeze produces one record per
         // sustained second rather than one per poll.
         this.lastAdvanceAt = Date.now()
+      } else if (visible && evalMs > this.freezeThresholdMs) {
+        // Frames kept ticking but our tiny evaluate queued behind a long task:
+        // TASK STARVATION — real input events would lag exactly the same way.
+        this.recordStarvation({ evalMs, frameIdx: this.lastFrameIdx })
       }
 
       const waitLeft = this.pollMs - (Date.now() - t0)
@@ -63,8 +82,9 @@ export class BeaconWatchdog {
     }
   }
 
-  async recordFreeze({ evalMs, stallMs, frameIdx }) {
+  async recordFreeze({ kind = 'freeze', evalMs, stallMs, frameIdx }) {
     const freeze = {
+      kind,
       t: Date.now(),
       frameIdx,
       evalMs: Math.round(evalMs),

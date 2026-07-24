@@ -84,7 +84,12 @@ type BenchGlobal = {
   info(): Record<string, unknown>
   beacon(): Record<string, unknown>
   getFramesSince(cursor: number): { cursor: number; frames: BenchFrame[] }
+  /** Same data as getFramesSince but pre-stringified in-page: CDP serializes
+   * one string orders of magnitude faster than a deep object graph, keeping
+   * the harness's periodic pump from stalling the page main thread. */
+  getFramesPacked(cursor: number): string
   getEventsSince(cursor: number): { cursor: number; events: BenchEvent[] }
+  getEventsPacked(cursor: number): string
   mark(label: string): void
   digest(): BenchDigest
   getCheckpoint(): BenchCheckpoint
@@ -253,8 +258,18 @@ function BenchBridgeCollector() {
         const frames = from < total ? ring.slice(from - start) : []
         return { cursor: total, frames }
       },
+      getFramesPacked: (cursor: number) => {
+        const ring = ringRef.current
+        const start = ringStartIdxRef.current
+        const total = start + ring.length
+        const from = Math.max(cursor, start)
+        const frames = from < total ? ring.slice(from - start) : []
+        return JSON.stringify({ cursor: total, frames })
+      },
       getEventsSince: (cursor: number) =>
         eventTapRef.current?.eventsSince(cursor) ?? { cursor: 0, events: [] },
+      getEventsPacked: (cursor: number) =>
+        JSON.stringify(eventTapRef.current?.eventsSince(cursor) ?? { cursor: 0, events: [] }),
       mark: (label: string) => {
         pendingMarksRef.current.push(label)
         eventTapRef.current?.push('mark', { label })
@@ -404,7 +419,11 @@ function attachCpuFrame(ring: BenchFrame[], profFrame: LandrushFrameProfileFrame
         unmeasuredActiveMs: profFrame.unmeasuredActiveMs,
         waitMs: profFrame.waitMs,
         schedulerProfile: profFrame.schedulerProfile,
-        topLevel: profFrame.topLevel.map((slice) => ({ id: slice.id, ms: slice.durationMs })),
+        // Sub-0.05ms spans are noise per-frame (the profiler's aggregate report
+        // still has them) — dropping them cuts the pump payload ~4x.
+        topLevel: profFrame.topLevel
+          .filter((slice) => slice.durationMs >= 0.05)
+          .map((slice) => ({ id: slice.id, ms: slice.durationMs })),
       }
       return true
     }

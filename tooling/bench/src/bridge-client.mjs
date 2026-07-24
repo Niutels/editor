@@ -47,12 +47,16 @@ export class BridgeClient {
     return this.page.evaluate(() => window.__PASCAL_BENCH__?.info() ?? null)
   }
 
-  /** Pull new frames since the last pump. */
+  /** Pull new frames since the last pump. Uses the packed (string) channel —
+   * deep-object CDP serialization measurably stalls the page main thread. */
   async pumpFrames() {
-    const result = await this.page.evaluate(
-      (cursor) => window.__PASCAL_BENCH__?.getFramesSince(cursor) ?? { cursor, frames: [] },
+    const packed = await this.page.evaluate(
+      (cursor) =>
+        window.__PASCAL_BENCH__?.getFramesPacked(cursor) ??
+        JSON.stringify({ cursor, frames: [] }),
       this.frameCursor,
     )
+    const result = JSON.parse(packed)
     const gap = this.frameCursor > 0 && result.frames.length > 0
       ? result.frames[0].frameIdx - this.frameCursor
       : 0
@@ -61,10 +65,13 @@ export class BridgeClient {
   }
 
   async pumpEvents() {
-    const result = await this.page.evaluate(
-      (cursor) => window.__PASCAL_BENCH__?.getEventsSince(cursor) ?? { cursor, events: [] },
+    const packed = await this.page.evaluate(
+      (cursor) =>
+        window.__PASCAL_BENCH__?.getEventsPacked(cursor) ??
+        JSON.stringify({ cursor, events: [] }),
       this.eventCursor,
     )
+    const result = JSON.parse(packed)
     this.eventCursor = result.cursor
     return result.events
   }

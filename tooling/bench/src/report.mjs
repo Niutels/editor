@@ -59,13 +59,19 @@ export function buildReport({ runDir, fpsCap = 50, measureFromFrame = 0, meta = 
   const frames = allFrames.filter((f) => f.frameIdx >= measureFromFrame)
 
   const capIntervalMs = 1000 / fpsCap
-  const spikeThresholdMs = capIntervalMs * 1.5
   const gpuBudgetMs = capIntervalMs
 
   // ---- frame cadence
   const dts = frames.map((f) => f.dtMs).filter((v) => v > 0)
   const dtStats = stats(dts)
   const fpsEffective = dtStats.avg ? round1(1000 / dtStats.avg) : null
+
+  // Spike threshold must respect vsync quantization: a 50fps cap on a 60Hz
+  // display legitimately produces 33.3ms beats (20ms budget → next vsync).
+  // Estimate the display interval from the fastest sustained dt (p5).
+  const dtsSorted = [...dts].sort((a, b) => a - b)
+  const displayIntervalMs = Math.max(1000 / 240, percentile(dtsSorted, 5) ?? 1000 / 60)
+  const spikeThresholdMs = Math.max(capIntervalMs * 1.5, capIntervalMs + displayIntervalMs + 4)
 
   // ---- CPU ledger
   const cpuFrames = frames.filter((f) => f.cpu)
@@ -160,7 +166,10 @@ export function buildReport({ runDir, fpsCap = 50, measureFromFrame = 0, meta = 
     .sort((a, b) => (b.p95 ?? 0) - (a.p95 ?? 0))
 
   // ---- events / detectors
-  const freezes = events.filter((e) => e.type === 'detector:freeze').map((e) => e.data)
+  const freezes = events
+    .filter((e) => e.type === 'detector:freeze' && e.data?.kind !== 'starvation')
+    .map((e) => e.data)
+  const starvations = events.filter((e) => e.type === 'detector:task-starvation').map((e) => e.data)
   const pageErrors = events.filter((e) => e.type === 'pageerror')
   const consoleErrors = events.filter((e) => e.type === 'console:error')
   const deviceLost = events.filter((e) => e.type === 'device-lost' || e.data === 'device-lost')
@@ -203,9 +212,14 @@ export function buildReport({ runDir, fpsCap = 50, measureFromFrame = 0, meta = 
       detail: `render+compute p95 = ${gpuTotals.p95}ms over ${gpuTotals.n} resolves; per-pass table attributes all of it`,
     },
     {
-      gate: 'No freezes >= 250ms',
+      gate: 'No frame freezes >= 250ms',
       pass: freezes.length === 0,
-      detail: `${freezes.length} freeze(s)${freezes.length ? `, worst ${Math.max(...freezes.map((f) => Math.max(f.evalMs, f.stallMs)))}ms` : ''}`,
+      detail: `${freezes.length} freeze(s)${freezes.length ? `, worst stall ${Math.max(...freezes.map((f) => f.stallMs))}ms` : ''}`,
+    },
+    {
+      gate: 'No main-thread task starvation >= 250ms',
+      pass: starvations.length === 0,
+      detail: `${starvations.length} episode(s)${starvations.length ? `, worst ${Math.max(...starvations.map((s) => s.evalMs))}ms — input events would lag the same way` : ''}`,
     },
     {
       gate: 'Zero page errors / crashes / device-lost',
