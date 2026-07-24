@@ -12,8 +12,15 @@ const lanDevOrigins = Array.from(
   ),
 )
 
+const landrushWorldMultiplayerWebSocketUrl =
+  process.env.NEXT_PUBLIC_LANDRUSH_WORLD_MULTIPLAYER_WS_URL ??
+  'wss://landrush.157-230-223-22.sslip.io/api/landrush-lab/world-multiplayer/ws'
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: lanDevOrigins,
+  env: {
+    NEXT_PUBLIC_LANDRUSH_WORLD_MULTIPLAYER_WS_URL: landrushWorldMultiplayerWebSocketUrl,
+  },
   logging: {
     browserToTerminal: true,
   },
