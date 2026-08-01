@@ -3,9 +3,13 @@
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { Canvas, type RootState, useFrame, useThree } from '@react-three/fiber'
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { ACESFilmicToneMapping, type Mesh, PlaneGeometry, SphereGeometry, Vector3 } from 'three'
+import { ACESFilmicToneMapping, type Mesh, SphereGeometry, Vector3 } from 'three'
 import * as THREE from 'three/webgpu'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
+import {
+  createStandaloneOceanDiskGeometry,
+  type StandaloneOceanDiskGeometryMetrics,
+} from './standalone-ocean-geometry'
 import {
   createDefaultStandaloneOceanParameters,
   createStandaloneOceanMaterials,
@@ -36,11 +40,13 @@ type StandaloneOceanDebugState = {
   quality: StandaloneOceanQuality
   rendering: {
     analyticWaveCount: number
+    detailRadialSegments: number
+    diskRadius: number
+    horizonRadialSegments: number
     oceanDrawCalls: number
-    planeSegments: number
     postProcessRenderTargets: number
     skyDrawCalls: number
-    triangleBudget: number
+    triangleCount: number
   }
   seed: number
   timeSeconds: number
@@ -52,7 +58,8 @@ declare global {
   }
 }
 
-export const STANDALONE_OCEAN_PLANE_SIZE = 1200
+export const STANDALONE_OCEAN_DETAIL_RADIUS = 600
+export const STANDALONE_OCEAN_HORIZON_RADIUS = 1800
 
 const STANDALONE_OCEAN_SKY_RADIUS = 950
 const STANDALONE_OCEAN_SKY_FAR_PLANE_RATIO = 0.8
@@ -755,40 +762,44 @@ export function StandaloneOceanWorld({
   waterlineInteractionField?: WaterlineInteractionField | null
 }) {
   const qualitySettings = STANDALONE_OCEAN_QUALITY[quality]
-  const planeGeometry = useMemo(
+  const diskGeometry = useMemo(
     () =>
-      new PlaneGeometry(
-        STANDALONE_OCEAN_PLANE_SIZE,
-        STANDALONE_OCEAN_PLANE_SIZE,
-        qualitySettings.segments,
-        qualitySettings.segments,
-      ),
+      createStandaloneOceanDiskGeometry({
+        detailRadialSegments: qualitySettings.segments / 2,
+        detailRadius: STANDALONE_OCEAN_DETAIL_RADIUS,
+        horizonAngularSegments: qualitySettings.segments,
+        horizonRadialSegments: Math.ceil(qualitySettings.segments / 6),
+        outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
+      }),
     [qualitySettings.segments],
   )
+  const diskMetrics = diskGeometry.userData
+    .standaloneOceanDisk as StandaloneOceanDiskGeometryMetrics
   const skyGeometry = useMemo(() => new SphereGeometry(STANDALONE_OCEAN_SKY_RADIUS, 32, 18), [])
   const parametersRef = useRef(parameters)
   parametersRef.current = parameters
   const submergedRockRefractionActive = submergedRockRefraction && parameters.underwaterRocksEnabled
-  const materials = useMemo(
-    () => {
-      const build = () =>
-        createStandaloneOceanMaterials(
-          parametersRef.current,
-          debugMode,
-          STANDALONE_OCEAN_PLANE_SIZE / qualitySettings.segments,
-          waterlineInteractionField,
-          submergedRockRefractionActive,
-        )
-      return profileMeasure ? profileMeasure('setup.ocean.materials', build) : build()
-    },
-    [
-      debugMode,
-      profileMeasure,
-      qualitySettings.segments,
-      submergedRockRefractionActive,
-      waterlineInteractionField,
-    ],
-  )
+  const materials = useMemo(() => {
+    const build = () =>
+      createStandaloneOceanMaterials(
+        parametersRef.current,
+        debugMode,
+        {
+          detailRadius: STANDALONE_OCEAN_DETAIL_RADIUS,
+          outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
+          vertexSpacing: STANDALONE_OCEAN_DETAIL_RADIUS / Math.max(1, qualitySettings.segments / 2),
+        },
+        waterlineInteractionField,
+        submergedRockRefractionActive,
+      )
+    return profileMeasure ? profileMeasure('setup.ocean.materials', build) : build()
+  }, [
+    debugMode,
+    profileMeasure,
+    qualitySettings.segments,
+    submergedRockRefractionActive,
+    waterlineInteractionField,
+  ])
   const timeRef = useRef(0)
   const resetRevisionRef = useRef(resetRevision)
   const frameIntervalRef = useRef(16.7)
@@ -828,7 +839,7 @@ export function StandaloneOceanWorld({
     materials.time.value = timeRef.current
   }, [materials, resetRevision])
   useEffect(() => () => materials.dispose(), [materials])
-  useEffect(() => () => planeGeometry.dispose(), [planeGeometry])
+  useEffect(() => () => diskGeometry.dispose(), [diskGeometry])
   useEffect(() => () => skyGeometry.dispose(), [skyGeometry])
 
   function runOceanFrame(state: RootState, delta: number) {
@@ -865,11 +876,13 @@ export function StandaloneOceanWorld({
       quality,
       rendering: {
         analyticWaveCount: STANDALONE_OCEAN_SPECTRAL_MODE_COUNT,
+        detailRadialSegments: diskMetrics.detailRadialSegments,
+        diskRadius: diskMetrics.outerRadius,
+        horizonRadialSegments: diskMetrics.horizonRadialSegments,
         oceanDrawCalls: 1,
-        planeSegments: qualitySettings.segments,
         postProcessRenderTargets: 0,
         skyDrawCalls: 1,
-        triangleBudget: qualitySettings.segments * qualitySettings.segments * 2,
+        triangleCount: diskMetrics.triangleCount,
       },
       seed: parameters.seed,
       timeSeconds: timeRef.current,
@@ -886,7 +899,7 @@ export function StandaloneOceanWorld({
     <>
       <mesh
         frustumCulled={false}
-        geometry={planeGeometry}
+        geometry={diskGeometry}
         position={[0, elevation, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
       >

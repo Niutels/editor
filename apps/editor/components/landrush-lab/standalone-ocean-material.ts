@@ -311,41 +311,54 @@ export const STANDALONE_OCEAN_SPECTRAL_MODE_COUNT =
 
 export type StandaloneOceanMaterialBundle = ReturnType<typeof createStandaloneOceanMaterials>
 
+type StandaloneOceanGeometryContract = {
+  detailRadius: number
+  outerRadius: number
+  vertexSpacing: number
+}
+
 export function createStandaloneOceanMaterials(
   parameters: StandaloneOceanParameters,
   debugMode: StandaloneOceanDebugMode,
-  vertexSpacing: number,
+  geometry: StandaloneOceanGeometryContract,
   waterlineInteractionField: WaterlineInteractionField | null = null,
   submergedRockRefraction = false,
 ) {
   const controls = createStandaloneOceanUniforms(parameters)
   const coordinates = vec2(positionLocal.x, positionLocal.y.negate())
+  const radialDistance = coordinates.length()
+  const waveEnvelope = radialDistance
+    .smoothstep(geometry.detailRadius * 0.9, geometry.detailRadius * 1.8)
+    .oneMinus()
   const geometryWaves = createStandaloneOceanWaveBundle(
     coordinates,
     controls.time,
     controls,
-    vertexSpacing,
+    geometry.vertexSpacing,
     false,
   )
   const surfaceWaves = createStandaloneOceanWaveBundle(
     coordinates,
     controls.time,
     controls,
-    vertexSpacing,
+    geometry.vertexSpacing,
     true,
   )
-  const opticalNormal = createStandaloneOceanDetailNormal(
-    surfaceWaves.normal,
-    coordinates,
-    controls.time,
-    controls,
-  )
+  const opticalNormal = mix(
+    vec3(0, 1, 0),
+    createStandaloneOceanDetailNormal(surfaceWaves.normal, coordinates, controls.time, controls),
+    waveEnvelope,
+  ).normalize()
   const opticalWaves = {
     ...surfaceWaves,
+    compression: surfaceWaves.compression.mul(waveEnvelope),
+    crest: surfaceWaves.crest.mul(waveEnvelope),
+    height: surfaceWaves.height.mul(waveEnvelope),
     normal: opticalNormal,
     slope: opticalNormal.y.oneMinus().mul(9).clamp(0, 1),
   }
   const sunDirection = createStandaloneOceanSunDirection(controls)
+  const horizonRadiance = createStandaloneOceanHorizonRadiance(controls)
   const viewDirection = cameraPosition.sub(positionWorld).normalize()
   const reflectionDirection = reflect(viewDirection.negate(), opticalWaves.normal).normalize()
   const reflectionColor = createStandaloneOceanSkyColor(reflectionDirection, sunDirection, controls)
@@ -374,12 +387,15 @@ export function createStandaloneOceanMaterials(
   const opticalColor = mix(submergedRockTransmission.color, reflectionColor, reflectionMix)
   const distanceToCamera = cameraPosition.sub(positionWorld).length()
   const haze = distanceToCamera
-    .smoothstep(180, 690)
+    .smoothstep(220, 1200)
     .mul(controls.horizonHaze)
     .mul(controls.hazeEnabled)
     .clamp(0, 0.86)
-  const horizonWater = mix(controls.shallowColor, controls.skyHorizonColor, 0.58)
+  const horizonWater = mix(controls.shallowColor, horizonRadiance, 0.68)
   const hazedOpticalColor = mix(opticalColor, horizonWater, haze)
+  const edgeHorizonBlend = radialDistance
+    .smoothstep(geometry.outerRadius * 0.7, geometry.outerRadius * 0.97)
+    .clamp(0, 1)
   const waveFoam = createStandaloneOceanFoamMask(opticalWaves, coordinates, controls)
   const waterlineFoam = createStandaloneOceanWaterlineFoam(
     coordinates,
@@ -428,12 +444,15 @@ export function createStandaloneOceanMaterials(
   const compositedSurfaceColor = finalSurfaceColor.add(
     glareColor.mul(glareMask).mul(controls.glareStrength).mul(0.13),
   )
+  const horizonSurfaceColor = mix(compositedSurfaceColor, horizonRadiance, edgeHorizonBlend)
+  const noGlareHorizonSurfaceColor = mix(finalSurfaceColor, horizonRadiance, edgeHorizonBlend)
   const surfaceOpacity = submergedRockTransmission.opacity
     .max(reflectionMix.mul(0.72))
     .max(waveFoamMix)
     .max(boundaryMistMix)
     .max(boundaryRibbonMix)
     .max(glareMask.mul(0.32))
+    .max(edgeHorizonBlend)
     .clamp(0, 1)
   const displacementDebug = vec3(
     geometryWaves.displacementX.mul(2.8).add(0.5),
@@ -470,8 +489,8 @@ export function createStandaloneOceanMaterials(
                       : debugMode === 'waterline'
                         ? waterlineFoam.debugColor
                         : debugMode === 'no-glare'
-                          ? finalSurfaceColor
-                          : compositedSurfaceColor
+                          ? noGlareHorizonSurfaceColor
+                          : horizonSurfaceColor
   const surface = new MeshBasicNodeMaterial({
     depthTest: true,
     depthWrite: !submergedRockRefraction,
@@ -479,9 +498,9 @@ export function createStandaloneOceanMaterials(
     transparent: submergedRockRefraction,
   })
   surface.positionNode = vec3(
-    positionLocal.x.add(geometryWaves.displacementX),
-    positionLocal.y.sub(geometryWaves.displacementZ),
-    geometryWaves.height,
+    positionLocal.x.add(geometryWaves.displacementX.mul(waveEnvelope)),
+    positionLocal.y.sub(geometryWaves.displacementZ.mul(waveEnvelope)),
+    geometryWaves.height.mul(waveEnvelope),
   )
   surface.colorNode = resolvedSurfaceColor
   surface.opacityNode = surfaceOpacity
@@ -790,12 +809,17 @@ function createStandaloneOceanSkyColor(
   sunDirection: TSLNode<'vec3'>,
   controls: StandaloneOceanUniforms,
 ) {
-  const skyBlend = direction.y.smoothstep(-0.08, 0.88)
-  const gradient = mix(controls.skyHorizonColor, controls.skyZenithColor, skyBlend)
+  const horizonRadiance = createStandaloneOceanHorizonRadiance(controls)
+  const skyBlend = direction.y.max(0).smoothstep(0.015, 0.62)
+  const gradient = mix(horizonRadiance, controls.skyZenithColor, skyBlend)
   const sunDot = direction.dot(sunDirection).max(0)
   const sunDisc = color('#ffd27a').mul(sunDot.pow(720)).mul(8)
   const sunHalo = color('#ffc66e').mul(sunDot.pow(18)).mul(0.9)
-  return mix(controls.skyHorizonColor, gradient.add(sunDisc).add(sunHalo), controls.skyEnabled)
+  return mix(horizonRadiance, gradient.add(sunDisc).add(sunHalo), controls.skyEnabled)
+}
+
+function createStandaloneOceanHorizonRadiance(controls: StandaloneOceanUniforms) {
+  return mix(controls.skyHorizonColor, color('#fff1d8'), 0.08)
 }
 
 function createStandaloneOceanFoamMask(

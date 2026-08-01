@@ -10,3 +10,4 @@ export type RenderReason =
   | 'thumbnail'
   | 'export'
   | 'debug'
+  | 'warmup'

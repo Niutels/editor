@@ -1,6 +1,24 @@
 'use client'
 
-import type { Dispatch, ReactNode, SetStateAction } from 'react'
+import { renderScheduler } from '@pascal-app/viewer'
+import { type Dispatch, type ReactNode, type SetStateAction, useState } from 'react'
+import {
+  LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_DEFAULT,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_MAX,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_MIN,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_DEFAULT,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_MAX,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_MIN,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_DEFAULT,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_MAX,
+  LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_MIN,
+  readLandrushRobotScreenRevealOuterRadiusScale,
+  readLandrushRobotScreenRevealRadiusScale,
+  readLandrushRobotScreenRevealSmoothness,
+  updateLandrushRobotScreenRevealOuterRadiusScale,
+  updateLandrushRobotScreenRevealRadiusScale,
+  updateLandrushRobotScreenRevealSmoothness,
+} from './robot-screen-reveal-mask'
 import {
   createDefaultStandaloneOceanParameters,
   type StandaloneOceanParameters,
@@ -150,6 +168,14 @@ export function StandaloneOceanParameterControls({
           />
         ))}
       </div>
+
+      <OceanControlSection label="Robot passthrough" open>
+        <div className="text-[9px] leading-4 text-stone-400">
+          Clear and outer radius are fixed, independent endpoints. Smoothness only reshapes opacity
+          between them; dragging either radius never shifts the other.
+        </div>
+        <RobotPassthroughControls />
+      </OceanControlSection>
 
       <OceanControlSection label="Wave-following shoreline ribbon" open>
         <div className="text-[9px] leading-4 text-stone-400">
@@ -1005,6 +1031,137 @@ function OceanControlSection({
       </summary>
       <div className="mt-2 space-y-2.5">{children}</div>
     </details>
+  )
+}
+
+function RobotPassthroughControls() {
+  const [radiusScale, setRadiusScale] = useState(readLandrushRobotScreenRevealRadiusScale)
+  const [outerRadiusScale, setOuterRadiusScale] = useState(
+    readLandrushRobotScreenRevealOuterRadiusScale,
+  )
+  const [smoothness, setSmoothness] = useState(readLandrushRobotScreenRevealSmoothness)
+  const minimumRadiusGap = 0.05
+
+  return (
+    <>
+      <RobotPassthroughControl
+        defaultValue={LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_DEFAULT}
+        label="Complete see-through radius"
+        max={LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_MAX}
+        min={LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_MIN}
+        onChange={(nextValue) => {
+          setRadiusScale(
+            updateLandrushRobotScreenRevealRadiusScale(
+              Math.min(nextValue, outerRadiusScale - minimumRadiusGap),
+            ),
+          )
+          renderScheduler.requestFrame('animation')
+        }}
+        value={radiusScale}
+      />
+      <RobotPassthroughControl
+        defaultValue={LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_DEFAULT}
+        label="Fully opaque outer radius"
+        max={LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_MAX}
+        min={LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_MIN}
+        onChange={(nextValue) => {
+          setOuterRadiusScale(
+            updateLandrushRobotScreenRevealOuterRadiusScale(
+              Math.max(nextValue, radiusScale + minimumRadiusGap),
+            ),
+          )
+          renderScheduler.requestFrame('animation')
+        }}
+        value={outerRadiusScale}
+      />
+      <RobotPassthroughControl
+        defaultValue={LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_DEFAULT}
+        label="Transition curve smoothness"
+        mapping="linear"
+        max={LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_MAX}
+        min={LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_MIN}
+        onChange={(nextValue) => {
+          setSmoothness(updateLandrushRobotScreenRevealSmoothness(nextValue))
+          renderScheduler.requestFrame('animation')
+        }}
+        step={1}
+        suffix="%"
+        value={smoothness}
+      />
+    </>
+  )
+}
+
+function RobotPassthroughControl({
+  defaultValue,
+  label,
+  mapping = 'logarithmic',
+  max,
+  min,
+  onChange,
+  step = 0.05,
+  suffix = 'x',
+  value,
+}: {
+  defaultValue: number
+  label: string
+  mapping?: 'linear' | 'logarithmic'
+  max: number
+  min: number
+  onChange: (value: number) => void
+  step?: number
+  suffix?: string
+  value: number
+}) {
+  const hasRange = max > min
+  const sliderValue = !hasRange
+    ? 0
+    : mapping === 'logarithmic'
+      ? Math.log(value / min) / Math.log(max / min)
+      : (value - min) / (max - min)
+
+  return (
+    <label className="block">
+      <span className="flex items-center justify-between gap-2 text-[10px] text-stone-300">
+        <span>{label}</span>
+        <span className="flex items-center gap-1">
+          <input
+            className="h-6 w-16 rounded border border-white/15 bg-black/20 px-1.5 text-right font-mono text-[9px] text-stone-100 outline-none focus:border-cyan-200/60"
+            max={max}
+            min={min}
+            onChange={(event) => onChange(Number(event.currentTarget.value))}
+            step={step}
+            type="number"
+            value={value}
+          />
+          <span className="font-mono text-stone-400">{suffix}</span>
+          <button
+            className="rounded border border-white/10 bg-white/5 px-1.5 py-1 font-semibold text-[8px] uppercase text-stone-300 hover:bg-white/10"
+            onClick={() => onChange(defaultValue)}
+            type="button"
+          >
+            Reset
+          </button>
+        </span>
+      </span>
+      <input
+        className="mt-1 block w-full accent-cyan-300"
+        max={1}
+        min={0}
+        onChange={(event) => {
+          if (!hasRange) return
+          const normalized = Number(event.currentTarget.value)
+          onChange(
+            mapping === 'logarithmic'
+              ? min * (max / min) ** normalized
+              : min + (max - min) * normalized,
+          )
+        }}
+        step={0.001}
+        type="range"
+        value={sliderValue}
+      />
+    </label>
   )
 }
 

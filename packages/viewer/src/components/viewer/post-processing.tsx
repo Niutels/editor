@@ -48,6 +48,36 @@ import { mergedOutline } from '../../lib/merged-outline-node'
 import { getSceneTheme } from '../../lib/scene-themes'
 import useViewer from '../../store/use-viewer'
 
+// How often the presentation-only pipeline re-checks whether the scene grew and
+// therefore needs another prewarm frame. Cheap enough to leave on permanently:
+// it converges once the scene stops growing.
+const PRESENTATION_PREWARM_CHECK_INTERVAL_MS = 500
+
+// One prewarm frame is not enough: the transition alternates between the direct
+// canvas render and the pipeline composite, and three builds node state per render
+// context as it encounters them — measured as 17 rebuilds on the first transition,
+// 8 on the second, 0 afterwards. Prewarming a run of pipeline frames builds those
+// variants during load instead. The amount is non-zero so the real blur path runs,
+// but far below the threshold where the blur is perceptible.
+const PRESENTATION_PREWARM_FRAME_BUDGET = 12
+const PRESENTATION_PREWARM_AMOUNT = 0.002
+
+function countRenderableObjects(root: Object3D) {
+  let count = 0
+  root.traverseVisible((object) => {
+    const candidate = object as {
+      isLine?: boolean
+      isMesh?: boolean
+      isPoints?: boolean
+      isSprite?: boolean
+    }
+    if (candidate.isMesh || candidate.isLine || candidate.isPoints || candidate.isSprite) {
+      count += 1
+    }
+  })
+  return count
+}
+
 // SSGI Parameters - adjust these to fine-tune global illumination and ambient occlusion
 export const SSGI_PARAMS = {
   enabled: true,
@@ -113,6 +143,11 @@ const PERF_DRAW_DISABLED =
       .split(',')
       .map((s) => s.trim()),
   ).has('draw')
+
+// `?viewerDebug=1` publishes the live renderer/scene/camera so profiling harnesses can
+// reach three's internals (node cache, pipeline cache) without a React devtools walk.
+const VIEWER_DEBUG_ENABLED =
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('viewerDebug')
 
 // Stand-in scene for `?disable=draw` frames — cleared, never populated.
 const emptyScene = new Scene()
@@ -287,7 +322,15 @@ const PostProcessingPasses = ({
   const { gl: renderer, invalidate, scene, camera, size, viewport } = useThree()
   const renderPipelineRef = useRef<RenderPipeline | null>(null)
   const presentationOnlyPipelineRef = useRef(false)
-  const presentationPrewarmPendingRef = useRef(false)
+  const presentationPrewarmFramesRef = useRef(0)
+  // The presentation pass renders the scene through its own render target, so every
+  // material needs a second node program built for that path. Building one is ~CPU
+  // only (TSL -> WGSL) but the scene streams in for seconds after the pipeline is
+  // created, so a single prewarm at creation time misses everything that arrives
+  // later — they would all build inside the first transition frame instead. Re-arm
+  // the prewarm whenever the renderable set changes, and stop once it settles.
+  const presentationPrewarmSignatureRef = useRef(-1)
+  const presentationPrewarmCheckAtRef = useRef(0)
   const hasPipelineErrorRef = useRef(false)
   const retryCountRef = useRef(0)
   const rebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -397,12 +440,22 @@ const PostProcessingPasses = ({
     invalidate,
   ])
 
+  useEffect(() => {
+    if (!VIEWER_DEBUG_ENABLED) return
+    ;(window as any).__PASCAL_VIEWER_DEBUG__ = { camera, renderer, scene }
+    return () => {
+      delete (window as any).__PASCAL_VIEWER_DEBUG__
+    }
+  }, [camera, renderer, scene])
+
   // Build / rebuild the post-processing pipeline
   useEffect(() => {
     const width = Math.floor(size.width)
     const height = Math.floor(size.height)
     presentationOnlyPipelineRef.current = false
-    presentationPrewarmPendingRef.current = false
+    presentationPrewarmFramesRef.current = 0
+    presentationPrewarmSignatureRef.current = -1
+    presentationPrewarmCheckAtRef.current = 0
 
     if (!(renderer && scene && camera)) {
       console.warn('[viewer/post-processing] Skipping pipeline build — missing dependency.', {
@@ -517,7 +570,7 @@ const PostProcessingPasses = ({
         renderPipeline.outputNode = presentationEffect.outputNode
         renderPipelineRef.current = renderPipeline
         presentationOnlyPipelineRef.current = true
-        presentationPrewarmPendingRef.current = true
+        presentationPrewarmFramesRef.current = PRESENTATION_PREWARM_FRAME_BUDGET
         hasPipelineErrorRef.current = false
         retryCountRef.current = 0
       } catch (error) {
@@ -540,7 +593,7 @@ const PostProcessingPasses = ({
         presentationScenePass?.dispose()
         renderPipelineRef.current = null
         presentationOnlyPipelineRef.current = false
-        presentationPrewarmPendingRef.current = false
+        presentationPrewarmFramesRef.current = 0
       }
     }
 
@@ -854,9 +907,35 @@ const PostProcessingPasses = ({
       presentationZoomCenter.current.value.set(presentationCenter[0], presentationCenter[1])
     }
 
-    const presentationPipelineFrame =
+    if (presentationOnlyPipelineRef.current && presentationAmount <= 0.001) {
+      const now = performance.now()
+      if (now >= presentationPrewarmCheckAtRef.current) {
+        presentationPrewarmCheckAtRef.current = now + PRESENTATION_PREWARM_CHECK_INTERVAL_MS
+        // Only a *growing* renderable set can introduce programs the pass path has
+        // not built yet, so tracking the peak converges instead of re-arming
+        // forever against systems that stream objects in and out.
+        const renderables = countRenderableObjects(scene)
+        if (renderables > presentationPrewarmSignatureRef.current) {
+          presentationPrewarmSignatureRef.current = renderables
+          presentationPrewarmFramesRef.current = PRESENTATION_PREWARM_FRAME_BUDGET
+        }
+      }
+    }
+
+    const prewarming =
       presentationOnlyPipelineRef.current &&
-      (presentationAmount > 0.001 || presentationPrewarmPendingRef.current)
+      presentationAmount <= 0.001 &&
+      presentationPrewarmFramesRef.current > 0
+    if (prewarming) {
+      // Drive the real blur path, not the amount==0 shortcut, so the prewarm builds
+      // the same node state the transition needs. Keep asking for frames: the budget
+      // has to be spent during load, not whenever the next repaint happens to occur.
+      presentationZoomAmount.current.value = PRESENTATION_PREWARM_AMOUNT
+      invalidate()
+    }
+
+    const presentationPipelineFrame =
+      presentationOnlyPipelineRef.current && (presentationAmount > 0.001 || prewarming)
     const renderPipeline = renderPipelineRef.current
     const shouldDirectRender =
       PERF_POST_FX_DISABLED ||
@@ -889,9 +968,27 @@ const PostProcessingPasses = ({
       // making scenePassColor.a a reliable geometry mask (geometry pixels write a=1 via output node).
       ;(renderer as any).setClearAlpha(0)
       const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
-      renderPipeline.render()
-      if (presentationOnlyPipelineRef.current) {
-        presentationPrewarmPendingRef.current = false
+      // A prewarm frame exists to build node programs, and a program is only built
+      // for what the camera actually renders. The presentation effect is normally
+      // triggered by a camera move that reveals far more of the scene than the
+      // current view, so prewarm unculled — otherwise everything outside the
+      // current frustum still builds during the transition, which is the freeze
+      // this prewarm is here to prevent.
+      const unculled: Object3D[] = []
+      if (prewarming) {
+        scene.traverse((object) => {
+          if (!object.frustumCulled) return
+          object.frustumCulled = false
+          unculled.push(object)
+        })
+      }
+      try {
+        renderPipeline.render()
+      } finally {
+        for (const object of unculled) object.frustumCulled = true
+      }
+      if (prewarming) {
+        presentationPrewarmFramesRef.current -= 1
       }
       if (PERF_OVERLAY_ENABLED) {
         // device.queue.onSubmittedWorkDone() resolves once the GPU has

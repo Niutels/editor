@@ -1,6 +1,6 @@
 'use client'
 
-import { getMaterialRendererBackend } from '@pascal-app/viewer'
+import { getMaterialRendererBackend, renderScheduler } from '@pascal-app/viewer'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -878,6 +878,7 @@ function StylizedSceneGrassLayer({
         hadFadeZones,
       )
     }
+    renderScheduler.requestFrame('animation')
   }, [bladesVisible, geometry, grassFadeBlockers])
 
   useFrame(({ clock }, delta) => {
@@ -959,6 +960,7 @@ function StylizedSceneGrassLayer({
           hadFadeZones,
         )
       }
+      if (fadeChanged) renderScheduler.requestFrame('animation')
       recordStylizedGrassFadeRuntimeProbe({
         cacheStats: takeStylizedGrassCacheStats(cacheStatsRef.current),
         debugState: grassDebugState,
@@ -2272,6 +2274,7 @@ function applyStylizedGrassFadeAttributes(
       if (fadeValue > 0.05) blockedVisibleCount += 1
     }
   }
+  fade.clearUpdateRanges()
   fade.needsUpdate = true
   return {
     blockedFullCount,

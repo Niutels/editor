@@ -156,6 +156,7 @@ export interface EditorProps {
   viewerToolbarLeft?: ReactNode
   viewerToolbarRight?: ReactNode
   showEditorChrome?: boolean
+  showFloorplanCompass?: boolean
   showSidebarRail?: boolean
   showFullActionMenu?: boolean
   showMobileSelectionBar?: boolean
@@ -1047,6 +1048,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   onThumbnailCapture,
   reactProfiler,
   showEditorChrome,
+  showFloorplanCompass,
   viewerCameraControls,
   viewerCameraInitialPose,
   viewerDefaultCamera,
@@ -1072,6 +1074,7 @@ const ViewerCanvas = memo(function ViewerCanvas({
   onThumbnailCapture?: (blob: Blob, cameraData: SnapshotCameraData) => void
   reactProfiler?: EditorReactProfilerConfig
   showEditorChrome: boolean
+  showFloorplanCompass: boolean
   viewerCameraControls: boolean
   viewerCameraInitialPose?: EditorCameraInitialPose | null
   viewerDefaultCamera?: boolean
@@ -1150,7 +1153,13 @@ const ViewerCanvas = memo(function ViewerCanvas({
     <ErrorBoundary fallback={<EditorSceneCrashFallback />}>
       {/* `relative` so the floorplan compass (portaled here to stay visible in
           2d / 3d / split alike) can anchor to this container's bottom-left. */}
-      <div className="relative flex h-full" ref={setViewerAreaNode}>
+      <div
+        className={[
+          'relative flex h-full',
+          showFloorplanCompass ? '' : "[&_button[aria-label='Align_view_to_north']]:hidden",
+        ].join(' ')}
+        ref={setViewerAreaNode}
+      >
         {/* 2D floorplan — always mounted once shown, hidden via CSS to preserve state */}
         <div
           className="relative h-full flex-shrink-0"
@@ -1251,6 +1260,7 @@ export default function Editor({
   viewerToolbarLeft,
   viewerToolbarRight,
   showEditorChrome = true,
+  showFloorplanCompass = true,
   showSidebarRail = true,
   showFullActionMenu = false,
   showMobileSelectionBar = true,
@@ -1492,6 +1502,7 @@ export default function Editor({
       reactProfiler={reactProfiler}
       sceneReadyKey={sceneReadyKey}
       showEditorChrome={showEditorChrome}
+      showFloorplanCompass={showFloorplanCompass}
       showLoader={showLoader}
       viewerCameraControls={viewerCameraControls}
       viewerCameraInitialPose={viewerCameraInitialPose}

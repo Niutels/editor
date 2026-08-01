@@ -247,7 +247,7 @@ function buildSafeStreetSegments(
 }
 
 function buildParcelEdgeStreetSegments(allocation: ParcelAllocationResult, roadWidth: number) {
-  const rawEdges = allocation.parcels.flatMap((parcel) => parcelEdges(parcel.id, parcel.points))
+  const rawEdges = allocation.parcels.flatMap((parcel) => parcelEdges(parcel.id, parcel.rawPoints))
   const nodes = new Map<string, LandrushPoint2>()
   const edgeMap = new Map<
     string,
@@ -265,8 +265,8 @@ function buildParcelEdgeStreetSegments(allocation: ParcelAllocationResult, roadW
   }
 
   for (const [first, second] of neighborParcelPairs(allocation)) {
-    for (const firstEdge of parcelEdges(first.id, first.points)) {
-      for (const secondEdge of parcelEdges(second.id, second.points)) {
+    for (const firstEdge of parcelEdges(first.id, first.rawPoints)) {
+      for (const secondEdge of parcelEdges(second.id, second.rawPoints)) {
         const overlap = segmentOverlap(
           firstEdge.start,
           firstEdge.end,

@@ -256,10 +256,10 @@ const ROCK_SHAPE_PROFILES = [
   { bellyRadius: 1.25, crownRadius: 0.65, crestRadius: 0.38, lean: 0.12, shoulderRadius: 0.91 },
   { bellyRadius: 1.04, crownRadius: 0.9, crestRadius: 0.58, lean: 0.2, shoulderRadius: 0.94 },
 ] as const
-const BEACH_COVERAGE_COLOR = new Color('#f5ce72')
-const BEACH_VARIANT_COLOR = new Color('#d6ae70')
-const BEACH_BASE_COLOR = new Color('#f0d099')
-const BEACH_HIGHLIGHT_COLOR = new Color('#ffe3aa')
+const BEACH_COVERAGE_COLOR = new Color('#d8ae4f')
+const BEACH_VARIANT_COLOR = new Color('#b98e43')
+const BEACH_BASE_COLOR = new Color('#d5ad56')
+const BEACH_HIGHLIGHT_COLOR = new Color('#e2c36e')
 
 export function createProceduralRockCliffPlan({
   beachControls = DEFAULT_PROCEDURAL_BEACH_CONTROLS,

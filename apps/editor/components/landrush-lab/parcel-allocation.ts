@@ -1,8 +1,10 @@
+import polygonClipping, { type Pair, type Polygon, type Ring } from 'polygon-clipping'
 import type { LandrushPoint2 } from '@/components/landrush/types'
 
 export type ParcelAllocationOptions = {
   count: number
   maxEdges: number
+  roadReserveMeters?: number
   seed: string | number
   shoreSetbackMeters: number
   simplifyToleranceMeters: number
@@ -22,6 +24,7 @@ export type ParcelAllocationParcel = {
   neighborIds: readonly string[]
   points: readonly LandrushPoint2[]
   rawPoints: readonly LandrushPoint2[]
+  reservedArea: number
 }
 
 export type ParcelAllocationResult = {
@@ -48,6 +51,10 @@ type SplitCandidate = {
 const EPSILON = 0.000001
 const MIN_SPLIT_AREA = 0.5
 const MAX_SPLIT_DEPTH = 32
+const MAX_SIMPLIFIED_AREA_COVERAGE = 1.1
+const MIN_SIMPLIFIED_AREA_COVERAGE = 0.9
+const PARCEL_ROAD_RESERVE_ROUND_SEGMENTS = 12
+const PARCEL_ROAD_RESERVE_SNAP_SCALE = 10_000
 
 const PARCEL_COLORS = [
   '#f2c94c',
@@ -77,8 +84,13 @@ export function allocateParcels(
   const ids = leaves.map((_, index) => `parcel-${String(index + 1).padStart(2, '0')}`)
   const neighborSets = createNeighborSets(leaves, ids)
   const parcels = leaves.map<ParcelAllocationParcel>((leaf, index) => {
-    const points = simplifyParcelPoints(
+    const reservedPoints = reserveParcelRoadArea(
       leaf.points,
+      Math.max(0, options.roadReserveMeters ?? 0),
+    )
+    const reservedArea = polygonArea(reservedPoints)
+    const points = simplifyParcelPoints(
+      reservedPoints,
       maxEdges,
       Math.max(0, options.simplifyToleranceMeters),
     )
@@ -96,6 +108,7 @@ export function allocateParcels(
       neighborIds: [...neighborSets[index]!].sort(),
       points,
       rawPoints: leaf.points,
+      reservedArea,
     }
   })
 
@@ -323,55 +336,152 @@ function prepareBoundary(points: readonly LandrushPoint2[], setback: number) {
   return polygonArea(inset) > polygonArea(boundary) * 0.25 ? cleanPoints(inset) : boundary
 }
 
+function reserveParcelRoadArea(points: readonly LandrushPoint2[], reserveMeters: number) {
+  const clean = cleanPoints(points)
+  if (clean.length < 3 || reserveMeters <= EPSILON) return clean
+
+  const subject = parcelPolygon(clean)
+  const edgeReserves = clean.flatMap((start, index) => {
+    const end = clean[(index + 1) % clean.length]
+    if (!end) return []
+    const capsule = parcelEdgeCapsule(start, end, reserveMeters, PARCEL_ROAD_RESERVE_ROUND_SEGMENTS)
+    return capsule ? [capsule] : []
+  })
+  const firstReserve = edgeReserves[0]
+  if (!firstReserve) return clean
+
+  const roadReserve = polygonClipping.union(firstReserve, ...edgeReserves.slice(1))
+  const buildableArea = polygonClipping.difference(subject, roadReserve)
+  const largestPolygon = [...buildableArea].sort(
+    (first, second) => polygonPairArea(second[0] ?? []) - polygonPairArea(first[0] ?? []),
+  )[0]
+  const outerRing = largestPolygon?.[0]
+  return outerRing ? cleanPoints(openPairRing(outerRing).map(([x, z]) => ({ x, z }))) : []
+}
+
+function parcelPolygon(points: readonly LandrushPoint2[]): Polygon {
+  return [closedPairRing(points.map((point) => snappedPair(point.x, point.z)))]
+}
+
+function parcelEdgeCapsule(
+  start: LandrushPoint2,
+  end: LandrushPoint2,
+  radius: number,
+  roundSegments: number,
+): Polygon | null {
+  const deltaX = end.x - start.x
+  const deltaZ = end.z - start.z
+  if (Math.hypot(deltaX, deltaZ) <= EPSILON) return null
+
+  const heading = Math.atan2(deltaZ, deltaX)
+  const capSegments = Math.max(3, Math.floor(roundSegments / 2))
+  const ring: Ring = []
+  for (let index = 0; index <= capSegments; index += 1) {
+    const angle = heading + Math.PI / 2 - (index / capSegments) * Math.PI
+    ring.push(snappedPair(end.x + Math.cos(angle) * radius, end.z + Math.sin(angle) * radius))
+  }
+  for (let index = 0; index <= capSegments; index += 1) {
+    const angle = heading - Math.PI / 2 - (index / capSegments) * Math.PI
+    ring.push(snappedPair(start.x + Math.cos(angle) * radius, start.z + Math.sin(angle) * radius))
+  }
+  return [closedPairRing(ring)]
+}
+
+function polygonPairArea(ring: Ring) {
+  const opened = openPairRing(ring)
+  let area = 0
+  for (let index = 0; index < opened.length; index += 1) {
+    const current = opened[index]
+    const next = opened[(index + 1) % opened.length]
+    if (current && next) area += current[0] * next[1] - next[0] * current[1]
+  }
+  return Math.abs(area / 2)
+}
+
+function openPairRing(ring: Ring): Ring {
+  if (ring.length <= 1) return [...ring]
+  const first = ring[0]
+  const last = ring.at(-1)
+  return first && last && first[0] === last[0] && first[1] === last[1]
+    ? ring.slice(0, -1)
+    : [...ring]
+}
+
+function closedPairRing(ring: Ring): Ring {
+  const opened = openPairRing(ring)
+  const first = opened[0]
+  return first ? [...opened, [first[0], first[1]]] : []
+}
+
+function snappedPair(x: number, z: number): Pair {
+  return [
+    Math.round(x * PARCEL_ROAD_RESERVE_SNAP_SCALE) / PARCEL_ROAD_RESERVE_SNAP_SCALE,
+    Math.round(z * PARCEL_ROAD_RESERVE_SNAP_SCALE) / PARCEL_ROAD_RESERVE_SNAP_SCALE,
+  ]
+}
+
 function simplifyParcelPoints(
   points: readonly LandrushPoint2[],
   maxEdges: number,
   tolerance: number,
 ) {
-  let simplified = removeSoftVertices(cleanPoints(points), tolerance)
+  const clean = cleanPoints(points)
+  const minimumArea = polygonArea(clean) * MIN_SIMPLIFIED_AREA_COVERAGE
+  const maximumArea = polygonArea(clean) * MAX_SIMPLIFIED_AREA_COVERAGE
+  let simplified = removeSoftVertices(clean, tolerance, minimumArea, maximumArea)
 
   while (simplified.length > maxEdges && simplified.length > 3) {
-    simplified = removeLeastImportantVertex(simplified)
+    const next = removeLeastImportantVertex(simplified, minimumArea, maximumArea)
+    if (!next) break
+    simplified = next
   }
 
   return simplified
 }
 
-function removeSoftVertices(points: readonly LandrushPoint2[], tolerance: number) {
+function removeSoftVertices(
+  points: readonly LandrushPoint2[],
+  tolerance: number,
+  minimumArea: number,
+  maximumArea: number,
+) {
   if (points.length <= 3 || tolerance <= 0) return [...points]
 
   let current = [...points]
-  let changed = true
-
-  while (changed && current.length > 3) {
-    changed = false
-    const next: LandrushPoint2[] = []
-    let removed = 0
+  while (current.length > 3) {
+    let best:
+      | {
+          importance: number
+          points: LandrushPoint2[]
+        }
+      | undefined
 
     for (let index = 0; index < current.length; index += 1) {
       const previous = current[(index - 1 + current.length) % current.length]!
       const point = current[index]!
       const following = current[(index + 1) % current.length]!
-      if (
-        distanceToSegment(point, previous, following) <= tolerance &&
-        triangleArea(previous, point, following) <= tolerance * 2 &&
-        current.length - removed > 3
-      ) {
-        removed += 1
-        changed = true
-        continue
-      }
-      next.push(point)
+      const importance = triangleArea(previous, point, following)
+      if (distanceToSegment(point, previous, following) > tolerance) continue
+      if (importance > tolerance * 2) continue
+
+      const candidate = removeParcelVertex(current, index, minimumArea, maximumArea)
+      if (!candidate || (best && importance >= best.importance)) continue
+      best = { importance, points: candidate }
     }
 
-    current = next
+    if (!best) break
+    current = best.points
   }
 
   return current
 }
 
-function removeLeastImportantVertex(points: readonly LandrushPoint2[]) {
-  let bestIndex = 0
+function removeLeastImportantVertex(
+  points: readonly LandrushPoint2[],
+  minimumArea: number,
+  maximumArea: number,
+): LandrushPoint2[] | null {
+  let best: LandrushPoint2[] | null = null
   let bestArea = Number.POSITIVE_INFINITY
 
   for (let index = 0; index < points.length; index += 1) {
@@ -379,13 +489,90 @@ function removeLeastImportantVertex(points: readonly LandrushPoint2[]) {
     const point = points[index]!
     const following = points[(index + 1) % points.length]!
     const area = triangleArea(previous, point, following)
-    if (area < bestArea) {
-      bestArea = area
-      bestIndex = index
+    if (area >= bestArea) continue
+
+    const candidate = removeParcelVertex(points, index, minimumArea, maximumArea)
+    if (!candidate) continue
+    bestArea = area
+    best = candidate
+  }
+
+  return best
+}
+
+function removeParcelVertex(
+  points: readonly LandrushPoint2[],
+  index: number,
+  minimumArea: number,
+  maximumArea: number,
+) {
+  const candidate = points.filter((_, candidateIndex) => candidateIndex !== index)
+  const candidateArea = polygonArea(candidate)
+  if (candidateArea + EPSILON < minimumArea || candidateArea - EPSILON > maximumArea) return null
+  return parcelPolygonIsSimple(candidate) ? candidate : null
+}
+
+function parcelPolygonIsSimple(points: readonly LandrushPoint2[]) {
+  for (let firstIndex = 0; firstIndex < points.length; firstIndex += 1) {
+    const firstStart = points[firstIndex]
+    const firstEnd = points[(firstIndex + 1) % points.length]
+    if (!(firstStart && firstEnd)) continue
+
+    for (let secondIndex = firstIndex + 1; secondIndex < points.length; secondIndex += 1) {
+      if (secondIndex === firstIndex + 1) continue
+      if (firstIndex === 0 && secondIndex === points.length - 1) continue
+
+      const secondStart = points[secondIndex]
+      const secondEnd = points[(secondIndex + 1) % points.length]
+      if (!(secondStart && secondEnd)) continue
+      if (parcelSegmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) return false
     }
   }
 
-  return points.filter((_, index) => index !== bestIndex)
+  return true
+}
+
+function parcelSegmentsIntersect(
+  firstStart: LandrushPoint2,
+  firstEnd: LandrushPoint2,
+  secondStart: LandrushPoint2,
+  secondEnd: LandrushPoint2,
+) {
+  const firstSideStart = parcelTurn(firstStart, firstEnd, secondStart)
+  const firstSideEnd = parcelTurn(firstStart, firstEnd, secondEnd)
+  const secondSideStart = parcelTurn(secondStart, secondEnd, firstStart)
+  const secondSideEnd = parcelTurn(secondStart, secondEnd, firstEnd)
+
+  if (
+    ((firstSideStart > EPSILON && firstSideEnd < -EPSILON) ||
+      (firstSideStart < -EPSILON && firstSideEnd > EPSILON)) &&
+    ((secondSideStart > EPSILON && secondSideEnd < -EPSILON) ||
+      (secondSideStart < -EPSILON && secondSideEnd > EPSILON))
+  ) {
+    return true
+  }
+
+  return (
+    (Math.abs(firstSideStart) <= EPSILON &&
+      parcelPointOnSegment(secondStart, firstStart, firstEnd)) ||
+    (Math.abs(firstSideEnd) <= EPSILON && parcelPointOnSegment(secondEnd, firstStart, firstEnd)) ||
+    (Math.abs(secondSideStart) <= EPSILON &&
+      parcelPointOnSegment(firstStart, secondStart, secondEnd)) ||
+    (Math.abs(secondSideEnd) <= EPSILON && parcelPointOnSegment(firstEnd, secondStart, secondEnd))
+  )
+}
+
+function parcelTurn(start: LandrushPoint2, end: LandrushPoint2, point: LandrushPoint2) {
+  return (end.x - start.x) * (point.z - start.z) - (end.z - start.z) * (point.x - start.x)
+}
+
+function parcelPointOnSegment(point: LandrushPoint2, start: LandrushPoint2, end: LandrushPoint2) {
+  return (
+    point.x >= Math.min(start.x, end.x) - EPSILON &&
+    point.x <= Math.max(start.x, end.x) + EPSILON &&
+    point.z >= Math.min(start.z, end.z) - EPSILON &&
+    point.z <= Math.max(start.z, end.z) + EPSILON
+  )
 }
 
 function createNeighborSets(leaves: readonly PartitionLeaf[], ids: readonly string[]) {

@@ -133,7 +133,12 @@ import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, type GrassFieldBlocker } from './grass-field-texture'
 import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-material'
 import { GrassWaterLandLayers } from './grass-water-layers'
+import { LandrushIslandBuildGridOverlay } from './landrush-build-grid-overlay'
 import { type LandrushGamepadInput, readLandrushGamepadInput } from './landrush-gamepad-input'
+import {
+  resolveLandrushGrassMapExposure,
+  resolveLandrushGrassMapVisibility,
+} from './landrush-grass-map-transition'
 import {
   LandrushIslandPlacedTvScreens,
   type LandrushIslandTvMediaSettings,
@@ -149,6 +154,7 @@ import {
 import {
   createNaturalRoadMaskSegments,
   createNaturalRoadPlan,
+  NATURAL_ROAD_STYLE,
   NaturalRoadNetworkLayer,
 } from './natural-road-network-layer'
 import {
@@ -188,6 +194,8 @@ import {
   clearLandrushRobotScreenRevealMask,
   createLandrushRobotScreenRevealOpacityNode,
   readLandrushRobotScreenRevealMaskSnapshot,
+  readLandrushRobotScreenRevealOuterRadiusScale,
+  readLandrushRobotScreenRevealRadiusScale,
   updateLandrushRobotScreenRevealMask,
 } from './robot-screen-reveal-mask'
 import { StandaloneOceanWorld } from './standalone-ocean-client'
@@ -275,6 +283,13 @@ const LANDRUSH_ISLAND_DIRT_ROAD_WIDTH_METERS =
     PARCEL_STREET_SHOULDER_EXTRA_WIDTH_METERS +
     PARCEL_STREET_CURB_EXTRA_WIDTH_METERS) /
   2.35
+const LANDRUSH_ISLAND_PARCEL_ROAD_RESERVE_METERS = Math.max(
+  NATURAL_ROAD_STYLE.carriageway.widthMeters / 2 +
+    NATURAL_ROAD_STYLE.sidewalk.widthMeters +
+    NATURAL_ROAD_STYLE.sidewalk.grassClearanceMeters,
+  NATURAL_ROAD_STYLE.sidewalk.perimeterThicknessMeters +
+    NATURAL_ROAD_STYLE.sidewalk.grassClearanceMeters,
+)
 const LANDRUSH_ISLAND_PROGRESSIVE_GRASS_BLADE_SUBDIVISIONS = 80
 const LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION = 64
 const LANDRUSH_ISLAND_INTERACTIVE_GRASS_FIELD_RESOLUTION = GRASS_FIELD_RESOLUTION
@@ -441,7 +456,6 @@ const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE = 1.5
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DEPTH_BIAS_METERS = 0.2
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
-const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE = 2
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_BASE_HEIGHT = 0.08
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT = 2.08
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS = 0.76
@@ -463,13 +477,13 @@ const LANDRUSH_ISLAND_BUILD_CAMERA_MAX_HEIGHT = 15
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS = 1.4
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS = 1000 / 120
 const LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS = 0.07
-const LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_SETTLE_SECONDS = 0.5
-const LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_COMPLETE_PROGRESS =
-  1 -
-  LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_SETTLE_SECONDS / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS
+// Distance owns ordinary camera movement. The authored map transition additionally
+// caps visibility on its timeline so camera easing cannot postpone the fade.
+const LANDRUSH_ISLAND_GRASS_FULLY_VISIBLE_DISTANCE = 35
+const LANDRUSH_ISLAND_GRASS_FULLY_HIDDEN_DISTANCE = 85
+const LANDRUSH_ISLAND_GRASS_VISIBILITY_RESPONSE = 6
+const LANDRUSH_ISLAND_GRASS_VISIBILITY_SETTLE_EPSILON = 0.002
 const LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_DEFAULT = 1
-const LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_MAX = 2
-const LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_STEP = 0.05
 const LANDRUSH_ISLAND_CAMERA_TRANSITION_COMPLETION_EPSILON_SECONDS = 0.001
 const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
 const LANDRUSH_ISLAND_LOADING_EXPECTED_MS = 18_000
@@ -519,9 +533,10 @@ const LANDRUSH_ISLAND_PARCEL_MAP_DEFAULT_FILL_OPACITY_SCALE = 0.65
 const LANDRUSH_ISLAND_PARCEL_MAP_CONTOUR_OPACITY = 0.62
 const LANDRUSH_ISLAND_PARCEL_MAP_FREE_BADGE_OPACITY = 0.88
 const LANDRUSH_ISLAND_PARCEL_MAP_HOVER_OPACITY = 0.34
-const LANDRUSH_ISLAND_PARCEL_MAP_ROAD_TRIM_METERS = LANDRUSH_ISLAND_DIRT_ROAD_WIDTH_METERS * 0.56
+const LANDRUSH_ISLAND_MAP_OVERLAY_WARMUP_FRAMES = 2
+const LANDRUSH_ISLAND_MAP_OVERLAY_WARMUP_OPACITY = 0.0008
 const LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE = 136
-const LANDRUSH_ISLAND_MAP_CAMERA_PITCH_RADIANS = MathUtils.degToRad(60)
+const LANDRUSH_ISLAND_MAP_CAMERA_PITCH_RADIANS = MathUtils.degToRad(30)
 const LANDRUSH_ISLAND_MAP_CAMERA_TARGET = [0, 0, 10] as const
 const LANDRUSH_ISLAND_MAP_CAMERA_POSITION = [
   LANDRUSH_ISLAND_MAP_CAMERA_TARGET[0],
@@ -615,9 +630,7 @@ type LandrushIslandModeTransitionFadeState = {
   id: number
   to: LandrushIslandViewMode
 }
-type LandrushIslandModeTransitionPresentationState = ViewerPresentationEffectState & {
-  grassVisibility: number
-}
+type LandrushIslandModeTransitionPresentationState = ViewerPresentationEffectState
 type LandrushIslandParcelSelectionDirection = 'down' | 'left' | 'right' | 'up'
 type LandrushIslandProfileMeasure = <T>(id: string, callback: () => T) => T
 type LandrushIslandCameraPose = {
@@ -1749,44 +1762,14 @@ function distanceSq2(first: LandrushPoint2, second: LandrushPoint2) {
   return dx * dx + dz * dz
 }
 
-function createLandrushIslandParcelMapShapes(
-  parcels: readonly ParcelAllocationParcel[],
-  roads: readonly LandrushRoadSegment[],
-) {
-  return new Map(
-    parcels.map((parcel) => [parcel.id, createLandrushIslandParcelMapShape(parcel, roads)]),
-  )
+function createLandrushIslandParcelMapShapes(parcels: readonly ParcelAllocationParcel[]) {
+  return new Map(parcels.map((parcel) => [parcel.id, createLandrushIslandParcelMapShape(parcel)]))
 }
 
 function createLandrushIslandParcelMapShape(
   parcel: ParcelAllocationParcel,
-  roads: readonly LandrushRoadSegment[],
 ): LandrushIslandParcelMapShape {
-  const connectedRoads = roads.filter((road) => road.connectsParcelIds.includes(parcel.id))
-  if (connectedRoads.length === 0) {
-    return { centroid: parcel.centroid, points: parcel.points }
-  }
-
-  const trimMeters = Math.max(
-    LANDRUSH_ISLAND_PARCEL_MAP_ROAD_TRIM_METERS,
-    ...connectedRoads.map((road) => road.width * 0.52),
-  )
-  const points = parcel.points.map((point) => {
-    const dx = parcel.centroid.x - point.x
-    const dz = parcel.centroid.z - point.z
-    const distance = Math.hypot(dx, dz)
-    if (distance <= 0.000001) return point
-
-    const amount = Math.min(trimMeters, distance * 0.36)
-    return {
-      x: point.x + (dx / distance) * amount,
-      z: point.z + (dz / distance) * amount,
-    }
-  })
-
-  return points.length >= 3
-    ? { centroid: polygonCentroid(points), points }
-    : { centroid: parcel.centroid, points: parcel.points }
+  return { centroid: parcel.centroid, points: parcel.points }
 }
 
 function canClaimLandrushIslandParcel({
@@ -2953,9 +2936,6 @@ export function LandrushIslandClient({
   const [gamepadHintsActive, setGamepadHintsActive] = useState(false)
   const gamepadHintsActiveRef = useRef(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
-  const [transitionBlurStrength, setTransitionBlurStrength] = useState(
-    LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_DEFAULT,
-  )
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile | null>(null)
   const [incomingVoiceSignals, setIncomingVoiceSignals] = useState<SpatialVoiceSignalMessage[]>([])
   const handleVoiceSignal = useCallback((message: SpatialVoiceSignalMessage) => {
@@ -3074,6 +3054,7 @@ export function LandrushIslandClient({
 
   const fpvActive = viewMode === 'player' && fpvView
   const mapPresentationProgressRef = useRef(viewMode === 'map' ? 1 : 0)
+  const grassMapExposureRef = useRef(viewMode === 'map' ? 1 : 0)
   const loadingAssetsReady = !stylizedGroundTextureRequired || stylizedGroundTextureReady
 
   useEffect(() => {
@@ -3133,11 +3114,9 @@ export function LandrushIslandClient({
         })
         updateLandrushIslandModeTransitionPresentation(
           modeTransitionPresentationRef.current,
-          viewMode,
           nextTransition,
           0,
         )
-        grassVisibilityRef.current = modeTransitionPresentationRef.current.grassVisibility
         setModeTransitionFade(nextTransition)
       }
 
@@ -3196,13 +3175,8 @@ export function LandrushIslandClient({
   useEffect(() => {
     if (!modeTransitionFade) {
       mapPresentationProgressRef.current = viewMode === 'map' ? 1 : 0
-      updateLandrushIslandModeTransitionPresentation(
-        modeTransitionPresentationRef.current,
-        viewMode,
-        null,
-        1,
-      )
-      grassVisibilityRef.current = modeTransitionPresentationRef.current.grassVisibility
+      grassMapExposureRef.current = viewMode === 'map' ? 1 : 0
+      updateLandrushIslandModeTransitionPresentation(modeTransitionPresentationRef.current, null, 1)
       return
     }
 
@@ -3214,12 +3188,15 @@ export function LandrushIslandClient({
       const nextProgress = clamp01(elapsed / LANDRUSH_ISLAND_CAMERA_TRANSITION_SECONDS)
       updateLandrushIslandModeTransitionPresentation(
         modeTransitionPresentationRef.current,
+        modeTransitionFade,
+        nextProgress,
+      )
+      mapPresentationProgressRef.current = resolveLandrushIslandMapPresentationProgress(
         viewMode,
         modeTransitionFade,
         nextProgress,
       )
-      grassVisibilityRef.current = modeTransitionPresentationRef.current.grassVisibility
-      mapPresentationProgressRef.current = resolveLandrushIslandMapPresentationProgress(
+      grassMapExposureRef.current = resolveLandrushGrassMapExposure(
         viewMode,
         modeTransitionFade,
         nextProgress,
@@ -3236,6 +3213,7 @@ export function LandrushIslandClient({
       modeTransitionFade,
       0,
     )
+    grassMapExposureRef.current = resolveLandrushGrassMapExposure(viewMode, modeTransitionFade, 0)
     intervalId = window.setInterval(tick, LANDRUSH_ISLAND_CAMERA_TRANSITION_TICK_MS)
     tick()
     return () => window.clearInterval(intervalId)
@@ -3243,14 +3221,14 @@ export function LandrushIslandClient({
 
   const mapPresentationVisible =
     viewMode === 'map' || modeTransitionFade?.from === 'map' || modeTransitionFade?.to === 'map'
-  const grassStreamingPaused =
-    viewMode === 'map' || (modeTransitionFade !== null && modeTransitionFade.from !== 'map')
-  const mapLabelsVisible = viewMode === 'map' && modeTransitionFade === null
+  // Pause streaming only where the grass is hidden anyway (map view, and the flight
+  // out to it). Pausing for every transition made ~1700 blades land in a single frame
+  // when streaming resumed at the end of a player<->build move, where the grass never
+  // goes away — the same animation-driven pop the distance fade exists to avoid.
+  const grassStreamingPaused = viewMode === 'map' || modeTransitionFade?.to === 'map'
+  const mapLabelsMounted = mapPresentationVisible
+  const mapLabelsInteractive = viewMode === 'map' && modeTransitionFade === null
   const grassBladesVisible = !startupProfileNoStylizedBlades
-
-  useEffect(() => {
-    modeTransitionPresentationRef.current.zoomBlurStrength = transitionBlurStrength
-  }, [transitionBlurStrength])
 
   const enterPlayerView = useCallback(() => {
     measureLandrushFrameSlice('landrush-island.view.enter-player', () => {
@@ -3622,6 +3600,11 @@ export function LandrushIslandClient({
         : liveGrassRoads,
     [liveGrassRoads, liveNaturalRoadPlan],
   )
+  const liveBuildGridRoads = useMemo(
+    () =>
+      liveNaturalRoadPlan ? createNaturalRoadMaskSegments(liveNaturalRoadPlan) : liveGrassRoads,
+    [liveGrassRoads, liveNaturalRoadPlan],
+  )
   const liveOceanElevation = LANDRUSH_ISLAND_LOW_ELEVATION - liveLandSurface.grassSurfaceElevation
   const multiplayerViewerRockWallControls = useMemo(
     () => ({
@@ -3694,7 +3677,7 @@ export function LandrushIslandClient({
   )
   const activeBuildParcelGrassFadeBlockers = useMemo(() => {
     const fadeBlockers: GrassFieldBlocker[] = []
-    if (buildSceneModeActive && activeBuildParcel) {
+    if (buildMode && activeBuildParcel) {
       fadeBlockers.push({
         featherMeters: LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS,
         initialVisibility: 1,
@@ -3702,7 +3685,7 @@ export function LandrushIslandClient({
       })
     }
     return fadeBlockers
-  }, [activeBuildParcel, buildSceneModeActive])
+  }, [activeBuildParcel, buildMode])
   const bladeGrassFadeBlockers = activeBuildParcelGrassFadeBlockers
   const treeGrassBlockers = useMemo(
     () =>
@@ -4439,6 +4422,7 @@ export function LandrushIslandClient({
               projectId={experienceConfig.projectId}
               reactProfiler={editorRuntimeReactProfiler}
               showEditorChrome={buildEditorChromeActive}
+              showFloorplanCompass={false}
               showFullActionMenu
               showMobileSelectionBar={false}
               showSidebarRail={false}
@@ -4448,7 +4432,7 @@ export function LandrushIslandClient({
               }
               viewerCameraInitialPose={activeBuildCameraControlsInitialPose}
               viewerDefaultCamera={false}
-              viewerEditorGrid={buildMode && buildEditorChromeActive}
+              viewerEditorGrid={false}
               viewerEditorGridVisualOffset={0.04}
               viewerEditorGridY={activeBuildGroundY}
               viewerEditorSystems={buildEditorSystemsActive}
@@ -4576,7 +4560,8 @@ export function LandrushIslandClient({
                         localProfile={resolvedLocalProfile}
                         mapPresentationProgressRef={mapPresentationProgressRef}
                         mapPresentationVisible={mapPresentationVisible}
-                        mapLabelsVisible={mapLabelsVisible}
+                        mapLabelsInteractive={mapLabelsInteractive}
+                        mapLabelsMounted={mapLabelsMounted}
                         mapView={sceneViewMode === 'map'}
                         onBuildParcel={handleBuildParcel}
                         parcelOwnerships={multiplayer.parcelOwnerships}
@@ -4698,6 +4683,13 @@ export function LandrushIslandClient({
                         </LandrushIslandStartupReactProfiler>
                       </LandrushIslandStartupReactProfiler>
                     ) : null}
+                    <LandrushIslandBuildGridOverlay
+                      buildableBoundaryPoints={liveParcelAllocation.boundary}
+                      groundY={activeBuildGroundY}
+                      parcel={activeBuildParcel ?? localOwnedParcel}
+                      roadClearanceSegments={liveBuildGridRoads}
+                      visible={buildMode}
+                    />
                     <LandrushIslandPlacedTvScreens
                       enabled={experience === 'pascal-multiplayer-island'}
                       localMotionRef={localMotionRef}
@@ -4707,6 +4699,11 @@ export function LandrushIslandClient({
                     <LandrushIslandRuntimeCameraProbeRecorder
                       mode={viewMode}
                       renderedFpsRef={renderedFpsRef}
+                    />
+                    <LandrushIslandGrassDistanceVisibility
+                      mapExposureRef={grassMapExposureRef}
+                      surface={liveLandSurface}
+                      visibilityRef={grassVisibilityRef}
                     />
                   </LandrushIslandStartupReactProfiler>
                 </LandrushIslandStartupReactProfiler>
@@ -4798,25 +4795,6 @@ export function LandrushIslandClient({
             </div>
           ) : null}
         </div>
-        <label
-          className="pointer-events-auto absolute bottom-4 left-1/2 z-[85] flex -translate-x-1/2 items-center gap-3 rounded-md border border-white/20 bg-slate-950/75 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur"
-          data-landrush-ui-interactive
-        >
-          <span className="whitespace-nowrap">Blur strength</span>
-          <input
-            aria-label="Blur strength"
-            className="h-1.5 w-40 cursor-pointer accent-cyan-300 md:w-56"
-            max={LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_MAX}
-            min={0}
-            onChange={(event) => setTransitionBlurStrength(Number(event.currentTarget.value))}
-            step={LANDRUSH_ISLAND_TRANSITION_BLUR_STRENGTH_STEP}
-            type="range"
-            value={transitionBlurStrength}
-          />
-          <output className="w-10 text-right tabular-nums">
-            {transitionBlurStrength.toFixed(2)}×
-          </output>
-        </label>
         {showTunePanel ? (
           <LandrushIslandTunePanel
             beachControls={multiplayerBeachControls}
@@ -4949,7 +4927,6 @@ function createLandrushIslandModeTransitionPresentationState(
   zoomBlurDebugMode: ViewerPresentationEffectDebugMode,
 ): LandrushIslandModeTransitionPresentationState {
   return {
-    grassVisibility: 1,
     zoomBlurAmount: 0,
     zoomBlurCenter: [0.5, 0.48],
     zoomBlurDebugMode,
@@ -4960,12 +4937,10 @@ function createLandrushIslandModeTransitionPresentationState(
 
 function updateLandrushIslandModeTransitionPresentation(
   output: LandrushIslandModeTransitionPresentationState,
-  viewMode: LandrushIslandViewMode,
   transition: LandrushIslandModeTransitionFadeState | null,
   progress: number,
 ) {
   if (!transition) {
-    output.grassVisibility = viewMode === 'map' ? 0 : 1
     output.zoomBlurAmount = 0
     output.zoomBlurDirection = 1
     return
@@ -4975,25 +4950,57 @@ function updateLandrushIslandModeTransitionPresentation(
   const normalizedCameraVelocity = 4 * amount * (1 - amount)
   const blurIn = MathUtils.smoothstep(amount, 0.0075, LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS)
   const blurOut = 1 - MathUtils.smoothstep(amount, 0.72, 0.98)
-  const conceal = MathUtils.smoothstep(amount, 0.16, 0.36)
-  const reveal = MathUtils.smoothstep(amount, 0.5, 0.7)
-  const mapExitGrassReveal = MathUtils.smoothstep(
-    amount,
-    LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS,
-    LANDRUSH_ISLAND_MAP_EXIT_GRASS_REVEAL_COMPLETE_PROGRESS,
-  )
-  const fromVisibility = transition.from === 'map' ? 0 : 1
-  const targetVisibility = transition.to === 'map' ? 0 : 1
 
   output.zoomBlurAmount = clamp01(normalizedCameraVelocity ** 0.72 * blurIn * blurOut)
   output.zoomBlurDirection =
     transition.to === 'map' || (transition.from === 'player' && transition.to === 'build') ? 1 : -1
-  output.grassVisibility =
-    fromVisibility === targetVisibility
-      ? clamp01(fromVisibility - conceal + reveal)
-      : fromVisibility > targetVisibility
-        ? 1 - conceal
-        : mapExitGrassReveal
+}
+
+/** Straight-line distance from the camera to the nearest point of the grass surface. */
+function landrushIslandCameraDistanceToGrass(camera: Camera, surface: LandrushIslandLandSurface) {
+  const ground = { x: camera.position.x, z: camera.position.z }
+  const horizontal = pointInPolygon(ground, surface.grassSurfacePoints)
+    ? 0
+    : distanceToClosedPolyline(ground, surface.grassSurfacePoints)
+  return Math.hypot(horizontal, camera.position.y - surface.grassSurfaceElevation)
+}
+
+function LandrushIslandGrassDistanceVisibility({
+  mapExposureRef,
+  surface,
+  visibilityRef,
+}: {
+  mapExposureRef: { current: number }
+  surface: LandrushIslandLandSurface
+  visibilityRef: { current: number }
+}) {
+  useFrame(({ camera }, delta) => {
+    const distance = landrushIslandCameraDistanceToGrass(camera, surface)
+    const distanceTarget =
+      1 -
+      MathUtils.smoothstep(
+        distance,
+        LANDRUSH_ISLAND_GRASS_FULLY_VISIBLE_DISTANCE,
+        LANDRUSH_ISLAND_GRASS_FULLY_HIDDEN_DISTANCE,
+      )
+    const mapVisibility = resolveLandrushGrassMapVisibility(mapExposureRef.current)
+    const target = Math.min(distanceTarget, mapVisibility)
+    const distanceNext = MathUtils.damp(
+      visibilityRef.current,
+      distanceTarget,
+      LANDRUSH_ISLAND_GRASS_VISIBILITY_RESPONSE,
+      delta,
+    )
+    const next = Math.min(distanceNext, mapVisibility)
+    const settled = Math.abs(next - target) <= LANDRUSH_ISLAND_GRASS_VISIBILITY_SETTLE_EPSILON
+    // Land exactly on the target so the blades mesh actually switches off at 0, and keep
+    // asking for frames until then — rendering is demand-driven, so a fade that outlasts
+    // the camera move would otherwise freeze part-way.
+    visibilityRef.current = settled ? target : next
+    if (!settled) renderScheduler.requestFrame('animation')
+  })
+
+  return null
 }
 
 function resolveLandrushIslandMapPresentationProgress(
@@ -7669,7 +7676,8 @@ function LandrushIslandParcelOwnershipLayer({
   localProfile,
   mapPresentationProgressRef,
   mapPresentationVisible,
-  mapLabelsVisible,
+  mapLabelsInteractive,
+  mapLabelsMounted,
   mapView,
   onBuildParcel,
   parcelOwnerships,
@@ -7686,7 +7694,8 @@ function LandrushIslandParcelOwnershipLayer({
   localProfile: LocalPlayerProfile
   mapPresentationProgressRef: { current: number }
   mapPresentationVisible: boolean
-  mapLabelsVisible: boolean
+  mapLabelsInteractive: boolean
+  mapLabelsMounted: boolean
   mapView: boolean
   onBuildParcel: (parcel: ParcelAllocationParcel) => void
   parcelOwnerships: readonly ParcelOwnership[]
@@ -7716,8 +7725,8 @@ function LandrushIslandParcelOwnershipLayer({
   const groundY =
     surface.grassSurfaceElevation + LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET
   const parcelMapShapes = useMemo(
-    () => createLandrushIslandParcelMapShapes(allocation.parcels, roads),
-    [allocation.parcels, roads],
+    () => createLandrushIslandParcelMapShapes(allocation.parcels),
+    [allocation.parcels],
   )
   const claimMapParcel = useCallback(
     (parcel: ParcelAllocationParcel) => {
@@ -7926,7 +7935,8 @@ function LandrushIslandParcelOwnershipLayer({
               groundY={groundY}
               hovered={hoveredParcelId === parcel.id}
               key={parcel.id}
-              labelVisible={mapLabelsVisible}
+              labelInteractive={mapLabelsInteractive}
+              labelMounted={mapLabelsMounted}
               mapOpacityRef={mapPresentationProgressRef}
               mapView={mapView}
               onClaim={() => {
@@ -7949,7 +7959,8 @@ function LandrushIslandParcelOwnershipLayer({
               <LandrushIslandParcelBuildMarker
                 groundY={groundY}
                 key={parcel.id}
-                labelsVisible={mapLabelsVisible}
+                labelsInteractive={mapLabelsInteractive}
+                labelsMounted={mapLabelsMounted}
                 mapPresentationVisible={mapPresentationVisible}
                 mapView={mapView}
                 mapOpacityRef={mapPresentationProgressRef}
@@ -7968,7 +7979,8 @@ function LandrushIslandParcelClaimMesh({
   canClaim,
   groundY,
   hovered,
-  labelVisible,
+  labelInteractive,
+  labelMounted,
   mapOpacityRef,
   mapView,
   onClaim,
@@ -7981,7 +7993,8 @@ function LandrushIslandParcelClaimMesh({
   canClaim: boolean
   groundY: number
   hovered: boolean
-  labelVisible: boolean
+  labelInteractive: boolean
+  labelMounted: boolean
   mapOpacityRef: { current: number }
   mapView: boolean
   onClaim: () => void
@@ -7996,7 +8009,7 @@ function LandrushIslandParcelClaimMesh({
   const materialRef = useRef<MeshBasicMaterial>(null!)
   const contourMaterialRef = useRef<LineBasicMaterial>(null!)
   const parcelShape = useMemo(
-    () => shape ?? createLandrushIslandParcelMapShape(parcel, []),
+    () => shape ?? createLandrushIslandParcelMapShape(parcel),
     [parcel, shape],
   )
   const geometry = useMemo(
@@ -8010,6 +8023,7 @@ function LandrushIslandParcelClaimMesh({
   const claimLabelExpanded = canClaim && selected
   const baseColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR), [])
   const hoverColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR), [])
+  const warmupRef = useLandrushIslandMapOverlayWarmup()
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => contourGeometry.dispose(), [contourGeometry])
@@ -8044,9 +8058,12 @@ function LandrushIslandParcelClaimMesh({
       ? opacityAmount * (LANDRUSH_ISLAND_PARCEL_MAP_CONTOUR_OPACITY + pulse * 0.018)
       : 0
     const badgeOpacity =
-      !owned && mapVisible ? opacityAmount * LANDRUSH_ISLAND_PARCEL_MAP_FREE_BADGE_OPACITY : 0
+      !owned && labelMounted && mapVisible
+        ? opacityAmount * LANDRUSH_ISLAND_PARCEL_MAP_FREE_BADGE_OPACITY
+        : 0
     if (freeBadgeRef.current) freeBadgeRef.current.style.opacity = String(badgeOpacity)
     group.visible = targetOpacity > 0.002 || contourMaterial.opacity > 0.002 || badgeOpacity > 0.002
+    applyLandrushIslandMapOverlayWarmup(group, warmupRef)
   })
 
   return (
@@ -8087,11 +8104,11 @@ function LandrushIslandParcelClaimMesh({
           transparent
         />
       </lineSegments>
-      {!owned && labelVisible ? (
+      {!owned && labelMounted ? (
         <Html
           center
           position={[0, 0.92, 0]}
-          style={{ pointerEvents: mapView ? 'auto' : 'none' }}
+          style={{ pointerEvents: labelInteractive ? 'auto' : 'none' }}
           zIndexRange={[65, 0]}
         >
           <button
@@ -8108,6 +8125,7 @@ function LandrushIslandParcelClaimMesh({
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
+              if (!labelInteractive) return
               if (canClaim) {
                 onClaim()
                 return
@@ -8115,9 +8133,11 @@ function LandrushIslandParcelClaimMesh({
               onSelect()
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            onPointerEnter={() => onSelect()}
+            onPointerEnter={() => {
+              if (labelInteractive) onSelect()
+            }}
             ref={freeBadgeRef}
-            style={{ opacity: 0 }}
+            style={{ opacity: 0, pointerEvents: labelInteractive ? 'auto' : 'none' }}
             type="button"
           >
             <span
@@ -8153,7 +8173,8 @@ function LandrushIslandParcelClaimMesh({
 
 function LandrushIslandParcelBuildMarker({
   groundY,
-  labelsVisible,
+  labelsInteractive,
+  labelsMounted,
   mapOpacityRef,
   mapPresentationVisible,
   mapView,
@@ -8163,7 +8184,8 @@ function LandrushIslandParcelBuildMarker({
   visible,
 }: {
   groundY: number
-  labelsVisible: boolean
+  labelsInteractive: boolean
+  labelsMounted: boolean
   mapOpacityRef: { current: number }
   mapPresentationVisible: boolean
   mapView: boolean
@@ -8181,7 +8203,7 @@ function LandrushIslandParcelBuildMarker({
     const fallbackActive = visible && !mapView && !mapPresentationVisible
     if (mapButtonRef.current) {
       mapButtonRef.current.style.opacity = String(mapActive ? mapOpacity : 0)
-      mapButtonRef.current.style.pointerEvents = mapView ? 'auto' : 'none'
+      mapButtonRef.current.style.pointerEvents = labelsInteractive ? 'auto' : 'none'
     }
     if (fallbackButtonRef.current) {
       fallbackButtonRef.current.style.opacity = fallbackActive ? '1' : '0'
@@ -8200,17 +8222,17 @@ function LandrushIslandParcelBuildMarker({
         shape={shape}
         visible={mapView || mapPresentationVisible}
       />
-      {labelsVisible ? (
+      {labelsMounted ? (
         <>
           <Html
             center
             position={[parcel.centroid.x, groundY + 1.05, parcel.centroid.z]}
-            style={{ pointerEvents: mapView ? 'auto' : 'none' }}
+            style={{ pointerEvents: labelsInteractive ? 'auto' : 'none' }}
             zIndexRange={[70, 0]}
           >
             <div
               ref={mapButtonRef}
-              style={{ opacity: 0, pointerEvents: mapView ? 'auto' : 'none' }}
+              style={{ opacity: 0, pointerEvents: labelsInteractive ? 'auto' : 'none' }}
             >
               <button
                 aria-label="Build"
@@ -8218,7 +8240,7 @@ function LandrushIslandParcelBuildMarker({
                 onClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
-                  if (!mapView) return
+                  if (!labelsInteractive) return
                   onBuild(parcel)
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -8274,7 +8296,7 @@ function LandrushIslandParcelBuildGlow({
   const groupRef = useRef<Group>(null!)
   const materialRef = useRef<MeshBasicMaterial>(null!)
   const parcelShape = useMemo(
-    () => shape ?? createLandrushIslandParcelMapShape(parcel, []),
+    () => shape ?? createLandrushIslandParcelMapShape(parcel),
     [parcel, shape],
   )
   const geometry = useMemo(
@@ -8283,6 +8305,7 @@ function LandrushIslandParcelBuildGlow({
   )
   const baseColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR), [])
   const hoverColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR), [])
+  const warmupRef = useLandrushIslandMapOverlayWarmup()
 
   useEffect(() => () => geometry.dispose(), [geometry])
 
@@ -8293,19 +8316,21 @@ function LandrushIslandParcelBuildGlow({
 
     const opacity = visible ? clamp01(opacityRef.current) : 0
     group.visible = opacity > 0.002
-    if (!group.visible) return
+    if (group.visible) {
+      const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 2.2 + parcel.index * 0.61) * 0.5
+      const targetScale = LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_HOVER_SCALE * 0.998
+      const scale = MathUtils.damp(
+        group.scale.x,
+        targetScale,
+        LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_RESPONSE,
+        delta,
+      )
+      group.scale.setScalar(scale)
+      material.opacity = opacity * (LANDRUSH_ISLAND_PARCEL_MAP_BASE_OPACITY * 0.62 + pulse * 0.01)
+      material.color.lerpColors(baseColor, hoverColor, 0.16 + pulse * 0.05)
+    }
 
-    const pulse = 0.5 + Math.sin(state.clock.elapsedTime * 2.2 + parcel.index * 0.61) * 0.5
-    const targetScale = LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_HOVER_SCALE * 0.998
-    const scale = MathUtils.damp(
-      group.scale.x,
-      targetScale,
-      LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_RESPONSE,
-      delta,
-    )
-    group.scale.setScalar(scale)
-    material.opacity = opacity * (LANDRUSH_ISLAND_PARCEL_MAP_BASE_OPACITY * 0.62 + pulse * 0.01)
-    material.color.lerpColors(baseColor, hoverColor, 0.16 + pulse * 0.05)
+    applyLandrushIslandMapOverlayWarmup(group, warmupRef)
   })
 
   return (
@@ -8545,9 +8570,11 @@ function LandrushIslandRobotScreenRevealClipper({
       LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX,
       robotScreenHeight * LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE * 0.5,
     )
-    const revealRadiusPx = baseRevealRadiusPx
-    const revealOuterRadiusPx =
-      revealRadiusPx * LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_FEATHER_RADIUS_SCALE
+    const revealRadiusPx = baseRevealRadiusPx * readLandrushRobotScreenRevealRadiusScale()
+    const revealOuterRadiusPx = Math.max(
+      revealRadiusPx + 1,
+      baseRevealRadiusPx * readLandrushRobotScreenRevealOuterRadiusScale(),
+    )
     const revealScreen = revealScreenRef.current
     revealScreen.x = robotScreen.x
     revealScreen.y = robotScreen.y
@@ -9115,6 +9142,63 @@ function setLandrushIslandGroupMaterialOpacity(group: Group, opacity: number) {
       candidate.transparent = true
     }
   })
+}
+
+type LandrushIslandMapOverlayWarmupState = {
+  culled: Object3D[]
+  framesLeft: number
+  restored: boolean
+}
+
+function useLandrushIslandMapOverlayWarmup() {
+  const warmupRef = useRef<LandrushIslandMapOverlayWarmupState>({
+    culled: [],
+    framesLeft: LANDRUSH_ISLAND_MAP_OVERLAY_WARMUP_FRAMES,
+    restored: false,
+  })
+
+  useEffect(() => {
+    renderScheduler.requestFrame('warmup')
+  }, [])
+
+  return warmupRef
+}
+
+// Map overlays stay hidden until the first map transition, so their render pipelines,
+// vertex buffers and bind groups would all be created inside that transition's first
+// frame — a one-off freeze the user sees only the first time they press M. Draw them
+// at a negligible opacity for the first frames after mount instead, with culling off
+// so off-screen parcels upload too, and the GPU resources exist before the transition.
+// Call this at the end of the overlay's useFrame so it wins over the normal state.
+function applyLandrushIslandMapOverlayWarmup(
+  root: Object3D,
+  warmupRef: { current: LandrushIslandMapOverlayWarmupState },
+) {
+  const warmup = warmupRef.current
+  if (warmup.framesLeft <= 0) {
+    if (warmup.restored) return
+    warmup.restored = true
+    for (const object of warmup.culled) object.frustumCulled = true
+    warmup.culled = []
+    return
+  }
+
+  warmup.framesLeft -= 1
+  root.visible = true
+  root.traverse((object) => {
+    if (object.frustumCulled) {
+      object.frustumCulled = false
+      warmup.culled.push(object)
+    }
+    const material = (object as { material?: Material | Material[] }).material
+    if (!material) return
+
+    for (const candidate of getLandrushIslandMaterials(material)) {
+      candidate.transparent = true
+      candidate.opacity = Math.max(candidate.opacity, LANDRUSH_ISLAND_MAP_OVERLAY_WARMUP_OPACITY)
+    }
+  })
+  renderScheduler.requestFrame('warmup')
 }
 
 function projectLandrushIslandScreenPoint(ndc: Vector3, width: number, height: number) {
@@ -12989,6 +13073,7 @@ function LandrushIslandMapPlayerMarker({
   const groupRef = useRef<Group>(null!)
   const materialOpacityRef = useRef(0)
   const labelRef = useRef<HTMLSpanElement | null>(null)
+  const warmupRef = useLandrushIslandMapOverlayWarmup()
 
   useFrame((_, delta) => {
     const group = groupRef.current
@@ -12999,10 +13084,12 @@ function LandrushIslandMapPlayerMarker({
     materialOpacityRef.current = targetOpacity
     setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
     if (labelRef.current) labelRef.current.style.opacity = String(materialOpacityRef.current)
-    if (!motion || targetOpacity <= 0.002) return
+    if (motion && targetOpacity > 0.002) {
+      group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
+      group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
+    }
 
-    group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
-    group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
+    applyLandrushIslandMapOverlayWarmup(group, warmupRef)
   })
 
   return (
@@ -13029,6 +13116,7 @@ function LandrushIslandRemoteMapPlayerMarker({
   const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
   const targetHeadingRef = useRef(player.heading)
+  const warmupRef = useLandrushIslandMapOverlayWarmup()
 
   useEffect(() => {
     targetPositionRef.current.set(
@@ -13045,24 +13133,26 @@ function LandrushIslandRemoteMapPlayerMarker({
 
     materialOpacityRef.current = visible ? clamp01(opacityRef.current) : 0
     setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
-    if (materialOpacityRef.current <= 0.002) return
+    if (materialOpacityRef.current > 0.002) {
+      const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
+      targetPositionRef.current.set(
+        livePlayer.position[0],
+        livePlayer.position[1] || groundY,
+        livePlayer.position[2],
+      )
+      targetHeadingRef.current = livePlayer.heading
 
-    const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
-    targetPositionRef.current.set(
-      livePlayer.position[0],
-      livePlayer.position[1] || groundY,
-      livePlayer.position[2],
-    )
-    targetHeadingRef.current = livePlayer.heading
+      const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+      const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
+      const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
+      positionRef.current.lerp(targetPositionRef.current, positionAmount)
+      headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
 
-    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-    const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
-    const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
-    positionRef.current.lerp(targetPositionRef.current, positionAmount)
-    headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+      group.position.set(positionRef.current.x, groundY + 0.24, positionRef.current.z)
+      group.rotation.y = headingRef.current
+    }
 
-    group.position.set(positionRef.current.x, groundY + 0.24, positionRef.current.z)
-    group.rotation.y = headingRef.current
+    applyLandrushIslandMapOverlayWarmup(group, warmupRef)
   })
 
   return <LandrushIslandMapBadgeMarker color={player.color} groupRef={groupRef} scale={1.28} />
@@ -17715,6 +17805,7 @@ function createLandrushIslandParcelOptions(seed: string): ParcelAllocationOption
   return {
     count: LANDRUSH_ISLAND_PARCEL_PARAMETERS.parcelCount,
     maxEdges: LANDRUSH_ISLAND_PARCEL_PARAMETERS.maxEdges,
+    roadReserveMeters: LANDRUSH_ISLAND_PARCEL_ROAD_RESERVE_METERS,
     seed: `${seed}:world-parcels:${LANDRUSH_ISLAND_PARCEL_PARAMETERS.parcelCount}`,
     shoreSetbackMeters: LANDRUSH_ISLAND_PARCEL_PARAMETERS.shoreSetbackMeters,
     simplifyToleranceMeters: LANDRUSH_ISLAND_PARCEL_PARAMETERS.simplifyToleranceMeters,
@@ -17724,6 +17815,7 @@ function createLandrushIslandParcelOptions(seed: string): ParcelAllocationOption
 }
 
 function createLandrushIslandParcelOwnershipWorldId(options: ParcelAllocationOptions) {
+  // Road reserve changes usable acreage without changing the cadastral partition or its owners.
   return [
     'landrush-world',
     'landrush-island',
