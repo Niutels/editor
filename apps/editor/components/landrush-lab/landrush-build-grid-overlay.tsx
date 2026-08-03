@@ -15,7 +15,8 @@ import type { ParcelAllocationParcel } from './parcel-allocation'
 const LANDRUSH_BUILD_GRID_ELEVATION_OFFSET =
   NATURAL_ROAD_STYLE.carriageway.liftMeters + NATURAL_ROAD_STYLE.sidewalk.curbHeightMeters + 0.025
 const LANDRUSH_BUILD_GRID_FADE_SECONDS = 1.375
-const LANDRUSH_BUILD_GRID_RENDER_ORDER = 0.05
+// Opaque terrain renders first; transparent construction must composite over the grid.
+const LANDRUSH_BUILD_GRID_RENDER_ORDER = -1
 const LANDRUSH_BUILD_GRID_WARMUP_FRAMES = 2
 const LANDRUSH_BUILD_GRID_WARMUP_OPACITY = 0.0008
 

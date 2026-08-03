@@ -21,6 +21,18 @@ import {
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
+import {
+  type LandrushRobotJumpPose,
+  type LandrushRobotJumpPoseRef,
+  resolveLandrushRobotJumpPose,
+} from './landrush-robot-jump'
+
+export {
+  type LandrushRobotJumpPhase,
+  type LandrushRobotJumpPose,
+  type LandrushRobotJumpPoseRef,
+  resolveLandrushRobotJumpPose,
+} from './landrush-robot-jump'
 
 const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot.glb'
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
@@ -118,6 +130,7 @@ type LandrushRobotProps = {
   fallMotionScale?: number
   framePriority?: number
   hoverOutlineWidthScale?: number
+  jumpPoseRef?: LandrushRobotJumpPoseRef
   node: LandrushWorldNode
   onAnimationState?: (state: LandrushRobotAnimationState) => void
   onHoverPoseSample?: (sample: LandrushRobotHoverPoseSample) => void
@@ -133,6 +146,7 @@ export function LandrushRobot({
   fallMotionScale = 1,
   framePriority = 0,
   hoverOutlineWidthScale = 1,
+  jumpPoseRef,
   node,
   onAnimationState,
   onHoverPoseSample,
@@ -323,6 +337,10 @@ export function LandrushRobot({
         fallJointMotionTimeRef.current,
         fallIntensityValue,
       )
+      const jumpProgress = jumpPoseRef?.current
+      if (jumpProgress !== null && jumpProgress !== undefined) {
+        applyLandrushRobotJumpPose(clonedScene, resolveLandrushRobotJumpPose(jumpProgress))
+      }
     })
   }, LANDRUSH_ROBOT_SKELETAL_POSE_FRAME_PRIORITY)
 
@@ -446,6 +464,11 @@ export function LandrushRobot({
 
       measure('frame.robot-glb.apply-transform', () => {
         const hoverOffset = resolveLandrushRobotHoverOffset(hoverAmount, clock.elapsedTime)
+        const jumpProgress = jumpPoseRef?.current
+        const jumpBodyCompressionOffset =
+          jumpProgress === null || jumpProgress === undefined
+            ? 0
+            : resolveLandrushRobotJumpPose(jumpProgress).bodyCompressionOffset
         const fallRotation = resolveLandrushRobotFallRotation(
           fallAmount,
           fallSpinRef.current,
@@ -453,7 +476,7 @@ export function LandrushRobot({
         )
         groupRef.current?.position.set(
           node.playerPosition[0],
-          node.playerPosition[1] + hoverOffset,
+          node.playerPosition[1] + hoverOffset - jumpBodyCompressionOffset,
           node.playerPosition[2],
         )
         if (fallPivotRef.current) {
@@ -638,6 +661,49 @@ function createLandrushRobotHoverMaterial(outlineWidthScale: number) {
 }
 
 type LandrushRobotRestPose = Map<string, Euler>
+
+function applyLandrushRobotJumpPose(root: Group, pose: LandrushRobotJumpPose) {
+  root.traverse((child) => {
+    if ((child as Object3D & { isBone?: boolean }).isBone !== true) return
+    const name = child.name.toLowerCase()
+
+    if (name === 'leftupleg' || name === 'rightupleg') {
+      child.rotateX(pose.upperLegPitch)
+      return
+    }
+    if (name === 'leftleg' || name === 'rightleg') {
+      child.rotateX(pose.kneePitch)
+      return
+    }
+    if (name === 'leftfoot' || name === 'rightfoot') {
+      child.rotateX(pose.footPitch)
+      return
+    }
+    if (name === 'lefttoebase' || name === 'righttoebase') {
+      child.rotateX(pose.footPitch * -0.2)
+      return
+    }
+    if (name === 'spine02') {
+      child.rotateX(pose.spinePitch * 0.55)
+      return
+    }
+    if (name === 'spine01') {
+      child.rotateX(pose.spinePitch * 0.3)
+      return
+    }
+    if (name === 'spine') {
+      child.rotateX(pose.spinePitch * 0.15)
+      return
+    }
+    if (name === 'leftarm' || name === 'rightarm') {
+      child.rotateX(pose.armPitch)
+      return
+    }
+    if (name === 'leftforearm' || name === 'rightforearm') {
+      child.rotateX(Math.max(0, pose.kneePitch) * -0.22)
+    }
+  })
+}
 
 function captureLandrushRobotRestPose(
   root: Group,
