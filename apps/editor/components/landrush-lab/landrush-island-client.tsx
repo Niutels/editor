@@ -136,8 +136,9 @@ import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-mater
 import { GrassWaterLandLayers } from './grass-water-layers'
 import { LandrushIslandBuildGridOverlay } from './landrush-build-grid-overlay'
 import {
-  findLandrushBuildingFloorInteriorRegion,
-  resolveLandrushBuildingFloorInteriorRegions,
+  findLandrushBuildingFloorContext,
+  resolveLandrushBuildingFloorStacks,
+  resolveLandrushBuildingFloorVisibility,
 } from './landrush-building-floor-visibility'
 import { type LandrushGamepadInput, readLandrushGamepadInput } from './landrush-gamepad-input'
 import {
@@ -561,8 +562,6 @@ const LANDRUSH_ISLAND_MAP_CAMERA_MIN_DISTANCE =
 const LANDRUSH_ISLAND_MAP_CAMERA_MAX_DISTANCE =
   (LANDRUSH_ISLAND_MAP_CAMERA_DISTANCE * LANDRUSH_ISLAND_MAP_CAMERA_ZOOM) /
   LANDRUSH_ISLAND_MAP_CAMERA_MIN_ZOOM
-const LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE = 12
-const LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE = 14
 const LANDRUSH_ISLAND_REMOTE_ROBOT_FRAME_PRIORITY = 1
 const LANDRUSH_ISLAND_REMOTE_BEACON_FRAME_PRIORITY = 2
 const LANDRUSH_ISLAND_LOCAL_ROBOT_FRAME_PRIORITY = 2
@@ -927,6 +926,13 @@ type LandrushIslandRuntimeGrassSample = {
   strength: number
   timeMs: number
 }
+type LandrushIslandRuntimeRemotePresentationSample = {
+  presentedPosition: [number, number, number]
+  presentationStepMeters: number
+  rawPosition: [number, number, number]
+  snapshotUpdatedAt: number
+  timeMs: number
+}
 type LandrushIslandRuntimeProbe = {
   cameraIntervalSamples: LandrushIslandRuntimeCameraSample[]
   cameraJumps: LandrushIslandRuntimeCameraJump[]
@@ -944,10 +950,13 @@ type LandrushIslandRuntimeProbe = {
   frameGaps: LandrushIslandRuntimeFrameGap[]
   frameSamples: LandrushIslandRuntimeFrameSample[]
   floorVisibility?: {
+    buildingScopeId: string | null
+    hiddenLevelIds: LevelNode['id'][]
     insideBuilding: boolean
     levelId: LevelNode['id'] | null
     levelMode: ReturnType<typeof useViewer.getState>['levelMode']
     regionSource: 'ceiling' | 'closed-walls' | 'slab' | 'zone' | null
+    visibleLevelIds: LevelNode['id'][]
   }
   gridSamples: Record<string, unknown>[]
   grassEvents: Record<string, unknown>[]
@@ -961,6 +970,7 @@ type LandrushIslandRuntimeProbe = {
   phaseEvents: LandrushIslandRuntimePhaseEvent[]
   reactCommits: LandrushIslandRuntimeReactCommit[]
   reactCommitTotals: Record<string, LandrushIslandRuntimeReactCommitTotal>
+  remotePresentationSamples: Record<string, LandrushIslandRuntimeRemotePresentationSample[]>
   revealSamples: Record<string, unknown>[]
   lastRobotAnimationState?: LandrushRobotAnimationState
   robotAnimationSamples: Record<string, unknown>[]
@@ -1464,6 +1474,7 @@ function getLandrushIslandRuntimeProbe() {
     phaseEvents: [],
     reactCommits: [],
     reactCommitTotals: {},
+    remotePresentationSamples: {},
     revealSamples: [],
     robotAnimationSamples: [],
     robotHoverSamples: [],
@@ -1471,6 +1482,7 @@ function getLandrushIslandRuntimeProbe() {
   }
   window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.cameraIntervalSamples ??= []
   window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.longAnimationFrames ??= []
+  window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.remotePresentationSamples ??= {}
   return window.__LANDRUSH_ISLAND_RUNTIME_PROBE__
 }
 
@@ -7637,52 +7649,32 @@ function LandrushIslandRobotLevelSelectionTracker({
   groundY: number
   localMotionRef: { current: RobotMotion | null }
 }) {
-  const interiorLevelIdRef = useRef<LevelNode['id'] | null>(null)
-  const previousLevelModeRef = useRef<ReturnType<typeof useViewer.getState>['levelMode'] | null>(
-    null,
-  )
-  const interiorRegionsCacheRef = useRef<{
-    levelId: LevelNode['id']
+  const activeContextSignatureRef = useRef<string | null>(null)
+  const floorStacksCacheRef = useRef<{
     nodes: Record<string, AnyNode>
-    regions: ReturnType<typeof resolveLandrushBuildingFloorInteriorRegions>
+    stacks: ReturnType<typeof resolveLandrushBuildingFloorStacks>
   } | null>(null)
-
-  const restorePreviousLevelMode = useCallback(
-    (reason: 'disabled' | 'left-building' | 'unmount') => {
-      const previousLevelMode = previousLevelModeRef.current
-      if (previousLevelMode === null) return
-
-      const viewer = useViewer.getState()
-      if (viewer.levelMode !== previousLevelMode) viewer.setLevelMode(previousLevelMode)
-      recordLandrushIslandNavigationProbe({
-        fromLevelId: interiorLevelIdRef.current,
-        kind: 'floor-visibility-exit',
-        reason,
-        restoredLevelMode: previousLevelMode,
-      })
-      previousLevelModeRef.current = null
-      interiorLevelIdRef.current = null
-    },
-    [],
-  )
-
-  useEffect(
-    () => () => {
-      restorePreviousLevelMode('unmount')
-    },
-    [restorePreviousLevelMode],
-  )
 
   useFrame(() => {
     if (!enabled) {
-      restorePreviousLevelMode('disabled')
+      if (activeContextSignatureRef.current !== null) {
+        recordLandrushIslandNavigationProbe({
+          fromContext: activeContextSignatureRef.current,
+          kind: 'floor-visibility-exit',
+          reason: 'disabled',
+        })
+        activeContextSignatureRef.current = null
+      }
       const probe = getLandrushIslandRuntimeProbe()
       if (probe) {
         probe.floorVisibility = {
+          buildingScopeId: null,
+          hiddenLevelIds: [],
           insideBuilding: false,
           levelId: null,
           levelMode: useViewer.getState().levelMode,
           regionSource: null,
+          visibleLevelIds: [],
         }
       }
       return
@@ -7692,72 +7684,80 @@ function LandrushIslandRobotLevelSelectionTracker({
     if (!motion) return
 
     const nodes = useScene.getState().nodes
-    const levelId = resolveLandrushIslandRobotLevelId(nodes, motion.position.y, groundY)
+    let floorStacksCache = floorStacksCacheRef.current
+    if (floorStacksCache?.nodes !== nodes) {
+      floorStacksCache = {
+        nodes,
+        stacks: resolveLandrushBuildingFloorStacks(nodes),
+      }
+      floorStacksCacheRef.current = floorStacksCache
+    }
+    const context = findLandrushBuildingFloorContext({
+      groundY,
+      point: { x: motion.position.x, z: motion.position.z },
+      robotWorldY: motion.position.y,
+      stacks: floorStacksCache.stacks,
+      verticalTolerance: LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS,
+    })
+    const visibility = resolveLandrushBuildingFloorVisibility(floorStacksCache.stacks, context)
+    const hiddenLevelIds = new Set(visibility.hiddenLevelIds)
+
+    for (const stack of floorStacksCache.stacks) {
+      for (const floor of stack.floors) {
+        for (const floorLevelId of floor.levelIds) {
+          const levelObject = sceneRegistry.nodes.get(floorLevelId as AnyNodeId)
+          if (!levelObject) continue
+          levelObject.position.y = floor.baseY
+          levelObject.visible = !hiddenLevelIds.has(floorLevelId)
+        }
+      }
+    }
+
     const viewer = useViewer.getState()
-    if (viewer.selection.levelId !== levelId) {
+    if (viewer.levelMode !== 'stacked') viewer.setLevelMode('stacked')
+    const levelId = context?.levelId ?? (LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'])
+    const buildingId = context?.buildingId ?? LANDRUSH_ISLAND_BUILDING_ID
+    if (viewer.selection.levelId !== levelId || viewer.selection.buildingId !== buildingId) {
       viewer.setSelection({
-        buildingId: LANDRUSH_ISLAND_BUILDING_ID as never,
+        buildingId: buildingId as never,
         levelId,
         selectedIds: [],
         zoneId: null,
       })
     }
-    let interiorCache = interiorRegionsCacheRef.current
-    if (interiorCache?.nodes !== nodes || interiorCache.levelId !== levelId) {
-      interiorCache = {
-        levelId,
-        nodes,
-        regions: resolveLandrushBuildingFloorInteriorRegions(nodes, levelId),
-      }
-      interiorRegionsCacheRef.current = interiorCache
-    }
-    const interiorRegion = findLandrushBuildingFloorInteriorRegion(
-      { x: motion.position.x, z: motion.position.z },
-      interiorCache.regions,
-    )
 
-    if (interiorRegion) {
-      if (previousLevelModeRef.current === null) {
-        previousLevelModeRef.current = viewer.levelMode === 'solo' ? 'stacked' : viewer.levelMode
-        recordLandrushIslandNavigationProbe({
-          fromLevelMode: viewer.levelMode,
-          kind: 'floor-visibility-enter',
-          levelId,
-          regionSource: interiorRegion.source,
-        })
-      } else if (interiorLevelIdRef.current !== levelId) {
-        recordLandrushIslandNavigationProbe({
-          fromLevelId: interiorLevelIdRef.current,
-          kind: 'floor-visibility-level-change',
-          levelId,
-          regionSource: interiorRegion.source,
-        })
-      }
-      interiorLevelIdRef.current = levelId
-      if (viewer.levelMode !== 'solo') viewer.setLevelMode('solo')
-    } else {
-      if (previousLevelModeRef.current !== null) {
-        restorePreviousLevelMode('left-building')
-      } else if (viewer.levelMode === 'solo') {
-        viewer.setLevelMode('stacked')
-        recordLandrushIslandNavigationProbe({
-          kind: 'floor-visibility-outside-normalized',
-          levelId,
-          restoredLevelMode: 'stacked',
-        })
-      }
+    const contextSignature = context ? `${context.scopeId}:${context.levelNumber}` : null
+    if (contextSignature !== activeContextSignatureRef.current) {
+      const previousContext = activeContextSignatureRef.current
+      recordLandrushIslandNavigationProbe({
+        buildingScopeId: context?.scopeId ?? null,
+        fromContext: previousContext,
+        hiddenLevelIds: visibility.hiddenLevelIds,
+        kind: context
+          ? previousContext
+            ? 'floor-visibility-level-change'
+            : 'floor-visibility-enter'
+          : 'floor-visibility-exit',
+        levelId,
+        levelNumber: context?.levelNumber ?? null,
+        regionSource: context?.region.source ?? null,
+      })
+      activeContextSignatureRef.current = contextSignature
     }
 
     const probe = getLandrushIslandRuntimeProbe()
     if (probe) {
       probe.floorVisibility = {
-        insideBuilding: interiorRegion !== null,
+        buildingScopeId: context?.scopeId ?? null,
+        hiddenLevelIds: [...visibility.hiddenLevelIds],
+        insideBuilding: context !== null,
         levelId,
-        levelMode: useViewer.getState().levelMode,
-        regionSource: interiorRegion?.source ?? null,
+        levelMode: viewer.levelMode === 'stacked' ? viewer.levelMode : 'stacked',
+        regionSource: context?.region.source ?? null,
+        visibleLevelIds: [...visibility.visibleLevelIds],
       }
     }
-  })
+  }, 6)
 
   return null
 }
@@ -11545,11 +11545,12 @@ function RemoteSpatialVoiceRangeRing({
   visible: boolean
 }) {
   const positionRef = useRef<readonly [number, number, number] | null>(
-    remotePlayerStore.getSnapshot(playerId)?.position ?? null,
+    remotePlayerStore.getPresentationSnapshot(playerId, performance.now())?.position ?? null,
   )
 
   useFrame(() => {
-    positionRef.current = remotePlayerStore.getSnapshot(playerId)?.position ?? null
+    positionRef.current =
+      remotePlayerStore.getPresentationSnapshot(playerId, performance.now())?.position ?? null
   })
 
   return (
@@ -11577,28 +11578,19 @@ function RemoteLandrushIslandRobot({
     createLandrushIslandRobotActorNode(baseNode, player.id, snapshotPoint(player), groundY),
   )
   const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
-  const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
   const headingRef = useRef(player.heading)
-  const targetHeadingRef = useRef(player.heading)
   const animationSettleSecondsRef = useRef(0)
   const lastSnapshotUpdatedAtRef = useRef(player.updatedAt)
   const lastSnapshotReceivedAtRef = useRef<number | null>(null)
+  const lastProbeSampleAtRef = useRef(0)
   const visualRootRef = useRef<Group | null>(null)
   const presentationMode: LandrushRobotPresentationMode =
     player.pose === 'falling' ? 'fall' : 'default'
 
-  useEffect(() => {
-    targetPositionRef.current.set(
-      player.position[0],
-      player.position[1] || groundY,
-      player.position[2],
-    )
-    targetHeadingRef.current = player.heading
-  }, [groundY, player])
-
   useFrame((_, delta) => {
     const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
     const now = performance.now()
+    const presentedPlayer = remotePlayerStore.getPresentationSnapshot(player.id, now) ?? livePlayer
     if (
       lastSnapshotReceivedAtRef.current === null ||
       livePlayer.updatedAt !== lastSnapshotUpdatedAtRef.current
@@ -11606,31 +11598,44 @@ function RemoteLandrushIslandRobot({
       lastSnapshotUpdatedAtRef.current = livePlayer.updatedAt
       lastSnapshotReceivedAtRef.current = now
     }
-    targetPositionRef.current.set(
-      livePlayer.position[0],
-      livePlayer.position[1] || groundY,
-      livePlayer.position[2],
-    )
-    targetHeadingRef.current = livePlayer.heading
 
     const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-    const positionErrorSq = positionRef.current.distanceToSquared(targetPositionRef.current)
-    const headingErrorRadians = shortestAngleDistance(headingRef.current, targetHeadingRef.current)
-    const positionAmount = frameIndependentResponseAmount(
-      LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE,
-      frameDelta,
-    )
-    const headingAmount = frameIndependentResponseAmount(
-      LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE,
-      frameDelta,
-    )
+    const presentedX = presentedPlayer.position[0]
+    const presentedY = presentedPlayer.position[1] || groundY
+    const presentedZ = presentedPlayer.position[2]
+    const positionErrorSq =
+      (positionRef.current.x - presentedX) ** 2 +
+      (positionRef.current.y - presentedY) ** 2 +
+      (positionRef.current.z - presentedZ) ** 2
+    const headingErrorRadians = shortestAngleDistance(headingRef.current, presentedPlayer.heading)
     const snapshotFresh =
       now - (lastSnapshotReceivedAtRef.current ?? now) <= REMOTE_PRESENTATION_MOVEMENT_FRESH_MS
-    const movementFresh = livePlayer.moving && snapshotFresh
-    const fallingFresh = livePlayer.pose === 'falling' && snapshotFresh
+    const movementFresh = presentedPlayer.moving && snapshotFresh
+    const fallingFresh = presentedPlayer.pose === 'falling' && snapshotFresh
 
-    positionRef.current.lerp(targetPositionRef.current, positionAmount)
-    headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
+    const probe = getLandrushIslandRuntimeProbe()
+    if (probe && now - lastProbeSampleAtRef.current >= 50) {
+      let samples = probe.remotePresentationSamples[player.id]
+      if (!samples) {
+        samples = []
+        probe.remotePresentationSamples[player.id] = samples
+      }
+      pushLandrushIslandProbeSample(
+        samples,
+        {
+          presentedPosition: [presentedX, presentedY, presentedZ],
+          presentationStepMeters: Math.sqrt(positionErrorSq),
+          rawPosition: [...livePlayer.position],
+          snapshotUpdatedAt: livePlayer.updatedAt,
+          timeMs: roundPerf(now - probe.startedAt),
+        },
+        240,
+      )
+      lastProbeSampleAtRef.current = now
+    }
+
+    positionRef.current.set(presentedX, presentedY, presentedZ)
+    headingRef.current = presentedPlayer.heading
     animationSettleSecondsRef.current =
       movementFresh || fallingFresh
         ? REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS
@@ -11644,7 +11649,7 @@ function RemoteLandrushIslandRobot({
     ]
     node.playerHeading = headingRef.current
     node.playerMoving = movementFresh
-    node.playerSpeed = movementFresh ? livePlayer.speed : 0
+    node.playerSpeed = movementFresh ? presentedPlayer.speed : 0
 
     if (
       shouldContinueRemotePresentation({
@@ -13288,44 +13293,19 @@ function LandrushIslandRemoteMapPlayerMarker({
 }) {
   const groupRef = useRef<Group>(null!)
   const materialOpacityRef = useRef(0)
-  const positionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
-  const targetPositionRef = useRef(new Vector3(player.position[0], groundY, player.position[2]))
-  const headingRef = useRef(player.heading)
-  const targetHeadingRef = useRef(player.heading)
   const warmupRef = useLandrushIslandMapOverlayWarmup()
 
-  useEffect(() => {
-    targetPositionRef.current.set(
-      player.position[0],
-      player.position[1] || groundY,
-      player.position[2],
-    )
-    targetHeadingRef.current = player.heading
-  }, [groundY, player])
-
-  useFrame((_, delta) => {
+  useFrame(() => {
     const group = groupRef.current
     if (!group) return
 
     materialOpacityRef.current = visible ? clamp01(opacityRef.current) : 0
     setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
     if (materialOpacityRef.current > 0.002) {
-      const livePlayer = remotePlayerStore.getSnapshot(player.id) ?? player
-      targetPositionRef.current.set(
-        livePlayer.position[0],
-        livePlayer.position[1] || groundY,
-        livePlayer.position[2],
-      )
-      targetHeadingRef.current = livePlayer.heading
-
-      const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-      const positionAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_POSITION_RESPONSE * frameDelta)
-      const headingAmount = 1 - Math.exp(-LANDRUSH_ISLAND_REMOTE_HEADING_RESPONSE * frameDelta)
-      positionRef.current.lerp(targetPositionRef.current, positionAmount)
-      headingRef.current = lerpAngle(headingRef.current, targetHeadingRef.current, headingAmount)
-
-      group.position.set(positionRef.current.x, groundY + 0.24, positionRef.current.z)
-      group.rotation.y = headingRef.current
+      const livePlayer =
+        remotePlayerStore.getPresentationSnapshot(player.id, performance.now()) ?? player
+      group.position.set(livePlayer.position[0], groundY + 0.24, livePlayer.position[2])
+      group.rotation.y = livePlayer.heading
     }
 
     applyLandrushIslandMapOverlayWarmup(group, warmupRef)

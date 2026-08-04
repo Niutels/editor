@@ -61,6 +61,9 @@ import {
   frameIndependentResponseAmount,
   REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS,
   REMOTE_PRESENTATION_MOVEMENT_FRESH_MS,
+  type RemotePresentationTimeline,
+  reconcileRemotePresentationTimeline,
+  resolveRemotePresentationSnapshot,
   shortestAngleDistance,
   shouldContinueRemotePresentation,
 } from './multiplayer-presentation'
@@ -102,9 +105,12 @@ export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
 }
 
 export type MultiplayerRemotePlayerStore = {
+  getPresentationSnapshot: (id: string, now: number) => MultiplayerPlayerSnapshot | null
   getSnapshot: (id: string) => MultiplayerPlayerSnapshot | null
   getSnapshots: () => MultiplayerPlayerSnapshot[]
 }
+
+type MultiplayerRemotePlayerTimeline = RemotePresentationTimeline<MultiplayerPlayerSnapshot>
 
 export type ParcelOwnership = {
   claimedAt: number
@@ -2768,6 +2774,7 @@ export function useLandrushWorldMultiplayer({
   const voiceSignalSequenceRef = useRef(0)
   const watchedParcelWorldIdRef = useRef<string | null>(null)
   const remotePlayerMapRef = useRef<Map<string, MultiplayerPlayerSnapshot>>(new Map())
+  const remotePlayerTimelineMapRef = useRef<Map<string, MultiplayerRemotePlayerTimeline>>(new Map())
   const [connection, setConnection] =
     useState<MultiplayerConnectionDetails>(createConnectionDetails)
   const [status, setStatus] = useState<ConnectionStatus>(enabled ? 'connecting' : 'offline')
@@ -2794,6 +2801,8 @@ export function useLandrushWorldMultiplayer({
   )
   const remotePlayerStore = useMemo<MultiplayerRemotePlayerStore>(
     () => ({
+      getPresentationSnapshot: (id, now) =>
+        resolveRemotePresentationSnapshot(remotePlayerTimelineMapRef.current.get(id) ?? null, now),
       getSnapshot: (id) => remotePlayerMapRef.current.get(id) ?? null,
       getSnapshots: () => sortedRemotePlayerSnapshots(remotePlayerMapRef.current),
     }),
@@ -3093,6 +3102,7 @@ export function useLandrushWorldMultiplayer({
     if (!enabled || (!spectator && localProfile.id === FALLBACK_LOCAL_PROFILE.id)) {
       setStatus(enabled ? 'connecting' : 'offline')
       remotePlayerMapRef.current = new Map()
+      remotePlayerTimelineMapRef.current = new Map()
       setRemotePlayerRosterMap(new Map())
       setParcelClaimError(null)
       const offlineState =
@@ -3311,12 +3321,27 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'snapshot') {
           setStatus('connected')
-          const nextRemotePlayerMap = new Map(
-            message.players
-              .filter((player) => player.id !== localProfile.id)
-              .map((player) => [player.id, player]),
-          )
+          const receivedAt = performance.now()
+          const nextRemotePlayerMap = new Map<string, MultiplayerPlayerSnapshot>()
+          const nextRemotePlayerTimelineMap = new Map<string, MultiplayerRemotePlayerTimeline>()
+          for (const player of message.players) {
+            if (player.id === localProfile.id) continue
+            const reconciliation = reconcileRemotePresentationTimeline(
+              remotePlayerTimelineMapRef.current.get(player.id) ?? null,
+              player,
+              message.serverTime,
+              receivedAt,
+            )
+            nextRemotePlayerTimelineMap.set(player.id, reconciliation.timeline)
+            nextRemotePlayerMap.set(
+              player.id,
+              reconciliation.accepted
+                ? player
+                : (remotePlayerMapRef.current.get(player.id) ?? player),
+            )
+          }
           remotePlayerMapRef.current = nextRemotePlayerMap
+          remotePlayerTimelineMapRef.current = nextRemotePlayerTimelineMap
           setRemotePlayerRosterMap(new Map(nextRemotePlayerMap))
           renderScheduler.requestFrame('animation')
           setConnection((current) => {
@@ -3330,6 +3355,14 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'player-joined' || message.type === 'player-state') {
           if (message.player.id === localProfile.id) return
+          const reconciliation = reconcileRemotePresentationTimeline(
+            remotePlayerTimelineMapRef.current.get(message.player.id) ?? null,
+            message.player,
+            message.serverTime,
+            performance.now(),
+          )
+          remotePlayerTimelineMapRef.current.set(message.player.id, reconciliation.timeline)
+          if (!reconciliation.accepted) return
           const previous = remotePlayerMapRef.current.get(message.player.id)
           remotePlayerMapRef.current.set(message.player.id, message.player)
           if (!previous || remotePlayerRosterChanged(previous, message.player)) {
@@ -3341,6 +3374,7 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'player-left') {
           remotePlayerMapRef.current.delete(message.id)
+          remotePlayerTimelineMapRef.current.delete(message.id)
           setRemotePlayerRosterMap(new Map(remotePlayerMapRef.current))
           renderScheduler.requestFrame('animation')
         }
@@ -3399,6 +3433,9 @@ export function useLandrushWorldMultiplayer({
       )
       if (next.size === remotePlayerMapRef.current.size) return
       remotePlayerMapRef.current = next
+      remotePlayerTimelineMapRef.current = new Map(
+        [...remotePlayerTimelineMapRef.current.entries()].filter(([id]) => next.has(id)),
+      )
       setRemotePlayerRosterMap(new Map(next))
     }, 3000)
     return () => window.clearInterval(interval)
@@ -3988,14 +4025,17 @@ function parseServerMessage(data: unknown): ServerMessage | null {
     if (
       message?.type === 'snapshot' &&
       Array.isArray(message.players) &&
-      typeof message.roomId === 'string'
+      message.players.every(isPlayerSnapshot) &&
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number'
     ) {
       return message
     }
     if (
       (message?.type === 'player-joined' || message?.type === 'player-state') &&
       isPlayerSnapshot(message.player) &&
-      typeof message.roomId === 'string'
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number'
     ) {
       return message
     }
@@ -4010,7 +4050,8 @@ function parseServerMessage(data: unknown): ServerMessage | null {
     if (
       message?.type === 'player-left' &&
       typeof message.id === 'string' &&
-      typeof message.roomId === 'string'
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number'
     ) {
       return message
     }

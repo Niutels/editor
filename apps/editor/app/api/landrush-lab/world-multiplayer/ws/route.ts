@@ -14,6 +14,7 @@ type PlayerSnapshot = {
   id: string
   moving: boolean
   name: string
+  pose?: 'falling'
   position: [number, number, number]
   speed: number
   updatedAt: number
@@ -963,6 +964,7 @@ function sanitizePlayerSnapshot(player: PlayerSnapshot, now: number): PlayerSnap
     id: sanitizeText(player.id, crypto.randomUUID(), 80),
     moving: Boolean(player.moving),
     name: sanitizeText(player.name, 'Player', 32),
+    ...(player.pose === 'falling' ? { pose: 'falling' as const } : {}),
     position: [
       finiteNumber(player.position?.[0], 0),
       finiteNumber(player.position?.[1], 0),

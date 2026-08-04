@@ -8,8 +8,11 @@ import {
   WallNode,
 } from '@pascal-app/core'
 import {
+  findLandrushBuildingFloorContext,
   findLandrushBuildingFloorInteriorRegion,
   resolveLandrushBuildingFloorInteriorRegions,
+  resolveLandrushBuildingFloorStacks,
+  resolveLandrushBuildingFloorVisibility,
 } from './landrush-building-floor-visibility'
 
 function createTestFloor() {
@@ -114,4 +117,89 @@ describe('Landrush building floor visibility', () => {
 
     expect(regions).toHaveLength(0)
   })
+
+  test('shows the current and lower floors only in the parcel the player entered', () => {
+    const building = BuildingNode.parse({ name: 'Shared island building root' })
+    const nodes = { [building.id]: building } as Record<string, AnyNode>
+    const parcelAFloors = createParcelFloorStack(nodes, building.id, 'parcel-a', 0)
+    const parcelBFloors = createParcelFloorStack(nodes, building.id, 'parcel-b', 20)
+
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const parcelAStack = stacks.find((stack) => stack.scopeId === 'parcel:parcel-a')
+    const context = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 5, z: 4.5 },
+      robotWorldY: 3.1,
+      stacks,
+    })
+    const visibility = resolveLandrushBuildingFloorVisibility(stacks, context)
+
+    expect(parcelAStack?.floors.map((floor) => floor.baseY)).toEqual([0, 3, 6])
+    expect(context?.scopeId).toBe('parcel:parcel-a')
+    expect(context?.levelNumber).toBe(1)
+    expect(visibility.visibleLevelIds).toContain(parcelAFloors[0]!.id)
+    expect(visibility.visibleLevelIds).toContain(parcelAFloors[1]!.id)
+    expect(visibility.hiddenLevelIds).toEqual([parcelAFloors[2]!.id])
+    expect(parcelBFloors.every((level) => visibility.visibleLevelIds.includes(level.id))).toBe(true)
+  })
+
+  test('keeps every parcel floor visible while the player is outside all buildings', () => {
+    const building = BuildingNode.parse({ name: 'Shared island building root' })
+    const nodes = { [building.id]: building } as Record<string, AnyNode>
+    const levels = [
+      ...createParcelFloorStack(nodes, building.id, 'parcel-a', 0),
+      ...createParcelFloorStack(nodes, building.id, 'parcel-b', 20),
+    ]
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const context = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 15, z: 4.5 },
+      robotWorldY: 3.1,
+      stacks,
+    })
+    const visibility = resolveLandrushBuildingFloorVisibility(stacks, context)
+
+    expect(context).toBeNull()
+    expect(visibility.hiddenLevelIds).toEqual([])
+    expect(new Set(visibility.visibleLevelIds)).toEqual(new Set(levels.map((level) => level.id)))
+  })
 })
+
+function createParcelFloorStack(
+  nodes: Record<string, AnyNode>,
+  buildingId: string,
+  parcelId: string,
+  offsetX: number,
+) {
+  const levels: LevelNode[] = []
+  const corners = [
+    [offsetX, 0],
+    [offsetX + 10, 0],
+    [offsetX + 10, 9],
+    [offsetX, 9],
+  ] as const
+
+  for (let floor = 0; floor < 3; floor += 1) {
+    const level = LevelNode.parse({
+      level: floor,
+      metadata: { landrushBuildSynced: true, landrushParcelId: parcelId },
+      name: `${parcelId} floor ${floor}`,
+      parentId: buildingId,
+    })
+    const walls = corners.map((start, index) =>
+      WallNode.parse({
+        end: corners[(index + 1) % corners.length],
+        height: 3,
+        name: `${parcelId} floor ${floor} wall ${index + 1}`,
+        parentId: level.id,
+        start,
+      }),
+    )
+    const populatedLevel = { ...level, children: walls.map((wall) => wall.id) } as LevelNode
+    nodes[populatedLevel.id] = populatedLevel
+    for (const wall of walls) nodes[wall.id] = wall
+    levels.push(populatedLevel)
+  }
+
+  return levels
+}
