@@ -1,7 +1,15 @@
 'use client'
 
 import { renderScheduler } from '@pascal-app/viewer'
-import { type Dispatch, type ReactNode, type SetStateAction, useState } from 'react'
+import {
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 import {
   LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_DEFAULT,
   LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_MAX,
@@ -12,6 +20,7 @@ import {
   LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_DEFAULT,
   LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_MAX,
   LANDRUSH_ROBOT_SCREEN_REVEAL_SMOOTHNESS_MIN,
+  readLandrushRobotScreenRevealMaskSnapshot,
   readLandrushRobotScreenRevealOuterRadiusScale,
   readLandrushRobotScreenRevealRadiusScale,
   readLandrushRobotScreenRevealSmoothness,
@@ -1044,6 +1053,7 @@ function RobotPassthroughControls() {
 
   return (
     <>
+      <RobotPassthroughRadiusOverlay />
       <RobotPassthroughControl
         defaultValue={LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_DEFAULT}
         label="Complete see-through radius"
@@ -1089,6 +1099,71 @@ function RobotPassthroughControls() {
         value={smoothness}
       />
     </>
+  )
+}
+
+function RobotPassthroughRadiusOverlay() {
+  const innerCircleRef = useRef<HTMLDivElement>(null)
+  const outerCircleRef = useRef<HTMLDivElement>(null)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => setMounted(true), [])
+
+  useEffect(() => {
+    if (!mounted) return
+    let animationFrame = 0
+    const updateCircle = (
+      circle: HTMLDivElement | null,
+      centerX: number,
+      centerY: number,
+      radius: number,
+      visible: boolean,
+    ) => {
+      if (!circle) return
+      const diameter = radius * 2
+      circle.style.width = `${diameter}px`
+      circle.style.height = `${diameter}px`
+      circle.style.opacity = visible ? '1' : '0'
+      circle.style.transform = `translate3d(${centerX - radius}px, ${centerY - radius}px, 0)`
+    }
+    const updateOverlay = () => {
+      const mask = readLandrushRobotScreenRevealMaskSnapshot()
+      const [centerX, centerY] = mask.centerPx
+      const [viewportWidth, viewportHeight] = mask.viewportPx
+      const visible =
+        mask.innerRadiusPx > 0 &&
+        mask.outerRadiusPx > mask.innerRadiusPx &&
+        centerX + mask.outerRadiusPx >= 0 &&
+        centerX - mask.outerRadiusPx <= viewportWidth &&
+        centerY + mask.outerRadiusPx >= 0 &&
+        centerY - mask.outerRadiusPx <= viewportHeight
+      updateCircle(innerCircleRef.current, centerX, centerY, mask.innerRadiusPx, visible)
+      updateCircle(outerCircleRef.current, centerX, centerY, mask.outerRadiusPx, visible)
+      animationFrame = requestAnimationFrame(updateOverlay)
+    }
+    updateOverlay()
+    return () => cancelAnimationFrame(animationFrame)
+  }, [mounted])
+
+  if (!mounted) return null
+  return createPortal(
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-0 z-40 overflow-hidden"
+      data-landrush-robot-reveal-radius-overlay
+    >
+      <div
+        className="absolute top-0 left-0 box-border rounded-full border-2 border-cyan-300 shadow-[0_0_0_1px_rgba(2,6,23,0.9),0_0_12px_rgba(34,211,238,0.8)] transition-opacity duration-75"
+        data-landrush-robot-reveal-radius="inner"
+        ref={innerCircleRef}
+      />
+      <div
+        className="absolute top-0 left-0 box-border rounded-full border-2 border-amber-300 border-dashed shadow-[0_0_0_1px_rgba(2,6,23,0.9),0_0_12px_rgba(251,191,36,0.75)] transition-opacity duration-75"
+        data-landrush-robot-reveal-radius="outer"
+        ref={outerCircleRef}
+      />
+    </div>,
+    document.body,
   )
 }
 

@@ -10,7 +10,9 @@ import {
 import {
   findLandrushBuildingFloorContext,
   findLandrushBuildingFloorInteriorRegion,
+  findLandrushBuildingFloorPlacement,
   resolveLandrushBuildingFloorInteriorRegions,
+  resolveLandrushBuildingFloorOpacities,
   resolveLandrushBuildingFloorStacks,
   resolveLandrushBuildingFloorVisibility,
 } from './landrush-building-floor-visibility'
@@ -162,6 +164,164 @@ describe('Landrush building floor visibility', () => {
     expect(context).toBeNull()
     expect(visibility.hiddenLevelIds).toEqual([])
     expect(new Set(visibility.visibleLevelIds)).toEqual(new Set(levels.map((level) => level.id)))
+  })
+
+  test('fades only the floor reached by a parcel stair while other parcels stay visible', () => {
+    const building = BuildingNode.parse({ name: 'Shared island building root' })
+    const nodes = { [building.id]: building } as Record<string, AnyNode>
+    const parcelAFloors = createParcelFloorStack(nodes, building.id, 'parcel-a', 0)
+    const parcelBFloors = createParcelFloorStack(nodes, building.id, 'parcel-b', 20)
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const context = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 5, z: 4.5 },
+      robotWorldY: 0.1,
+      stacks,
+    })
+    const opacities = resolveLandrushBuildingFloorOpacities(stacks, context, {
+      lowerLevelNumber: 0,
+      scopeId: 'parcel:parcel-a',
+      upperFloorVisibility: 0.5,
+      upperLevelNumber: 1,
+    })
+    const opacityByLevelId = new Map(opacities.map(({ levelId, opacity }) => [levelId, opacity]))
+
+    expect(opacityByLevelId.get(parcelAFloors[0]!.id)).toBe(1)
+    expect(opacityByLevelId.get(parcelAFloors[1]!.id)).toBe(0.5)
+    expect(opacityByLevelId.get(parcelAFloors[2]!.id)).toBe(0)
+    expect(parcelBFloors.every((level) => opacityByLevelId.get(level.id) === 1)).toBe(true)
+  })
+
+  test('finds a shared level in the parcel-specific stack requested by a stair', () => {
+    const building = BuildingNode.parse({ name: 'Shared island building root' })
+    const nodes = { [building.id]: building } as Record<string, AnyNode>
+    const sharedGroundLevel = LevelNode.parse({
+      level: 0,
+      name: 'Shared ground',
+      parentId: building.id,
+    })
+    nodes[sharedGroundLevel.id] = sharedGroundLevel
+    const parcelFloors = createParcelFloorStack(nodes, building.id, 'parcel-a', 0)
+    const parcelGroundWall = Object.values(nodes).find(
+      (node) => node.type === 'wall' && node.parentId === parcelFloors[0]!.id,
+    )
+    if (!parcelGroundWall) throw new Error('Expected parcel ground wall')
+    parcelGroundWall.parentId = sharedGroundLevel.id
+    parcelGroundWall.metadata = { landrushParcelId: 'parcel-a' }
+    delete nodes[parcelFloors[0]!.id]
+
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const placement = findLandrushBuildingFloorPlacement({
+      levelId: sharedGroundLevel.id,
+      scopeId: 'parcel:parcel-a',
+      stacks,
+    })
+
+    expect(placement?.scopeId).toBe('parcel:parcel-a')
+    expect(placement?.floor.baseY).toBe(0)
+  })
+
+  test('stacks a remote upper floor above its parcel content on the shared ground level', () => {
+    const building = BuildingNode.parse({ name: 'Shared island building root' })
+    const sharedGroundLevel = LevelNode.parse({
+      level: 0,
+      name: 'Shared island ground level',
+      parentId: building.id,
+    })
+    const parcelId = 'parcel-remote'
+    const parcelMetadata = { landrushBuildSynced: true, landrushParcelId: parcelId }
+    const corners = [
+      [0, 0],
+      [10, 0],
+      [10, 9],
+      [0, 9],
+    ] as const
+    const groundWalls = corners.map((start, index) =>
+      WallNode.parse({
+        end: corners[(index + 1) % corners.length],
+        height: 2.5,
+        metadata: parcelMetadata,
+        name: `Remote ground wall ${index + 1}`,
+        parentId: sharedGroundLevel.id,
+        start,
+      }),
+    )
+    const groundCeiling = CeilingNode.parse({
+      height: 2.55,
+      metadata: parcelMetadata,
+      name: 'Remote ground ceiling',
+      parentId: sharedGroundLevel.id,
+      polygon: corners,
+    })
+    const neighboringWall = WallNode.parse({
+      end: [30, 9],
+      height: 3,
+      metadata: { landrushBuildSynced: true, landrushParcelId: 'parcel-neighbor' },
+      name: 'Taller neighboring parcel wall',
+      parentId: sharedGroundLevel.id,
+      start: [30, 0],
+    })
+    const upperLevel = LevelNode.parse({
+      level: 1,
+      metadata: parcelMetadata,
+      name: 'Remote upper floor',
+      parentId: building.id,
+    })
+    const upperWalls = corners.map((start, index) =>
+      WallNode.parse({
+        end: corners[(index + 1) % corners.length],
+        height: 2.5,
+        metadata: parcelMetadata,
+        name: `Remote upper wall ${index + 1}`,
+        parentId: upperLevel.id,
+        start,
+      }),
+    )
+    const populatedGroundLevel = {
+      ...sharedGroundLevel,
+      children: [...groundWalls.map((wall) => wall.id), groundCeiling.id, neighboringWall.id],
+    } as LevelNode
+    const populatedUpperLevel = {
+      ...upperLevel,
+      children: upperWalls.map((wall) => wall.id),
+    } as LevelNode
+    const nodes = Object.fromEntries(
+      [
+        building,
+        populatedGroundLevel,
+        ...groundWalls,
+        groundCeiling,
+        neighboringWall,
+        populatedUpperLevel,
+        ...upperWalls,
+      ].map((node) => [node.id, node]),
+    ) as Record<string, AnyNode>
+
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const parcelStack = stacks.find((stack) => stack.scopeId === `parcel:${parcelId}`)
+    const upperContext = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 5, z: 4.5 },
+      robotWorldY: 2.8,
+      stacks,
+    })
+    const groundContext = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 5, z: 4.5 },
+      robotWorldY: 0.2,
+      stacks,
+    })
+    const groundVisibility = resolveLandrushBuildingFloorVisibility(stacks, groundContext)
+
+    expect(parcelStack?.floors.map((floor) => floor.baseY)).toEqual([0, 2.55])
+    expect(parcelStack?.floors[0]?.levelIds).toEqual([sharedGroundLevel.id])
+    expect(parcelStack?.floors[1]?.levelIds).toEqual([upperLevel.id])
+    expect(upperContext?.scopeId).toBe(`parcel:${parcelId}`)
+    expect(upperContext?.levelNumber).toBe(1)
+    expect(groundContext?.scopeId).toBe(`parcel:${parcelId}`)
+    expect(groundContext?.levelNumber).toBe(0)
+    expect(groundVisibility.hiddenLevelIds).toEqual([upperLevel.id])
+    expect(groundVisibility.visibleLevelIds).toContain(sharedGroundLevel.id)
   })
 })
 

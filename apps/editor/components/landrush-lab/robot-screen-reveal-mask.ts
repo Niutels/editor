@@ -4,18 +4,15 @@ import { Vector2 } from 'three'
 import {
   float,
   length,
-  max,
   mix,
   mul,
   positionView,
   screenUV,
   smoothstep,
-  step,
   sub,
   uniform,
 } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
-import { LANDRUSH_ROBOT_SCREEN_REVEAL_CURVE_POWER_RANGE } from './robot-screen-reveal-curve'
 
 const REVEAL_DISABLED_CENTER_PX = -100000
 const REVEAL_DEPTH_FEATHER_METERS = 0.04
@@ -42,6 +39,8 @@ let radialRadiusScale = LANDRUSH_ROBOT_SCREEN_REVEAL_RADIUS_SCALE_DEFAULT
 export function createLandrushRobotScreenRevealOpacityNode(
   baseOpacity: TSLNode<'float'> = float(1),
   revealAmount: TSLNode<'float'> = float(1),
+  effectiveLayerCount = 1,
+  { depthAware = true }: { depthAware?: boolean } = {},
 ) {
   const distancePx = createLandrushRobotScreenRevealDistanceNode()
   const transitionRatio = distancePx
@@ -49,25 +48,26 @@ export function createLandrushRobotScreenRevealOpacityNode(
     .div(outerRadiusPx.sub(innerRadiusPx))
     .clamp(0, 1)
   const smoothness = radialTransitionSmoothness.div(100)
-  const curvePower = float(1).add(
-    smoothness.oneMinus().pow(2).mul(LANDRUSH_ROBOT_SCREEN_REVEAL_CURVE_POWER_RANGE),
-  )
-  const opaqueWeight = transitionRatio.pow(curvePower)
-  const clearWeight = transitionRatio.oneMinus().pow(curvePower)
-  const radialFade = opaqueWeight.div(opaqueWeight.add(clearWeight))
-  const signedDepth = sub(positionView.z.negate(), robotNearDepth)
-  const depthOpacity = smoothstep(
-    -REVEAL_DEPTH_FEATHER_METERS / 2,
-    REVEAL_DEPTH_FEATHER_METERS / 2,
-    signedDepth,
-  )
-  return mul(baseOpacity, mix(float(1), max(radialFade, depthOpacity), revealAmount))
-}
-
-export function createLandrushRobotScreenRevealHardThresholdOpacityNode(
-  baseOpacity: TSLNode<'float'> = float(1),
-) {
-  return mul(baseOpacity, step(innerRadiusPx, createLandrushRobotScreenRevealDistanceNode()))
+  const endpointSmoothFade = transitionRatio.pow(2).mul(float(3).sub(transitionRatio.mul(2)))
+  const radialFade = mix(transitionRatio, endpointSmoothFade, smoothness)
+  const combinedFade = depthAware
+    ? float(1).sub(
+        radialFade
+          .oneMinus()
+          .mul(
+            smoothstep(
+              -REVEAL_DEPTH_FEATHER_METERS / 2,
+              REVEAL_DEPTH_FEATHER_METERS / 2,
+              sub(positionView.z.negate(), robotNearDepth),
+            ).oneMinus(),
+          ),
+      )
+    : radialFade
+  const revealFade =
+    effectiveLayerCount > 1
+      ? float(1).sub(combinedFade.oneMinus().pow(1 / effectiveLayerCount))
+      : combinedFade
+  return mul(baseOpacity, mix(float(1), revealFade, revealAmount))
 }
 
 function createLandrushRobotScreenRevealDistanceNode() {

@@ -46,6 +46,25 @@ export type LandrushBuildingFloorVisibility = {
   visibleLevelIds: readonly LevelNode['id'][]
 }
 
+export type LandrushBuildingFloorPlacement = {
+  buildingId: string | null
+  floor: LandrushBuildingFloorStackFloor
+  levelId: LevelNode['id']
+  scopeId: string
+}
+
+export type LandrushBuildingFloorTransition = {
+  lowerLevelNumber: number
+  scopeId: string
+  upperFloorVisibility: number
+  upperLevelNumber: number
+}
+
+export type LandrushBuildingFloorOpacity = {
+  levelId: LevelNode['id']
+  opacity: number
+}
+
 export function resolveLandrushBuildingFloorStacks(
   nodes: Record<string, AnyNode>,
 ): readonly LandrushBuildingFloorStack[] {
@@ -53,15 +72,46 @@ export function resolveLandrushBuildingFloorStacks(
 
   for (const node of Object.values(nodes)) {
     if (node.type !== 'level') continue
-    const scopeId = resolveLevelScopeId(node)
-    const levels = levelsByScope.get(scopeId)
-    if (levels) levels.push(node)
-    else levelsByScope.set(scopeId, [node])
+    for (const scopeId of resolveLevelScopeIds(node, nodes)) {
+      const levels = levelsByScope.get(scopeId)
+      if (levels) levels.push(node)
+      else levelsByScope.set(scopeId, [node])
+    }
   }
 
   return [...levelsByScope.entries()]
     .map(([scopeId, levels]) => createFloorStack(scopeId, levels, nodes))
     .sort((first, second) => first.scopeId.localeCompare(second.scopeId))
+}
+
+export function findLandrushBuildingFloorPlacement({
+  levelId,
+  scopeId,
+  stacks,
+}: {
+  levelId: LevelNode['id']
+  scopeId?: string | null
+  stacks: readonly LandrushBuildingFloorStack[]
+}): LandrushBuildingFloorPlacement | null {
+  const candidates: LandrushBuildingFloorPlacement[] = []
+
+  for (const stack of stacks) {
+    for (const floor of stack.floors) {
+      if (!floor.levelIds.includes(levelId)) continue
+      candidates.push({
+        buildingId: stack.buildingId,
+        floor,
+        levelId,
+        scopeId: stack.scopeId,
+      })
+    }
+  }
+
+  return (
+    candidates.find((candidate) => scopeId && candidate.scopeId === scopeId) ??
+    candidates.sort((first, second) => first.scopeId.localeCompare(second.scopeId))[0] ??
+    null
+  )
 }
 
 export function findLandrushBuildingFloorContext({
@@ -138,12 +188,47 @@ export function resolveLandrushBuildingFloorVisibility(
   return { hiddenLevelIds, visibleLevelIds }
 }
 
+export function resolveLandrushBuildingFloorOpacities(
+  stacks: readonly LandrushBuildingFloorStack[],
+  context: LandrushBuildingFloorContext | null,
+  transition: LandrushBuildingFloorTransition | null = null,
+): readonly LandrushBuildingFloorOpacity[] {
+  const opacityByLevelId = new Map<LevelNode['id'], number>()
+
+  for (const stack of stacks) {
+    for (const floor of stack.floors) {
+      let opacity =
+        context !== null && stack.scopeId === context.scopeId && floor.level > context.levelNumber
+          ? 0
+          : 1
+
+      if (transition && stack.scopeId === transition.scopeId) {
+        if (floor.level <= transition.lowerLevelNumber) opacity = 1
+        else if (floor.level === transition.upperLevelNumber) {
+          opacity = clampFloorOpacity(transition.upperFloorVisibility)
+        } else if (floor.level > transition.upperLevelNumber) opacity = 0
+      }
+
+      for (const levelId of floor.levelIds) {
+        opacityByLevelId.set(levelId, Math.min(opacityByLevelId.get(levelId) ?? 1, opacity))
+      }
+    }
+  }
+
+  return [...opacityByLevelId].map(([levelId, opacity]) => ({ levelId, opacity }))
+}
+
 export function resolveLandrushBuildingFloorInteriorRegions(
   nodes: Record<string, AnyNode>,
   levelId: LevelNode['id'],
+  scopeId?: string,
 ): readonly LandrushBuildingFloorInteriorRegion[] {
+  const level = nodes[levelId]
   const levelNodes = Object.values(nodes).filter(
-    (node) => node.parentId === levelId && node.visible !== false,
+    (node) =>
+      node.parentId === levelId &&
+      node.visible !== false &&
+      (level?.type !== 'level' || isNodeInLevelScope(node, level, scopeId)),
   )
   const walls = levelNodes.filter((node): node is WallNode => node.type === 'wall')
   const closedRooms = walls.length >= 3 ? detectSpacesForLevel(levelId, walls).spaces : []
@@ -252,6 +337,10 @@ function pointOnFloorSegment(
   )
 }
 
+function clampFloorOpacity(value: number) {
+  return Math.min(1, Math.max(0, value))
+}
+
 function createFloorStack(
   scopeId: string,
   levels: readonly LevelNode[],
@@ -270,16 +359,18 @@ function createFloorStack(
     .map(([levelNumber, floorLevels]) => {
       const sortedLevels = [...floorLevels].sort(
         (first, second) =>
-          countVisibleLevelContent(second.id, nodes) - countVisibleLevelContent(first.id, nodes) ||
-          first.id.localeCompare(second.id),
+          countVisibleLevelContent(second.id, nodes, scopeId) -
+            countVisibleLevelContent(first.id, nodes, scopeId) || first.id.localeCompare(second.id),
       )
       const primaryLevel = sortedLevels[0]!
-      const height = Math.max(...sortedLevels.map((level) => getLevelHeight(level.id, nodes)))
+      const height = Math.max(
+        ...sortedLevels.map((level) => getLevelHeightForScope(level, nodes, scopeId)),
+      )
       const floor: LandrushBuildingFloorStackFloor = {
         baseY,
         height,
         interiorRegions: sortedLevels.flatMap((level) =>
-          resolveLandrushBuildingFloorInteriorRegions(nodes, level.id),
+          resolveLandrushBuildingFloorInteriorRegions(nodes, level.id, scopeId),
         ),
         level: levelNumber,
         levelIds: sortedLevels.map((level) => level.id),
@@ -296,20 +387,69 @@ function createFloorStack(
   }
 }
 
-function resolveLevelScopeId(level: LevelNode) {
-  const metadata =
-    level.metadata && typeof level.metadata === 'object' && !Array.isArray(level.metadata)
-      ? (level.metadata as Record<string, unknown>)
-      : null
-  const parcelId = metadata?.landrushParcelId
-  if (typeof parcelId === 'string' && parcelId.length > 0) return `parcel:${parcelId}`
-  return `building:${level.parentId ?? level.id}`
+function resolveLevelScopeIds(level: LevelNode, nodes: Record<string, AnyNode>) {
+  const parcelId = resolveNodeParcelId(level)
+  if (parcelId) return [`parcel:${parcelId}`]
+
+  const scopeIds = new Set([`building:${level.parentId ?? level.id}`])
+  for (const node of Object.values(nodes)) {
+    if (node.parentId !== level.id) continue
+    const childParcelId = resolveNodeParcelId(node)
+    if (childParcelId) scopeIds.add(`parcel:${childParcelId}`)
+  }
+  return [...scopeIds]
 }
 
-function countVisibleLevelContent(levelId: LevelNode['id'], nodes: Record<string, AnyNode>) {
+function getLevelHeightForScope(level: LevelNode, nodes: Record<string, AnyNode>, scopeId: string) {
+  const children = Object.values(nodes)
+    .filter((node) => node.parentId === level.id && isNodeInLevelScope(node, level, scopeId))
+    .map((node) => node.id)
+  const scopedLevel = { ...level, children } as LevelNode
+  return getLevelHeight(level.id, { ...nodes, [level.id]: scopedLevel })
+}
+
+function isNodeInLevelScope(node: AnyNode, level: LevelNode, scopeId?: string) {
+  if (!scopeId) return true
+
+  const scopeParcelId = parcelIdForScope(scopeId)
+  const nodeParcelId = resolveNodeParcelId(node)
+  if (!scopeParcelId) return nodeParcelId === null
+
+  const levelParcelId = resolveNodeParcelId(level)
+  if (levelParcelId === scopeParcelId) {
+    return nodeParcelId === null || nodeParcelId === scopeParcelId
+  }
+  return nodeParcelId === scopeParcelId
+}
+
+function parcelIdForScope(scopeId: string) {
+  return scopeId.startsWith('parcel:') ? scopeId.slice('parcel:'.length) : null
+}
+
+function resolveNodeParcelId(node: AnyNode) {
+  const metadata =
+    node.metadata && typeof node.metadata === 'object' && !Array.isArray(node.metadata)
+      ? (node.metadata as Record<string, unknown>)
+      : null
+  const parcelId = metadata?.landrushParcelId
+  return typeof parcelId === 'string' && parcelId.length > 0 ? parcelId : null
+}
+
+function countVisibleLevelContent(
+  levelId: LevelNode['id'],
+  nodes: Record<string, AnyNode>,
+  scopeId?: string,
+) {
+  const level = nodes[levelId]
   let count = 0
   for (const node of Object.values(nodes)) {
-    if (node.parentId === levelId && node.visible !== false) count += 1
+    if (
+      node.parentId === levelId &&
+      node.visible !== false &&
+      (level?.type !== 'level' || isNodeInLevelScope(node, level, scopeId))
+    ) {
+      count += 1
+    }
   }
   return count
 }

@@ -23,7 +23,7 @@ import {
   Vector3,
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { float } from 'three/tsl'
+import { float, materialOpacity } from 'three/tsl'
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import type { LandrushTree } from '@/components/landrush/types'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
@@ -58,6 +58,7 @@ type FoliageBillboard = {
 const BRUNO_FOLIAGE_TEXTURE_PATH = '/landrush-lab/bruno-foliage/foliageSDF.png'
 const BRUNO_TREE_ASSET_BASE = '/landrush-lab/bruno-trees'
 const FOLIAGE_PLANE_COUNT = 80
+const FOLIAGE_REVEAL_EFFECTIVE_LAYER_COUNT = 8
 const FALLBACK_FOLIAGE_COLOR = new Color(0.47, 0.62, 0.28)
 
 const TREE_STYLES: Record<BrunoTreeKind, TreeStyle> = {
@@ -293,14 +294,18 @@ function FoliageInstances({
     }
     const nextMaterial = new MeshBasicNodeMaterial({
       alphaMap,
-      alphaTest: 0.035,
       depthWrite: false,
+      opacity,
       side: DoubleSide,
       toneMapped: false,
       transparent: true,
       vertexColors: true,
     })
-    nextMaterial.opacityNode = createLandrushRobotScreenRevealOpacityNode(float(opacity))
+    nextMaterial.opacityNode = createLandrushRobotScreenRevealOpacityNode(
+      materialOpacity,
+      float(1),
+      FOLIAGE_REVEAL_EFFECTIVE_LAYER_COUNT,
+    )
     nextMaterial.userData.landrushRobotScreenRevealSoftMask = true
     return nextMaterial
   }, [alphaMap, opacity])

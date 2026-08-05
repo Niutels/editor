@@ -1,5 +1,3 @@
-import { LANDRUSH_ROBOT_SCREEN_REVEAL_CURVE_POWER_RANGE } from '@/components/landrush-lab/robot-screen-reveal-curve'
-
 const DEBUG_DOCUMENT = `<!doctype html>
 <html lang="en">
   <head>
@@ -503,10 +501,12 @@ const DEBUG_DOCUMENT = `<!doctype html>
           <section class="metric-section">
             <h2 class="section-title">Production composition finding</h2>
             <div class="metric-grid">
-              <div class="metric"><span class="metric-label">Soft-mask maximum</span><span class="metric-value good">2 codes / px</span></div>
-              <div class="metric"><span class="metric-label">Object clip</span><span class="metric-value bad">255-code jump</span></div>
+              <div class="metric"><span class="metric-label">Radial endpoints</span><span class="metric-value good">zero slope at 100%</span></div>
+              <div class="metric"><span class="metric-label">Depth union</span><span class="metric-value good">continuous alpha union</span></div>
+              <div class="metric"><span class="metric-label">Foliage cutout</span><span class="metric-value good">independent of reveal</span></div>
+              <div class="metric"><span class="metric-label">Canopy overdraw</span><span class="metric-value good">8-layer compensated</span></div>
             </div>
-            <p class="finding">The object clipping branch cuts at the inner radius and does not read the smoothness value.</p>
+            <p class="finding">Production WebGPU materials use this opacity field directly. Foliage applies the inverse of repeated alpha compositing, so eight overlapping cards reproduce the requested radial opacity instead of turning a 10% fade into 57% opacity.</p>
           </section>
 
           <section class="metric-section">
@@ -526,7 +526,6 @@ const DEBUG_DOCUMENT = `<!doctype html>
 
     <script>
       (() => {
-        const CURVE_POWER_RANGE = ${LANDRUSH_ROBOT_SCREEN_REVEAL_CURVE_POWER_RANGE};
         const DEFAULTS = { innerRadiusPx: 96, outerRadiusPx: 288, smoothnessPercent: 100, mode: "soft-mask" };
         const state = { ...DEFAULTS };
         const byId = (id) => document.getElementById(id);
@@ -574,11 +573,6 @@ const DEBUG_DOCUMENT = `<!doctype html>
           state.smoothnessPercent = clamp(state.smoothnessPercent, 0, 100);
         }
 
-        function resolveCurvePower(smoothnessPercent) {
-          const smoothness = clamp(smoothnessPercent / 100, 0, 1);
-          return 1 + Math.pow(1 - smoothness, 2) * CURVE_POWER_RANGE;
-        }
-
         function sampleSoftOpacity(distancePx, smoothnessPercent) {
           const safeOuter = Math.max(state.innerRadiusPx + 1, state.outerRadiusPx);
           const ratio = clamp(
@@ -586,10 +580,9 @@ const DEBUG_DOCUMENT = `<!doctype html>
             0,
             1,
           );
-          const power = resolveCurvePower(smoothnessPercent);
-          const opaqueWeight = Math.pow(ratio, power);
-          const clearWeight = Math.pow(1 - ratio, power);
-          return opaqueWeight / (opaqueWeight + clearWeight);
+          const smoothness = clamp(smoothnessPercent / 100, 0, 1);
+          const endpointSmoothFade = Math.pow(ratio, 2) * (3 - 2 * ratio);
+          return ratio + (endpointSmoothFade - ratio) * smoothness;
         }
 
         function evaluateOpacity(distancePx, mode, smoothnessPercent) {
@@ -600,15 +593,27 @@ const DEBUG_DOCUMENT = `<!doctype html>
             : sampleSoftOpacity(distancePx, smoothnessPercent);
         }
 
-        function invertSymmetricPowerCurve(opacity, curvePower) {
-          const opaqueRoot = Math.pow(opacity, 1 / curvePower);
-          const clearRoot = Math.pow(1 - opacity, 1 / curvePower);
-          return opaqueRoot / (opaqueRoot + clearRoot);
+        function findFirstRatioAtOpacity(mode, smoothnessPercent, targetOpacity) {
+          let lowerRatio = 0;
+          let upperRatio = 1;
+          const transitionWidthPx = state.outerRadiusPx - state.innerRadiusPx;
+          for (let iteration = 0; iteration < 48; iteration += 1) {
+            const ratio = (lowerRatio + upperRatio) / 2;
+            const opacity = evaluateOpacity(
+              state.innerRadiusPx + ratio * transitionWidthPx,
+              mode,
+              smoothnessPercent,
+            );
+            if (opacity < targetOpacity) lowerRatio = ratio;
+            else upperRatio = ratio;
+          }
+          return upperRatio;
         }
 
         function measure(mode, smoothnessPercent) {
           const transitionWidthPx = state.outerRadiusPx - state.innerRadiusPx;
-          const curvePower = mode === "soft-mask" ? resolveCurvePower(smoothnessPercent) : null;
+          const endpointSlope =
+            mode === "soft-mask" ? 1 - clamp(smoothnessPercent / 100, 0, 1) : null;
           let largestJumpRadiusPx = state.innerRadiusPx;
           let maxDeltaPerPixel = 0;
           let maxQuantizedStep = 0;
@@ -636,7 +641,7 @@ const DEBUG_DOCUMENT = `<!doctype html>
 
           const firstVisibleRatio =
             mode === "soft-mask"
-              ? invertSymmetricPowerCurve(1 / 255, curvePower)
+              ? findFirstRatioAtOpacity(mode, smoothnessPercent, 1 / 255)
               : 0;
           const graphStartPx = Math.max(0, state.innerRadiusPx - transitionWidthPx * 0.12);
           const graphEndPx = state.outerRadiusPx + transitionWidthPx * 0.12;
@@ -656,7 +661,7 @@ const DEBUG_DOCUMENT = `<!doctype html>
 
           return {
             continuous: mode === "soft-mask",
-            curvePower,
+            endpointSlope,
             largestJumpRadiusPx,
             maxDeltaPerPixel,
             maxQuantizedStep,

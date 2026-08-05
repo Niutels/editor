@@ -1,7 +1,4 @@
-import {
-  resolveLandrushRobotScreenRevealCurvePower,
-  sampleLandrushRobotScreenRevealRadialOpacity,
-} from './robot-screen-reveal-curve'
+import { sampleLandrushRobotScreenRevealRadialOpacity } from './robot-screen-reveal-curve'
 
 export type RobotScreenRevealDebugMode = 'hard-threshold' | 'soft-mask'
 
@@ -21,7 +18,7 @@ export type RobotScreenRevealProfileSample = {
 
 export type RobotScreenRevealProfileMeasurement = {
   continuous: boolean
-  curvePower: number | null
+  endpointSlope: number | null
   firstOpaqueRadiusPx: number
   firstVisibleRadiusPx: number
   largestJumpRadiusPx: number
@@ -46,9 +43,9 @@ export function measureRobotScreenRevealProfile(
   const innerRadiusPx = Math.max(0, controls.innerRadiusPx)
   const outerRadiusPx = Math.max(innerRadiusPx + 1, controls.outerRadiusPx)
   const transitionWidthPx = outerRadiusPx - innerRadiusPx
-  const curvePower =
+  const endpointSlope =
     controls.mode === 'soft-mask'
-      ? resolveLandrushRobotScreenRevealCurvePower(controls.smoothnessPercent)
+      ? 1 - Math.min(1, Math.max(0, controls.smoothnessPercent / 100))
       : null
   const evaluate = (distancePx: number) =>
     controls.mode === 'soft-mask'
@@ -87,12 +84,22 @@ export function measureRobotScreenRevealProfile(
   }
 
   const firstVisibleRatio =
-    controls.mode === 'soft-mask' && curvePower
-      ? invertSymmetricPowerCurve(EIGHT_BIT_VISIBLE_THRESHOLD, curvePower)
+    controls.mode === 'soft-mask'
+      ? findFirstRatioAtOpacity(
+          evaluate,
+          innerRadiusPx,
+          transitionWidthPx,
+          EIGHT_BIT_VISIBLE_THRESHOLD,
+        )
       : 0
   const firstOpaqueRatio =
-    controls.mode === 'soft-mask' && curvePower
-      ? invertSymmetricPowerCurve(EIGHT_BIT_OPAQUE_THRESHOLD, curvePower)
+    controls.mode === 'soft-mask'
+      ? findFirstRatioAtOpacity(
+          evaluate,
+          innerRadiusPx,
+          transitionWidthPx,
+          EIGHT_BIT_OPAQUE_THRESHOLD,
+        )
       : 0
   const firstVisibleRadiusPx = innerRadiusPx + firstVisibleRatio * transitionWidthPx
   const firstOpaqueRadiusPx = innerRadiusPx + firstOpaqueRatio * transitionWidthPx
@@ -116,7 +123,7 @@ export function measureRobotScreenRevealProfile(
 
   return {
     continuous: controls.mode === 'soft-mask',
-    curvePower,
+    endpointSlope,
     firstOpaqueRadiusPx,
     firstVisibleRadiusPx,
     largestJumpRadiusPx,
@@ -132,8 +139,19 @@ export function measureRobotScreenRevealProfile(
   }
 }
 
-function invertSymmetricPowerCurve(opacity: number, curvePower: number) {
-  const opaqueRoot = opacity ** (1 / curvePower)
-  const clearRoot = (1 - opacity) ** (1 / curvePower)
-  return opaqueRoot / (opaqueRoot + clearRoot)
+function findFirstRatioAtOpacity(
+  evaluate: (distancePx: number) => number,
+  innerRadiusPx: number,
+  transitionWidthPx: number,
+  targetOpacity: number,
+) {
+  let lowerRatio = 0
+  let upperRatio = 1
+  for (let iteration = 0; iteration < 48; iteration += 1) {
+    const ratio = (lowerRatio + upperRatio) / 2
+    const opacity = evaluate(innerRadiusPx + ratio * transitionWidthPx)
+    if (opacity < targetOpacity) lowerRatio = ratio
+    else upperRatio = ratio
+  }
+  return upperRatio
 }
