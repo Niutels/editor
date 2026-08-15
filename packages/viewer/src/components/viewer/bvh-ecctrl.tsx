@@ -6,6 +6,12 @@ import type { ReactNode } from 'react'
 import { forwardRef, Suspense, useCallback, useImperativeHandle, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { clamp } from 'three/src/math/MathUtils.js'
+import {
+  type BVHEcctrlCollisionResponseMode,
+  resolveBVHEcctrlCollisionNormalSpeed,
+} from './bvh-ecctrl-collision'
+
+export type { BVHEcctrlCollisionResponseMode } from './bvh-ecctrl-collision'
 
 export type MovementInput = {
   forward?: boolean
@@ -36,6 +42,7 @@ export interface BVHEcctrlApi {
   getLinVel: (target?: THREE.Vector3) => THREE.Vector3
   resetLinVel: () => void
   addLinVel: (v: THREE.Vector3) => void
+  setCollisionResponseMode: (mode: BVHEcctrlCollisionResponseMode) => void
   setPaused: (paused: boolean) => void
   setLinVel: (v: THREE.Vector3) => void
   setMovement: (input: MovementInput) => void
@@ -189,6 +196,7 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
     const runState = useRef(false)
     const jumpState = useRef(false)
     const speedScaleState = useRef(1)
+    const collisionResponseModeState = useRef<BVHEcctrlCollisionResponseMode>('push-back')
     const imperativePaused = useRef(false)
     const isOnGround = useRef(false)
     const prevIsOnGround = useRef(false)
@@ -204,8 +212,6 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
     const triangleCount = useRef(0)
     const accumulatedContactNormal = useRef(new THREE.Vector3())
     const accumulatedContactPoint = useRef(new THREE.Vector3())
-    const absorbVel = useRef(new THREE.Vector3())
-    const pushBackVel = useRef(new THREE.Vector3())
     const characterBbox = useRef(new THREE.Box3())
     const characterSegment = useRef(new THREE.Line3())
     const localCharacterBbox = useRef(new THREE.Box3())
@@ -448,8 +454,6 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
 
         contactDepth.current = 0
         contactNormal.current.set(0, 0, 0)
-        absorbVel.current.set(0, 0, 0)
-        pushBackVel.current.set(0, 0, 0)
         totalDepth.current = 0
         triangleCount.current = 0
         accumulatedContactNormal.current.set(0, 0, 0)
@@ -495,19 +499,16 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
           const avgDepth = totalDepth.current / triangleCount.current
           relativeCollideVel.current.copy(currentLinVel.current)
           const intoSurfaceVel = relativeCollideVel.current.dot(accumulatedContactNormal.current)
-
-          if (intoSurfaceVel < 0) {
-            absorbVel.current
-              .copy(accumulatedContactNormal.current)
-              .multiplyScalar(-intoSurfaceVel * (1 + (mesh.userData.restitution ?? 0.05)))
-            currentLinVel.current.add(absorbVel.current)
-          }
-
-          if (avgDepth > collisionPushBackThreshold) {
-            const correction = (collisionPushBackDamping / delta) * avgDepth
-            pushBackVel.current.copy(accumulatedContactNormal.current).multiplyScalar(correction)
-            currentLinVel.current.add(pushBackVel.current)
-          }
+          const normalSpeed = resolveBVHEcctrlCollisionNormalSpeed({
+            averageDepth: avgDepth,
+            deltaSeconds: delta,
+            mode: collisionResponseModeState.current,
+            pushBackDamping: collisionPushBackDamping,
+            pushBackThreshold: collisionPushBackThreshold,
+            restitution: Number(mesh.userData.restitution ?? 0.05),
+            velocityIntoSurface: intoSurfaceVel,
+          })
+          currentLinVel.current.addScaledVector(accumulatedContactNormal.current, normalSpeed)
         }
       },
       [capsuleRadius, collisionPushBackDamping, collisionPushBackThreshold],
@@ -735,6 +736,9 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
     const setPaused = useCallback((nextPaused: boolean) => {
       imperativePaused.current = nextPaused
     }, [])
+    const setCollisionResponseMode = useCallback((mode: BVHEcctrlCollisionResponseMode) => {
+      collisionResponseModeState.current = mode
+    }, [])
     const setMovement = useCallback((movement: MovementInput) => {
       if (movement.forward !== undefined) forwardState.current = movement.forward
       if (movement.backward !== undefined) backwardState.current = movement.backward
@@ -770,11 +774,20 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         getLinVel,
         resetLinVel,
         addLinVel,
+        setCollisionResponseMode,
         setPaused,
         setLinVel,
         setMovement,
       }),
-      [addLinVel, getLinVel, resetLinVel, setLinVel, setMovement, setPaused],
+      [
+        addLinVel,
+        getLinVel,
+        resetLinVel,
+        setCollisionResponseMode,
+        setLinVel,
+        setMovement,
+        setPaused,
+      ],
     )
 
     const updateDebugger = useCallback(() => {
@@ -831,7 +844,6 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
         handleCollisionResponse(colliderMeshes, deltaTime)
         handleFloatingResponse(colliderMeshes, jump, deltaTime)
         updateCharacterWithPlatform()
-
         if (characterGroupRef.current) {
           characterGroupRef.current.position.addScaledVector(currentLinVel.current, deltaTime)
         }

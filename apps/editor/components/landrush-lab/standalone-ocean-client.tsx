@@ -63,6 +63,8 @@ export const STANDALONE_OCEAN_HORIZON_RADIUS = 1800
 
 const STANDALONE_OCEAN_SKY_RADIUS = 950
 const STANDALONE_OCEAN_SKY_FAR_PLANE_RATIO = 0.8
+// Pass-through structures keep depth ownership, so transparent water must composite first.
+const STANDALONE_OCEAN_TRANSPARENT_RENDER_ORDER = -10
 
 export const STANDALONE_OCEAN_QUALITY = {
   balanced: { dpr: [1, 1.35] as [number, number], segments: 192 },
@@ -901,6 +903,7 @@ export function StandaloneOceanWorld({
         frustumCulled={false}
         geometry={diskGeometry}
         position={[0, elevation, 0]}
+        renderOrder={submergedRockRefractionActive ? STANDALONE_OCEAN_TRANSPARENT_RENDER_ORDER : 0}
         rotation={[-Math.PI / 2, 0, 0]}
       >
         <primitive attach="material" object={materials.surface} />

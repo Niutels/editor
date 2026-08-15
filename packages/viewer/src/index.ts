@@ -15,6 +15,7 @@ export { NodeRenderer } from './components/renderers/node-renderer'
 export { default as Viewer, type ViewerHandle } from './components/viewer'
 export {
   type BVHEcctrlApi,
+  type BVHEcctrlCollisionResponseMode,
   default as BVHEcctrl,
   type MovementInput,
 } from './components/viewer/bvh-ecctrl'

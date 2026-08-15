@@ -5,6 +5,7 @@ import {
   CeilingNode,
   ColumnNode,
   ElevatorNode,
+  FenceNode,
   LevelNode,
   nodeRegistry,
   registerNode,
@@ -187,6 +188,29 @@ describe('buildFirstPersonColliderWorldFromRegistry', () => {
     expect(hit?.point.y).toBeCloseTo(0.4, 2)
     expect(hit?.face?.normal.y).toBeGreaterThan(0.9)
     expect(Math.abs(hit?.face?.normal.z ?? 0)).toBeGreaterThan(0.2)
+    world?.dispose()
+  })
+
+  test('uses a continuous barrier collider for visually porous fences', () => {
+    registerColliderDefinition('fence', FenceNode, 'structure')
+
+    const fence = FenceNode.parse({
+      end: [0, 4],
+      height: 1.8,
+      id: 'fence_test',
+      start: [0, -4],
+      thickness: 0.08,
+    })
+    setSceneNodes([fence])
+    mountRegistryGroup(fence)
+
+    const world = buildFirstPersonColliderWorldFromRegistry()
+    const raycaster = new Raycaster(new Vector3(-2, 0.9, 0), new Vector3(1, 0, 0))
+    const hit = world ? raycaster.intersectObject(world.mesh, false)[0] : undefined
+
+    expect(world).not.toBeNull()
+    expect(hit?.distance).toBeCloseTo(1.96, 2)
+    expect(hit?.point.x).toBeCloseTo(-0.04, 2)
     world?.dispose()
   })
 

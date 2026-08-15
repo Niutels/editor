@@ -54,6 +54,7 @@ import {
   resolveLandrushRobotJumpPose,
 } from '@pascal-app/nodes/landrush-world/robot'
 import {
+  type BVHEcctrlCollisionResponseMode,
   renderScheduler,
   useViewer,
   type ViewerPresentationEffectDebugMode,
@@ -62,6 +63,7 @@ import {
 import { Html, KeyboardControls, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { type RootState, useFrame, useThree } from '@react-three/fiber'
 import {
+  Camera as CameraIcon,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -135,6 +137,13 @@ import { resolveGrassWebGpuBladeSubdivisions } from './grass-blade-geometry'
 import { GRASS_FIELD_RESOLUTION, type GrassFieldBlocker } from './grass-field-texture'
 import { DEFAULT_GRASS_BLADE_TUNING, type GrassBladeTuning } from './grass-material'
 import { GrassWaterLandLayers } from './grass-water-layers'
+import {
+  cloneLandrushBugReportBuilds,
+  downloadLandrushBugReport,
+  type LandrushBugReport,
+  type LandrushBugReportCamera,
+  type LandrushBugReportPlayer,
+} from './landrush-bug-report'
 import { LandrushIslandBuildGridOverlay } from './landrush-build-grid-overlay'
 import {
   findLandrushBuildingFloorContext,
@@ -144,15 +153,27 @@ import {
   resolveLandrushBuildingFloorOpacities,
   resolveLandrushBuildingFloorStacks,
 } from './landrush-building-floor-visibility'
+import {
+  LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY,
+  readLandrushIslandFloorFadeOpacity,
+} from './landrush-floor-fade-opacity'
 import { type LandrushGamepadInput, readLandrushGamepadInput } from './landrush-gamepad-input'
 import {
   resolveLandrushGrassMapExposure,
   resolveLandrushGrassMapVisibility,
 } from './landrush-grass-map-transition'
+import { areLandrushWallColliderGeometriesReady } from './landrush-island-collider-readiness'
 import {
   LandrushIslandPlacedTvScreens,
   type LandrushIslandTvMediaSettings,
 } from './landrush-island-tv-screens'
+import {
+  advanceLandrushRobotRevealObjectTransitions,
+  LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY,
+  type LandrushRobotRevealObjectTransitionState,
+  readLandrushRobotRevealObjectAmount,
+  shouldKeepLandrushRobotRevealSlabOpaque,
+} from './landrush-robot-reveal-support'
 import {
   frameIndependentResponseAmount,
   REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS,
@@ -215,6 +236,7 @@ import {
   readLandrushRobotScreenRevealRadiusScale,
   updateLandrushRobotScreenRevealMask,
 } from './robot-screen-reveal-mask'
+import { projectLandrushRobotScreenRevealRadius } from './robot-screen-reveal-projection'
 import { StandaloneOceanWorld } from './standalone-ocean-client'
 import {
   createDefaultStandaloneOceanParameters,
@@ -372,7 +394,6 @@ const LANDRUSH_ISLAND_FLOOR_FADE_PREPARE_DISTANCE_METERS = 8
 const LANDRUSH_ISLAND_FLOOR_FADE_PREPARE_MAX_MATERIALS_PER_FRAME = 1
 const LANDRUSH_ISLAND_FLOOR_FADE_PREPARE_MAX_OBJECTS_PER_FRAME = 192
 const LANDRUSH_ISLAND_FLOOR_FADE_PREPARE_TIME_BUDGET_MS = 1.5
-const LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY = 'landrushFloorFadeOpacity'
 const LANDRUSH_ISLAND_ROBOT_JUMP_DURATION_MS = 1_280
 const LANDRUSH_ISLAND_ROBOT_JUMP_HEIGHT = 0.95
 const LANDRUSH_ISLAND_ROBOT_FALL_COLLIDER_MESHES: Mesh[] = []
@@ -413,10 +434,12 @@ const LANDRUSH_ISLAND_GAMEPAD_CAMERA_YAW_SPEED = MathUtils.degToRad(120)
 const LANDRUSH_ISLAND_GAMEPAD_CAMERA_PITCH_SPEED = MathUtils.degToRad(86)
 const LANDRUSH_ISLAND_ISOMETRIC_CAMERA_ZOOM_STEP = 0.0006
 const LANDRUSH_ISLAND_ROBOT_MESH_WIDTH_METERS = 0.46
+const LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS = 0.25
 const LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS = 0.35
 const LANDRUSH_ISLAND_CLICK_MOVE_PROJECTED_STOP_RADIUS =
   LANDRUSH_ISLAND_CLICK_MOVE_STOP_RADIUS * 1.75
 const LANDRUSH_ISLAND_CLICK_MOVE_WAYPOINT_RADIUS = 0.36
+const LANDRUSH_ISLAND_CLICK_MOVE_GRAPH_WAYPOINT_RADIUS = 0.24
 const LANDRUSH_ISLAND_CLICK_MOVE_FULL_SPEED_DISTANCE = 1.75
 const LANDRUSH_ISLAND_CLICK_MOVE_MIN_SPEED_SCALE = 0.08
 const LANDRUSH_ISLAND_CLICK_MOVE_RUN_DISTANCE = LANDRUSH_ISLAND_ROBOT_MESH_WIDTH_METERS * 4
@@ -428,11 +451,20 @@ const LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS = 520
 const LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_SIDE_METERS = 0.78
 const LANDRUSH_ISLAND_CLICK_MOVE_RECOVERY_FORWARD_METERS = 0.42
 const LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX = 6
+const LANDRUSH_ISLAND_CLICK_MOVE_TERMINAL_PROGRESS_METERS = 0.1
+const LANDRUSH_ISLAND_CLICK_MOVE_TERMINAL_NO_PROGRESS_MS =
+  LANDRUSH_ISLAND_CLICK_MOVE_NO_PROGRESS_RETRY_MS +
+  LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS * LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX
 const LANDRUSH_ISLAND_RIGHT_CLICK_MOVE_CLICK_TOLERANCE_PX = 8
-const LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS = 0.3
+const LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS =
+  LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS
+const LANDRUSH_ISLAND_NAVIGATION_ASSET_PADDING_METERS =
+  LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS + 0.08
 const LANDRUSH_ISLAND_NAVIGATION_LOCAL_RETRY_CONTACT_RADIUS_METERS = 0.16
 const LANDRUSH_ISLAND_NAVIGATION_TARGET_NUDGE_METERS = 0.08
 const LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS = 0.35
+const LANDRUSH_ISLAND_NAVIGATION_VERTEX_MIN_OFFSET_METERS = 0.04
+const LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_STEP_METERS = 0.04
 const LANDRUSH_ISLAND_NAVIGATION_MAX_GRAPH_POINTS = 96
 const LANDRUSH_ISLAND_NAVIGATION_DEBUG_TRACE_POINTS = 180
 const LANDRUSH_ISLAND_NAVIGATION_DEBUG_UPDATE_MS = 90
@@ -452,11 +484,20 @@ const LANDRUSH_ISLAND_NAVIGATION_LIVE_SCENARIO_STAIR_TOP_SLAB_ID =
 const LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS = 1.5
 const LANDRUSH_ISLAND_STAIR_CROSSING_CLEARANCE_METERS = 0.56
 const LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS = 0.24
+const LANDRUSH_ISLAND_CROSSING_EXIT_RADIUS = 0.08
 const LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS = 0.18
 const LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS = 0.5
 const LANDRUSH_ISLAND_DOOR_CROSSING_MIN_INTENSITY = 0.68
-const LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN = 0.82
+const LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN = 0.98
+const LANDRUSH_ISLAND_DOOR_CROSSING_LATCH_OFFSET_METERS = 0
+const LANDRUSH_ISLAND_DOOR_CROSSING_FRAME_MARGIN_METERS = 0.03
+const LANDRUSH_ISLAND_DOOR_PORTAL_MIN_CLEARANCE_METERS =
+  LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS + 0.1
+const LANDRUSH_ISLAND_DOOR_PORTAL_CLEARANCE_STEP_METERS = 0.05
+const LANDRUSH_ISLAND_STAIR_PORTAL_CLEARANCE_STEP_METERS = 0.04
 const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_LOOKAHEAD_METERS = 0.55
+const LANDRUSH_ISLAND_DOOR_EXIT_SLIDE_CLEARANCE_METERS =
+  LANDRUSH_ISLAND_CONSTRAINED_CROSSING_LOOKAHEAD_METERS
 const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_FULL_SPEED_METERS = 0.95
 const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_MIN_SPEED_SCALE = 0.28
 const LANDRUSH_ISLAND_CONSTRAINED_CROSSING_MAX_SPEED_SCALE = 0.82
@@ -468,7 +509,6 @@ const LANDRUSH_ISLAND_DOOR_OPEN_LOOKAHEAD_METERS = 4.8
 const LANDRUSH_ISLAND_DOOR_OPEN_PATH_CLEARANCE_METERS = 0.62
 const LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS = 520
 const LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE = Math.PI / 2
-const LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS = 0.25
 const LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_LENGTH = 0.8
 const LANDRUSH_ISLAND_ROBOT_CONTROLLER_FLOAT_HEIGHT = 0.5
 const LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT =
@@ -478,13 +518,11 @@ const LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT =
 const LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS = 3.15
 const LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH = 1
 const LANDRUSH_ISLAND_ROBOT_GRASS_FULL_BEND_SPEED = 5.8
-const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE = 1.5
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DEPTH_BIAS_METERS = 0.2
-const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX = 42
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS = 16
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_BASE_HEIGHT = 0.08
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HEAD_HEIGHT = 2.08
-const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS = 0.76
+const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CENTER_BIAS = 0.5
 const LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_HOVER_BOTTOM_SAFE_PX = 176
 const LANDRUSH_ISLAND_ROBOT_REVEAL_OCCLUDER_END_MARGIN_METERS = 0.18
 const LANDRUSH_ISLAND_ROBOT_REVEAL_REFRESH_MAX_SECONDS = 0.35
@@ -747,6 +785,7 @@ type LandrushIslandPerfRunScenario =
   | 'pointer-orbit'
   | 'straight'
 type LandrushIslandPerfRunOptions = {
+  direction: 'backward' | 'forward'
   durationMs: number
   enabled: boolean
   scenario: LandrushIslandPerfRunScenario
@@ -827,17 +866,24 @@ type LandrushIslandMoveTarget = {
   levelId?: LevelNode['id']
   point: LandrushPoint2
   route?: LandrushIslandMoveRouteState
+  terminalProgressAt?: number
+  terminalProgressPoint?: LandrushPoint2
   worldY?: number
 }
 type LandrushIslandMoveRouteState = {
   bestDistance: number
+  collisionSlideDirection: LandrushPoint2 | null
+  collisionSlideOrigin: LandrushPoint2 | null
   doorCrossing: LandrushIslandDoorCrossingState | null
   lastProgressAt: number
   lastRobotPoint: LandrushPoint2
   lastSteeringPoint: LandrushPoint2 | null
   legKey: string
   nextRetryAt: number
+  nextSteeringResolveAt: number
   recoveryCount: number
+  stairConnectorId: AnyNodeId | null
+  steering: LandrushIslandNavigationSteeringResult | null
 }
 type LandrushIslandNavigationDebugRobotPoint = LandrushPoint2 & { y: number }
 type LandrushIslandNavigationDebugSnapshot = {
@@ -1072,9 +1118,12 @@ type LandrushIslandNavigationContext = {
   stairPortals: readonly LandrushIslandStairPortal[]
 }
 type LandrushIslandNavigationLeg = {
+  approachPoint?: LandrushPoint2
   final: boolean
+  initialSteering?: LandrushIslandNavigationSteeringResult
   key: string
   point: LandrushPoint2
+  stairConnectorId?: AnyNodeId
   stairPortals?: readonly LandrushIslandStairPortal[]
 }
 type LandrushIslandWalkTargetPoint = LandrushPoint2 & {
@@ -1111,9 +1160,7 @@ type LandrushIslandRevealMaterialState = {
   depthWrite: boolean
   hasOwnOpacityNode: boolean
   opacityNode: TSLNode<'float'> | null | undefined
-  revealAmount?: number
   revealAmountUniform?: TSLNode<'float'> & { value: number }
-  revealFadeInDelaySeconds?: number
   transparent: boolean
 }
 type LandrushIslandRevealNodeMaterial = Material & {
@@ -1155,6 +1202,7 @@ type LandrushIslandRobotRevealOccluderContext = {
   cameraPoint: LandrushPoint2
   cameraY: number
   robotCenter: Vector3
+  robotLevelBaseY: number
   robotPoint: LandrushPoint2
   robotY: number
   stairTransitionTopY: number | null
@@ -1270,6 +1318,11 @@ declare global {
         parcels: number
         roadSegments: number
       }
+    }
+    __LANDRUSH_ISLAND_BUG_REPORT__?: {
+      capture: () => Promise<LandrushBugReport>
+      create: () => Promise<LandrushBugReport>
+      last: LandrushBugReport | null
     }
   }
 }
@@ -1395,7 +1448,8 @@ function createLandrushIslandPerfRunOptions(searchParams: { get: (key: string) =
     20_000,
   )
   const speed = searchParams.get('perfSpeed') === 'walk' ? 'walk' : 'run'
-  return { durationMs, enabled, scenario, speed } satisfies LandrushIslandPerfRunOptions
+  const direction = searchParams.get('perfDirection') === 'backward' ? 'backward' : 'forward'
+  return { direction, durationMs, enabled, scenario, speed } satisfies LandrushIslandPerfRunOptions
 }
 
 function summarizeLandrushIslandPerfRun(
@@ -2094,6 +2148,15 @@ function resolveLandrushIslandNavigationLeg(
   currentLevelId: LevelNode['id'],
   target: LandrushIslandMoveTarget,
   stairConnectors: readonly LandrushIslandStairConnector[],
+  isFirstConnectorReachable?: (
+    connector: LandrushIslandStairConnector,
+    entry: LandrushPoint2,
+  ) => boolean,
+  isTerminalExitReachable?: (
+    connector: LandrushIslandStairConnector,
+    exit: LandrushPoint2,
+    target: LandrushPoint2,
+  ) => boolean,
 ): LandrushIslandNavigationLeg | null {
   const targetLevelId = target.levelId ?? currentLevelId
   if (currentLevelId === targetLevelId) {
@@ -2108,16 +2171,21 @@ function resolveLandrushIslandNavigationLeg(
     start,
     currentLevelId,
     targetLevelId,
+    target.point,
     stairConnectors,
+    isFirstConnectorReachable,
+    isTerminalExitReachable,
   )
   const connector = route?.[0]
   if (!connector) return null
   const ascending = connector.fromLevelId === currentLevelId
 
   return {
+    approachPoint: ascending ? connector.fromPoint : connector.toPoint,
     final: false,
     key: `stair:${currentLevelId}:${targetLevelId}:${connector.nodeId}:${ascending ? 'up' : 'down'}`,
     point: ascending ? connector.toPoint : connector.fromPoint,
+    stairConnectorId: connector.nodeId,
     stairPortals: resolveLandrushIslandStairConnectorPortals(connector, ascending),
   }
 }
@@ -2127,6 +2195,12 @@ function resolveLandrushIslandClickMoveNavigationLeg(
   currentLevelId: LevelNode['id'],
   target: LandrushIslandMoveTarget,
   stairConnectors: readonly LandrushIslandStairConnector[],
+  navigation?: {
+    doorPortals: readonly LandrushIslandDoorPortal[]
+    navigationObstacles: readonly LandrushIslandNavigationObstacle[]
+    resolveLevelNavigation: (levelId: LevelNode['id']) => LandrushIslandNavigationContext
+    surfacePoints: readonly LandrushPoint2[]
+  },
 ): LandrushIslandNavigationLeg | null {
   const crossing = target.route?.doorCrossing
   if (crossing?.kind === 'stair') {
@@ -2135,17 +2209,114 @@ function resolveLandrushIslandClickMoveNavigationLeg(
         candidate.nodeId === crossing.nodeId ||
         candidate.portals.some((portal) => portal.nodeId === crossing.nodeId),
     )
+    if (!connector) return null
     const ascending = target.route!.legKey.endsWith(':up')
     return {
       final: false,
       key: target.route!.legKey,
       point: crossing.exit,
-      stairPortals: connector
-        ? resolveLandrushIslandStairConnectorPortals(connector, ascending)
-        : undefined,
+      stairPortals: resolveLandrushIslandStairConnectorPortals(connector, ascending),
     }
   }
-  return resolveLandrushIslandNavigationLeg(start, currentLevelId, target, stairConnectors)
+  const targetLevelId = target.levelId ?? currentLevelId
+  const lockedConnector =
+    currentLevelId !== targetLevelId &&
+    target.route?.stairConnectorId &&
+    target.route.legKey.startsWith(`stair:${currentLevelId}:`)
+      ? stairConnectors.find((connector) => connector.nodeId === target.route?.stairConnectorId)
+      : null
+  if (
+    lockedConnector &&
+    (lockedConnector.fromLevelId === currentLevelId || lockedConnector.toLevelId === currentLevelId)
+  ) {
+    const ascending = lockedConnector.fromLevelId === currentLevelId
+    return {
+      approachPoint: ascending ? lockedConnector.fromPoint : lockedConnector.toPoint,
+      final: false,
+      key: target.route!.legKey,
+      point: ascending ? lockedConnector.toPoint : lockedConnector.fromPoint,
+      stairConnectorId: lockedConnector.nodeId,
+      stairPortals: resolveLandrushIslandStairConnectorPortals(lockedConnector, ascending),
+    }
+  }
+
+  const initialSteeringByConnectorId = new Map<AnyNodeId, LandrushIslandNavigationSteeringResult>()
+  const leg = resolveLandrushIslandNavigationLeg(
+    start,
+    currentLevelId,
+    target,
+    stairConnectors,
+    navigation
+      ? (connector, entry) => {
+          const startInsideConnector = navigation.navigationObstacles.some(
+            (obstacle) =>
+              obstacle.stairId === connector.nodeId && pointInPolygon(start, obstacle.points),
+          )
+          const connectorObstacles = startInsideConnector
+            ? navigation.navigationObstacles.filter(
+                (obstacle) => obstacle.stairId !== connector.nodeId,
+              )
+            : navigation.navigationObstacles
+          const steering =
+            resolveLandrushIslandNavigationSteeringPoint(
+              start,
+              entry,
+              connectorObstacles,
+              navigation.doorPortals,
+              navigation.surfacePoints,
+            ) ??
+            resolveLandrushIslandNavigationEscapeSteeringPoint(
+              start,
+              entry,
+              connectorObstacles,
+              navigation.doorPortals,
+              navigation.surfacePoints,
+            )
+          recordLandrushIslandInputProbe({
+            connectorId: connector.nodeId,
+            kind: 'nav-connector-entry-check',
+            reachable: steering !== null,
+            steeringKind: steering?.kind ?? null,
+          })
+          if (steering) initialSteeringByConnectorId.set(connector.nodeId, steering)
+          return steering !== null
+        }
+      : undefined,
+    navigation
+      ? (_connector, exit, finalTarget) => {
+          const targetNavigation = navigation.resolveLevelNavigation(targetLevelId)
+          const terminalObstacles = targetNavigation.navigationObstacles.filter(
+            (obstacle) => obstacle.stairId !== _connector.nodeId,
+          )
+          const steering =
+            resolveLandrushIslandNavigationSteeringPoint(
+              exit,
+              finalTarget,
+              terminalObstacles,
+              targetNavigation.doorPortals,
+              navigation.surfacePoints,
+            ) ??
+            resolveLandrushIslandNavigationEscapeSteeringPoint(
+              exit,
+              finalTarget,
+              terminalObstacles,
+              targetNavigation.doorPortals,
+              navigation.surfacePoints,
+            )
+          recordLandrushIslandInputProbe({
+            connectorId: _connector.nodeId,
+            kind: 'nav-connector-terminal-check',
+            reachable: steering !== null,
+            steeringKind: steering?.kind ?? null,
+          })
+          return steering !== null
+        }
+      : undefined,
+  )
+  const initialSteering = leg?.stairConnectorId
+    ? initialSteeringByConnectorId.get(leg.stairConnectorId)
+    : undefined
+  return leg && initialSteering ? { ...leg, initialSteering } : leg
 }
 
 function resolveLandrushIslandStairConnectorPortals(
@@ -2166,7 +2337,17 @@ function resolveLandrushIslandStairConnectorRoute(
   start: LandrushPoint2,
   startLevelId: LevelNode['id'],
   targetLevelId: LevelNode['id'],
+  target: LandrushPoint2,
   stairConnectors: readonly LandrushIslandStairConnector[],
+  isFirstConnectorReachable?: (
+    connector: LandrushIslandStairConnector,
+    entry: LandrushPoint2,
+  ) => boolean,
+  isTerminalExitReachable?: (
+    connector: LandrushIslandStairConnector,
+    exit: LandrushPoint2,
+    target: LandrushPoint2,
+  ) => boolean,
 ): readonly LandrushIslandStairConnector[] | null {
   const frontier: Array<{
     cost: number
@@ -2192,10 +2373,25 @@ function resolveLandrushIslandStairConnectorRoute(
       const entry = ascending ? connector.fromPoint : connector.toPoint
       const exit = ascending ? connector.toPoint : connector.fromPoint
       const nextLevelId = ascending ? connector.toLevelId : connector.fromLevelId
+      if (
+        state.route.length === 0 &&
+        isFirstConnectorReachable &&
+        !isFirstConnectorReachable(connector, entry)
+      ) {
+        continue
+      }
+      if (
+        nextLevelId === targetLevelId &&
+        isTerminalExitReachable &&
+        !isTerminalExitReachable(connector, exit, target)
+      ) {
+        continue
+      }
       const nextCost =
         state.cost +
         Math.hypot(entry.x - state.point.x, entry.z - state.point.z) +
-        Math.hypot(exit.x - entry.x, exit.z - entry.z)
+        Math.hypot(exit.x - entry.x, exit.z - entry.z) +
+        (nextLevelId === targetLevelId ? Math.hypot(target.x - exit.x, target.z - exit.z) : 0)
       if (nextCost >= (bestCostByLevel.get(nextLevelId) ?? Number.POSITIVE_INFINITY)) continue
       frontier.push({
         cost: nextCost,
@@ -2311,6 +2507,18 @@ function runLandrushIslandNavigationSelfTest() {
     sideB: { x: -LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS, z: 0 },
     tangent: { x: 0, z: 1 },
   }
+  const latchBiasedDoorCenter = resolveLandrushIslandDoorPassageCenter(
+    doorPortal.center,
+    doorPortal.tangent,
+    {
+      doorType: 'hinged',
+      frameThickness: 0.05,
+      hingesSide: 'left',
+      openingKind: 'door',
+      rotation: [0, 0, 0],
+      width: 0.9,
+    },
+  )
   const stairId = 'stair_navigation_self_test' as AnyNodeId
   const stairPortal: LandrushIslandStairPortal = {
     center: { x: 0, z: 0 },
@@ -2370,6 +2578,36 @@ function runLandrushIslandNavigationSelfTest() {
     nodeId: 'sseg_navigation_self_test_overlap' as AnyNodeId,
     stairId: 'stair_navigation_self_test_overlap' as AnyNodeId,
   }
+  const wallBoundStairLayout: LandrushIslandStairSegmentLayout = {
+    center: { x: 0, z: 0 },
+    length: 4.1,
+    nodeId: 'sseg_navigation_self_test_wall_bound' as AnyNodeId,
+    normal: { x: 0, z: 1 },
+    tangent: { x: 1, z: 0 },
+    width: 1.15,
+  }
+  const wallBoundStairObstacles: LandrushIslandNavigationObstacle[] = [-1, 1].map((side) => ({
+    kind: 'graph',
+    levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    points: rectFootprint({
+      center: { x: 0, z: side * 2.75 },
+      depth: 0.7,
+      rotation: 0,
+      width: 4,
+    }),
+  }))
+  const wallBoundStairSideA = resolveLandrushIslandStairPortalSidePoint({
+    layout: wallBoundStairLayout,
+    levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    navigationObstacles: wallBoundStairObstacles,
+    side: 1,
+  })
+  const wallBoundStairSideB = resolveLandrushIslandStairPortalSidePoint({
+    layout: wallBoundStairLayout,
+    levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    navigationObstacles: wallBoundStairObstacles,
+    side: -1,
+  })
   const doorRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: -4, z: 0 },
     { x: 4, z: 0 },
@@ -2390,6 +2628,14 @@ function runLandrushIslandNavigationSelfTest() {
     [],
     [doorPortal],
     surface,
+  )
+  const tangentialDoorRoute = resolveLandrushIslandDoorCrossingSteeringPoint(
+    { x: 1.4, z: 0 },
+    { x: -4, z: 5 },
+    [],
+    [doorPortal],
+    surface,
+    false,
   )
   const stairCrossRoute = resolveLandrushIslandNavigationSteeringPoint(
     { x: 0, z: -4 },
@@ -2477,6 +2723,66 @@ function runLandrushIslandNavigationSelfTest() {
     point: { x: 0, z: 4 },
     worldY: 2.7,
   }
+  const enclosedConnectorObstacles: LandrushIslandNavigationObstacle[] = [
+    { center: { x: 0, z: -0.2 }, depth: 0.3, width: 2 },
+    { center: { x: 0, z: -1.8 }, depth: 0.3, width: 2 },
+    { center: { x: -0.85, z: -1 }, depth: 1.9, width: 0.3 },
+    { center: { x: 0.85, z: -1 }, depth: 1.9, width: 0.3 },
+  ].map(({ center, depth, width }) => ({
+    kind: 'asset',
+    levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    points: rectFootprint({ center, depth, rotation: 0, width }),
+  }))
+  const unreachableNearConnector: LandrushIslandStairConnector = {
+    ...floorConnector,
+    fromPoint: { x: 0, z: -1 },
+    nodeId: 'stair_navigation_self_test_unreachable_near' as AnyNodeId,
+    portals: [],
+    toPoint: { x: 0, z: -1 },
+  }
+  const reachableFarConnector: LandrushIslandStairConnector = {
+    ...floorConnector,
+    fromPoint: { x: 4, z: 3 },
+    nodeId: 'stair_navigation_self_test_reachable_far' as AnyNodeId,
+    portals: [],
+    toPoint: { x: 4, z: 3 },
+  }
+  const reachableConnectorLeg = resolveLandrushIslandNavigationLeg(
+    { x: 0, z: -5 },
+    LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
+    { levelId: upperLevelId, point: { x: 0, z: 0 } },
+    [unreachableNearConnector, reachableFarConnector],
+    (_connector, entry) =>
+      resolveLandrushIslandNavigationSteeringPoint(
+        { x: 0, z: -5 },
+        entry,
+        enclosedConnectorObstacles,
+        [],
+        surface,
+      ) !== null,
+  )
+  const terminallyEnclosedConnector: LandrushIslandStairConnector = {
+    ...floorConnector,
+    fromPoint: { x: 0, z: -1 },
+    nodeId: 'stair_navigation_self_test_terminally_enclosed' as AnyNodeId,
+    portals: [],
+    toPoint: { x: 0, z: 3 },
+  }
+  const terminallyReachableConnector: LandrushIslandStairConnector = {
+    ...floorConnector,
+    fromPoint: { x: 4, z: -3 },
+    nodeId: 'stair_navigation_self_test_terminally_reachable' as AnyNodeId,
+    portals: [],
+    toPoint: { x: 4, z: 3 },
+  }
+  const reachableDescendingConnectorLeg = resolveLandrushIslandNavigationLeg(
+    { x: 0, z: 5 },
+    upperLevelId,
+    { levelId: LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'], point: { x: 0, z: -5 } },
+    [terminallyEnclosedConnector, terminallyReachableConnector],
+    () => true,
+    (connector) => connector.nodeId === terminallyReachableConnector.nodeId,
+  )
   const upperFloorStairLeg = resolveLandrushIslandNavigationLeg(
     { x: 0, z: -4 },
     LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'],
@@ -2584,6 +2890,7 @@ function runLandrushIslandNavigationSelfTest() {
     surface,
   )
   return {
+    doorPassageLaneCentered: Math.abs(latchBiasedDoorCenter.z) <= 0.001,
     doorEntryMetersFromCenter:
       doorRoute?.kind === 'door' ? roundPerf(Math.abs(doorRoute.point.x)) : null,
     doorCenterAdvancesToExit:
@@ -2592,6 +2899,7 @@ function runLandrushIslandNavigationSelfTest() {
     doorNearCenterAdvancesToExit:
       doorNearCenterRoute?.kind === 'door' &&
       doorNearCenterRoute.point.x >= LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS - 0.001,
+    doorPassageRejectsTangentialReverse: tangentialDoorRoute === null,
     doorOpensBeforeCenter:
       doorRoute?.kind === 'door' &&
       doorRoute.doorId === doorPortal.doorId &&
@@ -2599,6 +2907,10 @@ function runLandrushIslandNavigationSelfTest() {
     projectedArrival,
     recoveryAvailable: recovery?.kind === 'recovery',
     recoveryPoint: recovery ? [roundPerf(recovery.point.x), roundPerf(recovery.point.z)] : null,
+    reachableCrossLevelConnectorSelected:
+      reachableConnectorLeg?.stairConnectorId === reachableFarConnector.nodeId,
+    reachableDescendingConnectorSelected:
+      reachableDescendingConnectorLeg?.stairConnectorId === terminallyReachableConnector.nodeId,
     obstacleRoutesAreBidirectional: obstacleForwardRoute !== null && obstacleReverseRoute !== null,
     overlappingStairsShareCrossing:
       overlappingStairCrossRoute?.kind === 'stair' &&
@@ -2632,6 +2944,15 @@ function runLandrushIslandNavigationSelfTest() {
       upperStairExitLeft?.kind === 'direct' && upperStairExitLeft.point.x <= -3.999,
     upperStairExitAllowsRight:
       upperStairExitRight?.kind === 'direct' && upperStairExitRight.point.x >= 3.999,
+    wallBoundStairPortalKeepsBothEntrancesWalkable:
+      !pointInLandrushIslandBlockingNavigationObstacle(
+        wallBoundStairSideA,
+        wallBoundStairObstacles,
+      ) &&
+      !pointInLandrushIslandBlockingNavigationObstacle(
+        wallBoundStairSideB,
+        wallBoundStairObstacles,
+      ),
     lowerFloorDescentStartsAtUpperStairPortal:
       lowerFloorStairLeg?.final === false &&
       lowerFloorStairPortals[0]?.nodeId === upperStairPortal.nodeId &&
@@ -2946,9 +3267,11 @@ function cancelLandrushIslandGamepadWallDraft(wallDraftActiveRef: { current: boo
 }
 
 export function LandrushIslandClient({
+  bugReportReplay = null,
   experience = 'pascal-water',
   waterFieldDebugMode,
 }: {
+  bugReportReplay?: LandrushBugReport | null
   experience?: LandrushIslandClientExperience
   waterFieldDebugMode?: LandrushIslandFieldDebugMode
 } = {}) {
@@ -2964,6 +3287,10 @@ export function LandrushIslandClient({
       : LANDRUSH_ISLAND_MATERIAL_PARAMETERS
   const defaultGrassTuning = LANDRUSH_ISLAND_GRASS_TUNING
   const searchParams = useSearchParams()
+  const bugReportReplayCameraPose = useMemo(
+    () => deserializeLandrushBugReportCameraPose(bugReportReplay?.camera ?? null),
+    [bugReportReplay],
+  )
   const runtimeProbeEnabled = searchParams.has('landrushProbe')
   const navigationDebugEnabled =
     searchParams.get('navDebug') === '1' || searchParams.get('landrushNavDebug') === '1'
@@ -3025,9 +3352,15 @@ export function LandrushIslandClient({
   const startupProfileRef = useRef<LandrushIslandStartupProfile | null>(null)
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
   const localMotionRef = useRef<RobotMotion | null>(null)
-  const playerCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
-  const buildCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
-  const mapCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
+  const playerCameraPoseRef = useRef<LandrushIslandCameraPose | null>(
+    bugReportReplay?.mode.view === 'player' ? bugReportReplayCameraPose : null,
+  )
+  const buildCameraPoseRef = useRef<LandrushIslandCameraPose | null>(
+    bugReportReplay?.mode.view === 'build' ? bugReportReplayCameraPose : null,
+  )
+  const mapCameraPoseRef = useRef<LandrushIslandCameraPose | null>(
+    bugReportReplay?.mode.view === 'map' ? bugReportReplayCameraPose : null,
+  )
   const mapTransitionStartPoseRef = useRef<LandrushIslandCameraPose | null>(null)
   const mapReturnCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
   const playerReturnCameraPoseRef = useRef<LandrushIslandCameraPose | null>(null)
@@ -3154,6 +3487,12 @@ export function LandrushIslandClient({
   const [gamepadHintsActive, setGamepadHintsActive] = useState(false)
   const gamepadHintsActiveRef = useRef(false)
   const [showTunePanel, setShowTunePanel] = useState(false)
+  const [bugReportStatus, setBugReportStatus] = useState<{
+    kind: 'error' | 'success'
+    message: string
+  } | null>(null)
+  const bugReportStatusTimeoutRef = useRef<number | null>(null)
+  const bugReportReplayModeAppliedRef = useRef(false)
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile | null>(null)
   const [incomingVoiceSignals, setIncomingVoiceSignals] = useState<SpatialVoiceSignalMessage[]>([])
   const handleVoiceSignal = useCallback((message: SpatialVoiceSignalMessage) => {
@@ -3957,8 +4296,197 @@ export function LandrushIslandClient({
   }, [])
 
   useEffect(() => {
-    setLocalProfile(readLocalPlayerProfile())
-  }, [])
+    setLocalProfile(bugReportReplay?.player.profile ?? readLocalPlayerProfile())
+  }, [bugReportReplay])
+
+  const createBugReport = useCallback(async (): Promise<LandrushBugReport> => {
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+
+    const canvas = document.querySelector('canvas')
+    const motion = localMotionRef.current
+    const cameraPose =
+      viewMode === 'build'
+        ? buildCameraPoseRef.current
+        : viewMode === 'map'
+          ? mapCameraPoseRef.current
+          : playerCameraPoseRef.current
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('The Landrush canvas is not ready.')
+    if (!motion) throw new Error('The player position is not ready.')
+    if (!cameraPose) throw new Error('The camera position is not ready.')
+
+    const screenshotDataUrl = canvas.toDataURL('image/png')
+    if (!screenshotDataUrl.startsWith('data:image/png;base64,')) {
+      throw new Error('The current frame could not be captured.')
+    }
+
+    const scene = useScene.getState()
+    const builds = cloneLandrushBugReportBuilds(
+      multiplayer.parcelBuildNodes.filter((build) => build.worldId === parcelWorldId),
+    )
+    if (localOwnedParcel) {
+      const liveBuildNodes = structuredClone(
+        createLandrushIslandSyncedBuildNodes({
+          nodes: scene.nodes,
+          parcel: localOwnedParcel,
+          parcelWorldId,
+        }),
+      ) as AnyNode[]
+      const existingBuildIndex = builds.findIndex((build) => build.parcelId === localOwnedParcel.id)
+      const existingBuild = builds[existingBuildIndex]
+      const liveBuild = {
+        nodes: liveBuildNodes,
+        parcelId: localOwnedParcel.id,
+        updatedAt: existingBuild?.updatedAt ?? Date.now(),
+        updatedBy: existingBuild?.updatedBy ?? resolvedLocalProfile.id,
+        worldId: parcelWorldId,
+      } satisfies ParcelBuildNodesSnapshot
+      if (existingBuildIndex >= 0) builds[existingBuildIndex] = liveBuild
+      else builds.push(liveBuild)
+    }
+    builds.sort((first, second) => first.parcelId.localeCompare(second.parcelId))
+
+    const floorContext = findLandrushBuildingFloorContext({
+      groundY: liveViewerLandSurface.grassSurfaceElevation,
+      point: { x: motion.position.x, z: motion.position.z },
+      robotWorldY: motion.position.y,
+      stacks: resolveLandrushBuildingFloorStacks(scene.nodes),
+      verticalTolerance: LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS,
+    })
+    const capturedAt = new Date().toISOString()
+    const report: LandrushBugReport = {
+      app: {
+        experience,
+        url: window.location.href,
+      },
+      camera: serializeLandrushBugReportCameraPose(cameraPose),
+      capturedAt,
+      diagnostics: createLandrushBugReportDiagnostics(window.__LANDRUSH_ISLAND_RUNTIME_PROBE__),
+      floor: {
+        buildingId: floorContext?.buildingId ?? null,
+        levelId: floorContext?.levelId ?? null,
+        levelNumber: floorContext?.levelNumber ?? null,
+        scopeId: floorContext?.scopeId ?? null,
+      },
+      format: 'landrush-bug-report',
+      mode: {
+        buildParcelId,
+        fpv: fpvActive,
+        view: viewMode,
+      },
+      player: {
+        cameraTargetY: motion.cameraTargetY ?? null,
+        falling: motion.falling,
+        heading: motion.heading,
+        moving: motion.isMoving,
+        position: [motion.position.x, motion.position.y, motion.position.z],
+        profile: resolvedLocalProfile,
+        speed: motion.speed,
+        velocity: [motion.velocity.x, motion.velocity.y, motion.velocity.z],
+      },
+      save: {
+        builds,
+        id: `${roomId}:${parcelWorldId}`,
+        ownerships: structuredClone(
+          multiplayer.parcelOwnerships.filter((ownership) => ownership.worldId === parcelWorldId),
+        ),
+        roomId,
+        source: offline ? 'offline' : 'multiplayer',
+        tvMediaStates: structuredClone(
+          multiplayer.tvMediaStates.filter((tv) => tv.worldId === parcelWorldId),
+        ),
+        worldId: parcelWorldId,
+      },
+      scene: {
+        nodeCount: Object.keys(scene.nodes).length,
+        rootNodeIds: scene.rootNodeIds.map(String),
+      },
+      screenshot: {
+        dataUrl: screenshotDataUrl,
+        height: canvas.height,
+        mimeType: 'image/png',
+        pixelRatio: window.devicePixelRatio,
+        width: canvas.width,
+      },
+      version: 1,
+    }
+    return report
+  }, [
+    buildParcelId,
+    experience,
+    fpvActive,
+    liveViewerLandSurface.grassSurfaceElevation,
+    localOwnedParcel,
+    multiplayer.parcelBuildNodes,
+    multiplayer.parcelOwnerships,
+    multiplayer.tvMediaStates,
+    offline,
+    parcelWorldId,
+    resolvedLocalProfile,
+    roomId,
+    viewMode,
+  ])
+
+  const captureBugReport = useCallback(async () => {
+    try {
+      const report = await createBugReport()
+      window.__LANDRUSH_ISLAND_BUG_REPORT__ ??= {
+        capture: async () => report,
+        create: async () => report,
+        last: null,
+      }
+      window.__LANDRUSH_ISLAND_BUG_REPORT__.last = report
+      downloadLandrushBugReport(report)
+      console.info('Landrush bug report captured', {
+        camera: report.camera,
+        file: report.capturedAt,
+        floor: report.floor,
+        mode: report.mode,
+        player: report.player,
+        save: {
+          builds: report.save.builds.map((build) => ({
+            nodes: build.nodes.length,
+            parcelId: build.parcelId,
+            updatedAt: build.updatedAt,
+          })),
+          id: report.save.id,
+          ownerships: report.save.ownerships.length,
+          source: report.save.source,
+        },
+      })
+      setBugReportStatus({
+        kind: 'success',
+        message: 'Bug report captured. The screenshot and replay state are in the downloaded JSON.',
+      })
+      if (bugReportStatusTimeoutRef.current !== null) {
+        window.clearTimeout(bugReportStatusTimeoutRef.current)
+      }
+      bugReportStatusTimeoutRef.current = window.setTimeout(() => setBugReportStatus(null), 5000)
+      return report
+    } catch (error) {
+      setBugReportStatus({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Bug report capture failed.',
+      })
+      throw error
+    }
+  }, [createBugReport])
+
+  useEffect(() => {
+    const api = {
+      capture: captureBugReport,
+      create: createBugReport,
+      last: null,
+    } satisfies NonNullable<Window['__LANDRUSH_ISLAND_BUG_REPORT__']>
+    window.__LANDRUSH_ISLAND_BUG_REPORT__ = api
+    return () => {
+      if (window.__LANDRUSH_ISLAND_BUG_REPORT__ === api) {
+        delete window.__LANDRUSH_ISLAND_BUG_REPORT__
+      }
+      if (bugReportStatusTimeoutRef.current !== null) {
+        window.clearTimeout(bugReportStatusTimeoutRef.current)
+      }
+    }
+  }, [captureBugReport, createBugReport])
 
   useEffect(() => {
     if (buildMode || modeTransitionFade?.from === 'build') return
@@ -4086,6 +4614,29 @@ export function LandrushIslandClient({
     setMapView(!initialBuildMode && initialMapView)
     if (initialBuildMode || initialMapView) releaseLandrushIslandPointerLock()
   }, [searchParams])
+
+  useEffect(() => {
+    if (!bugReportReplay || bugReportReplayModeAppliedRef.current) return
+    if (bugReportReplay.mode.view === 'build') {
+      const replayParcelId = bugReportReplay.mode.buildParcelId
+      if (!localOwnedParcel || (replayParcelId && localOwnedParcel.id !== replayParcelId)) return
+      bugReportReplayModeAppliedRef.current = true
+      buildSceneEntryViewModeRef.current = 'player'
+      startTransition(() => {
+        setBuildParcelId(replayParcelId ?? localOwnedParcel.id)
+        setBuildMode(true)
+        setMapView(false)
+        setFpvView(false)
+      })
+      releaseLandrushIslandPointerLock()
+      return
+    }
+
+    bugReportReplayModeAppliedRef.current = true
+    if (bugReportReplay.mode.view === 'player' && bugReportReplay.mode.fpv) {
+      setFpvView(true)
+    }
+  }, [bugReportReplay, localOwnedParcel])
 
   useEffect(() => {
     if (!buildMode) return
@@ -4320,6 +4871,13 @@ export function LandrushIslandClient({
           )
           return
         }
+        if (event.code === 'KeyR' && !event.shiftKey) {
+          event.preventDefault()
+          event.stopPropagation()
+          event.stopImmediatePropagation()
+          void captureBugReport().catch(() => undefined)
+          return
+        }
         if (event.code === 'KeyM') {
           event.preventDefault()
           event.stopPropagation()
@@ -4379,6 +4937,7 @@ export function LandrushIslandClient({
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [
     buildMode,
+    captureBugReport,
     enterBuildView,
     enterFpvView,
     enterMapView,
@@ -4745,6 +5304,7 @@ export function LandrushIslandClient({
                     >
                       <MemoizedLandrushIslandPlayerLayer
                         baseNode={liveLayoutNode}
+                        bugReportReplayPlayer={bugReportReplay?.player ?? null}
                         buildCameraPoseRef={buildCameraPoseRef}
                         fallPresentationRef={fallPresentationRef}
                         fpvActive={fpvActive}
@@ -5029,6 +5589,17 @@ export function LandrushIslandClient({
             <Eye aria-hidden className="size-5" />
             <span className="hidden text-lg md:inline">F</span>
           </button>
+          <button
+            aria-label="Capture bug report"
+            className={landrushIslandModeButtonClass(false)}
+            data-landrush-bug-report-capture
+            onClick={() => void captureBugReport().catch(() => undefined)}
+            title="Capture screenshot and replay state (R). Reset player with Shift+R."
+            type="button"
+          >
+            <CameraIcon aria-hidden className="size-5" />
+            <span className="hidden text-lg md:inline">R</span>
+          </button>
           <div className={landrushIslandModeHintClass()} title="Right click to move">
             <MouseRight aria-hidden className="size-6 text-white/82" />
             <span>Move</span>
@@ -5039,6 +5610,20 @@ export function LandrushIslandClient({
             </div>
           ) : null}
         </div>
+        {bugReportStatus ? (
+          <div
+            className={[
+              'pointer-events-none absolute bottom-5 left-1/2 z-[110] max-w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 rounded-lg border px-3 py-2 text-center font-medium text-sm shadow-2xl backdrop-blur-md',
+              bugReportStatus.kind === 'success'
+                ? 'border-emerald-300/25 bg-emerald-950/88 text-emerald-50'
+                : 'border-red-300/25 bg-red-950/88 text-red-50',
+            ].join(' ')}
+            data-landrush-bug-report-status={bugReportStatus.kind}
+            role="status"
+          >
+            {bugReportStatus.message}
+          </div>
+        ) : null}
         {showTunePanel ? (
           <LandrushIslandTunePanel
             beachControls={multiplayerBeachControls}
@@ -7415,6 +8000,15 @@ function landrushIslandStairColliderGeometryReady() {
   return true
 }
 
+function landrushIslandWallColliderGeometryReady() {
+  const { dirtyNodes, nodes } = useScene.getState()
+  return areLandrushWallColliderGeometriesReady({
+    dirtyNodeIds: dirtyNodes,
+    nodes,
+    resolveObject: (nodeId) => sceneRegistry.nodes.get(nodeId),
+  })
+}
+
 function landrushIslandLevelColliderTransformsReady() {
   const nodes = useScene.getState().nodes
   const expectedBaseYByLevelId = new Map<LevelNode['id'], number>()
@@ -7441,7 +8035,29 @@ function landrushIslandLevelColliderTransformsReady() {
 function buildLandrushIslandColliderWorld() {
   const nodes = useScene.getState().nodes
   const hiddenLevelObjects: Object3D[] = []
+  const redundantSlabObjects: Object3D[] = []
+  const levelsWithFinishedFloorSlabs = new Set<AnyNodeId>()
   for (const node of Object.values(nodes)) {
+    const metadata = node.metadata as { role?: string } | undefined
+    if (node.type === 'slab' && metadata?.role === 'finished-room-floor' && node.parentId) {
+      levelsWithFinishedFloorSlabs.add(node.parentId as AnyNodeId)
+    }
+  }
+  for (const node of Object.values(nodes)) {
+    const metadata = node.metadata as { role?: string } | undefined
+    if (
+      node.type === 'slab' &&
+      metadata?.role !== 'finished-room-floor' &&
+      node.parentId &&
+      levelsWithFinishedFloorSlabs.has(node.parentId as AnyNodeId)
+    ) {
+      const object = sceneRegistry.nodes.get(node.id)
+      if (object?.visible) {
+        redundantSlabObjects.push(object)
+        object.visible = false
+      }
+      continue
+    }
     if (node.type !== 'level' || node.visible === false) continue
     const object = sceneRegistry.nodes.get(node.id)
     if (!object || object.visible) continue
@@ -7453,6 +8069,7 @@ function buildLandrushIslandColliderWorld() {
   try {
     return buildFirstPersonColliderWorldFromRegistry()
   } finally {
+    for (const object of redundantSlabObjects) object.visible = true
     for (const object of hiddenLevelObjects) object.visible = false
   }
 }
@@ -7508,13 +8125,11 @@ function useLandrushIslandBuiltColliderWorlds() {
     void colliderWorldVersion
     let cancelled = false
     let frame = 0
-    let attempts = 0
     const rebuildWhenReady = () => {
-      attempts += 1
       if (
-        (!landrushIslandStairColliderGeometryReady() ||
-          !landrushIslandLevelColliderTransformsReady()) &&
-        attempts < 90
+        !landrushIslandWallColliderGeometryReady() ||
+        !landrushIslandStairColliderGeometryReady() ||
+        !landrushIslandLevelColliderTransformsReady()
       ) {
         frame = window.requestAnimationFrame(rebuildWhenReady)
         return
@@ -7635,6 +8250,7 @@ function disposeLandrushIslandGroundColliderMesh(mesh: Mesh) {
 
 function LandrushIslandPlayerLayer({
   baseNode,
+  bugReportReplayPlayer,
   buildCameraPoseRef,
   fallPresentationRef,
   fpvActive,
@@ -7665,6 +8281,7 @@ function LandrushIslandPlayerLayer({
   waterY,
 }: {
   baseNode: LandrushIslandLayoutNode
+  bugReportReplayPlayer: LandrushBugReportPlayer | null
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   fallPresentationRef: { current: LandrushIslandFallPresentationState }
   fpvActive: boolean
@@ -7700,6 +8317,14 @@ function LandrushIslandPlayerLayer({
   const movementEnabled = viewMode !== 'build'
   const cameraEnabled = viewMode === 'player'
   const localRobotVisualRootRef = useRef<Group | null>(null)
+  const localRobotLevelIdRef = useRef<LevelNode['id']>(LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'])
+  const playerCameraZoomDistanceRef = useRef(
+    clamp(
+      playerCameraPoseRef.current?.distance ?? LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE,
+      LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+      LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
+    ),
+  )
   const robotPresentationMode: LandrushRobotPresentationMode =
     viewMode === 'build' ? 'hover' : 'default'
   const remoteVoicePeerIdSet = useMemo(() => new Set(remoteVoicePeerIds), [remoteVoicePeerIds])
@@ -7722,11 +8347,13 @@ function LandrushIslandPlayerLayer({
       />
       <LocalLandrushIslandRobot
         baseNode={baseNode}
+        bugReportReplayPlayer={bugReportReplayPlayer}
         fallSurfacePoints={cliffFallBoundaryPoints}
         fallPresentationRef={fallPresentationRef}
         fpvActive={fpvActive}
         grassInteractionRef={grassInteractionRef}
         groundY={groundY}
+        localRobotLevelIdRef={localRobotLevelIdRef}
         localMotionRef={localMotionRef}
         localProfile={localProfile}
         localRobotVisualRootRef={localRobotVisualRootRef}
@@ -7742,6 +8369,7 @@ function LandrushIslandPlayerLayer({
         presentationMode={robotPresentationMode}
         buildCameraPoseRef={buildCameraPoseRef}
         mapReturnCameraPoseRef={mapReturnCameraPoseRef}
+        playerCameraZoomDistanceRef={playerCameraZoomDistanceRef}
         playerCameraPoseRef={playerCameraPoseRef}
         playerReturnCameraPoseRef={playerReturnCameraPoseRef}
         spawn={spawn}
@@ -7774,7 +8402,9 @@ function LandrushIslandPlayerLayer({
         />
       ))}
       <LandrushIslandRobotScreenRevealClipper
+        levelIdRef={localRobotLevelIdRef}
         motionRef={localMotionRef}
+        zoomDistanceRef={playerCameraZoomDistanceRef}
         presentationMode={robotPresentationMode}
         structureGroundY={surface.grassSurfaceElevation}
         visualRootRef={localRobotVisualRootRef}
@@ -8889,20 +9519,26 @@ const LANDRUSH_ISLAND_ROBOT_REVEAL_OCCLUDER_NODE_TYPES = [
 ] as const
 
 function LandrushIslandRobotScreenRevealClipper({
+  levelIdRef,
   motionRef,
   presentationMode,
   structureGroundY,
   visualRootRef,
   visible,
+  zoomDistanceRef,
 }: {
+  levelIdRef: { current: LevelNode['id'] }
   motionRef: { current: RobotMotion | null }
   presentationMode: LandrushRobotPresentationMode
   structureGroundY: number
   visualRootRef: { current: Group | null }
   visible: boolean
+  zoomDistanceRef: { current: number }
 }) {
   const { camera, gl, scene } = useThree()
   const occludersRef = useRef<LandrushIslandRobotRevealOccluder[]>([])
+  const activeRevealMeshesRef = useRef(new Set<Mesh>())
+  const revealMeshStatesRef = useRef(new Map<Mesh, LandrushRobotRevealObjectTransitionState>())
   const materialsRef = useRef<Material[]>([])
   const materialStatesRef = useRef(new Map<Material, LandrushIslandRevealMaterialState>())
   const activeMaterialsRef = useRef(new Set<Material>())
@@ -8935,6 +9571,11 @@ function LandrushIslandRobotScreenRevealClipper({
   } | null>(null)
   const restoreClipping = useCallback(() => {
     clearLandrushRobotScreenRevealMask()
+    for (const mesh of revealMeshStatesRef.current.keys()) {
+      delete mesh.userData[LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY]
+    }
+    activeRevealMeshesRef.current.clear()
+    revealMeshStatesRef.current.clear()
     restoreLandrushIslandRevealMaterials(materialStatesRef.current)
     activeMaterialsRef.current.clear()
     lastRefreshAtRef.current = -Infinity
@@ -8995,6 +9636,7 @@ function LandrushIslandRobotScreenRevealClipper({
     const robotX = robotVisualRoot?.x ?? motion.position.x
     const robotZ = robotVisualRoot?.z ?? motion.position.z
     const robotPoint = { x: robotX, z: robotZ }
+    camera.updateWorldMatrix(true, false)
     cameraPositionRef.current.setFromMatrixPosition(camera.matrixWorld)
     const robotBase = robotBaseRef.current.set(
       robotX,
@@ -9020,6 +9662,14 @@ function LandrushIslandRobotScreenRevealClipper({
       (revealViewChanged && refreshAge >= LANDRUSH_ISLAND_ROBOT_REVEAL_REFRESH_MIN_SECONDS)
     ) {
       const nodes = useScene.getState().nodes
+      const robotLevelId = levelIdRef.current
+      const robotLevelBaseY =
+        structureGroundY +
+        resolveLandrushIslandActiveLevelBaseY(
+          nodes,
+          robotLevelId,
+          resolveLandrushIslandNodeFloorScopeId(nodes[robotLevelId]),
+        )
       stairTransitionTopY = resolveLandrushIslandRobotRevealStairTransitionTopY(
         nodes,
         robotPoint,
@@ -9036,14 +9686,14 @@ function LandrushIslandRobotScreenRevealClipper({
         cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
         cameraY: cameraPositionRef.current.y,
         robotCenter,
+        robotLevelBaseY,
         robotPoint,
         robotY: robotVisualY,
         stairTransitionTopY,
         structureGroundY,
       })
-      materialsRef.current = collectLandrushIslandRobotRevealMaterials(
-        occludersRef.current,
-        registeredNodeRoots,
+      activeRevealMeshesRef.current = new Set(
+        collectLandrushIslandRobotRevealMeshes(occludersRef.current, registeredNodeRoots),
       )
     }
     const robotNdc = robotNdcRef.current.copy(robotCenter).project(camera)
@@ -9061,32 +9711,52 @@ function LandrushIslandRobotScreenRevealClipper({
       return
     }
 
-    const baseScreen = projectLandrushIslandScreenPoint(robotBase.project(camera), width, height)
-    const headScreen = projectLandrushIslandScreenPoint(robotHead.project(camera), width, height)
     const projectedCenterScreen = projectLandrushIslandScreenPoint(robotNdc, width, height)
     const robotScreen = projectedCenterScreen
     const robotScreenInsideViewport =
       robotScreen.x >= 0 && robotScreen.x <= width && robotScreen.y >= 0 && robotScreen.y <= height
-    const robotScreenHeight = Math.hypot(headScreen.x - baseScreen.x, headScreen.y - baseScreen.y)
-    const baseRevealRadiusPx = Math.max(
-      LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_MIN_RADIUS_PX,
-      robotScreenHeight * LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_DIAMETER_SCALE * 0.5,
-    )
+    const baseRevealRadiusPx = projectLandrushRobotScreenRevealRadius({
+      camera,
+      viewportHeight: height,
+      viewportWidth: width,
+      zoomDistance: zoomDistanceRef.current,
+    })
     const targetRevealRadiusPx = baseRevealRadiusPx * readLandrushRobotScreenRevealRadiusScale()
     const targetRevealOuterRadiusPx = Math.max(
       targetRevealRadiusPx + 1,
       baseRevealRadiusPx * readLandrushRobotScreenRevealOuterRadiusScale(),
     )
+    const previousRevealMeshes = [...revealMeshStatesRef.current.keys()]
+    const revealObjectTransition = advanceLandrushRobotRevealObjectTransitions({
+      activeObjects: activeRevealMeshesRef.current,
+      deltaSeconds: delta,
+      epsilon: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON,
+      fadeInDelaySeconds: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_IN_DELAY_SECONDS,
+      fadeInResponse: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_IN_RESPONSE,
+      fadeOutResponse: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_OUT_RESPONSE,
+      states: revealMeshStatesRef.current,
+    })
+    for (const mesh of previousRevealMeshes) {
+      if (!revealMeshStatesRef.current.has(mesh)) {
+        delete mesh.userData[LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY]
+      }
+    }
+    for (const [mesh, state] of revealMeshStatesRef.current) {
+      mesh.userData[LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY] = state.amount
+    }
+    materialsRef.current = collectLandrushIslandRobotRevealMeshMaterials(
+      revealMeshStatesRef.current.keys(),
+    )
     revealActiveRef.current = true
     let softTransition = null
     if (revealPath === 'soft-material') {
-      softTransition = applyLandrushIslandRevealMaterialSoftMasks({
+      const materialTransition = applyLandrushIslandRevealMaterialSoftMasks({
         activeMaterials: activeMaterialsRef.current,
-        deltaSeconds: delta,
         materialStates: materialStatesRef.current,
         materials: materialsRef.current,
       })
-      revealGrowthAmountRef.current = softTransition.growthAmount
+      softTransition = { ...revealObjectTransition, ...materialTransition }
+      revealGrowthAmountRef.current = revealObjectTransition.growthAmount
     } else {
       const growthTarget = materialsRef.current.length > 0 ? 1 : 0
       const growthResponse =
@@ -9110,11 +9780,8 @@ function LandrushIslandRobotScreenRevealClipper({
       amount: revealGrowthAmountRef.current,
       startScale: LANDRUSH_ISLAND_ROBOT_REVEAL_GROWTH_START_SCALE,
     })
-    const revealRadiusPx = targetRevealRadiusPx * revealGrowthScale
-    const revealOuterRadiusPx = Math.max(
-      revealRadiusPx + 1,
-      targetRevealOuterRadiusPx * revealGrowthScale,
-    )
+    const revealRadiusPx = targetRevealRadiusPx
+    const revealOuterRadiusPx = Math.max(revealRadiusPx + 1, targetRevealOuterRadiusPx)
     const revealScreen = revealScreenRef.current
     revealScreen.x = robotScreen.x
     revealScreen.y = robotScreen.y
@@ -9193,6 +9860,7 @@ function LandrushIslandRobotScreenRevealClipper({
             : materialsRef.current.filter(isLandrushIslandSoftRevealMaterial).length,
         targetRevealOuterRadiusPx: roundPerf(targetRevealOuterRadiusPx),
         targetRevealRadiusPx: roundPerf(targetRevealRadiusPx),
+        zoomDistance: roundPerf(zoomDistanceRef.current),
       })
     }
 
@@ -9258,12 +9926,10 @@ function resolveLandrushIslandRevealClippingPath(renderer: {
 
 function applyLandrushIslandRevealMaterialSoftMasks({
   activeMaterials,
-  deltaSeconds,
   materialStates,
   materials,
 }: {
   activeMaterials: Set<Material>
-  deltaSeconds: number
   materialStates: Map<Material, LandrushIslandRevealMaterialState>
   materials: readonly Material[]
 }) {
@@ -9274,12 +9940,12 @@ function applyLandrushIslandRevealMaterialSoftMasks({
     let state = materialStates.get(material)
     if (!state) {
       const nodeMaterial = material as LandrushIslandRevealNodeMaterial
-      const revealAmountUniform = uniform(0) as TSLNode<'float'> & { value: number }
+      const revealAmountUniform = uniform(0).onObjectUpdate(({ object }) =>
+        readLandrushRobotRevealObjectAmount(object?.userData),
+      ) as unknown as TSLNode<'float'> & { value: number }
       state = {
         ...captureLandrushIslandRevealMaterialState(material),
-        revealAmount: 0,
         revealAmountUniform,
-        revealFadeInDelaySeconds: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_IN_DELAY_SECONDS,
       }
       materialStates.set(material, state)
       landrushIslandActiveRevealMaterialStates.set(material, state)
@@ -9297,71 +9963,15 @@ function applyLandrushIslandRevealMaterialSoftMasks({
     }
   }
 
-  const clampedDeltaSeconds = Math.min(Math.max(deltaSeconds, 0), 0.05)
-  let fadingInMaterialCount = 0
-  let fadingOutMaterialCount = 0
-  let maxAmount = 0
-  let minAmount = 1
-  let transitionMaterialCount = 0
-  let waitingMaterialCount = 0
   for (const [material, state] of materialStates) {
-    const revealAmountUniform = state.revealAmountUniform
-    if (!revealAmountUniform) {
-      if (!activeMaterials.has(material)) {
-        restoreLandrushIslandRevealMaterialState(material, state)
-        materialStates.delete(material)
-      }
-      continue
-    }
-
-    const active = activeMaterials.has(material)
-    const target = active ? 1 : 0
-    let transitionDeltaSeconds = clampedDeltaSeconds
-    if (active) {
-      const fadeInDelaySeconds = Math.max(0, state.revealFadeInDelaySeconds ?? 0)
-      transitionDeltaSeconds = Math.max(0, clampedDeltaSeconds - fadeInDelaySeconds)
-      state.revealFadeInDelaySeconds = Math.max(0, fadeInDelaySeconds - clampedDeltaSeconds)
-      if (state.revealFadeInDelaySeconds > 0) waitingMaterialCount += 1
-    } else {
-      state.revealFadeInDelaySeconds = 0
-    }
-    const response = active
-      ? LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_IN_RESPONSE
-      : LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_OUT_RESPONSE
-    let revealAmount = advanceLandrushRobotScreenRevealAmount({
-      amount: state.revealAmount ?? 0,
-      deltaSeconds: transitionDeltaSeconds,
-      response,
-      target,
-    })
-    if (Math.abs(target - revealAmount) <= LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON) {
-      revealAmount = target
-    }
-    state.revealAmount = revealAmount
-    revealAmountUniform.value = revealAmount
-
-    if (!active && revealAmount === 0) {
-      restoreLandrushIslandRevealMaterialState(material, state)
-      materialStates.delete(material)
-      continue
-    }
-
-    transitionMaterialCount += 1
-    if (active && revealAmount < 1) fadingInMaterialCount += 1
-    if (!active) fadingOutMaterialCount += 1
-    maxAmount = Math.max(maxAmount, revealAmount)
-    minAmount = Math.min(minAmount, revealAmount)
+    if (activeMaterials.has(material)) continue
+    restoreLandrushIslandRevealMaterialState(material, state)
+    materialStates.delete(material)
   }
 
   return {
     activeMaterialCount: activeMaterials.size,
-    fadingInMaterialCount,
-    fadingOutMaterialCount,
-    growthAmount: maxAmount,
-    materialCount: transitionMaterialCount,
-    maxAmount: roundPerf(maxAmount),
-    minAmount: transitionMaterialCount > 0 ? roundPerf(minAmount) : 0,
-    waitingMaterialCount,
+    materialCount: materialStates.size,
   }
 }
 
@@ -9570,8 +10180,9 @@ function shouldSkipLandrushIslandRobotRevealOccluder(
   if (metadata?.isTransient) return true
 
   const levelId = resolveLandrushIslandNavigationNodeLevelId(node, nodes)
+  let levelBaseY: number | null = null
   if (levelId) {
-    const levelBaseY =
+    levelBaseY =
       context.structureGroundY +
       resolveLandrushIslandActiveLevelBaseY(
         nodes,
@@ -9585,6 +10196,18 @@ function shouldSkipLandrushIslandRobotRevealOccluder(
     ) {
       return true
     }
+  }
+
+  if (
+    node.type === 'slab' &&
+    levelBaseY !== null &&
+    shouldKeepLandrushRobotRevealSlabOpaque({
+      robotLevelBaseY: context.robotLevelBaseY,
+      slabLevelBaseY: levelBaseY,
+      tolerance: LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS,
+    })
+  ) {
+    return true
   }
 
   if (node.type === 'stair') {
@@ -9732,30 +10355,30 @@ function resolveLandrushIslandRobotRevealSurfaceY(
   return context.structureGroundY + levelBaseY + localSurfaceY
 }
 
-function collectLandrushIslandRobotRevealMaterials(
+function collectLandrushIslandRobotRevealMeshes(
   occluders: readonly LandrushIslandRobotRevealOccluder[],
   registeredNodeRoots: ReadonlySet<Object3D>,
 ) {
-  const materials = new Set<Material>()
+  const meshes = new Set<Mesh>()
   for (const { object } of occluders) {
-    collectLandrushIslandObjectMaterials(object, registeredNodeRoots, materials)
+    object.traverse((child) => {
+      const mesh = child as Mesh
+      if (!mesh.isMesh) return
+      if (!isLandrushRevealObjectOwnedByRoot(child, object, registeredNodeRoots)) return
+      meshes.add(mesh)
+    })
   }
-  return [...materials]
+  return [...meshes]
 }
 
-function collectLandrushIslandObjectMaterials(
-  object: Object3D,
-  registeredNodeRoots: ReadonlySet<Object3D>,
-  materials: Set<Material>,
-) {
-  object.traverse((child) => {
-    const mesh = child as { isMesh?: boolean; material?: unknown }
-    if (!mesh.isMesh) return
-    if (!isLandrushRevealObjectOwnedByRoot(child, object, registeredNodeRoots)) return
+function collectLandrushIslandRobotRevealMeshMaterials(meshes: Iterable<Mesh>) {
+  const materials = new Set<Material>()
+  for (const mesh of meshes) {
     for (const material of getLandrushIslandMaterials(mesh.material)) {
       materials.add(material)
     }
-  })
+  }
+  return [...materials]
 }
 
 function getLandrushIslandMaterials(material: unknown): Material[] {
@@ -9937,10 +10560,9 @@ function acquireLandrushIslandFloorFadeMaterial(
     : Object.hasOwn(material, 'opacityNode')
   const opacityNode = activeRevealState ? activeRevealState.opacityNode : nodeMaterial.opacityNode
   const transparent = activeRevealState?.transparent ?? material.transparent
-  const objectOpacityNode = uniform(1).onObjectUpdate(({ object }) => {
-    const value = object?.userData?.[LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY]
-    return typeof value === 'number' ? value : 1
-  }) as unknown as TSLNode<'float'>
+  const objectOpacityNode = uniform(1).onObjectUpdate(({ object }) =>
+    readLandrushIslandFloorFadeOpacity(object),
+  ) as unknown as TSLNode<'float'>
   const floorOpacityNode = mul(
     opacityNode ?? (materialOpacity as unknown as TSLNode<'float'>),
     objectOpacityNode,
@@ -10207,6 +10829,7 @@ function doesLandrushIslandScreenCapsuleIntersectViewport(
 
 function LocalLandrushIslandRobot({
   baseNode,
+  bugReportReplayPlayer,
   buildCameraPoseRef,
   cameraEnabled,
   fallSurfacePoints,
@@ -10214,6 +10837,7 @@ function LocalLandrushIslandRobot({
   fpvActive,
   grassInteractionRef,
   groundY,
+  localRobotLevelIdRef,
   localMotionRef,
   localProfile,
   localRobotVisualRootRef,
@@ -10228,12 +10852,14 @@ function LocalLandrushIslandRobot({
   perfRun,
   presentationMode,
   playerCameraPoseRef,
+  playerCameraZoomDistanceRef,
   playerReturnCameraPoseRef,
   spawn,
   surfacePoints,
   waterY,
 }: {
   baseNode: LandrushIslandLayoutNode
+  bugReportReplayPlayer: LandrushBugReportPlayer | null
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraEnabled: boolean
   fallSurfacePoints: readonly LandrushPoint2[]
@@ -10241,6 +10867,7 @@ function LocalLandrushIslandRobot({
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   groundY: number
+  localRobotLevelIdRef: { current: LevelNode['id'] }
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
   localRobotVisualRootRef: { current: Group | null }
@@ -10255,6 +10882,7 @@ function LocalLandrushIslandRobot({
   perfRun: LandrushIslandPerfRunOptions
   presentationMode: LandrushRobotPresentationMode
   playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerCameraZoomDistanceRef: { current: number }
   playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   spawn: LandrushPoint2
   surfacePoints: readonly LandrushPoint2[]
@@ -10266,6 +10894,8 @@ function LocalLandrushIslandRobot({
   const pressedKeysRef = useRef(new Set<string>())
   const clickMoveTargetRef = useRef<LandrushIslandMoveTarget | null>(null)
   const rightHoldMoveRef = useRef<LandrushIslandRightHoldMove | null>(null)
+  const navigationProofAutoStartedRef = useRef(false)
+  const navigationProofReverseStartedRef = useRef(false)
   const fallStateRef = useRef<LandrushIslandRobotFallState | null>(null)
   const fallControlQuaternionRef = useRef(new Quaternion())
   const fallControlAngularVelocityRef = useRef(new Vector3())
@@ -10288,8 +10918,8 @@ function LocalLandrushIslandRobot({
   } | null>(null)
   const lastFallDirectionRef = useRef<LandrushPoint2>({ x: 0, z: 1 })
   const physicsControllerRef = useRef<BVHEcctrlApi | null>(null)
+  const collisionResponseModeRef = useRef<BVHEcctrlCollisionResponseMode>('push-back')
   const physicsHeadingRef = useRef(0)
-  const currentLevelIdRef = useRef<LevelNode['id']>(LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id'])
   const lastPhysicsPositionRef = useRef(new Vector3(spawn.x, groundY, spawn.z))
   const targetMotionPositionRef = useRef(new Vector3(spawn.x, groundY, spawn.z))
   const lastGrassProbeAtRef = useRef(0)
@@ -10321,23 +10951,23 @@ function LocalLandrushIslandRobot({
   const doorPortals = useMemo(
     () =>
       movementEnabled && sceneNodesForNavigation
-        ? createLandrushIslandDoorPortals(sceneNodesForNavigation)
+        ? createLandrushIslandDoorPortals(sceneNodesForNavigation, navigationObstacles)
         : [],
-    [movementEnabled, sceneNodesForNavigation],
+    [movementEnabled, navigationObstacles, sceneNodesForNavigation],
   )
   const stairPortals = useMemo(
     () =>
       movementEnabled && sceneNodesForNavigation
-        ? createLandrushIslandStairPortals(sceneNodesForNavigation)
+        ? createLandrushIslandStairPortals(sceneNodesForNavigation, navigationObstacles)
         : [],
-    [movementEnabled, sceneNodesForNavigation],
+    [movementEnabled, navigationObstacles, sceneNodesForNavigation],
   )
   const stairConnectors = useMemo(
     () =>
       movementEnabled && sceneNodesForNavigation
-        ? createLandrushIslandStairConnectors(sceneNodesForNavigation)
+        ? createLandrushIslandStairConnectors(sceneNodesForNavigation, navigationObstacles)
         : [],
-    [movementEnabled, sceneNodesForNavigation],
+    [movementEnabled, navigationObstacles, sceneNodesForNavigation],
   )
   const nodeRef = useRef<LandrushWorldNode>(
     createLandrushIslandRobotActorNode(baseNode, localProfile.id, spawn, groundY),
@@ -10360,6 +10990,64 @@ function LocalLandrushIslandRobot({
     speed: 0,
     velocity: new Vector3(),
   })
+  const startNavigationProofTarget = useCallback(
+    (searchParams: URLSearchParams) => {
+      const targetX = Number(searchParams.get('navProofTargetX'))
+      const targetZ = Number(searchParams.get('navProofTargetZ'))
+      const targetWorldY = Number(searchParams.get('navProofTargetWorldY'))
+      const targetLevelId = searchParams.get('navProofTargetLevelId') as LevelNode['id'] | null
+      if (!(Number.isFinite(targetX) && Number.isFinite(targetZ) && targetLevelId)) return false
+
+      const targetNavigation = resolveLandrushIslandNavigationContext(
+        targetLevelId,
+        navigationObstacles,
+        doorPortals,
+        stairPortals,
+        stairConnectors,
+      )
+      const start = { x: motionRef.current.position.x, z: motionRef.current.position.z }
+      const rawTarget = resolveLandrushIslandClickNavigationTarget({
+        currentLevelId: localRobotLevelIdRef.current,
+        stairConnectors,
+        stairPortals: targetNavigation.stairPortals,
+        start,
+        target: { x: targetX, z: targetZ },
+        targetLevelId,
+      })
+      const resolvedTarget = resolveLandrushIslandWalkableNavigationTargetPoint(
+        rawTarget,
+        targetNavigation.navigationObstacles,
+        surfacePoints,
+      )
+      if (!resolvedTarget) return false
+
+      const target: LandrushIslandMoveTarget = {
+        levelId: targetLevelId,
+        point: resolvedTarget,
+      }
+      if (Number.isFinite(targetWorldY)) target.worldY = targetWorldY
+      rightHoldMoveRef.current = null
+      clickMoveTargetRef.current = target
+      recordLandrushIslandInputProbe({
+        kind: 'nav-proof-target',
+        rawTarget: [roundPerf(rawTarget.x), roundPerf(rawTarget.z)],
+        target: [roundPerf(resolvedTarget.x), roundPerf(targetWorldY), roundPerf(resolvedTarget.z)],
+        targetLevelId,
+      })
+      renderScheduler.requestFrame('animation')
+      return true
+    },
+    [
+      doorPortals,
+      localRobotLevelIdRef,
+      navigationObstacles,
+      stairConnectors,
+      stairPortals,
+      surfacePoints,
+    ],
+  )
+  const startNavigationProofTargetRef = useRef(startNavigationProofTarget)
+  startNavigationProofTargetRef.current = startNavigationProofTarget
   const activeNavigationDebugRef = useRef<{
     kind: LandrushIslandNavigationSteeringKind | 'manual' | null
     steeringPoint: LandrushPoint2 | null
@@ -10463,7 +11151,7 @@ function LocalLandrushIslandRobot({
     motion.cameraSnapVersion += 1
     motion.cameraTargetY = groundY
     physicsHeadingRef.current = 0
-    currentLevelIdRef.current = LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id']
+    localRobotLevelIdRef.current = LANDRUSH_ISLAND_LEVEL_ID as LevelNode['id']
     lastPhysicsPositionRef.current.set(spawn.x, groundY, spawn.z)
     targetMotionPositionRef.current.set(spawn.x, groundY, spawn.z)
     navigationTraceRef.current = [{ x: spawn.x, z: spawn.z }]
@@ -10475,12 +11163,14 @@ function LocalLandrushIslandRobot({
     jumpProofRequestedRef.current = false
     jumpAnimationRef.current = null
     jumpPoseRef.current = null
+    collisionResponseModeRef.current = 'push-back'
     lastFallDirectionRef.current = { x: 0, z: 1 }
     activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
     setNavigationDebugSnapshot(null)
     setFallPresentationActive(false)
     updateFallPresentation(createLandrushIslandFallPresentationState())
     physicsControllerRef.current?.setPaused(false)
+    physicsControllerRef.current?.setCollisionResponseMode('push-back')
     const physicsGroup = physicsControllerRef.current?.group
     if (physicsGroup) {
       physicsGroup.position.set(
@@ -10510,7 +11200,46 @@ function LocalLandrushIslandRobot({
     })
     writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
     publishCurrentPlayerRef.current()
-  }, [grassInteractionRef, groundY, spawn, updateFallPresentation])
+  }, [grassInteractionRef, groundY, localRobotLevelIdRef, spawn, updateFallPresentation])
+
+  const restoreBugReportPlayer = useCallback(() => {
+    if (!bugReportReplayPlayer) return
+    resetToSpawn()
+    const motion = motionRef.current
+    const [x, y, z] = bugReportReplayPlayer.position
+    motion.position.set(x, y, z)
+    motion.velocity.set(0, 0, 0)
+    motion.falling = false
+    motion.heading = bugReportReplayPlayer.heading
+    motion.isMoving = false
+    motion.runRequested = false
+    motion.speed = 0
+    motion.cameraSnapVersion += 1
+    motion.cameraTargetY = bugReportReplayPlayer.cameraTargetY ?? y
+    physicsHeadingRef.current = bugReportReplayPlayer.heading
+    lastPhysicsPositionRef.current.set(x, y, z)
+    targetMotionPositionRef.current.set(x, y, z)
+    navigationTraceRef.current = [{ x, z }]
+    const physicsGroup = physicsControllerRef.current?.group
+    if (physicsGroup) {
+      physicsGroup.position.set(x, y + LANDRUSH_ISLAND_ROBOT_PHYSICS_CENTER_FROM_ROOT, z)
+      physicsControllerRef.current?.resetLinVel()
+      physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
+    }
+    grassInteractionRef.current = {
+      radius: LANDRUSH_ISLAND_ROBOT_GRASS_INTERACTION_RADIUS,
+      speed: 0,
+      strength: LANDRUSH_ISLAND_ROBOT_GRASS_IDLE_BEND_STRENGTH,
+      x,
+      z,
+    }
+    writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
+    publishCurrentPlayerRef.current()
+    recordLandrushIslandInputProbe({
+      kind: 'bug-report-replay-player',
+      position: [roundPerf(x), roundPerf(y), roundPerf(z)],
+    })
+  }, [bugReportReplayPlayer, grassInteractionRef, resetToSpawn])
 
   const setupNavigationTestStart = useCallback(
     ({ label, start }: { label?: string; start: LandrushPoint2 & { y?: number } }) => {
@@ -10539,12 +11268,14 @@ function LocalLandrushIslandRobot({
       jumpProofRequestedRef.current = false
       jumpAnimationRef.current = null
       jumpPoseRef.current = null
+      collisionResponseModeRef.current = 'push-back'
       lastFallDirectionRef.current = { x: 0, z: 1 }
       activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
       setNavigationDebugSnapshot(null)
       setFallPresentationActive(false)
       updateFallPresentation(createLandrushIslandFallPresentationState())
       physicsControllerRef.current?.setPaused(false)
+      physicsControllerRef.current?.setCollisionResponseMode('push-back')
       const physicsGroup = physicsControllerRef.current?.group
       if (physicsGroup) {
         physicsGroup.position.set(
@@ -10567,11 +11298,39 @@ function LocalLandrushIslandRobot({
         label,
         start: [roundPerf(start.x), roundPerf(startY), roundPerf(start.z)],
       })
+      const colliderProbeOrigin = new Vector3(start.x, startY + 0.9, start.z)
+      const colliderProbeRaycaster = new Raycaster()
+      const cardinalColliderHits = [
+        ['+x', new Vector3(1, 0, 0)],
+        ['-x', new Vector3(-1, 0, 0)],
+        ['+z', new Vector3(0, 0, 1)],
+        ['-z', new Vector3(0, 0, -1)],
+      ].map(([direction, vector]) => {
+        colliderProbeRaycaster.set(colliderProbeOrigin, vector as Vector3)
+        colliderProbeRaycaster.far = 4
+        const hit = colliderProbeRaycaster.intersectObjects(colliderMeshes, false)[0]
+        return {
+          direction,
+          distance: hit ? roundPerf(hit.distance) : null,
+          point: hit
+            ? [roundPerf(hit.point.x), roundPerf(hit.point.y), roundPerf(hit.point.z)]
+            : null,
+        }
+      })
+      recordLandrushIslandInputProbe({
+        hits: cardinalColliderHits,
+        kind: 'nav-test-collider-probe',
+        origin: [
+          roundPerf(colliderProbeOrigin.x),
+          roundPerf(colliderProbeOrigin.y),
+          roundPerf(colliderProbeOrigin.z),
+        ],
+      })
       writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
       publishCurrentPlayerRef.current()
       return true
     },
-    [groundY, navigationLiveScenario, updateFallPresentation],
+    [colliderMeshes, groundY, navigationLiveScenario, updateFallPresentation],
   )
 
   useEffect(() => {
@@ -10696,8 +11455,90 @@ function LocalLandrushIslandRobot({
 
   useEffect(() => {
     nodeRef.current = createLandrushIslandRobotActorNode(baseNode, localProfile.id, spawn, groundY)
-    resetToSpawn()
-  }, [baseNode, groundY, localProfile.id, resetToSpawn, spawn])
+    if (bugReportReplayPlayer) restoreBugReportPlayer()
+    else resetToSpawn()
+  }, [
+    baseNode,
+    bugReportReplayPlayer,
+    groundY,
+    localProfile.id,
+    resetToSpawn,
+    restoreBugReportPlayer,
+    spawn,
+  ])
+
+  useEffect(() => {
+    if (!navigationLiveScenarioReady || navigationProofAutoStartedRef.current) {
+      return
+    }
+    const searchParams = new URLSearchParams(window.location.search)
+    if (searchParams.get('navProofAuto') !== '1') return
+
+    const delayMs = Math.max(0, Number(searchParams.get('navProofDelayMs')) || 0)
+    const timeoutId = window.setTimeout(() => {
+      navigationProofAutoStartedRef.current = true
+      const rawStartX = searchParams.get('navProofStartX')
+      const rawStartZ = searchParams.get('navProofStartZ')
+      const startX = rawStartX === null ? Number.NaN : Number(rawStartX)
+      const startZ = rawStartZ === null ? Number.NaN : Number(rawStartZ)
+      const startY = Number(searchParams.get('navProofStartY'))
+      if (Number.isFinite(startX) && Number.isFinite(startZ)) {
+        setupNavigationTestStart({
+          label: 'nav-proof-query-start',
+          start: {
+            x: startX,
+            y: Number.isFinite(startY) ? startY : undefined,
+            z: startZ,
+          },
+        })
+      }
+      startNavigationProofTargetRef.current(searchParams)
+    }, delayMs)
+    return () => window.clearTimeout(timeoutId)
+  }, [navigationLiveScenarioReady, setupNavigationTestStart])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The interval intentionally polls this mutable ref; a .current dependency would not make React observe mutations.
+  useEffect(() => {
+    if (!navigationLiveScenarioReady) return
+    const searchParams = new URLSearchParams(window.location.search)
+    const reverseTargetLevelId = searchParams.get('navProofReverseTargetLevelId') as
+      | LevelNode['id']
+      | null
+    const reverseTargetX = searchParams.get('navProofReverseTargetX')
+    const reverseTargetZ = searchParams.get('navProofReverseTargetZ')
+    const outboundTargetLevelId = searchParams.get('navProofTargetLevelId') as
+      | LevelNode['id']
+      | null
+    if (!(reverseTargetLevelId && reverseTargetX !== null && reverseTargetZ !== null)) return
+
+    const reverseDelayMs = Math.max(0, Number(searchParams.get('navProofReverseDelayMs')) || 0)
+    let idleSince: number | null = null
+    const intervalId = window.setInterval(() => {
+      if (
+        !navigationProofAutoStartedRef.current ||
+        navigationProofReverseStartedRef.current ||
+        clickMoveTargetRef.current ||
+        (outboundTargetLevelId && localRobotLevelIdRef.current !== outboundTargetLevelId)
+      ) {
+        idleSince = null
+        return
+      }
+      idleSince ??= performance.now()
+      if (performance.now() - idleSince < reverseDelayMs) return
+
+      const reverseParams = new URLSearchParams()
+      reverseParams.set('navProofTargetLevelId', reverseTargetLevelId)
+      reverseParams.set('navProofTargetX', reverseTargetX)
+      reverseParams.set('navProofTargetZ', reverseTargetZ)
+      const reverseTargetWorldY = searchParams.get('navProofReverseTargetWorldY')
+      if (reverseTargetWorldY !== null) {
+        reverseParams.set('navProofTargetWorldY', reverseTargetWorldY)
+      }
+      navigationProofReverseStartedRef.current = true
+      startNavigationProofTargetRef.current(reverseParams)
+    }, 200)
+    return () => window.clearInterval(intervalId)
+  }, [navigationLiveScenarioReady])
 
   useEffect(() => {
     if (!navigationDebugEnabled && !navigationLiveScenario) return
@@ -10740,6 +11581,7 @@ function LocalLandrushIslandRobot({
     jumpProofRequestedRef.current = false
     jumpAnimationRef.current = null
     jumpPoseRef.current = null
+    collisionResponseModeRef.current = 'push-back'
     lastFallDirectionRef.current = { x: 0, z: 1 }
     activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
     fallStateRef.current = null
@@ -10752,6 +11594,7 @@ function LocalLandrushIslandRobot({
     setFallPresentationActive(false)
     updateFallPresentation(createLandrushIslandFallPresentationState())
     physicsControllerRef.current?.setPaused(false)
+    physicsControllerRef.current?.setCollisionResponseMode('push-back')
     physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
     physicsControllerRef.current?.resetLinVel()
   }, [movementEnabled, updateFallPresentation])
@@ -10865,6 +11708,7 @@ function LocalLandrushIslandRobot({
     let stopTimer = 0
     let pointerOrbitAnimationFrame = 0
     let pointerOrbitActive = false
+    const movementKey = perfRun.direction === 'backward' ? 'KeyS' : 'KeyW'
     const pointerOrbitId = 91
     const stopPointerOrbit = () => {
       window.cancelAnimationFrame(pointerOrbitAnimationFrame)
@@ -10895,7 +11739,7 @@ function LocalLandrushIslandRobot({
           playerCameraPoseRef.current.pitch = LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH
         }
       }
-      pressedKeysRef.current.add('KeyW')
+      pressedKeysRef.current.add(movementKey)
       if (perfRun.speed === 'run') pressedKeysRef.current.add('ShiftLeft')
       if (orbitScenario) {
         window.dispatchEvent(
@@ -10948,7 +11792,7 @@ function LocalLandrushIslandRobot({
 
       stopTimer = window.setTimeout(() => {
         pressedKeysRef.current.delete('KeyA')
-        pressedKeysRef.current.delete('KeyW')
+        pressedKeysRef.current.delete(movementKey)
         pressedKeysRef.current.delete('ShiftLeft')
         if (orbitScenario) {
           window.dispatchEvent(
@@ -10964,7 +11808,7 @@ function LocalLandrushIslandRobot({
       window.clearTimeout(stopTimer)
       stopPointerOrbit()
       pressedKeysRef.current.delete('KeyA')
-      pressedKeysRef.current.delete('KeyW')
+      pressedKeysRef.current.delete(movementKey)
       pressedKeysRef.current.delete('ShiftLeft')
       if (perfRun.scenario === 'circle-camera' || perfRun.scenario === 'low-angle-orbit') {
         window.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, code: 'KeyE', key: 'e' }))
@@ -11076,7 +11920,14 @@ function LocalLandrushIslandRobot({
         : null
       const rawResolvedPoint =
         point && targetNavigation
-          ? resolveLandrushIslandStairConnectorTarget(start, point, targetNavigation.stairPortals)
+          ? resolveLandrushIslandClickNavigationTarget({
+              currentLevelId: localRobotLevelIdRef.current,
+              stairConnectors,
+              stairPortals: targetNavigation.stairPortals,
+              start,
+              target: point,
+              targetLevelId: point.levelId,
+            })
           : null
       const resolvedPoint = rawResolvedPoint
         ? resolveLandrushIslandWalkableNavigationTargetPoint(
@@ -11146,6 +11997,7 @@ function LocalLandrushIslandRobot({
     colliderMeshes,
     gl,
     groundY,
+    localRobotLevelIdRef,
     movementEnabled,
     doorPortals,
     navigationObstacles,
@@ -11166,7 +12018,7 @@ function LocalLandrushIslandRobot({
       }
       if (!movementEnabled || event.defaultPrevented || isEditableTarget(event.target)) return
 
-      if (event.code === 'KeyR') {
+      if (event.code === 'KeyR' && event.shiftKey) {
         event.preventDefault()
         if (!event.repeat) resetToSpawn()
         return
@@ -11202,10 +12054,10 @@ function LocalLandrushIslandRobot({
       motion.position.y,
       groundY,
       { x: motion.position.x, z: motion.position.z },
-      currentLevelIdRef.current,
+      localRobotLevelIdRef.current,
       stairConnectors,
     )
-    currentLevelIdRef.current = currentLevelId
+    localRobotLevelIdRef.current = currentLevelId
     const activeNavigation = resolveLandrushIslandNavigationContext(
       currentLevelId,
       navigationObstacles,
@@ -11250,6 +12102,7 @@ function LocalLandrushIslandRobot({
         y: roundPerf(motion.position.y),
       })
     }
+    const activeJumpAnimation = jumpAnimationRef.current
     const movementReferenceFrame: LandrushIslandMovementReferenceFrame = cameraEnabled
       ? 'camera-forward'
       : 'screen-up'
@@ -11295,10 +12148,32 @@ function LocalLandrushIslandRobot({
             surfacePointsRef.current,
             currentLevelId,
             stairConnectors,
+            (levelId) =>
+              resolveLandrushIslandNavigationContext(
+                levelId,
+                navigationObstacles,
+                doorPortals,
+                stairPortals,
+                stairConnectors,
+              ),
           )
         : null
     const activeMovement = movement ?? rightHoldMovement ?? clickMovement
     const physicsMovement = activeMovement
+    const collisionResponseMode: BVHEcctrlCollisionResponseMode = movement
+      ? 'push-back'
+      : rightHoldMovement || clickMovement
+        ? 'slide'
+        : 'push-back'
+    physicsControllerRef.current?.setCollisionResponseMode(collisionResponseMode)
+    if (collisionResponseModeRef.current !== collisionResponseMode) {
+      collisionResponseModeRef.current = collisionResponseMode
+      recordLandrushIslandInputProbe({
+        kind: 'collision-response-mode',
+        mode: collisionResponseMode,
+        source: movement ? 'direct-control' : 'right-click',
+      })
+    }
     const fallMovementDirection = physicsMovement ?? activeMovement
     if (
       fallMovementDirection &&
@@ -11433,6 +12308,8 @@ function LocalLandrushIslandRobot({
       jumpProofRequestedRef.current = false
       jumpAnimationRef.current = null
       jumpPoseRef.current = null
+      collisionResponseModeRef.current = 'push-back'
+      physicsControllerRef.current?.setCollisionResponseMode('push-back')
       physicsControllerRef.current?.setMovement({ worldDirection: null, run: false, jump: false })
       physicsControllerRef.current?.setLinVel(new Vector3(0, 0, 0))
       physicsControllerRef.current?.setPaused(true)
@@ -11773,6 +12650,7 @@ function LocalLandrushIslandRobot({
             mapReturnCameraPoseRef={mapReturnCameraPoseRef}
             motionRef={motionRef}
             playerCameraPoseRef={playerCameraPoseRef}
+            playerCameraZoomDistanceRef={playerCameraZoomDistanceRef}
             playerReturnCameraPoseRef={playerReturnCameraPoseRef}
           />
         )
@@ -11832,6 +12710,28 @@ function LocalLandrushIslandRobot({
         enabled={navigationDebugEnabled}
         snapshot={navigationDebugSnapshot}
       />
+      {navigationDebugEnabled ? (
+        <Html fullscreen style={{ pointerEvents: 'none' }}>
+          <button
+            data-testid="landrush-navigation-proof-trigger"
+            onClick={() => startNavigationProofTarget(new URLSearchParams(window.location.search))}
+            style={{
+              border: 0,
+              bottom: 0,
+              height: 24,
+              left: 24,
+              opacity: 0.01,
+              padding: 0,
+              pointerEvents: 'auto',
+              position: 'fixed',
+              width: 24,
+            }}
+            type="button"
+          >
+            Navigation proof
+          </button>
+        </Html>
+      ) : null}
       {jumpProofControlEnabled ? (
         <Html fullscreen style={{ pointerEvents: 'none' }}>
           <button
@@ -13005,6 +13905,7 @@ function LandrushIslandThirdPersonCameraRig({
   mapReturnCameraPoseRef,
   motionRef,
   playerCameraPoseRef,
+  playerCameraZoomDistanceRef,
   playerReturnCameraPoseRef,
 }: {
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
@@ -13012,6 +13913,7 @@ function LandrushIslandThirdPersonCameraRig({
   mapReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   motionRef: { current: RobotMotion }
   playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerCameraZoomDistanceRef: { current: number }
   playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
   const handleReturnSettled = useCallback(() => {
@@ -13027,6 +13929,7 @@ function LandrushIslandThirdPersonCameraRig({
       motionRef={motionRef}
       onReturnSettled={handleReturnSettled}
       playerCameraPoseRef={playerCameraPoseRef}
+      playerCameraZoomDistanceRef={playerCameraZoomDistanceRef}
       playerReturnCameraPoseRef={playerReturnCameraPoseRef}
     />
   )
@@ -13242,6 +14145,7 @@ function LandrushIslandThirdPersonCameraController({
   motionRef,
   onReturnSettled,
   playerCameraPoseRef,
+  playerCameraZoomDistanceRef: cameraDistanceRef,
   playerReturnCameraPoseRef,
 }: {
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
@@ -13249,10 +14153,10 @@ function LandrushIslandThirdPersonCameraController({
   motionRef: { current: RobotMotion }
   onReturnSettled: () => void
   playerCameraPoseRef: { current: LandrushIslandCameraPose | null }
+  playerCameraZoomDistanceRef: { current: number }
   playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
 }) {
   const { gl } = useThree()
-  const cameraDistanceRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE)
   const cameraPitchRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH)
   const targetCameraPitchRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_PITCH)
   const cameraYawRef = useRef(LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW)
@@ -13339,7 +14243,7 @@ function LandrushIslandThirdPersonCameraController({
 
     canvas.addEventListener('wheel', handleWheel, { capture: true, passive: false })
     return () => canvas.removeEventListener('wheel', handleWheel, true)
-  }, [gl])
+  }, [cameraDistanceRef, gl])
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -13394,7 +14298,7 @@ function LandrushIslandThirdPersonCameraController({
       window.removeEventListener('touchcancel', handleTouchEnd, true)
       pinchZoomRef.current = null
     }
-  }, [gl, setCameraMotionActive])
+  }, [cameraDistanceRef, gl, setCameraMotionActive])
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -13565,7 +14469,6 @@ function LandrushIslandThirdPersonCameraController({
         transition.targetPose.target,
         cameraYawRef,
         cameraPitchRef,
-        cameraDistanceRef,
       )
       targetCameraYawRef.current = cameraYawRef.current
       targetCameraPitchRef.current = cameraPitchRef.current
@@ -13587,6 +14490,7 @@ function LandrushIslandThirdPersonCameraController({
     },
     [
       buildCameraPoseRef,
+      cameraDistanceRef,
       mapReturnCameraPoseRef,
       motionRef,
       onReturnSettled,
@@ -13630,7 +14534,6 @@ function LandrushIslandThirdPersonCameraController({
           typeof storedYaw === 'number' && Number.isFinite(storedYaw)
             ? storedYaw
             : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW
-        const storedDistance = playerCameraPoseRef.current?.distance
         const storedPitch = playerCameraPoseRef.current?.pitch
         const pitch =
           typeof storedPitch === 'number' && Number.isFinite(storedPitch)
@@ -13644,14 +14547,11 @@ function LandrushIslandThirdPersonCameraController({
         targetCameraYawRef.current = yaw
         cameraPitchRef.current = pitch
         targetCameraPitchRef.current = pitch
-        cameraDistanceRef.current =
-          typeof storedDistance === 'number' && Number.isFinite(storedDistance)
-            ? clamp(
-                storedDistance,
-                LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
-                LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
-              )
-            : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE
+        cameraDistanceRef.current = clamp(
+          cameraDistanceRef.current,
+          LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+          LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
+        )
         entryTransition = {
           elapsed: 0,
           startPosition: state.camera.position.clone(),
@@ -13716,7 +14616,6 @@ function LandrushIslandThirdPersonCameraController({
         typeof storedYaw === 'number' && Number.isFinite(storedYaw)
           ? storedYaw
           : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_INITIAL_YAW
-      const storedDistance = playerCameraPoseRef.current?.distance
       const storedPitch = playerCameraPoseRef.current?.pitch
       const pitch =
         typeof storedPitch === 'number' && Number.isFinite(storedPitch)
@@ -13730,14 +14629,11 @@ function LandrushIslandThirdPersonCameraController({
       targetCameraYawRef.current = yaw
       cameraPitchRef.current = pitch
       targetCameraPitchRef.current = pitch
-      cameraDistanceRef.current =
-        typeof storedDistance === 'number' && Number.isFinite(storedDistance)
-          ? clamp(
-              storedDistance,
-              LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
-              LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
-            )
-          : LANDRUSH_ISLAND_ISOMETRIC_CAMERA_DISTANCE
+      cameraDistanceRef.current = clamp(
+        cameraDistanceRef.current,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
+        LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
+      )
       const desiredCameraPosition = resolveThirdPersonCameraPosition(
         target,
         cameraYawRef.current,
@@ -14711,6 +15607,58 @@ function cloneLandrushIslandCameraPose(
   }
 }
 
+function serializeLandrushBugReportCameraPose(
+  pose: LandrushIslandCameraPose,
+): LandrushBugReportCamera {
+  return {
+    distance: pose.distance,
+    pitch: pose.pitch,
+    position: [pose.position.x, pose.position.y, pose.position.z],
+    quaternion: [pose.quaternion.x, pose.quaternion.y, pose.quaternion.z, pose.quaternion.w],
+    target: [pose.target.x, pose.target.y, pose.target.z],
+    yaw: pose.yaw,
+    zoom: pose.zoom ?? null,
+  }
+}
+
+function deserializeLandrushBugReportCameraPose(
+  camera: LandrushBugReportCamera | null,
+): LandrushIslandCameraPose | null {
+  if (!camera) return null
+  return {
+    distance: camera.distance,
+    pitch: camera.pitch,
+    position: new Vector3(...camera.position),
+    quaternion: new Quaternion(...camera.quaternion),
+    target: new Vector3(...camera.target),
+    yaw: camera.yaw,
+    zoom: camera.zoom,
+  }
+}
+
+function createLandrushBugReportDiagnostics(
+  probe: LandrushIslandRuntimeProbe | undefined,
+): Record<string, unknown> {
+  if (!probe) return {}
+  return structuredClone({
+    cameraJumps: probe.cameraJumps.slice(-32),
+    cameraSamples: probe.cameraSamples.slice(-64),
+    floorFadePreparation: probe.floorFadePreparation ?? null,
+    floorVisibility: probe.floorVisibility ?? null,
+    frameGaps: probe.frameGaps.slice(-64),
+    inputEvents: probe.inputEvents.slice(-64),
+    longAnimationFrames: probe.longAnimationFrames.slice(-32),
+    longTasks: probe.longTasks.slice(-32),
+    navigationEvents: probe.navigationEvents
+      .filter((event) => event.kind !== 'nav-debug-snapshot')
+      .slice(-64),
+    navigationSelfTest: probe.navigationSelfTest ?? null,
+    parcelDiagnostics: probe.parcelDiagnostics ?? null,
+    phaseEvents: probe.phaseEvents.slice(-64),
+    startedAt: probe.startedAt,
+  })
+}
+
 function landrushIslandCameraPoseToEditorInitialPose(
   pose: LandrushIslandCameraPose,
 ): EditorCameraInitialPose {
@@ -14766,7 +15714,6 @@ function syncThirdPersonCameraOrbitRefs(
   target: Vector3,
   yawRef: { current: number },
   pitchRef: { current: number },
-  distanceRef: { current: number },
 ) {
   const offsetX = camera.position.x - target.x
   const offsetY = camera.position.y - target.y
@@ -14777,11 +15724,6 @@ function syncThirdPersonCameraOrbitRefs(
     Math.atan2(offsetY, horizontalDistance),
     LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_PITCH,
     LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_PITCH,
-  )
-  distanceRef.current = MathUtils.clamp(
-    Math.hypot(horizontalDistance, offsetY),
-    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MIN_DISTANCE,
-    LANDRUSH_ISLAND_ISOMETRIC_CAMERA_MAX_DISTANCE,
   )
 }
 
@@ -14971,6 +15913,7 @@ function resolveRightHoldMovement({
       )
     : null
   if (!(point && targetPoint)) return null
+  if (point.levelId !== currentLevelId) return null
 
   const leg = resolveLandrushIslandNavigationLeg(
     start,
@@ -15029,24 +15972,115 @@ function resolveClickMoveMovement(
   surfacePoints: readonly LandrushPoint2[],
   currentLevelId: LevelNode['id'],
   stairConnectors: readonly LandrushIslandStairConnector[],
+  resolveLevelNavigation: (levelId: LevelNode['id']) => LandrushIslandNavigationContext,
 ): RobotMovementInput | null {
   const target = targetRef.current
   if (!target) return null
 
   const now = performance.now()
   const start = { x: motion.position.x, z: motion.position.z }
+  const madePhysicalProgress =
+    !target.terminalProgressPoint ||
+    distanceSq2(start, target.terminalProgressPoint) >=
+      LANDRUSH_ISLAND_CLICK_MOVE_TERMINAL_PROGRESS_METERS ** 2
+  if (madePhysicalProgress) {
+    target.terminalProgressAt = now
+    target.terminalProgressPoint = clonePoint2(start)
+    if (target.route) {
+      target.route.lastProgressAt = now
+      target.route.nextRetryAt = 0
+    }
+  }
+  const terminalNoProgressMs = now - (target.terminalProgressAt ?? now)
+  if (terminalNoProgressMs >= LANDRUSH_ISLAND_CLICK_MOVE_TERMINAL_NO_PROGRESS_MS) {
+    recordLandrushIslandNavigationProbe({
+      kind: 'click-route-cancelled',
+      reason: 'terminal-no-physical-progress',
+      target: [roundPerf(target.point.x), roundPerf(target.point.z)],
+      terminalNoProgressMs: roundPerf(terminalNoProgressMs),
+    })
+    targetRef.current = null
+    return null
+  }
+  const targetLevelId = target.levelId ?? currentLevelId
+  const planningLegKey = `planning:${currentLevelId}:${targetLevelId}`
+  if (target.route && target.route.nextRetryAt > now && target.route.doorCrossing === null) {
+    return null
+  }
   const leg = resolveLandrushIslandClickMoveNavigationLeg(
     start,
     currentLevelId,
     target,
     stairConnectors,
+    { doorPortals, navigationObstacles, resolveLevelNavigation, surfacePoints },
   )
-  if (!leg) return null
-  const activeStairPortals = resolveLandrushIslandNavigationLegStairPortals(leg, stairPortals)
-  const navigationTarget = leg.point
+  if (!leg) {
+    if (target.route?.legKey !== planningLegKey) {
+      target.route = createLandrushIslandMoveRouteState(
+        start,
+        Math.hypot(target.point.x - start.x, target.point.z - start.z),
+        now,
+        planningLegKey,
+      )
+    }
+    target.route.recoveryCount += 1
+    if (target.route.recoveryCount >= LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX) {
+      recordLandrushIslandNavigationProbe({
+        kind: 'click-route-cancelled',
+        reason: 'planning-failed',
+        recoveryCount: target.route.recoveryCount,
+        target: [roundPerf(target.point.x), roundPerf(target.point.z)],
+      })
+      targetRef.current = null
+      return null
+    }
+    target.route.nextRetryAt = now + LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS
+    recordLandrushIslandNavigationProbe({
+      kind: 'click-route-planning-retry',
+      recoveryCount: target.route.recoveryCount,
+      retryMs: LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS,
+      target: [roundPerf(target.point.x), roundPerf(target.point.z)],
+    })
+    return null
+  }
+  const routeMatchesLeg = target.route?.legKey === leg.key
+  const activeStairConnectorId =
+    leg.stairConnectorId ?? (routeMatchesLeg ? target.route?.stairConnectorId : null) ?? null
+  const activeStairConnector = activeStairConnectorId
+    ? stairConnectors.find((connector) => connector.nodeId === activeStairConnectorId)
+    : null
+  const activeLegKey = routeMatchesLeg ? target.route!.legKey : leg.key
+  const stairApproachReached = Boolean(
+    leg.approachPoint &&
+      Math.hypot(leg.approachPoint.x - start.x, leg.approachPoint.z - start.z) <=
+        LANDRUSH_ISLAND_CLICK_MOVE_PROJECTED_STOP_RADIUS,
+  )
+  const stairCrossingActive = !leg.final && (!leg.approachPoint || stairApproachReached)
+  const activeStairPortals = stairCrossingActive
+    ? activeStairConnector
+      ? resolveLandrushIslandStairConnectorPortals(
+          activeStairConnector,
+          !activeLegKey.endsWith(':down'),
+        )
+      : resolveLandrushIslandNavigationLegStairPortals(leg, stairPortals)
+    : []
+  const activeNavigationObstacles =
+    activeStairConnectorId && stairCrossingActive
+      ? navigationObstacles.filter((obstacle) => obstacle.stairId !== activeStairConnectorId)
+      : navigationObstacles
+  const activeDoorPortals = stairCrossingActive ? [] : doorPortals
+  const navigationTarget =
+    leg.approachPoint && !stairApproachReached ? leg.approachPoint : leg.point
   const distance = Math.hypot(navigationTarget.x - start.x, navigationTarget.z - start.z)
   if (target.route?.legKey !== leg.key) {
-    target.route = createLandrushIslandMoveRouteState(start, distance, now, leg.key)
+    target.route = createLandrushIslandMoveRouteState(
+      start,
+      distance,
+      now,
+      leg.key,
+      leg.stairConnectorId,
+      stairApproachReached ? null : leg.initialSteering,
+    )
   }
   const crossingInProgress = target.route.doorCrossing !== null
 
@@ -15089,11 +16123,23 @@ function resolveClickMoveMovement(
   }
 
   target.route = updateLandrushIslandMoveRouteProgress(target.route, start, distance, now)
+  if (
+    target.route.collisionSlideOrigin &&
+    Math.hypot(
+      start.x - target.route.collisionSlideOrigin.x,
+      start.z - target.route.collisionSlideOrigin.z,
+    ) >= LANDRUSH_ISLAND_DOOR_EXIT_SLIDE_CLEARANCE_METERS
+  ) {
+    target.route.collisionSlideDirection = null
+    target.route.collisionSlideOrigin = null
+  }
+  let noProgressMs = now - target.route.lastProgressAt
   let doorCrossingResolution = resolveLandrushIslandActiveDoorCrossingSteering(
     target.route,
     start,
     now,
   )
+  noProgressMs = now - target.route.lastProgressAt
   if (doorCrossingResolution?.waiting) {
     target.route.lastRobotPoint = start
     return null
@@ -15105,18 +16151,32 @@ function resolveClickMoveMovement(
   const completedDoorCrossing = doorCrossingResolution?.completed === true
   let activeSteering: LandrushIslandNavigationSteeringResult | null =
     doorCrossingResolution?.steering ?? null
-  const noProgressMs = now - target.route.lastProgressAt
   const hasStalled =
     noProgressMs >= LANDRUSH_ISLAND_CLICK_MOVE_STALL_MS &&
     (motion.speed <= LANDRUSH_ISLAND_CLICK_MOVE_STALL_SPEED ||
       noProgressMs >= LANDRUSH_ISLAND_CLICK_MOVE_NO_PROGRESS_RETRY_MS)
+  if (
+    !activeSteering &&
+    hasStalled &&
+    target.route.recoveryCount >= LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX
+  ) {
+    recordLandrushIslandNavigationProbe({
+      distance: roundPerf(distance),
+      kind: 'click-route-cancelled',
+      recoveryCount: target.route.recoveryCount,
+      target: [roundPerf(navigationTarget.x), roundPerf(navigationTarget.z)],
+    })
+    targetRef.current = null
+    return null
+  }
   if (!activeSteering && hasStalled) {
+    target.route.steering = null
     const recovery = resolveLandrushIslandNavigationRecoverySteeringPoint(
       start,
       navigationTarget,
       target.route.lastSteeringPoint ?? navigationTarget,
-      navigationObstacles,
-      doorPortals,
+      activeNavigationObstacles,
+      activeDoorPortals,
       surfacePoints,
       activeStairPortals,
     )
@@ -15135,7 +16195,7 @@ function resolveClickMoveMovement(
         start,
         navigationTarget,
         target.route.lastSteeringPoint ?? navigationTarget,
-        navigationObstacles,
+        activeNavigationObstacles,
         surfacePoints,
         target.route.recoveryCount,
       )
@@ -15150,6 +16210,15 @@ function resolveClickMoveMovement(
         })
       } else if (target.route.recoveryCount < LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX) {
         target.route.nextRetryAt = now + LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS
+      } else {
+        recordLandrushIslandNavigationProbe({
+          distance: roundPerf(distance),
+          kind: 'click-route-cancelled',
+          recoveryCount: target.route.recoveryCount,
+          target: [roundPerf(navigationTarget.x), roundPerf(navigationTarget.z)],
+        })
+        targetRef.current = null
+        return null
       }
       recordLandrushIslandNavigationProbe({
         distance: roundPerf(distance),
@@ -15160,21 +16229,47 @@ function resolveClickMoveMovement(
     }
   }
 
+  if (!activeSteering) activeSteering = target.route.steering
   if (!activeSteering) {
+    const planningStart =
+      completedDoorCrossing && target.route.lastSteeringPoint
+        ? target.route.lastSteeringPoint
+        : start
     activeSteering = resolveLandrushIslandNavigationSteeringPoint(
-      start,
+      planningStart,
       navigationTarget,
-      navigationObstacles,
-      doorPortals,
+      activeNavigationObstacles,
+      activeDoorPortals,
       surfacePoints,
       activeStairPortals,
+      completedDoorCrossing ? (target.route.collisionSlideDirection ?? undefined) : undefined,
     )
+    if (
+      !activeSteering &&
+      completedDoorCrossing &&
+      target.route.collisionSlideDirection &&
+      target.route.collisionSlideOrigin
+    ) {
+      activeSteering = resolveLandrushIslandDoorExitClearanceSteeringPoint({
+        direction: target.route.collisionSlideDirection,
+        exit: target.route.collisionSlideOrigin,
+        obstacles: activeNavigationObstacles,
+        surfacePoints,
+        target: navigationTarget,
+      })
+      if (activeSteering) {
+        recordLandrushIslandNavigationProbe({
+          kind: 'door-exit-clearance',
+          steering: [roundPerf(activeSteering.point.x), roundPerf(activeSteering.point.z)],
+        })
+      }
+    }
     if (!activeSteering) {
       activeSteering = resolveLandrushIslandNavigationEscapeSteeringPoint(
         start,
         navigationTarget,
-        navigationObstacles,
-        doorPortals,
+        activeNavigationObstacles,
+        activeDoorPortals,
         surfacePoints,
         activeStairPortals,
       )
@@ -15194,8 +16289,8 @@ function resolveClickMoveMovement(
           start,
           navigationTarget,
           target.route.lastSteeringPoint ?? navigationTarget,
-          navigationObstacles,
-          doorPortals,
+          activeNavigationObstacles,
+          activeDoorPortals,
           surfacePoints,
           activeStairPortals,
         )
@@ -15216,7 +16311,7 @@ function resolveClickMoveMovement(
             start,
             navigationTarget,
             target.route.lastSteeringPoint ?? navigationTarget,
-            navigationObstacles,
+            activeNavigationObstacles,
             surfacePoints,
             target.route.recoveryCount,
           )
@@ -15231,6 +16326,16 @@ function resolveClickMoveMovement(
               target: [roundPerf(navigationTarget.x), roundPerf(navigationTarget.z)],
             })
           } else {
+            if (target.route.recoveryCount >= LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX) {
+              recordLandrushIslandNavigationProbe({
+                distance: roundPerf(distance),
+                kind: 'click-route-cancelled',
+                recoveryCount: target.route.recoveryCount,
+                target: [roundPerf(navigationTarget.x), roundPerf(navigationTarget.z)],
+              })
+              targetRef.current = null
+              return null
+            }
             target.route.nextRetryAt = now + LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS
             recordLandrushIslandNavigationProbe({
               distance: roundPerf(distance),
@@ -15247,11 +16352,14 @@ function resolveClickMoveMovement(
       recordLandrushIslandNavigationProbe({
         distance: roundPerf(distance),
         kind: 'door-crossing-resume-target',
+        steering: [roundPerf(activeSteering.point.x), roundPerf(activeSteering.point.z)],
+        steeringKind: activeSteering.kind,
       })
     }
   }
 
   if (activeSteering.doorCrossing && !target.route.doorCrossing) {
+    target.route.steering = null
     target.route.doorCrossing = cloneLandrushIslandDoorCrossingState(activeSteering.doorCrossing)
     recordLandrushIslandNavigationProbe({
       doorId: activeSteering.doorId,
@@ -15279,7 +16387,7 @@ function resolveClickMoveMovement(
     activeSteering = doorCrossingResolution?.steering ?? activeSteering
   }
 
-  openLandrushIslandDoorPortalsAlongSegment(start, navigationTarget, doorPortals)
+  openLandrushIslandDoorPortalsAlongSegment(start, navigationTarget, activeDoorPortals)
   if (activeSteering.doorId) {
     const openState = openLandrushIslandDoor(activeSteering.doorId)
     if (openState === 'started') {
@@ -15290,16 +16398,15 @@ function resolveClickMoveMovement(
       })
     }
   }
-  for (
-    let advance = 0;
-    activeSteering.kind !== 'door' && activeSteering.kind !== 'stair' && advance < 3;
-    advance += 1
-  ) {
+  if (activeSteering.kind !== 'door' && activeSteering.kind !== 'stair') {
     const steeringDistance = Math.hypot(
       activeSteering.point.x - start.x,
       activeSteering.point.z - start.z,
     )
-    const waypointRadius = LANDRUSH_ISLAND_CLICK_MOVE_WAYPOINT_RADIUS
+    const waypointRadius =
+      activeSteering.kind === 'graph'
+        ? LANDRUSH_ISLAND_CLICK_MOVE_GRAPH_WAYPOINT_RADIUS
+        : LANDRUSH_ISLAND_CLICK_MOVE_WAYPOINT_RADIUS
     const reached =
       steeringDistance <= waypointRadius ||
       segmentReachedLandrushIslandNavigationPoint(
@@ -15308,54 +16415,75 @@ function resolveClickMoveMovement(
         activeSteering.point,
         waypointRadius,
       )
-    if (!reached) break
-
-    target.route.lastProgressAt = now
-    target.route.lastRobotPoint = start
-    target.route.lastSteeringPoint = activeSteering.point
-    recordLandrushIslandNavigationProbe({
-      kind: 'click-waypoint-reached',
-      navigationKind: activeSteering.kind,
-      steeringDistance: roundPerf(steeringDistance),
-    })
-    const nextSteering = resolveLandrushIslandNavigationSteeringPoint(
-      start,
-      navigationTarget,
-      navigationObstacles,
-      doorPortals,
-      surfacePoints,
-      activeStairPortals,
-    )
-    if (
-      !nextSteering ||
-      (nextSteering.kind === activeSteering.kind &&
-        Math.hypot(
-          nextSteering.point.x - activeSteering.point.x,
-          nextSteering.point.z - activeSteering.point.z,
-        ) <= 0.001)
-    ) {
-      if (activeSteering.kind === 'direct') {
-        if (leg.final) {
+    if (reached && target.route.nextSteeringResolveAt <= now) {
+      const planningStart = activeSteering.kind === 'graph' ? activeSteering.point : start
+      const nextSteering = resolveLandrushIslandNavigationSteeringPoint(
+        planningStart,
+        navigationTarget,
+        activeNavigationObstacles,
+        activeDoorPortals,
+        surfacePoints,
+        activeStairPortals,
+      )
+      const repeatedSteering = Boolean(
+        nextSteering &&
+          nextSteering.kind === activeSteering.kind &&
+          Math.hypot(
+            nextSteering.point.x - activeSteering.point.x,
+            nextSteering.point.z - activeSteering.point.z,
+          ) <= 0.001,
+      )
+      if (!nextSteering || repeatedSteering) {
+        if (activeSteering.kind === 'direct') {
+          if (leg.final) {
+            recordLandrushIslandNavigationProbe({
+              distance: roundPerf(distance),
+              kind: 'click-arrived',
+              projected: true,
+            })
+            targetRef.current = null
+          } else {
+            recordLandrushIslandNavigationProbe({
+              currentLevelId,
+              distance: roundPerf(distance),
+              kind: 'floor-portal-arrived',
+              targetLevelId: target.levelId,
+            })
+          }
+          return null
+        }
+        target.route.recoveryCount += 1
+        if (target.route.recoveryCount >= LANDRUSH_ISLAND_CLICK_MOVE_LOCAL_RETRY_MAX) {
           recordLandrushIslandNavigationProbe({
-            distance: roundPerf(distance),
-            kind: 'click-arrived',
-            projected: true,
+            kind: 'click-route-cancelled',
+            reason: 'waypoint-planning-failed',
+            recoveryCount: target.route.recoveryCount,
+            target: [roundPerf(navigationTarget.x), roundPerf(navigationTarget.z)],
           })
           targetRef.current = null
-        } else {
-          recordLandrushIslandNavigationProbe({
-            currentLevelId,
-            distance: roundPerf(distance),
-            kind: 'floor-portal-arrived',
-            targetLevelId: target.levelId,
-          })
+          return null
         }
+        target.route.nextRetryAt = now + LANDRUSH_ISLAND_CLICK_MOVE_RETRY_MS
+        target.route.nextSteeringResolveAt = target.route.nextRetryAt
+        target.route.steering = activeSteering
+        return null
       }
-      return null
+
+      target.route.lastProgressAt = now
+      target.route.lastRobotPoint = start
+      target.route.lastSteeringPoint = activeSteering.point
+      target.route.nextSteeringResolveAt = 0
+      target.route.steering = null
+      recordLandrushIslandNavigationProbe({
+        kind: 'click-waypoint-reached',
+        navigationKind: activeSteering.kind,
+        steeringDistance: roundPerf(steeringDistance),
+      })
+      activeSteering = nextSteering
     }
-    activeSteering = nextSteering
   }
 
+  target.route.steering = activeSteering.doorCrossing ? null : activeSteering
   const movement = resolveLandrushIslandNavigationMovementVector(start, activeSteering, distance)
   const lastSteeringPoint = target.route.lastSteeringPoint
   const steeringPointChanged =
@@ -15364,6 +16492,15 @@ function resolveClickMoveMovement(
       movement.steeringPoint.x - lastSteeringPoint.x,
       movement.steeringPoint.z - lastSteeringPoint.z,
     ) > 0.05
+  if (steeringPointChanged) {
+    recordLandrushIslandNavigationProbe({
+      kind: 'navigation-route-selected',
+      navigationKind: activeSteering.kind,
+      steeringDistance: roundPerf(movement.steeringDistance),
+      steeringPoint: [roundPerf(movement.steeringPoint.x), roundPerf(movement.steeringPoint.z)],
+      target: [roundPerf(navigationTarget.x), roundPerf(navigationTarget.z)],
+    })
+  }
   if (activeSteering.doorId && steeringPointChanged) {
     recordLandrushIslandNavigationProbe({
       doorId: activeSteering.doorId,
@@ -15535,21 +16672,67 @@ function resolveLandrushIslandConstrainedCrossingMovement(
   }
 }
 
+function resolveLandrushIslandDoorExitClearanceSteeringPoint({
+  direction,
+  exit,
+  obstacles,
+  surfacePoints,
+  target,
+}: {
+  direction: LandrushPoint2
+  exit: LandrushPoint2
+  obstacles: readonly LandrushIslandNavigationObstacle[]
+  surfacePoints: readonly LandrushPoint2[]
+  target: LandrushPoint2
+}): LandrushIslandNavigationSteeringResult | null {
+  const tangent = { x: -direction.z, z: direction.x }
+  const targetTangent = (target.x - exit.x) * tangent.x + (target.z - exit.z) * tangent.z
+  const preferredSide = targetTangent < 0 ? -1 : 1
+  let best: { point: LandrushPoint2; score: number } | null = null
+
+  for (const side of [preferredSide, -preferredSide]) {
+    for (const lateral of [0.78, 0.62, 0.46]) {
+      for (const forward of [0.22, 0.4, 0.58]) {
+        const point = {
+          x: exit.x + direction.x * forward + tangent.x * lateral * side,
+          z: exit.z + direction.z * forward + tangent.z * lateral * side,
+        }
+        if (!pointInPolygonOrNearEdge(point, surfacePoints)) continue
+        if (pointInLandrushIslandBlockingNavigationObstacle(point, obstacles)) continue
+        const score =
+          Math.hypot(point.x - target.x, point.z - target.z) +
+          Math.hypot(point.x - exit.x, point.z - exit.z) * 0.2 +
+          (side === preferredSide ? 0 : 0.5)
+        if (!best || score < best.score) best = { point, score }
+      }
+    }
+  }
+
+  return best ? { kind: 'graph', point: best.point } : null
+}
+
 function createLandrushIslandMoveRouteState(
   point: LandrushPoint2,
   distance: number,
   now: number,
   legKey: string,
+  stairConnectorId?: AnyNodeId,
+  steering: LandrushIslandNavigationSteeringResult | null = null,
 ): LandrushIslandMoveRouteState {
   return {
     bestDistance: distance,
+    collisionSlideDirection: null,
+    collisionSlideOrigin: null,
     doorCrossing: null,
     lastProgressAt: now,
     lastRobotPoint: point,
     lastSteeringPoint: null,
     legKey,
     nextRetryAt: 0,
+    nextSteeringResolveAt: 0,
     recoveryCount: 0,
+    stairConnectorId: stairConnectorId ?? null,
+    steering,
   }
 }
 
@@ -15562,6 +16745,7 @@ function updateLandrushIslandMoveRouteProgress(
   if (distance < route.bestDistance - LANDRUSH_ISLAND_CLICK_MOVE_PROGRESS_EPSILON_METERS) {
     route.bestDistance = distance
     route.lastProgressAt = now
+    route.nextRetryAt = 0
   }
   route.lastRobotPoint = route.lastRobotPoint ?? point
   return route
@@ -15602,30 +16786,21 @@ function resolveLandrushIslandActiveDoorCrossingSteering(
     const radius =
       crossing.phase === 'center'
         ? LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS
-        : LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
+        : crossing.phase === 'exit'
+          ? LANDRUSH_ISLAND_CROSSING_EXIT_RADIUS
+          : LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
     const distance = Math.hypot(point.x - start.x, point.z - start.z)
     const reached =
       distance <= radius ||
-      segmentReachedLandrushIslandNavigationPoint(route.lastRobotPoint, start, point, radius)
-    if (!reached) {
-      return {
-        completed: false,
-        steering: {
-          doorCrossing: cloneLandrushIslandDoorCrossingState(crossing),
-          doorId: crossing.doorId,
-          kind: crossing.kind,
-          point,
-        },
-        waiting: false,
-      }
-    }
-
-    if (
+      segmentReachedLandrushIslandNavigationPoint(route.lastRobotPoint, start, point, radius) ||
+      landrushIslandDoorCrossingPhaseReached(start, crossing, radius)
+    const waitingForDoor =
       crossing.kind === 'door' &&
       crossing.doorId &&
-      crossing.phase === 'entry' &&
-      getLandrushIslandDoorOpenRatio(crossing.doorId) < LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN
-    ) {
+      crossing.phase !== 'exit' &&
+      (crossing.phase === 'center' || reached) &&
+      !isLandrushIslandDoorReadyForCrossing(crossing.doorId)
+    if (waitingForDoor && crossing.doorId) {
       const openState = openLandrushIslandDoor(crossing.doorId)
       route.lastProgressAt = now
       route.lastSteeringPoint = point
@@ -15639,6 +16814,18 @@ function resolveLandrushIslandActiveDoorCrossingSteering(
         phase: crossing.phase,
       })
       return { completed: false, steering: null, waiting: true }
+    }
+    if (!reached) {
+      return {
+        completed: false,
+        steering: {
+          doorCrossing: cloneLandrushIslandDoorCrossingState(crossing),
+          doorId: crossing.doorId,
+          kind: crossing.kind,
+          point,
+        },
+        waiting: false,
+      }
     }
 
     route.lastProgressAt = now
@@ -15656,6 +16843,13 @@ function resolveLandrushIslandActiveDoorCrossingSteering(
     const nextPhase = nextLandrushIslandDoorCrossingPhase(crossing.phase)
     if (!nextPhase) {
       route.doorCrossing = null
+      if (crossing.kind === 'door') {
+        route.collisionSlideDirection = normalize2(
+          crossing.exit.x - crossing.entry.x,
+          crossing.exit.z - crossing.entry.z,
+        )
+        route.collisionSlideOrigin = clonePoint2(crossing.exit)
+      }
       recordLandrushIslandNavigationProbe({
         doorId: crossing.doorId,
         kind: `${crossing.kind}-crossing-complete`,
@@ -15683,6 +16877,22 @@ function pointForLandrushIslandDoorCrossingPhase(crossing: LandrushIslandDoorCro
   if (crossing.phase === 'entry') return crossing.entry
   if (crossing.phase === 'center') return crossing.center
   return crossing.exit
+}
+
+function landrushIslandDoorCrossingPhaseReached(
+  point: LandrushPoint2,
+  crossing: LandrushIslandDoorCrossingState,
+  radius: number,
+) {
+  const route = normalize2(crossing.exit.x - crossing.entry.x, crossing.exit.z - crossing.entry.z)
+  const phasePoint = pointForLandrushIslandDoorCrossingPhase(crossing)
+  const progress = (point.x - crossing.entry.x) * route.x + (point.z - crossing.entry.z) * route.z
+  const phaseProgress =
+    (phasePoint.x - crossing.entry.x) * route.x + (phasePoint.z - crossing.entry.z) * route.z
+  const lateral = Math.abs(
+    (point.x - crossing.entry.x) * -route.z + (point.z - crossing.entry.z) * route.x,
+  )
+  return progress >= phaseProgress - radius && lateral <= radius
 }
 
 function nextLandrushIslandDoorCrossingPhase(
@@ -15744,7 +16954,7 @@ function getLandrushIslandDoorOpenRatio(doorId: AnyNodeId) {
   if (isOperationDoorType(node.doorType)) {
     return clamp01(
       interactiveDoor?.operationState ??
-        (activeAnimation?.field === 'operationState' ? activeAnimation.to : undefined) ??
+        (activeAnimation?.field === 'operationState' ? activeAnimation.from : undefined) ??
         node.operationState ??
         0,
     )
@@ -15752,9 +16962,17 @@ function getLandrushIslandDoorOpenRatio(doorId: AnyNodeId) {
 
   return clamp01(
     (interactiveDoor?.swingAngle ??
-      (activeAnimation?.field === 'swingAngle' ? activeAnimation.to : undefined) ??
+      (activeAnimation?.field === 'swingAngle' ? activeAnimation.from : undefined) ??
       node.swingAngle ??
       0) / LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE,
+  )
+}
+
+function isLandrushIslandDoorReadyForCrossing(doorId: AnyNodeId) {
+  const interactive = useInteractive.getState()
+  return (
+    !interactive.doorAnimations[doorId] &&
+    getLandrushIslandDoorOpenRatio(doorId) >= LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN
   )
 }
 
@@ -15955,8 +17173,10 @@ function resolveLandrushIslandNavigationEscapeSteeringPoint(
   surfacePoints: readonly LandrushPoint2[],
   stairPortals: readonly LandrushIslandStairPortal[] = [],
 ): LandrushIslandNavigationSteeringResult | null {
-  for (const obstacle of obstacles) {
-    if (!pointInPolygon(start, obstacle.points)) continue
+  const containingObstacles = new Set(
+    obstacles.filter((obstacle) => pointInPolygon(start, obstacle.points)),
+  )
+  for (const obstacle of containingObstacles) {
     for (const candidate of createLandrushIslandNavigationEscapeCandidates(
       start,
       target,
@@ -15969,7 +17189,7 @@ function resolveLandrushIslandNavigationEscapeSteeringPoint(
           start,
           candidate,
           obstacles,
-          obstacle,
+          containingObstacles,
         )
       ) {
         continue
@@ -16024,10 +17244,18 @@ function landrushIslandNavigationSegmentBlockedByOtherObstacles(
   start: LandrushPoint2,
   end: LandrushPoint2,
   obstacles: readonly LandrushIslandNavigationObstacle[],
-  ignoredObstacle: LandrushIslandNavigationObstacle,
+  ignoredObstacles:
+    | LandrushIslandNavigationObstacle
+    | ReadonlySet<LandrushIslandNavigationObstacle>,
 ) {
   for (const obstacle of obstacles) {
-    if (obstacle === ignoredObstacle) continue
+    if (
+      ignoredObstacles instanceof Set
+        ? ignoredObstacles.has(obstacle)
+        : obstacle === ignoredObstacles
+    ) {
+      continue
+    }
     if (landrushIslandNavigationSegmentIntersectsPolygon(start, end, obstacle.points)) return true
   }
   return false
@@ -17034,7 +18262,7 @@ function createLandrushIslandNavigationObstacles(
 
     const footprint = createLandrushIslandBuildNodeFootprint(
       node,
-      LANDRUSH_ISLAND_NAVIGATION_OBSTACLE_PADDING_METERS,
+      LANDRUSH_ISLAND_NAVIGATION_ASSET_PADDING_METERS,
       nodes,
     )
     if (!footprint) continue
@@ -17050,6 +18278,7 @@ function createLandrushIslandNavigationObstacles(
 
 function createLandrushIslandDoorPortals(
   nodes: Record<string, AnyNode>,
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[] = [],
 ): readonly LandrushIslandDoorPortal[] {
   const portals: LandrushIslandDoorPortal[] = []
   const floorStacks = resolveLandrushIslandFloorStacks(nodes)
@@ -17073,52 +18302,191 @@ function createLandrushIslandDoorPortals(
     if (!wallFrame) continue
 
     const centerX = MathUtils.clamp(node.position[0], 0, wallFrame.length)
-    const crossingDistance = LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS
-    const center = {
+    const doorCenter = {
       x: wall.start[0] + wallFrame.dir.x * centerX,
       z: wall.start[1] + wallFrame.dir.z * centerX,
     }
+    const levelObstacles = navigationObstacles.filter(
+      (obstacle) => obstacle.levelId === levelId && obstacle.kind !== 'stair',
+    )
+    const passage = resolveLandrushIslandDoorPassageLane(
+      doorCenter,
+      wallFrame.dir,
+      wallFrame.normal,
+      node,
+      levelObstacles,
+    )
     portals.push({
       baseY: floorPlacement?.floor.baseY ?? 0,
-      center,
+      center: passage.center,
       doorId: node.id as AnyNodeId,
       halfWidth: Math.max(0.18, node.width / 2),
       levelId,
       normal: wallFrame.normal,
-      sideA: {
-        x: center.x + wallFrame.normal.x * crossingDistance,
-        z: center.z + wallFrame.normal.z * crossingDistance,
-      },
-      sideB: {
-        x: center.x - wallFrame.normal.x * crossingDistance,
-        z: center.z - wallFrame.normal.z * crossingDistance,
-      },
+      sideA: passage.sideA,
+      sideB: passage.sideB,
       tangent: wallFrame.dir,
     })
   }
   return portals
 }
 
+function resolveLandrushIslandDoorPassageCenter(
+  center: LandrushPoint2,
+  tangent: LandrushPoint2,
+  door: Pick<
+    Extract<AnyNode, { type: 'door' }>,
+    'doorType' | 'frameThickness' | 'hingesSide' | 'openingKind' | 'rotation' | 'width'
+  >,
+) {
+  if (door.openingKind === 'opening' || isOperationDoorType(door.doorType)) return center
+
+  const clearHalfWidth = Math.max(0, door.width / 2 - door.frameThickness)
+  const maxOffset = Math.max(
+    0,
+    clearHalfWidth -
+      LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS -
+      LANDRUSH_ISLAND_DOOR_CROSSING_FRAME_MARGIN_METERS,
+  )
+  const latchOffset = Math.min(LANDRUSH_ISLAND_DOOR_CROSSING_LATCH_OFFSET_METERS, maxOffset)
+  const rotationY =
+    ((((door.rotation[1] % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) + 0.000001) %
+    (Math.PI * 2)
+  const planFlipped = rotationY > Math.PI / 2 && rotationY < (Math.PI * 3) / 2
+  const hingeOnLeft = planFlipped ? door.hingesSide === 'right' : door.hingesSide === 'left'
+  const latchSide = hingeOnLeft ? 1 : -1
+
+  // The open leaf occupies the hinge side, so the crossing lane must favor the latch side.
+  return {
+    x: center.x + tangent.x * latchOffset * latchSide,
+    z: center.z + tangent.z * latchOffset * latchSide,
+  }
+}
+
+function resolveLandrushIslandDoorPassageLane(
+  center: LandrushPoint2,
+  tangent: LandrushPoint2,
+  normal: LandrushPoint2,
+  door: Pick<
+    Extract<AnyNode, { type: 'door' }>,
+    'doorType' | 'frameThickness' | 'hingesSide' | 'openingKind' | 'rotation' | 'width'
+  >,
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+) {
+  const preferredCenter = resolveLandrushIslandDoorPassageCenter(center, tangent, door)
+  const preferredOffset =
+    (preferredCenter.x - center.x) * tangent.x + (preferredCenter.z - center.z) * tangent.z
+  const maxOffset = Math.max(
+    0,
+    door.width / 2 -
+      door.frameThickness -
+      LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS -
+      LANDRUSH_ISLAND_DOOR_CROSSING_FRAME_MARGIN_METERS,
+  )
+  const offsets = [
+    preferredOffset,
+    0,
+    -preferredOffset,
+    Math.sign(preferredOffset) * maxOffset,
+    -Math.sign(preferredOffset) * maxOffset,
+  ].filter(
+    (offset, index, values) =>
+      values.findIndex((candidate) => Math.abs(candidate - offset) <= 0.001) === index,
+  )
+
+  let bestLane: {
+    center: LandrushPoint2
+    clearance: number
+    offsetDistance: number
+    sideA: LandrushPoint2
+    sideB: LandrushPoint2
+  } | null = null
+  for (const offset of offsets) {
+    const laneCenter = {
+      x: center.x + tangent.x * offset,
+      z: center.z + tangent.z * offset,
+    }
+    if (pointInLandrushIslandNavigationObstacle(laneCenter, obstacles)) continue
+    const sideA = resolveLandrushIslandDoorPortalSidePoint(laneCenter, normal, 1, obstacles)
+    const sideB = resolveLandrushIslandDoorPortalSidePoint(laneCenter, normal, -1, obstacles)
+    if (!(sideA && sideB)) continue
+    const clearance = Math.min(
+      Math.hypot(sideA.x - laneCenter.x, sideA.z - laneCenter.z),
+      Math.hypot(sideB.x - laneCenter.x, sideB.z - laneCenter.z),
+    )
+    const offsetDistance = Math.abs(offset - preferredOffset)
+    if (
+      !bestLane ||
+      clearance > bestLane.clearance + 0.001 ||
+      (Math.abs(clearance - bestLane.clearance) <= 0.001 &&
+        offsetDistance < bestLane.offsetDistance)
+    ) {
+      bestLane = { center: laneCenter, clearance, offsetDistance, sideA, sideB }
+    }
+  }
+  if (bestLane) return bestLane
+
+  return {
+    center: preferredCenter,
+    sideA: {
+      x: preferredCenter.x + normal.x * LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS,
+      z: preferredCenter.z + normal.z * LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS,
+    },
+    sideB: {
+      x: preferredCenter.x - normal.x * LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS,
+      z: preferredCenter.z - normal.z * LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS,
+    },
+  }
+}
+
+function resolveLandrushIslandDoorPortalSidePoint(
+  center: LandrushPoint2,
+  normal: LandrushPoint2,
+  side: -1 | 1,
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+) {
+  const attempts = Math.ceil(
+    (LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS -
+      LANDRUSH_ISLAND_DOOR_PORTAL_MIN_CLEARANCE_METERS) /
+      LANDRUSH_ISLAND_DOOR_PORTAL_CLEARANCE_STEP_METERS,
+  )
+  for (let attempt = 0; attempt <= attempts; attempt += 1) {
+    const clearance = Math.max(
+      LANDRUSH_ISLAND_DOOR_PORTAL_MIN_CLEARANCE_METERS,
+      LANDRUSH_ISLAND_DOOR_CROSSING_CLEARANCE_METERS -
+        attempt * LANDRUSH_ISLAND_DOOR_PORTAL_CLEARANCE_STEP_METERS,
+    )
+    const point = {
+      x: center.x + normal.x * clearance * side,
+      z: center.z + normal.z * clearance * side,
+    }
+    if (!landrushIslandNavigationSegmentBlocked(center, point, obstacles)) return point
+  }
+  return null
+}
+
 function createLandrushIslandStairPortals(
   nodes: Record<string, AnyNode>,
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[] = [],
 ): readonly LandrushIslandStairPortal[] {
   const portals: LandrushIslandStairPortal[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'stair' || !isLandrushIslandBuildObjectNode(node, nodes)) continue
-    portals.push(...createLandrushIslandStairNavigationPortals(node, nodes))
+    portals.push(...createLandrushIslandStairNavigationPortals(node, nodes, navigationObstacles))
   }
   return portals
 }
 
 function createLandrushIslandStairConnectors(
   nodes: Record<string, AnyNode>,
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[] = [],
 ): readonly LandrushIslandStairConnector[] {
   const connectors: LandrushIslandStairConnector[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'stair' || !isLandrushIslandBuildObjectNode(node, nodes)) continue
     const levels = resolveLandrushIslandStairConnectorLevels(node, nodes)
     if (!levels) continue
-    const portals = createLandrushIslandStairNavigationPortals(node, nodes)
+    const portals = createLandrushIslandStairNavigationPortals(node, nodes, navigationObstacles)
     const firstPortal = portals[0]
     const lastPortal = portals[portals.length - 1]
     if (!(firstPortal && lastPortal)) continue
@@ -17171,6 +18539,7 @@ function createLandrushIslandStairNavigationFootprints(
 function createLandrushIslandStairNavigationPortals(
   stair: LandrushIslandStairNode,
   nodes: Record<string, AnyNode>,
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[] = [],
 ): readonly LandrushIslandStairPortal[] {
   const levelId =
     resolveLandrushIslandNavigationNodeLevelId(stair, nodes) ??
@@ -17181,27 +18550,128 @@ function createLandrushIslandStairNavigationPortals(
     return [createLandrushIslandFallbackStairPortal(stair, levelId)]
   }
 
-  return layouts.map((layout) => {
-    const sideDistance = layout.length / 2 + LANDRUSH_ISLAND_STAIR_CROSSING_CLEARANCE_METERS
-    return {
+  const connectorLevels = resolveLandrushIslandStairConnectorLevels(stair, nodes)
+  return layouts.map((layout, index) => {
+    const sideALevelId =
+      index === layouts.length - 1 ? (connectorLevels?.toLevelId ?? levelId) : levelId
+    const sideBLevelId = index === 0 ? (connectorLevels?.fromLevelId ?? levelId) : levelId
+    const crossingObstacles = navigationObstacles.filter((obstacle) => obstacle.stairId !== stairId)
+    const maxLaneOffset = Math.max(
+      0,
+      layout.width / 2 -
+        LANDRUSH_ISLAND_ROBOT_CONTROLLER_CAPSULE_RADIUS -
+        LANDRUSH_ISLAND_DOOR_CROSSING_FRAME_MARGIN_METERS,
+    )
+    const laneOffsets = [
+      0,
+      maxLaneOffset / 3,
+      -maxLaneOffset / 3,
+      (maxLaneOffset * 2) / 3,
+      (-maxLaneOffset * 2) / 3,
+      maxLaneOffset,
+      -maxLaneOffset,
+    ]
+    let lane:
+      | {
+          center: LandrushPoint2
+          sideA: LandrushPoint2
+          sideB: LandrushPoint2
+        }
+      | undefined
+    for (const offset of laneOffsets) {
+      const laneLayout = {
+        ...layout,
+        center: {
+          x: layout.center.x + layout.tangent.x * offset,
+          z: layout.center.z + layout.tangent.z * offset,
+        },
+      }
+      const sideA = resolveLandrushIslandStairPortalSidePoint({
+        layout: laneLayout,
+        levelId: sideALevelId,
+        navigationObstacles,
+        side: 1,
+      })
+      const sideB = resolveLandrushIslandStairPortalSidePoint({
+        layout: laneLayout,
+        levelId: sideBLevelId,
+        navigationObstacles,
+        side: -1,
+      })
+      if (
+        landrushIslandNavigationSegmentBlocked(laneLayout.center, sideA, crossingObstacles) ||
+        landrushIslandNavigationSegmentBlocked(laneLayout.center, sideB, crossingObstacles)
+      ) {
+        continue
+      }
+      lane = { center: laneLayout.center, sideA, sideB }
+      break
+    }
+    lane ??= {
       center: layout.center,
+      sideA: resolveLandrushIslandStairPortalSidePoint({
+        layout,
+        levelId: sideALevelId,
+        navigationObstacles,
+        side: 1,
+      }),
+      sideB: resolveLandrushIslandStairPortalSidePoint({
+        layout,
+        levelId: sideBLevelId,
+        navigationObstacles,
+        side: -1,
+      }),
+    }
+    return {
+      center: lane.center,
       halfRun: layout.length / 2,
       halfWidth: Math.max(0.2, layout.width / 2),
       levelId,
       nodeId: layout.nodeId,
       normal: layout.normal,
-      sideA: {
-        x: layout.center.x + layout.normal.x * sideDistance,
-        z: layout.center.z + layout.normal.z * sideDistance,
-      },
-      sideB: {
-        x: layout.center.x - layout.normal.x * sideDistance,
-        z: layout.center.z - layout.normal.z * sideDistance,
-      },
+      sideA: lane.sideA,
+      sideB: lane.sideB,
       stairId,
       tangent: layout.tangent,
     }
   })
+}
+
+function resolveLandrushIslandStairPortalSidePoint({
+  layout,
+  levelId,
+  navigationObstacles,
+  side,
+}: {
+  layout: LandrushIslandStairSegmentLayout
+  levelId: LevelNode['id']
+  navigationObstacles: readonly LandrushIslandNavigationObstacle[]
+  side: -1 | 1
+}) {
+  const attempts = Math.ceil(
+    LANDRUSH_ISLAND_STAIR_CROSSING_CLEARANCE_METERS /
+      LANDRUSH_ISLAND_STAIR_PORTAL_CLEARANCE_STEP_METERS,
+  )
+  const levelObstacles = navigationObstacles.filter((obstacle) => obstacle.levelId === levelId)
+
+  for (let attempt = 0; attempt <= attempts; attempt += 1) {
+    const clearance = Math.max(
+      0,
+      LANDRUSH_ISLAND_STAIR_CROSSING_CLEARANCE_METERS -
+        attempt * LANDRUSH_ISLAND_STAIR_PORTAL_CLEARANCE_STEP_METERS,
+    )
+    const sideDistance = layout.length / 2 + clearance
+    const point = {
+      x: layout.center.x + layout.normal.x * sideDistance * side,
+      z: layout.center.z + layout.normal.z * sideDistance * side,
+    }
+    if (!pointInLandrushIslandBlockingNavigationObstacle(point, levelObstacles)) return point
+  }
+
+  return {
+    x: layout.center.x + layout.normal.x * (layout.length / 2) * side,
+    z: layout.center.z + layout.normal.z * (layout.length / 2) * side,
+  }
 }
 
 function createLandrushIslandStraightStairSegmentLayouts(
@@ -17588,6 +19058,7 @@ function resolveLandrushIslandNavigationSteeringPoint(
   doorPortals: readonly LandrushIslandDoorPortal[],
   surfacePoints: readonly LandrushPoint2[],
   stairPortals: readonly LandrushIslandStairPortal[] = [],
+  startDirection?: LandrushPoint2,
 ): LandrushIslandNavigationSteeringResult | null {
   const directPassable = landrushIslandNavigationSegmentPassable(
     start,
@@ -17651,6 +19122,16 @@ function resolveLandrushIslandNavigationSteeringPoint(
     for (let nextIndex = 1; nextIndex < points.length; nextIndex += 1) {
       if (visited.has(nextIndex)) continue
       const next = points[nextIndex]
+      if (currentIndex === 0 && next && startDirection) {
+        const edgeX = next.x - start.x
+        const edgeZ = next.z - start.z
+        if (
+          Math.hypot(edgeX, edgeZ) <= 0.001 ||
+          edgeX * startDirection.x + edgeZ * startDirection.z < -0.001
+        ) {
+          continue
+        }
+      }
       if (
         !next ||
         !landrushIslandNavigationSegmentPassable(current, next, obstacles, surfacePoints)
@@ -17693,6 +19174,13 @@ function resolveLandrushIslandDoorCrossingSteeringPoint(
     const startTangent = tangentLandrushIslandDoorPortalDistance(start, portal)
     const targetTangent = tangentLandrushIslandDoorPortalDistance(target, portal)
     const tangentLimit = portal.halfWidth + LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS
+    const passageLimit =
+      Math.max(
+        Math.abs(signedLandrushIslandDoorPortalDistance(portal.sideA, portal)),
+        Math.abs(signedLandrushIslandDoorPortalDistance(portal.sideB, portal)),
+      ) + LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
+    const startWithinPassage =
+      Math.abs(startSigned) <= passageLimit && Math.abs(startTangent) <= tangentLimit
     const startNearCenter =
       Math.abs(startSigned) <= LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS &&
       Math.abs(startTangent) <= tangentLimit
@@ -17708,15 +19196,23 @@ function resolveLandrushIslandDoorCrossingSteeringPoint(
       continue
     }
 
+    // Proximity to a door cannot imply traversal when the intended segment misses its opening.
+    if (startWithinPassage && !directPathUsesDoor && !targetNearCenter) continue
+
     const crossesDoorPlane =
-      startSigned * targetSigned < 0 || startNearCenter || targetNearCenter || directPathUsesDoor
+      startSigned * targetSigned < 0 ||
+      startWithinPassage ||
+      startNearCenter ||
+      targetNearCenter ||
+      directPathUsesDoor
     if (!crossesDoorPlane) continue
 
     const targetSide = portalSideForSignedDistance(targetSigned)
     const startSide = portalSideForSignedDistance(startSigned) ?? -targetSide
     if (targetSide === 0) continue
+    if (startWithinPassage && startSide === targetSide && !targetNearCenter) continue
 
-    const entrySide = startNearCenter ? -targetSide : startSide || -targetSide
+    const entrySide = startWithinPassage || startNearCenter ? -targetSide : startSide || -targetSide
     const exitSide = targetSide
     const entry = portalPointForSide(portal, entrySide)
     const exit = portalPointForSide(portal, exitSide)
@@ -17738,12 +19234,14 @@ function resolveLandrushIslandDoorCrossingSteeringPoint(
         Math.hypot(target.x - exit.x, target.z - exit.z) <=
         LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS
       if (
+        !startWithinPassage &&
         !startToEntryReached &&
         !landrushIslandNavigationSegmentPassable(start, entry, obstacles, surfacePoints)
       ) {
         continue
       }
       if (
+        !startWithinPassage &&
         !exitToTargetReached &&
         !landrushIslandNavigationSegmentPassable(exit, target, obstacles, surfacePoints)
       ) {
@@ -17947,6 +19445,47 @@ function stairPortalPointForSide(portal: LandrushIslandStairPortal, side: number
   return side >= 0 ? portal.sideA : portal.sideB
 }
 
+function resolveLandrushIslandClickNavigationTarget({
+  currentLevelId,
+  stairConnectors,
+  stairPortals,
+  start,
+  target,
+  targetLevelId,
+}: {
+  currentLevelId: LevelNode['id']
+  stairConnectors: readonly LandrushIslandStairConnector[]
+  stairPortals: readonly LandrushIslandStairPortal[]
+  start: LandrushPoint2
+  target: LandrushPoint2
+  targetLevelId: LevelNode['id']
+}): LandrushPoint2 {
+  if (currentLevelId === targetLevelId) {
+    return resolveLandrushIslandStairConnectorTarget(start, target, stairPortals)
+  }
+
+  let best: { point: LandrushPoint2; score: number } | null = null
+  for (const portal of stairPortals) {
+    const targetSigned = signedLandrushIslandStairPortalDistance(target, portal)
+    const targetTangent = tangentLandrushIslandStairPortalDistance(target, portal)
+    const tangentLimit = portal.halfWidth + LANDRUSH_ISLAND_DOOR_CROSSING_TANGENT_MARGIN_METERS
+    const runLimit = portal.halfRun + LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS
+    if (Math.abs(targetSigned) > runLimit || Math.abs(targetTangent) > tangentLimit) continue
+
+    const connector = stairConnectors.find(
+      (candidate) =>
+        candidate.nodeId === portal.stairId &&
+        (candidate.fromLevelId === targetLevelId || candidate.toLevelId === targetLevelId),
+    )
+    if (!connector) continue
+    const point = connector.toLevelId === targetLevelId ? connector.toPoint : connector.fromPoint
+    const score = Math.abs(targetSigned) + Math.abs(targetTangent)
+    if (!best || score < best.score) best = { point, score }
+  }
+
+  return best?.point ?? target
+}
+
 function resolveLandrushIslandStairConnectorTarget(
   start: LandrushPoint2,
   target: LandrushPoint2,
@@ -18045,9 +19584,9 @@ function nextLandrushIslandDoorCrossingWaypoint(
     (progressFromEntry >= centerFromEntry - LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS &&
       lateralFromRoute <= LANDRUSH_ISLAND_DOOR_CROSSING_CENTER_RADIUS)
   const exitAligned =
-    exitDistance <= LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS ||
-    (progressFromEntry >= routeLength - LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS &&
-      lateralFromRoute <= LANDRUSH_ISLAND_DOOR_CROSSING_WAYPOINT_RADIUS)
+    exitDistance <= LANDRUSH_ISLAND_CROSSING_EXIT_RADIUS ||
+    (progressFromEntry >= routeLength - LANDRUSH_ISLAND_CROSSING_EXIT_RADIUS &&
+      lateralFromRoute <= LANDRUSH_ISLAND_CROSSING_EXIT_RADIUS)
 
   if (!entryAligned) {
     return entry
@@ -18081,41 +19620,46 @@ function collectLandrushIslandNavigationCandidates(
   surfacePoints: readonly LandrushPoint2[],
   stairPortals: readonly LandrushIslandStairPortal[] = [],
 ) {
-  const candidates: LandrushPoint2[] = []
+  const portalCandidates: LandrushPoint2[] = []
   for (const portal of doorPortals) {
     for (const point of [portal.sideA, portal.center, portal.sideB]) {
       if (!pointInPolygon(point, surfacePoints)) continue
       if (pointInLandrushIslandNavigationObstacle(point, obstacles)) continue
-      candidates.push(point)
+      portalCandidates.push(point)
     }
   }
   for (const portal of stairPortals) {
     for (const point of [portal.sideA, portal.center, portal.sideB]) {
       if (!pointInPolygon(point, surfacePoints)) continue
       if (pointInLandrushIslandNavigationObstacle(point, obstacles)) continue
-      candidates.push(point)
+      portalCandidates.push(point)
     }
   }
+  const obstacleCandidates: LandrushPoint2[] = []
   for (const obstacle of obstacles) {
     for (const vertex of obstacle.points) {
-      const candidate = offsetLandrushIslandNavigationCandidate(
+      const candidate = resolveLandrushIslandNavigationCandidate(
         vertex,
         obstacle.points,
-        LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS,
+        obstacles,
+        surfacePoints,
       )
-      if (!pointInPolygon(candidate, surfacePoints)) continue
-      if (pointInLandrushIslandNavigationObstacle(candidate, obstacles)) continue
-      candidates.push(candidate)
+      if (candidate) obstacleCandidates.push(candidate)
     }
   }
 
-  return candidates
-    .sort(
-      (first, second) =>
-        navigationCandidateScore(first, start, target) -
-        navigationCandidateScore(second, start, target),
-    )
-    .slice(0, LANDRUSH_ISLAND_NAVIGATION_MAX_GRAPH_POINTS)
+  const compareCandidateScore = (first: LandrushPoint2, second: LandrushPoint2) =>
+    navigationCandidateScore(first, start, target) - navigationCandidateScore(second, start, target)
+  portalCandidates.sort(compareCandidateScore)
+  obstacleCandidates.sort(compareCandidateScore)
+  const prioritizedPortals = portalCandidates.slice(0, LANDRUSH_ISLAND_NAVIGATION_MAX_GRAPH_POINTS)
+  return [
+    ...prioritizedPortals,
+    ...obstacleCandidates.slice(
+      0,
+      LANDRUSH_ISLAND_NAVIGATION_MAX_GRAPH_POINTS - prioritizedPortals.length,
+    ),
+  ]
 }
 
 function navigationCandidateScore(
@@ -18129,17 +19673,34 @@ function navigationCandidateScore(
   )
 }
 
-function offsetLandrushIslandNavigationCandidate(
+function resolveLandrushIslandNavigationCandidate(
   point: LandrushPoint2,
   polygon: readonly LandrushPoint2[],
-  distance: number,
+  obstacles: readonly LandrushIslandNavigationObstacle[],
+  surfacePoints: readonly LandrushPoint2[],
 ) {
   const centroid = centroidForPolygon(polygon)
   const direction = normalize2(point.x - centroid.x, point.z - centroid.z)
-  return {
-    x: point.x + direction.x * distance,
-    z: point.z + direction.z * distance,
+  const attempts = Math.ceil(
+    (LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS -
+      LANDRUSH_ISLAND_NAVIGATION_VERTEX_MIN_OFFSET_METERS) /
+      LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_STEP_METERS,
+  )
+  for (let attempt = 0; attempt <= attempts; attempt += 1) {
+    const distance = Math.max(
+      LANDRUSH_ISLAND_NAVIGATION_VERTEX_MIN_OFFSET_METERS,
+      LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_METERS -
+        attempt * LANDRUSH_ISLAND_NAVIGATION_VERTEX_OFFSET_STEP_METERS,
+    )
+    const candidate = {
+      x: point.x + direction.x * distance,
+      z: point.z + direction.z * distance,
+    }
+    if (!pointInPolygon(candidate, surfacePoints)) continue
+    if (pointInLandrushIslandNavigationObstacle(candidate, obstacles)) continue
+    return candidate
   }
+  return null
 }
 
 function landrushIslandNavigationSegmentPassable(
@@ -18148,6 +19709,12 @@ function landrushIslandNavigationSegmentPassable(
   obstacles: readonly LandrushIslandNavigationObstacle[],
   surfacePoints: readonly LandrushPoint2[],
 ) {
+  if (pointsAlmostEqual2(start, end)) {
+    return (
+      pointInPolygonOrNearEdge(start, surfacePoints) &&
+      !pointInLandrushIslandNavigationObstacle(start, obstacles)
+    )
+  }
   return (
     landrushIslandNavigationSegmentInSurface(start, end, surfacePoints) &&
     !landrushIslandNavigationSegmentBlocked(start, end, obstacles)
@@ -18333,7 +19900,7 @@ function openLandrushIslandDoor(doorId: AnyNodeId) {
       (activeAnimation?.field === 'operationState' ? activeAnimation.to : undefined) ??
       node.operationState ??
       0
-    if (currentOpenAmount >= 0.82) return 'already-open'
+    if (currentOpenAmount >= LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN) return 'already-open'
     interactive.startDoorAnimation(doorId, {
       durationMs: LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS,
       field: 'operationState',
@@ -18357,7 +19924,12 @@ function openLandrushIslandDoor(doorId: AnyNodeId) {
     (activeAnimation?.field === 'swingAngle' ? activeAnimation.to : undefined) ??
     node.swingAngle ??
     0
-  if (currentSwingAngle >= LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE * 0.82) return 'already-open'
+  if (
+    currentSwingAngle >=
+    LANDRUSH_ISLAND_DOOR_OPEN_SWING_ANGLE * LANDRUSH_ISLAND_DOOR_CROSSING_OPEN_MIN
+  ) {
+    return 'already-open'
+  }
   interactive.startDoorAnimation(doorId, {
     durationMs: LANDRUSH_ISLAND_DOOR_OPEN_ANIMATION_MS,
     field: 'swingAngle',

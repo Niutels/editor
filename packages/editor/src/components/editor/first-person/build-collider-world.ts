@@ -2,6 +2,9 @@ import {
   type AnyNode,
   type AnyNodeId,
   type DoorNode,
+  type FenceNode,
+  getFenceCenterlineFrameAt,
+  getFenceCenterlineLength,
   getGarageVisibleOpeningRatio,
   isOperationDoorType,
   nodeRegistry,
@@ -31,6 +34,7 @@ const LEVEL_FALLBACK_FLOOR_THICKNESS = 0.08
 const LEVEL_FALLBACK_FLOOR_PADDING = 2
 const LEVEL_FALLBACK_FLOOR_MIN_SIZE = 30
 const SITE_GROUND_COLLIDER_MIN_SIZE = 2000
+const FENCE_COLLIDER_MAX_SEGMENT_LENGTH = 0.75
 
 export const FIRST_PERSON_SPAWN_EYE_HEIGHT = SPAWN_EYE_HEIGHT
 
@@ -354,6 +358,35 @@ function createStraightStairRampColliderGeometry(
   return geometry
 }
 
+function createFenceBarrierColliderGeometries(root: THREE.Object3D, fence: FenceNode) {
+  const length = Math.max(0.01, getFenceCenterlineLength(fence))
+  const segmentCount = Math.max(1, Math.ceil(length / FENCE_COLLIDER_MAX_SEGMENT_LENGTH))
+  const height = Math.max(0.08, fence.height)
+  const thickness = Math.max(0.03, fence.thickness)
+  const geometries: THREE.BufferGeometry[] = []
+
+  root.updateWorldMatrix(true, false)
+  for (let index = 0; index < segmentCount; index += 1) {
+    const start = getFenceCenterlineFrameAt(fence, index / segmentCount).point
+    const end = getFenceCenterlineFrameAt(fence, (index + 1) / segmentCount).point
+    const dx = end.x - start.x
+    const dz = end.y - start.y
+    const segmentLength = Math.hypot(dx, dz)
+    if (segmentLength <= 0.0001) continue
+
+    const geometry = createBoxColliderGeometry(segmentLength + thickness, height, thickness)
+    geometry.applyMatrix4(
+      new THREE.Matrix4()
+        .makeRotationY(-Math.atan2(dz, dx))
+        .setPosition((start.x + end.x) / 2, height / 2, (start.y + end.y) / 2),
+    )
+    geometry.applyMatrix4(root.matrixWorld)
+    geometries.push(geometry)
+  }
+
+  return geometries
+}
+
 function collectStraightStairColliderGeometries(
   root: THREE.Object3D,
   stair: StairNode,
@@ -473,7 +506,6 @@ export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonCollider
   for (const nodeId of registeredColliderNodeIds) {
     const node = nodes[nodeId as AnyNodeId]
     if (!node) continue
-
     const root = sceneRegistry.nodes.get(nodeId)
     if (!root) continue
 
@@ -487,6 +519,11 @@ export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonCollider
       if (doorGeometry) {
         geometries.push(doorGeometry)
       }
+      continue
+    }
+
+    if (node.type === 'fence') {
+      geometries.push(...createFenceBarrierColliderGeometries(root, node))
       continue
     }
 
