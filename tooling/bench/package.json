@@ -1,0 +1,10 @@
+{
+  "name": "@pascal/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Perf bench harness: frame attribution, UI-driven scenarios, deterministic replay, verify gates. Driver runs under node (not bun).",
+  "dependencies": {
+    "playwright-core": "^1.50.0"
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Landrush Performance Investigation"
+  short_description: "Diagnose Landrush freezes without profiler bias"
+  default_prompt: "Use $landrush-performance-investigation to diagnose and verify a Landrush performance regression."

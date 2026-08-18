@@ -1,0 +1,51 @@
+Restored Landrush local save (2 parcels, 2 builds, 0 TVs)
+Landrush world multiplayer listening on port 3003
+WebSocket path: /api/landrush-lab/world-multiplayer/ws
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://192.168.1.197:3002
+✓ Ready in 2.1s
+- Experiments (use with caution):
+  · serverActions
+
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1916ms (next.js: 238ms, application-code: 1678ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 757ms (next.js: 20ms, application-code: 737ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+✓ Compiled in 1343ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 349ms (next.js: 300ms, application-code: 49ms)
+✓ Compiled in 747ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 532ms (next.js: 474ms, application-code: 58ms)
+✓ Compiled in 3.2s
+ GET /landrush-lab/pascal-multiplayer-island 200 in 433ms (next.js: 369ms, application-code: 64ms)
+✓ Compiled in 221ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 227ms (next.js: 184ms, application-code: 43ms)
+✓ Compiled in 337ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 455ms (next.js: 409ms, application-code: 46ms)
+✓ Compiled in 738ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 632ms (next.js: 543ms, application-code: 88ms)

@@ -1,0 +1,39 @@
+{
+  "name": "@landrush/pascal-host",
+  "version": "0.1.0",
+  "description": "Landrush composition boundary for the public Pascal editor and viewer APIs",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "check-types": "tsgo --noEmit"
+  },
+  "peerDependencies": {
+    "@landrush/runtime": "*",
+    "@pascal-app/core": "*",
+    "@pascal-app/editor": "*",
+    "@pascal-app/viewer": "*",
+    "react": "^18 || ^19"
+  },
+  "devDependencies": {
+    "@landrush/runtime": "*",
+    "@pascal-app/core": "*",
+    "@pascal-app/editor": "*",
+    "@pascal-app/viewer": "*",
+    "@pascal/typescript-config": "*",
+    "@types/react": "^19.2.2",
+    "react": "^19.2.4",
+    "typescript": "7.0.2"
+  },
+  "private": true
+}

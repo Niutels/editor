@@ -1,0 +1,2868 @@
+Restored Landrush local save (2 parcels, 2 builds, 0 TVs)
+Landrush world multiplayer listening on port 3003
+WebSocket path: /api/landrush-lab/world-multiplayer/ws
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://192.168.1.197:3002
+✓ Ready in 1144ms
+- Experiments (use with caution):
+  · serverActions
+
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 704ms (next.js: 47ms, application-code: 657ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeDom=1&profileRuntimeMetrics=1&disable=postFx 200 in 9.4s (next.js: 3.1s, application-code: 6.3s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 8.8s (next.js: 6.8s, application-code: 2.0s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeDom=1&landrushProbeOutput=interval&profileRuntimeMetrics=1&transitionBlurDebug=contribution 200 in 610ms (next.js: 12ms, application-code: 598ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeDom=1&landrushProbeOutput=interval&profileRuntimeMetrics=1 200 in 465ms (next.js: 12ms, application-code: 453ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeDom=1&landrushProbeOutput=interval&profileRuntimeMetrics=1 200 in 665ms (next.js: 9ms, application-code: 657ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1 200 in 473ms (next.js: 8ms, application-code: 465ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&disable=postFx 200 in 687ms (next.js: 15ms, application-code: 672ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 545ms (next.js: 29ms, application-code: 516ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m1198[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m3158[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m1198[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m3158[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 638ms (next.js: 9ms, application-code: 628ms)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m1146[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m3158[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 764ms (next.js: 15ms, application-code: 749ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m1146[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m3158[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m1146[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m3158[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 5s
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1718ms (next.js: 1450ms, application-code: 268ms)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m1134[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1561[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 2.8s (next.js: 9ms, application-code: 2.7s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 441ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 480ms (next.js: 389ms, application-code: 91ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1651ms (next.js: 10ms, application-code: 1641ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 480ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 861ms (next.js: 682ms, application-code: 179ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET / 200 in 1665ms (next.js: 183ms, application-code: 1483ms)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1 200 in 1525ms (next.js: 19ms, application-code: 1506ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 429ms (next.js: 9ms, application-code: 420ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 3.7s
+✓ Compiled in 1933ms
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 5.1s (next.js: 2.8s, application-code: 2.3s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 5.1s (next.js: 3.1s, application-code: 2.0s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1201ms (next.js: 262ms, application-code: 939ms)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 1212ms (next.js: 441ms, application-code: 772ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 648ms (next.js: 270ms, application-code: 378ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 655ms (next.js: 35ms, application-code: 620ms)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 646ms (next.js: 380ms, application-code: 266ms)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 286ms (next.js: 106ms, application-code: 180ms)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 84ms (next.js: 11ms, application-code: 73ms)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 119ms (next.js: 23ms, application-code: 96ms)
+✓ Compiled in 2.2s
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 7.4s (next.js: 2.6s, application-code: 4.9s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 7.4s (next.js: 3.6s, application-code: 3.8s)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 1ms
+✓ Finished filesystem cache database compaction in 10.1s
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?landrushProbe=1&landrushProbeOutput=dom 200 in 2.2s (next.js: 1797ms, application-code: 376ms)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 21.9s (next.js: 21.8s, application-code: 112ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1 200 in 3.8s (next.js: 18ms, application-code: 3.8s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1125ms (next.js: 19ms, application-code: 1106ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 239ms
+ GET /landrush-lab/pascal-multiplayer-island 200 in 398ms (next.js: 322ms, application-code: 77ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1&benchmark=1&benchPostFx=1 200 in 1793ms (next.js: 9ms, application-code: 1784ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mfalse[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mfalse[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1&benchmark=1&benchPostFx=1 200 in 1500ms (next.js: 13ms, application-code: 1486ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 854ms (next.js: 21ms, application-code: 833ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mfalse[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mfalse[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+✓ Compiled in 1249ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 810ms (next.js: 616ms, application-code: 194ms)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1&benchmark=1&benchPostFx=1 200 in 814ms (next.js: 731ms, application-code: 83ms)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mfalse[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1&benchmark=1 200 in 1918ms (next.js: 7ms, application-code: 1911ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1011ms (next.js: 16ms, application-code: 994ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m816[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&benchGpu=1&benchmark=1&benchPostFx=1&disable=postFx 200 in 859ms (next.js: 16ms, application-code: 844ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m859[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:317:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+✓ Compiled in 380ms
+✓ Finished filesystem cache database compaction in 13.7s
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 733ms (next.js: 438ms, application-code: 295ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 171ms (next.js: 15ms, application-code: 156ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 105ms (next.js: 13ms, application-code: 93ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 105ms (next.js: 50ms, application-code: 55ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 432ms (next.js: 10ms, application-code: 422ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1080ms (next.js: 13ms, application-code: 1067ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1215ms (next.js: 17ms, application-code: 1198ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1281ms (next.js: 78ms, application-code: 1204ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1292ms (next.js: 120ms, application-code: 1172ms)
+✓ Compiled in 741ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 925ms (next.js: 817ms, application-code: 108ms)
+✓ Compiled in 1938ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 913ms (next.js: 792ms, application-code: 121ms)
+✓ Compiled in 559ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 880ms (next.js: 763ms, application-code: 117ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1951ms (next.js: 10ms, application-code: 1942ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m727[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1292[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+✓ Compiled in 8.9s
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 4.3s (next.js: 1148ms, application-code: 3.2s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 4.3s (next.js: 1369ms, application-code: 2.9s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 644ms (next.js: 336ms, application-code: 308ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 651ms (next.js: 510ms, application-code: 140ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 852ms (next.js: 622ms, application-code: 230ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 853ms (next.js: 740ms, application-code: 113ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 452ms (next.js: 223ms, application-code: 229ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 461ms (next.js: 289ms, application-code: 172ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 726ms (next.js: 218ms, application-code: 508ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 723ms (next.js: 302ms, application-code: 421ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 343ms (next.js: 96ms, application-code: 246ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 347ms (next.js: 18ms, application-code: 329ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 167ms (next.js: 20ms, application-code: 147ms)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 645ms (next.js: 34ms, application-code: 611ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 202ms (next.js: 21ms, application-code: 181ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 107ms (next.js: 16ms, application-code: 91ms)
+✓ Finished filesystem cache database compaction in 13.3s
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 4.9s (next.js: 44ms, application-code: 4.9s)
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3002
+- Network:       http://192.168.1.197:3002
+✓ Ready in 2.9s
+- Experiments (use with caution):
+  · serverActions
+
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+○ Compiling /landrush-lab/pascal-multiplayer-island ...
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+[browser] [pascal:registry] loaded pascal:core v1 (47 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap, trees:tree, trees:flower, trees:grass) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 29.7s (next.js: 10.7s, application-code: 18.9s)
+ GET /landrush-lab/pascal-multiplayer-island 200 in 29.7s (next.js: 9.7s, application-code: 20.1s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+ GET /landrush-lab/pascal-multiplayer-island 200 in 1415ms (next.js: 23ms, application-code: 1392ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1850ms (next.js: 42ms, application-code: 1808ms)
+ GET /landrush-lab/pascal-multiplayer-island?profileNoStylizedGround=1 200 in 784ms (next.js: 43ms, application-code: 742ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m867[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m867[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 613ms (next.js: 16ms, application-code: 597ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 518ms (next.js: 10ms, application-code: 507ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 600ms (next.js: 14ms, application-code: 586ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+✓ Compiled in 537ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 494ms (next.js: 422ms, application-code: 72ms)
+✓ Compiled in 468ms
+✓ Finished filesystem cache database compaction in 10.4s
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 301ms (next.js: 250ms, application-code: 51ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 2.7s (next.js: 8ms, application-code: 2.7s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+✓ Finished writing to filesystem cache in 11.6s
+✓ Compiled in 3.1s
+✓ Compiled in 66ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1420ms (next.js: 940ms, application-code: 481ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 339ms (next.js: 16ms, application-code: 323ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 220ms (next.js: 13ms, application-code: 207ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 224ms (next.js: 93ms, application-code: 131ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 4.0s (next.js: 13ms, application-code: 4.0s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 649ms (next.js: 16ms, application-code: 633ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 808ms (next.js: 15ms, application-code: 793ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 822ms (next.js: 224ms, application-code: 598ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 888ms (next.js: 112ms, application-code: 776ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1006ms (next.js: 22ms, application-code: 984ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1180ms (next.js: 342ms, application-code: 838ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1148ms (next.js: 39ms, application-code: 1109ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1117ms (next.js: 276ms, application-code: 841ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 755ms (next.js: 22ms, application-code: 734ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 852ms (next.js: 119ms, application-code: 734ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 937ms (next.js: 112ms, application-code: 824ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 991ms (next.js: 96ms, application-code: 895ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 764ms (next.js: 18ms, application-code: 746ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 548ms (next.js: 96ms, application-code: 452ms)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+✓ Finished filesystem cache database compaction in 18.0s
+✓ Compiled in 1389ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 2.3s (next.js: 1835ms, application-code: 491ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 228ms (next.js: 28ms, application-code: 200ms)
+✓ Compiled in 935ms
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 3.8s (next.js: 2.2s, application-code: 1610ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 3.8s (next.js: 2.4s, application-code: 1402ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 3.8s (next.js: 2.6s, application-code: 1188ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 3.8s (next.js: 2.5s, application-code: 1316ms)
+✓ Compiled in 1711ms
+✓ Finished filesystem cache database compaction in 15.8s
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1073ms (next.js: 48ms, application-code: 1025ms)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 7.7s (next.js: 1346ms, application-code: 6.3s)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 920ms (next.js: 79ms, application-code: 841ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 697ms (next.js: 174ms, application-code: 523ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 716ms (next.js: 40ms, application-code: 677ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+✓ Compiled in 1514ms
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 2.1s (next.js: 1618ms, application-code: 494ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 201ms (next.js: 25ms, application-code: 176ms)
+✓ Compiled in 1689ms
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 2.1s (next.js: 1846ms, application-code: 245ms)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 142ms (next.js: 20ms, application-code: 122ms)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 7.0s (next.js: 179ms, application-code: 6.8s)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 168ms (next.js: 19ms, application-code: 148ms)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m808[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1745[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap)
+[pascal:registry] + 1 discovered plugin(s)
+✓ Compiled in 1598ms
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'clip-distances'[39m,
+    [32m'shader-f16'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m867[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m867[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 16.4s (next.js: 5.0s, application-code: 11.5s)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 503ms (next.js: 81ms, application-code: 422ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 1754ms (next.js: 37ms, application-code: 1717ms)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+[browser] Download the React DevTools for a better development experience: https://react.dev/link/react-devtools
+[browser] [pascal:registry] loaded pascal:core v1 (44 kinds: shelf, spawn, wall, fence, slab, ceiling, door, window, item, column, elevator, roof, roof-segment, stair, stair-segment, zone, site, building, level, guide, scan, landrush-layout, landrush-world, pascal-water, box-vent, ridge-vent, turbine-vent, cupola, eyebrow-vent, chimney, solar-panel, skylight, dormer, gutter, downspout, duct-segment, duct-fitting, duct-terminal, hvac-equipment, lineset, liquid-line, pipe-segment, pipe-fitting, pipe-trap) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:50:15)
+[browser] [pascal:registry] + 1 discovered plugin(s) (../../../../Pascal Optimization/editor/apps/editor/lib/bootstrap.ts:78:13)
+✓ Finished filesystem cache database compaction in 30.2s
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m914[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1599[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer] WebGPU device ready {
+  features: [
+    [32m'depth32float-stencil8'[39m,
+    [32m'rg11b10ufloat-renderable'[39m,
+    [32m'bgra8unorm-storage'[39m,
+    [32m'texture-formats-tier1'[39m,
+    [32m'texture-compression-bc'[39m,
+    [32m'dual-source-blending'[39m,
+    [32m'core-features-and-limits'[39m,
+    [32m'float32-filterable'[39m,
+    [32m'indirect-first-instance'[39m,
+    [32m'float32-blendable'[39m,
+    [32m'depth-clip-control'[39m,
+    [32m'texture-compression-bc-sliced-3d'[39m,
+    [32m'texture-formats-tier2'[39m,
+    [32m'timestamp-query'[39m,
+    [32m'shader-f16'[39m,
+    [32m'clip-distances'[39m,
+    [32m'subgroups'[39m
+  ],
+  label: [32m''[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/index.js:130:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m867[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+[browser] [viewer/post-processing] Building pipeline {
+  denoise: [33mtrue[39m,
+  height: [33m867[39m,
+  outline: [33mtrue[39m,
+  perfDisable: { ao: [33mfalse[39m, denoise: [33mfalse[39m, outline: [33mfalse[39m, postFx: [33mfalse[39m },
+  presentationOnly: [33mtrue[39m,
+  projectId: [32m'pascal-multiplayer-island'[39m,
+  rendererCtor: [32m'WebGPURenderer'[39m,
+  shading: [32m'rendered'[39m,
+  ssgi: [33mtrue[39m,
+  transparentBackground: [33mfalse[39m,
+  version: [33m0[39m,
+  width: [33m1762[39m
+} (../../../../Pascal Optimization/editor/packages/viewer/dist/components/viewer/post-processing.js:320:17)
+✓ Compiled in 4.7s
+ GET /landrush-lab/pascal-multiplayer-island?offline=1&bench=1&frameProfile=1 200 in 2.2s (next.js: 1655ms, application-code: 572ms)
+ GET /landrush-lab/pascal-multiplayer-island?ws=wss%3A%2F%2Flandrush.157-230-223-22.sslip.io%2Fapi%2Flandrush-lab%2Fworld-multiplayer%2Fws 200 in 2.2s (next.js: 2.0s, application-code: 206ms)

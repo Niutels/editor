@@ -1,0 +1,23 @@
+{
+  "name": "@landrush/protocol",
+  "version": "0.1.0",
+  "description": "Versioned wire contracts shared by the Landrush client and multiplayer server",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check src/index.js",
+    "test": "node --test src/index.test.mjs"
+  },
+  "private": true
+}
