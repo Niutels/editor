@@ -1,0 +1,19 @@
+name: Landrush upstream boundary
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Pascal ownership and Landrush imports
+        run: node tooling/landrush/check-upstream-boundary.mjs
