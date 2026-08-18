@@ -3,7 +3,7 @@
 //
 //   node tooling/bench/src/cli.mjs run --scenario orbit-sweep --minutes 2 [--seed 42]
 //        [--page pascal-multiplayer-island] [--headless] [--no-cpuprofile]
-//        [--warmup 20] [--fps-cap 50] [--no-spawn]
+//        [--warmup 20] [--fps-cap 50] [--no-spawn] [--checkpoints]
 //   node tooling/bench/src/cli.mjs report <runDir>          re-evaluate budgets
 //   node tooling/bench/src/cli.mjs replay <runDir> [...]    (phase 5)
 //   node tooling/bench/src/cli.mjs verify <runDir> [...]    (phase 4)
@@ -22,10 +22,11 @@ import {
   writeRunJson,
 } from './artifacts.mjs'
 import { BridgeClient, sleep } from './bridge-client.mjs'
+import { InputDriver } from './input.mjs'
 import { launchBenchBrowser } from './chrome.mjs'
 import { attachPageCapture, BeaconWatchdog } from './detectors.mjs'
 import { buildReport } from './report.mjs'
-import { BASE_URL, ensureServer } from './server.mjs'
+import { BASE_URL, ensureServer, readServerMode } from './server.mjs'
 
 function parseArgs(argv) {
   const [, , verb, ...rest] = argv
@@ -83,6 +84,11 @@ export async function runScenario(args) {
   const warmupSeconds = Number(args.warmup ?? 20)
   const fpsCap = Number(args['fps-cap'] ?? 50)
   const cpuProfile = !args['no-cpuprofile']
+  const frameProfile = !args['no-frame-profile']
+  const gpuProfile = !args['no-gpu-profile']
+  const periodicCheckpoints = Boolean(args.checkpoints)
+  const bridgeFrame = Boolean(args['bridge-frame'])
+  const serverMode = args['server-mode'] ?? 'dev'
 
   const scenario = await loadScenario(scenarioName)
   const { runId, runDir } = createRunDir(scenarioName, seed)
@@ -90,7 +96,13 @@ export async function runScenario(args) {
 
   log(`starting — scenario=${scenarioName} seed=${seed} minutes=${minutes} headless=${headless}`)
   const server = await ensureServer({ repoRoot: REPO_ROOT, runDir, spawnIfMissing: !args['no-spawn'] })
-  log(server.reused ? 'reusing running dev server' : 'spawned dev server')
+  log(server.reused ? `reusing running ${serverMode} server` : 'spawned dev server')
+  const actualServerMode = await readServerMode()
+  if (actualServerMode !== serverMode) {
+    throw new Error(
+      `server mode mismatch: requested ${serverMode}, received ${actualServerMode ?? 'unknown'}`,
+    )
+  }
 
   const framesOut = new JsonlWriter(path.join(runDir, 'frames.jsonl'))
   const eventsOut = new JsonlWriter(path.join(runDir, 'events.jsonl'))
@@ -102,6 +114,15 @@ export async function runScenario(args) {
   try {
     const pageCapture = attachPageCapture(browser.page, eventsOut)
 
+    await browser.cdp.send('Network.enable')
+    await browser.cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
+    for (const origin of [BASE_URL, BASE_URL.replace('localhost', '127.0.0.1')]) {
+      await browser.cdp.send('Storage.clearDataForOrigin', {
+        origin,
+        storageTypes: 'local_storage,indexeddb,cache_storage,service_workers',
+      })
+    }
+
     if (cpuProfile) {
       await browser.cdp.send('Profiler.enable')
       await browser.cdp.send('Profiler.setSamplingInterval', { interval: 1000 })
@@ -109,31 +130,57 @@ export async function runScenario(args) {
     }
 
     const scenarioParams = scenario.urlParams?.({ seed }) ?? ''
-    const url = `${BASE_URL}/landrush-lab/${page}?offline=1&bench=1&frameProfile=1${scenarioParams ? `&${scenarioParams}` : ''}`
+    const url = `${BASE_URL}/landrush-lab/${page}?offline=1&bench=1${frameProfile ? '&frameProfile=1' : ''}${gpuProfile ? '' : '&benchNoGpu=1'}${scenarioParams ? `&${scenarioParams}` : ''}`
     log(`opening ${url}`)
     await browser.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 180_000 })
 
-    const bridge = new BridgeClient(browser.page)
-    const up = await bridge.waitForBridge({ requireProfiler: true })
+    const bridgeTarget = bridgeFrame ? await waitForBenchFrame(browser.page) : browser.page
+    const bridge = new BridgeClient(bridgeTarget)
+    const up = await bridge.waitForBridge({ requireProfiler: frameProfile })
     log(`bridge up at frame ${up.beacon.frameIdx}`)
+
+    if (scenario.prepare) {
+      log('waiting for scenario state')
+      await scenario.prepare({ bridge, page: bridgeTarget, sleep })
+      const ready = (await bridge.beacon()).beacon
+      log(
+        `scenario state ready at frame ${ready?.frameIdx ?? 'unknown'} ` +
+          `(nodes=${ready?.nodeCount ?? 'unknown'}, mode=${ready?.mode ?? 'unknown'}, tool=${ready?.tool ?? 'none'})`,
+      )
+    }
 
     // Warmup: shader/pipeline compiles and dev-mode first-compile jank stay
     // out of the measurement window.
     await sleep(warmupSeconds * 1000)
+    if (scenario.prepare) {
+      await scenario.prepare({ bridge, page: bridgeTarget, sleep })
+    }
+    // Capture replay state before the timed window. Serializing the complete
+    // scene during measurement can itself create the hitch under test.
+    let checkpointCounter = 0
+    const initialCheckpoint = await bridge.getCheckpoint()
+    if (initialCheckpoint) {
+      checkpointCounter += 1
+      writeCheckpoint(runDir, `${checkpointCounter}`.padStart(3, '0'), {
+        frameIdx: (await bridge.beacon()).beacon.frameIdx,
+        checkpoint: initialCheckpoint,
+      })
+    }
     await bridge.mark('measure-start')
     const measureFromFrame = (await bridge.beacon()).beacon.frameIdx
     log(`warmup done — measuring from frame ${measureFromFrame}`)
 
     watchdog = new BeaconWatchdog({
-      page: browser.page,
+      page: bridgeTarget,
+      screenshotPage: browser.page,
       events: eventsOut,
       runDir,
       onAnomaly: (freeze) => log(`FREEZE detected: stall ${freeze.stallMs}ms at frame ${freeze.frameIdx}`),
     }).start()
 
-    // Background pumps: frames/events → JSONL every 2s; checkpoints every 10s.
+    // Background pumps: frames/events → JSONL every 2s. Periodic checkpoints
+    // are opt-in because full-scene serialization perturbs frame timing.
     let pumping = true
-    let checkpointCounter = 0
     const pumpLoop = (async () => {
       let sinceCheckpoint = 0
       while (pumping) {
@@ -145,8 +192,8 @@ export async function runScenario(args) {
             eventsOut.write({ t: performance.now(), type: 'pump-gap', data: { droppedByRing } })
           }
           eventsOut.writeAll(await bridge.pumpEvents())
-          sinceCheckpoint += 2
-          if (sinceCheckpoint >= 10) {
+          if (periodicCheckpoints) sinceCheckpoint += 2
+          if (periodicCheckpoints && sinceCheckpoint >= 10) {
             sinceCheckpoint = 0
             const checkpoint = await bridge.getCheckpoint()
             if (checkpoint) {
@@ -164,10 +211,12 @@ export async function runScenario(args) {
     })()
 
     const rng = createRng(seed)
+    const input = new InputDriver({ cdp: browser.cdp, trace: traceOut, rng })
     const context = {
-      page: browser.page,
+      page: bridgeTarget,
       cdp: browser.cdp,
       bridge,
+      input,
       rng,
       minutes,
       runDir,
@@ -217,7 +266,7 @@ export async function runScenario(args) {
       minutes,
       page,
       url,
-      mode: 'dev',
+      mode: serverMode,
       headless,
       git: gitInfo(),
       serverReused: server.reused,
@@ -227,6 +276,10 @@ export async function runScenario(args) {
       dpr: info?.dpr ?? null,
       fpsCap,
       warmupSeconds,
+      frameProfile,
+      gpuProfile,
+      periodicCheckpoints,
+      bridgeFrame,
       measureFromFrame,
       pageCapture,
       startedAt: new Date().toISOString(),
@@ -249,6 +302,18 @@ export async function runScenario(args) {
     await server.stop()
   }
   return exitCode
+}
+
+async function waitForBenchFrame(page, timeoutMs = 180_000) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    const frame = page
+      .frames()
+      .find((candidate) => candidate !== page.mainFrame() && candidate.url().includes('/landrush-lab/'))
+    if (frame) return frame
+    await sleep(250)
+  }
+  throw new Error('benchmark iframe did not load')
 }
 
 async function reevaluate(args) {

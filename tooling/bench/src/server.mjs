@@ -12,15 +12,36 @@ import path from 'node:path'
 const PORT = Number(process.env.PASCAL_BENCH_PORT ?? 3002)
 export const BASE_URL = process.env.PASCAL_BENCH_URL ?? `http://localhost:${PORT}`
 
-export async function probeServer(timeoutMs = 3000) {
+export async function probeServer(timeoutMs = 30_000) {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
-    const res = await fetch(`${BASE_URL}/`, { signal: controller.signal, redirect: 'manual' })
+    const res = await fetch(`${BASE_URL}/api/health`, {
+      signal: controller.signal,
+      redirect: 'manual',
+    })
     clearTimeout(timer)
     return res.status > 0
   } catch {
     return false
+  }
+}
+
+export async function readServerMode(timeoutMs = 30_000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${BASE_URL}/api/health`, {
+      signal: controller.signal,
+      redirect: 'manual',
+    })
+    if (!res.ok) return null
+    const health = await res.json()
+    return typeof health?.mode === 'string' ? health.mode : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 

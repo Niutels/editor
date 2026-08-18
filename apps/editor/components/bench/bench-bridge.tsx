@@ -120,10 +120,11 @@ const RING_CAPACITY = 4096
 const COLLECTOR_PRIORITY = 100_000
 
 function readBenchParams() {
-  if (typeof window === 'undefined') return { bench: false, spike: false }
+  if (typeof window === 'undefined') return { bench: false, gpu: false, spike: false }
   const params = new URLSearchParams(window.location.search)
   return {
     bench: params.get('bench') === '1',
+    gpu: params.get('benchNoGpu') !== '1',
     spike: params.get('benchGpu') === '1',
   }
 }
@@ -161,7 +162,7 @@ function BenchBridgeCollector() {
     let retry: ReturnType<typeof setTimeout> | null = null
 
     const install = () => {
-      if (cancelled) return
+      if (cancelled || !BENCH_PARAMS.gpu) return
       try {
         timer = createGpuFrameTimer(gl)
         gpuTimerRef.current = timer

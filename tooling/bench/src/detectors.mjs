@@ -9,8 +9,17 @@
 import path from 'node:path'
 
 export class BeaconWatchdog {
-  constructor({ page, events, runDir, freezeThresholdMs = 250, pollMs = 100, onAnomaly }) {
+  constructor({
+    page,
+    screenshotPage = page,
+    events,
+    runDir,
+    freezeThresholdMs = 250,
+    pollMs = 100,
+    onAnomaly,
+  }) {
     this.page = page
+    this.screenshotPage = screenshotPage
     this.events = events
     this.runDir = runDir
     this.freezeThresholdMs = freezeThresholdMs
@@ -98,7 +107,7 @@ export class BeaconWatchdog {
         'screenshots',
         `freeze-${this.freezes.length}-f${frameIdx}.png`,
       )
-      await this.page.screenshot({ path: file, timeout: 5000 })
+      await this.screenshotPage.screenshot({ path: file, timeout: 5000 })
       freeze.screenshot = path.basename(file)
     } catch {
       /* screenshot may fail while frozen — the freeze row still stands */

@@ -123,6 +123,14 @@ export class BridgeClient {
     return this.page.evaluate((p) => window.__PASCAL_BENCH__?.camera.setPose(p) ?? false, pose)
   }
 
+  async setMode(mode) {
+    await this.page.evaluate((value) => window.__PASCAL_BENCH__?.setMode(value), mode)
+  }
+
+  async setTool(tool) {
+    await this.page.evaluate((value) => window.__PASCAL_BENCH__?.setTool(value), tool)
+  }
+
   async profilerFreezeDump() {
     return this.page.evaluate(() => {
       const profiler = window.__LANDRUSH_FRAME_PROFILE__

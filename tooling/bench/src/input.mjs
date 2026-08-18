@@ -146,6 +146,13 @@ export class InputDriver {
   }
 
   async key(name, { modifiers = [], intent } = {}) {
+    await this.keyDown(name, { modifiers, intent })
+    await new Promise((r) => setTimeout(r, 30 + this.rng() * 40))
+    await this.keyUp(name, { modifiers, intent })
+    this.record('key', { key: name, modifiers, intent })
+  }
+
+  async keyDown(name, { modifiers = [], intent } = {}) {
     const def = keyDef(name)
     const bits = modifiers.reduce((acc, m) => acc | (MODIFIER_BITS[m] ?? 0), 0)
     await this.cdp.send('Input.dispatchKeyEvent', {
@@ -157,7 +164,12 @@ export class InputDriver {
       modifiers: bits,
       text: bits & MODIFIER_BITS.ctrl ? undefined : def.text,
     })
-    await new Promise((r) => setTimeout(r, 30 + this.rng() * 40))
+    this.record('keyDown', { key: name, modifiers, intent })
+  }
+
+  async keyUp(name, { modifiers = [], intent } = {}) {
+    const def = keyDef(name)
+    const bits = modifiers.reduce((acc, m) => acc | (MODIFIER_BITS[m] ?? 0), 0)
     await this.cdp.send('Input.dispatchKeyEvent', {
       type: 'keyUp',
       key: def.key,
@@ -166,6 +178,6 @@ export class InputDriver {
       nativeVirtualKeyCode: def.vk,
       modifiers: bits,
     })
-    this.record('key', { key: name, modifiers, intent })
+    this.record('keyUp', { key: name, modifiers, intent })
   }
 }

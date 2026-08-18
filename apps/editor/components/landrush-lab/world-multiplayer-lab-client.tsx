@@ -3936,7 +3936,7 @@ function readOfflineParcelWorldState(worldId: string | null) {
   }
 }
 
-function writeOfflineParcelWorldState(
+export function writeOfflineParcelWorldState(
   worldId: string,
   ownerships: readonly ParcelOwnership[],
   builds: readonly ParcelBuildNodesSnapshot[],
