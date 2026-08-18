@@ -1,0 +1,90 @@
+name: Publish Landrush site
+
+on:
+  push:
+    branches:
+      - pascal-landrush
+  workflow_dispatch:
+
+concurrency:
+  group: publish-landrush-site-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'Niutels/editor'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout editor
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install editor dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare build environment
+        run: touch .env.local
+
+      - name: Build editor Landrush routes
+        run: bun run build --filter landrush
+
+      - name: Checkout Landrush site
+        uses: actions/checkout@v4
+        with:
+          repository: Niutels/landrush-site
+          ref: main
+          path: landrush-site
+          token: ${{ secrets.LANDRUSH_SITE_PUSH_TOKEN }}
+
+      - name: Refresh Landrush static bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          site="landrush-site"
+
+          rm -rf "$site/_next" "$site/landrush-lab" "$site/navigation" "$site/audios"
+          mkdir -p "$site/_next"
+
+          cp -R apps/landrush/.next/static "$site/_next/static"
+          cp -R apps/landrush/public/landrush-lab "$site/landrush-lab"
+          cp -R apps/landrush/public/navigation "$site/navigation"
+          cp -R apps/landrush/public/audios "$site/audios"
+
+          for route in pascal-multiplayer-island pascal-multiplayer-island-bug-report pascal-multiplayer-island-navigation-debug pascal-multiplayer-island-water-debug; do
+            mkdir -p "$site/landrush-lab/$route"
+            cp "apps/landrush/.next/server/app/landrush-lab/$route.html" "$site/landrush-lab/$route/index.html"
+          done
+
+      - name: Validate Landrush site
+        working-directory: landrush-site
+        run: |
+          npm run check
+          npm run build
+
+      - name: Commit and push Landrush site
+        working-directory: landrush-site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No Landrush site changes to publish."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit \
+            -m "Publish Landrush from editor ${GITHUB_SHA::7}" \
+            -m "Source: Niutels/editor@${GITHUB_SHA}"
+          git push origin main
