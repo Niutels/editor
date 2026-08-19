@@ -59,5 +59,6 @@ benchmarks and verify a cold first load before pushing the merge.
 - One canvas is a hard contract; package separation does not create separate scenes or render loops.
 - Landrush node kinds use Pascal `NodeDefinition` registration instead of union edits or legacy dispatch.
 - Public package exports are the only coupling surface. Missing capability is handled in the adapter or proposed upstream as a public extension point.
+- The Pascal site root remains valid scene data; the host adapter suppresses only its unregistered standalone-ground presentation so it cannot cover Landrush's ocean or construction children.
 - Parcel builds are server-authoritative snapshots with `schemaVersion`, monotonic `revision`, and idempotent `operationId`; stale writes receive the current snapshot and retry in order.
 - The pinned commit is evidence of what was integrated, not a forked copy to edit. New Landrush behavior belongs in Landrush-owned paths.

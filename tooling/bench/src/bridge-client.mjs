@@ -93,6 +93,10 @@ export class BridgeClient {
     return this.page.evaluate(() => window.__PASCAL_BENCH__?.digest() ?? null)
   }
 
+  async renderRegistry() {
+    return this.page.evaluate(() => window.__PASCAL_BENCH__?.renderRegistry() ?? null)
+  }
+
   async getCheckpoint() {
     return this.page.evaluate(() => window.__PASCAL_BENCH__?.getCheckpoint() ?? null)
   }

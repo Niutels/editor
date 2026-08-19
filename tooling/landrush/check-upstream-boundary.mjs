@@ -80,6 +80,29 @@ for (const path of landrushFiles) {
   }
 }
 
+const runtimeRoot = 'packages/landrush-runtime/'
+const publicPascalImport = /(?:from\s*|import\s*\()\s*['"]@pascal-app\//
+for (const path of landrushFiles.filter((path) => path.startsWith(runtimeRoot))) {
+  if (publicPascalImport.test(readFileSync(join(repositoryRoot, path), 'utf8'))) {
+    violations.push(`Pascal-independent Landrush runtime imports Pascal: ${path}`)
+  }
+}
+
+const runtimeManifest = JSON.parse(
+  readFileSync(join(repositoryRoot, runtimeRoot, 'package.json'), 'utf8'),
+)
+for (const dependencyGroup of [
+  runtimeManifest.dependencies,
+  runtimeManifest.devDependencies,
+  runtimeManifest.peerDependencies,
+]) {
+  for (const dependency of Object.keys(dependencyGroup ?? {})) {
+    if (dependency.startsWith('@pascal-app/')) {
+      violations.push(`Pascal-independent Landrush runtime declares Pascal dependency: ${dependency}`)
+    }
+  }
+}
+
 const labRoot = join(repositoryRoot, 'apps/landrush/app/landrush-lab')
 const allowedPageRoutes = new Set([
   'pascal-multiplayer-island',

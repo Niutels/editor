@@ -13,8 +13,29 @@ export const landrushPlugin: Plugin = {
   ],
 }
 
-export { landrushLayoutDefinition, LandrushLayoutNode } from './landrush-layout'
-export { landrushWorldDefinition, LandrushWorldNode } from './landrush-world'
+export { LandrushLayoutNode, landrushLayoutDefinition } from './landrush-layout'
+export { LandrushWorldNode, landrushWorldDefinition } from './landrush-world'
+export {
+  blendStylizedGroundPathColor,
+  byte255 as stylizedGroundByte255,
+  createStylizedPathGrid,
+  mixRgbBytes as mixStylizedGroundRgbBytes,
+  STYLIZED_PATH_EDGE_FEATHER_METERS,
+  STYLIZED_PATH_EDGE_NOISE_METERS,
+  STYLIZED_PATH_SIDEWALK_SEAM_METERS,
+  STYLIZED_PATH_SIDEWALK_WIDTH_METERS,
+  STYLIZED_PATH_WIDTH_SCALE,
+  type StylizedGroundPoint2,
+  type StylizedGroundRgbByte,
+  type StylizedGroundRoadSegment,
+  type StylizedPathGrid,
+  sampleMaskRgba as sampleStylizedGroundMaskRgba,
+  stylizedPathOuterCurbShadowFromDistance,
+  stylizedPathSignedDistance,
+  stylizedPathWeightFromDistance,
+  stylizedStonePathColor,
+} from './landrush-world/stylized-ground-path'
+export { createStylizedGroundTextureFromCanvas } from './landrush-world/stylized-ground-texture'
 export {
   createLandrushWaterBodyMaterial,
   LANDRUSH_WATER_BODY_SURFACE_PARAMETERS,
@@ -39,11 +60,27 @@ export {
   pascalWaterDefinition,
   setPascalWaterMaterialParameters,
 } from './pascal-water'
-export { PascalWaterNode } from './pascal-water/schema'
+export {
+  PASCAL_WATER_ELEVATION_PARAMETER_DEFAULTS,
+  PascalWaterNode,
+} from './pascal-water/schema'
 export {
   createPascalWaterCliffRingGeometry,
   createPascalWaterLandSurface,
   PASCAL_WATER_LOW_ELEVATION,
+  type PascalWaterElevationParameters,
   type PascalWaterLandSurface,
 } from './pascal-water/surface-geometry'
-export { createPascalWaterSmoothedPerimeter } from './pascal-water/water-field'
+export {
+  createPascalWaterDepthReferencePerimeter,
+  createPascalWaterFieldTexture,
+  createPascalWaterFieldTextureData,
+  createPascalWaterFieldTextureFromData,
+  createPascalWaterSmoothedPerimeter,
+  PASCAL_WATER_FIELD_DEFAULT_PARAMETERS,
+  PASCAL_WATER_FIELD_DEPTH_REFERENCE_REACH,
+  PASCAL_WATER_FIELD_RESOLUTION,
+  type PascalWaterFieldParameters,
+  type PascalWaterFieldTextureData,
+  type PascalWaterPoint2,
+} from './pascal-water/water-field'

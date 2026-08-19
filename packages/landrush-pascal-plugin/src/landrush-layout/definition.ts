@@ -6,6 +6,7 @@ export const landrushLayoutDefinition: NodeDefinition<typeof LandrushLayoutNode>
   schemaVersion: 1,
   schema: LandrushLayoutNode,
   category: 'site',
+  dirtyTracking: false,
 
   defaults: () => {
     const stub = LandrushLayoutNode.parse({

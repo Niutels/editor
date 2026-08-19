@@ -1,7 +1,7 @@
 {
   "name": "@landrush/runtime",
   "version": "0.1.0",
-  "description": "Landrush game runtime and Pascal host adapters",
+  "description": "Pascal-independent Landrush game runtime",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -16,20 +16,20 @@
     "README.md"
   ],
   "scripts": {
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "bun test src"
   },
   "peerDependencies": {
-    "@pascal-app/core": "^1.0.0-beta.5",
     "@react-three/drei": "^10",
     "@react-three/fiber": "^9",
     "react": "^18 || ^19",
     "three": "^0.185"
   },
   "dependencies": {
+    "@landrush/protocol": "*",
     "three-mesh-bvh": "~0.9.8"
   },
   "devDependencies": {
-    "@pascal-app/core": "*",
     "@pascal/typescript-config": "*",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",

@@ -16,11 +16,12 @@
 //   GPU  — WebGPU timestamp queries per pass (gpu-frame-timer.ts), with
 //          onSubmittedWorkDone as an advisory upper bound.
 
-import { emitter, nodeRegistry, useScene } from '@pascal-app/core'
+import { emitter, nodeRegistry, sceneRegistry, useScene } from '@pascal-app/core'
 import { useEditor, useFloorplanDraftPreview } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
+import { Box3, type Material, type Object3D } from 'three'
 import type {
   LandrushFrameProfileApi,
   LandrushFrameProfileFrameSummary,
@@ -92,6 +93,7 @@ type BenchGlobal = {
   getEventsPacked(cursor: number): string
   mark(label: string): void
   digest(): BenchDigest
+  renderRegistry(): Record<string, unknown>
   getCheckpoint(): BenchCheckpoint
   restoreCheckpoint(cp: BenchCheckpoint): Promise<{ settledAtFrame: number; timedOut: boolean }>
   waitForSettle(opts?: { stableFrames?: number; timeoutMs?: number }): Promise<{
@@ -118,6 +120,20 @@ declare global {
 
 const RING_CAPACITY = 4096
 const COLLECTOR_PRIORITY = 100_000
+const RENDER_REGISTRY_SAMPLE_TYPES = new Set([
+  'building',
+  'ceiling',
+  'door',
+  'item',
+  'level',
+  'roof',
+  'roof-segment',
+  'slab',
+  'stair-segment',
+  'stairs',
+  'wall',
+  'window',
+])
 
 function readBenchParams() {
   if (typeof window === 'undefined') return { bench: false, gpu: false, spike: false }
@@ -133,6 +149,155 @@ const BENCH_PARAMS = readBenchParams()
 
 export function isBenchEnabled() {
   return BENCH_PARAMS.bench || BENCH_PARAMS.spike
+}
+
+function objectVisibility(object: Object3D) {
+  let current: Object3D | null = object
+  while (current) {
+    if (!current.visible) {
+      return {
+        effectivelyVisible: false,
+        hiddenObject: {
+          name: current.name || null,
+          type: current.type,
+          uuid: current.uuid,
+        },
+      }
+    }
+    current = current.parent
+  }
+  return { effectivelyVisible: true, hiddenObject: null }
+}
+
+function materialCanRender(material: Material) {
+  return material.visible && material.opacity > 0.001
+}
+
+function computeRenderRegistryDigest() {
+  const sceneNodes = useScene.getState().nodes as Record<
+    string,
+    { id?: string; type?: string } | undefined
+  >
+  const registeredKinds: Record<string, number> = {}
+  const mountedKinds: Record<string, number> = {}
+  const effectivelyVisibleKinds: Record<string, number> = {}
+  const rootsWithMeshesByKind: Record<string, number> = {}
+  const rootsWithRenderableMeshesByKind: Record<string, number> = {}
+  const aggregateBounds = new Map<string, Box3>()
+  const samples: Record<string, Record<string, unknown>[]> = {}
+  const sitePresentation: Record<string, unknown>[] = []
+
+  for (const [type, ids] of Object.entries(sceneRegistry.byType)) {
+    if (ids) registeredKinds[type] = ids.size
+  }
+
+  for (const [nodeId, object] of sceneRegistry.nodes) {
+    const id = String(nodeId)
+    const type = sceneNodes[id]?.type ?? 'unknown'
+    mountedKinds[type] = (mountedKinds[type] ?? 0) + 1
+
+    const visibility = objectVisibility(object)
+    if (visibility.effectivelyVisible) {
+      effectivelyVisibleKinds[type] = (effectivelyVisibleKinds[type] ?? 0) + 1
+    }
+
+    let meshCount = 0
+    let renderableMeshCount = 0
+    object.traverse((child) => {
+      const mesh = child as Object3D & { isMesh?: boolean; material?: Material | Material[] }
+      if (!mesh.isMesh) return
+      meshCount += 1
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      if (
+        objectVisibility(mesh).effectivelyVisible &&
+        materials.some((material) => material && materialCanRender(material))
+      ) {
+        renderableMeshCount += 1
+      }
+    })
+    if (meshCount > 0) rootsWithMeshesByKind[type] = (rootsWithMeshesByKind[type] ?? 0) + 1
+    if (renderableMeshCount > 0) {
+      rootsWithRenderableMeshesByKind[type] = (rootsWithRenderableMeshesByKind[type] ?? 0) + 1
+    }
+
+    object.updateWorldMatrix(true, true)
+    const bounds = new Box3().setFromObject(object, true)
+    if (!bounds.isEmpty()) {
+      const kindBounds = aggregateBounds.get(type) ?? new Box3()
+      kindBounds.union(bounds)
+      aggregateBounds.set(type, kindBounds)
+    }
+
+    if (RENDER_REGISTRY_SAMPLE_TYPES.has(type) && (samples[type]?.length ?? 0) < 2) {
+      const entries = samples[type] ?? []
+      entries.push({
+        bounds: bounds.isEmpty() ? null : { min: bounds.min.toArray(), max: bounds.max.toArray() },
+        effectivelyVisible: visibility.effectivelyVisible,
+        hiddenObject: visibility.hiddenObject,
+        id,
+        meshCount,
+        objectType: object.type,
+        parentChain: collectParentChain(object),
+        renderableMeshCount,
+        selfVisible: object.visible,
+        worldPosition: object.getWorldPosition(object.position.clone()).toArray(),
+      })
+      samples[type] = entries
+    }
+
+    if (type === 'site') {
+      const semanticChildObjects = (sceneNodes[id] as { children?: string[] } | undefined)?.children
+        ?.map((childId) => sceneRegistry.nodes.get(childId))
+        .filter((child): child is Object3D => Boolean(child))
+      const presentationChildren = object.children.filter(
+        (directChild) =>
+          !semanticChildObjects?.some((semanticChild) =>
+            objectIsWithin(semanticChild, directChild),
+          ),
+      )
+      sitePresentation.push({
+        id,
+        presentationChildCount: presentationChildren.length,
+        visiblePresentationChildCount: presentationChildren.filter((child) => child.visible).length,
+      })
+    }
+  }
+
+  return {
+    boundsByKind: Object.fromEntries(
+      Array.from(aggregateBounds, ([type, bounds]) => [
+        type,
+        { min: bounds.min.toArray(), max: bounds.max.toArray() },
+      ]),
+    ),
+    effectivelyVisibleKinds,
+    mountedKinds,
+    mountedNodeCount: sceneRegistry.nodes.size,
+    registeredKinds,
+    rootsWithMeshesByKind,
+    rootsWithRenderableMeshesByKind,
+    samples,
+    sitePresentation,
+  }
+}
+
+function objectIsWithin(object: Object3D, ancestor: Object3D) {
+  let current: Object3D | null = object
+  while (current) {
+    if (current === ancestor) return true
+    current = current.parent
+  }
+  return false
+}
+
+function collectParentChain(object: Object3D) {
+  const chain: { name: string | null; type: string; visible: boolean }[] = []
+  let current: Object3D | null = object
+  while (current && chain.length < 8) {
+    chain.push({ name: current.name || null, type: current.type, visible: current.visible })
+    current = current.parent
+  }
+  return chain
 }
 
 function BenchBridgeCollector() {
@@ -286,6 +451,7 @@ function BenchBridgeCollector() {
         eventTapRef.current?.push('mark', { label })
       },
       digest: () => computeSceneDigest(),
+      renderRegistry: () => computeRenderRegistryDigest(),
       getCheckpoint: () => captureCheckpoint(cameraRef.current, controlsRef.current),
       restoreCheckpoint: async (cp) => {
         restoreCheckpointState(cp, cameraRef.current, controlsRef.current)

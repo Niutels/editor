@@ -1,5 +1,6 @@
 import { BaseNode, nodeType, objectId } from '@pascal-app/core'
 import { z } from 'zod'
+import { PASCAL_WATER_FIELD_DEFAULT_PARAMETERS } from './water-field'
 
 const PascalWaterPoint2 = z.object({
   x: z.number(),
@@ -39,23 +40,6 @@ const PascalWaterFieldParameters = z.object({
   shoreNoiseFrequency: z.number().default(0.075),
   shoreVariationMeters: z.number().default(0.85),
 })
-
-const PASCAL_WATER_FIELD_PARAMETER_DEFAULTS = {
-  depthContourCollapseMeters: 10.3,
-  depthContourCollapseScale: 1.25,
-  depthContourNoiseFrequency: 0.1,
-  depthContourOffsetMeters: 2.6,
-  depthContourVariationMeters: 8.6,
-  depthExponent: 0.52,
-  depthNoiseFrequency: 0.03,
-  depthNoiseStrength: 0,
-  depthReach: 15,
-  edgeFadeDistance: 18,
-  shoreBandMeters: 0,
-  shoreFeatherMeters: 0.45,
-  shoreNoiseFrequency: 0.075,
-  shoreVariationMeters: 0.85,
-}
 
 const PascalWaterElevationParameters = z.object({
   cliffAverageSlope: z.number().default(0.42),
@@ -123,7 +107,7 @@ const PascalWaterElevationParameters = z.object({
   outerContourMeters: z.number().default(0),
 })
 
-const PASCAL_WATER_ELEVATION_PARAMETER_DEFAULTS = {
+export const PASCAL_WATER_ELEVATION_PARAMETER_DEFAULTS = {
   cliffAverageSlope: 0.42,
   cliffBandMergeThresholdMeters: 3.6,
   cliffBlockDepthMaxMeters: 2.1,
@@ -207,7 +191,7 @@ export const PascalWaterNode = BaseNode.extend({
     bounds: { minX: -50, maxX: 50, minZ: -50, maxZ: 50, width: 100, depth: 100 },
     closed: true,
   }),
-  fieldParameters: PascalWaterFieldParameters.default(PASCAL_WATER_FIELD_PARAMETER_DEFAULTS),
+  fieldParameters: PascalWaterFieldParameters.default(PASCAL_WATER_FIELD_DEFAULT_PARAMETERS),
   elevationParameters: PascalWaterElevationParameters.default(
     PASCAL_WATER_ELEVATION_PARAMETER_DEFAULTS,
   ),

@@ -182,6 +182,11 @@ export async function runScenario(args) {
         checkpoint: initialCheckpoint,
       })
     }
+    // Checkpoint serialization can leave one delayed rAF behind it. Keep that
+    // recovery frame outside the timed window so the harness cannot report its
+    // own replay capture as an application freeze.
+    await sleep(1000)
+    await bridge.waitForSettle({ stableFrames: 10, timeoutMs: 10_000 })
     await bridge.mark('measure-start')
     const measureFromFrame = (await bridge.beacon()).beacon.frameIdx
     log(`warmup done — measuring from frame ${measureFromFrame}`)

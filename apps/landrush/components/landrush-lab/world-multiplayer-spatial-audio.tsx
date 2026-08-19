@@ -1,13 +1,16 @@
 'use client'
 
+import {
+  isSpatialVoiceSignalPayload,
+  type LocalPlayerProfile,
+  type MultiplayerPlayerSnapshot,
+  type SpatialVoiceSignalMessage,
+  type SpatialVoiceSignalPayload,
+} from '@landrush/protocol'
+import type { RemotePresentationStore } from '@landrush/runtime'
 import { Mic, MicOff } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Vector3 } from 'three'
-import type {
-  LocalPlayerProfile,
-  MultiplayerPlayerSnapshot,
-  MultiplayerRemotePlayerStore,
-} from './world-multiplayer-lab-client'
 
 declare global {
   interface Window {
@@ -16,17 +19,7 @@ declare global {
   }
 }
 
-export type SpatialVoiceSignalPayload =
-  | { description: RTCSessionDescriptionInit; type: 'description' }
-  | { candidate: RTCIceCandidateInit; type: 'ice-candidate' }
-  | { type: 'disconnect' }
-  | { type: 'ready' }
-
-export type SpatialVoiceSignalMessage = {
-  from: string
-  sequence?: number
-  signal: SpatialVoiceSignalPayload
-}
+type MultiplayerRemotePlayerStore = RemotePresentationStore<MultiplayerPlayerSnapshot>
 
 export type SpatialVoiceStatus = 'idle' | 'starting' | 'live' | 'error' | 'unsupported'
 
@@ -392,12 +385,8 @@ export function useLandrushSpatialVoice({
           if (description.type === 'offer') {
             await connection.setLocalDescription()
             const localDescription = connection.localDescription
-            if (localDescription) {
-              sendSignalRef.current(message.from, {
-                description: localDescription.toJSON(),
-                type: 'description',
-              })
-            }
+            const signal = createSpatialVoiceDescriptionSignal(localDescription)
+            if (signal) sendSignalRef.current(message.from, signal)
           }
           return
         }
@@ -748,18 +737,6 @@ export function SpatialVoiceControl({ voice }: { voice: SpatialVoiceController }
   )
 }
 
-export function isSpatialVoiceSignalPayload(value: unknown): value is SpatialVoiceSignalPayload {
-  const signal = value as SpatialVoiceSignalPayload
-  if (signal?.type === 'disconnect') return true
-  if (signal?.type === 'ready') return true
-  if (signal?.type === 'ice-candidate') return Boolean(signal.candidate)
-  return (
-    signal?.type === 'description' &&
-    (signal.description?.type === 'offer' || signal.description?.type === 'answer') &&
-    typeof signal.description.sdp === 'string'
-  )
-}
-
 async function flushPendingIceCandidates(peer: VoicePeer) {
   const pendingCandidates = peer.pendingIceCandidates.splice(0)
   for (const candidate of pendingCandidates) {
@@ -854,17 +831,27 @@ async function createAndSendDescription(
     peer.makingOffer = true
     await peer.connection.setLocalDescription()
     const localDescription = peer.connection.localDescription
-    if (localDescription) {
-      sendSignal(peer.id, {
-        description: localDescription.toJSON(),
-        type: 'description',
-      })
-    }
+    const signal = createSpatialVoiceDescriptionSignal(localDescription)
+    if (signal) sendSignal(peer.id, signal)
   } catch {
     // Negotiation can be superseded by an incoming polite offer.
   } finally {
     peer.makingOffer = false
   }
+}
+
+function createSpatialVoiceDescriptionSignal(
+  description: RTCSessionDescription | null,
+): SpatialVoiceSignalPayload | null {
+  const value = description?.toJSON()
+  if (
+    !value ||
+    (value.type !== 'offer' && value.type !== 'answer') ||
+    typeof value.sdp !== 'string'
+  ) {
+    return null
+  }
+  return { description: { sdp: value.sdp, type: value.type }, type: 'description' }
 }
 
 function connectPeerAudio(peer: VoicePeer, audioContext: AudioContext | null) {

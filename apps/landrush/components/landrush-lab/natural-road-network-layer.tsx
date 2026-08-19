@@ -1,5 +1,10 @@
 'use client'
 
+import {
+  countWorldPolygonSurfaceTriangles,
+  createWorldPolygonBoundaryWallsGeometry,
+  createWorldPolygonSurfaceGeometry,
+} from '@landrush/runtime'
 import polygonClipping, {
   type MultiPolygon,
   type Pair,
@@ -7,14 +12,7 @@ import polygonClipping, {
   type Ring,
 } from 'polygon-clipping'
 import { useEffect, useMemo } from 'react'
-import {
-  BufferGeometry,
-  Color,
-  DoubleSide,
-  Float32BufferAttribute,
-  ShapeUtils,
-  Vector2,
-} from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
 import type { LandrushPoint2, LandrushRoadSegment, LandrushVec3 } from '@/components/landrush/types'
 import {
   STYLIZED_PATH_OUTER_CURB_COLOR,
@@ -816,104 +814,20 @@ function layeredSurfaceGeometry(
   y: number,
   role: string,
 ) {
-  const geometry = new BufferGeometry()
-  const positions: number[] = []
-  const indices: number[] = []
-  const colors: number[] = []
-  const usesVertexColors = layers.some((layer) => layer.color !== undefined)
-
-  for (const layer of layers) {
-    const layerColor = layer.color ? new Color(layer.color) : null
-    for (const polygon of layer.area) {
-      const rings = polygon.map(openRing).filter((ring): ring is Ring => ring.length >= 3)
-      const contourRing = rings[0]
-      if (!contourRing) continue
-      const contour = contourRing.map(([x, z]) => new Vector2(x, z))
-      const holes = rings.slice(1).map((ring) => ring.map(([x, z]) => new Vector2(x, z)))
-      const faces = ShapeUtils.triangulateShape(contour, holes)
-      const flattened = [contourRing, ...rings.slice(1)].flat()
-      const vertexOffset = positions.length / 3
-      for (const [x, z] of flattened) {
-        positions.push(x, y, z)
-        if (usesVertexColors) {
-          colors.push(layerColor?.r ?? 1, layerColor?.g ?? 1, layerColor?.b ?? 1)
-        }
-      }
-
-      for (const face of faces) {
-        const [a, b, c] = face
-        if (a === undefined || b === undefined || c === undefined) continue
-        const pointA = flattened[a]
-        const pointB = flattened[b]
-        const pointC = flattened[c]
-        if (!(pointA && pointB && pointC)) continue
-        const signedArea =
-          (pointB[0] - pointA[0]) * (pointC[1] - pointA[1]) -
-          (pointB[1] - pointA[1]) * (pointC[0] - pointA[0])
-        if (signedArea < 0) {
-          indices.push(vertexOffset + a, vertexOffset + b, vertexOffset + c)
-        } else {
-          indices.push(vertexOffset + a, vertexOffset + c, vertexOffset + b)
-        }
-      }
-    }
-  }
-
-  finalizeGeometry(geometry, positions, indices, role)
-  if (usesVertexColors && colors.length === positions.length) {
-    geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
-  }
-  return geometry
+  return createWorldPolygonSurfaceGeometry(layers, y, {
+    key: 'naturalRoadRole',
+    value: role,
+  })
 }
 
 function boundaryWallsGeometry(
   bands: readonly { area: MultiPolygon; bottomY: number; topY: number }[],
   role: string,
 ) {
-  const geometry = new BufferGeometry()
-  const positions: number[] = []
-  const indices: number[] = []
-
-  for (const { area, bottomY, topY } of bands) {
-    if (Math.abs(topY - bottomY) <= 0.0001) continue
-    for (const polygon of area) {
-      for (const ring of polygon.map(openRing)) {
-        for (let index = 0; index < ring.length; index += 1) {
-          const start = ring[index]
-          const end = ring[(index + 1) % ring.length]
-          if (!(start && end) || Math.hypot(end[0] - start[0], end[1] - start[1]) <= 0.0001) {
-            continue
-          }
-          const vertexOffset = positions.length / 3
-          positions.push(
-            start[0],
-            topY,
-            start[1],
-            start[0],
-            bottomY,
-            start[1],
-            end[0],
-            topY,
-            end[1],
-            end[0],
-            bottomY,
-            end[1],
-          )
-          indices.push(
-            vertexOffset,
-            vertexOffset + 1,
-            vertexOffset + 2,
-            vertexOffset + 2,
-            vertexOffset + 1,
-            vertexOffset + 3,
-          )
-        }
-      }
-    }
-  }
-
-  finalizeGeometry(geometry, positions, indices, role)
-  return geometry
+  return createWorldPolygonBoundaryWallsGeometry(bands, {
+    key: 'naturalRoadRole',
+    value: role,
+  })
 }
 
 function topologyGeometry(
@@ -941,21 +855,6 @@ function topologyGeometry(
   return geometry
 }
 
-function finalizeGeometry(
-  geometry: BufferGeometry,
-  positions: number[],
-  indices: number[],
-  role: string,
-) {
-  geometry.userData.naturalRoadRole = role
-  if (positions.length === 0 || indices.length === 0) return
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.setIndex(indices)
-  geometry.computeVertexNormals()
-  geometry.computeBoundingBox()
-  geometry.computeBoundingSphere()
-}
-
 function finalGeometryMetrics(footprints: NaturalRoadFootprints) {
   const surfaceAreas = [
     footprints.sidewalks,
@@ -978,17 +877,7 @@ function finalGeometryMetrics(footprints: NaturalRoadFootprints) {
 }
 
 function surfaceTriangleCount(area: MultiPolygon) {
-  let count = 0
-  for (const polygon of area) {
-    const rings = polygon.map(openRing).filter((ring): ring is Ring => ring.length >= 3)
-    const contour = rings[0]
-    if (!contour) continue
-    count += ShapeUtils.triangulateShape(
-      contour.map(([x, z]) => new Vector2(x, z)),
-      rings.slice(1).map((ring) => ring.map(([x, z]) => new Vector2(x, z))),
-    ).length
-  }
-  return count
+  return countWorldPolygonSurfaceTriangles(area)
 }
 
 function footprintVertexCount(area: MultiPolygon) {

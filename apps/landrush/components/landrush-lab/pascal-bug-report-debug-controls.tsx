@@ -1,5 +1,6 @@
 'use client'
 
+import { writeOfflineParcelWorldState } from '@landrush/runtime'
 import { Download, FileUp, Play, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -10,7 +11,6 @@ import {
   parseLandrushBugReportJson,
   storeLandrushBugReportReplay,
 } from './landrush-bug-report'
-import { writeOfflineParcelWorldState } from './world-multiplayer-lab-client'
 
 const PROOF_VIEW_LABELS = [
   'Top plan',

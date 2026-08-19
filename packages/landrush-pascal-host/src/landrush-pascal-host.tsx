@@ -4,6 +4,7 @@ import { LandrushMaterialRendererBackendBridge } from '@landrush/runtime'
 import {
   initSpaceDetectionSync,
   initSpatialGridSync,
+  sceneRegistry,
   spatialGridManager,
   useScene,
 } from '@pascal-app/core'
@@ -21,18 +22,30 @@ import {
 } from '@pascal-app/editor'
 import { InteractiveSystem, useViewer, Viewer } from '@pascal-app/viewer'
 import { type ReactNode, useEffect, useState } from 'react'
+import {
+  type PascalSitePresentationVisibility,
+  restorePascalSitePresentation,
+  suppressPascalSitePresentation,
+} from './pascal-site-presentation'
+
+const LANDRUSH_CONTROL_MODES = [
+  { iconSrc: '/icons/select.webp', id: 'select', label: 'Select' },
+  { iconSrc: '/icons/build.webp', id: 'build', label: 'Build' },
+  { iconSrc: '/icons/paint.webp', id: 'material-paint', label: 'Paint' },
+  { id: 'delete', label: 'Delete' },
+] as const
 
 const LANDRUSH_STRUCTURE_TOOLS = [
-  ['wall', 'Wall'],
-  ['door', 'Door'],
-  ['window', 'Window'],
-  ['stair', 'Stairs'],
-  ['slab', 'Floor'],
-  ['ceiling', 'Ceiling'],
-  ['roof', 'Roof'],
-  ['fence', 'Fence'],
-  ['column', 'Column'],
-  ['item', 'Furniture'],
+  { iconSrc: '/icons/wall.webp', id: 'wall', label: 'Wall' },
+  { iconSrc: '/icons/door.webp', id: 'door', label: 'Door' },
+  { iconSrc: '/icons/window.webp', id: 'window', label: 'Window' },
+  { iconSrc: '/icons/stairs.webp', id: 'stair', label: 'Stairs' },
+  { iconSrc: '/icons/floor.webp', id: 'slab', label: 'Floor' },
+  { iconSrc: '/icons/ceiling.webp', id: 'ceiling', label: 'Ceiling' },
+  { iconSrc: '/icons/roof.webp', id: 'roof', label: 'Roof' },
+  { iconSrc: '/icons/fence.webp', id: 'fence', label: 'Fence' },
+  { iconSrc: '/icons/column.webp', id: 'column', label: 'Column' },
+  { iconSrc: '/icons/couch.webp', id: 'item', label: 'Furniture' },
 ] as const
 
 export type LandrushPascalHostProps = {
@@ -120,6 +133,7 @@ export function LandrushPascalHost({
         selectionManager={selectionManager}
         useBvh={false}
       >
+        <LandrushWorldOwnedSitePresentation />
         <LandrushMaterialRendererBackendBridge />
         <InteractiveSystem />
         {editingActive ? <LandrushPascalEditingSurface /> : null}
@@ -128,6 +142,63 @@ export function LandrushPascalHost({
       {editingActive ? <LandrushPascalEditingChrome /> : null}
     </>
   )
+}
+
+function LandrushWorldOwnedSitePresentation() {
+  useEffect(() => {
+    const savedVisibility: PascalSitePresentationVisibility = new Map()
+    let animationFrame: number | null = null
+    let disposed = false
+
+    const schedule = () => {
+      if (disposed || animationFrame !== null) return
+      animationFrame = window.requestAnimationFrame(apply)
+    }
+    const apply = () => {
+      animationFrame = null
+      if (disposed) return
+
+      const scene = useScene.getState()
+      let waitingForRenderers = false
+      for (const rootId of scene.rootNodeIds) {
+        const rootNode = scene.nodes[rootId]
+        if (rootNode?.type !== 'site') continue
+        const siteObject = sceneRegistry.nodes.get(rootId)
+        if (!siteObject) {
+          waitingForRenderers = true
+          continue
+        }
+
+        let siteWaitingForRenderers = false
+        const semanticChildObjects = rootNode.children.flatMap((childId) => {
+          const object = sceneRegistry.nodes.get(childId)
+          if (!object) {
+            siteWaitingForRenderers = true
+            return []
+          }
+          return [object]
+        })
+        if (siteWaitingForRenderers) {
+          waitingForRenderers = true
+          continue
+        }
+        suppressPascalSitePresentation(siteObject, semanticChildObjects, savedVisibility)
+      }
+
+      if (waitingForRenderers) schedule()
+    }
+
+    const unsubscribe = useScene.subscribe(schedule)
+    schedule()
+    return () => {
+      disposed = true
+      unsubscribe()
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame)
+      restorePascalSitePresentation(savedVisibility)
+    }
+  }, [])
+
+  return null
 }
 
 function LandrushPascalEditingSurface() {
@@ -177,7 +248,7 @@ function LandrushPascalEditingChrome() {
     editor.setMode(nextMode)
   }
 
-  const setStructureTool = (nextTool: (typeof LANDRUSH_STRUCTURE_TOOLS)[number][0]) => {
+  const setStructureTool = (nextTool: (typeof LANDRUSH_STRUCTURE_TOOLS)[number]['id']) => {
     const editor = useEditor.getState()
     editor.setPhase(nextTool === 'item' ? 'furnish' : 'structure')
     if (nextTool !== 'item') editor.setStructureLayer('elements')
@@ -187,43 +258,33 @@ function LandrushPascalEditingChrome() {
   }
 
   return (
-    <>
+    <div className="dark text-foreground">
       <FloatingLevelSelector />
-      <div className="pointer-events-auto fixed bottom-5 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col gap-1.5 rounded-2xl border border-white/15 bg-slate-950/90 p-2 text-white shadow-2xl backdrop-blur-md">
-        <div className="flex items-center justify-center gap-1">
-          {(['select', 'build', 'material-paint', 'delete'] as const).map((controlMode) => (
-            <button
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                mode === controlMode || (controlMode === 'build' && mode === 'build')
-                  ? 'bg-blue-500 text-white'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white'
-              }`}
-              data-editor-control-mode={controlMode}
-              key={controlMode}
-              onClick={() => setControlMode(controlMode)}
-              type="button"
-            >
-              {controlMode === 'material-paint'
-                ? 'Paint'
-                : controlMode[0]?.toUpperCase() + controlMode.slice(1)}
-            </button>
+      <div className="pointer-events-auto fixed bottom-6 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-2xl border border-border bg-background/90 shadow-2xl backdrop-blur-md">
+        <div className="flex max-w-[calc(100vw-2rem)] items-center gap-1 overflow-x-auto px-2 py-1.5">
+          {LANDRUSH_CONTROL_MODES.map((controlMode) => (
+            <LandrushPascalToolbarButton
+              active={mode === controlMode.id}
+              dataAttribute={{ name: 'data-editor-control-mode', value: controlMode.id }}
+              iconSrc={'iconSrc' in controlMode ? controlMode.iconSrc : undefined}
+              key={controlMode.id}
+              label={controlMode.label}
+              onClick={() => setControlMode(controlMode.id)}
+            />
           ))}
-        </div>
-        <div className="flex max-w-[calc(100vw-3rem)] items-center gap-1 overflow-x-auto border-white/10 border-t pt-1.5">
-          {LANDRUSH_STRUCTURE_TOOLS.map(([toolId, label]) => (
-            <button
-              className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs transition ${
-                mode === 'build' && tool === toolId
-                  ? 'bg-emerald-500 text-slate-950'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white'
-              }`}
-              data-editor-structure-tool={toolId}
-              key={toolId}
-              onClick={() => setStructureTool(toolId)}
-              type="button"
-            >
-              {label}
-            </button>
+          <div className="mx-1 h-5 w-px shrink-0 bg-border" />
+          {LANDRUSH_STRUCTURE_TOOLS.map((structureTool) => (
+            <LandrushPascalToolbarButton
+              active={mode === 'build' && tool === structureTool.id}
+              dataAttribute={{
+                name: 'data-editor-structure-tool',
+                value: structureTool.id,
+              }}
+              iconSrc={structureTool.iconSrc}
+              key={structureTool.id}
+              label={structureTool.label}
+              onClick={() => setStructureTool(structureTool.id)}
+            />
           ))}
         </div>
       </div>
@@ -244,6 +305,67 @@ function LandrushPascalEditingChrome() {
           </div>
         </aside>
       ) : null}
-    </>
+    </div>
+  )
+}
+
+function LandrushPascalToolbarButton({
+  active,
+  dataAttribute,
+  iconSrc,
+  label,
+  onClick,
+}: {
+  active: boolean
+  dataAttribute: {
+    name: 'data-editor-control-mode' | 'data-editor-structure-tool'
+    value: string
+  }
+  iconSrc?: string
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      aria-label={label}
+      aria-pressed={active}
+      className={`group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-md transition-all ${
+        active
+          ? 'bg-white/10 text-foreground'
+          : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
+      }`}
+      {...{ [dataAttribute.name]: dataAttribute.value }}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      {iconSrc ? (
+        <img
+          alt=""
+          aria-hidden="true"
+          className={`h-7 w-7 object-contain transition-[opacity,filter,transform] group-hover:scale-105 group-hover:opacity-100 group-hover:grayscale-0 ${
+            active ? 'opacity-100 grayscale-0' : 'opacity-60 grayscale'
+          }`}
+          src={iconSrc}
+        />
+      ) : (
+        <svg
+          aria-hidden="true"
+          className="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
+        >
+          <path d="M3 6h18" />
+          <path d="M8 6V4h8v2" />
+          <path d="m19 6-1 14H6L5 6" />
+          <path d="M10 11v5" />
+          <path d="M14 11v5" />
+        </svg>
+      )}
+    </button>
   )
 }

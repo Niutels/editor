@@ -1,6 +1,5 @@
 // @ts-nocheck -- Bruno Simon TSL/WebGPU water surface port; see BRUNO_SIMON_LICENSE.md.
-import { ClampToEdgeWrapping, type Texture, Vector2 } from 'three'
-import { hashBlur } from 'three/examples/jsm/tsl/display/hashBlur.js'
+import { ClampToEdgeWrapping, type Texture } from 'three'
 import {
   color,
   dot,
@@ -10,21 +9,24 @@ import {
   max,
   mix,
   positionWorld,
-  screenUV,
-  select,
   sin,
   texture,
   uniform,
   vec2,
-  vec3,
   vec4,
-  viewportSharedTexture,
 } from 'three/tsl'
 import type * as THREE from 'three/webgpu'
-import { LandrushBrunoMeshDefaultMaterial } from './bruno-mesh-default-material'
+import type { LandrushBrunoMeshDefaultMaterial } from './bruno-mesh-default-material'
 import { LandrushBrunoWaterNoises } from './bruno-water-noises'
 import { LandrushBrunoWaterWind } from './bruno-water-wind'
 import type { LandrushWorldNode } from './schema'
+import {
+  attachLandrushWaterMaterialLifecycle,
+  createLandrushBrunoWaterContext,
+  createLandrushWaterBaseMaterial,
+  createLandrushWaterDepthNodes,
+  createLandrushWaterDetailNodes,
+} from './water-material-shared'
 
 export { LANDRUSH_BRUNO_WATER_NOISE_RESOLUTION } from './bruno-water-noises'
 
@@ -274,7 +276,9 @@ function createLandrushWaterMaterialInternal(
           bounds,
           coastalFoamFieldTexture,
           noises,
-          params,
+          qualityLevel: params.qualityLevel,
+          surfaceElevation: LANDRUSH_WATER_SURFACE_ELEVATION,
+          surfaceThickness: params.surfaceThickness,
           terrainFieldTexture,
           wind,
         }),
@@ -425,48 +429,20 @@ function createLandrushWaterMaterialFromContext({
   const hasIce = params.iceRatio > 0
   const hasSplashes = params.splashesRatio > 0
 
-  const packedDepthDistanceNode = Fn(([terrainData]) => {
-    return terrainData.r
-      .mul(255 * 256)
-      .add(terrainData.g.mul(255))
-      .div(65535)
-  })
-
-  const edgeFadeNode = Fn(([terrainData]) => {
-    const edgeDistance = terrainData.b.mul(depthReferenceReach)
-    return edgeDistance.smoothstep(0, edgeFadeDistance)
-  })
-
-  const shoreDepthFromTerrainNode = Fn(([terrainData, position]) => {
-    const offshore = packedDepthDistanceNode(terrainData)
-      .mul(depthReferenceReach)
-      .div(max(depthReach, float(0.001)))
-      .clamp(0, 1)
-    const depthNoise = texture(noises.perlin, position.mul(depthNoiseFrequency))
-      .r.sub(0.5)
-      .mul(depthNoiseStrength)
-      .mul(offshore.smoothstep(0.08, 0.55))
-    const waterDepth = offshore.pow(depthExponent).add(depthNoise).clamp(0, 1)
-
-    return waterDepth.oneMinus().mul(edgeFadeNode(terrainData))
-  })
-
-  const shoreDepthFieldNode = Fn(([terrainData]) => {
-    return shoreDepthFromTerrainNode(terrainData, positionWorld.xz)
-  })
-
-  const rippleVisibilityDepthNode = Fn(([terrainData]) => {
-    return shoreDepthFieldNode(terrainData)
-  })
-
-  const waterColorNode = Fn(([shoreDepthField]) => {
-    const waterDepth = shoreDepthField.oneMinus()
-    const shallowColor = color('#8fe4de')
-    const midColor = color('#39a8cb')
-    const deepColor = color('#1f6f9d')
-    const shallowToMid = mix(shallowColor, midColor, waterDepth.smoothstep(0.06, 0.32))
-
-    return mix(shallowToMid, deepColor, waterDepth.smoothstep(0.28, 0.68))
+  const {
+    edgeFadeNode,
+    rippleVisibilityDepthNode,
+    shoreDepthFieldNode,
+    shoreDepthFromTerrainNode,
+    waterColorNode,
+  } = createLandrushWaterDepthNodes({
+    depthExponent,
+    depthNoiseFrequency,
+    depthNoiseStrength,
+    depthReach,
+    depthReferenceReach,
+    edgeFadeDistance,
+    noises,
   })
 
   const phaseBandNode = Fn(([phase, start, end, feather]) => {
@@ -867,47 +843,20 @@ function createLandrushWaterMaterialFromContext({
     )
   })
 
-  const iceNode = Fn(([terrainData]) => {
-    const iceVoronoi = texture(noises.voronoi, positionWorld.xz.mul(iceNoiseFrequency)).g
-    const shoreDepthField = shoreDepthFieldNode(terrainData)
-    const ice = shoreDepthField.remapClamp(0, iceRatio, 0, 1).toVar()
-    ice.assign(iceVoronoi.step(ice))
-
-    return ice
-  })
-
-  const splashesNode = Fn(() => {
-    const splashesVoronoi = texture(noises.voronoi, positionWorld.xz.mul(splashesNoiseFrequency))
-    const splashPerlin = texture(
-      noises.perlin,
-      positionWorld.xz.mul(splashesNoiseFrequency.mul(0.25)),
-    ).r
-
-    const splash = splashesVoronoi.r
-
-    const splashTimeRandom = hash(splashesVoronoi.b.mul(123456)).add(splashPerlin)
-    const splashTime = wind.localTime.mul(splashesTimeFrequency).add(splashTimeRandom)
-    splash.assign(splash.sub(splashTime).fract())
-
-    const edgeMutliplier = splashesVoronoi.g.remapClamp(
-      splashesEdgeAttenuationLow,
-      splashesEdgeAttenuationHigh,
-      0,
-      1,
-    )
-    const thickness = splashesThickness.mul(edgeMutliplier)
-    splash.assign(splash.step(thickness).oneMinus())
-
-    const splashVisibilityRandom = hash(splashesVoronoi.b.mul(654321))
-    const visible = splashVisibilityRandom.add(splashPerlin).fract()
-    visible.assign(splashesRatio.step(visible))
-    splash.assign(splash.mul(visible))
-
-    return splash
-  })
-
-  const shoreNode = Fn(([terrainData]) => {
-    return terrainData.a.mul(edgeFadeNode(terrainData)).smoothstep(shoreEdge, shoreEdge.add(0.12))
+  const { iceNode, shoreNode, splashesNode } = createLandrushWaterDetailNodes({
+    edgeFadeNode,
+    iceNoiseFrequency,
+    iceRatio,
+    noises,
+    shoreDepthFieldNode,
+    shoreEdge,
+    splashesEdgeAttenuationHigh,
+    splashesEdgeAttenuationLow,
+    splashesNoiseFrequency,
+    splashesRatio,
+    splashesThickness,
+    splashesTimeFrequency,
+    wind,
   })
 
   const frontCyanDepthContourNode = Fn(([shoreDepthField]) => {
@@ -965,159 +914,26 @@ function createLandrushWaterMaterialFromContext({
     return max(float(0.92), detailsMask()).clamp(0, 1)
   })()
 
-  const blurOutputNode = Fn(() => {
-    const blurOutput = hashBlur(viewportSharedTexture(screenUV), params.blurStrength, {
-      repeats: 25,
-      premultipliedAlpha: true,
-    })
-
-    return vec3(blurOutput)
-  })
-
-  const material = new LandrushBrunoMeshDefaultMaterial(context, {
-    depthWrite: false,
-    colorNode: waterSurfaceColor,
+  const material = createLandrushWaterBaseMaterial({
     alphaNode: waterSurfaceAlpha,
-    alphaTest: 0,
-    hasCoreShadows: false,
-    hasDropShadows: true,
-    hasLightBounce: false,
-    hasFog: true,
-    hasWater: false,
-    transparent: true,
+    colorNode: waterSurfaceColor,
+    context,
+    detailsMask,
+    params,
   }) as LandrushIncomingWaterSurfaceMaterial
 
-  const baseOutput = material.outputNode
-  const blurredOutput = Fn(() => {
-    const blurOutput = blurOutputNode()
-    const surfaceAlpha = baseOutput.a
-    const surfaceOutput = vec4(baseOutput.rgb, 1)
-
-    return select(surfaceAlpha.lessThan(0.5), blurOutput, surfaceOutput)
-  })()
-
-  material.outputNode =
-    params.hasBlurredUnderlay && params.qualityLevel === 0 ? blurredOutput : baseOutput
-  material.maskShadowNode = detailsMask().greaterThan(0.5)
-  material.needsUpdate = true
-
-  const originalDispose = material.dispose.bind(material)
-  material.dispose = () => {
-    noises.dispose()
-    originalDispose()
-  }
-  material.userData.landrushWater = {
+  attachLandrushWaterMaterialLifecycle({
+    material,
     noises,
-    parameters: params,
-    setParameters: (nextParameters) => {
-      Object.assign(params, nextParameters)
-      for (const [key, parameterUniform] of Object.entries(parameterUniforms)) {
-        if (key in nextParameters && typeof nextParameters[key] === 'number') {
-          parameterUniform.value = nextParameters[key]
-        }
-      }
-      if (typeof nextParameters.windAngle === 'number') {
-        wind.angle = nextParameters.windAngle
-        wind.direction.value.set(
-          Math.sin(nextParameters.windAngle),
-          Math.cos(nextParameters.windAngle),
-        )
-      }
-      if (typeof nextParameters.windStrength === 'number') {
-        wind.strength.value = nextParameters.windStrength
-      }
-      if (typeof nextParameters.windTimeFrequency === 'number') {
-        wind.timeFrequency = nextParameters.windTimeFrequency
-      }
-    },
-    update: (deltaSeconds: number) => {
-      wind.update(deltaSeconds)
+    parameterUniforms,
+    params,
+    update: (deltaSeconds) => {
       coastalFoamTime.value += deltaSeconds
       crestTime.value +=
         deltaSeconds * wind.timeFrequency * wind.strength.value * ripplesTimeSpeed.value
     },
     wind,
-  }
+  })
 
   return material
-}
-
-function createLandrushBrunoWaterContext({
-  bounds,
-  coastalFoamFieldTexture,
-  noises,
-  params,
-  terrainFieldTexture,
-  wind,
-}: {
-  bounds: LandrushWorldNode['perimeter']['bounds']
-  coastalFoamFieldTexture: Texture
-  noises: LandrushBrunoWaterNoises
-  params: LandrushWaterSurfaceParameters
-  terrainFieldTexture: Texture
-  wind: LandrushBrunoWaterWind
-}) {
-  const boundsMin = uniform(new Vector2(bounds.minX, bounds.minZ))
-  const boundsSize = uniform(new Vector2(bounds.width, bounds.depth))
-  const surfaceElevationUniform = uniform(LANDRUSH_WATER_SURFACE_ELEVATION)
-  const surfaceThicknessUniform = uniform(params.surfaceThickness)
-
-  const terrainNode = Fn(([position]) => {
-    const textureUv = position.sub(boundsMin).div(boundsSize).clamp(0, 1)
-    return texture(terrainFieldTexture, textureUv)
-  })
-  const coastalFoamTerrainNode = Fn(([position]) => {
-    const textureUv = position.sub(boundsMin).div(boundsSize).clamp(0, 1)
-    return texture(coastalFoamFieldTexture, textureUv)
-  })
-
-  const colorNode = Fn(([terrainData]) => {
-    const waterDepth = terrainData.b.oneMinus()
-    const shallowColor = color('#8fe4de')
-    const midColor = color('#39a8cb')
-    const deepColor = color('#1f6f9d')
-    const shallowToMid = mix(shallowColor, midColor, waterDepth.smoothstep(0.06, 0.32))
-
-    return mix(shallowToMid, deepColor, waterDepth.smoothstep(0.28, 0.68))
-  })
-
-  return {
-    fog: {
-      color: color('#164a77'),
-      strength: float(0),
-    },
-    lighting: {
-      colorUniform: color('#ffffff'),
-      coreShadowEdgeHigh: float(0.55),
-      coreShadowEdgeLow: float(-0.15),
-      directionUniform: vec3(0.35, 0.74, 0.58).normalize(),
-      intensityUniform: float(1),
-      lightBounceDistance: float(12),
-      lightBounceEdgeHigh: float(0.7),
-      lightBounceEdgeLow: float(0.12),
-      lightBounceMultiplier: float(0),
-      shadowColor: color('#6d8ea0'),
-    },
-    noises,
-    quality: {
-      level: params.qualityLevel,
-    },
-    reveal: {
-      color: color('#ffffff'),
-      distance: float(100000),
-      intensity: float(0),
-      position2Uniform: uniform(vec2(0, 0)),
-      thickness: float(1),
-    },
-    terrain: {
-      coastalFoamTerrainNode,
-      colorNode,
-      terrainNode,
-    },
-    water: {
-      surfaceElevationUniform,
-      surfaceThicknessUniform,
-    },
-    wind,
-  }
 }

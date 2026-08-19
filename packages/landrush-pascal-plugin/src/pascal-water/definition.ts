@@ -6,6 +6,7 @@ export const pascalWaterDefinition: NodeDefinition<typeof PascalWaterNode> = {
   schemaVersion: 2,
   schema: PascalWaterNode,
   category: 'site',
+  dirtyTracking: false,
 
   defaults: () => {
     const stub = PascalWaterNode.parse({

@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest'
 import {
   frameIndependentResponseAmount,
   REMOTE_PRESENTATION_INTERPOLATION_DELAY_MS,
@@ -7,7 +6,8 @@ import {
   resolveRemotePresentationSnapshot,
   shouldContinueRemotePresentation,
   viewAnglesFromDirection,
-} from './multiplayer-presentation'
+} from '@landrush/runtime'
+import { describe, expect, it } from 'vitest'
 
 function converge(responsePerSecond: number, frameRate: number, seconds: number) {
   const deltaSeconds = 1 / frameRate

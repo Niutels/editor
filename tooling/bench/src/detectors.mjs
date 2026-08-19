@@ -16,6 +16,7 @@ export class BeaconWatchdog {
     runDir,
     freezeThresholdMs = 250,
     pollMs = 100,
+    startupGraceMs = 1000,
     onAnomaly,
   }) {
     this.page = page
@@ -24,6 +25,7 @@ export class BeaconWatchdog {
     this.runDir = runDir
     this.freezeThresholdMs = freezeThresholdMs
     this.pollMs = pollMs
+    this.detectAfter = Date.now() + startupGraceMs
     this.onAnomaly = onAnomaly
     this.stopped = false
     this.freezes = []
@@ -74,13 +76,13 @@ export class BeaconWatchdog {
 
       const stallMs = now - this.lastAdvanceAt
       const visible = this.lastBeacon?.visibility !== 'hidden'
-      if (visible && stallMs > this.freezeThresholdMs) {
+      if (now >= this.detectAfter && visible && stallMs > this.freezeThresholdMs) {
         // rAF starved — a true frame freeze.
         await this.recordFreeze({ kind: 'freeze', evalMs, stallMs, frameIdx: this.lastFrameIdx })
         // Re-arm after capture so one long freeze produces one record per
         // sustained second rather than one per poll.
         this.lastAdvanceAt = Date.now()
-      } else if (visible && evalMs > this.freezeThresholdMs) {
+      } else if (now >= this.detectAfter && visible && evalMs > this.freezeThresholdMs) {
         // Frames kept ticking but our tiny evaluate queued behind a long task:
         // TASK STARVATION — real input events would lag exactly the same way.
         this.recordStarvation({ evalMs, frameIdx: this.lastFrameIdx })

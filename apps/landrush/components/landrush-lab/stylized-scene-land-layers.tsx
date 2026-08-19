@@ -2657,7 +2657,6 @@ function createStylizedGrassNodeMaterial(
     .add(interactionLocalOffset)
     .mul(heightAlongBlade)
     .mul(STYLIZED_SCENE_GRASS_HEIGHT_SCALE)
-  const bladeRootLocal: TSLNode<'vec2'> = attribute<'vec2'>('uv', 'vec2')
   const bladeLocalXZ = vec2(positionLocal.x, positionLocal.z)
   const rootWidthProfile = float(1).sub(heightAlongBlade).pow(2)
   const rootWidthFactor = float(1).add(
@@ -2665,13 +2664,14 @@ function createStylizedGrassNodeMaterial(
       .mul(STYLIZED_SCENE_GRASS_EDGE_FILL_ROOT_WIDTH_MULTIPLIER - 1)
       .mul(rootWidthProfile),
   )
-  const thickenedBladeLocalXZ = bladeRootLocal.add(
-    bladeLocalXZ.sub(bladeRootLocal).mul(rootWidthFactor),
+  // Three applies instanceMatrix before positionNode, so this pivot must be in the same space.
+  const thickenedBladeObjectXZ = bladeWorldRoot.add(
+    bladeLocalXZ.sub(bladeWorldRoot).mul(rootWidthFactor),
   )
   const deformedPosition = vec3(
-    thickenedBladeLocalXZ.x.add(worldOffset.x),
+    thickenedBladeObjectXZ.x.add(worldOffset.x),
     positionLocal.y.mul(heightPulse).mul(float(1).sub(interactionFold)).mul(combinedFade),
-    thickenedBladeLocalXZ.y.add(worldOffset.y),
+    thickenedBladeObjectXZ.y.add(worldOffset.y),
   )
 
   const material = new MeshBasicNodeMaterial({

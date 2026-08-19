@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Perf bench harness: frame attribution, UI-driven scenarios, deterministic replay, verify gates. Driver runs under node (not bun).",
+  "scripts": {
+    "visual:landrush": "node src/landrush-visual-parity.mjs"
+  },
   "dependencies": {
     "playwright-core": "^1.50.0"
   }

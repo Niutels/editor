@@ -4,13 +4,14 @@ import http from 'node:http'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  isSpatialVoiceSignalPayload,
+  sanitizeMultiplayerRoomId,
   isParcelBuildSchemaVersion,
   normalizeParcelBuildRevision,
   PARCEL_BUILD_SCHEMA_VERSION,
 } from '@landrush/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 
-const DEFAULT_ROOM_ID = 'landrush-lab-world-multiplayer'
 const HEARTBEAT_INTERVAL_MS = 3000
 const LANDRUSH_BUILD_NODE_TYPES = new Set([
   'box-vent',
@@ -37,7 +38,6 @@ const LANDRUSH_BUILD_NODE_TYPES = new Set([
 ])
 const MAX_BUILD_NODES_PER_PARCEL = 1000
 const MAX_BUILD_SNAPSHOT_BYTES = 1_250_000
-const MAX_ROOM_ID_LENGTH = 80
 const MAX_ROOM_PEERS = 32
 const MIN_STATE_INTERVAL_MS = 40
 const PEER_STALE_MS = 15_000
@@ -147,7 +147,7 @@ wss.on('connection', (socket) => {
 
     if (message.type === 'join') {
       const player = sanitizePlayerSnapshot(message.player, now)
-      const roomId = sanitizeRoomId(message.roomId)
+      const roomId = sanitizeMultiplayerRoomId(message.roomId)
       const room = getRoom(roomId)
       const existingPeer = room.peers.get(player.id)
 
@@ -175,7 +175,7 @@ wss.on('connection', (socket) => {
     }
 
     if (message.type === 'watch') {
-      const roomId = sanitizeRoomId(message.roomId)
+      const roomId = sanitizeMultiplayerRoomId(message.roomId)
       leaveRoom(peer, true, 'watching')
       peer = null
       leaveWatcher(watcher)
@@ -193,7 +193,7 @@ wss.on('connection', (socket) => {
       if (peer) peer.lastSeenAt = now
       if (watcher) watcher.lastSeenAt = now
       const worldId = sanitizeParcelWorldId(message.worldId)
-      const roomId = sanitizeRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
+      const roomId = sanitizeMultiplayerRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
       sendParcelOwnershipSnapshot(socket, roomId, worldId)
       sendParcelBuildNodesSnapshot(socket, roomId, worldId)
       sendTvMediaStateSnapshot(socket, roomId, worldId)
@@ -1019,7 +1019,7 @@ function parseClientMessage(data) {
     if (
       raw?.type === 'voice-signal' &&
       typeof raw.to === 'string' &&
-      isVoiceSignalPayload(raw.signal)
+      isSpatialVoiceSignalPayload(raw.signal)
     ) {
       return raw
     }
@@ -1066,24 +1066,6 @@ function isPlayerSnapshot(value) {
     Array.isArray(value.position) &&
     value.position.length === 3
   )
-}
-
-function isVoiceSignalPayload(value) {
-  if (value?.type === 'disconnect') return true
-  if (value?.type === 'ready') return true
-  if (value?.type === 'ice-candidate') return typeof value.candidate === 'object'
-  return (
-    value?.type === 'description' &&
-    (value.description?.type === 'offer' || value.description?.type === 'answer') &&
-    typeof value.description.sdp === 'string' &&
-    value.description.sdp.length <= 120_000
-  )
-}
-
-function sanitizeRoomId(roomId) {
-  const normalized = typeof roomId === 'string' ? roomId.trim() : ''
-  if (!normalized) return DEFAULT_ROOM_ID
-  return normalized.slice(0, MAX_ROOM_ID_LENGTH).replace(/[^a-zA-Z0-9_-]/g, '-')
 }
 
 function sanitizePlayerSnapshot(player, now) {

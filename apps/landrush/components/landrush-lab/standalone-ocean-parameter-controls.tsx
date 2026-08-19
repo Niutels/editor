@@ -64,11 +64,13 @@ export function StandaloneOceanParameterControls({
   onAnimatedChange,
   onParametersChange,
   parameters,
+  showRobotPassthrough = true,
 }: {
   animated: boolean
   onAnimatedChange: (animated: boolean) => void
   onParametersChange: Dispatch<SetStateAction<StandaloneOceanParameters>>
   parameters: StandaloneOceanParameters
+  showRobotPassthrough?: boolean
 }) {
   function setParameter<Key extends keyof StandaloneOceanParameters>(
     key: Key,
@@ -178,13 +180,15 @@ export function StandaloneOceanParameterControls({
         ))}
       </div>
 
-      <OceanControlSection label="Robot passthrough" open>
-        <div className="text-[9px] leading-4 text-stone-400">
-          Clear and outer radius are fixed, independent endpoints. Smoothness only reshapes opacity
-          between them; dragging either radius never shifts the other.
-        </div>
-        <RobotPassthroughControls />
-      </OceanControlSection>
+      {showRobotPassthrough ? (
+        <OceanControlSection label="Robot passthrough" open>
+          <div className="text-[9px] leading-4 text-stone-400">
+            Clear and outer radius are fixed, independent endpoints. Smoothness only reshapes
+            opacity between them; dragging either radius never shifts the other.
+          </div>
+          <RobotPassthroughControls />
+        </OceanControlSection>
+      ) : null}
 
       <OceanControlSection label="Wave-following shoreline ribbon" open>
         <div className="text-[9px] leading-4 text-stone-400">

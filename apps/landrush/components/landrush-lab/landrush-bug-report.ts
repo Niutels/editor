@@ -1,10 +1,5 @@
-import type { AnyNode } from '@pascal-app/core'
-import type {
-  LocalPlayerProfile,
-  ParcelBuildNodesSnapshot,
-  ParcelOwnership,
-  TvMediaStateSnapshot,
-} from './world-multiplayer-lab-client'
+import type { LocalPlayerProfile, ParcelOwnership, TvMediaStateSnapshot } from '@landrush/protocol'
+import type { ParcelBuildNodesSnapshot } from '@landrush/runtime'
 
 export const LANDRUSH_BUG_REPORT_FORMAT = 'landrush-bug-report'
 export const LANDRUSH_BUG_REPORT_VERSION = 1
@@ -229,7 +224,7 @@ export function cloneLandrushBugReportBuilds(
 ): ParcelBuildNodesSnapshot[] {
   return builds.map((build) => ({
     ...build,
-    nodes: structuredClone(build.nodes) as AnyNode[],
+    nodes: structuredClone(build.nodes),
   }))
 }
 

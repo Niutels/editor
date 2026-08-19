@@ -1,0 +1,14 @@
+{
+  "$schema": "https://v2-8-1.turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/apps/editor/app/favicon.ico",
+        "$TURBO_ROOT$/apps/editor/app/fonts/**",
+        "$TURBO_ROOT$/apps/editor/public/**"
+      ]
+    }
+  }
+}

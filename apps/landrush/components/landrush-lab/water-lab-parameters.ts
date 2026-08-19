@@ -1,72 +1,13 @@
+import {
+  PASCAL_WATER_ELEVATION_PARAMETER_DEFAULTS,
+  PASCAL_WATER_FIELD_DEFAULT_PARAMETERS,
+  type PascalWaterElevationParameters,
+} from '@landrush/pascal-plugin'
 import { generateLandrushIsland } from '@/components/landrush/generator'
 import type { LandrushIsland } from '@/components/landrush/types'
 import type { WaterFieldParameters } from './water-field-texture'
 
-export type IslandElevationParameters = {
-  cliffAverageSlope: number
-  cliffBandMergeThresholdMeters: number
-  cliffBlockDepthMaxMeters: number
-  cliffBlockDepthMinMeters: number
-  cliffColorAverageRatio: number
-  cliffColorFamilyVariationCount: number
-  cliffColorFamilyDistribution: number
-  cliffContrast: number
-  cliffCornerChipAngleAverage: number
-  cliffCornerChipAngleDensity: number
-  cliffCornerChipAngleDistribution: number
-  cliffCornerChipAngleVariation: number
-  cliffCornerChipAverage: number
-  cliffCornerChipDarkening: number
-  cliffCornerChipDensity: number
-  cliffCornerChipDistribution: number
-  cliffCornerChipVariation: number
-  cliffFrontPaintColorCount: number
-  cliffFrontPaintColorDistance: number
-  cliffFrontPaintDensity: number
-  cliffFrontPaintSplashHeightRatio: number
-  cliffFrontPaintSplashHeightVariation: number
-  cliffFrontPaintSplashHeightVariationDistribution: number
-  cliffFrontPaintSplashVerticalSpreadRatio: number
-  cliffFrontPaintSplashVerticalSpreadVariation: number
-  cliffFrontPaintSplashVerticalSpreadVariationDistribution: number
-  cliffFrontPaintSplashWidthRatio: number
-  cliffFrontPaintSplashWidthVariation: number
-  cliffFrontPaintSplashWidthVariationDistribution: number
-  cliffLayer1BlockWidthMeters: number
-  cliffLayer1BlockWidthVariationMeters: number
-  cliffLayer1BlockWidthVariationDistribution: number
-  cliffLayer1ExtrusionAverageMeters: number
-  cliffLayer1ExtrusionVariationMeters: number
-  cliffLayer1ExtrusionVariationDistribution: number
-  cliffLayer2AltitudeRatio: number
-  cliffLayer2AltitudeVariation: number
-  cliffLayer2AltitudeVariationDistribution: number
-  cliffLayer2BlockWidthMeters: number
-  cliffLayer2Density: number
-  cliffLayer2BlockWidthVariationMeters: number
-  cliffLayer2BlockWidthVariationDistribution: number
-  cliffLayer2ExtrusionAverageMeters: number
-  cliffLayer2ExtrusionVariationMeters: number
-  cliffLayer2ExtrusionVariationDistribution: number
-  cliffLayer3AltitudeRatio: number
-  cliffLayer3AltitudeVariation: number
-  cliffLayer3AltitudeVariationDistribution: number
-  cliffLayer3BlockWidthMeters: number
-  cliffLayer3Density: number
-  cliffLayer3BlockWidthVariationMeters: number
-  cliffLayer3BlockWidthVariationDistribution: number
-  cliffLayer3ExtrusionAverageMeters: number
-  cliffLayer3ExtrusionVariationMeters: number
-  cliffLayer3ExtrusionVariationDistribution: number
-  cliffSlopeVariation: number
-  cliffSlopeVariationDistribution: number
-  cliffToneVariation: number
-  contourNoiseFrequency: number
-  contourVariationMeters: number
-  edgeLiftMeters: number
-  innerContourMeters: number
-  outerContourMeters: number
-}
+export type IslandElevationParameters = PascalWaterElevationParameters
 
 export type WaterLabIslandParameters = {
   coast: number
@@ -92,86 +33,11 @@ export type LabSliderConfig<Key extends string> = {
 }
 
 export const WATER_LAB_DEFAULT_FIELD_PARAMETERS = {
-  depthContourCollapseMeters: 10.3,
-  depthContourCollapseScale: 1.25,
-  depthContourNoiseFrequency: 0.1,
-  depthContourOffsetMeters: 2.6,
-  depthContourVariationMeters: 8.6,
-  depthExponent: 0.52,
-  depthNoiseFrequency: 0.03,
-  depthNoiseStrength: 0,
-  depthReach: 15,
-  edgeFadeDistance: 18,
-  shoreBandMeters: 0,
-  shoreFeatherMeters: 0.45,
-  shoreNoiseFrequency: 0.075,
-  shoreVariationMeters: 0.85,
+  ...PASCAL_WATER_FIELD_DEFAULT_PARAMETERS,
 } satisfies WaterFieldParameters
 
 export const WATER_LAB_DEFAULT_ELEVATION_PARAMETERS = {
-  cliffAverageSlope: 0.42,
-  cliffBandMergeThresholdMeters: 3.6,
-  cliffBlockDepthMaxMeters: 2.1,
-  cliffBlockDepthMinMeters: 0.5,
-  cliffColorAverageRatio: 0.75,
-  cliffColorFamilyVariationCount: 0,
-  cliffColorFamilyDistribution: 0,
-  cliffContrast: 0.41,
-  cliffCornerChipAngleAverage: 0.5,
-  cliffCornerChipAngleDensity: 1,
-  cliffCornerChipAngleDistribution: 0.5,
-  cliffCornerChipAngleVariation: 0,
-  cliffCornerChipAverage: 0,
-  cliffCornerChipDarkening: 0.12,
-  cliffCornerChipDensity: 0,
-  cliffCornerChipDistribution: 0.5,
-  cliffCornerChipVariation: 0,
-  cliffFrontPaintColorCount: 1,
-  cliffFrontPaintColorDistance: 0.45,
-  cliffFrontPaintDensity: 1,
-  cliffFrontPaintSplashHeightRatio: 0.32,
-  cliffFrontPaintSplashHeightVariation: 0.14,
-  cliffFrontPaintSplashHeightVariationDistribution: 0.55,
-  cliffFrontPaintSplashVerticalSpreadRatio: 0.24,
-  cliffFrontPaintSplashVerticalSpreadVariation: 0.12,
-  cliffFrontPaintSplashVerticalSpreadVariationDistribution: 0.55,
-  cliffFrontPaintSplashWidthRatio: 0.72,
-  cliffFrontPaintSplashWidthVariation: 0.18,
-  cliffFrontPaintSplashWidthVariationDistribution: 0.55,
-  cliffLayer1BlockWidthMeters: 5.4,
-  cliffLayer1BlockWidthVariationMeters: 1.8,
-  cliffLayer1BlockWidthVariationDistribution: 0,
-  cliffLayer1ExtrusionAverageMeters: 0.95,
-  cliffLayer1ExtrusionVariationMeters: 0.28,
-  cliffLayer1ExtrusionVariationDistribution: 0,
-  cliffLayer2AltitudeRatio: 0.64,
-  cliffLayer2AltitudeVariation: 0.14,
-  cliffLayer2AltitudeVariationDistribution: 0,
-  cliffLayer2BlockWidthMeters: 4.2,
-  cliffLayer2Density: 1,
-  cliffLayer2BlockWidthVariationMeters: 1.5,
-  cliffLayer2BlockWidthVariationDistribution: 0,
-  cliffLayer2ExtrusionAverageMeters: 0.95,
-  cliffLayer2ExtrusionVariationMeters: 0.28,
-  cliffLayer2ExtrusionVariationDistribution: 0,
-  cliffLayer3AltitudeRatio: 0.36,
-  cliffLayer3AltitudeVariation: 0.12,
-  cliffLayer3AltitudeVariationDistribution: 0,
-  cliffLayer3BlockWidthMeters: 3.1,
-  cliffLayer3Density: 1,
-  cliffLayer3BlockWidthVariationMeters: 1.15,
-  cliffLayer3BlockWidthVariationDistribution: 0,
-  cliffLayer3ExtrusionAverageMeters: 0.95,
-  cliffLayer3ExtrusionVariationMeters: 0.28,
-  cliffLayer3ExtrusionVariationDistribution: 0,
-  cliffSlopeVariation: 0.14,
-  cliffSlopeVariationDistribution: 0,
-  cliffToneVariation: 0.35,
-  contourNoiseFrequency: 0.08,
-  contourVariationMeters: 3.5,
-  edgeLiftMeters: 6,
-  innerContourMeters: 3.75,
-  outerContourMeters: 0,
+  ...PASCAL_WATER_ELEVATION_PARAMETER_DEFAULTS,
 } satisfies IslandElevationParameters
 
 export const PASCAL_WORLD_DEFAULT_ELEVATION_PARAMETERS = {

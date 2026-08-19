@@ -54,6 +54,54 @@ export async function waitForWorldLayout(page, minimumLevels = 3, { timeoutMs = 
   )
 }
 
+export async function waitForLocalParcelOwnership(
+  page,
+  parcelId,
+  { timeoutMs = 30_000 } = {},
+) {
+  const startedAt = Date.now()
+  let last = null
+  let consecutive = 0
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await page.evaluate(
+      () => window.__LANDRUSH_ISLAND_RUNTIME_PROBE__?.parcelDiagnostics ?? null,
+    )
+    if (last?.localOwnershipParcelId === parcelId) {
+      consecutive += 1
+      if (consecutive >= 4) return last
+    } else {
+      consecutive = 0
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(
+    `local parcel ownership did not reconcile to ${parcelId} ` +
+      `(last=${last?.localOwnershipParcelId ?? 'unavailable'})`,
+  )
+}
+
+export async function waitForActiveBuildParcel(page, parcelId, { timeoutMs = 30_000 } = {}) {
+  const startedAt = Date.now()
+  let last = null
+  let consecutive = 0
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await page.evaluate(
+      () => window.__LANDRUSH_ISLAND_RUNTIME_PROBE__?.parcelDiagnostics ?? null,
+    )
+    if (last?.buildParcelId === parcelId && last.buildParcelCentroid) {
+      consecutive += 1
+      if (consecutive >= 4) return last
+    } else {
+      consecutive = 0
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error(
+    `build parcel did not become ${parcelId} ` +
+      `(last=${last?.buildParcelId ?? 'unavailable'})`,
+  )
+}
+
 export async function activateEditorTool(bridge, mode, tool, { timeoutMs = 20_000 } = {}) {
   const startedAt = Date.now()
   let last = null

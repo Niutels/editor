@@ -52,6 +52,7 @@ export async function installLandrushBenchmarkFixture(page, fixture) {
 export function summarizeLandrushBenchmarkFixture(fixture) {
   if (!fixture) return null
   return {
+    buildParcelId: fixture.report.mode.buildParcelId ?? null,
     buildCount: fixture.report.save.builds.length,
     capturedAt: fixture.capturedAt,
     name: fixture.name,

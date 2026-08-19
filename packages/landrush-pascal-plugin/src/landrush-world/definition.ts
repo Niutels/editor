@@ -6,6 +6,7 @@ export const landrushWorldDefinition: NodeDefinition<typeof LandrushWorldNode> =
   schemaVersion: 1,
   schema: LandrushWorldNode,
   category: 'site',
+  dirtyTracking: false,
 
   defaults: () => {
     const stub = LandrushWorldNode.parse({

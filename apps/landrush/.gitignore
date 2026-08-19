@@ -35,3 +35,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# Mirrored from the canonical Pascal editor by scripts/sync-pascal-assets.mjs
+/.generated/
+/app/favicon.ico
+/app/fonts/
+/public/*.svg
+/public/audios/radios/
+/public/audios/sfx/*.mamd
+/public/audios/sfx/*.mp3
+/public/demos/
+/public/fonts/
+/public/hdri/
+/public/icons/
+/public/items/
+/public/material/

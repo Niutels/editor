@@ -1,5 +1,9 @@
 'use client'
 
+import {
+  createWorldPolygonBoundaryWallsGeometry,
+  createWorldPolygonSurfaceGeometry,
+} from '@landrush/runtime'
 import polygonClipping, {
   type MultiPolygon,
   type Pair,
@@ -7,7 +11,7 @@ import polygonClipping, {
   type Ring,
 } from 'polygon-clipping'
 import { useEffect, useMemo } from 'react'
-import { BufferGeometry, DoubleSide, Float32BufferAttribute, ShapeUtils, Vector2 } from 'three'
+import { type BufferGeometry, DoubleSide } from 'three'
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
 
 export const STYLIZED_PATH_SIDEWALK_WIDTH_METERS = 0.57
@@ -310,101 +314,17 @@ function segmentSignature(start: LandrushPoint2, end: LandrushPoint2, radius: nu
 }
 
 function surfaceGeometry(area: MultiPolygon, y: number, role: string) {
-  const geometry = new BufferGeometry()
-  const positions: number[] = []
-  const indices: number[] = []
-
-  for (const polygon of area) {
-    const rings = polygon.map(openRing).filter((ring): ring is Ring => ring.length >= 3)
-    const contourRing = rings[0]
-    if (!contourRing) continue
-    const contour = contourRing.map(([x, z]) => new Vector2(x, z))
-    const holes = rings.slice(1).map((ring) => ring.map(([x, z]) => new Vector2(x, z)))
-    const faces = ShapeUtils.triangulateShape(contour, holes)
-    const flattened = [contourRing, ...rings.slice(1)].flat()
-    const vertexOffset = positions.length / 3
-    for (const [x, z] of flattened) positions.push(x, y, z)
-
-    for (const face of faces) {
-      const [a, b, c] = face
-      if (a === undefined || b === undefined || c === undefined) continue
-      const pointA = flattened[a]
-      const pointB = flattened[b]
-      const pointC = flattened[c]
-      if (!(pointA && pointB && pointC)) continue
-      const signedArea =
-        (pointB[0] - pointA[0]) * (pointC[1] - pointA[1]) -
-        (pointB[1] - pointA[1]) * (pointC[0] - pointA[0])
-      if (signedArea < 0) {
-        indices.push(vertexOffset + a, vertexOffset + b, vertexOffset + c)
-      } else {
-        indices.push(vertexOffset + a, vertexOffset + c, vertexOffset + b)
-      }
-    }
-  }
-
-  finalizeGeometry(geometry, positions, indices, role)
-  return geometry
+  return createWorldPolygonSurfaceGeometry([{ area }], y, {
+    key: 'stylizedPathNetworkRole',
+    value: role,
+  })
 }
 
 function boundaryWallGeometry(area: MultiPolygon, topY: number, bottomY: number, role: string) {
-  const geometry = new BufferGeometry()
-  const positions: number[] = []
-  const indices: number[] = []
-  if (Math.abs(topY - bottomY) <= 0.0001) return geometry
-
-  for (const polygon of area) {
-    for (const ring of polygon.map(openRing)) {
-      for (let index = 0; index < ring.length; index += 1) {
-        const start = ring[index]
-        const end = ring[(index + 1) % ring.length]
-        if (!(start && end) || Math.hypot(end[0] - start[0], end[1] - start[1]) <= 0.0001) {
-          continue
-        }
-        const vertexOffset = positions.length / 3
-        positions.push(
-          start[0],
-          topY,
-          start[1],
-          start[0],
-          bottomY,
-          start[1],
-          end[0],
-          topY,
-          end[1],
-          end[0],
-          bottomY,
-          end[1],
-        )
-        indices.push(
-          vertexOffset,
-          vertexOffset + 1,
-          vertexOffset + 2,
-          vertexOffset + 2,
-          vertexOffset + 1,
-          vertexOffset + 3,
-        )
-      }
-    }
-  }
-
-  finalizeGeometry(geometry, positions, indices, role)
-  return geometry
-}
-
-function finalizeGeometry(
-  geometry: BufferGeometry,
-  positions: number[],
-  indices: number[],
-  role: string,
-) {
-  geometry.userData.stylizedPathNetworkRole = role
-  if (positions.length === 0 || indices.length === 0) return
-  geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
-  geometry.setIndex(indices)
-  geometry.computeVertexNormals()
-  geometry.computeBoundingBox()
-  geometry.computeBoundingSphere()
+  return createWorldPolygonBoundaryWallsGeometry([{ area, bottomY, topY }], {
+    key: 'stylizedPathNetworkRole',
+    value: role,
+  })
 }
 
 function cleanRoadPoints(points: readonly LandrushPoint2[]) {

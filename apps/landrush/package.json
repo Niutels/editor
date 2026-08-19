@@ -4,13 +4,15 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "dotenv -e ../../.env.local -- bun scripts/dev-with-landrush-ws.mjs",
-    "dev:next": "dotenv -e ../../.env.local -- next dev --port 3002",
+    "sync:pascal-assets": "node scripts/sync-pascal-assets.mjs",
+    "dev": "bun run sync:pascal-assets && dotenv -e ../../.env.local -- bun scripts/dev-with-landrush-ws.mjs",
+    "dev:next": "bun run sync:pascal-assets && dotenv -e ../../.env.local -- next dev --port 3002",
     "dev:world-multiplayer-ws": "bun scripts/landrush-world-multiplayer-ws.mjs",
-    "build": "dotenv -e ../../.env.local -- next build",
-    "start": "next start",
+    "build": "bun run sync:pascal-assets && dotenv -e ../../.env.local -- next build",
+    "start": "bun run sync:pascal-assets && next start",
     "lint": "biome lint",
-    "check-types": "next typegen && tsc --noEmit"
+    "check-types": "next typegen && tsc --noEmit",
+    "test": "bun test components/landrush-lab lib"
   },
   "dependencies": {
     "@iconify/react": "^6.0.2",
@@ -29,7 +31,6 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@tailwindcss/postcss": "^4.2.1",
-    "@vercel/functions": "^3.7.3",
     "clsx": "^2.1.1",
     "geist": "^1.7.0",
     "lucide-react": "^1.7.0",
