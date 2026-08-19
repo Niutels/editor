@@ -51,13 +51,25 @@ jobs:
 
           site="landrush-site"
 
-          rm -rf "$site/_next" "$site/landrush-lab" "$site/navigation" "$site/audios"
+          rm -rf \
+            "$site/_next" \
+            "$site/audios" \
+            "$site/demos" \
+            "$site/fonts" \
+            "$site/hdri" \
+            "$site/icons" \
+            "$site/items" \
+            "$site/landrush-lab" \
+            "$site/material" \
+            "$site/navigation"
           mkdir -p "$site/_next"
 
           cp -R apps/landrush/.next/static "$site/_next/static"
-          cp -R apps/landrush/public/landrush-lab "$site/landrush-lab"
-          cp -R apps/landrush/public/navigation "$site/navigation"
-          cp -R apps/landrush/public/audios "$site/audios"
+          for asset_dir in audios demos fonts hdri icons items landrush-lab material navigation; do
+            cp -R "apps/landrush/public/$asset_dir" "$site/$asset_dir"
+          done
+          cp apps/landrush/public/*.svg "$site/"
+          cp apps/landrush/app/favicon.ico "$site/favicon.ico"
 
           for route in pascal-multiplayer-island pascal-multiplayer-island-water-debug; do
             mkdir -p "$site/landrush-lab/$route"
