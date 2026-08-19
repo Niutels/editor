@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   isSpatialVoiceSignalPayload,
@@ -44,7 +44,16 @@ const PEER_STALE_MS = 15_000
 const PORT = Number(process.env.PORT ?? process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PORT ?? 3003)
 const WS_PATH = process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PATH ?? '/api/landrush-lab/world-multiplayer/ws'
 const PERSISTENT_STATE_SCHEMA_VERSION = 2
+const ALLOW_EMPTY_PERSISTENT_STATE =
+  process.env.LANDRUSH_WORLD_MULTIPLAYER_ALLOW_EMPTY_STATE === '1'
 const PERSISTENT_STATE_FILE = resolvePersistentStateFile()
+const persistentStateStatus = {
+  backupAvailable: false,
+  enabled: Boolean(PERSISTENT_STATE_FILE),
+  lastError: null,
+  migrated: false,
+  restored: false,
+}
 
 const rooms = new Map()
 const parcelBuildNodesByWorld = new Map()
@@ -79,6 +88,7 @@ const server = http.createServer((request, response) => {
     response.end(
       JSON.stringify({
         ok: true,
+        persistence: persistentStateHealth(),
         rooms: rooms.size,
         serverTime: Date.now(),
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
@@ -737,7 +747,15 @@ function resolvePersistentStateFile() {
   const configuredPath = process.env.LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE?.trim()
   if (configuredPath?.toLowerCase() === 'off') return null
   if (configuredPath) return resolve(configuredPath)
-  if (process.env.RENDER) return null
+  const configuredDataDirectory = process.env.LANDRUSH_WORLD_MULTIPLAYER_DATA_DIR?.trim()
+  if (configuredDataDirectory) {
+    return resolve(configuredDataDirectory, 'world-multiplayer-state.json')
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'Production multiplayer requires LANDRUSH_WORLD_MULTIPLAYER_DATA_DIR or LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE. Point it outside the deployed release, or explicitly set the state file to off for a stateless server.',
+    )
+  }
   return resolve(
     dirname(fileURLToPath(import.meta.url)),
     '../../.landrush-local/world-multiplayer-state.json',
@@ -750,8 +768,21 @@ async function restorePersistentWorldState() {
   try {
     encoded = await readFile(PERSISTENT_STATE_FILE, 'utf8')
   } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') return
-    console.warn(`Could not read Landrush local save: ${errorMessage(error)}`)
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      if (process.env.NODE_ENV === 'production' && !ALLOW_EMPTY_PERSISTENT_STATE) {
+        throw new Error(
+          'The configured production multiplayer save does not exist. Restore it before starting, or set LANDRUSH_WORLD_MULTIPLAYER_ALLOW_EMPTY_STATE=1 only for the first boot of a new world.',
+        )
+      }
+      return
+    }
+    persistentStateStatus.lastError = errorMessage(error)
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        `Could not read the configured production multiplayer save: ${persistentStateStatus.lastError}`,
+      )
+    }
+    console.warn(`Could not read Landrush local save: ${persistentStateStatus.lastError}`)
     return
   }
 
@@ -763,6 +794,7 @@ async function restorePersistentWorldState() {
     ) {
       throw new Error('Unsupported local-save schema')
     }
+    const needsCanonicalRewrite = persistentStateNeedsCanonicalRewrite(snapshot)
 
     let buildCount = 0
     let ownershipCount = 0
@@ -795,11 +827,80 @@ async function restorePersistentWorldState() {
       buildCount += builds.size
       tvCount += tvs.size
     }
+    persistentStateStatus.backupAvailable = await ensurePersistentWorldStateBackup(encoded)
+    persistentStateStatus.restored = true
+    if (needsCanonicalRewrite) {
+      await writePersistentWorldState(createPersistentWorldStateSnapshot())
+      persistentStateStatus.migrated = true
+    }
     console.log(
       `Restored Landrush local save (${ownershipCount} parcels, ${buildCount} builds, ${tvCount} TVs)`,
     )
   } catch (error) {
-    console.warn(`Could not restore Landrush local save: ${errorMessage(error)}`)
+    persistentStateStatus.lastError = errorMessage(error)
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        `Could not restore the configured production multiplayer save: ${persistentStateStatus.lastError}`,
+      )
+    }
+    console.warn(`Could not restore Landrush local save: ${persistentStateStatus.lastError}`)
+  }
+}
+
+function persistentStateNeedsCanonicalRewrite(snapshot) {
+  if (snapshot.schemaVersion !== PERSISTENT_STATE_SCHEMA_VERSION) return true
+  return snapshot.worlds.some((world) =>
+    (Array.isArray(world?.builds) ? world.builds : []).some(
+      (build) =>
+        typeof build?.operationId !== 'string' ||
+        !build.operationId ||
+        !Number.isSafeInteger(build.revision) ||
+        build.revision < 0 ||
+        !isParcelBuildSchemaVersion(build.schemaVersion),
+    ),
+  )
+}
+
+async function ensurePersistentWorldStateBackup(encoded) {
+  if (!PERSISTENT_STATE_FILE) return false
+  const digest = createHash('sha256').update(encoded).digest('hex').slice(0, 16)
+  const backupDirectory = resolve(dirname(PERSISTENT_STATE_FILE), 'backups')
+  const backupFile = resolve(
+    backupDirectory,
+    `${basename(PERSISTENT_STATE_FILE)}.${digest}.json`,
+  )
+  await mkdir(backupDirectory, { recursive: true })
+  try {
+    await writeFile(backupFile, encoded, { encoding: 'utf8', flag: 'wx' })
+  } catch (error) {
+    if (!(error && typeof error === 'object' && error.code === 'EEXIST')) throw error
+  }
+  return true
+}
+
+function persistentStateHealth() {
+  const buildCount = [...parcelBuildNodesByWorld.values()].reduce(
+    (count, builds) => count + builds.size,
+    0,
+  )
+  const ownershipCount = [...parcelOwnershipByWorld.values()].reduce(
+    (count, ownerships) => count + ownerships.size,
+    0,
+  )
+  const tvCount = [...tvMediaStateByWorld.values()].reduce(
+    (count, tvs) => count + tvs.size,
+    0,
+  )
+  return {
+    backupAvailable: persistentStateStatus.backupAvailable,
+    buildCount,
+    enabled: persistentStateStatus.enabled,
+    lastError: persistentStateStatus.lastError,
+    migrated: persistentStateStatus.migrated,
+    ownershipCount,
+    restored: persistentStateStatus.restored,
+    schemaVersion: PERSISTENT_STATE_SCHEMA_VERSION,
+    tvCount,
   }
 }
 
@@ -818,8 +919,10 @@ async function flushPersistentWorldState() {
       try {
         await writePersistentWorldState(createPersistentWorldStateSnapshot())
         persistentStateWrittenRevision = targetRevision
+        persistentStateStatus.lastError = null
       } catch (error) {
-        console.error(`Could not write Landrush local save: ${errorMessage(error)}`)
+        persistentStateStatus.lastError = errorMessage(error)
+        console.error(`Could not write Landrush local save: ${persistentStateStatus.lastError}`)
         break
       }
     }

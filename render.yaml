@@ -12,3 +12,5 @@ services:
         value: 22
       - key: LANDRUSH_WORLD_MULTIPLAYER_CORS_ORIGIN
         value: "*"
+      - key: LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE
+        value: "off"
