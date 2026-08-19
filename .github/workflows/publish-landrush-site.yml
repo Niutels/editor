@@ -59,7 +59,7 @@ jobs:
           cp -R apps/landrush/public/navigation "$site/navigation"
           cp -R apps/landrush/public/audios "$site/audios"
 
-          for route in pascal-multiplayer-island pascal-multiplayer-island-bug-report pascal-multiplayer-island-navigation-debug pascal-multiplayer-island-water-debug; do
+          for route in pascal-multiplayer-island pascal-multiplayer-island-water-debug; do
             mkdir -p "$site/landrush-lab/$route"
             cp "apps/landrush/.next/server/app/landrush-lab/$route.html" "$site/landrush-lab/$route/index.html"
           done
