@@ -7,7 +7,6 @@ export type LandrushGamepadInput = {
   dpadRight: boolean
   dpadUp: boolean
   forward: number
-  jump: boolean
   leftShoulder: boolean
   leftTrigger: number
   lookStrength: number
@@ -20,6 +19,17 @@ export type LandrushGamepadInput = {
   strafe: number
   strength: number
   triangle: boolean
+}
+
+export type LandrushGamepadSnapshot = {
+  axes: ArrayLike<number>
+  buttons: ArrayLike<
+    | {
+        pressed: boolean
+        value: number
+      }
+    | undefined
+  >
 }
 
 const GAMEPAD_STICK_DEADZONE = 0.18
@@ -49,51 +59,52 @@ function readCurrentLandrushGamepadInput(): LandrushGamepadInput | null {
 
   for (const gamepad of navigator.getGamepads()) {
     if (!gamepad?.connected) continue
-
-    const movement = resolveGamepadStick(readGamepadAxis(gamepad, 0), -readGamepadAxis(gamepad, 1))
-    const look = resolveGamepadStick(readGamepadAxis(gamepad, 2), readGamepadAxis(gamepad, 3))
-
-    return {
-      circle: gamepadButtonPressed(gamepad, 1),
-      connected: true,
-      cross: gamepadButtonPressed(gamepad, 0),
-      dpadDown: gamepadButtonPressed(gamepad, 13),
-      dpadLeft: gamepadButtonPressed(gamepad, 14),
-      dpadRight: gamepadButtonPressed(gamepad, 15),
-      dpadUp: gamepadButtonPressed(gamepad, 12),
-      forward: movement.y,
-      jump: gamepadButtonPressed(gamepad, 0),
-      leftShoulder: gamepadButtonPressed(gamepad, 4),
-      leftTrigger: gamepadButtonValue(gamepad, 6),
-      lookStrength: look.strength,
-      lookX: look.x,
-      lookY: look.y,
-      rightShoulder: gamepadButtonPressed(gamepad, 5),
-      rightTrigger: gamepadButtonValue(gamepad, 7),
-      run:
-        gamepadButtonPressed(gamepad, 5) ||
-        gamepadButtonPressed(gamepad, 7) ||
-        gamepadButtonPressed(gamepad, 10),
-      square: gamepadButtonPressed(gamepad, 2),
-      strafe: movement.x,
-      strength: movement.strength,
-      triangle: gamepadButtonPressed(gamepad, 3),
-    }
+    return resolveLandrushGamepadInput(gamepad)
   }
 
   return null
 }
 
-function readGamepadAxis(gamepad: Gamepad, index: number) {
+export function resolveLandrushGamepadInput(
+  gamepad: LandrushGamepadSnapshot,
+): LandrushGamepadInput {
+  const movement = resolveGamepadStick(readGamepadAxis(gamepad, 0), -readGamepadAxis(gamepad, 1))
+  const look = resolveGamepadStick(readGamepadAxis(gamepad, 2), readGamepadAxis(gamepad, 3))
+
+  return {
+    circle: gamepadButtonPressed(gamepad, 1),
+    connected: true,
+    cross: gamepadButtonPressed(gamepad, 0),
+    dpadDown: gamepadButtonPressed(gamepad, 13),
+    dpadLeft: gamepadButtonPressed(gamepad, 14),
+    dpadRight: gamepadButtonPressed(gamepad, 15),
+    dpadUp: gamepadButtonPressed(gamepad, 12),
+    forward: movement.y,
+    leftShoulder: gamepadButtonPressed(gamepad, 4),
+    leftTrigger: gamepadButtonValue(gamepad, 6),
+    lookStrength: look.strength,
+    lookX: look.x,
+    lookY: look.y,
+    rightShoulder: gamepadButtonPressed(gamepad, 5),
+    rightTrigger: gamepadButtonValue(gamepad, 7),
+    run: gamepadButtonPressed(gamepad, 10),
+    square: gamepadButtonPressed(gamepad, 2),
+    strafe: movement.x,
+    strength: movement.strength,
+    triangle: gamepadButtonPressed(gamepad, 3),
+  }
+}
+
+function readGamepadAxis(gamepad: LandrushGamepadSnapshot, index: number) {
   const value = gamepad.axes[index]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0
 }
 
-function gamepadButtonPressed(gamepad: Gamepad, index: number) {
+function gamepadButtonPressed(gamepad: LandrushGamepadSnapshot, index: number) {
   return gamepadButtonValue(gamepad, index) >= GAMEPAD_BUTTON_THRESHOLD
 }
 
-function gamepadButtonValue(gamepad: Gamepad, index: number) {
+function gamepadButtonValue(gamepad: LandrushGamepadSnapshot, index: number) {
   const button = gamepad.buttons[index]
   if (!button) return 0
   if (button.pressed) return 1

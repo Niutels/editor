@@ -1,0 +1,1095 @@
+{
+  "assets": {
+    "sunflare-pistol": {
+      "id": "sunflare-pistol",
+      "kind": "weapon",
+      "name": "Sunflare Pistol",
+      "prompt": "Single compact cartoony solar-energy sidearm, chunky readable silhouette, short orange ceramic barrel shroud, teal grip, brass power cell, friendly island rescue technology, barrel pointing toward +Z and grip downward along -Y, centered as one watertight game-ready mesh, no hands, no character, no stand, no floating parts, clean bevels, target 3000 faces.",
+      "texturePrompt": "Stylized hand-painted PBR: warm orange ceramic, teal rubber grip, brushed brass accents, dark charcoal seams, subtle edge wear, no baked lighting, no labels, clean readable game asset.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01b9d-8f71-75a9-9bdd-932f909c8478",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "outputs": {
+        "model": "/landrush-lab/zombie-escape/assets/weapons/sunflare-pistol.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/weapons/previews/sunflare-pistol.png"
+      },
+      "validation": {
+        "model": {
+          "animationCount": 0,
+          "byteLength": 6687408,
+          "imageCount": 4,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 0,
+          "textureCount": 4,
+          "triangleCount": 2955
+        }
+      },
+      "assetFingerprint": "1cfb98ff17ed25158a56a396cfb9e7329c94d4054ec5c5f3a88e112cb2f4d601",
+      "previewTaskIdFingerprint": "d78bffcaad60a846ca7a485bfa337cca64ef5b089cc6ea6e36627cd27692c036",
+      "refineTaskIdFingerprint": "841c9adac2f627d7bd293b5f61917e4b9b85497e40d4b9584962a464e1bc2559",
+      "artifacts": {
+        "model": {
+          "byteLength": 6687408,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/sunflare-pistol.glb",
+          "sha256": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6",
+          "taskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4"
+        },
+        "preview": {
+          "byteLength": 115054,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/previews/sunflare-pistol.png",
+          "sha256": "4e03e5ddd0d34e73e517932b986cc4ed1fa63030c20f3582df00e8759bd3ae82",
+          "taskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4"
+        }
+      }
+    },
+    "reef-carbine": {
+      "id": "reef-carbine",
+      "kind": "weapon",
+      "name": "Reef Carbine",
+      "prompt": "Single cartoony compact energy carbine for a tropical island defender, strong two-handed silhouette, coral-red receiver, aqua barrel fins, dark stock, barrel pointing toward +Z, pistol grip downward along -Y, one watertight game-ready mesh, no hands, no character, no sling, no stand, no detached pieces, clean bevels, target 3000 faces.",
+      "texturePrompt": "Stylized hand-painted PBR: coral red receiver, aqua cooling fins, matte charcoal stock, pale ivory details, restrained scratches, no baked lighting, no text, crisp material separation.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01b9d-8f6c-79b9-9a50-6b1505461239",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "outputs": {
+        "model": "/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/weapons/previews/reef-carbine.png"
+      },
+      "validation": {
+        "model": {
+          "animationCount": 0,
+          "byteLength": 6720928,
+          "imageCount": 4,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 0,
+          "textureCount": 4,
+          "triangleCount": 2900
+        }
+      },
+      "assetFingerprint": "2cfed3f5193cd34477600beb55b00fe8cf9dd91b6940401b6b3b48e6d56c3e1f",
+      "previewTaskIdFingerprint": "f182b89b8eaa79d284ee795f6ba503ba926dafb988847a4d699b2305ab43c391",
+      "refineTaskIdFingerprint": "19ced56d24f6569ba38d0d7b5805db1c02c821b42dde88ccdbe38e3ac85b399c",
+      "artifacts": {
+        "model": {
+          "byteLength": 6720928,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb",
+          "sha256": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5",
+          "taskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9"
+        },
+        "preview": {
+          "byteLength": 48494,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/previews/reef-carbine.png",
+          "sha256": "8118b2f8f50c41706ac819cf4d3ad0c7e5ca07f4121e0a756f65225132479f29",
+          "taskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9"
+        }
+      }
+    },
+    "driftwood-scattergun": {
+      "id": "driftwood-scattergun",
+      "kind": "weapon",
+      "name": "Driftwood Scattergun",
+      "prompt": "Single chunky cartoony short scattergun assembled from driftwood and marine steel, wide muzzle, readable pump and two-handed grip, barrel pointing toward +Z, grip downward along -Y, one watertight game-ready mesh, no hands, no character, no strap, no stand, no detached shells, clean simplified forms, target 3000 faces.",
+      "texturePrompt": "Stylized hand-painted PBR: honey driftwood stock and pump, desaturated marine steel, turquoise tape wraps, brass fasteners, mild salt wear, no baked lighting, no text.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01b9d-8f6e-79ba-9b5e-5720564e4a4c",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "outputs": {
+        "model": "/landrush-lab/zombie-escape/assets/weapons/driftwood-scattergun.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/weapons/previews/driftwood-scattergun.png"
+      },
+      "validation": {
+        "model": {
+          "animationCount": 0,
+          "byteLength": 7224932,
+          "imageCount": 4,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 0,
+          "textureCount": 4,
+          "triangleCount": 3145
+        }
+      },
+      "assetFingerprint": "7a308c150aee557f5383c1bf2fbe9dcc56c909460fec9b2648097038d2ce1208",
+      "previewTaskIdFingerprint": "6518fe9e4dd8e354b9b8bdc5aa4a3f7f1b3c6e46ae05ac4aa706779a289291eb",
+      "refineTaskIdFingerprint": "6c80bb5fdb5e809e005f462791cb10095caf3b2be72ae6dfc8d0f2400dbd0307",
+      "artifacts": {
+        "model": {
+          "byteLength": 7224932,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/driftwood-scattergun.glb",
+          "sha256": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051",
+          "taskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6"
+        },
+        "preview": {
+          "byteLength": 51771,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/previews/driftwood-scattergun.png",
+          "sha256": "cf0f575693353421941a6d5fb0d2527499290eaf5a9a939be41cea54d07b0002",
+          "taskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6"
+        }
+      }
+    },
+    "storm-coil-repeater": {
+      "id": "storm-coil-repeater",
+      "kind": "weapon",
+      "name": "Storm-Coil Repeater",
+      "prompt": "Single cartoony rapid-fire storm coil repeater, compact two-handed sci-fi weapon, circular copper coils around a navy receiver, bright cyan energy channel, barrel pointing toward +Z, grip downward along -Y, one watertight game-ready mesh, no hands, no character, no cable, no stand, no floating parts, target 3000 faces.",
+      "texturePrompt": "Stylized hand-painted PBR: navy painted metal, copper coils, cyan emissive channel, matte black grip, subtle rain wear, no baked lighting, no lettering, clean bold color blocks.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01b9f-07ed-702f-9566-7fb088249ce5",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "outputs": {
+        "model": "/landrush-lab/zombie-escape/assets/weapons/storm-coil-repeater.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/weapons/previews/storm-coil-repeater.png"
+      },
+      "validation": {
+        "model": {
+          "animationCount": 0,
+          "byteLength": 6168944,
+          "imageCount": 4,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 0,
+          "textureCount": 4,
+          "triangleCount": 3107
+        }
+      },
+      "assetFingerprint": "41cba02aa1fddcd9c8356315eac963dbd569e534bfff514fb025c00f3111cde9",
+      "previewTaskIdFingerprint": "437376cb73ae7f461521a5d58077c3052a60ce74509667b367a66dc4d7e87ff0",
+      "refineTaskIdFingerprint": "92d3b5578cf554af91ba5badb41d27b7d5fe20438bcb47b60a439ec1a8ddf42e",
+      "artifacts": {
+        "model": {
+          "byteLength": 6168944,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/storm-coil-repeater.glb",
+          "sha256": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da",
+          "taskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d"
+        },
+        "preview": {
+          "byteLength": 97559,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/previews/storm-coil-repeater.png",
+          "sha256": "78c1817c4bd7c21f6aeec194bcc2cd377a12b75ac9397fd1a67a6377118b13ee",
+          "taskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d"
+        }
+      }
+    },
+    "tidebreak-launcher": {
+      "id": "tidebreak-launcher",
+      "kind": "weapon",
+      "name": "Tidebreak Launcher",
+      "prompt": "Single cartoony shoulder-mounted rescue projectile launcher, broad cylindrical barrel and compact rear brace, white and red coast-guard palette, barrel pointing toward +Z, grip downward along -Y, one watertight game-ready mesh, no hands, no character, no projectile, no strap, no stand, no detached parts, target 3000 faces.",
+      "texturePrompt": "Stylized hand-painted PBR: warm white shell, rescue red bands, navy rubber grips, brushed steel muzzle, tiny amber indicator glow, no baked lighting, no text, minimal wear.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01b9f-6726-7a6b-ae56-c9c43881cbd5",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "outputs": {
+        "model": "/landrush-lab/zombie-escape/assets/weapons/tidebreak-launcher.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/weapons/previews/tidebreak-launcher.png"
+      },
+      "validation": {
+        "model": {
+          "animationCount": 0,
+          "byteLength": 7555376,
+          "imageCount": 4,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 0,
+          "textureCount": 4,
+          "triangleCount": 2990
+        }
+      },
+      "assetFingerprint": "9e32ea7cead71324d744554925d4d8f799e771731776e6f0d64b8fb66175a7c2",
+      "previewTaskIdFingerprint": "7e62a3b6345aead5fbc7d7ba4b9cca75ff5f962352b9e7e8966e6f6bc9d02526",
+      "refineTaskIdFingerprint": "c1b3403b3a463f13552b2e7b86ba60d733fee5a1561495abc54d01a51d4d0dfa",
+      "artifacts": {
+        "model": {
+          "byteLength": 7555376,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/tidebreak-launcher.glb",
+          "sha256": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af",
+          "taskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8"
+        },
+        "preview": {
+          "byteLength": 72777,
+          "path": "/landrush-lab/zombie-escape/assets/weapons/previews/tidebreak-launcher.png",
+          "sha256": "71f87d7546e164ebdfdd6c8659d25b9a346475adad4554e40cb63746c94ffa55",
+          "taskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8"
+        }
+      }
+    },
+    "dockworker": {
+      "id": "dockworker",
+      "kind": "zombie",
+      "name": "Dockworker Zombie",
+      "prompt": "Single full-body cartoony undead dockworker in neutral A-pose, standard biped with clearly separated arms and legs, believable seven-head-tall adult proportions, broad shoulders, work vest fused close to body, boots, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no props, no base, no gore, no detached clothing, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: muted sea-green skin, orange work vest, navy trousers, brown boots, tired friendly-undead face, clean color blocks, no blood, no gore, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01b9f-96bf-77b8-8b9f-4118036eaf93",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01b9f-cd70-7645-96f0-6b13d158af97",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba1-0a67-7095-900e-59d9db2a2f21",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/dockworker/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/dockworker/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/dockworker/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/dockworker/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7632880,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3205
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7645648,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3205
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7641056,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3205
+        }
+      },
+      "assetFingerprint": "35a906757ee882f212e4a2bc3327259dc565b098ccd93da7c5bcae5caf2e1175",
+      "previewTaskIdFingerprint": "3ed7af0c14b6c0e9df7c74f2c2b252d281b26191a5d7d6b0ce71b63b54c41d43",
+      "refineTaskIdFingerprint": "649c3ab6aa888be6195734f08df73232b685aec2e3802244a70bcfd566d4a17e",
+      "rigTaskIdFingerprint": "0d863d6bdab042a745b7918bb20f3dfff0e16e2932c9c2f2d6c49fa270cb56d3",
+      "artifacts": {
+        "preview": {
+          "byteLength": 93653,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/dockworker/preview.png",
+          "sha256": "151dcc797514a8100112a890d884dd82a8d1b6873958e1bed2ca01f7074c5e72",
+          "taskId": "01a01b9f-cd70-7645-96f0-6b13d158af97"
+        },
+        "rigged": {
+          "byteLength": 7632880,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/dockworker/rigged.glb",
+          "sha256": "47e1ed27416ef2e395244008f6a2e7eb37d3e1bc87debd4fa5fc4431f67727c3",
+          "taskId": "01a01ba1-0a67-7095-900e-59d9db2a2f21"
+        },
+        "walk": {
+          "byteLength": 7645648,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/dockworker/walk.glb",
+          "sha256": "04fda64e5ca243be96fdce0eeff6ab25bc3fe92fe334a87c65e85a4669a22698",
+          "taskId": "01a01ba1-0a67-7095-900e-59d9db2a2f21"
+        },
+        "run": {
+          "byteLength": 7641056,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/dockworker/run.glb",
+          "sha256": "dfdca0ed504e355936a38d0a364be48c0c6ec3bcb4b85d5c4d1d20208fb519de",
+          "taskId": "01a01ba1-0a67-7095-900e-59d9db2a2f21"
+        }
+      }
+    },
+    "lifeguard": {
+      "id": "lifeguard",
+      "kind": "zombie",
+      "name": "Lifeguard Zombie",
+      "prompt": "Single full-body cartoony undead adult human lifeguard in neutral A-pose, ordinary human head with short hair and round ears, realistic anatomy exactly seven-and-a-half heads tall, normal hands, long athletic legs, clearly separated limbs, fitted shirt, shorts and intact sneakers, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no horns, antlers, animal or fantasy traits, props, base, or gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: sun-faded red shirt, cream shorts, teal-gray skin, white shoes, slightly sunburned cartoon face, no logos, no blood, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01bae-cac0-7497-8c0a-b2f7383f9b20",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01baf-19d9-74aa-977e-6e8ea0d48dc6",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01bb0-58c3-7a79-bbf7-ffc1b17c1263",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|clip0|baselayer"
+          ],
+          "byteLength": 7116248,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3185
+        },
+        "walk": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|walking_man|baselayer"
+          ],
+          "byteLength": 7129024,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3185
+        },
+        "run": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|running|baselayer"
+          ],
+          "byteLength": 7124412,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3185
+        }
+      },
+      "assetFingerprint": "d3655210b3940267d8cf7855d08c15030c9e6276c7aba63557bee8a4e9de7f12",
+      "previewTaskIdFingerprint": "cea0c997e26f1e8d6cd0d282d430676925e217e6b67098cd9bf597a737bf0b5d",
+      "refineTaskIdFingerprint": "e1f043667e699d23dde2e0274d27d0a99486b3093126e5c1d747c15c4ae2fae8",
+      "rigTaskIdFingerprint": "4ddfaea64bd64fa93f055bbfe15cf6269d711607f93a6f0c7d670f792bd3a776",
+      "artifacts": {
+        "preview": {
+          "byteLength": 91462,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/preview.png",
+          "sha256": "0fad473f3e471f3a7c369d4a6b6d110a5e7d601c500d1d60e7272d080630ccdb",
+          "taskId": "01a01baf-19d9-74aa-977e-6e8ea0d48dc6"
+        },
+        "run": {
+          "byteLength": 7124412,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/run.glb",
+          "sha256": "9d44e2a642cfcb8bddb250904d2f36dcb6d5fb43b7c1c80a4c97138c8a8a931b",
+          "taskId": "01a01bb0-58c3-7a79-bbf7-ffc1b17c1263"
+        },
+        "walk": {
+          "byteLength": 7129024,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/walk.glb",
+          "sha256": "0b2d69242631eb87fa4f37b17e4a8dcc6c9032dd16ec852bed745e7c1677c27d",
+          "taskId": "01a01bb0-58c3-7a79-bbf7-ffc1b17c1263"
+        },
+        "rigged": {
+          "byteLength": 7116248,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/rigged.glb",
+          "sha256": "f3a1a74beb1e01aab37dd3b47aba6fbe4ffa0654c9325bf708f8bbcc87a9efe3",
+          "taskId": "01a01bb0-58c3-7a79-bbf7-ffc1b17c1263"
+        }
+      }
+    },
+    "island-gardener": {
+      "id": "island-gardener",
+      "kind": "zombie",
+      "name": "Island Gardener Zombie",
+      "prompt": "Single full-body cartoony undead adult island gardener in neutral A-pose, realistic human anatomy exactly seven-and-a-half heads tall, normal-size head and hands, arms ending at mid-thigh, legs half the body height, clearly separated limbs, fitted overalls, face and torso toward +Z, feet flat, one watertight game-ready mesh, no goggles, hat, tools, props, base, or gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: moss-green overalls, pale yellow shirt, lavender-gray skin, brown work shoes, soil smudges without gore, no baked lighting, crisp readable features.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba8-d692-7cba-957c-9ab58a79fbe9",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba9-25a4-78de-9e2f-3b7f91b8afaa",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01baa-ad7b-79e8-8dc4-0f0d618d563d",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7442940,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3236
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7455720,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3236
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7451108,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3236
+        }
+      },
+      "assetFingerprint": "373793f0ad1e1202e5815eea08977dad8e68cbf620eac088ae699fc346ae439e",
+      "previewTaskIdFingerprint": "c4a08eddbe045d0f403c5f23fa4246b084b0ea9324c074d7848adfd643843dab",
+      "refineTaskIdFingerprint": "3135b0fb575c05cbc0429f790a7daa3a17b0af9f59fd9474341f29a099844579",
+      "rigTaskIdFingerprint": "64cd89b143dd5a2fdc70848159b4e2b455d16381140ba7ad938528912ff89137",
+      "artifacts": {
+        "preview": {
+          "byteLength": 74343,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/preview.png",
+          "sha256": "743cfc6f497770346da4856f7b39773c147e6d725e77caf8f76598fc2e3f2dc1",
+          "taskId": "01a01ba9-25a4-78de-9e2f-3b7f91b8afaa"
+        },
+        "walk": {
+          "byteLength": 7455720,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/walk.glb",
+          "sha256": "6febf13e0582574fa45394c114e4e07e850f8c021e6fd466cbcab60c24d239e1",
+          "taskId": "01a01baa-ad7b-79e8-8dc4-0f0d618d563d"
+        },
+        "rigged": {
+          "byteLength": 7442940,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/rigged.glb",
+          "sha256": "d6aab089829b1b20cadd2c89ed64073c9fe80db649e3d785d0a59928afd30977",
+          "taskId": "01a01baa-ad7b-79e8-8dc4-0f0d618d563d"
+        },
+        "run": {
+          "byteLength": 7451108,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/run.glb",
+          "sha256": "68e2608fe668efe05493301ca4da2be7f1a3877835bd795d9a0e0a07d1ff580f",
+          "taskId": "01a01baa-ad7b-79e8-8dc4-0f0d618d563d"
+        }
+      }
+    },
+    "tourist": {
+      "id": "tourist",
+      "kind": "zombie",
+      "name": "Tourist Zombie",
+      "prompt": "Single full-body cartoony undead island tourist in neutral A-pose, standard biped with clearly separated arms and legs, believable seven-head-tall average adult proportions, short-sleeve tropical shirt and shorts fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no camera, no bag, no hat, no base, no gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: turquoise tropical shirt with simple coral leaf pattern, tan shorts, pale green-gray skin, canvas shoes, no text, no blood, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba1-b3f3-782a-9fa5-8bd77912b854",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba2-018e-7b24-a5a8-970f7e463225",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba3-862c-715f-b019-efc2f963f70b",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/tourist/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/tourist/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/tourist/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/tourist/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7403784,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3145
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7416572,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3145
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7411956,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3145
+        }
+      },
+      "assetFingerprint": "a2574ea6b3a0a3cb88c4179ef6e2898532424580905648c4d294bad5022bc666",
+      "previewTaskIdFingerprint": "f7f5c1e7b637c6c95f0b48a3cfef6c7ccc05c0c87427ba04764b29625299c1c0",
+      "refineTaskIdFingerprint": "0401d689d3e98860e181cf67943edd8af576ebf29e9b3fb5899876f63b7db269",
+      "rigTaskIdFingerprint": "b86df25e82305595414e569525b4b7f9358d05b5e5499da47aa0aa4eac03e3a7",
+      "artifacts": {
+        "preview": {
+          "byteLength": 76321,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/tourist/preview.png",
+          "sha256": "5ac38f1ff2fdd393b2934e0e40138658ae5ff0ed76e4dfba8c33d1f64bcb6a35",
+          "taskId": "01a01ba2-018e-7b24-a5a8-970f7e463225"
+        },
+        "walk": {
+          "byteLength": 7416572,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/tourist/walk.glb",
+          "sha256": "3687c13ebc4e2184478d517d8f7861bcb54ba3916832d28a4d62252e89520857",
+          "taskId": "01a01ba3-862c-715f-b019-efc2f963f70b"
+        },
+        "run": {
+          "byteLength": 7411956,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/tourist/run.glb",
+          "sha256": "f4f33b565ee81f730be232d12aeb6f92fd85caf0ccb740b61bcde9d056f7319c",
+          "taskId": "01a01ba3-862c-715f-b019-efc2f963f70b"
+        },
+        "rigged": {
+          "byteLength": 7403784,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/tourist/rigged.glb",
+          "sha256": "2c1f367d5d8b8e3889d02b840c3a4027031d8a728c3ad8212bfdd0630cdd9946",
+          "taskId": "01a01ba3-862c-715f-b019-efc2f963f70b"
+        }
+      }
+    },
+    "marina-mechanic": {
+      "id": "marina-mechanic",
+      "kind": "zombie",
+      "name": "Marina Mechanic Zombie",
+      "prompt": "Single full-body cartoony undead marina mechanic in neutral A-pose, standard biped with clearly separated limbs, believable seven-and-a-half-head-tall sturdy adult proportions, zipped coveralls close to body, heavy boots, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no wrench, no cap, no base, no gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: dark blue coveralls, mustard undershirt, cool gray-green skin, black boots, harmless grease smudges, no blood, no text, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba3-29b3-7744-8c5b-c2794229f9c0",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba3-5ee5-786f-aa64-79503af8179a",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7243200,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3175
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7255976,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3175
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7251368,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3175
+        }
+      },
+      "assetFingerprint": "3c0f203c98be06411b5b8878a6eb9a518bf5dff279b641bcec4286453587e863",
+      "previewTaskIdFingerprint": "57f8b244cd73aa1d2c6fbb73f1ec66dcc92f0c2bff7273ed06056423c6e76311",
+      "refineTaskIdFingerprint": "109945534471f40cb8d999f36d546e53094613f46360a4bc43baa79f14dfd71a",
+      "rigTaskIdFingerprint": "304751bef73adcf2ea87b23154c90d14d9f712366af99a4db042dc67f727a9a6",
+      "artifacts": {
+        "preview": {
+          "byteLength": 89496,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png",
+          "sha256": "bba2397eabd9718010402a2bc87151db669de372bdbd58c2922d96c45e2ba374",
+          "taskId": "01a01ba3-5ee5-786f-aa64-79503af8179a"
+        },
+        "run": {
+          "byteLength": 7251368,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
+          "sha256": "6e35ed322628646794a65cc6094e566d9a5e0bb1da4d971281b32f8576a88a17",
+          "taskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
+        },
+        "walk": {
+          "byteLength": 7255976,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
+          "sha256": "6a375d591eebd02b9e7acf628750508e66f123855e513077ce570bab00ad6621",
+          "taskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
+        },
+        "rigged": {
+          "byteLength": 7243200,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
+          "sha256": "66540d9fb88c2bf6d396279e582f4131fed2044071b2aef48406319ce94f3054",
+          "taskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
+        }
+      }
+    },
+    "beach-courier": {
+      "id": "beach-courier",
+      "kind": "zombie",
+      "name": "Beach Courier Zombie",
+      "prompt": "Single full-body cartoony undead beach courier in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall lean adult proportions, fitted windbreaker and cargo trousers, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no backpack, no parcel, no helmet, no base, no gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: bright yellow windbreaker, violet cargo trousers, desaturated mint skin, dark trainers, subtle fabric wear, no blood, no logos, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba3-70fd-776b-b07a-099522d54aa1",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba3-a5f1-7b9b-9763-c362c8379316",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba5-138b-77d9-a749-4e387d10524b",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 6639248,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3141
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 6652032,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3141
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 6647420,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3141
+        }
+      },
+      "assetFingerprint": "ae15486ad47eb7fedcfdca7bd625bd766dcafb2571529a963ac6b46184f8b71d",
+      "previewTaskIdFingerprint": "75cadaf46e2f0547a34af28436a96833f54118bccbaedac6ef3371407ebb8925",
+      "refineTaskIdFingerprint": "da26419d37d68c21ec245531623518ea46f49e6ecff47d42dbbfa25c6b26dea0",
+      "rigTaskIdFingerprint": "79568f29e02bebf9f09dcc600cc3f7aec56b22893ab9a329059909a4dfaaca0e",
+      "artifacts": {
+        "preview": {
+          "byteLength": 77687,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/preview.png",
+          "sha256": "7376e7b9f36bc60b811dc5d4579d83a71a450d66b56f8a4de60aac8a1ce360e6",
+          "taskId": "01a01ba3-a5f1-7b9b-9763-c362c8379316"
+        },
+        "run": {
+          "byteLength": 6647420,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/run.glb",
+          "sha256": "ec7dcac9467e5f739ffbb0601bdc4c9259879e060ac24a8e9e858910462af65f",
+          "taskId": "01a01ba5-138b-77d9-a749-4e387d10524b"
+        },
+        "rigged": {
+          "byteLength": 6639248,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/rigged.glb",
+          "sha256": "c518f0bee5f0776dedc18c607e50b3086c9fb72aa9b8f31f210e6eab57226d62",
+          "taskId": "01a01ba5-138b-77d9-a749-4e387d10524b"
+        },
+        "walk": {
+          "byteLength": 6652032,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/walk.glb",
+          "sha256": "9ba7bb7bb45c917c5c61fea9f3c45c431456dc7f1839f8a9997b02187b26d652",
+          "taskId": "01a01ba5-138b-77d9-a749-4e387d10524b"
+        }
+      }
+    },
+    "boardwalk-chef": {
+      "id": "boardwalk-chef",
+      "kind": "zombie",
+      "name": "Boardwalk Chef Zombie",
+      "prompt": "Single full-body cartoony undead boardwalk chef in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall stocky adult proportions, double-breasted jacket and apron fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no utensil, no base, no gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: cream chef jacket, tomato-red apron, soft blue-gray skin, dark checked trousers simplified for readability, no stains resembling blood, no text, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba4-263e-7899-aee3-c4e3952983f9",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba4-5c2d-77a3-b1a3-5061010f5aab",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba5-afae-78ec-950e-7b187237326c",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7002764,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3102
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7015532,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3102
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7010928,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3102
+        }
+      },
+      "assetFingerprint": "e0ed33aa450fe7acb5741fc9262de1dd4a306948b66a0f8ed030abf029016da2",
+      "previewTaskIdFingerprint": "bac058ef23114e085c045a19bfbb15a673b1f41341b85bcf1817d80c5ac6b490",
+      "refineTaskIdFingerprint": "5c329696f134d49d74d2a2c215d6f53c65ff1c40b0b266e15d16922158421717",
+      "rigTaskIdFingerprint": "2a0b5d852c8b65c0e2302193b27da5fdb65b8eddc7fcf759e0f4e2bf1ad51440",
+      "artifacts": {
+        "preview": {
+          "byteLength": 69503,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png",
+          "sha256": "d9deb95f63c7b601d3c227aece8f67a3167af465fb409998d9b863c5f276cd55",
+          "taskId": "01a01ba4-5c2d-77a3-b1a3-5061010f5aab"
+        },
+        "rigged": {
+          "byteLength": 7002764,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
+          "sha256": "9ff353044a2d2ea921117e7ac4e30f9e791028b80dc9822ec5eef09848cb6c71",
+          "taskId": "01a01ba5-afae-78ec-950e-7b187237326c"
+        },
+        "walk": {
+          "byteLength": 7015532,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
+          "sha256": "638c4c6f2116600b36cecaa491516a0edfce422eed0ca998aeea42b96fad74f7",
+          "taskId": "01a01ba5-afae-78ec-950e-7b187237326c"
+        },
+        "run": {
+          "byteLength": 7010928,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
+          "sha256": "dcce97362863203bb82d1f17259800f12afb76ade14416e7c15d478894738a45",
+          "taskId": "01a01ba5-afae-78ec-950e-7b187237326c"
+        }
+      }
+    },
+    "island-ranger": {
+      "id": "island-ranger",
+      "kind": "zombie",
+      "name": "Island Ranger Zombie",
+      "prompt": "Single full-body cartoony undead island ranger in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall fit adult proportions, short-sleeve uniform and utility trousers fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no radio, no weapon, no base, no gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: forest green uniform, sandy utility trousers, muted purple-gray skin, brown trail boots, no badge text, no blood, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba5-76a9-71e2-893e-119f8b6e672a",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba5-ac20-78eb-b31a-44ac66b6449f",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba7-44be-7879-b2db-81f7ab6b09e2",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 6740704,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3157
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 6753480,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3157
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 6748872,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3157
+        }
+      },
+      "assetFingerprint": "d21aac479c81647b005fa320fa1d0b7c4ee0340a4655e68c7e7d6a728ffc1b00",
+      "previewTaskIdFingerprint": "42a4d7c5b2c48dcfc00336dd595509966a84d76bb1ea6edc260c87f6cb527d6c",
+      "refineTaskIdFingerprint": "ed5530fd6f430e6806f1650b69f3e2016c338c2e7bc847001f64184871c980f8",
+      "rigTaskIdFingerprint": "bdcb176a6e88c46b0ff506c316e739724cb0eb53afe8ece148ffe7eb719025ee",
+      "artifacts": {
+        "preview": {
+          "byteLength": 103271,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/preview.png",
+          "sha256": "a37d7d9ac1742a5f04935411ac23d455353357ad9b0949625fe59cabf916eae9",
+          "taskId": "01a01ba5-ac20-78eb-b31a-44ac66b6449f"
+        },
+        "walk": {
+          "byteLength": 6753480,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/walk.glb",
+          "sha256": "c4e2f84376fb3af8b0f24d92e454246420f58aa39d4237509db56771e326b7a5",
+          "taskId": "01a01ba7-44be-7879-b2db-81f7ab6b09e2"
+        },
+        "run": {
+          "byteLength": 6748872,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/run.glb",
+          "sha256": "0269c29f0e3a00fe1ca38d265245263f82ea5ccd2039778726aa76192d76a75c",
+          "taskId": "01a01ba7-44be-7879-b2db-81f7ab6b09e2"
+        },
+        "rigged": {
+          "byteLength": 6740704,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/rigged.glb",
+          "sha256": "c044b098299dbd57d2b414816b728c9fa820e6451762db476b0cebaac57e4ec9",
+          "taskId": "01a01ba7-44be-7879-b2db-81f7ab6b09e2"
+        }
+      }
+    },
+    "resort-clerk": {
+      "id": "resort-clerk",
+      "kind": "zombie",
+      "name": "Resort Clerk Zombie",
+      "prompt": "Single full-body cartoony undead adult resort clerk in neutral A-pose, realistic human anatomy exactly seven-and-a-half heads tall, normal-size head and hands, long legs half the body height, clearly separated limbs, neat fitted vest and rolled-sleeve shirt, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no bald oversized head, tray, tag, props, base, or gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: plum vest, pale aqua shirt, charcoal trousers, soft sage skin, polished dark shoes, no lettering, no blood, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01bab-a8db-7d47-89e5-e16885d82c5b",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01bab-fb22-7a3c-b1c7-454a424e2b64",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01bad-81fd-7437-bc69-dcfef2abcfc6",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7399164,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3136
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7411928,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3136
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7407328,
+          "imageCount": 1,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3136
+        }
+      },
+      "assetFingerprint": "227f8ece546b5da586f06d97f3fff7ceda89971b614107fd83296b7407727a5b",
+      "previewTaskIdFingerprint": "0ce8293d4ae6c5529735a20fd2dd938c568160f76670791210fb72a9b367eb5a",
+      "refineTaskIdFingerprint": "bd74dcbcfa6878a5520ed067ab81c36abb2cc79e8e746290cafb9a605e26b35b",
+      "rigTaskIdFingerprint": "617710d5dc01122173eb07106aef8881e9888336aa829423a2a7e3eadf00ff5d",
+      "artifacts": {
+        "preview": {
+          "byteLength": 68727,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/preview.png",
+          "sha256": "c27b430a0cd4288785c89ed96fb9e3e6aa5f8aa9e33e1d25fb2b1502d96d7b15",
+          "taskId": "01a01bab-fb22-7a3c-b1c7-454a424e2b64"
+        },
+        "rigged": {
+          "byteLength": 7399164,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/rigged.glb",
+          "sha256": "bdefb7b7983a7404f34cc6c4e423516f73f4f91b243d34759d4ff306ed648748",
+          "taskId": "01a01bad-81fd-7437-bc69-dcfef2abcfc6"
+        },
+        "run": {
+          "byteLength": 7407328,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/run.glb",
+          "sha256": "b25f2ac249390dbf7aa7b6e79ede41dea6235b3d8d7ec5ba2620956d94790690",
+          "taskId": "01a01bad-81fd-7437-bc69-dcfef2abcfc6"
+        },
+        "walk": {
+          "byteLength": 7411928,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/walk.glb",
+          "sha256": "1f2ec4b4eeadddd00e35fab7c154b8d4d57953f057f69af9ebd83fad917554b4",
+          "taskId": "01a01bad-81fd-7437-bc69-dcfef2abcfc6"
+        }
+      }
+    },
+    "old-sailor": {
+      "id": "old-sailor",
+      "kind": "zombie",
+      "name": "Old Sailor Zombie",
+      "prompt": "Single full-body cartoony undead old sailor in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall older adult proportions, striped knit shirt and loose trousers kept close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no pipe, no rope, no base, no gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: cream and navy striped shirt, weathered red trousers, desaturated teal-gray skin, brown deck shoes, no blood, no text, no baked lighting.",
+      "targetFaceCount": 3000,
+      "previewTaskId": "01a01ba6-4393-78fe-a24c-eb110f55258f",
+      "previewTaskIdStatus": "SUCCEEDED",
+      "previewTaskIdCredits": 5,
+      "refineTaskId": "01a01ba6-8ffb-723b-85c0-a932cb6dc7e9",
+      "refineTaskIdStatus": "SUCCEEDED",
+      "refineTaskIdCredits": 10,
+      "rigTaskId": "01a01ba7-e05c-7969-8155-3dbed27c5f17",
+      "rigTaskIdStatus": "SUCCEEDED",
+      "rigTaskIdCredits": 5,
+      "outputs": {
+        "rigged": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/rigged.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/run.glb",
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/preview.png"
+      },
+      "validation": {
+        "rigged": {
+          "animationCount": 1,
+          "byteLength": 7229212,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3191
+        },
+        "walk": {
+          "animationCount": 1,
+          "byteLength": 7241988,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3191
+        },
+        "run": {
+          "animationCount": 1,
+          "byteLength": 7237376,
+          "materialCount": 1,
+          "meshCount": 1,
+          "primitiveCount": 1,
+          "skinCount": 1,
+          "triangleCount": 3191
+        }
+      },
+      "assetFingerprint": "a2c4203054d55c4883c3a34388bbc82d7c2b6d83ba9bee63b48369dda578819c",
+      "previewTaskIdFingerprint": "e319fd0505f3761fa35e03677d01f38531062f0ae8bf43fb29ffc7252ab71fff",
+      "refineTaskIdFingerprint": "b2e9fec7aee98fed47bbe756b53ea0df0fde347965d181ce6a21a361c4111d61",
+      "rigTaskIdFingerprint": "4fcd04b8baccd9197d4750b062f93ac4e9877938610aa474ea65ca0940d90bed",
+      "artifacts": {
+        "preview": {
+          "byteLength": 91334,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/preview.png",
+          "sha256": "52ad90c3cd53349be233d26ccee0471948ad58644677d5649a75fb37fa5f4101",
+          "taskId": "01a01ba6-8ffb-723b-85c0-a932cb6dc7e9"
+        },
+        "rigged": {
+          "byteLength": 7229212,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/rigged.glb",
+          "sha256": "1f5c5d7b6cb9875dc6340136b8ef44dfcf2b0ecee635c8b1825b3fc7148d196c",
+          "taskId": "01a01ba7-e05c-7969-8155-3dbed27c5f17"
+        },
+        "walk": {
+          "byteLength": 7241988,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/walk.glb",
+          "sha256": "17b3e8744fa16f1866e1d9179842cca39a7383d7e281be6e2326ab3ef8cd30d1",
+          "taskId": "01a01ba7-e05c-7969-8155-3dbed27c5f17"
+        },
+        "run": {
+          "byteLength": 7237376,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/run.glb",
+          "sha256": "7c56056e2472038cdc71d831180fdc501a9d69d5b2c7817b53754b60a597521d",
+          "taskId": "01a01ba7-e05c-7969-8155-3dbed27c5f17"
+        }
+      }
+    }
+  },
+  "schemaVersion": 2,
+  "targetFaceCount": 3000,
+  "textureResolution": "2k",
+  "generatedAt": "2026-08-19T20:23:02.039Z"
+}

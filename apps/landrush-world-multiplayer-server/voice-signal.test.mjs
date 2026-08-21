@@ -91,7 +91,12 @@ async function connectPlayer(port, id) {
       },
       roomId: 'voice-test',
       type: 'join',
+      writerSessionId: `writer-${id}`,
     }),
+  )
+  await nextMessage(
+    { messages, socket },
+    (message) => message.type === 'parcel-writer-session-granted',
   )
   await nextMessage({ messages, socket }, (message) => message.type === 'snapshot')
   return { messages, socket }

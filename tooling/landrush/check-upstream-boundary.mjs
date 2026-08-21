@@ -105,10 +105,15 @@ for (const dependencyGroup of [
 
 const labRoot = join(repositoryRoot, 'apps/landrush/app/landrush-lab')
 const allowedPageRoutes = new Set([
+  'orbot-animation-debug',
   'pascal-multiplayer-island',
   'pascal-multiplayer-island-bug-report',
   'pascal-multiplayer-island-navigation-debug',
   'pascal-multiplayer-island-water-debug',
+  'weapon-fit-debug',
+  'zombie-escape',
+  'zombie-running-debug',
+  'zombie-shooting-debug',
 ])
 const pageRoutes = readdirSync(labRoot, { withFileTypes: true })
   .filter((entry) => entry.isDirectory() && existsSync(join(labRoot, entry.name, 'page.tsx')))

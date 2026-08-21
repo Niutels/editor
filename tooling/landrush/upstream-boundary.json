@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/pascalorg/editor.git",
-  "integratedCommit": "6cfff809921e067dbb95c1030b5607b05b3d35c6",
+  "integratedCommit": "889144dbeba272fb1c5a8a8c918562069ea9eaff",
   "upstreamOwnedPaths": [
     "apps/editor",
     "apps/ifc-converter",

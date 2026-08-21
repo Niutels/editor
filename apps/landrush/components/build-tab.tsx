@@ -1,10 +1,19 @@
 'use client'
 
 import { nodeRegistry } from '@pascal-app/core'
-import { MaterialPaintPanel, triggerSFX, useEditor } from '@pascal-app/editor'
+import {
+  type FloorplanMode,
+  getFloorplanNodeExtension,
+  isFloorplanToolAvailableInMode,
+  MaterialPaintPanel,
+  TerrainSculptPanel,
+  triggerSFX,
+  useEditor,
+  useFloorplanMode,
+} from '@pascal-app/editor'
 import { useLiquidLineToolOptions } from '@pascal-app/nodes'
 import Image from 'next/image'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import {
   Tooltip,
   TooltipContent,
@@ -12,24 +21,6 @@ import {
   TooltipTrigger,
 } from '@/components/toolbar-tooltip'
 import { cn } from '@/lib/utils'
-
-/**
- * Raw structure-tool kinds the Build tab can activate. These map 1:1 to the
- * editor's `StructureTool` ids.
- */
-type BuildToolKind =
-  | 'wall'
-  | 'fence'
-  | 'slab'
-  | 'ceiling'
-  | 'roof'
-  | 'stair'
-  | 'elevator'
-  | 'door'
-  | 'window'
-  | 'column'
-  | 'shelf'
-  | 'spawn'
 
 /**
  * MEP (mechanical / plumbing) tool kinds surfaced under the Build tab's "MEP"
@@ -53,9 +44,10 @@ type BuildType = {
   /** Raster asset tile (legacy Build sidebar artwork). */
   iconSrc: string
   /** Present for structure-tool types (absent for paint mode and the MEP group). */
-  kind?: BuildToolKind
+  kind?: string
+  paletteOrder?: number
   /** Non-placement special mode. */
-  mode?: 'material-paint'
+  mode?: 'material-paint' | 'terrain-sculpt'
 }
 
 type MepItem = {
@@ -67,7 +59,7 @@ type MepItem = {
 }
 
 // Same icons + ordering as the community Build sidebar, minus presets.
-const BUILD_TYPES: BuildType[] = [
+const BASE_BUILD_TYPES: BuildType[] = [
   { id: 'wall', label: 'Wall', iconSrc: '/icons/wall.webp', kind: 'wall' },
   { id: 'fence', label: 'Fence', iconSrc: '/icons/fence.webp', kind: 'fence' },
   { id: 'slab', label: 'Slab', iconSrc: '/icons/floor.webp', kind: 'slab' },
@@ -83,7 +75,65 @@ const BUILD_TYPES: BuildType[] = [
   // Group tile — no tool of its own; opens the MEP sub-grid below (like Roof).
   { id: 'mep', label: 'MEP', iconSrc: '/icons/HVAC.webp' },
   { id: 'painting', label: 'Painting', iconSrc: '/icons/paint.webp', mode: 'material-paint' },
+  { id: 'terrain', label: 'Terrain', iconSrc: '/icons/mesh.webp', mode: 'terrain-sculpt' },
 ]
+
+export type BuildTabCapabilities = {
+  materialPaint: boolean
+}
+
+export type BuildTabProps = {
+  capabilities?: Partial<BuildTabCapabilities>
+  runStructureToolActivation?: (activate: () => void) => void
+}
+
+const FULL_BUILD_TAB_CAPABILITIES: BuildTabCapabilities = {
+  materialPaint: true,
+}
+
+const runToolActivationDirectly = (activate: () => void) => activate()
+
+export function applyBuildTabCapabilities<T extends { mode?: string }>(
+  types: T[],
+  capabilities: BuildTabCapabilities,
+): T[] {
+  return capabilities.materialPaint ? types : types.filter((type) => type.mode !== 'material-paint')
+}
+
+const subscribeToClientMount = () => () => {}
+
+function collectBuildTypes(floorplanMode: FloorplanMode): BuildType[] {
+  const baseKinds = new Set(BASE_BUILD_TYPES.flatMap((type) => (type.kind ? [type.kind] : [])))
+  const tools = BASE_BUILD_TYPES.filter((type) => type.kind).map((type, index) => ({
+    ...type,
+    paletteOrder:
+      nodeRegistry.get(type.kind!)?.presentation?.paletteOrder ?? type.paletteOrder ?? index * 10,
+  }))
+  for (const [kind, definition] of nodeRegistry.entries()) {
+    const presentation = definition.presentation
+    const extension = getFloorplanNodeExtension(definition)
+    if (
+      baseKinds.has(kind) ||
+      definition.presentation?.paletteGroup === 'roof-features' ||
+      !extension?.tool ||
+      !isFloorplanToolAvailableInMode(extension.availableModes, floorplanMode) ||
+      !presentation ||
+      presentation.hidden ||
+      presentation.paletteSection !== 'structure'
+    ) {
+      continue
+    }
+    tools.push({
+      id: kind,
+      kind,
+      label: presentation.label,
+      iconSrc: presentation.icon.kind === 'url' ? presentation.icon.src : '/icons/spawn-point.webp',
+      paletteOrder: presentation.paletteOrder ?? Number.MAX_SAFE_INTEGER,
+    })
+  }
+  tools.sort((left, right) => (left.paletteOrder ?? 0) - (right.paletteOrder ?? 0))
+  return [...tools, ...BASE_BUILD_TYPES.filter((type) => !type.kind)]
+}
 
 // MEP sub-grid surfaced under the "MEP" tile — same icons + ordering the MEP
 // tools had in the community Build sidebar.
@@ -105,8 +155,18 @@ const MEP_ITEMS: MepItem[] = [
  * Activate a raw structure draw/cursor tool. Mirrors the editor's own
  * structure-tool activation (`setPhase`/`setStructureLayer`/`setMode`/`setTool`).
  */
-function activateBuildTool(kind: BuildToolKind | MepToolKind): void {
+function activateBuildTool(kind: string): void {
   const ed = useEditor.getState()
+  const definition = nodeRegistry.get(kind)
+  const extension = getFloorplanNodeExtension(definition)
+  if (
+    !isFloorplanToolAvailableInMode(extension?.availableModes, useFloorplanMode.getState().mode)
+  ) {
+    useFloorplanMode.getState().showExpertModeNotice(definition?.presentation?.label ?? kind)
+    return
+  }
+  const preferredView = extension?.preferredView
+  if (preferredView) ed.setViewMode(preferredView)
   ed.setPhase('structure')
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
@@ -123,18 +183,25 @@ function activatePaintMode(): void {
   ed.setMode('material-paint')
 }
 
+/**
+ * Enter terrain-sculpt mode — the Build tab's "Terrain" category. No `setPhase`:
+ * `setMode` moves to the site phase itself, since sculpting is a site-phase mode.
+ */
+function activateTerrainSculptMode(): void {
+  useEditor.getState().setMode('terrain-sculpt')
+}
+
 type RoofFeature = { kind: string; label: string; iconSrc: string }
 
 const ROOF_FEATURE_FALLBACK_ICON = '/icons/roof.webp'
 
 /**
- * Roof accessories surfaced under the Roof tile (a "Features" group). Unlike
- * the community editor these aren't DB presets — each is a registry kind with
- * `capabilities.roofAccessory`, enumerated from the registry at render time
- * (it is populated by the app bootstrap — a module-scope const would race it)
- * and activated like any structure tool (the kind's tool attaches it to the
- * roof segment under the cursor). Label + icon come from the registry's
- * `presentation`; non-url icons fall back to the roof icon.
+ * Roof accessories and extensions surfaced under the Roof tile. Unlike the
+ * community editor these aren't DB presets — each is a registry kind, either
+ * carrying `capabilities.roofAccessory` or explicitly classified as a roof
+ * extension. They are enumerated at render time because the registry is
+ * populated during app bootstrap. Label + icon come from `presentation`;
+ * non-url icons fall back to the roof icon.
  */
 function activateRoofFeatureTool(kind: string): void {
   const ed = useEditor.getState()
@@ -142,7 +209,7 @@ function activateRoofFeatureTool(kind: string): void {
   ed.setStructureLayer('elements')
   ed.setCatalogCategory(null)
   ed.setMode('build')
-  ed.setTool(kind as Parameters<typeof ed.setTool>[0])
+  ed.setTool(kind)
 }
 
 /**
@@ -160,11 +227,26 @@ const MEP_TOOL_KINDS = new Set<string>([
   'pipe-trap',
 ])
 
-export function BuildTab() {
+export function BuildTab({
+  capabilities,
+  runStructureToolActivation = runToolActivationDirectly,
+}: BuildTabProps = {}) {
+  const materialPaintEnabled =
+    capabilities?.materialPaint ?? FULL_BUILD_TAB_CAPABILITIES.materialPaint
   const activeTool = useEditor((s) => s.tool)
   const mode = useEditor((s) => s.mode)
+  const floorplanMode = useFloorplanMode((s) => s.mode)
   const follow = useLiquidLineToolOptions((s) => s.follow)
   const toggleFollow = useLiquidLineToolOptions((s) => s.toggleFollow)
+  const registryReady = useSyncExternalStore(
+    subscribeToClientMount,
+    () => true,
+    () => false,
+  )
+  const buildTypes = useMemo(() => {
+    const availableTypes = registryReady ? collectBuildTypes(floorplanMode) : BASE_BUILD_TYPES
+    return applyBuildTabCapabilities(availableTypes, { materialPaint: materialPaintEnabled })
+  }, [floorplanMode, materialPaintEnabled, registryReady])
 
   // The fitting / follow tools are armed from a segment's panel, not a grid
   // tile — keep the segment tile lit so the panel (and the way back) stays
@@ -188,9 +270,15 @@ export function BuildTab() {
   // Read at render time (not module scope): the registry is populated by the
   // app bootstrap, so enumerating earlier would race it and see no kinds.
   const roofFeatures = useMemo<RoofFeature[]>(() => {
+    if (!registryReady) return []
     const features: RoofFeature[] = []
     for (const [kind, def] of nodeRegistry.entries()) {
-      if (def.capabilities.roofAccessory === undefined) continue
+      if (
+        def.capabilities.roofAccessory === undefined &&
+        def.presentation?.paletteGroup !== 'roof-features'
+      ) {
+        continue
+      }
       // Door / window declare `roofAccessory` for the wall-face cut but
       // already have their own Build tiles — listing them here too
       // would duplicate the entry under Roof → Features.
@@ -203,7 +291,7 @@ export function BuildTab() {
       })
     }
     return features
-  }, [])
+  }, [registryReady])
 
   // Tile highlight derives from the single source of truth (the active tool /
   // mode), never a separate local selection — so keyboard shortcuts and panel
@@ -216,24 +304,37 @@ export function BuildTab() {
   const isMepActive = mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)
 
   const isTypeActive = (type: BuildType) => {
-    if (type.mode === 'material-paint') return mode === 'material-paint'
+    if (type.mode) return mode === type.mode
     if (type.id === 'mep') return isMepActive
     if (type.id === 'roof')
       return mode === 'build' && (activeTool === 'roof' || isRoofFeatureActive)
     return mode === 'build' && activeTool === type.kind
   }
 
-  const handleTypeClick = useCallback((type: BuildType) => {
-    if (type.mode === 'material-paint') {
-      activatePaintMode()
-    } else if (type.id === 'mep') {
-      // MEP is a group tile: arm its first tool so a usable tool is active
-      // (and we leave any prior paint mode), then reveal the MEP sub-grid.
-      activateBuildTool('duct-segment')
-    } else if (type.kind) {
-      activateBuildTool(type.kind)
-    }
-  }, [])
+  const runBuildToolActivation = useCallback(
+    (kind: string) => runStructureToolActivation(() => activateBuildTool(kind)),
+    [runStructureToolActivation],
+  )
+  const runRoofFeatureActivation = useCallback(
+    (kind: string) => runStructureToolActivation(() => activateRoofFeatureTool(kind)),
+    [runStructureToolActivation],
+  )
+  const handleTypeClick = useCallback(
+    (type: BuildType) => {
+      if (type.mode === 'material-paint') {
+        activatePaintMode()
+      } else if (type.mode === 'terrain-sculpt') {
+        activateTerrainSculptMode()
+      } else if (type.id === 'mep') {
+        // MEP is a group tile: arm its first tool so a usable tool is active
+        // (and we leave any prior paint mode), then reveal the MEP sub-grid.
+        runBuildToolActivation('duct-segment')
+      } else if (type.kind) {
+        runBuildToolActivation(type.kind)
+      }
+    },
+    [runBuildToolActivation],
+  )
 
   // On open, land on the first build tool — parity with the community Build
   // sidebar, so switching to Build immediately arms a usable tool. Skip when a
@@ -245,9 +346,9 @@ export function BuildTab() {
     didInitRef.current = true
     const ed = useEditor.getState()
     if (ed.mode === 'build' && ed.tool) return
-    const firstType = BUILD_TYPES.find((t) => t.kind)
+    const firstType = buildTypes.find((t) => t.kind)
     if (firstType) handleTypeClick(firstType)
-  }, [handleTypeClick])
+  }, [buildTypes, handleTypeClick])
 
   return (
     <div className="flex h-full flex-col gap-3 p-3">
@@ -256,7 +357,7 @@ export function BuildTab() {
           className="grid gap-1.5"
           style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }}
         >
-          {BUILD_TYPES.map((type) => {
+          {buildTypes.map((type) => {
             const active = isTypeActive(type)
             return (
               <Tooltip key={type.id}>
@@ -293,15 +394,21 @@ export function BuildTab() {
         </div>
       </TooltipProvider>
 
-      {mode === 'material-paint' ? (
+      {materialPaintEnabled && mode === 'material-paint' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <MaterialPaintPanel />
+        </div>
+      ) : mode === 'terrain-sculpt' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <TerrainSculptPanel />
         </div>
       ) : mode === 'build' &&
         (activeTool === 'roof' || isRoofFeatureActive) &&
         roofFeatures.length > 0 ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-          <div className="px-0.5 pt-1 font-medium text-muted-foreground text-xs">Features</div>
+          <div className="px-0.5 pt-1 font-medium text-muted-foreground text-xs">
+            Features & extensions
+          </div>
           <TooltipProvider delayDuration={0} disableHoverableContent>
             <div
               className="grid gap-1.5"
@@ -321,7 +428,7 @@ export function BuildTab() {
                         )}
                         onClick={() => {
                           triggerSFX('sfx:menu-click')
-                          activateRoofFeatureTool(feature.kind)
+                          runRoofFeatureActivation(feature.kind)
                         }}
                         onMouseEnter={() => triggerSFX('sfx:menu-hover')}
                         type="button"
@@ -366,7 +473,7 @@ export function BuildTab() {
                         )}
                         onClick={() => {
                           triggerSFX('sfx:menu-click')
-                          activateBuildTool(item.kind)
+                          runBuildToolActivation(item.kind)
                         }}
                         onMouseEnter={() => triggerSFX('sfx:menu-hover')}
                         type="button"
@@ -401,7 +508,9 @@ export function BuildTab() {
                 )}
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
-                  activateBuildTool(activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting')
+                  runBuildToolActivation(
+                    activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting',
+                  )
                 }}
                 onMouseEnter={() => triggerSFX('sfx:menu-hover')}
                 type="button"
@@ -431,7 +540,9 @@ export function BuildTab() {
                 )}
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
-                  activateBuildTool(activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting')
+                  runBuildToolActivation(
+                    activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting',
+                  )
                 }}
                 onMouseEnter={() => triggerSFX('sfx:menu-hover')}
                 type="button"
@@ -455,7 +566,7 @@ export function BuildTab() {
                 )}
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
-                  activateBuildTool(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
+                  runBuildToolActivation(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
                 }}
                 onMouseEnter={() => triggerSFX('sfx:menu-hover')}
                 type="button"

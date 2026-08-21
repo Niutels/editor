@@ -25,6 +25,22 @@ Set `LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE` to use another path, or to `off` to 
 persistence. `LANDRUSH_WORLD_MULTIPLAYER_DATA_DIR` is the preferred production setting; the
 server stores `world-multiplayer-state.json` beneath that directory.
 
+Joined editor clients use a server-issued writer epoch. A new tab takes over with a new session;
+the displaced session keeps its expired epoch and is terminally rejected if it reconnects. Network
+reconnects from the active tab retain the same session, epoch, and build operation IDs, making
+retries idempotent. Displacement fences the previous socket before it is physically closed, so it
+cannot reclaim a lease or mutate ownership, builds, TV state, presence, or voice signaling during
+the close race. `LANDRUSH_WRITER_SESSION_CLOSE_GRACE_MS` may defer only that physical close by up
+to five seconds; logical fencing remains immediate.
+
+Inactive writer grants are retained for five minutes and capped at 1,024 entries by default.
+`LANDRUSH_WRITER_SESSION_RETENTION_MS` and `LANDRUSH_MAX_INACTIVE_WRITER_SESSIONS` configure those
+bounds. Once an inactive grant is evicted, reconnect behavior is equivalent to reconnecting after
+a server restart: the editor obtains a fresh lease instead of relying on an expired tombstone.
+Active grants are never evicted. Parcel authority is keyed by world, and `watch-parcels`
+subscriptions receive ownership, build, and TV updates even when subscribers use different
+presence rooms.
+
 ## Durable production saves
 
 Production refuses to start unless persistence is explicitly configured or explicitly disabled.
@@ -48,7 +64,14 @@ world, then remove it after the initial save has been written.
 On startup, every distinct valid save is copied to `backups/` using a content-derived filename
 before migration. Legacy schema-1 saves are then rewritten atomically to the current schema while
 preserving ownership, parcel builds, revisions, and TV state. `/health` reports whether persistence
-was restored, backed up, or migrated without exposing the filesystem path.
+was restored, backed up, or migrated without exposing the filesystem path. Schema-2 build graphs
+and authority envelopes are restored strictly: malformed IDs, revisions, timestamps, metadata,
+duplicate keys, or lossy graph data stop production startup instead of being silently rewritten.
+Explicit schema-1 parcel builds remain available for deterministic client migration.
+
+Inbound WebSocket messages are capped slightly above the legal parcel-build snapshot size. Build
+nodes also have an explicit nesting limit, so pathological JSON is rejected without risking the
+multiplayer process.
 
 The checked-in Render free-service blueprint explicitly runs statelessly because that plan has no
 persistent disk. It must not be used as the canonical multiplayer world. Attach a persistent disk,

@@ -2,29 +2,42 @@
 
 import {
   type ConnectionStatus,
-  isParcelBuildSchemaVersion,
+  isParcelWriterEpoch,
   isSpatialVoiceSignalPayload,
+  isSupportedParcelBuildSchemaVersion,
+  LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
   type LocalPlayerProfile,
   type MultiplayerPlayerSnapshot,
   normalizeParcelBuildRevision,
   PARCEL_BUILD_SCHEMA_VERSION,
+  PARCEL_WRITER_SESSION_CLOSE_CODE,
   type ParcelBuildNode,
+  type ParcelBuildNodesAckMessage,
+  type ParcelBuildNodesRejectedMessage,
   type ParcelBuildSnapshot,
   type ParcelClaimError,
   type ParcelOwnership,
   type SpatialVoiceSignalMessage,
   type SpatialVoiceSignalPayload,
-  type SyncParcelBuildNodesMessage,
   sanitizeMultiplayerRoomId,
+  sanitizeParcelWriterSessionId,
   type TvMediaStateSnapshot,
 } from '@landrush/protocol'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   type RemotePresentationStore,
   type RemotePresentationTimeline,
   reconcileRemotePresentationTimeline,
   resolveRemotePresentationSnapshot,
 } from './multiplayer-presentation'
+import {
+  createClaimedParcelBuildAuthorityUpdate,
+  createOfflineParcelBuildAuthorityUpdates,
+  isParcelBuildContentUpdateAuthorityCurrent,
+  ParcelBuildContentAuthorityEpoch,
+  shouldRefreshParcelBuildAuthorityAfterClaim,
+} from './parcel-build-content-authority'
+import { type ParcelBuildSyncConflict, ParcelBuildSyncQueue } from './parcel-build-sync-queue'
 import { renderScheduler } from './render-scheduler'
 
 export type MultiplayerRemotePlayerStore = RemotePresentationStore<MultiplayerPlayerSnapshot>
@@ -33,10 +46,13 @@ type MultiplayerRemotePlayerTimeline = RemotePresentationTimeline<MultiplayerPla
 
 export type ParcelBuildNodesSnapshot = ParcelBuildSnapshot<ParcelBuildNode>
 
-type ParcelBuildSyncQueueEntry = {
-  inFlight: { nodes: ParcelBuildNode[]; operationId: string } | null
+export type ParcelBuildContentUpdate = {
+  build: ParcelBuildNodesSnapshot | null
+  localDesiredNodes?: ParcelBuildNode[]
   parcelId: string
-  pendingNodes: ParcelBuildNode[] | null
+  rejectedOperationId?: string | null
+  sequence: number
+  source: 'conflict' | 'remote' | 'snapshot'
   worldId: string
 }
 
@@ -107,15 +123,34 @@ type ServerMessage =
       build: ParcelBuildNodesSnapshot
       roomId: string
       serverTime: number
-      type: 'parcel-build-nodes-synced' | 'parcel-build-nodes-updated'
+      type: 'parcel-build-nodes-updated'
     }
+  | ParcelBuildNodesAckMessage
+  | ParcelBuildNodesRejectedMessage
   | {
       build: ParcelBuildNodesSnapshot | null
       operationId: string
+      parcelId: string
       reason: string
       roomId: string
       serverTime: number
       type: 'parcel-build-nodes-conflict'
+      worldId: string
+    }
+  | {
+      roomId: string
+      serverTime: number
+      type: 'parcel-writer-session-granted'
+      writerEpoch: number
+      writerSessionId: string
+    }
+  | {
+      code: string
+      message: string
+      roomId?: string
+      serverTime: number
+      type: 'parcel-writer-session-rejected'
+      writerSessionId: string
     }
   | {
       roomId: string
@@ -164,6 +199,8 @@ const LOCAL_STATE_POSITION_EPSILON = 0.03
 const LOCAL_STATE_SPEED_EPSILON = 0.05
 
 const REMOTE_PLAYER_STALE_MS = 12_000
+
+const PARCEL_BUILD_ACK_RETRY_MS = 5_000
 
 export const MULTIPLAYER_LATENCY_EVENT = 'landrush-multiplayer-latency'
 
@@ -230,7 +267,25 @@ export function useLandrushWorldMultiplayer({
   const onVoiceSignalRef = useRef(onVoiceSignal)
   const voiceSignalSequenceRef = useRef(0)
   const watchedParcelWorldIdRef = useRef<string | null>(null)
-  const parcelBuildSyncQueueRef = useRef<Map<string, ParcelBuildSyncQueueEntry>>(new Map())
+  const parcelBuildContentAuthorityRef = useRef<ParcelBuildContentAuthorityEpoch | null>(null)
+  if (!parcelBuildContentAuthorityRef.current) {
+    parcelBuildContentAuthorityRef.current = new ParcelBuildContentAuthorityEpoch({
+      enabled,
+      localProfileId: localProfile.id,
+      roomId,
+    })
+  }
+  const parcelBuildSyncQueueRef = useRef<ParcelBuildSyncQueue | null>(null)
+  if (!parcelBuildSyncQueueRef.current) {
+    parcelBuildSyncQueueRef.current = new ParcelBuildSyncQueue(createParcelBuildOperationId)
+  }
+  const parcelBuildUpdateSequenceRef = useRef(0)
+  const transportConnectionIdRef = useRef<string | null>(null)
+  const writerSessionRef = useRef<{ writerEpoch: number; writerSessionId: string } | null>(null)
+  const writerLeaseEpochRef = useRef<number | null>(null)
+  const writerSessionIdRef = useRef<string | null>(null)
+  if (!writerSessionIdRef.current) writerSessionIdRef.current = createParcelWriterSessionId()
+  const terminalWriterSessionRef = useRef(false)
   const remotePlayerMapRef = useRef<Map<string, MultiplayerPlayerSnapshot>>(new Map())
   const remotePlayerTimelineMapRef = useRef<Map<string, MultiplayerRemotePlayerTimeline>>(new Map())
   const [connection, setConnection] =
@@ -246,7 +301,11 @@ export function useLandrushWorldMultiplayer({
   const [parcelBuildNodeMap, setParcelBuildNodeMap] = useState<
     Map<string, ParcelBuildNodesSnapshot>
   >(() => new Map())
+  const [parcelBuildUpdateMap, setParcelBuildUpdateMap] = useState<
+    Map<string, ParcelBuildContentUpdate>
+  >(() => new Map())
   const [parcelBuildSnapshotWorldId, setParcelBuildSnapshotWorldId] = useState<string | null>(null)
+  const [parcelBuildContentAuthorityEpoch, setParcelBuildContentAuthorityEpoch] = useState(0)
   const [tvMediaStateMap, setTvMediaStateMap] = useState<Map<string, TvMediaStateSnapshot>>(
     () => new Map(),
   )
@@ -279,6 +338,11 @@ export function useLandrushWorldMultiplayer({
         first.parcelId.localeCompare(second.parcelId),
       ),
     [parcelBuildNodeMap],
+  )
+  const parcelBuildUpdates = useMemo(
+    () =>
+      [...parcelBuildUpdateMap.values()].sort((first, second) => first.sequence - second.sequence),
+    [parcelBuildUpdateMap],
   )
   const tvMediaStates = useMemo(
     () =>
@@ -317,64 +381,103 @@ export function useLandrushWorldMultiplayer({
     }
   }, [])
 
+  const publishParcelBuildUpdates = useCallback(
+    (updates: readonly Omit<ParcelBuildContentUpdate, 'sequence'>[]) => {
+      if (updates.length === 0) return
+      const authorityEpoch = parcelBuildContentAuthorityRef.current!.current
+      const sequencedUpdates = updates.map((update) => ({
+        ...update,
+        sequence: ++parcelBuildUpdateSequenceRef.current,
+      }))
+      setParcelBuildUpdateMap((current) => {
+        if (
+          !isParcelBuildContentUpdateAuthorityCurrent(
+            authorityEpoch,
+            parcelBuildContentAuthorityRef.current!.current,
+          )
+        ) {
+          return current
+        }
+        const next = new Map(current)
+        for (const update of sequencedUpdates) {
+          next.set(parcelBuildSyncKey(update.worldId, update.parcelId), {
+            ...update,
+          })
+        }
+        return next
+      })
+    },
+    [],
+  )
+
+  useLayoutEffect(() => {
+    const transition = parcelBuildContentAuthorityRef.current!.updateScope({
+      enabled,
+      localProfileId: localProfile.id,
+      roomId,
+    })
+    if (!transition.changed) return
+
+    parcelBuildSyncQueueRef.current!.clear()
+    parcelBuildUpdateSequenceRef.current = 0
+    parcelOwnershipMapRef.current = new Map()
+    parcelBuildNodeMapRef.current = new Map()
+    tvMediaStateMapRef.current = new Map()
+    setParcelBuildSnapshotWorldId(null)
+    setParcelOwnershipMap(new Map())
+    setParcelBuildNodeMap(new Map())
+    setParcelBuildUpdateMap(new Map())
+    setTvMediaStateMap(new Map())
+    setParcelBuildContentAuthorityEpoch(transition.epoch)
+  }, [enabled, localProfile.id, roomId])
+
   const flushQueuedParcelBuildSync = useCallback(
-    (key: string) => {
-      const entry = parcelBuildSyncQueueRef.current.get(key)
-      if (!(enabled && entry?.pendingNodes) || entry.inFlight) return false
-
-      const currentBuild = parcelBuildNodeMapRef.current.get(entry.parcelId)
-      const operationId = createParcelBuildOperationId()
-      const nodes = entry.pendingNodes
-      const message = {
-        baseRevision:
-          currentBuild?.worldId === entry.worldId
-            ? normalizeParcelBuildRevision(currentBuild.revision)
-            : 0,
-        nodes,
-        operationId,
-        parcelId: entry.parcelId,
-        schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
-        type: 'sync-parcel-build-nodes',
-        worldId: entry.worldId,
-      } satisfies SyncParcelBuildNodesMessage<ParcelBuildNode>
-      if (!sendMessage(message)) return false
-
-      entry.pendingNodes = null
-      entry.inFlight = { nodes, operationId }
+    (worldId: string, parcelId: string) => {
+      const connectionId = transportConnectionIdRef.current
+      const writerSession = writerSessionRef.current
+      if (
+        !(
+          enabled &&
+          connectionId &&
+          writerSession &&
+          parcelBuildSyncQueueRef.current!.isWorldReady(worldId)
+        )
+      ) {
+        return false
+      }
+      const now = Date.now()
+      const message = parcelBuildSyncQueueRef.current!.prepareSend({
+        connectionId,
+        now,
+        parcelId,
+        retryAfterMs: PARCEL_BUILD_ACK_RETRY_MS,
+        worldId,
+        ...writerSession,
+      })
+      if (!message || !sendMessage(message)) return false
+      parcelBuildSyncQueueRef.current!.markSent(
+        worldId,
+        parcelId,
+        message.operationId,
+        connectionId,
+        now,
+      )
+      window.setTimeout(
+        () => flushQueuedParcelBuildSync(worldId, parcelId),
+        PARCEL_BUILD_ACK_RETRY_MS,
+      )
       return true
     },
     [enabled, sendMessage],
   )
 
-  const settleParcelBuildSync = useCallback(
-    ({
-      operationId,
-      parcelId,
-      retry,
-      worldId,
-    }: {
-      operationId: string
-      parcelId: string
-      retry: boolean
-      worldId: string
-    }) => {
-      const key = parcelBuildSyncKey(worldId, parcelId)
-      const entry = parcelBuildSyncQueueRef.current.get(key)
-      if (!entry?.inFlight || entry.inFlight.operationId !== operationId) return
-      if (retry && !entry.pendingNodes) entry.pendingNodes = entry.inFlight.nodes
-      entry.inFlight = null
-      flushQueuedParcelBuildSync(key)
-    },
-    [flushQueuedParcelBuildSync],
-  )
-
-  const requeueInFlightParcelBuildSyncs = useCallback(() => {
-    for (const entry of parcelBuildSyncQueueRef.current.values()) {
-      if (!entry.inFlight) continue
-      if (!entry.pendingNodes) entry.pendingNodes = entry.inFlight.nodes
-      entry.inFlight = null
+  const flushAllQueuedParcelBuildSyncs = useCallback(() => {
+    const worldId = watchedParcelWorldIdRef.current
+    if (!worldId) return
+    for (const parcelId of parcelBuildSyncQueueRef.current!.parcelIds(worldId)) {
+      flushQueuedParcelBuildSync(worldId, parcelId)
     }
-  }, [])
+  }, [flushQueuedParcelBuildSync])
 
   const sendPlayerState = useCallback(
     (player: MultiplayerPlayerSnapshot) => {
@@ -416,8 +519,10 @@ export function useLandrushWorldMultiplayer({
   const watchParcelWorld = useCallback(
     (worldId: string) => {
       if (watchedParcelWorldIdRef.current !== worldId) {
+        const authorityTransition = parcelBuildContentAuthorityRef.current!.watchWorld(worldId)
         watchedParcelWorldIdRef.current = worldId
-        parcelBuildSyncQueueRef.current.clear()
+        parcelBuildSyncQueueRef.current!.clear()
+        parcelBuildUpdateSequenceRef.current = 0
         const offlineState =
           !enabled && persistOfflineState ? readOfflineParcelWorldState(worldId) : null
         const nextOwnershipMap = offlineState
@@ -435,17 +540,30 @@ export function useLandrushWorldMultiplayer({
         setParcelBuildSnapshotWorldId(enabled ? null : worldId)
         setParcelOwnershipMap(nextOwnershipMap)
         setParcelBuildNodeMap(nextBuildNodeMap)
+        setParcelBuildUpdateMap(new Map())
         setTvMediaStateMap(nextTvMediaStateMap)
+        if (authorityTransition.changed) {
+          setParcelBuildContentAuthorityEpoch(authorityTransition.epoch)
+        }
+        if (!enabled) {
+          publishParcelBuildUpdates(
+            createOfflineParcelBuildAuthorityUpdates({
+              builds: [...nextBuildNodeMap.values()],
+              ownerships: [...nextOwnershipMap.values()],
+              worldId,
+            }),
+          )
+        }
       }
       if (!enabled) return
       sendMessage({ roomId, type: 'watch-parcels', worldId })
     },
-    [enabled, persistOfflineState, roomId, sendMessage],
+    [enabled, persistOfflineState, publishParcelBuildUpdates, roomId, sendMessage],
   )
 
   const syncParcelBuildNodes = useCallback(
     (worldId: string, parcelId: string, nodes: readonly ParcelBuildNode[]) => {
-      watchedParcelWorldIdRef.current = worldId
+      if (watchedParcelWorldIdRef.current !== worldId) watchParcelWorld(worldId)
       const clonedNodes = cloneParcelBuildNodes(nodes)
       if (!enabled) {
         const currentBuild = parcelBuildNodeMapRef.current.get(parcelId)
@@ -477,25 +595,58 @@ export function useLandrushWorldMultiplayer({
         return true
       }
 
-      const key = parcelBuildSyncKey(worldId, parcelId)
-      const entry = parcelBuildSyncQueueRef.current.get(key) ?? {
-        inFlight: null,
-        parcelId,
-        pendingNodes: null,
+      const currentBuild = parcelBuildNodeMapRef.current.get(parcelId)
+      const pausedConflict = parcelBuildSyncQueueRef.current!.enqueue(
         worldId,
+        parcelId,
+        clonedNodes,
+        currentBuild?.worldId === worldId ? currentBuild.revision : 0,
+      )
+      if (pausedConflict) {
+        publishParcelBuildUpdates([
+          conflictContentUpdate(
+            worldId,
+            parcelId,
+            pausedConflict.authoritativeBuild,
+            pausedConflict,
+          ),
+        ])
+        return false
       }
-      entry.pendingNodes = clonedNodes
-      parcelBuildSyncQueueRef.current.set(key, entry)
-      const accepted = entry.inFlight !== null || flushQueuedParcelBuildSync(key)
-      if (!accepted) {
-        setConnection((current) => ({
-          ...current,
-          lastError: 'Connect before syncing build nodes',
-        }))
-      }
-      return accepted
+      flushQueuedParcelBuildSync(worldId, parcelId)
+      return true
     },
-    [enabled, flushQueuedParcelBuildSync, localProfile.id, persistOfflineState],
+    [
+      enabled,
+      flushQueuedParcelBuildSync,
+      localProfile.id,
+      persistOfflineState,
+      publishParcelBuildUpdates,
+      watchParcelWorld,
+    ],
+  )
+
+  const resolveParcelBuildConflict = useCallback(
+    (worldId: string, parcelId: string, nodes: readonly ParcelBuildNode[]) => {
+      const currentBuild = parcelBuildNodeMapRef.current.get(parcelId)
+      const resolved = parcelBuildSyncQueueRef.current!.resolveConflict(
+        worldId,
+        parcelId,
+        nodes,
+        currentBuild?.worldId === worldId ? currentBuild.revision : 0,
+      )
+      if (!resolved) return false
+      setParcelBuildUpdateMap((current) => {
+        const key = parcelBuildSyncKey(worldId, parcelId)
+        if (current.get(key)?.source !== 'conflict') return current
+        const next = new Map(current)
+        next.delete(key)
+        return next
+      })
+      flushQueuedParcelBuildSync(worldId, parcelId)
+      return true
+    },
+    [flushQueuedParcelBuildSync],
   )
 
   const syncTvMediaState = useCallback(
@@ -512,7 +663,7 @@ export function useLandrushWorldMultiplayer({
         userVolume: number
       },
     ) => {
-      watchedParcelWorldIdRef.current = worldId
+      if (watchedParcelWorldIdRef.current !== worldId) watchParcelWorld(worldId)
       const now = Date.now()
       const tv = {
         muted: Boolean(media.muted),
@@ -563,12 +714,12 @@ export function useLandrushWorldMultiplayer({
       }
       return Boolean(sent)
     },
-    [enabled, localProfile.id, persistOfflineState, sendMessage],
+    [enabled, localProfile.id, persistOfflineState, sendMessage, watchParcelWorld],
   )
 
   const claimParcel = useCallback(
     (worldId: string, parcelId: string) => {
-      watchedParcelWorldIdRef.current = worldId
+      if (watchedParcelWorldIdRef.current !== worldId) watchParcelWorld(worldId)
       setParcelClaimError(null)
       if (!enabled) {
         const currentOwnershipMap = parcelOwnershipMapRef.current
@@ -616,6 +767,13 @@ export function useLandrushWorldMultiplayer({
             [...tvMediaStateMapRef.current.values()],
           )
         }
+        publishParcelBuildUpdates([
+          createClaimedParcelBuildAuthorityUpdate({
+            builds: [...parcelBuildNodeMapRef.current.values()],
+            parcelId,
+            worldId,
+          }),
+        ])
         return true
       }
 
@@ -630,12 +788,24 @@ export function useLandrushWorldMultiplayer({
       }
       return Boolean(sent)
     },
-    [enabled, localProfile, persistOfflineState, sendMessage],
+    [
+      enabled,
+      localProfile,
+      persistOfflineState,
+      publishParcelBuildUpdates,
+      sendMessage,
+      watchParcelWorld,
+    ],
   )
 
   useEffect(() => {
     if (!enabled || (!spectator && localProfile.id === FALLBACK_LOCAL_PROFILE.id)) {
-      parcelBuildSyncQueueRef.current.clear()
+      parcelBuildSyncQueueRef.current!.clear()
+      parcelBuildUpdateSequenceRef.current = 0
+      writerSessionRef.current = null
+      writerLeaseEpochRef.current = null
+      transportConnectionIdRef.current = null
+      terminalWriterSessionRef.current = false
       setStatus(enabled ? 'connecting' : 'offline')
       remotePlayerMapRef.current = new Map()
       remotePlayerTimelineMapRef.current = new Map()
@@ -659,12 +829,25 @@ export function useLandrushWorldMultiplayer({
       tvMediaStateMapRef.current = nextTvMediaStateMap
       setParcelBuildSnapshotWorldId(enabled ? null : watchedParcelWorldIdRef.current)
       setParcelBuildNodeMap(nextBuildNodeMap)
+      setParcelBuildUpdateMap(new Map())
       setParcelOwnershipMap(nextOwnershipMap)
       setTvMediaStateMap(nextTvMediaStateMap)
+      if (!enabled && watchedParcelWorldIdRef.current) {
+        publishParcelBuildUpdates(
+          createOfflineParcelBuildAuthorityUpdates({
+            builds: [...nextBuildNodeMap.values()],
+            ownerships: [...nextOwnershipMap.values()],
+            worldId: watchedParcelWorldIdRef.current,
+          }),
+        )
+      }
       setConnection(createConnectionDetails())
       return
     }
 
+    terminalWriterSessionRef.current = false
+    writerSessionRef.current = null
+    transportConnectionIdRef.current = null
     let cancelled = false
     let reconnectTimer = 0
     let heartbeatTimer = 0
@@ -677,6 +860,10 @@ export function useLandrushWorldMultiplayer({
     const connect = () => {
       if (cancelled) return
       setParcelBuildSnapshotWorldId(null)
+      const watchedParcelWorldId = watchedParcelWorldIdRef.current
+      if (watchedParcelWorldId) {
+        parcelBuildSyncQueueRef.current!.suspendWorld(watchedParcelWorldId)
+      }
       setStatus(reconnectDelayRef.current > 1000 ? 'reconnecting' : 'connecting')
       setConnection((current) => ({
         ...current,
@@ -689,13 +876,22 @@ export function useLandrushWorldMultiplayer({
       socketRef.current = socket
 
       socket.addEventListener('open', () => {
-        if (cancelled) return
+        if (cancelled || socketRef.current !== socket) return
         reconnectDelayRef.current = 1000
         reconnectAttemptRef.current = 0
         const player = latestPlayerRef.current ?? createStationaryPlayer(localProfile)
         const joined = spectator
           ? sendMessage({ roomId, type: 'watch' }, socket)
-          : sendMessage({ player, roomId, type: 'join' }, socket)
+          : sendMessage(
+              {
+                player,
+                roomId,
+                type: 'join',
+                writerEpoch: writerLeaseEpochRef.current ?? undefined,
+                writerSessionId: writerSessionIdRef.current,
+              },
+              socket,
+            )
         if (joined) {
           lastNetworkSentAtRef.current = window.performance.now()
           lastSentPlayerRef.current = player
@@ -711,10 +907,12 @@ export function useLandrushWorldMultiplayer({
       })
 
       socket.addEventListener('message', (event) => {
+        if (socketRef.current !== socket) return
         const message = parseServerMessage(event.data)
         if (!message) return
 
         if (message.type === 'welcome') {
+          transportConnectionIdRef.current = message.connectionId
           heartbeatIntervalMsRef.current = message.heartbeatIntervalMs
           setConnection((current) => ({
             ...current,
@@ -724,6 +922,38 @@ export function useLandrushWorldMultiplayer({
             maxPeers: message.maxPeers,
             stalePeerMs: message.stalePeerMs,
           }))
+          return
+        }
+
+        if (message.type === 'parcel-writer-session-granted') {
+          if (
+            spectator ||
+            message.roomId !== roomId ||
+            message.writerSessionId !== writerSessionIdRef.current
+          ) {
+            return
+          }
+          writerSessionRef.current = {
+            writerEpoch: message.writerEpoch,
+            writerSessionId: message.writerSessionId,
+          }
+          writerLeaseEpochRef.current = message.writerEpoch
+          terminalWriterSessionRef.current = false
+          if (
+            watchedParcelWorldIdRef.current &&
+            parcelBuildSyncQueueRef.current!.isWorldReady(watchedParcelWorldIdRef.current)
+          ) {
+            flushAllQueuedParcelBuildSyncs()
+          }
+          return
+        }
+
+        if (message.type === 'parcel-writer-session-rejected') {
+          if (message.writerSessionId !== writerSessionIdRef.current) return
+          terminalWriterSessionRef.current = true
+          writerSessionRef.current = null
+          setConnection((current) => ({ ...current, lastError: message.message }))
+          socket.close(PARCEL_WRITER_SESSION_CLOSE_CODE, 'Writer session superseded')
           return
         }
 
@@ -783,44 +1013,73 @@ export function useLandrushWorldMultiplayer({
 
         if (message.type === 'parcel-ownership-snapshot') {
           if (message.worldId !== watchedParcelWorldIdRef.current) return
-          setParcelOwnershipMap(
-            new Map(message.ownerships.map((ownership) => [ownership.parcelId, ownership])),
+          const nextOwnershipMap = new Map(
+            message.ownerships.map((ownership) => [ownership.parcelId, ownership]),
           )
+          parcelOwnershipMapRef.current = nextOwnershipMap
+          setParcelOwnershipMap(nextOwnershipMap)
           setParcelClaimError(null)
           return
         }
 
         if (message.type === 'parcel-owned' || message.type === 'parcel-claim-result') {
           if (message.ownership.worldId !== watchedParcelWorldIdRef.current) return
-          setParcelOwnershipMap((current) => {
-            const next = new Map(current)
-            next.set(message.ownership.parcelId, message.ownership)
-            return next
-          })
+          const nextOwnershipMap = new Map(parcelOwnershipMapRef.current)
+          nextOwnershipMap.set(message.ownership.parcelId, message.ownership)
+          parcelOwnershipMapRef.current = nextOwnershipMap
+          setParcelOwnershipMap(nextOwnershipMap)
           setParcelClaimError(null)
+          if (shouldRefreshParcelBuildAuthorityAfterClaim(message.type)) {
+            sendMessage(
+              {
+                roomId,
+                type: 'watch-parcels',
+                worldId: message.ownership.worldId,
+              },
+              socket,
+            )
+          }
           return
         }
 
         if (message.type === 'parcel-build-nodes-snapshot') {
           if (message.worldId !== watchedParcelWorldIdRef.current) return
           const nextBuildNodeMap = new Map(message.builds.map((build) => [build.parcelId, build]))
-          parcelBuildNodeMapRef.current = nextBuildNodeMap
-          setParcelBuildNodeMap(nextBuildNodeMap)
-          setParcelBuildSnapshotWorldId(message.worldId)
-          for (const [key, entry] of parcelBuildSyncQueueRef.current) {
-            if (entry.worldId !== message.worldId) continue
-            const acknowledgedBuild = nextBuildNodeMap.get(entry.parcelId)
-            if (entry.inFlight && acknowledgedBuild?.operationId === entry.inFlight.operationId) {
-              settleParcelBuildSync({
-                operationId: entry.inFlight.operationId,
-                parcelId: entry.parcelId,
-                retry: false,
-                worldId: entry.worldId,
-              })
-            } else {
-              flushQueuedParcelBuildSync(key)
+          const parcelIds = new Set([
+            ...parcelBuildNodeMapRef.current.keys(),
+            ...nextBuildNodeMap.keys(),
+            ...parcelBuildSyncQueueRef.current!.parcelIds(message.worldId),
+            ...[...parcelOwnershipMapRef.current.values()]
+              .filter((ownership) => ownership.worldId === message.worldId)
+              .map((ownership) => ownership.parcelId),
+          ])
+          const updates: Omit<ParcelBuildContentUpdate, 'sequence'>[] = []
+          let conflictReason: string | null = null
+          for (const parcelId of parcelIds) {
+            const build = nextBuildNodeMap.get(parcelId) ?? null
+            const reconciliation = parcelBuildSyncQueueRef.current!.reconcileSnapshot(
+              message.worldId,
+              parcelId,
+              build,
+            )
+            if (reconciliation.kind === 'content') {
+              updates.push({ build, parcelId, source: 'snapshot', worldId: message.worldId })
+            } else if (reconciliation.kind === 'conflict') {
+              updates.push(
+                conflictContentUpdate(message.worldId, parcelId, build, reconciliation.conflict),
+              )
+              conflictReason = `Parcel ${parcelId} changed while local work was pending`
             }
           }
+          parcelBuildNodeMapRef.current = nextBuildNodeMap
+          setParcelBuildNodeMap(nextBuildNodeMap)
+          publishParcelBuildUpdates(updates)
+          setParcelBuildSnapshotWorldId(message.worldId)
+          parcelBuildSyncQueueRef.current!.resumeWorld(message.worldId)
+          if (conflictReason) {
+            setConnection((current) => ({ ...current, lastError: conflictReason }))
+          }
+          flushAllQueuedParcelBuildSyncs()
           return
         }
 
@@ -838,10 +1097,43 @@ export function useLandrushWorldMultiplayer({
           return
         }
 
-        if (
-          message.type === 'parcel-build-nodes-synced' ||
-          message.type === 'parcel-build-nodes-updated'
-        ) {
+        if (message.type === 'parcel-build-nodes-ack') {
+          if (
+            message.worldId !== watchedParcelWorldIdRef.current ||
+            message.writerSessionId !== writerSessionIdRef.current ||
+            message.writerEpoch !== writerSessionRef.current?.writerEpoch
+          ) {
+            return
+          }
+          const acknowledged = parcelBuildSyncQueueRef.current!.acknowledge(
+            message.worldId,
+            message.parcelId,
+            message.operationId,
+            message.revision,
+          )
+          if (!acknowledged) return
+          const acknowledgedBuild = {
+            nodes: acknowledged.nodes,
+            operationId: message.operationId,
+            parcelId: message.parcelId,
+            revision: acknowledged.revision,
+            schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
+            updatedAt: message.updatedAt,
+            updatedBy: message.updatedBy,
+            worldId: message.worldId,
+          } satisfies ParcelBuildNodesSnapshot
+          const nextBuildNodeMap = new Map(parcelBuildNodeMapRef.current)
+          nextBuildNodeMap.set(message.parcelId, acknowledgedBuild)
+          parcelBuildNodeMapRef.current = nextBuildNodeMap
+          setParcelBuildNodeMap(nextBuildNodeMap)
+          setConnection((current) =>
+            current.lastError === null ? current : { ...current, lastError: null },
+          )
+          flushQueuedParcelBuildSync(message.worldId, message.parcelId)
+          return
+        }
+
+        if (message.type === 'parcel-build-nodes-updated') {
           if (message.build.worldId !== watchedParcelWorldIdRef.current) return
           const currentBuild = parcelBuildNodeMapRef.current.get(message.build.parcelId)
           if (
@@ -854,37 +1146,73 @@ export function useLandrushWorldMultiplayer({
           nextBuildNodeMap.set(message.build.parcelId, message.build)
           parcelBuildNodeMapRef.current = nextBuildNodeMap
           setParcelBuildNodeMap(nextBuildNodeMap)
-          if (message.type === 'parcel-build-nodes-synced') {
-            settleParcelBuildSync({
-              operationId: message.build.operationId,
-              parcelId: message.build.parcelId,
-              retry: false,
-              worldId: message.build.worldId,
-            })
-            setConnection((current) =>
-              current.lastError === null ? current : { ...current, lastError: null },
-            )
+          const reconciliation = parcelBuildSyncQueueRef.current!.reconcileRemoteBuild(
+            message.build,
+          )
+          if (reconciliation.kind === 'content') {
+            publishParcelBuildUpdates([
+              {
+                build: message.build,
+                parcelId: message.build.parcelId,
+                source: 'remote',
+                worldId: message.build.worldId,
+              },
+            ])
+          } else if (reconciliation.kind === 'conflict') {
+            publishParcelBuildUpdates([
+              conflictContentUpdate(
+                message.build.worldId,
+                message.build.parcelId,
+                message.build,
+                reconciliation.conflict,
+              ),
+            ])
+            setConnection((current) => ({
+              ...current,
+              lastError: `Parcel ${message.build.parcelId} changed while local work was pending`,
+            }))
+          } else {
+            flushQueuedParcelBuildSync(message.build.worldId, message.build.parcelId)
           }
           return
         }
 
         if (message.type === 'parcel-build-nodes-conflict') {
-          const entry = [...parcelBuildSyncQueueRef.current.values()].find(
-            (candidate) => candidate.inFlight?.operationId === message.operationId,
+          if (message.worldId !== watchedParcelWorldIdRef.current) return
+          const conflict = parcelBuildSyncQueueRef.current!.reject(
+            message.worldId,
+            message.parcelId,
+            message.operationId,
+            message.build,
           )
-          if (!entry || entry.worldId !== watchedParcelWorldIdRef.current) return
+          if (!conflict) return
           const nextBuildNodeMap = new Map(parcelBuildNodeMapRef.current)
           if (message.build) nextBuildNodeMap.set(message.build.parcelId, message.build)
-          else nextBuildNodeMap.delete(entry.parcelId)
+          else nextBuildNodeMap.delete(message.parcelId)
           parcelBuildNodeMapRef.current = nextBuildNodeMap
           setParcelBuildNodeMap(nextBuildNodeMap)
+          publishParcelBuildUpdates([
+            conflictContentUpdate(message.worldId, message.parcelId, message.build, conflict),
+          ])
           setConnection((current) => ({ ...current, lastError: message.reason }))
-          settleParcelBuildSync({
-            operationId: message.operationId,
-            parcelId: entry.parcelId,
-            retry: true,
-            worldId: entry.worldId,
-          })
+          return
+        }
+
+        if (message.type === 'parcel-build-nodes-rejected') {
+          if (message.worldId !== watchedParcelWorldIdRef.current) return
+          const currentBuild = parcelBuildNodeMapRef.current.get(message.parcelId)
+          const authoritativeBuild = currentBuild?.worldId === message.worldId ? currentBuild : null
+          const conflict = parcelBuildSyncQueueRef.current!.reject(
+            message.worldId,
+            message.parcelId,
+            message.operationId,
+            authoritativeBuild,
+          )
+          if (!conflict) return
+          publishParcelBuildUpdates([
+            conflictContentUpdate(message.worldId, message.parcelId, authoritativeBuild, conflict),
+          ])
+          setConnection((current) => ({ ...current, lastError: message.reason }))
           return
         }
 
@@ -970,10 +1298,24 @@ export function useLandrushWorldMultiplayer({
       })
 
       socket.addEventListener('close', (event) => {
+        const wasCurrentSocket = socketRef.current === socket
+        if (!wasCurrentSocket) return
         clearHeartbeat()
-        requeueInFlightParcelBuildSyncs()
-        if (socketRef.current === socket) socketRef.current = null
+        socketRef.current = null
+        transportConnectionIdRef.current = null
+        writerSessionRef.current = null
         if (cancelled) return
+
+        if (terminalWriterSessionRef.current || event.code === PARCEL_WRITER_SESSION_CLOSE_CODE) {
+          terminalWriterSessionRef.current = true
+          setStatus('offline')
+          setConnection((current) => ({
+            ...current,
+            connectionId: null,
+            lastError: event.reason || current.lastError || 'Writer session superseded',
+          }))
+          return
+        }
 
         reconnectAttemptRef.current += 1
         setStatus('reconnecting')
@@ -988,7 +1330,7 @@ export function useLandrushWorldMultiplayer({
       })
 
       socket.addEventListener('error', () => {
-        if (cancelled) return
+        if (cancelled || socketRef.current !== socket) return
         setStatus('reconnecting')
         setConnection((current) => ({
           ...current,
@@ -1012,13 +1354,13 @@ export function useLandrushWorldMultiplayer({
     }
   }, [
     enabled,
+    flushAllQueuedParcelBuildSyncs,
     flushQueuedParcelBuildSync,
     localProfile,
     persistOfflineState,
-    requeueInFlightParcelBuildSyncs,
+    publishParcelBuildUpdates,
     roomId,
     sendMessage,
-    settleParcelBuildSync,
     spectator,
   ])
 
@@ -1045,12 +1387,15 @@ export function useLandrushWorldMultiplayer({
     claimParcel,
     connection,
     parcelBuildNodes,
+    parcelBuildContentAuthorityEpoch,
+    parcelBuildUpdates,
     parcelBuildSnapshotWorldId,
     parcelClaimError,
     parcelOwnerships,
     publishLocalPlayer,
     remotePlayerStore,
     remotePlayers,
+    resolveParcelBuildConflict,
     sendVoiceSignal,
     syncParcelBuildNodes,
     syncTvMediaState,
@@ -1301,20 +1646,66 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       return message
     }
     if (
-      (message?.type === 'parcel-build-nodes-synced' ||
-        message?.type === 'parcel-build-nodes-updated') &&
+      message?.type === 'parcel-build-nodes-updated' &&
       typeof message.roomId === 'string' &&
       isParcelBuildNodesSnapshot(message.build)
     ) {
       return message
     }
     if (
+      message?.type === 'parcel-build-nodes-ack' &&
+      typeof message.operationId === 'string' &&
+      typeof message.parcelId === 'string' &&
+      Number.isSafeInteger(message.revision) &&
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
+      typeof message.updatedAt === 'number' &&
+      typeof message.updatedBy === 'string' &&
+      typeof message.worldId === 'string' &&
+      isParcelWriterEpoch(message.writerEpoch) &&
+      typeof message.writerSessionId === 'string'
+    ) {
+      return message
+    }
+    if (
       message?.type === 'parcel-build-nodes-conflict' &&
       typeof message.operationId === 'string' &&
+      typeof message.parcelId === 'string' &&
       typeof message.reason === 'string' &&
       typeof message.roomId === 'string' &&
       typeof message.serverTime === 'number' &&
+      typeof message.worldId === 'string' &&
       (message.build === null || isParcelBuildNodesSnapshot(message.build))
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'parcel-build-nodes-rejected' &&
+      typeof message.code === 'string' &&
+      typeof message.operationId === 'string' &&
+      typeof message.parcelId === 'string' &&
+      typeof message.reason === 'string' &&
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
+      typeof message.worldId === 'string'
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'parcel-writer-session-granted' &&
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
+      isParcelWriterEpoch(message.writerEpoch) &&
+      typeof message.writerSessionId === 'string'
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'parcel-writer-session-rejected' &&
+      typeof message.code === 'string' &&
+      typeof message.message === 'string' &&
+      typeof message.serverTime === 'number' &&
+      typeof message.writerSessionId === 'string'
     ) {
       return message
     }
@@ -1381,7 +1772,7 @@ function isParcelBuildNodesSnapshot(value: unknown): value is ParcelBuildNodesSn
     build.operationId.length > 0 &&
     Number.isSafeInteger(build.revision) &&
     build.revision >= 0 &&
-    isParcelBuildSchemaVersion(build.schemaVersion) &&
+    isSupportedParcelBuildSchemaVersion(build.schemaVersion) &&
     typeof build.updatedAt === 'number' &&
     typeof build.updatedBy === 'string' &&
     typeof build.worldId === 'string' &&
@@ -1415,7 +1806,9 @@ function normalizeParcelBuildNodesSnapshot(
         : `offline-migrated-${build.parcelId}-${revision}`,
     parcelId: build.parcelId,
     revision,
-    schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
+    schemaVersion: isSupportedParcelBuildSchemaVersion(build.schemaVersion)
+      ? build.schemaVersion
+      : LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
     updatedAt: build.updatedAt,
     updatedBy: build.updatedBy,
     worldId: expectedWorldId,
@@ -1491,6 +1884,30 @@ function createParcelBuildOperationId() {
   return typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `parcel-build-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function createParcelWriterSessionId() {
+  const candidate =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? `writer-${globalThis.crypto.randomUUID()}`
+      : `writer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return sanitizeParcelWriterSessionId(candidate)
+}
+
+function conflictContentUpdate(
+  worldId: string,
+  parcelId: string,
+  build: ParcelBuildNodesSnapshot | null,
+  conflict: ParcelBuildSyncConflict,
+): Omit<ParcelBuildContentUpdate, 'sequence'> {
+  return {
+    build,
+    localDesiredNodes: cloneParcelBuildNodes(conflict.localDesiredNodes),
+    parcelId,
+    rejectedOperationId: conflict.rejectedOperationId,
+    source: 'conflict',
+    worldId,
+  }
 }
 
 function parcelBuildSyncKey(worldId: string, parcelId: string) {

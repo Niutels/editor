@@ -23,7 +23,24 @@ describe('Pascal multiplayer-island composition', () => {
     expect(clientSource).toContain("from '@landrush/pascal-host'")
     expect(clientSource.match(/<LandrushPascalHost\b/g)).toHaveLength(1)
     expect(clientSource).not.toContain('<Viewer')
+    expect(clientSource).toContain(
+      'const [viewerSceneReady, setViewerSceneReady] = useState(false)',
+    )
+    expect(clientSource).toMatch(/const loadingAssetsReady =\s+viewerSceneReady &&/)
+    expect(clientSource).toContain('onSceneReadyChange={setViewerSceneReady}')
+    const runtimeOverlayStart = clientSource.indexOf('function LandrushIslandLoadingOverlay')
+    const runtimeOverlayEnd = clientSource.indexOf(
+      'function LandrushIslandTunePanel',
+      runtimeOverlayStart,
+    )
+    expect(runtimeOverlayStart).toBeGreaterThanOrEqual(0)
+    expect(runtimeOverlayEnd).toBeGreaterThan(runtimeOverlayStart)
+    const runtimeOverlaySource = clientSource.slice(runtimeOverlayStart, runtimeOverlayEnd)
+    expect(runtimeOverlaySource).toContain('bg-transparent')
+    expect(runtimeOverlaySource).not.toContain('bg-[#0f1720]')
     expect(hostSource.match(/<Viewer\b/g)).toHaveLength(1)
     expect(hostSource).toContain('{children}')
+    expect(hostSource).toContain('onSceneReadyChange: (ready: boolean) => void')
+    expect(hostSource).toContain('onSceneReadyChange={onSceneReadyChange}')
   })
 })

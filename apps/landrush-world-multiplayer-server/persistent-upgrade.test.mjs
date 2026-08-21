@@ -6,7 +6,10 @@ import net from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { after, test } from 'node:test'
-import { PARCEL_BUILD_SCHEMA_VERSION } from '@landrush/protocol'
+import {
+  LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
+  PARCEL_BUILD_SCHEMA_VERSION,
+} from '@landrush/protocol'
 import { WebSocket } from 'ws'
 
 const WS_PATH = '/api/landrush-lab/world-multiplayer/ws'
@@ -35,7 +38,7 @@ test('keeps and migrates a legacy world across server replacement', async () => 
     assert.equal(firstSnapshot.builds.length, 1)
     assert.equal(firstSnapshot.builds[0].parcelId, 'parcel-02')
     assert.equal(firstSnapshot.builds[0].revision, 0)
-    assert.equal(firstSnapshot.builds[0].schemaVersion, PARCEL_BUILD_SCHEMA_VERSION)
+    assert.equal(firstSnapshot.builds[0].schemaVersion, LEGACY_PARCEL_BUILD_SCHEMA_VERSION)
     assert.equal(firstSnapshot.builds[0].operationId, 'restored-parcel-02-0')
     assert.equal(firstSnapshot.builds[0].nodes.length, 1)
     assert.equal(firstHealth.persistence.backupAvailable, true)
@@ -49,7 +52,10 @@ test('keeps and migrates a legacy world across server replacement', async () => 
     assert.equal(migratedState.schemaVersion, 2)
     assert.equal(migratedState.worlds[0].builds[0].operationId, 'restored-parcel-02-0')
     assert.equal(migratedState.worlds[0].builds[0].revision, 0)
-    assert.equal(migratedState.worlds[0].builds[0].schemaVersion, PARCEL_BUILD_SCHEMA_VERSION)
+    assert.equal(
+      migratedState.worlds[0].builds[0].schemaVersion,
+      LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
+    )
 
     const firstBackupFiles = await readdir(join(dataDirectory, 'backups'))
     assert.equal(firstBackupFiles.length, 1)
@@ -150,6 +156,207 @@ test('refuses to serve an invalid production save', async () => {
     await rm(dataDirectory, { force: true, recursive: true })
   }
 })
+
+test('refuses to lossy-repair a malformed schema-2 build during restore', async () => {
+  const dataDirectory = await mkdtemp(join(tmpdir(), 'landrush-malformed-v2-production-'))
+  const worldId = 'malformed-v2-world'
+  await writeFile(
+    join(dataDirectory, 'world-multiplayer-state.json'),
+    JSON.stringify({
+      savedAt: Date.now(),
+      schemaVersion: 2,
+      worlds: [
+        {
+          builds: [
+            {
+              nodes: [createCanonicalWall('duplicate-wall'), createCanonicalWall('duplicate-wall')],
+              operationId: 'malformed-v2-operation',
+              parcelId: 'parcel-02',
+              revision: 1,
+              schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
+              updatedAt: Date.now(),
+              updatedBy: 'malformed-builder',
+              worldId,
+            },
+          ],
+          ownerships: [],
+          tvMediaStates: [],
+          worldId,
+        },
+      ],
+    }),
+    'utf8',
+  )
+  const port = await getOpenPort()
+  const server = spawn(process.execPath, ['server.mjs'], {
+    cwd: new URL('.', import.meta.url),
+    env: {
+      ...process.env,
+      LANDRUSH_WORLD_MULTIPLAYER_DATA_DIR: dataDirectory,
+      LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE: '',
+      LANDRUSH_WORLD_MULTIPLAYER_WS_PORT: String(port),
+      NODE_ENV: 'production',
+      RENDER: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const stderr = []
+  server.stderr.on('data', (chunk) => stderr.push(chunk.toString()))
+
+  try {
+    const [exitCode] = await once(server, 'exit')
+    assert.notEqual(exitCode, 0)
+    assert.match(stderr.join(''), /invalid schema-2 build graph/)
+  } finally {
+    await rm(dataDirectory, { force: true, recursive: true })
+  }
+})
+
+test('rejects noncanonical and duplicate schema-2 authority envelopes', async () => {
+  const cases = [
+    {
+      mutate(snapshot) {
+        snapshot.worlds[0].builds[0].worldId = 'other-world'
+      },
+      name: 'mismatched nested world ID',
+    },
+    {
+      mutate(snapshot) {
+        snapshot.worlds[0].builds[0].parcelId = ' parcel-02 '
+      },
+      name: 'noncanonical parcel ID',
+    },
+    {
+      mutate(snapshot) {
+        snapshot.worlds[0].builds[0].revision = -1
+      },
+      name: 'invalid revision',
+    },
+    {
+      mutate(snapshot) {
+        delete snapshot.worlds[0].builds[0].schemaVersion
+      },
+      name: 'missing build schema',
+    },
+    {
+      mutate(snapshot) {
+        snapshot.worlds.push(structuredClone(snapshot.worlds[0]))
+      },
+      name: 'duplicate world ID',
+    },
+    {
+      mutate(snapshot) {
+        const duplicate = structuredClone(snapshot.worlds[0].builds[0])
+        duplicate.operationId = 'duplicate-parcel-operation'
+        snapshot.worlds[0].builds.push(duplicate)
+      },
+      name: 'duplicate parcel build',
+    },
+    {
+      mutate(snapshot) {
+        snapshot.worlds[0].builds[0].operationId = ' noncanonical-operation '
+      },
+      name: 'noncanonical operation metadata',
+    },
+    {
+      mutate(snapshot) {
+        snapshot.worlds[0].builds[0].updatedAt = Number.MAX_SAFE_INTEGER + 1
+      },
+      name: 'unsafe build timestamp',
+    },
+  ]
+
+  for (const entry of cases) {
+    const snapshot = createCanonicalSchema2State('strict-envelope-world')
+    entry.mutate(snapshot)
+    await assertProductionRestoreFails(snapshot, entry.name)
+  }
+})
+
+function createCanonicalSchema2State(worldId) {
+  const now = Date.now()
+  return {
+    savedAt: now,
+    schemaVersion: 2,
+    worlds: [
+      {
+        builds: [
+          {
+            nodes: [createCanonicalWall('wall-strict-envelope')],
+            operationId: 'strict-envelope-operation',
+            parcelId: 'parcel-02',
+            revision: 1,
+            schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
+            updatedAt: now,
+            updatedBy: 'strict-builder',
+            worldId,
+          },
+        ],
+        ownerships: [],
+        tvMediaStates: [],
+        worldId,
+      },
+    ],
+  }
+}
+
+async function assertProductionRestoreFails(snapshot, name) {
+  const dataDirectory = await mkdtemp(join(tmpdir(), 'landrush-strict-v2-production-'))
+  await writeFile(
+    join(dataDirectory, 'world-multiplayer-state.json'),
+    JSON.stringify(snapshot),
+    'utf8',
+  )
+  const port = await getOpenPort()
+  const server = spawn(process.execPath, ['server.mjs'], {
+    cwd: new URL('.', import.meta.url),
+    env: {
+      ...process.env,
+      LANDRUSH_WORLD_MULTIPLAYER_DATA_DIR: dataDirectory,
+      LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE: '',
+      LANDRUSH_WORLD_MULTIPLAYER_WS_PORT: String(port),
+      NODE_ENV: 'production',
+      RENDER: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  children.add(server)
+  server.on('exit', () => children.delete(server))
+  const stderr = []
+  server.stderr.on('data', (chunk) => stderr.push(chunk.toString()))
+
+  try {
+    const outcome = await Promise.race([
+      once(server, 'exit').then(([exitCode]) => ({ exitCode })),
+      new Promise((resolve) => setTimeout(() => resolve({ exitCode: null }), 1500)),
+    ])
+    if (outcome.exitCode === null) {
+      server.kill()
+      await once(server, 'exit')
+      assert.fail(`Server accepted ${name}`)
+    }
+    assert.notEqual(outcome.exitCode, 0, name)
+    assert.match(stderr.join(''), /Could not restore the configured production multiplayer save/)
+  } finally {
+    if (server.exitCode === null) server.kill()
+    await rm(dataDirectory, { force: true, recursive: true })
+  }
+}
+
+function createCanonicalWall(id) {
+  return {
+    children: [],
+    end: [2, 0],
+    height: 2.5,
+    id,
+    object: 'node',
+    parentId: null,
+    start: [0, 0],
+    thickness: 0.2,
+    type: 'wall',
+    visible: true,
+  }
+}
 
 function createLegacyState(worldId) {
   return {

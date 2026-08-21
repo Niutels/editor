@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026-08-20.2",
+  "modelId": "eleven_text_to_sound_v2",
+  "outputFormat": "mp3_44100_128",
+  "cues": [
+    {
+      "id": "weapon-shot-sunflare-pistol",
+      "eventKind": "shot-fired",
+      "weaponId": "sunflare-pistol",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.65,
+      "prompt": "Short bright compact solar pulse pistol shot, crisp ceramic click and warm energy pop, stylized tropical science-fiction game sound effect, isolated one-shot, dry, no ambience, no music, no voice, fast decay.",
+      "files": ["/audios/sfx/zombie-escape/weapons/sunflare-pistol-shot-0.mp3"],
+      "playback": {
+        "maxVoices": 5,
+        "minIntervalMs": 80,
+        "rateRange": [0.97, 1.03],
+        "spatial": false,
+        "volume": 0.58
+      }
+    },
+    {
+      "id": "weapon-shot-reef-carbine",
+      "eventKind": "shot-fired",
+      "weaponId": "reef-carbine",
+      "durationSeconds": 0.5,
+      "promptInfluence": 0.72,
+      "prompt": "One very short punchy stylized rifle cartridge shot: a single crisp muzzle crack, compact low mechanical body, and tiny bolt snap. Built to layer cleanly during automatic fire. No burst within the clip, no plasma, laser, energy zap, echo, reverb, ambience, music, or voice. Isolated dry game one-shot with an immediate decay.",
+      "files": ["/audios/sfx/zombie-escape/weapons/reef-carbine-shot-0.mp3"],
+      "playback": {
+        "maxVoices": 6,
+        "minIntervalMs": 64,
+        "rateRange": [0.98, 1.025],
+        "spatial": false,
+        "volume": 0.52
+      }
+    },
+    {
+      "id": "weapon-shot-driftwood-scattergun",
+      "eventKind": "shot-fired",
+      "weaponId": "driftwood-scattergun",
+      "durationSeconds": 0.8,
+      "promptInfluence": 0.65,
+      "prompt": "Chunky driftwood and marine-steel scattergun blast, broad compressed thump with a short wooden pump rattle, stylized cartoony game sound effect, isolated one-shot, dry, no ambience, no music, no voice.",
+      "files": ["/audios/sfx/zombie-escape/weapons/driftwood-scattergun-shot-0.mp3"],
+      "playback": {
+        "maxVoices": 4,
+        "minIntervalMs": 180,
+        "rateRange": [0.98, 1.02],
+        "spatial": false,
+        "volume": 0.64
+      }
+    },
+    {
+      "id": "weapon-shot-storm-coil-repeater",
+      "eventKind": "shot-fired",
+      "weaponId": "storm-coil-repeater",
+      "durationSeconds": 0.5,
+      "promptInfluence": 0.74,
+      "prompt": "One ultra-short automatic rifle cartridge shot: a sharp compact muzzle crack with a tight mechanical receiver tick and almost no tail. Designed to repeat rapidly without becoming a noisy burst. No burst within the clip, no electricity, coil sound, plasma, laser, echo, reverb, ambience, music, or voice. Isolated dry game one-shot.",
+      "files": ["/audios/sfx/zombie-escape/weapons/storm-coil-repeater-shot-0.mp3"],
+      "playback": {
+        "maxVoices": 7,
+        "minIntervalMs": 48,
+        "rateRange": [0.975, 1.03],
+        "spatial": false,
+        "volume": 0.46
+      }
+    },
+    {
+      "id": "weapon-shot-tidebreak-launcher",
+      "eventKind": "shot-fired",
+      "weaponId": "tidebreak-launcher",
+      "durationSeconds": 0.9,
+      "promptInfluence": 0.65,
+      "prompt": "Heavy coast-guard rescue launcher shot, low compressed pneumatic boom with a solid marine-metal clack, stylized cartoony game sound effect, isolated one-shot, short tail, no ambience, no music, no voice.",
+      "files": ["/audios/sfx/zombie-escape/weapons/tidebreak-launcher-shot-0.mp3"],
+      "playback": {
+        "maxVoices": 3,
+        "minIntervalMs": 280,
+        "rateRange": [0.985, 1.015],
+        "spatial": false,
+        "volume": 0.68
+      }
+    },
+    {
+      "id": "enemy-hit",
+      "eventKind": "enemy-hit",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.6,
+      "prompt": "Short cartoony undead enemy pain grunt blended with a compact projectile body impact, non-gory and playful, isolated game one-shot, no words, no ambience, no music, quick decay.",
+      "files": [
+        "/audios/sfx/zombie-escape/enemy/hit-0.mp3",
+        "/audios/sfx/zombie-escape/enemy/hit-1.mp3",
+        "/audios/sfx/zombie-escape/enemy/hit-2.mp3"
+      ],
+      "playback": {
+        "maxDistance": 28,
+        "maxVoices": 8,
+        "minIntervalMs": 42,
+        "rateRange": [0.94, 1.06],
+        "referenceDistance": 4,
+        "spatial": true,
+        "volume": 0.48
+      }
+    },
+    {
+      "id": "enemy-death",
+      "eventKind": "enemy-killed",
+      "durationSeconds": 1.2,
+      "promptInfluence": 0.58,
+      "prompt": "Stylized cartoony undead enemy defeated, brief raspy nonverbal groan collapsing into a soft body fall, non-gory and playful, isolated game one-shot, no words, no ambience, no music.",
+      "files": [
+        "/audios/sfx/zombie-escape/enemy/death-0.mp3",
+        "/audios/sfx/zombie-escape/enemy/death-1.mp3",
+        "/audios/sfx/zombie-escape/enemy/death-2.mp3"
+      ],
+      "playback": {
+        "maxDistance": 32,
+        "maxVoices": 6,
+        "minIntervalMs": 70,
+        "rateRange": [0.94, 1.055],
+        "referenceDistance": 4.5,
+        "spatial": true,
+        "volume": 0.58
+      }
+    },
+    {
+      "id": "player-hurt",
+      "eventKind": "player-hurt",
+      "durationSeconds": 0.7,
+      "promptInfluence": 0.62,
+      "prompt": "Small friendly robot struck by an enemy, quick metal dent and clank with a short electronic distress chirp, stylized game one-shot, no spoken words, no ambience, no music.",
+      "files": [
+        "/audios/sfx/zombie-escape/player/hurt-0.mp3",
+        "/audios/sfx/zombie-escape/player/hurt-1.mp3"
+      ],
+      "playback": {
+        "maxVoices": 3,
+        "minIntervalMs": 90,
+        "rateRange": [0.97, 1.035],
+        "spatial": false,
+        "volume": 0.62
+      }
+    },
+    {
+      "id": "player-death",
+      "eventKind": "player-killed",
+      "durationSeconds": 1.4,
+      "promptInfluence": 0.6,
+      "prompt": "Small friendly robot defeated, descending electronic power-down chirp followed by a light loose-metal settle, sympathetic stylized game one-shot, no explosion, no spoken words, no ambience, no music.",
+      "files": [
+        "/audios/sfx/zombie-escape/player/death-0.mp3",
+        "/audios/sfx/zombie-escape/player/death-1.mp3"
+      ],
+      "playback": {
+        "maxVoices": 2,
+        "minIntervalMs": 500,
+        "rateRange": [0.985, 1.015],
+        "spatial": false,
+        "volume": 0.72
+      }
+    },
+    {
+      "id": "weapon-pickup",
+      "eventKind": "weapon-purchased",
+      "durationSeconds": 0.8,
+      "promptInfluence": 0.68,
+      "prompt": "Satisfying science-fiction weapon pickup, compact magnetic latch followed by a bright two-note confirmation chime, clean stylized game one-shot, no voice, no ambience, no music.",
+      "files": [
+        "/audios/sfx/zombie-escape/items/weapon-pickup-0.mp3",
+        "/audios/sfx/zombie-escape/items/weapon-pickup-1.mp3"
+      ],
+      "playback": {
+        "maxVoices": 2,
+        "minIntervalMs": 140,
+        "rateRange": [0.98, 1.02],
+        "spatial": false,
+        "volume": 0.56
+      }
+    },
+    {
+      "id": "melee-swing",
+      "eventKind": "melee-swing",
+      "durationSeconds": 0.5,
+      "promptInfluence": 0.72,
+      "prompt": "One fast compact rifle-stock melee swing: a clean low-pitched air whoosh with a brief rigid weapon movement and immediate decay. No cloth flutter, science-fiction energy tone, impact, voice, ambience, or music. Isolated dry game one-shot.",
+      "files": [
+        "/audios/sfx/zombie-escape/melee/swing-0.mp3",
+        "/audios/sfx/zombie-escape/melee/swing-1.mp3"
+      ],
+      "playback": {
+        "maxVoices": 2,
+        "minIntervalMs": 180,
+        "rateRange": [0.96, 1.04],
+        "spatial": false,
+        "volume": 0.5
+      }
+    },
+    {
+      "id": "environment-impact",
+      "eventKind": "environment-impact",
+      "durationSeconds": 0.5,
+      "promptInfluence": 0.68,
+      "prompt": "Energy projectile striking a solid plaster and wood wall, tiny dry crack with a brief spark, compact stylized game impact, isolated one-shot, no long ricochet, no voice, no ambience, no music.",
+      "files": [
+        "/audios/sfx/zombie-escape/impacts/environment-0.mp3",
+        "/audios/sfx/zombie-escape/impacts/environment-1.mp3"
+      ],
+      "playback": {
+        "maxDistance": 24,
+        "maxVoices": 6,
+        "minIntervalMs": 36,
+        "rateRange": [0.94, 1.06],
+        "referenceDistance": 3.5,
+        "spatial": true,
+        "volume": 0.34
+      }
+    },
+    {
+      "id": "purchase-denied",
+      "eventKind": "purchase-denied",
+      "durationSeconds": 0.5,
+      "promptInfluence": 0.72,
+      "prompt": "Short soft negative user-interface chirp, low double electronic blip, friendly stylized game feedback, isolated one-shot, no voice, no ambience, no music.",
+      "files": ["/audios/sfx/zombie-escape/ui/purchase-denied-0.mp3"],
+      "playback": {
+        "maxVoices": 1,
+        "minIntervalMs": 180,
+        "rateRange": [1, 1],
+        "spatial": false,
+        "volume": 0.42
+      }
+    }
+  ]
+}

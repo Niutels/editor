@@ -1,0 +1,3 @@
+# The canonical weapon GLBs are direct children; ignore duplicate legacy nested downloads.
+*/model.glb
+*/preview.png

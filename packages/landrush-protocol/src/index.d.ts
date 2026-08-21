@@ -1,6 +1,13 @@
-export const PARCEL_BUILD_SCHEMA_VERSION: 1
+export const LEGACY_PARCEL_BUILD_SCHEMA_VERSION: 1
+export const PARCEL_BUILD_SCHEMA_VERSION: 2
+export const PARCEL_WRITER_SESSION_CLOSE_CODE: 4009
+export const MAX_PARCEL_WRITER_SESSION_ID_LENGTH: 120
 export const DEFAULT_MULTIPLAYER_ROOM_ID: 'landrush-lab-world-multiplayer'
 export const MAX_MULTIPLAYER_ROOM_ID_LENGTH: 80
+
+export type ParcelBuildReadableSchemaVersion =
+  | typeof LEGACY_PARCEL_BUILD_SCHEMA_VERSION
+  | typeof PARCEL_BUILD_SCHEMA_VERSION
 
 export type LocalPlayerProfile = {
   color: string
@@ -80,7 +87,7 @@ export type ParcelBuildSnapshot<Node = ParcelBuildNode> = {
   operationId: string
   parcelId: string
   revision: number
-  schemaVersion: typeof PARCEL_BUILD_SCHEMA_VERSION
+  schemaVersion: ParcelBuildReadableSchemaVersion
   updatedAt: number
   updatedBy: string
   worldId: string
@@ -93,12 +100,47 @@ export type SyncParcelBuildNodesMessage<Node = ParcelBuildNode> = {
   parcelId: string
   schemaVersion: typeof PARCEL_BUILD_SCHEMA_VERSION
   type: 'sync-parcel-build-nodes'
+  writerEpoch: number
+  writerSessionId: string
+  worldId: string
+}
+
+export type ParcelWriterSession = {
+  writerEpoch: number
+  writerSessionId: string
+}
+
+export type ParcelBuildNodesAckMessage = ParcelWriterSession & {
+  operationId: string
+  parcelId: string
+  revision: number
+  roomId: string
+  serverTime: number
+  type: 'parcel-build-nodes-ack'
+  updatedAt: number
+  updatedBy: string
+  worldId: string
+}
+
+export type ParcelBuildNodesRejectedMessage = {
+  code: string
+  operationId: string
+  parcelId: string
+  reason: string
+  roomId: string
+  serverTime: number
+  type: 'parcel-build-nodes-rejected'
   worldId: string
 }
 
 export function isParcelBuildSchemaVersion(
   value: unknown,
 ): value is typeof PARCEL_BUILD_SCHEMA_VERSION
+export function isSupportedParcelBuildSchemaVersion(
+  value: unknown,
+): value is ParcelBuildReadableSchemaVersion
+export function isParcelWriterEpoch(value: unknown): value is number
+export function sanitizeParcelWriterSessionId(value: unknown): string
 export function normalizeParcelBuildRevision(value: unknown, fallback?: number): number
 export function sanitizeMultiplayerRoomId(value: unknown): string
 export function isSpatialVoiceSignalPayload(value: unknown): value is SpatialVoiceSignalPayload

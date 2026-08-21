@@ -12,9 +12,12 @@ export type LandrushRobotJumpPhase =
   | 'recovery'
   | 'complete'
 
+export type LandrushRobotJumpContact = 'airborne' | 'landed' | 'preload'
+
 export type LandrushRobotJumpPose = {
   armPitch: number
   bodyCompressionOffset: number
+  contact: LandrushRobotJumpContact
   footPitch: number
   kneePitch: number
   phase: LandrushRobotJumpPhase
@@ -122,6 +125,13 @@ export function resolveLandrushRobotJumpPose(progress: number): LandrushRobotJum
   )
 }
 
+export function resolveLandrushRobotJumpContact(progress: number): LandrushRobotJumpContact {
+  const clampedProgress = clamp01(progress)
+  if (clampedProgress < ANTICIPATION_END) return 'preload'
+  if (clampedProgress < TOUCHDOWN) return 'airborne'
+  return 'landed'
+}
+
 function resolveJumpAltitudeScale(progress: number) {
   if (progress <= ANTICIPATION_END || progress >= TOUCHDOWN) return 0
   const airborneProgress =
@@ -142,6 +152,7 @@ function createJumpPose(
   return {
     armPitch,
     bodyCompressionOffset: resolveBodyCompressionOffset(phase, kneePitch),
+    contact: resolveLandrushRobotJumpContact(progress),
     footPitch,
     kneePitch,
     phase,

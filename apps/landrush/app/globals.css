@@ -147,6 +147,11 @@
   }
 }
 
+body:has([data-landrush-island-world-frame-ready])
+  [data-landrush-island-loading-shell] {
+  display: none;
+}
+
 /* Apple-style smooth corners (squircle) — progressive enhancement */
 .rounded-smooth {
   border-radius: var(--radius-lg);

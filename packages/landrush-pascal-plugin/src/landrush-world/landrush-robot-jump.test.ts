@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveLandrushRobotJumpPose } from './landrush-robot-jump'
+import {
+  resolveLandrushRobotJumpContact,
+  resolveLandrushRobotJumpPose,
+} from './landrush-robot-jump'
 
 describe('resolveLandrushRobotJumpPose', () => {
   test('keeps the root grounded while the knees preload and after touchdown', () => {
@@ -42,6 +45,7 @@ describe('resolveLandrushRobotJumpPose', () => {
     expect(complete).toEqual({
       armPitch: 0,
       bodyCompressionOffset: 0,
+      contact: 'landed',
       footPitch: 0,
       kneePitch: 0,
       phase: 'complete',
@@ -50,5 +54,12 @@ describe('resolveLandrushRobotJumpPose', () => {
       spinePitch: 0,
       upperLegPitch: 0,
     })
+  })
+
+  test('exposes the exact post-flight contact seam for responsive restart control', () => {
+    expect(resolveLandrushRobotJumpContact(0)).toBe('preload')
+    expect(resolveLandrushRobotJumpContact(0.779_999)).toBe('airborne')
+    expect(resolveLandrushRobotJumpContact(0.78)).toBe('landed')
+    expect(resolveLandrushRobotJumpContact(1)).toBe('landed')
   })
 })

@@ -3,16 +3,31 @@ import test from 'node:test'
 import {
   DEFAULT_MULTIPLAYER_ROOM_ID,
   isParcelBuildSchemaVersion,
+  isParcelWriterEpoch,
   isSpatialVoiceSignalPayload,
+  isSupportedParcelBuildSchemaVersion,
+  LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
   MAX_MULTIPLAYER_ROOM_ID_LENGTH,
   normalizeParcelBuildRevision,
   PARCEL_BUILD_SCHEMA_VERSION,
+  sanitizeParcelWriterSessionId,
   sanitizeMultiplayerRoomId,
 } from './index.js'
 
 test('accepts only the current parcel-build schema', () => {
   assert.equal(isParcelBuildSchemaVersion(PARCEL_BUILD_SCHEMA_VERSION), true)
+  assert.equal(isParcelBuildSchemaVersion(LEGACY_PARCEL_BUILD_SCHEMA_VERSION), false)
   assert.equal(isParcelBuildSchemaVersion(PARCEL_BUILD_SCHEMA_VERSION + 1), false)
+  assert.equal(isSupportedParcelBuildSchemaVersion(LEGACY_PARCEL_BUILD_SCHEMA_VERSION), true)
+  assert.equal(isSupportedParcelBuildSchemaVersion(PARCEL_BUILD_SCHEMA_VERSION), true)
+  assert.equal(isSupportedParcelBuildSchemaVersion(PARCEL_BUILD_SCHEMA_VERSION + 1), false)
+})
+
+test('validates and sanitizes parcel writer sessions consistently', () => {
+  assert.equal(isParcelWriterEpoch(1), true)
+  assert.equal(isParcelWriterEpoch(0), false)
+  assert.equal(isParcelWriterEpoch(1.5), false)
+  assert.equal(sanitizeParcelWriterSessionId(' tab / one '), 'tab---one')
 })
 
 test('validates the spatial voice wire payload once for clients and servers', () => {

@@ -7,40 +7,36 @@ import {
   isSpatialVoiceSignalPayload,
   sanitizeMultiplayerRoomId,
   isParcelBuildSchemaVersion,
+  isParcelWriterEpoch,
+  isSupportedParcelBuildSchemaVersion,
+  LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
   normalizeParcelBuildRevision,
   PARCEL_BUILD_SCHEMA_VERSION,
+  PARCEL_WRITER_SESSION_CLOSE_CODE,
+  sanitizeParcelWriterSessionId,
 } from '@landrush/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 
 const HEARTBEAT_INTERVAL_MS = 3000
-const LANDRUSH_BUILD_NODE_TYPES = new Set([
-  'box-vent',
-  'ceiling',
-  'chimney',
-  'column',
-  'door',
-  'dormer',
-  'elevator',
-  'fence',
-  'item',
-  'level',
-  'ridge-vent',
-  'roof',
-  'roof-segment',
-  'shelf',
-  'slab',
-  'skylight',
-  'solar-panel',
-  'stair',
-  'stair-segment',
-  'wall',
-  'window',
-])
+const MAX_BUILD_NODE_TYPE_LENGTH = 120
 const MAX_BUILD_NODES_PER_PARCEL = 1000
+const MAX_BUILD_NODE_VALUE_DEPTH = 100
 const MAX_BUILD_SNAPSHOT_BYTES = 1_250_000
 const MAX_ROOM_PEERS = 32
+const MAX_INACTIVE_WRITER_SESSIONS = Math.max(
+  1,
+  Number(process.env.LANDRUSH_MAX_INACTIVE_WRITER_SESSIONS) || 1024,
+)
 const MIN_STATE_INTERVAL_MS = 40
 const PEER_STALE_MS = 15_000
+const WRITER_SESSION_RETENTION_MS = Math.max(
+  1,
+  Number(process.env.LANDRUSH_WRITER_SESSION_RETENTION_MS) || 5 * 60_000,
+)
+const WRITER_SESSION_CLOSE_GRACE_MS = Math.max(
+  0,
+  Math.min(5_000, Number(process.env.LANDRUSH_WRITER_SESSION_CLOSE_GRACE_MS) || 0),
+)
 const PORT = Number(process.env.PORT ?? process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PORT ?? 3003)
 const WS_PATH = process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PATH ?? '/api/landrush-lab/world-multiplayer/ws'
 const PERSISTENT_STATE_SCHEMA_VERSION = 2
@@ -59,9 +55,13 @@ const rooms = new Map()
 const parcelBuildNodesByWorld = new Map()
 const parcelOwnershipByWorld = new Map()
 const tvMediaStateByWorld = new Map()
+const writerSessionsByPlayer = new Map()
+const parcelWorldSubscriptionBySocket = new Map()
+const parcelWorldSubscribers = new Map()
 let persistentStateRequestedRevision = 0
 let persistentStateWrittenRevision = 0
 let persistentStateWriteRunning = false
+let lastWriterSessionSweepAt = 0
 const startedAt = Date.now()
 
 await restorePersistentWorldState()
@@ -110,16 +110,24 @@ const server = http.createServer((request, response) => {
       (count, room) => count + room.watchers.size,
       0,
     )
+    const inactiveWriterSessionCount = [...writerSessionsByPlayer.values()].filter(
+      (grant) => grant.activeConnectionId === null,
+    ).length
     response.writeHead(200, headers)
     response.end(
       JSON.stringify({
         maxPeers: MAX_ROOM_PEERS,
+        inactiveWriterSessions: inactiveWriterSessionCount,
+        maxInactiveWriterSessions: MAX_INACTIVE_WRITER_SESSIONS,
         players: playerCount,
         rooms: rooms.size,
         serverTime: Date.now(),
         stalePeerMs: PEER_STALE_MS,
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         watchers: watcherCount,
+        worldSubscriptions: parcelWorldSubscriptionBySocket.size,
+        writerSessionRetentionMs: WRITER_SESSION_RETENTION_MS,
+        writerSessions: writerSessionsByPlayer.size,
       }),
     )
     return
@@ -129,7 +137,11 @@ const server = http.createServer((request, response) => {
   response.end(JSON.stringify({ error: 'not-found' }))
 })
 
-const wss = new WebSocketServer({ path: WS_PATH, server })
+const wss = new WebSocketServer({
+  maxPayload: MAX_BUILD_SNAPSHOT_BYTES + 250_000,
+  path: WS_PATH,
+  server,
+})
 
 wss.on('connection', (socket) => {
   const connectionId = randomUUID()
@@ -156,12 +168,16 @@ wss.on('connection', (socket) => {
     }
 
     if (message.type === 'join') {
+      if (peer && !isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
+        return
+      }
       const player = sanitizePlayerSnapshot(message.player, now)
       const roomId = sanitizeMultiplayerRoomId(message.roomId)
-      const room = getRoom(roomId)
-      const existingPeer = room.peers.get(player.id)
+      const room = rooms.get(roomId)
+      const existingPeer = room?.peers.get(player.id)
 
-      if (!existingPeer && room.peers.size >= MAX_ROOM_PEERS) {
+      if (!existingPeer && (room?.peers.size ?? 0) >= MAX_ROOM_PEERS) {
         sendError(socket, 'room-full', 'Room is full')
         socket.close(1013, 'Room is full')
         return
@@ -170,6 +186,29 @@ wss.on('connection', (socket) => {
       leaveWatcher(watcher)
       watcher = null
       leaveRoom(peer, false, 'room-change')
+      peer = null
+
+      const writerSession = grantWriterSession({
+        connectionId,
+        now,
+        playerId: player.id,
+        socket,
+        writerEpoch: message.writerEpoch,
+        writerSessionId: message.writerSessionId,
+      })
+      if (!writerSession.ok) {
+        send(socket, {
+          code: writerSession.code,
+          message: writerSession.message,
+          roomId,
+          serverTime: now,
+          type: 'parcel-writer-session-rejected',
+          writerSessionId: writerSession.writerSessionId,
+        })
+        socket.close(PARCEL_WRITER_SESSION_CLOSE_CODE, 'Writer session superseded')
+        return
+      }
+
       peer = {
         connectionId,
         id: player.id,
@@ -179,8 +218,18 @@ wss.on('connection', (socket) => {
         player,
         roomId,
         socket,
+        writerEpoch: writerSession.writerEpoch,
+        writerSessionId: writerSession.writerSessionId,
       }
+      send(socket, {
+        roomId,
+        serverTime: now,
+        type: 'parcel-writer-session-granted',
+        writerEpoch: writerSession.writerEpoch,
+        writerSessionId: writerSession.writerSessionId,
+      })
       joinRoom(peer)
+      updateParcelWorldSubscriptionRoom(socket, roomId)
       return
     }
 
@@ -196,6 +245,7 @@ wss.on('connection', (socket) => {
         socket,
       }
       watchRoom(watcher)
+      updateParcelWorldSubscriptionRoom(socket, roomId)
       return
     }
 
@@ -204,6 +254,7 @@ wss.on('connection', (socket) => {
       if (watcher) watcher.lastSeenAt = now
       const worldId = sanitizeParcelWorldId(message.worldId)
       const roomId = sanitizeMultiplayerRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
+      setParcelWorldSubscription(socket, roomId, worldId)
       sendParcelOwnershipSnapshot(socket, roomId, worldId)
       sendParcelBuildNodesSnapshot(socket, roomId, worldId)
       sendTvMediaStateSnapshot(socket, roomId, worldId)
@@ -215,6 +266,10 @@ wss.on('connection', (socket) => {
         sendError(socket, 'not-joined', 'Join a room before syncing parcel build nodes')
         return
       }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
+        return
+      }
 
       peer.lastSeenAt = now
       const synced = syncParcelBuildNodes(peer, message, now)
@@ -223,39 +278,66 @@ wss.on('connection', (socket) => {
           send(socket, {
             build: synced.build,
             operationId: synced.operationId,
+            parcelId: synced.parcelId,
             reason: synced.message,
             roomId: peer.roomId,
             serverTime: now,
             type: 'parcel-build-nodes-conflict',
+            worldId: synced.worldId,
           })
           return
         }
-        sendError(socket, synced.code, synced.message)
+        if (synced.code === 'writer-session-superseded') {
+          rejectWriterSession(socket, peer, now)
+          return
+        }
+        send(socket, {
+          code: synced.code,
+          operationId: sanitizeText(message.operationId, 'unknown-operation', 120),
+          parcelId: sanitizeParcelId(message.parcelId),
+          reason: synced.message,
+          roomId: peer.roomId,
+          serverTime: now,
+          type: 'parcel-build-nodes-rejected',
+          worldId: sanitizeParcelWorldId(message.worldId),
+        })
         return
       }
 
       send(socket, {
-        build: synced.build,
+        operationId: synced.build.operationId,
+        parcelId: synced.build.parcelId,
+        revision: synced.build.revision,
         roomId: peer.roomId,
         serverTime: now,
-        type: 'parcel-build-nodes-synced',
+        type: 'parcel-build-nodes-ack',
+        updatedAt: synced.build.updatedAt,
+        updatedBy: synced.build.updatedBy,
+        worldId: synced.build.worldId,
+        writerEpoch: peer.writerEpoch,
+        writerSessionId: peer.writerSessionId,
       })
-      broadcast(
-        peer.roomId,
-        {
-          build: synced.build,
-          roomId: peer.roomId,
-          serverTime: now,
-          type: 'parcel-build-nodes-updated',
-        },
-        peer.id,
-      )
+      if (!synced.duplicate) {
+        broadcastParcelWorld(
+          synced.build.worldId,
+          {
+            build: synced.build,
+            serverTime: now,
+            type: 'parcel-build-nodes-updated',
+          },
+          socket,
+        )
+      }
       return
     }
 
     if (message.type === 'sync-tv-media-state') {
       if (!peer) {
         sendError(socket, 'not-joined', 'Join a room before syncing TV media')
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
         return
       }
 
@@ -272,15 +354,14 @@ wss.on('connection', (socket) => {
         tv: synced.tv,
         type: 'tv-media-state-synced',
       })
-      broadcast(
-        peer.roomId,
+      broadcastParcelWorld(
+        synced.tv.worldId,
         {
-          roomId: peer.roomId,
           serverTime: now,
           tv: synced.tv,
           type: 'tv-media-state-updated',
         },
-        peer.id,
+        socket,
       )
       return
     }
@@ -294,6 +375,10 @@ wss.on('connection', (socket) => {
           roomId: watcher?.roomId,
           worldId: sanitizeParcelWorldId(message.worldId),
         })
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
         return
       }
 
@@ -310,10 +395,10 @@ wss.on('connection', (socket) => {
         serverTime: now,
         type: 'parcel-claim-result',
       })
-      broadcast(
-        peer.roomId,
-        { ownership: claim.ownership, roomId: peer.roomId, serverTime: now, type: 'parcel-owned' },
-        peer.id,
+      broadcastParcelWorld(
+        claim.ownership.worldId,
+        { ownership: claim.ownership, serverTime: now, type: 'parcel-owned' },
+        socket,
       )
       return
     }
@@ -321,6 +406,10 @@ wss.on('connection', (socket) => {
     if (message.type === 'state') {
       if (!peer) {
         sendError(socket, 'not-joined', 'Join a room before sending player state')
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
         return
       }
 
@@ -340,6 +429,10 @@ wss.on('connection', (socket) => {
     if (message.type === 'voice-signal') {
       if (!peer) {
         sendError(socket, 'not-joined', 'Join a room before sending voice signals')
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
         return
       }
 
@@ -367,6 +460,7 @@ wss.on('connection', (socket) => {
     peer = null
     leaveWatcher(watcher)
     watcher = null
+    clearParcelWorldSubscription(socket)
   })
 
   socket.on('close', () => {
@@ -374,6 +468,7 @@ wss.on('connection', (socket) => {
     peer = null
     leaveWatcher(watcher)
     watcher = null
+    clearParcelWorldSubscription(socket)
   })
 
   socket.on('error', () => {
@@ -381,6 +476,7 @@ wss.on('connection', (socket) => {
     peer = null
     leaveWatcher(watcher)
     watcher = null
+    clearParcelWorldSubscription(socket)
   })
 })
 
@@ -401,11 +497,6 @@ server.on('error', (error) => {
 
 function joinRoom(peer) {
   const room = getRoom(peer.roomId)
-  const previousPeer = room.peers.get(peer.id)
-  if (previousPeer && previousPeer.socket !== peer.socket) {
-    previousPeer.socket.close(1000, 'Replaced by a newer connection')
-  }
-
   room.peers.set(peer.id, peer)
   const now = Date.now()
   send(peer.socket, {
@@ -420,6 +511,136 @@ function joinRoom(peer) {
     peer.id,
   )
   broadcastRoomState(peer.roomId)
+}
+
+function grantWriterSession({
+  connectionId,
+  now,
+  playerId,
+  socket,
+  writerEpoch: requestedWriterEpoch,
+  writerSessionId: value,
+}) {
+  const writerSessionId = sanitizeParcelWriterSessionId(value)
+  if (!writerSessionId) {
+    return {
+      code: 'bad-writer-session',
+      message: 'A writer session ID is required',
+      ok: false,
+      writerSessionId: '',
+    }
+  }
+
+  const existing = writerSessionsByPlayer.get(playerId)
+  if (!existing) {
+    const grant = {
+      activeConnectionId: connectionId,
+      activeSocket: socket,
+      lastTouchedAt: now,
+      writerEpoch: 1,
+      writerSessionId,
+    }
+    writerSessionsByPlayer.set(playerId, grant)
+    return { ok: true, writerEpoch: grant.writerEpoch, writerSessionId }
+  }
+
+  if (
+    requestedWriterEpoch !== undefined &&
+    (!isParcelWriterEpoch(requestedWriterEpoch) || requestedWriterEpoch !== existing.writerEpoch)
+  ) {
+    return {
+      code: 'writer-session-superseded',
+      message: 'This editor session has an expired writer lease',
+      ok: false,
+      writerSessionId,
+    }
+  }
+
+  if (existing.writerSessionId === writerSessionId) {
+    const previousSocket = existing.activeSocket
+    existing.activeConnectionId = connectionId
+    existing.activeSocket = socket
+    existing.lastTouchedAt = now
+    if (previousSocket && previousSocket !== socket) {
+      closeReplacedWriterSocket(previousSocket, 'Reconnected in another socket')
+    }
+    return { ok: true, writerEpoch: existing.writerEpoch, writerSessionId }
+  }
+
+  if (requestedWriterEpoch !== undefined) {
+    return {
+      code: 'writer-session-superseded',
+      message: 'This editor session was superseded by another tab',
+      ok: false,
+      writerSessionId,
+    }
+  }
+
+  const previousSocket = existing.activeSocket
+  existing.writerEpoch += 1
+  existing.writerSessionId = writerSessionId
+  existing.activeConnectionId = connectionId
+  existing.activeSocket = socket
+  existing.lastTouchedAt = now
+  if (previousSocket && previousSocket !== socket) {
+    closeReplacedWriterSocket(previousSocket, 'Writer session superseded')
+  }
+  return { ok: true, writerEpoch: existing.writerEpoch, writerSessionId }
+}
+
+function closeReplacedWriterSocket(socket, reason) {
+  if (WRITER_SESSION_CLOSE_GRACE_MS === 0) {
+    socket.close(PARCEL_WRITER_SESSION_CLOSE_CODE, reason)
+    return
+  }
+  const closeTimer = setTimeout(() => {
+    socket.close(PARCEL_WRITER_SESSION_CLOSE_CODE, reason)
+  }, WRITER_SESSION_CLOSE_GRACE_MS)
+  closeTimer.unref()
+}
+
+function releaseWriterSession(peer) {
+  const grant = writerSessionsByPlayer.get(peer.id)
+  if (!grant || grant.activeConnectionId !== peer.connectionId) return
+  grant.activeConnectionId = null
+  grant.activeSocket = null
+  grant.lastTouchedAt = Date.now()
+  trimInactiveWriterSessions()
+}
+
+function isActiveWriterSession(peer, writerSessionIdValue, writerEpochValue) {
+  const writerSessionId = sanitizeParcelWriterSessionId(writerSessionIdValue)
+  const grant = writerSessionsByPlayer.get(peer.id)
+  return Boolean(
+    isCurrentPeer(peer) &&
+      grant &&
+      grant.writerSessionId === writerSessionId &&
+      isParcelWriterEpoch(writerEpochValue) &&
+      writerEpochValue === peer.writerEpoch,
+  )
+}
+
+function isCurrentPeer(peer) {
+  const grant = writerSessionsByPlayer.get(peer.id)
+  return Boolean(
+    rooms.get(peer.roomId)?.peers.get(peer.id) === peer &&
+      grant &&
+      grant.activeConnectionId === peer.connectionId &&
+      grant.writerSessionId === peer.writerSessionId &&
+      grant.writerEpoch === peer.writerEpoch,
+  )
+}
+
+function rejectWriterSession(socket, peer, now) {
+  send(socket, {
+    code: 'writer-session-superseded',
+    message: 'This editor session was superseded by another tab',
+    roomId: peer.roomId,
+    serverTime: now,
+    type: 'parcel-writer-session-rejected',
+    writerSessionId: peer.writerSessionId,
+  })
+  socket.close(PARCEL_WRITER_SESSION_CLOSE_CODE, 'Writer session superseded')
 }
 
 function watchRoom(watcher) {
@@ -442,6 +663,7 @@ function watchRoom(watcher) {
 
 function leaveRoom(peer, announce, reason) {
   if (!peer) return
+  releaseWriterSession(peer)
 
   const room = rooms.get(peer.roomId)
   if (!room || room.peers.get(peer.id) !== peer) return
@@ -485,6 +707,13 @@ function sweepStalePeers(now) {
       watcher.socket.close(1001, 'Stale watcher')
       leaveWatcher(watcher)
     }
+  }
+  if (
+    now - lastWriterSessionSweepAt >=
+    Math.min(HEARTBEAT_INTERVAL_MS, WRITER_SESSION_RETENTION_MS)
+  ) {
+    lastWriterSessionSweepAt = now
+    trimInactiveWriterSessions(now)
   }
 }
 
@@ -594,6 +823,13 @@ function sendTvMediaStateSnapshot(socket, roomId, worldId) {
 function syncParcelBuildNodes(peer, message, now) {
   const worldId = sanitizeParcelWorldId(message.worldId)
   const parcelId = sanitizeParcelId(message.parcelId)
+  if (!isActiveWriterSession(peer, message.writerSessionId, message.writerEpoch)) {
+    return {
+      code: 'writer-session-superseded',
+      message: 'This editor session was superseded by another tab',
+      ok: false,
+    }
+  }
   const ownership = getParcelOwnerships(worldId).get(parcelId)
   if (!ownership || ownership.owner.id !== peer.id) {
     return {
@@ -622,7 +858,16 @@ function syncParcelBuildNodes(peer, message, now) {
 
   const builds = getParcelBuildNodes(worldId)
   const currentBuild = builds.get(parcelId) ?? null
+  const nodes = sanitizeBuildNodes(message.nodes, { strict: true })
+  if (!nodes.ok) return nodes
   if (currentBuild?.operationId === operationId) {
+    if (JSON.stringify(currentBuild.nodes) !== JSON.stringify(nodes.nodes)) {
+      return {
+        code: 'parcel-build-operation-reused',
+        message: 'Parcel build operation ID was reused with different content',
+        ok: false,
+      }
+    }
     return { build: currentBuild, duplicate: true, ok: true }
   }
 
@@ -634,11 +879,10 @@ function syncParcelBuildNodes(peer, message, now) {
       message: `Parcel build revision changed from ${message.baseRevision} to ${currentRevision}`,
       ok: false,
       operationId,
+      parcelId,
+      worldId,
     }
   }
-
-  const nodes = sanitizeBuildNodes(message.nodes)
-  if (!nodes.ok) return nodes
 
   const build = {
     nodes: nodes.nodes,
@@ -794,38 +1038,91 @@ async function restorePersistentWorldState() {
     ) {
       throw new Error('Unsupported local-save schema')
     }
+    const strictEnvelope = snapshot.schemaVersion === PERSISTENT_STATE_SCHEMA_VERSION
+    if (
+      strictEnvelope &&
+      (!Number.isSafeInteger(snapshot.savedAt) || snapshot.savedAt < 0)
+    ) {
+      throw new Error('Schema-2 local save has an invalid savedAt timestamp')
+    }
     const needsCanonicalRewrite = persistentStateNeedsCanonicalRewrite(snapshot)
 
     let buildCount = 0
     let ownershipCount = 0
     let tvCount = 0
+    const restoredBuildsByWorld = new Map()
+    const restoredOwnershipsByWorld = new Map()
+    const restoredTvsByWorld = new Map()
+    const worldIds = new Set()
     for (const candidate of snapshot.worlds) {
       if (!candidate || typeof candidate !== 'object' || typeof candidate.worldId !== 'string') {
+        if (strictEnvelope) throw new Error('Schema-2 local save contains an invalid world')
         continue
       }
       const worldId = sanitizeParcelWorldId(candidate.worldId)
+      if (strictEnvelope && worldId !== candidate.worldId) {
+        throw new Error('Schema-2 local save contains a noncanonical world ID')
+      }
+      if (strictEnvelope && worldIds.has(worldId)) {
+        throw new Error(`Schema-2 local save contains duplicate world ${worldId}`)
+      }
+      worldIds.add(worldId)
+      if (
+        strictEnvelope &&
+        (!Array.isArray(candidate.ownerships) ||
+          !Array.isArray(candidate.builds) ||
+          !Array.isArray(candidate.tvMediaStates))
+      ) {
+        throw new Error(`Schema-2 world ${worldId} has an invalid authority envelope`)
+      }
       const ownerships = new Map()
       for (const value of Array.isArray(candidate.ownerships) ? candidate.ownerships : []) {
-        const ownership = sanitizePersistentParcelOwnership(value, worldId)
-        if (ownership) ownerships.set(ownership.parcelId, ownership)
+        const ownership = sanitizePersistentParcelOwnership(value, worldId, strictEnvelope)
+        if (!ownership) continue
+        if (strictEnvelope && ownerships.has(ownership.parcelId)) {
+          throw new Error(
+            `Schema-2 world ${worldId} contains duplicate parcel ownership ${ownership.parcelId}`,
+          )
+        }
+        ownerships.set(ownership.parcelId, ownership)
       }
       const builds = new Map()
       for (const value of Array.isArray(candidate.builds) ? candidate.builds : []) {
-        const build = sanitizePersistentParcelBuild(value, worldId)
-        if (build) builds.set(build.parcelId, build)
+        const build = sanitizePersistentParcelBuild(value, worldId, strictEnvelope)
+        if (!build) continue
+        if (strictEnvelope && builds.has(build.parcelId)) {
+          throw new Error(`Schema-2 world ${worldId} contains duplicate parcel ${build.parcelId}`)
+        }
+        builds.set(build.parcelId, build)
       }
       const tvs = new Map()
       for (const value of Array.isArray(candidate.tvMediaStates) ? candidate.tvMediaStates : []) {
-        const tv = sanitizePersistentTvMediaState(value, worldId)
-        if (tv) tvs.set(tv.tvId, tv)
+        const tv = sanitizePersistentTvMediaState(value, worldId, strictEnvelope)
+        if (!tv) continue
+        if (strictEnvelope && tvs.has(tv.tvId)) {
+          throw new Error(`Schema-2 world ${worldId} contains duplicate TV ${tv.tvId}`)
+        }
+        tvs.set(tv.tvId, tv)
       }
 
-      if (ownerships.size > 0) parcelOwnershipByWorld.set(worldId, ownerships)
-      if (builds.size > 0) parcelBuildNodesByWorld.set(worldId, builds)
-      if (tvs.size > 0) tvMediaStateByWorld.set(worldId, tvs)
+      if (ownerships.size > 0) restoredOwnershipsByWorld.set(worldId, ownerships)
+      if (builds.size > 0) restoredBuildsByWorld.set(worldId, builds)
+      if (tvs.size > 0) restoredTvsByWorld.set(worldId, tvs)
       ownershipCount += ownerships.size
       buildCount += builds.size
       tvCount += tvs.size
+    }
+    parcelOwnershipByWorld.clear()
+    parcelBuildNodesByWorld.clear()
+    tvMediaStateByWorld.clear()
+    for (const [worldId, ownerships] of restoredOwnershipsByWorld) {
+      parcelOwnershipByWorld.set(worldId, ownerships)
+    }
+    for (const [worldId, builds] of restoredBuildsByWorld) {
+      parcelBuildNodesByWorld.set(worldId, builds)
+    }
+    for (const [worldId, tvs] of restoredTvsByWorld) {
+      tvMediaStateByWorld.set(worldId, tvs)
     }
     persistentStateStatus.backupAvailable = await ensurePersistentWorldStateBackup(encoded)
     persistentStateStatus.restored = true
@@ -856,7 +1153,7 @@ function persistentStateNeedsCanonicalRewrite(snapshot) {
         !build.operationId ||
         !Number.isSafeInteger(build.revision) ||
         build.revision < 0 ||
-        !isParcelBuildSchemaVersion(build.schemaVersion),
+        !isSupportedParcelBuildSchemaVersion(build.schemaVersion),
     ),
   )
 }
@@ -935,6 +1232,25 @@ async function flushPersistentWorldState() {
   }
 }
 
+function trimInactiveWriterSessions(now = Date.now()) {
+  const inactive = [...writerSessionsByPlayer.entries()]
+    .filter(([, grant]) => grant.activeConnectionId === null)
+    .sort((first, second) => first[1].lastTouchedAt - second[1].lastTouchedAt)
+  for (const [playerId, grant] of inactive) {
+    if (now - grant.lastTouchedAt < WRITER_SESSION_RETENTION_MS) continue
+    if (writerSessionsByPlayer.get(playerId) === grant) writerSessionsByPlayer.delete(playerId)
+  }
+
+  const retainedInactive = inactive.filter(
+    ([playerId, grant]) => writerSessionsByPlayer.get(playerId) === grant,
+  )
+  const overflow = retainedInactive.length - MAX_INACTIVE_WRITER_SESSIONS
+  for (let index = 0; index < overflow; index += 1) {
+    const [playerId, grant] = retainedInactive[index]
+    if (writerSessionsByPlayer.get(playerId) === grant) writerSessionsByPlayer.delete(playerId)
+  }
+}
+
 function createPersistentWorldStateSnapshot() {
   const worldIds = new Set([
     ...parcelOwnershipByWorld.keys(),
@@ -968,7 +1284,31 @@ async function writePersistentWorldState(snapshot) {
   }
 }
 
-function sanitizePersistentParcelOwnership(value, worldId) {
+function sanitizePersistentParcelOwnership(value, worldId, strictEnvelope = false) {
+  if (strictEnvelope) {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      value.worldId !== worldId ||
+      typeof value.parcelId !== 'string' ||
+      sanitizeParcelId(value.parcelId) !== value.parcelId ||
+      !Number.isSafeInteger(value.claimedAt) ||
+      value.claimedAt < 0 ||
+      !value.owner ||
+      typeof value.owner !== 'object' ||
+      Array.isArray(value.owner) ||
+      typeof value.owner.id !== 'string' ||
+      !value.owner.id ||
+      sanitizeText(value.owner.id, '', 80) !== value.owner.id ||
+      typeof value.owner.name !== 'string' ||
+      !value.owner.name ||
+      sanitizeText(value.owner.name, 'Player', 32) !== value.owner.name ||
+      sanitizeColor(value.owner.color) !== value.owner.color
+    ) {
+      throw new Error(`Schema-2 world ${worldId} has an invalid parcel ownership`)
+    }
+  }
   if (
     !value ||
     typeof value !== 'object' ||
@@ -991,7 +1331,30 @@ function sanitizePersistentParcelOwnership(value, worldId) {
   }
 }
 
-function sanitizePersistentParcelBuild(value, worldId) {
+function sanitizePersistentParcelBuild(value, worldId, strictEnvelope = false) {
+  if (strictEnvelope) {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      value.worldId !== worldId ||
+      typeof value.parcelId !== 'string' ||
+      sanitizeParcelId(value.parcelId) !== value.parcelId ||
+      !Number.isSafeInteger(value.revision) ||
+      value.revision < 0 ||
+      !isSupportedParcelBuildSchemaVersion(value.schemaVersion) ||
+      typeof value.operationId !== 'string' ||
+      !value.operationId ||
+      sanitizeText(value.operationId, '', 120) !== value.operationId ||
+      !Number.isSafeInteger(value.updatedAt) ||
+      value.updatedAt < 0 ||
+      typeof value.updatedBy !== 'string' ||
+      !value.updatedBy ||
+      sanitizeText(value.updatedBy, '', 80) !== value.updatedBy
+    ) {
+      throw new Error(`Schema-2 world ${worldId} has an invalid parcel-build envelope`)
+    }
+  }
   if (
     !value ||
     typeof value !== 'object' ||
@@ -1000,23 +1363,65 @@ function sanitizePersistentParcelBuild(value, worldId) {
   ) {
     return null
   }
-  const nodes = sanitizeBuildNodes(value.nodes)
-  if (!nodes.ok) return null
   const parcelId = sanitizeParcelId(value.parcelId)
   const revision = normalizeParcelBuildRevision(value.revision)
+  const schemaVersion = isSupportedParcelBuildSchemaVersion(value.schemaVersion)
+    ? value.schemaVersion
+    : LEGACY_PARCEL_BUILD_SCHEMA_VERSION
+  const nodes = sanitizeBuildNodes(value.nodes, {
+    strict: schemaVersion === PARCEL_BUILD_SCHEMA_VERSION,
+  })
+  if (!nodes.ok) {
+    if (strictEnvelope || schemaVersion === PARCEL_BUILD_SCHEMA_VERSION) {
+      throw new Error(`Persisted parcel ${parcelId} has an invalid schema-2 build graph`)
+    }
+    return null
+  }
   return {
     nodes: nodes.nodes,
     operationId: sanitizeText(value.operationId, `restored-${parcelId}-${revision}`, 120),
     parcelId,
     revision,
-    schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
+    schemaVersion,
     updatedAt: Math.max(0, finiteNumber(value.updatedAt, 0)),
     updatedBy: sanitizeText(value.updatedBy, 'local-save', 80),
     worldId,
   }
 }
 
-function sanitizePersistentTvMediaState(value, worldId) {
+function sanitizePersistentTvMediaState(value, worldId, strictEnvelope = false) {
+  if (strictEnvelope) {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      value.worldId !== worldId ||
+      typeof value.parcelId !== 'string' ||
+      sanitizeParcelId(value.parcelId) !== value.parcelId ||
+      typeof value.tvId !== 'string' ||
+      sanitizeParcelKey(value.tvId, 'tv', 120) !== value.tvId ||
+      typeof value.muted !== 'boolean' ||
+      typeof value.playing !== 'boolean' ||
+      typeof value.url !== 'string' ||
+      sanitizeText(value.url, '', 2048) !== value.url ||
+      typeof value.playbackSeconds !== 'number' ||
+      !Number.isFinite(value.playbackSeconds) ||
+      value.playbackSeconds < 0 ||
+      !Number.isSafeInteger(value.playbackUpdatedAt) ||
+      value.playbackUpdatedAt < 0 ||
+      !Number.isSafeInteger(value.updatedAt) ||
+      value.updatedAt < 0 ||
+      typeof value.updatedBy !== 'string' ||
+      !value.updatedBy ||
+      sanitizeText(value.updatedBy, '', 80) !== value.updatedBy ||
+      typeof value.userVolume !== 'number' ||
+      !Number.isFinite(value.userVolume) ||
+      value.userVolume < 0 ||
+      value.userVolume > 1
+    ) {
+      throw new Error(`Schema-2 world ${worldId} has an invalid TV authority envelope`)
+    }
+  }
   if (
     !value ||
     typeof value !== 'object' ||
@@ -1045,6 +1450,42 @@ function sanitizePersistentTvMediaState(value, worldId) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function setParcelWorldSubscription(socket, roomId, worldId) {
+  clearParcelWorldSubscription(socket)
+  parcelWorldSubscriptionBySocket.set(socket, { roomId, worldId })
+  let subscribers = parcelWorldSubscribers.get(worldId)
+  if (!subscribers) {
+    subscribers = new Map()
+    parcelWorldSubscribers.set(worldId, subscribers)
+  }
+  subscribers.set(socket, roomId)
+}
+
+function updateParcelWorldSubscriptionRoom(socket, roomId) {
+  const subscription = parcelWorldSubscriptionBySocket.get(socket)
+  if (!subscription || subscription.roomId === roomId) return
+  subscription.roomId = roomId
+  parcelWorldSubscribers.get(subscription.worldId)?.set(socket, roomId)
+}
+
+function clearParcelWorldSubscription(socket) {
+  const subscription = parcelWorldSubscriptionBySocket.get(socket)
+  if (!subscription) return
+  parcelWorldSubscriptionBySocket.delete(socket)
+  const subscribers = parcelWorldSubscribers.get(subscription.worldId)
+  subscribers?.delete(socket)
+  if (subscribers?.size === 0) parcelWorldSubscribers.delete(subscription.worldId)
+}
+
+function broadcastParcelWorld(worldId, message, exceptSocket) {
+  const subscribers = parcelWorldSubscribers.get(worldId)
+  if (!subscribers) return
+  for (const [socket, roomId] of subscribers) {
+    if (socket === exceptSocket) continue
+    send(socket, { ...message, roomId })
+  }
 }
 
 function broadcast(roomId, message, exceptPeerId) {
@@ -1113,7 +1554,15 @@ function roomIsEmpty(room) {
 function parseClientMessage(data) {
   try {
     const raw = JSON.parse(data.toString())
-    if (raw?.type === 'join' && isPlayerSnapshot(raw.player)) return raw
+    if (
+      raw?.type === 'join' &&
+      isPlayerSnapshot(raw.player) &&
+      (raw.writerEpoch === undefined || isParcelWriterEpoch(raw.writerEpoch)) &&
+      typeof raw.writerSessionId === 'string' &&
+      raw.writerSessionId.length > 0
+    ) {
+      return raw
+    }
     if (raw?.type === 'state' && isPlayerSnapshot(raw.player)) return raw
     if (raw?.type === 'heartbeat') return raw
     if (raw?.type === 'leave') return raw
@@ -1135,6 +1584,9 @@ function parseClientMessage(data) {
       raw.operationId.length > 0 &&
       Number.isSafeInteger(raw.baseRevision) &&
       raw.baseRevision >= 0 &&
+      isParcelWriterEpoch(raw.writerEpoch) &&
+      typeof raw.writerSessionId === 'string' &&
+      raw.writerSessionId.length > 0 &&
       Array.isArray(raw.nodes)
     ) {
       return raw
@@ -1210,7 +1662,7 @@ function sanitizeParcelKey(value, fallback, maxLength) {
   return (normalized || fallback).slice(0, maxLength).replace(/[^a-zA-Z0-9._:-]/g, '-')
 }
 
-function sanitizeBuildNodes(value) {
+function sanitizeBuildNodes(value, { strict = false } = {}) {
   if (!Array.isArray(value)) {
     return { code: 'bad-build-nodes', message: 'Build nodes must be an array', ok: false }
   }
@@ -1221,9 +1673,17 @@ function sanitizeBuildNodes(value) {
       ok: false,
     }
   }
+  if (buildNodesExceedDepthLimit(value)) {
+    return { code: 'bad-build-nodes', message: 'Build node nesting limit exceeded', ok: false }
+  }
 
-  const encoded = JSON.stringify(value)
-  if (encoded.length > MAX_BUILD_SNAPSHOT_BYTES) {
+  let encoded
+  try {
+    encoded = JSON.stringify(value)
+  } catch {
+    return { code: 'bad-build-nodes', message: 'Build nodes must be serializable', ok: false }
+  }
+  if (Buffer.byteLength(encoded, 'utf8') > MAX_BUILD_SNAPSHOT_BYTES) {
     return {
       code: 'build-snapshot-too-large',
       message: 'Parcel build snapshot is too large',
@@ -1232,20 +1692,108 @@ function sanitizeBuildNodes(value) {
   }
 
   const nodes = []
+  const nodeIds = new Set()
   for (const candidate of value) {
     const node = sanitizeBuildNode(candidate)
-    if (!node) continue
+    if (!node) {
+      if (strict) return invalidBuildNodeGraph('Build snapshots cannot contain invalid nodes')
+      continue
+    }
+    if (strict && !isCanonicalBuildNode(candidate, node)) {
+      return invalidBuildNodeGraph(`Build node ${node.id} is not canonical`)
+    }
+    if (nodeIds.has(node.id)) {
+      if (strict) return invalidBuildNodeGraph(`Build node ID ${node.id} is duplicated`)
+      continue
+    }
+    nodeIds.add(node.id)
     nodes.push(node)
+  }
+  if (strict) {
+    const graphError = validateBuildNodeRelations(nodes)
+    if (graphError) return invalidBuildNodeGraph(graphError)
   }
   const normalizedNodes = sanitizeBuildNodeRelations(nodes)
   normalizedNodes.sort((first, second) => first.id.localeCompare(second.id))
   return { nodes: normalizedNodes, ok: true }
 }
 
+function buildNodesExceedDepthLimit(nodes) {
+  const pending = nodes.map((node) => ({ depth: 1, value: node }))
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (!current?.value || typeof current.value !== 'object') continue
+    if (current.depth > MAX_BUILD_NODE_VALUE_DEPTH) return true
+    for (const value of Object.values(current.value)) {
+      if (value && typeof value === 'object') {
+        pending.push({ depth: current.depth + 1, value })
+      }
+    }
+  }
+  return false
+}
+
+function isCanonicalBuildNode(value, node) {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      value.id === node.id &&
+      value.type === node.type &&
+      value.object === 'node' &&
+      typeof value.visible === 'boolean' &&
+      (value.parentId === null || typeof value.parentId === 'string') &&
+      (value.children === undefined || Array.isArray(value.children)),
+  )
+}
+
+function validateBuildNodeRelations(nodes) {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  for (const node of nodes) {
+    const childIds = new Set()
+    for (const childId of node.children ?? []) {
+      if (typeof childId !== 'string' || childIds.has(childId)) {
+        return `Build node ${node.id} has invalid or duplicate children`
+      }
+      childIds.add(childId)
+      const child = nodesById.get(childId)
+      if (!child || child.parentId !== node.id) {
+        return `Build node ${node.id} has a child with a mismatched parent`
+      }
+    }
+    if (typeof node.parentId === 'string') {
+      const parent = nodesById.get(node.parentId)
+      if (!parent) return `Build node ${node.id} references a missing parent`
+      if (!(parent.children ?? []).includes(node.id)) {
+        return `Build node ${node.id} is missing from its parent children`
+      }
+    }
+  }
+
+  for (const node of nodes) {
+    const ancestors = new Set([node.id])
+    let parentId = node.parentId
+    while (typeof parentId === 'string') {
+      if (ancestors.has(parentId)) return `Build node ${node.id} has a cyclic parent chain`
+      ancestors.add(parentId)
+      parentId = nodesById.get(parentId)?.parentId ?? null
+    }
+  }
+  return null
+}
+
+function invalidBuildNodeGraph(message) {
+  return { code: 'invalid-build-node-graph', message, ok: false }
+}
+
 function sanitizeBuildNode(value) {
-  if (!value || typeof value !== 'object') return null
-  const type = typeof value.type === 'string' ? value.type : ''
-  if (!LANDRUSH_BUILD_NODE_TYPES.has(type)) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const type =
+    typeof value.type === 'string' &&
+    value.type.length <= MAX_BUILD_NODE_TYPE_LENGTH &&
+    /^[a-zA-Z0-9._:-]+$/.test(value.type)
+      ? value.type
+      : ''
+  if (!type) return null
   const id = sanitizeBuildNodeId(value.id)
   if (!id) return null
 

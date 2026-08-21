@@ -42,6 +42,7 @@ import {
   expandToComponent,
   levelFrame,
   participantExtents,
+  rotateGroupPatches,
   rotateGroupSnapshots,
   translateGroupPatches,
   type Vec2,
@@ -74,6 +75,46 @@ function groupParticipantIds(): string[] {
 /** True when the current selection is a group the pick-up move can carry. */
 export function canGroupPickUp(): boolean {
   return groupParticipantIds().length > 0
+}
+
+export function rotateCurrentGroupSelection(direction: 1 | -1): boolean {
+  const { selectedIds, levelId } = useViewer.getState().selection
+  if (selectedIds.length <= 1) return false
+  const nodes = useScene.getState().nodes
+  const participantIds = selectedIds.filter(
+    (id) => classifyParticipant(nodes[id as AnyNodeId], levelId, nodes) !== null,
+  )
+  if (participantIds.length === 0) return false
+  const fullIds = expandToComponent(participantIds, nodes, levelId)
+  const { starts, links } = collectParticipants(fullIds, nodes, levelId)
+  if (starts.length === 0) return false
+
+  // Placements are level-local, while the shared gizmo pivot comes from the
+  // world-space selection box. Convert the pivot so rotated buildings orbit
+  // around the same visible center as the OG drag handle.
+  const box = computeGroupBox(fullIds)
+  if (!box) return false
+  const worldCenter = new Vector3(
+    (box.min.x + box.max.x) / 2,
+    box.min.y,
+    (box.min.z + box.max.z) / 2,
+  )
+  const localCenter = worldCenter.applyMatrix4(levelFrame(levelId).inverse)
+  // `rotateGroupPatches` uses atan2 x→z, whose sign is opposite Three.js yaw.
+  const delta = -direction * (Math.PI / 4)
+  const patches = rotateGroupPatches(starts, links, { x: localCenter.x, z: localCenter.z }, delta)
+
+  // A rigid transform of existing walls must not regenerate room surfaces.
+  pauseSpaceDetection()
+  try {
+    useScene
+      .getState()
+      .updateNodes(patches.map(([id, data]) => ({ id, data: data as Partial<AnyNode> })))
+  } finally {
+    resumeSpaceDetection()
+  }
+  sfxEmitter.emit('sfx:item-rotate')
+  return true
 }
 
 /**

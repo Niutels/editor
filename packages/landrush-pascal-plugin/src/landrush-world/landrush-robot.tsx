@@ -20,17 +20,19 @@ import {
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
-import type { LandrushWorldNode } from './schema'
 import {
   type LandrushRobotJumpPose,
   type LandrushRobotJumpPoseRef,
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
+import type { LandrushWorldNode } from './schema'
 
 export {
+  type LandrushRobotJumpContact,
   type LandrushRobotJumpPhase,
   type LandrushRobotJumpPose,
   type LandrushRobotJumpPoseRef,
+  resolveLandrushRobotJumpContact,
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
 

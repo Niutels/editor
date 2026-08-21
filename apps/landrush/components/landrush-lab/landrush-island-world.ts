@@ -35,7 +35,7 @@ import {
 } from './water-lab-parameters'
 import { WATER_PLANE_SIZE } from './water-material'
 
-const LANDRUSH_ISLAND_SITE_ID = 'site_landrush-island-debug'
+export const LANDRUSH_ISLAND_SITE_ID = 'site_landrush-island-debug'
 export const LANDRUSH_ISLAND_BUILDING_ID = 'building_landrush-island-debug'
 export const LANDRUSH_ISLAND_LEVEL_ID = 'level_landrush-island-debug'
 export const LANDRUSH_ISLAND_NODE_ID = 'pascal-water_debug-water'
