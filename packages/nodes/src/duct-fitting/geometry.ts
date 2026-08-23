@@ -1,5 +1,5 @@
 import type { GeometryContext } from '@pascal-app/core'
-import type { ColorPreset, RenderShading } from '@pascal-app/viewer'
+import { cloneMaterial, type ColorPreset, type RenderShading } from '@pascal-app/viewer'
 import {
   BufferGeometry,
   CylinderGeometry,
@@ -137,7 +137,7 @@ function buildMiteredElbow(
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.computeVertexNormals()
-  const solidMaterial = material.clone()
+  const solidMaterial = cloneMaterial(material)
   solidMaterial.side = DoubleSide
   const mesh = new Mesh(geometry, solidMaterial)
   mesh.name = `fitting-elbow-${profileShape}`
@@ -188,7 +188,7 @@ function buildRectToRoundLoft(
   const geometry = new BufferGeometry()
   geometry.setAttribute('position', new Float32BufferAttribute(positions, 3))
   geometry.computeVertexNormals()
-  const solidMaterial = material.clone()
+  const solidMaterial = cloneMaterial(material)
   solidMaterial.side = DoubleSide
   const mesh = new Mesh(geometry, solidMaterial)
   mesh.name = 'fitting-transition-loft'

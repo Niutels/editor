@@ -4,16 +4,9 @@ import { type RootState, useFrame, useThree } from '@react-three/fiber'
 import { type MutableRefObject, useLayoutEffect, useMemo, useRef } from 'react'
 import { type Camera, MathUtils, Matrix4, OrthographicCamera, Quaternion, Vector3 } from 'three'
 import type { LandrushIslandCameraPose } from './landrush-island-camera-pose'
+import { ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE } from './zombie-escape-config'
 
-const CAMERA_AZIMUTH_RADIANS = MathUtils.degToRad(34)
-const CAMERA_ELEVATION_RADIANS = MathUtils.degToRad(68)
-const CAMERA_DISTANCE = 18
-const CAMERA_HALF_HEIGHT = 6.4
-const CAMERA_TARGET_HEIGHT = 0.72
-const CAMERA_FOLLOW_RESPONSE = 12
-const CAMERA_NEAR = 0.05
-const CAMERA_FAR = 90
-const CAMERA_ZOOM = 1
+const CAMERA = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
 
 export const LANDRUSH_ZOMBIE_ESCAPE_CAMERA_FRAME_PRIORITY = 0.5
 export const LANDRUSH_ZOMBIE_ESCAPE_CAMERA_TRANSITION_SECONDS = 1.4
@@ -21,9 +14,11 @@ export const LANDRUSH_ZOMBIE_ESCAPE_CAMERA_TRANSITION_SECONDS = 1.4
 export type LandrushZombieEscapeCameraLayout = {
   bottom: number
   far: number
+  halfHeight: number
   left: number
   near: number
   offset: readonly [number, number, number]
+  projectionCenterY: number
   right: number
   targetOffset: readonly [number, number, number]
   top: number
@@ -40,6 +35,7 @@ export type LandrushZombieEscapeCameraTransitionSample = {
   far: number
   halfHeight: number
   progress: number
+  projectionCenterY: number
 }
 
 export function resolveLandrushZombieEscapeCameraLayout(
@@ -49,22 +45,27 @@ export function resolveLandrushZombieEscapeCameraLayout(
   const width = Number.isFinite(viewportWidth) ? Math.max(0, viewportWidth) : 0
   const height = Number.isFinite(viewportHeight) ? Math.max(1, viewportHeight) : 1
   const aspect = Math.max(0.1, width / height)
-  const horizontalDistance = Math.cos(CAMERA_ELEVATION_RADIANS) * CAMERA_DISTANCE
+  const horizontalDistance = Math.cos(CAMERA.elevationRadians) * CAMERA.distanceMeters
+  const horizontalHalfSpan = CAMERA.halfHeightMeters * Math.min(aspect, CAMERA.maximumAspectRatio)
+  const halfHeight = horizontalHalfSpan / aspect
+  const projectionCenterY = 0
 
   return {
-    bottom: -CAMERA_HALF_HEIGHT,
-    far: CAMERA_FAR,
-    left: -CAMERA_HALF_HEIGHT * aspect,
-    near: CAMERA_NEAR,
+    bottom: -halfHeight,
+    far: CAMERA.farMeters,
+    halfHeight,
+    left: -horizontalHalfSpan,
+    near: CAMERA.nearMeters,
     offset: [
-      Math.sin(CAMERA_AZIMUTH_RADIANS) * horizontalDistance,
-      Math.sin(CAMERA_ELEVATION_RADIANS) * CAMERA_DISTANCE,
-      Math.cos(CAMERA_AZIMUTH_RADIANS) * horizontalDistance,
+      Math.sin(CAMERA.azimuthRadians) * horizontalDistance,
+      Math.sin(CAMERA.elevationRadians) * CAMERA.distanceMeters,
+      Math.cos(CAMERA.azimuthRadians) * horizontalDistance,
     ],
-    right: CAMERA_HALF_HEIGHT * aspect,
-    targetOffset: [0, CAMERA_TARGET_HEIGHT, 0],
-    top: CAMERA_HALF_HEIGHT,
-    zoom: CAMERA_ZOOM,
+    projectionCenterY,
+    right: horizontalHalfSpan,
+    targetOffset: [0, CAMERA.targetHeightMeters, 0],
+    top: halfHeight,
+    zoom: CAMERA.zoom,
   }
 }
 
@@ -73,7 +74,7 @@ export function resolveLandrushZombieEscapeCameraProjectionHalfHeight(
   focusDistance: number,
 ) {
   const distance = MathUtils.clamp(
-    Number.isFinite(focusDistance) ? focusDistance : CAMERA_HALF_HEIGHT,
+    Number.isFinite(focusDistance) ? focusDistance : CAMERA.halfHeightMeters,
     0.1,
     200,
   )
@@ -99,21 +100,25 @@ export function resolveLandrushZombieEscapeCameraProjectionHalfHeight(
     return MathUtils.clamp(height / (2 * Math.max(orthographic.zoom ?? 1, 0.001)), 0.1, 200)
   }
 
-  return CAMERA_HALF_HEIGHT
+  return CAMERA.halfHeightMeters
 }
 
 export function sampleLandrushZombieEscapeCameraTransition(
   progress: number,
   sourceHalfHeight: number,
-  sourceFar = CAMERA_FAR,
+  sourceFar: number = CAMERA.farMeters,
+  sourceProjectionCenterY = 0,
+  targetProjectionCenterY = 0,
+  targetHalfHeight: number = CAMERA.halfHeightMeters,
 ): LandrushZombieEscapeCameraTransitionSample {
   const t = MathUtils.clamp(progress, 0, 1)
   const amount = t * t * (3 - 2 * t)
   return {
     amount,
-    far: MathUtils.lerp(sourceFar, CAMERA_FAR, amount),
-    halfHeight: MathUtils.lerp(sourceHalfHeight, CAMERA_HALF_HEIGHT, amount),
+    far: MathUtils.lerp(sourceFar, CAMERA.farMeters, amount),
+    halfHeight: MathUtils.lerp(sourceHalfHeight, targetHalfHeight, amount),
     progress: t,
+    projectionCenterY: MathUtils.lerp(sourceProjectionCenterY, targetProjectionCenterY, amount),
   }
 }
 
@@ -128,13 +133,25 @@ function applyLandrushZombieEscapeCameraProjection(
   camera: OrthographicCamera,
   halfHeight: number,
   aspect: number,
+  projectionCenterY: number,
 ) {
   const safeAspect = Number.isFinite(aspect) ? Math.max(0.1, aspect) : 1
   camera.left = -halfHeight * safeAspect
   camera.right = halfHeight * safeAspect
-  camera.top = halfHeight
-  camera.bottom = -halfHeight
+  camera.top = projectionCenterY + halfHeight
+  camera.bottom = projectionCenterY - halfHeight
   camera.updateProjectionMatrix()
+}
+
+function resolveLandrushZombieEscapeCameraProjectionCenterY(camera: Camera) {
+  const orthographic = camera as Camera & {
+    bottom?: number
+    isOrthographicCamera?: boolean
+    top?: number
+  }
+  if (!orthographic.isOrthographicCamera) return 0
+
+  return ((orthographic.top ?? 1) + (orthographic.bottom ?? -1)) / 2
 }
 
 type LandrushZombieEscapeCameraTransition = {
@@ -142,6 +159,7 @@ type LandrushZombieEscapeCameraTransition = {
   sourceFar: number
   sourceHalfHeight: number
   sourcePosition: Vector3
+  sourceProjectionCenterY: number
   sourceQuaternion: Quaternion
   sourceTarget: Vector3
 }
@@ -169,7 +187,8 @@ export function LandrushZombieEscapeCamera({
   }, [])
   const previousCameraRef = useRef<RootState['camera'] | null>(null)
   const transitionRef = useRef<LandrushZombieEscapeCameraTransition | null>(null)
-  const currentHalfHeightRef = useRef(CAMERA_HALF_HEIGHT)
+  const currentHalfHeightRef = useRef<number>(CAMERA.halfHeightMeters)
+  const currentProjectionCenterYRef = useRef(0)
   const onSettledRef = useRef(onSettled)
   const sourcePoseRef = useRef(sourcePose)
   const followedTarget = useMemo(() => new Vector3(), [])
@@ -193,13 +212,18 @@ export function LandrushZombieEscapeCamera({
 
   useLayoutEffect(() => {
     camera.near = layout.near
-    if (!transitionRef.current) camera.far = layout.far
+    if (!transitionRef.current) {
+      camera.far = layout.far
+      currentHalfHeightRef.current = layout.halfHeight
+      currentProjectionCenterYRef.current = layout.projectionCenterY
+    }
     camera.zoom = layout.zoom
     cameraOffset.fromArray(layout.offset)
     applyLandrushZombieEscapeCameraProjection(
       camera,
       currentHalfHeightRef.current,
-      layout.right / CAMERA_HALF_HEIGHT,
+      layout.right / layout.halfHeight,
+      currentProjectionCenterYRef.current,
     )
   }, [camera, cameraOffset, layout])
 
@@ -223,29 +247,33 @@ export function LandrushZombieEscapeCamera({
             .add(
               previousCamera
                 .getWorldDirection(new Vector3())
-                .multiplyScalar(Math.max(0.1, entryPose?.distance ?? CAMERA_DISTANCE)),
+                .multiplyScalar(Math.max(0.1, entryPose?.distance ?? CAMERA.distanceMeters)),
             )
     const focusDistance = Math.max(0.1, sourcePosition.distanceTo(sourceTarget))
     const previousFar = (previousCamera as Camera & { far?: number }).far
     const sourceFar = Math.max(
       layoutRef.current.far,
       Number.isFinite(previousFar) ? (previousFar ?? 0) : 0,
-      focusDistance + CAMERA_DISTANCE,
+      focusDistance + CAMERA.distanceMeters,
     )
     const sourceHalfHeight = resolveLandrushZombieEscapeCameraProjectionHalfHeight(
       previousCamera,
       focusDistance,
     )
+    const sourceProjectionCenterY =
+      resolveLandrushZombieEscapeCameraProjectionCenterY(previousCamera)
 
     transitionRef.current = {
       elapsedSeconds: 0,
       sourceFar,
       sourceHalfHeight,
       sourcePosition: sourcePosition.clone(),
+      sourceProjectionCenterY,
       sourceQuaternion: sourceQuaternion.clone(),
       sourceTarget: sourceTarget.clone(),
     }
     currentHalfHeightRef.current = sourceHalfHeight
+    currentProjectionCenterYRef.current = sourceProjectionCenterY
     followedTarget.copy(sourceTarget)
     publishedTarget.copy(sourceTarget)
     camera.position.copy(sourcePosition)
@@ -255,7 +283,8 @@ export function LandrushZombieEscapeCamera({
     applyLandrushZombieEscapeCameraProjection(
       camera,
       sourceHalfHeight,
-      layoutRef.current.right / CAMERA_HALF_HEIGHT,
+      layoutRef.current.right / layoutRef.current.halfHeight,
+      sourceProjectionCenterY,
     )
     camera.updateMatrixWorld(true)
     camera.userData.landrushCameraTarget = publishedTarget
@@ -280,8 +309,8 @@ export function LandrushZombieEscapeCamera({
     const motion = motionRef.current
     if (motion) {
       desiredTarget.copy(motion.position)
-      desiredTarget.y = (motion.cameraTargetY ?? motion.position.y) + CAMERA_TARGET_HEIGHT
-    } else desiredTarget.set(0, CAMERA_TARGET_HEIGHT, 0)
+      desiredTarget.y = (motion.cameraTargetY ?? motion.position.y) + CAMERA.targetHeightMeters
+    } else desiredTarget.set(0, CAMERA.targetHeightMeters, 0)
 
     const transition = transitionRef.current
     if (transition) {
@@ -293,6 +322,9 @@ export function LandrushZombieEscapeCamera({
         transition.elapsedSeconds / LANDRUSH_ZOMBIE_ESCAPE_CAMERA_TRANSITION_SECONDS,
         transition.sourceHalfHeight,
         transition.sourceFar,
+        transition.sourceProjectionCenterY,
+        layoutRef.current.projectionCenterY,
+        layoutRef.current.halfHeight,
       )
       transitionPosition.copy(desiredTarget).add(cameraOffset)
       camera.position.lerpVectors(transition.sourcePosition, transitionPosition, sample.amount)
@@ -305,11 +337,13 @@ export function LandrushZombieEscapeCamera({
         sample.amount,
       )
       currentHalfHeightRef.current = sample.halfHeight
+      currentProjectionCenterYRef.current = sample.projectionCenterY
       camera.far = sample.far
       applyLandrushZombieEscapeCameraProjection(
         camera,
         sample.halfHeight,
-        layoutRef.current.right / CAMERA_HALF_HEIGHT,
+        layoutRef.current.right / layoutRef.current.halfHeight,
+        sample.projectionCenterY,
       )
       publishedTarget.copy(transitionTarget)
       camera.updateMatrixWorld()
@@ -325,7 +359,7 @@ export function LandrushZombieEscapeCamera({
 
     followedTarget.lerp(
       desiredTarget,
-      1 - Math.exp(-CAMERA_FOLLOW_RESPONSE * Math.min(0.05, Math.max(0, delta))),
+      1 - Math.exp(-CAMERA.followResponse * Math.min(0.05, Math.max(0, delta))),
     )
     camera.position.copy(followedTarget).add(cameraOffset)
     camera.lookAt(followedTarget)

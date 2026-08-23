@@ -26,8 +26,17 @@ describe('Pascal multiplayer-island composition', () => {
     expect(clientSource).toContain(
       'const [viewerSceneReady, setViewerSceneReady] = useState(false)',
     )
-    expect(clientSource).toMatch(/const loadingAssetsReady =\s+viewerSceneReady &&/)
+    expect(clientSource).toMatch(
+      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+worldFrameReady &&\s+ambientLoadReadiness\?\.ready === true &&/,
+    )
     expect(clientSource).toContain('onSceneReadyChange={setViewerSceneReady}')
+    expect(clientSource).toContain(
+      'sceneReadyPrerequisitesReady={initialParcelMaterializationReady}',
+    )
+    expect(clientSource).toContain('sceneReadyKey={initialParcelAuthorityKey}')
+    expect(clientSource).toContain(
+      'sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}',
+    )
     const runtimeOverlayStart = clientSource.indexOf('function LandrushIslandLoadingOverlay')
     const runtimeOverlayEnd = clientSource.indexOf(
       'function LandrushIslandTunePanel',
@@ -42,5 +51,9 @@ describe('Pascal multiplayer-island composition', () => {
     expect(hostSource).toContain('{children}')
     expect(hostSource).toContain('onSceneReadyChange: (ready: boolean) => void')
     expect(hostSource).toContain('onSceneReadyChange={onSceneReadyChange}')
+    expect(hostSource).toContain('sceneReadyKey={viewerSceneReadyKey}')
+    expect(hostSource).toContain('JSON.stringify([sceneReadyKey, sceneLoadRevision])')
+    expect(hostSource).toContain('sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}')
+    expect(hostSource).toContain('sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}')
   })
 })

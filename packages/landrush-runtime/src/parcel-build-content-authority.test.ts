@@ -5,11 +5,12 @@ import {
   createOfflineParcelBuildAuthorityUpdates,
   isParcelBuildContentUpdateAuthorityCurrent,
   ParcelBuildContentAuthorityEpoch,
+  resolveLocalParcelBuildContentAuthority,
   shouldRefreshParcelBuildAuthorityAfterClaim,
 } from './parcel-build-content-authority'
 
 const ONLINE_SCOPE = {
-  enabled: true,
+  contentAuthority: 'online',
   localProfileId: 'player-a',
   roomId: 'room-a',
 } as const
@@ -42,16 +43,20 @@ describe('ParcelBuildContentAuthorityEpoch', () => {
     expect(authority.watchWorld('world-a')).toEqual({ changed: true, epoch: 3 })
   })
 
-  test('changes across disable and re-enable in the same world', () => {
+  test('changes across online, offline, and online-pending authority in the same world', () => {
     const authority = new ParcelBuildContentAuthorityEpoch(ONLINE_SCOPE)
     authority.watchWorld('world-a')
 
-    expect(authority.updateScope({ ...ONLINE_SCOPE, enabled: false })).toEqual({
+    expect(authority.updateScope({ ...ONLINE_SCOPE, contentAuthority: 'offline' })).toEqual({
       changed: true,
       epoch: 2,
     })
     expect(authority.watchWorld('world-a')).toEqual({ changed: false, epoch: 2 })
-    expect(authority.updateScope(ONLINE_SCOPE)).toEqual({ changed: true, epoch: 3 })
+    expect(authority.updateScope({ ...ONLINE_SCOPE, contentAuthority: 'online-pending' })).toEqual({
+      changed: true,
+      epoch: 3,
+    })
+    expect(authority.updateScope(ONLINE_SCOPE)).toEqual({ changed: true, epoch: 4 })
   })
 
   test('changes for distinct room and local session authority', () => {
@@ -86,7 +91,7 @@ describe('ParcelBuildContentAuthorityEpoch', () => {
   test('hydrates online to offline from offline authority, never old online content', () => {
     const authority = new ParcelBuildContentAuthorityEpoch(ONLINE_SCOPE)
     authority.watchWorld('world-a')
-    const transition = authority.updateScope({ ...ONLINE_SCOPE, enabled: false })
+    const transition = authority.updateScope({ ...ONLINE_SCOPE, contentAuthority: 'offline' })
     const updates = createOfflineParcelBuildAuthorityUpdates({
       builds: [OFFLINE_BUILD],
       ownerships: [OFFLINE_OWNERSHIP],
@@ -122,7 +127,10 @@ describe('ParcelBuildContentAuthorityEpoch', () => {
   })
 
   test('moves offline to online into a new authority epoch', () => {
-    const authority = new ParcelBuildContentAuthorityEpoch({ ...ONLINE_SCOPE, enabled: false })
+    const authority = new ParcelBuildContentAuthorityEpoch({
+      ...ONLINE_SCOPE,
+      contentAuthority: 'offline',
+    })
     authority.watchWorld('world-a')
 
     expect(authority.updateScope(ONLINE_SCOPE)).toEqual({ changed: true, epoch: 2 })
@@ -134,7 +142,10 @@ describe('ParcelBuildContentAuthorityEpoch', () => {
   })
 
   test('drops delayed offline hydration after online authority takes over', () => {
-    const authority = new ParcelBuildContentAuthorityEpoch({ ...ONLINE_SCOPE, enabled: false })
+    const authority = new ParcelBuildContentAuthorityEpoch({
+      ...ONLINE_SCOPE,
+      contentAuthority: 'offline',
+    })
     authority.watchWorld('world-a')
     const offlineEpoch = authority.current
 
@@ -144,5 +155,19 @@ describe('ParcelBuildContentAuthorityEpoch', () => {
     expect(isParcelBuildContentUpdateAuthorityCurrent(authority.current, authority.current)).toBe(
       true,
     )
+  })
+
+  test('leaves online-pending and online local authority unresolved while offline is explicit', () => {
+    const resolve = (contentAuthority: 'offline' | 'online' | 'online-pending') =>
+      resolveLocalParcelBuildContentAuthority({
+        builds: [],
+        contentAuthority,
+        ownerships: [],
+        worldId: 'world-a',
+      })
+
+    expect(resolve('online-pending')).toEqual({ snapshotWorldId: null, updates: [] })
+    expect(resolve('online')).toEqual({ snapshotWorldId: null, updates: [] })
+    expect(resolve('offline')).toEqual({ snapshotWorldId: 'world-a', updates: [] })
   })
 })

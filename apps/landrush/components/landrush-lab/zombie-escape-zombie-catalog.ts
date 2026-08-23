@@ -1,3 +1,8 @@
+import {
+  LANDRUSH_ISLAND_AMBIENT_NPCS,
+  type LandrushIslandAmbientNpc,
+} from './landrush-island-ambient-catalog'
+
 export type ZombieEscapeZombieLocomotionGlb = {
   expectedClipCount: 1
   expectedClipName: 'Armature|running|baselayer' | 'Armature|walking_man|baselayer'
@@ -43,6 +48,7 @@ export type ZombieEscapeZombieCatalogEntry = {
   }
   seed: number
   silhouette: string
+  sourceNpcId: LandrushIslandAmbientNpc['id']
   triangleBudget: {
     maximum: 3600
     minimum: 2400
@@ -60,7 +66,9 @@ type ZombieDefinition = Omit<ZombieEscapeZombieCatalogEntry, 'glb' | 'meshy' | '
 }
 
 function defineZombie<const T extends ZombieDefinition>(zombie: T) {
-  const directory = `/landrush-lab/zombie-escape/assets/zombies/${zombie.id}`
+  const sourceNpc = LANDRUSH_ISLAND_AMBIENT_NPCS.find((npc) => npc.id === zombie.sourceNpcId)
+  if (!sourceNpc) throw new Error(`Missing island ambient NPC asset: ${zombie.sourceNpcId}`)
+  const directory = sourceNpc.glb.rigged.slice(0, -'/rigged.glb'.length)
   return {
     capsule: zombie.capsule,
     characterHeightMeters: zombie.characterHeightMeters,
@@ -74,7 +82,7 @@ function defineZombie<const T extends ZombieDefinition>(zombie: T) {
         expectedClipCount: 1,
         expectedClipName: 'Armature|running|baselayer',
         loop: true,
-        path: `${directory}/run.glb`,
+        path: sourceNpc.glb.run,
         rootMotion: 'in-place',
         skeleton: 'rigged-base',
       },
@@ -82,7 +90,7 @@ function defineZombie<const T extends ZombieDefinition>(zombie: T) {
         expectedClipCount: 1,
         expectedClipName: 'Armature|walking_man|baselayer',
         loop: true,
-        path: `${directory}/walk.glb`,
+        path: sourceNpc.glb.walk,
         rootMotion: 'in-place',
         skeleton: 'rigged-base',
       },
@@ -105,6 +113,7 @@ function defineZombie<const T extends ZombieDefinition>(zombie: T) {
     movement: zombie.movement,
     seed: zombie.seed,
     silhouette: zombie.silhouette,
+    sourceNpcId: zombie.sourceNpcId,
     triangleBudget: {
       maximum: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_TRIANGLE_COUNT,
       minimum: ZOMBIE_ESCAPE_ZOMBIE_MINIMUM_TRIANGLE_COUNT,
@@ -124,6 +133,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead dockworker in neutral A-pose, standard biped with clearly separated arms and legs, believable seven-head-tall adult proportions, broad shoulders, work vest fused close to body, boots, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no props, no base, no gore, no detached clothing, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0001,
     silhouette: 'broad shoulders, work vest, heavy boots',
+    sourceNpcId: 'dock-worker',
     texturePrompt:
       'Stylized hand-painted PBR: muted sea-green skin, orange work vest, navy trousers, brown boots, tired friendly-undead face, clean color blocks, no blood, no gore, no baked lighting.',
   }),
@@ -137,6 +147,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead adult human lifeguard in neutral A-pose, ordinary human head with short hair and round ears, realistic anatomy exactly seven-and-a-half heads tall, normal hands, long athletic legs, clearly separated limbs, fitted shirt, shorts and intact sneakers, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no horns, antlers, animal or fantasy traits, props, base, or gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0002,
     silhouette: 'athletic torso, shorts, exposed lower legs',
+    sourceNpcId: 'lifeguard',
     texturePrompt:
       'Stylized hand-painted PBR: sun-faded red shirt, cream shorts, teal-gray skin, white shoes, slightly sunburned cartoon face, no logos, no blood, no baked lighting.',
   }),
@@ -150,6 +161,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead adult island gardener in neutral A-pose, realistic human anatomy exactly seven-and-a-half heads tall, normal-size head and hands, arms ending at mid-thigh, legs half the body height, clearly separated limbs, fitted overalls, face and torso toward +Z, feet flat, one watertight game-ready mesh, no goggles, hat, tools, props, base, or gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0003,
     silhouette: 'older posture, fitted overalls, work gloves',
+    sourceNpcId: 'island-groundskeeper',
     texturePrompt:
       'Stylized hand-painted PBR: moss-green overalls, pale yellow shirt, lavender-gray skin, brown work shoes, soil smudges without gore, no baked lighting, crisp readable features.',
   }),
@@ -163,6 +175,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead island tourist in neutral A-pose, standard biped with clearly separated arms and legs, believable seven-head-tall average adult proportions, short-sleeve tropical shirt and shorts fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no camera, no bag, no hat, no base, no gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0004,
     silhouette: 'average torso, tropical shirt, shorts',
+    sourceNpcId: 'backpacker-tourist',
     texturePrompt:
       'Stylized hand-painted PBR: turquoise tropical shirt with simple coral leaf pattern, tan shorts, pale green-gray skin, canvas shoes, no text, no blood, no baked lighting.',
   }),
@@ -176,6 +189,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead marina mechanic in neutral A-pose, standard biped with clearly separated limbs, believable seven-and-a-half-head-tall sturdy adult proportions, zipped coveralls close to body, heavy boots, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no wrench, no cap, no base, no gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0005,
     silhouette: 'sturdy torso, zipped coveralls, heavy boots',
+    sourceNpcId: 'building-technician',
     texturePrompt:
       'Stylized hand-painted PBR: dark blue coveralls, mustard undershirt, cool gray-green skin, black boots, harmless grease smudges, no blood, no text, no baked lighting.',
   }),
@@ -189,6 +203,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead beach courier in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall lean adult proportions, fitted windbreaker and cargo trousers, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no backpack, no parcel, no helmet, no base, no gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0006,
     silhouette: 'lean limbs, fitted windbreaker, cargo trousers',
+    sourceNpcId: 'marine-biologist',
     texturePrompt:
       'Stylized hand-painted PBR: bright yellow windbreaker, violet cargo trousers, desaturated mint skin, dark trainers, subtle fabric wear, no blood, no logos, no baked lighting.',
   }),
@@ -202,6 +217,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead boardwalk chef in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall stocky adult proportions, double-breasted jacket and apron fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no utensil, no base, no gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0007,
     silhouette: 'stocky torso, double-breasted jacket, apron',
+    sourceNpcId: 'market-food-vendor',
     texturePrompt:
       'Stylized hand-painted PBR: cream chef jacket, tomato-red apron, soft blue-gray skin, dark checked trousers simplified for readability, no stains resembling blood, no text, no baked lighting.',
   }),
@@ -215,6 +231,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead island ranger in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall fit adult proportions, short-sleeve uniform and utility trousers fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no radio, no weapon, no base, no gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0008,
     silhouette: 'fit frame, short sleeves, utility trousers',
+    sourceNpcId: 'local-fisher',
     texturePrompt:
       'Stylized hand-painted PBR: forest green uniform, sandy utility trousers, muted purple-gray skin, brown trail boots, no badge text, no blood, no baked lighting.',
   }),
@@ -228,6 +245,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead adult resort clerk in neutral A-pose, realistic human anatomy exactly seven-and-a-half heads tall, normal-size head and hands, long legs half the body height, clearly separated limbs, neat fitted vest and rolled-sleeve shirt, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no bald oversized head, tray, tag, props, base, or gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_0009,
     silhouette: 'slim torso, neat vest, rolled sleeves',
+    sourceNpcId: 'resort-concierge',
     texturePrompt:
       'Stylized hand-painted PBR: plum vest, pale aqua shirt, charcoal trousers, soft sage skin, polished dark shoes, no lettering, no blood, no baked lighting.',
   }),
@@ -241,6 +259,7 @@ export const ZOMBIE_ESCAPE_ZOMBIE_CATALOG = [
       'Single full-body cartoony undead old sailor in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall older adult proportions, striped knit shirt and loose trousers kept close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no pipe, no rope, no base, no gore, target 3000 faces, suitable for auto-rigging.',
     seed: 0x5a45_000a,
     silhouette: 'older frame, knit shirt, loose trousers',
+    sourceNpcId: 'retired-holidaymaker',
     texturePrompt:
       'Stylized hand-painted PBR: cream and navy striped shirt, weathered red trousers, desaturated teal-gray skin, brown deck shoes, no blood, no text, no baked lighting.',
   }),

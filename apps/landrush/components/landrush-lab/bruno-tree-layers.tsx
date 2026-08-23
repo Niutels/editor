@@ -624,6 +624,3 @@ function hashSeed(seed: string) {
 }
 
 useTexture.preload(BRUNO_FOLIAGE_TEXTURE_PATH)
-useGLTF.preload(TREE_STYLES.canopy.assetPath)
-useGLTF.preload(TREE_STYLES.flowering.assetPath)
-useGLTF.preload(TREE_STYLES.pine.assetPath)

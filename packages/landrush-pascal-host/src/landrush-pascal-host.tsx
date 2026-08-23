@@ -12,6 +12,8 @@ import {
   applySceneGraphToEditor,
   FloatingMenu,
   Grid,
+  getMovingNode,
+  getPlacementSurface,
   NodeArrowHandles,
   type SceneGraph,
   ToolManager,
@@ -19,12 +21,16 @@ import {
   useSidebarStore,
 } from '@pascal-app/editor'
 import { InteractiveSystem, useViewer, Viewer } from '@pascal-app/viewer'
-import { type ReactNode, useEffect, useLayoutEffect, useState } from 'react'
+import { useFrame } from '@react-three/fiber'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type Group, Vector3 } from 'three'
 import {
+  didLandrushPascalEditingDeactivate,
   exitLandrushPascalEditingToSelect,
   LandrushPascalEditingRuntime,
   resolveLandrushPascalSelectionManager,
 } from './landrush-pascal-editing-runtime'
+import { resolveLandrushPascalCanonicalGridVisibility } from './landrush-pascal-grid-visual-owner'
 import { applyLandrushPascalSceneGraph } from './landrush-pascal-scene-load'
 import {
   type PascalSitePresentationVisibility,
@@ -37,10 +43,16 @@ export type LandrushPascalHostProps = {
   disablePostFx?: boolean
   editingActive: boolean
   editingChrome: ReactNode
+  editingViewportModeTransitionActive: boolean
+  editingViewportOpen: boolean
   maxFps?: number
   onLoad: () => Promise<SceneGraph | null>
   onSceneReadyChange: (ready: boolean) => void
+  ownedHorizontalGridPlaneY: number | null
   projectId?: string | null
+  sceneReadyKey?: string | number | null
+  sceneReadyMaxWaitMs?: number
+  sceneReadyPrerequisitesReady?: boolean
 }
 
 export function LandrushPascalHost({
@@ -48,14 +60,30 @@ export function LandrushPascalHost({
   disablePostFx = true,
   editingActive,
   editingChrome,
+  editingViewportModeTransitionActive,
+  editingViewportOpen,
   maxFps = 60,
   onLoad,
   onSceneReadyChange,
+  ownedHorizontalGridPlaneY,
   projectId = null,
+  sceneReadyKey = null,
+  sceneReadyMaxWaitMs,
+  sceneReadyPrerequisitesReady = true,
 }: LandrushPascalHostProps) {
   const [hasLoadedScene, setHasLoadedScene] = useState(false)
-  const [sceneReadyKey, setSceneReadyKey] = useState(0)
+  const [sceneLoadRevision, setSceneLoadRevision] = useState(0)
+  const viewerSceneReadyKey = JSON.stringify([sceneReadyKey, sceneLoadRevision])
+  const previousEditingActiveRef = useRef(editingActive)
   const selectionManager = resolveLandrushPascalSelectionManager(editingActive)
+
+  useLayoutEffect(() => {
+    const previousEditingActive = previousEditingActiveRef.current
+    previousEditingActiveRef.current = editingActive
+    if (didLandrushPascalEditingDeactivate(previousEditingActive, editingActive)) {
+      exitLandrushPascalEditingToSelect()
+    }
+  }, [editingActive])
 
   useEffect(() => {
     const stopSpatialGrid = initSpatialGridSync()
@@ -98,7 +126,7 @@ export function LandrushPascalHost({
       }
 
       if (cancelled) return
-      setSceneReadyKey((key) => key + 1)
+      setSceneLoadRevision((revision) => revision + 1)
       setHasLoadedScene(true)
     }
 
@@ -112,9 +140,9 @@ export function LandrushPascalHost({
 
   return (
     <div className="absolute inset-0" data-landrush-pascal-host>
-      <div
-        className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
-        data-landrush-pascal-viewer-viewport
+      <LandrushPascalViewerViewport
+        modeTransitionActive={editingViewportModeTransitionActive}
+        open={editingViewportOpen}
       >
         <Viewer
           defaultRender={{ shading: 'solid' }}
@@ -122,18 +150,45 @@ export function LandrushPascalHost({
           maxFps={maxFps}
           onSceneReadyChange={onSceneReadyChange}
           renderContext="editor"
-          sceneReadyKey={sceneReadyKey}
+          sceneReadyKey={viewerSceneReadyKey}
+          sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}
+          sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}
           selectionManager={selectionManager}
           useBvh={false}
         >
           <LandrushWorldOwnedSitePresentation />
           <LandrushMaterialRendererBackendBridge />
           <InteractiveSystem />
-          {editingActive ? <LandrushPascalEditingSurface /> : null}
+          {editingActive ? (
+            <LandrushPascalEditingSurface ownedHorizontalGridPlaneY={ownedHorizontalGridPlaneY} />
+          ) : null}
           {children}
         </Viewer>
+      </LandrushPascalViewerViewport>
+      {editingChrome}
+    </div>
+  )
+}
+
+function LandrushPascalViewerViewport({
+  children,
+  modeTransitionActive,
+  open,
+}: {
+  children: ReactNode
+  modeTransitionActive: boolean
+  open: boolean
+}) {
+  return (
+    <div
+      className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
+      data-landrush-pascal-viewer-mode-transition={modeTransitionActive ? 'true' : 'false'}
+      data-landrush-pascal-viewer-open={open ? 'true' : 'false'}
+      data-landrush-pascal-viewer-viewport
+    >
+      <div className="absolute inset-0 min-h-0 min-w-0" data-landrush-pascal-viewer-surface>
+        {children}
       </div>
-      {editingActive ? editingChrome : null}
     </div>
   )
 }
@@ -195,23 +250,69 @@ function LandrushWorldOwnedSitePresentation() {
   return null
 }
 
-function LandrushPascalEditingSurface() {
+function LandrushPascalEditingSurface({
+  ownedHorizontalGridPlaneY,
+}: {
+  ownedHorizontalGridPlaneY: number | null
+}) {
   const gridSnapStep = useEditor((state) => state.gridSnapStep)
-
-  useLayoutEffect(
-    () => () => {
-      exitLandrushPascalEditingToSelect()
-    },
-    [],
-  )
 
   return (
     <>
       <LandrushPascalEditingRuntime />
       <NodeArrowHandles />
       <FloatingMenu />
-      <Grid cellColor="#aaa" cellSize={gridSnapStep} fadeDistance={500} sectionColor="#ccc" />
+      <LandrushPascalCanonicalGrid
+        cellSize={gridSnapStep}
+        ownedHorizontalGridPlaneY={ownedHorizontalGridPlaneY}
+      />
       <ToolManager />
     </>
+  )
+}
+
+function LandrushPascalCanonicalGrid({
+  cellSize,
+  ownedHorizontalGridPlaneY,
+}: {
+  cellSize: number
+  ownedHorizontalGridPlaneY: number | null
+}) {
+  const visualGroupRef = useRef<Group>(null)
+  const movingWorldPositionRef = useRef(new Vector3())
+
+  useFrame(() => {
+    const publishedSurface = getPlacementSurface()
+    const movingNode = publishedSurface ? null : getMovingNode()
+    const movingObject = movingNode ? sceneRegistry.nodes.get(movingNode.id) : null
+    const movingPositionY = movingObject
+      ? movingObject.getWorldPosition(movingWorldPositionRef.current).y
+      : null
+    let selectedLevelY = 0
+    if (!(publishedSurface || movingObject)) {
+      const selectedLevelId = useViewer.getState().selection.levelId
+      if (selectedLevelId)
+        selectedLevelY = sceneRegistry.nodes.get(selectedLevelId)?.position.y ?? 0
+    }
+    const movingPlaneWallHosted =
+      movingNode?.type === 'item' &&
+      (movingNode.asset?.attachTo === 'wall' || movingNode.asset?.attachTo === 'wall-side')
+    const visible = resolveLandrushPascalCanonicalGridVisibility(
+      ownedHorizontalGridPlaneY,
+      publishedSurface?.point.y ?? null,
+      publishedSurface?.normal.y ?? null,
+      movingPositionY,
+      movingPlaneWallHosted,
+      selectedLevelY,
+    )
+    if (visualGroupRef.current && visualGroupRef.current.visible !== visible) {
+      visualGroupRef.current.visible = visible
+    }
+  })
+
+  return (
+    <group ref={visualGroupRef}>
+      <Grid cellColor="#aaa" cellSize={cellSize} fadeDistance={500} sectionColor="#ccc" />
+    </group>
   )
 }

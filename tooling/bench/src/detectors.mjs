@@ -8,6 +8,8 @@
 
 import path from 'node:path'
 
+export const DEFAULT_BEACON_WATCHDOG_POLL_MS = 100
+
 export class BeaconWatchdog {
   constructor({
     page,
@@ -15,7 +17,7 @@ export class BeaconWatchdog {
     events,
     runDir,
     freezeThresholdMs = 250,
-    pollMs = 100,
+    pollMs = DEFAULT_BEACON_WATCHDOG_POLL_MS,
     startupGraceMs = 1000,
     onAnomaly,
   }) {
@@ -34,6 +36,7 @@ export class BeaconWatchdog {
     this.lastAdvanceAt = Date.now()
     this.screenshotCount = 0
     this.lastBeacon = null
+    this.loopPromise = null
   }
 
   recordStarvation({ evalMs, frameIdx }) {
@@ -50,7 +53,7 @@ export class BeaconWatchdog {
   }
 
   start() {
-    this.loop().catch(() => {})
+    this.loopPromise ??= this.loop().catch(() => {})
     return this
   }
 
@@ -88,6 +91,7 @@ export class BeaconWatchdog {
         this.recordStarvation({ evalMs, frameIdx: this.lastFrameIdx })
       }
 
+      if (this.stopped) break
       const waitLeft = this.pollMs - (Date.now() - t0)
       if (waitLeft > 0) await new Promise((r) => setTimeout(r, waitLeft))
     }
@@ -128,15 +132,16 @@ export class BeaconWatchdog {
     await this.onAnomaly?.(freeze)
   }
 
-  stop() {
+  async stop() {
     this.stopped = true
+    await this.loopPromise
   }
 }
 
 /** Wire console/pageerror/crash capture into the events stream. */
 export function attachPageCapture(page, events) {
   const counters = { consoleErrors: 0, pageErrors: 0, crashed: false }
-  page.on('console', (msg) => {
+  const onConsole = (msg) => {
     const type = msg.type()
     if (type === 'error' || type === 'warning') {
       const text = msg.text().slice(0, 400)
@@ -145,18 +150,32 @@ export function attachPageCapture(page, events) {
       if (type === 'error') counters.consoleErrors += 1
       events.write({ t: performance.now(), type: `console:${type}`, data: text })
     }
-  })
-  page.on('pageerror', (err) => {
+  }
+  const onPageError = (err) => {
     counters.pageErrors += 1
     events.write({
       t: performance.now(),
       type: 'pageerror',
       data: (err.stack ?? String(err)).slice(0, 1200),
     })
-  })
-  page.on('crash', () => {
+  }
+  const onCrash = () => {
     counters.crashed = true
     events.write({ t: performance.now(), type: 'crash', data: 'page crashed' })
+  }
+  page.on('console', onConsole)
+  page.on('pageerror', onPageError)
+  page.on('crash', onCrash)
+  let disposed = false
+  Object.defineProperty(counters, 'dispose', {
+    enumerable: false,
+    value: () => {
+      if (disposed) return
+      disposed = true
+      page.off('console', onConsole)
+      page.off('pageerror', onPageError)
+      page.off('crash', onCrash)
+    },
   })
   return counters
 }

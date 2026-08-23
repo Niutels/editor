@@ -1,6 +1,7 @@
 export type LandrushGamepadInput = {
   circle: boolean
   connected: boolean
+  crouch: boolean
   cross: boolean
   dpadDown: boolean
   dpadLeft: boolean
@@ -74,6 +75,7 @@ export function resolveLandrushGamepadInput(
   return {
     circle: gamepadButtonPressed(gamepad, 1),
     connected: true,
+    crouch: gamepadButtonPressed(gamepad, 6),
     cross: gamepadButtonPressed(gamepad, 0),
     dpadDown: gamepadButtonPressed(gamepad, 13),
     dpadLeft: gamepadButtonPressed(gamepad, 14),

@@ -16,6 +16,10 @@ import { MeshLambertNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 
 import { resolveCdnUrl } from './asset-url'
 import { isKtx2Url, ktx2Loader, whenKtx2Ready } from './ktx2-loader'
+import {
+  type MaterialTextureSettlement,
+  materialTextureAssignmentRegistry,
+} from './material-texture-settlement'
 import { getSceneTheme } from './scene-themes'
 import { stampPascalTextureRef } from './texture-reference'
 
@@ -106,11 +110,15 @@ const sideMap: Record<MaterialProperties['side'], THREE.Side> = {
 }
 
 const materialCache = new Map<string, THREE.Material>()
+const materialCloneCache = new Map<string, THREE.Material>()
 const defaultMaterialCache = new Map<string, THREE.Material>()
 const surfaceRoleMaterialCache = new Map<string, THREE.Material>()
 const textureCache = new Map<string, THREE.Texture>()
 const textureLoadPromises = new Map<string, Promise<THREE.Texture | null>>()
+let materialCacheGeneration = 0
 const textureLoader = new THREE.TextureLoader()
+const TEXTURE_LOAD_ATTEMPT_TIMEOUT_MS = 10_000
+const TEXTURE_LOAD_RETRY_DELAYS_MS = [100, 400] as const
 
 // `.ktx2` finish maps transcode through the shared KTX2 loader (support is
 // detected once at viewer init); everything else loads as a normal image.
@@ -142,6 +150,7 @@ type StandardMaterial =
   | MeshStandardNodeMaterial
 
 type TextureMaterial = CommonMaterial & Partial<Record<TextureSlot, THREE.Texture | null>>
+type MaterialTextureConfig = NonNullable<MaterialSchema['texture']>
 
 type TextureSlot =
   | 'map'
@@ -203,35 +212,6 @@ export function getTextureKey(material?: MaterialSchema): string {
   if (!texture) return 'none'
   const [repeatX, repeatY] = resolveTextureRepeat(texture.repeat, texture.scale)
   return `${texture.url}-${repeatX}x${repeatY}`
-}
-
-function getTexture(material?: MaterialSchema): THREE.Texture | undefined {
-  const textureConfig = material?.texture
-  if (!textureConfig?.url) return undefined
-
-  const cacheKey = getTextureKey(material)
-  const cached = textureCache.get(cacheKey)
-  if (cached) return cached
-
-  const resolvedUrl = /^(?:asset|blob|data):/.test(textureConfig.url)
-    ? textureConfig.url
-    : (resolveCdnUrl(textureConfig.url) ?? textureConfig.url)
-  const texture = pickTextureLoader(resolvedUrl).load(resolvedUrl)
-  texture.wrapS = THREE.RepeatWrapping
-  texture.wrapT = THREE.RepeatWrapping
-
-  const [repeatX, repeatY] = resolveTextureRepeat(textureConfig.repeat, textureConfig.scale)
-  texture.repeat.set(repeatX, repeatY)
-  texture.updateMatrix()
-  texture.colorSpace = THREE.SRGBColorSpace
-  stampPascalTextureRef(texture, {
-    kind: 'project-asset',
-    src: resolvedUrl,
-    slot: 'map',
-  })
-
-  textureCache.set(cacheKey, texture)
-  return texture
 }
 
 function isStandardMaterial(material: THREE.Material): material is StandardMaterial {
@@ -324,50 +304,149 @@ function applyTexturePropertiesToMaterial(material: CommonMaterial, props: Mater
   }
 }
 
-async function loadPresetTexture(
-  path: string,
-  props: MaterialMapProperties,
-  slot?: TextureSlot,
+function loadCachedTexture(
+  resolvedPath: string,
+  cacheKey: string,
+  configure: (texture: THREE.Texture) => void,
 ): Promise<THREE.Texture | null> {
-  const resolvedPath = resolveCdnUrl(path) ?? path
-  const cacheKey = getPresetTextureCacheKey(resolvedPath, props, slot)
   const cached = textureCache.get(cacheKey)
-  if (cached) return cached
+  if (cached) return Promise.resolve(cached)
 
   const existingPromise = textureLoadPromises.get(cacheKey)
   if (existingPromise) return existingPromise
 
-  // `.ktx2` loads wait for `detectSupport` (KTX2Loader.load throws before it) —
-  // materials can be created while a capture canvas's renderer is still
-  // initializing, and failing here would cache the material permanently
-  // texture-less (white).
-  const load = isKtx2Url(resolvedPath)
-    ? whenKtx2Ready().then(() =>
-        (ktx2Loader as unknown as THREE.TextureLoader).loadAsync(resolvedPath),
-      )
-    : textureLoader.loadAsync(resolvedPath)
-
-  const promise = load
+  const generation = materialCacheGeneration
+  let promise: Promise<THREE.Texture | null>
+  promise = loadTextureWithRetry(resolvedPath)
     .then((texture) => {
-      applyTextureProperties(texture, props, slot)
-      stampPascalTextureRef(texture, {
-        kind: 'material',
-        src: resolvedPath,
-        slot: slot ?? 'map',
-      })
+      if (
+        generation !== materialCacheGeneration ||
+        textureLoadPromises.get(cacheKey) !== promise
+      ) {
+        texture.dispose()
+        return null
+      }
+      configure(texture)
       setTextureCacheKey(texture, cacheKey)
       textureCache.set(cacheKey, texture)
       textureLoadPromises.delete(cacheKey)
       return texture
     })
     .catch((error) => {
-      console.warn('[viewer] Failed to load material texture', resolvedPath, error)
-      textureLoadPromises.delete(cacheKey)
+      if (
+        generation === materialCacheGeneration &&
+        textureLoadPromises.get(cacheKey) === promise
+      ) {
+        console.warn('[viewer] Failed to load material texture', resolvedPath, error)
+        textureLoadPromises.delete(cacheKey)
+      }
       return null
     })
 
   textureLoadPromises.set(cacheKey, promise)
   return promise
+}
+
+async function loadTextureWithRetry(resolvedPath: string): Promise<THREE.Texture> {
+  let lastError: unknown = new Error(`Failed to load texture: ${resolvedPath}`)
+
+  for (let attempt = 0; attempt <= TEXTURE_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, TEXTURE_LOAD_RETRY_DELAYS_MS[attempt - 1])
+      })
+    }
+
+    try {
+      return await loadTextureAttempt(resolvedPath)
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError
+}
+
+function loadTextureAttempt(resolvedPath: string): Promise<THREE.Texture> {
+  // `.ktx2` loads wait for `detectSupport` (KTX2Loader.load throws before it) —
+  // materials can be created while a capture canvas's renderer is still
+  // initializing. The attempt timeout also bounds that prerequisite so a
+  // missing renderer or network response cannot leave strict readiness pending.
+  const load = isKtx2Url(resolvedPath)
+    ? whenKtx2Ready().then(() =>
+        (ktx2Loader as unknown as THREE.TextureLoader).loadAsync(resolvedPath),
+      )
+    : textureLoader.loadAsync(resolvedPath)
+
+  return new Promise((resolve, reject) => {
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      reject(new Error(`Texture load timed out after ${TEXTURE_LOAD_ATTEMPT_TIMEOUT_MS}ms`))
+    }, TEXTURE_LOAD_ATTEMPT_TIMEOUT_MS)
+
+    load.then(
+      (texture) => {
+        clearTimeout(timeout)
+        if (timedOut) {
+          texture.dispose()
+          return
+        }
+        resolve(texture)
+      },
+      (error) => {
+        clearTimeout(timeout)
+        if (!timedOut) reject(error)
+      },
+    )
+  })
+}
+
+function loadPresetTexture(
+  path: string,
+  props: MaterialMapProperties,
+  slot?: TextureSlot,
+): Promise<THREE.Texture | null> {
+  const resolvedPath = resolveCdnUrl(path) ?? path
+  const cacheKey = getPresetTextureCacheKey(resolvedPath, props, slot)
+  return loadCachedTexture(resolvedPath, cacheKey, (texture) => {
+    applyTextureProperties(texture, props, slot)
+    stampPascalTextureRef(texture, {
+      kind: 'material',
+      src: resolvedPath,
+      slot: slot ?? 'map',
+    })
+  })
+}
+
+function getInlineTextureCacheKey(texture: MaterialTextureConfig) {
+  const resolvedPath = /^(?:asset|blob|data):/.test(texture.url)
+    ? texture.url
+    : (resolveCdnUrl(texture.url) ?? texture.url)
+  const [repeatX, repeatY] = resolveTextureRepeat(texture.repeat, texture.scale)
+  return {
+    cacheKey: `project-${resolvedPath}-${repeatX}x${repeatY}`,
+    repeatX,
+    repeatY,
+    resolvedPath,
+  }
+}
+
+function loadInlineTexture(textureConfig: MaterialTextureConfig): Promise<THREE.Texture | null> {
+  const { cacheKey, repeatX, repeatY, resolvedPath } = getInlineTextureCacheKey(textureConfig)
+  return loadCachedTexture(resolvedPath, cacheKey, (texture) => {
+    texture.wrapS = THREE.RepeatWrapping
+    texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(repeatX, repeatY)
+    texture.updateMatrix()
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.needsUpdate = true
+    stampPascalTextureRef(texture, {
+      kind: 'project-asset',
+      src: resolvedPath,
+      slot: 'map',
+    })
+  })
 }
 
 function queueTextureAssignment(
@@ -376,9 +455,14 @@ function queueTextureAssignment(
   path: string | undefined,
   props: MaterialMapProperties,
 ) {
+  // An explicit clone override ends source-following before the async write;
+  // otherwise settlement would mirror the source's old slot over the clone.
+  materialTextureAssignmentRegistry.untrackClone(material)
   const textureMaterial = material as TextureMaterial
+  const retry = () => queueTextureAssignment(material, slot, path, props)
 
   if (!path) {
+    materialTextureAssignmentRegistry.clear(material, slot)
     if (textureMaterial[slot] != null) {
       // Rebuild the node graph: a cached WebGPU material keeps a TextureNode
       // for the slot, whose per-frame material reference would pull the null
@@ -394,6 +478,8 @@ function queueTextureAssignment(
 
   if (textureMaterial[slot]?.userData.pascalTextureCacheKey === cacheKey) {
     applyTextureProperties(textureMaterial[slot], props, slot)
+    materialTextureAssignmentRegistry.begin(material, slot, cacheKey, retry)
+    materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'ready')
     return
   }
 
@@ -401,6 +487,8 @@ function queueTextureAssignment(
   if (cached) {
     textureMaterial[slot] = createAssignedTexture(cached, props, slot)
     material.needsUpdate = true
+    materialTextureAssignmentRegistry.begin(material, slot, cacheKey, retry)
+    materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'ready')
     return
   }
 
@@ -413,10 +501,71 @@ function queueTextureAssignment(
     material.needsUpdate = true
   }
 
+  materialTextureAssignmentRegistry.begin(material, slot, cacheKey, retry)
   loadPresetTexture(path, props, slot).then((texture) => {
-    if (!texture) return
+    if (!materialTextureAssignmentRegistry.isCurrent(material, slot, cacheKey)) return
+    if (!texture) {
+      materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'failed')
+      return
+    }
     textureMaterial[slot] = createAssignedTexture(texture, props, slot)
     material.needsUpdate = true
+    materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'ready')
+  })
+}
+
+function queueInlineTextureAssignment(
+  material: CommonMaterial,
+  textureConfig: MaterialTextureConfig | undefined,
+) {
+  materialTextureAssignmentRegistry.untrackClone(material)
+  const slot: TextureSlot = 'map'
+  const textureMaterial = material as TextureMaterial
+  if (!textureConfig?.url) {
+    materialTextureAssignmentRegistry.clear(material, slot)
+    return
+  }
+
+  const { cacheKey, repeatX, repeatY } = getInlineTextureCacheKey(textureConfig)
+  const retry = () => queueInlineTextureAssignment(material, textureConfig)
+  if (textureMaterial.map?.userData.pascalTextureCacheKey === cacheKey) {
+    materialTextureAssignmentRegistry.begin(material, slot, cacheKey, retry)
+    materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'ready')
+    return
+  }
+
+  const assign = (source: THREE.Texture) => {
+    const texture = source.clone()
+    setTextureCacheKey(texture, cacheKey)
+    texture.wrapS = THREE.RepeatWrapping
+    texture.wrapT = THREE.RepeatWrapping
+    texture.repeat.set(repeatX, repeatY)
+    texture.updateMatrix()
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.needsUpdate = true
+    textureMaterial.map = texture
+    material.needsUpdate = true
+  }
+  if (textureMaterial.map != null) {
+    textureMaterial.map = null
+    material.needsUpdate = true
+  }
+  const cached = textureCache.get(cacheKey)
+  materialTextureAssignmentRegistry.begin(material, slot, cacheKey, retry)
+  if (cached) {
+    assign(cached)
+    materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'ready')
+    return
+  }
+
+  loadInlineTexture(textureConfig).then((texture) => {
+    if (!materialTextureAssignmentRegistry.isCurrent(material, slot, cacheKey)) return
+    if (!texture) {
+      materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'failed')
+      return
+    }
+    assign(texture)
+    materialTextureAssignmentRegistry.settle(material, slot, cacheKey, 'ready')
   })
 }
 
@@ -524,8 +673,12 @@ export function createMaterialFromPreset(
 ): THREE.Material {
   const cacheKey = `${shading}-${JSON.stringify(preset)}`
 
-  if (materialCache.has(cacheKey)) {
-    return materialCache.get(cacheKey)!
+  const cached = materialCache.get(cacheKey)
+  if (cached) {
+    if (materialTextureAssignmentRegistry.hasFailed(cached)) {
+      applyMaterialPresetToMaterials(cached, preset)
+    }
+    return cached
   }
 
   const material =
@@ -553,14 +706,16 @@ export function createMaterial(
   const props = resolveMaterial(material)
   const cacheKey = `${getCacheKey(props, shading)}-${getTextureKey(material)}`
 
-  if (materialCache.has(cacheKey)) {
-    return materialCache.get(cacheKey)!
+  const cached = materialCache.get(cacheKey)
+  if (cached) {
+    if (materialTextureAssignmentRegistry.hasFailed(cached)) {
+      queueInlineTextureAssignment(cached as CommonMaterial, material?.texture)
+    }
+    return cached
   }
 
-  const map = getTexture(material)
   const materialParams: {
     color: string
-    map?: THREE.Texture
     opacity: number
     side: THREE.Side
     transparent: boolean
@@ -571,8 +726,6 @@ export function createMaterial(
     side: sideMap[props.side],
   }
 
-  if (map) materialParams.map = map
-
   const threeMaterial =
     shading === 'solid'
       ? new MeshLambertNodeMaterial(materialParams)
@@ -582,10 +735,33 @@ export function createMaterial(
           metalness: props.metalness,
         })
 
+  queueInlineTextureAssignment(threeMaterial, material?.texture)
   maybeApplyGlassFresnel(threeMaterial)
   threeMaterial.userData.__pascalCachedMaterial = true
   materialCache.set(cacheKey, threeMaterial)
   return threeMaterial
+}
+
+export function cloneMaterial(
+  source: THREE.Material,
+  options: { cacheKey?: string; configure?: (clone: THREE.Material) => void } = {},
+): THREE.Material {
+  const cacheKey = options.cacheKey ? `${source.uuid}\u0000${options.cacheKey}` : null
+  if (cacheKey) {
+    const cached = materialCloneCache.get(cacheKey)
+    if (cached) return cached
+  }
+
+  const clone = source.clone()
+  materialTextureAssignmentRegistry.trackClone(source, clone)
+  options.configure?.(clone)
+  if (cacheKey) {
+    clone.userData.__pascalCachedMaterial = true
+    materialCloneCache.set(cacheKey, clone)
+  } else {
+    delete clone.userData.__pascalCachedMaterial
+  }
+  return clone
 }
 
 /**
@@ -765,11 +941,32 @@ export function DEFAULT_STAIR_MATERIAL(shading: RenderShading = 'rendered'): THR
   return cachedDefaultMaterial('stair', '#e9e6e0', 0.9, shading)
 }
 
+export function getObjectMaterialTextureSettlement(
+  roots: Iterable<THREE.Object3D>,
+): MaterialTextureSettlement {
+  return materialTextureAssignmentRegistry.summarizeObjects(roots)
+}
+
+export function getMaterialTextureAssignmentRevision() {
+  return materialTextureAssignmentRegistry.revision
+}
+
+export function retryFailedObjectMaterialTextures(roots: Iterable<THREE.Object3D>) {
+  return materialTextureAssignmentRegistry.retryFailedObjects(roots)
+}
+
 export function disposeMaterial(material: THREE.Material): void {
   material.dispose()
 }
 
 export function clearMaterialCache(): void {
+  materialCacheGeneration += 1
+
+  for (const material of materialCloneCache.values()) {
+    material.dispose()
+  }
+  materialCloneCache.clear()
+
   for (const material of materialCache.values()) {
     material.dispose()
   }
@@ -790,4 +987,5 @@ export function clearMaterialCache(): void {
   }
   textureCache.clear()
   textureLoadPromises.clear()
+  materialTextureAssignmentRegistry.reset()
 }

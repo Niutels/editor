@@ -1,9 +1,10 @@
 import { type AnyNodeId, type GeometryContext, getMaterialPresetByRef } from '@pascal-app/core'
 import {
-  applyMaterialPresetToMaterials,
   type ColorPreset,
+  cloneMaterial,
   createDefaultMaterial,
   createMaterial,
+  createMaterialFromPresetRef,
   createSurfaceRoleMaterial,
   generateFenceSlotGeometries,
   type RenderShading,
@@ -40,8 +41,6 @@ type FenceMaterial = Material & {
 
 const FENCE_SLOT_ORDER: FenceSlotId[] = ['posts', 'infill', 'base', 'rail']
 
-const fenceMaterialCache = new Map<string, Material>()
-
 function getFenceSlotMaterial(
   node: FenceNode,
   slotId: FenceSlotId,
@@ -74,19 +73,14 @@ function getLegacyFenceMaterial(node: FenceNode, shading: RenderShading): Materi
     material: node.material ?? null,
     materialPreset: node.materialPreset ?? null,
   })
-  const cached = fenceMaterialCache.get(cacheKey)
-  if (cached) return cached
-
   const preset = getMaterialPresetByRef(node.materialPreset)
-  const material = preset
-    ? createDefaultMaterial('#ffffff', 0.5, shading)
+  const source = preset
+    ? (createMaterialFromPresetRef(node.materialPreset, shading) ??
+      createDefaultMaterial('#ffffff', 0.5, shading))
     : node.material
-      ? createMaterial(node.material, shading).clone()
+      ? createMaterial(node.material, shading)
       : createDefaultMaterial('#ffffff', 0.9, shading)
-
-  if (preset) {
-    applyMaterialPresetToMaterials(material, preset)
-  }
+  const material = cloneMaterial(source, { cacheKey: `fence-legacy:${cacheKey}` })
 
   const fenceMaterial = material as FenceMaterial
   fenceMaterial.transparent = false
@@ -96,7 +90,6 @@ function getLegacyFenceMaterial(node: FenceNode, shading: RenderShading): Materi
   fenceMaterial.depthWrite = true
   fenceMaterial.needsUpdate = true
 
-  fenceMaterialCache.set(cacheKey, material)
   return material
 }
 

@@ -90,7 +90,8 @@ export async function launchBenchBrowser({
     // set stays explicit; playwright-level headless would inject its own flags.
     headless: false,
     args: chromeArgs({ headless, width, height }),
-    viewport: null,
+    deviceScaleFactor: 1,
+    viewport: { width, height },
     ignoreDefaultArgs: ['--enable-automation'],
   })
 

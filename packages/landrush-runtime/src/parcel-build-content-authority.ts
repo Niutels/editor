@@ -1,10 +1,12 @@
 import type { ParcelBuildNode, ParcelBuildSnapshot, ParcelOwnership } from '@landrush/protocol'
 
 export type ParcelBuildContentAuthorityScope = {
-  enabled: boolean
+  contentAuthority: ParcelBuildContentAuthority
   localProfileId: string
   roomId: string
 }
+
+export type ParcelBuildContentAuthority = 'offline' | 'online' | 'online-pending'
 
 export type ParcelBuildContentAuthorityTransition = {
   changed: boolean
@@ -16,6 +18,30 @@ export type ParcelBuildAuthoritySnapshotUpdate = {
   parcelId: string
   source: 'snapshot'
   worldId: string
+}
+
+export function resolveLocalParcelBuildContentAuthority({
+  builds,
+  contentAuthority,
+  ownerships,
+  worldId,
+}: {
+  builds: readonly ParcelBuildSnapshot<ParcelBuildNode>[]
+  contentAuthority: ParcelBuildContentAuthority
+  ownerships: readonly ParcelOwnership[]
+  worldId: string
+}) {
+  if (contentAuthority !== 'offline') {
+    return {
+      snapshotWorldId: null,
+      updates: [] as ParcelBuildAuthoritySnapshotUpdate[],
+    }
+  }
+
+  return {
+    snapshotWorldId: worldId,
+    updates: createOfflineParcelBuildAuthorityUpdates({ builds, ownerships, worldId }),
+  }
 }
 
 export function createOfflineParcelBuildAuthorityUpdates({
@@ -84,7 +110,7 @@ export class ParcelBuildContentAuthorityEpoch {
 
   updateScope(scope: ParcelBuildContentAuthorityScope) {
     if (
-      scope.enabled === this.#scope.enabled &&
+      scope.contentAuthority === this.#scope.contentAuthority &&
       scope.localProfileId === this.#scope.localProfileId &&
       scope.roomId === this.#scope.roomId
     ) {

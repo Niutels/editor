@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { pointInPolygonOrNearEdge, segmentFootprint } from '@landrush/runtime'
+import { type AnyNode, AnyNode as AnyNodeSchema, SlabNode } from '@pascal-app/core'
+import { migrateVerticalSceneNodes } from '@pascal-app/core/scene-migrations'
 import {
   areLandrushBuildFootprintsInsideBoundary,
   areLandrushBuildSyncNodeSetsEqual,
@@ -623,6 +625,94 @@ describe('Landrush build sync', () => {
       kind: 'nodes',
       nodes: { wall: { id: 'wall' } },
     })
+  })
+
+  test('preserves validated legacy slab field presence for migration and v2 lossless checks', () => {
+    const rawLegacySlab = structuredClone(
+      SlabNode.parse({
+        elevation: 0.15,
+        id: 'slab_legacy_interval',
+        polygon: [
+          [0, 0],
+          [2, 0],
+          [2, 2],
+          [0, 2],
+        ],
+      }),
+    ) as Record<string, unknown>
+    delete rawLegacySlab.thickness
+    const parseNode = (value: unknown) => {
+      const result = AnyNodeSchema.safeParse(value)
+      return result.success ? result.data : null
+    }
+
+    const parsedLegacy = parseLandrushBuildSyncSnapshotNodes([rawLegacySlab], parseNode)
+    expect(parsedLegacy.kind).toBe('nodes')
+    if (parsedLegacy.kind !== 'nodes') throw new Error('Expected valid legacy slab')
+    expect(Object.hasOwn(parsedLegacy.nodes.slab_legacy_interval!, 'thickness')).toBe(false)
+
+    const migration = migrateVerticalSceneNodes(parsedLegacy.nodes)
+    const migratedNodes = migration.nodes as Record<string, AnyNode>
+    expect(migration.changed).toBe(true)
+    expect(migratedNodes.slab_legacy_interval).toMatchObject({
+      elevation: 0.15,
+      thickness: 0.15,
+      type: 'slab',
+    })
+    expect(
+      isLandrushBuildSyncV2GraphLossless(
+        parsedLegacy.nodes,
+        Object.values(parsedLegacy.nodes),
+        Object.values(migratedNodes),
+      ),
+    ).toBe(false)
+
+    const rawV2Slab = { ...rawLegacySlab, thickness: 0.15 }
+    const parsedV2 = parseLandrushBuildSyncSnapshotNodes([rawV2Slab], parseNode)
+    expect(parsedV2.kind).toBe('nodes')
+    if (parsedV2.kind !== 'nodes') throw new Error('Expected valid v2 slab')
+    const canonicalV2 = migrateVerticalSceneNodes(parsedV2.nodes)
+    expect(canonicalV2.changed).toBe(false)
+    expect(
+      isLandrushBuildSyncV2GraphLossless(
+        parsedV2.nodes,
+        Object.values(parsedV2.nodes),
+        Object.values(canonicalV2.nodes) as AnyNode[],
+      ),
+    ).toBe(true)
+
+    const rawZeroThicknessSlab = { ...rawLegacySlab, thickness: 0 }
+    const parsedZeroThickness = parseLandrushBuildSyncSnapshotNodes(
+      [rawZeroThicknessSlab],
+      parseNode,
+    )
+    expect(parsedZeroThickness.kind).toBe('nodes')
+    if (parsedZeroThickness.kind !== 'nodes') throw new Error('Expected valid zero-thickness slab')
+    expect(parsedZeroThickness.nodes.slab_legacy_interval).toMatchObject({ thickness: 0 })
+    expect(migrateVerticalSceneNodes(parsedZeroThickness.nodes).changed).toBe(false)
+
+    const rawUndefinedThicknessSlab = { ...rawLegacySlab, thickness: undefined }
+    const parsedUndefinedThickness = parseLandrushBuildSyncSnapshotNodes(
+      [rawUndefinedThicknessSlab],
+      parseNode,
+    )
+    expect(parsedUndefinedThickness.kind).toBe('nodes')
+    if (parsedUndefinedThickness.kind !== 'nodes') {
+      throw new Error('Expected valid undefined-thickness slab')
+    }
+    expect(Object.hasOwn(parsedUndefinedThickness.nodes.slab_legacy_interval!, 'thickness')).toBe(
+      false,
+    )
+
+    expect(
+      parseLandrushBuildSyncSnapshotNodes([{ ...rawLegacySlab, polygon: 'malformed' }], parseNode),
+    ).toEqual({ kind: 'invalid' })
+    expect(
+      parseLandrushBuildSyncSnapshotNodes(
+        [rawLegacySlab, structuredClone(rawLegacySlab)],
+        parseNode,
+      ),
+    ).toEqual({ kind: 'invalid' })
   })
 
   test('projects external host parents to transport roots without detaching internal children', () => {

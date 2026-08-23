@@ -63,6 +63,35 @@ describe('Landrush island input ownership', () => {
     expect(freshPressFrame.pressed.square).toBe(true)
   })
 
+  test('does not turn a held terminal Triangle into a Day map command', () => {
+    let previous = createLandrushIslandGamepadButtonState()
+    const heldTriangle = { ...previous, triangle: true }
+
+    previous = advanceLandrushIslandDayGamepadButtonState({
+      current: heldTriangle,
+      owner: 'zombie-night',
+      previous,
+    }).next
+    const handoffFrame = advanceLandrushIslandDayGamepadButtonState({
+      current: heldTriangle,
+      owner: 'day-interface',
+      previous,
+    })
+    expect(handoffFrame.pressed.triangle).toBe(false)
+
+    previous = advanceLandrushIslandDayGamepadButtonState({
+      current: createLandrushIslandGamepadButtonState(),
+      owner: 'day-interface',
+      previous: handoffFrame.next,
+    }).next
+    const freshPressFrame = advanceLandrushIslandDayGamepadButtonState({
+      current: heldTriangle,
+      owner: 'day-interface',
+      previous,
+    })
+    expect(freshPressFrame.pressed.triangle).toBe(true)
+  })
+
   test('synchronously fences every day interface surface during zombie night', () => {
     expect(
       resolveLandrushIslandDayInterfaceState({

@@ -4,6 +4,7 @@ import http from 'node:http'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  isMultiplayerPlayerPose,
   isSpatialVoiceSignalPayload,
   sanitizeMultiplayerRoomId,
   isParcelBuildSchemaVersion,
@@ -1624,7 +1625,7 @@ function isPlayerSnapshot(value) {
 }
 
 function sanitizePlayerSnapshot(player, now) {
-  return {
+  const snapshot = {
     color: sanitizeColor(player.color),
     heading: finiteNumber(player.heading, 0),
     id: sanitizeText(player.id, randomUUID(), 80),
@@ -1638,6 +1639,8 @@ function sanitizePlayerSnapshot(player, now) {
     speed: Math.max(0, finiteNumber(player.speed, 0)),
     updatedAt: now,
   }
+  if (isMultiplayerPlayerPose(player.pose)) snapshot.pose = player.pose
+  return snapshot
 }
 
 function sanitizeText(value, fallback, maxLength) {

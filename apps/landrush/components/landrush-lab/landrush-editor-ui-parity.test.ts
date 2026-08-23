@@ -11,14 +11,22 @@ function replaceRequired(source: string, embedded: string, canonical: string): s
 }
 
 function removeLandrushBuildTabAdapters(source: string): string {
-  let normalized = replaceRequired(
-    source,
+  const controllerItemPattern = /^[ \t]+data-editor-build-controller-item\n/gm
+  const controllerActionPattern =
+    /^[ \t]+data-editor-build-controller-action=(?:"[^"]+"|\{\n[ \t]+[^\n]+\n[ \t]+\})\n/gm
+  expect(source.match(controllerItemPattern) ?? []).toHaveLength(7)
+  expect(source.match(controllerActionPattern) ?? []).toHaveLength(7)
+  let normalized = source.replace(controllerItemPattern, '')
+  normalized = normalized.replace(controllerActionPattern, '')
+  normalized = replaceRequired(
+    normalized,
     `export type BuildTabCapabilities = {
   materialPaint: boolean
 }
 
 export type BuildTabProps = {
   capabilities?: Partial<BuildTabCapabilities>
+  interactionReady?: boolean
   runStructureToolActivation?: (activate: () => void) => void
 }
 
@@ -42,6 +50,7 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
     normalized,
     `export function BuildTab({
   capabilities,
+  interactionReady = true,
   runStructureToolActivation = runToolActivationDirectly,
 }: BuildTabProps = {}) {
   const materialPaintEnabled =
@@ -98,6 +107,35 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
       activateBuildTool(type.kind)
     }
   }, [])`,
+  )
+  normalized = replaceRequired(
+    normalized,
+    `  const didInitRef = useRef(false)
+  const awaitingInteractionRef = useRef(!interactionReady)
+  useEffect(() => {
+    if (!interactionReady) {
+      awaitingInteractionRef.current = true
+      didInitRef.current = false
+      return
+    }
+    if (didInitRef.current) return
+    didInitRef.current = true
+    const ed = useEditor.getState()
+    const enteredFromVisualHandoff = awaitingInteractionRef.current
+    awaitingInteractionRef.current = false
+    if (!enteredFromVisualHandoff && ed.mode === 'build' && ed.tool) return
+    const firstType = buildTypes.find((t) => t.kind)
+    if (firstType) handleTypeClick(firstType)
+  }, [buildTypes, handleTypeClick, interactionReady])`,
+    `  const didInitRef = useRef(false)
+  useEffect(() => {
+    if (didInitRef.current) return
+    didInitRef.current = true
+    const ed = useEditor.getState()
+    if (ed.mode === 'build' && ed.tool) return
+    const firstType = buildTypes.find((t) => t.kind)
+    if (firstType) handleTypeClick(firstType)
+  }, [buildTypes, handleTypeClick])`,
   )
   normalized = replaceRequired(
     normalized,
@@ -281,6 +319,7 @@ describe('Landrush Pascal editor UI parity', () => {
     const canonical = readSource('../../../editor/components/build-tab.tsx')
     const landrush = readSource('../build-tab.tsx')
 
+    expect(canonical).not.toContain('data-editor-build-controller-')
     expect(removeLandrushBuildTabAdapters(landrush)).toBe(canonical)
     for (const tool of [
       'wall',
@@ -309,6 +348,9 @@ describe('Landrush Pascal editor UI parity', () => {
     expect(landrush).toContain("paletteGroup === 'roof-features'")
     expect(landrush).toContain('materialPaint: boolean')
     expect(landrush).toContain("type.mode !== 'material-paint'")
+    expect(landrush).toContain('data-editor-build-controller-item')
+    expect(landrush).toContain('data-editor-build-controller-action="placement"')
+    expect(landrush).toContain('data-editor-build-controller-action="palette"')
   })
 
   test('keeps the standalone viewer toolbar with only declared embed capability gates', () => {
@@ -327,6 +369,7 @@ describe('Landrush Pascal editor UI parity', () => {
 
     expect(chrome).toContain(`<BuildTab
       capabilities={{ materialPaint: false }}
+      interactionReady={interactionReady}
       runStructureToolActivation={runLandrushPascalToolActivationInCurrentLevel}
     />`)
     expect(chrome).toContain('<ItemsPanel showSourceFilter={false} showTagFilters={false} />')
@@ -359,7 +402,15 @@ describe('Landrush Pascal editor UI parity', () => {
     expect(chrome).not.toContain('<span>Select</span>')
     expect(chrome).not.toContain("editor.setActiveSidebarPanel('build')")
     expect(chrome).toContain('data-landrush-exit-build')
+    expect(chrome).toContain('ref={chromeRootRef}')
+    expect(chrome).toContain('ref={exitBuildButtonRef}')
     expect(chrome).toContain('onExitBuild()')
+    expect(chrome).toContain('aria-hidden={!layoutOpen}')
+    expect(chrome).toContain('inert={!layoutOpen}')
+    expect(chrome).toContain('inert={!interactionReady}')
+    expect(chrome).toContain("pointerEvents: layoutOpen && interactionReady ? 'auto' : 'none'")
+    expect(chrome).toContain('resolveLandrushPascalEditorPresentationTransition')
+    expect(chrome).toContain('data-landrush-pascal-editor-mode-transition=')
     expect(chrome).not.toMatch(/from ['"].*apps\/editor/)
   })
 
@@ -373,14 +424,21 @@ describe('Landrush Pascal editor UI parity', () => {
 
     expect(host.match(/<Viewer\b/g)).toHaveLength(1)
     expect(host).toContain('editingChrome: ReactNode')
-    expect(host).toContain('{editingActive ? editingChrome : null}')
+    expect(host).toContain('{editingChrome}')
     expect(host).toContain('data-landrush-pascal-viewer-viewport')
+    expect(host).toContain('data-landrush-pascal-viewer-mode-transition=')
+    expect(host).toContain('data-landrush-pascal-viewer-surface')
     expect(host).toContain('className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"')
     expect(host).not.toContain('style={{ left: viewerLeft }}')
     expect(host).toContain('const gridSnapStep = useEditor((state) => state.gridSnapStep)')
     expect(host).toContain('cellSize={gridSnapStep}')
+    expect(host).not.toContain('visualPolicy=')
     expect(host).toContain('<LandrushPascalEditingRuntime />')
     expect(host).toContain('exitLandrushPascalEditingToSelect()')
+    expect(host).toContain(
+      'didLandrushPascalEditingDeactivate(previousEditingActive, editingActive)',
+    )
+    expect(host).not.toContain('() => exitLandrushPascalEditingToSelect()')
     expect(host).toContain('<ToolManager />')
     expect(host).not.toContain('LANDRUSH_STRUCTURE_TOOLS')
     expect(host).not.toContain('LandrushPascalEditingChrome')
@@ -392,13 +450,14 @@ describe('Landrush Pascal editor UI parity', () => {
   })
 
   test('mounts Pascal chrome only for the build phase and removes competing Landrush HUD', () => {
+    const buildGridOverlay = readSource('landrush-build-grid-overlay.tsx')
     const island = readSource('landrush-island-client.tsx')
 
     expect(island).toContain(
       "import { LandrushPascalEditorChrome } from './landrush-pascal-editor-chrome'",
     )
     expect(island).toMatch(
-      /editingChrome=\{\s*buildEditorChromeActive && !zombieEscapeNightActive \? \(\s*<LandrushPascalEditorChrome onExitBuild=\{enterPlayerView\} \/>/,
+      /editingChrome=\{\s*<LandrushPascalEditorChrome\s+active=\{buildEditorChromeActive && !zombieEscapeNightActive\}\s+chromeRootRef=\{buildEditorChromeRootRef\}\s+exitBuildButtonRef=\{buildEditorExitButtonRef\}\s+interactionReady=\{buildEditorInteractionReady\}\s+modeTransitionActive=\{buildEditorModeTransitionActive\}\s+onExitBuild=\{enterPlayerView\}\s+open=\{buildEditorLayoutOpen\}\s*\/>/,
     )
     expect(island).toContain(
       'const buildEditorRuntimeActive = buildEditorSystemsActive && !zombieEscapeNightActive',
@@ -408,13 +467,47 @@ describe('Landrush Pascal editor UI parity', () => {
     )
     expect(island).toContain('editingActive={buildEditorRuntimeActive}')
     expect(island).toContain(
+      'editingViewportModeTransitionActive={buildEditorModeTransitionActive}',
+    )
+    expect(island).toContain('editingViewportOpen={buildEditorLayoutOpen}')
+    expect(island).not.toContain('LandrushIslandLevelModeControls')
+    expect(island).toContain(`ownedHorizontalGridPlaneY={
+                dayInterfaceState.buildControlsActive && (activeBuildParcel ?? localOwnedParcel)
+                  ? activeBuildGroundY
+                  : null
+              }`)
+    expect(buildGridOverlay).not.toContain('isGridSnapActive')
+    expect(buildGridOverlay).not.toContain('resolveLandrushBuildGridOverlayMeshVisibility')
+    expect(buildGridOverlay).toContain(
+      'visible={(renderVisible || warmupVisible) && Boolean(renderParcel)}',
+    )
+    expect(island).toContain('interactionReady: buildEditorInteractionReadyState')
+    expect(island).toContain('interactionReady: buildEditorInteractionReady,')
+    expect(island).toContain(
+      'const buildEditorModeSyncRequested = shouldSyncLandrushBuildEditorMode({',
+    )
+    expect(island).toContain('useLayoutEffect(() => {')
+    expect(island).toContain(
+      'if (!hasLiveLayoutNode || !buildEditorChromeActive || !buildEditorModeSyncRequested)',
+    )
+    expect(island).not.toContain('landrush-island.effect.sync-build-mode-after-scene-load')
+    expect(island).toContain(
       "event.code === 'KeyR' && !event.shiftKey && !buildEditorKeyboardReserved",
     )
-    expect(island).toMatch(
-      /\{!zombieEscapeNightActive && !buildEditorChromeActive \? \(\s*<MultiplayerStatusPanel/,
+    expect(island).toContain('data-landrush-day-chrome')
+    expect(island).toContain('data-landrush-interface-focus-sink')
+    expect(island).toContain('beginBuildEditorFocusHandoff(nextTransition)')
+    expect(island).toContain('resolveLandrushBuildEditorFocusRestore({')
+    expect(island).toContain(
+      "handoff.targetOwner === 'editor' ? buildEditorLayoutOpen : dayChromeInteractionReady",
     )
-    expect(island).toMatch(
-      /\{!zombieEscapeNightActive && !buildEditorChromeActive \? \(\s*<div\s+className="pointer-events-auto absolute top-20 right-3/,
+    expect(island).toContain('ref={dayBuildButtonRef}')
+    expect(island).toContain('ref={dayChromeRootRef}')
+    expect(island).toContain('aria-hidden={!dayChromeInteractionReady}')
+    expect(island).toContain('inert={!dayChromeInteractionReady}')
+    expect(island).toMatch(/transition: `opacity \$\{dayChromeTransition\}`/)
+    expect(island).not.toMatch(
+      /\{!zombieEscapeNightActive && !buildEditorChromeActive \? \(\s*<MultiplayerStatusPanel/,
     )
   })
 })

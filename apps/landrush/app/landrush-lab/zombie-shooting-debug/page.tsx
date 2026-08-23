@@ -1,7 +1,7 @@
 import { ZombieShootingDebugClient } from '@/components/landrush-lab/zombie-shooting-debug-client'
 
 export const metadata = {
-  title: 'Zombie Shooting Debug · Landrush Lab',
+  title: 'All-Weapon Zombie Hit Debug · Landrush Lab',
 }
 
 export default function ZombieShootingDebugPage() {

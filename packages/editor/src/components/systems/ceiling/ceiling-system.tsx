@@ -1,5 +1,5 @@
 import { type AnyNodeId, sceneRegistry, useScene } from '@pascal-app/core'
-import { useViewer } from '@pascal-app/viewer'
+import { cloneMaterial, useViewer } from '@pascal-app/viewer'
 import { useEffect } from 'react'
 import { Color, type Material, type Mesh } from 'three'
 import useEditor from '../../../store/use-editor'
@@ -24,7 +24,7 @@ type HighlightableMaterial = Material & {
 
 function cloneCeilingGridHighlightMaterial(material: Material | Material[]): Material | Material[] {
   const cloneOne = (entry: Material): Material => {
-    const clone = entry.clone() as HighlightableMaterial
+    const clone = cloneMaterial(entry) as HighlightableMaterial
     if (clone.color instanceof Color) {
       clone.color.set(CEILING_GRID_HIGHLIGHT_COLOR)
     }

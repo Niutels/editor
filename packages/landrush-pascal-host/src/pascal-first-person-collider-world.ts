@@ -1,12 +1,20 @@
-import { buildFirstPersonColliderWorld, type FirstPersonColliderWorld } from '@landrush/runtime'
+import {
+  buildFirstPersonColliderWorld,
+  type FirstPersonColliderWorld,
+  resolveLandrushSemanticItemCollisionProfile,
+} from '@landrush/runtime'
 import {
   type AnyNode,
   type AnyNodeId,
+  computeStairSegmentChainTransforms,
   type DoorNode,
   type FenceNode,
   getFenceCenterlineFrameAt,
   getFenceCenterlineLength,
+  getFloorStackedPosition,
   getGarageVisibleOpeningRatio,
+  getLevelElevations,
+  type ItemNode,
   isOperationDoorType,
   nodeRegistry,
   type StairNode,
@@ -31,60 +39,6 @@ const FENCE_COLLIDER_MAX_SEGMENT_LENGTH = 0.75
 type LevelNode = Extract<AnyNode, { type: 'level' }>
 type SiteNode = Extract<AnyNode, { type: 'site' }>
 type SceneNodes = ReturnType<typeof useScene.getState>['nodes']
-type StairSegmentTransform = {
-  position: [number, number, number]
-  rotation: number
-}
-
-function rotatePlanVector(x: number, z: number, rotation: number): [number, number] {
-  const cosine = Math.cos(rotation)
-  const sine = Math.sin(rotation)
-  return [x * cosine - z * sine, x * sine + z * cosine]
-}
-
-function computeFloorplanStairSegmentTransforms(
-  segments: StairSegmentNode[],
-): StairSegmentTransform[] {
-  const transforms: StairSegmentTransform[] = []
-  let currentX = 0
-  let currentY = 0
-  let currentZ = 0
-  let currentRotation = 0
-
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index]!
-    if (index > 0) {
-      const previousSegment = segments[index - 1]!
-      let attachX = 0
-      const attachY = previousSegment.height
-      let attachZ = previousSegment.length
-      let rotationDelta = 0
-
-      if (segment.attachmentSide === 'left') {
-        attachX = previousSegment.width / 2
-        attachZ = previousSegment.length / 2
-        rotationDelta = Math.PI / 2
-      } else if (segment.attachmentSide === 'right') {
-        attachX = -previousSegment.width / 2
-        attachZ = previousSegment.length / 2
-        rotationDelta = -Math.PI / 2
-      }
-
-      const [rotatedAttachX, rotatedAttachZ] = rotatePlanVector(attachX, attachZ, currentRotation)
-      currentX += rotatedAttachX
-      currentY += attachY
-      currentZ += rotatedAttachZ
-      currentRotation += rotationDelta
-    }
-
-    transforms.push({
-      position: [currentX, currentY, currentZ],
-      rotation: currentRotation,
-    })
-  }
-
-  return transforms
-}
 
 function computeSceneBoundsXZ(nodes: AnyNode[] | SceneNodes) {
   const values = Array.isArray(nodes) ? nodes : Object.values(nodes)
@@ -174,6 +128,106 @@ function createBoxColliderGeometry(width: number, height: number, depth: number)
   return geometry
 }
 
+function createItemSemanticColliderGeometry(
+  root: THREE.Object3D | undefined,
+  item: ItemNode,
+  nodes: SceneNodes,
+) {
+  const profile = resolveLandrushSemanticItemCollisionProfile({
+    attachTo: item.asset.attachTo,
+    dimensions: item.asset.dimensions,
+    scale: item.scale,
+    surfaceHeight: item.asset.surface?.height,
+    tags: item.asset.tags,
+  })
+  if (!profile) return null
+
+  const worldMatrix = resolveItemSemanticWorldMatrix(item, nodes, root)
+  if (!worldMatrix) return null
+  const height = profile.maximumY - profile.minimumY
+  const geometry = createBoxColliderGeometry(profile.width, height, profile.depth)
+  geometry.applyMatrix4(new THREE.Matrix4().makeTranslation(0, profile.minimumY + height / 2, 0))
+  geometry.applyMatrix4(worldMatrix)
+  return geometry
+}
+
+function resolveItemSemanticWorldMatrix(item: ItemNode, nodes: SceneNodes, root?: THREE.Object3D) {
+  const level = item.parentId ? nodes[item.parentId as AnyNodeId] : undefined
+  if (level?.type !== 'level') {
+    if (root) {
+      root.updateWorldMatrix(true, false)
+      return root.matrixWorld.clone()
+    }
+    if (item.parentId) return null
+    return createPoseMatrix(item.position, item.rotation)
+  }
+
+  const position = getFloorStackedPosition({ node: item, nodes, position: item.position })
+  const levelBaseY = getLevelElevations(nodes).get(level.id)?.baseY ?? level.baseElevation
+  const matrix = resolveBuildingWorldMatrix(level, nodes)
+  matrix.multiply(new THREE.Matrix4().makeTranslation(0, levelBaseY, 0))
+  matrix.multiply(createPoseMatrix(position, item.rotation))
+  return matrix
+}
+
+function resolveStairSemanticWorldMatrix(
+  stair: StairNode,
+  nodes: SceneNodes,
+  root?: THREE.Object3D,
+) {
+  const level = stair.parentId ? nodes[stair.parentId as AnyNodeId] : undefined
+  if (level?.type !== 'level') {
+    if (root) {
+      root.updateWorldMatrix(true, false)
+      return root.matrixWorld.clone()
+    }
+    if (stair.parentId) return null
+    return createPoseMatrix(stair.position, [0, stair.rotation, 0])
+  }
+
+  const position = getFloorStackedPosition({
+    levelId: level.id,
+    node: stair,
+    nodes,
+    position: stair.position,
+    rotation: stair.rotation,
+  })
+  const levelBaseY = getLevelElevations(nodes).get(level.id)?.baseY ?? level.baseElevation
+  const matrix = resolveBuildingWorldMatrix(level, nodes)
+  matrix.multiply(new THREE.Matrix4().makeTranslation(0, levelBaseY, 0))
+  matrix.multiply(createPoseMatrix(position, [0, stair.rotation, 0]))
+  return matrix
+}
+
+function resolveBuildingWorldMatrix(level: LevelNode, nodes: SceneNodes) {
+  const building = level.parentId ? nodes[level.parentId as AnyNodeId] : undefined
+  return building?.type === 'building'
+    ? createPoseMatrix(building.position, building.rotation)
+    : new THREE.Matrix4()
+}
+
+function createPoseMatrix(
+  position: readonly [number, number, number],
+  rotation: readonly [number, number, number],
+) {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...position),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+    new THREE.Vector3(1, 1, 1),
+  )
+}
+
+function isSemanticNodeHierarchyVisible(node: AnyNode, nodes: SceneNodes) {
+  const visited = new Set<string>()
+  let current: AnyNode | undefined = node
+  while (current) {
+    if (current.visible === false || visited.has(current.id)) return false
+    visited.add(current.id)
+    current = current.parentId ? nodes[current.parentId as AnyNodeId] : undefined
+  }
+  return true
+}
+
 function getVisibleLevelChildren(level: LevelNode, nodes: SceneNodes) {
   return level.children
     .map((childId) => nodes[childId as AnyNodeId])
@@ -181,7 +235,7 @@ function getVisibleLevelChildren(level: LevelNode, nodes: SceneNodes) {
 }
 
 function createLevelFallbackFloorGeometry(level: LevelNode, nodes: SceneNodes) {
-  if (level.visible === false) return null
+  if (level.visible === false || level.level !== 0) return null
 
   const children = getVisibleLevelChildren(level, nodes)
   if (children.some((child) => child.type === 'slab')) return null
@@ -211,10 +265,14 @@ function createLevelFallbackFloorGeometry(level: LevelNode, nodes: SceneNodes) {
   return geometry
 }
 
-function collectLevelFallbackFloorGeometries(nodes: SceneNodes) {
+function collectLevelFallbackFloorGeometries(
+  nodes: SceneNodes,
+  excludedRegisteredNodeIds?: ReadonlySet<string>,
+) {
   const geometries: THREE.BufferGeometry[] = []
 
   for (const levelId of sceneRegistry.byType.level!) {
+    if (excludedRegisteredNodeIds?.has(levelId)) continue
     const node = nodes[levelId as AnyNodeId]
     if (node?.type !== 'level') continue
 
@@ -262,10 +320,14 @@ function createSiteGroundColliderGeometry(site: SiteNode, nodes: SceneNodes) {
   return geometry
 }
 
-function collectSiteGroundColliderGeometries(nodes: SceneNodes) {
+function collectSiteGroundColliderGeometries(
+  nodes: SceneNodes,
+  excludedRegisteredNodeIds?: ReadonlySet<string>,
+) {
   const geometries: THREE.BufferGeometry[] = []
 
   for (const siteId of sceneRegistry.byType.site ?? []) {
+    if (excludedRegisteredNodeIds?.has(siteId)) continue
     const node = nodes[siteId as AnyNodeId]
     if (node?.type !== 'site') continue
 
@@ -465,7 +527,8 @@ function createFenceBarrierColliderGeometries(root: THREE.Object3D, fence: Fence
 }
 
 function collectStraightStairColliderGeometries(
-  root: THREE.Object3D,
+  root: THREE.Object3D | undefined,
+  stairWorldMatrix: THREE.Matrix4,
   stair: StairNode,
   nodes: SceneNodes,
   visitedMeshes: WeakSet<THREE.Object3D>,
@@ -479,8 +542,7 @@ function collectStraightStairColliderGeometries(
     .filter((node): node is StairSegmentNode => node?.type === 'stair-segment')
   if (segments.length === 0) return null
 
-  root.updateMatrixWorld(true)
-  const transforms = computeFloorplanStairSegmentTransforms(segments)
+  const transforms = computeStairSegmentChainTransforms(segments)
   const geometries: THREE.BufferGeometry[] = []
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index]
@@ -493,12 +555,12 @@ function collectStraightStairColliderGeometries(
         .makeRotationY(transform.rotation)
         .setPosition(transform.position[0], transform.position[1], transform.position[2]),
     )
-    geometry.applyMatrix4(root.matrixWorld)
+    geometry.applyMatrix4(stairWorldMatrix)
     geometries.push(geometry)
   }
   if (geometries.length === 0) return null
 
-  const railingRoot = root.getObjectByName('stair-railing')
+  const railingRoot = root?.getObjectByName('stair-railing')
   if (railingRoot && isEffectivelyVisible(railingRoot)) {
     geometries.push(
       ...collectColliderGeometriesFromNode(
@@ -513,10 +575,17 @@ function collectStraightStairColliderGeometries(
   return geometries
 }
 
-function buildRegisteredColliderNodeIds(nodes: SceneNodes) {
+function buildRegisteredColliderNodeIds(
+  nodes: SceneNodes,
+  excludedRegisteredNodeIds?: ReadonlySet<string>,
+) {
   const nodeIds = new Set<string>()
 
   for (const nodeId of sceneRegistry.nodes.keys()) {
+    if (excludedRegisteredNodeIds?.has(nodeId)) {
+      nodeIds.add(nodeId)
+      continue
+    }
     const node = nodes[nodeId as AnyNodeId]
     if (!node || !isGenericColliderNode(node)) continue
     if (shouldSkipColliderNode(node)) continue
@@ -569,18 +638,58 @@ function collectColliderGeometriesFromNode(
   return geometries
 }
 
-export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonColliderWorld | null {
+export function buildFirstPersonColliderWorldFromRegistry(
+  excludedRegisteredNodeIds?: ReadonlySet<string>,
+): FirstPersonColliderWorld | null {
   const nodes = useScene.getState().nodes
   const geometries: THREE.BufferGeometry[] = []
   const visitedMeshes = new WeakSet<THREE.Object3D>()
-  const registeredColliderNodeIds = buildRegisteredColliderNodeIds(nodes)
+  const registeredColliderNodeIds = buildRegisteredColliderNodeIds(nodes, excludedRegisteredNodeIds)
   const registeredObjectIds = new Map<THREE.Object3D, string>()
 
   for (const [nodeId, object] of sceneRegistry.nodes) {
     registeredObjectIds.set(object, nodeId)
   }
 
+  const semanticColliderNodeIds = new Set<string>()
+  const semanticNodes = Object.values(nodes).sort((first, second) =>
+    first.id.localeCompare(second.id),
+  )
+  for (const node of semanticNodes) {
+    if (excludedRegisteredNodeIds?.has(node.id) || !isSemanticNodeHierarchyVisible(node, nodes)) {
+      continue
+    }
+    if (node.type === 'item') {
+      semanticColliderNodeIds.add(node.id)
+      const geometry = createItemSemanticColliderGeometry(
+        sceneRegistry.nodes.get(node.id),
+        node,
+        nodes,
+      )
+      if (geometry) geometries.push(geometry)
+      continue
+    }
+    if (node.type !== 'stair' || node.stairType !== 'straight') continue
+    const root = sceneRegistry.nodes.get(node.id)
+    const worldMatrix = resolveStairSemanticWorldMatrix(node, nodes, root)
+    if (!worldMatrix) continue
+    const stairGeometries = collectStraightStairColliderGeometries(
+      root,
+      worldMatrix,
+      node,
+      nodes,
+      visitedMeshes,
+      registeredObjectIds,
+      registeredColliderNodeIds,
+    )
+    if (!stairGeometries) continue
+    semanticColliderNodeIds.add(node.id)
+    geometries.push(...stairGeometries)
+  }
+
   for (const nodeId of registeredColliderNodeIds) {
+    if (excludedRegisteredNodeIds?.has(nodeId)) continue
+    if (semanticColliderNodeIds.has(nodeId)) continue
     const node = nodes[nodeId as AnyNodeId]
     if (!node) continue
     const root = sceneRegistry.nodes.get(nodeId)
@@ -605,8 +714,10 @@ export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonCollider
     }
 
     if (node.type === 'stair') {
+      root.updateWorldMatrix(true, false)
       const stairGeometries = collectStraightStairColliderGeometries(
         root,
+        root.matrixWorld,
         node,
         nodes,
         visitedMeshes,
@@ -631,8 +742,8 @@ export function buildFirstPersonColliderWorldFromRegistry(): FirstPersonCollider
     )
   }
 
-  geometries.push(...collectLevelFallbackFloorGeometries(nodes))
-  geometries.push(...collectSiteGroundColliderGeometries(nodes))
+  geometries.push(...collectLevelFallbackFloorGeometries(nodes, excludedRegisteredNodeIds))
+  geometries.push(...collectSiteGroundColliderGeometries(nodes, excludedRegisteredNodeIds))
 
   return buildFirstPersonColliderWorld(geometries)
 }

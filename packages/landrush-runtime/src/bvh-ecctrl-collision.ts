@@ -27,3 +27,18 @@ export function resolveBVHEcctrlCollisionNormalSpeed({
       : 0
   return absorbedSpeed + pushBackSpeed
 }
+
+export function resolveBVHEcctrlCollisionCorrectionDistance({
+  averageDepth,
+  maxCorrectionDistance,
+  mode,
+  skin,
+}: {
+  averageDepth: number
+  maxCorrectionDistance: number
+  mode: BVHEcctrlCollisionResponseMode
+  skin: number
+}) {
+  if (mode !== 'slide' || averageDepth <= 0) return 0
+  return Math.min(Math.max(0, maxCorrectionDistance), Math.max(0, averageDepth) + Math.max(0, skin))
+}

@@ -1,5 +1,6 @@
 'use client'
 
+import { useGLTFKTX2 } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
@@ -76,7 +77,7 @@ export function ZombieRunningDebugClient() {
         zombie.id,
         {
           clipName: zombie.glb.run.expectedClipName,
-          detail: 'Loading actual run.glb',
+          detail: 'Loading optimized rig and animation-only run clip',
           state: 'loading' as const,
         },
       ]),
@@ -307,20 +308,21 @@ function ActualZombieRunner({
   timeScale: number
   zombie: ZombieEscapeZombieCatalogEntry
 }) {
-  const gltf = useGLTF(zombie.glb.run.path)
+  const riggedGltf = useGLTFKTX2(zombie.glb.riggedBase.path)
+  const runGltf = useGLTF(zombie.glb.run.path)
   const stage = RUNNER_STAGES[index]!
   const runnerRef = useRef<Group>(null)
   const elapsedRef = useRef(0)
-  const model = useMemo(() => cloneSkeleton(gltf.scene) as Group, [gltf.scene])
+  const model = useMemo(() => cloneSkeleton(riggedGltf.scene) as Group, [riggedGltf.scene])
   const modelTransform = useMemo(
-    () => computeRunnerTransform(gltf.scene, zombie.characterHeightMeters),
-    [gltf.scene, zombie.characterHeightMeters],
+    () => computeRunnerTransform(riggedGltf.scene, zombie.characterHeightMeters),
+    [riggedGltf.scene, zombie.characterHeightMeters],
   )
   const exactClip = useMemo(
     () =>
-      gltf.animations.find((animation) => animation.name === zombie.glb.run.expectedClipName) ??
+      runGltf.animations.find((animation) => animation.name === zombie.glb.run.expectedClipName) ??
       null,
-    [gltf.animations, zombie.glb.run.expectedClipName],
+    [runGltf.animations, zombie.glb.run.expectedClipName],
   )
   const mixer = useMemo(() => new AnimationMixer(model), [model])
 
@@ -356,7 +358,7 @@ function ActualZombieRunner({
     action.play()
     onStatus(zombie.id, {
       clipName: exactClip.name,
-      detail: `${zombie.glb.run.path} · exact clip active`,
+      detail: `${zombie.glb.riggedBase.path} + ${zombie.glb.run.path} · exact clip active`,
       state: 'ready',
     })
 
@@ -384,7 +386,8 @@ function ActualZombieRunner({
       ref={runnerRef}
       rotation={[0, stage.yaw, 0]}
       userData={{
-        actualAssetPath: zombie.glb.run.path,
+        actualAnimationPath: zombie.glb.run.path,
+        actualAssetPath: zombie.glb.riggedBase.path,
         actualClipName: zombie.glb.run.expectedClipName,
         variantId: zombie.id,
       }}

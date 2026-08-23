@@ -1,6 +1,10 @@
 'use client'
 
-import { LANDRUSH_WATER_SURFACE_ELEVATION, type PascalWaterLandSurface } from '@landrush/pascal-plugin'
+import {
+  LANDRUSH_WATER_SURFACE_ELEVATION,
+  type PascalWaterLandSurface,
+} from '@landrush/pascal-plugin'
+import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
@@ -80,37 +84,34 @@ export function ProceduralRockCliffs({
   wallControls: ProceduralRockCliffWallControls
   waterSurfaceElevation?: number
 }) {
-  const plan = useMemo(
-    () => {
-      const build = () =>
-        createProceduralRockCliffPlan({
-          beachControls,
-          cutCount,
-          offshoreControls,
-          quality,
-          rockScale,
-          seed,
-          surface,
-          toneControls,
-          wallControls,
-          waterSurfaceElevation,
-        })
-      return profileMeasure ? profileMeasure('setup.cliffs.geometry-plan', build) : build()
-    },
-    [
-      beachControls,
-      cutCount,
-      offshoreControls,
-      profileMeasure,
-      quality,
-      rockScale,
-      seed,
-      surface,
-      toneControls,
-      wallControls,
-      waterSurfaceElevation,
-    ],
-  )
+  const plan = useMemo(() => {
+    const build = () =>
+      createProceduralRockCliffPlan({
+        beachControls,
+        cutCount,
+        offshoreControls,
+        quality,
+        rockScale,
+        seed,
+        surface,
+        toneControls,
+        wallControls,
+        waterSurfaceElevation,
+      })
+    return profileMeasure ? profileMeasure('setup.cliffs.geometry-plan', build) : build()
+  }, [
+    beachControls,
+    cutCount,
+    offshoreControls,
+    profileMeasure,
+    quality,
+    rockScale,
+    seed,
+    surface,
+    toneControls,
+    wallControls,
+    waterSurfaceElevation,
+  ])
   const grassField = useMemo(
     () =>
       showGround
@@ -126,41 +127,34 @@ export function ProceduralRockCliffs({
         : null,
     [showGround, surface.grassSurfacePoints],
   )
-  const waterlineInteractionField = useMemo(
-    () => {
-      if (!onWaterlineInteractionField) return null
-      const build = () =>
-        createWaterlineInteractionField(
-          plan.geometry,
-          waterSurfaceElevation ?? LANDRUSH_WATER_SURFACE_ELEVATION,
-          {
-            elevationRangeMeters: 2.5,
-            maximumDistanceMeters: 6,
-            resolution: quality === 'dense' ? 1280 : 1024,
-          },
-        )
-      return profileMeasure ? profileMeasure('setup.cliffs.waterline-sdf', build) : build()
-    },
-    [onWaterlineInteractionField, plan.geometry, profileMeasure, quality, waterSurfaceElevation],
-  )
+  const waterlineInteractionField = useMemo(() => {
+    if (!onWaterlineInteractionField) return null
+    const build = () =>
+      createWaterlineInteractionField(
+        plan.geometry,
+        waterSurfaceElevation ?? LANDRUSH_WATER_SURFACE_ELEVATION,
+        {
+          elevationRangeMeters: 2.5,
+          maximumDistanceMeters: 6,
+          resolution: quality === 'dense' ? 1280 : 1024,
+        },
+      )
+    return profileMeasure ? profileMeasure('setup.cliffs.waterline-sdf', build) : build()
+  }, [onWaterlineInteractionField, plan.geometry, profileMeasure, quality, waterSurfaceElevation])
   const toonGradient = useMemo(createRockToonGradientTexture, [])
+
+  useGpuResourceLifetime(plan.coverageGeometry)
+  useGpuResourceLifetime(plan.geometry)
+  useGpuResourceLifetime(plan.variantGeometry)
+  useGpuResourceLifetime(grassField?.texture)
+  useGpuResourceLifetime(toonGradient)
+  useGpuResourceLifetime(waterlineInteractionField?.texture)
 
   useEffect(() => onMetrics?.(plan.metrics), [onMetrics, plan.metrics])
   useEffect(() => {
     onWaterlineInteractionField?.(waterlineInteractionField)
     return () => onWaterlineInteractionField?.(null)
   }, [onWaterlineInteractionField, waterlineInteractionField])
-  useEffect(
-    () => () => {
-      plan.coverageGeometry.dispose()
-      plan.geometry.dispose()
-      plan.variantGeometry.dispose()
-    },
-    [plan],
-  )
-  useEffect(() => () => grassField?.texture.dispose(), [grassField])
-  useEffect(() => () => toonGradient.dispose(), [toonGradient])
-  useEffect(() => () => waterlineInteractionField?.texture.dispose(), [waterlineInteractionField])
 
   const rockGeometry =
     debugMode === 'coverage'
@@ -206,7 +200,7 @@ function ProceduralRockMesh({
     [debugMode, toonGradient],
   )
 
-  useEffect(() => () => material.dispose(), [material])
+  useGpuResourceLifetime(material)
 
   return (
     <mesh

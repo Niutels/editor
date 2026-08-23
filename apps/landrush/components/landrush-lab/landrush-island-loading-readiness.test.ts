@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { createLandrushIslandPaintReadinessGate } from './landrush-island-loading-readiness'
+import {
+  advanceLandrushGeneratedAssetMountGeneration,
+  createLandrushInitialParcelAuthorityKey,
+  createLandrushIslandLoadingHandoffGate,
+  createLandrushIslandPaintReadinessGate,
+  reconcileLandrushGeneratedAssetReadinessStatus,
+  resolveLandrushAuthorityResyncActive,
+  resolveLandrushGeneratedAssetsReady,
+  resolveLandrushInitialParcelMaterializationReadiness,
+  shouldPersistLandrushIslandOfflineState,
+  wasLandrushInitialParcelAuthorityMaterialized,
+} from './landrush-island-loading-readiness'
 
 function createFrameScheduler() {
   let nextId = 1
@@ -30,7 +41,211 @@ function createFrameScheduler() {
   }
 }
 
+function createTimeoutScheduler() {
+  let nextId = 1
+  const callbacks = new Map<number, () => void>()
+
+  return {
+    flush() {
+      const pending = [...callbacks.values()]
+      callbacks.clear()
+      for (const callback of pending) callback()
+    },
+    pendingCount() {
+      return callbacks.size
+    },
+    scheduler: {
+      clearTimeout(timeoutId: number) {
+        callbacks.delete(timeoutId)
+      },
+      setTimeout(callback: () => void) {
+        const timeoutId = nextId
+        nextId += 1
+        callbacks.set(timeoutId, callback)
+        return timeoutId
+      },
+    },
+  }
+}
+
 describe('Landrush island paint readiness', () => {
+  test('hydrates cached parcel authority only in explicit non-clean offline mode', () => {
+    expect(shouldPersistLandrushIslandOfflineState({ clean: false, offline: true })).toBe(true)
+    expect(shouldPersistLandrushIslandOfflineState({ clean: true, offline: true })).toBe(false)
+    expect(shouldPersistLandrushIslandOfflineState({ clean: false, offline: false })).toBe(false)
+    expect(shouldPersistLandrushIslandOfflineState({ clean: true, offline: false })).toBe(false)
+  })
+
+  test('requires the matching authoritative parcel snapshot and every terminal update', () => {
+    const updates = [
+      { parcelId: 'parcel-a', sequence: 2, worldId: 'world-a' },
+      { parcelId: 'parcel-b', sequence: 4, worldId: 'world-a' },
+    ]
+    const applied = new Map([
+      ['parcel-a', 2],
+      ['parcel-b', 3],
+    ])
+    const resolve = (snapshotWorldId: string | null) =>
+      resolveLandrushInitialParcelMaterializationReadiness({
+        appliedSequenceForUpdate: (update) => applied.get(update.parcelId) ?? 0,
+        authorityEpoch: 7,
+        snapshotWorldId,
+        updates,
+        worldId: 'world-a',
+      })
+
+    expect(resolve('world-b').ready).toBe(false)
+    expect(resolve('world-a').ready).toBe(false)
+    applied.set('parcel-b', 4)
+    expect(resolve('world-a')).toEqual({ authorityKey: '7:world-a', ready: true })
+  })
+
+  test('accepts an empty matching snapshot and invalidates readiness across authority epochs', () => {
+    const readiness = resolveLandrushInitialParcelMaterializationReadiness({
+      appliedSequenceForUpdate: () => 0,
+      authorityEpoch: 3,
+      snapshotWorldId: 'world-a',
+      updates: [],
+      worldId: 'world-a',
+    })
+
+    expect(readiness.ready).toBe(true)
+    expect(readiness.authorityKey).not.toBe(createLandrushInitialParcelAuthorityKey(4, 'world-a'))
+  })
+
+  test('stays unresolved from online-pending through profile authority until the server snapshot', () => {
+    const resolve = (authorityEpoch: number, snapshotWorldId: string | null) =>
+      resolveLandrushInitialParcelMaterializationReadiness({
+        appliedSequenceForUpdate: () => 0,
+        authorityEpoch,
+        snapshotWorldId,
+        updates: [],
+        worldId: 'world-a',
+      })
+
+    expect(resolve(1, null)).toEqual({ authorityKey: '1:world-a', ready: false })
+    expect(resolve(2, null)).toEqual({ authorityKey: '2:world-a', ready: false })
+    expect(resolve(2, 'world-a')).toEqual({ authorityKey: '2:world-a', ready: true })
+  })
+
+  test('does not evict a pending authority generation that never materialized', () => {
+    expect(
+      wasLandrushInitialParcelAuthorityMaterialized({
+        authorityEpoch: 1,
+        readyAuthorityKey: null,
+        worldId: 'world-a',
+      }),
+    ).toBe(false)
+    expect(
+      wasLandrushInitialParcelAuthorityMaterialized({
+        authorityEpoch: 1,
+        readyAuthorityKey: '1:world-a',
+        worldId: 'world-a',
+      }),
+    ).toBe(true)
+  })
+
+  test('accepts generated assets only for their current mount generation', () => {
+    const currentGeneration = 'assets:2:world-a'
+    const ready = reconcileLandrushGeneratedAssetReadinessStatus({
+      current: null,
+      currentGeneration,
+      ready: true,
+      reportedGeneration: currentGeneration,
+    })
+    const afterLateCleanup = reconcileLandrushGeneratedAssetReadinessStatus({
+      current: ready,
+      currentGeneration,
+      ready: false,
+      reportedGeneration: 'assets:1:world-a',
+    })
+
+    expect(afterLateCleanup).toBe(ready)
+    expect(
+      resolveLandrushGeneratedAssetsReady({
+        enabled: true,
+        generation: currentGeneration,
+        status: afterLateCleanup,
+      }),
+    ).toBe(true)
+    expect(
+      resolveLandrushGeneratedAssetsReady({
+        enabled: true,
+        generation: 'assets:3:world-a',
+        status: afterLateCleanup,
+      }),
+    ).toBe(false)
+  })
+
+  test('advances the generated-asset generation only when its owning mode remounts', () => {
+    const mounted = { enabled: true, generation: 4 }
+
+    expect(advanceLandrushGeneratedAssetMountGeneration(mounted, true)).toBe(mounted)
+    expect(advanceLandrushGeneratedAssetMountGeneration(mounted, false)).toEqual({
+      enabled: false,
+      generation: 5,
+    })
+  })
+
+  test('shows a compact resync veil only after initial handoff and until the generation is ready', () => {
+    expect(
+      resolveLandrushAuthorityResyncActive({
+        authorityKey: '2:world-a',
+        handedOff: false,
+        presentedAuthorityKey: null,
+        ready: false,
+      }),
+    ).toBe(false)
+    expect(
+      resolveLandrushAuthorityResyncActive({
+        authorityKey: '3:world-a',
+        handedOff: true,
+        presentedAuthorityKey: '2:world-a',
+        ready: false,
+      }),
+    ).toBe(true)
+    expect(
+      resolveLandrushAuthorityResyncActive({
+        authorityKey: '3:world-a',
+        handedOff: true,
+        presentedAuthorityKey: '3:world-a',
+        ready: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('withdraws readiness when a reconnect removes the same-epoch snapshot', () => {
+    const resolve = (snapshotWorldId: string | null) =>
+      resolveLandrushInitialParcelMaterializationReadiness({
+        appliedSequenceForUpdate: () => 0,
+        authorityEpoch: 9,
+        snapshotWorldId,
+        updates: [],
+        worldId: 'world-a',
+      })
+
+    expect(resolve('world-a')).toEqual({ authorityKey: '9:world-a', ready: true })
+    expect(resolve(null)).toEqual({ authorityKey: '9:world-a', ready: false })
+    expect(resolve('world-a')).toEqual({ authorityKey: '9:world-a', ready: true })
+  })
+
+  test('withdraws readiness when the current update list advances before materialization', () => {
+    let appliedSequence = 3
+    const resolve = (sequence: number) =>
+      resolveLandrushInitialParcelMaterializationReadiness({
+        appliedSequenceForUpdate: () => appliedSequence,
+        authorityEpoch: 9,
+        snapshotWorldId: 'world-a',
+        updates: [{ parcelId: 'parcel-a', sequence, worldId: 'world-a' }],
+        worldId: 'world-a',
+      })
+
+    expect(resolve(3).ready).toBe(true)
+    expect(resolve(4).ready).toBe(false)
+    appliedSequence = 4
+    expect(resolve(4).ready).toBe(true)
+  })
+
   test('waits for two browser presentation frames after every prerequisite is ready', () => {
     const frames = createFrameScheduler()
     const changes: boolean[] = []
@@ -83,13 +298,118 @@ describe('Landrush island paint readiness', () => {
     expect(changes).toEqual([true, false])
   })
 
+  test('cancels loader completion and hands off only the renewed readiness generation', () => {
+    const timeouts = createTimeoutScheduler()
+    const handoffs: string[] = []
+    const resets: Array<{ generation: string; generationChanged: boolean }> = []
+    const gate = createLandrushIslandLoadingHandoffGate({
+      fadeMs: 500,
+      onHandoff: (generation) => handoffs.push(generation),
+      onReset: (reset) => resets.push(reset),
+      scheduler: timeouts.scheduler,
+    })
+
+    gate.setReadiness('pending:world-a', true)
+    expect(gate.requestHandoff('pending:world-a')).toBe(true)
+    gate.setReadiness('online:world-a', false)
+
+    expect(timeouts.pendingCount()).toBe(0)
+    expect(resets).toEqual([{ generation: 'online:world-a', generationChanged: true }])
+
+    gate.setReadiness('online:world-a', true)
+    expect(gate.requestHandoff('pending:world-a')).toBe(false)
+    expect(gate.requestHandoff('online:world-a')).toBe(true)
+    timeouts.flush()
+
+    expect(handoffs).toEqual(['online:world-a'])
+  })
+
+  test('cancels an in-flight loader fade when same-generation readiness withdraws', () => {
+    const timeouts = createTimeoutScheduler()
+    const handoffs: string[] = []
+    const resets: Array<{ generation: string; generationChanged: boolean }> = []
+    const gate = createLandrushIslandLoadingHandoffGate({
+      fadeMs: 500,
+      onHandoff: (generation) => handoffs.push(generation),
+      onReset: (reset) => resets.push(reset),
+      scheduler: timeouts.scheduler,
+    })
+
+    gate.setReadiness('online:world-a', true)
+    gate.requestHandoff('online:world-a')
+    gate.setReadiness('online:world-a', false)
+    timeouts.flush()
+
+    expect(resets).toEqual([{ generation: 'online:world-a', generationChanged: false }])
+    expect(handoffs).toEqual([])
+  })
+
   test('wires the loader to a Landrush world frame and the presentation gate', () => {
     const clientPath = fileURLToPath(new URL('./landrush-island-client.tsx', import.meta.url))
     const clientSource = readFileSync(clientPath, 'utf8')
 
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(clientSource).toContain('useLandrushIslandPaintReadiness(loadingAssetsReady)')
+    expect(clientSource).toContain('ambientLoadReadiness?.ready === true')
     expect(clientSource).toContain('assetsReady={loadingPaintReady}')
+    expect(clientSource).toContain('readinessGeneration={initialParcelAuthorityKey}')
+    expect(clientSource).toContain('createLandrushIslandLoadingHandoffGate({')
+    expect(clientSource).toContain('requestHandoff(loadingRun.generation)')
+    expect(clientSource).toContain('readinessGenerationRef.current === loadingRun.generation')
+    expect(clientSource).toContain('if (!handedOff || loadedRef.current) return')
+    expect(clientSource).toContain('<LandrushIslandAuthorityResyncVeil')
+    expect(clientSource).toContain('Syncing world…')
+    expect(clientSource).toContain('currentInitialParcelReadiness.ready')
+    expect(clientSource).toContain('admitted={initialParcelMaterializationReady}')
+    expect(clientSource).toContain('onLoadReadinessChange={handleAmbientLoadReadinessChange}')
+    expect(clientSource).not.toContain('admitted={!loadingActive}')
+    expect(clientSource).toMatch(
+      /data-landrush-loading-ambient-ready=\{\s*ambientLoadReadiness\?\.ready === true \? 'true' : 'false'\s*\}/,
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-handed-off={!loadingActive ? 'true' : 'false'}",
+    )
+    expect(clientSource).toMatch(
+      /data-landrush-loading-initial-parcel-ready=\{\s*initialParcelMaterializationReady \? 'true' : 'false'\s*\}/,
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-paint-ready={loadingPaintReady ? 'true' : 'false'}",
+    )
+    expect(clientSource).toMatch(
+      /data-landrush-loading-stylized-ground-ready=\{\s*stylizedGroundTextureReady \? 'true' : 'false'\s*\}/,
+    )
+    expect(clientSource).toMatch(
+      /data-landrush-loading-stylized-ground-required=\{\s*stylizedGroundTextureRequired \? 'true' : 'false'\s*\}/,
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-viewer-scene-ready={viewerSceneReady ? 'true' : 'false'}",
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-world-frame-ready={worldFrameReady ? 'true' : 'false'}",
+    )
+    expect(clientSource).toMatch(
+      /data-landrush-loading-zombie-assets-ready=\{\s*zombieEscapeGeneratedAssetsReady \? 'true' : 'false'\s*\}/,
+    )
+
+    const loadingProgressStart = clientSource.indexOf('function useLandrushIslandLoadingProgress')
+    const loadingProgressEnd = clientSource.indexOf(
+      'function useProgressiveRenderValue',
+      loadingProgressStart,
+    )
+    expect(loadingProgressStart).toBeGreaterThanOrEqual(0)
+    expect(loadingProgressEnd).toBeGreaterThan(loadingProgressStart)
+    const loadingProgressSource = clientSource.slice(loadingProgressStart, loadingProgressEnd)
+
+    expect(loadingProgressSource).toContain(
+      'readinessGenerationRef.current === loadingRun.generation',
+    )
+    expect(loadingProgressSource).toContain('assetsReadyRef.current')
+    expect(loadingProgressSource).toContain("document.readyState !== 'loading'")
+    expect(loadingProgressSource).toContain('elapsed >= LANDRUSH_ISLAND_LOADING_MINIMUM_MS')
+    expect(loadingProgressSource).not.toContain('PerformanceObserver')
+    expect(loadingProgressSource).not.toContain('lastLongTaskAt')
+    expect(loadingProgressSource).not.toContain('quietFor')
+    expect(loadingProgressSource).not.toContain('LANDRUSH_ISLAND_LOADING_QUIET_MS')
   })
 
   test('keeps the route shell dark only until the canonical runtime world paints a frame', () => {
@@ -135,5 +455,58 @@ describe('Landrush island paint readiness', () => {
     ).toContain("setAttribute('data-landrush-island-world-frame-ready', '')")
     expect(runtimeOverlaySource).toContain('bg-transparent')
     expect(runtimeOverlaySource).not.toContain('bg-[#0f1720]')
+  })
+
+  test('keeps eager Zombie Escape weapon assets behind a local suspense boundary', () => {
+    const generatedAssetsPath = fileURLToPath(
+      new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
+    )
+    const generatedAssetsSource = readFileSync(generatedAssetsPath, 'utf8')
+    const boundaryStart = generatedAssetsSource.indexOf('export function GeneratedWeaponModel')
+    const loaderStart = generatedAssetsSource.indexOf(
+      'function LoadedGeneratedWeaponModel',
+      boundaryStart,
+    )
+    const nextFunctionStart = generatedAssetsSource.indexOf(
+      'function ZombieEscapeGeneratedZombies',
+      loaderStart,
+    )
+
+    expect(boundaryStart).toBeGreaterThanOrEqual(0)
+    expect(loaderStart).toBeGreaterThan(boundaryStart)
+    expect(nextFunctionStart).toBeGreaterThan(loaderStart)
+
+    const boundarySource = generatedAssetsSource.slice(boundaryStart, loaderStart)
+    const loaderSource = generatedAssetsSource.slice(loaderStart, nextFunctionStart)
+    expect(boundarySource).toContain('<GeneratedAssetErrorBoundary')
+    expect(boundarySource).toContain('<Suspense fallback={null}>')
+    expect(boundarySource).toContain('<LoadedGeneratedWeaponModel')
+    expect(boundarySource).toContain('onAssetStatusChange={onAssetStatusChange}')
+    expect(boundarySource).not.toContain('useGLTF(')
+    expect(loaderSource).toContain('useGLTF(weapon.assetPath)')
+  })
+
+  test('keeps zombie startup pending until the complete generated catalog settles', () => {
+    const clientSource = readFileSync(
+      new URL('./landrush-island-client.tsx', import.meta.url),
+      'utf8',
+    )
+    const generatedAssetsSource = readFileSync(
+      new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(clientSource).toContain('zombieEscapeGeneratedAssetsReady &&')
+    expect(clientSource).not.toContain('setZombieEscapeGeneratedAssetsReady(!zombieEscapeEnabled)')
+    expect(clientSource).toContain('reportedGeneration: zombieEscapeGeneratedAssetGeneration')
+    expect(clientSource).toContain(
+      'onGeneratedAssetsReadyChange={onZombieEscapeGeneratedAssetsReadyChange}',
+    )
+    expect(generatedAssetsSource).toContain('GENERATED_BALANCED_ASSET_KEYS')
+    expect(generatedAssetsSource).toContain('...GENERATED_WEAPON_ASSET_KEYS')
+    expect(generatedAssetsSource).toContain('...GENERATED_ZOMBIE_ASSET_KEYS')
+    expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetSettlement(')
+    expect(generatedAssetsSource).toContain('onGeneratedAssetsReadyChange?.(settlement.ready)')
+    expect(generatedAssetsSource).toContain("onAssetStatusChange(assetKey, { state: 'ready' })")
   })
 })

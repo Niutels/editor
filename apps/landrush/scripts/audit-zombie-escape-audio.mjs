@@ -8,6 +8,7 @@ import {
   fileExists,
   inspectZombieEscapeAudioFile,
   inspectZombieEscapeAudioIntegrity,
+  inspectZombieEscapeAudioLoudness,
   isIsoTimestamp,
   isSha256,
   listMp3Files,
@@ -15,6 +16,9 @@ import {
   readZombieEscapeAudioContract,
   readZombieEscapeAudioProvenance,
   validateZombieEscapeAudioInspection,
+  validateZombieEscapeOneShotMastering,
+  validateZombieEscapeOneShotVariantSpread,
+  ZOMBIE_ESCAPE_ONE_SHOT_MASTERING,
   ZOMBIE_ESCAPE_AUDIO_PUBLIC_PREFIX,
 } from './zombie-escape-audio-pipeline.mjs'
 
@@ -32,9 +36,10 @@ export async function auditZombieEscapeAudio({
   const diskFiles = await listMp3Files(audioRoot)
   const diskPublicPaths = diskFiles.map((path) => publicPathFor(publicRoot, path))
   const artifactRecords = isRecord(provenance?.artifacts) ? provenance.artifacts : {}
+  const masteredLoudnessByCue = new Map()
   const artifactKeys = Object.keys(artifactRecords)
   const pending =
-    provenance?.schemaVersion === 1 &&
+    provenance?.schemaVersion === 2 &&
     provenance.catalogVersion === contract.catalog.catalogVersion &&
     provenance.catalogSha256 === null &&
     provenance.generatedAt === null &&
@@ -50,7 +55,7 @@ export async function auditZombieEscapeAudio({
   if (!isRecord(provenance)) {
     failures.push('provenance manifest is missing or is not an object')
   } else {
-    if (provenance.schemaVersion !== 1) failures.push('provenance.schemaVersion must be 1')
+    if (provenance.schemaVersion !== 2) failures.push('provenance.schemaVersion must be 2')
     if (provenance.catalogVersion !== contract.catalog.catalogVersion) {
       failures.push('provenance.catalogVersion does not match the catalog')
     }
@@ -127,9 +132,38 @@ export async function auditZombieEscapeAudio({
         if (Number.isFinite(inspection.bitRate)) {
           expectEqual(failures, `${label}: bitRateBps`, artifact.bitRateBps, inspection.bitRate)
         }
+        if (asset.masteringProfile) {
+          const loudness = await inspectZombieEscapeAudioLoudness(filePath)
+          for (const failure of validateZombieEscapeOneShotMastering(loudness)) {
+            failures.push(`${label}: ${failure}`)
+          }
+          const cueLoudness = masteredLoudnessByCue.get(asset.cueId) ?? []
+          cueLoudness.push(loudness)
+          masteredLoudnessByCue.set(asset.cueId, cueLoudness)
+          expectNear(
+            failures,
+            `${label}: mastering.outputIntegratedLoudnessLufs`,
+            artifact.mastering?.outputIntegratedLoudnessLufs,
+            loudness.integratedLoudnessLufs,
+            0.01,
+          )
+          expectNear(
+            failures,
+            `${label}: mastering.outputTruePeakDbfs`,
+            artifact.mastering?.outputTruePeakDbfs,
+            loudness.truePeakDbfs,
+            0.01,
+          )
+        }
       }
     } catch (error) {
       failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  for (const [cueId, loudnesses] of masteredLoudnessByCue) {
+    for (const failure of validateZombieEscapeOneShotVariantSpread(loudnesses)) {
+      failures.push(`${cueId}: ${failure}`)
     }
   }
 
@@ -189,6 +223,80 @@ function validateArtifactMetadata(failures, artifact, asset) {
   }
   if (artifact.bitRateBps !== null && !Number.isInteger(artifact.bitRateBps)) {
     failures.push(`${label}: bitRateBps must be an integer or null`)
+  }
+  if (asset.masteringProfile) {
+    validateMasteringMetadata(
+      failures,
+      artifact.mastering,
+      asset.masteringProfile,
+      label,
+    )
+  } else if (artifact.mastering !== null) failures.push(`${label}: mastering must be null`)
+}
+
+function validateMasteringMetadata(failures, mastering, expectedProfile, label) {
+  if (!isRecord(mastering)) {
+    failures.push(`${label}: mastering metadata is missing`)
+    return
+  }
+  expectEqual(
+    failures,
+    `${label}: mastering.algorithm`,
+    mastering.algorithm,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.algorithm,
+  )
+  expectEqual(
+    failures,
+    `${label}: mastering.crestPreconditioner`,
+    mastering.crestPreconditioner,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.crestPreconditioner,
+  )
+  expectEqual(
+    failures,
+    `${label}: mastering.targetIntegratedLoudnessLufs`,
+    mastering.targetIntegratedLoudnessLufs,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.integratedLoudnessLufs,
+  )
+  expectEqual(
+    failures,
+    `${label}: mastering.normalizationTruePeakDbfs`,
+    mastering.normalizationTruePeakDbfs,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.normalizationTruePeakDbfs,
+  )
+  expectEqual(
+    failures,
+    `${label}: mastering.targetTruePeakDbfs`,
+    mastering.targetTruePeakDbfs,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.truePeakDbfs,
+  )
+  expectEqual(
+    failures,
+    `${label}: mastering.outputSampleRateHz`,
+    mastering.outputSampleRateHz,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.outputSampleRateHz,
+  )
+  expectEqual(
+    failures,
+    `${label}: mastering.outputBitRateBps`,
+    mastering.outputBitRateBps,
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.outputBitRateBps,
+  )
+  expectEqual(failures, `${label}: mastering.profile`, mastering.profile, expectedProfile)
+  if (!isSha256(mastering.inputSha256)) {
+    failures.push(`${label}: mastering.inputSha256 is invalid`)
+  }
+  if (!isIsoTimestamp(mastering.processedAt)) {
+    failures.push(`${label}: mastering.processedAt is not a canonical ISO-8601 timestamp`)
+  }
+  for (const field of [
+    'inputIntegratedLoudnessLufs',
+    'inputTruePeakDbfs',
+    'outputIntegratedLoudnessLufs',
+    'outputTruePeakDbfs',
+  ]) {
+    if (!Number.isFinite(mastering[field])) {
+      failures.push(`${label}: mastering.${field} must be finite`)
+    }
   }
 }
 

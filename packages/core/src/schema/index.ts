@@ -278,6 +278,11 @@ export {
   StairType,
 } from './nodes/stair'
 export { AttachmentSide, StairSegmentNode, StairSegmentType } from './nodes/stair-segment'
+export {
+  computeStairSegmentChainTransforms,
+  type StairSegmentChainInput,
+  type StairSegmentChainTransform,
+} from './nodes/stair-segment-chain'
 export { StructuralGridNode } from './nodes/structural-grid'
 export { SurfaceHoleMetadata } from './nodes/surface-hole-metadata'
 export { TurbineVentMaterialRole, TurbineVentNode } from './nodes/turbine-vent'

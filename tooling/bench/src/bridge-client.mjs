@@ -34,7 +34,9 @@ export class BridgeClient {
       last = status?.beacon?.frameIdx ?? null
       await sleep(1000)
     }
-    throw new Error('bench bridge did not come up (missing global, frames stalled, or profiler inactive)')
+    throw new Error(
+      'bench bridge did not come up (missing global, frames stalled, or profiler inactive)',
+    )
   }
 
   async beacon() {
@@ -50,30 +52,57 @@ export class BridgeClient {
   /** Pull new frames since the last pump. Uses the packed (string) channel —
    * deep-object CDP serialization measurably stalls the page main thread. */
   async pumpFrames() {
+    const requestedCursor = this.frameCursor
     const packed = await this.page.evaluate(
       (cursor) =>
-        window.__PASCAL_BENCH__?.getFramesPacked(cursor) ??
-        JSON.stringify({ cursor, frames: [] }),
+        window.__PASCAL_BENCH__?.getFramesPacked(cursor) ?? JSON.stringify({ cursor, frames: [] }),
       this.frameCursor,
     )
     const result = JSON.parse(packed)
-    const gap = this.frameCursor > 0 && result.frames.length > 0
-      ? result.frames[0].frameIdx - this.frameCursor
-      : 0
+    const gap = result.frames.length > 0 ? result.frames[0].frameIdx - requestedCursor : 0
     this.frameCursor = result.cursor
     return { frames: result.frames, droppedByRing: Math.max(0, gap) }
   }
 
-  async pumpEvents() {
+  primeFrameCursor(cursor) {
+    if (!Number.isInteger(cursor) || cursor < 0) {
+      throw new Error(`invalid frame cursor: ${String(cursor)}`)
+    }
+    this.frameCursor = cursor
+  }
+
+  async pumpEventBatch() {
+    const requestedCursor = this.eventCursor
     const packed = await this.page.evaluate(
       (cursor) =>
-        window.__PASCAL_BENCH__?.getEventsPacked(cursor) ??
-        JSON.stringify({ cursor, events: [] }),
+        window.__PASCAL_BENCH__?.getEventsPacked(cursor) ?? JSON.stringify({ cursor, events: [] }),
       this.eventCursor,
     )
     const result = JSON.parse(packed)
+    const firstSeq = result.events.find((event) => Number.isInteger(event?.seq))?.seq
+    const droppedByRing = Number.isInteger(firstSeq)
+      ? Math.max(0, firstSeq - requestedCursor)
+      : Math.max(0, result.cursor - requestedCursor - result.events.length)
     this.eventCursor = result.cursor
-    return result.events
+    return {
+      cursor: result.cursor,
+      droppedByRing,
+      events: result.events,
+      requestedCursor,
+    }
+  }
+
+  async pumpEvents() {
+    return (await this.pumpEventBatch()).events
+  }
+
+  async discardEvents() {
+    const batch = await this.pumpEventBatch()
+    return {
+      cursor: batch.cursor,
+      discardedCount: batch.events.length,
+      droppedByRing: batch.droppedByRing,
+    }
   }
 
   /** Cursor-explicit event read that does NOT advance the shared pump cursor —
@@ -86,7 +115,13 @@ export class BridgeClient {
   }
 
   async mark(label) {
-    await this.page.evaluate((l) => window.__PASCAL_BENCH__?.mark(l), label)
+    return this.page.evaluate((l) => {
+      const bench = window.__PASCAL_BENCH__
+      if (!bench) return null
+      const targetFrameIdx = bench.beacon().frameIdx
+      bench.mark(l)
+      return targetFrameIdx
+    }, label)
   }
 
   async digest() {
@@ -109,9 +144,33 @@ export class BridgeClient {
   }
 
   async waitForSettle(opts = {}) {
+    return this.page.evaluate((o) => window.__PASCAL_BENCH__?.waitForSettle(o) ?? null, opts)
+  }
+
+  async waitForFrame(frameIdx, { timeoutMs = 10_000 } = {}) {
     return this.page.evaluate(
-      (o) => window.__PASCAL_BENCH__?.waitForSettle(o) ?? null,
-      opts,
+      ({ target, timeout }) =>
+        new Promise((resolve, reject) => {
+          let settled = false
+          const timeoutId = setTimeout(() => {
+            if (settled) return
+            settled = true
+            reject(new Error(`bench frame ${target} did not commit within ${timeout}ms`))
+          }, timeout)
+          const check = () => {
+            if (settled) return
+            const current = window.__PASCAL_BENCH__?.beacon()?.frameIdx
+            if (Number.isInteger(current) && current > target) {
+              settled = true
+              clearTimeout(timeoutId)
+              resolve(current)
+              return
+            }
+            requestAnimationFrame(check)
+          }
+          check()
+        }),
+      { target: frameIdx, timeout: timeoutMs },
     )
   }
 
@@ -140,7 +199,10 @@ export class BridgeClient {
       const profiler = window.__LANDRUSH_FRAME_PROFILE__
       if (!profiler) return null
       profiler.freeze()
-      const report = profiler.compactReport({ includeSlowFrames: true, slowFrameLimit: 12 })
+      const report = profiler.compactReport({
+        includeSlowFrames: true,
+        slowFrameLimit: 12,
+      })
       profiler.reset()
       return report
     })

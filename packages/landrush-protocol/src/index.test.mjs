@@ -4,6 +4,7 @@ import {
   DEFAULT_MULTIPLAYER_ROOM_ID,
   isParcelBuildSchemaVersion,
   isParcelWriterEpoch,
+  isMultiplayerPlayerPose,
   isSpatialVoiceSignalPayload,
   isSupportedParcelBuildSchemaVersion,
   LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
@@ -62,4 +63,11 @@ test('normalizes multiplayer room ids consistently for clients and servers', () 
     sanitizeMultiplayerRoomId('x'.repeat(MAX_MULTIPLAYER_ROOM_ID_LENGTH + 1)),
     'x'.repeat(MAX_MULTIPLAYER_ROOM_ID_LENGTH),
   )
+})
+
+test('accepts only supported multiplayer presentation poses', () => {
+  assert.equal(isMultiplayerPlayerPose('crouching'), true)
+  assert.equal(isMultiplayerPlayerPose('falling'), true)
+  assert.equal(isMultiplayerPlayerPose('standing'), false)
+  assert.equal(isMultiplayerPlayerPose(undefined), false)
 })

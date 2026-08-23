@@ -1,0 +1,207 @@
+{
+  "assetCount": 27,
+  "authoringSourceBytes": 480181689,
+  "consumedCredits": 485,
+  "failures": [],
+  "generatedAt": "2026-08-22T04:46:57.071Z",
+  "publicAssetBytes": 14088316,
+  "publicMetadataBytes": 363520,
+  "publicPayloadBytes": 13724796,
+  "runtimeCompressedTextureBytes": 7884810,
+  "runtimeGlbBytes": 12340260,
+  "runtimeReachableBytes": 13724796,
+  "runtimeTextureCount": 78,
+  "runtimeUncompressedRgbaMipBytes": 126528000,
+  "summaries": [
+    {
+      "id": "tropical-fishing-skiff",
+      "kind": "boat",
+      "runtimeBytes": 685252,
+      "textureResolution": 512,
+      "triangles": 2840
+    },
+    {
+      "id": "island-rescue-speedboat",
+      "kind": "boat",
+      "runtimeBytes": 627772,
+      "textureResolution": 512,
+      "triangles": 2941
+    },
+    {
+      "id": "harbor-workboat",
+      "kind": "boat",
+      "runtimeBytes": 617088,
+      "textureResolution": 512,
+      "triangles": 2810
+    },
+    {
+      "id": "classic-coconut-palm",
+      "kind": "palm",
+      "runtimeBytes": 499576,
+      "textureResolution": 512,
+      "triangles": 3247
+    },
+    {
+      "id": "windblown-coastal-palm",
+      "kind": "palm",
+      "runtimeBytes": 394472,
+      "textureResolution": 512,
+      "triangles": 3067
+    },
+    {
+      "id": "short-fan-palm",
+      "kind": "palm",
+      "runtimeBytes": 531128,
+      "textureResolution": 512,
+      "triangles": 3222
+    },
+    {
+      "id": "twin-trunk-date-palm",
+      "kind": "palm",
+      "runtimeBytes": 590428,
+      "textureResolution": 512,
+      "triangles": 2994
+    },
+    {
+      "id": "tiny-blue-green-chromis",
+      "kind": "fish",
+      "runtimeBytes": 439272,
+      "textureResolution": 512,
+      "triangles": 3149
+    },
+    {
+      "id": "small-clownfish",
+      "kind": "fish",
+      "runtimeBytes": 468308,
+      "textureResolution": 512,
+      "triangles": 3126
+    },
+    {
+      "id": "small-yellow-tang",
+      "kind": "fish",
+      "runtimeBytes": 356856,
+      "textureResolution": 512,
+      "triangles": 3103
+    },
+    {
+      "id": "medium-lionfish",
+      "kind": "fish",
+      "runtimeBytes": 593908,
+      "textureResolution": 512,
+      "triangles": 3196
+    },
+    {
+      "id": "medium-parrotfish",
+      "kind": "fish",
+      "runtimeBytes": 546136,
+      "textureResolution": 512,
+      "triangles": 3108
+    },
+    {
+      "id": "large-grouper",
+      "kind": "fish",
+      "runtimeBytes": 527764,
+      "textureResolution": 512,
+      "triangles": 3119
+    },
+    {
+      "id": "large-barracuda",
+      "kind": "fish",
+      "runtimeBytes": 555824,
+      "textureResolution": 512,
+      "triangles": 3061
+    },
+    {
+      "id": "giant-manta-ray",
+      "kind": "fish",
+      "runtimeBytes": 493656,
+      "textureResolution": 512,
+      "triangles": 3217
+    },
+    {
+      "id": "caribbean-reef-shark",
+      "kind": "fish",
+      "runtimeBytes": 456016,
+      "textureResolution": 512,
+      "triangles": 3221
+    },
+    {
+      "id": "hammerhead-shark",
+      "kind": "fish",
+      "runtimeBytes": 456868,
+      "textureResolution": 512,
+      "triangles": 3060
+    },
+    {
+      "id": "island-groundskeeper",
+      "kind": "npc",
+      "runtimeBytes": 330892,
+      "textureResolution": 768,
+      "triangles": 3204
+    },
+    {
+      "id": "local-fisher",
+      "kind": "npc",
+      "runtimeBytes": 379508,
+      "textureResolution": 768,
+      "triangles": 3249
+    },
+    {
+      "id": "dock-worker",
+      "kind": "npc",
+      "runtimeBytes": 333784,
+      "textureResolution": 768,
+      "triangles": 3253
+    },
+    {
+      "id": "lifeguard",
+      "kind": "npc",
+      "runtimeBytes": 354540,
+      "textureResolution": 768,
+      "triangles": 3255
+    },
+    {
+      "id": "backpacker-tourist",
+      "kind": "npc",
+      "runtimeBytes": 363332,
+      "textureResolution": 768,
+      "triangles": 3054
+    },
+    {
+      "id": "market-food-vendor",
+      "kind": "npc",
+      "runtimeBytes": 343776,
+      "textureResolution": 768,
+      "triangles": 3258
+    },
+    {
+      "id": "marine-biologist",
+      "kind": "npc",
+      "runtimeBytes": 352532,
+      "textureResolution": 768,
+      "triangles": 3210
+    },
+    {
+      "id": "building-technician",
+      "kind": "npc",
+      "runtimeBytes": 344024,
+      "textureResolution": 768,
+      "triangles": 3221
+    },
+    {
+      "id": "retired-holidaymaker",
+      "kind": "npc",
+      "runtimeBytes": 365904,
+      "textureResolution": 768,
+      "triangles": 3200
+    },
+    {
+      "id": "resort-concierge",
+      "kind": "npc",
+      "runtimeBytes": 331644,
+      "textureResolution": 768,
+      "triangles": 3253
+    }
+  ],
+  "targetFaceCount": 3000
+}

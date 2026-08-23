@@ -4,6 +4,11 @@ import { renderScheduler } from '@landrush/runtime'
 import { emitter, useScene } from '@pascal-app/core'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
+import {
+  calculateFrameObservedWorkEnvelopeAccounting,
+  LANDRUSH_FRAME_PROFILE_SCOPE,
+  setFrameLoadProfilerActive,
+} from './frame-load-profiler-accounting'
 
 declare global {
   interface Window {
@@ -20,21 +25,25 @@ type FrameSlice = {
 }
 
 type FrameRecord = {
-  activeWallMs: number
   beginMs: number
   index: number
   intervalMs: number
-  measuredTopLevelMs: number
+  measuredTopLevelUnionMs: number
+  observedWorkEnvelopeMs: number
+  outsideObservedWorkEnvelopeMs: number
   schedulerProfile: string
   slices: FrameSlice[]
-  unmeasuredActiveMs: number
-  waitMs: number
+  unmeasuredObservedWorkEnvelopeMs: number
   workEndMs: number
 }
 
 type OpenFrameRecord = Omit<
   FrameRecord,
-  'activeWallMs' | 'intervalMs' | 'measuredTopLevelMs' | 'unmeasuredActiveMs' | 'waitMs'
+  | 'intervalMs'
+  | 'measuredTopLevelUnionMs'
+  | 'observedWorkEnvelopeMs'
+  | 'outsideObservedWorkEnvelopeMs'
+  | 'unmeasuredObservedWorkEnvelopeMs'
 > & {
   nextSliceIndex: number
 }
@@ -64,14 +73,18 @@ export type LandrushFrameProfileApi = {
   freeze: () => void
   report: (options?: ReportOptions) => LandrushFrameProfileReport
   reset: () => void
+  scope: typeof LANDRUSH_FRAME_PROFILE_SCOPE
 }
 
+// The bridge consumes these established field names; scope keeps them from
+// being interpreted as whole-main-thread CPU coverage.
 export type LandrushFrameProfileFrameSummary = {
   activeWallMs: number
   beginMs: number
   index: number
   intervalMs: number
   measuredTopLevelMs: number
+  scope: typeof LANDRUSH_FRAME_PROFILE_SCOPE
   schedulerProfile: string
   topLevel: { durationMs: number; id: string }[]
   unmeasuredActiveMs: number
@@ -81,20 +94,22 @@ export type LandrushFrameProfileFrameSummary = {
 export type LandrushFrameProfileFramesSince = {
   cursor: number
   frames: LandrushFrameProfileFrameSummary[]
+  scope: typeof LANDRUSH_FRAME_PROFILE_SCOPE
 }
 
 export type LandrushFrameProfileReport = {
   frames: {
-    activeWallMs: ProfileStats
     intervalMs: ProfileStats
-    measuredTopLevelMs: ProfileStats
+    measuredTopLevelUnionMs: ProfileStats
+    observedWorkEnvelopeMs: ProfileStats
+    outsideObservedWorkEnvelopeMs: ProfileStats
     sumErrorMs: ProfileStats
-    unmeasuredActiveMs: ProfileStats
-    waitMs: ProfileStats
+    unmeasuredObservedWorkEnvelopeMs: ProfileStats
   }
   metadata: {
     frameCount: number
     generatedAt: string
+    scope: typeof LANDRUSH_FRAME_PROFILE_SCOPE
     slowFrameThresholdMs: number
     slowFrameCount: number
     thresholdMs: number
@@ -130,17 +145,17 @@ type ProfileNodeReport = {
 }
 
 type ProfileProofFrame = {
-  activeWallMs: number
   endMs: number
   frameIndex: number
   intervalMs: number
-  measuredTopLevelMs: number
+  measuredTopLevelUnionMs: number
+  observedWorkEnvelopeMs: number
+  outsideObservedWorkEnvelopeMs: number
   schedulerProfile: string
   startMs: number
   sumCheckMs: number
   topLevel: { durationMs: number; id: string }[]
-  unmeasuredActiveMs: number
-  waitMs: number
+  unmeasuredObservedWorkEnvelopeMs: number
 }
 
 type ProfileSlowFrame = ProfileProofFrame & {
@@ -216,7 +231,7 @@ export function FrameLoadProfilerProbe({ enabled }: { enabled: boolean }) {
   useEffect(() => {
     if (!enabled) return
     const profiler = getOrCreateProfiler()
-    profiler.reset()
+    setFrameLoadProfilerActive(profiler, true)
     const r3fSubscriberProfiling = installR3fSubscriberProfiling(getThreeState, profiler)
     wrapR3fSubscribersRef.current = r3fSubscriberProfiling.wrap
     const restore = restoreAll([
@@ -228,6 +243,7 @@ export function FrameLoadProfilerProbe({ enabled }: { enabled: boolean }) {
     window.__LANDRUSH_FRAME_PROFILE__ = profiler.api
     return () => {
       wrapR3fSubscribersRef.current = null
+      setFrameLoadProfilerActive(profiler, false)
       restore()
       if (window.__LANDRUSH_FRAME_PROFILE__ === profiler.api) {
         delete window.__LANDRUSH_FRAME_PROFILE__
@@ -380,43 +396,87 @@ function installSceneStoreMethodProfiling(profiler: LandrushFrameProfiler) {
   return restoreAll(restoreCallbacks)
 }
 
-function installR3fSubscriberProfiling(
+export function installR3fSubscriberProfiling(
   getRootState: () => unknown,
-  profiler: LandrushFrameProfiler,
+  profiler: Pick<LandrushFrameProfiler, 'measure'>,
 ) {
-  const restoreCallbacks: PatchRestore[] = []
-  const wrappedCallbacks = new WeakSet<ProfiledCallback>()
+  type SubscriberProfile = {
+    frameRef: NonNullable<R3fFrameSubscriber['ref']>
+    label: string
+    original: ProfiledCallback
+    seenInCollection: number
+    wrapped: ProfiledCallback
+  }
+
+  const profilesByRef = new Map<NonNullable<R3fFrameSubscriber['ref']>, SubscriberProfile>()
+  let active = true
+  let collection = 0
+
+  const restoreProfile = (profile: SubscriberProfile) => {
+    if (profile.frameRef.current === profile.wrapped) {
+      profile.frameRef.current = profile.original
+    }
+  }
 
   const wrap = () => {
+    if (!active) return
     const subscribers = getR3fFrameSubscribers(getRootState())
+    collection += 1
+
     subscribers.forEach((subscriber, index) => {
       if (subscriber.priority === -100_000) return
 
       const frameRef = subscriber.ref
       if (!frameRef) return
-      const current = frameRef?.current
+      const current = frameRef.current
       if (typeof current !== 'function') return
-      const original = current as ProfiledCallback
-      if (wrappedCallbacks.has(original)) return
+
+      const existingProfile = profilesByRef.get(frameRef)
+      const original =
+        current === existingProfile?.wrapped
+          ? existingProfile.original
+          : (current as ProfiledCallback)
 
       const priority = subscriber.priority ?? 0
       const label = `r3f.useFrame.${index}.p${normalizeProfileLabel(String(priority))}.${normalizeProfileLabel(
         original.name || 'anonymous',
       )}`
-      const wrapped = function profiledUseFrame(this: unknown, ...args: unknown[]) {
-        return profiler.measure(label, () => original.apply(this, args))
+
+      if (existingProfile) {
+        existingProfile.label = label
+        existingProfile.seenInCollection = collection
+        if (current !== existingProfile.wrapped) {
+          existingProfile.original = original
+          frameRef.current = existingProfile.wrapped
+        }
+        return
       }
-      wrappedCallbacks.add(wrapped)
+
+      let profile: SubscriberProfile
+      const wrapped = function profiledUseFrame(this: unknown, ...args: unknown[]) {
+        return profiler.measure(profile.label, () => profile.original.apply(this, args))
+      }
+      profile = { frameRef, label, original, seenInCollection: collection, wrapped }
+      profilesByRef.set(frameRef, profile)
       frameRef.current = wrapped
-      restoreCallbacks.push(() => {
-        if (frameRef.current === wrapped) frameRef.current = original
-      })
     })
+
+    for (const [frameRef, profile] of profilesByRef) {
+      if (profile.seenInCollection === collection) continue
+      restoreProfile(profile)
+      profilesByRef.delete(frameRef)
+    }
   }
 
   wrap()
   return {
-    restore: restoreAll(restoreCallbacks),
+    getTrackedSubscriberCount: () => profilesByRef.size,
+    restore: () => {
+      if (!active) return
+      active = false
+      for (const profile of profilesByRef.values()) restoreProfile(profile)
+      profilesByRef.clear()
+    },
     wrap,
   }
 }
@@ -484,33 +544,39 @@ class LandrushFrameProfiler {
     freeze: () => this.freeze(),
     report: (options) => this.report(options),
     reset: () => this.reset(),
+    scope: LANDRUSH_FRAME_PROFILE_SCOPE,
   }
 
   // Incremental cursor read of finalized frames, used by the bench bridge to
-  // merge CPU spans into its unified per-frame ledger without recomputing the
-  // aggregate reports. The returned cursor is `last finalized index + 1` — NOT
-  // `nextFrameIndex`, which counts the still-open frame and would put every
-  // finalized frame permanently behind the cursor.
+  // merge observed-work-envelope spans into its unified per-frame ledger without
+  // recomputing the aggregate reports. The returned cursor is
+  // `last finalized index + 1` — NOT `nextFrameIndex`, which counts the still-open
+  // frame and would put every finalized frame permanently behind the cursor.
   framesSince(cursor: number): LandrushFrameProfileFramesSince {
     // Frames are index-ordered; scan back from the tail so steady-state reads
     // (cursor at end, 0-1 new frames) don't walk the whole 1800-frame ring.
     let start = this.frames.length
     while (start > 0 && this.frames[start - 1]!.index >= cursor) start -= 1
     const frames = this.frames.slice(start).map((frame) => ({
-      activeWallMs: frame.activeWallMs,
+      activeWallMs: frame.observedWorkEnvelopeMs,
       beginMs: frame.beginMs,
       index: frame.index,
       intervalMs: frame.intervalMs,
-      measuredTopLevelMs: frame.measuredTopLevelMs,
+      measuredTopLevelMs: frame.measuredTopLevelUnionMs,
+      scope: LANDRUSH_FRAME_PROFILE_SCOPE,
       schedulerProfile: frame.schedulerProfile,
       topLevel: frame.slices
         .filter((slice) => slice.parentIndex === null)
         .map((slice) => ({ durationMs: slice.durationMs, id: slice.id })),
-      unmeasuredActiveMs: frame.unmeasuredActiveMs,
-      waitMs: frame.waitMs,
+      unmeasuredActiveMs: frame.unmeasuredObservedWorkEnvelopeMs,
+      waitMs: frame.outsideObservedWorkEnvelopeMs,
     }))
     const lastFinalized = this.frames.at(-1)
-    return { cursor: lastFinalized ? lastFinalized.index + 1 : cursor, frames }
+    return {
+      cursor: lastFinalized ? lastFinalized.index + 1 : cursor,
+      frames,
+      scope: LANDRUSH_FRAME_PROFILE_SCOPE,
+    }
   }
 
   reset() {
@@ -602,20 +668,24 @@ class LandrushFrameProfiler {
       options.topLevelOnly ? getTopLevelSlices : undefined,
     )
     const toProofFrame = (frame: FrameRecord): ProfileProofFrame => ({
-      activeWallMs: roundMs(frame.activeWallMs),
       endMs: roundMs(frame.beginMs + frame.intervalMs - this.startedAtMs),
       frameIndex: frame.index,
       intervalMs: roundMs(frame.intervalMs),
-      measuredTopLevelMs: roundMs(frame.measuredTopLevelMs),
+      measuredTopLevelUnionMs: roundMs(frame.measuredTopLevelUnionMs),
+      observedWorkEnvelopeMs: roundMs(frame.observedWorkEnvelopeMs),
+      outsideObservedWorkEnvelopeMs: roundMs(frame.outsideObservedWorkEnvelopeMs),
       schedulerProfile: frame.schedulerProfile,
       startMs: roundMs(frame.beginMs - this.startedAtMs),
-      sumCheckMs: roundMs(frame.measuredTopLevelMs + frame.unmeasuredActiveMs + frame.waitMs),
+      sumCheckMs: roundMs(
+        frame.measuredTopLevelUnionMs +
+          frame.unmeasuredObservedWorkEnvelopeMs +
+          frame.outsideObservedWorkEnvelopeMs,
+      ),
       topLevel: getTopLevelSlices(frame).map((slice) => ({
         durationMs: roundMs(slice.durationMs),
         id: slice.id,
       })),
-      unmeasuredActiveMs: roundMs(frame.unmeasuredActiveMs),
-      waitMs: roundMs(frame.waitMs),
+      unmeasuredObservedWorkEnvelopeMs: roundMs(frame.unmeasuredObservedWorkEnvelopeMs),
     })
     const slowFrameRecords = getSlowFrames(frames)
     const slowFrameStart = Math.max(0, options.slowFrameOffset ?? 0)
@@ -625,23 +695,31 @@ class LandrushFrameProfiler {
         : slowFrameStart + Math.max(0, options.slowFrameLimit)
     return {
       frames: {
-        activeWallMs: stats(frames.map((frame) => frame.activeWallMs)),
         intervalMs: stats(frames.map((frame) => frame.intervalMs)),
-        measuredTopLevelMs: stats(frames.map((frame) => frame.measuredTopLevelMs)),
+        measuredTopLevelUnionMs: stats(frames.map((frame) => frame.measuredTopLevelUnionMs)),
+        observedWorkEnvelopeMs: stats(frames.map((frame) => frame.observedWorkEnvelopeMs)),
+        outsideObservedWorkEnvelopeMs: stats(
+          frames.map((frame) => frame.outsideObservedWorkEnvelopeMs),
+        ),
         sumErrorMs: stats(
           frames.map(
             (frame) =>
-              frame.intervalMs - (frame.activeWallMs + frame.waitMs) ||
               frame.intervalMs -
-                (frame.measuredTopLevelMs + frame.unmeasuredActiveMs + frame.waitMs),
+                (frame.observedWorkEnvelopeMs + frame.outsideObservedWorkEnvelopeMs) ||
+              frame.intervalMs -
+                (frame.measuredTopLevelUnionMs +
+                  frame.unmeasuredObservedWorkEnvelopeMs +
+                  frame.outsideObservedWorkEnvelopeMs),
           ),
         ),
-        unmeasuredActiveMs: stats(frames.map((frame) => frame.unmeasuredActiveMs)),
-        waitMs: stats(frames.map((frame) => frame.waitMs)),
+        unmeasuredObservedWorkEnvelopeMs: stats(
+          frames.map((frame) => frame.unmeasuredObservedWorkEnvelopeMs),
+        ),
       },
       metadata: {
         frameCount: frames.length,
         generatedAt: new Date().toISOString(),
+        scope: LANDRUSH_FRAME_PROFILE_SCOPE,
         slowFrameThresholdMs: FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS,
         slowFrameCount: slowFrameRecords.length,
         thresholdMs: FRAME_PROFILE_THRESHOLD_MS,
@@ -701,56 +779,27 @@ class LandrushFrameProfiler {
   }
 
   private createFrameRecord(frame: OpenFrameRecord, nextBeginMs: number): FrameRecord {
-    const intervalMs = Math.max(0, nextBeginMs - frame.beginMs)
     const topLevelSlices = frame.slices.filter((slice) => slice.parentIndex === null)
-    const activeWallMs = calculateIntervalUnionMs(topLevelSlices)
-    const measuredTopLevelMs = topLevelSlices.reduce((total, slice) => total + slice.durationMs, 0)
-    const unmeasuredActiveMs = Math.max(0, activeWallMs - measuredTopLevelMs)
-    const waitMs = Math.max(0, intervalMs - activeWallMs)
+    const accounting = calculateFrameObservedWorkEnvelopeAccounting({
+      beginMs: frame.beginMs,
+      nextBeginMs,
+      topLevelSlices,
+      workEndMs: frame.workEndMs,
+    })
 
     return {
       beginMs: frame.beginMs,
       index: frame.index,
       slices: frame.slices,
       workEndMs: frame.workEndMs,
-      activeWallMs,
-      intervalMs,
-      measuredTopLevelMs,
+      intervalMs: accounting.intervalMs,
+      measuredTopLevelUnionMs: accounting.measuredTopLevelUnionMs,
+      observedWorkEnvelopeMs: accounting.observedWorkEnvelopeMs,
+      outsideObservedWorkEnvelopeMs: accounting.outsideObservedWorkEnvelopeMs,
       schedulerProfile: frame.schedulerProfile,
-      unmeasuredActiveMs,
-      waitMs,
+      unmeasuredObservedWorkEnvelopeMs: accounting.unmeasuredObservedWorkEnvelopeMs,
     }
   }
-}
-
-function calculateIntervalUnionMs(slices: readonly FrameSlice[]) {
-  const intervals = slices
-    .filter((slice) => slice.durationMs > 0)
-    .map((slice) => [slice.startMs, slice.startMs + slice.durationMs] as const)
-    .sort((a, b) => a[0] - b[0])
-  let totalMs = 0
-  let currentStartMs: number | null = null
-  let currentEndMs = 0
-
-  for (const [startMs, endMs] of intervals) {
-    if (currentStartMs === null) {
-      currentStartMs = startMs
-      currentEndMs = endMs
-      continue
-    }
-
-    if (startMs <= currentEndMs) {
-      currentEndMs = Math.max(currentEndMs, endMs)
-      continue
-    }
-
-    totalMs += currentEndMs - currentStartMs
-    currentStartMs = startMs
-    currentEndMs = endMs
-  }
-
-  if (currentStartMs !== null) totalMs += currentEndMs - currentStartMs
-  return Math.max(0, totalMs)
 }
 
 function installRendererProfiling(renderer: MethodTarget, profiler: LandrushFrameProfiler) {
@@ -873,15 +922,15 @@ function createNodeReports(
 
     addPseudoAggregate(
       aggregates,
-      'frame.active.unmeasured-r3f-or-react',
-      frame.unmeasuredActiveMs,
+      'frame.observed-work-envelope.unmeasured',
+      frame.unmeasuredObservedWorkEnvelopeMs,
       frameIndex,
       frames.length,
     )
     addPseudoAggregate(
       aggregates,
-      'frame.wait.idle-vsync-browser-or-gpu',
-      frame.waitMs,
+      'frame.outside-observed-work-envelope.unattributed',
+      frame.outsideObservedWorkEnvelopeMs,
       frameIndex,
       frames.length,
     )
@@ -946,7 +995,7 @@ function getSlowFrames(frames: readonly FrameRecord[]) {
   return frames.filter(
     (frame) =>
       frame.intervalMs > FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS ||
-      frame.activeWallMs > FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS,
+      frame.observedWorkEnvelopeMs > FRAME_PROFILE_SLOW_FRAME_THRESHOLD_MS,
   )
 }
 

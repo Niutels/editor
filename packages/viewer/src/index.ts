@@ -55,6 +55,7 @@ export {
 export { SceneEnvironment } from './components/viewer/scene-environment'
 export { useAssetUrl } from './hooks/use-asset-url'
 export { useGLTFKTX2 } from './hooks/use-gltf-ktx2'
+export { useGpuResourceLifetime } from './hooks/use-gpu-resource-lifetime'
 export { useNodeEvents } from './hooks/use-node-events'
 export { ASSETS_CDN_URL, resolveAssetUrl, resolveCdnUrl } from './lib/asset-url'
 export { backdropGradient, deepSkyColor, horizonHazeColor } from './lib/backdrop'
@@ -105,6 +106,7 @@ export {
   CLAY_PALETTE,
   type ColorPreset,
   clearMaterialCache,
+  cloneMaterial,
   createDefaultMaterial,
   createMaterial,
   createMaterialFromPresetRef,

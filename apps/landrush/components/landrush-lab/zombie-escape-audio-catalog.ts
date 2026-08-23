@@ -17,12 +17,15 @@ type ZombieEscapeAudioCatalogEventKind =
   | 'shot-fired'
   | 'weapon-purchased'
 
+type ZombieEscapeAudioMasteringProfile = 'one-shot-v1'
+
 export type ZombieEscapeAudioCue = Readonly<{
   durationSeconds: number
   eventKind: ZombieEscapeAudioCatalogEventKind
   files: readonly string[]
   id: string
   kind: ZombieEscapeAudioEventKind
+  masteringProfile: ZombieEscapeAudioMasteringProfile | null
   playback: Readonly<{
     maxDistance?: number
     maxVoices: number
@@ -38,6 +41,38 @@ export type ZombieEscapeAudioCue = Readonly<{
   weaponIndex: number
 }>
 
+export type ZombieEscapeMovementAudioCue = Readonly<{
+  durationSeconds: number
+  files: readonly string[]
+  id: string
+  masteringProfile: ZombieEscapeAudioMasteringProfile
+  movementKind: 'jump'
+  playback: ZombieEscapeAudioCue['playback']
+  prompt: string
+  promptInfluence: number
+}>
+
+export type ZombieEscapePresenceAudioCue = Readonly<{
+  durationSeconds: number
+  files: readonly [string, string, string]
+  id: string
+  masteringProfile: null
+  playback: ZombieEscapeAudioCue['playback'] &
+    Readonly<{
+      maxDistance: number
+      referenceDistance: number
+      spatial: true
+    }>
+  presenceKind: 'zombie-vocalization'
+  prompt: string
+  promptInfluence: number
+  schedule: Readonly<{
+    initialDelaySeconds: readonly [number, number]
+    intervalSeconds: readonly [number, number]
+    rangeHysteresisMeters: number
+  }>
+}>
+
 export type ZombieEscapeAudioArtifactProvenance = Readonly<{
   bitRateBps: number | null
   byteLength: number
@@ -46,6 +81,22 @@ export type ZombieEscapeAudioArtifactProvenance = Readonly<{
   cueId: string
   durationSeconds: number
   generatedAt: string
+  mastering: Readonly<{
+    algorithm: string
+    crestPreconditioner: string
+    inputIntegratedLoudnessLufs: number
+    inputSha256: string
+    inputTruePeakDbfs: number
+    normalizationTruePeakDbfs: number
+    outputBitRateBps: number
+    outputIntegratedLoudnessLufs: number
+    outputSampleRateHz: number
+    outputTruePeakDbfs: number
+    processedAt: string
+    profile: ZombieEscapeAudioMasteringProfile
+    targetIntegratedLoudnessLufs: number
+    targetTruePeakDbfs: number
+  }> | null
   path: string
   requestId: string | null
   requestedDurationSeconds: number
@@ -61,7 +112,9 @@ type ZombieEscapeAudioCatalogState = Readonly<{
   catalogVersion: string
   cues: readonly ZombieEscapeAudioCue[]
   modelId: string
+  movementCues: readonly ZombieEscapeMovementAudioCue[]
   outputFormat: string
+  presenceCues: readonly ZombieEscapePresenceAudioCue[]
 }>
 
 const EVENT_KIND_BY_NAME = {
@@ -96,13 +149,21 @@ export const ZOMBIE_ESCAPE_AUDIO_CATALOG = createZombieEscapeAudioCatalogState(
 
 export const ZOMBIE_ESCAPE_AUDIO_ASSETS_READY = ZOMBIE_ESCAPE_AUDIO_CATALOG.assetsReady
 export const ZOMBIE_ESCAPE_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.cues
+export const ZOMBIE_ESCAPE_MOVEMENT_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.movementCues
+export const ZOMBIE_ESCAPE_PRESENCE_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.presenceCues
+export const ZOMBIE_ESCAPE_PLAYER_JUMP_AUDIO_CUE = ZOMBIE_ESCAPE_MOVEMENT_AUDIO_CUES.find(
+  (cue) => cue.movementKind === 'jump',
+)!
+export const ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE = ZOMBIE_ESCAPE_PRESENCE_AUDIO_CUES.find(
+  (cue) => cue.presenceKind === 'zombie-vocalization',
+)!
 
 export function createZombieEscapeAudioCatalogState(
   rawCatalog: unknown,
   rawProvenance: unknown,
 ): ZombieEscapeAudioCatalogState {
   const catalog = requireRecord(rawCatalog, 'audio catalog')
-  if (catalog.schemaVersion !== 1) throw new Error('Zombie Escape audio catalog schema must be 1')
+  if (catalog.schemaVersion !== 3) throw new Error('Zombie Escape audio catalog schema must be 3')
   const catalogVersion = requireString(catalog.catalogVersion, 'catalogVersion')
   const modelId = requireString(catalog.modelId, 'modelId')
   const outputFormat = requireString(catalog.outputFormat, 'outputFormat')
@@ -120,6 +181,11 @@ export function createZombieEscapeAudioCatalogState(
     if (ids.has(id)) throw new Error(`Duplicate Zombie Escape audio cue: ${id}`)
     ids.add(id)
     const eventKind = requireEventKind(cue.eventKind, id)
+    const masteringProfile = requireMasteringProfile(
+      cue.masteringProfile,
+      eventKind === 'shot-fired',
+      id,
+    )
     const files = requireFiles(cue.files, id, paths)
     const durationSeconds = requireFiniteNumber(cue.durationSeconds, `${id}.durationSeconds`)
     const promptInfluence = requireFiniteNumber(cue.promptInfluence, `${id}.promptInfluence`)
@@ -154,6 +220,7 @@ export function createZombieEscapeAudioCatalogState(
       files,
       id,
       kind: EVENT_KIND_BY_NAME[eventKind],
+      masteringProfile,
       playback,
       prompt,
       promptInfluence,
@@ -169,22 +236,126 @@ export function createZombieEscapeAudioCatalogState(
     throw new Error('Zombie Escape audio catalog requires exactly one cue per non-shot event kind')
   }
 
+  if (!Array.isArray(catalog.movementCues) || catalog.movementCues.length === 0) {
+    throw new Error('Zombie Escape audio catalog requires movement cues')
+  }
+  const movementKinds = new Set<string>()
+  const movementCues = catalog.movementCues.map((value, cueIndex) => {
+    const cue = requireRecord(value, `movementCues[${String(cueIndex)}]`)
+    const id = requireString(cue.id, `movementCues[${String(cueIndex)}].id`)
+    if (ids.has(id)) throw new Error(`Duplicate Zombie Escape audio cue: ${id}`)
+    ids.add(id)
+    if (cue.movementKind !== 'jump') throw new Error(`${id}.movementKind is invalid`)
+    const masteringProfile = requireMasteringProfile(cue.masteringProfile, true, id)
+    if (movementKinds.has(cue.movementKind)) {
+      throw new Error(`Duplicate Zombie Escape movement cue: ${cue.movementKind}`)
+    }
+    movementKinds.add(cue.movementKind)
+    const durationSeconds = requireFiniteNumber(cue.durationSeconds, `${id}.durationSeconds`)
+    const promptInfluence = requireFiniteNumber(cue.promptInfluence, `${id}.promptInfluence`)
+    if (durationSeconds < 0.5 || durationSeconds > 30) {
+      throw new Error(`${id}.durationSeconds must be between 0.5 and 30`)
+    }
+    if (promptInfluence < 0 || promptInfluence > 1) {
+      throw new Error(`${id}.promptInfluence must be between 0 and 1`)
+    }
+    return {
+      durationSeconds,
+      files: requireFiles(cue.files, id, paths),
+      id,
+      masteringProfile,
+      movementKind: cue.movementKind,
+      playback: requirePlayback(cue.playback, id),
+      prompt: requireString(cue.prompt, `${id}.prompt`),
+      promptInfluence,
+    } satisfies ZombieEscapeMovementAudioCue
+  })
+  if (movementKinds.size !== 1) {
+    throw new Error('Zombie Escape audio catalog requires exactly one cue per movement kind')
+  }
+
+  if (!Array.isArray(catalog.presenceCues) || catalog.presenceCues.length === 0) {
+    throw new Error('Zombie Escape audio catalog requires presence cues')
+  }
+  const presenceKinds = new Set<string>()
+  const presenceCues = catalog.presenceCues.map((value, cueIndex) => {
+    const cue = requireRecord(value, `presenceCues[${String(cueIndex)}]`)
+    const id = requireString(cue.id, `presenceCues[${String(cueIndex)}].id`)
+    if (ids.has(id)) throw new Error(`Duplicate Zombie Escape audio cue: ${id}`)
+    ids.add(id)
+    if (cue.presenceKind !== 'zombie-vocalization') {
+      throw new Error(`${id}.presenceKind is invalid`)
+    }
+    if (presenceKinds.has(cue.presenceKind)) {
+      throw new Error(`Duplicate Zombie Escape presence cue: ${cue.presenceKind}`)
+    }
+    presenceKinds.add(cue.presenceKind)
+    const durationSeconds = requireFiniteNumber(cue.durationSeconds, `${id}.durationSeconds`)
+    const promptInfluence = requireFiniteNumber(cue.promptInfluence, `${id}.promptInfluence`)
+    if (durationSeconds < 0.5 || durationSeconds > 30) {
+      throw new Error(`${id}.durationSeconds must be between 0.5 and 30`)
+    }
+    if (promptInfluence < 0 || promptInfluence > 1) {
+      throw new Error(`${id}.promptInfluence must be between 0 and 1`)
+    }
+    const files = requireFiles(cue.files, id, paths)
+    if (files.length !== 3) throw new Error(`${id}.files must contain exactly three variants`)
+    const playback = requirePlayback(cue.playback, id)
+    if (
+      !playback.spatial ||
+      playback.maxDistance === undefined ||
+      playback.referenceDistance === undefined
+    ) {
+      throw new Error(`${id}.playback must be spatial`)
+    }
+    const schedule = requirePresenceSchedule(cue.schedule, id)
+    return {
+      durationSeconds,
+      files: files as [string, string, string],
+      id,
+      masteringProfile: requireMasteringProfile(cue.masteringProfile, false, id),
+      playback: {
+        ...playback,
+        maxDistance: playback.maxDistance,
+        referenceDistance: playback.referenceDistance,
+        spatial: true,
+      },
+      presenceKind: cue.presenceKind,
+      prompt: requireString(cue.prompt, `${id}.prompt`),
+      promptInfluence,
+      schedule,
+    } satisfies ZombieEscapePresenceAudioCue
+  })
+  if (presenceKinds.size !== 1) {
+    throw new Error('Zombie Escape audio catalog requires exactly one cue per presence kind')
+  }
+
   return {
-    assetsReady: provenanceCoversCatalog(rawProvenance, catalogVersion, cues),
+    assetsReady: provenanceCoversCatalog(rawProvenance, catalogVersion, [
+      ...cues,
+      ...movementCues,
+      ...presenceCues,
+    ]),
     catalogVersion,
     cues,
     modelId,
+    movementCues,
     outputFormat,
+    presenceCues,
   }
 }
 
 function provenanceCoversCatalog(
   rawProvenance: unknown,
   catalogVersion: string,
-  cues: readonly ZombieEscapeAudioCue[],
+  cues: readonly (
+    | ZombieEscapeAudioCue
+    | ZombieEscapeMovementAudioCue
+    | ZombieEscapePresenceAudioCue
+  )[],
 ) {
   if (!isRecord(rawProvenance)) return false
-  if (rawProvenance.schemaVersion !== 1 || rawProvenance.catalogVersion !== catalogVersion) {
+  if (rawProvenance.schemaVersion !== 2 || rawProvenance.catalogVersion !== catalogVersion) {
     return false
   }
   if (
@@ -209,6 +380,7 @@ function provenanceCoversCatalog(
       const path = cue.files[variantIndex]!
       const artifact = rawProvenance.artifacts[path]
       if (!isRecord(artifact)) return false
+      const requiresMastering = cue.masteringProfile !== null
       if (
         artifact.path !== path ||
         artifact.cueId !== cue.id ||
@@ -226,6 +398,9 @@ function provenanceCoversCatalog(
         (artifact.channels as number) <= 0 ||
         (artifact.bitRateBps !== null && !Number.isInteger(artifact.bitRateBps)) ||
         !isIsoTimestamp(artifact.generatedAt) ||
+        (requiresMastering
+          ? !isValidOneShotMastering(artifact.mastering, cue.masteringProfile)
+          : artifact.mastering !== null) ||
         (artifact.requestId !== null && typeof artifact.requestId !== 'string') ||
         (artifact.traceId !== null && typeof artifact.traceId !== 'string') ||
         typeof artifact.sha256 !== 'string' ||
@@ -239,6 +414,57 @@ function provenanceCoversCatalog(
   const aggregateSource =
     sources.size === 1 ? sources.values().next().value : sources.size > 1 ? 'mixed' : null
   return rawProvenance.source === aggregateSource
+}
+
+function isValidOneShotMastering(
+  value: unknown,
+  expectedProfile: ZombieEscapeAudioMasteringProfile,
+) {
+  if (!isRecord(value)) return false
+  return (
+    value.algorithm === 'ffmpeg-crest-loudnorm-v1' &&
+    value.profile === expectedProfile &&
+    value.crestPreconditioner ===
+      'acompressor=threshold=0.015:ratio=4:attack=0.1:release=60:knee=2.828:makeup=1' &&
+    typeof value.inputSha256 === 'string' &&
+    SHA256_PATTERN.test(value.inputSha256) &&
+    isIsoTimestamp(value.processedAt) &&
+    value.targetIntegratedLoudnessLufs === -20 &&
+    value.normalizationTruePeakDbfs === -2.2 &&
+    value.targetTruePeakDbfs === -1.5 &&
+    value.outputSampleRateHz === 44_100 &&
+    value.outputBitRateBps === 128_000 &&
+    Number.isFinite(value.inputIntegratedLoudnessLufs) &&
+    Number.isFinite(value.inputTruePeakDbfs) &&
+    Number.isFinite(value.outputIntegratedLoudnessLufs) &&
+    Number.isFinite(value.outputTruePeakDbfs)
+  )
+}
+
+function requireMasteringProfile(
+  value: unknown,
+  required: true,
+  cueId: string,
+): ZombieEscapeAudioMasteringProfile
+function requireMasteringProfile(value: unknown, required: false, cueId: string): null
+function requireMasteringProfile(
+  value: unknown,
+  required: boolean,
+  cueId: string,
+): ZombieEscapeAudioMasteringProfile | null
+function requireMasteringProfile(
+  value: unknown,
+  required: boolean,
+  cueId: string,
+): ZombieEscapeAudioMasteringProfile | null {
+  if (required) {
+    if (value !== 'one-shot-v1') throw new Error(`${cueId}.masteringProfile must be one-shot-v1`)
+    return value
+  }
+  if (value !== undefined) {
+    throw new Error(`${cueId}.masteringProfile is only valid for mastered one-shot cues`)
+  }
+  return null
 }
 
 function isIsoTimestamp(value: unknown) {
@@ -310,6 +536,39 @@ function requirePlayback(value: unknown, cueId: string): ZombieEscapeAudioCue['p
     spatial: playback.spatial,
     volume,
   }
+}
+
+function requirePresenceSchedule(
+  value: unknown,
+  cueId: string,
+): ZombieEscapePresenceAudioCue['schedule'] {
+  const schedule = requireRecord(value, `${cueId}.schedule`)
+  const initialDelaySeconds = requirePositiveRange(
+    schedule.initialDelaySeconds,
+    `${cueId}.schedule.initialDelaySeconds`,
+  )
+  const intervalSeconds = requirePositiveRange(
+    schedule.intervalSeconds,
+    `${cueId}.schedule.intervalSeconds`,
+  )
+  const rangeHysteresisMeters = requireFiniteNumber(
+    schedule.rangeHysteresisMeters,
+    `${cueId}.schedule.rangeHysteresisMeters`,
+  )
+  if (rangeHysteresisMeters <= 0) {
+    throw new Error(`${cueId}.schedule.rangeHysteresisMeters must be positive`)
+  }
+  return { initialDelaySeconds, intervalSeconds, rangeHysteresisMeters }
+}
+
+function requirePositiveRange(value: unknown, label: string): readonly [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw new Error(`${label} must have two values`)
+  }
+  const minimum = requireFiniteNumber(value[0], `${label}[0]`)
+  const maximum = requireFiniteNumber(value[1], `${label}[1]`)
+  if (minimum < 0 || maximum < minimum) throw new Error(`${label} is invalid`)
+  return [minimum, maximum]
 }
 
 function optionalPositiveNumber(value: unknown, label: string) {

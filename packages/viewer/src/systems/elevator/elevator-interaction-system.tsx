@@ -3,6 +3,7 @@ import {
   openElevatorDoor,
   requestElevatorLevel,
   resolveElevatorDispatchTarget,
+  sceneRegistry,
   useInteractive,
   useScene,
 } from '@pascal-app/core'
@@ -20,7 +21,7 @@ type ElevatorButtonUserData = {
   levelId?: AnyNodeId
 }
 
-function getElevatorButtonData(object: Object3D): ElevatorButtonUserData | null {
+export function getElevatorButtonData(object: Object3D): ElevatorButtonUserData | null {
   let current: Object3D | null = object
 
   while (current) {
@@ -32,10 +33,34 @@ function getElevatorButtonData(object: Object3D): ElevatorButtonUserData | null 
   return null
 }
 
+export function shouldHandleElevatorPointerDown({
+  button,
+  eventManagerEnabled,
+}: {
+  button: number
+  eventManagerEnabled: boolean
+}) {
+  return eventManagerEnabled && button === 0
+}
+
+export function collectRegisteredElevatorButtonTargets() {
+  const targets: Object3D[] = []
+  for (const elevatorId of sceneRegistry.byType.elevator ?? []) {
+    const root = sceneRegistry.nodes.get(elevatorId)
+    if (!root) continue
+    root.traverse((object) => {
+      if ((object.userData as { elevatorButton?: ElevatorButtonUserData }).elevatorButton) {
+        targets.push(object)
+      }
+    })
+  }
+  return targets
+}
+
 export function ElevatorInteractionSystem() {
   const camera = useThree((state) => state.camera)
+  const get = useThree((state) => state.get)
   const gl = useThree((state) => state.gl)
-  const scene = useThree((state) => state.scene)
   const raycasterRef = useRef(new Raycaster())
   const pointerRef = useRef(new Vector2())
 
@@ -43,7 +68,16 @@ export function ElevatorInteractionSystem() {
     const canvas = gl.domElement
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return
+      if (
+        !shouldHandleElevatorPointerDown({
+          button: event.button,
+          eventManagerEnabled: get().events.enabled,
+        })
+      ) {
+        return
+      }
+      const targets = collectRegisteredElevatorButtonTargets()
+      if (targets.length === 0) return
 
       const rect = canvas.getBoundingClientRect()
       const pointer = pointerRef.current
@@ -54,7 +88,7 @@ export function ElevatorInteractionSystem() {
       raycaster.setFromCamera(pointer, camera)
 
       const button = raycaster
-        .intersectObjects(scene.children, true)
+        .intersectObjects(targets, true)
         .map((intersection) => getElevatorButtonData(intersection.object))
         .find((data): data is ElevatorButtonUserData => data !== null)
 
@@ -87,7 +121,7 @@ export function ElevatorInteractionSystem() {
     return () => {
       canvas.removeEventListener('pointerdown', handlePointerDown, true)
     }
-  }, [camera, gl, scene])
+  }, [camera, get, gl])
 
   return null
 }

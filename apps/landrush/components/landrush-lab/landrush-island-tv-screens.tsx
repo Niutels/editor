@@ -175,12 +175,13 @@ export function LandrushIslandPlacedTvScreens({
     [mediaStates],
   )
 
-  if (!enabled || televisions.length === 0) return null
+  if (televisions.length === 0) return null
 
   return (
     <>
       {televisions.map((item) => (
         <LandrushIslandPlacedTvScreen
+          active={enabled}
           item={item}
           key={item.id}
           localMotionRef={localMotionRef}
@@ -221,10 +222,9 @@ export function LandrushIslandTvScreens({
     }))
   }, [videoUrlOrId])
 
-  if (!enabled) return null
-
   return (
     <LandrushIslandTvScreen
+      active={enabled}
       embed={embed}
       localMotionRef={localMotionRef}
       media={media}
@@ -235,6 +235,7 @@ export function LandrushIslandTvScreens({
 }
 
 function LandrushIslandTvScreen({
+  active,
   embed,
   fixtureVisible = true,
   localMotionRef,
@@ -248,6 +249,7 @@ function LandrushIslandTvScreen({
   rangeVisible = true,
   screenPosition = LANDRUSH_ISLAND_TV_SCREEN_POSITION,
 }: {
+  active: boolean
   embed: LandrushIslandTvEmbed | null
   fixtureVisible?: boolean
   localMotionRef?: { readonly current: LandrushIslandTvLocalMotion | null }
@@ -277,6 +279,8 @@ function LandrushIslandTvScreen({
   const occlusionCandidatesRef = useRef<Object3D[]>([])
   const lastOcclusionCandidateRefreshAtRef = useRef(Number.NEGATIVE_INFINITY)
   const lastScreenOcclusionCheckAtRef = useRef(Number.NEGATIVE_INFINITY)
+  const activeRef = useRef(active)
+  activeRef.current = active
   const mediaRef = useRef(media)
   const spatialGainRef = useRef(0)
   const tvWorldPositionRef = useRef(new Vector3())
@@ -332,11 +336,9 @@ function LandrushIslandTvScreen({
       if (playerIframeRef.current !== iframe) return
       const media = mediaRef.current
       const playbackSeconds = resolveLandrushIslandTvEffectivePlaybackSeconds(media)
-      const shouldPlay = shouldLandrushIslandTvPlayLocally(
-        media,
-        spatialGainRef.current,
-        interactingRef.current,
-      )
+      const shouldPlay =
+        shouldLandrushIslandTvPlayLocally(media, spatialGainRef.current, interactingRef.current) &&
+        activeRef.current
       suppressYoutubePlaybackPublishUntilRef.current =
         Date.now() + LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS
       if (shouldPlay) sendLandrushIslandYoutubeSeek(iframe, playbackSeconds)
@@ -383,6 +385,7 @@ function LandrushIslandTvScreen({
   )
 
   const openInteraction = useCallback(() => {
+    if (!activeRef.current) return
     setDraftUrl(mediaRef.current.url)
     setUrlError(null)
     setInteracting(true)
@@ -470,7 +473,22 @@ function LandrushIslandTvScreen({
   }, [])
 
   useEffect(() => {
+    if (active) return
+    aimedRef.current = false
+    promptVisibleRef.current = false
+    interactingRef.current = false
+    spatialGainRef.current = 0
+    setAimed(false)
+    setPromptVisible(false)
+    setInteracting(false)
+    sendLandrushIslandYoutubePlayback(playerIframeRef.current, false)
+    sendLandrushIslandYoutubeVolume(playerIframeRef.current, 0, true)
+    lastLocalYoutubePlayingRef.current = false
+  }, [active])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!activeRef.current) return
       if (event.code === 'Escape' && interactingRef.current) {
         event.preventDefault()
         event.stopImmediatePropagation()
@@ -628,11 +646,9 @@ function LandrushIslandTvScreen({
 
     const targetSeconds = resolveLandrushIslandTvEffectivePlaybackSeconds(media)
     const currentSeconds = lastYoutubePlaybackSecondsRef.current
-    const shouldPlay = shouldLandrushIslandTvPlayLocally(
-      media,
-      spatialGainRef.current,
-      interactingRef.current,
-    )
+    const shouldPlay =
+      shouldLandrushIslandTvPlayLocally(media, spatialGainRef.current, interactingRef.current) &&
+      active
     suppressYoutubePlaybackPublishUntilRef.current =
       Date.now() + LANDRUSH_ISLAND_TV_PLAYBACK_RESTORE_DELAY_MS
 
@@ -647,9 +663,10 @@ function LandrushIslandTvScreen({
     lastLocalYoutubePlayingRef.current = shouldPlay
     if (!shouldPlay) sendLandrushIslandYoutubeVolume(iframe, 0, true)
     lastYoutubePlayingRef.current = media.playing
-  }, [embed?.kind, media])
+  }, [active, embed?.kind, media])
 
   useFrame(({ clock }) => {
+    if (!active) return
     const screenMesh = screenMeshRef.current
     if (!screenMesh) return
 
@@ -783,7 +800,8 @@ function LandrushIslandTvScreen({
 
   useEffect(() => {
     if (embed?.kind !== 'youtube') return
-    const shouldPlay = shouldLandrushIslandTvPlayLocally(media, spatialGainRef.current, interacting)
+    const shouldPlay =
+      active && shouldLandrushIslandTvPlayLocally(media, spatialGainRef.current, interacting)
     const nextVolume = shouldPlay
       ? resolveLandrushIslandTvEffectiveVolume(media, spatialGainRef.current, interacting)
       : 0
@@ -791,7 +809,7 @@ function LandrushIslandTvScreen({
     lastSentVolumeRef.current = nextVolume
     lastSentMutedRef.current = nextMuted
     sendLandrushIslandYoutubeVolume(playerIframeRef.current, nextVolume, nextMuted)
-  }, [embed?.kind, interacting, media])
+  }, [active, embed?.kind, interacting, media])
 
   const screen = (
     <group
@@ -800,6 +818,7 @@ function LandrushIslandTvScreen({
       rotation={rotation}
       scale={scale}
       userData={{ pascalExcludeFromToolConeTarget: true }}
+      visible={active}
     >
       {fixtureVisible ? (
         <>
@@ -862,7 +881,7 @@ function LandrushIslandTvScreen({
         <Html
           center
           distanceFactor={LANDRUSH_ISLAND_TV_HTML_DISTANCE_FACTOR}
-          pointerEvents={interacting ? 'auto' : 'none'}
+          pointerEvents={active && interacting ? 'auto' : 'none'}
           position={screenPosition}
           transform
           zIndexRange={[30, 0]}
@@ -872,15 +891,15 @@ function LandrushIslandTvScreen({
             onPointerUp={(event) => event.stopPropagation()}
             style={{
               ...frameWrapStyle,
-              pointerEvents: interacting ? 'auto' : 'none',
-              visibility: screenOccluded && !interacting ? 'hidden' : 'visible',
+              pointerEvents: active && interacting ? 'auto' : 'none',
+              visibility: active && (!screenOccluded || interacting) ? 'visible' : 'hidden',
             }}
           >
             <div ref={assignScreenPlayerSlot} style={playerSlotStyle} />
           </div>
         </Html>
       ) : null}
-      {promptVisible ? (
+      {active && promptVisible ? (
         <LandrushIslandTvAimPrompt onInteract={openInteraction} position={promptPosition} />
       ) : null}
     </group>
@@ -894,12 +913,12 @@ function LandrushIslandTvScreen({
           groundY={rangeGroundY}
           motionRef={tvRingMotionRef}
           radiusMeters={LANDRUSH_ISLAND_TV_SOUND_MAX_DISTANCE}
-          visible={rangeVisible && Boolean(embed)}
+          visible={active && rangeVisible && Boolean(embed)}
         />,
         scene,
       )}
       {screen}
-      {interacting ? (
+      {active && interacting ? (
         <LandrushIslandTvInteractionPanel
           draftUrl={draftUrl}
           embed={embed}
@@ -916,11 +935,13 @@ function LandrushIslandTvScreen({
 }
 
 function LandrushIslandPlacedTvScreen({
+  active,
   item,
   localMotionRef,
   mediaState,
   onMediaStateChange,
 }: {
+  active: boolean
   item: ItemNode
   localMotionRef?: { readonly current: LandrushIslandTvLocalMotion | null }
   mediaState?: LandrushIslandTvMediaState
@@ -965,9 +986,18 @@ function LandrushIslandPlacedTvScreen({
   )
 
   useFrame(() => {
-    const target = sceneRegistry.nodes.get(item.id as AnyNodeId) ?? null
     const group = itemWorldGroupRef.current
     if (!group) return
+    if (!active) {
+      group.visible = false
+      if (itemVisibleRef.current) {
+        itemVisibleRef.current = false
+        setItemVisible(false)
+      }
+      return
+    }
+
+    const target = sceneRegistry.nodes.get(item.id as AnyNodeId) ?? null
 
     if (!target) {
       itemSceneObjectRef.current = null
@@ -994,6 +1024,7 @@ function LandrushIslandPlacedTvScreen({
   return (
     <group matrixAutoUpdate={false} ref={itemWorldGroupRef} visible={false}>
       <LandrushIslandTvScreen
+        active={active}
         embed={embed}
         fixtureVisible={false}
         interactionBounds={interactionArea}

@@ -24,7 +24,10 @@ import {
 } from './zombie-escape-aim'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
 import { ZOMBIE_ESCAPE_DEFAULT_WEAPON } from './zombie-escape-config'
-import { ZombieEscapeGeneratedAssets } from './zombie-escape-generated-assets'
+import {
+  type ZombieEscapeGeneratedAssetFailure,
+  ZombieEscapeGeneratedAssets,
+} from './zombie-escape-generated-assets'
 import { resolveZombieEscapeHitFlickerPhase } from './zombie-escape-hit-flicker'
 import {
   createZombieEscapePresentationPoint,
@@ -34,6 +37,7 @@ import {
   type ZombieEscapePresentationPoint,
   type ZombieEscapePresentationPose,
 } from './zombie-escape-presentation-pose'
+import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 import {
   getZombieEscapeMeleeProgress,
   restoreZombieEscapeDefaultMuzzlePose,
@@ -58,17 +62,25 @@ const ZOMBIE_ASSET_SLOTS = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((entry) => ({
 
 export function ZombieEscapeActors({
   impactVisualRegistry,
+  onGeneratedAssetsFailureChange,
+  onGeneratedAssetsReadyChange,
   playerColor = '#fff0a2',
   presentationFramePriority,
   quality,
+  renderReadinessRegistry,
   renderPlayer = true,
+  retryGeneratedAssetsGeneration = 0,
   simulationRef,
 }: {
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
+  onGeneratedAssetsFailureChange?: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
+  onGeneratedAssetsReadyChange?: (ready: boolean) => void
   playerColor?: string
   presentationFramePriority?: number
   quality: ZombieEscapeQuality
+  renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   renderPlayer?: boolean
+  retryGeneratedAssetsGeneration?: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
 }) {
   const loadedZombieVariantsRef = useRef(new Set<number>())
@@ -79,7 +91,11 @@ export function ZombieEscapeActors({
         impactVisualRegistry={impactVisualRegistry}
         loadedZombieVariantsRef={loadedZombieVariantsRef}
         omitHeldWeapon
+        onGeneratedAssetsFailureChange={onGeneratedAssetsFailureChange}
+        onGeneratedAssetsReadyChange={onGeneratedAssetsReadyChange}
         quality={quality}
+        renderReadinessRegistry={renderReadinessRegistry}
+        retryGeneration={retryGeneratedAssetsGeneration}
         simulationRef={simulationRef}
         zombiePresentationFramePriority={presentationFramePriority}
       />
@@ -178,16 +194,8 @@ function ZombieEscapeOrbot({
           visualRootRef={visualRootRef}
         />
       </Suspense>
-      <ZombieEscapeActorRenderDriver />
     </group>
   )
-}
-
-function ZombieEscapeActorRenderDriver() {
-  useFrame(({ camera, gl, scene }) => {
-    gl.render(scene, camera)
-  }, 100)
-  return null
 }
 
 function resolveZombieEscapeWeaponRecoil(simulation: ZombieEscapeSimulation) {
@@ -208,6 +216,7 @@ function ZombieEscapeZombieInstances({
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
 }) {
   const capacity = simulationRef.current.zombies.pool.capacity
+  const groupRef = useRef<Group>(null)
   const bodyRef = useRef<InstancedMesh>(null)
   const headRef = useRef<InstancedMesh>(null)
   const leftLegRef = useRef<InstancedMesh>(null)
@@ -236,6 +245,11 @@ function ZombieEscapeZombieInstances({
   }, [])
 
   useFrame(() => {
+    const allVariantsLoaded =
+      loadedZombieVariantsRef.current.size === ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length
+    if (groupRef.current) groupRef.current.visible = !allVariantsLoaded
+    if (allVariantsLoaded) return
+
     const simulation = simulationRef.current
     const zombies = simulation.zombies
     for (let index = 0; index < zombies.pool.capacity; index += 1) {
@@ -259,7 +273,7 @@ function ZombieEscapeZombieInstances({
       }
       resolveZombieEscapePresentationPose(
         zombies.x[index]!,
-        0,
+        zombies.y[index]!,
         zombies.z[index]!,
         zombies.heading[index]!,
         zombies.hitReaction[index]!,
@@ -375,7 +389,10 @@ function ZombieEscapeZombieInstances({
   }, framePriority)
 
   return (
-    <group userData={{ assetSlots: ZOMBIE_ASSET_SLOTS, placeholder: 'procedural-zombie-pool' }}>
+    <group
+      ref={groupRef}
+      userData={{ assetSlots: ZOMBIE_ASSET_SLOTS, placeholder: 'procedural-zombie-pool' }}
+    >
       <instancedMesh args={[undefined, undefined, capacity]} frustumCulled={false} ref={bodyRef}>
         <capsuleGeometry args={[0.5, 0.7, 3, 7]} />
         <meshBasicMaterial />

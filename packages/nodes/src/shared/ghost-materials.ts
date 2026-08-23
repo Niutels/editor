@@ -1,5 +1,6 @@
 'use client'
 
+import { cloneMaterial } from '@pascal-app/viewer'
 import type { Material, Mesh, Object3D, Raycaster } from 'three'
 
 export const INVALID_GHOST_COLOR = 0xef_44_44
@@ -50,7 +51,7 @@ export function applyGhost(
     const cloneOne = (mat: Material): Material | null => {
       // Skip invisible materials (door/window root hitbox).
       if ((mat as { visible?: boolean }).visible === false) return null
-      const clone = mat.clone()
+      const clone = cloneMaterial(mat)
       clone.transparent = true
       clone.depthWrite = false
       if (invalid) {

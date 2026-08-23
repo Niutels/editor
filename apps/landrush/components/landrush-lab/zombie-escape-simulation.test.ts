@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  type AnyNode,
+  BuildingNode,
+  LevelNode,
+  SlabNode,
+  StairNode,
+  StairSegmentNode,
+} from '@pascal-app/core'
+import { createLandrushZombieEscapeCollisionWorldsResolver } from './landrush-island-ai-navigation-semantics'
+import {
   visitZombieEscapeAudioEventsAfter,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
   type ZombieEscapeAudioEventKind,
@@ -8,12 +17,14 @@ import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-worl
 import {
   getZombieEscapeZombieCatalogEntry,
   ZOMBIE_ESCAPE_CAPACITY,
+  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_WEAPON_PICKUPS,
   ZOMBIE_ESCAPE_WEAPON_PROFILES,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
 } from './zombie-escape-config'
 import { createZombieEscapeControlState } from './zombie-escape-controls'
+import { shouldRenderZombieEscapeTracer } from './zombie-escape-effects'
 import {
   createZombieEscapeHudSnapshot,
   createZombieEscapeSimulation,
@@ -26,8 +37,10 @@ import {
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
   ZOMBIE_ESCAPE_SHOT_PHASE,
+  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
 } from './zombie-escape-simulation'
 import { createZombieEscapeArena } from './zombie-escape-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_GAIT } from './zombie-escape-zombie-roster'
 
 describe('Zombie Escape simulation', () => {
   test('replays identical fixed-step input deterministically', () => {
@@ -57,12 +70,122 @@ describe('Zombie Escape simulation', () => {
     expect(second.shotsFired).toBe(first.shotsFired)
     expect([...second.zombies.pool.active]).toEqual([...first.zombies.pool.active])
     expect([...second.zombies.x]).toEqual([...first.zombies.x])
+    expect([...second.zombies.y]).toEqual([...first.zombies.y])
+    expect([...second.zombies.navigationConnector]).toEqual([...first.zombies.navigationConnector])
     expect([...second.shots.x]).toEqual([...first.shots.x])
     expect([...second.shots.y]).toEqual([...first.shots.y])
     expect([...second.shots.phase]).toEqual([...first.shots.phase])
     expect([...second.zombies.hitReaction]).toEqual([...first.zombies.hitReaction])
+    expect([...second.zombies.heading]).toEqual([...first.zombies.heading])
+    expect([...second.zombies.intent]).toEqual([...first.zombies.intent])
+    expect([...second.zombies.attackFocusX]).toEqual([...first.zombies.attackFocusX])
+    expect([...second.zombies.attackFocusZ]).toEqual([...first.zombies.attackFocusZ])
+    expect(second.zombies.attackTargetObjectId).toEqual(first.zombies.attackTargetObjectId)
     expect([...second.audioEvents.kind]).toEqual([...first.audioEvents.kind])
     expect([...second.audioEvents.sequence]).toEqual([...first.audioEvents.sequence])
+  })
+
+  test('starts night one with twice the original first-wave population', () => {
+    const arena = createZombieEscapeArena(12_345)
+    const state = createZombieEscapeSimulation(arena, 98_760)
+
+    setZombieEscapeGamePhase(state, 'night')
+
+    expect(state.wave).toBe(1)
+    expect(state.waveSpawnRemaining).toBe(14)
+    expect(state.replacementSpawnRemaining).toBe(0)
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(14)
+  })
+
+  test('keeps roster runners running until their first damaging hit downgrades them', () => {
+    const arena = createZombieEscapeArena(12_347)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 98_762)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 0
+    state.player.z = 0
+    state.gaitByPoolSlot[0] = ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner
+    const zombie = spawnZombieEscapeZombie(state, 0, -2, 120)
+    state.zombies.speedScale[zombie] = 0
+    const input = createZombieEscapeControlState()
+    input.aimX = 0
+    input.aimZ = -1
+    input.aimStrength = 1
+
+    for (let frame = 0; frame < 30; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+    expect(state.zombies.gait[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner)
+    expect(state.zombies.runBlend[zombie]).toBeCloseTo(1, 5)
+
+    input.fire = true
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    input.fire = false
+    for (let frame = 0; frame < 10; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(state.zombies.health[zombie]).toBeLessThan(120)
+    expect(state.zombies.gait[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker)
+    expect(state.zombies.runBlend[zombie]).toBeLessThan(1)
+  })
+
+  test('releases each corpse once and deterministically replaces it outside the player exclusion radius', () => {
+    const arena = createZombieEscapeArena(12_346)
+    arena.obstacleCount = 0
+    const first = createZombieEscapeSimulation(arena, 98_761)
+    const second = createZombieEscapeSimulation(arena, 98_761)
+    const input = createZombieEscapeControlState()
+
+    for (const state of [first, second]) {
+      setZombieEscapeGamePhase(state, 'night')
+      state.waveSpawnRemaining = 0
+      state.waveSpawnTimerSeconds = 0
+      state.player.x = 0
+      state.player.z = 0
+      const corpse = spawnZombieEscapeZombie(state, 1, 0, 1)
+      state.zombies.health[corpse] = 0
+      state.zombies.deathPresentationSeconds[corpse] = 0.001
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(first.zombies.pool.activeCount).toBe(1)
+    expect(first.replacementSpawnRemaining).toBe(0)
+    expect(createZombieEscapeHudSnapshot(first).waveRemaining).toBe(1)
+    const firstReplacement = first.zombies.pool.active.findIndex((active) => active !== 0)
+    const secondReplacement = second.zombies.pool.active.findIndex((active) => active !== 0)
+    expect(firstReplacement).toBeGreaterThanOrEqual(0)
+    expect(secondReplacement).toBe(firstReplacement)
+    expect(first.zombies.variant[firstReplacement]).toBe(first.variantByPoolSlot[firstReplacement])
+    expect(second.zombies.variant[secondReplacement]).toBe(
+      second.variantByPoolSlot[secondReplacement],
+    )
+    expect(first.zombies.pool.generation[firstReplacement]).toBe(2)
+    expect(second.zombies.pool.generation[secondReplacement]).toBe(2)
+    expect(first.zombies.x[firstReplacement]).toBe(second.zombies.x[secondReplacement])
+    expect(first.zombies.z[firstReplacement]).toBe(second.zombies.z[secondReplacement])
+    expect(
+      Math.hypot(first.zombies.x[firstReplacement]!, first.zombies.z[firstReplacement]!),
+    ).toBeGreaterThanOrEqual(ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS)
+
+    for (let frame = 0; frame < 60; frame += 1) {
+      stepZombieEscapeSimulation(first, input, 1 / 60, arena)
+      stepZombieEscapeSimulation(second, input, 1 / 60, arena)
+    }
+    expect(first.zombies.pool.activeCount).toBe(1)
+    expect(first.zombies.pool.generation[firstReplacement]).toBe(2)
+    expect(second.zombies.pool.generation[secondReplacement]).toBe(2)
+    expect(first.replacementSpawnRemaining).toBe(0)
+    expect(second.replacementSpawnRemaining).toBe(0)
+
+    first.zombies.health[firstReplacement] = 0
+    first.zombies.deathPresentationSeconds[firstReplacement] = 1
+    setZombieEscapeGamePhase(first, 'build')
+    stepZombieEscapeSimulation(first, input, 1 / 60, arena)
+    expect(first.zombies.pool.activeCount).toBe(0)
+    expect(first.replacementSpawnRemaining).toBe(0)
   })
 
   test('routes one shared zombie field around a wall without crossing it', () => {
@@ -98,26 +221,151 @@ describe('Zombie Escape simulation', () => {
     expect(state.zombies.x[zombie]).toBeGreaterThan(2)
   })
 
-  test('attacks an unreachable blocking object twice, removes it, and restores it on reset', () => {
+  test('moves a zombie through the parcel-02 stair connector using navigation collision', () => {
+    const building = BuildingNode.parse({
+      children: ['level_parcel_02_ground'],
+      id: 'building_parcel_02',
+    })
+    const level = LevelNode.parse({
+      children: ['stair_main', 'slab_parcel_02_upper'],
+      id: 'level_parcel_02_ground',
+      level: 0,
+      parentId: building.id,
+    })
+    const segment = StairSegmentNode.parse({
+      id: 'sseg_main',
+      parentId: 'stair_main',
+    })
+    const stair = StairNode.parse({
+      children: [segment.id],
+      id: 'stair_main',
+      parentId: level.id,
+      position: [4.25, 0, -7.5],
+      rotation: Math.PI / 2,
+    })
+    const upperSlab = SlabNode.parse({
+      elevation: segment.height,
+      id: 'slab_parcel_02_upper',
+      parentId: level.id,
+      polygon: [
+        [1, -12],
+        [12, -12],
+        [12, -3],
+        [1, -3],
+      ],
+    })
+    const nodes = Object.fromEntries(
+      [building, level, stair, segment, upperSlab].map((node) => [node.id, node]),
+    ) as Record<string, AnyNode>
+    const arena = createZombieEscapeArena(42)
+    arena.obstacleCount = 0
+    const worlds = createLandrushZombieEscapeCollisionWorldsResolver()({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      nodes,
+      playRadius: arena.playRadius,
+      spawn: { x: 0, z: 0 },
+    })
+    const stairBoxes = worlds.combat.boxes.filter(({ objectId }) => objectId === stair.id)
+    const [connector] = worlds.navigation.navigationConnectors
+    const startX = connector!.startX - connector!.directionX * 2
+    const startZ = connector!.startZ - connector!.directionZ * 2
+    const targetX = connector!.endX + connector!.directionX * 4
+    const targetZ = connector!.endZ + connector!.directionZ * 4
+
+    expect(stairBoxes.length).toBeGreaterThan(1)
+    expect(worlds.navigation.navigationConnectors).toHaveLength(1)
+    expect(worlds.navigation.boxes.some(({ objectId }) => objectId === stair.id)).toBe(false)
+
+    const state = createZombieEscapeSimulation(arena, 82)
+    setZombieEscapeCollisionWorld(state, worlds.navigation, worlds.combat)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = targetX
+    state.player.y = connector!.endY
+    state.player.z = targetZ
+    const zombie = spawnZombieEscapeZombie(state, startX, startZ)
+    const input = createZombieEscapeControlState()
+    let previousProgress = 0
+    let previousElevation = state.zombies.y[zombie]!
+    let largestBacktrack = 0
+    let crossedStair = false
+
+    for (let frame = 0; frame < 720; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+      const progress =
+        (state.zombies.x[zombie]! - startX) * connector!.directionX +
+        (state.zombies.z[zombie]! - startZ) * connector!.directionZ
+      largestBacktrack = Math.max(largestBacktrack, previousProgress - progress)
+      previousProgress = progress
+      expect(state.zombies.y[zombie]!).toBeGreaterThanOrEqual(previousElevation - 0.001)
+      previousElevation = state.zombies.y[zombie]!
+      if (progress > connector!.length + 2.5) {
+        crossedStair = true
+        break
+      }
+    }
+
+    expect(crossedStair).toBe(true)
+    expect(largestBacktrack).toBeLessThan(0.02)
+    expect(state.zombies.y[zombie]).toBeCloseTo(connector!.endY, 5)
+    expect(state.zombies.navigationConnector[zombie]).toBe(-1)
+    expect(state.zombies.attackTargetObjectId[zombie]).toBeNull()
+
+    state.player.x = startX - connector!.directionX * 2
+    state.player.y = connector!.startY
+    state.player.z = startZ - connector!.directionZ * 2
+    state.zombies.vx[zombie] = 0
+    state.zombies.vz[zombie] = 0
+    previousProgress =
+      (state.zombies.x[zombie]! - startX) * connector!.directionX +
+      (state.zombies.z[zombie]! - startZ) * connector!.directionZ
+    let previousY = state.zombies.y[zombie]!
+    let largestForwardSlip = 0
+    let descendedStair = false
+    for (let frame = 0; frame < 720; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+      const progress =
+        (state.zombies.x[zombie]! - startX) * connector!.directionX +
+        (state.zombies.z[zombie]! - startZ) * connector!.directionZ
+      largestForwardSlip = Math.max(largestForwardSlip, progress - previousProgress)
+      previousProgress = progress
+      expect(state.zombies.y[zombie]!).toBeLessThanOrEqual(previousY + 0.001)
+      previousY = state.zombies.y[zombie]!
+      if (progress < -0.25) {
+        descendedStair = true
+        break
+      }
+    }
+    expect(descendedStair).toBe(true)
+    expect(largestForwardSlip).toBeLessThan(0.02)
+    expect(state.zombies.y[zombie]).toBeCloseTo(connector!.startY, 5)
+    expect(state.zombies.navigationConnector[zombie]).toBe(-1)
+  })
+
+  test('attacks immediate furniture despite a reachable route, removes it after two hits, and restores it on build and reset', () => {
     const arena = createZombieEscapeArena(410)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 810)
-    const wall = createZombieEscapeCollisionWorld({
+    const furniture = createZombieEscapeCollisionWorld({
       agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-      playRadius: arena.playRadius,
-      segments: [
+      boxes: [
         {
-          endX: 0,
-          endZ: arena.playRadius,
-          halfThickness: 0.09,
-          id: 'house-wall:piece-0',
-          objectId: 'house-wall',
-          startX: 0,
-          startZ: -arena.playRadius,
+          breakable: true,
+          centerX: 0,
+          centerZ: 0,
+          halfDepth: 1.2,
+          halfWidth: 0.35,
+          id: 'table:footprint',
+          maximumY: 0.8,
+          minimumY: 0,
+          objectId: 'table',
+          rotation: 0,
         },
       ],
+      playRadius: arena.playRadius,
     })
-    setZombieEscapeCollisionWorld(state, wall)
+    setZombieEscapeCollisionWorld(state, furniture)
     setZombieEscapeGamePhase(state, 'night')
     state.waveSpawnRemaining = 0
     state.waveState = 'escape'
@@ -127,24 +375,151 @@ describe('Zombie Escape simulation', () => {
     state.zombies.attackCooldown[zombie] = 0
     const input = createZombieEscapeControlState()
 
-    for (let frame = 0; frame < 180 && !state.obstacleHitCounts.has('house-wall'); frame += 1) {
+    for (let frame = 0; frame < 180 && !state.obstacleHitCounts.has('table'); frame += 1) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
-    expect(state.obstacleHitCounts.get('house-wall')).toBe(1)
-    expect(state.destroyedObstacleIds.has('house-wall')).toBe(false)
-    expect(state.collisionWorld.segments).toHaveLength(1)
+    expect(state.navigationSampleScratch.reachable).toBe(true)
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle)
+    expect(state.zombies.attackTargetObjectId[zombie]).toBe('table')
+    expect(state.zombies.vx[zombie]).toBe(0)
+    expect(state.zombies.vz[zombie]).toBe(0)
+    expect(state.obstacleHitCounts.get('table')).toBe(1)
+    expect(state.destroyedObstacleIds.has('table')).toBe(false)
+    expect(state.collisionWorld.boxes).toHaveLength(1)
 
-    for (let frame = 0; frame < 180 && !state.destroyedObstacleIds.has('house-wall'); frame += 1) {
+    const heldFocusX = state.zombies.attackFocusX[zombie]!
+    const heldFocusZ = state.zombies.attackFocusZ[zombie]!
+    state.player.x = -4
+    state.player.z = 4
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    expect(state.navigationHitScratch.colliderKind).toBe('none')
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle)
+    expect(state.zombies.attackTargetObjectId[zombie]).toBe('table')
+    expect(state.zombies.attackFocusX[zombie]).toBe(heldFocusX)
+    expect(state.zombies.attackFocusZ[zombie]).toBe(heldFocusZ)
+
+    for (let frame = 0; frame < 180 && !state.destroyedObstacleIds.has('table'); frame += 1) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
-    expect(state.destroyedObstacleIds.has('house-wall')).toBe(true)
-    expect(state.obstacleHitCounts.has('house-wall')).toBe(false)
-    expect(state.collisionSourceWorld.segments).toHaveLength(1)
-    expect(state.collisionWorld.segments).toHaveLength(0)
+    expect(state.destroyedObstacleIds.has('table')).toBe(true)
+    expect(state.obstacleHitCounts.has('table')).toBe(false)
+    expect(state.collisionSourceWorld.boxes).toHaveLength(1)
+    expect(state.collisionWorld.boxes).toHaveLength(0)
+    expect(state.obstacleRevision).toBe(1)
 
+    const destroyedCollisionGeneration = state.collisionWorldGeneration
+    setZombieEscapeGamePhase(state, 'build')
+    expect(state.destroyedObstacleIds.size).toBe(0)
+    expect(state.obstacleHitCounts.size).toBe(0)
+    expect(state.collisionWorld.boxes).toHaveLength(1)
+    expect(state.obstacleRevision).toBe(2)
+    expect(state.collisionWorldGeneration).toBeGreaterThan(destroyedCollisionGeneration)
+
+    state.obstacleHitCounts.set('table', 1)
     resetZombieEscapeSimulation(state, arena)
     expect(state.destroyedObstacleIds.size).toBe(0)
     expect(state.obstacleHitCounts.size).toBe(0)
+    expect(state.obstacleRevision).toBe(3)
+  })
+
+  test('holds and faces an unbreakable wall without damage or rapid heading oscillation', () => {
+    const arena = createZombieEscapeArena(411)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 811)
+    setZombieEscapeCollisionWorld(
+      state,
+      createZombieEscapeCollisionWorld({
+        agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+        playRadius: arena.playRadius,
+        segments: [
+          {
+            breakable: false,
+            endX: 0,
+            endZ: arena.playRadius,
+            halfThickness: 0.09,
+            id: 'house-wall:piece-0',
+            objectId: 'house-wall',
+            startX: 0,
+            startZ: -arena.playRadius,
+          },
+        ],
+      }),
+    )
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 1.5
+    state.player.z = 0
+    const zombie = spawnZombieEscapeZombie(state, -0.55, 0)
+    state.zombies.heading[zombie] = -Math.PI / 2
+    state.zombies.vx[zombie] = 3
+    const input = createZombieEscapeControlState()
+    let previousHeading = state.zombies.heading[zombie]!
+
+    for (let frame = 0; frame < 180; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+      const heading = state.zombies.heading[zombie]!
+      expect(Math.abs(normalizeAngle(heading - previousHeading))).toBeLessThanOrEqual(
+        ZOMBIE_ESCAPE_SIMULATION.zombieTurnSpeedRadiansPerSecond / 60 + 0.000_001,
+      )
+      previousHeading = heading
+    }
+
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.blocked)
+    expect(state.zombies.vx[zombie]).toBe(0)
+    expect(state.zombies.vz[zombie]).toBe(0)
+    expect(state.obstacleHitCounts.size).toBe(0)
+    expect(state.destroyedObstacleIds.size).toBe(0)
+    expect(state.collisionWorld.segments).toHaveLength(1)
+    expect(state.zombies.heading[zombie]).toBeCloseTo(Math.PI / 2, 5)
+  })
+
+  test('publishes a destroyed closed-door id and restores the door collider on build entry', () => {
+    const arena = createZombieEscapeArena(4_112)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 8_112)
+    setZombieEscapeCollisionWorld(
+      state,
+      createZombieEscapeCollisionWorld({
+        agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+        playRadius: arena.playRadius,
+        segments: [
+          {
+            breakable: true,
+            endX: 0,
+            endZ: 0.5,
+            halfThickness: 0.09,
+            id: 'front-door:solid:0:0',
+            objectId: 'front-door',
+            startX: 0,
+            startZ: -0.5,
+          },
+        ],
+      }),
+    )
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 1.5
+    state.player.z = 0
+    const zombie = spawnZombieEscapeZombie(state, -0.55, 0)
+    state.zombies.attackCooldown[zombie] = 0
+    const input = createZombieEscapeControlState()
+
+    for (let frame = 0; frame < 180 && !state.destroyedObstacleIds.has('front-door'); frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(state.destroyedObstacleIds.has('front-door')).toBe(true)
+    expect(state.obstacleRevision).toBe(1)
+    expect(state.collisionSourceWorld.segments).toHaveLength(1)
+    expect(state.collisionWorld.segments).toHaveLength(0)
+
+    setZombieEscapeGamePhase(state, 'build')
+
+    expect(state.destroyedObstacleIds.size).toBe(0)
+    expect(state.obstacleHitCounts.size).toBe(0)
+    expect(state.obstacleRevision).toBe(2)
     expect(state.collisionWorld.segments).toHaveLength(1)
   })
 
@@ -331,6 +706,7 @@ describe('Zombie Escape simulation', () => {
     const state = createZombieEscapeSimulation(arena, 91)
     setZombieEscapeGamePhase(state, 'night')
     state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
     const zombie = spawnZombieEscapeZombie(state, state.player.x, state.player.z - 3.2, 36)
     const input = createZombieEscapeControlState()
     input.aimX = 0
@@ -347,6 +723,180 @@ describe('Zombie Escape simulation', () => {
     expect(state.kills).toBeGreaterThanOrEqual(1)
     expect(state.shots.pool.active.length).toBe(ZOMBIE_ESCAPE_CAPACITY.shots)
     expect(state.tracers.pool.activeCount).toBe(0)
+  })
+
+  test('keeps the final traveled tracer segment alive through a sub-frame indoor impact', () => {
+    const arena = createZombieEscapeArena(511)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 911)
+    setZombieEscapeCollisionWorld(
+      state,
+      createZombieEscapeCollisionWorld({
+        agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+        playRadius: arena.playRadius,
+        segments: [
+          {
+            endX: 2,
+            endZ: -0.3,
+            halfThickness: 0.04,
+            id: 'indoor-wall',
+            startX: -2,
+            startZ: -0.3,
+          },
+        ],
+      }),
+    )
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: 0,
+      y: 1.05,
+      z: 0,
+    })
+    const input = createZombieEscapeControlState()
+    input.fire = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    const shot = state.lastShotSlot
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment)
+    expect(state.shots.pool.active[shot]).toBe(1)
+    expect(state.shots.previousZ[shot]).toBeCloseTo(0, 6)
+    expect(state.shots.z[shot]).toBeLessThan(-0.1)
+    const finalSegment = {
+      previousX: state.shots.previousX[shot],
+      previousY: state.shots.previousY[shot],
+      previousZ: state.shots.previousZ[shot],
+      x: state.shots.x[shot],
+      y: state.shots.y[shot],
+      z: state.shots.z[shot],
+    }
+    input.fire = false
+
+    for (let frame = 0; frame < 5; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.pool.active[shot]).toBe(1)
+    expect({
+      previousX: state.shots.previousX[shot],
+      previousY: state.shots.previousY[shot],
+      previousZ: state.shots.previousZ[shot],
+      x: state.shots.x[shot],
+      y: state.shots.y[shot],
+      z: state.shots.z[shot],
+    }).toEqual(finalSegment)
+  })
+
+  test('sweeps from the player anchor and resolves an obstructed muzzle as an immediate impact', () => {
+    const arena = createZombieEscapeArena(5_113)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_113)
+    state.player.x = 0
+    state.player.z = 0
+    setZombieEscapeCollisionWorld(
+      state,
+      createZombieEscapeCollisionWorld({
+        agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+        playRadius: arena.playRadius,
+        segments: [
+          {
+            endX: 1,
+            endZ: -0.25,
+            halfThickness: 0.04,
+            id: 'muzzle-obstruction',
+            startX: -1,
+            startZ: -0.25,
+          },
+        ],
+      }),
+    )
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: 0,
+      y: ZOMBIE_ESCAPE_SIMULATION.defaultMuzzleHeight,
+      z: -0.55,
+    })
+    const input = createZombieEscapeControlState()
+    input.fire = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    const shot = state.lastShotSlot
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment)
+    expect(state.shots.originZ[shot]).toBeCloseTo(0, 6)
+    expect(state.shots.previousZ[shot]).toBeCloseTo(0, 6)
+    expect(state.shots.z[shot]).toBeLessThan(0)
+    expect(state.shots.z[shot]).toBeGreaterThan(-0.55)
+    expect(state.shots.hitZ[shot]).toBeCloseTo(-0.21, 5)
+    expect(readZombieEscapeAudioEventKinds(state)).toEqual([
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired,
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.environmentImpact,
+    ])
+  })
+
+  test('uses upper-floor combat geometry without adding it to the ground navigation world', () => {
+    const arena = createZombieEscapeArena(512)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 912)
+    const navigationWorld = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      playRadius: arena.playRadius,
+    })
+    const combatWorld = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      cellSize: arena.playRadius * 2,
+      playRadius: arena.playRadius,
+      segments: [
+        {
+          endX: 2,
+          endZ: -0.3,
+          halfThickness: 0.04,
+          id: 'upper-floor-wall',
+          maximumY: 5,
+          minimumY: 3,
+          startX: -2,
+          startZ: -0.3,
+        },
+      ],
+    })
+    setZombieEscapeCollisionWorld(state, navigationWorld, combatWorld)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: 0,
+      y: 3.5,
+      z: 0,
+    })
+    const input = createZombieEscapeControlState()
+    input.fire = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    const shot = state.lastShotSlot
+    expect(state.collisionWorld).toBe(navigationWorld)
+    expect(state.navigationField.world.semanticKey).toBe(navigationWorld.semanticKey)
+    expect(state.navigationField.world.segments).toHaveLength(0)
+    expect(state.combatCollisionWorld.segments).toHaveLength(1)
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment)
+    expect(state.shots.hitY[shot]).toBeCloseTo(3.5, 5)
   })
 
   test('creates exactly one 3D traveling carrier at the explicit muzzle pose', () => {
@@ -426,30 +976,82 @@ describe('Zombie Escape simulation', () => {
     )
   })
 
-  test('sweeps projectiles only against collision spans on the same vertical layer', () => {
+  test('uses a supported stair elevation for zombie presentation and projectile capsules', () => {
+    const arena = createZombieEscapeArena(542)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 942)
+    setZombieEscapeCollisionWorld(
+      state,
+      createZombieEscapeCollisionWorld({
+        agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+        navigationSupports: [
+          {
+            elevation: 2.5,
+            id: 'stair-upper-landing',
+            polygon: [
+              { x: state.player.x - 2, z: state.player.z - 5 },
+              { x: state.player.x + 2, z: state.player.z - 5 },
+              { x: state.player.x + 2, z: state.player.z + 2 },
+              { x: state.player.x - 2, z: state.player.z + 2 },
+            ],
+          },
+        ],
+        playRadius: arena.playRadius,
+      }),
+    )
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    const zombie = spawnZombieEscapeZombie(state, state.player.x, state.player.z - 3.2, 120)
+    state.zombies.speedScale[zombie] = 0
+    state.zombies.y[zombie] = 2.5
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: state.player.x,
+      y: 3.5,
+      z: state.player.z,
+    })
+    const input = createZombieEscapeControlState()
+    input.fire = true
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    input.fire = false
+    for (let frame = 0; frame < 10; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(state.zombies.health[zombie]).toBeLessThan(120)
+    expect(state.shots.impactKind[state.lastShotSlot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy)
+    expect(state.shots.hitY[state.lastShotSlot]).toBeGreaterThan(2.5)
+  })
+
+  test('lets weapon-height projectiles pass over furniture below the shot altitude', () => {
     const arena = createZombieEscapeArena(5410)
     arena.obstacleCount = 0
     const low = createZombieEscapeSimulation(arena, 9410)
     const high = createZombieEscapeSimulation(arena, 9410)
     const world = createZombieEscapeCollisionWorld({
       agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-      playRadius: arena.playRadius,
-      segments: [
+      boxes: [
         {
-          endX: 2,
-          endZ: -1,
-          halfThickness: 0.09,
-          id: 'ground-wall',
-          maximumY: 2,
+          breakable: true,
+          centerX: 0,
+          centerZ: -1,
+          halfDepth: 0.1,
+          halfWidth: 2,
+          id: 'low-table:footprint',
+          maximumY: 0.8,
           minimumY: 0,
-          startX: -2,
-          startZ: -1,
+          objectId: 'low-table',
+          rotation: 0,
         },
       ],
+      playRadius: arena.playRadius,
     })
     for (const [state, y] of [
-      [low, 1],
-      [high, 3],
+      [low, 0.6],
+      [high, 1.05],
     ] as const) {
       setZombieEscapeCollisionWorld(state, world)
       setZombieEscapeGamePhase(state, 'night')
@@ -479,6 +1081,72 @@ describe('Zombie Escape simulation', () => {
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired,
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.environmentImpact,
     ])
+  })
+
+  test('damages a zombie behind low furniture and retains the visible final tracer segment', () => {
+    const arena = createZombieEscapeArena(5412)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9412)
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boxes: [
+        {
+          breakable: true,
+          centerX: 0,
+          centerZ: -1,
+          halfDepth: 0.1,
+          halfWidth: 2,
+          id: 'low-table:footprint',
+          maximumY: 0.8,
+          minimumY: 0,
+          objectId: 'low-table',
+          rotation: 0,
+        },
+      ],
+      playRadius: arena.playRadius,
+    })
+    setZombieEscapeCollisionWorld(state, world)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    const zombie = spawnZombieEscapeZombie(state, 0, -2.2, 120)
+    state.zombies.speedScale[zombie] = 0
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: 0,
+      y: 1.05,
+      z: 0,
+    })
+    const input = createZombieEscapeControlState()
+    input.fire = true
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    input.fire = false
+    const shot = state.lastShotSlot
+
+    for (
+      let frame = 0;
+      frame < 10 && state.shots.phase[shot] === ZOMBIE_ESCAPE_SHOT_PHASE.travel;
+      frame += 1
+    ) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(state.zombies.health[zombie]).toBeLessThan(120)
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy)
+    expect(state.shots.hitTargetSlot[shot]).toBe(zombie)
+    expect(state.shots.hitTargetGeneration[shot]).toBe(state.zombies.pool.generation[zombie])
+    expect(
+      Math.hypot(
+        state.shots.x[shot]! - state.shots.previousX[shot]!,
+        state.shots.y[shot]! - state.shots.previousY[shot]!,
+        state.shots.z[shot]! - state.shots.previousZ[shot]!,
+      ),
+    ).toBeGreaterThan(0)
+    expect(
+      shouldRenderZombieEscapeTracer(state.shots.phase[shot]!, state.shots.impactKind[shot]!),
+    ).toBe(true)
   })
 
   test('uses the catalog capsule instead of an oversized global target', () => {
@@ -551,6 +1219,7 @@ describe('Zombie Escape simulation', () => {
     const state = createZombieEscapeSimulation(arena, 943)
     setZombieEscapeGamePhase(state, 'night')
     state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
     const zombie = spawnZombieEscapeZombie(state, state.player.x, state.player.z - 3.2, 1)
     state.zombies.speedScale[zombie] = 0
     const input = createZombieEscapeControlState()
@@ -660,7 +1329,7 @@ describe('Zombie Escape simulation', () => {
     expect(state.player.muzzlePoseExternal).toBe(false)
     expect(state.phase).toBe('build')
     expect(state.phaseSecondsRemaining).toBe(ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds)
-    expect(state.player.ammo).toBe(15)
+    expect(state.player.ammo).toBe(60)
   })
 
   test('publishes player hurt and death once and preserves a lethal cue across reset', () => {
@@ -670,12 +1339,20 @@ describe('Zombie Escape simulation', () => {
     setZombieEscapeGamePhase(state, 'night')
     state.waveSpawnRemaining = 0
     const zombie = spawnZombieEscapeZombie(state, state.player.x, state.player.z - 0.7, 120)
-    state.zombies.speedScale[zombie] = 0
+    const attackX = state.zombies.x[zombie]!
+    const attackZ = state.zombies.z[zombie]!
+    state.zombies.vx[zombie] = 3
+    state.zombies.vz[zombie] = 2
     state.zombies.attackCooldown[zombie] = 0
     const input = createZombieEscapeControlState()
 
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     expect(state.player.health).toBe(92)
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer)
+    expect(state.zombies.x[zombie]).toBe(attackX)
+    expect(state.zombies.z[zombie]).toBe(attackZ)
+    expect(state.zombies.vx[zombie]).toBe(0)
+    expect(state.zombies.vz[zombie]).toBe(0)
     expect(readZombieEscapeAudioEventKinds(state)).toEqual([
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerHurt,
     ])
@@ -830,7 +1507,13 @@ describe('Zombie Escape simulation', () => {
     expect(external.money).toBe(0)
   })
 
-  test('starts with a free pistol and exactly 15 finite rounds on night one', () => {
+  test('uses the four-times ammo balance for every weapon profile', () => {
+    expect(ZOMBIE_ESCAPE_WEAPON_PROFILES.map(({ ammoGranted }) => ammoGranted)).toEqual([
+      60, 168, 72, 256, 40,
+    ])
+  })
+
+  test('starts with a free pistol and exactly 60 finite rounds on night one', () => {
     const arena = createZombieEscapeArena(531)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 931)
@@ -841,15 +1524,20 @@ describe('Zombie Escape simulation', () => {
     expect(state.phase).toBe('build')
     expect(state.shotsFired).toBe(0)
     expect(state.player.weaponIndex).toBe(0)
-    expect(state.player.ammo).toBe(15)
+    expect(state.player.ammo).toBe(60)
     expect(state.purchasedWeapons[0]).toBe(1)
 
     setZombieEscapeGamePhase(state, 'night')
-    for (let frame = 0; frame < 600; frame += 1) {
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    const pistolProfile = ZOMBIE_ESCAPE_WEAPON_PROFILES[0]
+    const framesToEmpty =
+      Math.ceil(pistolProfile.ammoGranted * pistolProfile.shotIntervalSeconds * 60) + 1
+    for (let frame = 0; frame < framesToEmpty; frame += 1) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
 
-    expect(state.shotsFired).toBe(15)
+    expect(state.shotsFired).toBe(60)
     expect(state.player.ammo).toBe(0)
   })
 
@@ -901,7 +1589,7 @@ describe('Zombie Escape simulation', () => {
     }
 
     expect(state.kills).toBe(1)
-    expect(state.player.ammo).toBe(14)
+    expect(state.player.ammo).toBe(59)
     expect(state.money).toBe(ZOMBIE_ESCAPE_SIMULATION.killReward)
 
     input.fire = false
@@ -937,7 +1625,10 @@ describe('Zombie Escape simulation', () => {
     const shotsBefore = state.shotsFired
     const input = createZombieEscapeControlState()
     input.fire = true
-    for (let frame = 0; frame < 600; frame += 1) {
+    const pistolProfile = ZOMBIE_ESCAPE_WEAPON_PROFILES[0]
+    const framesToEmpty =
+      Math.ceil(pistolProfile.ammoGranted * pistolProfile.shotIntervalSeconds * 60) + 1
+    for (let frame = 0; frame < framesToEmpty; frame += 1) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
 
@@ -983,11 +1674,13 @@ describe('Zombie Escape simulation', () => {
     expect(state.money).toBe(7)
   })
 
-  test('cycles build and night at 60 and 180 seconds while build suppresses threats', () => {
+  test('cycles through an explicit 60-second day and 180-second night while day suppresses threats', () => {
     const arena = createZombieEscapeArena(533)
     const state = createZombieEscapeSimulation(arena, 933)
     const input = createZombieEscapeControlState()
     input.fire = true
+    expect(ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds).toBe(60)
+    expect(ZOMBIE_ESCAPE_SIMULATION.nightDurationSeconds).toBe(180)
     state.phaseSecondsRemaining = 1 / 60
 
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
@@ -1014,4 +1707,9 @@ function readZombieEscapeAudioEventKinds(
     kinds.push(kind)
   })
   return kinds
+}
+
+function normalizeAngle(angle: number) {
+  const fullTurn = Math.PI * 2
+  return ((((angle + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI
 }

@@ -15,6 +15,19 @@ export const DEFAULT_AUDIO_PROVENANCE_PATH = resolve(
 export const DEFAULT_PUBLIC_ROOT = resolve(import.meta.dirname, '../public')
 export const ZOMBIE_ESCAPE_AUDIO_PUBLIC_PREFIX = '/audios/sfx/zombie-escape/'
 export const AUDIO_DURATION_TOLERANCE_SECONDS = 0.08
+export const ZOMBIE_ESCAPE_ONE_SHOT_MASTERING = Object.freeze({
+  algorithm: 'ffmpeg-crest-loudnorm-v1',
+  crestPreconditioner:
+    'acompressor=threshold=0.015:ratio=4:attack=0.1:release=60:knee=2.828:makeup=1',
+  integratedLoudnessLufs: -20,
+  loudnessRangeLufs: 7,
+  normalizationTruePeakDbfs: -2.2,
+  outputBitRateBps: 128_000,
+  outputSampleRateHz: 44_100,
+  toleranceLufs: 1.25,
+  truePeakDbfs: -1.5,
+  variantSpreadToleranceLufs: 1,
+})
 
 const execFileAsync = promisify(execFile)
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -46,6 +59,8 @@ const SHOT_WEAPON_IDS = new Set([
   'storm-coil-repeater',
   'tidebreak-launcher',
 ])
+const MOVEMENT_KINDS = new Set(['jump'])
+const PRESENCE_KINDS = new Set(['zombie-vocalization'])
 
 export async function readZombieEscapeAudioContract(
   catalogPath = DEFAULT_AUDIO_CATALOG_PATH,
@@ -63,7 +78,7 @@ export async function readZombieEscapeAudioContract(
 
 export function validateZombieEscapeAudioCatalog(catalog) {
   requireRecord(catalog, 'catalog')
-  if (catalog.schemaVersion !== 1) throw new Error('catalog.schemaVersion must be 1')
+  if (catalog.schemaVersion !== 3) throw new Error('catalog.schemaVersion must be 3')
   requireNonEmptyString(catalog.catalogVersion, 'catalog.catalogVersion')
   if (catalog.modelId !== 'eleven_text_to_sound_v2') {
     throw new Error('catalog.modelId must be eleven_text_to_sound_v2')
@@ -136,9 +151,16 @@ export function validateZombieEscapeAudioCatalog(catalog) {
       }
       if (publicPaths.has(publicPath)) throw new Error(`duplicate audio path ${publicPath}`)
       publicPaths.add(publicPath)
+      const masteringProfile = requireMasteringProfile(
+        cue.masteringProfile,
+        cue.eventKind === 'shot-fired',
+        cueLabel,
+      )
       assets.push({
         cueId: cue.id,
         durationSeconds: cue.durationSeconds,
+        kind: 'event',
+        masteringProfile,
         prompt: cue.prompt,
         promptInfluence: cue.promptInfluence,
         publicPath,
@@ -151,6 +173,135 @@ export function validateZombieEscapeAudioCatalog(catalog) {
   }
   if (shotWeaponIds.size !== SHOT_WEAPON_IDS.size) {
     throw new Error('catalog must define exactly one shot cue for every weapon')
+  }
+
+  if (!Array.isArray(catalog.movementCues) || catalog.movementCues.length === 0) {
+    throw new Error('catalog.movementCues must be a non-empty array')
+  }
+  const movementKinds = new Set()
+  for (const [cueIndex, cue] of catalog.movementCues.entries()) {
+    const cueLabel = `catalog.movementCues[${cueIndex}]`
+    requireRecord(cue, cueLabel)
+    requireNonEmptyString(cue.id, `${cueLabel}.id`)
+    if (cueIds.has(cue.id)) throw new Error(`duplicate cue id ${cue.id}`)
+    cueIds.add(cue.id)
+    if (!MOVEMENT_KINDS.has(cue.movementKind)) {
+      throw new Error(`${cueLabel}.movementKind is invalid`)
+    }
+    if (movementKinds.has(cue.movementKind)) {
+      throw new Error(`duplicate movement cue kind ${cue.movementKind}`)
+    }
+    movementKinds.add(cue.movementKind)
+    requireFiniteNumber(cue.durationSeconds, `${cueLabel}.durationSeconds`)
+    if (
+      cue.durationSeconds < 0.5 ||
+      cue.durationSeconds > 30 ||
+      Math.abs(cue.durationSeconds * 10 - Math.round(cue.durationSeconds * 10)) > 1e-9
+    ) {
+      throw new Error(`${cueLabel}.durationSeconds must be a 0.1 second step from 0.5 to 30`)
+    }
+    requireFiniteNumber(cue.promptInfluence, `${cueLabel}.promptInfluence`)
+    if (cue.promptInfluence < 0 || cue.promptInfluence > 1) {
+      throw new Error(`${cueLabel}.promptInfluence must be between 0 and 1`)
+    }
+    requireNonEmptyString(cue.prompt, `${cueLabel}.prompt`)
+    if (!Array.isArray(cue.files) || cue.files.length === 0) {
+      throw new Error(`${cueLabel}.files must be a non-empty array`)
+    }
+    for (const [variantIndex, publicPath] of cue.files.entries()) {
+      requireNonEmptyString(publicPath, `${cueLabel}.files[${variantIndex}]`)
+      if (
+        !publicPath.startsWith(ZOMBIE_ESCAPE_AUDIO_PUBLIC_PREFIX) ||
+        !publicPath.endsWith(`-${variantIndex}.mp3`) ||
+        publicPath.includes('..') ||
+        publicPath.includes('\\')
+      ) {
+        throw new Error(`${cueLabel}.files[${variantIndex}] is not a canonical audio path`)
+      }
+      if (publicPaths.has(publicPath)) throw new Error(`duplicate audio path ${publicPath}`)
+      publicPaths.add(publicPath)
+      const masteringProfile = requireMasteringProfile(
+        cue.masteringProfile,
+        true,
+        cueLabel,
+      )
+      assets.push({
+        cueId: cue.id,
+        durationSeconds: cue.durationSeconds,
+        kind: 'movement',
+        masteringProfile,
+        prompt: cue.prompt,
+        promptInfluence: cue.promptInfluence,
+        publicPath,
+        variantIndex,
+      })
+    }
+  }
+  if (movementKinds.size !== MOVEMENT_KINDS.size) {
+    throw new Error('catalog must define exactly one cue for every movement kind')
+  }
+
+  if (!Array.isArray(catalog.presenceCues) || catalog.presenceCues.length === 0) {
+    throw new Error('catalog.presenceCues must be a non-empty array')
+  }
+  const presenceKinds = new Set()
+  for (const [cueIndex, cue] of catalog.presenceCues.entries()) {
+    const cueLabel = `catalog.presenceCues[${cueIndex}]`
+    requireRecord(cue, cueLabel)
+    requireNonEmptyString(cue.id, `${cueLabel}.id`)
+    if (cueIds.has(cue.id)) throw new Error(`duplicate cue id ${cue.id}`)
+    cueIds.add(cue.id)
+    if (!PRESENCE_KINDS.has(cue.presenceKind)) {
+      throw new Error(`${cueLabel}.presenceKind is invalid`)
+    }
+    if (presenceKinds.has(cue.presenceKind)) {
+      throw new Error(`duplicate presence cue kind ${cue.presenceKind}`)
+    }
+    presenceKinds.add(cue.presenceKind)
+    requireFiniteNumber(cue.durationSeconds, `${cueLabel}.durationSeconds`)
+    if (
+      cue.durationSeconds < 0.5 ||
+      cue.durationSeconds > 30 ||
+      Math.abs(cue.durationSeconds * 10 - Math.round(cue.durationSeconds * 10)) > 1e-9
+    ) {
+      throw new Error(`${cueLabel}.durationSeconds must be a 0.1 second step from 0.5 to 30`)
+    }
+    requireFiniteNumber(cue.promptInfluence, `${cueLabel}.promptInfluence`)
+    if (cue.promptInfluence < 0 || cue.promptInfluence > 1) {
+      throw new Error(`${cueLabel}.promptInfluence must be between 0 and 1`)
+    }
+    requireNonEmptyString(cue.prompt, `${cueLabel}.prompt`)
+    if (!Array.isArray(cue.files) || cue.files.length !== 3) {
+      throw new Error(`${cueLabel}.files must contain exactly three variants`)
+    }
+    validatePresencePlayback(cue.playback, `${cueLabel}.playback`)
+    validatePresenceSchedule(cue.schedule, `${cueLabel}.schedule`)
+    for (const [variantIndex, publicPath] of cue.files.entries()) {
+      requireNonEmptyString(publicPath, `${cueLabel}.files[${variantIndex}]`)
+      if (
+        !publicPath.startsWith(ZOMBIE_ESCAPE_AUDIO_PUBLIC_PREFIX) ||
+        !publicPath.endsWith(`-${variantIndex}.mp3`) ||
+        publicPath.includes('..') ||
+        publicPath.includes('\\')
+      ) {
+        throw new Error(`${cueLabel}.files[${variantIndex}] is not a canonical audio path`)
+      }
+      if (publicPaths.has(publicPath)) throw new Error(`duplicate audio path ${publicPath}`)
+      publicPaths.add(publicPath)
+      assets.push({
+        cueId: cue.id,
+        durationSeconds: cue.durationSeconds,
+        kind: 'presence',
+        masteringProfile: requireMasteringProfile(cue.masteringProfile, false, cueLabel),
+        prompt: cue.prompt,
+        promptInfluence: cue.promptInfluence,
+        publicPath,
+        variantIndex,
+      })
+    }
+  }
+  if (presenceKinds.size !== PRESENCE_KINDS.size) {
+    throw new Error('catalog must define exactly one cue for every presence kind')
   }
   return assets
 }
@@ -217,6 +368,108 @@ export async function inspectZombieEscapeAudioIntegrity(path) {
   }
 }
 
+export async function inspectZombieEscapeAudioLoudness(path) {
+  return inspectZombieEscapeAudioLoudnessWithPrefix(path, null)
+}
+
+async function inspectZombieEscapeAudioLoudnessWithPrefix(path, filterPrefix) {
+  const result = await runFfmpeg([
+    '-hide_banner',
+    '-nostdin',
+    '-i',
+    path,
+    '-af',
+    joinAudioFilters(filterPrefix, createLoudnormFilter()),
+    '-f',
+    'null',
+    '-',
+  ])
+  return parseLoudnormMeasurement(result.stderr)
+}
+
+export async function masterZombieEscapeOneShotAudio(inputPath, outputPath) {
+  const [inputInspection, inputLoudness, normalizationMeasurement] = await Promise.all([
+    inspectZombieEscapeAudioIntegrity(inputPath),
+    inspectZombieEscapeAudioLoudness(inputPath),
+    inspectZombieEscapeAudioLoudnessWithPrefix(
+      inputPath,
+      ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.crestPreconditioner,
+    ),
+  ])
+  const filter = joinAudioFilters(
+    ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.crestPreconditioner,
+    createLoudnormFilter(normalizationMeasurement),
+  )
+  await runFfmpeg([
+    '-hide_banner',
+    '-nostdin',
+    '-y',
+    '-i',
+    inputPath,
+    '-map_metadata',
+    '-1',
+    '-vn',
+    '-af',
+    filter,
+    '-ar',
+    String(ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.outputSampleRateHz),
+    '-codec:a',
+    'libmp3lame',
+    '-b:a',
+    String(ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.outputBitRateBps),
+    outputPath,
+  ])
+  const [outputInspection, outputLoudness] = await Promise.all([
+    inspectZombieEscapeAudioFile(outputPath),
+    inspectZombieEscapeAudioLoudness(outputPath),
+  ])
+  const failures = validateZombieEscapeOneShotMastering(outputLoudness)
+  if (failures.length > 0) throw new Error(`${outputPath}: ${failures.join('; ')}`)
+  return {
+    inputInspection,
+    inputLoudness,
+    outputInspection,
+    outputLoudness,
+  }
+}
+
+export function validateZombieEscapeOneShotMastering(loudness) {
+  const failures = []
+  if (
+    !Number.isFinite(loudness?.integratedLoudnessLufs) ||
+    Math.abs(
+      loudness.integratedLoudnessLufs -
+        ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.integratedLoudnessLufs,
+    ) > ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.toleranceLufs
+  ) {
+    failures.push(
+      `integrated loudness ${String(loudness?.integratedLoudnessLufs)} LUFS is outside the one-shot target envelope`,
+    )
+  }
+  if (
+    !Number.isFinite(loudness?.truePeakDbfs) ||
+    loudness.truePeakDbfs > ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.truePeakDbfs + 0.05
+  ) {
+    failures.push(
+      `true peak ${String(loudness?.truePeakDbfs)} dBFS exceeds the one-shot ceiling`,
+    )
+  }
+  return failures
+}
+
+export function validateZombieEscapeOneShotVariantSpread(loudnesses) {
+  const integrated = loudnesses
+    .map((loudness) => loudness?.integratedLoudnessLufs)
+    .filter(Number.isFinite)
+  if (integrated.length !== loudnesses.length || integrated.length < 2) return []
+  const spread = Math.max(...integrated) - Math.min(...integrated)
+  return spread > ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.variantSpreadToleranceLufs
+    ? [
+        `integrated loudness spread ${spread.toFixed(2)} LU exceeds the one-shot variant limit`,
+      ]
+    : []
+}
+
 export function validateZombieEscapeAudioInspection(inspection, asset, source) {
   const failures = []
   if (inspection.byteLength < 512) failures.push('file is unexpectedly small')
@@ -262,6 +515,7 @@ export function createZombieEscapeAudioArtifact({
   asset,
   generatedAt,
   inspection,
+  mastering = null,
   requestId = null,
   source,
   traceId = null,
@@ -274,6 +528,7 @@ export function createZombieEscapeAudioArtifact({
     cueId: asset.cueId,
     durationSeconds: roundDuration(inspection.durationSeconds),
     generatedAt,
+    mastering,
     path: asset.publicPath,
     requestId: nullableHeader(requestId),
     requestedDurationSeconds: asset.durationSeconds,
@@ -360,6 +615,63 @@ async function runFfprobe(path) {
   }
 }
 
+async function runFfmpeg(arguments_) {
+  try {
+    return await execFileAsync('ffmpeg', arguments_, {
+      maxBuffer: 4 * 1024 * 1024,
+      windowsHide: true,
+    })
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error('ffmpeg is required to master or audit Zombie Escape audio assets')
+    }
+    throw error
+  }
+}
+
+function createLoudnormFilter(measurement = null) {
+  const target = ZOMBIE_ESCAPE_ONE_SHOT_MASTERING
+  const settings = [
+    `I=${target.integratedLoudnessLufs}`,
+    `TP=${target.normalizationTruePeakDbfs}`,
+    `LRA=${target.loudnessRangeLufs}`,
+  ]
+  if (measurement) {
+    settings.push(
+      `measured_I=${measurement.integratedLoudnessLufs}`,
+      `measured_LRA=${measurement.loudnessRangeLufs}`,
+      `measured_TP=${measurement.truePeakDbfs}`,
+      `measured_thresh=${measurement.thresholdLufs}`,
+      `offset=${measurement.targetOffsetLufs}`,
+      'linear=true',
+    )
+  }
+  settings.push('print_format=json')
+  return `loudnorm=${settings.join(':')}`
+}
+
+function joinAudioFilters(prefix, filter) {
+  return prefix ? `${prefix},${filter}` : filter
+}
+
+function parseLoudnormMeasurement(stderr) {
+  const matches = stderr.match(/\{\s*"input_i"[\s\S]*?\}/g)
+  const body = matches?.at(-1)
+  if (!body) throw new Error('ffmpeg loudnorm did not report a measurement')
+  const parsed = JSON.parse(body)
+  const measurement = {
+    integratedLoudnessLufs: Number(parsed.input_i),
+    loudnessRangeLufs: Number(parsed.input_lra),
+    targetOffsetLufs: Number(parsed.target_offset),
+    thresholdLufs: Number(parsed.input_thresh),
+    truePeakDbfs: Number(parsed.input_tp),
+  }
+  if (Object.values(measurement).some((value) => !Number.isFinite(value))) {
+    throw new Error('ffmpeg loudnorm reported a non-finite measurement')
+  }
+  return measurement
+}
+
 function nullableHeader(value) {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
@@ -386,4 +698,64 @@ function requireFiniteNumber(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error(`${label} must be a finite number`)
   }
+}
+
+function requireMasteringProfile(value, required, label) {
+  if (required) {
+    if (value !== 'one-shot-v1') {
+      throw new Error(`${label}.masteringProfile must be one-shot-v1`)
+    }
+    return value
+  }
+  if (value !== undefined) {
+    throw new Error(`${label}.masteringProfile is only valid for mastered one-shot cues`)
+  }
+  return null
+}
+
+function validatePresencePlayback(value, label) {
+  requireRecord(value, label)
+  requireFiniteNumber(value.maxDistance, `${label}.maxDistance`)
+  requireFiniteNumber(value.referenceDistance, `${label}.referenceDistance`)
+  requireFiniteNumber(value.maxVoices, `${label}.maxVoices`)
+  requireFiniteNumber(value.minIntervalMs, `${label}.minIntervalMs`)
+  requireFiniteNumber(value.volume, `${label}.volume`)
+  if (!Array.isArray(value.rateRange) || value.rateRange.length !== 2) {
+    throw new Error(`${label}.rateRange must have two values`)
+  }
+  requireFiniteNumber(value.rateRange[0], `${label}.rateRange[0]`)
+  requireFiniteNumber(value.rateRange[1], `${label}.rateRange[1]`)
+  if (
+    value.spatial !== true ||
+    value.referenceDistance <= 0 ||
+    value.maxDistance <= value.referenceDistance ||
+    !Number.isInteger(value.maxVoices) ||
+    value.maxVoices < 1 ||
+    value.minIntervalMs < 0 ||
+    value.rateRange[0] <= 0 ||
+    value.rateRange[1] < value.rateRange[0] ||
+    value.volume < 0 ||
+    value.volume > 2
+  ) {
+    throw new Error(`${label} is invalid`)
+  }
+}
+
+function validatePresenceSchedule(value, label) {
+  requireRecord(value, label)
+  validatePositiveRange(value.initialDelaySeconds, `${label}.initialDelaySeconds`)
+  validatePositiveRange(value.intervalSeconds, `${label}.intervalSeconds`)
+  requireFiniteNumber(value.rangeHysteresisMeters, `${label}.rangeHysteresisMeters`)
+  if (value.rangeHysteresisMeters <= 0) {
+    throw new Error(`${label}.rangeHysteresisMeters must be positive`)
+  }
+}
+
+function validatePositiveRange(value, label) {
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw new Error(`${label} must have two values`)
+  }
+  requireFiniteNumber(value[0], `${label}[0]`)
+  requireFiniteNumber(value[1], `${label}[1]`)
+  if (value[0] < 0 || value[1] < value[0]) throw new Error(`${label} is invalid`)
 }

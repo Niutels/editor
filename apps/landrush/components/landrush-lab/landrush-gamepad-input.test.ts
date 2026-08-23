@@ -31,6 +31,14 @@ describe('Landrush gamepad input', () => {
     expect(input.rightTrigger).toBe(0)
   })
 
+  test('maps L2 to crouch without changing the run command', () => {
+    const input = resolveLandrushGamepadInput(createGamepadSnapshot({ 6: 0.8 }))
+
+    expect(input.crouch).toBe(true)
+    expect(input.leftTrigger).toBeCloseTo(0.8)
+    expect(input.run).toBe(false)
+  })
+
   test('keeps R1 observable without treating it as run', () => {
     const input = resolveLandrushGamepadInput(createGamepadSnapshot({ 5: 1 }))
 

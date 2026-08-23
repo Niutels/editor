@@ -39,10 +39,10 @@ import {
   useFacingPose,
   usePlacementPreview,
 } from '@pascal-app/editor'
-import { useViewer } from '@pascal-app/viewer'
+import { cloneMaterial, useViewer } from '@pascal-app/viewer'
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type Group, Mesh, Quaternion, Vector3 } from 'three'
 import {
   FLOOR_PLACEMENT_ALIGNMENT_THRESHOLD_M,
@@ -73,6 +73,7 @@ import {
   cabinetRunFootprint,
 } from './definition'
 import { buildCabinetGeometry } from './geometry'
+import { ownCabinetGhostResources } from './ghost-resources'
 import { resolveCabinetGridPosition } from './placement-snap'
 import useCabinetPlacementStatus from './placement-status'
 import useCabinetPlacementType from './placement-type'
@@ -306,30 +307,36 @@ const CabinetTool = () => {
       previewNode.depth + (islandMode ? ISLAND_SEATING_OVERHANG : 0),
     ] as [number, number, number]
   }, [previewNode, islandMode])
-  const ghost = useMemo(() => {
+  const [ghostResources, setGhostResources] = useState<
+    ReturnType<typeof ownCabinetGhostResources> | undefined
+  >()
+  useLayoutEffect(() => {
     const group = buildCabinetGeometry(previewNode)
     group.traverse((child) => {
       if (child instanceof Mesh) {
-        child.material = child.material.clone()
+        child.material = cloneMaterial(child.material)
         child.material.transparent = true
         child.material.opacity = PREVIEW_OPACITY
         child.raycast = () => {}
       }
     })
-    return group
+    const resources = ownCabinetGhostResources(group)
+    setGhostResources(resources)
+    return resources.dispose
   }, [previewNode])
   // The stretched span renders one ghost per module — the same Object3D can't
   // appear twice in the scene, so extra modules reuse pooled clones (geometry
   // and materials stay shared) instead of cloning on every pointer move.
-  const ghostPoolRef = useRef<Group[]>([])
   const ghostForIndex = useCallback(
     (index: number): Group => {
+      if (!ghostResources) throw new Error('Cabinet ghost resources are not mounted')
+      const ghost = ghostResources.ghost
       if (index === 0) return ghost
-      const pool = ghostPoolRef.current
+      const pool = ghostResources.pool
       while (pool.length < index) pool.push(ghost.clone())
       return pool[index - 1] as Group
     },
-    [ghost],
+    [ghostResources],
   )
 
   const publishFloorplanPreview = useCallback(
@@ -1114,7 +1121,8 @@ const CabinetTool = () => {
     }
   }, [activeLevelId, placementDimensions, previewNode, publishFloorplanPreview])
 
-  if (!activeLevelId || !placement) return null
+  if (!activeLevelId || !placement || !ghostResources) return null
+  const ghost = ghostResources.ghost
   const stretch = placement.stretch
   const draftModuleOffsets = draftSegments.map((segment, segmentIndex) =>
     draftSegments

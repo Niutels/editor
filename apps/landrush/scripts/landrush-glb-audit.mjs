@@ -18,6 +18,9 @@ const TYPE_COMPONENT_COUNTS = {
   VEC3: 3,
   VEC4: 4,
 }
+const KTX2_IDENTIFIER = Buffer.from([
+  0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a,
+])
 
 export async function inspectGlb(path) {
   const file = await readFile(path)
@@ -93,6 +96,8 @@ export async function inspectGlb(path) {
     assetVersion: json.asset?.version ?? null,
     byteLength: file.byteLength,
     contentHash: hashBytes(file),
+    extensionsRequired: [...(json.extensionsRequired ?? [])].sort(),
+    extensionsUsed: [...(json.extensionsUsed ?? [])].sort(),
     glbVersion: version,
     imageCount: images.length,
     images,
@@ -103,6 +108,7 @@ export async function inspectGlb(path) {
     primitiveCount,
     primitiveWithoutMaterialCount,
     skinCompatibilityHash: skinInspection.hash,
+    skinSemanticCompatibilityHash: skinInspection.semanticHash,
     skinCount: json.skins?.length ?? 0,
     skinJointCounts: skinInspection.jointCounts,
     skinnedMeshNodeCount: skinInspection.skinnedMeshNodeCount,
@@ -223,12 +229,18 @@ function inspectImage(json, binaryChunk, image, index, path) {
   const data = imageData(json, binaryChunk, image, path)
   const detected = data ? detectImage(data) : null
   return {
+    basisMode: detected?.basisMode ?? null,
     byteLength: data?.byteLength ?? null,
     embedded: Boolean(data),
+    hasFullMipChain: detected?.hasFullMipChain ?? null,
     height: detected?.height ?? null,
     index,
+    levelCount: detected?.levelCount ?? null,
     mimeType: image.mimeType ?? detected?.mimeType ?? null,
     name: image.name?.trim() || null,
+    supercompressionScheme: detected?.supercompressionScheme ?? null,
+    uncompressedRgbaMipByteLength: detected?.uncompressedRgbaMipByteLength ?? null,
+    vkFormat: detected?.vkFormat ?? null,
     width: detected?.width ?? null,
   }
 }
@@ -248,6 +260,8 @@ function imageData(json, binaryChunk, image, path) {
 }
 
 function detectImage(data) {
+  const ktx2 = ktx2Metadata(data)
+  if (ktx2) return ktx2
   if (
     data.byteLength >= 24 &&
     data.readUInt32BE(0) === 0x89504e47 &&
@@ -264,6 +278,45 @@ function detectImage(data) {
   const webp = webpDimensions(data)
   if (webp) return { ...webp, mimeType: 'image/webp' }
   return null
+}
+
+function ktx2Metadata(data) {
+  if (data.byteLength < 80 || !data.subarray(0, KTX2_IDENTIFIER.length).equals(KTX2_IDENTIFIER)) {
+    return null
+  }
+  const vkFormat = data.readUInt32LE(12)
+  const width = data.readUInt32LE(20)
+  const height = data.readUInt32LE(24)
+  const levelCount = data.readUInt32LE(40)
+  const supercompressionScheme = data.readUInt32LE(44)
+  if (width < 1 || height < 1 || levelCount < 1) return null
+  const fullMipLevelCount = Math.floor(Math.log2(Math.max(width, height))) + 1
+  return {
+    basisMode:
+      vkFormat !== 0
+        ? null
+        : supercompressionScheme === 1
+          ? 'etc1s'
+          : supercompressionScheme === 2
+            ? 'uastc'
+            : 'uastc-uncompressed',
+    hasFullMipChain: levelCount === fullMipLevelCount,
+    height,
+    levelCount,
+    mimeType: 'image/ktx2',
+    supercompressionScheme,
+    uncompressedRgbaMipByteLength: rgbaMipByteLength(width, height, levelCount),
+    vkFormat,
+    width,
+  }
+}
+
+function rgbaMipByteLength(width, height, levelCount) {
+  let byteLength = 0
+  for (let level = 0; level < levelCount; level += 1) {
+    byteLength += Math.max(1, width >> level) * Math.max(1, height >> level) * 4
+  }
+  return byteLength
 }
 
 function jpegDimensions(data) {
@@ -329,17 +382,42 @@ function inspectTextureSlot(json, images, slot, path) {
   const textureIndex = slot.index
   const texture = json.textures?.[textureIndex]
   if (!texture) throw new Error(`${path} references missing texture ${textureIndex}.`)
-  const imageIndex = texture.source ?? texture.extensions?.KHR_texture_basisu?.source
+  const basisImageIndex = texture.extensions?.KHR_texture_basisu?.source
+  const sourceImageIndex = texture.source
+  const imageIndex = basisImageIndex ?? sourceImageIndex
   if (!Number.isInteger(imageIndex) || !images[imageIndex]) {
     throw new Error(`${path} texture ${textureIndex} does not reference a valid image.`)
   }
   const image = images[imageIndex]
+  const sourceImage = Number.isInteger(sourceImageIndex) ? images[sourceImageIndex] : null
+  if (Number.isInteger(sourceImageIndex) && !sourceImage) {
+    throw new Error(`${path} texture ${textureIndex} has an invalid fallback source image.`)
+  }
   return {
+    basisMode: image.basisMode,
+    fallbackImageIndex:
+      Number.isInteger(basisImageIndex) && Number.isInteger(sourceImageIndex)
+        ? sourceImageIndex
+        : null,
+    fallbackMimeType:
+      Number.isInteger(basisImageIndex) && Number.isInteger(sourceImageIndex)
+        ? sourceImage.mimeType
+        : null,
+    hasRasterFallback:
+      Number.isInteger(basisImageIndex) &&
+      Number.isInteger(sourceImageIndex) &&
+      ['image/jpeg', 'image/png', 'image/webp'].includes(sourceImage.mimeType),
+    hasFullMipChain: image.hasFullMipChain,
     height: image.height,
     imageIndex,
+    ktx2ExtensionSource: Number.isInteger(basisImageIndex),
+    levelCount: image.levelCount,
     mimeType: image.mimeType,
+    supercompressionScheme: image.supercompressionScheme,
+    sourceImageIndex: Number.isInteger(sourceImageIndex) ? sourceImageIndex : null,
     texCoord: slot.texCoord ?? 0,
     textureIndex,
+    uncompressedRgbaMipByteLength: image.uncompressedRgbaMipByteLength,
     width: image.width,
   }
 }
@@ -428,8 +506,42 @@ function inspectSkinCompatibility(json, binaryChunk, path) {
   return {
     hash: skins.length > 0 ? hashBytes(Buffer.from(JSON.stringify(signature))) : null,
     jointCounts: skins.map(({ joints }) => joints.length),
+    semanticHash:
+      skins.length > 0
+        ? hashBytes(Buffer.from(JSON.stringify(canonicalizeSkinSignature(signature))))
+        : null,
     skinnedMeshNodeCount: bindings.length,
   }
+}
+
+function canonicalizeSkinSignature(signature) {
+  return {
+    ...signature,
+    skins: signature.skins.map((skin) => ({
+      ...skin,
+      joints: skin.joints.map((joint) => ({
+        ...joint,
+        matrix: canonicalizeTransform(joint.matrix),
+        rotation: canonicalizeTransform(joint.rotation ?? [0, 0, 0, 1]),
+        scale: canonicalizeScale(joint.scale ?? [1, 1, 1]),
+        translation: canonicalizeTransform(joint.translation ?? [0, 0, 0]),
+      })),
+    })),
+  }
+}
+
+function canonicalizeScale(values) {
+  return values.map((value) => (Math.abs(value - 1) < 1e-5 ? 1 : value))
+}
+
+function canonicalizeTransform(values) {
+  if (!values) return values
+  return values.map((value) => {
+    if (Math.abs(value) < 1e-6) return 0
+    if (Math.abs(value - 1) < 1e-6) return 1
+    if (Math.abs(value + 1) < 1e-6) return -1
+    return value
+  })
 }
 
 function accessorSignature(json, binaryChunk, accessorIndex, path, includeDataHash) {

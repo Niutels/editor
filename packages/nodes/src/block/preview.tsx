@@ -2,7 +2,7 @@
 
 import type { BlockNode } from '@pascal-app/core'
 import { EDITOR_LAYER } from '@pascal-app/editor'
-import { useViewer } from '@pascal-app/viewer'
+import { cloneMaterial, useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo } from 'react'
 import { Color, type Material, Mesh } from 'three'
 import { buildBlockGeometry } from './geometry'
@@ -20,7 +20,7 @@ export default function BlockPreview({ node, valid = true }: { node: BlockNode; 
       child.raycast = () => {}
       if (!(child instanceof Mesh)) return
       const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material]
-      const materials = sourceMaterials.map((material) => material.clone())
+      const materials = sourceMaterials.map((material) => cloneMaterial(material))
       for (const material of materials) {
         material.transparent = true
         material.opacity = 0.52

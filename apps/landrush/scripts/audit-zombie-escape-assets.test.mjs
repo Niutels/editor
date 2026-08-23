@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { auditZombieEscapeAssets } from './audit-zombie-escape-assets.mjs'
 import { inspectGlb } from './landrush-glb-audit.mjs'
 
-const assetRoot = resolve(import.meta.dirname, '../public/landrush-lab/zombie-escape/assets')
+const assetRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../public/landrush-lab/zombie-escape/assets',
+)
 
 test('inspects 2048 material slots and compatible bundled zombie skins', async () => {
   const weapon = await inspectGlb(resolve(assetRoot, 'weapons/sunflare-pistol.glb'))
@@ -46,7 +50,27 @@ test('audits the checked-in asset contract without writing a report', async () =
   assert.equal(audit.failures.length, provenanceFailureCount, audit.failures.join('\n'))
   assert.equal(audit.pass, provenanceFailureCount === 0)
   assert.ok(audit.failures.every((failure) => failure.includes('state/catalog')))
+  assert.deepEqual(audit.catalogChecks, { weapons: 5, zombies: 10 })
+  assert.deepEqual(audit.runtimeCatalogChecks, {
+    ambientNpcSources: 10,
+    mappedZombies: 10,
+    sourceNpcBijection: true,
+    zombieEntries: 10,
+  })
+  assert.ok(
+    audit.failures.every(
+      (failure) =>
+        !failure.startsWith('weapon catalog:') &&
+        !failure.startsWith('zombie catalog:') &&
+        !failure.startsWith('ambient NPC catalog:') &&
+        !failure.includes(': runtime '),
+    ),
+  )
   assert.equal(Object.keys(audit.assets).length, 15)
+  assert.equal(
+    audit.assets.dockworker.canonicalOutputs.rigged,
+    '/landrush-lab/zombie-escape/assets/zombies/dockworker/rigged.glb',
+  )
   assert.equal(audit.assets['sunflare-pistol'].outputs.model.textureContract.profile, 'full-pbr-2048')
   assert.equal(
     audit.assets.dockworker.outputs.rigged.textureContract.profile,

@@ -5,6 +5,7 @@ import {
   LevelNode,
   type StairNode,
 } from '@pascal-app/core'
+import { migrateVerticalSceneNodes } from '@pascal-app/core/scene-migrations'
 
 export type LandrushParcelBuildGraphScope = {
   contextBuildingId: string
@@ -79,6 +80,8 @@ export function canonicalizeLandrushParcelBuildGraph(
     ? existingDefaultBuilding
     : (existingDefaultBuilding ?? sourceBuildings[0])
   const buildingId = defaultSourceBuilding?.id ?? ids.buildingId
+  const legacyWorldBaseElevations = new Map<string, number>()
+  const reparentedLegacyLevelIds = new Set<string>()
 
   const nodesById = new Map<string, AnyNode>()
   for (const sourceBuilding of sourceBuildings) {
@@ -100,7 +103,15 @@ export function canonicalizeLandrushParcelBuildGraph(
   }
 
   for (const level of sourceLevels) {
-    const parentId = sourceBuildingIds.has(level.parentId ?? '') ? level.parentId! : buildingId
+    const hasAcceptedBuildingParent = sourceBuildingIds.has(level.parentId ?? '')
+    const parentId = hasAcceptedBuildingParent ? level.parentId! : buildingId
+    if (!hasAcceptedBuildingParent) {
+      reparentedLegacyLevelIds.add(level.id)
+      const worldBaseElevation = readWorldBaseElevationMetadata(level)
+      if (worldBaseElevation !== null) {
+        legacyWorldBaseElevations.set(level.id, worldBaseElevation)
+      }
+    }
     nodesById.set(level.id, { ...level, parentId } as AnyNode)
   }
 
@@ -113,12 +124,14 @@ export function canonicalizeLandrushParcelBuildGraph(
         nodeBelongsToScope(level, scope),
     )
   const groundLevelId = groundLevel?.id ?? ids.groundLevelId
-  if (!nodesById.has(groundLevelId)) {
+  const createdGroundLevel = !nodesById.has(groundLevelId)
+  if (createdGroundLevel) {
+    reparentedLegacyLevelIds.add(groundLevelId)
     nodesById.set(
       groundLevelId,
       LevelNode.parse({
         children: [],
-        height: DEFAULT_LEVEL_HEIGHT,
+        ...(hasLegacyContent ? {} : { height: DEFAULT_LEVEL_HEIGHT }),
         id: groundLevelId,
         level: 0,
         name: 'Ground Floor',
@@ -146,6 +159,18 @@ export function canonicalizeLandrushParcelBuildGraph(
   repairSlabHostReferences(nodesById)
   repairParentReferences(nodesById, groundLevelId, scope.contextSiteId)
   synchronizeChildren(nodesById)
+  migrateVerticalParcelNodes(nodesById)
+  for (const levelId of reparentedLegacyLevelIds) {
+    if (legacyWorldBaseElevations.has(levelId)) continue
+    const directChildWorldBaseElevation = readConsistentDirectChildWorldBaseElevation(
+      nodesById,
+      levelId,
+    )
+    if (directChildWorldBaseElevation !== null) {
+      legacyWorldBaseElevations.set(levelId, directChildWorldBaseElevation)
+    }
+  }
+  migrateLegacyWorldBaseElevations(nodesById, legacyWorldBaseElevations)
 
   const nodes = sortGraphNodes(nodesById)
   return {
@@ -154,6 +179,70 @@ export function canonicalizeLandrushParcelBuildGraph(
     migrated: !haveEqualNodeMaps(sourceInput, nodes),
     nodes,
   }
+}
+
+function migrateVerticalParcelNodes(nodesById: Map<string, AnyNode>) {
+  const migration = migrateVerticalSceneNodes(Object.fromEntries(nodesById))
+  if (!migration.changed) return
+  for (const [id, node] of Object.entries(migration.nodes)) {
+    nodesById.set(id, node as AnyNode)
+  }
+}
+
+function readConsistentDirectChildWorldBaseElevation(
+  nodesById: ReadonlyMap<string, AnyNode>,
+  levelId: string,
+) {
+  let worldBaseElevation: number | null = null
+  for (const node of nodesById.values()) {
+    if (node.parentId !== levelId) continue
+    const candidate = readWorldBaseElevationMetadata(node)
+    if (candidate === null) continue
+    if (worldBaseElevation !== null && candidate !== worldBaseElevation) return null
+    worldBaseElevation = candidate
+  }
+  return worldBaseElevation
+}
+
+function migrateLegacyWorldBaseElevations(
+  nodesById: Map<string, AnyNode>,
+  worldBaseElevations: ReadonlyMap<string, number>,
+) {
+  if (worldBaseElevations.size === 0) return
+
+  const cumulativeYByBuilding = new Map<string | null, number>()
+  const levels = [...nodesById.values()]
+    .filter((node): node is Extract<AnyNode, { type: 'level' }> => node.type === 'level')
+    .sort((left, right) => left.level - right.level || compareNodeIds(left, right))
+
+  for (const level of levels) {
+    const buildingId = getBuilding(nodesById, level.parentId)?.id ?? null
+    const inheritedBaseY = cumulativeYByBuilding.get(buildingId) ?? 0
+    const targetWorldBaseY = worldBaseElevations.get(level.id)
+    let resolvedLevel = level
+    let baseY = inheritedBaseY + (level.baseElevation ?? 0)
+
+    if (targetWorldBaseY !== undefined) {
+      const metadata = { ...(level.metadata as Record<string, unknown>) }
+      delete metadata.worldBaseElevationM
+      resolvedLevel = {
+        ...level,
+        baseElevation: targetWorldBaseY - inheritedBaseY,
+        metadata,
+      } as typeof level
+      baseY = targetWorldBaseY
+      nodesById.set(level.id, resolvedLevel)
+    }
+
+    cumulativeYByBuilding.set(buildingId, baseY + (resolvedLevel.height ?? DEFAULT_LEVEL_HEIGHT))
+  }
+}
+
+function readWorldBaseElevationMetadata(node: Pick<AnyNode, 'metadata'>) {
+  const metadata = node.metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const value = (metadata as Record<string, unknown>).worldBaseElevationM
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 function resolveCanonicalParentId({

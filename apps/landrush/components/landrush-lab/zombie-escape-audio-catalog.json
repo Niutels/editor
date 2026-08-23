@@ -1,12 +1,13 @@
 {
-  "schemaVersion": 1,
-  "catalogVersion": "2026-08-20.2",
+  "schemaVersion": 3,
+  "catalogVersion": "2026-08-23.1",
   "modelId": "eleven_text_to_sound_v2",
   "outputFormat": "mp3_44100_128",
   "cues": [
     {
       "id": "weapon-shot-sunflare-pistol",
       "eventKind": "shot-fired",
+      "masteringProfile": "one-shot-v1",
       "weaponId": "sunflare-pistol",
       "durationSeconds": 0.6,
       "promptInfluence": 0.65,
@@ -23,6 +24,7 @@
     {
       "id": "weapon-shot-reef-carbine",
       "eventKind": "shot-fired",
+      "masteringProfile": "one-shot-v1",
       "weaponId": "reef-carbine",
       "durationSeconds": 0.5,
       "promptInfluence": 0.72,
@@ -33,12 +35,13 @@
         "minIntervalMs": 64,
         "rateRange": [0.98, 1.025],
         "spatial": false,
-        "volume": 0.52
+        "volume": 0.74
       }
     },
     {
       "id": "weapon-shot-driftwood-scattergun",
       "eventKind": "shot-fired",
+      "masteringProfile": "one-shot-v1",
       "weaponId": "driftwood-scattergun",
       "durationSeconds": 0.8,
       "promptInfluence": 0.65,
@@ -49,12 +52,13 @@
         "minIntervalMs": 180,
         "rateRange": [0.98, 1.02],
         "spatial": false,
-        "volume": 0.64
+        "volume": 0.9
       }
     },
     {
       "id": "weapon-shot-storm-coil-repeater",
       "eventKind": "shot-fired",
+      "masteringProfile": "one-shot-v1",
       "weaponId": "storm-coil-repeater",
       "durationSeconds": 0.5,
       "promptInfluence": 0.74,
@@ -71,6 +75,7 @@
     {
       "id": "weapon-shot-tidebreak-launcher",
       "eventKind": "shot-fired",
+      "masteringProfile": "one-shot-v1",
       "weaponId": "tidebreak-launcher",
       "durationSeconds": 0.9,
       "promptInfluence": 0.65,
@@ -81,7 +86,7 @@
         "minIntervalMs": 280,
         "rateRange": [0.985, 1.015],
         "spatial": false,
-        "volume": 0.68
+        "volume": 1
       }
     },
     {
@@ -231,6 +236,55 @@
         "rateRange": [1, 1],
         "spatial": false,
         "volume": 0.42
+      }
+    }
+  ],
+  "presenceCues": [
+    {
+      "id": "enemy-presence",
+      "presenceKind": "zombie-vocalization",
+      "durationSeconds": 1.4,
+      "promptInfluence": 0.68,
+      "prompt": "Three distinct short nonverbal undead zombie presence vocalizations for a stylized game: dry raspy breaths, low hungry groans, and brief strained snarls, close-miked and isolated. Each variation should feel like an approaching creature, threatening but not gory, with no intelligible words, footsteps, impacts, ambience, music, reverb, or long tail. One vocalization per variation, fast natural decay. Duration 1.4 seconds.",
+      "files": [
+        "/audios/sfx/zombie-escape/enemy/presence-0.mp3",
+        "/audios/sfx/zombie-escape/enemy/presence-1.mp3",
+        "/audios/sfx/zombie-escape/enemy/presence-2.mp3"
+      ],
+      "playback": {
+        "maxDistance": 30,
+        "maxVoices": 6,
+        "minIntervalMs": 220,
+        "rateRange": [0.94, 1.06],
+        "referenceDistance": 4.5,
+        "spatial": true,
+        "volume": 0.46
+      },
+      "schedule": {
+        "initialDelaySeconds": [0.35, 2.8],
+        "intervalSeconds": [3.8, 7],
+        "rangeHysteresisMeters": 2
+      }
+    }
+  ],
+  "movementCues": [
+    {
+      "id": "player-jump",
+      "movementKind": "jump",
+      "masteringProfile": "one-shot-v1",
+      "durationSeconds": 0.5,
+      "promptInfluence": 0.72,
+      "prompt": "Compact stylized robot jump takeoff for a game: one crisp mechanical spring compression followed immediately by a short lightweight servo release and soft upward air whoosh. Energetic but not explosive, dry close-miked one-shot, strong clean transient, mastered loud. No landing, footsteps, impact, voice, music, ambience, weapon, or laser tone. Duration 0.5 seconds.",
+      "files": [
+        "/audios/sfx/zombie-escape/player/jump-0.mp3",
+        "/audios/sfx/zombie-escape/player/jump-1.mp3"
+      ],
+      "playback": {
+        "maxVoices": 2,
+        "minIntervalMs": 90,
+        "rateRange": [0.98, 1.02],
+        "spatial": false,
+        "volume": 0.56
       }
     }
   ]

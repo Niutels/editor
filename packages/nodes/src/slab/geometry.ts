@@ -14,11 +14,12 @@ import {
   terrainFieldOf,
 } from '@pascal-app/core'
 import {
-  applyMaterialPresetToMaterials,
   buildTerrainPerimeterFillGeometry,
   type ColorPreset,
+  cloneMaterial,
   createDefaultMaterial,
   createMaterial,
+  createMaterialFromPresetRef,
   createSurfaceRoleMaterial,
   generateSlabGeometry,
   type RenderShading,
@@ -56,7 +57,6 @@ type SlabMaterial = Material & {
   transparent: boolean
 }
 
-const slabMaterialCache = new Map<string, Material>()
 function getSlabSlotMaterial(
   node: SlabNode,
   slotId: SlabSlotId,
@@ -149,27 +149,19 @@ function splitSlabFacesByFacing(geometry: BufferGeometry): {
 }
 
 function getLegacySlabMaterial(node: SlabNode, shading: RenderShading): Material {
-  // Cached by `{material, materialPreset}` signature so slabs sharing settings
-  // share the GPU resource; cached entry mutation (preset apply) is preserved
-  // so async texture loads still update the rendered material after re-mount.
   const cacheKey = JSON.stringify({
     shading,
     material: node.material ?? null,
     materialPreset: node.materialPreset ?? null,
   })
-  const cached = slabMaterialCache.get(cacheKey)
-  if (cached) return cached
-
   const preset = getMaterialPresetByRef(node.materialPreset)
-  const material = preset
-    ? createDefaultMaterial('#ffffff', 0.5, shading)
+  const source = preset
+    ? (createMaterialFromPresetRef(node.materialPreset, shading) ??
+      createDefaultMaterial('#ffffff', 0.5, shading))
     : node.material
-      ? createMaterial(node.material, shading).clone()
+      ? createMaterial(node.material, shading)
       : createDefaultMaterial('#e5e5e5', 0.8, shading)
-
-  if (preset) {
-    applyMaterialPresetToMaterials(material, preset)
-  }
+  const material = cloneMaterial(source, { cacheKey: `slab-legacy:${cacheKey}` })
 
   const slabMaterial = material as SlabMaterial
   slabMaterial.transparent = false
@@ -182,7 +174,6 @@ function getLegacySlabMaterial(node: SlabNode, shading: RenderShading): Material
   slabMaterial.depthWrite = true
   slabMaterial.needsUpdate = true
 
-  slabMaterialCache.set(cacheKey, material)
   return material
 }
 

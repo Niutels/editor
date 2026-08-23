@@ -5,6 +5,9 @@
   "private": true,
   "scripts": {
     "sync:pascal-assets": "node scripts/sync-pascal-assets.mjs",
+    "generate:island-ambient-assets": "node scripts/generate-island-ambient-assets.mjs",
+    "optimize:island-ambient-assets": "node scripts/optimize-island-ambient-assets.mjs",
+    "audit:island-ambient-assets": "node scripts/audit-island-ambient-assets.mjs",
     "generate:zombie-escape-assets": "node scripts/generate-zombie-escape-assets.mjs",
     "audit:zombie-escape-assets": "node scripts/audit-zombie-escape-assets.mjs",
     "generate:zombie-escape-audio": "node scripts/generate-zombie-escape-audio.mjs",

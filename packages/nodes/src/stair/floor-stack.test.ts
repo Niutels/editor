@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import {
   type AnyNode,
   type AnyNodeDefinition,
+  computeStairSegmentChainTransforms,
   getFloorPlacedElevation,
   getFloorStackedPosition,
   nodeRegistry,
@@ -112,6 +113,61 @@ describe('stair floor-stack footprints', () => {
     expect(footprints[1]?.position?.[1]).toBeCloseTo(1)
     expect(footprints[1]?.position?.[2]).toBeCloseTo(2)
     expect(footprints[1]?.rotation[1]).toBeCloseTo(Math.PI / 2)
+  })
+
+  test.each([
+    {
+      attachmentSide: 'left' as const,
+      expectedSecond: [1, 1, 2] as const,
+      expectedThird: [2.5, 1.8, 1.25] as const,
+      rotation: Math.PI,
+      turn: Math.PI / 2,
+    },
+    {
+      attachmentSide: 'right' as const,
+      expectedSecond: [-1, 1, 2] as const,
+      expectedThird: [-2.5, 1.8, 1.25] as const,
+      rotation: -Math.PI,
+      turn: -Math.PI / 2,
+    },
+  ])('keeps $attachmentSide L- and U-chain transforms aligned with footprints', (fixture) => {
+    const first = StairSegmentNode.parse({
+      id: `sseg_${fixture.attachmentSide}_first`,
+      height: 1,
+      length: 4,
+      width: 2,
+    })
+    const second = StairSegmentNode.parse({
+      attachmentSide: fixture.attachmentSide,
+      id: `sseg_${fixture.attachmentSide}_second`,
+      height: 0.8,
+      length: 3,
+      width: 1.5,
+    })
+    const third = StairSegmentNode.parse({
+      attachmentSide: fixture.attachmentSide,
+      id: `sseg_${fixture.attachmentSide}_third`,
+      height: 0.6,
+      length: 2,
+      width: 1,
+    })
+    const stair = StairNode.parse({
+      children: [first.id, second.id, third.id],
+      id: `stair_${fixture.attachmentSide}_u_chain`,
+      parentId: LEVEL_ID,
+    })
+    const transforms = computeStairSegmentChainTransforms([first, second, third])
+    const footprints = getStairSegmentFloorPlacedFootprints(stair, [first, second, third])
+
+    expect(transforms[1]?.position).toEqual(fixture.expectedSecond)
+    expect(transforms[1]?.rotation).toBeCloseTo(fixture.turn)
+    expect(transforms[2]?.position).toEqual(fixture.expectedThird)
+    expect(transforms[2]?.rotation).toBeCloseTo(fixture.rotation)
+    expect(footprints[1]?.rotation[1]).toBeCloseTo(fixture.turn)
+    expect(footprints[2]?.rotation[1]).toBeCloseTo(fixture.rotation)
+    expect(footprints[2]?.position?.[0]).toBeCloseTo(fixture.expectedThird[0])
+    expect(footprints[2]?.position?.[1]).toBeCloseTo(fixture.expectedThird[1])
+    expect(footprints[2]?.position?.[2]).toBeCloseTo(fixture.expectedThird[2] - 1)
   })
 
   test('derives spiral footprints from the parent instead of retained straight segments', () => {

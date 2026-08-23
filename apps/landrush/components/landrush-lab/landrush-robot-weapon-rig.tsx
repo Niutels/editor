@@ -13,6 +13,10 @@ import {
 } from './zombie-escape-combat-pose'
 import { GeneratedWeaponModel } from './zombie-escape-generated-assets'
 import {
+  createZombieEscapeHeldWeaponRenderRepresentativeKey,
+  type ZombieEscapeRenderReadinessRegistry,
+} from './zombie-escape-render-readiness'
+import {
   ZOMBIE_ESCAPE_WEAPON_CATALOG,
   type ZombieEscapeWeaponHandFitPose,
   type ZombieEscapeWeaponSpecification,
@@ -123,6 +127,7 @@ type LandrushRobotWeaponRigScratch = {
 }
 
 export function LandrushRobotWeaponRig({
+  active = true,
   combatStateRef,
   debug = false,
   dominantHand = 'right',
@@ -130,9 +135,11 @@ export function LandrushRobotWeaponRig({
   framePriority = 2.5,
   muzzlePoseRef,
   onFitSnapshot,
+  renderReadinessRegistry,
   supportHandEnabled = true,
   visualRootRef,
 }: {
+  active?: boolean
   combatStateRef: RefObject<LandrushRobotWeaponCombatState>
   debug?: boolean
   dominantHand?: 'left' | 'right'
@@ -140,6 +147,7 @@ export function LandrushRobotWeaponRig({
   framePriority?: number
   muzzlePoseRef: MutableRefObject<LandrushRobotWeaponMuzzlePose>
   onFitSnapshot?: (snapshot: LandrushRobotWeaponFitSnapshot) => void
+  renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   supportHandEnabled?: boolean
   visualRootRef: RefObject<Group | null>
 }) {
@@ -191,6 +199,10 @@ export function LandrushRobotWeaponRig({
 
   useFrame((_, delta) => {
     const weaponRoot = weaponRootRef.current
+    if (!active) {
+      if (weaponRoot) weaponRoot.visible = false
+      return
+    }
     const visualRoot = visualRootRef.current
     const combatState = combatStateRef.current
     if (!weaponRoot || !visualRoot || !combatState) {
@@ -414,7 +426,11 @@ export function LandrushRobotWeaponRig({
 
   return (
     <>
-      <group ref={weaponRootRef} userData={{ role: 'landrush-robot-mounted-weapon' }}>
+      <group
+        ref={weaponRootRef}
+        userData={{ role: 'landrush-robot-mounted-weapon' }}
+        visible={active}
+      >
         {ZOMBIE_ESCAPE_WEAPON_CATALOG.map((weapon, index) => (
           <group
             key={weapon.id}
@@ -424,7 +440,13 @@ export function LandrushRobotWeaponRig({
             visible={index === 0}
           >
             <Suspense fallback={null}>
-              <GeneratedWeaponModel weapon={weapon} />
+              <GeneratedWeaponModel
+                renderReadinessRegistry={renderReadinessRegistry}
+                renderRepresentativeKey={createZombieEscapeHeldWeaponRenderRepresentativeKey(
+                  weapon.id,
+                )}
+                weapon={weapon}
+              />
             </Suspense>
           </group>
         ))}

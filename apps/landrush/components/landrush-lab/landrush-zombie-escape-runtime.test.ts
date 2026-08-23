@@ -1,0 +1,279 @@
+import { describe, expect, test } from 'bun:test'
+import {
+  advanceLandrushZombieEscapeRestartButtonState,
+  createLandrushZombieEscapeRestartButtonState,
+  resolveLandrushZombieEscapeIntegratedLocomotionEnabled,
+  restartLandrushZombieEscapeIntegratedSimulation,
+  stepLandrushZombieEscapeIntegratedSimulation,
+} from './landrush-zombie-escape-runtime'
+import { ZOMBIE_ESCAPE_SEED, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+import { createZombieEscapeControlState } from './zombie-escape-controls'
+import {
+  createZombieEscapeHudSnapshot,
+  createZombieEscapeSimulation,
+  setZombieEscapeGamePhase,
+  spawnZombieEscapeZombie,
+} from './zombie-escape-simulation'
+import { createZombieEscapeArena } from './zombie-escape-world'
+
+describe('integrated Zombie Escape terminal lifecycle', () => {
+  test('keeps a lethal step in terminal night instead of resetting to Day', () => {
+    const { arena, input, simulation } = createLethalIntegratedSimulation()
+
+    const outcome = stepLandrushZombieEscapeIntegratedSimulation({
+      arena,
+      deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      expectedPhase: 'night',
+      input,
+      phaseReady: true,
+      simulation,
+    })
+    const snapshot = createZombieEscapeHudSnapshot(simulation)
+
+    expect(outcome).toEqual({ phaseChanged: false, stepped: true, terminal: true })
+    expect(snapshot.status).toBe('lost')
+    expect(snapshot.phase).toBe('night')
+    expect(snapshot.health).toBe(0)
+  })
+
+  test('resets external motion before either terminal outcome starts one deterministic Day', () => {
+    for (const terminalStatus of ['lost', 'won'] as const) {
+      const { arena, simulation } = createTerminalIntegratedSimulation(terminalStatus)
+      const externalMotion = {
+        velocityX: 4,
+        velocityZ: -2,
+        x: 9,
+        z: -3,
+      }
+      let externalResetCalls = 0
+
+      restartLandrushZombieEscapeIntegratedSimulation({
+        arena,
+        resetExternalPlayerMotion: () => {
+          expect(simulation.status).toBe(terminalStatus)
+          externalResetCalls += 1
+          externalMotion.velocityX = 0
+          externalMotion.velocityZ = 0
+          externalMotion.x = arena.playerStartX
+          externalMotion.z = arena.playerStartZ
+        },
+        simulation,
+      })
+
+      simulation.player.x = externalMotion.x
+      simulation.player.z = externalMotion.z
+      simulation.player.vx = externalMotion.velocityX
+      simulation.player.vz = externalMotion.velocityZ
+
+      expect(externalResetCalls).toBe(1)
+      expect(createZombieEscapeHudSnapshot(simulation)).toMatchObject({
+        health: 100,
+        night: 0,
+        phase: 'build',
+        phaseSecondsRemaining: ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds,
+        status: 'playing',
+        zombies: 0,
+      })
+      expect(simulation.player).toMatchObject({
+        vx: 0,
+        vz: 0,
+        x: arena.playerStartX,
+        z: arena.playerStartZ,
+      })
+    }
+  })
+
+  test('does not advance time, spawn, or damage while the camera handoff is unready', () => {
+    const { arena, input, simulation } = createLethalIntegratedSimulation()
+    const before = createZombieEscapeHudSnapshot(simulation)
+
+    for (let frame = 0; frame < 84; frame += 1) {
+      const outcome = stepLandrushZombieEscapeIntegratedSimulation({
+        arena,
+        deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+        expectedPhase: 'night',
+        input,
+        phaseReady: false,
+        simulation,
+      })
+      expect(outcome.stepped).toBe(false)
+    }
+
+    expect(createZombieEscapeHudSnapshot(simulation)).toMatchObject({
+      elapsedSeconds: before.elapsedSeconds,
+      health: before.health,
+      phase: 'night',
+      status: 'playing',
+      zombies: before.zombies,
+    })
+  })
+
+  test('starts deterministic first-wave damage only after readiness', () => {
+    const arena = createIntegratedArena()
+    const simulation = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED)
+    const input = createZombieEscapeControlState()
+    setZombieEscapeGamePhase(simulation, 'night')
+
+    for (let frame = 0; frame < 84; frame += 1) {
+      stepLandrushZombieEscapeIntegratedSimulation({
+        arena,
+        deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+        expectedPhase: 'night',
+        input,
+        phaseReady: false,
+        simulation,
+      })
+    }
+    expect(simulation.elapsedSeconds).toBe(0)
+    expect(simulation.player.health).toBe(100)
+
+    let firstDamageAt = Number.POSITIVE_INFINITY
+    for (let frame = 1; frame <= 720; frame += 1) {
+      stepLandrushZombieEscapeIntegratedSimulation({
+        arena,
+        deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+        expectedPhase: 'night',
+        input,
+        phaseReady: true,
+        simulation,
+      })
+      if (simulation.player.health < 100) {
+        firstDamageAt = simulation.elapsedSeconds
+        break
+      }
+    }
+
+    expect(firstDamageAt).toBeCloseTo(437 * ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, 6)
+    expect(simulation.player.health).toBe(92)
+    expect(simulation.phase).toBe('night')
+    expect(simulation.status).toBe('playing')
+  })
+
+  test('holds both won and lost terminal snapshots without advancing simulation', () => {
+    for (const terminalStatus of ['lost', 'won'] as const) {
+      const { arena, input, simulation } = createTerminalIntegratedSimulation(terminalStatus)
+      const elapsedSeconds = simulation.elapsedSeconds
+
+      const outcome = stepLandrushZombieEscapeIntegratedSimulation({
+        arena,
+        deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+        expectedPhase: 'night',
+        input,
+        phaseReady: true,
+        simulation,
+      })
+
+      expect(outcome).toEqual({ phaseChanged: false, stepped: false, terminal: true })
+      expect(simulation.elapsedSeconds).toBe(elapsedSeconds)
+      expect(simulation.phase).toBe('night')
+      expect(simulation.status).toBe(terminalStatus)
+    }
+  })
+
+  test('freezes integrated locomotion for either terminal status without affecting normal island movement', () => {
+    expect(
+      resolveLandrushZombieEscapeIntegratedLocomotionEnabled({
+        baseMovementEnabled: true,
+        status: 'playing',
+        zombieEscapeEnabled: true,
+      }),
+    ).toBe(true)
+
+    for (const status of ['lost', 'won'] as const) {
+      expect(
+        resolveLandrushZombieEscapeIntegratedLocomotionEnabled({
+          baseMovementEnabled: true,
+          status,
+          zombieEscapeEnabled: true,
+        }),
+      ).toBe(false)
+      expect(
+        resolveLandrushZombieEscapeIntegratedLocomotionEnabled({
+          baseMovementEnabled: true,
+          status,
+          zombieEscapeEnabled: false,
+        }),
+      ).toBe(true)
+    }
+
+    expect(
+      resolveLandrushZombieEscapeIntegratedLocomotionEnabled({
+        baseMovementEnabled: false,
+        status: 'playing',
+        zombieEscapeEnabled: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('requires a released then freshly pressed Triangle for either terminal restart', () => {
+    for (const status of ['lost', 'won'] as const) {
+      const buttonState = createLandrushZombieEscapeRestartButtonState()
+
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, 'playing')).toBe(
+        false,
+      )
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, status)).toBe(false)
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, false, status)).toBe(false)
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, status)).toBe(true)
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, status)).toBe(false)
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, 'playing')).toBe(
+        false,
+      )
+      expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, status)).toBe(false)
+    }
+  })
+})
+
+function createIntegratedArena() {
+  const arena = createZombieEscapeArena(ZOMBIE_ESCAPE_SEED)
+  arena.obstacleCount = 0
+  arena.playerStartX = 0
+  arena.playerStartZ = 0
+  return arena
+}
+
+function createLethalIntegratedSimulation() {
+  const arena = createIntegratedArena()
+  const simulation = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED)
+  const input = createZombieEscapeControlState()
+  setZombieEscapeGamePhase(simulation, 'night')
+  simulation.waveSpawnRemaining = 0
+  simulation.waveState = 'escape'
+  simulation.player.health = 8
+  const zombie = spawnZombieEscapeZombie(
+    simulation,
+    simulation.player.x,
+    simulation.player.z - 0.7,
+    120,
+  )
+  simulation.zombies.attackCooldown[zombie] = 0
+  return { arena, input, simulation }
+}
+
+function createWinningIntegratedSimulation() {
+  const arena = createIntegratedArena()
+  const simulation = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED)
+  const input = createZombieEscapeControlState()
+  setZombieEscapeGamePhase(simulation, 'night')
+  simulation.extractionOpen = true
+  simulation.waveSpawnRemaining = 0
+  simulation.waveState = 'escape'
+  simulation.player.x = arena.escapeX
+  simulation.player.z = arena.escapeZ
+  return { arena, input, simulation }
+}
+
+function createTerminalIntegratedSimulation(status: 'lost' | 'won') {
+  const state =
+    status === 'lost' ? createLethalIntegratedSimulation() : createWinningIntegratedSimulation()
+  stepLandrushZombieEscapeIntegratedSimulation({
+    arena: state.arena,
+    deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+    expectedPhase: 'night',
+    input: state.input,
+    phaseReady: true,
+    simulation: state.simulation,
+  })
+  expect(state.simulation.status).toBe(status)
+  return state
+}

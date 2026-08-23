@@ -10,6 +10,18 @@ export function resolveLandrushBuildEditorModeTransition(
   return null
 }
 
+export function shouldSyncLandrushBuildEditorMode({
+  buildMode,
+  interactionReady,
+  transitionFromBuild,
+}: {
+  buildMode: boolean
+  interactionReady: boolean
+  transitionFromBuild: boolean
+}) {
+  return buildMode ? !interactionReady : transitionFromBuild
+}
+
 export function resolveLandrushBuildEditorActivation({
   buildMode,
   buildSceneModeActive,
@@ -25,11 +37,13 @@ export function resolveLandrushBuildEditorActivation({
   systemsReady: boolean
   transitionFromBuild: boolean
 }) {
-  const entryActive = buildMode && buildSceneModeActive && parcelReady
+  const chromeEntryActive = buildMode && chromeReady
+  const systemsEntryActive = buildMode && parcelReady && buildSceneModeActive
   const exitActive = !buildMode && transitionFromBuild
   return {
-    chromeActive: (entryActive && chromeReady) || exitActive,
-    systemsActive: (entryActive && systemsReady) || exitActive,
+    chromeActive: chromeEntryActive || exitActive,
+    interactionReady: systemsEntryActive && chromeReady && systemsReady,
+    systemsActive: (systemsEntryActive && systemsReady) || exitActive,
   }
 }
 

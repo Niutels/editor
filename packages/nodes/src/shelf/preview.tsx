@@ -1,6 +1,6 @@
 'use client'
 
-import { useViewer } from '@pascal-app/viewer'
+import { cloneMaterial, useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo } from 'react'
 import type { Material } from 'three'
 import { buildShelfGeometry } from './geometry'
@@ -51,7 +51,7 @@ const ShelfPreview = ({ node }: { node: ShelfNode }) => {
       if (!mesh.material) return
 
       const cloneAndSwap = (mat: Material): Material => {
-        const c = mat.clone()
+        const c = cloneMaterial(mat)
         c.transparent = true
         c.opacity = 0.5
         c.depthWrite = false

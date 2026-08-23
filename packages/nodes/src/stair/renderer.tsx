@@ -2,8 +2,10 @@
 
 import {
   type AnyNodeId,
+  computeStairSegmentChainTransforms,
   resolveStairTotalRise,
   type StairNode,
+  type StairSegmentChainTransform,
   type StairSegmentNode,
   useLiveNodeOverrides,
   useRegistry,
@@ -29,10 +31,7 @@ import {
   type StairSlotId,
 } from './slots'
 
-type SegmentTransform = {
-  position: [number, number, number]
-  rotation: number
-}
+type SegmentTransform = StairSegmentChainTransform
 
 type StairRailPathSide = 'left' | 'right' | 'front'
 
@@ -1154,7 +1153,7 @@ function resolveLandingChainNextStair(
 }
 
 function computeStairRailLayouts(segments: StairSegmentNode[]): StairRailLayout[] {
-  const transforms = computeSegmentTransforms(segments)
+  const transforms = computeStairSegmentChainTransforms(segments)
   return segments.map((segment, index) => {
     const transform = transforms[index]!
     const [centerOffsetX, centerOffsetZ] = rotateXZ(0, segment.length / 2, transform.rotation)
@@ -1254,50 +1253,6 @@ function toWorldRailPoint(
   const [localX, localY, localZ] = point
   const [offsetX, offsetZ] = rotateXZ(localZ, localX, layout.rotation)
   return [layout.center[0] + offsetX, layout.elevation + localY, layout.center[1] + offsetZ]
-}
-
-function computeSegmentTransforms(segments: StairSegmentNode[]): SegmentTransform[] {
-  const transforms: SegmentTransform[] = []
-  let currentPos = new THREE.Vector3(0, 0, 0)
-  let currentRot = 0
-
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i]!
-
-    if (i === 0) {
-      transforms.push({
-        position: [currentPos.x, currentPos.y, currentPos.z],
-        rotation: currentRot,
-      })
-      continue
-    }
-
-    const prev = segments[i - 1]!
-    const localAttachPos = new THREE.Vector3()
-    let rotChange = 0
-
-    switch (segment.attachmentSide) {
-      case 'front':
-        localAttachPos.set(0, prev.height, prev.length)
-        break
-      case 'left':
-        localAttachPos.set(prev.width / 2, prev.height, prev.length / 2)
-        rotChange = Math.PI / 2
-        break
-      case 'right':
-        localAttachPos.set(-prev.width / 2, prev.height, prev.length / 2)
-        rotChange = -Math.PI / 2
-        break
-    }
-
-    localAttachPos.applyAxisAngle(new THREE.Vector3(0, 1, 0), currentRot)
-    currentPos = currentPos.clone().add(localAttachPos)
-    currentRot += rotChange
-
-    transforms.push({ position: [currentPos.x, currentPos.y, currentPos.z], rotation: currentRot })
-  }
-
-  return transforms
 }
 
 function rotateXZ(x: number, z: number, angle: number): [number, number] {

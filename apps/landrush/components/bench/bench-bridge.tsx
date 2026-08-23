@@ -64,6 +64,11 @@ export type BenchFrame = {
     renderMs: number | null
     computeMs: number | null
     resolvedAtFrame: number
+    threeFrames: number[]
+    renderFrames: number[]
+    computeFrames: number[]
+    renderStatus: 'measured' | 'no-queries' | 'incomplete' | null
+    computeStatus: 'measured' | 'no-queries' | 'incomplete' | null
     passes: { uid: string; ms: number }[]
     queryPressure: number
     workDoneDeltaMs: number | null
@@ -118,7 +123,10 @@ declare global {
   }
 }
 
-const RING_CAPACITY = 4096
+// Landrush is capped at 60 fps; this retains more than six minutes so
+// observer-light active-play scenarios can defer serialization until the end.
+const RING_CAPACITY = 22_000
+const RING_TRIM_CHUNK = 2_048
 const COLLECTOR_PRIORITY = 100_000
 const RENDER_REGISTRY_SAMPLE_TYPES = new Set([
   'building',
@@ -500,8 +508,11 @@ function BenchBridgeCollector() {
     const gpuSample = timer?.latest() ?? null
     const workDone = timer?.latestWorkDone() ?? null
 
-    const info = (gl as unknown as { info?: { render?: { calls?: number; triangles?: number } } })
-      .info
+    const info = (
+      gl as unknown as {
+        info?: { render?: { calls?: number; drawCalls?: number; triangles?: number } }
+      }
+    ).info
     const memory = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory
 
     const frame: BenchFrame = {
@@ -509,7 +520,7 @@ function BenchBridgeCollector() {
       wallT: now,
       dtMs,
       simT: state.clock.elapsedTime,
-      draws: info?.render?.calls ?? 0,
+      draws: info?.render?.drawCalls ?? info?.render?.calls ?? 0,
       tris: info?.render?.triangles ?? 0,
       memMB: memory?.usedJSHeapSize ? Math.round(memory.usedJSHeapSize / 1048576) : null,
       marks: pendingMarksRef.current.length > 0 ? pendingMarksRef.current.splice(0) : [],
@@ -519,6 +530,11 @@ function BenchBridgeCollector() {
             renderMs: gpuSample?.renderMs ?? null,
             computeMs: gpuSample?.computeMs ?? null,
             resolvedAtFrame: gpuSample?.resolvedAtFrame ?? -1,
+            threeFrames: gpuSample?.threeFrames ?? [],
+            renderFrames: gpuSample?.renderFrames ?? [],
+            computeFrames: gpuSample?.computeFrames ?? [],
+            renderStatus: gpuSample?.renderStatus ?? null,
+            computeStatus: gpuSample?.computeStatus ?? null,
             passes: gpuSample?.passes ?? [],
             queryPressure: gpuSample?.queryPressure ?? 0,
             workDoneDeltaMs: workDone?.deltaMs ?? null,
@@ -529,9 +545,9 @@ function BenchBridgeCollector() {
 
     const ring = ringRef.current
     ring.push(frame)
-    // Trim in chunks — a per-frame splice on a full ring would memmove 4096
-    // entries every frame.
-    if (ring.length > RING_CAPACITY + 512) {
+    // Trim in chunks — a per-frame splice on a full ring would memmove the
+    // retained history every frame.
+    if (ring.length > RING_CAPACITY + RING_TRIM_CHUNK) {
       ring.splice(0, ring.length - RING_CAPACITY)
       ringStartIdxRef.current = frameIdx + 1 - ring.length
     }

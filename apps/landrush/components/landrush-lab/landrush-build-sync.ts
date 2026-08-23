@@ -45,11 +45,57 @@ export function parseLandrushBuildSyncSnapshotNodes<Node extends { id: string }>
 ): { kind: 'invalid' } | { kind: 'nodes'; nodes: Record<string, Node> } {
   const nodes: Record<string, Node> = {}
   for (const value of values) {
-    const node = parseNode(value)
+    const parsedNode = parseNode(value)
+    const node = parsedNode
+      ? preserveLandrushBuildSyncMigrationFieldPresence(value, parsedNode)
+      : null
     if (!node || Object.hasOwn(nodes, node.id)) return { kind: 'invalid' }
     nodes[node.id] = node
   }
   return { kind: 'nodes', nodes }
+}
+
+function preserveLandrushBuildSyncMigrationFieldPresence<Node extends { id: string }>(
+  source: unknown,
+  parsedNode: Node,
+): Node {
+  if (
+    !source ||
+    typeof source !== 'object' ||
+    Array.isArray(source) ||
+    !parsedNode ||
+    typeof parsedNode !== 'object' ||
+    Array.isArray(parsedNode)
+  ) {
+    return parsedNode
+  }
+
+  const sourceRecord = source as Record<string, unknown>
+  const parsedRecord = parsedNode as Node & Record<string, unknown>
+  if (sourceRecord.id !== parsedRecord.id || sourceRecord.type !== parsedRecord.type) {
+    return parsedNode
+  }
+
+  const presenceSensitiveField =
+    sourceRecord.type === 'slab'
+      ? 'thickness'
+      : sourceRecord.type === 'level' ||
+          sourceRecord.type === 'wall' ||
+          sourceRecord.type === 'ceiling'
+        ? 'height'
+        : null
+  if (
+    !presenceSensitiveField ||
+    sourceRecord[presenceSensitiveField] !== undefined ||
+    !Object.hasOwn(parsedRecord, presenceSensitiveField)
+  ) {
+    return parsedNode
+  }
+
+  // Core uses these omitted fields as vertical migration or follow-mode gates.
+  const migratedInput = { ...parsedRecord }
+  delete migratedInput[presenceSensitiveField]
+  return migratedInput
 }
 
 export function isLandrushBuildSyncV2GraphLossless<

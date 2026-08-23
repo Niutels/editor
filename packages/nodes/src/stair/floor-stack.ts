@@ -1,15 +1,13 @@
-import type {
-  AnyNode,
-  AnyNodeId,
-  FloorPlacedFootprint,
-  StairNode,
-  StairSegmentNode,
+import {
+  type AnyNode,
+  type AnyNodeId,
+  computeStairSegmentChainTransforms,
+  type FloorPlacedFootprint,
+  type StairNode,
+  type StairSegmentNode,
 } from '@pascal-app/core'
 
-type SegmentTransform = {
-  position: [number, number, number]
-  rotation: number
-}
+export { computeStairSegmentChainTransforms as computeStairSegmentFloorStackTransforms }
 
 export function getStairFloorPlacedFootprints(
   stair: StairNode,
@@ -75,7 +73,7 @@ export function getStairSegmentFloorPlacedFootprints(
   stair: StairNode,
   segments: readonly StairSegmentNode[],
 ): FloorPlacedFootprint[] {
-  const transforms = computeStairSegmentFloorStackTransforms(segments)
+  const transforms = computeStairSegmentChainTransforms(segments)
 
   return segments.map((segment, index) => {
     const transform = transforms[index]!
@@ -102,58 +100,6 @@ export function getStairSegmentFloorPlacedFootprints(
       rotation: [0, stair.rotation + transform.rotation, 0],
     }
   })
-}
-
-export function computeStairSegmentFloorStackTransforms(
-  segments: readonly StairSegmentNode[],
-): SegmentTransform[] {
-  const transforms: SegmentTransform[] = []
-  let currentX = 0
-  let currentY = 0
-  let currentZ = 0
-  let currentRot = 0
-
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index]!
-
-    if (index > 0) {
-      const previous = segments[index - 1]!
-      let attachX = 0
-      let attachZ = 0
-      let rotationDelta = 0
-
-      switch (segment.attachmentSide) {
-        case 'front':
-          attachX = 0
-          attachZ = previous.length
-          rotationDelta = 0
-          break
-        case 'left':
-          attachX = previous.width / 2
-          attachZ = previous.length / 2
-          rotationDelta = Math.PI / 2
-          break
-        case 'right':
-          attachX = -previous.width / 2
-          attachZ = previous.length / 2
-          rotationDelta = -Math.PI / 2
-          break
-      }
-
-      const [rotatedX, rotatedZ] = rotateXZ(attachX, attachZ, currentRot)
-      currentX += rotatedX
-      currentY += previous.height
-      currentZ += rotatedZ
-      currentRot += rotationDelta
-    }
-
-    transforms.push({
-      position: [currentX, currentY, currentZ],
-      rotation: currentRot,
-    })
-  }
-
-  return transforms
 }
 
 function rotateXZ(x: number, z: number, angle: number): [number, number] {

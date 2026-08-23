@@ -13,7 +13,9 @@ import { NATURAL_ROAD_STYLE } from './natural-road-network-layer'
 import type { ParcelAllocationParcel } from './parcel-allocation'
 
 const LANDRUSH_BUILD_GRID_ELEVATION_OFFSET =
-  NATURAL_ROAD_STYLE.carriageway.liftMeters + NATURAL_ROAD_STYLE.sidewalk.curbHeightMeters + 0.025
+  NATURAL_ROAD_STYLE.carriageway.surfaceOffsetMeters +
+  NATURAL_ROAD_STYLE.sidewalk.curbHeightMeters +
+  0.025
 const LANDRUSH_BUILD_GRID_FADE_SECONDS = 1.375
 // Opaque terrain renders first; transparent construction must composite over the grid.
 const LANDRUSH_BUILD_GRID_RENDER_ORDER = -1

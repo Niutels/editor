@@ -99,4 +99,41 @@ describe('Pascal texture references', () => {
       colorSpace: 'linear',
     })
   })
+
+  test('re-evaluates a storage origin configured after an earlier missing lookup', () => {
+    const previousUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const lateStorageOrigin = 'https://late-storage.supabase.co'
+    const src = `${lateStorageOrigin}/storage/v1/object/public/project-assets/project/asset.png`
+
+    try {
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL
+      expect(
+        stampPascalTextureRef(new THREE.Texture(), {
+          kind: 'project-asset',
+          src,
+          slot: 'map',
+        }),
+      ).toBeNull()
+
+      process.env.NEXT_PUBLIC_SUPABASE_URL = lateStorageOrigin
+      const texture = new THREE.Texture()
+      const ref = stampPascalTextureRef(texture, {
+        kind: 'project-asset',
+        src,
+        slot: 'map',
+      })
+
+      expect(ref).toEqual({
+        v: 1,
+        kind: 'project-asset',
+        src,
+        map: 'basecolor',
+        colorSpace: 'linear',
+      })
+      expect(getPascalTextureRef(texture)).toEqual(ref)
+    } finally {
+      if (previousUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL
+      else process.env.NEXT_PUBLIC_SUPABASE_URL = previousUrl
+    }
+  })
 })

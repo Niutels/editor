@@ -1,9 +1,11 @@
 import {
   type AnyNode,
   type AnyNodeId,
+  computeStairSegmentChainTransforms,
   getEffectiveNode,
   getFloorStackedPosition,
   type StairNode,
+  type StairSegmentChainTransform,
   type StairSegmentNode,
   sceneRegistry,
   useScene,
@@ -252,7 +254,7 @@ function syncSegmentMeshTransforms(stairNode: StairNode, nodes: Record<string, A
 
   if (segments.length === 0) return
 
-  const transforms = computeSegmentTransforms(segments)
+  const transforms = computeStairSegmentChainTransforms(segments)
 
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i]!
@@ -325,7 +327,7 @@ function updateMergedStairGeometry(
   }
 
   // Compute chained transforms for segments
-  const transforms = computeSegmentTransforms(segments)
+  const transforms = computeStairSegmentChainTransforms(segments)
 
   const geometries: THREE.BufferGeometry[] = []
 
@@ -461,63 +463,12 @@ function ensureUv2Attribute(geometry: THREE.BufferGeometry) {
 // SEGMENT CHAINING
 // ============================================================================
 
-interface SegmentTransform {
-  position: [number, number, number]
-  rotation: number
-}
+type SegmentTransform = StairSegmentChainTransform
 
 /**
  * Computes world-relative transforms for each segment by chaining
  * based on attachmentSide. This mirrors the prototype's StairSystem logic.
  */
-function computeSegmentTransforms(segments: StairSegmentNode[]): SegmentTransform[] {
-  const transforms: SegmentTransform[] = []
-  let currentPos = new THREE.Vector3(0, 0, 0)
-  let currentRot = 0
-
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i]!
-
-    if (i === 0) {
-      transforms.push({
-        position: [currentPos.x, currentPos.y, currentPos.z],
-        rotation: currentRot,
-      })
-    } else {
-      const prev = segments[i - 1]!
-      const localAttachPos = new THREE.Vector3()
-      let rotChange = 0
-
-      switch (segment.attachmentSide) {
-        case 'front':
-          localAttachPos.set(0, prev.height, prev.length)
-          rotChange = 0
-          break
-        case 'left':
-          localAttachPos.set(prev.width / 2, prev.height, prev.length / 2)
-          rotChange = Math.PI / 2
-          break
-        case 'right':
-          localAttachPos.set(-prev.width / 2, prev.height, prev.length / 2)
-          rotChange = -Math.PI / 2
-          break
-      }
-
-      // Rotate local attachment point by previous global rotation
-      localAttachPos.applyAxisAngle(new THREE.Vector3(0, 1, 0), currentRot)
-      currentPos = currentPos.clone().add(localAttachPos)
-      currentRot += rotChange
-
-      transforms.push({
-        position: [currentPos.x, currentPos.y, currentPos.z],
-        rotation: currentRot,
-      })
-    }
-  }
-
-  return transforms
-}
-
 function rotateXZ(x: number, z: number, angle: number): [number, number] {
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
@@ -1082,7 +1033,7 @@ function computeAbsoluteHeight(node: StairSegmentNode): number {
     .map((childId) => nodes[childId as AnyNodeId] as StairSegmentNode | undefined)
     .filter((n): n is StairSegmentNode => n?.type === 'stair-segment')
 
-  const transforms = computeSegmentTransforms(segments)
+  const transforms = computeStairSegmentChainTransforms(segments)
   const index = segments.findIndex((s) => s.id === node.id)
   if (index < 0) return 0
 

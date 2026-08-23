@@ -1,6 +1,7 @@
 'use client'
 
 import { useAudio } from '@pascal-app/editor'
+import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -9,6 +10,7 @@ import {
   type Group,
   MathUtils,
   PositionalAudio,
+  Audio as ThreeAudio,
   type Vector3,
 } from 'three'
 
@@ -41,12 +43,31 @@ const FOOTSTEP_MAX_DISTANCE = 22
 const FOOTSTEP_ROLLOFF = 0.8
 const FOOTSTEP_WALK_PLAYBACK_SPEED = 2.2
 const FOOTSTEP_RUN_PLAYBACK_SPEED = 1
+const GAMEPAD_AUDIO_UNLOCK_AXIS_THRESHOLD = 0.35
+const JUMP_AUDIO_MAX_RETRYABLE_PLAY_FAILURES = 2
+export const ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS = 0.45
+const EMPTY_JUMP_AUDIO_BUFFERS: readonly AudioBuffer[] = []
 
 export type RobotFootstepMotion = {
+  grounded: boolean
   heading: number
   isMoving: boolean
   position: Vector3
   speed: number
+  supportY: number
+}
+
+export type RobotJumpAudioCue = {
+  files: readonly string[]
+  playback: {
+    maxDistance?: number
+    maxVoices: number
+    minIntervalMs: number
+    rateRange: readonly [number, number]
+    referenceDistance?: number
+    spatial: boolean
+    volume: number
+  }
 }
 
 type FootstepBuffers = {
@@ -54,8 +75,43 @@ type FootstepBuffers = {
   right: AudioBuffer[]
 }
 
+export type RobotJumpAudioBufferStatus = 'failed' | 'loading' | 'ready' | 'unavailable'
+
+export type RobotJumpAudioPlaybackDisposition = 'play' | 'retry' | 'terminal'
+
+export type RobotJumpAudioPlaybackState = {
+  acknowledgedSequence: number
+  pendingSequence: number | null
+  pendingSinceSeconds: number | null
+  retryablePlayFailureCount: number
+}
+
+export type RobotJumpAudioPlaybackAdvanceResult = 'none' | 'pending' | 'played' | 'terminal'
+
+export type RobotJumpAudioPlayResult = 'played' | 'retry' | 'terminal'
+
+export type RobotAudioUnlockGamepad = {
+  axes: readonly number[]
+  buttons: readonly { pressed: boolean; value: number }[]
+  connected?: boolean
+}
+
+export type RobotGamepadAudioPromptState = {
+  gamepadPromptInputActive: boolean
+}
+
+type JumpAudioBufferLoadState = {
+  buffers: readonly AudioBuffer[]
+  filesKey: string
+  status: RobotJumpAudioBufferStatus
+}
+
 type FootstepRuntime = {
   distance: number
+  gamepadPromptInputActive: boolean
+  jumpPoolIndex: number
+  jumpPlayback: RobotJumpAudioPlaybackState
+  lastJumpPlayedAtSeconds: number
   lastLeftIndex: number
   lastRightIndex: number
   nextLeft: boolean
@@ -65,13 +121,15 @@ type FootstepRuntime = {
 
 export function LandrushRobotFootstepAudio({
   enabled = true,
-  groundY,
+  jumpAudioCue,
+  jumpSequenceRef,
   motionRef,
   runSpeed,
   walkSpeed,
 }: {
   enabled?: boolean
-  groundY: number
+  jumpAudioCue?: RobotJumpAudioCue
+  jumpSequenceRef?: { readonly current: number }
   motionRef: { readonly current: RobotFootstepMotion | null }
   runSpeed: number
   walkSpeed: number
@@ -80,8 +138,15 @@ export function LandrushRobotFootstepAudio({
   const [listener, setListener] = useState<AudioListener | null>(null)
   const audioGroupRef = useRef<Group>(null!)
   const audioPoolRef = useRef<PositionalAudio[]>([])
+  const jumpAudioPoolRef = useRef<(PositionalAudio | ThreeAudio)[]>([])
+  const jumpAudioPoolCueRef = useRef<RobotJumpAudioCue | null>(null)
+  const unlockAudioRef = useRef<(() => void) | null>(null)
   const runtimeRef = useRef<FootstepRuntime>({
     distance: 0,
+    gamepadPromptInputActive: false,
+    jumpPoolIndex: 0,
+    jumpPlayback: createRobotJumpAudioPlaybackState(jumpSequenceRef?.current ?? 0),
+    lastJumpPlayedAtSeconds: Number.NEGATIVE_INFINITY,
     lastLeftIndex: -1,
     lastRightIndex: -1,
     nextLeft: true,
@@ -89,7 +154,15 @@ export function LandrushRobotFootstepAudio({
     wasMoving: false,
   })
   const [buffers, setBuffers] = useState<FootstepBuffers | null>(null)
+  const jumpAudioFilesKey = resolveJumpAudioFilesKey(jumpAudioCue)
+  const jumpAudioCueConfigurationValid = isRobotJumpAudioCueConfigurationValid(jumpAudioCue)
+  const [jumpBufferLoad, setJumpBufferLoad] = useState<JumpAudioBufferLoadState>(() => ({
+    buffers: EMPTY_JUMP_AUDIO_BUFFERS,
+    filesKey: jumpAudioFilesKey,
+    status: shouldLoadRobotJumpAudioCue(jumpAudioCue) ? 'loading' : 'unavailable',
+  }))
   const [audioUnlocked, setAudioUnlocked] = useState(false)
+  const [controllerAudioActivationNeeded, setControllerAudioActivationNeeded] = useState(false)
   const masterVolume = useAudio((state) => state.masterVolume)
   const muted = useAudio((state) => state.muted)
   const sfxVolume = useAudio((state) => state.sfxVolume)
@@ -97,6 +170,48 @@ export function LandrushRobotFootstepAudio({
   useEffect(() => {
     setListener(new AudioListener())
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const filesKey = resolveJumpAudioFilesKey(jumpAudioCue)
+    if (!shouldLoadRobotJumpAudioCue(jumpAudioCue)) {
+      setJumpBufferLoad({
+        buffers: EMPTY_JUMP_AUDIO_BUFFERS,
+        filesKey,
+        status: 'unavailable',
+      })
+      return () => {
+        active = false
+      }
+    }
+
+    setJumpBufferLoad({ buffers: EMPTY_JUMP_AUDIO_BUFFERS, filesKey, status: 'loading' })
+
+    const loader = new AudioLoader()
+    const loadBuffer = (url: string) =>
+      new Promise<AudioBuffer>((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject)
+      })
+
+    Promise.allSettled(jumpAudioCue.files.map(loadBuffer)).then((results) => {
+      if (!active) return
+      const loadedBuffers = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      )
+      setJumpBufferLoad({
+        buffers: loadedBuffers,
+        filesKey,
+        status: loadedBuffers.length > 0 ? 'ready' : 'failed',
+      })
+      if (loadedBuffers.length < results.length) {
+        console.warn('[landrush] One or more robot jump audio variants failed to load.')
+      }
+    })
+
+    return () => {
+      active = false
+    }
+  }, [jumpAudioCue])
 
   useEffect(() => {
     if (!listener) return
@@ -109,28 +224,52 @@ export function LandrushRobotFootstepAudio({
   useEffect(() => {
     if (!listener) return
 
+    let active = true
+    let resumeInFlight = false
+    const context = listener.context
+    const syncAudioState = () => {
+      if (!active) return
+      const running = context.state === 'running'
+      setAudioUnlocked(running)
+      if (context.state !== 'suspended') setControllerAudioActivationNeeded(false)
+    }
     const unlockAudio = () => {
-      const context = listener.context
       if (context.state === 'running') {
-        setAudioUnlocked(true)
+        syncAudioState()
         return
       }
+      if (resumeInFlight) return
+      resumeInFlight = true
       void context
         .resume()
-        .then(() => setAudioUnlocked(context.state === 'running'))
+        .then(syncAudioState)
         .catch(() => {})
+        .finally(() => {
+          resumeInFlight = false
+        })
     }
 
-    unlockAudio()
+    unlockAudioRef.current = unlockAudio
+    syncAudioState()
+    context.addEventListener('statechange', syncAudioState)
     window.addEventListener('pointerdown', unlockAudio, { passive: true })
     window.addEventListener('touchstart', unlockAudio, { passive: true })
     window.addEventListener('keydown', unlockAudio)
     return () => {
+      active = false
+      if (unlockAudioRef.current === unlockAudio) unlockAudioRef.current = null
+      context.removeEventListener('statechange', syncAudioState)
       window.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('touchstart', unlockAudio)
       window.removeEventListener('keydown', unlockAudio)
     }
   }, [listener])
+
+  useEffect(() => {
+    if (!enabled || muted || masterVolume <= 0 || sfxVolume <= 0) {
+      setControllerAudioActivationNeeded(false)
+    }
+  }, [enabled, masterVolume, muted, sfxVolume])
 
   useEffect(() => {
     let active = true
@@ -182,11 +321,99 @@ export function LandrushRobotFootstepAudio({
     }
   }, [listener])
 
-  useFrame((_, delta) => {
+  useEffect(() => {
+    jumpAudioPoolCueRef.current = null
+    if (!(listener && jumpAudioCue && isRobotJumpAudioCueConfigurationValid(jumpAudioCue))) return
+
+    const audioGroup = audioGroupRef.current
+    const voiceCount = Math.max(1, Math.min(8, Math.trunc(jumpAudioCue.playback.maxVoices)))
+    const pool = Array.from({ length: voiceCount }, () => {
+      const audio = jumpAudioCue.playback.spatial
+        ? new PositionalAudio(listener)
+        : new ThreeAudio(listener)
+      if (audio instanceof PositionalAudio) {
+        audio.setDistanceModel('inverse')
+        audio.setRefDistance(jumpAudioCue.playback.referenceDistance ?? FOOTSTEP_REF_DISTANCE)
+        audio.setMaxDistance(jumpAudioCue.playback.maxDistance ?? FOOTSTEP_MAX_DISTANCE)
+        audio.setRolloffFactor(FOOTSTEP_ROLLOFF)
+      }
+      audio.setLoop(false)
+      audioGroup.add(audio)
+      return audio
+    })
+
+    jumpAudioPoolRef.current = pool
+    jumpAudioPoolCueRef.current = jumpAudioCue
+    return () => {
+      for (const audio of pool) {
+        if (audio.isPlaying) audio.stop()
+        audio.disconnect()
+        audioGroup.remove(audio)
+      }
+      jumpAudioPoolRef.current = []
+      if (jumpAudioPoolCueRef.current === jumpAudioCue) jumpAudioPoolCueRef.current = null
+    }
+  }, [jumpAudioCue, listener])
+
+  useFrame((state, delta) => {
     const runtime = runtimeRef.current
     const pool = audioPoolRef.current
+    const jumpPool = jumpAudioPoolRef.current
     const motion = motionRef.current
     const volumeScale = muted ? 0 : (masterVolume / 100) * (sfxVolume / 100)
+    const audioContextRunning = listener?.context.state === 'running'
+    const audioContextSuspended = listener?.context.state === 'suspended'
+    if (audioContextSuspended && enabled && volumeScale > 0 && !controllerAudioActivationNeeded) {
+      // Polled Gamepad state is not a browser user-activation event, so it can only surface this prompt.
+      const gamepadInputActive = readRobotGamepadAudioUnlockInput()
+      if (advanceRobotGamepadAudioPromptState(runtime, gamepadInputActive, true)) {
+        setControllerAudioActivationNeeded(true)
+      }
+    } else {
+      advanceRobotGamepadAudioPromptState(runtime, false, false)
+    }
+
+    const currentJumpBufferLoad =
+      jumpBufferLoad.filesKey === jumpAudioFilesKey
+        ? jumpBufferLoad
+        : {
+            buffers: EMPTY_JUMP_AUDIO_BUFFERS,
+            filesKey: jumpAudioFilesKey,
+            status: 'loading' as const,
+          }
+    const jumpPlaybackResult = advanceRobotJumpAudioPlaybackState(runtime.jumpPlayback, {
+      disposition: resolveRobotJumpAudioPlaybackDisposition({
+        audioRunning: audioContextRunning,
+        audible: volumeScale > 0,
+        bufferStatus: currentJumpBufferLoad.status,
+        enabled,
+        hasCue: Boolean(jumpAudioCue && jumpAudioCueConfigurationValid),
+        hasMotion: Boolean(motion),
+        hasPool: jumpAudioPoolCueRef.current === jumpAudioCue && jumpPool.length > 0,
+        intervalElapsed: Boolean(
+          jumpAudioCue &&
+            state.clock.elapsedTime - runtime.lastJumpPlayedAtSeconds >=
+              jumpAudioCue.playback.minIntervalMs / 1_000,
+        ),
+      }),
+      nowSeconds: state.clock.elapsedTime,
+      observedSequence: jumpSequenceRef?.current ?? runtime.jumpPlayback.acknowledgedSequence,
+      play: (sequence) => {
+        if (!(jumpAudioCue && motion)) return 'retry'
+        return playJump({
+          buffers: currentJumpBufferLoad.buffers,
+          cue: jumpAudioCue,
+          motion,
+          pool: jumpPool,
+          runtime,
+          sequence,
+          volumeScale,
+        })
+      },
+    })
+    if (jumpPlaybackResult === 'played') {
+      runtime.lastJumpPlayedAtSeconds = state.clock.elapsedTime
+    }
 
     if (
       !enabled ||
@@ -202,7 +429,7 @@ export function LandrushRobotFootstepAudio({
     }
 
     const speed = Math.max(0, motion.speed)
-    const moving = motion.isMoving && speed > FOOTSTEP_MIN_SPEED
+    const moving = motion.grounded && motion.isMoving && speed > FOOTSTEP_MIN_SPEED
     if (!moving) {
       runtime.distance = 0
       runtime.wasMoving = false
@@ -225,7 +452,6 @@ export function LandrushRobotFootstepAudio({
     runtime.distance -= stride
     playFootstep({
       buffers,
-      groundY,
       motion,
       pool,
       runBlend,
@@ -234,12 +460,268 @@ export function LandrushRobotFootstepAudio({
     })
   })
 
-  return <group ref={audioGroupRef} />
+  return (
+    <>
+      <group ref={audioGroupRef} />
+      {controllerAudioActivationNeeded ? (
+        <Html fullscreen style={{ pointerEvents: 'none' }}>
+          <div
+            aria-live="polite"
+            className="pointer-events-none fixed inset-x-0 bottom-6 z-[70] flex justify-center px-4"
+          >
+            <div className="flex max-w-sm items-center gap-3 rounded-xl border border-white/20 bg-black/80 px-4 py-3 text-white shadow-2xl backdrop-blur-md">
+              <span className="text-sm leading-snug">
+                Browser audio needs a click, tap, or keyboard press.
+              </span>
+              <button
+                className="pointer-events-auto shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-black text-sm outline-none transition hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-cyan-300"
+                onClick={() => unlockAudioRef.current?.()}
+                type="button"
+              >
+                Enable sound
+              </button>
+            </div>
+          </div>
+        </Html>
+      ) : null}
+    </>
+  )
+}
+
+function playJump({
+  buffers,
+  cue,
+  motion,
+  pool,
+  runtime,
+  sequence,
+  volumeScale,
+}: {
+  buffers: readonly AudioBuffer[]
+  cue: RobotJumpAudioCue
+  motion: RobotFootstepMotion
+  pool: readonly (PositionalAudio | ThreeAudio)[]
+  runtime: FootstepRuntime
+  sequence: number
+  volumeScale: number
+}): RobotJumpAudioPlayResult {
+  if (!isRobotJumpAudioCueConfigurationValid(cue)) return 'terminal'
+  const audio = pool[runtime.jumpPoolIndex % pool.length]
+  const buffer = buffers[Math.abs(sequence - 1) % buffers.length]
+  if (!(audio && buffer)) return 'retry'
+
+  const [minimumRate, maximumRate] = cue.playback.rateRange
+
+  try {
+    if (audio.isPlaying) audio.stop()
+    audio.setBuffer(buffer)
+    const rateProgress = hashAudioSequence(sequence)
+    audio.setPlaybackRate(MathUtils.lerp(minimumRate, maximumRate, rateProgress))
+    audio.setVolume(cue.playback.volume * volumeScale)
+    if (audio instanceof PositionalAudio) audio.position.copy(motion.position)
+    audio.updateMatrixWorld()
+    audio.play()
+    if (!audio.isPlaying) return 'retry'
+    runtime.jumpPoolIndex += 1
+    return 'played'
+  } catch {
+    return 'retry'
+  }
+}
+
+export function createRobotJumpAudioPlaybackState(
+  acknowledgedSequence = 0,
+): RobotJumpAudioPlaybackState {
+  return {
+    acknowledgedSequence: normalizeJumpAudioSequence(acknowledgedSequence),
+    pendingSequence: null,
+    pendingSinceSeconds: null,
+    retryablePlayFailureCount: 0,
+  }
+}
+
+export function advanceRobotJumpAudioPlaybackState(
+  state: RobotJumpAudioPlaybackState,
+  {
+    disposition,
+    nowSeconds,
+    observedSequence,
+    play,
+  }: {
+    disposition: RobotJumpAudioPlaybackDisposition
+    nowSeconds: number
+    observedSequence: number
+    play: (sequence: number) => RobotJumpAudioPlayResult
+  },
+): RobotJumpAudioPlaybackAdvanceResult {
+  const observed = normalizeJumpAudioSequence(observedSequence)
+  const now = normalizeJumpAudioClockSeconds(nowSeconds)
+  if (
+    observed > state.acknowledgedSequence &&
+    (state.pendingSequence === null || observed > state.pendingSequence)
+  ) {
+    state.pendingSequence = observed
+    state.pendingSinceSeconds = now
+    state.retryablePlayFailureCount = 0
+  }
+
+  const pending = state.pendingSequence
+  if (pending === null) return 'none'
+  if (
+    state.pendingSinceSeconds !== null &&
+    now - state.pendingSinceSeconds >= ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS
+  ) {
+    acknowledgeRobotJumpAudioSequence(state, pending)
+    return 'terminal'
+  }
+  if (disposition === 'retry') return 'pending'
+  if (disposition === 'terminal') {
+    acknowledgeRobotJumpAudioSequence(state, pending)
+    return 'terminal'
+  }
+
+  const playResult = play(pending)
+  if (playResult === 'retry') {
+    state.retryablePlayFailureCount += 1
+    if (state.retryablePlayFailureCount <= JUMP_AUDIO_MAX_RETRYABLE_PLAY_FAILURES) {
+      return 'pending'
+    }
+  }
+  acknowledgeRobotJumpAudioSequence(state, pending)
+  return playResult === 'played' ? 'played' : 'terminal'
+}
+
+export function resolveRobotJumpAudioPlaybackDisposition({
+  audioRunning,
+  audible,
+  bufferStatus,
+  enabled,
+  hasCue,
+  hasMotion,
+  hasPool,
+  intervalElapsed,
+}: {
+  audioRunning: boolean
+  audible: boolean
+  bufferStatus: RobotJumpAudioBufferStatus
+  enabled: boolean
+  hasCue: boolean
+  hasMotion: boolean
+  hasPool: boolean
+  intervalElapsed: boolean
+}): RobotJumpAudioPlaybackDisposition {
+  if (
+    !enabled ||
+    !audible ||
+    !hasCue ||
+    !hasMotion ||
+    bufferStatus === 'failed' ||
+    bufferStatus === 'unavailable'
+  ) {
+    return 'terminal'
+  }
+  if (!audioRunning || !hasPool || bufferStatus === 'loading') return 'retry'
+  return intervalElapsed ? 'play' : 'terminal'
+}
+
+export function hasRobotGamepadAudioUnlockInput(
+  gamepads: readonly (RobotAudioUnlockGamepad | null | undefined)[],
+) {
+  return gamepads.some(
+    (gamepad) =>
+      gamepad !== null &&
+      gamepad !== undefined &&
+      gamepad.connected !== false &&
+      (gamepad.buttons.some((button) => button.pressed || button.value >= 0.5) ||
+        gamepad.axes.some((axis) => Math.abs(axis) >= GAMEPAD_AUDIO_UNLOCK_AXIS_THRESHOLD)),
+  )
+}
+
+export function isRobotJumpAudioCueConfigurationValid(cue: RobotJumpAudioCue | undefined) {
+  if (!cue || cue.files.length === 0) return false
+  const { maxDistance, maxVoices, minIntervalMs, rateRange, referenceDistance, volume } =
+    cue.playback
+  const [minimumRate, maximumRate] = rateRange
+  return (
+    Number.isFinite(maxVoices) &&
+    maxVoices >= 1 &&
+    Number.isFinite(minIntervalMs) &&
+    minIntervalMs >= 0 &&
+    Number.isFinite(minimumRate) &&
+    minimumRate > 0 &&
+    Number.isFinite(maximumRate) &&
+    maximumRate >= minimumRate &&
+    Number.isFinite(volume) &&
+    volume >= 0 &&
+    (referenceDistance === undefined ||
+      (Number.isFinite(referenceDistance) && referenceDistance > 0)) &&
+    (maxDistance === undefined || (Number.isFinite(maxDistance) && maxDistance > 0)) &&
+    (referenceDistance === undefined ||
+      maxDistance === undefined ||
+      maxDistance >= referenceDistance)
+  )
+}
+
+export function shouldLoadRobotJumpAudioCue(
+  cue: RobotJumpAudioCue | undefined,
+): cue is RobotJumpAudioCue {
+  return isRobotJumpAudioCueConfigurationValid(cue)
+}
+
+export function advanceRobotGamepadAudioPromptState(
+  state: RobotGamepadAudioPromptState,
+  inputActive: boolean,
+  contextSuspended: boolean,
+) {
+  if (!contextSuspended) {
+    state.gamepadPromptInputActive = false
+    return false
+  }
+  const promptRequested = inputActive && !state.gamepadPromptInputActive
+  state.gamepadPromptInputActive = inputActive
+  return promptRequested
+}
+
+function readRobotGamepadAudioUnlockInput() {
+  if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') return false
+  try {
+    return hasRobotGamepadAudioUnlockInput(navigator.getGamepads())
+  } catch {
+    return false
+  }
+}
+
+function acknowledgeRobotJumpAudioSequence(state: RobotJumpAudioPlaybackState, sequence: number) {
+  state.acknowledgedSequence = Math.max(state.acknowledgedSequence, sequence)
+  if (state.pendingSequence !== null && state.pendingSequence <= state.acknowledgedSequence) {
+    state.pendingSequence = null
+    state.pendingSinceSeconds = null
+    state.retryablePlayFailureCount = 0
+  }
+}
+
+function normalizeJumpAudioSequence(sequence: number) {
+  return Number.isFinite(sequence) ? Math.max(0, Math.trunc(sequence)) : 0
+}
+
+function normalizeJumpAudioClockSeconds(seconds: number) {
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+}
+
+function resolveJumpAudioFilesKey(cue: RobotJumpAudioCue | undefined) {
+  return cue?.files.join('\u0000') ?? ''
+}
+
+function hashAudioSequence(sequence: number) {
+  let value = Math.trunc(sequence) >>> 0
+  value = Math.imul(value ^ (value >>> 16), 0x7feb_352d)
+  value = Math.imul(value ^ (value >>> 15), 0x846c_a68b)
+  value ^= value >>> 16
+  return (value >>> 0) / 4_294_967_296
 }
 
 function playFootstep({
   buffers,
-  groundY,
   motion,
   pool,
   runBlend,
@@ -247,7 +729,6 @@ function playFootstep({
   volumeScale,
 }: {
   buffers: FootstepBuffers
-  groundY: number
   motion: RobotFootstepMotion
   pool: PositionalAudio[]
   runBlend: number
@@ -296,7 +777,7 @@ function playFootstep({
     motion.position.x +
       rightX * FOOTSTEP_LATERAL_OFFSET_METERS * side +
       forwardX * FOOTSTEP_FORWARD_OFFSET_METERS,
-    groundY + FOOTSTEP_HEIGHT_METERS,
+    motion.supportY + FOOTSTEP_HEIGHT_METERS,
     motion.position.z +
       rightZ * FOOTSTEP_LATERAL_OFFSET_METERS * side +
       forwardZ * FOOTSTEP_FORWARD_OFFSET_METERS,

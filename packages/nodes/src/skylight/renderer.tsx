@@ -734,7 +734,7 @@ const SkylightRenderer = ({ node: storeNode }: { node: SkylightNode }) => {
     const mat = node.glassMaterial
       ? createMaterial(node.glassMaterial, shading)
       : (createMaterialFromPresetRef(node.glassMaterialPreset, shading) ??
-        defaultGlassMaterial.clone())
+        defaultGlassMaterial)
     if (mat && typeof mat === 'object') {
       if (mat instanceof THREE.MeshPhysicalMaterial) {
         mat.thickness = glassThickness

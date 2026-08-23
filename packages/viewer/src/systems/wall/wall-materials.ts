@@ -20,6 +20,7 @@ import { MeshLambertNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import {
   baseMaterial,
   type ColorPreset,
+  cloneMaterial,
   createDefaultMaterial,
   createMaterial,
   createMaterialFromPresetRef,
@@ -259,7 +260,7 @@ function getHighlightedColor(color: Color, kind: WallHighlightKind): Color {
 }
 
 function createHighlightedWallMaterial(material: Material, kind: WallHighlightKind): Material {
-  const highlightedMaterial = material.clone() as Material & {
+  const highlightedMaterial = cloneMaterial(material) as Material & {
     color?: Color
     emissive?: Color
     emissiveIntensity?: number
@@ -289,58 +290,35 @@ function createHighlightedWallMaterial(material: Material, kind: WallHighlightKi
 // Light selection highlight for walls (walls are excluded from the generic
 // editor selection highlight, so they need their own). Adds a gentle indigo
 // emissive (no albedo tint) so the real material/texture stays readable with a
-// soft "selected" glow. Two NodeMaterial-clone gotchas are handled:
-//   1. `clone()` on the WebGPU backend drops the texture-map nodes → re-attach
-//      them from the source (shared by reference).
-//   2. The wall's finish texture loads async, so an early clone has no map yet →
-//      cache keyed by the source `.map` and rebuild when it changes (self-heals
-//      once the texture lands).
+// soft "selected" glow. The shared tracked-clone path mirrors every async
+// texture assignment from the cached source while this cached variant lives.
 const SELECTION_HIGHLIGHT_COLOR = new Color('#818cf8')
 const SELECTION_EMISSIVE_BLEND = 0.4
 const SELECTION_EMISSIVE_INTENSITY = 0.12
 
-const SELECTION_TEXTURE_MAP_KEYS = [
-  'map',
-  'normalMap',
-  'roughnessMap',
-  'metalnessMap',
-  'aoMap',
-  'emissiveMap',
-  'bumpMap',
-  'displacementMap',
-  'alphaMap',
-  'lightMap',
-] as const
-
-const selectionHighlightCache = new WeakMap<Material, { clone: Material; map: unknown }>()
-
 function getSelectionHighlightMaterial(base: Material): Material {
-  const baseMap = (base as { map?: unknown }).map ?? null
-  const cached = selectionHighlightCache.get(base)
-  if (cached && cached.map === baseMap) return cached.clone
-
-  const clone = base.clone() as Material & {
-    emissive?: Color
-    emissiveIntensity?: number
-    needsUpdate?: boolean
-  }
-  // Re-attach texture maps the WebGPU NodeMaterial clone drops.
-  const src = base as unknown as Record<string, unknown>
-  const dst = clone as unknown as Record<string, unknown>
-  for (const key of SELECTION_TEXTURE_MAP_KEYS) {
-    if (src[key]) dst[key] = src[key]
-  }
-  if ('emissive' in clone && clone.emissive) {
-    clone.emissive = clone.emissive
-      .clone()
-      .lerp(SELECTION_HIGHLIGHT_COLOR, SELECTION_EMISSIVE_BLEND)
-  }
-  if ('emissiveIntensity' in clone) {
-    clone.emissiveIntensity = Math.max(clone.emissiveIntensity ?? 0, SELECTION_EMISSIVE_INTENSITY)
-  }
-  clone.needsUpdate = true
-  selectionHighlightCache.set(base, { clone, map: baseMap })
-  return clone
+  return cloneMaterial(base, {
+    cacheKey: 'wall-selection-highlight',
+    configure: (material) => {
+      const clone = material as Material & {
+        emissive?: Color
+        emissiveIntensity?: number
+        needsUpdate?: boolean
+      }
+      if ('emissive' in clone && clone.emissive) {
+        clone.emissive = clone.emissive
+          .clone()
+          .lerp(SELECTION_HIGHLIGHT_COLOR, SELECTION_EMISSIVE_BLEND)
+      }
+      if ('emissiveIntensity' in clone) {
+        clone.emissiveIntensity = Math.max(
+          clone.emissiveIntensity ?? 0,
+          SELECTION_EMISSIVE_INTENSITY,
+        )
+      }
+      clone.needsUpdate = true
+    },
+  })
 }
 
 /** Lazy light-emissive selection variant of a wall's material array (keeps texture). */

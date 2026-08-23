@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { LANDRUSH_ISLAND_AMBIENT_NPCS } from './landrush-island-ambient-catalog'
 import {
   getZombieEscapeZombieCollisionRadiusMeters,
   ZOMBIE_ESCAPE_SIMULATION,
@@ -77,13 +80,17 @@ describe('Zombie Escape generated zombie catalog', () => {
     }
   })
 
-  test('declares rigged, walking, and running GLBs for every generated id', () => {
+  test('uses every optimized island NPC rig with animation-only locomotion clips', () => {
     const paths = new Set<string>()
     for (const zombie of ZOMBIE_ESCAPE_ZOMBIE_CATALOG) {
-      const directory = `/landrush-lab/zombie-escape/assets/zombies/${zombie.id}`
-      expect(zombie.glb.riggedBase.path).toBe(`${directory}/rigged.glb`)
-      expect(zombie.glb.walk.path).toBe(`${directory}/walk.glb`)
-      expect(zombie.glb.run.path).toBe(`${directory}/run.glb`)
+      const sourceNpc = LANDRUSH_ISLAND_AMBIENT_NPCS.find((npc) => npc.id === zombie.sourceNpcId)
+      expect(sourceNpc).toBeDefined()
+      expect(zombie.glb.riggedBase.path).toBe(sourceNpc!.glb.rigged)
+      expect(zombie.glb.walk.path).toBe(sourceNpc!.glb.walk)
+      expect(zombie.glb.run.path).toBe(sourceNpc!.glb.run)
+      expect(zombie.glb.walk.path).toEndWith('/walk.anim.glb')
+      expect(zombie.glb.run.path).toEndWith('/run.anim.glb')
+      expect(zombie.glb.riggedBase.path).not.toContain('/zombie-escape/assets/zombies/')
       paths.add(zombie.glb.riggedBase.path)
       paths.add(zombie.glb.walk.path)
       paths.add(zombie.glb.run.path)
@@ -93,7 +100,15 @@ describe('Zombie Escape generated zombie catalog', () => {
       })
       expect(zombie.glb.walk.expectedClipName).toBe('Armature|walking_man|baselayer')
       expect(zombie.glb.run.expectedClipName).toBe('Armature|running|baselayer')
+      for (const path of [zombie.glb.riggedBase.path, zombie.glb.walk.path, zombie.glb.run.path]) {
+        expect(existsSync(join(import.meta.dir, '../../public', path.replace(/^\/+/, '')))).toBe(
+          true,
+        )
+      }
     }
     expect(paths.size).toBe(30)
+    expect(new Set(ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((zombie) => zombie.sourceNpcId))).toEqual(
+      new Set(LANDRUSH_ISLAND_AMBIENT_NPCS.map((npc) => npc.id)),
+    )
   })
 })

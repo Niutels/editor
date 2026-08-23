@@ -84,6 +84,7 @@ export type BuildTabCapabilities = {
 
 export type BuildTabProps = {
   capabilities?: Partial<BuildTabCapabilities>
+  interactionReady?: boolean
   runStructureToolActivation?: (activate: () => void) => void
 }
 
@@ -229,6 +230,7 @@ const MEP_TOOL_KINDS = new Set<string>([
 
 export function BuildTab({
   capabilities,
+  interactionReady = true,
   runStructureToolActivation = runToolActivationDirectly,
 }: BuildTabProps = {}) {
   const materialPaintEnabled =
@@ -341,14 +343,22 @@ export function BuildTab({
   // build tool is already active (e.g. the B shortcut armed one before this
   // panel mounted): the active tool is the source of truth, not this default.
   const didInitRef = useRef(false)
+  const awaitingInteractionRef = useRef(!interactionReady)
   useEffect(() => {
+    if (!interactionReady) {
+      awaitingInteractionRef.current = true
+      didInitRef.current = false
+      return
+    }
     if (didInitRef.current) return
     didInitRef.current = true
     const ed = useEditor.getState()
-    if (ed.mode === 'build' && ed.tool) return
+    const enteredFromVisualHandoff = awaitingInteractionRef.current
+    awaitingInteractionRef.current = false
+    if (!enteredFromVisualHandoff && ed.mode === 'build' && ed.tool) return
     const firstType = buildTypes.find((t) => t.kind)
     if (firstType) handleTypeClick(firstType)
-  }, [buildTypes, handleTypeClick])
+  }, [buildTypes, handleTypeClick, interactionReady])
 
   return (
     <div className="flex h-full flex-col gap-3 p-3">
@@ -369,6 +379,10 @@ export function BuildTab({
                         ? 'bg-primary/10 ring-1 ring-primary/50'
                         : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
                     )}
+                    data-editor-build-controller-action={
+                      type.id === 'mep' ? 'palette' : 'placement'
+                    }
+                    data-editor-build-controller-item
                     onClick={() => {
                       triggerSFX('sfx:menu-click')
                       handleTypeClick(type)
@@ -426,6 +440,8 @@ export function BuildTab({
                             ? 'bg-primary/10 ring-1 ring-primary/50'
                             : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
                         )}
+                        data-editor-build-controller-action="placement"
+                        data-editor-build-controller-item
                         onClick={() => {
                           triggerSFX('sfx:menu-click')
                           runRoofFeatureActivation(feature.kind)
@@ -471,6 +487,8 @@ export function BuildTab({
                             ? 'bg-primary/10 ring-1 ring-primary/50'
                             : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
                         )}
+                        data-editor-build-controller-action="placement"
+                        data-editor-build-controller-item
                         onClick={() => {
                           triggerSFX('sfx:menu-click')
                           runBuildToolActivation(item.kind)
@@ -506,6 +524,8 @@ export function BuildTab({
                     ? 'bg-primary/10 ring-1 ring-primary/50'
                     : 'bg-muted/40 hover:bg-muted',
                 )}
+                data-editor-build-controller-action="placement"
+                data-editor-build-controller-item
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
                   runBuildToolActivation(
@@ -538,6 +558,8 @@ export function BuildTab({
                     ? 'bg-primary/10 ring-1 ring-primary/50'
                     : 'bg-muted/40 hover:bg-muted',
                 )}
+                data-editor-build-controller-action="placement"
+                data-editor-build-controller-item
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
                   runBuildToolActivation(
@@ -564,6 +586,8 @@ export function BuildTab({
                     ? 'bg-primary/10 ring-1 ring-primary/50'
                     : 'bg-muted/40 hover:bg-muted',
                 )}
+                data-editor-build-controller-action="placement"
+                data-editor-build-controller-item
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
                   runBuildToolActivation(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
@@ -592,6 +616,8 @@ export function BuildTab({
                   'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200',
                   follow ? 'bg-primary/10 ring-1 ring-primary/50' : 'bg-muted/40 hover:bg-muted',
                 )}
+                data-editor-build-controller-action="palette"
+                data-editor-build-controller-item
                 onClick={() => {
                   triggerSFX('sfx:menu-click')
                   toggleFollow()

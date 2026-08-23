@@ -33,12 +33,16 @@ const STORAGE_BUCKET_BY_KIND = {
   'project-asset': 'project-assets',
 } as const
 
+let cachedStorageOriginEnv: string | undefined
 let cachedStorageOrigin: string | null | undefined
 function pascalStorageOrigin(): string | null {
-  if (cachedStorageOrigin !== undefined) return cachedStorageOrigin
+  const configuredUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (cachedStorageOrigin !== undefined && cachedStorageOriginEnv === configuredUrl) {
+    return cachedStorageOrigin
+  }
+  cachedStorageOriginEnv = configuredUrl
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-    cachedStorageOrigin = url ? new URL(url).origin : null
+    cachedStorageOrigin = configuredUrl ? new URL(configuredUrl).origin : null
   } catch {
     cachedStorageOrigin = null
   }

@@ -1,26 +1,49 @@
 import { describe, expect, test } from 'bun:test'
-import type { AnyNode } from '@pascal-app/core'
-import { collectLandrushZombieEscapeStructureNodeIds } from './landrush-zombie-escape-structure-presentation'
+import { Group, type Object3D } from 'three'
+import {
+  restoreLandrushZombieEscapeStructureRoots,
+  syncLandrushZombieEscapeStructureRoots,
+} from './landrush-zombie-escape-structure-presentation'
 
 describe('Landrush Zombie Escape structure presentation', () => {
-  test('selects visible permanent ground-floor structures through nested ownership', () => {
-    const nodes = {
-      ground: { id: 'ground', level: 0, parentId: null, type: 'level' },
-      upper: { id: 'upper', level: 1, parentId: null, type: 'level' },
-      wall: { id: 'wall', parentId: 'ground', type: 'wall' },
-      door: { id: 'door', parentId: 'wall', type: 'door' },
-      slab: { id: 'slab', parentId: 'ground', type: 'slab' },
-      hidden: { id: 'hidden', parentId: 'ground', type: 'wall', visible: false },
-      transient: {
-        id: 'transient',
-        metadata: { isTransient: true },
-        parentId: 'ground',
-        type: 'fence',
-      },
-      upperWall: { id: 'upper-wall', parentId: 'upper', type: 'wall' },
-      item: { id: 'item', parentId: 'ground', type: 'item' },
-    } as unknown as Record<string, AnyNode>
+  test('hides only destroyed roots and restores their prior visibility', () => {
+    const first = new Group()
+    const second = new Group()
+    const alreadyHidden = new Group()
+    alreadyHidden.visible = false
+    const hiddenRoots = new Map<Object3D, boolean>()
 
-    expect(collectLandrushZombieEscapeStructureNodeIds(nodes)).toEqual(['door', 'slab', 'wall'])
+    syncLandrushZombieEscapeStructureRoots(new Set([first, alreadyHidden]), hiddenRoots)
+
+    expect(first.visible).toBe(false)
+    expect(second.visible).toBe(true)
+    expect(alreadyHidden.visible).toBe(false)
+    expect(hiddenRoots.get(first)).toBe(true)
+    expect(hiddenRoots.get(alreadyHidden)).toBe(false)
+
+    syncLandrushZombieEscapeStructureRoots(new Set([second]), hiddenRoots)
+
+    expect(first.visible).toBe(true)
+    expect(second.visible).toBe(false)
+    expect(alreadyHidden.visible).toBe(false)
+    expect(hiddenRoots.has(first)).toBe(false)
+    expect(hiddenRoots.has(alreadyHidden)).toBe(false)
+
+    restoreLandrushZombieEscapeStructureRoots(hiddenRoots)
+
+    expect(second.visible).toBe(true)
+    expect(hiddenRoots.size).toBe(0)
+  })
+
+  test('does not overwrite the captured state while a root remains destroyed', () => {
+    const root = new Group()
+    const hiddenRoots = new Map<Object3D, boolean>()
+    const destroyedRoots = new Set<Object3D>([root])
+
+    syncLandrushZombieEscapeStructureRoots(destroyedRoots, hiddenRoots)
+    syncLandrushZombieEscapeStructureRoots(destroyedRoots, hiddenRoots)
+    restoreLandrushZombieEscapeStructureRoots(hiddenRoots)
+
+    expect(root.visible).toBe(true)
   })
 })

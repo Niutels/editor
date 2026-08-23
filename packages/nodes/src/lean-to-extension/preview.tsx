@@ -2,7 +2,7 @@
 
 import type { LeanToExtensionNode } from '@pascal-app/core'
 import { EDITOR_LAYER } from '@pascal-app/editor'
-import { useViewer } from '@pascal-app/viewer'
+import { cloneMaterial, useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo } from 'react'
 import type { Material } from 'three'
 import { buildLeanToExtensionGeometry } from './geometry'
@@ -24,7 +24,7 @@ const LeanToExtensionPreview = ({ node }: { node: LeanToExtensionNode }) => {
       const mesh = object as { material?: Material | Material[] }
       if (!mesh.material) return
       const clone = (material: Material) => {
-        const copy = material.clone()
+        const copy = cloneMaterial(material)
         copy.transparent = true
         copy.opacity = 0.5
         copy.depthWrite = false

@@ -1,11 +1,13 @@
 'use client'
 
+import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { Canvas, type RootState, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ACESFilmicToneMapping, type Mesh, SphereGeometry, Vector3 } from 'three'
 import * as THREE from 'three/webgpu'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
+import { createStandaloneOceanCloudProfile } from './standalone-ocean-clouds'
 import {
   createStandaloneOceanDiskGeometry,
   type StandaloneOceanDiskGeometryMetrics,
@@ -40,6 +42,13 @@ type StandaloneOceanDebugState = {
   quality: StandaloneOceanQuality
   rendering: {
     analyticWaveCount: number
+    cloudBaseAltitude: number
+    cloudCoverage: number
+    cloudDetailOctaves: number
+    cloudDrawCalls: number
+    cloudEstimatedNoiseSamples: number
+    cloudRenderTargets: number
+    cloudTopAltitude: number
     detailRadialSegments: number
     diskRadius: number
     horizonRadialSegments: number
@@ -213,6 +222,8 @@ export function StandaloneOceanClient() {
             >
               <option value="final">Final</option>
               <option value="no-glare">No glare baseline</option>
+              <option value="cloud-density">Cloud density</option>
+              <option value="cloud-lighting">Cloud lighting</option>
               <option value="displacement">XYZ displacement</option>
               <option value="normals">Spectral normals</option>
               <option value="compression">Compression / crest</option>
@@ -344,6 +355,10 @@ export function StandaloneOceanWorld({
   )
   const diskMetrics = diskGeometry.userData
     .standaloneOceanDisk as StandaloneOceanDiskGeometryMetrics
+  const cloudProfile = useMemo(
+    () => createStandaloneOceanCloudProfile({ quality, seed: parameters.seed }),
+    [parameters.seed, quality],
+  )
   const skyGeometry = useMemo(() => new SphereGeometry(STANDALONE_OCEAN_SKY_RADIUS, 32, 18), [])
   const parametersRef = useRef(parameters)
   parametersRef.current = parameters
@@ -354,6 +369,7 @@ export function StandaloneOceanWorld({
         parametersRef.current,
         debugMode,
         {
+          cloudDetailOctaves: cloudProfile.metrics.detailOctaves,
           detailRadius: STANDALONE_OCEAN_DETAIL_RADIUS,
           outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
           vertexSpacing: STANDALONE_OCEAN_DETAIL_RADIUS / Math.max(1, qualitySettings.segments / 2),
@@ -363,6 +379,7 @@ export function StandaloneOceanWorld({
       )
     return profileMeasure ? profileMeasure('setup.ocean.materials', build) : build()
   }, [
+    cloudProfile.metrics.detailOctaves,
     debugMode,
     profileMeasure,
     qualitySettings.segments,
@@ -381,6 +398,10 @@ export function StandaloneOceanWorld({
     toneMapping: number
     toneMappingExposure: number
   }
+
+  useGpuResourceLifetime(materials)
+  useGpuResourceLifetime(diskGeometry)
+  useGpuResourceLifetime(skyGeometry)
 
   useEffect(() => {
     const previousDpr = renderer.getPixelRatio?.() ?? 1
@@ -407,9 +428,6 @@ export function StandaloneOceanWorld({
     }
     materials.time.value = timeRef.current
   }, [materials, resetRevision])
-  useEffect(() => () => materials.dispose(), [materials])
-  useEffect(() => () => diskGeometry.dispose(), [diskGeometry])
-  useEffect(() => () => skyGeometry.dispose(), [skyGeometry])
 
   function runOceanFrame(state: RootState, delta: number) {
     renderer.toneMapping = ACESFilmicToneMapping
@@ -445,6 +463,13 @@ export function StandaloneOceanWorld({
       quality,
       rendering: {
         analyticWaveCount: STANDALONE_OCEAN_SPECTRAL_MODE_COUNT,
+        cloudBaseAltitude: cloudProfile.metrics.baseAltitude,
+        cloudCoverage: cloudProfile.metrics.coverage,
+        cloudDetailOctaves: cloudProfile.metrics.detailOctaves,
+        cloudDrawCalls: cloudProfile.metrics.drawCalls,
+        cloudEstimatedNoiseSamples: cloudProfile.metrics.estimatedNoiseSamples,
+        cloudRenderTargets: cloudProfile.metrics.renderTargets,
+        cloudTopAltitude: cloudProfile.metrics.topAltitude,
         detailRadialSegments: diskMetrics.detailRadialSegments,
         diskRadius: diskMetrics.outerRadius,
         horizonRadialSegments: diskMetrics.horizonRadialSegments,

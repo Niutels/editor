@@ -7,41 +7,163 @@ import {
   resolveLandrushZombieEscapeCameraProjectionHalfHeight,
   sampleLandrushZombieEscapeCameraTransition,
 } from './landrush-zombie-escape-camera'
+import {
+  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters,
+  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE,
+  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+} from './zombie-escape-config'
 
 describe('Landrush Zombie Escape camera', () => {
-  test('matches the Orbot animation-debug design bookmark', () => {
+  test('preserves the Orbot animation-debug pose and centers its projection', () => {
     const layout = resolveLandrushZombieEscapeCameraLayout(1920, 1080)
-    const horizontalDistance = Math.cos(MathUtils.degToRad(68)) * 18
+    const camera = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+    const horizontalDistance = Math.cos(camera.elevationRadians) * camera.distanceMeters
 
-    expect(layout.offset[0]).toBeCloseTo(Math.sin(MathUtils.degToRad(34)) * horizontalDistance, 12)
-    expect(layout.offset[1]).toBeCloseTo(Math.sin(MathUtils.degToRad(68)) * 18, 12)
-    expect(layout.offset[2]).toBeCloseTo(Math.cos(MathUtils.degToRad(34)) * horizontalDistance, 12)
-    expect(layout.targetOffset).toEqual([0, 0.72, 0])
-    expect(layout.top).toBe(6.4)
-    expect(layout.bottom).toBe(-6.4)
-    expect(layout.near).toBe(0.05)
-    expect(layout.far).toBe(90)
-    expect(layout.zoom).toBe(1)
+    expect(layout.offset[0]).toBeCloseTo(Math.sin(camera.azimuthRadians) * horizontalDistance, 12)
+    expect(layout.offset[1]).toBeCloseTo(
+      Math.sin(camera.elevationRadians) * camera.distanceMeters,
+      12,
+    )
+    expect(layout.offset[2]).toBeCloseTo(Math.cos(camera.azimuthRadians) * horizontalDistance, 12)
+    expect(layout.targetOffset).toEqual([0, camera.targetHeightMeters, 0])
+    expect(layout.halfHeight).toBe(camera.halfHeightMeters)
+    expect(layout.top).toBe(camera.halfHeightMeters)
+    expect(layout.bottom).toBe(-camera.halfHeightMeters)
+    expect(layout.projectionCenterY).toBe(0)
+    expect(layout.near).toBe(camera.nearMeters)
+    expect(layout.far).toBe(camera.farMeters)
+    expect(layout.zoom).toBe(camera.zoom)
     expect(LANDRUSH_ZOMBIE_ESCAPE_CAMERA_FRAME_PRIORITY).toBeGreaterThan(0.4)
     expect(LANDRUSH_ZOMBIE_ESCAPE_CAMERA_FRAME_PRIORITY).toBeLessThan(1)
   })
 
-  test('keeps the vertical framing fixed and derives horizontal framing from the viewport', () => {
+  test('keeps replacement zombies outside full standard, envelope, and ultrawide footprints', () => {
+    const camera = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+    const standardFootprint = resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(16 / 9)
+    const maximumFootprint = resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(
+      camera.maximumAspectRatio,
+    )
+    const ultrawideFootprint = resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(32 / 9)
+
+    expect(standardFootprint).toBeLessThan(maximumFootprint)
+    expect(ultrawideFootprint).toBeLessThan(maximumFootprint)
+    for (const aspect of [16 / 9, camera.maximumAspectRatio, 32 / 9]) {
+      const layout = resolveLandrushZombieEscapeCameraLayout(aspect * 900, 900)
+      const target = new Vector3(0, camera.targetHeightMeters, 0)
+      const gameplayCamera = new OrthographicCamera(
+        layout.left,
+        layout.right,
+        layout.top,
+        layout.bottom,
+        layout.near,
+        layout.far,
+      )
+      gameplayCamera.position.fromArray(layout.offset).add(target)
+      gameplayCamera.lookAt(target)
+      gameplayCamera.updateMatrixWorld(true)
+      gameplayCamera.updateProjectionMatrix()
+      let projectedGroundRadius = 0
+
+      for (const ndcX of [-1, 1]) {
+        for (const ndcY of [-1, 1]) {
+          const nearPoint = new Vector3(ndcX, ndcY, -1).unproject(gameplayCamera)
+          const direction = new Vector3(ndcX, ndcY, 1).unproject(gameplayCamera).sub(nearPoint)
+          const groundPoint = nearPoint
+            .clone()
+            .addScaledVector(direction, -nearPoint.y / direction.y)
+          projectedGroundRadius = Math.max(
+            projectedGroundRadius,
+            Math.hypot(groundPoint.x, groundPoint.z),
+          )
+        }
+      }
+
+      expect(projectedGroundRadius).toBeCloseTo(
+        resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(aspect),
+        10,
+      )
+      expect(
+        projectedGroundRadius + ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      ).toBeLessThan(ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS)
+    }
+    expect(
+      ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS -
+        maximumFootprint -
+        ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+    ).toBeCloseTo(camera.replacementSpawnMarginMeters, 12)
+    expect(ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS).toBeGreaterThan(17.9)
+    expect(ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS).toBeLessThan(18.1)
+  })
+
+  test('caps ultrawide horizontal span while preserving the live projection aspect', () => {
+    const camera = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+    const liveAspect = 32 / 9
+    const layout = resolveLandrushZombieEscapeCameraLayout(3200, 900)
+    const maximumHorizontalHalfSpan = camera.halfHeightMeters * camera.maximumAspectRatio
+
+    expect(layout.right).toBeCloseTo(maximumHorizontalHalfSpan, 12)
+    expect(layout.left).toBeCloseTo(-maximumHorizontalHalfSpan, 12)
+    expect(layout.halfHeight).toBeCloseTo(maximumHorizontalHalfSpan / liveAspect, 12)
+    expect(layout.halfHeight).toBeLessThan(camera.halfHeightMeters)
+    expect((layout.right - layout.left) / (layout.top - layout.bottom)).toBeCloseTo(liveAspect, 12)
+  })
+
+  test('keeps vertical framing stable across resize and derives horizontal framing from aspect', () => {
     const landscape = resolveLandrushZombieEscapeCameraLayout(1920, 1080)
     const portrait = resolveLandrushZombieEscapeCameraLayout(900, 1600)
 
-    expect(landscape.right).toBeCloseTo(6.4 * (1920 / 1080), 12)
+    expect(landscape.right).toBeCloseTo(landscape.halfHeight * (1920 / 1080), 12)
     expect(landscape.left).toBeCloseTo(-landscape.right, 12)
-    expect(portrait.right).toBeCloseTo(6.4 * (900 / 1600), 12)
+    expect(portrait.right).toBeCloseTo(portrait.halfHeight * (900 / 1600), 12)
     expect(portrait.left).toBeCloseTo(-portrait.right, 12)
-    expect(portrait.top - portrait.bottom).toBe(12.8)
+    expect(portrait.halfHeight).toBeCloseTo(landscape.halfHeight, 12)
+    expect(portrait.top).toBeCloseTo(landscape.top, 12)
+    expect(portrait.bottom).toBeCloseTo(landscape.bottom, 12)
+  })
+
+  test('centers the followed target without tying actor scale to terrain elevation', () => {
+    const layouts = [
+      resolveLandrushZombieEscapeCameraLayout(1920, 1080),
+      resolveLandrushZombieEscapeCameraLayout(900, 1600),
+    ]
+    const landscape = layouts[0]!
+    const groundY = 0
+    const target = new Vector3(44, groundY + 0.72, 12.3)
+    const createCamera = (layout: typeof landscape) => {
+      const camera = new OrthographicCamera(
+        layout.left,
+        layout.right,
+        layout.top,
+        layout.bottom,
+        layout.near,
+        layout.far,
+      )
+      camera.position.fromArray(layout.offset).add(target)
+      camera.lookAt(target)
+      camera.updateMatrixWorld(true)
+      camera.updateProjectionMatrix()
+      return camera
+    }
+
+    for (const layout of layouts) {
+      const camera = createCamera(layout)
+      const targetProjection = target.clone().project(camera)
+
+      expect(layout.top - layout.bottom).toBeCloseTo(layout.halfHeight * 2, 12)
+      expect(layout.halfHeight).toBe(6.4)
+      expect(targetProjection.x).toBeCloseTo(0, 12)
+      expect(targetProjection.y).toBeCloseTo(0, 12)
+      expect(targetProjection.z).toBeGreaterThanOrEqual(-1)
+      expect(targetProjection.z).toBeLessThanOrEqual(1)
+    }
   })
 
   test('produces a finite minimum frustum for an unavailable viewport', () => {
     const layout = resolveLandrushZombieEscapeCameraLayout(Number.NaN, 0)
 
-    expect(layout.left).toBeCloseTo(-0.64, 12)
-    expect(layout.right).toBeCloseTo(0.64, 12)
+    expect(layout.left).toBeCloseTo(-layout.halfHeight * 0.1, 12)
+    expect(layout.right).toBeCloseTo(layout.halfHeight * 0.1, 12)
     expect(layout.offset.every(Number.isFinite)).toBe(true)
   })
 
@@ -63,26 +185,58 @@ describe('Landrush Zombie Escape camera', () => {
     )
   })
 
-  test('preserves source framing at entry and lands exactly on the authored framing', () => {
+  test('preserves source framing at entry and lands smoothly on the authored gameplay span', () => {
     const sourceHalfHeight = 2.75
+    const sourceProjectionCenterY = -1.4
+    const targetHalfHeight = resolveLandrushZombieEscapeCameraLayout(1920, 1080).halfHeight
 
-    expect(sampleLandrushZombieEscapeCameraTransition(0, sourceHalfHeight)).toEqual({
+    expect(
+      sampleLandrushZombieEscapeCameraTransition(
+        0,
+        sourceHalfHeight,
+        90,
+        sourceProjectionCenterY,
+        0,
+        targetHalfHeight,
+      ),
+    ).toEqual({
       amount: 0,
       far: 90,
       halfHeight: sourceHalfHeight,
       progress: 0,
+      projectionCenterY: sourceProjectionCenterY,
     })
-    expect(sampleLandrushZombieEscapeCameraTransition(0.5, sourceHalfHeight)).toEqual({
+    expect(
+      sampleLandrushZombieEscapeCameraTransition(
+        0.5,
+        sourceHalfHeight,
+        90,
+        sourceProjectionCenterY,
+        0,
+        targetHalfHeight,
+      ),
+    ).toEqual({
       amount: 0.5,
       far: 90,
-      halfHeight: (sourceHalfHeight + 6.4) / 2,
+      halfHeight: (sourceHalfHeight + targetHalfHeight) / 2,
       progress: 0.5,
+      projectionCenterY: sourceProjectionCenterY / 2,
     })
-    expect(sampleLandrushZombieEscapeCameraTransition(1, sourceHalfHeight)).toEqual({
+    expect(
+      sampleLandrushZombieEscapeCameraTransition(
+        1,
+        sourceHalfHeight,
+        90,
+        sourceProjectionCenterY,
+        0,
+        targetHalfHeight,
+      ),
+    ).toEqual({
       amount: 1,
       far: 90,
-      halfHeight: 6.4,
+      halfHeight: targetHalfHeight,
       progress: 1,
+      projectionCenterY: 0,
     })
   })
 

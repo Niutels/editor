@@ -3,11 +3,16 @@ import {
   cameraFar,
   cameraNear,
   cameraPosition,
+  cameraProjectionMatrix,
+  cameraProjectionMatrixInverse,
+  cameraWorldMatrix,
   color,
   cos,
   exp,
   float,
   fwidth,
+  getViewPosition,
+  int,
   linearDepth,
   mix,
   mx_noise_float,
@@ -19,14 +24,20 @@ import {
   sqrt,
   texture,
   uniform,
+  varying,
   vec2,
   vec3,
+  vec4,
   viewportDepthTexture,
+  viewZToOrthographicDepth,
 } from 'three/tsl'
 import { MeshBasicNodeMaterial, type Node as TSLNode } from 'three/webgpu'
+import { STANDALONE_OCEAN_CLOUD_CONTROLS } from './standalone-ocean-clouds'
 import type { WaterlineInteractionField } from './waterline-interaction-field'
 
 export type StandaloneOceanDebugMode =
+  | 'cloud-density'
+  | 'cloud-lighting'
   | 'compression'
   | 'displacement'
   | 'final'
@@ -309,12 +320,33 @@ const STANDALONE_OCEAN_SPECTRAL_COMPONENTS = STANDALONE_OCEAN_BANDS.map((_band, 
 export const STANDALONE_OCEAN_SPECTRAL_MODE_COUNT =
   STANDALONE_OCEAN_BANDS.length * STANDALONE_OCEAN_COMPONENTS_PER_BAND
 
+const STANDALONE_OCEAN_TRANSPARENT_BODY_OPACITY_FLOOR = 0.42
+const createStandaloneOceanPackedVarying = varying as unknown as <
+  T extends 'float' | 'vec2' | 'vec4',
+>(
+  node: TSLNode<T>,
+  name: string,
+) => TSLNode<T>
+
 export type StandaloneOceanMaterialBundle = ReturnType<typeof createStandaloneOceanMaterials>
 
 type StandaloneOceanGeometryContract = {
+  cloudDetailOctaves: number
   detailRadius: number
   outerRadius: number
   vertexSpacing: number
+}
+
+type StandaloneOceanWaveBundle = {
+  compression: TSLNode<'float'>
+  crest: TSLNode<'float'>
+  displacementX: TSLNode<'float'>
+  displacementZ: TSLNode<'float'>
+  glintCarrier: TSLNode<'float'>
+  height: TSLNode<'float'>
+  jacobian: TSLNode<'float'>
+  normal: TSLNode<'vec3'>
+  slope: TSLNode<'float'>
 }
 
 export function createStandaloneOceanMaterials(
@@ -330,38 +362,68 @@ export function createStandaloneOceanMaterials(
   const waveEnvelope = radialDistance
     .smoothstep(geometry.detailRadius * 0.9, geometry.detailRadius * 1.8)
     .oneMinus()
-  const geometryWaves = createStandaloneOceanWaveBundle(
+  const evaluatedWaves = createStandaloneOceanWaveBundle(
     coordinates,
     controls.time,
     controls,
     geometry.vertexSpacing,
-    false,
   )
-  const surfaceWaves = createStandaloneOceanWaveBundle(
-    coordinates,
-    controls.time,
-    controls,
-    geometry.vertexSpacing,
-    true,
+  const wavePoseInput = vec4(
+    evaluatedWaves.displacementX,
+    evaluatedWaves.displacementZ,
+    evaluatedWaves.height,
+    evaluatedWaves.jacobian,
+  ) as TSLNode<'vec4'>
+  const waveFrameInput = vec4(evaluatedWaves.normal, evaluatedWaves.compression) as TSLNode<'vec4'>
+  const waveEnergyInput = vec2(evaluatedWaves.crest, evaluatedWaves.glintCarrier) as TSLNode<'vec2'>
+  const wavePose = createStandaloneOceanPackedVarying(wavePoseInput, 'vStandaloneOceanWavePose')
+  const waveFrame = createStandaloneOceanPackedVarying(waveFrameInput, 'vStandaloneOceanWaveFrame')
+  const waveEnergy = createStandaloneOceanPackedVarying(
+    waveEnergyInput,
+    'vStandaloneOceanWaveEnergy',
   )
+  const interpolatedWaveNormal = waveFrame.xyz.normalize()
+  const geometryWaves = {
+    compression: waveFrame.w,
+    crest: waveEnergy.x,
+    displacementX: wavePose.x,
+    displacementZ: wavePose.y,
+    glintCarrier: waveEnergy.y,
+    height: wavePose.z,
+    jacobian: wavePose.w,
+    normal: interpolatedWaveNormal,
+    slope: interpolatedWaveNormal.y.oneMinus().mul(9).clamp(0, 1),
+  }
   const opticalNormal = mix(
     vec3(0, 1, 0),
-    createStandaloneOceanDetailNormal(surfaceWaves.normal, coordinates, controls.time, controls),
+    createStandaloneOceanDetailNormal(geometryWaves.normal, coordinates, controls.time, controls),
     waveEnvelope,
   ).normalize()
   const opticalWaves = {
-    ...surfaceWaves,
-    compression: surfaceWaves.compression.mul(waveEnvelope),
-    crest: surfaceWaves.crest.mul(waveEnvelope),
-    height: surfaceWaves.height.mul(waveEnvelope),
+    ...geometryWaves,
+    compression: geometryWaves.compression.mul(waveEnvelope),
+    crest: geometryWaves.crest.mul(waveEnvelope),
+    height: geometryWaves.height.mul(waveEnvelope),
     normal: opticalNormal,
     slope: opticalNormal.y.oneMinus().mul(9).clamp(0, 1),
   }
   const sunDirection = createStandaloneOceanSunDirection(controls)
   const horizonRadiance = createStandaloneOceanHorizonRadiance(controls)
-  const viewDirection = cameraPosition.sub(positionWorld).normalize()
+  const projectionW = cameraProjectionMatrix.element(int(3)).element(int(3)) as TSLNode<'float'>
+  const orthographicProjection = projectionW.equal(float(1))
+  const perspectiveViewDirection = cameraPosition.sub(positionWorld).normalize()
+  const orthographicViewDirection = vec3(0, 0, 1).transformDirection(cameraWorldMatrix)
+  const viewDirection = orthographicProjection.select(
+    orthographicViewDirection,
+    perspectiveViewDirection,
+  )
   const reflectionDirection = reflect(viewDirection.negate(), opticalWaves.normal).normalize()
-  const reflectionColor = createStandaloneOceanSkyColor(reflectionDirection, sunDirection, controls)
+  const reflectedSky = createStandaloneOceanAnalyticReflection(
+    reflectionDirection,
+    sunDirection,
+    controls,
+  )
+  const reflectionColor = reflectedSky.color
   const nDotV = opticalWaves.normal.dot(viewDirection).abs().clamp(0, 1)
   const fresnel = nDotV.oneMinus().pow(5).mul(0.98).add(0.02)
   const activeFresnel = mix(float(1), fresnel, controls.fresnelEnabled)
@@ -401,6 +463,7 @@ export function createStandaloneOceanMaterials(
     coordinates,
     geometryWaves,
     opticalWaves,
+    viewDirection,
     controls,
     waterlineInteractionField,
   )
@@ -446,7 +509,11 @@ export function createStandaloneOceanMaterials(
   )
   const horizonSurfaceColor = mix(compositedSurfaceColor, horizonRadiance, edgeHorizonBlend)
   const noGlareHorizonSurfaceColor = mix(finalSurfaceColor, horizonRadiance, edgeHorizonBlend)
+  const bodyOpacityFloor = float(
+    submergedRockRefraction ? STANDALONE_OCEAN_TRANSPARENT_BODY_OPACITY_FLOOR : 1,
+  )
   const surfaceOpacity = submergedRockTransmission.opacity
+    .max(bodyOpacityFloor)
     .max(reflectionMix.mul(0.72))
     .max(waveFoamMix)
     .max(boundaryMistMix)
@@ -468,29 +535,33 @@ export function createStandaloneOceanMaterials(
   const glintDebug = vec3(glint, glint.mul(0.94), glint.mul(0.72))
   const glareDebug = vec3(glareMask, glareMask.mul(0.55), glareMask.mul(0.12))
   const resolvedSurfaceColor =
-    debugMode === 'compression'
-      ? compressionDebug
-      : debugMode === 'displacement'
-        ? displacementDebug
-        : debugMode === 'foam'
-          ? foamDebug
-          : debugMode === 'fresnel'
-            ? vec3(activeFresnel, activeFresnel, activeFresnel)
-            : debugMode === 'glare'
-              ? glareDebug
-              : debugMode === 'glints'
-                ? glintDebug
-                : debugMode === 'normals'
-                  ? opticalWaves.normal.mul(0.5).add(0.5)
-                  : debugMode === 'reflection'
-                    ? reflectionColor
-                    : debugMode === 'submerged-rocks'
-                      ? submergedRockTransmission.debugColor
-                      : debugMode === 'waterline'
-                        ? waterlineFoam.debugColor
-                        : debugMode === 'no-glare'
-                          ? noGlareHorizonSurfaceColor
-                          : horizonSurfaceColor
+    debugMode === 'cloud-density'
+      ? vec3(reflectedSky.cloudDensity)
+      : debugMode === 'cloud-lighting'
+        ? reflectedSky.cloudLighting
+        : debugMode === 'compression'
+          ? compressionDebug
+          : debugMode === 'displacement'
+            ? displacementDebug
+            : debugMode === 'foam'
+              ? foamDebug
+              : debugMode === 'fresnel'
+                ? vec3(activeFresnel, activeFresnel, activeFresnel)
+                : debugMode === 'glare'
+                  ? glareDebug
+                  : debugMode === 'glints'
+                    ? glintDebug
+                    : debugMode === 'normals'
+                      ? opticalWaves.normal.mul(0.5).add(0.5)
+                      : debugMode === 'reflection'
+                        ? reflectionColor
+                        : debugMode === 'submerged-rocks'
+                          ? submergedRockTransmission.debugColor
+                          : debugMode === 'waterline'
+                            ? waterlineFoam.debugColor
+                            : debugMode === 'no-glare'
+                              ? noGlareHorizonSurfaceColor
+                              : horizonSurfaceColor
   const surface = new MeshBasicNodeMaterial({
     depthTest: true,
     depthWrite: !submergedRockRefraction,
@@ -498,9 +569,9 @@ export function createStandaloneOceanMaterials(
     transparent: submergedRockRefraction,
   })
   surface.positionNode = vec3(
-    positionLocal.x.add(geometryWaves.displacementX.mul(waveEnvelope)),
-    positionLocal.y.sub(geometryWaves.displacementZ.mul(waveEnvelope)),
-    geometryWaves.height.mul(waveEnvelope),
+    positionLocal.x.add(wavePose.x.mul(waveEnvelope)),
+    positionLocal.y.sub(wavePose.y.mul(waveEnvelope)),
+    wavePose.z.mul(waveEnvelope),
   )
   surface.colorNode = resolvedSurfaceColor
   surface.opacityNode = surfaceOpacity
@@ -508,6 +579,7 @@ export function createStandaloneOceanMaterials(
   surface.userData.standaloneOcean = {
     foam: 'instantaneous-jacobian-crest-bright-broken-coverage',
     glare: 'single-pass-analytic-glare',
+    minimumBodyOpacity: STANDALONE_OCEAN_TRANSPARENT_BODY_OPACITY_FLOOR,
     submergedRocks: submergedRockRefraction
       ? 'depth-aware-beer-lambert-filtered-transmission'
       : 'disabled-no-pre-water-capture',
@@ -517,17 +589,35 @@ export function createStandaloneOceanMaterials(
     waves: 'twenty-four-mode-stochastic-directional-spectrum',
   }
 
-  const skyDirection = positionWorld.sub(cameraPosition).normalize()
+  const skyDirection = viewDirection.negate()
+  const skyField = createStandaloneOceanSky(
+    skyDirection,
+    sunDirection,
+    controls,
+    geometry.cloudDetailOctaves,
+  )
   const sky = new MeshBasicNodeMaterial({
     depthTest: false,
     depthWrite: false,
     side: BackSide,
   })
   sky.colorNode =
-    debugMode === 'final' || debugMode === 'no-glare'
-      ? createStandaloneOceanSkyColor(skyDirection, sunDirection, controls)
-      : color('#01030a')
+    debugMode === 'cloud-density'
+      ? vec3(skyField.cloudDensity)
+      : debugMode === 'cloud-lighting'
+        ? skyField.cloudLighting
+        : debugMode === 'final' || debugMode === 'no-glare'
+          ? skyField.color
+          : color('#01030a')
   sky.name = 'standalone-ocean-sky'
+  sky.userData.standaloneOceanClouds = {
+    detailOctaves: geometry.cloudDetailOctaves,
+    field: 'vertex-weather-warp-shape-lighting-with-fragment-detail-erosion',
+    fragmentNoiseSamples: 1,
+    reflection: 'bounded-analytic-cloud-radiance',
+    vertexNoiseSamples: geometry.cloudDetailOctaves + 5,
+    vertexVaryings: ['vStandaloneOceanSkyShape', 'vStandaloneOceanSkyLight'],
+  }
 
   return {
     dispose() {
@@ -729,6 +819,17 @@ function createStandaloneOceanUniforms(parameters: StandaloneOceanParameters) {
 
 type StandaloneOceanUniforms = ReturnType<typeof createStandaloneOceanUniforms>
 
+function createStandaloneOceanSampledLinearDepth(
+  screenPosition: TSLNode<'vec2'>,
+  depthSample: TSLNode<'float'>,
+) {
+  return viewZToOrthographicDepth(
+    getViewPosition(screenPosition, depthSample, cameraProjectionMatrixInverse).z,
+    cameraNear,
+    cameraFar,
+  )
+}
+
 function createStandaloneOceanSubmergedRockTransmission(
   bodyColor: TSLNode<'vec3'>,
   normal: TSLNode<'vec3'>,
@@ -756,7 +857,10 @@ function createStandaloneOceanSubmergedRockTransmission(
     .mul(controls.underwaterRockDistortion)
     .mul(fresnel.oneMinus().mul(0.82).add(0.18))
   const refractedUv = screenUV.add(distortion).clamp(0.002, 0.998)
-  const centerLinearDepth = linearDepth(viewportDepth.sample(refractedUv).r)
+  const centerLinearDepth = createStandaloneOceanSampledLinearDepth(
+    refractedUv,
+    viewportDepth.sample(refractedUv).r,
+  )
   const centerRayDepth = centerLinearDepth.sub(currentLinearDepth).mul(depthRange).max(0)
   const centerVerticalDepth = centerRayDepth.mul(viewDirection.y.abs().max(0.12))
   const centerDepthRatio = centerVerticalDepth.div(maximumDepth).clamp(0, 1)
@@ -804,18 +908,179 @@ function createStandaloneOceanSunDirection(controls: StandaloneOceanUniforms) {
   ).normalize()
 }
 
-function createStandaloneOceanSkyColor(
+function createStandaloneOceanAnalyticReflection(
   direction: TSLNode<'vec3'>,
   sunDirection: TSLNode<'vec3'>,
   controls: StandaloneOceanUniforms,
 ) {
   const horizonRadiance = createStandaloneOceanHorizonRadiance(controls)
-  const skyBlend = direction.y.max(0).smoothstep(0.015, 0.62)
+  const upward = direction.y.clamp(0, 1)
+  const skyBlend = upward.smoothstep(0.015, 0.62)
   const gradient = mix(horizonRadiance, controls.skyZenithColor, skyBlend)
   const sunDot = direction.dot(sunDirection).max(0)
   const sunDisc = color('#ffd27a').mul(sunDot.pow(720)).mul(8)
   const sunHalo = color('#ffc66e').mul(sunDot.pow(18)).mul(0.9)
-  return mix(horizonRadiance, gradient.add(sunDisc).add(sunHalo), controls.skyEnabled)
+  const clearSky = gradient.add(sunDisc).add(sunHalo)
+
+  const projectedDirection = direction.xz.div(upward.max(0.16)).clamp(-6, 6)
+  const windPhase = controls.time.mul(
+    (STANDALONE_OCEAN_CLOUD_CONTROLS.wind.xMetersPerSecond +
+      STANDALONE_OCEAN_CLOUD_CONTROLS.wind.zMetersPerSecond) *
+      0.018,
+  )
+  const seedPhase = controls.seed.mul(0.173)
+  const primaryLobe = sin(projectedDirection.dot(vec2(1.17, 0.73)).add(windPhase).add(seedPhase))
+  const secondaryLobe = sin(
+    projectedDirection.dot(vec2(-0.61, 1.43)).sub(windPhase.mul(0.71)).sub(seedPhase.mul(1.37)),
+  )
+  const densitySignal = primaryLobe
+    .mul(0.58)
+    .add(secondaryLobe.mul(0.27))
+    .add(primaryLobe.mul(secondaryLobe).mul(0.15))
+    .mul(0.5)
+    .add(0.5)
+  const coverageThreshold = 1 - STANDALONE_OCEAN_CLOUD_CONTROLS.coverage * 0.78
+  const horizonFade = upward.smoothstep(0.012, STANDALONE_OCEAN_CLOUD_CONTROLS.horizonFade)
+  const cloudDensity = densitySignal
+    .smoothstep(coverageThreshold, coverageThreshold + 0.16)
+    .mul(horizonFade)
+    .mul(STANDALONE_OCEAN_CLOUD_CONTROLS.density)
+    .clamp(0, 0.88)
+
+  const sunHeight = sunDirection.y.max(0).smoothstep(0.02, 0.32)
+  const lightVariation = secondaryLobe.mul(0.5).add(0.5)
+  const lightVisibility = lightVariation
+    .mul(0.24)
+    .add(0.58)
+    .mul(sunHeight.mul(0.65).add(0.35))
+    .clamp(0, 1)
+  const cloudEdge = cloudDensity.mul(cloudDensity.oneMinus()).mul(4).clamp(0, 1)
+  const silverLining = cloudEdge
+    .mul(sunDot.pow(6))
+    .mul(STANDALONE_OCEAN_CLOUD_CONTROLS.silverLining)
+  const precipitationDarkening = 1 - STANDALONE_OCEAN_CLOUD_CONTROLS.precipitation * 0.34
+  const shadowColor = mix(color('#70828e'), horizonRadiance, 0.16).mul(precipitationDarkening)
+  const sunlitColor = mix(color('#f1f4ed'), color('#fff0d2'), sunHeight.mul(0.48))
+  const cloudColor = mix(shadowColor, sunlitColor, lightVisibility).add(
+    color('#ffe4b0').mul(silverLining.mul(0.58)),
+  )
+  const cloudedSky = mix(clearSky, cloudColor, cloudDensity)
+
+  return {
+    cloudDensity,
+    cloudLighting: vec3(lightVisibility, silverLining, cloudDensity),
+    color: mix(horizonRadiance, cloudedSky, controls.skyEnabled),
+  }
+}
+
+function createStandaloneOceanSky(
+  direction: TSLNode<'vec3'>,
+  sunDirection: TSLNode<'vec3'>,
+  controls: StandaloneOceanUniforms,
+  detailOctaves: number,
+) {
+  const horizonRadiance = createStandaloneOceanHorizonRadiance(controls)
+  const upward = direction.y.max(0)
+  const skyBlend = upward.smoothstep(0.015, 0.62)
+  const gradient = mix(horizonRadiance, controls.skyZenithColor, skyBlend)
+  const sunDot = direction.dot(sunDirection).max(0)
+  const sunDisc = color('#ffd27a').mul(sunDot.pow(720)).mul(8)
+  const sunHalo = color('#ffc66e').mul(sunDot.pow(18)).mul(0.9)
+  const clearSky = gradient.add(sunDisc).add(sunHalo)
+
+  const projectedDirection = direction.xz.div(upward.max(0.045))
+  const cloudWind = vec2(
+    controls.time.mul(STANDALONE_OCEAN_CLOUD_CONTROLS.wind.xMetersPerSecond * 0.0024),
+    controls.time.mul(STANDALONE_OCEAN_CLOUD_CONTROLS.wind.zMetersPerSecond * 0.0024),
+  )
+  const seedOffset = vec2(controls.seed.mul(0.071), controls.seed.mul(-0.053))
+  const baseCoordinates = projectedDirection
+    .mul(STANDALONE_OCEAN_CLOUD_CONTROLS.shapeScale)
+    .add(cloudWind)
+    .add(seedOffset)
+  const weatherCoordinates = baseCoordinates.mul(0.31)
+  const weather = normalizedStandaloneOceanNoise(weatherCoordinates)
+  const warpX = normalizedStandaloneOceanNoise(
+    weatherCoordinates.mul(1.73).add(vec2(13.7, -8.1)),
+  ).sub(0.5)
+  const warpZ = normalizedStandaloneOceanNoise(
+    weatherCoordinates.mul(1.57).add(vec2(-5.3, 17.9)),
+  ).sub(0.5)
+  const shapedCoordinates = baseCoordinates.add(vec2(warpX, warpZ).mul(0.86))
+  const broadShape = createStandaloneOceanCloudFbm(shapedCoordinates, detailOctaves)
+  const skyShapeInput = vec4(shapedCoordinates, weather, broadShape) as TSLNode<'vec4'>
+  const skyShape = createStandaloneOceanPackedVarying(skyShapeInput, 'vStandaloneOceanSkyShape')
+  const sunPlanarDirection = sunDirection.xz.div(sunDirection.xz.length().max(0.001))
+  const lightCoordinates = skyShape.xy.add(sunPlanarDirection.mul(0.32))
+  const lightDensityInput = normalizedStandaloneOceanNoise(lightCoordinates.mul(0.74))
+    .mul(0.58)
+    .add(normalizedStandaloneOceanNoise(lightCoordinates.mul(1.61).add(vec2(7.9, -12.4))).mul(0.42))
+    .toVar('standaloneOceanSkyLightDensity') as TSLNode<'float'>
+  const lightDensity = createStandaloneOceanPackedVarying(
+    lightDensityInput,
+    'vStandaloneOceanSkyLight',
+  )
+  const detail = normalizedStandaloneOceanNoise(skyShape.xy.mul(5.2).add(vec2(31.3, -19.7)))
+  const cloudType = STANDALONE_OCEAN_CLOUD_CONTROLS.cloudType
+  const densitySignal = skyShape.z
+    .mul(0.54 + cloudType * 0.08)
+    .add(skyShape.w.mul(0.5))
+    .sub(detail.mul(STANDALONE_OCEAN_CLOUD_CONTROLS.detailErosion * 0.16))
+  const coverageThreshold = 1 - STANDALONE_OCEAN_CLOUD_CONTROLS.coverage * 0.78
+  const densityFootprint = fwidth(densitySignal).mul(1.45).max(0.008)
+  const horizonFade = upward.smoothstep(0.012, STANDALONE_OCEAN_CLOUD_CONTROLS.horizonFade)
+  const cloudDensity = densitySignal
+    .smoothstep(
+      float(coverageThreshold).sub(densityFootprint),
+      float(coverageThreshold + 0.14).add(densityFootprint),
+    )
+    .mul(horizonFade)
+    .mul(STANDALONE_OCEAN_CLOUD_CONTROLS.density)
+    .clamp(0, 0.94)
+
+  const sunHeight = sunDirection.y.max(0).smoothstep(0.02, 0.32)
+  const lightVisibility = lightDensity
+    .smoothstep(0.47, 0.73)
+    .oneMinus()
+    .mul(sunHeight.mul(0.65).add(0.35))
+  const cloudEdge = cloudDensity.mul(cloudDensity.oneMinus()).mul(4).clamp(0, 1)
+  const forwardScatter = sunDot.pow(6)
+  const silverLining = cloudEdge
+    .mul(forwardScatter)
+    .mul(STANDALONE_OCEAN_CLOUD_CONTROLS.silverLining)
+  const precipitationDarkening = 1 - STANDALONE_OCEAN_CLOUD_CONTROLS.precipitation * 0.34
+  const shadowColor = mix(color('#70828e'), horizonRadiance, 0.16).mul(precipitationDarkening)
+  const sunlitColor = mix(color('#f1f4ed'), color('#fff0d2'), sunHeight.mul(0.48))
+  const cloudLight = lightVisibility.mul(0.72).add(0.18).clamp(0, 1)
+  const cloudColor = mix(shadowColor, sunlitColor, cloudLight).add(
+    color('#ffe4b0').mul(silverLining.mul(0.58)),
+  )
+  const cloudedSky = mix(clearSky, cloudColor, cloudDensity)
+
+  return {
+    cloudDensity,
+    cloudLighting: vec3(lightVisibility, silverLining, cloudDensity),
+    color: mix(horizonRadiance, cloudedSky, controls.skyEnabled),
+  }
+}
+
+function createStandaloneOceanCloudFbm(coordinates: TSLNode<'vec2'>, octaves: number) {
+  let amplitude = 0.56
+  let frequency = 1
+  let normalization = 0
+  let result: TSLNode<'float'> = float(0)
+
+  for (let octave = 0; octave < Math.max(1, Math.min(4, octaves)); octave += 1) {
+    const octaveOffset = vec2(17.13 * octave, -11.47 * octave)
+    result = result.add(
+      normalizedStandaloneOceanNoise(coordinates.mul(frequency).add(octaveOffset)).mul(amplitude),
+    )
+    normalization += amplitude
+    amplitude *= 0.5
+    frequency *= 2.07
+  }
+
+  return result.div(normalization)
 }
 
 function createStandaloneOceanHorizonRadiance(controls: StandaloneOceanUniforms) {
@@ -823,7 +1088,7 @@ function createStandaloneOceanHorizonRadiance(controls: StandaloneOceanUniforms)
 }
 
 function createStandaloneOceanFoamMask(
-  waves: ReturnType<typeof createStandaloneOceanWaveBundle>,
+  waves: StandaloneOceanWaveBundle,
   coordinates: TSLNode<'vec2'>,
   controls: StandaloneOceanUniforms,
 ) {
@@ -865,8 +1130,9 @@ function createStandaloneOceanFoamMask(
 
 function createStandaloneOceanWaterlineFoam(
   coordinates: TSLNode<'vec2'>,
-  geometryWaves: ReturnType<typeof createStandaloneOceanWaveBundle>,
-  waves: ReturnType<typeof createStandaloneOceanWaveBundle>,
+  geometryWaves: StandaloneOceanWaveBundle,
+  waves: StandaloneOceanWaveBundle,
+  viewDirection: TSLNode<'vec3'>,
   controls: StandaloneOceanUniforms,
   field: WaterlineInteractionField | null,
 ) {
@@ -964,10 +1230,13 @@ function createStandaloneOceanWaterlineFoam(
     .min(field.maximumDistanceMeters * 0.92)
   const fieldValidity = signedNormalizedDistance.abs().smoothstep(0.94, 0.995).oneMinus()
   const currentSurfaceDepth = linearDepth()
-  const sceneLinearDepth = linearDepth(viewportDepthTexture().sample(screenUV).r)
+  const sceneLinearDepth = createStandaloneOceanSampledLinearDepth(
+    screenUV,
+    viewportDepthTexture().sample(screenUV).r,
+  )
   const sceneRayClearance = sceneLinearDepth.sub(currentSurfaceDepth).mul(cameraFar.sub(cameraNear))
   const sceneBehindWater = sceneRayClearance.smoothstep(-0.02, 0.001)
-  const verticalViewScale = cameraPosition.sub(positionWorld).normalize().y.abs().max(0.12)
+  const verticalViewScale = viewDirection.y.abs().max(0.12)
   const visibleSurfaceClearance = sceneRayClearance.max(0).mul(verticalViewScale)
   const clearanceFootprint = fwidth(visibleSurfaceClearance)
     .mul(1.35)
@@ -1053,7 +1322,7 @@ function createStandaloneOceanWaterlineFoam(
 }
 
 function createStandaloneOceanGlintMask(
-  waves: ReturnType<typeof createStandaloneOceanWaveBundle>,
+  waves: StandaloneOceanWaveBundle,
   coordinates: TSLNode<'vec2'>,
   time: TSLNode<'float'>,
   viewDirection: TSLNode<'vec3'>,
@@ -1081,7 +1350,7 @@ function createStandaloneOceanGlintMask(
 }
 
 function createStandaloneOceanGlareMask(
-  waves: ReturnType<typeof createStandaloneOceanWaveBundle>,
+  waves: StandaloneOceanWaveBundle,
   glint: TSLNode<'float'>,
   controls: StandaloneOceanUniforms,
 ) {
@@ -1178,8 +1447,7 @@ function createStandaloneOceanWaveBundle(
   time: TSLNode<'float'>,
   controls: StandaloneOceanUniforms,
   vertexSpacing: number,
-  fragmentFiltered: boolean,
-) {
+): StandaloneOceanWaveBundle {
   const windVelocity = controls.oceanWindVelocity.max(0.1)
   const minimumWavelength = controls.oceanSmallestWave.max(0.35)
   const longestWavelength = windVelocity
@@ -1214,7 +1482,6 @@ function createStandaloneOceanWaveBundle(
   const waveCoordinates = coordinates.add(
     vec2(curvatureX, curvatureZ).mul(longestWavelength.mul(curvature).mul(0.62)),
   )
-  const footprint = fragmentFiltered ? fwidth(coordinates).length() : float(0)
   let height: TSLNode<'float'> = float(0)
   let displacementX: TSLNode<'float'> = float(0)
   let displacementZ: TSLNode<'float'> = float(0)
@@ -1269,9 +1536,7 @@ function createStandaloneOceanWaveBundle(
         .mul(bandControls.choppiness.max(0))
         .mul(0.78 - index * 0.055)
         .div(alignment.mul(0.22).add(0.78).max(1))
-      const filterWeight = fragmentFiltered
-        ? footprint.mul(waveNumber).smoothstep(0.48, 1.65).oneMinus()
-        : wavelength.smoothstep(vertexSpacing * 2.2, vertexSpacing * 4)
+      const filterWeight = wavelength.smoothstep(vertexSpacing * 2.2, vertexSpacing * 4)
       const angularSpeed = sqrt(waveNumber.mul(9.81))
         .mul(timeScale)
         .mul(band.speed * component.speedScale)

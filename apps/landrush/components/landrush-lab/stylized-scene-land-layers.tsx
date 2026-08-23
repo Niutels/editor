@@ -1,9 +1,18 @@
 'use client'
 
 import { getMaterialRendererBackend, renderScheduler } from '@landrush/runtime'
+import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   BufferGeometry,
   Color,
@@ -144,7 +153,7 @@ type StylizedSceneResolvedGrassTuning = {
   windStrength: number
 }
 
-type StylizedGrassInstance = {
+export type StylizedGrassInstance = {
   heightFactor: number
   id: string
   macroVariation: number
@@ -176,23 +185,22 @@ type StylizedGrassFadeZone = StylizedGrassCompiledBlocker & {
 
 type StylizedGrassCellCache = Map<string, readonly StylizedGrassInstance[]>
 
-type StylizedGrassVisibleInstanceState = {
+type StylizedGrassResidentInstanceState = {
+  arrivalState: StylizedGrassArrivalState
+  cacheRevision: number
   cellInstancesByKey: Map<string, readonly StylizedGrassInstance[]>
+  contentRevision: number
   coverageRevision: number
-  desiredInstanceCount: number
-  indexById: Map<string, number>
-  instances: StylizedGrassInstance[]
-  revision: number
-  snapshot: readonly StylizedGrassInstance[]
+  instanceCount: number
 }
 
-type StylizedGrassVisibleCellChanges = {
+type StylizedGrassResidentCellChanges = {
   added: readonly StylizedGrassStreamCell[]
   removed: readonly StylizedGrassStreamCell[]
   revision: number
 }
 
-type StylizedGrassStreamCell = {
+export type StylizedGrassStreamCell = {
   cellX: number
   cellZ: number
   index: number
@@ -208,19 +216,66 @@ type StylizedGrassStreamGrid = {
   chunks: readonly StylizedGrassStreamChunk[]
 }
 
-type StylizedGrassVisibleCellScan = {
+type StylizedGrassResidentCellScan = {
   cells: readonly StylizedGrassStreamCell[]
-  exactVisibleCellKeys: ReadonlySet<string>
 }
 
-type StylizedGrassResidentState = {
-  freeSlots: Set<number>
-  geometry: BufferGeometry | null
+export type StylizedGrassDrawEnvelope = {
+  horizontalMargin: number
+  maxHeight: number
+  minHeight: number
+}
+
+export type StylizedGrassCellCoverage = {
+  residentCells: readonly StylizedGrassStreamCell[]
+  residentRevision: number
+}
+
+export type StylizedGrassExactDrawMembership = {
+  addedKeys: string[]
+  changedAtMs: number
+  exact: Set<string>
+  removedKeys: string[]
+  revision: number
+  scanRevision: number
+  seenAtByKey: Map<string, number>
+  stagedAddedKeys: string[]
+  stagedRemovedKeys: string[]
+}
+
+export type StylizedGrassDrawMembershipApplyDecision = 'canonical' | 'delta' | 'none' | 'wait'
+
+type StylizedGrassCommittedResidentDrawSources = {
+  contentGeneration: number
+  instancesByCell: ReadonlyMap<string, readonly StylizedGrassInstance[]>
+  residentCells: readonly StylizedGrassStreamCell[]
+  revision: number
+}
+
+export type StylizedGrassArrivalState = {
+  initialized: boolean
+  residentCellKeys: Set<string>
+  startedAtByCell: Map<string, number>
+}
+
+export type StylizedGrassDenseDrawState = {
+  eligibleTotal: number
   instances: StylizedGrassInstance[]
-  lastStreamFadeTraceAt: number
+  saturated: boolean
   slotById: Map<string, number>
+}
+
+type StylizedGrassDrawState = StylizedGrassDenseDrawState & {
+  fadeStateById: Map<string, StylizedGrassFadeSlotState>
+  geometry: BufferGeometry | null
+  lastStreamFadeTraceAt: number
   streamFadeById: Map<string, number>
   tuning: StylizedSceneResolvedGrassTuning | null
+}
+
+type StylizedGrassFadeSlotState = {
+  insideHiddenZone: boolean
+  value: number
 }
 
 type StylizedGrassCacheStats = {
@@ -326,12 +381,17 @@ const STYLIZED_SCENE_GRASS_FADE_MAX_DELTA_SECONDS = 0.25
 const STYLIZED_SCENE_GRASS_EDGE_FILL_DENSITY_MULTIPLIER = 5
 const STYLIZED_SCENE_GRASS_EDGE_FILL_ROOT_WIDTH_MULTIPLIER = 1.8
 const STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE = 0.5
+const STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION = 4095
+const STYLIZED_SCENE_GRASS_MIN_HEIGHT_FACTOR = 0.2
+const STYLIZED_SCENE_GRASS_MAX_HEIGHT_FACTOR = 1.8
 const STYLIZED_SCENE_GRASS_EDGE_SAFETY_METERS = 0.04
 const STYLIZED_SCENE_PATH_EDGE_JITTER_METERS = 0.06
 const STYLIZED_SCENE_STREAM_CAPACITY_HEADROOM = 1.2
 const STYLIZED_SCENE_STREAM_CAPACITY_PADDING = 64
 const STYLIZED_SCENE_STREAM_CAMERA_MOVE_METERS = 2
 const STYLIZED_SCENE_STREAM_CAMERA_ROTATION_RADIANS = Math.PI / 180
+const STYLIZED_SCENE_STREAM_DRAW_ENTER_GUARD_METERS = STYLIZED_SCENE_STREAM_CELL_SIZE * 1.5
+const STYLIZED_SCENE_STREAM_DRAW_EXIT_GUARD_METERS = STYLIZED_SCENE_STREAM_CELL_SIZE * 3
 const STYLIZED_SCENE_STREAM_PREFETCH_MARGIN_METERS = 9
 const STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS = 15
 const STYLIZED_SCENE_STREAM_INTERACTION_RADIUS_METERS = 8
@@ -352,23 +412,6 @@ const STYLIZED_GRASS_LOD_DENSITY: Record<StylizedGrassLod, number> = {
   far: 0.45,
   mid: 0.82,
   near: 1,
-}
-
-type StylizedGrassDisposableGpuResource = {
-  dispose: () => void
-}
-
-function disposeStylizedGrassGpuResourceLater(
-  resource: StylizedGrassDisposableGpuResource | null | undefined,
-) {
-  if (!resource) return
-  if (typeof requestAnimationFrame !== 'function') {
-    resource.dispose()
-    return
-  }
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => resource.dispose())
-  })
 }
 
 const STYLIZED_SCENE_DEFAULT_TUNING: StylizedSceneResolvedGrassTuning = {
@@ -531,6 +574,7 @@ function StylizedSceneGrassLayer({
   tuning?: GrassBladeTuning
   visibilityRef?: StylizedGrassVisibilityRef
 }) {
+  const shaderTransformsGrassInstances = getMaterialRendererBackend() !== 'webgl'
   const { scene } = useGLTF(STYLIZED_SCENE_PATHS.grassBlades)
   const pathMask = useTexture(STYLIZED_SCENE_PATHS.pathMask) as Texture
   const resolvedTuning = useMemo(
@@ -577,6 +621,26 @@ function StylizedSceneGrassLayer({
   })
   const bladeWorldHeight =
     sourceBladeHeight * resolvedTuning.scale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE
+  const grassClusterRadius = grassRootRadius * resolvedTuning.scale
+  const grassDrawEnvelope = useMemo(
+    () =>
+      resolveStylizedGrassDrawEnvelope({
+        bladeHeight: bladeWorldHeight,
+        flutter: resolvedTuning.flutter,
+        horizontalRadius: grassClusterRadius,
+        scale: resolvedTuning.scale,
+        turbulence: resolvedTuning.turbulence,
+        windStrength: resolvedTuning.windStrength,
+      }),
+    [
+      bladeWorldHeight,
+      grassClusterRadius,
+      resolvedTuning.flutter,
+      resolvedTuning.scale,
+      resolvedTuning.turbulence,
+      resolvedTuning.windStrength,
+    ],
+  )
   const surfaceBounds = useMemo(
     () => stylizedGrassSurfaceBounds(openRing(surfacePoints)),
     [surfacePoints],
@@ -588,18 +652,20 @@ function StylizedSceneGrassLayer({
       ),
     [profileMeasure, surfacePoints],
   )
+  const arrivalStateRef = useRef(createStylizedGrassArrivalState())
   const {
-    cells: visibleCells,
-    changesRef: visibleCellChangesRef,
-    exactVisibleCellKeysRef,
-  } = useStylizedGrassVisibleCells({
-    bladeHeight: bladeWorldHeight,
+    changesRef: residentCellChangesRef,
+    coverage,
+    exactDrawMembershipRef,
+  } = useStylizedGrassCellCoverage({
+    arrivalState: arrivalStateRef.current,
+    drawEnvelope: grassDrawEnvelope,
     elevation,
     interactionRef,
     streamingPaused: grassWorkPaused,
     surfaceBounds,
   })
-  const grassClusterRadius = grassRootRadius * resolvedTuning.scale
+  const residentCells = coverage.residentCells
   const grassClusterClearance = grassClusterRadius + STYLIZED_SCENE_GRASS_EDGE_SAFETY_METERS
   const grassEdgeFillClearance =
     grassClusterRadius * STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE +
@@ -648,14 +714,13 @@ function StylizedSceneGrassLayer({
   )
   const cellCacheRef = useRef<StylizedGrassCellCache>(new Map())
   const cellCacheRevisionRef = useRef(0)
-  const visibleInstanceStateRef = useRef<StylizedGrassVisibleInstanceState>({
+  const residentInstanceStateRef = useRef<StylizedGrassResidentInstanceState>({
+    arrivalState: arrivalStateRef.current,
+    cacheRevision: 0,
     cellInstancesByKey: new Map(),
+    contentRevision: 0,
     coverageRevision: 0,
-    desiredInstanceCount: 0,
-    indexById: new Map(),
-    instances: [],
-    revision: 0,
-    snapshot: [],
+    instanceCount: 0,
   })
   const cacheStatsRef = useRef<StylizedGrassCacheStats>({
     clears: 0,
@@ -706,62 +771,58 @@ function StylizedSceneGrassLayer({
       surfacePoints,
     }
   }
+  const residentContentGeneration = cellCacheRevisionRef.current
   const grassFadeBlockerSignature = useMemo(
     () => stylizedGrassBlockersSignature(grassFadeBlockers),
     [grassFadeBlockers],
   )
-  const lastNonEmptyInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
-  const instances = useMemo(
+  const residentInstanceSnapshot = useMemo(
     () =>
       measureStylizedScene(profileMeasure, 'setup.stylized-grass.instances', () => {
-        if (lod === 'culled') return []
-        const nextInstances = updateStylizedGrassVisibleInstances({
-          cacheRevision: cellCacheRevisionRef.current,
-          cellCache: cellCacheRef.current,
-          cacheStats: cacheStatsRef.current,
-          grassBlockers: compiledGrassBlockers,
-          pathMaskData,
-          roadGrid,
-          surfacePolygon,
-          state: visibleInstanceStateRef.current,
-          tuning: resolvedTuning,
-          visibleCellChanges: visibleCellChangesRef.current,
-          visibleCells,
-        })
-        if (nextInstances.length > 0 || visibleCells.length > 0) {
-          lastNonEmptyInstancesRef.current = nextInstances
-          return nextInstances
+        let revision: number
+        if (lod === 'culled') {
+          revision = residentInstanceStateRef.current.contentRevision
+        } else {
+          revision = updateStylizedGrassResidentInstances({
+            cacheRevision: residentContentGeneration,
+            cellCache: cellCacheRef.current,
+            cacheStats: cacheStatsRef.current,
+            grassBlockers: compiledGrassBlockers,
+            pathMaskData,
+            roadGrid,
+            surfacePolygon,
+            state: residentInstanceStateRef.current,
+            tuning: resolvedTuning,
+            residentCellChanges: residentCellChangesRef.current,
+            residentCells,
+          })
         }
-        return lastNonEmptyInstancesRef.current
+        return {
+          instancesByCell: new Map(residentInstanceStateRef.current.cellInstancesByKey),
+          revision,
+        }
       }),
     [
       pathMaskData,
       lod,
       profileMeasure,
+      residentContentGeneration,
       roadGrid,
       resolvedTuning,
       compiledGrassBlockers,
       surfacePolygon,
-      visibleCellChangesRef,
-      visibleCells,
+      residentCellChangesRef,
+      residentCells,
     ],
   )
-  const visibleInstances = useMemo(() => {
-    const density = STYLIZED_GRASS_LOD_DENSITY[lod]
-    if (density >= 1) return instances
-    if (density <= 0) return []
-    return instances.filter((instance) => instance.seed / 10_000 <= density)
-  }, [instances, lod])
+  const residentInstancesByCell = residentInstanceSnapshot.instancesByCell
+  const residentInstanceRevision = residentInstanceSnapshot.revision
+  const committedResidentDrawSourcesRef = useRef<StylizedGrassCommittedResidentDrawSources | null>(
+    null,
+  )
   const instanceCapacity = useMemo(
     () => stylizedGrassInstanceCapacity(resolvedTuning.density, surfaceBounds, lod),
     [lod, resolvedTuning.density, surfaceBounds],
-  )
-  const renderedInstances = useMemo(
-    () =>
-      visibleInstances.length <= instanceCapacity
-        ? visibleInstances
-        : visibleInstances.slice(0, instanceCapacity),
-    [instanceCapacity, visibleInstances],
   )
   const geometry = useMemo(
     () =>
@@ -779,21 +840,195 @@ function StylizedSceneGrassLayer({
   const meshRef = useRef<InstancedMesh>(null!)
   const layoutMeshRef = useRef<InstancedMesh | null>(null)
   const dummyRef = useRef(new Object3D())
-  const residentStateRef = useRef<StylizedGrassResidentState>({
-    freeSlots: new Set(),
+  const drawStateRef = useRef<StylizedGrassDrawState>({
+    eligibleTotal: 0,
+    fadeStateById: new Map(),
     geometry: null,
     instances: [],
     lastStreamFadeTraceAt: 0,
+    saturated: false,
     slotById: new Map(),
     streamFadeById: new Map(),
     tuning: null,
   })
-  const residentInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
+  const drawInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
+  const appliedDrawRevisionRef = useRef(-1)
+  const appliedResidentContentGenerationRef = useRef(-1)
+  const appliedResidentInstanceRevisionRef = useRef(-1)
   const fadeZonesRef = useRef<StylizedGrassFadeZone[]>([])
   const lastFadeFrameAtRef = useRef<number | null>(null)
   const lastFadeSummaryRef = useRef<StylizedGrassFadeSummary>(EMPTY_STYLIZED_GRASS_FADE_SUMMARY)
   const smoothedInteractionRef = useRef(new Vector4())
   const profiledStartupFramesRef = useRef(0)
+  const profileMeasureRef = useRef(profileMeasure)
+  profileMeasureRef.current = profileMeasure
+
+  const applyExactDrawMembership = useCallback(
+    (nowMs: number) => {
+      const membership = exactDrawMembershipRef.current
+      const mesh = meshRef.current
+      if (!mesh) return false
+      mesh.visible = bladesVisible
+      if (!bladesVisible) {
+        mesh.count = 0
+        return true
+      }
+      if (!geometry || !material) return false
+
+      const residentSources = committedResidentDrawSourcesRef.current
+      if (!residentSources || residentSources.contentGeneration !== residentContentGeneration) {
+        return false
+      }
+      const meshReplaced = layoutMeshRef.current !== mesh
+      const state = drawStateRef.current
+      const density = STYLIZED_GRASS_LOD_DENSITY[lod]
+      const residentContentChanged =
+        appliedResidentContentGenerationRef.current !== residentSources.contentGeneration
+      const forceCanonical =
+        meshReplaced ||
+        residentContentChanged ||
+        state.geometry !== geometry ||
+        state.tuning !== resolvedTuning
+      const decision = resolveStylizedGrassDrawMembershipApplyDecision({
+        appliedRevision: appliedDrawRevisionRef.current,
+        forceCanonical,
+        membership,
+        residentInstancesByCell: residentSources.instancesByCell,
+      })
+      if (decision === 'wait') return false
+      if (decision === 'none') {
+        mesh.count = state.instances.length
+        appliedResidentContentGenerationRef.current = residentSources.contentGeneration
+        appliedResidentInstanceRevisionRef.current = residentSources.revision
+        return true
+      }
+
+      let completed = true
+      measureStylizedScene(profileMeasureRef.current, 'setup.stylized-grass.apply-layout', () => {
+        layoutMeshRef.current = mesh
+        let fullRebuild = decision === 'canonical'
+        const rebuildCanonical = () => {
+          const selection = selectStylizedGrassDrawInstances({
+            capacity: instanceCapacity,
+            density,
+            exactDrawCellKeys: membership.exact,
+            residentCells: residentSources.residentCells,
+            residentInstancesByCell: residentSources.instancesByCell,
+          })
+          return reconcileStylizedGrassDrawInstances({
+            arrivalState: residentInstanceStateRef.current.arrivalState,
+            capacity: instanceCapacity,
+            eligibleTotal: selection.eligibleTotal,
+            geometry,
+            nextInstances: selection.instances,
+            nowMs,
+            state,
+            tuning: resolvedTuning,
+          })
+        }
+        let drawUpdate: ReturnType<typeof reconcileStylizedGrassDenseDrawInstances>
+        if (fullRebuild) {
+          drawUpdate = rebuildCanonical()
+        } else {
+          const delta = reconcileStylizedGrassDenseDrawCellDelta({
+            addedCellKeys: membership.addedKeys,
+            capacity: instanceCapacity,
+            density,
+            removedCellKeys: membership.removedKeys,
+            residentInstancesByCell: residentSources.instancesByCell,
+            state,
+            streamFadeById: state.streamFadeById,
+          })
+          fullRebuild = delta.requiresFullRebuild
+          if (fullRebuild) {
+            const fallbackDecision = resolveStylizedGrassDrawMembershipApplyDecision({
+              appliedRevision: appliedDrawRevisionRef.current,
+              forceCanonical: true,
+              membership,
+              residentInstancesByCell: residentSources.instancesByCell,
+            })
+            if (fallbackDecision === 'wait') {
+              completed = false
+              return
+            }
+            drawUpdate = rebuildCanonical()
+          } else {
+            for (const id of delta.removedIds) state.fadeStateById.delete(id)
+            for (const instance of delta.addedInstances) {
+              const fade = resolveStylizedGrassArrivalFade(
+                instance,
+                residentInstanceStateRef.current.arrivalState,
+                nowMs,
+              )
+              if (fade < 1) state.streamFadeById.set(instance.id, fade)
+              else state.streamFadeById.delete(instance.id)
+            }
+            drawUpdate = delta
+          }
+        }
+        drawInstancesRef.current = drawUpdate.instances
+        // R3F replaces the InstancedMesh when args change, so its new matrix buffer
+        // and every static instance attribute need one authoritative initialization set.
+        const structuralUploadSlots = resolveStylizedGrassStructuralUploadSlots({
+          changedSlots: drawUpdate.changedSlots,
+          instanceCount: drawUpdate.instances.length,
+          resourceReallocated: meshReplaced,
+        })
+        if (shaderTransformsGrassInstances) {
+          if (meshReplaced) initializeStylizedGrassIdentityMatrices(mesh)
+        } else {
+          mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+          applyStylizedGrassStaticMatrices(
+            mesh,
+            drawUpdate.instances,
+            structuralUploadSlots,
+            resolvedTuning,
+            dummyRef.current,
+          )
+        }
+        applyStylizedGrassInstanceAttributes(geometry, drawUpdate.instances, structuralUploadSlots)
+        applyStylizedGrassStreamFadeAttributes(
+          geometry,
+          drawUpdate.instances,
+          structuralUploadSlots,
+          drawStateRef.current,
+        )
+        const fadeSlots = resolveStylizedGrassFadeUploadSlots({
+          changedSlots: structuralUploadSlots,
+          fadeZonesActive: fadeZonesRef.current.length > 0,
+          fadeZonesChanged: false,
+          instanceCount: drawUpdate.instances.length,
+        })
+        applyStylizedGrassFadeAttributeSlots(
+          geometry,
+          drawUpdate.instances,
+          fadeZonesRef.current,
+          fadeSlots,
+          state.fadeStateById,
+        )
+        if (stylizedGrassRuntimeProbeIsEnabled()) {
+          lastFadeSummaryRef.current = summarizeStylizedGrassFadeSlotStates(state.fadeStateById)
+        }
+        mesh.count = drawUpdate.instances.length
+      })
+      if (!completed) return false
+      appliedDrawRevisionRef.current = membership.revision
+      appliedResidentContentGenerationRef.current = residentSources.contentGeneration
+      appliedResidentInstanceRevisionRef.current = residentSources.revision
+      return true
+    },
+    [
+      bladesVisible,
+      exactDrawMembershipRef,
+      geometry,
+      instanceCapacity,
+      lod,
+      material,
+      residentContentGeneration,
+      resolvedTuning,
+      shaderTransformsGrassInstances,
+    ],
+  )
 
   useEffect(() => {
     if (!materialBundle) return
@@ -801,70 +1036,40 @@ function StylizedSceneGrassLayer({
   }, [groundTintCap, materialBundle])
 
   useLayoutEffect(() => {
-    const mesh = meshRef.current
-    if (!mesh) return
-    mesh.visible = bladesVisible
-    if (!bladesVisible) {
-      mesh.count = 0
+    committedResidentDrawSourcesRef.current = {
+      contentGeneration: residentContentGeneration,
+      instancesByCell: residentInstancesByCell,
+      residentCells,
+      revision: residentInstanceRevision,
+    }
+  }, [residentCells, residentContentGeneration, residentInstanceRevision, residentInstancesByCell])
+
+  useLayoutEffect(() => {
+    applyExactDrawMembership(performance.now())
+  }, [applyExactDrawMembership])
+
+  useLayoutEffect(() => {
+    const residentSources = committedResidentDrawSourcesRef.current
+    if (!residentSources || residentSources.revision !== residentInstanceRevision) return
+    if (
+      appliedDrawRevisionRef.current === exactDrawMembershipRef.current.revision &&
+      appliedResidentInstanceRevisionRef.current === residentSources.revision
+    ) {
       return
     }
-    if (!geometry || !material) return
+    applyExactDrawMembership(performance.now())
+  }, [applyExactDrawMembership, exactDrawMembershipRef, residentInstanceRevision])
 
-    measureStylizedScene(profileMeasure, 'setup.stylized-grass.apply-layout', () => {
-      mesh.instanceMatrix.setUsage(DynamicDrawUsage)
-      const meshReplaced = layoutMeshRef.current !== mesh
-      layoutMeshRef.current = mesh
-      const residentUpdate = reconcileStylizedGrassResidentInstances({
-        capacity: instanceCapacity,
-        exactVisibleCellKeys: exactVisibleCellKeysRef.current,
-        geometry,
-        nextInstances: renderedInstances,
-        state: residentStateRef.current,
-        tuning: resolvedTuning,
-      })
-      residentInstancesRef.current = residentUpdate.instances
-      // R3F replaces the InstancedMesh when args change, so its new matrix buffer
-      // needs every resident transform even when the residency set itself is unchanged.
-      const matrixSlots = meshReplaced
-        ? residentUpdate.instances.map((_, index) => index)
-        : residentUpdate.changedSlots
-      applyStylizedGrassStaticMatrices(
-        mesh,
-        residentUpdate.instances,
-        matrixSlots,
-        residentStateRef.current,
-        resolvedTuning,
-        dummyRef.current,
-      )
-      applyStylizedGrassInstanceAttributes(
-        geometry,
-        residentUpdate.instances,
-        residentUpdate.changedSlots,
-      )
-      applyStylizedGrassStreamFadeAttributes(
-        geometry,
-        residentUpdate.instances,
-        residentUpdate.changedSlots,
-        residentStateRef.current,
-      )
-      lastFadeSummaryRef.current = applyStylizedGrassFadeAttributes(
-        geometry,
-        residentUpdate.instances,
-        fadeZonesRef.current,
-        fadeZonesRef.current.length > 0,
-      )
-      mesh.count = residentUpdate.instances.length
-    })
-  }, [
-    exactVisibleCellKeysRef,
-    bladesVisible,
-    geometry,
-    instanceCapacity,
-    material,
-    profileMeasure,
-    renderedInstances,
-    resolvedTuning,
-  ])
+  useFrame(() => {
+    const residentRevision = committedResidentDrawSourcesRef.current?.revision ?? -1
+    if (
+      appliedDrawRevisionRef.current === exactDrawMembershipRef.current.revision &&
+      appliedResidentInstanceRevisionRef.current === residentRevision
+    ) {
+      return
+    }
+    applyExactDrawMembership(performance.now())
+  }, 1)
 
   useLayoutEffect(() => {
     if (!bladesVisible) return
@@ -873,9 +1078,10 @@ function StylizedSceneGrassLayer({
     if (geometry && (hadFadeZones || fadeZonesRef.current.length > 0)) {
       lastFadeSummaryRef.current = applyStylizedGrassFadeAttributes(
         geometry,
-        residentInstancesRef.current,
+        drawInstancesRef.current,
         fadeZonesRef.current,
         hadFadeZones,
+        drawStateRef.current.fadeStateById,
       )
     }
     renderScheduler.requestFrame('animation')
@@ -903,16 +1109,22 @@ function StylizedSceneGrassLayer({
           ? Math.max(0, delta)
           : Math.max(0, (fadeFrameAt - previousFadeFrameAt) / 1000)
       const mesh = meshRef.current
-      const residentInstances = residentInstancesRef.current
-      const residentInstanceCount = residentStateRef.current.slotById.size
-      if (!mesh || !geometry || !materialBundle || residentInstanceCount === 0) {
+      const activeDrawInstances = drawInstancesRef.current
+      const drawInstanceCount = drawStateRef.current.slotById.size
+      const hadFadeZones = fadeZonesRef.current.length > 0
+      // Fade zones must remain visual-only. Converting a converged fade zone into a
+      // structural blocker rebuilds the instanced grass buffers at fade-end, which
+      // can flash the old buffer contents for a frame across the whole field.
+      const fadeChanged = advanceStylizedGrassFadeZones(fadeZonesRef.current, fadeDelta)
+      if (!mesh || !geometry || !materialBundle || drawInstanceCount === 0) {
+        if (fadeChanged) renderScheduler.requestFrame('animation')
         recordStylizedGrassFadeRuntimeProbe({
           cacheStats: takeStylizedGrassCacheStats(cacheStatsRef.current),
           debugState: grassDebugState,
           fadeBlockerSignature: grassFadeBlockerSignature,
           fadeSummary: lastFadeSummaryRef.current,
           fadeZoneCount: fadeZonesRef.current.length,
-          instanceCount: residentInstanceCount,
+          instanceCount: drawInstanceCount,
           structuralBlockerSignature: grassBlockerSignature,
         })
         return
@@ -946,18 +1158,19 @@ function StylizedSceneGrassLayer({
         materialBundle.uniforms.interaction.value.copy(smoothedInteraction)
       }
       recordStylizedGrassRuntimeProbe(interaction, smoothedInteraction)
-      advanceStylizedGrassStreamFades(geometry, residentStateRef.current, delta)
-      const hadFadeZones = fadeZonesRef.current.length > 0
-      // Fade zones must remain visual-only. Converting a converged fade zone into a
-      // structural blocker rebuilds the instanced grass buffers at fade-end, which
-      // can flash the old buffer contents for a frame across the whole field.
-      const fadeChanged = advanceStylizedGrassFadeZones(fadeZonesRef.current, fadeDelta)
+      advanceStylizedGrassStreamFades(
+        geometry,
+        drawStateRef.current,
+        residentInstanceStateRef.current.arrivalState,
+        fadeFrameAt,
+      )
       if (fadeChanged || (!hadFadeZones && fadeZonesRef.current.length > 0)) {
         lastFadeSummaryRef.current = applyStylizedGrassFadeAttributes(
           geometry,
-          residentInstances,
+          activeDrawInstances,
           fadeZonesRef.current,
           hadFadeZones,
+          drawStateRef.current.fadeStateById,
         )
       }
       if (fadeChanged) renderScheduler.requestFrame('animation')
@@ -967,7 +1180,7 @@ function StylizedSceneGrassLayer({
         fadeBlockerSignature: grassFadeBlockerSignature,
         fadeSummary: lastFadeSummaryRef.current,
         fadeZoneCount: fadeZonesRef.current.length,
-        instanceCount: residentInstanceCount,
+        instanceCount: drawInstanceCount,
         structuralBlockerSignature: grassBlockerSignature,
       })
     }
@@ -980,16 +1193,11 @@ function StylizedSceneGrassLayer({
     runFrame()
   }, 2)
 
-  useEffect(() => () => disposeStylizedGrassGpuResourceLater(geometry), [geometry])
-  useEffect(() => () => disposeStylizedGrassGpuResourceLater(material), [material])
-  useEffect(
-    () => () => {
-      disposeStylizedGrassGpuResourceLater(lodGeometries?.far)
-      disposeStylizedGrassGpuResourceLater(lodGeometries?.mid)
-      disposeStylizedGrassGpuResourceLater(sourceGeometry)
-    },
-    [lodGeometries, sourceGeometry],
-  )
+  useGpuResourceLifetime(geometry)
+  useGpuResourceLifetime(material)
+  useGpuResourceLifetime(lodGeometries?.far)
+  useGpuResourceLifetime(lodGeometries?.mid)
+  useGpuResourceLifetime(sourceGeometry)
 
   if (!geometry || !material) return null
 
@@ -1102,13 +1310,8 @@ function StylizedSceneTree({
     mesh.rotation.set(sway * 0.65, 0, sway)
   })
 
-  useEffect(
-    () => () => {
-      disposeStylizedGrassGpuResourceLater(leavesGeometry)
-      disposeStylizedGrassGpuResourceLater(leavesMaterial)
-    },
-    [leavesGeometry, leavesMaterial],
-  )
+  useGpuResourceLifetime(leavesGeometry)
+  useGpuResourceLifetime(leavesMaterial)
 
   if (!leavesGeometry) return null
 
@@ -1459,41 +1662,46 @@ function resolveStylizedGrassLod(projectedPixels: number, current: StylizedGrass
   return 'culled'
 }
 
-function useStylizedGrassVisibleCells({
-  bladeHeight,
+function useStylizedGrassCellCoverage({
+  arrivalState,
+  drawEnvelope,
   elevation,
   interactionRef,
   streamingPaused,
   surfaceBounds,
 }: {
-  bladeHeight: number
+  arrivalState: StylizedGrassArrivalState
+  drawEnvelope: StylizedGrassDrawEnvelope
   elevation: number
   interactionRef?: StylizedGrassInteractionRef
   streamingPaused: boolean
   surfaceBounds: StylizedGrassBounds
 }) {
   const camera = useThree((state) => state.camera)
-  const [visibleCells, setVisibleCells] = useState<readonly StylizedGrassStreamCell[]>([])
-  const visibleCellsRef = useRef(visibleCells)
+  const [coverage, setCoverage] = useState<StylizedGrassCellCoverage>(() =>
+    createInitialStylizedGrassCellCoverage(),
+  )
+  const coverageRef = useRef(coverage)
+  const exactDrawMembershipRef = useRef(createInitialStylizedGrassExactDrawMembership())
   const initializedRef = useRef(false)
-  const lastCameraPositionRef = useRef(new Vector3())
-  const lastCameraQuaternionRef = useRef(new Quaternion())
-  const lastProjectionMatrixRef = useRef(new Matrix4())
+  const lastResidentCameraPositionRef = useRef(new Vector3())
+  const lastResidentCameraQuaternionRef = useRef(new Quaternion())
+  const lastResidentProjectionMatrixRef = useRef(new Matrix4())
+  const lastDrawProjectionViewMatrixRef = useRef(new Matrix4())
   const currentCameraPositionRef = useRef(new Vector3())
   const currentCameraQuaternionRef = useRef(new Quaternion())
   const projectionViewMatrixRef = useRef(new Matrix4())
   const frustumRef = useRef(new Frustum())
   const streamGrid = useMemo(() => createStylizedGrassStreamGrid(surfaceBounds), [surfaceBounds])
-  const exactVisibleCellKeysRef = useRef<ReadonlySet<string>>(new Set())
-  const changesRef = useRef<StylizedGrassVisibleCellChanges>({
+  const changesRef = useRef<StylizedGrassResidentCellChanges>({
     added: [],
     removed: [],
     revision: 0,
   })
   const lastInteractionCellRef = useRef('')
-  const lastCoverageUpdateTimeRef = useRef(-Infinity)
-  const coverageRevision = `${surfaceBounds.minX}:${surfaceBounds.minZ}:${surfaceBounds.maxX}:${surfaceBounds.maxZ}:${elevation}:${bladeHeight}`
-  const lastCoverageRevisionRef = useRef('')
+  const lastResidentUpdateTimeRef = useRef(-Infinity)
+  const coverageSignature = `${surfaceBounds.minX}:${surfaceBounds.minZ}:${surfaceBounds.maxX}:${surfaceBounds.maxZ}:${elevation}:${drawEnvelope.horizontalMargin}:${drawEnvelope.minHeight}:${drawEnvelope.maxHeight}`
+  const lastCoverageSignatureRef = useRef('')
 
   useFrame(({ clock }) => {
     if (streamingPaused) return
@@ -1507,138 +1715,227 @@ function useStylizedGrassVisibleCells({
           interaction.z / STYLIZED_SCENE_STREAM_INTERACTION_CELL_METERS,
         )}`
       : ''
-    const cameraMoved =
-      !initializedRef.current ||
-      lastCameraPositionRef.current.distanceToSquared(currentCameraPositionRef.current) >=
-        STYLIZED_SCENE_STREAM_CAMERA_MOVE_METERS ** 2
-    const cameraRotated =
-      !initializedRef.current ||
-      lastCameraQuaternionRef.current.angleTo(currentCameraQuaternionRef.current) >=
-        STYLIZED_SCENE_STREAM_CAMERA_ROTATION_RADIANS
-    const projectionChanged =
-      !initializedRef.current ||
-      stylizedGrassMatrixChanged(lastProjectionMatrixRef.current, camera.projectionMatrix)
-    const interactionChanged = lastInteractionCellRef.current !== interactionCell
-    const coverageChanged = lastCoverageRevisionRef.current !== coverageRevision
-    if (
-      initializedRef.current &&
-      !coverageChanged &&
-      clock.elapsedTime - lastCoverageUpdateTimeRef.current <
-        STYLIZED_SCENE_STREAM_MIN_UPDATE_SECONDS
-    ) {
-      return
-    }
-    if (
-      !cameraMoved &&
-      !cameraRotated &&
-      !projectionChanged &&
-      !interactionChanged &&
-      !coverageChanged
-    ) {
-      return
-    }
-
-    initializedRef.current = true
-    lastCameraPositionRef.current.copy(currentCameraPositionRef.current)
-    lastCameraQuaternionRef.current.copy(currentCameraQuaternionRef.current)
-    lastProjectionMatrixRef.current.copy(camera.projectionMatrix)
-    lastInteractionCellRef.current = interactionCell
-    lastCoverageRevisionRef.current = coverageRevision
-    lastCoverageUpdateTimeRef.current = clock.elapsedTime
     projectionViewMatrixRef.current.multiplyMatrices(
       camera.projectionMatrix,
       camera.matrixWorldInverse,
     )
+    const drawViewChanged =
+      !initializedRef.current ||
+      stylizedGrassMatrixChanged(
+        lastDrawProjectionViewMatrixRef.current,
+        projectionViewMatrixRef.current,
+      )
+    const residentCameraMoved =
+      !initializedRef.current ||
+      lastResidentCameraPositionRef.current.distanceToSquared(currentCameraPositionRef.current) >=
+        STYLIZED_SCENE_STREAM_CAMERA_MOVE_METERS ** 2
+    const residentCameraRotated =
+      !initializedRef.current ||
+      lastResidentCameraQuaternionRef.current.angleTo(currentCameraQuaternionRef.current) >=
+        STYLIZED_SCENE_STREAM_CAMERA_ROTATION_RADIANS
+    const residentProjectionChanged =
+      !initializedRef.current ||
+      stylizedGrassMatrixChanged(lastResidentProjectionMatrixRef.current, camera.projectionMatrix)
+    const interactionChanged = lastInteractionCellRef.current !== interactionCell
+    const coverageChanged = lastCoverageSignatureRef.current !== coverageSignature
+    const residentUpdateDue =
+      !initializedRef.current ||
+      coverageChanged ||
+      interactionChanged ||
+      (clock.elapsedTime - lastResidentUpdateTimeRef.current >=
+        STYLIZED_SCENE_STREAM_MIN_UPDATE_SECONDS &&
+        (residentCameraMoved || residentCameraRotated || residentProjectionChanged))
+    if (!residentUpdateDue && !drawViewChanged) return
+
     frustumRef.current.setFromProjectionMatrix(
       projectionViewMatrixRef.current,
       camera.coordinateSystem,
     )
     const profile = getStylizedGrassPerfProbe()
     const streamStartedAt = profile ? performance.now() : 0
-    const nextScan = createStylizedGrassVisibleCells({
-      bladeHeight,
+    const previousCoverage = coverageRef.current
+    const nextResidentCells = residentUpdateDue
+      ? createStylizedGrassResidentCells({
+          drawEnvelope,
+          elevation,
+          frustum: frustumRef.current,
+          grid: streamGrid,
+          interaction,
+          previousCells: previousCoverage.residentCells,
+        }).cells
+      : previousCoverage.residentCells
+    const changedAtMs = performance.now()
+    const hadArrivalBaseline = arrivalState.initialized
+    const drawMembershipChanged = reconcileStylizedGrassExactDrawMembership({
+      cells: nextResidentCells,
+      changedAtMs,
+      drawEnvelope,
       elevation,
       frustum: frustumRef.current,
-      grid: streamGrid,
-      interaction,
-      previousCells: visibleCellsRef.current,
+      membership: exactDrawMembershipRef.current,
     })
+    const nextCoverage = reconcileStylizedGrassCellCoverage(previousCoverage, nextResidentCells)
+    if (nextCoverage !== previousCoverage) {
+      reconcileStylizedGrassArrivalState(arrivalState, nextResidentCells, changedAtMs)
+    }
+    if (drawMembershipChanged && hadArrivalBaseline) {
+      markStylizedGrassDrawArrivals(
+        arrivalState,
+        exactDrawMembershipRef.current.addedKeys,
+        changedAtMs,
+      )
+    }
     if (profile) {
       recordStylizedGrassPerfSample(profile, {
         centerX: currentCameraPositionRef.current.x,
         centerZ: currentCameraPositionRef.current.z,
-        count: nextScan.cells.length,
+        count: nextResidentCells.length,
         durationMs: performance.now() - streamStartedAt,
         kind: 'stream',
       })
     }
-    exactVisibleCellKeysRef.current = nextScan.exactVisibleCellKeys
-    const nextCells = nextScan.cells
-    if (sameStylizedGrassStreamCells(visibleCellsRef.current, nextCells)) return
+    if (residentUpdateDue) {
+      initializedRef.current = true
+      lastResidentCameraPositionRef.current.copy(currentCameraPositionRef.current)
+      lastResidentCameraQuaternionRef.current.copy(currentCameraQuaternionRef.current)
+      lastResidentProjectionMatrixRef.current.copy(camera.projectionMatrix)
+      lastInteractionCellRef.current = interactionCell
+      lastCoverageSignatureRef.current = coverageSignature
+      lastResidentUpdateTimeRef.current = clock.elapsedTime
+    }
+    lastDrawProjectionViewMatrixRef.current.copy(projectionViewMatrixRef.current)
+    if (nextCoverage === previousCoverage) return
 
-    const streamChanges = summarizeStylizedGrassStreamChanges({
-      nextCells,
-      previousCells: visibleCellsRef.current,
-    })
-    if (stylizedGrassRuntimeProbeIsEnabled()) {
-      const visibleAdded = streamChanges.added
-        .filter((cell) => nextScan.exactVisibleCellKeys.has(cell.key))
-        .map(stylizedGrassStreamCellKey)
-      const visibleRemoved = streamChanges.removed
-        .filter((cell) =>
-          stylizedGrassStreamCellIntersectsFrustum(
-            cell,
-            frustumRef.current,
-            elevation,
-            bladeHeight,
-          ),
-        )
-        .map(stylizedGrassStreamCellKey)
-      recordStylizedGrassStreamRuntimeEvent({
-        addedCells: streamChanges.added.length,
-        cameraPosition: currentCameraPositionRef.current
-          .toArray()
-          .map((value) => Math.round(value * 1000) / 1000),
-        cameraQuaternion: currentCameraQuaternionRef.current
-          .toArray()
-          .map((value) => Math.round(value * 10_000) / 10_000),
-        event: 'coverage-change',
-        lateVisibleAddedCellKeys: visibleAdded.slice(0, 24),
-        lateVisibleAddedCells: visibleAdded.length,
-        nextCells: nextCells.length,
-        previousCells: visibleCellsRef.current.length,
-        removedCells: streamChanges.removed.length,
-        visibleRemovedCellKeys: visibleRemoved.slice(0, 24),
-        visibleRemovedCells: visibleRemoved.length,
+    if (nextCoverage.residentRevision !== previousCoverage.residentRevision) {
+      const streamChanges = summarizeStylizedGrassStreamChanges({
+        nextCells: nextResidentCells,
+        previousCells: previousCoverage.residentCells,
       })
+      changesRef.current = {
+        added: streamChanges.added,
+        removed: streamChanges.removed,
+        revision: changesRef.current.revision + 1,
+      }
+      if (stylizedGrassRuntimeProbeIsEnabled()) {
+        const nextExactDrawCellKeys = exactDrawMembershipRef.current.exact
+        const visibleAdded = streamChanges.added
+          .filter((cell) => nextExactDrawCellKeys.has(cell.key))
+          .map(stylizedGrassStreamCellKey)
+        const visibleRemoved = streamChanges.removed
+          .filter((cell) =>
+            stylizedGrassStreamCellIntersectsFrustum(
+              cell,
+              frustumRef.current,
+              elevation,
+              drawEnvelope,
+            ),
+          )
+          .map(stylizedGrassStreamCellKey)
+        recordStylizedGrassStreamRuntimeEvent({
+          addedCells: streamChanges.added.length,
+          cameraPosition: currentCameraPositionRef.current
+            .toArray()
+            .map((value) => Math.round(value * 1000) / 1000),
+          cameraQuaternion: currentCameraQuaternionRef.current
+            .toArray()
+            .map((value) => Math.round(value * 10_000) / 10_000),
+          event: 'coverage-change',
+          lateVisibleAddedCellKeys: visibleAdded.slice(0, 24),
+          lateVisibleAddedCells: visibleAdded.length,
+          nextCells: nextResidentCells.length,
+          previousCells: previousCoverage.residentCells.length,
+          removedCells: streamChanges.removed.length,
+          visibleRemovedCellKeys: visibleRemoved.slice(0, 24),
+          visibleRemovedCells: visibleRemoved.length,
+        })
+      }
     }
-    changesRef.current = {
-      added: streamChanges.added,
-      removed: streamChanges.removed,
-      revision: changesRef.current.revision + 1,
-    }
-    visibleCellsRef.current = nextCells
-    setVisibleCells(nextCells)
+    coverageRef.current = nextCoverage
+    setCoverage(nextCoverage)
   })
 
-  return { cells: visibleCells, changesRef, exactVisibleCellKeysRef }
+  return { changesRef, coverage, exactDrawMembershipRef }
 }
 
-function createStylizedGrassVisibleCells({
+export function createInitialStylizedGrassCellCoverage(): StylizedGrassCellCoverage {
+  return {
+    residentCells: [],
+    residentRevision: 0,
+  }
+}
+
+export function createInitialStylizedGrassExactDrawMembership(): StylizedGrassExactDrawMembership {
+  return {
+    addedKeys: [],
+    changedAtMs: 0,
+    exact: new Set(),
+    removedKeys: [],
+    revision: 0,
+    scanRevision: 0,
+    seenAtByKey: new Map(),
+    stagedAddedKeys: [],
+    stagedRemovedKeys: [],
+  }
+}
+
+export function reconcileStylizedGrassCellCoverage(
+  current: StylizedGrassCellCoverage,
+  residentCells: readonly StylizedGrassStreamCell[],
+): StylizedGrassCellCoverage {
+  const residentChanged = !sameStylizedGrassStreamCells(current.residentCells, residentCells)
+  if (!residentChanged) return current
+  return {
+    residentCells,
+    residentRevision: current.residentRevision + 1,
+  }
+}
+
+export function resolveStylizedGrassDrawEnvelope({
   bladeHeight,
+  flutter,
+  horizontalRadius,
+  scale,
+  turbulence,
+  windStrength,
+}: {
+  bladeHeight: number
+  flutter: number
+  horizontalRadius: number
+  scale: number
+  turbulence: number
+  windStrength: number
+}): StylizedGrassDrawEnvelope {
+  const gustAmplitude = 1 + Math.abs(turbulence) * 0.42 + Math.abs(flutter) * 0.35
+  const windDisplacement = gustAmplitude * Math.max(0, windStrength) * 0.18
+  const deformationDisplacement =
+    (STYLIZED_SCENE_INTERACTION_MAX_BEND + windDisplacement) *
+    STYLIZED_SCENE_GRASS_HEIGHT_SCALE *
+    Math.max(0.001, scale)
+  return {
+    horizontalMargin:
+      Math.max(0, horizontalRadius) * STYLIZED_SCENE_GRASS_EDGE_FILL_ROOT_WIDTH_MULTIPLIER +
+      deformationDisplacement +
+      STYLIZED_SCENE_GRASS_EDGE_SAFETY_METERS,
+    maxHeight: Math.max(0.1, bladeHeight) * 1.8 * 1.12 + 0.1,
+    minHeight: -0.1,
+  }
+}
+
+export function createStylizedGrassResidentCells({
+  drawEnvelope,
   elevation,
   frustum,
   grid,
   interaction,
   previousCells,
 }: {
-  bladeHeight: number
+  drawEnvelope: StylizedGrassDrawEnvelope
   elevation: number
   frustum: Frustum
   grid: StylizedGrassStreamGrid
   interaction: StylizedGrassInteraction | null | undefined
   previousCells: readonly StylizedGrassStreamCell[]
-}): StylizedGrassVisibleCellScan {
+}): StylizedGrassResidentCellScan {
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
   const interactionRadius = interaction
     ? Math.max(
@@ -1649,8 +1946,8 @@ function createStylizedGrassVisibleCells({
   const interactionRadiusSquared = interactionRadius * interactionRadius
   const previousCellIndices = new Set(previousCells.map((cell) => cell.index))
   const cells: StylizedGrassStreamCell[] = []
-  const exactVisibleCellKeys = new Set<string>()
-  const maxBladeY = elevation + Math.max(0.1, bladeHeight)
+  const minBladeY = elevation + drawEnvelope.minHeight
+  const maxBladeY = elevation + drawEnvelope.maxHeight
 
   for (const chunk of grid.chunks) {
     const chunkNearInteraction = interaction
@@ -1661,12 +1958,12 @@ function createStylizedGrassVisibleCells({
       !chunkNearInteraction &&
       !stylizedGrassFrustumIntersectsBounds(
         frustum,
-        chunk.minX - STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS,
-        elevation - 0.5,
-        chunk.minZ - STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS,
-        chunk.maxX + STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS,
-        maxBladeY + 0.5,
-        chunk.maxZ + STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS,
+        chunk.minX - STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS - drawEnvelope.horizontalMargin,
+        minBladeY,
+        chunk.minZ - STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS - drawEnvelope.horizontalMargin,
+        chunk.maxX + STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS + drawEnvelope.horizontalMargin,
+        maxBladeY,
+        chunk.maxZ + STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS + drawEnvelope.horizontalMargin,
       )
     ) {
       continue
@@ -1693,37 +1990,120 @@ function createStylizedGrassVisibleCells({
         !nearInteraction &&
         !stylizedGrassFrustumIntersectsBounds(
           frustum,
-          minX - margin,
-          elevation - 0.5,
-          minZ - margin,
-          minX + cellSize + margin,
-          maxBladeY + 0.5,
-          minZ + cellSize + margin,
+          minX - margin - drawEnvelope.horizontalMargin,
+          minBladeY,
+          minZ - margin - drawEnvelope.horizontalMargin,
+          minX + cellSize + margin + drawEnvelope.horizontalMargin,
+          maxBladeY,
+          minZ + cellSize + margin + drawEnvelope.horizontalMargin,
         )
       ) {
         continue
       }
       cells.push(cell)
-      if (
-        stylizedGrassFrustumIntersectsBounds(
-          frustum,
-          minX + 0.02,
-          elevation - 0.1,
-          minZ + 0.02,
-          minX + cellSize - 0.02,
-          maxBladeY + 0.1,
-          minZ + cellSize - 0.02,
-        )
-      ) {
-        exactVisibleCellKeys.add(cell.key)
-      }
     }
   }
 
-  return { cells, exactVisibleCellKeys }
+  return { cells }
 }
 
-function createStylizedGrassStreamGrid(
+export function createStylizedGrassExactDrawCellKeys({
+  cells,
+  drawEnvelope,
+  elevation,
+  frustum,
+}: {
+  cells: readonly StylizedGrassStreamCell[]
+  drawEnvelope: StylizedGrassDrawEnvelope
+  elevation: number
+  frustum: Frustum
+}) {
+  const membership = createInitialStylizedGrassExactDrawMembership()
+  reconcileStylizedGrassExactDrawMembership({
+    cells,
+    changedAtMs: 0,
+    drawEnvelope,
+    elevation,
+    frustum,
+    membership,
+  })
+  return new Set(membership.exact)
+}
+
+export function reconcileStylizedGrassExactDrawMembership({
+  cells,
+  changedAtMs,
+  drawEnvelope,
+  elevation,
+  frustum,
+  membership,
+}: {
+  cells: readonly StylizedGrassStreamCell[]
+  changedAtMs: number
+  drawEnvelope: StylizedGrassDrawEnvelope
+  elevation: number
+  frustum: Frustum
+  membership: StylizedGrassExactDrawMembership
+}) {
+  membership.stagedAddedKeys.length = 0
+  membership.stagedRemovedKeys.length = 0
+  const scanRevision = membership.scanRevision + 1
+  membership.scanRevision = scanRevision
+
+  for (const cell of cells) {
+    const guardMeters = membership.exact.has(cell.key)
+      ? STYLIZED_SCENE_STREAM_DRAW_EXIT_GUARD_METERS
+      : STYLIZED_SCENE_STREAM_DRAW_ENTER_GUARD_METERS
+    if (
+      !stylizedGrassStreamCellIntersectsFrustum(cell, frustum, elevation, drawEnvelope, guardMeters)
+    ) {
+      continue
+    }
+    membership.seenAtByKey.set(cell.key, scanRevision)
+    if (membership.exact.has(cell.key)) continue
+    membership.exact.add(cell.key)
+    membership.stagedAddedKeys.push(cell.key)
+  }
+  for (const key of membership.exact) {
+    if (membership.seenAtByKey.get(key) === scanRevision) continue
+    membership.exact.delete(key)
+    membership.seenAtByKey.delete(key)
+    membership.stagedRemovedKeys.push(key)
+  }
+
+  if (membership.stagedAddedKeys.length === 0 && membership.stagedRemovedKeys.length === 0) {
+    return false
+  }
+  membership.addedKeys.length = 0
+  membership.addedKeys.push(...membership.stagedAddedKeys)
+  membership.removedKeys.length = 0
+  membership.removedKeys.push(...membership.stagedRemovedKeys)
+  membership.changedAtMs = changedAtMs
+  membership.revision += 1
+  return true
+}
+
+export function resolveStylizedGrassDrawMembershipApplyDecision({
+  appliedRevision,
+  forceCanonical,
+  membership,
+  residentInstancesByCell,
+}: {
+  appliedRevision: number
+  forceCanonical: boolean
+  membership: Pick<StylizedGrassExactDrawMembership, 'addedKeys' | 'exact' | 'revision'>
+  residentInstancesByCell: ReadonlyMap<string, readonly StylizedGrassInstance[]>
+}): StylizedGrassDrawMembershipApplyDecision {
+  if (!forceCanonical && appliedRevision === membership.revision) return 'none'
+  const canonical = forceCanonical || membership.revision !== appliedRevision + 1
+  const requiredKeys = canonical ? membership.exact : membership.addedKeys
+  for (const key of requiredKeys) {
+    if (!residentInstancesByCell.has(key)) return 'wait'
+  }
+  return canonical ? 'canonical' : 'delta'
+}
+
+export function createStylizedGrassStreamGrid(
   surfaceBounds: StylizedGrassBounds,
 ): StylizedGrassStreamGrid {
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
@@ -1841,23 +2221,24 @@ function summarizeStylizedGrassStreamChanges({
   return { added, removed }
 }
 
-function stylizedGrassStreamCellIntersectsFrustum(
+export function stylizedGrassStreamCellIntersectsFrustum(
   cell: StylizedGrassStreamCell,
   frustum: Frustum,
   elevation: number,
-  bladeHeight: number,
+  drawEnvelope: StylizedGrassDrawEnvelope,
+  guardMeters = 0,
 ) {
-  const inset = 0.02
   const minX = cell.cellX * STYLIZED_SCENE_STREAM_CELL_SIZE
   const minZ = cell.cellZ * STYLIZED_SCENE_STREAM_CELL_SIZE
+  const guard = Math.max(0, guardMeters)
   return stylizedGrassFrustumIntersectsBounds(
     frustum,
-    minX + inset,
-    elevation - 0.1,
-    minZ + inset,
-    minX + STYLIZED_SCENE_STREAM_CELL_SIZE - inset,
-    elevation + Math.max(0.1, bladeHeight) + 0.1,
-    minZ + STYLIZED_SCENE_STREAM_CELL_SIZE - inset,
+    minX - drawEnvelope.horizontalMargin - guard,
+    elevation + drawEnvelope.minHeight - guard,
+    minZ - drawEnvelope.horizontalMargin - guard,
+    minX + STYLIZED_SCENE_STREAM_CELL_SIZE + drawEnvelope.horizontalMargin + guard,
+    elevation + drawEnvelope.maxHeight + guard,
+    minZ + STYLIZED_SCENE_STREAM_CELL_SIZE + drawEnvelope.horizontalMargin + guard,
   )
 }
 
@@ -1914,7 +2295,279 @@ function resolveStylizedSceneTuning(
   }
 }
 
-function updateStylizedGrassVisibleInstances({
+export function createStylizedGrassArrivalState(): StylizedGrassArrivalState {
+  return {
+    initialized: false,
+    residentCellKeys: new Set(),
+    startedAtByCell: new Map(),
+  }
+}
+
+export function reconcileStylizedGrassArrivalState(
+  state: StylizedGrassArrivalState,
+  residentCells: readonly StylizedGrassStreamCell[],
+  changedAtMs: number,
+) {
+  const nextKeys = new Set(residentCells.map((cell) => cell.key))
+  if (!state.initialized) {
+    if (nextKeys.size === 0) return
+    state.initialized = true
+    state.residentCellKeys = nextKeys
+    return
+  }
+
+  for (const key of state.residentCellKeys) {
+    if (!nextKeys.has(key)) state.startedAtByCell.delete(key)
+  }
+  for (const key of nextKeys) {
+    if (!state.residentCellKeys.has(key)) state.startedAtByCell.set(key, changedAtMs)
+  }
+  state.residentCellKeys = nextKeys
+}
+
+export function markStylizedGrassDrawArrivals(
+  state: StylizedGrassArrivalState,
+  addedCellKeys: readonly string[],
+  changedAtMs: number,
+) {
+  if (!state.initialized) return
+  for (const key of addedCellKeys) {
+    if (state.residentCellKeys.has(key)) state.startedAtByCell.set(key, changedAtMs)
+  }
+}
+
+export function resolveStylizedGrassArrivalFade(
+  instance: StylizedGrassInstance,
+  state: StylizedGrassArrivalState,
+  nowMs: number,
+) {
+  const startedAt = state.startedAtByCell.get(stylizedGrassInstanceCellKey(instance.id))
+  if (startedAt === undefined) return 1
+  const durationVariation = 0.72 + ((instance.seed * 997) % 1000) / 1_800
+  const durationMs = STYLIZED_SCENE_STREAM_ARRIVAL_FADE_SECONDS * 1000 * durationVariation
+  return clamp01((nowMs - startedAt) / Math.max(1, durationMs))
+}
+
+export function selectStylizedGrassDrawInstances({
+  capacity,
+  density,
+  exactDrawCellKeys,
+  residentCells,
+  residentInstancesByCell,
+}: {
+  capacity: number
+  density: number
+  exactDrawCellKeys: ReadonlySet<string>
+  residentCells: readonly StylizedGrassStreamCell[]
+  residentInstancesByCell: ReadonlyMap<string, readonly StylizedGrassInstance[]>
+}) {
+  const limit = Math.max(0, Math.floor(capacity))
+  const instances: StylizedGrassInstance[] = []
+  let eligibleTotal = 0
+  if (density <= 0 || exactDrawCellKeys.size === 0) {
+    return { eligibleTotal, instances, saturated: false }
+  }
+  for (const cell of residentCells) {
+    if (!exactDrawCellKeys.has(cell.key)) continue
+    const cellInstances = residentInstancesByCell.get(cell.key) ?? []
+    for (const instance of cellInstances) {
+      if (!stylizedGrassInstanceIsEligible(instance, density)) continue
+      eligibleTotal += 1
+      if (instances.length < limit) instances.push(instance)
+    }
+  }
+  return { eligibleTotal, instances, saturated: eligibleTotal > limit }
+}
+
+export function createStylizedGrassDenseDrawState(): StylizedGrassDenseDrawState {
+  return { eligibleTotal: 0, instances: [], saturated: false, slotById: new Map() }
+}
+
+function stylizedGrassInstanceIsEligible(instance: StylizedGrassInstance, density: number) {
+  return density >= 1 || instance.seed / 10_000 <= density
+}
+
+export function reconcileStylizedGrassDenseDrawInstances({
+  capacity,
+  nextInstances,
+  eligibleTotal = nextInstances.length,
+  state,
+}: {
+  capacity: number
+  eligibleTotal?: number
+  nextInstances: readonly StylizedGrassInstance[]
+  state: StylizedGrassDenseDrawState
+}) {
+  const desiredInstances = nextInstances.slice(0, Math.max(0, Math.floor(capacity)))
+  const desiredIds = new Set(desiredInstances.map((instance) => instance.id))
+  const changedSlots = new Set<number>()
+  const removedIds: string[] = []
+
+  for (let index = state.instances.length - 1; index >= 0; index -= 1) {
+    const instance = state.instances[index]
+    if (!instance || desiredIds.has(instance.id)) continue
+    const lastIndex = state.instances.length - 1
+    const lastInstance = state.instances[lastIndex]
+    state.slotById.delete(instance.id)
+    removedIds.push(instance.id)
+    if (index !== lastIndex && lastInstance) {
+      state.instances[index] = lastInstance
+      state.slotById.set(lastInstance.id, index)
+      changedSlots.add(index)
+    }
+    state.instances.pop()
+  }
+
+  const addedInstances: StylizedGrassInstance[] = []
+  for (const instance of desiredInstances) {
+    const existingSlot = state.slotById.get(instance.id)
+    if (existingSlot !== undefined) {
+      const previousInstance = state.instances[existingSlot]
+      if (!previousInstance || !sameStylizedGrassInstancePayload(previousInstance, instance)) {
+        state.instances[existingSlot] = instance
+        changedSlots.add(existingSlot)
+      }
+      continue
+    }
+    const slot = state.instances.length
+    state.instances.push(instance)
+    state.slotById.set(instance.id, slot)
+    changedSlots.add(slot)
+    addedInstances.push(instance)
+  }
+  state.eligibleTotal = Math.max(desiredInstances.length, Math.floor(eligibleTotal))
+  state.saturated = state.eligibleTotal > Math.max(0, Math.floor(capacity))
+
+  return {
+    addedInstances,
+    changedSlots: [...changedSlots]
+      .filter((slot) => slot < state.instances.length)
+      .sort((first, second) => first - second),
+    instances: state.instances,
+    removedIds,
+  }
+}
+
+function sameStylizedGrassInstancePayload(
+  first: StylizedGrassInstance,
+  second: StylizedGrassInstance,
+) {
+  return (
+    first.id === second.id &&
+    first.heightFactor === second.heightFactor &&
+    first.macroVariation === second.macroVariation &&
+    first.patchVariation === second.patchVariation &&
+    first.scaleFactor === second.scaleFactor &&
+    first.seed === second.seed &&
+    first.x === second.x &&
+    first.yaw === second.yaw &&
+    first.z === second.z
+  )
+}
+
+export function reconcileStylizedGrassDenseDrawCellDelta({
+  addedCellKeys,
+  capacity,
+  density,
+  removedCellKeys,
+  residentInstancesByCell,
+  state,
+  streamFadeById,
+}: {
+  addedCellKeys: readonly string[]
+  capacity: number
+  density: number
+  removedCellKeys: readonly string[]
+  residentInstancesByCell: ReadonlyMap<string, readonly StylizedGrassInstance[]>
+  state: StylizedGrassDenseDrawState
+  streamFadeById?: Map<string, number>
+}) {
+  const fallback = () => ({
+    addedInstances: [] as StylizedGrassInstance[],
+    changedSlots: [] as number[],
+    eligibleTotal: state.eligibleTotal,
+    instances: state.instances,
+    removedIds: [] as string[],
+    requiresFullRebuild: true,
+    saturated: state.saturated,
+  })
+  if (state.saturated || state.instances.length !== state.eligibleTotal) return fallback()
+
+  let removedEligibleTotal = 0
+  for (const key of removedCellKeys) {
+    const cellInstances = residentInstancesByCell.get(key)
+    if (!cellInstances) return fallback()
+    for (const instance of cellInstances) {
+      if (!stylizedGrassInstanceIsEligible(instance, density)) continue
+      if (!state.slotById.has(instance.id)) return fallback()
+      removedEligibleTotal += 1
+    }
+  }
+
+  let addedEligibleTotal = 0
+  for (const key of addedCellKeys) {
+    const cellInstances = residentInstancesByCell.get(key)
+    if (!cellInstances) return fallback()
+    for (const instance of cellInstances) {
+      if (!stylizedGrassInstanceIsEligible(instance, density)) continue
+      if (state.slotById.has(instance.id)) return fallback()
+      addedEligibleTotal += 1
+    }
+  }
+
+  const limit = Math.max(0, Math.floor(capacity))
+  const eligibleTotal = state.eligibleTotal - removedEligibleTotal + addedEligibleTotal
+  if (eligibleTotal < 0 || eligibleTotal > limit) return fallback()
+
+  const changedSlots = new Set<number>()
+  const removedIds: string[] = []
+  for (const key of removedCellKeys) {
+    for (const instance of residentInstancesByCell.get(key)!) {
+      if (!stylizedGrassInstanceIsEligible(instance, density)) continue
+      const slot = state.slotById.get(instance.id)
+      if (slot === undefined) return fallback()
+      const lastSlot = state.instances.length - 1
+      const lastInstance = state.instances[lastSlot]
+      state.slotById.delete(instance.id)
+      streamFadeById?.delete(instance.id)
+      removedIds.push(instance.id)
+      if (slot !== lastSlot && lastInstance) {
+        state.instances[slot] = lastInstance
+        state.slotById.set(lastInstance.id, slot)
+        changedSlots.add(slot)
+      }
+      state.instances.pop()
+    }
+  }
+
+  const addedInstances: StylizedGrassInstance[] = []
+  for (const key of addedCellKeys) {
+    for (const instance of residentInstancesByCell.get(key)!) {
+      if (!stylizedGrassInstanceIsEligible(instance, density)) continue
+      const slot = state.instances.length
+      state.instances.push(instance)
+      state.slotById.set(instance.id, slot)
+      changedSlots.add(slot)
+      addedInstances.push(instance)
+    }
+  }
+
+  state.eligibleTotal = eligibleTotal
+  state.saturated = false
+  return {
+    addedInstances,
+    changedSlots: [...changedSlots]
+      .filter((slot) => slot < state.instances.length)
+      .sort((first, second) => first - second),
+    eligibleTotal,
+    instances: state.instances,
+    removedIds,
+    requiresFullRebuild: false,
+    saturated: false,
+  }
+}
+
+function updateStylizedGrassResidentInstances({
   cacheRevision,
   cellCache,
   cacheStats,
@@ -1924,8 +2577,8 @@ function updateStylizedGrassVisibleInstances({
   surfacePolygon,
   state,
   tuning,
-  visibleCellChanges,
-  visibleCells,
+  residentCellChanges,
+  residentCells,
 }: {
   cacheRevision: number
   cellCache: StylizedGrassCellCache
@@ -1934,40 +2587,42 @@ function updateStylizedGrassVisibleInstances({
   pathMaskData: ImageData | null
   roadGrid: StylizedGrassRoadGrid | null
   surfacePolygon: StylizedGrassCompiledPolygon
-  state: StylizedGrassVisibleInstanceState
+  state: StylizedGrassResidentInstanceState
   tuning: StylizedSceneResolvedGrassTuning
-  visibleCellChanges: StylizedGrassVisibleCellChanges
-  visibleCells: readonly StylizedGrassStreamCell[]
-}): readonly StylizedGrassInstance[] {
+  residentCellChanges: StylizedGrassResidentCellChanges
+  residentCells: readonly StylizedGrassStreamCell[]
+}): number {
   const profile = getStylizedGrassPerfProbe()
   const startedAt = profile ? performance.now() : 0
   if (cacheStats) cacheStats.rebuilds += 1
-  const finish = (result: readonly StylizedGrassInstance[]) => {
+  const finish = () => {
     if (profile) {
       recordStylizedGrassPerfSample(profile, {
-        count: result.length,
+        count: state.instanceCount,
         durationMs: performance.now() - startedAt,
         kind: 'build',
       })
     }
-    return result
+    return state.contentRevision
   }
   const baseDensity =
     Math.max(0, finiteNumber(tuning.density, 0)) * STYLIZED_SCENE_GRASS_FIELD_DENSITY_SCALE
-  const coverageChanged = state.coverageRevision !== visibleCellChanges.revision
+  const coverageChanged = state.coverageRevision !== residentCellChanges.revision
   const rebuildAll =
-    state.revision !== cacheRevision ||
-    (coverageChanged && state.coverageRevision + 1 !== visibleCellChanges.revision)
+    state.cacheRevision !== cacheRevision ||
+    (coverageChanged && state.coverageRevision + 1 !== residentCellChanges.revision)
+  let changed = false
   if (rebuildAll || baseDensity === 0) {
     state.cellInstancesByKey.clear()
-    state.coverageRevision = visibleCellChanges.revision
-    state.desiredInstanceCount = 0
-    state.indexById.clear()
-    state.instances.length = 0
-    state.revision = cacheRevision
-    state.snapshot = []
+    state.cacheRevision = cacheRevision
+    state.coverageRevision = residentCellChanges.revision
+    state.instanceCount = 0
+    changed = true
   }
-  if (baseDensity === 0) return finish(state.snapshot)
+  if (baseDensity === 0) {
+    if (changed) state.contentRevision += 1
+    return finish()
+  }
 
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
   const densityPerSquareMeter = baseDensity / (Math.PI * STYLIZED_SCENE_BASE_STREAM_RADIUS ** 2)
@@ -1979,29 +2634,16 @@ function updateStylizedGrassVisibleInstances({
     ),
   )
   const candidateAcceptance = clamp01((densityPerSquareMeter * cellArea) / slotsPerCell)
-  const removedCells = rebuildAll ? [] : coverageChanged ? visibleCellChanges.removed : []
-  const addedCells = rebuildAll ? visibleCells : coverageChanged ? visibleCellChanges.added : []
-  let changed = rebuildAll
+  const removedCells = rebuildAll ? [] : coverageChanged ? residentCellChanges.removed : []
+  const addedCells = rebuildAll ? residentCells : coverageChanged ? residentCellChanges.added : []
 
   for (const cell of removedCells) {
     const key = stylizedGrassStreamCellKey(cell)
     const cellInstances = state.cellInstancesByKey.get(key)
     if (!cellInstances) continue
     state.cellInstancesByKey.delete(key)
-    state.desiredInstanceCount -= cellInstances.length
+    state.instanceCount -= cellInstances.length
     changed = true
-    for (const instance of cellInstances) {
-      const index = state.indexById.get(instance.id)
-      if (index === undefined) continue
-      const lastIndex = state.instances.length - 1
-      const lastInstance = state.instances[lastIndex]
-      state.indexById.delete(instance.id)
-      if (index !== lastIndex && lastInstance) {
-        state.instances[index] = lastInstance
-        state.indexById.set(lastInstance.id, index)
-      }
-      state.instances.pop()
-    }
   }
 
   for (const cell of addedCells) {
@@ -2021,35 +2663,12 @@ function updateStylizedGrassVisibleInstances({
       tuning,
     })
     state.cellInstancesByKey.set(key, cellInstances)
-    state.desiredInstanceCount += cellInstances.length
+    state.instanceCount += cellInstances.length
     changed = true
-    for (const instance of cellInstances) {
-      if (state.instances.length >= STYLIZED_SCENE_MAX_GRASS_INSTANCES) break
-      state.indexById.set(instance.id, state.instances.length)
-      state.instances.push(instance)
-    }
   }
-  if (coverageChanged) state.coverageRevision = visibleCellChanges.revision
-
-  if (
-    state.instances.length <
-    Math.min(state.desiredInstanceCount, STYLIZED_SCENE_MAX_GRASS_INSTANCES)
-  ) {
-    for (const cell of visibleCells) {
-      const cellInstances = state.cellInstancesByKey.get(stylizedGrassStreamCellKey(cell)) ?? []
-      for (const instance of cellInstances) {
-        if (state.instances.length >= STYLIZED_SCENE_MAX_GRASS_INSTANCES) break
-        if (state.indexById.has(instance.id)) continue
-        state.indexById.set(instance.id, state.instances.length)
-        state.instances.push(instance)
-        changed = true
-      }
-      if (state.instances.length >= STYLIZED_SCENE_MAX_GRASS_INSTANCES) break
-    }
-  }
-
-  if (changed) state.snapshot = state.instances.slice()
-  return finish(state.snapshot)
+  if (coverageChanged) state.coverageRevision = residentCellChanges.revision
+  if (changed) state.contentRevision += 1
+  return finish()
 }
 
 function getStylizedGrassCellInstances(
@@ -2206,7 +2825,6 @@ function applyStylizedGrassStaticMatrices(
   mesh: InstancedMesh,
   instances: readonly StylizedGrassInstance[],
   slots: readonly number[],
-  state: StylizedGrassResidentState,
   tuning: StylizedSceneResolvedGrassTuning,
   dummy: Object3D,
 ) {
@@ -2220,15 +2838,11 @@ function applyStylizedGrassStaticMatrices(
       scale * clamp(instance.scaleFactor, STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE, 1)
     dummy.position.set(instance.x, 0, instance.z)
     dummy.rotation.set(0, instance.yaw, 0)
-    if (state.slotById.get(instance.id) === index) {
-      dummy.scale.set(
-        instanceScale,
-        instanceScale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE * instance.heightFactor,
-        instanceScale,
-      )
-    } else {
-      dummy.scale.setScalar(0)
-    }
+    dummy.scale.set(
+      instanceScale,
+      instanceScale * STYLIZED_SCENE_GRASS_HEIGHT_SCALE * instance.heightFactor,
+      instanceScale,
+    )
     dummy.updateMatrix()
     mesh.setMatrixAt(index, dummy.matrix)
   }
@@ -2243,16 +2857,31 @@ function applyStylizedGrassStaticMatrices(
   }
 }
 
+function initializeStylizedGrassIdentityMatrices(mesh: InstancedMesh) {
+  const matrixArray = mesh.instanceMatrix.array
+  matrixArray.fill(0)
+  for (let offset = 0; offset < matrixArray.length; offset += 16) {
+    matrixArray[offset] = 1
+    matrixArray[offset + 5] = 1
+    matrixArray[offset + 10] = 1
+    matrixArray[offset + 15] = 1
+  }
+  mesh.instanceMatrix.clearUpdateRanges()
+  mesh.instanceMatrix.needsUpdate = true
+}
+
 function applyStylizedGrassFadeAttributes(
   geometry: BufferGeometry,
   instances: readonly StylizedGrassInstance[],
   fadeZones: readonly StylizedGrassFadeZone[] = [],
   forceNoZoneUpdate = false,
+  fadeStateById?: Map<string, StylizedGrassFadeSlotState>,
 ) {
   const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
   if (!fade) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
 
   const hasFadeZones = fadeZones.length > 0
+  fadeStateById?.clear()
   if (!hasFadeZones && !forceNoZoneUpdate) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
 
   const fadeState = { heightVisibility: 1, insideHiddenZone: false, opacity: 1 }
@@ -2266,6 +2895,12 @@ function applyStylizedGrassFadeAttributes(
     resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
     const fadeValue = hasFadeZones ? Math.min(fadeState.heightVisibility, fadeState.opacity) : 1
     fade.setX(index, fadeValue)
+    if (hasFadeZones) {
+      fadeStateById?.set(instance.id, {
+        insideHiddenZone: fadeState.insideHiddenZone,
+        value: fadeValue,
+      })
+    }
     fadeMin = Math.min(fadeMin, fadeValue)
     fadeMax = Math.max(fadeMax, fadeValue)
     if (hasFadeZones && fadeState.insideHiddenZone) {
@@ -2274,8 +2909,10 @@ function applyStylizedGrassFadeAttributes(
       if (fadeValue > 0.05) blockedVisibleCount += 1
     }
   }
-  fade.clearUpdateRanges()
-  fade.needsUpdate = true
+  markStylizedGrassInstanceSlotsUpdated(
+    fade,
+    Array.from({ length: instances.length }, (_, index) => index),
+  )
   return {
     blockedFullCount,
     blockedInstanceCount,
@@ -2283,6 +2920,83 @@ function applyStylizedGrassFadeAttributes(
     fadeMax: instances.length > 0 ? fadeMax : 1,
     fadeMin: instances.length > 0 ? fadeMin : 1,
   }
+}
+
+export function resolveStylizedGrassFadeUploadSlots({
+  changedSlots,
+  fadeZonesActive,
+  fadeZonesChanged,
+  instanceCount,
+}: {
+  changedSlots: readonly number[]
+  fadeZonesActive: boolean
+  fadeZonesChanged: boolean
+  instanceCount: number
+}) {
+  if (instanceCount <= 0) return []
+  if (fadeZonesChanged) return Array.from({ length: instanceCount }, (_, index) => index)
+  if (!fadeZonesActive) return []
+  return changedSlots.filter((slot) => slot >= 0 && slot < instanceCount)
+}
+
+export function resolveStylizedGrassStructuralUploadSlots({
+  changedSlots,
+  instanceCount,
+  resourceReallocated,
+}: {
+  changedSlots: readonly number[]
+  instanceCount: number
+  resourceReallocated: boolean
+}) {
+  if (instanceCount <= 0) return []
+  return resourceReallocated
+    ? Array.from({ length: instanceCount }, (_, index) => index)
+    : changedSlots
+}
+
+function applyStylizedGrassFadeAttributeSlots(
+  geometry: BufferGeometry,
+  instances: readonly StylizedGrassInstance[],
+  fadeZones: readonly StylizedGrassFadeZone[],
+  slots: readonly number[],
+  fadeStateById: Map<string, StylizedGrassFadeSlotState>,
+) {
+  if (fadeZones.length === 0 || slots.length === 0) return
+  const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
+  if (!fade) return
+  const fadeState = { heightVisibility: 1, insideHiddenZone: false, opacity: 1 }
+  for (const slot of slots) {
+    const instance = instances[slot]
+    if (!instance) continue
+    resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
+    const value = Math.min(fadeState.heightVisibility, fadeState.opacity)
+    fade.setX(slot, value)
+    fadeStateById.set(instance.id, {
+      insideHiddenZone: fadeState.insideHiddenZone,
+      value,
+    })
+  }
+  markStylizedGrassInstanceSlotsUpdated(fade, slots)
+}
+
+function summarizeStylizedGrassFadeSlotStates(
+  fadeStateById: ReadonlyMap<string, StylizedGrassFadeSlotState>,
+) {
+  if (fadeStateById.size === 0) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
+  let blockedFullCount = 0
+  let blockedInstanceCount = 0
+  let blockedVisibleCount = 0
+  let fadeMax = Number.NEGATIVE_INFINITY
+  let fadeMin = Number.POSITIVE_INFINITY
+  for (const state of fadeStateById.values()) {
+    fadeMax = Math.max(fadeMax, state.value)
+    fadeMin = Math.min(fadeMin, state.value)
+    if (!state.insideHiddenZone) continue
+    blockedInstanceCount += 1
+    if (state.value > 0.95) blockedFullCount += 1
+    if (state.value > 0.05) blockedVisibleCount += 1
+  }
+  return { blockedFullCount, blockedInstanceCount, blockedVisibleCount, fadeMax, fadeMin }
 }
 
 function updateStylizedGrassFadeZones(
@@ -2480,16 +3194,16 @@ function stylizedGrassInstanceCapacity(
   return nextStylizedGrassInstanceCapacity(budget)
 }
 
-function withStylizedGrassInstanceAttributes(geometry: BufferGeometry, capacity: number) {
+export function withStylizedGrassInstanceAttributes(geometry: BufferGeometry, capacity: number) {
   const instancedGeometry = geometry.clone()
   instancedGeometry.computeBoundingBox()
   instancedGeometry.setAttribute(
-    'aOrigin',
-    new InstancedBufferAttribute(new Float32Array(capacity * 2), 2).setUsage(DynamicDrawUsage),
+    'aTransform',
+    new InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(DynamicDrawUsage),
   )
   instancedGeometry.setAttribute(
-    'aVariationYaw',
-    new InstancedBufferAttribute(new Float32Array(capacity * 2), 2).setUsage(DynamicDrawUsage),
+    'aVariation',
+    new InstancedBufferAttribute(new Float32Array(capacity), 1).setUsage(DynamicDrawUsage),
   )
   const fade = new Float32Array(capacity)
   fade.fill(1)
@@ -2542,15 +3256,27 @@ function createStylizedGrassNodeMaterial(
   const gradientT = pow(heightAlongBlade, 1.4)
   const gradientA = mix(tslColor('#66715a'), tslColor('#899766'), gradientT)
   const gradientB = mix(tslColor('#73745a'), tslColor('#9b9869'), gradientT)
-  const instanceOrigin: TSLNode<'vec2'> = attribute<'vec2'>('aOrigin', 'vec2')
-  const instanceVariationYaw: TSLNode<'vec2'> = attribute<'vec2'>('aVariationYaw', 'vec2')
-  const instanceVariationPacked = instanceVariationYaw.x
-  const instanceScaleFactorByte = instanceVariationPacked.div(65_536).floor()
-  const colorVariationPacked = instanceVariationPacked.sub(instanceScaleFactorByte.mul(65_536))
-  const macroVariationByte = colorVariationPacked.div(256).floor()
-  const patchVariation = colorVariationPacked.sub(macroVariationByte.mul(256)).div(255)
+  const instanceTransform: TSLNode<'vec4'> = attribute<'vec4'>('aTransform', 'vec4')
+  const instanceVariationPacked: TSLNode<'float'> = attribute<'float'>('aVariation', 'float')
+  const macroVariationByte = instanceVariationPacked.div(256).floor()
+  const patchVariation = instanceVariationPacked.sub(macroVariationByte.mul(256)).div(255)
   const packedMacroVariation = macroVariationByte.div(255)
-  const instanceScaleFactor = instanceScaleFactorByte.div(255)
+  const instanceScaleFactorCode = instanceTransform.w
+    .div(STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION + 1)
+    .floor()
+  const instanceHeightFactorCode = instanceTransform.w.sub(
+    instanceScaleFactorCode.mul(STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION + 1),
+  )
+  const instanceScaleFactor = mix(
+    STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE,
+    1,
+    instanceScaleFactorCode.div(STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION),
+  )
+  const instanceHeightFactor = mix(
+    STYLIZED_SCENE_GRASS_MIN_HEIGHT_FACTOR,
+    STYLIZED_SCENE_GRASS_MAX_HEIGHT_FACTOR,
+    instanceHeightFactorCode.div(STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION),
+  )
   const edgeFillProfile = tslClamp(
     float(1)
       .sub(instanceScaleFactor)
@@ -2558,7 +3284,24 @@ function createStylizedGrassNodeMaterial(
     0,
     1,
   )
-  const instanceYaw = instanceVariationYaw.y.mul(Math.PI * 2)
+  const instanceOrigin = instanceTransform.xy
+  const instanceYaw = instanceTransform.z.mul(Math.PI * 2)
+  const instanceYawCos = cos(instanceYaw)
+  const instanceYawSin = sin(instanceYaw)
+  const instanceGeometryScale = float(Math.max(0.001, tuning.scale)).mul(instanceScaleFactor)
+  const scaledGeometryXZ = vec2(positionLocal.x, positionLocal.z).mul(instanceGeometryScale)
+  const instancePosition = vec3(
+    instanceOrigin.x
+      .add(scaledGeometryXZ.x.mul(instanceYawCos))
+      .add(scaledGeometryXZ.y.mul(instanceYawSin)),
+    positionLocal.y
+      .mul(instanceGeometryScale)
+      .mul(STYLIZED_SCENE_GRASS_HEIGHT_SCALE)
+      .mul(instanceHeightFactor),
+    instanceOrigin.y
+      .add(scaledGeometryXZ.y.mul(instanceYawCos))
+      .sub(scaledGeometryXZ.x.mul(instanceYawSin)),
+  )
   const instanceFade: TSLNode<'float'> = attribute<'float'>('aFade', 'float')
   const instanceStreamFade: TSLNode<'float'> = attribute<'float'>('aStreamFade', 'float')
   const combinedFade = instanceFade.mul(instanceStreamFade)
@@ -2575,8 +3318,8 @@ function createStylizedGrassNodeMaterial(
   const bladeGroundSample = attribute<'vec2'>('uv', 'vec2')
     .mul(Math.max(0.001, tuning.scale))
     .mul(instanceScaleFactor)
-  const bladeRootYawCos = cos(instanceYaw)
-  const bladeRootYawSin = sin(instanceYaw)
+  const bladeRootYawCos = instanceYawCos
+  const bladeRootYawSin = instanceYawSin
   const bladeWorldRoot = instanceOrigin.add(
     vec2(
       bladeGroundSample.x.mul(bladeRootYawCos).add(bladeGroundSample.y.mul(bladeRootYawSin)),
@@ -2657,7 +3400,7 @@ function createStylizedGrassNodeMaterial(
     .add(interactionLocalOffset)
     .mul(heightAlongBlade)
     .mul(STYLIZED_SCENE_GRASS_HEIGHT_SCALE)
-  const bladeLocalXZ = vec2(positionLocal.x, positionLocal.z)
+  const bladeLocalXZ = instancePosition.xz
   const rootWidthProfile = float(1).sub(heightAlongBlade).pow(2)
   const rootWidthFactor = float(1).add(
     edgeFillProfile
@@ -2670,7 +3413,7 @@ function createStylizedGrassNodeMaterial(
   )
   const deformedPosition = vec3(
     thickenedBladeObjectXZ.x.add(worldOffset.x),
-    positionLocal.y.mul(heightPulse).mul(float(1).sub(interactionFold)).mul(combinedFade),
+    instancePosition.y.mul(heightPulse).mul(float(1).sub(interactionFold)).mul(combinedFade),
     thickenedBladeObjectXZ.y.add(worldOffset.y),
   )
 
@@ -2706,29 +3449,28 @@ function applyStylizedGrassInstanceAttributes(
   if (slots.length === 0) return
   const profile = getStylizedGrassPerfProbe()
   const startedAt = profile ? performance.now() : 0
-  const origin = geometry.getAttribute('aOrigin') as InstancedBufferAttribute | undefined
-  const variationYaw = geometry.getAttribute('aVariationYaw') as
-    | InstancedBufferAttribute
-    | undefined
+  const transform = geometry.getAttribute('aTransform') as InstancedBufferAttribute | undefined
+  const variation = geometry.getAttribute('aVariation') as InstancedBufferAttribute | undefined
   const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
-  if (!origin || !variationYaw) return
+  if (!transform || !variation) return
 
   for (const index of slots) {
     const instance = instances[index]!
     const patchByte = Math.round(clamp01(instance.patchVariation) * 255)
     const macroByte = Math.round(clamp01(instance.macroVariation) * 255)
-    const scaleFactorByte = Math.round(clamp01(instance.scaleFactor) * 255)
-    origin.setXY(index, instance.x, instance.z)
-    variationYaw.setXY(
+    transform.setXYZW(
       index,
-      patchByte + macroByte * 256 + scaleFactorByte * 65_536,
+      instance.x,
+      instance.z,
       instance.yaw / (Math.PI * 2),
+      packStylizedGrassScaleHeight(instance.scaleFactor, instance.heightFactor),
     )
+    variation.setX(index, patchByte + macroByte * 256)
     fade?.setX(index, 1)
   }
 
-  markStylizedGrassInstanceSlotsUpdated(origin, slots)
-  markStylizedGrassInstanceSlotsUpdated(variationYaw, slots)
+  markStylizedGrassInstanceSlotsUpdated(transform, slots)
+  markStylizedGrassInstanceSlotsUpdated(variation, slots)
   if (fade) markStylizedGrassInstanceSlotsUpdated(fade, slots)
   if (profile) {
     recordStylizedGrassPerfSample(profile, {
@@ -2743,7 +3485,7 @@ function applyStylizedGrassStreamFadeAttributes(
   geometry: BufferGeometry,
   instances: readonly StylizedGrassInstance[],
   slots: readonly number[],
-  state: StylizedGrassResidentState,
+  state: StylizedGrassDrawState,
 ) {
   if (slots.length === 0) return
   const streamFade = geometry.getAttribute('aStreamFade') as InstancedBufferAttribute | undefined
@@ -2752,29 +3494,26 @@ function applyStylizedGrassStreamFadeAttributes(
   for (const index of slots) {
     const instance = instances[index]
     if (!instance) continue
-    streamFade.setX(
-      index,
-      state.slotById.get(instance.id) === index ? (state.streamFadeById.get(instance.id) ?? 1) : 0,
-    )
+    streamFade.setX(index, state.streamFadeById.get(instance.id) ?? 1)
   }
   markStylizedGrassInstanceSlotsUpdated(streamFade, slots)
 }
 
 function advanceStylizedGrassStreamFades(
   geometry: BufferGeometry,
-  state: StylizedGrassResidentState,
-  delta: number,
+  state: StylizedGrassDrawState,
+  arrivalState: StylizedGrassArrivalState,
+  nowMs: number,
 ) {
   if (state.streamFadeById.size === 0) return
   const streamFade = geometry.getAttribute('aStreamFade') as InstancedBufferAttribute | undefined
   if (!streamFade) return
 
   const activeBefore = state.streamFadeById.size
-  const step = Math.max(0, Math.min(delta, 0.05)) / STYLIZED_SCENE_STREAM_ARRIVAL_FADE_SECONDS
   const changedSlots: number[] = []
   let fadeMax = 0
   let fadeMin = 1
-  for (const [id, currentFade] of state.streamFadeById) {
+  for (const id of state.streamFadeById.keys()) {
     const slot = state.slotById.get(id)
     if (slot === undefined) {
       state.streamFadeById.delete(id)
@@ -2782,8 +3521,7 @@ function advanceStylizedGrassStreamFades(
     }
     const instance = state.instances[slot]
     if (!instance) continue
-    const durationVariation = 0.72 + ((instance.seed * 997) % 1000) / 1_800
-    const nextFade = Math.min(1, currentFade + step / durationVariation)
+    const nextFade = resolveStylizedGrassArrivalFade(instance, arrivalState, nowMs)
     fadeMax = Math.max(fadeMax, nextFade)
     fadeMin = Math.min(fadeMin, nextFade)
     streamFade.setX(slot, nextFade)
@@ -2794,9 +3532,8 @@ function advanceStylizedGrassStreamFades(
 
   changedSlots.sort((first, second) => first - second)
   markStylizedGrassInstanceSlotsUpdated(streamFade, changedSlots)
-  const now = performance.now()
-  if (now - state.lastStreamFadeTraceAt >= 100 || state.streamFadeById.size === 0) {
-    state.lastStreamFadeTraceAt = now
+  if (nowMs - state.lastStreamFadeTraceAt >= 100 || state.streamFadeById.size === 0) {
+    state.lastStreamFadeTraceAt = nowMs
     recordStylizedGrassStreamRuntimeEvent({
       activeAfter: state.streamFadeById.size,
       activeBefore,
@@ -2808,128 +3545,93 @@ function advanceStylizedGrassStreamFades(
   }
 }
 
-function reconcileStylizedGrassResidentInstances({
+function reconcileStylizedGrassDrawInstances({
+  arrivalState,
   capacity,
-  exactVisibleCellKeys,
+  eligibleTotal,
   geometry,
   nextInstances,
+  nowMs,
   state,
   tuning,
 }: {
+  arrivalState: StylizedGrassArrivalState
   capacity: number
-  exactVisibleCellKeys: ReadonlySet<string>
+  eligibleTotal: number
   geometry: BufferGeometry
   nextInstances: readonly StylizedGrassInstance[]
-  state: StylizedGrassResidentState
+  nowMs: number
+  state: StylizedGrassDrawState
   tuning: StylizedSceneResolvedGrassTuning
 }) {
-  state.freeSlots ??= new Set()
-  const desiredInstances =
-    nextInstances.length <= capacity ? nextInstances : nextInstances.slice(0, capacity)
-  if (state.geometry !== geometry || state.tuning !== tuning) {
-    const previousCount = state.instances.length
-    const reason = state.geometry !== geometry ? 'geometry' : 'tuning'
+  const reset = state.geometry !== geometry || state.tuning !== tuning
+  const previousCount = state.instances.length
+  const reason = state.geometry !== geometry ? 'geometry' : 'tuning'
+  if (reset) {
     state.geometry = geometry
     state.tuning = tuning
-    state.instances = [...desiredInstances]
-    state.freeSlots.clear()
+    state.eligibleTotal = 0
+    state.instances.length = 0
+    state.saturated = false
+    state.slotById.clear()
+    state.fadeStateById.clear()
     state.streamFadeById.clear()
-    state.slotById = new Map(
-      state.instances.map((instance, index) => [instance.id, index] as const),
-    )
+  }
+
+  const drawUpdate = reconcileStylizedGrassDenseDrawInstances({
+    capacity,
+    eligibleTotal,
+    nextInstances,
+    state,
+  })
+  for (const id of drawUpdate.removedIds) {
+    state.fadeStateById.delete(id)
+    state.streamFadeById.delete(id)
+  }
+  for (const instance of drawUpdate.addedInstances) {
+    const fade = resolveStylizedGrassArrivalFade(instance, arrivalState, nowMs)
+    if (fade < 1) state.streamFadeById.set(instance.id, fade)
+    else state.streamFadeById.delete(instance.id)
+  }
+
+  if (reset) {
     recordStylizedGrassStreamRuntimeEvent({
       event: 'resident-reset',
-      nextInstances: state.instances.length,
+      nextInstances: drawUpdate.instances.length,
       previousInstances: previousCount,
       reason,
-      visibleInstances: state.instances.filter((instance) =>
-        exactVisibleCellKeys.has(stylizedGrassInstanceCellKey(instance.id)),
-      ).length,
+      visibleInstances: drawUpdate.instances.length,
     })
-    return {
-      changedSlots: state.instances.map((_, index) => index),
-      instances: state.instances,
-    }
+    return drawUpdate
   }
 
-  const desiredIds = new Set(desiredInstances.map((instance) => instance.id))
-  const changedSlots = new Set<number>()
-  let addedInstances = 0
-  let addedVisibleInstances = 0
-  let fadingAddedInstances = 0
-  let removedInstances = 0
-  let removedVisibleInstances = 0
-  let reusedSlots = 0
-  for (let index = 0; index < state.instances.length; index += 1) {
-    const instance = state.instances[index]
-    if (!instance || state.slotById.get(instance.id) !== index || desiredIds.has(instance.id)) {
-      continue
-    }
-    state.slotById.delete(instance.id)
-    state.streamFadeById.delete(instance.id)
-    state.freeSlots.add(index)
-    changedSlots.add(index)
-    removedInstances += 1
-    if (exactVisibleCellKeys.has(stylizedGrassInstanceCellKey(instance.id))) {
-      removedVisibleInstances += 1
-    }
-  }
-
-  for (const instance of desiredInstances) {
-    if (state.slotById.has(instance.id)) continue
-    if (state.slotById.size >= capacity) break
-    const freeSlot = state.freeSlots.values().next().value as number | undefined
-    const index = freeSlot ?? state.instances.length
-    if (freeSlot === undefined) {
-      if (index >= capacity) break
-      state.instances.push(instance)
-    } else {
-      state.freeSlots.delete(freeSlot)
-      state.instances[freeSlot] = instance
-      reusedSlots += 1
-    }
-    state.slotById.set(instance.id, index)
-    changedSlots.add(index)
-    addedInstances += 1
-    const isVisible = exactVisibleCellKeys.has(stylizedGrassInstanceCellKey(instance.id))
-    if (isVisible) {
-      addedVisibleInstances += 1
-    } else {
-      state.streamFadeById.set(instance.id, 0)
-      fadingAddedInstances += 1
-    }
-  }
-
-  while (state.instances.length > 0 && state.freeSlots.has(state.instances.length - 1)) {
-    const lastIndex = state.instances.length - 1
-    state.freeSlots.delete(lastIndex)
-    state.instances.pop()
-  }
-
-  if (changedSlots.size > 0) {
+  if (drawUpdate.changedSlots.length > 0 || drawUpdate.removedIds.length > 0) {
     recordStylizedGrassStreamRuntimeEvent({
       activeArrivalFades: state.streamFadeById.size,
-      addedInstances,
-      addedVisibleInstances,
-      changedSlots: changedSlots.size,
+      addedInstances: drawUpdate.addedInstances.length,
+      addedVisibleInstances: drawUpdate.addedInstances.length,
+      changedSlots: drawUpdate.changedSlots.length,
       event: 'resident-update',
-      fadingAddedInstances,
-      freeSlots: state.freeSlots.size,
-      highWatermark: state.instances.length,
-      movedInstances: 0,
-      movedVisibleInstances: 0,
-      removedInstances,
-      removedVisibleInstances,
-      residentInstances: state.slotById.size,
-      reusedSlots,
+      fadingAddedInstances: drawUpdate.addedInstances.filter((instance) =>
+        state.streamFadeById.has(instance.id),
+      ).length,
+      freeSlots: 0,
+      highWatermark: drawUpdate.instances.length,
+      movedInstances: Math.max(
+        0,
+        drawUpdate.changedSlots.length - drawUpdate.addedInstances.length,
+      ),
+      movedVisibleInstances: Math.max(
+        0,
+        drawUpdate.changedSlots.length - drawUpdate.addedInstances.length,
+      ),
+      removedInstances: drawUpdate.removedIds.length,
+      removedVisibleInstances: drawUpdate.removedIds.length,
+      residentInstances: drawUpdate.instances.length,
+      reusedSlots: 0,
     })
   }
-  return {
-    changedSlots: [...changedSlots]
-      .filter((slot) => slot < state.instances.length)
-      .sort((first, second) => first - second),
-    instances: state.instances,
-  }
+  return drawUpdate
 }
 
 function stylizedGrassInstanceCellKey(id: string) {
@@ -2937,35 +3639,61 @@ function stylizedGrassInstanceCellKey(id: string) {
   return separator < 0 ? id : id.slice(0, separator)
 }
 
-function markStylizedGrassInstanceSlotsUpdated(
+export function markStylizedGrassInstanceSlotsUpdated(
   attribute: InstancedBufferAttribute,
   slots: readonly number[],
 ) {
-  const firstSlot = slots[0]
-  if (firstSlot === undefined) return
+  if (slots.length === 0) return
 
-  attribute.clearUpdateRanges()
-  let rangeStart = firstSlot
-  let rangeEnd = firstSlot
-  for (let index = 1; index < slots.length; index += 1) {
-    const slot = slots[index]
-    if (slot === undefined) continue
-    if (slot <= rangeEnd + STYLIZED_SCENE_STREAM_UPDATE_RANGE_GAP + 1) {
-      rangeEnd = slot
+  const itemSize = attribute.itemSize
+  const ranges = attribute.updateRanges.map(({ start, count }) => ({ count, start }))
+  for (const slot of slots) {
+    if (!Number.isInteger(slot) || slot < 0 || slot >= attribute.count) continue
+    ranges.push({ count: itemSize, start: slot * itemSize })
+  }
+  if (ranges.length === attribute.updateRanges.length) return
+
+  ranges.sort((first, second) => first.start - second.start)
+  const mergedRanges: { count: number; start: number }[] = []
+  const mergeGap = STYLIZED_SCENE_STREAM_UPDATE_RANGE_GAP * itemSize
+  for (const range of ranges) {
+    const previous = mergedRanges.at(-1)
+    if (!previous) {
+      mergedRanges.push({ ...range })
       continue
     }
-    attribute.addUpdateRange(
-      rangeStart * attribute.itemSize,
-      (rangeEnd - rangeStart + 1) * attribute.itemSize,
-    )
-    rangeStart = slot
-    rangeEnd = slot
+    const previousEnd = previous.start + previous.count
+    const rangeEnd = range.start + range.count
+    if (range.start <= previousEnd + mergeGap) {
+      previous.count = Math.max(previousEnd, rangeEnd) - previous.start
+      continue
+    }
+    mergedRanges.push({ ...range })
   }
-  attribute.addUpdateRange(
-    rangeStart * attribute.itemSize,
-    (rangeEnd - rangeStart + 1) * attribute.itemSize,
-  )
+
+  attribute.clearUpdateRanges()
+  for (const range of mergedRanges) attribute.addUpdateRange(range.start, range.count)
   attribute.needsUpdate = true
+}
+
+export function packStylizedGrassScaleHeight(scaleFactor: number, heightFactor: number) {
+  const scaleCode = Math.round(
+    ((clamp(scaleFactor, STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE, 1) -
+      STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE) /
+      (1 - STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE)) *
+      STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION,
+  )
+  const heightCode = Math.round(
+    ((clamp(
+      heightFactor,
+      STYLIZED_SCENE_GRASS_MIN_HEIGHT_FACTOR,
+      STYLIZED_SCENE_GRASS_MAX_HEIGHT_FACTOR,
+    ) -
+      STYLIZED_SCENE_GRASS_MIN_HEIGHT_FACTOR) /
+      (STYLIZED_SCENE_GRASS_MAX_HEIGHT_FACTOR - STYLIZED_SCENE_GRASS_MIN_HEIGHT_FACTOR)) *
+      STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION,
+  )
+  return heightCode + scaleCode * (STYLIZED_SCENE_GRASS_TRANSFORM_QUANTIZATION + 1)
 }
 
 function stylizedGrassHeightFactor(x: number, z: number, tuning: StylizedSceneResolvedGrassTuning) {
@@ -3657,5 +4385,3 @@ function recordStylizedGrassPerfSample(
 }
 
 useGLTF.preload(STYLIZED_SCENE_PATHS.grassBlades)
-useGLTF.preload(STYLIZED_SCENE_PATHS.treeLeaves)
-useGLTF.preload(STYLIZED_SCENE_PATHS.treeTrunk)

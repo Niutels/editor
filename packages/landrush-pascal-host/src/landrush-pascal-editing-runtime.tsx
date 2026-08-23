@@ -88,6 +88,13 @@ export function resolveLandrushPascalSelectionManager(_editingActive: boolean): 
   return 'custom'
 }
 
+export function didLandrushPascalEditingDeactivate(
+  previousEditingActive: boolean,
+  editingActive: boolean,
+) {
+  return previousEditingActive && !editingActive
+}
+
 export function resolveLandrushPascalNodeSelectionTarget({
   itemCategory,
   nodeType,

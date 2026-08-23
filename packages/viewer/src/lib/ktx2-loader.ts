@@ -119,8 +119,8 @@ class AlignmentSafeKTX2Loader extends KTX2Loader {
  * from the viewer root the moment the renderer is ready (even when no GLB is in
  * the scene, so catalog `.ktx2` finishes still load).
  */
-export const ktx2Loader = new AlignmentSafeKTX2Loader()
-ktx2Loader.setTranscoderPath('https://cdn.jsdelivr.net/gh/pmndrs/drei-assets@master/basis/')
+export const KTX2_TRANSCODER_PATH = '/basis/'
+export const ktx2Loader = new AlignmentSafeKTX2Loader().setTranscoderPath(KTX2_TRANSCODER_PATH)
 
 const configuredRenderers = new WeakSet<object>()
 const warnedRenderers = new WeakSet<object>()

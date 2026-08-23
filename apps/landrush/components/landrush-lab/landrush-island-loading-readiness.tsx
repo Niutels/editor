@@ -8,9 +8,139 @@ type LandrushIslandFrameScheduler = {
   requestFrame: (callback: FrameRequestCallback) => number
 }
 
+type LandrushIslandTimeoutScheduler = {
+  clearTimeout: (timeoutId: number) => void
+  setTimeout: (callback: () => void, delayMs: number) => number
+}
+
 export type LandrushIslandPaintReadinessGate = {
   dispose: () => void
   setPrerequisitesReady: (ready: boolean) => void
+}
+
+export type LandrushIslandLoadingHandoffGate = {
+  dispose: () => void
+  requestHandoff: (generation: string) => boolean
+  setReadiness: (generation: string, ready: boolean) => void
+}
+
+export type LandrushIslandLoadingHandoffReset = {
+  generation: string
+  generationChanged: boolean
+}
+
+export type LandrushGeneratedAssetReadinessStatus = {
+  generation: string
+  ready: boolean
+}
+
+export type LandrushGeneratedAssetMountGeneration = {
+  enabled: boolean
+  generation: number
+}
+
+export function advanceLandrushGeneratedAssetMountGeneration(
+  current: LandrushGeneratedAssetMountGeneration,
+  enabled: boolean,
+) {
+  if (current.enabled === enabled) return current
+  return { enabled, generation: current.generation + 1 }
+}
+
+export function reconcileLandrushGeneratedAssetReadinessStatus({
+  current,
+  currentGeneration,
+  ready,
+  reportedGeneration,
+}: {
+  current: LandrushGeneratedAssetReadinessStatus | null
+  currentGeneration: string
+  ready: boolean
+  reportedGeneration: string
+}) {
+  if (reportedGeneration !== currentGeneration) return current
+  if (current?.generation === reportedGeneration && current.ready === ready) return current
+  return { generation: reportedGeneration, ready }
+}
+
+export function resolveLandrushGeneratedAssetsReady({
+  enabled,
+  generation,
+  status,
+}: {
+  enabled: boolean
+  generation: string
+  status: LandrushGeneratedAssetReadinessStatus | null
+}) {
+  return !enabled || (status?.generation === generation && status.ready)
+}
+
+export function resolveLandrushAuthorityResyncActive({
+  authorityKey,
+  handedOff,
+  presentedAuthorityKey,
+  ready,
+}: {
+  authorityKey: string
+  handedOff: boolean
+  presentedAuthorityKey: string | null
+  ready: boolean
+}) {
+  return handedOff && (!ready || presentedAuthorityKey !== authorityKey)
+}
+
+export function shouldPersistLandrushIslandOfflineState({
+  clean,
+  offline,
+}: {
+  clean: boolean
+  offline: boolean
+}) {
+  return offline && !clean
+}
+
+export type LandrushInitialParcelMaterializationUpdate = {
+  parcelId: string
+  sequence: number
+  worldId: string
+}
+
+export function createLandrushInitialParcelAuthorityKey(authorityEpoch: number, worldId: string) {
+  return `${authorityEpoch}:${worldId}`
+}
+
+export function wasLandrushInitialParcelAuthorityMaterialized({
+  authorityEpoch,
+  readyAuthorityKey,
+  worldId,
+}: {
+  authorityEpoch: number
+  readyAuthorityKey: string | null
+  worldId: string
+}) {
+  return readyAuthorityKey === createLandrushInitialParcelAuthorityKey(authorityEpoch, worldId)
+}
+
+export function resolveLandrushInitialParcelMaterializationReadiness({
+  appliedSequenceForUpdate,
+  authorityEpoch,
+  snapshotWorldId,
+  updates,
+  worldId,
+}: {
+  appliedSequenceForUpdate: (update: LandrushInitialParcelMaterializationUpdate) => number
+  authorityEpoch: number
+  snapshotWorldId: string | null
+  updates: readonly LandrushInitialParcelMaterializationUpdate[]
+  worldId: string
+}) {
+  const authorityKey = createLandrushInitialParcelAuthorityKey(authorityEpoch, worldId)
+  if (snapshotWorldId !== worldId) return { authorityKey, ready: false }
+
+  const ready = updates
+    .filter((update) => update.worldId === worldId)
+    .every((update) => appliedSequenceForUpdate(update) >= update.sequence)
+  return { authorityKey, ready }
 }
 
 export function createLandrushIslandPaintReadinessGate({
@@ -61,6 +191,61 @@ export function createLandrushIslandPaintReadinessGate({
           onReadyChange(true)
         })
       })
+    },
+  }
+}
+
+export function createLandrushIslandLoadingHandoffGate({
+  fadeMs,
+  onHandoff,
+  onReset,
+  scheduler,
+}: {
+  fadeMs: number
+  onHandoff: (generation: string) => void
+  onReset: (reset: LandrushIslandLoadingHandoffReset) => void
+  scheduler: LandrushIslandTimeoutScheduler
+}): LandrushIslandLoadingHandoffGate {
+  let currentGeneration: string | null = null
+  let handedOff = false
+  let handoffTimeoutId: number | null = null
+  let ready = false
+
+  const cancelHandoff = () => {
+    if (handoffTimeoutId !== null) scheduler.clearTimeout(handoffTimeoutId)
+    handoffTimeoutId = null
+  }
+
+  return {
+    dispose() {
+      cancelHandoff()
+      handedOff = true
+      ready = false
+    },
+    requestHandoff(generation) {
+      if (handedOff || !ready || generation !== currentGeneration || handoffTimeoutId !== null) {
+        return false
+      }
+
+      handoffTimeoutId = scheduler.setTimeout(() => {
+        handoffTimeoutId = null
+        if (handedOff || !ready || generation !== currentGeneration) return
+        handedOff = true
+        onHandoff(generation)
+      }, fadeMs)
+      return true
+    },
+    setReadiness(generation, nextReady) {
+      if (handedOff) return
+
+      const generationChanged = currentGeneration !== null && generation !== currentGeneration
+      const readinessWithdrawn = ready && !nextReady
+      currentGeneration = generation
+      ready = nextReady
+
+      if (!generationChanged && !readinessWithdrawn) return
+      cancelHandoff()
+      onReset({ generation, generationChanged })
     },
   }
 }

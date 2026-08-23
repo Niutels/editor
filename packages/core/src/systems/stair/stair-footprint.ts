@@ -1,4 +1,11 @@
-import type { AnyNode, AnyNodeId, StairNode, StairSegmentNode } from '../../schema'
+import {
+  type AnyNode,
+  type AnyNodeId,
+  computeStairSegmentChainTransforms,
+  type StairNode,
+  type StairSegmentChainTransform,
+  type StairSegmentNode,
+} from '../../schema'
 
 /**
  * Stair footprint geometry shared by the slab-opening sync and the
@@ -13,10 +20,7 @@ import type { AnyNode, AnyNodeId, StairNode, StairSegmentNode } from '../../sche
 
 export type StairFootprintAABB = { minX: number; minZ: number; maxX: number; maxZ: number }
 
-type SegmentTransform = {
-  position: [number, number, number]
-  rotation: number
-}
+type SegmentTransform = StairSegmentChainTransform
 
 /**
  * XZ rotation in the stair geometry convention (equivalent to rotating by
@@ -37,55 +41,7 @@ export function rotateXZ(x: number, z: number, angle: number): [number, number] 
  * the stair's local frame (before the stair's own `position` / `rotation`).
  */
 export function computeSegmentTransforms(segments: StairSegmentNode[]): SegmentTransform[] {
-  const transforms: SegmentTransform[] = []
-  let currentX = 0
-  let currentY = 0
-  let currentZ = 0
-  let currentRot = 0
-
-  for (let index = 0; index < segments.length; index++) {
-    const segment = segments[index]
-    if (!segment) continue
-
-    if (index === 0) {
-      transforms.push({ position: [currentX, currentY, currentZ], rotation: currentRot })
-      continue
-    }
-
-    const previous = segments[index - 1]
-    if (!previous) continue
-
-    let attachX = 0
-    let attachZ = 0
-    let rotationDelta = 0
-
-    switch (segment.attachmentSide) {
-      case 'front':
-        attachX = 0
-        attachZ = previous.length
-        break
-      case 'left':
-        attachX = previous.width / 2
-        attachZ = previous.length / 2
-        rotationDelta = Math.PI / 2
-        break
-      case 'right':
-        attachX = -previous.width / 2
-        attachZ = previous.length / 2
-        rotationDelta = -Math.PI / 2
-        break
-    }
-
-    const [deltaX, deltaZ] = rotateXZ(attachX, attachZ, currentRot)
-    currentX += deltaX
-    currentY += previous.height
-    currentZ += deltaZ
-    currentRot += rotationDelta
-
-    transforms.push({ position: [currentX, currentY, currentZ], rotation: currentRot })
-  }
-
-  return transforms
+  return computeStairSegmentChainTransforms(segments)
 }
 
 function emptyBox(): StairFootprintAABB {

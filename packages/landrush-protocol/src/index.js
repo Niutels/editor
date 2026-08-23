@@ -46,3 +46,7 @@ export function isSpatialVoiceSignalPayload(value) {
     value.description.sdp.length <= 120_000
   )
 }
+
+export function isMultiplayerPlayerPose(value) {
+  return value === 'crouching' || value === 'falling'
+}

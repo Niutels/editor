@@ -15,6 +15,7 @@ import { BoxGeometry, Mesh, MeshBasicMaterial } from 'three'
 import {
   cancelLandrushPascalEditingRuntime,
   deleteLandrushPascalSelectedOpenings,
+  didLandrushPascalEditingDeactivate,
   exitLandrushPascalEditingToSelect,
   isLandrushPascalClockwiseRotationShortcut,
   isLandrushPascalRotationOwnedByTool,
@@ -83,6 +84,13 @@ describe('Landrush Pascal editing runtime', () => {
   test('keeps the Viewer hierarchy manager out of the Landrush-owned selection route', () => {
     expect(resolveLandrushPascalSelectionManager(true)).toBe('custom')
     expect(resolveLandrushPascalSelectionManager(false)).toBe('custom')
+  })
+
+  test('cleans up editing only on a real active-to-inactive host transition', () => {
+    expect(didLandrushPascalEditingDeactivate(false, false)).toBe(false)
+    expect(didLandrushPascalEditingDeactivate(false, true)).toBe(false)
+    expect(didLandrushPascalEditingDeactivate(true, true)).toBe(false)
+    expect(didLandrushPascalEditingDeactivate(true, false)).toBe(true)
   })
 
   test('routes common and registry nodes to the same editor phases as Pascal', () => {

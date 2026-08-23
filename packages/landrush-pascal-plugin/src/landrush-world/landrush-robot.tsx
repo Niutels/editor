@@ -21,12 +21,23 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import {
+  applyLandrushRobotCrouchPose,
+  createLandrushRobotCrouchRig,
+  resetLandrushRobotCrouchPose,
+} from './landrush-robot-crouch'
+import {
   type LandrushRobotJumpPose,
   type LandrushRobotJumpPoseRef,
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
 import type { LandrushWorldNode } from './schema'
 
+export {
+  applyLandrushRobotCrouchPose,
+  createLandrushRobotCrouchRig,
+  type LandrushRobotCrouchRig,
+  resetLandrushRobotCrouchPose,
+} from './landrush-robot-crouch'
 export {
   type LandrushRobotJumpContact,
   type LandrushRobotJumpPhase,
@@ -48,6 +59,7 @@ const LANDRUSH_ROBOT_ANIMATION_PACE_RANGE = [0.2, 1.6] as const
 const LANDRUSH_ROBOT_CLIP_BLEND_RESPONSE = 8
 const LANDRUSH_ROBOT_CLIP_TIME_SCALE_RESPONSE = 10
 const LANDRUSH_ROBOT_FALL_RESPONSE = 7
+export const LANDRUSH_ROBOT_CROUCH_RESPONSE = 12
 const LANDRUSH_ROBOT_FALL_SPIN_SPEED = 1.35
 const LANDRUSH_ROBOT_FALL_JOINT_MOTION_AMPLITUDE = 28.8
 // Drei's mixer writes at 0 and post-processing renders at 1, so procedural bones own the gap.
@@ -127,6 +139,8 @@ type LandrushRobotHoverMaterialState = Object3D['userData'] & {
 }
 type LandrushRobotProps = {
   animationPace?: number
+  crouching?: boolean
+  crouchingRef?: { current: boolean }
   fallControlRotation?: Quaternion
   fallIntensity?: number
   fallMotionScale?: number
@@ -143,6 +157,8 @@ type LandrushRobotProps = {
 
 export function LandrushRobot({
   animationPace = 1,
+  crouching = false,
+  crouchingRef,
   fallControlRotation,
   fallIntensity = 1,
   fallMotionScale = 1,
@@ -186,6 +202,7 @@ export function LandrushRobot({
       ),
     [clonedScene, locomotionClips, measure],
   )
+  const crouchRig = useMemo(() => createLandrushRobotCrouchRig(clonedScene), [clonedScene])
   const robotTransform = useMemo(() => {
     return measure('setup.robot-glb.compute-transform', () => {
       const bounds = measure('setup.robot-glb.compute-transform.bounds-from-object', () =>
@@ -249,6 +266,7 @@ export function LandrushRobot({
     walkWeight: 0,
   })
   const hoverAmountRef = useRef(0)
+  const crouchAmountRef = useRef(0)
   const fallAmountRef = useRef(0)
   const fallSpinRef = useRef(0)
   const fallJointMotionTimeRef = useRef(0)
@@ -330,6 +348,10 @@ export function LandrushRobot({
   ])
 
   useFrame(() => {
+    resetLandrushRobotCrouchPose(crouchRig)
+  }, -0.5)
+
+  useFrame(() => {
     measure('frame.robot-glb.apply-hover-pose', () => {
       applyLandrushRobotHoverPose(clonedScene, hoverAmountRef.current, hoverRestPose)
       applyLandrushRobotFallPose(
@@ -343,6 +365,14 @@ export function LandrushRobot({
       if (jumpProgress !== null && jumpProgress !== undefined) {
         applyLandrushRobotJumpPose(clonedScene, resolveLandrushRobotJumpPose(jumpProgress))
       }
+      applyLandrushRobotCrouchPose(
+        crouchRig,
+        jumpProgress === null || jumpProgress === undefined
+          ? presentationMode === 'default'
+            ? crouchAmountRef.current
+            : 0
+          : 0,
+      )
     })
   }, LANDRUSH_ROBOT_SKELETAL_POSE_FRAME_PRIORITY)
 
@@ -351,6 +381,16 @@ export function LandrushRobot({
       const frameDelta = Math.min(delta, 0.05)
       const speed = node.playerSpeed ?? 0
       const blendState = blendStateRef.current
+      crouchAmountRef.current = MathUtils.damp(
+        crouchAmountRef.current,
+        (crouchingRef?.current ?? crouching) &&
+          presentationMode === 'default' &&
+          (jumpPoseRef?.current === null || jumpPoseRef?.current === undefined)
+          ? 1
+          : 0,
+        LANDRUSH_ROBOT_CROUCH_RESPONSE,
+        frameDelta,
+      )
       const hoverAmount = measure('frame.robot-glb.damp-hover-presentation', () => {
         hoverAmountRef.current = MathUtils.damp(
           hoverAmountRef.current,
@@ -555,6 +595,8 @@ export function LandrushRobot({
       })
     })
   }, [clonedScene, measure])
+
+  useEffect(() => () => resetLandrushRobotCrouchPose(crouchRig), [crouchRig])
 
   useEffect(() => {
     measure('setup.robot-glb.configure-hover-fill', () => {

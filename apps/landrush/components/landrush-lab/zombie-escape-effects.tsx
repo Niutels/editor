@@ -12,6 +12,17 @@ import {
   Quaternion,
   Vector3,
 } from 'three'
+import {
+  createZombieEscapeBloodEventPool,
+  createZombieEscapeBloodEventSeed,
+  spawnZombieEscapeBloodEvent,
+  type ZombieEscapeBloodEvent,
+} from './zombie-escape-blood-effects'
+import {
+  isZombieEscapeBloodAttachmentGenerationCurrent,
+  ZombieEscapeBloodPresentation,
+  type ZombieEscapeBloodWorldAttachmentResolver,
+} from './zombie-escape-blood-presentation'
 import { ZOMBIE_ESCAPE_CAPACITY, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
   createZombieEscapeBallisticSample,
@@ -20,12 +31,20 @@ import {
   resolveZombieEscapeImpactAttachment,
 } from './zombie-escape-impact-attachment'
 import {
+  createZombieEscapeMuzzleFlashTransform,
+  resolveZombieEscapeMuzzleFlashTransform,
+} from './zombie-escape-muzzle-flash'
+import {
   createZombieEscapePresentationPose,
   resolveZombieEscapePresentationPose,
 } from './zombie-escape-presentation-pose'
+import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
+import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
 import {
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
   ZOMBIE_ESCAPE_SHOT_PHASE,
+  type ZombieEscapeShotImpactKind,
+  type ZombieEscapeShotPhase,
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
 import {
@@ -37,18 +56,33 @@ import {
 
 const HIDDEN_Y = -100
 const TWO_PI = Math.PI * 2
-const BLOOD_BLOTS_PER_SHOT = 2
-const BLOOD_DROPLETS_PER_SHOT = 6
 const Y_AXIS = new Vector3(0, 1, 0)
 const Z_AXIS = new Vector3(0, 0, 1)
+
+export function shouldRenderZombieEscapeTracer(
+  phase: ZombieEscapeShotPhase,
+  impactKind: ZombieEscapeShotImpactKind,
+) {
+  return (
+    phase === ZOMBIE_ESCAPE_SHOT_PHASE.travel ||
+    (phase === ZOMBIE_ESCAPE_SHOT_PHASE.impact &&
+      impactKind !== ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.expired)
+  )
+}
+
+export function shouldRenderZombieEscapeGenericImpact(impactKind: ZombieEscapeShotImpactKind) {
+  return impactKind === ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment
+}
 
 export function ZombieEscapeEffects({
   framePriority = -16,
   impactVisualRegistry,
+  renderReadinessRegistry,
   simulationRef,
 }: {
   framePriority?: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
+  renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
 }) {
   const effectsRootRef = useRef<Group>(null)
@@ -56,17 +90,27 @@ export function ZombieEscapeEffects({
   const muzzleRef = useRef<InstancedMesh>(null)
   const impactFlashRef = useRef<InstancedMesh>(null)
   const impactRingRef = useRef<InstancedMesh>(null)
-  const bloodBlotRef = useRef<InstancedMesh>(null)
-  const bloodDropletRef = useRef<InstancedMesh>(null)
-  const bloodVisibleRef = useRef(new Uint8Array(simulationRef.current.shots.pool.capacity))
-  const skinnedImpactAttachments = useMemo(
-    () =>
-      Array.from({ length: simulationRef.current.shots.pool.capacity }, () =>
-        createZombieEscapeSkinnedImpactAttachment(),
-      ),
+  const impactRootRef = useRef<Group>(null)
+  const bloodEvents = useMemo(
+    () => createZombieEscapeBloodEventPool(simulationRef.current.shots.pool.capacity),
     [simulationRef],
   )
+  const observedBloodShotGenerationRef = useRef(
+    new Uint32Array(simulationRef.current.shots.pool.capacity),
+  )
+  const previousSimulationElapsedRef = useRef(simulationRef.current.elapsedSeconds)
+  const skinnedBloodAttachments = useMemo(
+    () =>
+      Array.from({ length: bloodEvents.pool.capacity }, () =>
+        createZombieEscapeSkinnedImpactAttachment(),
+      ),
+    [bloodEvents.pool.capacity],
+  )
   const sparkRef = useRef<InstancedMesh>(null)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:tracer', travelRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:muzzle', muzzleRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:impact', impactRootRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:sparks', sparkRef)
   const dummy = useMemo(() => new Object3D(), [])
   const direction = useMemo(() => new Vector3(), [])
   const ballisticSample = useMemo(() => createZombieEscapeBallisticSample(), [])
@@ -81,12 +125,52 @@ export function ZombieEscapeEffects({
   const attachmentWorldRayEnd = useMemo(() => new Vector3(), [])
   const attachmentWorldRayStart = useMemo(() => new Vector3(), [])
   const presentationPose = useMemo(() => createZombieEscapePresentationPose(), [])
-  const splashTangent = useMemo(() => new Vector3(), [])
-  const splashBitangent = useMemo(() => new Vector3(), [])
+  const muzzleFlashTransform = useMemo(() => createZombieEscapeMuzzleFlashTransform(), [])
+  const bloodEventScratch = useMemo<ZombieEscapeBloodEvent>(
+    () => ({
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      normalX: 0,
+      normalY: 0,
+      normalZ: 1,
+      originX: 0,
+      originY: 0,
+      originZ: 0,
+      seed: 0,
+      spawnElapsedSeconds: 0,
+      targetGeneration: 0,
+      targetSlot: -1,
+    }),
+    [],
+  )
   const quaternion = useMemo(() => new Quaternion(), [])
   const effectsWorldQuaternion = useMemo(() => new Quaternion(), [])
-  const inverseEffectsWorldQuaternion = useMemo(() => new Quaternion(), [])
-  const rollQuaternion = useMemo(() => new Quaternion(), [])
+  const getBloodElapsedSeconds = useMemo(
+    () => () => simulationRef.current.elapsedSeconds,
+    [simulationRef],
+  )
+  const resolveBloodWorldAttachment = useMemo<ZombieEscapeBloodWorldAttachmentResolver>(
+    () => (eventSlot, eventGeneration, targetSlot, targetGeneration, outputPoint, outputNormal) => {
+      const attachment = skinnedBloodAttachments[eventSlot]
+      return Boolean(
+        attachment &&
+          attachment.targetSlot === targetSlot &&
+          attachment.targetGeneration === targetGeneration &&
+          isZombieEscapeBloodAttachmentGenerationCurrent(
+            eventGeneration,
+            attachment.shotGeneration,
+          ) &&
+          resolveZombieEscapeSkinnedImpact(
+            impactVisualRegistry,
+            attachment,
+            outputPoint,
+            outputNormal,
+          ),
+      )
+    },
+    [impactVisualRegistry, skinnedBloodAttachments],
+  )
 
   useLayoutEffect(() => {
     for (const mesh of [
@@ -94,35 +178,24 @@ export function ZombieEscapeEffects({
       muzzleRef.current,
       impactFlashRef.current,
       impactRingRef.current,
-      bloodBlotRef.current,
-      bloodDropletRef.current,
       sparkRef.current,
     ]) {
       mesh?.instanceMatrix.setUsage(DynamicDrawUsage)
     }
-    for (let slot = 0; slot < simulationRef.current.shots.pool.capacity; slot += 1) {
-      for (let blot = 0; blot < BLOOD_BLOTS_PER_SHOT; blot += 1) {
-        hideEffectInstance(bloodBlotRef.current, slot * BLOOD_BLOTS_PER_SHOT + blot, dummy)
-      }
-      for (let droplet = 0; droplet < BLOOD_DROPLETS_PER_SHOT; droplet += 1) {
-        hideEffectInstance(bloodDropletRef.current, slot * BLOOD_DROPLETS_PER_SHOT + droplet, dummy)
-      }
-    }
-    markEffectInstanceMeshDirty(bloodBlotRef.current)
-    markEffectInstanceMeshDirty(bloodDropletRef.current)
-  }, [dummy, simulationRef])
+  }, [])
 
   useFrame(() => {
     const simulation = simulationRef.current
     const shots = simulation.shots
+    if (simulation.elapsedSeconds < previousSimulationElapsedRef.current) {
+      observedBloodShotGenerationRef.current.fill(0)
+    }
+    previousSimulationElapsedRef.current = simulation.elapsedSeconds
     const effectsRoot = effectsRootRef.current
     if (effectsRoot) {
       effectsRoot.updateWorldMatrix(true, false)
       effectsRoot.getWorldQuaternion(effectsWorldQuaternion)
-      inverseEffectsWorldQuaternion.copy(effectsWorldQuaternion).invert()
     }
-    let bloodBlotDirty = false
-    let bloodDropletDirty = false
     for (let slot = 0; slot < shots.pool.capacity; slot += 1) {
       hideEffectInstance(travelRef.current, slot, dummy)
       hideEffectInstance(muzzleRef.current, slot, dummy)
@@ -155,7 +228,7 @@ export function ZombieEscapeEffects({
           ) {
             resolveZombieEscapePresentationPose(
               simulation.zombies.x[targetSlot]!,
-              0,
+              simulation.zombies.y[targetSlot]!,
               simulation.zombies.z[targetSlot]!,
               simulation.zombies.heading[targetSlot]!,
               simulation.zombies.hitReaction[targetSlot]!,
@@ -192,79 +265,101 @@ export function ZombieEscapeEffects({
 
           const targetGeneration = shots.hitTargetGeneration[slot]!
           const shotGeneration = shots.pool.generation[slot]!
-          const skinnedAttachment = skinnedImpactAttachments[slot]!
           if (
-            effectsRoot &&
             shots.impactKind[slot] === ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy &&
-            targetSlot >= 0 &&
-            simulation.zombies.pool.active[targetSlot] !== 0 &&
-            simulation.zombies.pool.generation[targetSlot] === targetGeneration &&
-            skinnedAttachment.shotGeneration !== shotGeneration
+            observedBloodShotGenerationRef.current[slot] !== shotGeneration
           ) {
-            effectsRoot.localToWorld(attachmentWorldPoint.copy(impactPoint))
-            attachmentWorldNormal
-              .copy(impactNormal)
-              .applyQuaternion(effectsWorldQuaternion)
-              .normalize()
-            attachmentWorldDirection
-              .copy(direction)
-              .applyQuaternion(effectsWorldQuaternion)
-              .normalize()
-            attachmentWorldRayStart
-              .copy(attachmentWorldPoint)
-              .addScaledVector(attachmentWorldDirection, -1.25)
-            attachmentWorldRayEnd
-              .copy(attachmentWorldPoint)
-              .addScaledVector(attachmentWorldDirection, 2.5)
-            captureZombieEscapeSkinnedImpact(
-              impactVisualRegistry,
-              targetSlot,
-              targetGeneration,
+            observedBloodShotGenerationRef.current[slot] = shotGeneration
+            bloodEventScratch.directionX = direction.x
+            bloodEventScratch.directionY = direction.y
+            bloodEventScratch.directionZ = direction.z
+            bloodEventScratch.normalX = impactNormal.x
+            bloodEventScratch.normalY = impactNormal.y
+            bloodEventScratch.normalZ = impactNormal.z
+            bloodEventScratch.originX = impactPoint.x
+            bloodEventScratch.originY = impactPoint.y
+            bloodEventScratch.originZ = impactPoint.z
+            bloodEventScratch.seed = createZombieEscapeBloodEventSeed(
               shotGeneration,
-              attachmentWorldRayStart,
-              attachmentWorldRayEnd,
-              attachmentWorldNormal,
-              skinnedAttachment,
+              slot,
+              targetGeneration,
             )
-          }
-          if (
-            effectsRoot &&
-            shots.impactKind[slot] === ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy &&
-            skinnedAttachment.shotGeneration === shotGeneration &&
-            resolveZombieEscapeSkinnedImpact(
-              impactVisualRegistry,
-              skinnedAttachment,
-              attachmentWorldPoint,
-              attachmentWorldNormal,
+            bloodEventScratch.spawnElapsedSeconds = Math.max(
+              0,
+              simulation.elapsedSeconds - shots.impactAge[slot]!,
             )
-          ) {
-            effectsRoot.worldToLocal(attachmentWorldPoint)
-            impactPoint.copy(attachmentWorldPoint)
-            impactNormal
-              .copy(attachmentWorldNormal)
-              .applyQuaternion(inverseEffectsWorldQuaternion)
-              .normalize()
+            bloodEventScratch.targetGeneration = targetGeneration
+            bloodEventScratch.targetSlot = targetSlot
+            const bloodEventSlot = spawnZombieEscapeBloodEvent(bloodEvents, bloodEventScratch)
+            const skinnedAttachment = skinnedBloodAttachments[bloodEventSlot]!
+            if (
+              effectsRoot &&
+              targetSlot >= 0 &&
+              simulation.zombies.pool.active[targetSlot] !== 0 &&
+              simulation.zombies.pool.generation[targetSlot] === targetGeneration
+            ) {
+              effectsRoot.localToWorld(attachmentWorldPoint.copy(impactPoint))
+              attachmentWorldNormal
+                .copy(impactNormal)
+                .applyQuaternion(effectsWorldQuaternion)
+                .normalize()
+              attachmentWorldDirection
+                .copy(direction)
+                .applyQuaternion(effectsWorldQuaternion)
+                .normalize()
+              attachmentWorldRayStart
+                .copy(attachmentWorldPoint)
+                .addScaledVector(attachmentWorldDirection, -1.25)
+              attachmentWorldRayEnd
+                .copy(attachmentWorldPoint)
+                .addScaledVector(attachmentWorldDirection, 2.5)
+              captureZombieEscapeSkinnedImpact(
+                impactVisualRegistry,
+                targetSlot,
+                targetGeneration,
+                bloodEvents.pool.generation[bloodEventSlot]!,
+                attachmentWorldRayStart,
+                attachmentWorldRayEnd,
+                attachmentWorldNormal,
+                skinnedAttachment,
+              )
+            }
           }
         }
         if (shotAge < ZOMBIE_ESCAPE_SIMULATION.muzzleFlashSeconds) {
           const muzzleProgress = shotAge / ZOMBIE_ESCAPE_SIMULATION.muzzleFlashSeconds
           const muzzleEnvelope = Math.sin(Math.PI * muzzleProgress) * (1 - muzzleProgress * 0.25)
+          resolveZombieEscapeMuzzleFlashTransform(
+            simulation.player,
+            muzzleEnvelope,
+            muzzleFlashTransform,
+          )
+          direction.set(
+            muzzleFlashTransform.directionX,
+            muzzleFlashTransform.directionY,
+            muzzleFlashTransform.directionZ,
+          )
           quaternion.setFromUnitVectors(Y_AXIS, direction)
           applyEffectInstance(
             muzzleRef.current,
             slot,
             dummy,
-            shots.originX[slot]! + direction.x * 0.08,
-            shots.originY[slot]! + direction.y * 0.08,
-            shots.originZ[slot]! + direction.z * 0.08,
+            muzzleFlashTransform.x,
+            muzzleFlashTransform.y,
+            muzzleFlashTransform.z,
             quaternion,
-            0.14 * muzzleEnvelope,
-            0.38 * muzzleEnvelope,
-            0.14 * muzzleEnvelope,
+            muzzleFlashTransform.scaleX,
+            muzzleFlashTransform.scaleY,
+            muzzleFlashTransform.scaleZ,
           )
         }
 
-        if (phase === ZOMBIE_ESCAPE_SHOT_PHASE.travel) {
+        if (
+          shouldRenderZombieEscapeTracer(
+            phase as ZombieEscapeShotPhase,
+            shots.impactKind[slot] as ZombieEscapeShotImpactKind,
+          )
+        ) {
           direction.set(
             shots.x[slot]! - shots.previousX[slot]!,
             shots.y[slot]! - shots.previousY[slot]!,
@@ -276,6 +371,15 @@ export function ZombieEscapeEffects({
           } else {
             direction.multiplyScalar(1 / travelLength)
           }
+          const tracerEnvelope =
+            phase === ZOMBIE_ESCAPE_SHOT_PHASE.impact
+              ? Math.sqrt(
+                  Math.max(
+                    0,
+                    1 - shots.impactAge[slot]! / ZOMBIE_ESCAPE_SIMULATION.impactLifetimeSeconds,
+                  ),
+                )
+              : 1
           quaternion.setFromUnitVectors(Y_AXIS, direction)
           applyEffectInstance(
             travelRef.current,
@@ -285,13 +389,16 @@ export function ZombieEscapeEffects({
             (shots.previousY[slot]! + shots.y[slot]!) * 0.5,
             (shots.previousZ[slot]! + shots.z[slot]!) * 0.5,
             quaternion,
-            0.065,
+            0.065 * tracerEnvelope,
             Math.max(0.12, travelLength * 0.5 + 0.055),
-            0.065,
+            0.065 * tracerEnvelope,
           )
-        } else if (
+        }
+        if (
           phase === ZOMBIE_ESCAPE_SHOT_PHASE.impact &&
-          shots.impactKind[slot] !== ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.expired
+          shouldRenderZombieEscapeGenericImpact(
+            shots.impactKind[slot] as ZombieEscapeShotImpactKind,
+          )
         ) {
           const impactProgress = Math.min(
             1,
@@ -325,141 +432,7 @@ export function ZombieEscapeEffects({
             ringScale,
             ringScale,
           )
-
-          if (shots.impactKind[slot] === ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy) {
-            if (Math.abs(impactNormal.y) < 0.92) {
-              splashTangent.crossVectors(Y_AXIS, impactNormal).normalize()
-            } else {
-              splashTangent.crossVectors(Z_AXIS, impactNormal).normalize()
-            }
-            splashBitangent.crossVectors(impactNormal, splashTangent).normalize()
-
-            const generation = shots.pool.generation[slot] ?? 0
-            const splashEnvelope = Math.sqrt(impactEnvelope)
-            for (let blot = 0; blot < BLOOD_BLOTS_PER_SHOT; blot += 1) {
-              const instance = slot * BLOOD_BLOTS_PER_SHOT + blot
-              const seed =
-                generation ^ Math.imul(slot + 1, 0x632b_e59b) ^ Math.imul(blot + 1, 0x8515_7af5)
-              const angle = hashUnit(seed) * TWO_PI
-              const spread =
-                (0.025 + hashUnit(seed ^ 0xa511_e9b3) * 0.09) * (0.25 + impactProgress * 0.75)
-              const blotScale =
-                (0.085 + hashUnit(seed ^ 0x63d8_35f1) * 0.055) *
-                Math.min(1, 0.45 + impactProgress * 8) *
-                splashEnvelope
-              quaternion.setFromUnitVectors(Z_AXIS, impactNormal)
-              rollQuaternion.setFromAxisAngle(Z_AXIS, angle)
-              quaternion.multiply(rollQuaternion)
-              applyEffectInstance(
-                bloodBlotRef.current,
-                instance,
-                dummy,
-                impactPoint.x +
-                  impactNormal.x * 0.026 +
-                  splashTangent.x * Math.cos(angle) * spread +
-                  splashBitangent.x * Math.sin(angle) * spread,
-                impactPoint.y +
-                  impactNormal.y * 0.026 +
-                  splashTangent.y * Math.cos(angle) * spread +
-                  splashBitangent.y * Math.sin(angle) * spread,
-                impactPoint.z +
-                  impactNormal.z * 0.026 +
-                  splashTangent.z * Math.cos(angle) * spread +
-                  splashBitangent.z * Math.sin(angle) * spread,
-                quaternion,
-                blotScale,
-                blotScale * (0.58 + hashUnit(seed ^ 0xc2b2_ae35) * 0.24),
-                1,
-              )
-            }
-            bloodBlotDirty = true
-
-            if (Math.abs(worldImpactNormal.y) < 0.92) {
-              splashTangent.crossVectors(Y_AXIS, worldImpactNormal).normalize()
-            } else {
-              splashTangent.crossVectors(Z_AXIS, worldImpactNormal).normalize()
-            }
-            splashBitangent.crossVectors(worldImpactNormal, splashTangent).normalize()
-            for (let droplet = 0; droplet < BLOOD_DROPLETS_PER_SHOT; droplet += 1) {
-              const instance = slot * BLOOD_DROPLETS_PER_SHOT + droplet
-              const seed =
-                generation ^ Math.imul(slot + 1, 0x9e37_79b1) ^ Math.imul(droplet + 1, 0x85eb_ca6b)
-              const angle = hashUnit(seed) * TWO_PI
-              const radialSpeed = 0.55 + hashUnit(seed ^ 0x27d4_eb2f) * 1.05
-              const outwardSpeed = 0.25 + hashUnit(seed ^ 0x1656_67b1) * 0.55
-              const upwardSpeed = 0.35 + hashUnit(seed ^ 0xd3a2_646c) * 0.95
-              const radialX =
-                splashTangent.x * Math.cos(angle) + splashBitangent.x * Math.sin(angle)
-              const radialY =
-                splashTangent.y * Math.cos(angle) + splashBitangent.y * Math.sin(angle)
-              const radialZ =
-                splashTangent.z * Math.cos(angle) + splashBitangent.z * Math.sin(angle)
-              const velocityX = radialX * radialSpeed + worldImpactNormal.x * outwardSpeed
-              const velocityY =
-                radialY * radialSpeed + worldImpactNormal.y * outwardSpeed + upwardSpeed
-              const velocityZ = radialZ * radialSpeed + worldImpactNormal.z * outwardSpeed
-              const age = shots.impactAge[slot]!
-              resolveZombieEscapeBallisticSample(
-                worldImpactPoint.x,
-                worldImpactPoint.y,
-                worldImpactPoint.z,
-                worldImpactNormal.x,
-                worldImpactNormal.y,
-                worldImpactNormal.z,
-                0.03,
-                velocityX,
-                velocityY,
-                velocityZ,
-                8.4,
-                age,
-                ballisticSample,
-              )
-              direction.set(
-                ballisticSample.velocityX,
-                ballisticSample.velocityY,
-                ballisticSample.velocityZ,
-              )
-              if (direction.lengthSq() <= 0.000_001) direction.set(0, 1, 0)
-              else direction.normalize()
-              quaternion.setFromUnitVectors(Y_AXIS, direction)
-              const dropletRadius = (0.018 + hashUnit(seed ^ 0xfd70_46c5) * 0.018) * splashEnvelope
-              applyEffectInstance(
-                bloodDropletRef.current,
-                instance,
-                dummy,
-                ballisticSample.x,
-                ballisticSample.y,
-                ballisticSample.z,
-                quaternion,
-                dropletRadius,
-                dropletRadius * (1.5 + hashUnit(seed ^ 0xb55a_4f09) * 1.15),
-                dropletRadius,
-              )
-            }
-            bloodDropletDirty = true
-            bloodVisibleRef.current[slot] = 1
-          }
         }
-      }
-
-      const bloodVisible =
-        active &&
-        phase === ZOMBIE_ESCAPE_SHOT_PHASE.impact &&
-        shots.impactKind[slot] === ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy
-      if (!bloodVisible && bloodVisibleRef.current[slot] !== 0) {
-        for (let blot = 0; blot < BLOOD_BLOTS_PER_SHOT; blot += 1) {
-          hideEffectInstance(bloodBlotRef.current, slot * BLOOD_BLOTS_PER_SHOT + blot, dummy)
-        }
-        for (let droplet = 0; droplet < BLOOD_DROPLETS_PER_SHOT; droplet += 1) {
-          hideEffectInstance(
-            bloodDropletRef.current,
-            slot * BLOOD_DROPLETS_PER_SHOT + droplet,
-            dummy,
-          )
-        }
-        bloodBlotDirty = true
-        bloodDropletDirty = true
-        bloodVisibleRef.current[slot] = 0
       }
 
       for (let spark = 0; spark < ZOMBIE_ESCAPE_CAPACITY.impactSparksPerShot; spark += 1) {
@@ -467,7 +440,9 @@ export function ZombieEscapeEffects({
         if (
           !active ||
           phase !== ZOMBIE_ESCAPE_SHOT_PHASE.impact ||
-          shots.impactKind[slot] === ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.expired
+          !shouldRenderZombieEscapeGenericImpact(
+            shots.impactKind[slot] as ZombieEscapeShotImpactKind,
+          )
         ) {
           hideEffectInstance(sparkRef.current, instance, dummy)
           continue
@@ -525,8 +500,6 @@ export function ZombieEscapeEffects({
     markEffectInstanceMeshDirty(muzzleRef.current)
     markEffectInstanceMeshDirty(impactFlashRef.current)
     markEffectInstanceMeshDirty(impactRingRef.current)
-    if (bloodBlotDirty) markEffectInstanceMeshDirty(bloodBlotRef.current)
-    if (bloodDropletDirty) markEffectInstanceMeshDirty(bloodDropletRef.current)
     markEffectInstanceMeshDirty(sparkRef.current)
   }, framePriority)
 
@@ -535,8 +508,9 @@ export function ZombieEscapeEffects({
     <group
       ref={effectsRootRef}
       userData={{
-        allocation: 'fixed-shot-event-pool',
+        allocation: 'fixed-shot-and-blood-event-pools',
         authoritativeLifecycle: 'inactive-travel-impact',
+        bloodEventCapacity: bloodEvents.pool.capacity,
         perShotObjectAllocation: false,
         travelingCarriersPerShot: 1,
       }}
@@ -570,52 +544,45 @@ export function ZombieEscapeEffects({
           transparent
         />
       </instancedMesh>
-      <instancedMesh
-        args={[undefined, undefined, simulation.shots.pool.capacity]}
-        frustumCulled={false}
-        ref={impactFlashRef}
-      >
-        <circleGeometry args={[1, 12]} />
-        <meshBasicMaterial
-          blending={AdditiveBlending}
-          color="#fff1a0"
-          depthWrite={false}
-          side={DoubleSide}
-          toneMapped={false}
-          transparent
-        />
-      </instancedMesh>
-      <instancedMesh
-        args={[undefined, undefined, simulation.shots.pool.capacity]}
-        frustumCulled={false}
-        ref={impactRingRef}
-      >
-        <ringGeometry args={[0.55, 1, 18]} />
-        <meshBasicMaterial
-          blending={AdditiveBlending}
-          color="#ff8c5c"
-          depthWrite={false}
-          side={DoubleSide}
-          toneMapped={false}
-          transparent
-        />
-      </instancedMesh>
-      <instancedMesh
-        args={[undefined, undefined, simulation.shots.pool.capacity * BLOOD_BLOTS_PER_SHOT]}
-        frustumCulled={false}
-        ref={bloodBlotRef}
-      >
-        <circleGeometry args={[1, 7]} />
-        <meshBasicMaterial color="#981b36" side={DoubleSide} toneMapped={false} />
-      </instancedMesh>
-      <instancedMesh
-        args={[undefined, undefined, simulation.shots.pool.capacity * BLOOD_DROPLETS_PER_SHOT]}
-        frustumCulled={false}
-        ref={bloodDropletRef}
-      >
-        <dodecahedronGeometry args={[1, 0]} />
-        <meshBasicMaterial color="#c4264d" toneMapped={false} />
-      </instancedMesh>
+      <group ref={impactRootRef}>
+        <instancedMesh
+          args={[undefined, undefined, simulation.shots.pool.capacity]}
+          frustumCulled={false}
+          ref={impactFlashRef}
+        >
+          <circleGeometry args={[1, 12]} />
+          <meshBasicMaterial
+            blending={AdditiveBlending}
+            color="#fff1a0"
+            depthWrite={false}
+            side={DoubleSide}
+            toneMapped={false}
+            transparent
+          />
+        </instancedMesh>
+        <instancedMesh
+          args={[undefined, undefined, simulation.shots.pool.capacity]}
+          frustumCulled={false}
+          ref={impactRingRef}
+        >
+          <ringGeometry args={[0.55, 1, 18]} />
+          <meshBasicMaterial
+            blending={AdditiveBlending}
+            color="#ff8c5c"
+            depthWrite={false}
+            side={DoubleSide}
+            toneMapped={false}
+            transparent
+          />
+        </instancedMesh>
+      </group>
+      <ZombieEscapeBloodPresentation
+        events={bloodEvents}
+        getElapsedSeconds={getBloodElapsedSeconds}
+        producerFramePriority={framePriority}
+        renderReadinessRegistry={renderReadinessRegistry}
+        resolveWorldAttachment={resolveBloodWorldAttachment}
+      />
       <instancedMesh
         args={[
           undefined,

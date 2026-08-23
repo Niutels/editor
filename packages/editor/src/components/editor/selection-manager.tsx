@@ -28,6 +28,7 @@ import {
 } from '@pascal-app/core'
 
 import {
+  cloneMaterial,
   createMaterial,
   createMaterialFromPresetRef,
   getRoofMaterialArray,
@@ -524,7 +525,7 @@ const TEXTURE_MAP_KEYS = [
 ] as const
 
 function createHighlightedMaterial(material: Material, kind: HighlightKind): Material {
-  const highlightedMaterial = material.clone() as HighlightableMaterial
+  const highlightedMaterial = cloneMaterial(material) as HighlightableMaterial
   // `NodeMaterial.clone()` on the WebGPU backend drops the texture-map node
   // assignments, so the clone renders flat. Re-attach the maps from the source
   // material (they're shared by reference — same texture object) so the

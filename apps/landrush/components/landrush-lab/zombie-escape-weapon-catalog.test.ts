@@ -4,6 +4,14 @@ import {
   ZOMBIE_ESCAPE_WEAPON_CATALOG,
 } from './zombie-escape-weapon-catalog'
 
+const EXPECTED_MUZZLE_ANCHORS = {
+  'driftwood-scattergun': [-0.00305, 0.05746, 0.41],
+  'reef-carbine': [-0.0001, 0.05018, 0.39],
+  'storm-coil-repeater': [-0.00068, 0.0931, 0.35],
+  'sunflare-pistol': [0.00025, 0.05445, 0.17],
+  'tidebreak-launcher': [-0.00046, 0.05835, 0.47],
+} as const
+
 describe('zombie escape firearm catalog', () => {
   test('defines five distinct generated firearm contracts', () => {
     expect(ZOMBIE_ESCAPE_WEAPON_CATALOG).toHaveLength(5)
@@ -49,6 +57,19 @@ describe('zombie escape firearm catalog', () => {
         weapon.canonicalDimensionsMeters.heightY / 2,
         weapon.canonicalDimensionsMeters.lengthZ / 2,
       ])
+    }
+  })
+
+  test('keeps each muzzle socket calibrated to its normalized GLB leading face', () => {
+    for (const weapon of ZOMBIE_ESCAPE_WEAPON_CATALOG) {
+      expect(weapon.muzzle.anchorMeters).toEqual(EXPECTED_MUZZLE_ANCHORS[weapon.id])
+      expect(weapon.muzzle.anchorMeters[2]).toBe(weapon.canonicalDimensionsMeters.lengthZ / 2)
+      expect(Math.abs(weapon.muzzle.anchorMeters[0])).toBeLessThanOrEqual(
+        weapon.canonicalDimensionsMeters.widthX / 2,
+      )
+      expect(Math.abs(weapon.muzzle.anchorMeters[1])).toBeLessThanOrEqual(
+        weapon.canonicalDimensionsMeters.heightY / 2,
+      )
     }
   })
 

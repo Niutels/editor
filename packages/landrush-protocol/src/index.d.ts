@@ -18,11 +18,13 @@ export type LocalPlayerProfile = {
 export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
   heading: number
   moving: boolean
-  pose?: 'falling'
+  pose?: MultiplayerPlayerPose
   position: [number, number, number]
   speed: number
   updatedAt: number
 }
+
+export type MultiplayerPlayerPose = 'crouching' | 'falling'
 
 export type ParcelOwnership = {
   claimedAt: number
@@ -144,3 +146,4 @@ export function sanitizeParcelWriterSessionId(value: unknown): string
 export function normalizeParcelBuildRevision(value: unknown, fallback?: number): number
 export function sanitizeMultiplayerRoomId(value: unknown): string
 export function isSpatialVoiceSignalPayload(value: unknown): value is SpatialVoiceSignalPayload
+export function isMultiplayerPlayerPose(value: unknown): value is MultiplayerPlayerPose

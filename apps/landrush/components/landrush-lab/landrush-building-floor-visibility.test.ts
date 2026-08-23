@@ -4,6 +4,7 @@ import {
   BuildingNode,
   CeilingNode,
   LevelNode,
+  RoofNode,
   SlabNode,
   WallNode,
 } from '@pascal-app/core'
@@ -11,6 +12,8 @@ import {
   findLandrushBuildingFloorContext,
   findLandrushBuildingFloorInteriorRegion,
   findLandrushBuildingFloorPlacement,
+  resolveLandrushBuildingActiveFloorCoverNodeIds,
+  resolveLandrushBuildingFloorCovers,
   resolveLandrushBuildingFloorInteriorRegions,
   resolveLandrushBuildingFloorOpacities,
   resolveLandrushBuildingFloorStacks,
@@ -164,6 +167,56 @@ describe('Landrush building floor visibility', () => {
     expect(context).toBeNull()
     expect(visibility.hiddenLevelIds).toEqual([])
     expect(new Set(visibility.visibleLevelIds)).toEqual(new Set(levels.map((level) => level.id)))
+  })
+
+  test('enters on the exact footprint and retains the building across doorway-scale boundary jitter', () => {
+    const { nodes } = createTestFloor()
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const inside = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 9.99, z: 4.5 },
+      robotWorldY: 0.1,
+      stacks,
+    })
+    const refreshedStacks = resolveLandrushBuildingFloorStacks({ ...nodes })
+    const outsideCannotEnter = findLandrushBuildingFloorContext({
+      groundY: 0,
+      horizontalExitMargin: 0.15,
+      point: { x: 10.04, z: 4.5 },
+      robotWorldY: 0.1,
+      stacks,
+    })
+    const retainedOutside = findLandrushBuildingFloorContext({
+      groundY: 0,
+      horizontalExitMargin: 0.15,
+      point: { x: 10.04, z: 4.5 },
+      previousContext: inside,
+      robotWorldY: 0.1,
+      stacks: refreshedStacks,
+    })
+    const retainedInside = findLandrushBuildingFloorContext({
+      groundY: 0,
+      horizontalExitMargin: 0.15,
+      point: { x: 9.98, z: 4.5 },
+      previousContext: retainedOutside,
+      robotWorldY: 0.1,
+      stacks,
+    })
+    const exited = findLandrushBuildingFloorContext({
+      groundY: 0,
+      horizontalExitMargin: 0.15,
+      point: { x: 10.16, z: 4.5 },
+      previousContext: retainedInside,
+      robotWorldY: 0.1,
+      stacks,
+    })
+
+    expect(inside).not.toBeNull()
+    expect(outsideCannotEnter).toBeNull()
+    expect(retainedOutside?.scopeId).toBe(inside?.scopeId)
+    expect(retainedOutside?.floor).not.toBe(inside?.floor)
+    expect(retainedInside?.scopeId).toBe(inside?.scopeId)
+    expect(exited).toBeNull()
   })
 
   test('fades only the floor reached by a parcel stair while other parcels stay visible', () => {
@@ -322,6 +375,90 @@ describe('Landrush building floor visibility', () => {
     expect(groundContext?.levelNumber).toBe(0)
     expect(groundVisibility.hiddenLevelIds).toEqual([upperLevel.id])
     expect(groundVisibility.visibleLevelIds).toContain(sharedGroundLevel.id)
+  })
+
+  test('opens the complete overhead cover of the active upper floor without hiding its contents', () => {
+    const building = BuildingNode.parse({ name: 'Furnished house' })
+    const parcelMetadata = { landrushParcelId: 'parcel-furnished' }
+    const groundLevel = LevelNode.parse({ level: 0, parentId: building.id })
+    const upperLevel = LevelNode.parse({
+      level: 1,
+      metadata: parcelMetadata,
+      parentId: building.id,
+    })
+    const corners = [
+      [0, 0],
+      [10, 0],
+      [10, 9],
+      [0, 9],
+    ] as const
+    const walls = [groundLevel, upperLevel].flatMap((level) =>
+      corners.map((start, index) =>
+        WallNode.parse({
+          end: corners[(index + 1) % corners.length],
+          height: 3,
+          metadata: parcelMetadata,
+          parentId: level.id,
+          start,
+        }),
+      ),
+    )
+    const nodes = Object.fromEntries(
+      [building, groundLevel, upperLevel, ...walls].map((node) => [node.id, node]),
+    ) as Record<string, AnyNode>
+    const upperCeiling = CeilingNode.parse({
+      metadata: { ...parcelMetadata, role: 'room-ceiling' },
+      name: 'Upper room ceiling',
+      parentId: upperLevel.id,
+      polygon: [
+        [0, 0],
+        [10, 0],
+        [10, 9],
+        [0, 9],
+      ],
+    })
+    const roof = RoofNode.parse({
+      metadata: parcelMetadata,
+      name: 'Upper roof',
+      parentId: upperLevel.id,
+    })
+    const parkedSuppressor = CeilingNode.parse({
+      height: -100,
+      metadata: {
+        ...parcelMetadata,
+        nonRendering: 'parked-below-terrain',
+      },
+      name: 'Detector suppressor',
+      parentId: upperLevel.id,
+      polygon: [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+      ],
+    })
+    nodes[upperCeiling.id] = upperCeiling
+    nodes[roof.id] = roof
+    nodes[parkedSuppressor.id] = parkedSuppressor
+
+    const stacks = resolveLandrushBuildingFloorStacks(nodes)
+    const parcelStack = stacks.find((stack) => stack.scopeId === 'parcel:parcel-furnished')
+    const covers = resolveLandrushBuildingFloorCovers(nodes, stacks)
+    const context = findLandrushBuildingFloorContext({
+      groundY: 0,
+      point: { x: 5, z: 4.5 },
+      robotWorldY: 3.2,
+      stacks,
+    })
+    const activeCoverNodeIds = resolveLandrushBuildingActiveFloorCoverNodeIds(covers, context)
+
+    expect(parcelStack?.floors.map(({ baseY }) => baseY)).toEqual([0, 3])
+    expect(context?.levelNumber).toBe(1)
+    expect(upperCeiling.height).toBeUndefined()
+    expect(activeCoverNodeIds).toEqual([upperCeiling.id, roof.id].sort())
+    expect(activeCoverNodeIds).not.toContain(upperLevel.id)
+    expect(activeCoverNodeIds).not.toContain(parkedSuppressor.id)
+    expect(resolveLandrushBuildingActiveFloorCoverNodeIds(covers, null)).toEqual([])
   })
 })
 

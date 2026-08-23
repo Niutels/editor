@@ -9,9 +9,11 @@ import {
   inspectZombieEscapeAudioFile,
   isIsoTimestamp,
   localAudioPath,
+  masterZombieEscapeOneShotAudio,
   readZombieEscapeAudioContract,
   readZombieEscapeAudioProvenance,
   validateZombieEscapeAudioInspection,
+  ZOMBIE_ESCAPE_ONE_SHOT_MASTERING,
 } from './zombie-escape-audio-pipeline.mjs'
 
 const API_URL = 'https://api.elevenlabs.io/v1/sound-generation'
@@ -65,40 +67,71 @@ else await generateElevenLabsApiArtifacts(contract)
 async function recordElevenLabsWebArtifacts(audioContract) {
   const existing = await readZombieEscapeAudioProvenance()
   const artifacts = {}
-  for (const asset of audioContract.assets) {
-    const path = localAudioPath(DEFAULT_PUBLIC_ROOT, asset.publicPath)
-    if (!(await fileExists(path))) {
-      throw new Error(`Missing ElevenLabs web artifact ${asset.publicPath}`)
+  const stagedArtifacts = []
+  const stagingRoot = await mkdtemp(resolve(DEFAULT_PUBLIC_ROOT, '.zombie-escape-audio-staging-'))
+  try {
+    for (const [assetIndex, asset] of audioContract.assets.entries()) {
+      const path = localAudioPath(DEFAULT_PUBLIC_ROOT, asset.publicPath)
+      if (!(await fileExists(path))) {
+        throw new Error(`Missing ElevenLabs web artifact ${asset.publicPath}`)
+      }
+      const inspection = await inspectZombieEscapeAudioFile(path)
+      const existingArtifact = existing?.artifacts?.[asset.publicPath]
+      const existingMatchesBytes =
+        existingArtifact?.cueId === asset.cueId &&
+        existingArtifact.variantIndex === asset.variantIndex &&
+        existingArtifact.sha256 === inspection.sha256
+      if (asset.masteringProfile && existingMatchesBytes && existingArtifact.mastering) {
+        artifacts[asset.publicPath] = {
+          ...existingArtifact,
+          mastering: {
+            ...existingArtifact.mastering,
+            profile: asset.masteringProfile,
+          },
+        }
+        continue
+      }
+
+      assertInspection(asset, inspection, 'elevenlabs-web')
+      let finalInspection = inspection
+      let mastering = null
+      if (asset.masteringProfile) {
+        const stagedPath = resolve(stagingRoot, `${String(assetIndex).padStart(2, '0')}.mp3`)
+        const result = await masterZombieEscapeOneShotAudio(path, stagedPath)
+        finalInspection = result.outputInspection
+        assertInspection(asset, finalInspection, 'elevenlabs-web')
+        mastering = createOneShotMasteringMetadata(result, generatedAt, asset.masteringProfile)
+        stagedArtifacts.push({ stagedPath, targetPath: path })
+      }
+      artifacts[asset.publicPath] = createZombieEscapeAudioArtifact({
+        asset,
+        generatedAt:
+          existingMatchesBytes && isIsoTimestamp(existingArtifact.generatedAt)
+            ? existingArtifact.generatedAt
+            : generatedAt,
+        inspection: finalInspection,
+        mastering,
+        requestId:
+          webRequestIds.get(asset.cueId) ??
+          (existingMatchesBytes ? existingArtifact.requestId : null),
+        source: 'elevenlabs-web',
+      })
     }
-    const inspection = await inspectZombieEscapeAudioFile(path)
-    assertInspection(asset, inspection, 'elevenlabs-web')
-    const existingArtifact = existing?.artifacts?.[asset.publicPath]
-    const existingMatchesBytes =
-      existingArtifact?.cueId === asset.cueId &&
-      existingArtifact.variantIndex === asset.variantIndex &&
-      existingArtifact.sha256 === inspection.sha256
-    artifacts[asset.publicPath] = createZombieEscapeAudioArtifact({
-      asset,
-      generatedAt:
-        existingMatchesBytes && isIsoTimestamp(existingArtifact.generatedAt)
-          ? existingArtifact.generatedAt
-          : generatedAt,
-      inspection,
-      requestId:
-        webRequestIds.get(asset.cueId) ??
-        (existingMatchesBytes ? existingArtifact.requestId : null),
-      source: 'elevenlabs-web',
-    })
+    const provenance = createProvenance(audioContract, artifacts)
+    if (
+      stagedArtifacts.length === 0 &&
+      existing?.catalogSha256 === audioContract.catalogSha256 &&
+      isIsoTimestamp(existing.generatedAt)
+    ) {
+      provenance.generatedAt = existing.generatedAt
+    }
+    await commitStagedApiArtifacts(stagedArtifacts, provenance, stagingRoot)
+    console.log(
+      `Recorded ${audioContract.assets.length} ElevenLabs web artifacts; mastered ${stagedArtifacts.length} one-shot variants.`,
+    )
+  } finally {
+    await rm(stagingRoot, { force: true, recursive: true })
   }
-  const provenance = createProvenance(audioContract, artifacts)
-  if (
-    existing?.catalogSha256 === audioContract.catalogSha256 &&
-    isIsoTimestamp(existing.generatedAt)
-  ) {
-    provenance.generatedAt = existing.generatedAt
-  }
-  await writeProvenance(provenance)
-  console.log(`Recorded ${audioContract.assets.length} unchanged ElevenLabs web artifacts.`)
 }
 
 async function generateElevenLabsApiArtifacts(audioContract) {
@@ -175,19 +208,34 @@ async function generateElevenLabsApiArtifacts(audioContract) {
         throw new Error(`ElevenLabs sound generation failed (${response.status}): ${errorBody}`)
       }
 
-      const stagedPath = resolve(stagingRoot, `${String(assetIndex).padStart(2, '0')}.mp3`)
-      await writeFile(stagedPath, Buffer.from(await response.arrayBuffer()))
-      const inspection = await inspectZombieEscapeAudioFile(stagedPath)
+      const rawStagedPath = resolve(stagingRoot, `${String(assetIndex).padStart(2, '0')}-raw.mp3`)
+      await writeFile(rawStagedPath, Buffer.from(await response.arrayBuffer()))
+      const inspection = await inspectZombieEscapeAudioFile(rawStagedPath)
       assertInspection(asset, inspection, 'elevenlabs-api')
+      let finalInspection = inspection
+      let finalStagedPath = rawStagedPath
+      let mastering = null
+      if (asset.masteringProfile) {
+        finalStagedPath = resolve(stagingRoot, `${String(assetIndex).padStart(2, '0')}.mp3`)
+        const result = await masterZombieEscapeOneShotAudio(rawStagedPath, finalStagedPath)
+        finalInspection = result.outputInspection
+        assertInspection(asset, finalInspection, 'elevenlabs-api')
+        mastering = createOneShotMasteringMetadata(
+          result,
+          new Date().toISOString(),
+          asset.masteringProfile,
+        )
+      }
       artifacts[asset.publicPath] = createZombieEscapeAudioArtifact({
         asset,
         generatedAt: new Date().toISOString(),
-        inspection,
+        inspection: finalInspection,
+        mastering,
         requestId: response.headers.get('request-id') ?? response.headers.get('x-request-id'),
         source: 'elevenlabs-api',
         traceId: response.headers.get('trace-id') ?? response.headers.get('x-trace-id'),
       })
-      stagedArtifacts.push({ stagedPath, targetPath })
+      stagedArtifacts.push({ stagedPath: finalStagedPath, targetPath })
     }
 
     const provenance = createProvenance(audioContract, artifacts)
@@ -240,7 +288,7 @@ async function commitStagedApiArtifacts(stagedArtifacts, provenance, stagingRoot
 
 function createProvenance(audioContract, artifacts) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     catalogVersion: audioContract.catalog.catalogVersion,
     catalogSha256: audioContract.catalogSha256,
     generatedAt,
@@ -250,6 +298,25 @@ function createProvenance(audioContract, artifacts) {
       sharedWithExplore: false,
     },
     artifacts,
+  }
+}
+
+function createOneShotMasteringMetadata(result, processedAt, profile) {
+  return {
+    algorithm: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.algorithm,
+    crestPreconditioner: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.crestPreconditioner,
+    inputIntegratedLoudnessLufs: result.inputLoudness.integratedLoudnessLufs,
+    inputSha256: result.inputInspection.sha256,
+    inputTruePeakDbfs: result.inputLoudness.truePeakDbfs,
+    normalizationTruePeakDbfs: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.normalizationTruePeakDbfs,
+    outputBitRateBps: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.outputBitRateBps,
+    outputIntegratedLoudnessLufs: result.outputLoudness.integratedLoudnessLufs,
+    outputSampleRateHz: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.outputSampleRateHz,
+    outputTruePeakDbfs: result.outputLoudness.truePeakDbfs,
+    processedAt,
+    profile,
+    targetIntegratedLoudnessLufs: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.integratedLoudnessLufs,
+    targetTruePeakDbfs: ZOMBIE_ESCAPE_ONE_SHOT_MASTERING.truePeakDbfs,
   }
 }
 

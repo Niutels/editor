@@ -3,6 +3,7 @@ import {
   detectSpacesForLevel,
   getStoredLevelHeight,
   type LevelNode,
+  resolveCeilingHeight,
   type WallNode,
 } from '@pascal-app/core'
 
@@ -65,6 +66,12 @@ export type LandrushBuildingFloorOpacity = {
   opacity: number
 }
 
+export type LandrushBuildingFloorCover = {
+  levelId: LevelNode['id']
+  nodeId: AnyNode['id']
+  scopeId: string
+}
+
 export function resolveLandrushBuildingFloorStacks(
   nodes: Record<string, AnyNode>,
 ): readonly LandrushBuildingFloorStack[] {
@@ -116,13 +123,17 @@ export function findLandrushBuildingFloorPlacement({
 
 export function findLandrushBuildingFloorContext({
   groundY,
+  horizontalExitMargin = 0,
   point,
+  previousContext = null,
   robotWorldY,
   stacks,
   verticalTolerance = 0.35,
 }: {
   groundY: number
+  horizontalExitMargin?: number
   point: LandrushBuildingFloorPoint
+  previousContext?: LandrushBuildingFloorContext | null
   robotWorldY: number
   stacks: readonly LandrushBuildingFloorStack[]
   verticalTolerance?: number
@@ -163,10 +174,36 @@ export function findLandrushBuildingFloorContext({
       first.verticalDistance - second.verticalDistance ||
       first.scopeId.localeCompare(second.scopeId),
   )[0]
-  if (!best) return null
+  if (best) {
+    const { verticalDistance: _verticalDistance, ...context } = best
+    return context
+  }
 
-  const { verticalDistance: _verticalDistance, ...context } = best
-  return context
+  const exitMargin = Math.max(0, horizontalExitMargin)
+  if (!previousContext || exitMargin <= 0) return null
+  const previousStack = stacks.find((stack) => stack.scopeId === previousContext.scopeId)
+  const previousFloor = previousStack?.floors.find(
+    (floor) => floor.level === previousContext.levelNumber,
+  )
+  if (!previousStack || !previousFloor) return null
+
+  const minimumY = groundY + previousFloor.baseY - verticalTolerance
+  const maximumY = groundY + previousFloor.baseY + previousFloor.height + verticalTolerance
+  if (robotWorldY < minimumY || robotWorldY > maximumY) return null
+
+  const region = previousFloor.interiorRegions.find((candidate) =>
+    pointWithinFloorRegionExitMargin(point, candidate, exitMargin),
+  )
+  if (!region) return null
+
+  return {
+    buildingId: previousStack.buildingId,
+    floor: previousFloor,
+    levelId: previousFloor.primaryLevelId,
+    levelNumber: previousFloor.level,
+    region,
+    scopeId: previousStack.scopeId,
+  }
 }
 
 export function resolveLandrushBuildingFloorVisibility(
@@ -216,6 +253,65 @@ export function resolveLandrushBuildingFloorOpacities(
   }
 
   return [...opacityByLevelId].map(([levelId, opacity]) => ({ levelId, opacity }))
+}
+
+export function resolveLandrushBuildingFloorCovers(
+  nodes: Record<string, AnyNode>,
+  stacks: readonly LandrushBuildingFloorStack[],
+): readonly LandrushBuildingFloorCover[] {
+  const covers = new Map<string, LandrushBuildingFloorCover>()
+  const nodesByParentId = new Map<string, AnyNode[]>()
+  for (const node of Object.values(nodes)) {
+    if (!node.parentId) continue
+    const siblings = nodesByParentId.get(node.parentId)
+    if (siblings) siblings.push(node)
+    else nodesByParentId.set(node.parentId, [node])
+  }
+
+  for (const stack of stacks) {
+    for (const floor of stack.floors) {
+      for (const levelId of floor.levelIds) {
+        const level = nodes[levelId]
+        if (level?.type !== 'level') continue
+
+        for (const node of nodesByParentId.get(levelId) ?? []) {
+          if (
+            node.parentId !== levelId ||
+            node.visible === false ||
+            (node.type !== 'ceiling' && node.type !== 'roof') ||
+            !isNodeInLevelScope(node, level, stack.scopeId) ||
+            !isRenderedOverheadCover(node, nodes)
+          ) {
+            continue
+          }
+
+          covers.set(`${stack.scopeId}:${node.id}`, {
+            levelId,
+            nodeId: node.id,
+            scopeId: stack.scopeId,
+          })
+        }
+      }
+    }
+  }
+
+  return [...covers.values()].sort(
+    (first, second) =>
+      first.scopeId.localeCompare(second.scopeId) ||
+      first.levelId.localeCompare(second.levelId) ||
+      first.nodeId.localeCompare(second.nodeId),
+  )
+}
+
+export function resolveLandrushBuildingActiveFloorCoverNodeIds(
+  covers: readonly LandrushBuildingFloorCover[],
+  context: LandrushBuildingFloorContext | null,
+): readonly AnyNode['id'][] {
+  if (!context) return []
+  const activeLevelIds = new Set(context.floor.levelIds)
+  return covers
+    .filter((cover) => cover.scopeId === context.scopeId && activeLevelIds.has(cover.levelId))
+    .map((cover) => cover.nodeId)
 }
 
 export function resolveLandrushBuildingFloorInteriorRegions(
@@ -337,6 +433,63 @@ function pointOnFloorSegment(
   )
 }
 
+function pointWithinFloorRegionExitMargin(
+  point: LandrushBuildingFloorPoint,
+  region: LandrushBuildingFloorInteriorRegion,
+  exitMargin: number,
+) {
+  const withinOuterBoundary =
+    pointInFloorPolygon(point, region.polygon) ||
+    distanceToFloorPolygonBoundary(point, region.polygon) <= exitMargin
+  if (!withinOuterBoundary) return false
+
+  for (const hole of region.holes) {
+    if (
+      pointInFloorPolygon(point, hole) &&
+      distanceToFloorPolygonBoundary(point, hole) > exitMargin
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function distanceToFloorPolygonBoundary(
+  point: LandrushBuildingFloorPoint,
+  polygon: readonly (readonly [number, number])[],
+) {
+  let minimumDistance = Number.POSITIVE_INFINITY
+  for (
+    let index = 0, previousIndex = polygon.length - 1;
+    index < polygon.length;
+    previousIndex = index, index += 1
+  ) {
+    const current = polygon[index]
+    const previous = polygon[previousIndex]
+    if (!(current && previous)) continue
+    minimumDistance = Math.min(minimumDistance, distanceToFloorSegment(point, previous, current))
+  }
+  return minimumDistance
+}
+
+function distanceToFloorSegment(
+  point: LandrushBuildingFloorPoint,
+  start: readonly [number, number],
+  end: readonly [number, number],
+) {
+  const dx = end[0] - start[0]
+  const dz = end[1] - start[1]
+  const lengthSquared = dx * dx + dz * dz
+  if (lengthSquared <= Number.EPSILON) {
+    return Math.hypot(point.x - start[0], point.z - start[1])
+  }
+  const projection = Math.min(
+    1,
+    Math.max(0, ((point.x - start[0]) * dx + (point.z - start[1]) * dz) / lengthSquared),
+  )
+  return Math.hypot(point.x - (start[0] + dx * projection), point.z - (start[1] + dz * projection))
+}
+
 function clampFloorOpacity(value: number) {
   return Math.min(1, Math.max(0, value))
 }
@@ -433,6 +586,18 @@ function isNodeInLevelScope(node: AnyNode, level: LevelNode, scopeId?: string) {
     return nodeParcelId === null || nodeParcelId === scopeParcelId
   }
   return nodeParcelId === scopeParcelId
+}
+
+function isRenderedOverheadCover(
+  node: Extract<AnyNode, { type: 'ceiling' | 'roof' }>,
+  nodes: Record<string, AnyNode>,
+) {
+  const metadata =
+    node.metadata && typeof node.metadata === 'object' && !Array.isArray(node.metadata)
+      ? (node.metadata as Record<string, unknown>)
+      : null
+  if (metadata?.nonRendering) return false
+  return node.type === 'roof' || resolveCeilingHeight(node, nodes) > 0
 }
 
 function parcelIdForScope(scopeId: string) {

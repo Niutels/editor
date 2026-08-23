@@ -16,6 +16,40 @@ export const ZOMBIE_ESCAPE_PLAYER_HEIGHT = 1.82
 export const ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS =
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_CAPSULE_RADIUS_METERS
 
+// Replacement spawning uses the authored maximum envelope instead of live viewport state so
+// multiplayer simulation stays deterministic while spawned zombies remain fully offscreen.
+export const ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE = {
+  azimuthRadians: (34 * Math.PI) / 180,
+  distanceMeters: 18,
+  elevationRadians: (68 * Math.PI) / 180,
+  farMeters: 90,
+  followResponse: 12,
+  halfHeightMeters: 6.4,
+  maximumAspectRatio: 21 / 9,
+  nearMeters: 0.05,
+  replacementSpawnMarginMeters: 1,
+  targetHeightMeters: 0.72,
+  zoom: 1,
+} as const
+
+export function resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(aspectRatio: number) {
+  const aspect = Number.isFinite(aspectRatio) ? Math.max(0.1, aspectRatio) : 1
+  const camera = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+  const horizontalHalfWidth = camera.halfHeightMeters * Math.min(aspect, camera.maximumAspectRatio)
+  const verticalHalfHeight = horizontalHalfWidth / aspect
+  const verticalGroundReach =
+    verticalHalfHeight / Math.sin(camera.elevationRadians) +
+    camera.targetHeightMeters / Math.tan(camera.elevationRadians)
+  return Math.hypot(horizontalHalfWidth, verticalGroundReach)
+}
+
+export const ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS =
+  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(
+    ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE.maximumAspectRatio,
+  ) +
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS +
+  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE.replacementSpawnMarginMeters
+
 export const ZOMBIE_ESCAPE_ARENA = {
   radius: 27,
   playRadius: 23.6,
@@ -54,7 +88,10 @@ export const ZOMBIE_ESCAPE_SIMULATION = {
   zombieNavigationRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
   zombieObstacleAttackCooldownSeconds: 0.72,
   zombieObstacleAttackReachMeters: 0.9,
+  zombieObstacleAttackReleaseMeters: 1.1,
+  zombiePlayerAttackReachMeters: 1.05,
   zombieRadius: 0.48,
+  zombieTurnSpeedRadiansPerSecond: Math.PI * 3,
 } as const
 
 export const ZOMBIE_ESCAPE_MELEE = {
@@ -117,11 +154,11 @@ export function createZombieEscapeWeaponPickupGrassBlockers(
 }
 
 export const ZOMBIE_ESCAPE_WEAPON_PROFILES = [
-  { ammoGranted: 15, projectileDamage: 36, purchaseCost: 0, shotIntervalSeconds: 0.19 },
-  { ammoGranted: 42, projectileDamage: 24, purchaseCost: 5, shotIntervalSeconds: 0.095 },
-  { ammoGranted: 18, projectileDamage: 58, purchaseCost: 5, shotIntervalSeconds: 0.42 },
-  { ammoGranted: 64, projectileDamage: 20, purchaseCost: 5, shotIntervalSeconds: 0.072 },
-  { ammoGranted: 10, projectileDamage: 92, purchaseCost: 5, shotIntervalSeconds: 0.68 },
+  { ammoGranted: 60, projectileDamage: 36, purchaseCost: 0, shotIntervalSeconds: 0.19 },
+  { ammoGranted: 168, projectileDamage: 24, purchaseCost: 5, shotIntervalSeconds: 0.095 },
+  { ammoGranted: 72, projectileDamage: 58, purchaseCost: 5, shotIntervalSeconds: 0.42 },
+  { ammoGranted: 256, projectileDamage: 20, purchaseCost: 5, shotIntervalSeconds: 0.072 },
+  { ammoGranted: 40, projectileDamage: 92, purchaseCost: 5, shotIntervalSeconds: 0.68 },
 ] as const
 
 if (

@@ -156,7 +156,7 @@ export const ZOMBIE_ESCAPE_WEAPON_CATALOG = [
       texturePrompt:
         'Stylized hand-painted PBR: warm orange ceramic, teal rubber grip, brushed brass accents, dark charcoal seams, subtle edge wear, no baked lighting, no labels, clean readable game asset.',
     },
-    muzzleAnchorMeters: [0, 0.035, 0.17],
+    muzzleAnchorMeters: [0.00025, 0.05445, 0.17],
     wield: 'one-hand',
   }),
   defineWeapon({
@@ -179,7 +179,7 @@ export const ZOMBIE_ESCAPE_WEAPON_CATALOG = [
       texturePrompt:
         'Stylized hand-painted PBR: coral red receiver, aqua cooling fins, matte charcoal stock, pale ivory details, restrained scratches, no baked lighting, no text, crisp material separation.',
     },
-    muzzleAnchorMeters: [0, 0.035, 0.39],
+    muzzleAnchorMeters: [-0.0001, 0.05018, 0.39],
     wield: 'two-hand',
   }),
   defineWeapon({
@@ -202,7 +202,7 @@ export const ZOMBIE_ESCAPE_WEAPON_CATALOG = [
       texturePrompt:
         'Stylized hand-painted PBR: honey driftwood stock and pump, desaturated marine steel, turquoise tape wraps, brass fasteners, mild salt wear, no baked lighting, no text.',
     },
-    muzzleAnchorMeters: [0, 0.045, 0.41],
+    muzzleAnchorMeters: [-0.00305, 0.05746, 0.41],
     wield: 'two-hand',
   }),
   defineWeapon({
@@ -225,7 +225,7 @@ export const ZOMBIE_ESCAPE_WEAPON_CATALOG = [
       texturePrompt:
         'Stylized hand-painted PBR: navy painted metal, copper coils, cyan emissive channel, matte black grip, subtle rain wear, no baked lighting, no lettering, clean bold color blocks.',
     },
-    muzzleAnchorMeters: [0, 0.035, 0.35],
+    muzzleAnchorMeters: [-0.00068, 0.0931, 0.35],
     wield: 'two-hand',
   }),
   defineWeapon({
@@ -248,7 +248,7 @@ export const ZOMBIE_ESCAPE_WEAPON_CATALOG = [
       texturePrompt:
         'Stylized hand-painted PBR: warm white shell, rescue red bands, navy rubber grips, brushed steel muzzle, tiny amber indicator glow, no baked lighting, no text, minimal wear.',
     },
-    muzzleAnchorMeters: [0, 0.06, 0.47],
+    muzzleAnchorMeters: [-0.00046, 0.05835, 0.47],
     wield: 'two-hand',
   }),
 ] as const

@@ -359,15 +359,13 @@ function DisplayMenu() {
   return (
     <DropdownMenu>
       <ToolbarTooltip label="Display settings">
-        <DropdownMenuTrigger asChild>
-          <button
-            aria-label="Display settings"
-            className={cn(TOOLBAR_BTN, 'w-auto gap-1.5 px-2.5 text-foreground/90')}
-            type="button"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
-            <span className="font-medium text-xs">Display</span>
-          </button>
+        <DropdownMenuTrigger
+          aria-label="Display settings"
+          className={cn(TOOLBAR_BTN, 'w-auto gap-1.5 px-2.5 text-foreground/90')}
+          type="button"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-medium text-xs">Display</span>
         </DropdownMenuTrigger>
       </ToolbarTooltip>
       <DropdownMenuContent

@@ -12,16 +12,14 @@ export function advanceLandrushRobotRevealObjectTransitions<T>({
   deltaSeconds,
   epsilon,
   fadeInDelaySeconds,
-  fadeInResponse,
-  fadeOutResponse,
+  response,
   states,
 }: {
   activeObjects: ReadonlySet<T>
   deltaSeconds: number
   epsilon: number
   fadeInDelaySeconds: number
-  fadeInResponse: number
-  fadeOutResponse: number
+  response: number
   states: Map<T, LandrushRobotRevealObjectTransitionState>
 }) {
   const safeDeltaSeconds = Math.min(Math.max(deltaSeconds, 0), 0.05)
@@ -54,7 +52,7 @@ export function advanceLandrushRobotRevealObjectTransitions<T>({
     state.amount = advanceLandrushRobotScreenRevealAmount({
       amount: state.amount,
       deltaSeconds: transitionDeltaSeconds,
-      response: active ? fadeInResponse : fadeOutResponse,
+      response,
       target,
     })
     if (Math.abs(target - state.amount) <= Math.max(0, epsilon)) state.amount = target
@@ -86,6 +84,10 @@ export function readLandrushRobotRevealObjectAmount(userData: Record<string, unk
   return typeof amount === 'number' && Number.isFinite(amount)
     ? Math.min(1, Math.max(0, amount))
     : 0
+}
+
+export function isLandrushRobotRevealObjectPresented(amount: number, epsilon: number) {
+  return Number.isFinite(amount) && amount > Math.max(0, epsilon)
 }
 
 export function shouldKeepLandrushRobotRevealSlabOpaque({

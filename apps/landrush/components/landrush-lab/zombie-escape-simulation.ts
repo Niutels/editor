@@ -10,13 +10,19 @@ import {
   createZombieEscapeCollisionWorld,
   createZombieEscapeCollisionWorldWithoutObjects,
   createZombieEscapeFlowField,
+  createZombieEscapeNavigationMoveResult,
   createZombieEscapeReachableSpawn,
+  isZombieEscapeCollisionHitBreakable,
+  isZombieEscapeCollisionObjectBreakable,
+  isZombieEscapeCollisionObjectBreakableAtElevation,
   moveZombieEscapeCircleWithSlide,
+  moveZombieEscapeNavigationAgent,
   resolveZombieEscapeCollisionHitObjectId,
   resolveZombieEscapeFlowDirection,
+  resolveZombieEscapeNavigationTargetElevation,
   resolveZombieEscapeReachableSpawn,
   setZombieEscapeFlowFieldWorld,
-  sweepZombieEscapeCircleAgainstWorldInVerticalRange,
+  sweepZombieEscapeProjectileAgainstWorld,
   updateZombieEscapeFlowTarget,
   type ZombieEscapeCircleMoveResult,
   type ZombieEscapeCollisionCircleSource,
@@ -24,6 +30,7 @@ import {
   type ZombieEscapeCollisionWorld,
   type ZombieEscapeFlowField,
   type ZombieEscapeFlowSample,
+  type ZombieEscapeNavigationMoveResult,
   zombieEscapeSegmentIsClearInVerticalRange,
 } from './zombie-escape-collision-world'
 import {
@@ -39,11 +46,11 @@ import {
   ZOMBIE_ESCAPE_DEBUG_MODES,
   ZOMBIE_ESCAPE_MELEE,
   ZOMBIE_ESCAPE_PLAYER_HEIGHT,
+  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
   ZOMBIE_ESCAPE_SEED,
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_WEAPON_PROFILES,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-  ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT,
   type ZombieEscapeCameraBookmark,
   type ZombieEscapeDebugMode,
 } from './zombie-escape-config'
@@ -78,11 +85,21 @@ import {
   type ZombieEscapeWeaponPickupPlacement,
 } from './zombie-escape-weapon-placement'
 import type { ZombieEscapeArenaData } from './zombie-escape-world'
+import {
+  createZombieEscapeGaitByPoolSlot,
+  createZombieEscapeVariantByPoolSlot,
+  ZOMBIE_ESCAPE_ZOMBIE_GAIT,
+} from './zombie-escape-zombie-roster'
 
 export type ZombieEscapeGameStatus = 'lost' | 'playing' | 'won'
 export type ZombieEscapeGamePhase = 'build' | 'night'
 export type ZombieEscapeWaveState = 'active' | 'escape' | 'intermission'
 export type ZombieEscapePurchaseFeedback = 'insufficient-funds' | 'purchased' | null
+
+const ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS = 21.4
+const ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MAXIMUM_RADIUS_METERS = 22.8
+const ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS = 8
+const ZOMBIE_ESCAPE_MUZZLE_VALIDATION_MAXIMUM_DISTANCE_METERS = 2.25
 
 export type ZombieEscapePickupPrompt = Readonly<{
   affordable: boolean
@@ -109,6 +126,16 @@ export const ZOMBIE_ESCAPE_SHOT_IMPACT_KIND = {
 
 export type ZombieEscapeShotImpactKind =
   (typeof ZOMBIE_ESCAPE_SHOT_IMPACT_KIND)[keyof typeof ZOMBIE_ESCAPE_SHOT_IMPACT_KIND]
+
+export const ZOMBIE_ESCAPE_ZOMBIE_INTENT = {
+  attackObstacle: 2,
+  attackPlayer: 1,
+  blocked: 3,
+  chase: 0,
+} as const
+
+export type ZombieEscapeZombieIntent =
+  (typeof ZOMBIE_ESCAPE_ZOMBIE_INTENT)[keyof typeof ZOMBIE_ESCAPE_ZOMBIE_INTENT]
 
 export type ZombieEscapeMuzzlePose = Readonly<{
   directionX: number
@@ -199,16 +226,23 @@ type ZombieEscapeVerticalRange = {
 
 export type ZombieEscapeZombiePool = {
   attackCooldown: Float32Array
+  attackFocusX: Float32Array
+  attackFocusZ: Float32Array
+  attackTargetObjectId: Array<string | null>
   deathPresentationSeconds: Float32Array
   health: Float32Array
+  gait: Uint8Array
   heading: Float32Array
   hitFlash: Float32Array
   hitImpulseX: Float32Array
   hitImpulseY: Float32Array
   hitImpulseZ: Float32Array
   hitReaction: Float32Array
+  intent: Uint8Array
   locomotionBlend: Float32Array
   locomotionPhase: Float32Array
+  navigationConnector: Int16Array
+  navigationConnectorTargetEnd: Uint8Array
   pool: ZombieEscapeFixedPool
   runBlend: Float32Array
   speedScale: Float32Array
@@ -216,6 +250,7 @@ export type ZombieEscapeZombiePool = {
   vx: Float32Array
   vz: Float32Array
   x: Float32Array
+  y: Float32Array
   z: Float32Array
 }
 
@@ -227,6 +262,8 @@ export type ZombieEscapeSimulation = {
   collisionSourceWorld: ZombieEscapeCollisionWorld
   collisionWorld: ZombieEscapeCollisionWorld
   collisionWorldGeneration: number
+  combatCollisionSourceWorld: ZombieEscapeCollisionWorld
+  combatCollisionWorld: ZombieEscapeCollisionWorld
   combatVerticalRangeScratch: ZombieEscapeVerticalRange
   debugMode: ZombieEscapeDebugMode
   destroyedObstacleIds: Set<string>
@@ -242,7 +279,10 @@ export type ZombieEscapeSimulation = {
   money: number
   nearbyPickupIndex: number
   navigationField: ZombieEscapeFlowField
+  navigationHitScratch: ZombieEscapeCollisionHit
+  navigationMoveScratch: ZombieEscapeNavigationMoveResult
   navigationSampleScratch: ZombieEscapeFlowSample
+  navigationTargetY: number
   night: number
   obstacleHitCounts: Map<string, number>
   obstacleRevision: number
@@ -251,16 +291,20 @@ export type ZombieEscapeSimulation = {
   phaseSecondsRemaining: number
   player: ZombieEscapePlayerState
   presentationPoseScratch: ZombieEscapePresentationPose
+  projectileHitCandidateScratch: ZombieEscapeCollisionHit
   projectiles: ZombieEscapeShotPhaseMetricView
   purchaseFeedback: ZombieEscapePurchaseFeedback
   purchasedWeapons: Uint8Array
   random: ZombieEscapeRandomState
   reachableSpawnScratch: ReturnType<typeof createZombieEscapeReachableSpawn>
+  replacementSpawnRemaining: number
   seed: number
   shots: ZombieEscapeShotEventPool
   shotsFired: number
   status: ZombieEscapeGameStatus
   tracers: ZombieEscapeShotPhaseMetricView
+  variantByPoolSlot: Uint8Array
+  gaitByPoolSlot: Uint8Array
   wave: number
   waveIntermissionSeconds: number
   waveSpawnRemaining: number
@@ -334,6 +378,8 @@ export function createZombieEscapeSimulation(
     collisionSourceWorld: collisionWorld,
     collisionWorld,
     collisionWorldGeneration: 1,
+    combatCollisionSourceWorld: collisionWorld,
+    combatCollisionWorld: collisionWorld,
     combatVerticalRangeScratch: { maximumY: 0, minimumY: 0 },
     debugMode: 'final',
     destroyedObstacleIds: new Set(),
@@ -349,7 +395,17 @@ export function createZombieEscapeSimulation(
     money: 0,
     nearbyPickupIndex: -1,
     navigationField: createZombieEscapeFlowField(collisionWorld),
-    navigationSampleScratch: { reachable: false, x: 0, z: 0 },
+    navigationHitScratch: createZombieEscapeCollisionHit(),
+    navigationMoveScratch: createZombieEscapeNavigationMoveResult(),
+    navigationSampleScratch: {
+      blockingDistance: Number.POSITIVE_INFINITY,
+      blockingX: 0,
+      blockingZ: 0,
+      reachable: false,
+      x: 0,
+      z: 0,
+    },
+    navigationTargetY: 0,
     night: 0,
     obstacleHitCounts: new Map(),
     obstacleRevision: 0,
@@ -358,16 +414,20 @@ export function createZombieEscapeSimulation(
     phaseSecondsRemaining: ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds,
     player: createPlayerState(arena),
     presentationPoseScratch: createZombieEscapePresentationPose(),
+    projectileHitCandidateScratch: createZombieEscapeCollisionHit(),
     projectiles: createShotPhaseMetricView(shots, ZOMBIE_ESCAPE_SHOT_PHASE.travel),
     purchaseFeedback: null,
     purchasedWeapons,
     random: createZombieEscapeRandomState(seed),
     reachableSpawnScratch: createZombieEscapeReachableSpawn(),
+    replacementSpawnRemaining: 0,
     seed,
     shots,
     shotsFired: 0,
     status: 'playing',
     tracers: createShotPhaseMetricView(shots, ZOMBIE_ESCAPE_SHOT_PHASE.inactive),
+    gaitByPoolSlot: createZombieEscapeGaitByPoolSlot(seed),
+    variantByPoolSlot: createZombieEscapeVariantByPoolSlot(seed),
     wave: 1,
     waveIntermissionSeconds: 0,
     waveSpawnRemaining: 0,
@@ -394,18 +454,16 @@ export function resetZombieEscapeSimulation(
   state.lastShotSlot = -1
   state.money = 0
   state.nearbyPickupIndex = -1
+  state.navigationTargetY = 0
   state.night = 0
-  const hadObstacleDamage = state.destroyedObstacleIds.size > 0 || state.obstacleHitCounts.size > 0
-  state.destroyedObstacleIds.clear()
-  state.obstacleHitCounts.clear()
-  if (hadObstacleDamage) state.obstacleRevision += 1
-  applyZombieEscapeEffectiveCollisionWorld(state)
+  restoreZombieEscapeObstacleState(state)
   state.paused = false
   state.phase = 'build'
   state.phaseSecondsRemaining = ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds
   state.purchaseFeedback = null
   state.purchasedWeapons.fill(0)
   state.purchasedWeapons[0] = 1
+  state.replacementSpawnRemaining = 0
   state.player.ammo = ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted
   state.player.aimAngle = Math.PI
   state.player.health = 100
@@ -459,9 +517,11 @@ export function setZombieEscapeExternalPlayerPose(
 
 export function setZombieEscapeCollisionWorld(
   state: ZombieEscapeSimulation,
-  collisionWorld: ZombieEscapeCollisionWorld,
+  navigationWorld: ZombieEscapeCollisionWorld,
+  combatWorld: ZombieEscapeCollisionWorld = navigationWorld,
 ) {
-  state.collisionSourceWorld = collisionWorld
+  state.collisionSourceWorld = navigationWorld
+  state.combatCollisionSourceWorld = combatWorld
   return applyZombieEscapeEffectiveCollisionWorld(state)
 }
 
@@ -538,6 +598,25 @@ export function stepZombieEscapeSimulation(
   deltaSeconds: number,
   arena: ZombieEscapeArenaData,
 ) {
+  stepZombieEscapeSimulationFrame(state, input, deltaSeconds, arena, true)
+}
+
+export function stepZombieEscapeSimulationPhysics(
+  state: ZombieEscapeSimulation,
+  input: ZombieEscapeControlState,
+  deltaSeconds: number,
+  arena: ZombieEscapeArenaData,
+) {
+  stepZombieEscapeSimulationFrame(state, input, deltaSeconds, arena, false)
+}
+
+function stepZombieEscapeSimulationFrame(
+  state: ZombieEscapeSimulation,
+  input: ZombieEscapeControlState,
+  deltaSeconds: number,
+  arena: ZombieEscapeArenaData,
+  advancePhaseClock: boolean,
+) {
   if (state.paused || state.status !== 'playing') return
   const delta = Math.max(
     0,
@@ -545,7 +624,7 @@ export function stepZombieEscapeSimulation(
   )
   if (delta <= 0) return
   state.elapsedSeconds += delta
-  advanceZombieEscapePhase(state, delta)
+  if (advancePhaseClock) advanceZombieEscapePhaseClock(state, delta)
   updatePlayer(state, input, delta)
   if (state.phase === 'night') {
     updateShots(state, delta)
@@ -574,10 +653,12 @@ export function spawnZombieEscapeZombie(
   const zombies = state.zombies
   const slot = acquireZombieEscapePoolSlot(zombies.pool)
   zombies.x[slot] = x
+  zombies.y[slot] = 0
   zombies.z[slot] = z
   zombies.vx[slot] = 0
   zombies.vz[slot] = 0
   zombies.health[slot] = health
+  zombies.gait[slot] = state.gaitByPoolSlot[slot]!
   zombies.heading[slot] = Math.atan2(state.player.x - x, state.player.z - z)
   zombies.hitFlash[slot] = 0
   zombies.hitImpulseX[slot] = 0
@@ -585,14 +666,18 @@ export function spawnZombieEscapeZombie(
   zombies.hitImpulseZ[slot] = 0
   zombies.hitReaction[slot] = 0
   zombies.locomotionBlend[slot] = 0
-  zombies.runBlend[slot] = 0
+  zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase
+  zombies.runBlend[slot] = zombies.gait[slot] === ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner ? 1 : 0
   zombies.locomotionPhase[slot] = nextZombieEscapeRandom(state.random) * Math.PI * 2
+  zombies.navigationConnector[slot] = -1
+  zombies.navigationConnectorTargetEnd[slot] = 0
   zombies.attackCooldown[slot] = zombieEscapeRandomRange(state.random, 0.1, 0.6)
+  zombies.attackFocusX[slot] = x
+  zombies.attackFocusZ[slot] = z
+  zombies.attackTargetObjectId[slot] = null
   zombies.deathPresentationSeconds[slot] = 0
   zombies.speedScale[slot] = zombieEscapeRandomRange(state.random, 0.9, 1.12)
-  zombies.variant[slot] = Math.floor(
-    nextZombieEscapeRandom(state.random) * ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT,
-  )
+  zombies.variant[slot] = state.variantByPoolSlot[slot]!
   return slot
 }
 
@@ -684,7 +769,8 @@ export function createZombieEscapeHudSnapshot(
     triangles,
     night: state.night,
     wave: state.wave,
-    waveRemaining: state.waveSpawnRemaining + state.zombies.pool.activeCount,
+    waveRemaining:
+      state.waveSpawnRemaining + state.replacementSpawnRemaining + state.zombies.pool.activeCount,
     waveState: state.waveState,
     weaponIndex: state.player.weaponIndex,
     zombies: state.zombies.pool.activeCount,
@@ -793,22 +879,11 @@ function spawnShot(state: ZombieEscapeSimulation, damage: number) {
   shots.hitNormalY[slot] = 0
   shots.hitNormalZ[slot] = 0
   shots.hitWorldGeneration[slot] = state.collisionWorldGeneration
-  shots.hitX[slot] = player.muzzleX
-  shots.hitY[slot] = player.muzzleY
-  shots.hitZ[slot] = player.muzzleZ
   shots.impactAge[slot] = 0
   shots.impactKind[slot] = ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.none
-  shots.originX[slot] = player.muzzleX
-  shots.originY[slot] = player.muzzleY
-  shots.originZ[slot] = player.muzzleZ
   shots.phase[slot] = ZOMBIE_ESCAPE_SHOT_PHASE.travel
-  shots.previousX[slot] = player.muzzleX
-  shots.previousY[slot] = player.muzzleY
-  shots.previousZ[slot] = player.muzzleZ
   shots.travelAge[slot] = 0
-  shots.x[slot] = player.muzzleX
-  shots.y[slot] = player.muzzleY
-  shots.z[slot] = player.muzzleZ
+  initializeZombieEscapeShotLaunch(state, slot)
   state.lastShotGeneration = shots.pool.generation[slot] ?? 0
   state.lastShotSlot = slot
   state.player.ammo = Math.max(0, state.player.ammo - 1)
@@ -821,6 +896,87 @@ function spawnShot(state: ZombieEscapeSimulation, damage: number) {
     player.muzzleZ,
     player.weaponIndex,
   )
+  if (shots.phase[slot] === ZOMBIE_ESCAPE_SHOT_PHASE.impact) {
+    emitZombieEscapeAudioEvent(
+      state.audioEvents,
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.environmentImpact,
+      shots.hitX[slot]!,
+      shots.hitY[slot]!,
+      shots.hitZ[slot]!,
+    )
+  }
+}
+
+function initializeZombieEscapeShotLaunch(state: ZombieEscapeSimulation, slot: number) {
+  const shots = state.shots
+  const player = state.player
+  const anchorX = player.x
+  const anchorY = player.y + ZOMBIE_ESCAPE_SIMULATION.defaultMuzzleHeight
+  const anchorZ = player.z
+  const muzzleOffsetX = player.muzzleX - anchorX
+  const muzzleOffsetY = player.muzzleY - anchorY
+  const muzzleOffsetZ = player.muzzleZ - anchorZ
+  const muzzleDistance = Math.hypot(muzzleOffsetX, muzzleOffsetY, muzzleOffsetZ)
+  const validatesMuzzle =
+    muzzleDistance > 0.000_001 &&
+    muzzleDistance <= ZOMBIE_ESCAPE_MUZZLE_VALIDATION_MAXIMUM_DISTANCE_METERS
+
+  if (validatesMuzzle) {
+    sweepZombieEscapeProjectileAgainstWorld(
+      state.combatCollisionWorld,
+      anchorX,
+      anchorY,
+      anchorZ,
+      muzzleOffsetX,
+      muzzleOffsetY,
+      muzzleOffsetZ,
+      ZOMBIE_ESCAPE_SIMULATION.projectileRadius,
+      state.collisionHitScratch,
+      state.projectileHitCandidateScratch,
+    )
+  }
+
+  if (validatesMuzzle && state.collisionHitScratch.colliderKind !== 'none') {
+    const amount = Math.min(1, Math.max(0, state.collisionHitScratch.time))
+    const hitCenterX = anchorX + muzzleOffsetX * amount
+    const hitCenterY = anchorY + muzzleOffsetY * amount
+    const hitCenterZ = anchorZ + muzzleOffsetZ * amount
+    const normalX = state.collisionHitScratch.normalX
+    const normalY = state.collisionHitScratch.normalY
+    const normalZ = state.collisionHitScratch.normalZ
+    shots.hitColliderIndex[slot] = state.collisionHitScratch.colliderIndex
+    shots.hitNormalX[slot] = normalX
+    shots.hitNormalY[slot] = normalY
+    shots.hitNormalZ[slot] = normalZ
+    shots.hitX[slot] = hitCenterX - normalX * ZOMBIE_ESCAPE_SIMULATION.projectileRadius
+    shots.hitY[slot] = hitCenterY - normalY * ZOMBIE_ESCAPE_SIMULATION.projectileRadius
+    shots.hitZ[slot] = hitCenterZ - normalZ * ZOMBIE_ESCAPE_SIMULATION.projectileRadius
+    shots.impactKind[slot] = ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment
+    shots.phase[slot] = ZOMBIE_ESCAPE_SHOT_PHASE.impact
+    shots.originX[slot] = anchorX
+    shots.originY[slot] = anchorY
+    shots.originZ[slot] = anchorZ
+    shots.previousX[slot] = anchorX
+    shots.previousY[slot] = anchorY
+    shots.previousZ[slot] = anchorZ
+    shots.x[slot] = hitCenterX
+    shots.y[slot] = hitCenterY
+    shots.z[slot] = hitCenterZ
+    return
+  }
+
+  shots.hitX[slot] = player.muzzleX
+  shots.hitY[slot] = player.muzzleY
+  shots.hitZ[slot] = player.muzzleZ
+  shots.originX[slot] = player.muzzleX
+  shots.originY[slot] = player.muzzleY
+  shots.originZ[slot] = player.muzzleZ
+  shots.previousX[slot] = player.muzzleX
+  shots.previousY[slot] = player.muzzleY
+  shots.previousZ[slot] = player.muzzleZ
+  shots.x[slot] = player.muzzleX
+  shots.y[slot] = player.muzzleY
+  shots.z[slot] = player.muzzleZ
 }
 
 function updateShots(state: ZombieEscapeSimulation, delta: number) {
@@ -868,22 +1024,24 @@ function updateTravelingShot(state: ZombieEscapeSimulation, slot: number, delta:
   let hitNormalY = 0
   let hitNormalZ = 0
 
-  sweepZombieEscapeCircleAgainstWorldInVerticalRange(
-    state.collisionWorld,
+  sweepZombieEscapeProjectileAgainstWorld(
+    state.combatCollisionWorld,
     previousX,
+    previousY,
     previousZ,
     nextX - previousX,
+    nextY - previousY,
     nextZ - previousZ,
     ZOMBIE_ESCAPE_SIMULATION.projectileRadius,
-    Math.min(previousY, nextY) - ZOMBIE_ESCAPE_SIMULATION.projectileRadius,
-    Math.max(previousY, nextY) + ZOMBIE_ESCAPE_SIMULATION.projectileRadius,
     state.collisionHitScratch,
+    state.projectileHitCandidateScratch,
   )
   if (state.collisionHitScratch.colliderKind !== 'none') {
     hitAmount = state.collisionHitScratch.time
     impactKind = ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment
     hitColliderIndex = state.collisionHitScratch.colliderIndex
     hitNormalX = state.collisionHitScratch.normalX
+    hitNormalY = state.collisionHitScratch.normalY
     hitNormalZ = state.collisionHitScratch.normalZ
   }
 
@@ -902,8 +1060,10 @@ function updateTravelingShot(state: ZombieEscapeSimulation, slot: number, delta:
       nextZ,
       zombies.x[zombie]!,
       zombies.z[zombie]!,
-      zombieCatalogEntry.capsule.radiusMeters,
-      zombieCatalogEntry.capsule.radiusMeters + zombieCatalogEntry.capsule.segmentLengthMeters,
+      zombies.y[zombie]! + zombieCatalogEntry.capsule.radiusMeters,
+      zombies.y[zombie]! +
+        zombieCatalogEntry.capsule.radiusMeters +
+        zombieCatalogEntry.capsule.segmentLengthMeters,
       hitRadius,
     )
     if (amount >= hitAmount) continue
@@ -1003,6 +1163,7 @@ function applyZombieDamage(
 ) {
   const zombies = state.zombies
   if (zombies.health[zombieSlot]! <= 0) return false
+  zombies.gait[zombieSlot] = ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker
   zombies.health[zombieSlot] = zombies.health[zombieSlot]! - damage
   zombies.hitFlash[zombieSlot] = 1
   zombies.hitReaction[zombieSlot] = Math.min(1, zombies.hitReaction[zombieSlot]! + 0.82)
@@ -1122,6 +1283,7 @@ function resolveZombieEscapeMeleeHit(state: ZombieEscapeSimulation) {
     if (
       !resolveZombieEscapeCombatVerticalRange(
         player.y,
+        zombies.y[slot]!,
         zombieCatalogEntry.characterHeightMeters,
         state.combatVerticalRangeScratch,
       )
@@ -1135,7 +1297,7 @@ function resolveZombieEscapeMeleeHit(state: ZombieEscapeSimulation) {
     if ((offsetX * aimX + offsetZ * aimZ) / distance < minimumDot) continue
     if (
       !zombieEscapeSegmentIsClearInVerticalRange(
-        state.collisionWorld,
+        state.combatCollisionWorld,
         player.x,
         player.z,
         zombies.x[slot]!,
@@ -1163,7 +1325,7 @@ function resolveZombieEscapeMeleeHit(state: ZombieEscapeSimulation) {
     0.18,
     aimZ,
     zombies.x[targetSlot]!,
-    targetCatalogEntry.characterHeightMeters * 0.55,
+    zombies.y[targetSlot]! + targetCatalogEntry.characterHeightMeters * 0.55,
     zombies.z[targetSlot]!,
   )
 }
@@ -1182,11 +1344,12 @@ function writeZombieEscapeZombieHitAttachment(
   const zombies = state.zombies
   const shots = state.shots
   const zombieX = zombies.x[zombieSlot]!
+  const zombieY = zombies.y[zombieSlot]!
   const zombieZ = zombies.z[zombieSlot]!
   const zombieCatalogEntry = getZombieEscapeZombieCatalogEntry(zombies.variant[zombieSlot]!)
   const radius = zombieCatalogEntry.capsule.radiusMeters
-  const axisStartY = radius
-  const axisEndY = radius + zombieCatalogEntry.capsule.segmentLengthMeters
+  const axisStartY = zombieY + radius
+  const axisEndY = zombieY + radius + zombieCatalogEntry.capsule.segmentLengthMeters
   const axisY = Math.max(axisStartY, Math.min(axisEndY, hitY))
   let normalX = hitX - zombieX
   let normalY = hitY - axisY
@@ -1208,7 +1371,7 @@ function writeZombieEscapeZombieHitAttachment(
   const surfaceZ = zombieZ + normalZ * radius
   const presentationPose = resolveZombieEscapePresentationPose(
     zombieX,
-    0,
+    zombieY,
     zombieZ,
     zombies.heading[zombieSlot]!,
     zombies.hitReaction[zombieSlot]!,
@@ -1243,7 +1406,17 @@ function writeZombieEscapeZombieHitAttachment(
 
 function updateZombies(state: ZombieEscapeSimulation, delta: number) {
   const zombies = state.zombies
-  updateZombieEscapeFlowTarget(state.navigationField, state.player.x, state.player.z)
+  state.navigationTargetY = resolveZombieEscapeNavigationTargetElevation(
+    state.collisionWorld,
+    state.player.y,
+    state.navigationTargetY,
+  )
+  updateZombieEscapeFlowTarget(
+    state.navigationField,
+    state.player.x,
+    state.player.z,
+    state.navigationTargetY,
+  )
   for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
     if (zombies.pool.active[slot] === 0) continue
     zombies.hitFlash[slot] = Math.max(
@@ -1261,125 +1434,93 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
     if (zombies.health[slot]! <= 0) {
       zombies.deathPresentationSeconds[slot] = zombies.deathPresentationSeconds[slot]! - delta
       if (zombies.deathPresentationSeconds[slot]! <= 0) {
-        releaseZombieEscapePoolSlot(zombies.pool, slot)
+        const released = releaseZombieEscapePoolSlot(zombies.pool, slot)
+        if (released && state.phase === 'night' && state.waveState === 'active') {
+          state.replacementSpawnRemaining = Math.min(
+            zombies.pool.capacity,
+            state.replacementSpawnRemaining + 1,
+          )
+        }
       }
       continue
     }
     zombies.attackCooldown[slot] = zombies.attackCooldown[slot]! - delta
     const x = zombies.x[slot]!
+    const y = zombies.y[slot]!
     const z = zombies.z[slot]!
     const toPlayerX = state.player.x - x
     const toPlayerZ = state.player.z - z
     const playerDistance = Math.max(0.000_1, Math.hypot(toPlayerX, toPlayerZ))
-    resolveZombieEscapeFlowDirection(
-      state.navigationField,
-      x,
-      z,
-      state.player.x,
-      state.player.z,
-      state.navigationSampleScratch,
-      state.collisionHitScratch,
-    )
+    const catalogEntry = getZombieEscapeZombieCatalogEntry(zombies.variant[slot]!)
+    const activeConnector =
+      state.collisionWorld.navigationConnectors[zombies.navigationConnector[slot]!]
+    if (activeConnector) {
+      const targetEnd = zombies.navigationConnectorTargetEnd[slot] !== 0
+      const directionAmount = targetEnd ? 1 : -1
+      state.navigationSampleScratch.blockingDistance = Number.POSITIVE_INFINITY
+      state.navigationSampleScratch.blockingX = x
+      state.navigationSampleScratch.blockingZ = z
+      state.navigationSampleScratch.reachable = true
+      state.navigationSampleScratch.x = activeConnector.directionX * directionAmount
+      state.navigationSampleScratch.z = activeConnector.directionZ * directionAmount
+      resetZombieEscapeNavigationHit(state.navigationHitScratch)
+    } else {
+      resolveZombieEscapeFlowDirection(
+        state.navigationField,
+        x,
+        z,
+        state.player.x,
+        state.player.z,
+        state.navigationSampleScratch,
+        state.navigationHitScratch,
+        y,
+      )
+    }
     let steerX = state.navigationSampleScratch.x
     let steerZ = state.navigationSampleScratch.z
-    let obstacleInAttackRange = false
-    const blockingObjectId = state.navigationSampleScratch.reachable
-      ? null
-      : resolveZombieEscapeCollisionHitObjectId(state.collisionWorld, state.collisionHitScratch)
-    if (blockingObjectId) {
-      const hitDistance = playerDistance * Math.max(0, Math.min(1, state.collisionHitScratch.time))
-      obstacleInAttackRange =
-        hitDistance <= ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackReachMeters
-      if (obstacleInAttackRange) {
-        steerX = 0
-        steerZ = 0
-        if (zombies.attackCooldown[slot]! <= 0) {
-          hitZombieEscapeObstacle(state, slot, blockingObjectId, x, z, toPlayerX, toPlayerZ)
-        }
-      } else {
-        steerX = toPlayerX / playerDistance
-        steerZ = toPlayerZ / playerDistance
-      }
-    }
-
-    for (let other = 0; other < zombies.pool.capacity; other += 1) {
-      if (other === slot || zombies.pool.active[other] === 0 || zombies.health[other]! <= 0) {
-        continue
-      }
-      const separateX = x - zombies.x[other]!
-      const separateZ = z - zombies.z[other]!
-      const distanceSquared = separateX * separateX + separateZ * separateZ
-      if (distanceSquared <= 0.000_1 || distanceSquared >= 1.75 * 1.75) continue
-      const distance = Math.sqrt(distanceSquared)
-      const amount = (1.75 - distance) / 1.75
-      steerX += (separateX / distance) * amount * 1.55
-      steerZ += (separateZ / distance) * amount * 1.55
-    }
-
-    const steeringLength = Math.hypot(steerX, steerZ)
-    if (obstacleInAttackRange) {
-      steerX = 0
-      steerZ = 0
-    } else if (steeringLength > 0.000_1) {
-      steerX /= steeringLength
-      steerZ /= steeringLength
-    } else {
-      steerX = 0
-      steerZ = 0
-    }
-    const runTarget = Math.min(1, Math.max(0, (playerDistance - 2.6) / 5.5))
-    zombies.runBlend[slot] =
-      zombies.runBlend[slot]! + (runTarget - zombies.runBlend[slot]!) * (1 - Math.exp(-4.5 * delta))
-    const catalogEntry = getZombieEscapeZombieCatalogEntry(zombies.variant[slot]!)
-    const walkSpeed = catalogEntry.movement.walkMetersPerSecond + state.wave * 0.06
-    const runSpeed = catalogEntry.movement.runMetersPerSecond + state.wave * 0.18
-    const desiredSpeed =
-      (walkSpeed + (runSpeed - walkSpeed) * zombies.runBlend[slot]!) * zombies.speedScale[slot]!
-    const response = 1 - Math.exp(-7 * delta)
-    zombies.vx[slot] = zombies.vx[slot]! + (steerX * desiredSpeed - zombies.vx[slot]!) * response
-    zombies.vz[slot] = zombies.vz[slot]! + (steerZ * desiredSpeed - zombies.vz[slot]!) * response
-    moveZombieEscapeCircleWithSlide(
-      state.collisionWorld,
-      x,
-      z,
-      zombies.vx[slot]! * delta,
-      zombies.vz[slot]! * delta,
-      getZombieEscapeZombieCollisionRadiusMeters(zombies.variant[slot]!),
-      state.collisionHitScratch,
-      state.collisionMoveScratch,
-    )
-    zombies.x[slot] = state.collisionMoveScratch.x
-    zombies.z[slot] = state.collisionMoveScratch.z
-    if (state.collisionMoveScratch.collided) {
-      zombies.vx[slot] = (zombies.x[slot]! - x) / delta
-      zombies.vz[slot] = (zombies.z[slot]! - z) / delta
-    }
-    const speed = Math.hypot(zombies.vx[slot]!, zombies.vz[slot]!)
-    if (speed > 0.04) {
-      zombies.heading[slot] = Math.atan2(zombies.vx[slot]!, zombies.vz[slot]!)
-    }
-    zombies.locomotionBlend[slot] =
-      zombies.locomotionBlend[slot]! +
-      (Math.min(1, speed / walkSpeed) - zombies.locomotionBlend[slot]!) * (1 - Math.exp(-9 * delta))
-    zombies.locomotionPhase[slot] =
-      zombies.locomotionPhase[slot]! + speed * delta * (2.2 + zombies.runBlend[slot]!)
-    const resolvedPlayerDistance = Math.hypot(
-      state.player.x - zombies.x[slot]!,
-      state.player.z - zombies.z[slot]!,
-    )
+    const directBlockingObjectId =
+      playerDistance > 0.000_2
+        ? resolveZombieEscapeCollisionHitObjectId(state.collisionWorld, state.navigationHitScratch)
+        : null
+    const directHitDistance = directBlockingObjectId
+      ? state.navigationSampleScratch.blockingDistance
+      : Number.POSITIVE_INFINITY
+    const directBlockerIsBreakable =
+      directBlockingObjectId !== null &&
+      isZombieEscapeCollisionHitBreakable(state.collisionWorld, state.navigationHitScratch)
+    const previousObstacleTarget = zombies.attackTargetObjectId[slot] ?? null
+    const storedFocusDistance = previousObstacleTarget
+      ? Math.hypot(zombies.attackFocusX[slot]! - x, zombies.attackFocusZ[slot]! - z)
+      : Number.POSITIVE_INFINITY
+    const storedObstacleTargetIsHeld =
+      previousObstacleTarget !== null &&
+      isZombieEscapeCollisionObjectBreakableAtElevation(
+        state.collisionWorld,
+        previousObstacleTarget,
+        y,
+      ) &&
+      storedFocusDistance <= ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackReleaseMeters
+    const directObstacleTargetIsInRange =
+      directBlockerIsBreakable &&
+      directHitDistance <= ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackReachMeters
+    const obstacleTargetObjectId = storedObstacleTargetIsHeld
+      ? previousObstacleTarget
+      : directObstacleTargetIsInRange
+        ? directBlockingObjectId
+        : null
     const combatLayersOverlap = resolveZombieEscapeCombatVerticalRange(
       state.player.y,
+      zombies.y[slot]!,
       catalogEntry.characterHeightMeters,
       state.combatVerticalRangeScratch,
     )
-    if (
+    const playerInAttackRange =
       combatLayersOverlap &&
-      resolvedPlayerDistance < 1.05 &&
-      zombies.attackCooldown[slot]! <= 0 &&
+      playerDistance <= ZOMBIE_ESCAPE_SIMULATION.zombiePlayerAttackReachMeters &&
       zombieEscapeSegmentIsClearInVerticalRange(
-        state.collisionWorld,
-        zombies.x[slot]!,
-        zombies.z[slot]!,
+        state.combatCollisionWorld,
+        x,
+        z,
         state.player.x,
         state.player.z,
         0.05,
@@ -1387,32 +1528,175 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
         state.combatVerticalRangeScratch.maximumY,
         state.collisionHitScratch,
       )
-    ) {
-      applyZombieEscapePlayerDamage(state, slot, 8)
-      zombies.attackCooldown[slot] = 0.72
+
+    let holdsPosition = false
+    let facingX = steerX
+    let facingZ = steerZ
+    if (obstacleTargetObjectId) {
+      holdsPosition = true
+      zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle
+      zombies.attackTargetObjectId[slot] = obstacleTargetObjectId
+      if (directBlockingObjectId === obstacleTargetObjectId) {
+        zombies.attackFocusX[slot] = state.navigationSampleScratch.blockingX
+        zombies.attackFocusZ[slot] = state.navigationSampleScratch.blockingZ
+      }
+      facingX = zombies.attackFocusX[slot]! - x
+      facingZ = zombies.attackFocusZ[slot]! - z
+      if (zombies.attackCooldown[slot]! <= 0) {
+        const destroyed = hitZombieEscapeObstacle(
+          state,
+          slot,
+          obstacleTargetObjectId,
+          zombies.attackFocusX[slot]!,
+          zombies.attackFocusZ[slot]!,
+        )
+        if (destroyed) zombies.attackTargetObjectId[slot] = null
+      }
+    } else if (playerInAttackRange) {
+      holdsPosition = true
+      zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer
+      zombies.attackTargetObjectId[slot] = null
+      zombies.attackFocusX[slot] = state.player.x
+      zombies.attackFocusZ[slot] = state.player.z
+      facingX = toPlayerX
+      facingZ = toPlayerZ
+      if (zombies.attackCooldown[slot]! <= 0) {
+        applyZombieEscapePlayerDamage(state, slot, 8)
+        zombies.attackCooldown[slot] = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
+      }
+    } else if (!state.navigationSampleScratch.reachable) {
+      holdsPosition = true
+      zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.blocked
+      zombies.attackTargetObjectId[slot] = null
+      zombies.attackFocusX[slot] = directBlockingObjectId
+        ? state.navigationSampleScratch.blockingX
+        : state.player.x
+      zombies.attackFocusZ[slot] = directBlockingObjectId
+        ? state.navigationSampleScratch.blockingZ
+        : state.player.z
+      facingX = zombies.attackFocusX[slot]! - x
+      facingZ = zombies.attackFocusZ[slot]! - z
+    } else {
+      zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase
+      zombies.attackTargetObjectId[slot] = null
+
+      for (let other = 0; !activeConnector && other < zombies.pool.capacity; other += 1) {
+        if (other === slot || zombies.pool.active[other] === 0 || zombies.health[other]! <= 0) {
+          continue
+        }
+        const separateX = x - zombies.x[other]!
+        const separateZ = z - zombies.z[other]!
+        if (Math.abs(y - zombies.y[other]!) > 0.75) continue
+        const distanceSquared = separateX * separateX + separateZ * separateZ
+        if (distanceSquared <= 0.000_1 || distanceSquared >= 1.75 * 1.75) continue
+        const distance = Math.sqrt(distanceSquared)
+        const amount = (1.75 - distance) / 1.75
+        steerX += (separateX / distance) * amount * 1.55
+        steerZ += (separateZ / distance) * amount * 1.55
+      }
+
+      const steeringLength = Math.hypot(steerX, steerZ)
+      if (steeringLength > 0.000_1) {
+        steerX /= steeringLength
+        steerZ /= steeringLength
+        facingX = steerX
+        facingZ = steerZ
+      } else {
+        steerX = 0
+        steerZ = 0
+        facingX = toPlayerX
+        facingZ = toPlayerZ
+      }
     }
+
+    const facingLength = Math.hypot(facingX, facingZ)
+    if (facingLength > 0.000_1) {
+      zombies.heading[slot] = turnZombieEscapeHeadingToward(
+        zombies.heading[slot]!,
+        Math.atan2(facingX, facingZ),
+        ZOMBIE_ESCAPE_SIMULATION.zombieTurnSpeedRadiansPerSecond * delta,
+      )
+    }
+    const runTarget =
+      holdsPosition || zombies.gait[slot] !== ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner ? 0 : 1
+    zombies.runBlend[slot] =
+      zombies.runBlend[slot]! + (runTarget - zombies.runBlend[slot]!) * (1 - Math.exp(-4.5 * delta))
+    const walkSpeed = catalogEntry.movement.walkMetersPerSecond + state.wave * 0.06
+    const runSpeed = catalogEntry.movement.runMetersPerSecond + state.wave * 0.18
+    const desiredSpeed =
+      (walkSpeed + (runSpeed - walkSpeed) * zombies.runBlend[slot]!) * zombies.speedScale[slot]!
+    if (holdsPosition) {
+      zombies.vx[slot] = 0
+      zombies.vz[slot] = 0
+    } else {
+      const response = 1 - Math.exp(-7 * delta)
+      zombies.vx[slot] = zombies.vx[slot]! + (steerX * desiredSpeed - zombies.vx[slot]!) * response
+      zombies.vz[slot] = zombies.vz[slot]! + (steerZ * desiredSpeed - zombies.vz[slot]!) * response
+      moveZombieEscapeNavigationAgent(
+        state.collisionWorld,
+        x,
+        y,
+        z,
+        zombies.vx[slot]! * delta,
+        zombies.vz[slot]! * delta,
+        getZombieEscapeZombieCollisionRadiusMeters(zombies.variant[slot]!),
+        zombies.navigationConnector[slot]!,
+        zombies.navigationConnectorTargetEnd[slot] !== 0,
+        state.collisionHitScratch,
+        state.navigationMoveScratch,
+      )
+      zombies.x[slot] = state.navigationMoveScratch.x
+      zombies.y[slot] = state.navigationMoveScratch.y
+      zombies.z[slot] = state.navigationMoveScratch.z
+      zombies.navigationConnector[slot] = state.navigationMoveScratch.connectorIndex
+      zombies.navigationConnectorTargetEnd[slot] = state.navigationMoveScratch.connectorTargetEnd
+        ? 1
+        : 0
+      if (state.navigationMoveScratch.collided) {
+        zombies.vx[slot] = (zombies.x[slot]! - x) / delta
+        zombies.vz[slot] = (zombies.z[slot]! - z) / delta
+      }
+    }
+    const speed = Math.hypot(zombies.vx[slot]!, zombies.vz[slot]!)
+    zombies.locomotionBlend[slot] =
+      zombies.locomotionBlend[slot]! +
+      (Math.min(1, speed / walkSpeed) - zombies.locomotionBlend[slot]!) * (1 - Math.exp(-9 * delta))
+    zombies.locomotionPhase[slot] =
+      zombies.locomotionPhase[slot]! + speed * delta * (2.2 + zombies.runBlend[slot]!)
   }
+}
+
+function resetZombieEscapeNavigationHit(hit: ZombieEscapeCollisionHit) {
+  hit.colliderIndex = -1
+  hit.colliderKind = 'none'
+  hit.normalX = 0
+  hit.normalY = 0
+  hit.normalZ = 0
+  hit.time = Number.POSITIVE_INFINITY
 }
 
 function hitZombieEscapeObstacle(
   state: ZombieEscapeSimulation,
   attackerSlot: number,
   objectId: string,
-  zombieX: number,
-  zombieZ: number,
-  toPlayerX: number,
-  toPlayerZ: number,
+  focusX: number,
+  focusZ: number,
 ) {
-  if (state.destroyedObstacleIds.has(objectId)) return false
+  if (
+    state.destroyedObstacleIds.has(objectId) ||
+    !isZombieEscapeCollisionObjectBreakable(state.collisionWorld, objectId)
+  ) {
+    return false
+  }
   const zombies = state.zombies
-  const distance = Math.max(0.000_1, Math.hypot(toPlayerX, toPlayerZ))
-  const hitDistance = distance * Math.max(0, Math.min(1, state.collisionHitScratch.time))
   emitZombieEscapeAudioEvent(
     state.audioEvents,
     ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.environmentImpact,
-    zombieX + (toPlayerX / distance) * hitDistance,
-    getZombieEscapeZombieCatalogEntry(zombies.variant[attackerSlot]!).characterHeightMeters * 0.45,
-    zombieZ + (toPlayerZ / distance) * hitDistance,
+    focusX,
+    zombies.y[attackerSlot]! +
+      getZombieEscapeZombieCatalogEntry(zombies.variant[attackerSlot]!).characterHeightMeters *
+        0.45,
+    focusZ,
     attackerSlot,
   )
   const hitCount = (state.obstacleHitCounts.get(objectId) ?? 0) + 1
@@ -1427,19 +1711,47 @@ function hitZombieEscapeObstacle(
   state.destroyedObstacleIds.add(objectId)
   state.obstacleRevision += 1
   applyZombieEscapeEffectiveCollisionWorld(state)
-  updateZombieEscapeFlowTarget(state.navigationField, state.player.x, state.player.z)
+  updateZombieEscapeFlowTarget(
+    state.navigationField,
+    state.player.x,
+    state.player.z,
+    state.navigationTargetY,
+  )
   return true
 }
 
+function turnZombieEscapeHeadingToward(current: number, target: number, maximumDelta: number) {
+  const fullTurn = Math.PI * 2
+  const delta = ((((target - current + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI
+  const next = current + Math.max(-maximumDelta, Math.min(maximumDelta, delta))
+  return ((((next + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI
+}
+
 function applyZombieEscapeEffectiveCollisionWorld(state: ZombieEscapeSimulation) {
-  const collisionWorld = createZombieEscapeCollisionWorldWithoutObjects(
+  const navigationWorld = createZombieEscapeCollisionWorldWithoutObjects(
     state.collisionSourceWorld,
     state.destroyedObstacleIds,
   )
-  if (!setZombieEscapeFlowFieldWorld(state.navigationField, collisionWorld)) return false
-  state.collisionWorld = collisionWorld
-  state.collisionWorldGeneration += 1
-  return true
+  const combatWorld = createZombieEscapeCollisionWorldWithoutObjects(
+    state.combatCollisionSourceWorld,
+    state.destroyedObstacleIds,
+  )
+  const changed =
+    navigationWorld.semanticKey !== state.collisionWorld.semanticKey ||
+    combatWorld.semanticKey !== state.combatCollisionWorld.semanticKey
+  setZombieEscapeFlowFieldWorld(state.navigationField, navigationWorld)
+  state.collisionWorld = navigationWorld
+  state.combatCollisionWorld = combatWorld
+  if (changed) state.collisionWorldGeneration += 1
+  return changed
+}
+
+function restoreZombieEscapeObstacleState(state: ZombieEscapeSimulation) {
+  const hadObstacleDamage = state.destroyedObstacleIds.size > 0 || state.obstacleHitCounts.size > 0
+  state.destroyedObstacleIds.clear()
+  state.obstacleHitCounts.clear()
+  if (hadObstacleDamage) state.obstacleRevision += 1
+  applyZombieEscapeEffectiveCollisionWorld(state)
 }
 
 function applyZombieEscapePlayerDamage(
@@ -1458,7 +1770,9 @@ function applyZombieEscapePlayerDamage(
       ? ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerKilled
       : ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerHurt,
     zombies.x[attackerSlot]!,
-    getZombieEscapeZombieCatalogEntry(zombies.variant[attackerSlot]!).characterHeightMeters * 0.55,
+    zombies.y[attackerSlot]! +
+      getZombieEscapeZombieCatalogEntry(zombies.variant[attackerSlot]!).characterHeightMeters *
+        0.55,
     zombies.z[attackerSlot]!,
     zombies.variant[attackerSlot]!,
   )
@@ -1467,11 +1781,12 @@ function applyZombieEscapePlayerDamage(
 
 function resolveZombieEscapeCombatVerticalRange(
   playerY: number,
+  zombieY: number,
   zombieHeight: number,
   output: ZombieEscapeVerticalRange,
 ) {
-  output.minimumY = Math.max(playerY, 0)
-  output.maximumY = Math.min(playerY + ZOMBIE_ESCAPE_PLAYER_HEIGHT, zombieHeight)
+  output.minimumY = Math.max(playerY, zombieY)
+  output.maximumY = Math.min(playerY + ZOMBIE_ESCAPE_PLAYER_HEIGHT, zombieY + zombieHeight)
   return output.maximumY >= output.minimumY
 }
 
@@ -1490,12 +1805,17 @@ function updateWaves(state: ZombieEscapeSimulation, delta: number) {
 
   state.waveSpawnTimerSeconds -= delta
   while (
-    state.waveSpawnRemaining > 0 &&
+    (state.replacementSpawnRemaining > 0 || state.waveSpawnRemaining > 0) &&
     state.waveSpawnTimerSeconds <= 0 &&
     state.zombies.pool.activeCount < state.zombies.pool.capacity
   ) {
+    const isReplacement = state.replacementSpawnRemaining > 0
     const angle = nextZombieEscapeRandom(state.random) * Math.PI * 2
-    const radius = 21.4 + nextZombieEscapeRandom(state.random) * 1.4
+    const radius =
+      ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS +
+      nextZombieEscapeRandom(state.random) *
+        (ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MAXIMUM_RADIUS_METERS -
+          ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS)
     const desiredX = Math.sin(angle) * radius
     const desiredZ = Math.cos(angle) * radius
     state.waveSpawnTimerSeconds += Math.max(0.28, 0.74 - state.wave * 0.08)
@@ -1506,17 +1826,27 @@ function updateWaves(state: ZombieEscapeSimulation, delta: number) {
         desiredZ,
         state.player.x,
         state.player.z,
-        8,
+        isReplacement
+          ? ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS
+          : ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
         state.reachableSpawnScratch,
+        state.navigationTargetY,
       )
     ) {
       break
     }
     spawnZombieEscapeZombie(state, state.reachableSpawnScratch.x, state.reachableSpawnScratch.z)
-    state.waveSpawnRemaining -= 1
+    if (isReplacement) state.replacementSpawnRemaining -= 1
+    else state.waveSpawnRemaining -= 1
   }
 
-  if (state.waveSpawnRemaining > 0 || state.zombies.pool.activeCount > 0) return
+  if (
+    state.replacementSpawnRemaining > 0 ||
+    state.waveSpawnRemaining > 0 ||
+    state.zombies.pool.activeCount > 0
+  ) {
+    return
+  }
   state.waveState = 'intermission'
   state.waveIntermissionSeconds = 2.8
   state.player.health = Math.min(100, state.player.health + 14)
@@ -1629,14 +1959,23 @@ function segmentSphereFirstIntersectionAmount(
 }
 
 function zombieEscapeWaveSize(wave: number) {
-  return 4 + Math.max(1, Math.trunc(wave)) * 3
+  const normalizedWave = Math.max(1, Math.trunc(wave))
+  const population = 4 + normalizedWave * 3
+  return normalizedWave === 1 ? population * 2 : population
 }
 
-function advanceZombieEscapePhase(state: ZombieEscapeSimulation, delta: number) {
-  state.phaseSecondsRemaining = Math.max(0, state.phaseSecondsRemaining - delta)
-  if (state.phaseSecondsRemaining > 0) return
+export function advanceZombieEscapePhaseClock(
+  state: ZombieEscapeSimulation,
+  elapsedSeconds: number,
+) {
+  if (state.paused || state.status !== 'playing') return false
+  const elapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds) : 0
+  if (elapsed <= 0) return false
+  state.phaseSecondsRemaining = Math.max(0, state.phaseSecondsRemaining - elapsed)
+  if (state.phaseSecondsRemaining > 0) return false
   if (state.phase === 'build') enterZombieEscapeNight(state)
   else enterZombieEscapeBuild(state)
+  return true
 }
 
 function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
@@ -1652,6 +1991,7 @@ function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
   resetZombieEscapeMeleeState(state.player)
   state.lastShotGeneration = 0
   state.lastShotSlot = -1
+  state.replacementSpawnRemaining = 0
   state.wave = state.night
   state.waveIntermissionSeconds = 0
   state.waveSpawnRemaining = zombieEscapeWaveSize(state.wave)
@@ -1670,11 +2010,13 @@ function enterZombieEscapeBuild(state: ZombieEscapeSimulation) {
   state.phaseSecondsRemaining = ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds
   resetShotEventPool(state.shots)
   resetZombiePool(state.zombies)
+  restoreZombieEscapeObstacleState(state)
   state.extractionOpen = false
   state.fireCooldownSeconds = 0
   resetZombieEscapeMeleeState(state.player)
   state.lastShotGeneration = 0
   state.lastShotSlot = -1
+  state.replacementSpawnRemaining = 0
   state.waveIntermissionSeconds = 0
   state.waveSpawnRemaining = 0
   state.waveSpawnTimerSeconds = 0.35
@@ -1860,7 +2202,11 @@ function createShotPhaseMetricView(
 function createZombiePool(capacity: number): ZombieEscapeZombiePool {
   return {
     attackCooldown: new Float32Array(capacity),
+    attackFocusX: new Float32Array(capacity),
+    attackFocusZ: new Float32Array(capacity),
+    attackTargetObjectId: Array.from({ length: capacity }, () => null),
     deathPresentationSeconds: new Float32Array(capacity),
+    gait: new Uint8Array(capacity),
     health: new Float32Array(capacity),
     heading: new Float32Array(capacity),
     hitFlash: new Float32Array(capacity),
@@ -1868,8 +2214,11 @@ function createZombiePool(capacity: number): ZombieEscapeZombiePool {
     hitImpulseY: new Float32Array(capacity),
     hitImpulseZ: new Float32Array(capacity),
     hitReaction: new Float32Array(capacity),
+    intent: new Uint8Array(capacity),
     locomotionBlend: new Float32Array(capacity),
     locomotionPhase: new Float32Array(capacity),
+    navigationConnector: new Int16Array(capacity).fill(-1),
+    navigationConnectorTargetEnd: new Uint8Array(capacity),
     pool: createZombieEscapeFixedPool(capacity),
     runBlend: new Float32Array(capacity),
     speedScale: new Float32Array(capacity),
@@ -1877,6 +2226,7 @@ function createZombiePool(capacity: number): ZombieEscapeZombiePool {
     vx: new Float32Array(capacity),
     vz: new Float32Array(capacity),
     x: new Float32Array(capacity),
+    y: new Float32Array(capacity),
     z: new Float32Array(capacity),
   }
 }
@@ -1921,7 +2271,11 @@ function resetShotEventPool(shots: ZombieEscapeShotEventPool) {
 function resetZombiePool(zombies: ZombieEscapeZombiePool) {
   resetZombieEscapeFixedPool(zombies.pool)
   zombies.attackCooldown.fill(0)
+  zombies.attackFocusX.fill(0)
+  zombies.attackFocusZ.fill(0)
+  zombies.attackTargetObjectId.fill(null)
   zombies.deathPresentationSeconds.fill(0)
+  zombies.gait.fill(ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker)
   zombies.health.fill(0)
   zombies.heading.fill(0)
   zombies.hitFlash.fill(0)
@@ -1929,14 +2283,18 @@ function resetZombiePool(zombies: ZombieEscapeZombiePool) {
   zombies.hitImpulseY.fill(0)
   zombies.hitImpulseZ.fill(0)
   zombies.hitReaction.fill(0)
+  zombies.intent.fill(ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase)
   zombies.locomotionBlend.fill(0)
   zombies.locomotionPhase.fill(0)
+  zombies.navigationConnector.fill(-1)
+  zombies.navigationConnectorTargetEnd.fill(0)
   zombies.runBlend.fill(0)
   zombies.speedScale.fill(0)
   zombies.variant.fill(0)
   zombies.vx.fill(0)
   zombies.vz.fill(0)
   zombies.x.fill(0)
+  zombies.y.fill(0)
   zombies.z.fill(0)
 }
 

@@ -1,0 +1,363 @@
+{
+  "generatedAt": "2026-08-22T01:59:11.273Z",
+  "targetFaceCount": 3000,
+  "textureResolution": "2k",
+  "assets": [
+    {
+      "id": "tropical-fishing-skiff",
+      "kind": "boat",
+      "name": "Tropical Fishing Skiff",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/boats/tropical-fishing-skiff/model.glb"
+      },
+      "sourceFile": "boat_01_tropical_fishing_skiff.png",
+      "targetSizeMeters": 4.5,
+      "triangleCount": 2840
+    },
+    {
+      "id": "island-rescue-speedboat",
+      "kind": "boat",
+      "name": "Island Rescue Speedboat",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/boats/island-rescue-speedboat/model.glb"
+      },
+      "sourceFile": "boat_02_rescue_speedboat.png",
+      "targetSizeMeters": 6,
+      "triangleCount": 2941
+    },
+    {
+      "id": "harbor-workboat",
+      "kind": "boat",
+      "name": "Harbor Workboat",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/boats/harbor-workboat/model.glb"
+      },
+      "sourceFile": "boat_03_harbor_workboat.png",
+      "targetSizeMeters": 7,
+      "triangleCount": 2810
+    },
+    {
+      "id": "classic-coconut-palm",
+      "kind": "palm",
+      "name": "Classic Coconut Palm",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/palms/classic-coconut-palm/model.glb"
+      },
+      "sourceFile": "palm_01_classic_coconut.png",
+      "targetSizeMeters": 7.5,
+      "triangleCount": 3247
+    },
+    {
+      "id": "windblown-coastal-palm",
+      "kind": "palm",
+      "name": "Windblown Coastal Palm",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/palms/windblown-coastal-palm/model.glb"
+      },
+      "sourceFile": "palm_02_windblown_coastal.png",
+      "targetSizeMeters": 6.5,
+      "triangleCount": 3067
+    },
+    {
+      "id": "short-fan-palm",
+      "kind": "palm",
+      "name": "Short Fan Palm",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/palms/short-fan-palm/model.glb"
+      },
+      "sourceFile": "palm_03_short_fan_palm.png",
+      "targetSizeMeters": 3.5,
+      "triangleCount": 3222
+    },
+    {
+      "id": "twin-trunk-date-palm",
+      "kind": "palm",
+      "name": "Twin-Trunk Date Palm",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/palms/twin-trunk-date-palm/model.glb"
+      },
+      "sourceFile": "palm_04_twin_trunk_date_palm.png",
+      "targetSizeMeters": 5.5,
+      "triangleCount": 2994
+    },
+    {
+      "id": "tiny-blue-green-chromis",
+      "kind": "fish",
+      "name": "Tiny Blue-Green Chromis",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/tiny-blue-green-chromis/model.glb"
+      },
+      "sourceFile": "fish_01_tiny_blue_green_chromis.png",
+      "targetSizeMeters": 0.09,
+      "triangleCount": 3149
+    },
+    {
+      "id": "small-clownfish",
+      "kind": "fish",
+      "name": "Small Clownfish",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/small-clownfish/model.glb"
+      },
+      "sourceFile": "fish_02_small_clownfish.png",
+      "targetSizeMeters": 0.12,
+      "triangleCount": 3126
+    },
+    {
+      "id": "small-yellow-tang",
+      "kind": "fish",
+      "name": "Small Yellow Tang",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/small-yellow-tang/model.glb"
+      },
+      "sourceFile": "fish_03_small_yellow_tang.png",
+      "targetSizeMeters": 0.2,
+      "triangleCount": 3103
+    },
+    {
+      "id": "medium-lionfish",
+      "kind": "fish",
+      "name": "Medium Lionfish",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/medium-lionfish/model.glb"
+      },
+      "sourceFile": "fish_04_medium_lionfish.png",
+      "targetSizeMeters": 0.38,
+      "triangleCount": 3196
+    },
+    {
+      "id": "medium-parrotfish",
+      "kind": "fish",
+      "name": "Medium Parrotfish",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/medium-parrotfish/model.glb"
+      },
+      "sourceFile": "fish_05_medium_parrotfish.png",
+      "targetSizeMeters": 0.55,
+      "triangleCount": 3108
+    },
+    {
+      "id": "large-grouper",
+      "kind": "fish",
+      "name": "Large Grouper",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/large-grouper/model.glb"
+      },
+      "sourceFile": "fish_06_large_grouper.png",
+      "targetSizeMeters": 1.4,
+      "triangleCount": 3119
+    },
+    {
+      "id": "large-barracuda",
+      "kind": "fish",
+      "name": "Large Barracuda",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/large-barracuda/model.glb"
+      },
+      "sourceFile": "fish_07_large_barracuda.png",
+      "targetSizeMeters": 1.8,
+      "triangleCount": 3061
+    },
+    {
+      "id": "giant-manta-ray",
+      "kind": "fish",
+      "name": "Giant Manta Ray",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/giant-manta-ray/model.glb"
+      },
+      "sourceFile": "fish_08_giant_manta_ray.png",
+      "targetSizeMeters": 4.5,
+      "triangleCount": 3217
+    },
+    {
+      "id": "caribbean-reef-shark",
+      "kind": "fish",
+      "name": "Caribbean Reef Shark",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/caribbean-reef-shark/model.glb"
+      },
+      "sourceFile": "fish_09_caribbean_reef_shark.png",
+      "targetSizeMeters": 2.4,
+      "triangleCount": 3221
+    },
+    {
+      "id": "hammerhead-shark",
+      "kind": "fish",
+      "name": "Hammerhead Shark",
+      "outputs": {
+        "model": "/landrush-lab/island-ambient-assets/fish/hammerhead-shark/model.glb"
+      },
+      "sourceFile": "fish_10_hammerhead_shark.png",
+      "targetSizeMeters": 3.4,
+      "triangleCount": 3060
+    },
+    {
+      "id": "island-groundskeeper",
+      "kind": "npc",
+      "name": "Island Groundskeeper",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/island-groundskeeper/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/island-groundskeeper/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/island-groundskeeper/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/island-groundskeeper/walk.anim.glb"
+      },
+      "sourceFile": "npc_01_island_groundskeeper.png",
+      "targetSizeMeters": 1.72,
+      "triangleCount": 3204
+    },
+    {
+      "id": "local-fisher",
+      "kind": "npc",
+      "name": "Local Fisher",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/local-fisher/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/local-fisher/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/local-fisher/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/local-fisher/walk.anim.glb"
+      },
+      "sourceFile": "npc_02_local_fisher.png",
+      "targetSizeMeters": 1.78,
+      "triangleCount": 3249
+    },
+    {
+      "id": "dock-worker",
+      "kind": "npc",
+      "name": "Dock Worker",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/dock-worker/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/dock-worker/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/dock-worker/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/dock-worker/walk.anim.glb"
+      },
+      "sourceFile": "npc_03_dock_worker.png",
+      "targetSizeMeters": 1.83,
+      "triangleCount": 3253
+    },
+    {
+      "id": "lifeguard",
+      "kind": "npc",
+      "name": "Lifeguard",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/lifeguard/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/lifeguard/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/lifeguard/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/lifeguard/walk.anim.glb"
+      },
+      "sourceFile": "npc_04_lifeguard.png",
+      "targetSizeMeters": 1.76,
+      "triangleCount": 3255
+    },
+    {
+      "id": "backpacker-tourist",
+      "kind": "npc",
+      "name": "Backpacker Tourist",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/backpacker-tourist/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/backpacker-tourist/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/backpacker-tourist/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/backpacker-tourist/walk.anim.glb"
+      },
+      "sourceFile": "npc_05_backpacker_tourist.png",
+      "targetSizeMeters": 1.7,
+      "triangleCount": 3054
+    },
+    {
+      "id": "market-food-vendor",
+      "kind": "npc",
+      "name": "Market Food Vendor",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/market-food-vendor/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/market-food-vendor/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/market-food-vendor/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/market-food-vendor/walk.anim.glb"
+      },
+      "sourceFile": "npc_06_market_food_vendor.png",
+      "targetSizeMeters": 1.68,
+      "triangleCount": 3258
+    },
+    {
+      "id": "marine-biologist",
+      "kind": "npc",
+      "name": "Marine Biologist",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/marine-biologist/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/marine-biologist/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/marine-biologist/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/marine-biologist/walk.anim.glb"
+      },
+      "sourceFile": "npc_07_marine_biologist.png",
+      "targetSizeMeters": 1.74,
+      "triangleCount": 3210
+    },
+    {
+      "id": "building-technician",
+      "kind": "npc",
+      "name": "Building Technician",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/building-technician/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/building-technician/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/building-technician/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/building-technician/walk.anim.glb"
+      },
+      "sourceFile": "npc_08_building_technician.png",
+      "targetSizeMeters": 1.8,
+      "triangleCount": 3221
+    },
+    {
+      "id": "retired-holidaymaker",
+      "kind": "npc",
+      "name": "Retired Holidaymaker",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/retired-holidaymaker/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/retired-holidaymaker/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/retired-holidaymaker/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/retired-holidaymaker/walk.anim.glb"
+      },
+      "sourceFile": "npc_09_retired_holidaymaker.png",
+      "targetSizeMeters": 1.69,
+      "triangleCount": 3200
+    },
+    {
+      "id": "resort-concierge",
+      "kind": "npc",
+      "name": "Resort Concierge",
+      "outputs": {
+        "idleAnimation": "/landrush-lab/island-ambient-assets/npcs/resort-concierge/idle.anim.glb",
+        "rigged": "/landrush-lab/island-ambient-assets/npcs/resort-concierge/rigged.glb",
+        "runAnimation": "/landrush-lab/island-ambient-assets/npcs/resort-concierge/run.anim.glb",
+        "walkAnimation": "/landrush-lab/island-ambient-assets/npcs/resort-concierge/walk.anim.glb"
+      },
+      "sourceFile": "npc_10_resort_concierge.png",
+      "targetSizeMeters": 1.75,
+      "triangleCount": 3253
+    }
+  ],
+  "runtimeTextures": {
+    "etc1s": {
+      "compression": 5,
+      "quality": 255
+    },
+    "gltfTransformVersion": "4.4.2",
+    "ktxSoftware": {
+      "archiveSha256": "a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245",
+      "archiveUrl": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2",
+      "executableSha256": "2028e023a18e827e66362a9e184052f40192566b10f92655a337e2eb8ea0829b",
+      "librarySha256": "0792dd32ce7d2a101d614a3d1dc1f2b4297869d9cab5d7f0bb4fee304c4c9bcc",
+      "version": "4.4.2"
+    },
+    "maxRuntimeCompressedTextureBytes": 100663296,
+    "maxRuntimeUncompressedRgbaMipBytes": 268435456,
+    "resolutionByKind": {
+      "boat": 512,
+      "fish": 512,
+      "npc": 768,
+      "palm": 512
+    },
+    "schemaVersion": 1,
+    "sharpVersion": "0.34.5",
+    "uastc": {
+      "level": 4,
+      "rdo": false,
+      "zstd": 18
+    }
+  }
+}

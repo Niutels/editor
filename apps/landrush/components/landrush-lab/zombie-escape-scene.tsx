@@ -360,8 +360,16 @@ export function ZombieEscapeScene({
         simulationRef={simulationRef}
       />
       <ZombieEscapeCamera arena={arena} simulationRef={simulationRef} />
+      <ZombieEscapeRenderDriver />
     </>
   )
+}
+
+function ZombieEscapeRenderDriver() {
+  useFrame(({ camera, gl, scene }) => {
+    gl.render(scene, camera)
+  }, 100)
+  return null
 }
 
 function ZombieEscapePresentation({

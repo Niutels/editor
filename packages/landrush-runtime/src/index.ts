@@ -64,6 +64,14 @@ export {
   renderScheduler,
 } from './render-scheduler'
 export {
+  LANDRUSH_ITEM_LOW_PROFILE_MAXIMUM_HEIGHT_METERS,
+  LANDRUSH_ITEM_SUPPORT_SURFACE_THICKNESS_METERS,
+  type LandrushSemanticItemCollisionInput,
+  type LandrushSemanticItemCollisionProfile,
+  resolveLandrushSemanticItemCollisionProfile,
+} from './semantic-item-collision'
+export {
+  type LandrushWorldContentAuthority,
   MULTIPLAYER_LATENCY_EVENT,
   type MultiplayerConnectionDetails,
   type MultiplayerRemotePlayerStore,

@@ -3,6 +3,7 @@ import {
   type AnyNode,
   BuildingNode,
   DoorNode,
+  getLevelElevations,
   LevelNode,
   SlabNode,
   StairNode,
@@ -66,13 +67,19 @@ describe('Landrush parcel build graph', () => {
       height: 3.1,
       id: 'level_house_upper_storey',
       level: 1,
-      metadata: SCOPE_METADATA,
+      metadata: {
+        ...SCOPE_METADATA,
+        retainedMarker: 'upper',
+        worldBaseElevationM: 3,
+      },
       parentId: SCOPE.contextBuildingId,
     })
     const wall = WallNode.parse({
       children: ['door_front'],
       end: [8.25, -4.5],
+      height: 3,
       id: 'wall_front',
+      metadata: { retainedMarker: 'wall', worldBaseElevationM: 0 },
       parentId: SCOPE.contextLevelId,
       start: [1.25, -4.5],
     })
@@ -84,6 +91,7 @@ describe('Landrush parcel build graph', () => {
     })
     const groundSlab = SlabNode.parse({
       id: 'slab_ground',
+      metadata: { retainedMarker: 'slab', worldBaseElevationM: 0 },
       parentId: SCOPE.contextLevelId,
       polygon: [
         [1.25, -4.5],
@@ -127,14 +135,21 @@ describe('Landrush parcel build graph', () => {
     expect(migrated.migrated).toBe(true)
     expect(nodes[oldUpperLevel.id]).toMatchObject({
       height: 3.1,
+      metadata: { ...SCOPE_METADATA, retainedMarker: 'upper' },
       parentId: migrated.buildingId,
     })
+    if (nodes[oldUpperLevel.id]?.type !== 'level') throw new Error('Expected upper level')
+    expect(nodes[oldUpperLevel.id].baseElevation).toBeCloseTo(-0.05)
+    expect(nodes[migrated.groundLevelId]).toMatchObject({ baseElevation: 0, height: 3.05 })
+    expect(getLevelElevations(nodes).get(oldUpperLevel.id)?.baseY).toBe(3)
     expect(nodes[wall.id]).toMatchObject({
       end: wall.end,
       id: wall.id,
       parentId: migrated.groundLevelId,
       start: wall.start,
     })
+    expect(nodes[wall.id]?.metadata).toEqual(wall.metadata)
+    expect(nodes[groundSlab.id]?.metadata).toEqual(groundSlab.metadata)
     expect(nodes[door.id]).toMatchObject({
       id: door.id,
       parentId: wall.id,
@@ -155,6 +170,167 @@ describe('Landrush parcel build graph', () => {
 
     const repeated = canonicalizeLandrushParcelBuildGraph(migrated.nodes, SCOPE)
     expect(repeated.nodes).toEqual(migrated.nodes)
+    expect(repeated.migrated).toBe(false)
+  })
+
+  test('consumes legacy world anchors into exact Pascal level elevations once', () => {
+    const upperLevel = LevelNode.parse({
+      id: 'level_house_upper_storey',
+      level: 1,
+      metadata: {
+        ...SCOPE_METADATA,
+        retainedMarker: 'upper',
+        worldBaseElevationM: 3,
+      },
+      parentId: SCOPE.contextBuildingId,
+    })
+    const negativeLevel = LevelNode.parse({
+      id: 'level_house_negative_anchor',
+      level: 2,
+      metadata: {
+        ...SCOPE_METADATA,
+        retainedMarker: 'negative',
+        worldBaseElevationM: -1,
+      },
+      parentId: 'building_missing_shared_context',
+    })
+
+    const migrated = canonicalizeLandrushParcelBuildGraph([upperLevel, negativeLevel], SCOPE)
+    const migratedNodes = Object.fromEntries(migrated.nodes.map((node) => [node.id, node]))
+    const elevations = getLevelElevations(migratedNodes)
+
+    expect(migratedNodes[upperLevel.id]).toMatchObject({
+      baseElevation: 0.5,
+      metadata: { ...SCOPE_METADATA, retainedMarker: 'upper' },
+      parentId: migrated.buildingId,
+    })
+    expect(migratedNodes[negativeLevel.id]).toMatchObject({
+      baseElevation: -6.5,
+      metadata: { ...SCOPE_METADATA, retainedMarker: 'negative' },
+      parentId: migrated.buildingId,
+    })
+    expect(elevations.get(upperLevel.id)?.baseY).toBe(3)
+    expect(elevations.get(negativeLevel.id)?.baseY).toBe(-1)
+    expect(migratedNodes[upperLevel.id]?.metadata).toEqual({
+      ...SCOPE_METADATA,
+      retainedMarker: 'upper',
+    })
+    expect(migratedNodes[negativeLevel.id]?.metadata).toEqual({
+      ...SCOPE_METADATA,
+      retainedMarker: 'negative',
+    })
+
+    const transportNodes = createLandrushBuildSyncTransportNodes(migrated.nodes, SCOPE)
+    const roundTrip = canonicalizeLandrushParcelBuildGraph(transportNodes, SCOPE)
+    const roundTripTransportNodes = createLandrushBuildSyncTransportNodes(roundTrip.nodes, SCOPE)
+    const repeated = canonicalizeLandrushParcelBuildGraph(roundTrip.nodes, SCOPE)
+
+    expect(
+      isLandrushBuildSyncV2GraphLossless(
+        Object.fromEntries(transportNodes.map((node) => [node.id, node])),
+        transportNodes,
+        roundTripTransportNodes,
+      ),
+    ).toBe(true)
+    expect(
+      getLevelElevations(Object.fromEntries(roundTrip.nodes.map((node) => [node.id, node]))).get(
+        upperLevel.id,
+      )?.baseY,
+    ).toBe(3)
+    expect(repeated.nodes).toEqual(roundTrip.nodes)
+    expect(repeated.migrated).toBe(false)
+  })
+
+  test('does not consume stale world anchors from a native in-payload level', () => {
+    const ids = createLandrushParcelBuildGraphIds(SCOPE)
+    const building = BuildingNode.parse({
+      id: ids.buildingId,
+      metadata: SCOPE_METADATA,
+      parentId: SCOPE.contextSiteId,
+    })
+    const groundLevel = LevelNode.parse({
+      height: 2.5,
+      id: ids.groundLevelId,
+      level: 0,
+      parentId: building.id,
+    })
+    const nativeUpperLevel = LevelNode.parse({
+      baseElevation: 0.75,
+      children: ['slab_native_upper'],
+      height: 2.5,
+      id: ids.levelId(1),
+      level: 1,
+      metadata: {
+        ...SCOPE_METADATA,
+        retainedMarker: 'native',
+        worldBaseElevationM: -8,
+      },
+      parentId: building.id,
+    })
+    const nativeUpperSlab = SlabNode.parse({
+      elevation: 0.15,
+      id: 'slab_native_upper',
+      metadata: { worldBaseElevationM: -9 },
+      parentId: nativeUpperLevel.id,
+      polygon: [
+        [0, 0],
+        [2, 0],
+        [2, 2],
+        [0, 2],
+      ],
+      thickness: 0.15,
+    })
+
+    const canonical = canonicalizeLandrushParcelBuildGraph(
+      [building, groundLevel, nativeUpperLevel, nativeUpperSlab],
+      SCOPE,
+    )
+    const nodes = Object.fromEntries(canonical.nodes.map((node) => [node.id, node]))
+
+    expect(nodes[nativeUpperLevel.id]).toEqual(nativeUpperLevel)
+    expect(nodes[nativeUpperSlab.id]).toEqual(nativeUpperSlab)
+    expect(getLevelElevations(nodes).get(nativeUpperLevel.id)?.baseY).toBe(3.25)
+  })
+
+  test('uses a consistent direct-child world anchor for any reparented legacy level', () => {
+    const orphanUpperLevel = LevelNode.parse({
+      children: ['slab_orphan_upper'],
+      height: 2.5,
+      id: 'level_orphan_upper',
+      level: 1,
+      metadata: SCOPE_METADATA,
+      parentId: 'building_missing_shared_context',
+    })
+    const orphanUpperSlab = SlabNode.parse({
+      elevation: 0.15,
+      id: 'slab_orphan_upper',
+      metadata: { retainedMarker: 'slab', worldBaseElevationM: 3 },
+      parentId: orphanUpperLevel.id,
+      polygon: [
+        [0, 0],
+        [2, 0],
+        [2, 2],
+        [0, 2],
+      ],
+      thickness: 0.15,
+    })
+
+    const canonical = canonicalizeLandrushParcelBuildGraph(
+      [orphanUpperLevel, orphanUpperSlab],
+      SCOPE,
+    )
+    const nodes = Object.fromEntries(canonical.nodes.map((node) => [node.id, node]))
+
+    expect(nodes[orphanUpperLevel.id]).toMatchObject({
+      baseElevation: 0.5,
+      metadata: SCOPE_METADATA,
+      parentId: canonical.buildingId,
+    })
+    expect(nodes[orphanUpperSlab.id]?.metadata).toEqual(orphanUpperSlab.metadata)
+    expect(getLevelElevations(nodes).get(orphanUpperLevel.id)?.baseY).toBe(3)
+
+    const repeated = canonicalizeLandrushParcelBuildGraph(canonical.nodes, SCOPE)
+    expect(repeated.nodes).toEqual(canonical.nodes)
     expect(repeated.migrated).toBe(false)
   })
 
@@ -207,6 +383,38 @@ describe('Landrush parcel build graph', () => {
     expect(restored.nodes.find((node) => node.id === migrated.buildingId)?.parentId).toBe(
       SCOPE.contextSiteId,
     )
+  })
+
+  test('rejects a Site-anchored host scaffold as v2 transport while accepting its null-root projection', () => {
+    const canonical = canonicalizeLandrushParcelBuildGraph([], SCOPE)
+    const hostNodes = createLandrushBuildSyncSnapshotNodes(canonical.nodes, SCOPE)
+    const transportNodes = createLandrushBuildSyncTransportNodes(canonical.nodes, SCOPE)
+    const hostRoundTrip = canonicalizeLandrushParcelBuildGraph(hostNodes, SCOPE)
+    const transportRoundTrip = canonicalizeLandrushParcelBuildGraph(transportNodes, SCOPE)
+    const hostCanonicalTransport = createLandrushBuildSyncTransportNodes(hostRoundTrip.nodes, SCOPE)
+    const transportCanonicalTransport = createLandrushBuildSyncTransportNodes(
+      transportRoundTrip.nodes,
+      SCOPE,
+    )
+
+    expect(hostNodes.find((node) => node.id === canonical.buildingId)?.parentId).toBe(
+      SCOPE.contextSiteId,
+    )
+    expect(transportNodes.find((node) => node.id === canonical.buildingId)?.parentId).toBeNull()
+    expect(
+      isLandrushBuildSyncV2GraphLossless(
+        Object.fromEntries(hostNodes.map((node) => [node.id, node])),
+        hostNodes,
+        hostCanonicalTransport,
+      ),
+    ).toBe(false)
+    expect(
+      isLandrushBuildSyncV2GraphLossless(
+        Object.fromEntries(transportNodes.map((node) => [node.id, node])),
+        transportNodes,
+        transportCanonicalTransport,
+      ),
+    ).toBe(true)
   })
 
   test('quarantines a v2 orphan that requires an internal hierarchy repair', () => {
@@ -301,6 +509,28 @@ describe('Landrush parcel build graph', () => {
     expect(repeated.migrated).toBe(false)
   })
 
+  test('migrates a missing height under an accepted canonical building parent', () => {
+    const ids = createLandrushParcelBuildGraphIds(SCOPE)
+    const building = BuildingNode.parse({
+      id: ids.buildingId,
+      metadata: SCOPE_METADATA,
+      parentId: SCOPE.contextSiteId,
+    })
+    const legacyLevel = LevelNode.parse({
+      id: ids.groundLevelId,
+      level: 0,
+      parentId: building.id,
+    })
+
+    const canonical = canonicalizeLandrushParcelBuildGraph([building, legacyLevel], SCOPE)
+    const migratedLevel = canonical.nodes.find((node) => node.id === legacyLevel.id)
+
+    expect(migratedLevel).toMatchObject({ height: 2.5, parentId: building.id, type: 'level' })
+    const repeated = canonicalizeLandrushParcelBuildGraph(canonical.nodes, SCOPE)
+    expect(repeated.nodes).toEqual(canonical.nodes)
+    expect(repeated.migrated).toBe(false)
+  })
+
   test('preserves multiple parcel-owned building graphs and keeps stairs inside their building', () => {
     const buildingA = BuildingNode.parse({
       id: 'building_parcel-a',
@@ -313,18 +543,21 @@ describe('Landrush parcel build graph', () => {
       parentId: SCOPE.contextSiteId,
     })
     const groundA = LevelNode.parse({
+      height: 2.5,
       id: 'level_parcel-a-ground',
       level: 0,
       metadata: SCOPE_METADATA,
       parentId: buildingA.id,
     })
     const groundB = LevelNode.parse({
+      height: 2.5,
       id: 'level_parcel-b-ground',
       level: 0,
       metadata: SCOPE_METADATA,
       parentId: buildingB.id,
     })
     const upperB = LevelNode.parse({
+      height: 2.5,
       id: 'level_parcel-b-upper',
       level: 1,
       metadata: SCOPE_METADATA,

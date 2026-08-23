@@ -18,11 +18,18 @@ export type GpuPassSample = {
   ms: number
 }
 
+export type GpuTimestampBatchStatus = 'measured' | 'no-queries' | 'incomplete'
+
 export type GpuFrameSample = {
   /** Bench frame index at which this sample resolved (assigned by caller). */
   resolvedAtFrame: number
   /** three's internal frame numbers covered by this resolve batch. */
   threeFrames: number[]
+  renderFrames: number[]
+  computeFrames: number[]
+  renderStatus: GpuTimestampBatchStatus
+  computeStatus: GpuTimestampBatchStatus
+  /** Three returns the total for only the final frame in each resolve batch. */
   renderMs: number | null
   computeMs: number | null
   passes: GpuPassSample[]
@@ -40,6 +47,7 @@ export type GpuWorkDoneSample = {
 type TimestampPool = {
   trackTimestamp: boolean
   currentQueryIndex: number
+  queryOffsets: Map<string, number>
   timestamps: Map<string, number>
   frames: number[]
 }
@@ -67,6 +75,19 @@ export type GpuFrameTimer = {
 }
 
 const WORK_DONE_EVERY_N_FRAMES = 30
+const TIMESTAMP_FRAME_SUFFIX = /:f(\d+)$/u
+
+type TimestampResolveBatch = {
+  frames: number[]
+  lastFrameMs: number | null
+  passes: GpuPassSample[]
+  status: GpuTimestampBatchStatus
+}
+
+function timestampFrame(uid: string) {
+  const match = TIMESTAMP_FRAME_SUFFIX.exec(uid)
+  return match ? Number(match[1]) : null
+}
 
 export function createGpuFrameTimer(rendererLike: unknown): GpuFrameTimer {
   const renderer = rendererLike as TimestampRenderer
@@ -138,34 +159,64 @@ export function createGpuFrameTimer(rendererLike: unknown): GpuFrameTimer {
     const queryPressure =
       (renderPool?.currentQueryIndex ?? 0) + (computePool?.currentQueryIndex ?? 0)
 
-    const resolveOne = (type: 'render' | 'compute') =>
-      readPool(type)
-        ? (renderer.resolveTimestampsAsync?.(type) ?? Promise.resolve(undefined)).catch(
-            () => undefined,
-          )
-        : Promise.resolve(undefined)
+    const resolveOne = async (type: 'render' | 'compute'): Promise<TimestampResolveBatch> => {
+      const pool = readPool(type)
+      if (!pool || pool.currentQueryIndex === 0) {
+        return { frames: [], lastFrameMs: null, passes: [], status: 'no-queries' }
+      }
+
+      // Three resets queryOffsets synchronously when resolution starts. Capture
+      // the exact UID set first so later frames recorded while the GPU readback
+      // is pending cannot be mistaken for this batch.
+      const batchUids = [...pool.queryOffsets.keys()]
+      if (batchUids.length === 0) {
+        return { frames: [], lastFrameMs: null, passes: [], status: 'incomplete' }
+      }
+
+      let resolvedMs: number | undefined
+      try {
+        resolvedMs = await renderer.resolveTimestampsAsync?.(type)
+      } catch {
+        return { frames: [], lastFrameMs: null, passes: [], status: 'incomplete' }
+      }
+
+      const passes: GpuPassSample[] = []
+      const frames = new Set<number>()
+      for (const uid of batchUids) {
+        const ms = pool.timestamps.get(uid)
+        const frame = timestampFrame(uid)
+        if (Number.isFinite(ms) && frame !== null) {
+          passes.push({ uid, ms: ms as number })
+          frames.add(frame)
+        }
+        pool.timestamps.delete(uid)
+      }
+
+      return {
+        frames: [...frames].sort((left, right) => left - right),
+        lastFrameMs:
+          typeof resolvedMs === 'number' && Number.isFinite(resolvedMs) ? resolvedMs : null,
+        passes,
+        status: passes.length === batchUids.length ? 'measured' : 'incomplete',
+      }
+    }
 
     Promise.all([resolveOne('render'), resolveOne('compute')])
-      .then(([renderMs, computeMs]) => {
+      .then(([renderBatch, computeBatch]) => {
         if (disposed) return
-        const pool = readPool('render')
-        const passes: GpuPassSample[] = []
-        if (pool) {
-          // `timestamps` accumulates across resolves — keep only the passes
-          // belonging to this resolve batch (uids end in `:f<frame>`), then
-          // clear so the map stays bounded and never reports stale passes.
-          const batchFrames = new Set(pool.frames ?? [])
-          for (const [uid, ms] of pool.timestamps) {
-            const match = uid.match(/:f(\d+)$/)
-            if (match && batchFrames.has(Number(match[1]))) passes.push({ uid, ms })
-          }
-          pool.timestamps.clear()
-        }
+        const threeFrames = [...new Set([...renderBatch.frames, ...computeBatch.frames])].sort(
+          (left, right) => left - right,
+        )
+        const passes = [...renderBatch.passes, ...computeBatch.passes]
         latestSample = {
           resolvedAtFrame: frameIdx,
-          threeFrames: pool?.frames ? [...pool.frames] : [],
-          renderMs: typeof renderMs === 'number' && Number.isFinite(renderMs) ? renderMs : null,
-          computeMs: typeof computeMs === 'number' && Number.isFinite(computeMs) ? computeMs : null,
+          threeFrames,
+          renderFrames: renderBatch.frames,
+          computeFrames: computeBatch.frames,
+          renderStatus: renderBatch.status,
+          computeStatus: computeBatch.status,
+          renderMs: renderBatch.lastFrameMs,
+          computeMs: computeBatch.lastFrameMs,
           passes,
           passCount: passes.length,
           queryPressure,

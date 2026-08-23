@@ -10,6 +10,7 @@ import {
 import {
   baseMaterial,
   type ColorPreset,
+  cloneMaterial,
   createColumnBoxGeometry,
   createColumnCylinderGeometry,
   createColumnSphereGeometry,
@@ -2336,13 +2337,14 @@ export const ColumnPreview = ({ node }: { node: ColumnNode }) => {
   const groupRef = useRef<Group>(null)
 
   const materials = useMemo(() => {
-    const ghost = createLegacyColumnMaterial({
+    const source = createLegacyColumnMaterial({
       material: node.material,
       materialPreset: node.materialPreset,
       shading,
       textures,
       colorPreset,
-    }).clone()
+    })
+    const ghost = cloneMaterial(source)
     ghost.transparent = true
     ghost.opacity = 0.5
     ghost.depthWrite = false

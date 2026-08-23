@@ -21,7 +21,14 @@ import { hasDrawableGeometry } from '../../lib/drawable-geometry'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { applyIsolation, clearIsolation } from '../../lib/isolation'
 import { ensureKtx2Support } from '../../lib/ktx2-loader'
-import type { ColorPreset, RenderShading } from '../../lib/materials'
+import type { MaterialTextureSettlement } from '../../lib/material-texture-settlement'
+import {
+  type ColorPreset,
+  getMaterialTextureAssignmentRevision,
+  getObjectMaterialTextureSettlement,
+  type RenderShading,
+  retryFailedObjectMaterialTextures,
+} from '../../lib/materials'
 import { initializeGpuRenderer, type RendererPowerPreference } from '../../lib/renderer-capability'
 import { getSceneTheme } from '../../lib/scene-themes'
 import { installTextureNodeNullGuard } from '../../lib/texture-node-guard'
@@ -37,9 +44,16 @@ import { PointerRaycastLayers } from './pointer-raycast-layers'
 import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
 import { RegisteredSystems } from './registered-systems'
 import { SceneBvh } from './scene-bvh'
+import {
+  advanceSceneReadinessState,
+  getSceneReadinessBlockerNames,
+  shouldWaitForSceneReadiness,
+  type SceneReadinessState,
+} from './scene-readiness'
 import { SelectionManager } from './selection-manager'
 import { UnsupportedGpuViewerFallback } from './unsupported-gpu-fallback'
 import { ViewerCamera } from './viewer-camera'
+import { createViewerPointerEvents } from './viewer-pointer-events'
 
 // Must be in place before any node material builds — a null texture pulled by
 // a shared override-material pass otherwise kills the render pass outright.
@@ -256,20 +270,49 @@ function hasCommittedSceneRoot() {
   return rootNodeIds.some((id) => sceneRegistry.nodes.has(id))
 }
 
+function getSceneMaterialRoots() {
+  const roots: THREE.Object3D[] = []
+  for (const id of useScene.getState().rootNodeIds) {
+    const root = sceneRegistry.nodes.get(id)
+    if (root) roots.push(root)
+  }
+  return roots
+}
+
 function SceneReadyTracker({
   onSceneReadyChange,
+  sceneReadyPrerequisitesReady,
   sceneReadyKey,
   sceneReadyMaxWaitMs,
 }: {
   onSceneReadyChange?: (ready: boolean) => void
+  sceneReadyPrerequisitesReady: boolean
   sceneReadyKey?: string | number | null
   sceneReadyMaxWaitMs?: number
 }) {
   const invalidate = useThree((state) => state.invalidate)
-  const readyRef = useRef(false)
-  const settledFramesRef = useRef(0)
+  const readinessStateRef = useRef<SceneReadinessState>({
+    key: sceneReadyKey,
+    ready: false,
+    settledFrames: 0,
+  })
   const waitedFramesRef = useRef(0)
   const waitStartRef = useRef<number | null>(null)
+  const warnedDegradedRef = useRef(false)
+  const forceEvaluationRef = useRef(true)
+  const retryFailedAssignmentsRef = useRef(true)
+  const observedRevisionsRef = useRef({
+    dirtyNodes: -1,
+    geometry: -1,
+    material: -1,
+    scene: -1,
+  })
+  const materialSettlementCacheRef = useRef<{
+    geometryRevision: number
+    materialRevision: number
+    sceneRevision: number
+    settlement: MaterialTextureSettlement
+  } | null>(null)
   const onSceneReadyChangeRef = useRef(onSceneReadyChange)
 
   useEffect(() => {
@@ -278,41 +321,156 @@ function SceneReadyTracker({
 
   useEffect(() => {
     void sceneReadyKey
-    readyRef.current = false
-    settledFramesRef.current = 0
+    readinessStateRef.current = { key: sceneReadyKey, ready: false, settledFrames: 0 }
     waitedFramesRef.current = 0
     waitStartRef.current = null
+    warnedDegradedRef.current = false
+    forceEvaluationRef.current = true
+    retryFailedAssignmentsRef.current = true
+    materialSettlementCacheRef.current = null
     onSceneReadyChangeRef.current?.(false)
     invalidate()
   }, [invalidate, sceneReadyKey])
 
-  useFrame(() => {
-    if (!(onSceneReadyChangeRef.current && !readyRef.current)) return
+  useEffect(() => {
+    forceEvaluationRef.current = true
+    if (!sceneReadyPrerequisitesReady) {
+      const state = readinessStateRef.current
+      if (state.ready) {
+        readinessStateRef.current = { ...state, ready: false, settledFrames: 0 }
+        onSceneReadyChangeRef.current?.(false)
+      }
+      waitedFramesRef.current = 0
+      waitStartRef.current = null
+      warnedDegradedRef.current = false
+    }
+    invalidate()
+  }, [invalidate, sceneReadyPrerequisitesReady])
 
+  useFrame(() => {
+    if (!onSceneReadyChangeRef.current) return
+
+    if (!sceneReadyPrerequisitesReady) {
+      waitedFramesRef.current = 0
+      waitStartRef.current = null
+      warnedDegradedRef.current = false
+      return
+    }
+
+    const materialRevision = getMaterialTextureAssignmentRevision()
+    const geometryRevision = useViewer.getState().geometryRevision
+    const sceneRevision = sceneRegistry.revision
+    const dirtyNodeCount = useScene.getState().dirtyNodes.size
+    const observed = observedRevisionsRef.current
+    const geometryOrSceneChanged =
+      observed.geometry !== geometryRevision || observed.scene !== sceneRevision
+    const revisionsChanged =
+      geometryOrSceneChanged ||
+      observed.material !== materialRevision ||
+      observed.dirtyNodes !== dirtyNodeCount
+    if (
+      readinessStateRef.current.ready &&
+      !forceEvaluationRef.current &&
+      !revisionsChanged
+    ) {
+      return
+    }
+    observedRevisionsRef.current = {
+      dirtyNodes: dirtyNodeCount,
+      geometry: geometryRevision,
+      material: materialRevision,
+      scene: sceneRevision,
+    }
+    forceEvaluationRef.current = false
+    if (geometryOrSceneChanged) retryFailedAssignmentsRef.current = true
+
+    let roots: THREE.Object3D[] | null = null
+    if (retryFailedAssignmentsRef.current) {
+      retryFailedAssignmentsRef.current = false
+      roots = getSceneMaterialRoots()
+      if (retryFailedObjectMaterialTextures(roots) > 0) {
+        const state = readinessStateRef.current
+        if (state.ready) {
+          readinessStateRef.current = { ...state, ready: false, settledFrames: 0 }
+          onSceneReadyChangeRef.current(false)
+        }
+        waitedFramesRef.current = 0
+        waitStartRef.current = null
+        warnedDegradedRef.current = false
+        materialSettlementCacheRef.current = null
+        forceEvaluationRef.current = true
+        invalidate()
+        return
+      }
+    }
+
+    const currentMaterialRevision = getMaterialTextureAssignmentRevision()
     waitedFramesRef.current += 1
     waitStartRef.current ??= performance.now()
-    // Give-up cap so a permanently-dirty node can't block readiness forever.
-    // The frame-count default assumes display-rate frames; a host whose frame
-    // cadence is decoupled from wall time (the headless bake page's timer-driven
-    // loop runs 180 frames in 3.6s — faster than a cold item download) passes
-    // `sceneReadyMaxWaitMs` to make the cap wall-clock instead.
-    const capReached = sceneReadyMaxWaitMs
-      ? performance.now() - waitStartRef.current >= sceneReadyMaxWaitMs
+    const cachedMaterialSettlement = materialSettlementCacheRef.current
+    const canReuseMaterialSettlement =
+      cachedMaterialSettlement?.geometryRevision === geometryRevision &&
+      cachedMaterialSettlement.materialRevision === currentMaterialRevision &&
+      cachedMaterialSettlement.sceneRevision === sceneRevision
+    let materialSettlement: MaterialTextureSettlement
+    if (canReuseMaterialSettlement && cachedMaterialSettlement) {
+      materialSettlement = cachedMaterialSettlement.settlement
+    } else {
+      roots ??= getSceneMaterialRoots()
+      materialSettlement = getObjectMaterialTextureSettlement(roots)
+    }
+    if (materialSettlement !== cachedMaterialSettlement?.settlement) {
+      materialSettlementCacheRef.current = {
+        geometryRevision,
+        materialRevision: currentMaterialRevision,
+        sceneRevision,
+        settlement: materialSettlement,
+      }
+    }
+    const blockers = getSceneReadinessBlockerNames({
+      buildWork: hasPendingSceneBuildWork(),
+      committedRoot: hasCommittedSceneRoot(),
+      failedMaterialTextures: materialSettlement.failedAssignments,
+      pendingMaterialTextures: materialSettlement.pendingAssignments,
+      prerequisitesReady: sceneReadyPrerequisitesReady,
+    })
+    const previousState = readinessStateRef.current
+    if (previousState.ready && blockers.length > 0) {
+      waitedFramesRef.current = 1
+      waitStartRef.current = performance.now()
+      warnedDegradedRef.current = false
+    }
+    // Host surfaces with timer-driven frame loops provide a wall-clock cap;
+    // interactive viewers retain the existing bounded frame-count fallback.
+    const effectiveCapReached = sceneReadyMaxWaitMs
+      ? performance.now() - (waitStartRef.current ?? performance.now()) >= sceneReadyMaxWaitMs
       : waitedFramesRef.current >= SCENE_READY_MAX_WAIT_FRAMES
-    if (!capReached && (!hasCommittedSceneRoot() || hasPendingSceneBuildWork())) {
-      settledFramesRef.current = 0
+    const waiting = shouldWaitForSceneReadiness(blockers, effectiveCapReached)
+    if (effectiveCapReached && blockers.length > 0 && !waiting && !warnedDegradedRef.current) {
+      warnedDegradedRef.current = true
+      console.warn('[viewer] Scene readiness reached its bounded wait cap; presenting degraded.', {
+        blockers,
+        failedMaterialTextures: materialSettlement.failedAssignments,
+        pendingMaterialTextures: materialSettlement.pendingAssignments,
+      })
+    }
+
+    const nextState = advanceSceneReadinessState(previousState, {
+      blockers,
+      capReached: effectiveCapReached,
+      key: sceneReadyKey,
+      settledFramesRequired: SCENE_READY_SETTLED_FRAMES,
+    })
+    readinessStateRef.current = nextState
+    if (nextState.ready !== previousState.ready) {
+      onSceneReadyChangeRef.current(nextState.ready)
+    }
+    if (!nextState.ready) {
       invalidate()
       return
     }
-
-    settledFramesRef.current += 1
-    if (settledFramesRef.current < SCENE_READY_SETTLED_FRAMES) {
-      invalidate()
-      return
-    }
-
-    readyRef.current = true
-    onSceneReadyChangeRef.current(true)
+    waitedFramesRef.current = 0
+    waitStartRef.current = null
   }, 10)
 
   return null
@@ -348,6 +506,11 @@ interface ViewerProps {
    */
   sceneReadyKey?: string | number | null
   onSceneReadyChange?: (ready: boolean) => void
+  /**
+   * Host-owned prerequisite for content materialized outside the viewer. The
+   * viewer's bounded wait starts only after this strict prerequisite is ready.
+   */
+  sceneReadyPrerequisitesReady?: boolean
   /**
    * Wall-clock give-up cap for scene readiness, replacing the default
    * frame-count cap. Set it on hosts whose frame cadence is decoupled from
@@ -404,6 +567,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     isolate,
     sceneReadyKey,
     onSceneReadyChange,
+    sceneReadyPrerequisitesReady = true,
     sceneReadyMaxWaitMs,
     maxFps = 50,
     disablePostFx = false,
@@ -521,6 +685,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         transparentBackground ? 'bg-transparent' : isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'
       }`}
       dpr={[1, maxDpr]}
+      events={createViewerPointerEvents}
       frameloop="never"
       gl={
         ((props: { canvas?: HTMLCanvasElement; powerPreference?: RendererPowerPreference }) => {
@@ -582,6 +747,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
         onSceneReadyChange={onSceneReadyChange}
         sceneReadyKey={sceneReadyKey}
         sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}
+        sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}
       />
 
       <ErrorBoundary fallback={null} scope="viewer-scene">

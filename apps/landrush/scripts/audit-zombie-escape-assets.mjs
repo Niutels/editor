@@ -1,18 +1,11 @@
 import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { inspectGlb } from './landrush-glb-audit.mjs'
+import { loadTypescriptModuleGraph } from './load-typescript-module-graph.mjs'
 
-const {
-  DiagnosticCategory,
-  ModuleKind,
-  ScriptTarget,
-  flattenDiagnosticMessageText,
-  transpileModule,
-} = createRequire(resolve(import.meta.dirname, '../../../package.json'))('typescript')
-
+const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const TARGET_TRIANGLES = 3_000
 const MINIMUM_TRIANGLES = 2_400
 const MAXIMUM_TRIANGLES = 3_600
@@ -20,10 +13,11 @@ const TEXTURE_SIZE = 2_048
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const PUBLIC_ASSET_PREFIX = '/landrush-lab/zombie-escape/assets/'
 const DEFAULT_ASSET_ROOT = resolve(
-  import.meta.dirname,
+  scriptDirectory,
   '../public/landrush-lab/zombie-escape/assets',
 )
 const DEFAULT_AUDIT_PATH = resolve(DEFAULT_ASSET_ROOT, 'asset-audit.json')
+const CATALOG_SOURCE_ROOT = resolve(scriptDirectory, '../components/landrush-lab')
 const WEAPON_IDS = [
   'sunflare-pistol',
   'reef-carbine',
@@ -101,7 +95,7 @@ export async function auditZombieEscapeAssets({
   const expectedIds = EXPECTED_ASSETS.map(({ id }) => id)
   const stateIds = Object.keys(generation.assets ?? {})
   validateExactIds(failures, 'generation assets', stateIds, expectedIds)
-  validateCatalogs(failures, catalogs)
+  const runtimeCatalogChecks = validateCatalogs(failures, catalogs)
 
   for (const contract of EXPECTED_ASSETS) {
     const { id, kind } = contract
@@ -185,15 +179,11 @@ export async function auditZombieEscapeAssets({
     const outputAudit = {}
     for (const output of contract.glbOutputs) {
       const canonicalPublicPath = contract.canonicalOutputs[output]
-      if (catalog) {
-        const catalogPath =
-          kind === 'weapon'
-            ? catalog.assetPath
-            : catalog.glb[output === 'rigged' ? 'riggedBase' : output].path
+      if (catalog && kind === 'weapon') {
         expectEqual(
           failures,
           `${id}/${output}: canonical catalog path`,
-          catalogPath,
+          catalog.assetPath,
           canonicalPublicPath,
         )
       }
@@ -306,6 +296,7 @@ export async function auditZombieEscapeAssets({
     provenance: {
       stateCatalogDifferences: provenanceDifferences,
     },
+    runtimeCatalogChecks,
     targetFaceCount: generation.targetFaceCount,
     textureResolution: generation.textureResolution,
   }
@@ -685,64 +676,117 @@ function validateCatalogs(failures, catalogs) {
       )
     }
   }
+
+  return validateZombieRuntimeCatalog(failures, catalogs)
 }
 
 async function loadCatalogs(failures) {
+  const [weapon, zombie, ambientNpc] = await Promise.all([
+    loadCatalog({
+      exportName: 'ZOMBIE_ESCAPE_WEAPON_CATALOG',
+      failures,
+      label: 'weapon',
+      path: resolve(CATALOG_SOURCE_ROOT, 'zombie-escape-weapon-catalog.ts'),
+    }),
+    loadCatalog({
+      exportName: 'ZOMBIE_ESCAPE_ZOMBIE_CATALOG',
+      failures,
+      label: 'zombie',
+      path: resolve(CATALOG_SOURCE_ROOT, 'zombie-escape-zombie-catalog.ts'),
+    }),
+    loadCatalog({
+      exportName: 'LANDRUSH_ISLAND_AMBIENT_NPCS',
+      failures,
+      label: 'ambient NPC',
+      path: resolve(CATALOG_SOURCE_ROOT, 'landrush-island-ambient-catalog.ts'),
+    }),
+  ])
+  return { ambientNpc, weapon, zombie }
+}
+
+async function loadCatalog({ exportName, failures, label, path }) {
   try {
-    const [weaponModule, zombieModule] = await Promise.all([
-      loadTypescriptModule(
-        resolve(
-          import.meta.dirname,
-          '../components/landrush-lab/zombie-escape-weapon-catalog.ts',
-        ),
-      ),
-      loadTypescriptModule(
-        resolve(
-          import.meta.dirname,
-          '../components/landrush-lab/zombie-escape-zombie-catalog.ts',
-        ),
-      ),
-    ])
-    return {
-      weapon: indexCatalog(weaponModule.ZOMBIE_ESCAPE_WEAPON_CATALOG),
-      zombie: indexCatalog(zombieModule.ZOMBIE_ESCAPE_ZOMBIE_CATALOG),
-    }
+    const module = await loadTypescriptModuleGraph(path, {
+      sourceRoot: CATALOG_SOURCE_ROOT,
+    })
+    const entries = module[exportName]
+    if (!Array.isArray(entries)) throw new Error(`missing array export ${exportName}`)
+    return indexCatalog(entries, label)
   } catch (error) {
-    failures.push(`catalogs: ${error instanceof Error ? error.message : String(error)}`)
-    return { weapon: new Map(), zombie: new Map() }
+    failures.push(`${label} catalog: ${error instanceof Error ? error.message : String(error)}`)
+    return new Map()
   }
 }
 
-async function loadTypescriptModule(path) {
-  const source = await readFile(path, 'utf8')
-  const result = transpileModule(source, {
-    compilerOptions: {
-      module: ModuleKind.ESNext,
-      target: ScriptTarget.ES2022,
-    },
-    fileName: path,
-    reportDiagnostics: true,
-  })
-  const errors = (result.diagnostics ?? []).filter(
-    ({ category }) => category === DiagnosticCategory.Error,
-  )
-  if (errors.length > 0) {
-    throw new Error(
-      errors
-        .map((diagnostic) =>
-          flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
-        )
-        .join('\n'),
+function validateZombieRuntimeCatalog(failures, catalogs) {
+  const sourceNpcIds = []
+  let mappedZombies = 0
+
+  for (const zombie of catalogs.zombie.values()) {
+    const sourceNpcId = zombie.sourceNpcId
+    if (typeof sourceNpcId !== 'string' || sourceNpcId.length === 0) {
+      failures.push(`${zombie.id}: runtime sourceNpcId is missing`)
+      continue
+    }
+    sourceNpcIds.push(sourceNpcId)
+
+    const sourceNpc = catalogs.ambientNpc.get(sourceNpcId)
+    if (!sourceNpc) {
+      failures.push(`${zombie.id}: runtime ambient NPC source ${sourceNpcId} is missing`)
+      continue
+    }
+    mappedZombies += 1
+
+    const riggedPath = sourceNpc.glb?.rigged
+    if (typeof riggedPath !== 'string' || !riggedPath.endsWith('/rigged.glb')) {
+      failures.push(`${zombie.id}: runtime ambient NPC rigged path is invalid`)
+      continue
+    }
+    expectEqual(
+      failures,
+      `${zombie.id}: runtime rigged path`,
+      zombie.glb?.riggedBase?.path,
+      riggedPath,
+    )
+    expectEqual(
+      failures,
+      `${zombie.id}: runtime run animation path`,
+      zombie.glb?.run?.path,
+      sourceNpc.glb.run,
+    )
+    expectEqual(
+      failures,
+      `${zombie.id}: runtime walk animation path`,
+      zombie.glb?.walk?.path,
+      sourceNpc.glb.walk,
     )
   }
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(result.outputText).toString('base64')}`
-  return import(dataUrl)
+
+  const ambientNpcIds = [...catalogs.ambientNpc.keys()]
+  if (catalogs.zombie.size > 0 && catalogs.ambientNpc.size > 0) {
+    validateExactIds(failures, 'zombie runtime ambient NPC sources', sourceNpcIds, ambientNpcIds)
+  }
+  const uniqueSourceNpcIds = new Set(sourceNpcIds)
+  const sourceNpcBijection =
+    catalogs.zombie.size > 0 &&
+    catalogs.ambientNpc.size > 0 &&
+    sourceNpcIds.length === catalogs.zombie.size &&
+    uniqueSourceNpcIds.size === sourceNpcIds.length &&
+    uniqueSourceNpcIds.size === catalogs.ambientNpc.size &&
+    ambientNpcIds.every((id) => uniqueSourceNpcIds.has(id))
+
+  return {
+    ambientNpcSources: catalogs.ambientNpc.size,
+    mappedZombies,
+    sourceNpcBijection,
+    zombieEntries: catalogs.zombie.size,
+  }
 }
 
-function indexCatalog(entries) {
+function indexCatalog(entries, label) {
   const map = new Map()
   for (const entry of entries ?? []) {
-    if (map.has(entry.id)) throw new Error(`catalog contains duplicate id ${entry.id}`)
+    if (map.has(entry.id)) throw new Error(`${label} catalog contains duplicate id ${entry.id}`)
     map.set(entry.id, entry)
   }
   return map

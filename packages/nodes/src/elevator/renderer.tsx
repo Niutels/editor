@@ -25,6 +25,7 @@ import {
 } from '@pascal-app/core'
 import {
   type ColorPreset,
+  cloneMaterial,
   createDefaultMaterial,
   createSurfaceRoleMaterial,
   type RenderShading,
@@ -388,7 +389,7 @@ function resolveElevatorFinishMaterial(
 }
 
 function withElevatorGlassTransparency(material: Material): Material {
-  const glass = material.clone()
+  const glass = cloneMaterial(material)
   glass.depthWrite = false
   glass.opacity = 0.2
   glass.transparent = true
