@@ -35,6 +35,7 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { WebGPURenderer } from 'three/webgpu'
 import {
   createLandrushRobotWeaponMuzzlePose,
   type LandrushRobotWeaponMuzzlePose,
@@ -62,10 +63,32 @@ import {
   spawnZombieEscapeBloodEvent,
   type ZombieEscapeBloodEvent,
 } from './zombie-escape-blood-effects'
-import { ZombieEscapeBloodPresentation } from './zombie-escape-blood-presentation'
+import {
+  isZombieEscapeBloodAttachmentGenerationCurrent,
+  ZombieEscapeBloodPresentation,
+  type ZombieEscapeBloodWorldAttachmentResolver,
+} from './zombie-escape-blood-presentation'
+import {
+  DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT,
+  isZombieEscapeBloodVariant,
+  ZOMBIE_ESCAPE_BLOOD_VARIANTS,
+  type ZombieEscapeBloodVariant,
+} from './zombie-escape-blood-variants'
 import { resolveZombieEscapeHitFlickerPhase } from './zombie-escape-hit-flicker'
+import {
+  captureZombieEscapeSkinnedImpact,
+  createZombieEscapeImpactVisualRegistry,
+  createZombieEscapeSkinnedImpactAttachment,
+  registerZombieEscapeImpactVisual,
+  resolveZombieEscapeSkinnedImpact,
+  type ZombieEscapeImpactVisualRegistry,
+} from './zombie-escape-skinned-impact-attachment'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
+import {
+  createZombieEscapeZombieShader,
+  type ZombieEscapeZombieMaterialDebugMode,
+} from './zombie-escape-zombie-material'
 import {
   shouldRenderZombieShootingDebugContactMarker,
   writeZombieShootingDebugBloodEvent,
@@ -155,7 +178,7 @@ const CAMERA_POSES = {
     far: 50,
     fov: 40,
     near: 0.035,
-    position: new Vector3(3.25, 2.7, -1.25),
+    position: new Vector3(-3.25, 2.7, -1.25),
     target: new Vector3(0, 1.18, -5.05),
   },
 } as const satisfies Record<
@@ -169,6 +192,28 @@ const EMPTY_METRICS: DebugMetrics = {
   fps: 0,
   sequenceSeconds: 0,
   triangles: 0,
+}
+
+const ZOMBIE_SHADER_PROOF_RENDERER_CACHE = new WeakMap<HTMLCanvasElement, Promise<WebGPURenderer>>()
+
+function createZombieShootingShaderProofRenderer(props: { canvas?: HTMLCanvasElement }) {
+  const canvas = props.canvas
+  const cached = canvas ? ZOMBIE_SHADER_PROOF_RENDERER_CACHE.get(canvas) : undefined
+  if (cached) return cached
+
+  const promise = (async () => {
+    const renderer = new WebGPURenderer({
+      ...props,
+      alpha: false,
+      antialias: true,
+      powerPreference: 'high-performance',
+    } as never)
+    await renderer.init()
+    return renderer
+  })()
+
+  if (canvas) ZOMBIE_SHADER_PROOF_RENDERER_CACHE.set(canvas, promise)
+  return promise
 }
 
 const ignorePoseDiagnostic = (_diagnostic: Pick<WeaponFitDebugDiagnostics, 'arms' | 'grips'>) => {}
@@ -186,6 +231,15 @@ export function ZombieShootingDebugClient() {
   const [metrics, setMetrics] = useState<DebugMetrics>(EMPTY_METRICS)
   const [weaponDiagnostic, setWeaponDiagnostic] = useState<WeaponAssetDiagnostic | null>(null)
   const [zombieClipLoaded, setZombieClipLoaded] = useState(false)
+  const [bloodVariant, setBloodVariant] = useState<ZombieEscapeBloodVariant>(
+    DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT,
+  )
+  const [captureTimeSeconds, setCaptureTimeSeconds] = useState<number | null>(null)
+  const [shaderProof, setShaderProof] = useState(false)
+  const [zombify, setZombify] = useState(1)
+  const [zombieShaderDebugMode, setZombieShaderDebugMode] =
+    useState<ZombieEscapeZombieMaterialDebugMode>('final')
+  const [zombieShaderMaterialReady, setZombieShaderMaterialReady] = useState(false)
   const activeWeapon = ZOMBIE_ESCAPE_WEAPON_CATALOG[activeWeaponIndex]!
   const activeCue = SHOT_CUE_BY_WEAPON_INDEX[activeWeaponIndex]
 
@@ -194,6 +248,13 @@ export function ZombieShootingDebugClient() {
     const requestedCamera = params.get('camera')
     const requestedView = params.get('view')
     const requestedWeapon = params.get('weapon')
+    const requestedBlood = params.get('blood')
+    const requestedTimeParameter = params.get('time')
+    const requestedTime =
+      requestedTimeParameter === null ? Number.NaN : Number(requestedTimeParameter)
+    setShaderProof(parseZombieShootingShaderProof(params.get('shaderProof')))
+    setZombify(parseZombieShootingZombify(params.get('zombify')))
+    setZombieShaderDebugMode(parseZombieShootingShaderDebugMode(params.get('zombieShaderDebug')))
     if (isCameraBookmark(requestedCamera)) setBookmark(requestedCamera)
     if (isViewMode(requestedView)) setViewMode(requestedView)
     if (requestedWeapon && requestedWeapon !== 'all') {
@@ -207,6 +268,11 @@ export function ZombieShootingDebugClient() {
       }
     }
     if (params.get('paused') === '1') setPaused(true)
+    if (isZombieEscapeBloodVariant(requestedBlood)) setBloodVariant(requestedBlood)
+    if (Number.isFinite(requestedTime) && requestedTime >= 0) {
+      setCaptureTimeSeconds(requestedTime)
+      setPaused(false)
+    }
     setResetRevision((revision) => revision + 1)
   }, [])
 
@@ -217,6 +283,11 @@ export function ZombieShootingDebugClient() {
   const updateViewMode = useCallback((next: ViewMode) => {
     setViewMode(next)
     replaceDebugQuery('view', next)
+  }, [])
+  const updateBloodVariant = useCallback((next: ZombieEscapeBloodVariant) => {
+    setBloodVariant(next)
+    setResetRevision((revision) => revision + 1)
+    replaceDebugQuery('blood', next)
   }, [])
   const reset = useCallback(() => {
     setResetRevision((revision) => revision + 1)
@@ -256,9 +327,26 @@ export function ZombieShootingDebugClient() {
   const markWeaponCompleted = useCallback((weaponIndex: number) => {
     setCompletedWeaponMask((mask) => mask | (1 << weaponIndex))
   }, [])
+  const zombieShaderReady =
+    shaderProof && zombieShaderMaterialReady && zombieClipLoaded && metrics.drawCalls > 0
+  const captureReady =
+    metrics.drawCalls > 0 &&
+    zombieClipLoaded &&
+    weaponDiagnostic?.status === 'loaded' &&
+    (!shaderProof || zombieShaderReady) &&
+    (captureTimeSeconds === null ||
+      Math.abs(metrics.sequenceSeconds - captureTimeSeconds) < 0.000_1)
 
   return (
-    <main className="relative h-screen w-screen select-none overflow-hidden bg-[#2387a6] text-white [&_canvas]:h-full [&_canvas]:w-full">
+    <main
+      className="relative h-screen w-screen select-none overflow-hidden bg-[#2387a6] text-white [&_canvas]:h-full [&_canvas]:w-full"
+      data-blood-variant={bloodVariant}
+      data-capture-ready={captureReady ? 'true' : 'false'}
+      data-capture-time={captureTimeSeconds ?? 'live'}
+      data-zombie-shader-debug={shaderProof ? zombieShaderDebugMode : undefined}
+      data-zombie-shader-ready={shaderProof ? (zombieShaderReady ? 'true' : 'false') : undefined}
+      data-zombify={shaderProof ? zombify : undefined}
+    >
       <Canvas
         aria-label="Landrush character firing a generated weapon at a generated running zombie"
         camera={{
@@ -267,25 +355,36 @@ export function ZombieShootingDebugClient() {
           near: CAMERA_POSES.design.near,
           position: CAMERA_POSES.design.position.toArray(),
         }}
-        dpr={[1, 1.5]}
+        dpr={captureTimeSeconds === null ? [1, 1.5] : 1}
         frameloop="always"
-        gl={{ alpha: false, antialias: true, powerPreference: 'high-performance' }}
+        gl={
+          shaderProof
+            ? (createZombieShootingShaderProofRenderer as never)
+            : { alpha: false, antialias: true, powerPreference: 'high-performance' }
+        }
+        key={shaderProof ? 'shader-proof-webgpu' : 'default-webgl'}
         shadows={false}
       >
         <ZombieShootingWorld
           activeWeaponIndex={activeWeaponIndex}
           autoAllWeapons={autoAllWeapons}
+          bloodVariant={bloodVariant}
           bookmark={bookmark}
+          captureTimeSeconds={captureTimeSeconds}
           onActiveWeaponIndexChange={setActiveWeaponIndex}
           onMetricsChange={setMetrics}
           onWeaponCompleted={markWeaponCompleted}
           onWeaponDiagnosticChange={setWeaponDiagnostic}
           onZombieClipStatusChange={setZombieClipLoaded}
+          onZombieShaderMaterialReadyChange={setZombieShaderMaterialReady}
           paused={paused}
           resetRevision={resetRevision}
           selectedWeaponIndex={selectedWeaponIndex}
+          shaderProof={shaderProof}
           soundEnabled={soundEnabled}
           viewMode={viewMode}
+          zombieShaderDebugMode={zombieShaderDebugMode}
+          zombify={zombify}
         />
       </Canvas>
 
@@ -302,8 +401,10 @@ export function ZombieShootingDebugClient() {
 
       <DebugControls
         autoAllWeapons={autoAllWeapons}
+        bloodVariant={bloodVariant}
         bookmark={bookmark}
         onBookmarkChange={updateBookmark}
+        onBloodVariantChange={updateBloodVariant}
         onEnableSound={enableSound}
         onReset={reset}
         onWeaponChange={selectWeapon}
@@ -324,6 +425,9 @@ export function ZombieShootingDebugClient() {
             {metrics.activeEffectSlots}/{EFFECT_POOL_CAPACITY} VFX slots
           </span>
           <span>t={metrics.sequenceSeconds.toFixed(2)}s</span>
+          <span>
+            {ZOMBIE_ESCAPE_BLOOD_VARIANTS.find((entry) => entry.id === bloodVariant)?.label}
+          </span>
         </div>
         <div className="mt-1 text-slate-400">
           weapon {weaponDiagnostic?.status ?? 'loading'} · zombie clip{' '}
@@ -359,8 +463,10 @@ export function ZombieShootingDebugClient() {
 
 function DebugControls({
   autoAllWeapons,
+  bloodVariant,
   bookmark,
   onBookmarkChange,
+  onBloodVariantChange,
   onEnableSound,
   onReset,
   onWeaponChange,
@@ -372,8 +478,10 @@ function DebugControls({
   viewMode,
 }: {
   autoAllWeapons: boolean
+  bloodVariant: ZombieEscapeBloodVariant
   bookmark: CameraBookmark
   onBookmarkChange: (bookmark: CameraBookmark) => void
+  onBloodVariantChange: (variant: ZombieEscapeBloodVariant) => void
   onEnableSound: () => void
   onReset: () => void
   onWeaponChange: (weaponIndex: number | null) => void
@@ -387,7 +495,7 @@ function DebugControls({
   return (
     <nav
       aria-label="Zombie shooting debug controls"
-      className="absolute top-4 right-4 flex max-w-[30rem] flex-col gap-2 rounded-2xl border border-white/15 bg-slate-950/82 p-2 shadow-2xl backdrop-blur-md"
+      className="absolute top-4 right-4 flex max-w-[48rem] flex-col gap-2 rounded-2xl border border-white/15 bg-slate-950/82 p-2 shadow-2xl backdrop-blur-md"
     >
       <ControlRow label="Camera">
         {(['near', 'design', 'far'] as const).map((entry) => (
@@ -421,6 +529,16 @@ function DebugControls({
             key={weapon.id}
             label={weapon.displayName.replace(/^.*?\s/, '')}
             onClick={() => onWeaponChange(weaponIndex)}
+          />
+        ))}
+      </ControlRow>
+      <ControlRow label="Blood">
+        {ZOMBIE_ESCAPE_BLOOD_VARIANTS.map((variant) => (
+          <DebugButton
+            active={bloodVariant === variant.id}
+            key={variant.id}
+            label={variant.label}
+            onClick={() => onBloodVariantChange(variant.id)}
           />
         ))}
       </ControlRow>
@@ -476,31 +594,43 @@ function DebugButton({
 function ZombieShootingWorld({
   activeWeaponIndex,
   autoAllWeapons,
+  bloodVariant,
   bookmark,
+  captureTimeSeconds,
   onActiveWeaponIndexChange,
   onMetricsChange,
   onWeaponCompleted,
   onWeaponDiagnosticChange,
   onZombieClipStatusChange,
+  onZombieShaderMaterialReadyChange,
   paused,
   resetRevision,
   selectedWeaponIndex,
+  shaderProof,
   soundEnabled,
   viewMode,
+  zombieShaderDebugMode,
+  zombify,
 }: {
   activeWeaponIndex: number
   autoAllWeapons: boolean
+  bloodVariant: ZombieEscapeBloodVariant
   bookmark: CameraBookmark
+  captureTimeSeconds: number | null
   onActiveWeaponIndexChange: (weaponIndex: number) => void
   onMetricsChange: Dispatch<SetStateAction<DebugMetrics>>
   onWeaponCompleted: (weaponIndex: number) => void
   onWeaponDiagnosticChange: Dispatch<SetStateAction<WeaponAssetDiagnostic | null>>
   onZombieClipStatusChange: Dispatch<SetStateAction<boolean>>
+  onZombieShaderMaterialReadyChange: Dispatch<SetStateAction<boolean>>
   paused: boolean
   resetRevision: number
   selectedWeaponIndex: number
+  shaderProof: boolean
   soundEnabled: boolean
   viewMode: ViewMode
+  zombieShaderDebugMode: ZombieEscapeZombieMaterialDebugMode
+  zombify: number
 }) {
   const timelineRef = useRef<TimelineState>({
     activeWeaponIndex,
@@ -512,13 +642,19 @@ function ZombieShootingWorld({
   const audioSourceRef = useRef<ZombieEscapeAudioEventSource>({
     audioEvents: createZombieEscapeAudioEventRing(),
   })
+  const impactVisualRegistry = useMemo(() => createZombieEscapeImpactVisualRegistry(), [])
 
   return (
     <>
       <color args={[viewMode === 'diagnostic' ? '#172131' : '#70c9df']} attach="background" />
       <fog attach="fog" args={[viewMode === 'diagnostic' ? '#172131' : '#70c9df', 15, 42]} />
       <RendererPresentation viewMode={viewMode} />
-      <TimelineClock paused={paused} resetRevision={resetRevision} timelineRef={timelineRef} />
+      <TimelineClock
+        captureTimeSeconds={captureTimeSeconds}
+        paused={paused}
+        resetRevision={resetRevision}
+        timelineRef={timelineRef}
+      />
       <SequenceDirector
         autoAllWeapons={autoAllWeapons}
         onActiveWeaponIndexChange={onActiveWeaponIndexChange}
@@ -540,9 +676,15 @@ function ZombieShootingWorld({
       />
       <Suspense fallback={<ZombieLoadingStandIn />}>
         <GeneratedRunningZombie
+          impactVisualRegistry={impactVisualRegistry}
           onClipStatusChange={onZombieClipStatusChange}
+          onShaderMaterialReadyChange={onZombieShaderMaterialReadyChange}
           resetRevision={resetRevision}
+          shaderDebugMode={zombieShaderDebugMode}
+          shaderProof={shaderProof}
+          showHitFlicker={!shaderProof && captureTimeSeconds === null}
           timelineRef={timelineRef}
+          zombify={zombify}
         />
       </Suspense>
       <FiringEffects
@@ -550,12 +692,16 @@ function ZombieShootingWorld({
         muzzlePoseRef={muzzlePoseRef}
         timelineRef={timelineRef}
       />
-      <DebugBloodEffects
-        autoAllWeapons={autoAllWeapons}
-        resetRevision={resetRevision}
-        selectedWeaponIndex={selectedWeaponIndex}
-        timelineRef={timelineRef}
-      />
+      {shaderProof ? null : (
+        <DebugBloodEffects
+          autoAllWeapons={autoAllWeapons}
+          impactVisualRegistry={impactVisualRegistry}
+          resetRevision={resetRevision}
+          selectedWeaponIndex={selectedWeaponIndex}
+          timelineRef={timelineRef}
+          variant={bloodVariant}
+        />
+      )}
       <DebugCombatAudioEvents
         active={soundEnabled}
         audioSourceRef={audioSourceRef}
@@ -580,10 +726,12 @@ function ZombieShootingWorld({
 }
 
 function TimelineClock({
+  captureTimeSeconds,
   paused,
   resetRevision,
   timelineRef,
 }: {
+  captureTimeSeconds: number | null
   paused: boolean
   resetRevision: number
   timelineRef: MutableRefObject<TimelineState>
@@ -596,9 +744,14 @@ function TimelineClock({
   }, [resetRevision, timelineRef])
 
   useFrame((_, rawDelta) => {
-    const delta = Math.min(MAXIMUM_DELTA_SECONDS, Math.max(0, rawDelta))
-    timelineRef.current.deltaSeconds = paused ? 0 : delta
-    if (!paused) timelineRef.current.elapsedSeconds += delta
+    const remaining =
+      captureTimeSeconds === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, captureTimeSeconds - timelineRef.current.elapsedSeconds)
+    const delta = Math.min(MAXIMUM_DELTA_SECONDS, Math.max(0, rawDelta), remaining)
+    const frozen = paused || remaining <= 0
+    timelineRef.current.deltaSeconds = frozen ? 0 : delta
+    if (!frozen) timelineRef.current.elapsedSeconds += delta
   }, -100)
 
   return null
@@ -797,13 +950,25 @@ function ShooterCharacter({
 }
 
 function GeneratedRunningZombie({
+  impactVisualRegistry,
   onClipStatusChange,
+  onShaderMaterialReadyChange,
   resetRevision,
+  shaderDebugMode,
+  shaderProof,
+  showHitFlicker,
   timelineRef,
+  zombify,
 }: {
+  impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   onClipStatusChange: Dispatch<SetStateAction<boolean>>
+  onShaderMaterialReadyChange: Dispatch<SetStateAction<boolean>>
   resetRevision: number
+  shaderDebugMode: ZombieEscapeZombieMaterialDebugMode
+  shaderProof: boolean
+  showHitFlicker: boolean
   timelineRef: MutableRefObject<TimelineState>
+  zombify: number
 }) {
   const riggedGltf = useGLTFKTX2(ZOMBIE.glb.riggedBase.path)
   const runGltf = useGLTF(ZOMBIE.glb.run.path)
@@ -817,12 +982,25 @@ function GeneratedRunningZombie({
   const modelTransform = useMemo(() => computeZombieTransform(riggedGltf.scene), [riggedGltf.scene])
   const mixer = useMemo(() => new AnimationMixer(model), [model])
   const flashMaterialsRef = useRef<ZombieFlashMaterialState[]>([])
+  const zombieShader = useMemo(
+    () =>
+      shaderProof
+        ? createZombieEscapeZombieShader({ debugMode: shaderDebugMode, phaseAmount: 0 })
+        : null,
+    [shaderDebugMode, shaderProof],
+  )
 
   useLayoutEffect(() => {
+    zombieShader?.setPhaseAmount(zombify)
+  }, [zombieShader, zombify])
+
+  useLayoutEffect(() => {
+    onShaderMaterialReadyChange(false)
     model.position.copy(modelTransform.offset)
     model.scale.setScalar(modelTransform.scale)
     const ownedMaterials: ZombieFlashMaterial[] = []
     const flashMaterials: ZombieFlashMaterialState[] = []
+    let shaderMaterialCount = 0
     model.traverse((object) => {
       const mesh = object as Mesh
       if (!mesh.isMesh) return
@@ -830,9 +1008,15 @@ function GeneratedRunningZombie({
       mesh.receiveShadow = false
       mesh.frustumCulled = false
       const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-      const clonedMaterials = sourceMaterials.map(
-        (sourceMaterial) => sourceMaterial.clone() as ZombieFlashMaterial,
-      )
+      const clonedMaterials = sourceMaterials.map((sourceMaterial) => {
+        const material = (
+          zombieShader
+            ? zombieShader.createMaterial(sourceMaterial, mesh.geometry, 0)
+            : sourceMaterial.clone()
+        ) as ZombieFlashMaterial
+        if (material.userData.zombieTextureShader) shaderMaterialCount += 1
+        return material
+      })
       ownedMaterials.push(...clonedMaterials)
       for (const material of clonedMaterials) {
         flashMaterials.push({
@@ -846,11 +1030,19 @@ function GeneratedRunningZombie({
       else if (clonedMaterials[0]) mesh.material = clonedMaterials[0]
     })
     flashMaterialsRef.current = flashMaterials
+    onShaderMaterialReadyChange(shaderProof && shaderMaterialCount > 0)
     return () => {
       flashMaterialsRef.current = []
+      onShaderMaterialReadyChange(false)
       for (const material of ownedMaterials) material.dispose()
     }
-  }, [model, modelTransform])
+  }, [model, modelTransform, onShaderMaterialReadyChange, shaderProof, zombieShader])
+
+  useLayoutEffect(() => {
+    const pivot = pivotRef.current
+    if (!pivot) return
+    return registerZombieEscapeImpactVisual(impactVisualRegistry, 0, 1, pivot)
+  }, [impactVisualRegistry])
 
   useEffect(() => {
     onClipStatusChange(Boolean(clip))
@@ -887,7 +1079,7 @@ function GeneratedRunningZombie({
       reaction = Math.max(reaction, Math.sin(normalized * Math.PI) * (1 - normalized * 0.36))
       hitFlash = Math.max(hitFlash, 1 - MathUtils.clamp(impactAge / 0.18, 0, 1))
     }
-    const hitFlickerPhase = resolveZombieEscapeHitFlickerPhase(hitFlash)
+    const hitFlickerPhase = showHitFlicker ? resolveZombieEscapeHitFlickerPhase(hitFlash) : 'none'
     const hitFlickerColor = hitFlickerPhase === 'red' ? ZOMBIE_HIT_RED : ZOMBIE_HIT_BLACK
     const approach = (sequenceTime / SEQUENCE_DURATION_SECONDS) * 0.34
     pivot.position.set(0, 1 + reaction * 0.08, -5.5 + approach - reaction * 0.42)
@@ -1060,16 +1252,27 @@ function FiringEffects({
 
 function DebugBloodEffects({
   autoAllWeapons,
+  impactVisualRegistry,
   resetRevision,
   selectedWeaponIndex,
   timelineRef,
+  variant,
 }: {
   autoAllWeapons: boolean
+  impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   resetRevision: number
   selectedWeaponIndex: number
   timelineRef: MutableRefObject<TimelineState>
+  variant: ZombieEscapeBloodVariant
 }) {
   const events = useMemo(() => createZombieEscapeBloodEventPool(EFFECT_POOL_CAPACITY), [])
+  const skinnedAttachments = useMemo(
+    () =>
+      Array.from({ length: EFFECT_POOL_CAPACITY }, () =>
+        createZombieEscapeSkinnedImpactAttachment(),
+      ),
+    [],
+  )
   const eventScratch = useMemo<ZombieEscapeBloodEvent>(
     () => ({
       directionX: 0,
@@ -1089,14 +1292,72 @@ function DebugBloodEffects({
     [],
   )
   const previousElapsedRef = useRef(0)
+  const worldRayStart = useMemo(() => new Vector3(), [])
+  const worldRayEnd = useMemo(() => new Vector3(), [])
+  const rayDirection = useMemo(() => new Vector3(), [])
+  const referenceNormal = useMemo(() => new Vector3(), [])
   const getElapsedSeconds = useCallback(() => timelineRef.current.elapsedSeconds, [timelineRef])
+  const resolveWorldAttachment = useMemo<ZombieEscapeBloodWorldAttachmentResolver>(
+    () => (eventSlot, eventGeneration, targetSlot, targetGeneration, outputPoint, outputNormal) => {
+      const attachment = skinnedAttachments[eventSlot]
+      return Boolean(
+        attachment &&
+          attachment.targetSlot === targetSlot &&
+          attachment.targetGeneration === targetGeneration &&
+          isZombieEscapeBloodAttachmentGenerationCurrent(
+            eventGeneration,
+            attachment.shotGeneration,
+          ) &&
+          resolveZombieEscapeSkinnedImpact(
+            impactVisualRegistry,
+            attachment,
+            outputPoint,
+            outputNormal,
+          ),
+      )
+    },
+    [impactVisualRegistry, skinnedAttachments],
+  )
   const visitSequenceEvent = useCallback(
     (event: Parameters<typeof writeZombieShootingDebugBloodEvent>[0]) => {
       if (writeZombieShootingDebugBloodEvent(event, eventScratch)) {
-        spawnZombieEscapeBloodEvent(events, eventScratch)
+        const eventSlot = spawnZombieEscapeBloodEvent(events, eventScratch)
+        worldRayStart.set(
+          ZOMBIE_SHOOTING_DEBUG_SHOOTER_POSITION.x,
+          ZOMBIE_SHOOTING_DEBUG_SHOOTER_POSITION.y,
+          ZOMBIE_SHOOTING_DEBUG_SHOOTER_POSITION.z,
+        )
+        rayDirection
+          .set(eventScratch.directionX, eventScratch.directionY, eventScratch.directionZ)
+          .normalize()
+        worldRayEnd
+          .set(eventScratch.originX, eventScratch.originY, eventScratch.originZ)
+          .addScaledVector(rayDirection, 2.5)
+        referenceNormal
+          .set(eventScratch.normalX, eventScratch.normalY, eventScratch.normalZ)
+          .normalize()
+        captureZombieEscapeSkinnedImpact(
+          impactVisualRegistry,
+          eventScratch.targetSlot,
+          eventScratch.targetGeneration,
+          events.pool.generation[eventSlot]!,
+          worldRayStart,
+          worldRayEnd,
+          referenceNormal,
+          skinnedAttachments[eventSlot]!,
+        )
       }
     },
-    [eventScratch, events],
+    [
+      eventScratch,
+      events,
+      impactVisualRegistry,
+      rayDirection,
+      referenceNormal,
+      skinnedAttachments,
+      worldRayEnd,
+      worldRayStart,
+    ],
   )
 
   useLayoutEffect(() => {
@@ -1123,6 +1384,8 @@ function DebugBloodEffects({
       events={events}
       getElapsedSeconds={getElapsedSeconds}
       producerFramePriority={DEBUG_EFFECTS_PRODUCER_FRAME_PRIORITY}
+      resolveWorldAttachment={resolveWorldAttachment}
+      variant={variant}
     />
   )
 }
@@ -1393,6 +1656,25 @@ function isCameraBookmark(value: string | null): value is CameraBookmark {
 
 function isViewMode(value: string | null): value is ViewMode {
   return value === 'final' || value === 'no-post' || value === 'diagnostic'
+}
+
+export function parseZombieShootingShaderProof(value: string | null) {
+  return value === '1'
+}
+
+export function parseZombieShootingZombify(value: string | null) {
+  if (value === null || value.trim() === '') return 1
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? MathUtils.clamp(parsed, 0, 1) : 1
+}
+
+export function parseZombieShootingShaderDebugMode(
+  value: string | null,
+): ZombieEscapeZombieMaterialDebugMode {
+  if (value === 'mottle' || value === 'roughness' || value === 'tissue' || value === 'veins') {
+    return value
+  }
+  return 'final'
 }
 
 function capitalize(value: string) {

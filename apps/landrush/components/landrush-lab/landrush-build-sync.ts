@@ -1,3 +1,5 @@
+import { rectFootprint } from '@landrush/runtime'
+
 export type LandrushBuildSyncGraphNode = {
   readonly children?: readonly string[]
   readonly id: string
@@ -16,9 +18,26 @@ const LANDRUSH_BUILD_SYNC_STRUCTURAL_OBJECT_TYPES = new Set([
   'roof',
   'shelf',
   'slab',
+  'spawn',
   'stair',
   'wall',
 ])
+
+export function createLandrushBuildSpawnFootprint(
+  spawn: {
+    position: readonly [number, number, number]
+    rotation: number
+  },
+  padding = 0,
+) {
+  const size = 0.6 + Math.max(0, padding) * 2
+  return rectFootprint({
+    center: { x: spawn.position[0], z: spawn.position[2] },
+    depth: size,
+    rotation: spawn.rotation,
+    width: size,
+  })
+}
 
 export function isLandrushBuildPlacementDraft(node: Pick<LandrushBuildSyncGraphNode, 'metadata'>) {
   const metadata = node.metadata

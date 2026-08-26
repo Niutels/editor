@@ -1,37 +1,83 @@
 import {
+  constrainZombieEscapeAgentSeparationToRoute,
+  createZombieEscapeAgentSeparation,
+  createZombieEscapeAgentSpatialIndex,
+  rebuildZombieEscapeAgentSpatialIndex,
+  resetZombieEscapeAgentSpatialIndex,
+  resolveZombieEscapeAgentSeparation,
+  type ZombieEscapeAgentSeparation,
+  type ZombieEscapeAgentSpatialIndex,
+  zombieEscapeAgentSpatialPositionIsClear,
+} from './zombie-escape-agent-spatial-index'
+import {
   createZombieEscapeAudioEventRing,
   emitZombieEscapeAudioEvent,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
   type ZombieEscapeAudioEventRing,
 } from './zombie-escape-audio-events'
 import {
+  acknowledgeZombieEscapeFlowFieldCollisionMaskRemoval,
+  adoptZombieEscapeSparsePublishedRouteAtWaypoint,
+  beginZombieEscapeSparseFlowSearch,
+  beginZombieEscapeSparseTargetUpdate,
+  classifyZombieEscapeCollisionObjectDelta,
+  clearZombieEscapeSparseFlowSearchRouteCorridor,
   createZombieEscapeCircleMoveResult,
   createZombieEscapeCollisionHit,
+  createZombieEscapeCollisionObjectDeltaResult,
   createZombieEscapeCollisionWorld,
+  createZombieEscapeCollisionWorldActiveView,
   createZombieEscapeCollisionWorldWithoutObjects,
   createZombieEscapeFlowField,
   createZombieEscapeNavigationMoveResult,
   createZombieEscapeReachableSpawn,
+  createZombieEscapeSparseCommittedNodeRoute,
+  createZombieEscapeSparseFlowSearch,
+  createZombieEscapeSparseSpawnAnchor,
+  deactivateZombieEscapeCollisionObject,
+  findFirstActiveZombieEscapeBreakableObjectId,
+  followZombieEscapeCachedSparseWaypoint,
+  getZombieEscapeSparseCommittedRouteGeneration,
+  getZombieEscapeSparseFlowSearchRouteGeneration,
+  getZombieEscapeSparseRequestedTargetRevision,
+  inspectZombieEscapeSparseAttachmentHeapLeases,
   isZombieEscapeCollisionHitBreakable,
   isZombieEscapeCollisionObjectBreakable,
   isZombieEscapeCollisionObjectBreakableAtElevation,
   moveZombieEscapeCircleWithSlide,
   moveZombieEscapeNavigationAgent,
+  resetZombieEscapeSparseFlowSearch,
   resolveZombieEscapeCollisionHitObjectId,
+  resolveZombieEscapeCollisionHitObjectOrdinal,
   resolveZombieEscapeFlowDirection,
-  resolveZombieEscapeNavigationTargetElevation,
   resolveZombieEscapeReachableSpawn,
+  sampleZombieEscapeSparseCommittedNodeRoute,
+  sampleZombieEscapeSparseSpawnAnchor,
+  seedZombieEscapeSparseFlowSearchRouteCorridor,
   setZombieEscapeFlowFieldWorld,
+  stepZombieEscapeSparseFlowSearch,
+  stepZombieEscapeSparseTargetUpdate,
   sweepZombieEscapeProjectileAgainstWorld,
   updateZombieEscapeFlowTarget,
   type ZombieEscapeCircleMoveResult,
   type ZombieEscapeCollisionCircleSource,
   type ZombieEscapeCollisionHit,
+  type ZombieEscapeCollisionObjectDeltaResult,
   type ZombieEscapeCollisionWorld,
   type ZombieEscapeFlowField,
   type ZombieEscapeFlowSample,
   type ZombieEscapeNavigationMoveResult,
+  type ZombieEscapeSparseFlowSearch,
+  type ZombieEscapeSparseNavigationGraph,
+  type ZombieEscapeSparseSearchBudget,
+  type ZombieEscapeSparseTargetUpdateBudget,
+  zombieEscapeCollisionObjectOrdinalIsActive,
+  zombieEscapeSameLayerNavigationSegmentIsClear,
   zombieEscapeSegmentIsClearInVerticalRange,
+  zombieEscapeSparseFlowSearchCanBegin,
+  zombieEscapeSparseFlowSearchCanProgress,
+  zombieEscapeSparseFlowSearchHasAttachmentHeapLease,
+  zombieEscapeSparseFlowSearchHoldsStagingReverseFieldBankLease,
 } from './zombie-escape-collision-world'
 import {
   resolveZombieEscapeMeleePhaseProgress,
@@ -77,17 +123,22 @@ import {
   nextZombieEscapeRandom,
   resetZombieEscapeRandomState,
   type ZombieEscapeRandomState,
-  zombieEscapeRandomRange,
 } from './zombie-escape-random'
+import {
+  resolveSparseNavigationNearestStrictTargetProjection,
+  resolveSparseNavigationStrictRegionIndex,
+  type ZombieEscapeSparseNavigationTargetProjection,
+} from './zombie-escape-sparse-navigation'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import {
   createZombieEscapeFallbackWeaponPickupPlacements,
   type ZombieEscapeWeaponPickupPlacement,
-} from './zombie-escape-weapon-placement'
+} from './zombie-escape-weapon-pickup-data'
 import type { ZombieEscapeArenaData } from './zombie-escape-world'
 import {
-  createZombieEscapeGaitByPoolSlot,
   createZombieEscapeVariantByPoolSlot,
+  resolveZombieEscapeProjectileSlowdownMultiplier,
+  resolveZombieEscapeSpawnSpeedScale,
   ZOMBIE_ESCAPE_ZOMBIE_GAIT,
 } from './zombie-escape-zombie-roster'
 
@@ -95,11 +146,90 @@ export type ZombieEscapeGameStatus = 'lost' | 'playing' | 'won'
 export type ZombieEscapeGamePhase = 'build' | 'night'
 export type ZombieEscapeWaveState = 'active' | 'escape' | 'intermission'
 export type ZombieEscapePurchaseFeedback = 'insufficient-funds' | 'purchased' | null
+export type ZombieEscapeSimulationOptions = Readonly<{
+  requireSparseNavigation?: boolean
+  zombieCapacity?: number
+}>
 
 const ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS = 21.4
 const ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MAXIMUM_RADIUS_METERS = 22.8
 const ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS = 8
+const ZOMBIE_ESCAPE_WAVE_SPAWN_AUTHORED_GROUND_ELEVATION_METERS = 0
+const ZOMBIE_ESCAPE_WAVE_SPAWN_MAXIMUM_PROBES_PER_ADMISSION = 64
+const ZOMBIE_ESCAPE_WAVE_SPAWN_GOLDEN_ANGLE_RADIANS = Math.PI * (3 - Math.sqrt(5))
 const ZOMBIE_ESCAPE_MUZZLE_VALIDATION_MAXIMUM_DISTANCE_METERS = 2.25
+const ZOMBIE_ESCAPE_COLLISION_RECOVERY_REARM_RADIUS_MULTIPLIER = 0.5
+const ZOMBIE_ESCAPE_LIVE_GOAL_LAYER_TOLERANCE_METERS = 0.12
+const ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_DISTANCE_METERS = 3
+const ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_LAYER_DISTANCE_METERS = ZOMBIE_ESCAPE_PLAYER_HEIGHT
+const ZOMBIE_ESCAPE_LIVE_GOAL_VELOCITY_RESPONSE_PER_SECOND = 20
+const ZOMBIE_ESCAPE_ROUTE_VELOCITY_RESPONSE_PER_SECOND = 7
+const ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS =
+  ZOMBIE_ESCAPE_SIMULATION.runSpeed *
+  ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds *
+  ZOMBIE_ESCAPE_SIMULATION.navigationRouteTargetMaximumPublicationLatencyTicks
+const ZOMBIE_ESCAPE_PENDING_ROUTE_TERMINAL_CONTINUATION_MAXIMUM_DISTANCE_METERS =
+  ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS * 2
+const ZOMBIE_ESCAPE_NAVIGATION_NO_PROGRESS_TIMEOUT_TICKS = Math.max(
+  1,
+  Math.round(0.65 / ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds),
+)
+const ZOMBIE_ESCAPE_NAVIGATION_RECOVERY_COOLDOWN_TICKS = Math.max(
+  ZOMBIE_ESCAPE_NAVIGATION_NO_PROGRESS_TIMEOUT_TICKS,
+  Math.round(1.5 / ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds),
+)
+const ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED = -2
+const ZOMBIE_ESCAPE_MAXIMUM_ZOMBIE_CAPACITY = 32_767
+const ZOMBIE_ESCAPE_ZERO_SPARSE_SEARCH_BUDGET: ZombieEscapeSparseSearchBudget = {
+  maximumCandidateVisits: 0,
+  maximumCollisionPredicates: 0,
+  maximumHeapOperations: 0,
+  maximumHierarchyNodeVisits: 0,
+  maximumSupportPredicates: 0,
+}
+
+type ZombieEscapeNavigationIntentDemandReason =
+  | 'cachedAnchorLost'
+  | 'collisionRecovery'
+  | 'connectorChanged'
+  | 'routePublished'
+  | 'spawn'
+  | 'worldChanged'
+
+type ZombieEscapeSparseSearchRestartReason =
+  | 'collisionRecovery'
+  | 'routePublished'
+  | 'targetPublicationPreemption'
+  | 'worldChanged'
+
+const ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON = {
+  cachedAnchorLost: 1 << 0,
+  collisionRecovery: 1 << 1,
+  connectorChanged: 1 << 2,
+  routePublished: 1 << 3,
+  spawn: 1 << 4,
+  worldChanged: 1 << 5,
+} as const
+
+type ZombieEscapeDeferredNavigationIntentReason = ZombieEscapeNavigationIntentDemandReason
+
+type ZombieEscapeSparseServiceCategory = 'agent' | 'spawn' | 'target'
+
+type ZombieEscapeSparseStepWork = Readonly<{
+  lastStepCandidateVisits: number
+  lastStepColliderCandidateVisits: number
+  lastStepColliderHierarchyNodeVisits: number
+  lastStepCollisionPredicates: number
+  lastStepGraphEdgeVisits?: number
+  lastStepHeapOperations: number
+  lastStepHierarchyNodeVisits: number
+  lastStepSupportHierarchyNodeVisits: number
+  lastStepSupportHoleVisits: number
+  lastStepSupportItemVisits: number
+  lastStepSupportPredicates: number
+  lastStepSupportRingEdgeVisits: number
+  lastStepSupportRingHierarchyNodeVisits: number
+}>
 
 export type ZombieEscapePickupPrompt = Readonly<{
   affordable: boolean
@@ -136,6 +266,14 @@ export const ZOMBIE_ESCAPE_ZOMBIE_INTENT = {
 
 export type ZombieEscapeZombieIntent =
   (typeof ZOMBIE_ESCAPE_ZOMBIE_INTENT)[keyof typeof ZOMBIE_ESCAPE_ZOMBIE_INTENT]
+
+export type ZombieEscapeCommittedNavigationAction =
+  | 'attack-obstacle'
+  | 'attack-player'
+  | 'connector'
+  | 'direct'
+  | 'none'
+  | 'route'
 
 export type ZombieEscapeMuzzlePose = Readonly<{
   directionX: number
@@ -224,11 +362,115 @@ type ZombieEscapeVerticalRange = {
   minimumY: number
 }
 
+type ZombieEscapeMutableSparseSearchBudget = {
+  maximumCandidateVisits: number
+  maximumCollisionPredicates: number
+  maximumGraphEdgeVisits: number
+  maximumHeapOperations: number
+  maximumHierarchyNodeVisits: number
+  maximumSupportPredicates: number
+}
+
+type ZombieEscapeSparseWorkMetrics = {
+  candidateVisitsMaximumObservedPerTick: number
+  candidateVisitsThisTick: number
+  candidateVisitsTotal: number
+  collisionPredicatesMaximumObservedPerTick: number
+  collisionPredicatesThisTick: number
+  collisionPredicatesTotal: number
+  heapOperationsMaximumObservedPerTick: number
+  heapOperationsThisTick: number
+  heapOperationsTotal: number
+  hierarchyNodeVisitsMaximumObservedPerTick: number
+  hierarchyNodeVisitsThisTick: number
+  hierarchyNodeVisitsTotal: number
+  supportPredicatesMaximumObservedPerTick: number
+  supportPredicatesThisTick: number
+  supportPredicatesTotal: number
+}
+
+type ZombieEscapeSparseAttachmentWorkMetrics = ZombieEscapeSparseWorkMetrics & {
+  attachmentHierarchyNodeVisitsMaximumObservedPerTick: number
+  attachmentHierarchyNodeVisitsThisTick: number
+  attachmentHierarchyNodeVisitsTotal: number
+}
+
+type ZombieEscapeSparseTargetWorkMetrics = ZombieEscapeSparseWorkMetrics & {
+  graphEdgeVisitsMaximumObservedPerTick: number
+  graphEdgeVisitsThisTick: number
+  graphEdgeVisitsTotal: number
+}
+
+type ZombieEscapeNavigationVisibilityWorkMetrics = {
+  colliderCandidateVisitsMaximumObservedPerTick: number
+  colliderCandidateVisitsThisTick: number
+  colliderCandidateVisitsTotal: number
+  colliderHierarchyNodeVisitsMaximumObservedPerTick: number
+  colliderHierarchyNodeVisitsThisTick: number
+  colliderHierarchyNodeVisitsTotal: number
+  supportHierarchyNodeVisitsMaximumObservedPerTick: number
+  supportHierarchyNodeVisitsThisTick: number
+  supportHierarchyNodeVisitsTotal: number
+  supportHoleVisitsMaximumObservedPerTick: number
+  supportHoleVisitsThisTick: number
+  supportHoleVisitsTotal: number
+  supportItemVisitsMaximumObservedPerTick: number
+  supportItemVisitsThisTick: number
+  supportItemVisitsTotal: number
+  supportRingEdgeVisitsMaximumObservedPerTick: number
+  supportRingEdgeVisitsThisTick: number
+  supportRingEdgeVisitsTotal: number
+  supportRingHierarchyNodeVisitsMaximumObservedPerTick: number
+  supportRingHierarchyNodeVisitsThisTick: number
+  supportRingHierarchyNodeVisitsTotal: number
+}
+
+type ZombieEscapeObstacleDeltaCounter = {
+  maximumObservedPerTick: number
+  thisTick: number
+  total: number
+}
+
+export type ZombieEscapeObstacleDeltaMetrics = {
+  allocationCount: ZombieEscapeObstacleDeltaCounter
+  appliedCount: number
+  appliedRevision: number
+  connectorMaskWrites: ZombieEscapeObstacleDeltaCounter
+  fullArrayClearCount: ZombieEscapeObstacleDeltaCounter
+  objectLookupComparisons: ZombieEscapeObstacleDeltaCounter
+  objectMaskWrites: ZombieEscapeObstacleDeltaCounter
+  requestCount: number
+  requestedRevision: number
+  requiresRecompileCount: number
+  revisionAdvanceCount: number
+  unchangedCount: number
+  viewRevisionAdvanceCount: number
+  worldCompileCount: ZombieEscapeObstacleDeltaCounter
+}
+
+export type ZombieEscapeObstacleDeltaRequestResult = {
+  applied: boolean
+  appliedRevision: number
+  objectId: string | null
+  requestedRevision: number
+}
+
+export type ZombieEscapeNavigationRefreshInspectionState = {
+  cursor: number
+  inspections: number
+  obstacleRemaining: number
+  slot: number
+  targetsRemovedObstacle: boolean
+  worldRemaining: number
+}
+
 export type ZombieEscapeZombiePool = {
   attackCooldown: Float32Array
+  attackContactResolved: Uint8Array
   attackFocusX: Float32Array
   attackFocusZ: Float32Array
   attackTargetObjectId: Array<string | null>
+  attackTargetObjectOrdinal: Int32Array
   deathPresentationSeconds: Float32Array
   health: Float32Array
   gait: Uint8Array
@@ -241,10 +483,63 @@ export type ZombieEscapeZombiePool = {
   intent: Uint8Array
   locomotionBlend: Float32Array
   locomotionPhase: Float32Array
+  navigationBlockerBreakable: Uint8Array
+  navigationBlockerObjectId: Array<string | null>
+  navigationBlockerObjectOrdinal: Int32Array
+  navigationBlockingDistance: Float64Array
+  navigationBlockingX: Float64Array
+  navigationBlockingZ: Float64Array
   navigationConnector: Int16Array
   navigationConnectorTargetEnd: Uint8Array
+  navigationDirectionX: Float64Array
+  navigationDirectionZ: Float64Array
+  navigationCollisionRecoveryOriginX: Float64Array
+  navigationCollisionRecoveryOriginZ: Float64Array
+  navigationIntentAdmissionDeferredNext: Int32Array
+  navigationIntentAdmissionDeferredPrevious: Int32Array
+  navigationIntentAdmissionDeferredReasons: Uint8Array
+  navigationIntentHasCached: Uint8Array
+  navigationIntentHasReceivedFirstService: Uint8Array
+  navigationIntentAdmissionWorldGeneration: Uint32Array
+  navigationIntentFirstServiceEligibleSinceTick: Uint32Array
+  navigationIntentFirstServiceTick: Uint32Array
+  navigationIntentPending: Uint8Array
+  navigationIntentPendingSinceTick: Uint32Array
+  navigationIntentPoolGeneration: Uint32Array
+  navigationIntentResolvedTick: Uint32Array
+  navigationIntentCommittedRouteGeneration: Uint32Array
+  navigationIntentCurrentTargetFallback: Uint8Array
+  navigationIntentTargetRevision: Uint32Array
+  navigationIntentUrgentRefreshUsed: Uint8Array
+  navigationIntentValid: Uint8Array
+  navigationIntentWorldGeneration: Uint32Array
+  navigationNoProgressTicks: Uint16Array
+  navigationProgressTargetNode: Int32Array
+  navigationRecoveryCooldownTicks: Uint16Array
+  navigationReachable: Uint8Array
+  navigationRequestedConnector: Int16Array
+  navigationRequestedConnectorTargetEnd: Uint8Array
+  navigationSparseCommittedFlowSearch: ZombieEscapeSparseFlowSearch[]
+  navigationSparseFlowHit: ZombieEscapeCollisionHit[]
+  navigationSparseFlowSample: ZombieEscapeFlowSample[]
+  navigationSparseFlowSearch: ZombieEscapeSparseFlowSearch[]
+  navigationSparseFlowSearchActive: Uint8Array
+  navigationSparseFlowSearchDependencyWaiting: Uint8Array
+  navigationSparseFlowSearchLastProgressTick: Uint32Array
+  navigationSparseFlowSearchRestartToken: Uint8Array
+  navigationSparseFlowSearchStartedForDemand: Uint8Array
+  navigationSparseFlowSearchTargetPreemptionUsed: Uint8Array
+  navigationSparseFlowSearchWorldRevision: Uint32Array
+  navigationSourceCertifiedX: Float32Array
+  navigationSourceCertifiedY: Float32Array
+  navigationSourceCertifiedZ: Float32Array
+  navigationSourceNeedsValidation: Uint8Array
+  navigationWaypointFallback: Uint8Array
+  navigationWaypointNode: Int32Array
   pool: ZombieEscapeFixedPool
+  projectileHitOrdinal: Uint32Array
   runBlend: Float32Array
+  spawnOrdinal: Uint32Array
   speedScale: Float32Array
   variant: Uint8Array
   vx: Float32Array
@@ -255,6 +550,8 @@ export type ZombieEscapeZombiePool = {
 }
 
 export type ZombieEscapeSimulation = {
+  agentSeparationScratch: ZombieEscapeAgentSeparation
+  agentSpatialIndex: ZombieEscapeAgentSpatialIndex
   audioEvents: ZombieEscapeAudioEventRing
   cameraBookmark: ZombieEscapeCameraBookmark
   collisionHitScratch: ZombieEscapeCollisionHit
@@ -279,11 +576,182 @@ export type ZombieEscapeSimulation = {
   money: number
   nearbyPickupIndex: number
   navigationField: ZombieEscapeFlowField
+  navigationGoalInitialized: boolean
+  navigationGoalLayerIndex: number
+  navigationGoalProjectionScratch: ZombieEscapeSparseNavigationTargetProjection
+  navigationGoalRegionIndex: number
+  navigationGoalResolvedTick: number
+  navigationGoalX: number
+  navigationGoalY: number
+  navigationGoalZ: number
   navigationHitScratch: ZombieEscapeCollisionHit
   navigationMoveScratch: ZombieEscapeNavigationMoveResult
+  navigationRouteTargetCellX: number
+  navigationRouteTargetCellZ: number
+  navigationRouteTargetInitialized: boolean
+  navigationRouteTargetX: number
+  navigationRouteTargetY: number
+  navigationRouteTargetZ: number
+  navigationRouteTargetRegionIndex: number
   navigationSampleScratch: ZombieEscapeFlowSample
   navigationTargetY: number
+  navigationAnchorInvalidationCount: number
+  navigationAnchoredAgentCount: number
+  navigationIntentCanceledCount: number
+  navigationIntentDemandCachedAnchorLostCount: number
+  navigationIntentDemandCollisionRecoveryCount: number
+  navigationIntentDemandConnectorChangedCount: number
+  navigationIntentDemandRoutePublishedCount: number
+  navigationIntentDemandSpawnCount: number
+  navigationIntentDemandWorldChangedCount: number
+  navigationIntentIssuedCount: number
+  navigationIntentFirstServiceCount: number
+  navigationIntentInlineRecoveryWithoutFirstServiceCount: number
+  navigationIntentMaximumResolveCountObservedPerTick: number
+  navigationIntentMaximumUnservicedAgeTicksObserved: number
+  navigationIntentOldestPendingAgeTicks: number
+  navigationIntentOldestUnservicedAgeTicks: number
+  navigationIntentPendingCount: number
+  navigationIntentResolvedCount: number
+  navigationIntentResolveBudgetViolationCount: number
+  navigationIntentResolveCount: number
+  navigationIntentResolveCountThisTick: number
+  navigationIntentResolveCursor: number
+  navigationIntentResolveEligible: Uint8Array
+  navigationIntentResolveScheduled: Uint8Array
+  navigationIntentUnservicedPendingCount: number
+  navigationLivingWithoutCommittedActionCount: number
+  navigationRetainedPendingActionCount: number
+  navigationStaleTargetCount: number
+  navigationIntentAdmissionDeferredCanceledCount: number
+  navigationIntentAdmissionDeferredMarkedCount: number
+  navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick: number
+  navigationIntentAdmissionDeferredPendingCount: number
+  navigationIntentAdmissionDeferredPromotedCachedAnchorLostCount: number
+  navigationIntentAdmissionDeferredPromotedCollisionRecoveryCount: number
+  navigationIntentAdmissionDeferredPromotedConnectorChangedCount: number
+  navigationIntentAdmissionDeferredPromotedCount: number
+  navigationIntentAdmissionDeferredPromotedCountThisTick: number
+  navigationIntentAdmissionDeferredPromotedSpawnCount: number
+  navigationIntentAdmissionDeferredPromotedWorldChangedCount: number
+  navigationIntentAdmissionDeferredQueueHead: number
+  navigationIntentAdmissionDeferredQueueOperationCountThisTick: number
+  navigationIntentAdmissionDeferredQueueOperationCountTotal: number
+  navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick: number
+  navigationIntentAdmissionDeferredQueueTail: number
+  navigationObstacleRefreshDeferredCanceledCount: number
+  navigationObstacleRefreshDiscoveryAppliedRevision: number
+  navigationObstacleRefreshDiscoveryEpochRevision: number
+  navigationObstacleRefreshDiscoveryRemainingSlotCount: number
+  navigationObstacleRefreshDeferredMarkedCount: number
+  navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick: number
+  navigationObstacleRefreshDeferredPendingCount: number
+  navigationObstacleRefreshDeferredPromotedCount: number
+  navigationObstacleRefreshDeferredPromotedCountThisTick: number
+  navigationRefreshAdmissionCountThisTick: number
+  navigationRefreshAdmissionCountTotal: number
+  navigationRefreshAdmissionCursor: number
+  navigationRefreshAdmissionMaximumCountObservedPerTick: number
+  navigationRefreshAdmissionPreferScanned: boolean
+  navigationRefreshCandidateInspectionsThisTick: number
+  navigationRefreshCandidateInspectionsTotal: number
+  navigationRefreshCandidateInspectionsMaximumObservedPerTick: number
+  navigationRefreshInspectionScratch: ZombieEscapeNavigationRefreshInspectionState
+  navigationVisibilityWork: ZombieEscapeNavigationVisibilityWorkMetrics
+  navigationSparseCachedFollowWork: ZombieEscapeSparseWorkMetrics
+  navigationSparseCollisionReanchorAttemptCount: number
+  navigationSparseCollisionReanchorCompletedCount: number
+  navigationSparseCollisionReanchorFailedCount: number
+  navigationSparseFlowSearchWork: ZombieEscapeSparseWorkMetrics
+  navigationSparseSearchBudgetScratch: ZombieEscapeMutableSparseSearchBudget
+  navigationSparseSearchBudgetViolationCount: number
+  navigationSparseSearchActiveAgentCount: number
+  navigationSparseSearchWorldStaleActiveCount: number
+  navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick: number
+  navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved: number
+  navigationSparseSearchAgentOldestPendingNoProgressAgeTicks: number
+  navigationSparseSearchAgentProgressSliceCountThisTick: number
+  navigationSparseSearchAgentProgressSliceCountTotal: number
+  navigationSparseSearchAgentDrainCursor: number
+  navigationSparseSearchProtectedDrainCursor: number
+  navigationSparseSearchProtectedOwnerPoolGeneration: number
+  navigationSparseSearchProtectedOwnerSlot: number
+  navigationSparseSearchAgentServiceSliceCountThisTick: number
+  navigationSparseSearchAgentServiceSliceCountTotal: number
+  navigationSparseSearchCandidateVisitsMaximumObservedPerTick: number
+  navigationSparseSearchCandidateVisitsThisTick: number
+  navigationSparseSearchCandidateVisitsTotal: number
+  navigationSparseSearchCollisionPredicatesMaximumObservedPerTick: number
+  navigationSparseSearchCollisionPredicatesThisTick: number
+  navigationSparseSearchCollisionPredicatesTotal: number
+  navigationSparseSearchCanceledCount: number
+  navigationSparseSearchCompletedCount: number
+  navigationSparseSearchCompletionProgressThisTick: number
+  navigationSparseSearchCompletionProgressTotal: number
+  navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick: number
+  navigationSparseSearchGraphEdgeVisitsThisTick: number
+  navigationSparseSearchGraphEdgeVisitsTotal: number
+  navigationSparseSearchHeapOperationsMaximumObservedPerTick: number
+  navigationSparseSearchHeapOperationsThisTick: number
+  navigationSparseSearchHeapOperationsTotal: number
+  navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick: number
+  navigationSparseSearchHierarchyNodeVisitsThisTick: number
+  navigationSparseSearchHierarchyNodeVisitsTotal: number
+  navigationSparseSearchInvalidatedCount: number
+  navigationSparseSearchMaximumNoProgressAgeTicksObserved: number
+  navigationSparseSearchNoProgressAgeTicks: number
+  navigationSparseSearchPendingAgentCount: number
+  navigationSparseSearchRestartedCollisionRecoveryCount: number
+  navigationSparseSearchRestartedCount: number
+  navigationSparseSearchRestartedRoutePublishedCount: number
+  navigationSparseSearchRestartedTargetPublicationPreemptionCount: number
+  navigationSparseSearchRestartedWorldChangedCount: number
+  navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved: number
+  navigationSparseSearchSpawnNoProgressAgeTicks: number
+  navigationSparseSearchSpawnProgressSliceCountThisTick: number
+  navigationSparseSearchSpawnProgressSliceCountTotal: number
+  navigationSparseSearchSpawnServiceSliceCountThisTick: number
+  navigationSparseSearchSpawnServiceSliceCountTotal: number
+  navigationSparseSearchServiceSliceCountThisTick: number
+  navigationSparseSearchServiceSliceCountTotal: number
+  navigationSparseSearchStartedCount: number
+  navigationSparseSearchSupportPredicatesMaximumObservedPerTick: number
+  navigationSparseSearchSupportPredicatesThisTick: number
+  navigationSparseSearchSupportPredicatesTotal: number
+  navigationSparseSearchTargetBuildsMaximumObservedPerTick: number
+  navigationSparseSearchTargetBuildsThisTick: number
+  navigationSparseSearchTargetBuildsTotal: number
+  navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved: number
+  navigationSparseSearchTargetNoProgressAgeTicks: number
+  navigationSparseSearchTargetProgressSliceCountThisTick: number
+  navigationSparseSearchTargetProgressSliceCountTotal: number
+  navigationSparseSearchTargetServiceSliceCountThisTick: number
+  navigationSparseSearchTargetServiceSliceCountTotal: number
+  navigationSparseSearchUncausedStartViolationCount: number
+  navigationSparseSpawnDesiredX: number
+  navigationSparseSpawnDesiredZ: number
+  navigationSparseSpawnIsReplacement: boolean
+  navigationSparseSpawnMinimumTargetDistanceMeters: number
+  navigationSparseSpawnSearchActive: boolean
+  navigationSparseSpawnSearchCompletedCount: number
+  navigationSparseSpawnSearchDependencyWaiting: boolean
+  navigationSparseSpawnSearchInvalidatedCount: number
+  navigationSparseSpawnSearchNeedsRestart: boolean
+  navigationSparseSpawnSearchStartedCount: number
+  navigationSparseSpawnProbeCountTotal: number
+  navigationSparseSpawnProbeMaximumObservedPerAdmission: number
+  navigationSparseSpawnProbeOrdinal: number
+  navigationSparseSpawnAnchorScratch: ReturnType<typeof createZombieEscapeSparseSpawnAnchor>
+  navigationSparseSpawnRouteScratch: ReturnType<typeof createZombieEscapeSparseCommittedNodeRoute>
+  navigationSparseSpawnWork: ZombieEscapeSparseAttachmentWorkMetrics
+  navigationSparseTargetWork: ZombieEscapeSparseTargetWorkMetrics
+  nextZombieSpawnOrdinal: number
   night: number
+  obstacleDamageEnabled: boolean
+  obstacleDeltaCombatResult: ZombieEscapeCollisionObjectDeltaResult
+  obstacleDeltaMetrics: ZombieEscapeObstacleDeltaMetrics
+  obstacleDeltaNavigationResult: ZombieEscapeCollisionObjectDeltaResult
+  obstacleDeltaRequestResult: ZombieEscapeObstacleDeltaRequestResult
   obstacleHitCounts: Map<string, number>
   obstacleRevision: number
   paused: boolean
@@ -299,12 +767,28 @@ export type ZombieEscapeSimulation = {
   reachableSpawnScratch: ReturnType<typeof createZombieEscapeReachableSpawn>
   replacementSpawnRemaining: number
   seed: number
+  sparseNavigationRequired: boolean
   shots: ZombieEscapeShotEventPool
   shotsFired: number
+  navigationIntentTick: number
+  navigationTargetCommittedRouteGeneration: number
+  navigationTargetRequestedLayerHint: number
+  navigationTargetRequestedRevision: number
+  navigationWorldRevision: number
+  navigationWorldRefreshAdmissionGeneration: number
+  navigationWorldRefreshEpochGeneration: number
+  navigationWorldRefreshInspectionRemaining: number
+  navigationWorldRefreshMaximumPromotedCountObservedPerTick: number
+  navigationWorldRefreshMinimumAppliedGeneration: number
+  navigationWorldRefreshPendingCount: number
+  navigationWorldRefreshPromotedCountThisTick: number
+  navigationWorldRefreshPromotedCountTotal: number
+  navigationWorldRefreshRestartedCountThisTick: number
+  navigationWorldRefreshRestartedCountTotal: number
+  simulationTick: number
   status: ZombieEscapeGameStatus
   tracers: ZombieEscapeShotPhaseMetricView
   variantByPoolSlot: Uint8Array
-  gaitByPoolSlot: Uint8Array
   wave: number
   waveIntermissionSeconds: number
   waveSpawnRemaining: number
@@ -345,7 +829,7 @@ export type ZombieEscapeHudSnapshot = {
   zombies: number
 }
 
-function createArenaCollisionWorld(arena: ZombieEscapeArenaData) {
+function createArenaCollisionWorld(arena: ZombieEscapeArenaData, requireSparseNavigation = false) {
   const circles: ZombieEscapeCollisionCircleSource[] = []
   for (let index = 0; index < arena.obstacleCount; index += 1) {
     circles.push({
@@ -358,28 +842,391 @@ function createArenaCollisionWorld(arena: ZombieEscapeArenaData) {
   return createZombieEscapeCollisionWorld({
     agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
     circles,
+    navigationSupports: requireSparseNavigation
+      ? [
+          {
+            boundary: true,
+            elevation: 0,
+            id: 'arena-sparse-navigation-boundary',
+            polygon: Array.from({ length: 32 }, (_, index) => {
+              const angle = (index / 32) * Math.PI * 2
+              return {
+                x: Math.cos(angle) * arena.playRadius,
+                z: Math.sin(angle) * arena.playRadius,
+              }
+            }),
+          },
+        ]
+      : [],
     playRadius: arena.playRadius,
   })
+}
+
+function createZombieEscapeNavigationSample(): ZombieEscapeFlowSample {
+  return {
+    blockingDistance: Number.POSITIVE_INFINITY,
+    blockingX: 0,
+    blockingZ: 0,
+    connectorIndex: -1,
+    connectorTargetEnd: false,
+    reachable: false,
+    waypointNode: -1,
+    waypointUsesFallback: false,
+    x: 0,
+    z: 0,
+  }
+}
+
+function createZombieEscapeSparseWorkMetrics(): ZombieEscapeSparseWorkMetrics {
+  return {
+    candidateVisitsMaximumObservedPerTick: 0,
+    candidateVisitsThisTick: 0,
+    candidateVisitsTotal: 0,
+    collisionPredicatesMaximumObservedPerTick: 0,
+    collisionPredicatesThisTick: 0,
+    collisionPredicatesTotal: 0,
+    heapOperationsMaximumObservedPerTick: 0,
+    heapOperationsThisTick: 0,
+    heapOperationsTotal: 0,
+    hierarchyNodeVisitsMaximumObservedPerTick: 0,
+    hierarchyNodeVisitsThisTick: 0,
+    hierarchyNodeVisitsTotal: 0,
+    supportPredicatesMaximumObservedPerTick: 0,
+    supportPredicatesThisTick: 0,
+    supportPredicatesTotal: 0,
+  }
+}
+
+function createZombieEscapeSparseAttachmentWorkMetrics(): ZombieEscapeSparseAttachmentWorkMetrics {
+  return {
+    ...createZombieEscapeSparseWorkMetrics(),
+    attachmentHierarchyNodeVisitsMaximumObservedPerTick: 0,
+    attachmentHierarchyNodeVisitsThisTick: 0,
+    attachmentHierarchyNodeVisitsTotal: 0,
+  }
+}
+
+function createZombieEscapeSparseTargetWorkMetrics(): ZombieEscapeSparseTargetWorkMetrics {
+  return {
+    ...createZombieEscapeSparseWorkMetrics(),
+    graphEdgeVisitsMaximumObservedPerTick: 0,
+    graphEdgeVisitsThisTick: 0,
+    graphEdgeVisitsTotal: 0,
+  }
+}
+
+function createZombieEscapeNavigationVisibilityWorkMetrics(): ZombieEscapeNavigationVisibilityWorkMetrics {
+  return {
+    colliderCandidateVisitsMaximumObservedPerTick: 0,
+    colliderCandidateVisitsThisTick: 0,
+    colliderCandidateVisitsTotal: 0,
+    colliderHierarchyNodeVisitsMaximumObservedPerTick: 0,
+    colliderHierarchyNodeVisitsThisTick: 0,
+    colliderHierarchyNodeVisitsTotal: 0,
+    supportHierarchyNodeVisitsMaximumObservedPerTick: 0,
+    supportHierarchyNodeVisitsThisTick: 0,
+    supportHierarchyNodeVisitsTotal: 0,
+    supportHoleVisitsMaximumObservedPerTick: 0,
+    supportHoleVisitsThisTick: 0,
+    supportHoleVisitsTotal: 0,
+    supportItemVisitsMaximumObservedPerTick: 0,
+    supportItemVisitsThisTick: 0,
+    supportItemVisitsTotal: 0,
+    supportRingEdgeVisitsMaximumObservedPerTick: 0,
+    supportRingEdgeVisitsThisTick: 0,
+    supportRingEdgeVisitsTotal: 0,
+    supportRingHierarchyNodeVisitsMaximumObservedPerTick: 0,
+    supportRingHierarchyNodeVisitsThisTick: 0,
+    supportRingHierarchyNodeVisitsTotal: 0,
+  }
+}
+
+function createZombieEscapeObstacleDeltaCounter(): ZombieEscapeObstacleDeltaCounter {
+  return { maximumObservedPerTick: 0, thisTick: 0, total: 0 }
+}
+
+function createZombieEscapeObstacleDeltaMetrics(): ZombieEscapeObstacleDeltaMetrics {
+  return {
+    allocationCount: createZombieEscapeObstacleDeltaCounter(),
+    appliedCount: 0,
+    appliedRevision: 0,
+    connectorMaskWrites: createZombieEscapeObstacleDeltaCounter(),
+    fullArrayClearCount: createZombieEscapeObstacleDeltaCounter(),
+    objectLookupComparisons: createZombieEscapeObstacleDeltaCounter(),
+    objectMaskWrites: createZombieEscapeObstacleDeltaCounter(),
+    requestCount: 0,
+    requestedRevision: 0,
+    requiresRecompileCount: 0,
+    revisionAdvanceCount: 0,
+    unchangedCount: 0,
+    viewRevisionAdvanceCount: 0,
+    worldCompileCount: createZombieEscapeObstacleDeltaCounter(),
+  }
+}
+
+function resetZombieEscapeObstacleDeltaCounter(counter: ZombieEscapeObstacleDeltaCounter) {
+  counter.maximumObservedPerTick = 0
+  counter.thisTick = 0
+  counter.total = 0
+}
+
+function resetZombieEscapeObstacleDeltaMetrics(metrics: ZombieEscapeObstacleDeltaMetrics) {
+  resetZombieEscapeObstacleDeltaCounter(metrics.allocationCount)
+  metrics.appliedCount = 0
+  metrics.appliedRevision = 0
+  resetZombieEscapeObstacleDeltaCounter(metrics.connectorMaskWrites)
+  resetZombieEscapeObstacleDeltaCounter(metrics.fullArrayClearCount)
+  resetZombieEscapeObstacleDeltaCounter(metrics.objectLookupComparisons)
+  resetZombieEscapeObstacleDeltaCounter(metrics.objectMaskWrites)
+  metrics.requestCount = 0
+  metrics.requestedRevision = 0
+  metrics.requiresRecompileCount = 0
+  metrics.revisionAdvanceCount = 0
+  metrics.unchangedCount = 0
+  metrics.viewRevisionAdvanceCount = 0
+  resetZombieEscapeObstacleDeltaCounter(metrics.worldCompileCount)
+}
+
+function resetZombieEscapeObstacleDeltaMetricsThisTick(metrics: ZombieEscapeObstacleDeltaMetrics) {
+  metrics.allocationCount.thisTick = 0
+  metrics.connectorMaskWrites.thisTick = 0
+  metrics.fullArrayClearCount.thisTick = 0
+  metrics.objectLookupComparisons.thisTick = 0
+  metrics.objectMaskWrites.thisTick = 0
+  metrics.worldCompileCount.thisTick = 0
+}
+
+function accumulateZombieEscapeObstacleDeltaCounter(
+  counter: ZombieEscapeObstacleDeltaCounter,
+  amount: number,
+) {
+  const normalizedAmount = Math.max(0, Math.trunc(amount))
+  counter.thisTick += normalizedAmount
+  counter.total += normalizedAmount
+  counter.maximumObservedPerTick = Math.max(counter.maximumObservedPerTick, counter.thisTick)
+}
+
+function accumulateZombieEscapeCollisionObjectDeltaResult(
+  metrics: ZombieEscapeObstacleDeltaMetrics,
+  result: ZombieEscapeCollisionObjectDeltaResult,
+) {
+  accumulateZombieEscapeObstacleDeltaCounter(metrics.allocationCount, result.allocationCount)
+  accumulateZombieEscapeObstacleDeltaCounter(
+    metrics.fullArrayClearCount,
+    result.fullArrayClearCount,
+  )
+  accumulateZombieEscapeObstacleDeltaCounter(
+    metrics.objectLookupComparisons,
+    result.objectLookupComparisons,
+  )
+  accumulateZombieEscapeObstacleDeltaCounter(metrics.objectMaskWrites, result.objectMaskWrites)
+  accumulateZombieEscapeObstacleDeltaCounter(metrics.worldCompileCount, result.worldCompileCount)
+  metrics.viewRevisionAdvanceCount += result.revisionAdvanceCount
+}
+
+function resetZombieEscapeSparseWorkMetrics(metrics: ZombieEscapeSparseWorkMetrics) {
+  metrics.candidateVisitsMaximumObservedPerTick = 0
+  metrics.candidateVisitsThisTick = 0
+  metrics.candidateVisitsTotal = 0
+  metrics.collisionPredicatesMaximumObservedPerTick = 0
+  metrics.collisionPredicatesThisTick = 0
+  metrics.collisionPredicatesTotal = 0
+  metrics.heapOperationsMaximumObservedPerTick = 0
+  metrics.heapOperationsThisTick = 0
+  metrics.heapOperationsTotal = 0
+  metrics.hierarchyNodeVisitsMaximumObservedPerTick = 0
+  metrics.hierarchyNodeVisitsThisTick = 0
+  metrics.hierarchyNodeVisitsTotal = 0
+  metrics.supportPredicatesMaximumObservedPerTick = 0
+  metrics.supportPredicatesThisTick = 0
+  metrics.supportPredicatesTotal = 0
+}
+
+function resetZombieEscapeSparseAttachmentWorkMetrics(
+  metrics: ZombieEscapeSparseAttachmentWorkMetrics,
+) {
+  resetZombieEscapeSparseWorkMetrics(metrics)
+  metrics.attachmentHierarchyNodeVisitsMaximumObservedPerTick = 0
+  metrics.attachmentHierarchyNodeVisitsThisTick = 0
+  metrics.attachmentHierarchyNodeVisitsTotal = 0
+}
+
+function resetZombieEscapeSparseTargetWorkMetrics(metrics: ZombieEscapeSparseTargetWorkMetrics) {
+  resetZombieEscapeSparseWorkMetrics(metrics)
+  metrics.graphEdgeVisitsMaximumObservedPerTick = 0
+  metrics.graphEdgeVisitsThisTick = 0
+  metrics.graphEdgeVisitsTotal = 0
+}
+
+function resetZombieEscapeNavigationVisibilityWorkMetrics(
+  metrics: ZombieEscapeNavigationVisibilityWorkMetrics,
+) {
+  metrics.colliderCandidateVisitsMaximumObservedPerTick = 0
+  metrics.colliderCandidateVisitsThisTick = 0
+  metrics.colliderCandidateVisitsTotal = 0
+  metrics.colliderHierarchyNodeVisitsMaximumObservedPerTick = 0
+  metrics.colliderHierarchyNodeVisitsThisTick = 0
+  metrics.colliderHierarchyNodeVisitsTotal = 0
+  metrics.supportHierarchyNodeVisitsMaximumObservedPerTick = 0
+  metrics.supportHierarchyNodeVisitsThisTick = 0
+  metrics.supportHierarchyNodeVisitsTotal = 0
+  metrics.supportHoleVisitsMaximumObservedPerTick = 0
+  metrics.supportHoleVisitsThisTick = 0
+  metrics.supportHoleVisitsTotal = 0
+  metrics.supportItemVisitsMaximumObservedPerTick = 0
+  metrics.supportItemVisitsThisTick = 0
+  metrics.supportItemVisitsTotal = 0
+  metrics.supportRingEdgeVisitsMaximumObservedPerTick = 0
+  metrics.supportRingEdgeVisitsThisTick = 0
+  metrics.supportRingEdgeVisitsTotal = 0
+  metrics.supportRingHierarchyNodeVisitsMaximumObservedPerTick = 0
+  metrics.supportRingHierarchyNodeVisitsThisTick = 0
+  metrics.supportRingHierarchyNodeVisitsTotal = 0
+}
+
+function resetZombieEscapeSparseWorkMetricsThisTick(metrics: ZombieEscapeSparseWorkMetrics) {
+  metrics.candidateVisitsThisTick = 0
+  metrics.collisionPredicatesThisTick = 0
+  metrics.heapOperationsThisTick = 0
+  metrics.hierarchyNodeVisitsThisTick = 0
+  metrics.supportPredicatesThisTick = 0
+}
+
+function resetZombieEscapeSparseAttachmentWorkMetricsThisTick(
+  metrics: ZombieEscapeSparseAttachmentWorkMetrics,
+) {
+  resetZombieEscapeSparseWorkMetricsThisTick(metrics)
+  metrics.attachmentHierarchyNodeVisitsThisTick = 0
+}
+
+function resetZombieEscapeSparseTargetWorkMetricsThisTick(
+  metrics: ZombieEscapeSparseTargetWorkMetrics,
+) {
+  resetZombieEscapeSparseWorkMetricsThisTick(metrics)
+  metrics.graphEdgeVisitsThisTick = 0
+}
+
+function resetZombieEscapeNavigationVisibilityWorkMetricsThisTick(
+  metrics: ZombieEscapeNavigationVisibilityWorkMetrics,
+) {
+  metrics.colliderCandidateVisitsThisTick = 0
+  metrics.colliderHierarchyNodeVisitsThisTick = 0
+  metrics.supportHierarchyNodeVisitsThisTick = 0
+  metrics.supportHoleVisitsThisTick = 0
+  metrics.supportItemVisitsThisTick = 0
+  metrics.supportRingEdgeVisitsThisTick = 0
+  metrics.supportRingHierarchyNodeVisitsThisTick = 0
+}
+
+function finalizeZombieEscapeSparseWorkMetrics(metrics: ZombieEscapeSparseWorkMetrics) {
+  metrics.candidateVisitsMaximumObservedPerTick = Math.max(
+    metrics.candidateVisitsMaximumObservedPerTick,
+    metrics.candidateVisitsThisTick,
+  )
+  metrics.collisionPredicatesMaximumObservedPerTick = Math.max(
+    metrics.collisionPredicatesMaximumObservedPerTick,
+    metrics.collisionPredicatesThisTick,
+  )
+  metrics.heapOperationsMaximumObservedPerTick = Math.max(
+    metrics.heapOperationsMaximumObservedPerTick,
+    metrics.heapOperationsThisTick,
+  )
+  metrics.hierarchyNodeVisitsMaximumObservedPerTick = Math.max(
+    metrics.hierarchyNodeVisitsMaximumObservedPerTick,
+    metrics.hierarchyNodeVisitsThisTick,
+  )
+  metrics.supportPredicatesMaximumObservedPerTick = Math.max(
+    metrics.supportPredicatesMaximumObservedPerTick,
+    metrics.supportPredicatesThisTick,
+  )
+}
+
+function finalizeZombieEscapeSparseAttachmentWorkMetrics(
+  metrics: ZombieEscapeSparseAttachmentWorkMetrics,
+) {
+  finalizeZombieEscapeSparseWorkMetrics(metrics)
+  metrics.attachmentHierarchyNodeVisitsMaximumObservedPerTick = Math.max(
+    metrics.attachmentHierarchyNodeVisitsMaximumObservedPerTick,
+    metrics.attachmentHierarchyNodeVisitsThisTick,
+  )
+}
+
+function finalizeZombieEscapeSparseTargetWorkMetrics(metrics: ZombieEscapeSparseTargetWorkMetrics) {
+  finalizeZombieEscapeSparseWorkMetrics(metrics)
+  metrics.graphEdgeVisitsMaximumObservedPerTick = Math.max(
+    metrics.graphEdgeVisitsMaximumObservedPerTick,
+    metrics.graphEdgeVisitsThisTick,
+  )
+}
+
+function finalizeZombieEscapeNavigationVisibilityWorkMetrics(
+  metrics: ZombieEscapeNavigationVisibilityWorkMetrics,
+) {
+  metrics.colliderCandidateVisitsMaximumObservedPerTick = Math.max(
+    metrics.colliderCandidateVisitsMaximumObservedPerTick,
+    metrics.colliderCandidateVisitsThisTick,
+  )
+  metrics.colliderHierarchyNodeVisitsMaximumObservedPerTick = Math.max(
+    metrics.colliderHierarchyNodeVisitsMaximumObservedPerTick,
+    metrics.colliderHierarchyNodeVisitsThisTick,
+  )
+  metrics.supportHierarchyNodeVisitsMaximumObservedPerTick = Math.max(
+    metrics.supportHierarchyNodeVisitsMaximumObservedPerTick,
+    metrics.supportHierarchyNodeVisitsThisTick,
+  )
+  metrics.supportHoleVisitsMaximumObservedPerTick = Math.max(
+    metrics.supportHoleVisitsMaximumObservedPerTick,
+    metrics.supportHoleVisitsThisTick,
+  )
+  metrics.supportItemVisitsMaximumObservedPerTick = Math.max(
+    metrics.supportItemVisitsMaximumObservedPerTick,
+    metrics.supportItemVisitsThisTick,
+  )
+  metrics.supportRingEdgeVisitsMaximumObservedPerTick = Math.max(
+    metrics.supportRingEdgeVisitsMaximumObservedPerTick,
+    metrics.supportRingEdgeVisitsThisTick,
+  )
+  metrics.supportRingHierarchyNodeVisitsMaximumObservedPerTick = Math.max(
+    metrics.supportRingHierarchyNodeVisitsMaximumObservedPerTick,
+    metrics.supportRingHierarchyNodeVisitsThisTick,
+  )
 }
 
 export function createZombieEscapeSimulation(
   arena: ZombieEscapeArenaData,
   seed = ZOMBIE_ESCAPE_SEED,
   weaponPickups: readonly ZombieEscapeWeaponPickupPlacement[] = createZombieEscapeFallbackWeaponPickupPlacements(),
+  options: ZombieEscapeSimulationOptions = {},
 ): ZombieEscapeSimulation {
+  const zombieCapacity = resolveZombieEscapeSimulationZombieCapacity(options.zombieCapacity)
   const shots = createShotEventPool(ZOMBIE_ESCAPE_CAPACITY.shots)
   const purchasedWeapons = createPurchasedWeapons()
-  const collisionWorld = createArenaCollisionWorld(arena)
+  const collisionSourceWorld = createArenaCollisionWorld(
+    arena,
+    options.requireSparseNavigation === true,
+  )
+  const collisionWorld = createZombieEscapeCollisionWorldActiveView(collisionSourceWorld)
+  const combatCollisionWorld = createZombieEscapeCollisionWorldActiveView(collisionSourceWorld)
+  const navigationField = createZombieEscapeFlowField(collisionWorld)
   return {
+    agentSeparationScratch: createZombieEscapeAgentSeparation(),
+    agentSpatialIndex: createZombieEscapeAgentSpatialIndex(zombieCapacity, {
+      cellSizeMeters: ZOMBIE_ESCAPE_SIMULATION.zombieSeparationRadiusMeters,
+      maximumCandidateInspectionsPerQuery:
+        ZOMBIE_ESCAPE_SIMULATION.zombieSpatialMaximumCandidateInspectionsPerQuery,
+      separationRadiusMeters: ZOMBIE_ESCAPE_SIMULATION.zombieSeparationRadiusMeters,
+      separationStrength: ZOMBIE_ESCAPE_SIMULATION.zombieSeparationStrength,
+      verticalToleranceMeters: ZOMBIE_ESCAPE_SIMULATION.zombieSeparationVerticalToleranceMeters,
+    }),
     audioEvents: createZombieEscapeAudioEventRing(),
     cameraBookmark: 'design',
     collisionHitScratch: createZombieEscapeCollisionHit(),
     collisionMoveScratch: createZombieEscapeCircleMoveResult(),
-    collisionSourceWorld: collisionWorld,
+    collisionSourceWorld,
     collisionWorld,
     collisionWorldGeneration: 1,
-    combatCollisionSourceWorld: collisionWorld,
-    combatCollisionWorld: collisionWorld,
+    combatCollisionSourceWorld: collisionSourceWorld,
+    combatCollisionWorld,
     combatVerticalRangeScratch: { maximumY: 0, minimumY: 0 },
     debugMode: 'final',
     destroyedObstacleIds: new Set(),
@@ -394,19 +1241,207 @@ export function createZombieEscapeSimulation(
     lastShotSlot: -1,
     money: 0,
     nearbyPickupIndex: -1,
-    navigationField: createZombieEscapeFlowField(collisionWorld),
-    navigationHitScratch: createZombieEscapeCollisionHit(),
-    navigationMoveScratch: createZombieEscapeNavigationMoveResult(),
-    navigationSampleScratch: {
-      blockingDistance: Number.POSITIVE_INFINITY,
-      blockingX: 0,
-      blockingZ: 0,
-      reachable: false,
+    navigationField,
+    navigationGoalInitialized: false,
+    navigationGoalLayerIndex: -1,
+    navigationGoalProjectionScratch: {
+      distanceSquared: Number.POSITIVE_INFINITY,
+      regionIndex: -1,
       x: 0,
       z: 0,
     },
+    navigationGoalRegionIndex: -1,
+    navigationGoalResolvedTick: 0,
+    navigationGoalX: 0,
+    navigationGoalY: 0,
+    navigationGoalZ: 0,
+    navigationHitScratch: createZombieEscapeCollisionHit(),
+    navigationMoveScratch: createZombieEscapeNavigationMoveResult(),
+    navigationRouteTargetCellX: 0,
+    navigationRouteTargetCellZ: 0,
+    navigationRouteTargetInitialized: false,
+    navigationRouteTargetX: 0,
+    navigationRouteTargetY: 0,
+    navigationRouteTargetZ: 0,
+    navigationRouteTargetRegionIndex: -1,
+    navigationSampleScratch: createZombieEscapeNavigationSample(),
     navigationTargetY: 0,
+    navigationAnchorInvalidationCount: 0,
+    navigationAnchoredAgentCount: 0,
+    navigationIntentCanceledCount: 0,
+    navigationIntentDemandCachedAnchorLostCount: 0,
+    navigationIntentDemandCollisionRecoveryCount: 0,
+    navigationIntentDemandConnectorChangedCount: 0,
+    navigationIntentDemandRoutePublishedCount: 0,
+    navigationIntentDemandSpawnCount: 0,
+    navigationIntentDemandWorldChangedCount: 0,
+    navigationIntentIssuedCount: 0,
+    navigationIntentFirstServiceCount: 0,
+    navigationIntentInlineRecoveryWithoutFirstServiceCount: 0,
+    navigationIntentMaximumResolveCountObservedPerTick: 0,
+    navigationIntentMaximumUnservicedAgeTicksObserved: 0,
+    navigationIntentOldestPendingAgeTicks: 0,
+    navigationIntentOldestUnservicedAgeTicks: 0,
+    navigationIntentPendingCount: 0,
+    navigationIntentResolvedCount: 0,
+    navigationIntentResolveBudgetViolationCount: 0,
+    navigationIntentResolveCount: 0,
+    navigationIntentResolveCountThisTick: 0,
+    navigationIntentResolveCursor: 0,
+    navigationIntentResolveEligible: new Uint8Array(zombieCapacity),
+    navigationIntentResolveScheduled: new Uint8Array(zombieCapacity),
+    navigationIntentUnservicedPendingCount: 0,
+    navigationLivingWithoutCommittedActionCount: 0,
+    navigationRetainedPendingActionCount: 0,
+    navigationStaleTargetCount: 0,
+    navigationIntentAdmissionDeferredCanceledCount: 0,
+    navigationIntentAdmissionDeferredMarkedCount: 0,
+    navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick: 0,
+    navigationIntentAdmissionDeferredPendingCount: 0,
+    navigationIntentAdmissionDeferredPromotedCachedAnchorLostCount: 0,
+    navigationIntentAdmissionDeferredPromotedCollisionRecoveryCount: 0,
+    navigationIntentAdmissionDeferredPromotedConnectorChangedCount: 0,
+    navigationIntentAdmissionDeferredPromotedCount: 0,
+    navigationIntentAdmissionDeferredPromotedCountThisTick: 0,
+    navigationIntentAdmissionDeferredPromotedSpawnCount: 0,
+    navigationIntentAdmissionDeferredPromotedWorldChangedCount: 0,
+    navigationIntentAdmissionDeferredQueueHead: -1,
+    navigationIntentAdmissionDeferredQueueOperationCountThisTick: 0,
+    navigationIntentAdmissionDeferredQueueOperationCountTotal: 0,
+    navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick: 0,
+    navigationIntentAdmissionDeferredQueueTail: -1,
+    navigationObstacleRefreshDeferredCanceledCount: 0,
+    navigationObstacleRefreshDiscoveryAppliedRevision: 0,
+    navigationObstacleRefreshDiscoveryEpochRevision: 0,
+    navigationObstacleRefreshDiscoveryRemainingSlotCount: 0,
+    navigationObstacleRefreshDeferredMarkedCount: 0,
+    navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick: 0,
+    navigationObstacleRefreshDeferredPendingCount: 0,
+    navigationObstacleRefreshDeferredPromotedCount: 0,
+    navigationObstacleRefreshDeferredPromotedCountThisTick: 0,
+    navigationRefreshAdmissionCountThisTick: 0,
+    navigationRefreshAdmissionCountTotal: 0,
+    navigationRefreshAdmissionCursor: 0,
+    navigationRefreshAdmissionMaximumCountObservedPerTick: 0,
+    navigationRefreshAdmissionPreferScanned: true,
+    navigationRefreshCandidateInspectionsThisTick: 0,
+    navigationRefreshCandidateInspectionsTotal: 0,
+    navigationRefreshCandidateInspectionsMaximumObservedPerTick: 0,
+    navigationRefreshInspectionScratch: {
+      cursor: 0,
+      inspections: 0,
+      obstacleRemaining: 0,
+      slot: -1,
+      targetsRemovedObstacle: false,
+      worldRemaining: 0,
+    },
+    navigationVisibilityWork: createZombieEscapeNavigationVisibilityWorkMetrics(),
+    navigationSparseCachedFollowWork: createZombieEscapeSparseWorkMetrics(),
+    navigationSparseCollisionReanchorAttemptCount: 0,
+    navigationSparseCollisionReanchorCompletedCount: 0,
+    navigationSparseCollisionReanchorFailedCount: 0,
+    navigationSparseFlowSearchWork: createZombieEscapeSparseWorkMetrics(),
+    navigationSparseSearchBudgetScratch: {
+      maximumCandidateVisits: 0,
+      maximumCollisionPredicates: 0,
+      maximumGraphEdgeVisits: 0,
+      maximumHeapOperations: 0,
+      maximumHierarchyNodeVisits: 0,
+      maximumSupportPredicates: 0,
+    },
+    navigationSparseSearchBudgetViolationCount: 0,
+    navigationSparseSearchActiveAgentCount: 0,
+    navigationSparseSearchWorldStaleActiveCount: 0,
+    navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick: 0,
+    navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved: 0,
+    navigationSparseSearchAgentOldestPendingNoProgressAgeTicks: 0,
+    navigationSparseSearchAgentProgressSliceCountThisTick: 0,
+    navigationSparseSearchAgentProgressSliceCountTotal: 0,
+    navigationSparseSearchAgentDrainCursor: 0,
+    navigationSparseSearchProtectedDrainCursor: 0,
+    navigationSparseSearchProtectedOwnerPoolGeneration: 0,
+    navigationSparseSearchProtectedOwnerSlot: -1,
+    navigationSparseSearchAgentServiceSliceCountThisTick: 0,
+    navigationSparseSearchAgentServiceSliceCountTotal: 0,
+    navigationSparseSearchCandidateVisitsMaximumObservedPerTick: 0,
+    navigationSparseSearchCandidateVisitsThisTick: 0,
+    navigationSparseSearchCandidateVisitsTotal: 0,
+    navigationSparseSearchCollisionPredicatesMaximumObservedPerTick: 0,
+    navigationSparseSearchCollisionPredicatesThisTick: 0,
+    navigationSparseSearchCollisionPredicatesTotal: 0,
+    navigationSparseSearchCanceledCount: 0,
+    navigationSparseSearchCompletedCount: 0,
+    navigationSparseSearchCompletionProgressThisTick: 0,
+    navigationSparseSearchCompletionProgressTotal: 0,
+    navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick: 0,
+    navigationSparseSearchGraphEdgeVisitsThisTick: 0,
+    navigationSparseSearchGraphEdgeVisitsTotal: 0,
+    navigationSparseSearchHeapOperationsMaximumObservedPerTick: 0,
+    navigationSparseSearchHeapOperationsThisTick: 0,
+    navigationSparseSearchHeapOperationsTotal: 0,
+    navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick: 0,
+    navigationSparseSearchHierarchyNodeVisitsThisTick: 0,
+    navigationSparseSearchHierarchyNodeVisitsTotal: 0,
+    navigationSparseSearchInvalidatedCount: 0,
+    navigationSparseSearchMaximumNoProgressAgeTicksObserved: 0,
+    navigationSparseSearchNoProgressAgeTicks: 0,
+    navigationSparseSearchPendingAgentCount: 0,
+    navigationSparseSearchRestartedCollisionRecoveryCount: 0,
+    navigationSparseSearchRestartedCount: 0,
+    navigationSparseSearchRestartedRoutePublishedCount: 0,
+    navigationSparseSearchRestartedTargetPublicationPreemptionCount: 0,
+    navigationSparseSearchRestartedWorldChangedCount: 0,
+    navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved: 0,
+    navigationSparseSearchSpawnNoProgressAgeTicks: 0,
+    navigationSparseSearchSpawnProgressSliceCountThisTick: 0,
+    navigationSparseSearchSpawnProgressSliceCountTotal: 0,
+    navigationSparseSearchSpawnServiceSliceCountThisTick: 0,
+    navigationSparseSearchSpawnServiceSliceCountTotal: 0,
+    navigationSparseSearchServiceSliceCountThisTick: 0,
+    navigationSparseSearchServiceSliceCountTotal: 0,
+    navigationSparseSearchStartedCount: 0,
+    navigationSparseSearchSupportPredicatesMaximumObservedPerTick: 0,
+    navigationSparseSearchSupportPredicatesThisTick: 0,
+    navigationSparseSearchSupportPredicatesTotal: 0,
+    navigationSparseSearchTargetBuildsMaximumObservedPerTick: 0,
+    navigationSparseSearchTargetBuildsThisTick: 0,
+    navigationSparseSearchTargetBuildsTotal: 0,
+    navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved: 0,
+    navigationSparseSearchTargetNoProgressAgeTicks: 0,
+    navigationSparseSearchTargetProgressSliceCountThisTick: 0,
+    navigationSparseSearchTargetProgressSliceCountTotal: 0,
+    navigationSparseSearchTargetServiceSliceCountThisTick: 0,
+    navigationSparseSearchTargetServiceSliceCountTotal: 0,
+    navigationSparseSearchUncausedStartViolationCount: 0,
+    navigationSparseSpawnDesiredX: 0,
+    navigationSparseSpawnDesiredZ: 0,
+    navigationSparseSpawnIsReplacement: false,
+    navigationSparseSpawnMinimumTargetDistanceMeters: 0,
+    navigationSparseSpawnSearchActive: false,
+    navigationSparseSpawnSearchCompletedCount: 0,
+    navigationSparseSpawnSearchDependencyWaiting: false,
+    navigationSparseSpawnSearchInvalidatedCount: 0,
+    navigationSparseSpawnSearchNeedsRestart: false,
+    navigationSparseSpawnSearchStartedCount: 0,
+    navigationSparseSpawnProbeCountTotal: 0,
+    navigationSparseSpawnProbeMaximumObservedPerAdmission: 0,
+    navigationSparseSpawnProbeOrdinal: 0,
+    navigationSparseSpawnAnchorScratch: createZombieEscapeSparseSpawnAnchor(),
+    navigationSparseSpawnRouteScratch: createZombieEscapeSparseCommittedNodeRoute(),
+    navigationSparseSpawnWork: createZombieEscapeSparseAttachmentWorkMetrics(),
+    navigationSparseTargetWork: createZombieEscapeSparseTargetWorkMetrics(),
+    nextZombieSpawnOrdinal: 0,
     night: 0,
+    obstacleDamageEnabled: true,
+    obstacleDeltaCombatResult: createZombieEscapeCollisionObjectDeltaResult(),
+    obstacleDeltaMetrics: createZombieEscapeObstacleDeltaMetrics(),
+    obstacleDeltaNavigationResult: createZombieEscapeCollisionObjectDeltaResult(),
+    obstacleDeltaRequestResult: {
+      applied: false,
+      appliedRevision: 0,
+      objectId: null,
+      requestedRevision: 0,
+    },
     obstacleHitCounts: new Map(),
     obstacleRevision: 0,
     paused: false,
@@ -422,20 +1457,53 @@ export function createZombieEscapeSimulation(
     reachableSpawnScratch: createZombieEscapeReachableSpawn(),
     replacementSpawnRemaining: 0,
     seed,
+    sparseNavigationRequired: options.requireSparseNavigation === true,
     shots,
     shotsFired: 0,
+    navigationIntentTick: 0,
+    navigationTargetCommittedRouteGeneration:
+      getZombieEscapeSparseCommittedRouteGeneration(navigationField),
+    navigationTargetRequestedLayerHint:
+      navigationField.graphSparseTargetUpdate.requestedTargetLayerHint,
+    navigationTargetRequestedRevision:
+      getZombieEscapeSparseRequestedTargetRevision(navigationField),
+    navigationWorldRevision: 0,
+    navigationWorldRefreshAdmissionGeneration: 1,
+    navigationWorldRefreshEpochGeneration: 1,
+    navigationWorldRefreshInspectionRemaining: 0,
+    navigationWorldRefreshMaximumPromotedCountObservedPerTick: 0,
+    navigationWorldRefreshMinimumAppliedGeneration: 1,
+    navigationWorldRefreshPendingCount: 0,
+    navigationWorldRefreshPromotedCountThisTick: 0,
+    navigationWorldRefreshPromotedCountTotal: 0,
+    navigationWorldRefreshRestartedCountThisTick: 0,
+    navigationWorldRefreshRestartedCountTotal: 0,
+    simulationTick: 0,
     status: 'playing',
     tracers: createShotPhaseMetricView(shots, ZOMBIE_ESCAPE_SHOT_PHASE.inactive),
-    gaitByPoolSlot: createZombieEscapeGaitByPoolSlot(seed),
-    variantByPoolSlot: createZombieEscapeVariantByPoolSlot(seed),
+    variantByPoolSlot: createZombieEscapeVariantByPoolSlot(seed, zombieCapacity),
     wave: 1,
     waveIntermissionSeconds: 0,
     waveSpawnRemaining: 0,
     waveSpawnTimerSeconds: 0.35,
     waveState: 'intermission',
     weaponPickups: sanitizeZombieEscapeWeaponPickupPlacements(weaponPickups),
-    zombies: createZombiePool(ZOMBIE_ESCAPE_CAPACITY.zombies),
+    zombies: createZombiePool(zombieCapacity),
   }
+}
+
+function resolveZombieEscapeSimulationZombieCapacity(zombieCapacity: number | undefined) {
+  if (zombieCapacity === undefined) return ZOMBIE_ESCAPE_CAPACITY.zombies
+  if (
+    !Number.isInteger(zombieCapacity) ||
+    zombieCapacity < 1 ||
+    zombieCapacity > ZOMBIE_ESCAPE_MAXIMUM_ZOMBIE_CAPACITY
+  ) {
+    throw new RangeError(
+      `Zombie Escape zombieCapacity must be an integer from 1 through ${String(ZOMBIE_ESCAPE_MAXIMUM_ZOMBIE_CAPACITY)}`,
+    )
+  }
+  return zombieCapacity
 }
 
 export function resetZombieEscapeSimulation(
@@ -446,6 +1514,7 @@ export function resetZombieEscapeSimulation(
   resetZombieEscapeRandomState(state.random, state.seed)
   resetShotEventPool(state.shots)
   resetZombiePool(state.zombies)
+  resetZombieEscapeAgentSpatialIndex(state.agentSpatialIndex)
   state.elapsedSeconds = 0
   state.extractionOpen = false
   state.fireCooldownSeconds = 0
@@ -454,7 +1523,19 @@ export function resetZombieEscapeSimulation(
   state.lastShotSlot = -1
   state.money = 0
   state.nearbyPickupIndex = -1
+  state.navigationGoalInitialized = false
+  state.navigationGoalLayerIndex = -1
+  state.navigationGoalProjectionScratch.distanceSquared = Number.POSITIVE_INFINITY
+  state.navigationGoalProjectionScratch.regionIndex = -1
+  state.navigationGoalProjectionScratch.x = 0
+  state.navigationGoalProjectionScratch.z = 0
+  state.navigationGoalRegionIndex = -1
+  state.navigationGoalResolvedTick = 0
+  state.navigationGoalX = 0
+  state.navigationGoalY = 0
+  state.navigationGoalZ = 0
   state.navigationTargetY = 0
+  state.nextZombieSpawnOrdinal = 0
   state.night = 0
   restoreZombieEscapeObstacleState(state)
   state.paused = false
@@ -483,6 +1564,7 @@ export function resetZombieEscapeSimulation(
   state.player.z = arena.playerStartZ
   updateDefaultMuzzlePose(state.player)
   state.shotsFired = 0
+  resetZombieEscapeNavigationIntentScheduler(state)
   state.status = 'playing'
   state.wave = 1
   state.waveIntermissionSeconds = 0
@@ -520,9 +1602,136 @@ export function setZombieEscapeCollisionWorld(
   navigationWorld: ZombieEscapeCollisionWorld,
   combatWorld: ZombieEscapeCollisionWorld = navigationWorld,
 ) {
+  if (state.sparseNavigationRequired && navigationWorld.navigationMode !== 'sparse') {
+    throw new Error('Zombie Escape integrated gameplay requires authored sparse navigation')
+  }
   state.collisionSourceWorld = navigationWorld
   state.combatCollisionSourceWorld = combatWorld
-  return applyZombieEscapeEffectiveCollisionWorld(state)
+  const changed = applyZombieEscapeEffectiveCollisionWorld(state)
+  if (changed) {
+    refreshZombieEscapeNavigationIntentMetrics(state)
+  }
+  return changed
+}
+
+export function setZombieEscapeObstacleDamageEnabled(
+  state: ZombieEscapeSimulation,
+  enabled: boolean,
+) {
+  state.obstacleDamageEnabled = enabled
+}
+
+export function requestZombieEscapeDeterministicObstacleDelta(state: ZombieEscapeSimulation) {
+  const objectId = findFirstActiveZombieEscapeBreakableObjectId(state.combatCollisionWorld)
+  if (objectId) return applyZombieEscapeObstacleDelta(state, objectId)
+  const metrics = state.obstacleDeltaMetrics
+  const result = state.obstacleDeltaRequestResult
+  metrics.requestCount += 1
+  metrics.requestedRevision += 1
+  metrics.unchangedCount += 1
+  result.applied = false
+  result.appliedRevision = metrics.appliedRevision
+  result.objectId = null
+  result.requestedRevision = metrics.requestedRevision
+  return result
+}
+
+export function applyZombieEscapeObstacleDelta(
+  state: ZombieEscapeSimulation,
+  objectId: string,
+  attackerSlot = -1,
+) {
+  const metrics = state.obstacleDeltaMetrics
+  const result = state.obstacleDeltaRequestResult
+  metrics.requestCount += 1
+  metrics.requestedRevision += 1
+  result.applied = false
+  result.appliedRevision = metrics.appliedRevision
+  result.objectId = objectId
+  result.requestedRevision = metrics.requestedRevision
+
+  const navigationStatus = classifyZombieEscapeCollisionObjectDelta(
+    state.collisionWorld,
+    objectId,
+    state.obstacleDeltaNavigationResult,
+  )
+  const combatStatus = classifyZombieEscapeCollisionObjectDelta(
+    state.combatCollisionWorld,
+    objectId,
+    state.obstacleDeltaCombatResult,
+  )
+  const requiresRecompile =
+    navigationStatus === 'requires-recompile' || combatStatus === 'requires-recompile'
+  const navigationChanges = navigationStatus === 'changed'
+  const combatChanges = combatStatus === 'changed'
+  if (!requiresRecompile && !navigationChanges && !combatChanges) {
+    accumulateZombieEscapeCollisionObjectDeltaResult(metrics, state.obstacleDeltaNavigationResult)
+    accumulateZombieEscapeCollisionObjectDeltaResult(metrics, state.obstacleDeltaCombatResult)
+    metrics.unchangedCount += 1
+    return result
+  }
+
+  const previousWorld = state.collisionWorld
+  const previousWorldGeneration = state.collisionWorldGeneration
+  let collisionWorldChanged = false
+  if (requiresRecompile) {
+    metrics.requiresRecompileCount += 1
+    state.destroyedObstacleIds.add(objectId)
+    collisionWorldChanged = applyZombieEscapeEffectiveCollisionWorld(state)
+    const compileCount =
+      Number(navigationStatus === 'requires-recompile' || navigationChanges) +
+      Number(combatStatus === 'requires-recompile' || combatChanges)
+    accumulateZombieEscapeObstacleDeltaCounter(metrics.worldCompileCount, compileCount)
+    accumulateZombieEscapeObstacleDeltaCounter(metrics.allocationCount, compileCount)
+    accumulateZombieEscapeObstacleDeltaCounter(metrics.fullArrayClearCount, 1)
+  } else {
+    if (navigationChanges) {
+      deactivateZombieEscapeCollisionObject(
+        state.collisionWorld,
+        state.obstacleDeltaNavigationResult,
+      )
+    }
+    if (combatChanges) {
+      deactivateZombieEscapeCollisionObject(
+        state.combatCollisionWorld,
+        state.obstacleDeltaCombatResult,
+      )
+    }
+    state.destroyedObstacleIds.add(objectId)
+    invalidateZombieEscapeRuntimeForCollisionMaskDelta(state)
+    collisionWorldChanged = true
+  }
+  accumulateZombieEscapeCollisionObjectDeltaResult(metrics, state.obstacleDeltaNavigationResult)
+  accumulateZombieEscapeCollisionObjectDeltaResult(metrics, state.obstacleDeltaCombatResult)
+  if (!collisionWorldChanged) {
+    state.destroyedObstacleIds.delete(objectId)
+    metrics.unchangedCount += 1
+    return result
+  }
+
+  state.obstacleRevision += 1
+  metrics.appliedCount += 1
+  metrics.appliedRevision += 1
+  metrics.revisionAdvanceCount += 1
+  result.applied = true
+  result.appliedRevision = metrics.appliedRevision
+  normalizeZombieEscapeNavigationIntentsAfterObstacleRemoval(
+    state,
+    attackerSlot,
+    objectId,
+    previousWorld,
+    previousWorldGeneration,
+    true,
+  )
+  if (state.collisionWorld.navigationMode === 'dense') {
+    updateZombieEscapeFlowTarget(
+      state.navigationField,
+      state.player.x,
+      state.player.z,
+      state.navigationTargetY,
+    )
+  }
+  return result
 }
 
 export function getZombieEscapeMeleeProgress(player: ZombieEscapePlayerState) {
@@ -630,6 +1839,8 @@ function stepZombieEscapeSimulationFrame(
     updateShots(state, delta)
     updateZombies(state, delta)
     updateWaves(state, delta)
+    finalizeZombieEscapeSparseSearchTickMetrics(state)
+    refreshZombieEscapeNavigationIntentMetrics(state)
   }
   if (state.extractionOpen) {
     const escapeDistance = Math.hypot(
@@ -650,15 +1861,170 @@ export function spawnZombieEscapeZombie(
   z: number,
   health = 44 + state.wave * 8,
 ) {
+  return spawnZombieEscapeZombieAtNavigationElevation(
+    state,
+    x,
+    z,
+    ZOMBIE_ESCAPE_WAVE_SPAWN_AUTHORED_GROUND_ELEVATION_METERS,
+    health,
+  )
+}
+
+export function spawnZombieEscapeZombieAtNavigationElevation(
+  state: ZombieEscapeSimulation,
+  x: number,
+  z: number,
+  authoredElevation: number,
+  health = 44 + state.wave * 8,
+) {
+  if (!Number.isFinite(authoredElevation)) return -1
+  if (state.sparseNavigationRequired && state.collisionWorld.navigationMode !== 'sparse') {
+    return -1
+  }
+  if (state.collisionWorld.navigationMode === 'sparse') {
+    if (
+      !state.navigationGoalInitialized ||
+      state.navigationGoalResolvedTick !== state.navigationIntentTick ||
+      state.navigationField.graphSparseTargetUpdate.status !== 'ready' ||
+      state.navigationTargetCommittedRouteGeneration <= 0
+    ) {
+      return -1
+    }
+    const anchor = state.navigationSparseSpawnAnchorScratch
+    if (
+      !sampleZombieEscapeSparseSpawnAnchor(
+        state.navigationField,
+        x,
+        z,
+        authoredElevation,
+        state.navigationSparseSpawnRouteScratch,
+        anchor,
+      ) ||
+      anchor.generation !== state.navigationTargetCommittedRouteGeneration
+    ) {
+      return -1
+    }
+    return initializeZombieEscapeZombie(state, anchor.x, anchor.z, health, anchor)
+  }
+  if (authoredElevation !== ZOMBIE_ESCAPE_WAVE_SPAWN_AUTHORED_GROUND_ELEVATION_METERS) return -1
+  return initializeZombieEscapeZombie(state, x, z, health, null)
+}
+
+export function inspectZombieEscapeCommittedNavigationAction(
+  state: ZombieEscapeSimulation,
+  slot: number,
+): ZombieEscapeCommittedNavigationAction {
+  const zombies = state.zombies
+  if (
+    slot < 0 ||
+    slot >= zombies.pool.capacity ||
+    zombies.pool.active[slot] === 0 ||
+    zombies.health[slot]! <= 0
+  ) {
+    return 'none'
+  }
+  if (
+    state.collisionWorld.navigationMode === 'sparse' &&
+    (!state.navigationGoalInitialized ||
+      state.navigationGoalResolvedTick !== state.navigationIntentTick ||
+      zombies.navigationIntentTargetRevision[slot] !== state.navigationTargetRequestedRevision)
+  ) {
+    return 'none'
+  }
+  if (zombies.navigationConnector[slot]! >= 0) return 'connector'
+  if (
+    zombies.intent[slot] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle &&
+    zombies.attackTargetObjectId[slot] !== null
+  ) {
+    return 'attack-obstacle'
+  }
+  if (zombies.intent[slot] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer) return 'attack-player'
+  if (zombies.navigationIntentCurrentTargetFallback[slot] !== 0) return 'direct'
+  if (
+    zombies.navigationIntentHasCached[slot] === 0 ||
+    zombies.navigationIntentValid[slot] === 0 ||
+    zombies.navigationReachable[slot] === 0
+  ) {
+    return 'none'
+  }
+  return zombies.navigationWaypointNode[slot]! >= 0 ? 'route' : 'direct'
+}
+
+function spawnZombieEscapeSparseAnchoredZombie(
+  state: ZombieEscapeSimulation,
+  x: number,
+  z: number,
+  expectedPoolSlot: number,
+  candidateRadius: number,
+  minimumPlayerDistanceSquared: number,
+  health = 44 + state.wave * 8,
+) {
+  const anchor = state.navigationSparseSpawnAnchorScratch
+  if (
+    !sampleZombieEscapeSparseSpawnAnchor(
+      state.navigationField,
+      x,
+      z,
+      ZOMBIE_ESCAPE_WAVE_SPAWN_AUTHORED_GROUND_ELEVATION_METERS,
+      state.navigationSparseSpawnRouteScratch,
+      anchor,
+    )
+  ) {
+    return -1
+  }
+  if (resolveZombieEscapeNextAvailablePoolSlot(state.zombies.pool) !== expectedPoolSlot) return -1
+  const playerOffsetX = anchor.x - state.player.x
+  const playerOffsetZ = anchor.z - state.player.z
+  if (
+    playerOffsetX * playerOffsetX + playerOffsetZ * playerOffsetZ <
+    minimumPlayerDistanceSquared
+  ) {
+    return -1
+  }
+  if (
+    !zombieEscapeAgentSpatialPositionIsClear(
+      state.agentSpatialIndex,
+      anchor.layerIndex,
+      anchor.x,
+      anchor.z,
+      candidateRadius,
+      state.zombies.variant,
+      state.zombies.x,
+      state.zombies.z,
+    ) ||
+    !sampleZombieEscapeSparseSpawnAnchor(
+      state.navigationField,
+      anchor.x,
+      anchor.z,
+      ZOMBIE_ESCAPE_WAVE_SPAWN_AUTHORED_GROUND_ELEVATION_METERS,
+      state.navigationSparseSpawnRouteScratch,
+      anchor,
+    )
+  ) {
+    return -1
+  }
+  return initializeZombieEscapeZombie(state, anchor.x, anchor.z, health, anchor)
+}
+
+function initializeZombieEscapeZombie(
+  state: ZombieEscapeSimulation,
+  x: number,
+  z: number,
+  health: number,
+  anchor: ZombieEscapeSimulation['navigationSparseSpawnAnchorScratch'] | null,
+) {
   const zombies = state.zombies
   const slot = acquireZombieEscapePoolSlot(zombies.pool)
+  cancelZombieEscapeNavigationIntentDemand(state, slot)
+  const spawnOrdinal = state.nextZombieSpawnOrdinal >>> 0
+  state.nextZombieSpawnOrdinal = (spawnOrdinal + 1) >>> 0
   zombies.x[slot] = x
-  zombies.y[slot] = 0
+  zombies.y[slot] = anchor?.elevation ?? 0
   zombies.z[slot] = z
   zombies.vx[slot] = 0
   zombies.vz[slot] = 0
   zombies.health[slot] = health
-  zombies.gait[slot] = state.gaitByPoolSlot[slot]!
+  zombies.gait[slot] = ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner
   zombies.heading[slot] = Math.atan2(state.player.x - x, state.player.z - z)
   zombies.hitFlash[slot] = 0
   zombies.hitImpulseX[slot] = 0
@@ -669,16 +2035,358 @@ export function spawnZombieEscapeZombie(
   zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase
   zombies.runBlend[slot] = zombies.gait[slot] === ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner ? 1 : 0
   zombies.locomotionPhase[slot] = nextZombieEscapeRandom(state.random) * Math.PI * 2
+  zombies.navigationBlockerBreakable[slot] = 0
+  zombies.navigationBlockerObjectId[slot] = null
+  zombies.navigationBlockerObjectOrdinal[slot] = -1
+  zombies.navigationBlockingDistance[slot] = Number.POSITIVE_INFINITY
+  zombies.navigationBlockingX[slot] = x
+  zombies.navigationBlockingZ[slot] = z
   zombies.navigationConnector[slot] = -1
   zombies.navigationConnectorTargetEnd[slot] = 0
-  zombies.attackCooldown[slot] = zombieEscapeRandomRange(state.random, 0.1, 0.6)
+  zombies.navigationDirectionX[slot] = 0
+  zombies.navigationDirectionZ[slot] = 0
+  zombies.navigationCollisionRecoveryOriginX[slot] = x
+  zombies.navigationCollisionRecoveryOriginZ[slot] = z
+  zombies.navigationIntentAdmissionDeferredReasons[slot] = 0
+  zombies.navigationIntentAdmissionDeferredNext[slot] = -1
+  zombies.navigationIntentAdmissionDeferredPrevious[slot] = -1
+  zombies.navigationIntentHasCached[slot] = 0
+  zombies.navigationIntentHasReceivedFirstService[slot] = 0
+  zombies.navigationIntentAdmissionWorldGeneration[slot] = state.collisionWorldGeneration
+  zombies.navigationIntentFirstServiceEligibleSinceTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationIntentFirstServiceTick[slot] = 0
+  zombies.navigationIntentPending[slot] = 0
+  zombies.navigationIntentPendingSinceTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationIntentPoolGeneration[slot] = zombies.pool.generation[slot] ?? 0
+  zombies.navigationIntentResolvedTick[slot] = 0
+  zombies.navigationIntentCommittedRouteGeneration[slot] =
+    state.navigationTargetCommittedRouteGeneration
+  zombies.navigationIntentCurrentTargetFallback[slot] = 0
+  zombies.navigationIntentTargetRevision[slot] = 0
+  zombies.navigationIntentUrgentRefreshUsed[slot] = 0
+  zombies.navigationIntentValid[slot] = 0
+  zombies.navigationIntentWorldGeneration[slot] = state.collisionWorldGeneration
+  zombies.navigationNoProgressTicks[slot] = 0
+  zombies.navigationProgressTargetNode[slot] = ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED
+  zombies.navigationRecoveryCooldownTicks[slot] = 0
+  zombies.navigationReachable[slot] = 0
+  zombies.navigationRequestedConnector[slot] = -1
+  zombies.navigationRequestedConnectorTargetEnd[slot] = 0
+  resetZombieEscapeSparseFlowSearch(zombies.navigationSparseCommittedFlowSearch[slot]!)
+  resetZombieEscapeSparseFlowSearch(zombies.navigationSparseFlowSearch[slot]!)
+  zombies.navigationSparseFlowSearchActive[slot] = 0
+  zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+  zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+  zombies.navigationSparseFlowSearchStartedForDemand[slot] = 0
+  zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 0
+  zombies.navigationSparseFlowSearchWorldRevision[slot] = state.navigationWorldRevision
+  zombies.navigationSourceCertifiedX[slot] = x
+  zombies.navigationSourceCertifiedY[slot] = zombies.y[slot]!
+  zombies.navigationSourceCertifiedZ[slot] = z
+  zombies.navigationSourceNeedsValidation[slot] = 0
+  zombies.navigationWaypointFallback[slot] = 0
+  zombies.navigationWaypointNode[slot] = -1
+  zombies.projectileHitOrdinal[slot] = 0
+  zombies.attackCooldown[slot] = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
+  zombies.attackContactResolved[slot] = 0
   zombies.attackFocusX[slot] = x
   zombies.attackFocusZ[slot] = z
   zombies.attackTargetObjectId[slot] = null
+  zombies.attackTargetObjectOrdinal[slot] = -1
   zombies.deathPresentationSeconds[slot] = 0
-  zombies.speedScale[slot] = zombieEscapeRandomRange(state.random, 0.9, 1.12)
+  zombies.spawnOrdinal[slot] = spawnOrdinal
+  zombies.speedScale[slot] = resolveZombieEscapeSpawnSpeedScale(state.seed, spawnOrdinal)
   zombies.variant[slot] = state.variantByPoolSlot[slot]!
+  if (anchor) {
+    cacheZombieEscapeSparseNavigationAnchor(state, slot, anchor)
+  } else {
+    deferZombieEscapeNavigationIntentAdmission(state, slot, 'spawn')
+  }
   return slot
+}
+
+function cacheZombieEscapeSparseNavigationAnchor(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  anchor: ZombieEscapeSimulation['navigationSparseSpawnAnchorScratch'],
+) {
+  writeZombieEscapeSparseNavigationAnchorSample(state, anchor)
+  state.zombies.navigationIntentAdmissionWorldGeneration[slot] = state.collisionWorldGeneration
+  cacheZombieEscapeNavigationIntent(
+    state,
+    slot,
+    state.navigationIntentTick,
+    null,
+    -1,
+    false,
+    anchor.generation,
+    state.navigationTargetRequestedRevision,
+  )
+  seedZombieEscapeSparseFlowSearchRouteCorridor(
+    state.zombies.navigationSparseCommittedFlowSearch[slot]!,
+    state.navigationField,
+    anchor.witnessNode,
+    anchor.usesFallback,
+  )
+}
+
+function rejectZombieEscapeUnanchoredZombieFromNavigation(
+  state: ZombieEscapeSimulation,
+  slot: number,
+) {
+  cancelZombieEscapeNavigationIntentDemand(state, slot)
+  const released = releaseZombieEscapePoolSlot(state.zombies.pool, slot)
+  if (released && state.phase === 'night' && state.waveState === 'active') {
+    state.replacementSpawnRemaining = Math.min(
+      state.zombies.pool.capacity,
+      state.replacementSpawnRemaining + 1,
+    )
+  }
+}
+
+function certifyZombieEscapeNavigationSource(
+  zombies: ZombieEscapeZombiePool,
+  slot: number,
+  sourceX: number,
+  sourceY: number,
+  sourceZ: number,
+) {
+  zombies.navigationSourceCertifiedX[slot] = sourceX
+  zombies.navigationSourceCertifiedY[slot] = sourceY
+  zombies.navigationSourceCertifiedZ[slot] = sourceZ
+  zombies.navigationSourceNeedsValidation[slot] = 0
+}
+
+function retainedZombieEscapeSparseCorridorCertifiesSource(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  sourceX: number,
+  sourceY: number,
+  sourceZ: number,
+) {
+  const zombies = state.zombies
+  if (
+    zombies.navigationIntentHasCached[slot] === 0 ||
+    zombies.navigationIntentValid[slot] === 0 ||
+    zombies.navigationReachable[slot] === 0 ||
+    zombies.navigationIntentCommittedRouteGeneration[slot] !==
+      state.navigationTargetCommittedRouteGeneration
+  ) {
+    return false
+  }
+  const waypointNode = zombies.navigationWaypointNode[slot]!
+  if (waypointNode < 0) {
+    return (
+      state.navigationGoalInitialized &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        sourceX,
+        sourceY,
+        sourceZ,
+        state.navigationGoalX,
+        state.navigationGoalY,
+        state.navigationGoalZ,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    )
+  }
+  const graph = state.collisionWorld.navigationGraph
+  const layerIndex = graph.layerIndices[waypointNode] ?? -1
+  const layer = state.collisionWorld.navigationLayers[layerIndex]
+  if (
+    !layer ||
+    !sampleZombieEscapeSparseCommittedNodeRoute(
+      state.navigationField,
+      waypointNode,
+      zombies.navigationWaypointFallback[slot] !== 0,
+      state.navigationSparseSpawnRouteScratch,
+    ) ||
+    !state.navigationSparseSpawnRouteScratch.reachable ||
+    state.navigationSparseSpawnRouteScratch.generation !==
+      state.navigationTargetCommittedRouteGeneration
+  ) {
+    return false
+  }
+  resetZombieEscapeNavigationHit(state.navigationHitScratch)
+  if (
+    zombieEscapeSameLayerNavigationSegmentIsClear(
+      state.collisionWorld,
+      sourceX,
+      sourceY,
+      sourceZ,
+      graph.x[waypointNode]!,
+      layer.elevation,
+      graph.z[waypointNode]!,
+      state.collisionWorld.agentRadius,
+      state.navigationHitScratch,
+    )
+  ) {
+    return true
+  }
+  return (
+    zombies.navigationWaypointFallback[slot] !== 0 &&
+    isZombieEscapeCollisionHitBreakable(state.collisionWorld, state.navigationHitScratch)
+  )
+}
+
+function validateZombieEscapeReconciledSparseSource(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  sourceX: number,
+  sourceY: number,
+  sourceZ: number,
+  navigationIntentTick: number,
+) {
+  if (retainedZombieEscapeSparseCorridorCertifiesSource(state, slot, sourceX, sourceY, sourceZ)) {
+    return true
+  }
+  if (state.zombies.navigationWaypointNode[slot]! >= 0) {
+    state.navigationAnchorInvalidationCount += 1
+  }
+  const anchor = state.navigationSparseSpawnAnchorScratch
+  if (
+    !sampleZombieEscapeSparseSpawnAnchor(
+      state.navigationField,
+      sourceX,
+      sourceZ,
+      sourceY,
+      state.navigationSparseSpawnRouteScratch,
+      anchor,
+    ) ||
+    anchor.generation !== state.navigationTargetCommittedRouteGeneration ||
+    !seedZombieEscapeSparseFlowSearchRouteCorridor(
+      state.zombies.navigationSparseCommittedFlowSearch[slot]!,
+      state.navigationField,
+      anchor.witnessNode,
+      anchor.usesFallback,
+    )
+  ) {
+    return false
+  }
+  writeZombieEscapeSparseNavigationAnchorSample(state, anchor)
+  state.zombies.navigationIntentAdmissionWorldGeneration[slot] = state.collisionWorldGeneration
+  completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+  return true
+}
+
+function writeZombieEscapeSparseNavigationAnchorSample(
+  state: ZombieEscapeSimulation,
+  anchor: ZombieEscapeSimulation['navigationSparseSpawnAnchorScratch'],
+) {
+  const graph = state.collisionWorld.navigationGraph
+  const witnessX = graph.x[anchor.witnessNode]!
+  const witnessZ = graph.z[anchor.witnessNode]!
+  const directionX = witnessX - anchor.x
+  const directionZ = witnessZ - anchor.z
+  const directionLength = Math.hypot(directionX, directionZ)
+  const sample = state.navigationSampleScratch
+  sample.blockingDistance = Number.POSITIVE_INFINITY
+  sample.blockingX = anchor.x
+  sample.blockingZ = anchor.z
+  sample.connectorIndex = -1
+  sample.connectorTargetEnd = false
+  sample.reachable = true
+  sample.waypointNode = anchor.witnessNode
+  sample.waypointUsesFallback = anchor.usesFallback
+  sample.x = directionLength > 0.000_001 ? directionX / directionLength : 0
+  sample.z = directionLength > 0.000_001 ? directionZ / directionLength : 0
+}
+
+function writeZombieEscapeSparseRegionWitnessNavigationSample(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  sourceX: number,
+  sourceY: number,
+  sourceZ: number,
+) {
+  const anchor = state.navigationSparseSpawnAnchorScratch
+  if (
+    !sampleZombieEscapeSparseSpawnAnchor(
+      state.navigationField,
+      sourceX,
+      sourceZ,
+      sourceY,
+      state.navigationSparseSpawnRouteScratch,
+      anchor,
+    ) ||
+    anchor.generation !== state.navigationTargetCommittedRouteGeneration
+  ) {
+    return false
+  }
+  const graph = state.collisionWorld.navigationGraph
+  const witnessNode = anchor.witnessNode
+  if (
+    witnessNode < 0 ||
+    !zombieEscapeSameLayerNavigationSegmentIsClear(
+      state.collisionWorld,
+      sourceX,
+      sourceY,
+      sourceZ,
+      graph.x[witnessNode]!,
+      anchor.elevation,
+      graph.z[witnessNode]!,
+      state.collisionWorld.agentRadius,
+      state.navigationHitScratch,
+    ) ||
+    !seedZombieEscapeSparseFlowSearchRouteCorridor(
+      state.zombies.navigationSparseCommittedFlowSearch[slot]!,
+      state.navigationField,
+      witnessNode,
+      anchor.usesFallback,
+    )
+  ) {
+    return false
+  }
+  writeZombieEscapeSparseNavigationAnchorSample(state, anchor)
+  resetZombieEscapeNavigationHit(state.navigationHitScratch)
+  return true
+}
+
+function tryReanchorZombieEscapeSparseCollision(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  acceptedX: number,
+  acceptedY: number,
+  acceptedZ: number,
+) {
+  const zombies = state.zombies
+  if (
+    state.collisionWorld.navigationMode !== 'sparse' ||
+    zombies.navigationConnector[slot]! >= 0 ||
+    zombies.navigationIntentPending[slot] !== 0 ||
+    zombies.navigationSparseFlowSearchActive[slot] !== 0 ||
+    zombies.navigationIntentAdmissionDeferredReasons[slot] !== 0
+  ) {
+    return false
+  }
+  state.navigationSparseCollisionReanchorAttemptCount += 1
+  const anchor = state.navigationSparseSpawnAnchorScratch
+  if (
+    !sampleZombieEscapeSparseSpawnAnchor(
+      state.navigationField,
+      acceptedX,
+      acceptedZ,
+      acceptedY,
+      state.navigationSparseSpawnRouteScratch,
+      anchor,
+    )
+  ) {
+    state.navigationSparseCollisionReanchorFailedCount += 1
+    return false
+  }
+  zombies.x[slot] = acceptedX
+  zombies.y[slot] = acceptedY
+  zombies.z[slot] = acceptedZ
+  zombies.vx[slot] = 0
+  zombies.vz[slot] = 0
+  cacheZombieEscapeSparseNavigationAnchor(state, slot, anchor)
+  zombies.navigationCollisionRecoveryOriginX[slot] = acceptedX
+  zombies.navigationCollisionRecoveryOriginZ[slot] = acceptedZ
+  zombies.navigationIntentUrgentRefreshUsed[slot] = 1
+  state.navigationSparseCollisionReanchorCompletedCount += 1
+  return true
 }
 
 export function countZombieEscapeShotsByPhase(
@@ -1121,6 +2829,7 @@ function updateTravelingShot(state: ZombieEscapeSimulation, slot: number, delta:
     applyZombieDamage(
       state,
       hitTargetSlot,
+      'projectile',
       shots.damage[slot]!,
       shots.directionX[slot]!,
       shots.directionY[slot]!,
@@ -1153,6 +2862,7 @@ function updateTravelingShot(state: ZombieEscapeSimulation, slot: number, delta:
 function applyZombieDamage(
   state: ZombieEscapeSimulation,
   zombieSlot: number,
+  source: 'melee' | 'projectile',
   damage: number,
   impulseX: number,
   impulseY: number,
@@ -1163,7 +2873,6 @@ function applyZombieDamage(
 ) {
   const zombies = state.zombies
   if (zombies.health[zombieSlot]! <= 0) return false
-  zombies.gait[zombieSlot] = ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker
   zombies.health[zombieSlot] = zombies.health[zombieSlot]! - damage
   zombies.hitFlash[zombieSlot] = 1
   zombies.hitReaction[zombieSlot] = Math.min(1, zombies.hitReaction[zombieSlot]! + 0.82)
@@ -1172,6 +2881,19 @@ function applyZombieDamage(
   zombies.hitImpulseZ[zombieSlot] = impulseZ
   const variant = zombies.variant[zombieSlot]!
   if (zombies.health[zombieSlot]! > 0) {
+    if (source === 'projectile') {
+      const projectileHitOrdinal = zombies.projectileHitOrdinal[zombieSlot]!
+      zombies.projectileHitOrdinal[zombieSlot] = projectileHitOrdinal + 1
+      zombies.gait[zombieSlot] = ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker
+      zombies.speedScale[zombieSlot] = Math.fround(
+        zombies.speedScale[zombieSlot]! *
+          resolveZombieEscapeProjectileSlowdownMultiplier(
+            state.seed,
+            zombies.spawnOrdinal[zombieSlot]!,
+            projectileHitOrdinal,
+          ),
+      )
+    }
     emitZombieEscapeAudioEvent(
       state.audioEvents,
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyHit,
@@ -1183,6 +2905,8 @@ function applyZombieDamage(
     return true
   }
   zombies.health[zombieSlot] = 0
+  cancelZombieEscapeNavigationIntentDemand(state, zombieSlot)
+  zombies.navigationIntentUrgentRefreshUsed[zombieSlot] = 0
   zombies.deathPresentationSeconds[zombieSlot] = ZOMBIE_ESCAPE_SIMULATION.zombieHitReactionSeconds
   state.kills += 1
   state.money += ZOMBIE_ESCAPE_SIMULATION.killReward
@@ -1320,6 +3044,7 @@ function resolveZombieEscapeMeleeHit(state: ZombieEscapeSimulation) {
   applyZombieDamage(
     state,
     targetSlot,
+    'melee',
     ZOMBIE_ESCAPE_MELEE.damage,
     aimX,
     0.18,
@@ -1404,19 +3129,2520 @@ function writeZombieEscapeZombieHitAttachment(
   shots.hitNormalZ[shotSlot] = normalZ
 }
 
+export function scheduleZombieEscapeNavigationIntentResolutions(
+  active: Uint8Array,
+  health: Float32Array,
+  navigationConnector: Int16Array,
+  _navigationIntentValid: Uint8Array,
+  navigationIntentPending: Uint8Array,
+  navigationIntentResolveCursor: number,
+  navigationIntentResolveScheduled: Uint8Array,
+  maximumResolveCount: number = ZOMBIE_ESCAPE_SIMULATION.navigationIntentResolveBudgetPerTick,
+  navigationIntentResolveEligible?: Uint8Array,
+) {
+  const capacity = active.length
+  navigationIntentResolveScheduled.fill(0)
+  if (capacity === 0) return 0
+
+  const resolveBudget = Math.min(capacity, Math.max(0, Math.trunc(maximumResolveCount)))
+  const normalizedCursor = Number.isFinite(navigationIntentResolveCursor)
+    ? Math.trunc(navigationIntentResolveCursor)
+    : 0
+  let slot = ((normalizedCursor % capacity) + capacity) % capacity
+  let scannedCount = 0
+  let scheduledCount = 0
+  while (scannedCount < capacity && scheduledCount < resolveBudget) {
+    if (
+      active[slot] !== 0 &&
+      (health[slot] ?? 0) > 0 &&
+      (navigationConnector[slot] ?? -1) < 0 &&
+      navigationIntentPending[slot] !== 0 &&
+      navigationIntentResolveEligible?.[slot] !== 0
+    ) {
+      navigationIntentResolveScheduled[slot] = 1
+      scheduledCount += 1
+    }
+    slot = (slot + 1) % capacity
+    scannedCount += 1
+  }
+  return slot
+}
+
+export function resolveZombieEscapeSparseSharedWorkBudgetLimit(
+  maximumPerTick: number,
+  consumedThisTick: number,
+  reservedCommonWorkSlices: number,
+) {
+  const minimumWork = ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMinimumWorkUnitsPerAgentSlice
+  return Math.max(
+    0,
+    Math.trunc(maximumPerTick) -
+      Math.max(0, Math.trunc(consumedThisTick)) -
+      Math.max(0, Math.trunc(reservedCommonWorkSlices)) * minimumWork,
+  )
+}
+
+export function resolveZombieEscapeSparseAgentWorkBudgetLimit(
+  maximumPerAgentSlice: number,
+  maximumPerTick: number,
+  consumedThisTick: number,
+  remainingAgentSlicesIncludingCurrent: number,
+  reservedTailSlices: number,
+) {
+  const minimumWork = ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMinimumWorkUnitsPerAgentSlice
+  const futureReservedSlices =
+    Math.max(0, Math.trunc(remainingAgentSlicesIncludingCurrent) - 1) +
+    Math.max(0, Math.trunc(reservedTailSlices))
+  return Math.min(
+    Math.max(0, Math.trunc(maximumPerAgentSlice)),
+    Math.max(
+      0,
+      Math.trunc(maximumPerTick) -
+        Math.max(0, Math.trunc(consumedThisTick)) -
+        futureReservedSlices * minimumWork,
+    ),
+  )
+}
+
+function resetZombieEscapeNavigationIntentScheduler(state: ZombieEscapeSimulation) {
+  for (const search of state.zombies.navigationSparseCommittedFlowSearch) {
+    resetZombieEscapeSparseFlowSearch(search)
+  }
+  for (const search of state.zombies.navigationSparseFlowSearch) {
+    resetZombieEscapeSparseFlowSearch(search)
+  }
+  resetZombieEscapeObstacleDeltaMetrics(state.obstacleDeltaMetrics)
+  state.obstacleDeltaRequestResult.applied = false
+  state.obstacleDeltaRequestResult.appliedRevision = 0
+  state.obstacleDeltaRequestResult.objectId = null
+  state.obstacleDeltaRequestResult.requestedRevision = 0
+  state.navigationAnchorInvalidationCount = 0
+  state.navigationAnchoredAgentCount = 0
+  state.navigationIntentCanceledCount = 0
+  state.navigationIntentDemandCachedAnchorLostCount = 0
+  state.navigationIntentDemandCollisionRecoveryCount = 0
+  state.navigationIntentDemandConnectorChangedCount = 0
+  state.navigationIntentDemandRoutePublishedCount = 0
+  state.navigationIntentDemandSpawnCount = 0
+  state.navigationIntentDemandWorldChangedCount = 0
+  state.navigationIntentIssuedCount = 0
+  state.navigationIntentFirstServiceCount = 0
+  state.navigationIntentInlineRecoveryWithoutFirstServiceCount = 0
+  state.navigationIntentMaximumResolveCountObservedPerTick = 0
+  state.navigationIntentMaximumUnservicedAgeTicksObserved = 0
+  state.navigationIntentOldestPendingAgeTicks = 0
+  state.navigationIntentOldestUnservicedAgeTicks = 0
+  state.navigationIntentPendingCount = 0
+  state.navigationIntentResolvedCount = 0
+  state.navigationIntentResolveBudgetViolationCount = 0
+  state.navigationIntentResolveCount = 0
+  state.navigationIntentResolveCountThisTick = 0
+  state.navigationIntentResolveCursor = 0
+  state.navigationIntentResolveEligible.fill(0)
+  state.navigationIntentResolveScheduled.fill(0)
+  state.navigationIntentUnservicedPendingCount = 0
+  state.navigationLivingWithoutCommittedActionCount = 0
+  state.navigationRetainedPendingActionCount = 0
+  state.navigationStaleTargetCount = 0
+  state.navigationIntentAdmissionDeferredCanceledCount = 0
+  state.navigationIntentAdmissionDeferredMarkedCount = 0
+  state.navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick = 0
+  state.navigationIntentAdmissionDeferredPendingCount = 0
+  state.navigationIntentAdmissionDeferredPromotedCachedAnchorLostCount = 0
+  state.navigationIntentAdmissionDeferredPromotedCollisionRecoveryCount = 0
+  state.navigationIntentAdmissionDeferredPromotedConnectorChangedCount = 0
+  state.navigationIntentAdmissionDeferredPromotedCount = 0
+  state.navigationIntentAdmissionDeferredPromotedCountThisTick = 0
+  state.navigationIntentAdmissionDeferredPromotedSpawnCount = 0
+  state.navigationIntentAdmissionDeferredPromotedWorldChangedCount = 0
+  state.navigationIntentAdmissionDeferredQueueHead = -1
+  state.navigationIntentAdmissionDeferredQueueOperationCountThisTick = 0
+  state.navigationIntentAdmissionDeferredQueueOperationCountTotal = 0
+  state.navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick = 0
+  state.navigationIntentAdmissionDeferredQueueTail = -1
+  state.navigationObstacleRefreshDeferredCanceledCount = 0
+  state.navigationObstacleRefreshDiscoveryAppliedRevision = 0
+  state.navigationObstacleRefreshDiscoveryEpochRevision = 0
+  state.navigationObstacleRefreshDiscoveryRemainingSlotCount = 0
+  state.navigationObstacleRefreshDeferredMarkedCount = 0
+  state.navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick = 0
+  state.navigationObstacleRefreshDeferredPendingCount = 0
+  state.navigationObstacleRefreshDeferredPromotedCount = 0
+  state.navigationObstacleRefreshDeferredPromotedCountThisTick = 0
+  state.navigationRefreshAdmissionCountThisTick = 0
+  state.navigationRefreshAdmissionCountTotal = 0
+  state.navigationRefreshAdmissionCursor = 0
+  state.navigationRefreshAdmissionMaximumCountObservedPerTick = 0
+  state.navigationRefreshAdmissionPreferScanned = true
+  state.navigationRefreshCandidateInspectionsThisTick = 0
+  state.navigationRefreshCandidateInspectionsTotal = 0
+  state.navigationRefreshCandidateInspectionsMaximumObservedPerTick = 0
+  state.navigationRefreshInspectionScratch.cursor = 0
+  state.navigationRefreshInspectionScratch.inspections = 0
+  state.navigationRefreshInspectionScratch.obstacleRemaining = 0
+  state.navigationRefreshInspectionScratch.slot = -1
+  state.navigationRefreshInspectionScratch.targetsRemovedObstacle = false
+  state.navigationRefreshInspectionScratch.worldRemaining = 0
+  resetZombieEscapeNavigationVisibilityWorkMetrics(state.navigationVisibilityWork)
+  resetZombieEscapeSparseWorkMetrics(state.navigationSparseCachedFollowWork)
+  state.navigationSparseCollisionReanchorAttemptCount = 0
+  state.navigationSparseCollisionReanchorCompletedCount = 0
+  state.navigationSparseCollisionReanchorFailedCount = 0
+  resetZombieEscapeSparseWorkMetrics(state.navigationSparseFlowSearchWork)
+  state.navigationSparseSearchBudgetScratch.maximumCandidateVisits = 0
+  state.navigationSparseSearchBudgetScratch.maximumCollisionPredicates = 0
+  state.navigationSparseSearchBudgetScratch.maximumGraphEdgeVisits = 0
+  state.navigationSparseSearchBudgetScratch.maximumHeapOperations = 0
+  state.navigationSparseSearchBudgetScratch.maximumHierarchyNodeVisits = 0
+  state.navigationSparseSearchBudgetScratch.maximumSupportPredicates = 0
+  state.navigationSparseSearchBudgetViolationCount = 0
+  state.navigationSparseSearchActiveAgentCount = 0
+  state.navigationSparseSearchWorldStaleActiveCount = 0
+  state.navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick = 0
+  state.navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved = 0
+  state.navigationSparseSearchAgentOldestPendingNoProgressAgeTicks = 0
+  state.navigationSparseSearchAgentProgressSliceCountThisTick = 0
+  state.navigationSparseSearchAgentProgressSliceCountTotal = 0
+  state.navigationSparseSearchAgentDrainCursor = 0
+  state.navigationSparseSearchProtectedDrainCursor = 0
+  state.navigationSparseSearchProtectedOwnerPoolGeneration = 0
+  state.navigationSparseSearchProtectedOwnerSlot = -1
+  state.navigationSparseSearchAgentServiceSliceCountThisTick = 0
+  state.navigationSparseSearchAgentServiceSliceCountTotal = 0
+  state.navigationSparseSearchCandidateVisitsMaximumObservedPerTick = 0
+  state.navigationSparseSearchCandidateVisitsThisTick = 0
+  state.navigationSparseSearchCandidateVisitsTotal = 0
+  state.navigationSparseSearchCollisionPredicatesMaximumObservedPerTick = 0
+  state.navigationSparseSearchCollisionPredicatesThisTick = 0
+  state.navigationSparseSearchCollisionPredicatesTotal = 0
+  state.navigationSparseSearchCanceledCount = 0
+  state.navigationSparseSearchCompletedCount = 0
+  state.navigationSparseSearchCompletionProgressThisTick = 0
+  state.navigationSparseSearchCompletionProgressTotal = 0
+  state.navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick = 0
+  state.navigationSparseSearchGraphEdgeVisitsThisTick = 0
+  state.navigationSparseSearchGraphEdgeVisitsTotal = 0
+  state.navigationSparseSearchHeapOperationsMaximumObservedPerTick = 0
+  state.navigationSparseSearchHeapOperationsThisTick = 0
+  state.navigationSparseSearchHeapOperationsTotal = 0
+  state.navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick = 0
+  state.navigationSparseSearchHierarchyNodeVisitsThisTick = 0
+  state.navigationSparseSearchHierarchyNodeVisitsTotal = 0
+  state.navigationSparseSearchInvalidatedCount = 0
+  state.navigationSparseSearchMaximumNoProgressAgeTicksObserved = 0
+  state.navigationSparseSearchNoProgressAgeTicks = 0
+  state.navigationSparseSearchPendingAgentCount = 0
+  state.navigationSparseSearchRestartedCollisionRecoveryCount = 0
+  state.navigationSparseSearchRestartedCount = 0
+  state.navigationSparseSearchRestartedRoutePublishedCount = 0
+  state.navigationSparseSearchRestartedTargetPublicationPreemptionCount = 0
+  state.navigationSparseSearchRestartedWorldChangedCount = 0
+  state.navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved = 0
+  state.navigationSparseSearchSpawnNoProgressAgeTicks = 0
+  state.navigationSparseSearchSpawnProgressSliceCountThisTick = 0
+  state.navigationSparseSearchSpawnProgressSliceCountTotal = 0
+  state.navigationSparseSearchSpawnServiceSliceCountThisTick = 0
+  state.navigationSparseSearchSpawnServiceSliceCountTotal = 0
+  state.navigationSparseSearchServiceSliceCountThisTick = 0
+  state.navigationSparseSearchServiceSliceCountTotal = 0
+  state.navigationSparseSearchStartedCount = 0
+  state.navigationSparseSearchSupportPredicatesMaximumObservedPerTick = 0
+  state.navigationSparseSearchSupportPredicatesThisTick = 0
+  state.navigationSparseSearchSupportPredicatesTotal = 0
+  state.navigationSparseSearchTargetBuildsMaximumObservedPerTick = 0
+  state.navigationSparseSearchTargetBuildsThisTick = 0
+  state.navigationSparseSearchTargetBuildsTotal = 0
+  state.navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved = 0
+  state.navigationSparseSearchTargetNoProgressAgeTicks = 0
+  state.navigationSparseSearchTargetProgressSliceCountThisTick = 0
+  state.navigationSparseSearchTargetProgressSliceCountTotal = 0
+  state.navigationSparseSearchTargetServiceSliceCountThisTick = 0
+  state.navigationSparseSearchTargetServiceSliceCountTotal = 0
+  state.navigationSparseSearchUncausedStartViolationCount = 0
+  state.navigationSparseSpawnDesiredX = 0
+  state.navigationSparseSpawnDesiredZ = 0
+  state.navigationSparseSpawnIsReplacement = false
+  state.navigationSparseSpawnMinimumTargetDistanceMeters = 0
+  state.navigationSparseSpawnSearchActive = false
+  state.navigationSparseSpawnSearchCompletedCount = 0
+  state.navigationSparseSpawnSearchDependencyWaiting = false
+  state.navigationSparseSpawnSearchInvalidatedCount = 0
+  state.navigationSparseSpawnSearchNeedsRestart = false
+  state.navigationSparseSpawnSearchStartedCount = 0
+  state.navigationSparseSpawnProbeCountTotal = 0
+  state.navigationSparseSpawnProbeMaximumObservedPerAdmission = 0
+  state.navigationSparseSpawnProbeOrdinal = 0
+  resetZombieEscapeSparseAttachmentWorkMetrics(state.navigationSparseSpawnWork)
+  resetZombieEscapeSparseTargetWorkMetrics(state.navigationSparseTargetWork)
+  state.navigationIntentTick = 0
+  state.navigationRouteTargetCellX = 0
+  state.navigationRouteTargetCellZ = 0
+  state.navigationRouteTargetInitialized = false
+  state.navigationRouteTargetX = 0
+  state.navigationRouteTargetY = 0
+  state.navigationRouteTargetZ = 0
+  state.navigationRouteTargetRegionIndex = -1
+  state.navigationTargetCommittedRouteGeneration = getZombieEscapeSparseCommittedRouteGeneration(
+    state.navigationField,
+  )
+  state.navigationTargetRequestedLayerHint =
+    state.navigationField.graphSparseTargetUpdate.requestedTargetLayerHint
+  state.navigationTargetRequestedRevision = getZombieEscapeSparseRequestedTargetRevision(
+    state.navigationField,
+  )
+  state.navigationWorldRevision = 0
+  state.navigationWorldRefreshAdmissionGeneration = state.collisionWorldGeneration
+  state.navigationWorldRefreshEpochGeneration = state.collisionWorldGeneration
+  state.navigationWorldRefreshInspectionRemaining = 0
+  state.navigationWorldRefreshMaximumPromotedCountObservedPerTick = 0
+  state.navigationWorldRefreshMinimumAppliedGeneration = state.collisionWorldGeneration
+  state.navigationWorldRefreshPendingCount = 0
+  state.navigationWorldRefreshPromotedCountThisTick = 0
+  state.navigationWorldRefreshPromotedCountTotal = 0
+  state.navigationWorldRefreshRestartedCountThisTick = 0
+  state.navigationWorldRefreshRestartedCountTotal = 0
+  state.simulationTick = 0
+  state.zombies.navigationCollisionRecoveryOriginX.fill(0)
+  state.zombies.navigationCollisionRecoveryOriginZ.fill(0)
+  state.zombies.navigationIntentAdmissionDeferredReasons.fill(0)
+  state.zombies.navigationIntentAdmissionDeferredNext.fill(-1)
+  state.zombies.navigationIntentAdmissionDeferredPrevious.fill(-1)
+  state.zombies.navigationIntentHasCached.fill(0)
+  state.zombies.navigationIntentHasReceivedFirstService.fill(0)
+  state.zombies.navigationIntentAdmissionWorldGeneration.fill(0)
+  state.zombies.navigationIntentFirstServiceEligibleSinceTick.fill(0)
+  state.zombies.navigationIntentFirstServiceTick.fill(0)
+  state.zombies.navigationIntentPending.fill(0)
+  state.zombies.navigationIntentPendingSinceTick.fill(0)
+  state.zombies.navigationIntentCommittedRouteGeneration.fill(0)
+  state.zombies.navigationIntentCurrentTargetFallback.fill(0)
+  state.zombies.navigationIntentTargetRevision.fill(0)
+  state.zombies.navigationNoProgressTicks.fill(0)
+  state.zombies.navigationProgressTargetNode.fill(
+    ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED,
+  )
+  state.zombies.navigationRecoveryCooldownTicks.fill(0)
+  state.zombies.navigationSparseFlowSearchActive.fill(0)
+  state.zombies.navigationSparseFlowSearchDependencyWaiting.fill(0)
+  state.zombies.navigationSparseFlowSearchLastProgressTick.fill(0)
+  state.zombies.navigationSparseFlowSearchRestartToken.fill(0)
+  state.zombies.navigationSparseFlowSearchStartedForDemand.fill(0)
+  state.zombies.navigationSparseFlowSearchTargetPreemptionUsed.fill(0)
+  state.zombies.navigationSparseFlowSearchWorldRevision.fill(0)
+}
+
+const ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_OBSTACLE = 1 << 6
+
+function resolveZombieEscapeDeferredNavigationIntentReasonBit(
+  reason: ZombieEscapeDeferredNavigationIntentReason,
+) {
+  return ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON[reason]
+}
+
+function cancelZombieEscapeDeferredNavigationIntentAdmission(
+  state: ZombieEscapeSimulation,
+  slot: number,
+) {
+  const zombies = state.zombies
+  const reasons = zombies.navigationIntentAdmissionDeferredReasons[slot]!
+  if (reasons === 0) return false
+  unlinkZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+  zombies.navigationIntentAdmissionDeferredReasons[slot] = 0
+  state.navigationIntentAdmissionDeferredPendingCount -= 1
+  state.navigationIntentAdmissionDeferredCanceledCount += 1
+  if ((reasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_OBSTACLE) !== 0) {
+    state.navigationObstacleRefreshDeferredPendingCount -= 1
+    state.navigationObstacleRefreshDeferredCanceledCount += 1
+  }
+  return true
+}
+
+function recordZombieEscapeDeferredNavigationIntentQueueOperation(state: ZombieEscapeSimulation) {
+  state.navigationIntentAdmissionDeferredQueueOperationCountThisTick += 1
+  state.navigationIntentAdmissionDeferredQueueOperationCountTotal += 1
+  state.navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick = Math.max(
+    state.navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick,
+    state.navigationIntentAdmissionDeferredQueueOperationCountThisTick,
+  )
+}
+
+function unlinkZombieEscapeDeferredNavigationIntentAdmission(
+  state: ZombieEscapeSimulation,
+  slot: number,
+) {
+  const zombies = state.zombies
+  const previous = zombies.navigationIntentAdmissionDeferredPrevious[slot]!
+  const next = zombies.navigationIntentAdmissionDeferredNext[slot]!
+  if (previous >= 0) zombies.navigationIntentAdmissionDeferredNext[previous] = next
+  else state.navigationIntentAdmissionDeferredQueueHead = next
+  if (next >= 0) zombies.navigationIntentAdmissionDeferredPrevious[next] = previous
+  else state.navigationIntentAdmissionDeferredQueueTail = previous
+  zombies.navigationIntentAdmissionDeferredNext[slot] = -1
+  zombies.navigationIntentAdmissionDeferredPrevious[slot] = -1
+  recordZombieEscapeDeferredNavigationIntentQueueOperation(state)
+}
+
+function deferZombieEscapeNavigationIntentAdmission(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  reason: ZombieEscapeDeferredNavigationIntentReason,
+) {
+  const zombies = state.zombies
+  if (zombies.pool.active[slot] === 0 || zombies.health[slot]! <= 0) return false
+  const reasonBit = resolveZombieEscapeDeferredNavigationIntentReasonBit(reason)
+  const previousReasons = zombies.navigationIntentAdmissionDeferredReasons[slot]!
+  if ((previousReasons & reasonBit) !== 0) return false
+  if (previousReasons === 0) {
+    const tail = state.navigationIntentAdmissionDeferredQueueTail
+    zombies.navigationIntentAdmissionDeferredNext[slot] = -1
+    zombies.navigationIntentAdmissionDeferredPrevious[slot] = tail
+    if (tail >= 0) zombies.navigationIntentAdmissionDeferredNext[tail] = slot
+    else state.navigationIntentAdmissionDeferredQueueHead = slot
+    state.navigationIntentAdmissionDeferredQueueTail = slot
+    recordZombieEscapeDeferredNavigationIntentQueueOperation(state)
+    state.navigationIntentAdmissionDeferredMarkedCount += 1
+    state.navigationIntentAdmissionDeferredPendingCount += 1
+  }
+  zombies.navigationIntentAdmissionDeferredReasons[slot] = previousReasons | reasonBit
+  return true
+}
+
+function deferZombieEscapeObstacleNavigationRefresh(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (zombies.pool.active[slot] === 0 || zombies.health[slot]! <= 0) return false
+  deferZombieEscapeNavigationIntentAdmission(state, slot, 'cachedAnchorLost')
+  const reasons = zombies.navigationIntentAdmissionDeferredReasons[slot]!
+  if ((reasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_OBSTACLE) !== 0) return false
+  zombies.navigationIntentAdmissionDeferredReasons[slot] =
+    reasons | ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_OBSTACLE
+  state.navigationObstacleRefreshDeferredMarkedCount += 1
+  state.navigationObstacleRefreshDeferredPendingCount += 1
+  return true
+}
+
+function clearZombieEscapeDeferredNavigationIntentReason(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  reason: ZombieEscapeDeferredNavigationIntentReason,
+) {
+  const zombies = state.zombies
+  const reasonBit = resolveZombieEscapeDeferredNavigationIntentReasonBit(reason)
+  const previousReasons = zombies.navigationIntentAdmissionDeferredReasons[slot]!
+  if ((previousReasons & reasonBit) === 0) return false
+  const nextReasons = previousReasons & ~reasonBit
+  if (nextReasons !== 0) {
+    zombies.navigationIntentAdmissionDeferredReasons[slot] = nextReasons
+    return true
+  }
+  cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+  return true
+}
+
+function beginZombieEscapeWorldRefreshAdmissionEpoch(state: ZombieEscapeSimulation) {
+  state.navigationWorldRefreshEpochGeneration = state.collisionWorldGeneration
+  state.navigationWorldRefreshInspectionRemaining = state.zombies.pool.capacity
+  if (state.navigationWorldRefreshInspectionRemaining === 0) {
+    state.navigationWorldRefreshAdmissionGeneration = state.collisionWorldGeneration
+  }
+}
+
+function recordZombieEscapeNavigationRefreshCandidateInspection(state: ZombieEscapeSimulation) {
+  state.navigationRefreshCandidateInspectionsThisTick += 1
+  state.navigationRefreshCandidateInspectionsTotal += 1
+}
+
+function takeZombieEscapeDeferredNavigationIntentCandidate(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  const inspectionBudget =
+    ZOMBIE_ESCAPE_SIMULATION.navigationRefreshCandidateInspectionBudgetPerTick
+  let slot = state.navigationIntentAdmissionDeferredQueueHead
+  while (slot >= 0 && state.navigationRefreshCandidateInspectionsThisTick < inspectionBudget) {
+    const nextSlot = zombies.navigationIntentAdmissionDeferredNext[slot]!
+    recordZombieEscapeNavigationRefreshCandidateInspection(state)
+    if (
+      zombies.pool.active[slot] !== 0 &&
+      zombies.health[slot]! > 0 &&
+      zombies.navigationConnector[slot]! < 0
+    ) {
+      const deferredReasons = zombies.navigationIntentAdmissionDeferredReasons[slot]!
+      const hasWorldRefresh =
+        (deferredReasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON.worldChanged) !== 0 ||
+        zombies.navigationIntentAdmissionWorldGeneration[slot] !== state.collisionWorldGeneration
+      const reason = resolveZombieEscapeDeferredNavigationIntentPromotionReason(
+        deferredReasons,
+        hasWorldRefresh,
+      )
+      if (
+        reason !== 'collisionRecovery' ||
+        (zombies.navigationIntentPending[slot] === 0 &&
+          zombies.navigationSparseFlowSearchActive[slot] === 0)
+      ) {
+        return slot
+      }
+    } else {
+      cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+    }
+    slot = nextSlot
+  }
+  return -1
+}
+
+export function inspectZombieEscapeNavigationRefreshCandidates(
+  world: ZombieEscapeCollisionWorld,
+  active: Uint8Array,
+  health: Float32Array,
+  navigationConnector: Int16Array,
+  worldRevisionBySlot: Uint32Array,
+  worldRevision: number,
+  blockerObjectOrdinal: Int32Array,
+  attackTargetObjectOrdinal: Int32Array,
+  inspection: ZombieEscapeNavigationRefreshInspectionState,
+  maximumInspections: number,
+) {
+  const capacity = active.length
+  const inspectionLimit = Math.max(0, Math.trunc(maximumInspections))
+  inspection.inspections = 0
+  inspection.slot = -1
+  inspection.targetsRemovedObstacle = false
+  while (
+    capacity > 0 &&
+    (inspection.obstacleRemaining > 0 || inspection.worldRemaining > 0) &&
+    inspection.inspections < inspectionLimit
+  ) {
+    const slot = inspection.cursor % capacity
+    inspection.cursor = (slot + 1) % capacity
+    if (inspection.obstacleRemaining > 0) inspection.obstacleRemaining -= 1
+    if (inspection.worldRemaining > 0) inspection.worldRemaining -= 1
+    inspection.inspections += 1
+    if (active[slot] === 0 || health[slot]! <= 0 || navigationConnector[slot]! >= 0) {
+      continue
+    }
+    const blockerOrdinal = blockerObjectOrdinal[slot]!
+    const attackOrdinal = attackTargetObjectOrdinal[slot]!
+    const targetsRemovedObstacle =
+      (blockerOrdinal >= 0 && !zombieEscapeCollisionObjectOrdinalIsActive(world, blockerOrdinal)) ||
+      (attackOrdinal >= 0 && !zombieEscapeCollisionObjectOrdinalIsActive(world, attackOrdinal))
+    if (targetsRemovedObstacle || worldRevisionBySlot[slot] !== worldRevision) {
+      inspection.slot = slot
+      inspection.targetsRemovedObstacle = targetsRemovedObstacle
+      return true
+    }
+  }
+  return false
+}
+
+function takeZombieEscapeScannedNavigationRefreshCandidate(
+  state: ZombieEscapeSimulation,
+  maximumInspections: number,
+) {
+  const zombies = state.zombies
+  const inspectionBudget =
+    ZOMBIE_ESCAPE_SIMULATION.navigationRefreshCandidateInspectionBudgetPerTick
+  const scratch = state.navigationRefreshInspectionScratch
+  scratch.cursor = state.navigationRefreshAdmissionCursor
+  scratch.obstacleRemaining = state.navigationObstacleRefreshDiscoveryRemainingSlotCount
+  scratch.worldRemaining = state.navigationWorldRefreshInspectionRemaining
+  inspectZombieEscapeNavigationRefreshCandidates(
+    state.collisionWorld,
+    zombies.pool.active,
+    zombies.health,
+    zombies.navigationConnector,
+    zombies.navigationIntentAdmissionWorldGeneration,
+    state.collisionWorldGeneration,
+    zombies.navigationBlockerObjectOrdinal,
+    zombies.attackTargetObjectOrdinal,
+    scratch,
+    Math.min(
+      maximumInspections,
+      inspectionBudget - state.navigationRefreshCandidateInspectionsThisTick,
+    ),
+  )
+  state.navigationRefreshAdmissionCursor = scratch.cursor
+  state.navigationObstacleRefreshDiscoveryRemainingSlotCount = scratch.obstacleRemaining
+  state.navigationWorldRefreshInspectionRemaining = scratch.worldRemaining
+  state.navigationRefreshCandidateInspectionsThisTick += scratch.inspections
+  state.navigationRefreshCandidateInspectionsTotal += scratch.inspections
+  if (state.navigationObstacleRefreshDiscoveryRemainingSlotCount === 0) {
+    state.navigationObstacleRefreshDiscoveryAppliedRevision =
+      state.navigationObstacleRefreshDiscoveryEpochRevision
+  }
+  if (state.navigationWorldRefreshInspectionRemaining === 0) {
+    state.navigationWorldRefreshAdmissionGeneration = state.navigationWorldRefreshEpochGeneration
+  }
+  if (scratch.slot < 0) return -1
+  if (scratch.targetsRemovedObstacle) {
+    clearZombieEscapeRemovedObstacleReferences(zombies, scratch.slot)
+    deferZombieEscapeObstacleNavigationRefresh(state, scratch.slot)
+  }
+  if (
+    zombies.navigationIntentAdmissionWorldGeneration[scratch.slot] !==
+    state.collisionWorldGeneration
+  ) {
+    deferZombieEscapeNavigationIntentAdmission(state, scratch.slot, 'worldChanged')
+  }
+  return scratch.slot
+}
+
+function admitZombieEscapeDeferredNavigationRefreshes(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  const maximumAdmissions = ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick
+  const inspectionBudget =
+    ZOMBIE_ESCAPE_SIMULATION.navigationRefreshCandidateInspectionBudgetPerTick
+  const inspectionsPerScannedAttempt = Math.max(
+    1,
+    Math.floor(inspectionBudget / Math.max(1, maximumAdmissions)),
+  )
+  if (
+    state.navigationIntentAdmissionDeferredPendingCount === 0 &&
+    state.navigationObstacleRefreshDiscoveryRemainingSlotCount === 0 &&
+    state.navigationWorldRefreshAdmissionGeneration === state.collisionWorldGeneration
+  ) {
+    return
+  }
+  if (state.navigationWorldRefreshEpochGeneration !== state.collisionWorldGeneration) {
+    beginZombieEscapeWorldRefreshAdmissionEpoch(state)
+  }
+  let admitted = 0
+  let obstaclePromoted = 0
+  let worldPromoted = 0
+  let worldRestarted = 0
+  while (
+    admitted < maximumAdmissions &&
+    state.navigationRefreshCandidateInspectionsThisTick < inspectionBudget
+  ) {
+    let slot = -1
+    if (state.navigationRefreshAdmissionPreferScanned) {
+      slot = takeZombieEscapeScannedNavigationRefreshCandidate(state, inspectionsPerScannedAttempt)
+      if (slot < 0) slot = takeZombieEscapeDeferredNavigationIntentCandidate(state)
+    } else {
+      slot = takeZombieEscapeDeferredNavigationIntentCandidate(state)
+      if (slot < 0) {
+        slot = takeZombieEscapeScannedNavigationRefreshCandidate(
+          state,
+          inspectionsPerScannedAttempt,
+        )
+      }
+    }
+    if (slot < 0) {
+      if (
+        (state.navigationObstacleRefreshDiscoveryRemainingSlotCount > 0 ||
+          state.navigationWorldRefreshInspectionRemaining > 0) &&
+        state.navigationRefreshCandidateInspectionsThisTick < inspectionBudget
+      ) {
+        state.navigationRefreshAdmissionPreferScanned = true
+        continue
+      }
+      break
+    }
+    const deferredReasons = zombies.navigationIntentAdmissionDeferredReasons[slot]!
+    const hasObstacleRefresh =
+      (deferredReasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_OBSTACLE) !== 0
+    const hasWorldRefresh =
+      (deferredReasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON.worldChanged) !== 0 ||
+      zombies.navigationIntentAdmissionWorldGeneration[slot] !== state.collisionWorldGeneration
+    unlinkZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+    zombies.navigationIntentAdmissionDeferredReasons[slot] = 0
+    state.navigationIntentAdmissionDeferredPendingCount -= 1
+    state.navigationIntentAdmissionDeferredPromotedCount += 1
+    if (hasObstacleRefresh) {
+      state.navigationObstacleRefreshDeferredPendingCount -= 1
+      state.navigationObstacleRefreshDeferredPromotedCount += 1
+      obstaclePromoted += 1
+    }
+    const reason = resolveZombieEscapeDeferredNavigationIntentPromotionReason(
+      deferredReasons,
+      hasWorldRefresh,
+    )
+    const worldRestartCountBefore = state.navigationSparseSearchRestartedWorldChangedCount
+    demandZombieEscapeNavigationIntent(
+      state,
+      slot,
+      reason,
+      reason === 'worldChanged' || reason === 'connectorChanged',
+    )
+    recordZombieEscapeDeferredNavigationIntentPromotion(state, reason)
+    if (hasWorldRefresh) {
+      zombies.navigationIntentAdmissionWorldGeneration[slot] = state.collisionWorldGeneration
+      worldPromoted += 1
+      worldRestarted +=
+        state.navigationSparseSearchRestartedWorldChangedCount - worldRestartCountBefore
+    }
+    admitted += 1
+    state.navigationRefreshAdmissionPreferScanned = !state.navigationRefreshAdmissionPreferScanned
+  }
+  state.navigationRefreshAdmissionCountThisTick = admitted
+  state.navigationRefreshAdmissionCountTotal += admitted
+  state.navigationRefreshAdmissionMaximumCountObservedPerTick = Math.max(
+    state.navigationRefreshAdmissionMaximumCountObservedPerTick,
+    admitted,
+  )
+  state.navigationIntentAdmissionDeferredPromotedCountThisTick = admitted
+  state.navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick = Math.max(
+    state.navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick,
+    admitted,
+  )
+  state.navigationObstacleRefreshDeferredPromotedCountThisTick = obstaclePromoted
+  state.navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick = Math.max(
+    state.navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick,
+    obstaclePromoted,
+  )
+  state.navigationWorldRefreshPromotedCountThisTick = worldPromoted
+  state.navigationWorldRefreshPromotedCountTotal += worldPromoted
+  state.navigationWorldRefreshMaximumPromotedCountObservedPerTick = Math.max(
+    state.navigationWorldRefreshMaximumPromotedCountObservedPerTick,
+    worldPromoted,
+  )
+  state.navigationWorldRefreshRestartedCountThisTick = worldRestarted
+  state.navigationWorldRefreshRestartedCountTotal += worldRestarted
+  state.navigationRefreshCandidateInspectionsMaximumObservedPerTick = Math.max(
+    state.navigationRefreshCandidateInspectionsMaximumObservedPerTick,
+    state.navigationRefreshCandidateInspectionsThisTick,
+  )
+}
+
+function resolveZombieEscapeDeferredNavigationIntentPromotionReason(
+  reasons: number,
+  hasWorldRefresh: boolean,
+): ZombieEscapeNavigationIntentDemandReason {
+  if ((reasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON.spawn) !== 0) return 'spawn'
+  if (hasWorldRefresh) return 'worldChanged'
+  if ((reasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON.connectorChanged) !== 0) {
+    return 'connectorChanged'
+  }
+  if ((reasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON.routePublished) !== 0) {
+    return 'routePublished'
+  }
+  if ((reasons & ZOMBIE_ESCAPE_NAVIGATION_INTENT_ADMISSION_REASON.collisionRecovery) !== 0) {
+    return 'collisionRecovery'
+  }
+  return 'cachedAnchorLost'
+}
+
+function recordZombieEscapeDeferredNavigationIntentPromotion(
+  state: ZombieEscapeSimulation,
+  reason: ZombieEscapeNavigationIntentDemandReason,
+) {
+  if (reason === 'spawn') state.navigationIntentAdmissionDeferredPromotedSpawnCount += 1
+  else if (reason === 'worldChanged') {
+    state.navigationIntentAdmissionDeferredPromotedWorldChangedCount += 1
+  } else if (reason === 'connectorChanged') {
+    state.navigationIntentAdmissionDeferredPromotedConnectorChangedCount += 1
+  } else if (reason === 'collisionRecovery') {
+    state.navigationIntentAdmissionDeferredPromotedCollisionRecoveryCount += 1
+  } else {
+    state.navigationIntentAdmissionDeferredPromotedCachedAnchorLostCount += 1
+  }
+}
+
+function zombieEscapeProtectedSearchOwnerMatchesSlot(state: ZombieEscapeSimulation, slot: number) {
+  return (
+    state.navigationSparseSearchProtectedOwnerSlot === slot &&
+    state.navigationSparseSearchProtectedOwnerPoolGeneration === state.zombies.pool.generation[slot]
+  )
+}
+
+function releaseZombieEscapeProtectedSearchOwner(state: ZombieEscapeSimulation, slot: number) {
+  if (!zombieEscapeProtectedSearchOwnerMatchesSlot(state, slot)) return false
+  state.navigationSparseSearchProtectedOwnerPoolGeneration = 0
+  state.navigationSparseSearchProtectedOwnerSlot = -1
+  return true
+}
+
+function zombieEscapeProtectedSearchOwnerIsLive(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  const slot = state.navigationSparseSearchProtectedOwnerSlot
+  return (
+    slot >= 0 &&
+    slot < zombies.pool.capacity &&
+    zombies.pool.active[slot] !== 0 &&
+    zombies.pool.generation[slot] === state.navigationSparseSearchProtectedOwnerPoolGeneration &&
+    zombies.health[slot]! > 0 &&
+    zombies.navigationConnector[slot]! < 0 &&
+    zombies.navigationIntentPending[slot] !== 0 &&
+    zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] !== 0
+  )
+}
+
+function tryClaimZombieEscapeProtectedSearchOwner(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] === 0) return true
+  if (zombieEscapeProtectedSearchOwnerMatchesSlot(state, slot)) return true
+  if (zombieEscapeProtectedSearchOwnerIsLive(state)) return false
+  state.navigationSparseSearchProtectedOwnerPoolGeneration = zombies.pool.generation[slot]!
+  state.navigationSparseSearchProtectedOwnerSlot = slot
+  return true
+}
+
+function restartZombieEscapeSparseFlowSearch(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  reason: ZombieEscapeSparseSearchRestartReason,
+) {
+  const zombies = state.zombies
+  if (zombies.navigationSparseFlowSearchActive[slot] === 0) return false
+  resetZombieEscapeSparseFlowSearch(zombies.navigationSparseFlowSearch[slot]!)
+  releaseZombieEscapeProtectedSearchOwner(state, slot)
+  zombies.navigationSparseFlowSearchActive[slot] = 0
+  zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+  zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationSparseFlowSearchRestartToken[slot] = 1
+  if (reason === 'routePublished' || reason === 'targetPublicationPreemption') {
+    zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 1
+  }
+  state.navigationSparseSearchInvalidatedCount += 1
+  state.navigationSparseSearchRestartedCount += 1
+  if (reason === 'routePublished') state.navigationSparseSearchRestartedRoutePublishedCount += 1
+  else if (reason === 'targetPublicationPreemption') {
+    state.navigationSparseSearchRestartedTargetPublicationPreemptionCount += 1
+  } else if (reason === 'worldChanged') {
+    state.navigationSparseSearchRestartedWorldChangedCount += 1
+  } else {
+    state.navigationSparseSearchRestartedCollisionRecoveryCount += 1
+  }
+  return true
+}
+
+function cancelZombieEscapeSparseFlowSearch(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  releaseZombieEscapeProtectedSearchOwner(state, slot)
+  if (zombies.navigationSparseFlowSearchActive[slot] === 0) return false
+  resetZombieEscapeSparseFlowSearch(zombies.navigationSparseFlowSearch[slot]!)
+  zombies.navigationSparseFlowSearchActive[slot] = 0
+  zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+  zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+  zombies.navigationSparseFlowSearchStartedForDemand[slot] = 0
+  state.navigationSparseSearchCanceledCount += 1
+  return true
+}
+
+function recordZombieEscapeSparseFlowSearchStart(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (zombies.navigationSparseFlowSearchStartedForDemand[slot] === 0) {
+    zombies.navigationSparseFlowSearchStartedForDemand[slot] = 1
+  } else if (zombies.navigationSparseFlowSearchRestartToken[slot] !== 0) {
+    zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+  } else {
+    state.navigationSparseSearchUncausedStartViolationCount += 1
+  }
+  state.navigationSparseSearchStartedCount += 1
+}
+
+function beginZombieEscapeSparseFlowSearchForAgent(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (zombies.navigationSparseFlowSearchActive[slot] !== 0) return true
+  if (!tryClaimZombieEscapeProtectedSearchOwner(state, slot)) return false
+  const search = zombies.navigationSparseFlowSearch[slot]!
+  const stagedPreferredWaypointNode = search.preferredWaypointNode
+  const stagedPreferredWaypointUsesFallback = search.preferredWaypointUsesFallback
+  const targetUpdate = state.navigationField.graphSparseTargetUpdate
+  const hasValidatedTarget =
+    targetUpdate.routeTargetInitialized &&
+    targetUpdate.status !== 'invalidated' &&
+    targetUpdate.worldRevision === state.navigationField.world.revision &&
+    targetUpdate.routeTargetLayerIndex === state.navigationField.targetLayerIndex
+  const catalogEntry = getZombieEscapeZombieCatalogEntry(zombies.variant[slot]!)
+  const plannerTravelSpeed =
+    (zombies.gait[slot] === ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner
+      ? catalogEntry.movement.runMetersPerSecond + state.wave * 0.18
+      : catalogEntry.movement.walkMetersPerSecond + state.wave * 0.06) * zombies.speedScale[slot]!
+  beginZombieEscapeSparseFlowSearch(
+    search,
+    state.navigationField,
+    zombies.x[slot]!,
+    zombies.z[slot]!,
+    hasValidatedTarget ? targetUpdate.routeTargetX : state.navigationGoalX,
+    hasValidatedTarget ? targetUpdate.routeTargetZ : state.navigationGoalZ,
+    zombies.y[slot]!,
+    zombies.navigationWaypointNode[slot]! >= 0
+      ? zombies.navigationWaypointNode[slot]!
+      : stagedPreferredWaypointNode,
+    zombies.navigationWaypointNode[slot]! >= 0
+      ? zombies.navigationWaypointFallback[slot] !== 0
+      : stagedPreferredWaypointUsesFallback,
+    plannerTravelSpeed,
+  )
+  if (search.status !== 'pending') {
+    releaseZombieEscapeProtectedSearchOwner(state, slot)
+    zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 1
+    zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+    return false
+  }
+  zombies.navigationSparseFlowSearchActive[slot] = 1
+  zombies.navigationSparseFlowSearchWorldRevision[slot] = state.navigationWorldRevision
+  recordZombieEscapeSparseFlowSearchStart(state, slot)
+  return true
+}
+
+function refreshZombieEscapeSparseFlowSearchEligibility(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  const eligible = state.navigationIntentResolveEligible
+  const capacity = zombies.pool.capacity
+  const targetIsUnavailable =
+    state.navigationField.graphSparseTargetUpdate.status === 'ready' &&
+    state.navigationTargetCommittedRouteGeneration > 0 &&
+    state.navigationField.targetLayerIndex < 0
+  let availableAgentLeases = inspectZombieEscapeSparseAttachmentHeapLeases(
+    state.navigationField,
+  ).availableAgentLeases
+  eligible.fill(0)
+  for (let offset = 0; offset < capacity; offset += 1) {
+    const slot = (state.navigationIntentResolveCursor + offset) % capacity
+    if (
+      zombies.pool.active[slot] === 0 ||
+      zombies.health[slot]! <= 0 ||
+      zombies.navigationConnector[slot]! >= 0 ||
+      zombies.navigationIntentPending[slot] === 0
+    ) {
+      zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+      continue
+    }
+    const searchIsActive = zombies.navigationSparseFlowSearchActive[slot] !== 0
+    const search = zombies.navigationSparseFlowSearch[slot]!
+    const searchHasLease = zombieEscapeSparseFlowSearchHasAttachmentHeapLease(
+      search,
+      state.navigationField,
+    )
+    const hasAdmissionCapacity = searchHasLease || availableAgentLeases > 0
+    let canProgress =
+      targetIsUnavailable ||
+      (hasAdmissionCapacity &&
+        (searchIsActive
+          ? zombieEscapeSparseFlowSearchCanProgress(search, state.navigationField)
+          : zombieEscapeSparseFlowSearchCanBegin(search, state.navigationField)))
+    if (canProgress && !searchIsActive && !tryClaimZombieEscapeProtectedSearchOwner(state, slot)) {
+      canProgress = false
+    }
+    const wasDependencyWaiting = zombies.navigationSparseFlowSearchDependencyWaiting[slot] !== 0
+    if (canProgress) {
+      eligible[slot] = 1
+      if (!targetIsUnavailable && !searchHasLease) availableAgentLeases -= 1
+      if (!wasDependencyWaiting) continue
+      zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+    } else {
+      zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 1
+    }
+    zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+    if (zombies.navigationIntentHasReceivedFirstService[slot] === 0) {
+      zombies.navigationIntentFirstServiceEligibleSinceTick[slot] = state.navigationIntentTick >>> 0
+    }
+  }
+}
+
+function markZombieEscapeNavigationIntentFirstService(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (
+    zombies.navigationIntentPending[slot] === 0 ||
+    zombies.navigationIntentHasReceivedFirstService[slot] !== 0
+  ) {
+    return false
+  }
+  zombies.navigationIntentHasReceivedFirstService[slot] = 1
+  zombies.navigationIntentFirstServiceTick[slot] = state.navigationIntentTick >>> 0
+  state.navigationIntentFirstServiceCount += 1
+  return true
+}
+
+function demandZombieEscapeNavigationIntent(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  reason: ZombieEscapeNavigationIntentDemandReason,
+  rearmCollisionRecovery: boolean,
+) {
+  const zombies = state.zombies
+  if (zombies.pool.active[slot] === 0 || zombies.health[slot]! <= 0) return false
+  if (
+    reason === 'collisionRecovery' &&
+    (zombies.navigationIntentPending[slot] !== 0 ||
+      zombies.navigationSparseFlowSearchActive[slot] !== 0)
+  ) {
+    return false
+  }
+  cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+  if (rearmCollisionRecovery) zombies.navigationIntentUrgentRefreshUsed[slot] = 0
+  if (reason === 'worldChanged') {
+    if (zombies.navigationSparseFlowSearchWorldRevision[slot] !== state.navigationWorldRevision) {
+      restartZombieEscapeSparseFlowSearch(state, slot, reason)
+      zombies.navigationSparseFlowSearchWorldRevision[slot] = state.navigationWorldRevision
+    }
+  } else if (reason === 'collisionRecovery') {
+    restartZombieEscapeSparseFlowSearch(state, slot, reason)
+  } else if (reason === 'spawn') {
+    if (zombies.navigationIntentHasCached[slot] === 0) zombies.navigationIntentValid[slot] = 0
+  }
+  if (zombies.navigationConnector[slot]! >= 0) {
+    clearZombieEscapeNavigationWaypoint(state, slot)
+    cancelZombieEscapeNavigationIntentDemand(state, slot)
+    return false
+  }
+  if (zombies.navigationIntentPending[slot] !== 0) return false
+
+  zombies.navigationIntentPending[slot] = 1
+  zombies.navigationIntentPendingSinceTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationIntentHasReceivedFirstService[slot] = 0
+  zombies.navigationIntentFirstServiceEligibleSinceTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationIntentFirstServiceTick[slot] = 0
+  zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+  zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+  zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+  zombies.navigationSparseFlowSearchStartedForDemand[slot] = 0
+  zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 0
+  state.navigationIntentIssuedCount += 1
+  state.navigationIntentPendingCount += 1
+  if (reason === 'spawn') state.navigationIntentDemandSpawnCount += 1
+  else if (reason === 'worldChanged') state.navigationIntentDemandWorldChangedCount += 1
+  else if (reason === 'connectorChanged') state.navigationIntentDemandConnectorChangedCount += 1
+  else if (reason === 'routePublished') state.navigationIntentDemandRoutePublishedCount += 1
+  else if (reason === 'cachedAnchorLost') {
+    state.navigationIntentDemandCachedAnchorLostCount += 1
+  } else {
+    state.navigationIntentDemandCollisionRecoveryCount += 1
+  }
+  return true
+}
+
+function resolveZombieEscapeNavigationIntentDemand(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (zombies.navigationIntentPending[slot] === 0) return false
+  releaseZombieEscapeProtectedSearchOwner(state, slot)
+  zombies.navigationIntentPending[slot] = 0
+  zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+  zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 0
+  state.navigationIntentPendingCount -= 1
+  state.navigationIntentResolvedCount += 1
+  return true
+}
+
+function cancelZombieEscapeNavigationIntentDemand(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+  zombies.navigationIntentValid[slot] = 0
+  zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+  cancelZombieEscapeSparseFlowSearch(state, slot)
+  state.navigationIntentResolveScheduled[slot] = 0
+  zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 0
+  if (zombies.navigationIntentPending[slot] === 0) return false
+  zombies.navigationIntentPending[slot] = 0
+  state.navigationIntentPendingCount -= 1
+  state.navigationIntentCanceledCount += 1
+  return true
+}
+
+function refreshZombieEscapeNavigationIntentMetrics(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  let anchoredAgentCount = 0
+  let livingWithoutCommittedActionCount = 0
+  let oldestPendingAgeTicks = 0
+  let oldestPendingNoProgressAgeTicks = 0
+  let oldestUnservicedAgeTicks = 0
+  let retainedPendingActionCount = 0
+  let sparseSearchPendingAgentCount = 0
+  let sparseSearchWorldStaleActiveCount = 0
+  let worldRefreshMinimumAppliedRevision = state.collisionWorldGeneration
+  let worldRefreshPendingCount = 0
+  let unservicedPendingCount = 0
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0 || zombies.health[slot]! <= 0) continue
+    const committedAction = inspectZombieEscapeCommittedNavigationAction(state, slot)
+    if (committedAction === 'none') livingWithoutCommittedActionCount += 1
+    else if (
+      zombies.navigationIntentPending[slot] !== 0 &&
+      zombies.navigationIntentHasCached[slot] !== 0
+    ) {
+      retainedPendingActionCount += 1
+    }
+    if (zombies.navigationConnector[slot]! < 0) {
+      const appliedWorldRevision = zombies.navigationIntentAdmissionWorldGeneration[slot]!
+      worldRefreshMinimumAppliedRevision = Math.min(
+        worldRefreshMinimumAppliedRevision,
+        appliedWorldRevision,
+      )
+      if (appliedWorldRevision !== state.collisionWorldGeneration) worldRefreshPendingCount += 1
+    }
+    if (zombies.navigationWaypointNode[slot]! >= 0) anchoredAgentCount += 1
+    if (zombies.navigationSparseFlowSearchActive[slot] !== 0) {
+      sparseSearchPendingAgentCount += 1
+      if (
+        zombies.navigationSparseFlowSearch[slot]!.worldRevision !==
+        state.navigationField.world.revision
+      ) {
+        sparseSearchWorldStaleActiveCount += 1
+      }
+    }
+    if (zombies.navigationIntentPending[slot] === 0) continue
+    if (zombies.navigationSparseFlowSearchDependencyWaiting[slot] !== 0) {
+      zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+      if (zombies.navigationIntentHasReceivedFirstService[slot] === 0) {
+        zombies.navigationIntentFirstServiceEligibleSinceTick[slot] =
+          state.navigationIntentTick >>> 0
+      }
+    }
+    const pendingAge =
+      (state.navigationIntentTick - zombies.navigationIntentPendingSinceTick[slot]!) >>> 0
+    oldestPendingAgeTicks = Math.max(oldestPendingAgeTicks, pendingAge)
+    const noProgressAge =
+      (state.navigationIntentTick - zombies.navigationSparseFlowSearchLastProgressTick[slot]!) >>> 0
+    oldestPendingNoProgressAgeTicks = Math.max(oldestPendingNoProgressAgeTicks, noProgressAge)
+    if (zombies.navigationIntentHasReceivedFirstService[slot] === 0) {
+      unservicedPendingCount += 1
+      const unservicedAge =
+        (state.navigationIntentTick -
+          zombies.navigationIntentFirstServiceEligibleSinceTick[slot]!) >>>
+        0
+      oldestUnservicedAgeTicks = Math.max(oldestUnservicedAgeTicks, unservicedAge)
+    }
+  }
+  state.navigationAnchoredAgentCount = anchoredAgentCount
+  state.navigationIntentOldestPendingAgeTicks = oldestPendingAgeTicks
+  state.navigationIntentOldestUnservicedAgeTicks = oldestUnservicedAgeTicks
+  state.navigationIntentMaximumUnservicedAgeTicksObserved = Math.max(
+    state.navigationIntentMaximumUnservicedAgeTicksObserved,
+    oldestUnservicedAgeTicks,
+  )
+  state.navigationIntentUnservicedPendingCount = unservicedPendingCount
+  state.navigationLivingWithoutCommittedActionCount = livingWithoutCommittedActionCount
+  state.navigationRetainedPendingActionCount = retainedPendingActionCount
+  state.navigationStaleTargetCount =
+    state.collisionWorld.navigationMode === 'sparse' &&
+    (!state.navigationGoalInitialized ||
+      state.navigationGoalResolvedTick !== state.navigationIntentTick)
+      ? 1
+      : 0
+  state.navigationSparseSearchPendingAgentCount = sparseSearchPendingAgentCount
+  state.navigationSparseSearchActiveAgentCount = sparseSearchPendingAgentCount
+  state.navigationSparseSearchWorldStaleActiveCount = sparseSearchWorldStaleActiveCount
+  state.navigationWorldRefreshMinimumAppliedGeneration = worldRefreshMinimumAppliedRevision
+  state.navigationWorldRefreshPendingCount = worldRefreshPendingCount
+  state.navigationSparseSearchAgentOldestPendingNoProgressAgeTicks = oldestPendingNoProgressAgeTicks
+  state.navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved = Math.max(
+    state.navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved,
+    oldestPendingNoProgressAgeTicks,
+  )
+  state.navigationSparseSearchNoProgressAgeTicks = Math.max(
+    oldestPendingNoProgressAgeTicks,
+    state.navigationSparseSearchTargetNoProgressAgeTicks,
+    state.navigationSparseSearchSpawnNoProgressAgeTicks,
+  )
+  state.navigationSparseSearchMaximumNoProgressAgeTicksObserved = Math.max(
+    state.navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved,
+    state.navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved,
+    state.navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved,
+  )
+}
+
+function cacheZombieEscapeNavigationIntent(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  navigationIntentTick: number,
+  blockerObjectId: string | null,
+  blockerObjectOrdinal: number,
+  blockerIsBreakable: boolean,
+  committedRouteGeneration: number,
+  targetRevision: number,
+  recordResolvedTick = true,
+) {
+  const zombies = state.zombies
+  const sample = state.navigationSampleScratch
+  zombies.navigationBlockerBreakable[slot] = blockerIsBreakable ? 1 : 0
+  zombies.navigationBlockerObjectId[slot] = blockerObjectId
+  zombies.navigationBlockerObjectOrdinal[slot] = blockerObjectOrdinal
+  zombies.navigationBlockingDistance[slot] = sample.blockingDistance
+  zombies.navigationBlockingX[slot] = sample.blockingX
+  zombies.navigationBlockingZ[slot] = sample.blockingZ
+  zombies.navigationDirectionX[slot] = sample.x
+  zombies.navigationDirectionZ[slot] = sample.z
+  zombies.navigationIntentHasCached[slot] = 1
+  zombies.navigationIntentCommittedRouteGeneration[slot] = committedRouteGeneration
+  zombies.navigationIntentCurrentTargetFallback[slot] = 0
+  zombies.navigationIntentTargetRevision[slot] = targetRevision >>> 0
+  zombies.navigationIntentPoolGeneration[slot] = zombies.pool.generation[slot] ?? 0
+  if (recordResolvedTick) {
+    zombies.navigationIntentResolvedTick[slot] = navigationIntentTick >>> 0
+  }
+  zombies.navigationIntentWorldGeneration[slot] = state.collisionWorldGeneration
+  zombies.navigationReachable[slot] = sample.reachable ? 1 : 0
+  zombies.navigationRequestedConnector[slot] = sample.connectorIndex
+  zombies.navigationRequestedConnectorTargetEnd[slot] = sample.connectorTargetEnd ? 1 : 0
+  zombies.navigationWaypointFallback[slot] = sample.waypointUsesFallback ? 1 : 0
+  zombies.navigationWaypointNode[slot] = sample.waypointNode ?? -1
+  zombies.navigationIntentValid[slot] = 1
+}
+
+function completeZombieEscapeRecoveredNavigationIntent(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  navigationIntentTick: number,
+) {
+  const zombies = state.zombies
+  const recoveredDemand = zombies.navigationIntentPending[slot] !== 0
+  cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+  if (recoveredDemand) {
+    if (zombies.navigationIntentHasReceivedFirstService[slot] === 0) {
+      state.navigationIntentInlineRecoveryWithoutFirstServiceCount += 1
+    }
+    cancelZombieEscapeSparseFlowSearch(state, slot)
+    state.navigationIntentResolveScheduled[slot] = 0
+    state.navigationIntentResolveCount += 1
+    state.navigationIntentResolveCountThisTick += 1
+    resolveZombieEscapeNavigationIntentDemand(state, slot)
+  }
+  cacheZombieEscapeNavigationIntent(
+    state,
+    slot,
+    navigationIntentTick,
+    null,
+    -1,
+    false,
+    state.navigationTargetCommittedRouteGeneration,
+    state.navigationTargetRequestedRevision,
+    false,
+  )
+}
+
+function writeZombieEscapeDirectNavigationSample(
+  state: ZombieEscapeSimulation,
+  sourceX: number,
+  sourceZ: number,
+) {
+  const directionX = state.navigationGoalX - sourceX
+  const directionZ = state.navigationGoalZ - sourceZ
+  const directionLength = Math.hypot(directionX, directionZ)
+  const sample = state.navigationSampleScratch
+  sample.blockingDistance = Number.POSITIVE_INFINITY
+  sample.blockingX = state.navigationGoalX
+  sample.blockingZ = state.navigationGoalZ
+  sample.connectorIndex = -1
+  sample.connectorTargetEnd = false
+  sample.reachable = true
+  sample.waypointNode = -1
+  sample.waypointUsesFallback = false
+  sample.x = directionLength > 0.000_001 ? directionX / directionLength : 0
+  sample.z = directionLength > 0.000_001 ? directionZ / directionLength : 0
+  resetZombieEscapeNavigationHit(state.navigationHitScratch)
+}
+
+function copyZombieEscapeNavigationSample(
+  target: ZombieEscapeFlowSample,
+  source: ZombieEscapeFlowSample,
+) {
+  target.blockingDistance = source.blockingDistance
+  target.blockingX = source.blockingX
+  target.blockingZ = source.blockingZ
+  target.connectorIndex = source.connectorIndex
+  target.connectorTargetEnd = source.connectorTargetEnd
+  target.reachable = source.reachable
+  target.waypointNode = source.waypointNode
+  target.waypointUsesFallback = source.waypointUsesFallback
+  target.x = source.x
+  target.z = source.z
+}
+
+function commitZombieEscapeSparseFlowSearchRouteCorridor(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  work: ZombieEscapeSparseFlowSearch,
+  sample: ZombieEscapeFlowSample,
+) {
+  const committed = state.zombies.navigationSparseCommittedFlowSearch[slot]!
+  if (!sample.reachable) {
+    clearZombieEscapeSparseFlowSearchRouteCorridor(committed)
+    return
+  }
+  if ((sample.waypointNode ?? -1) < 0) {
+    clearZombieEscapeSparseFlowSearchRouteCorridor(committed)
+    return
+  }
+  if (
+    work.routeCorridorGeneration <= 0 ||
+    work.routeCorridorGeneration !== state.navigationTargetCommittedRouteGeneration ||
+    !seedZombieEscapeSparseFlowSearchRouteCorridor(
+      committed,
+      state.navigationField,
+      sample.waypointNode!,
+      sample.waypointUsesFallback === true,
+    )
+  ) {
+    clearZombieEscapeSparseFlowSearchRouteCorridor(committed)
+  }
+}
+
+function resetZombieEscapeSparseSearchTickMetrics(state: ZombieEscapeSimulation) {
+  state.navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick = 0
+  state.navigationSparseSearchAgentProgressSliceCountThisTick = 0
+  state.navigationSparseSearchAgentServiceSliceCountThisTick = 0
+  state.navigationSparseSearchCandidateVisitsThisTick = 0
+  state.navigationSparseSearchCollisionPredicatesThisTick = 0
+  state.navigationSparseSearchCompletionProgressThisTick = 0
+  state.navigationSparseSearchGraphEdgeVisitsThisTick = 0
+  state.navigationSparseSearchHeapOperationsThisTick = 0
+  state.navigationSparseSearchHierarchyNodeVisitsThisTick = 0
+  state.navigationSparseSearchServiceSliceCountThisTick = 0
+  state.navigationSparseSearchSpawnProgressSliceCountThisTick = 0
+  state.navigationSparseSearchSpawnServiceSliceCountThisTick = 0
+  state.navigationSparseSearchSupportPredicatesThisTick = 0
+  state.navigationSparseSearchTargetBuildsThisTick = 0
+  state.navigationSparseSearchTargetProgressSliceCountThisTick = 0
+  state.navigationSparseSearchTargetServiceSliceCountThisTick = 0
+  resetZombieEscapeNavigationVisibilityWorkMetricsThisTick(state.navigationVisibilityWork)
+  resetZombieEscapeSparseWorkMetricsThisTick(state.navigationSparseCachedFollowWork)
+  resetZombieEscapeSparseWorkMetricsThisTick(state.navigationSparseFlowSearchWork)
+  resetZombieEscapeSparseAttachmentWorkMetricsThisTick(state.navigationSparseSpawnWork)
+  resetZombieEscapeSparseTargetWorkMetricsThisTick(state.navigationSparseTargetWork)
+}
+
+function resolveZombieEscapeSparseAgentSearchBudget(
+  state: ZombieEscapeSimulation,
+  remainingAgentSlicesIncludingCurrent: number,
+  reserveSpawnSlice: boolean,
+): ZombieEscapeSparseSearchBudget {
+  const budget = state.navigationSparseSearchBudgetScratch
+  const reservedTailSlices = reserveSpawnSlice
+    ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchSpawnSlicesPerTick
+    : 0
+  budget.maximumCandidateVisits = resolveZombieEscapeSparseAgentWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCandidateVisitsPerAgentSlice,
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCandidateVisitsPerTick,
+    state.navigationSparseSearchCandidateVisitsThisTick -
+      state.navigationSparseTargetWork.candidateVisitsThisTick,
+    remainingAgentSlicesIncludingCurrent,
+    reservedTailSlices,
+  )
+  budget.maximumCollisionPredicates = resolveZombieEscapeSparseAgentWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCollisionPredicatesPerAgentSlice,
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCollisionPredicatesPerTick,
+    state.navigationSparseSearchCollisionPredicatesThisTick,
+    remainingAgentSlicesIncludingCurrent,
+    reservedTailSlices,
+  )
+  budget.maximumHeapOperations = resolveZombieEscapeSparseAgentWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHeapOperationsPerAgentSlice,
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHeapOperationsPerTick,
+    state.navigationSparseSearchHeapOperationsThisTick -
+      state.navigationSparseTargetWork.heapOperationsThisTick,
+    remainingAgentSlicesIncludingCurrent,
+    reservedTailSlices,
+  )
+  budget.maximumHierarchyNodeVisits = resolveZombieEscapeSparseAgentWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHierarchyNodeVisitsPerAgentSlice,
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHierarchyNodeVisitsPerTick,
+    state.navigationSparseSearchHierarchyNodeVisitsThisTick,
+    remainingAgentSlicesIncludingCurrent,
+    reservedTailSlices,
+  )
+  budget.maximumSupportPredicates = resolveZombieEscapeSparseAgentWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumSupportPredicatesPerAgentSlice,
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumSupportPredicatesPerTick,
+    state.navigationSparseSearchSupportPredicatesThisTick,
+    remainingAgentSlicesIncludingCurrent,
+    reservedTailSlices,
+  )
+  return budget
+}
+
+function resolveZombieEscapeSparseTargetSearchBudget(
+  state: ZombieEscapeSimulation,
+  reservedCommonWorkSlices: number,
+): ZombieEscapeSparseTargetUpdateBudget {
+  const budget = state.navigationSparseSearchBudgetScratch
+  const compactTarget =
+    state.collisionWorld.navigationGraph.nodeIds.length <=
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumNodeCount
+  budget.maximumCandidateVisits = resolveZombieEscapeSparseSharedWorkBudgetLimit(
+    compactTarget
+      ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumCandidateVisitsPerTick
+      : ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetCandidateVisitsPerTick,
+    state.navigationSparseTargetWork.candidateVisitsThisTick,
+    reservedCommonWorkSlices,
+  )
+  budget.maximumCollisionPredicates = resolveZombieEscapeSparseSharedWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCollisionPredicatesPerTick,
+    state.navigationSparseSearchCollisionPredicatesThisTick,
+    reservedCommonWorkSlices,
+  )
+  budget.maximumGraphEdgeVisits = Math.max(
+    0,
+    (compactTarget
+      ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumGraphEdgeVisitsPerTick
+      : ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetGraphEdgeVisitsPerTick) -
+      state.navigationSparseTargetWork.graphEdgeVisitsThisTick,
+  )
+  budget.maximumHeapOperations = resolveZombieEscapeSparseSharedWorkBudgetLimit(
+    compactTarget
+      ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumHeapOperationsPerTick
+      : ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetHeapOperationsPerTick,
+    state.navigationSparseTargetWork.heapOperationsThisTick,
+    reservedCommonWorkSlices,
+  )
+  budget.maximumHierarchyNodeVisits = resolveZombieEscapeSparseSharedWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHierarchyNodeVisitsPerTick,
+    state.navigationSparseSearchHierarchyNodeVisitsThisTick,
+    reservedCommonWorkSlices,
+  )
+  budget.maximumSupportPredicates = resolveZombieEscapeSparseSharedWorkBudgetLimit(
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumSupportPredicatesPerTick,
+    state.navigationSparseSearchSupportPredicatesThisTick,
+    reservedCommonWorkSlices,
+  )
+  return budget
+}
+
+function accumulateZombieEscapeSparseSearchWork(
+  state: ZombieEscapeSimulation,
+  work: ZombieEscapeSparseStepWork,
+  category: ZombieEscapeSparseWorkMetrics | ZombieEscapeSparseTargetWorkMetrics,
+) {
+  const visibility = state.navigationVisibilityWork
+  const graphEdgeVisits = work.lastStepGraphEdgeVisits ?? 0
+  const heapOperations = work.lastStepHeapOperations
+  state.navigationSparseSearchCandidateVisitsThisTick += work.lastStepCandidateVisits
+  state.navigationSparseSearchCandidateVisitsTotal += work.lastStepCandidateVisits
+  state.navigationSparseSearchCollisionPredicatesThisTick += work.lastStepCollisionPredicates
+  state.navigationSparseSearchCollisionPredicatesTotal += work.lastStepCollisionPredicates
+  state.navigationSparseSearchGraphEdgeVisitsThisTick += graphEdgeVisits
+  state.navigationSparseSearchGraphEdgeVisitsTotal += graphEdgeVisits
+  state.navigationSparseSearchHeapOperationsThisTick += heapOperations
+  state.navigationSparseSearchHeapOperationsTotal += heapOperations
+  state.navigationSparseSearchHierarchyNodeVisitsThisTick += work.lastStepHierarchyNodeVisits
+  state.navigationSparseSearchHierarchyNodeVisitsTotal += work.lastStepHierarchyNodeVisits
+  state.navigationSparseSearchSupportPredicatesThisTick += work.lastStepSupportPredicates
+  state.navigationSparseSearchSupportPredicatesTotal += work.lastStepSupportPredicates
+  visibility.colliderCandidateVisitsThisTick += work.lastStepColliderCandidateVisits
+  visibility.colliderCandidateVisitsTotal += work.lastStepColliderCandidateVisits
+  visibility.colliderHierarchyNodeVisitsThisTick += work.lastStepColliderHierarchyNodeVisits
+  visibility.colliderHierarchyNodeVisitsTotal += work.lastStepColliderHierarchyNodeVisits
+  visibility.supportHierarchyNodeVisitsThisTick += work.lastStepSupportHierarchyNodeVisits
+  visibility.supportHierarchyNodeVisitsTotal += work.lastStepSupportHierarchyNodeVisits
+  visibility.supportHoleVisitsThisTick += work.lastStepSupportHoleVisits
+  visibility.supportHoleVisitsTotal += work.lastStepSupportHoleVisits
+  visibility.supportItemVisitsThisTick += work.lastStepSupportItemVisits
+  visibility.supportItemVisitsTotal += work.lastStepSupportItemVisits
+  visibility.supportRingEdgeVisitsThisTick += work.lastStepSupportRingEdgeVisits
+  visibility.supportRingEdgeVisitsTotal += work.lastStepSupportRingEdgeVisits
+  visibility.supportRingHierarchyNodeVisitsThisTick += work.lastStepSupportRingHierarchyNodeVisits
+  visibility.supportRingHierarchyNodeVisitsTotal += work.lastStepSupportRingHierarchyNodeVisits
+  category.candidateVisitsThisTick += work.lastStepCandidateVisits
+  category.candidateVisitsTotal += work.lastStepCandidateVisits
+  category.collisionPredicatesThisTick += work.lastStepCollisionPredicates
+  category.collisionPredicatesTotal += work.lastStepCollisionPredicates
+  category.heapOperationsThisTick += heapOperations
+  category.heapOperationsTotal += heapOperations
+  category.hierarchyNodeVisitsThisTick += work.lastStepHierarchyNodeVisits
+  category.hierarchyNodeVisitsTotal += work.lastStepHierarchyNodeVisits
+  category.supportPredicatesThisTick += work.lastStepSupportPredicates
+  category.supportPredicatesTotal += work.lastStepSupportPredicates
+  if ('graphEdgeVisitsThisTick' in category) {
+    category.graphEdgeVisitsThisTick += graphEdgeVisits
+    category.graphEdgeVisitsTotal += graphEdgeVisits
+  }
+  return (
+    work.lastStepCandidateVisits +
+    work.lastStepCollisionPredicates +
+    graphEdgeVisits +
+    heapOperations +
+    work.lastStepHierarchyNodeVisits +
+    work.lastStepSupportPredicates
+  )
+}
+
+function recordZombieEscapeSparseServiceSlice(
+  state: ZombieEscapeSimulation,
+  category: ZombieEscapeSparseServiceCategory,
+  serviceCapacityProvided: boolean,
+  consumedWork: number,
+  progressedWithoutWork: boolean,
+) {
+  if (!serviceCapacityProvided) return
+  if (category === 'agent') {
+    state.navigationSparseSearchAgentServiceSliceCountThisTick += 1
+    state.navigationSparseSearchAgentServiceSliceCountTotal += 1
+  } else if (category === 'target') {
+    state.navigationSparseSearchTargetServiceSliceCountThisTick += 1
+    state.navigationSparseSearchTargetServiceSliceCountTotal += 1
+  } else {
+    state.navigationSparseSearchSpawnServiceSliceCountThisTick += 1
+    state.navigationSparseSearchSpawnServiceSliceCountTotal += 1
+  }
+  state.navigationSparseSearchServiceSliceCountThisTick += 1
+  state.navigationSparseSearchServiceSliceCountTotal += 1
+  if (consumedWork <= 0 && !progressedWithoutWork) return
+  if (category === 'agent') {
+    state.navigationSparseSearchAgentProgressSliceCountThisTick += 1
+    state.navigationSparseSearchAgentProgressSliceCountTotal += 1
+  } else if (category === 'target') {
+    state.navigationSparseSearchTargetProgressSliceCountThisTick += 1
+    state.navigationSparseSearchTargetProgressSliceCountTotal += 1
+  } else {
+    state.navigationSparseSearchSpawnProgressSliceCountThisTick += 1
+    state.navigationSparseSearchSpawnProgressSliceCountTotal += 1
+  }
+  state.navigationSparseSearchCompletionProgressThisTick += 1
+  state.navigationSparseSearchCompletionProgressTotal += 1
+}
+
+function resolveZombieEscapeSparseNavigationIntentSlice(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  navigationIntentTick: number,
+  remainingAgentSlicesIncludingCurrent: number,
+  reserveSpawnSlice: boolean,
+) {
+  const zombies = state.zombies
+  if (
+    state.navigationField.graphSparseTargetUpdate.status === 'ready' &&
+    state.navigationTargetCommittedRouteGeneration > 0 &&
+    state.navigationField.targetLayerIndex < 0
+  ) {
+    cancelZombieEscapeSparseFlowSearch(state, slot)
+    recordZombieEscapeSparseServiceSlice(state, 'agent', true, 0, true)
+    markZombieEscapeNavigationIntentFirstService(state, slot)
+    state.navigationIntentResolveCount += 1
+    state.navigationIntentResolveCountThisTick += 1
+    resolveZombieEscapeNavigationIntentDemand(state, slot)
+    zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+    zombies.navigationSparseFlowSearchStartedForDemand[slot] = 0
+    cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+    rejectZombieEscapeUnanchoredZombieFromNavigation(state, slot)
+    return true
+  }
+  const search = zombies.navigationSparseFlowSearch[slot]!
+  const sample = zombies.navigationSparseFlowSample[slot]!
+  const hit = zombies.navigationSparseFlowHit[slot]!
+  if (!beginZombieEscapeSparseFlowSearchForAgent(state, slot)) return false
+  const budget = resolveZombieEscapeSparseAgentSearchBudget(
+    state,
+    remainingAgentSlicesIncludingCurrent,
+    reserveSpawnSlice,
+  )
+  const minimumWork = ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMinimumWorkUnitsPerAgentSlice
+  const serviceCapacityProvided =
+    budget.maximumCandidateVisits >= minimumWork &&
+    budget.maximumCollisionPredicates >= minimumWork &&
+    budget.maximumHeapOperations >= minimumWork &&
+    budget.maximumHierarchyNodeVisits >= minimumWork &&
+    budget.maximumSupportPredicates >= minimumWork
+  if (!serviceCapacityProvided) state.navigationSparseSearchBudgetViolationCount += 1
+  const status = stepZombieEscapeSparseFlowSearch(
+    search,
+    state.navigationField,
+    sample,
+    budget,
+    hit,
+  )
+  const consumedWork = accumulateZombieEscapeSparseSearchWork(
+    state,
+    search,
+    state.navigationSparseFlowSearchWork,
+  )
+  recordZombieEscapeSparseServiceSlice(
+    state,
+    'agent',
+    serviceCapacityProvided,
+    consumedWork,
+    status !== 'pending',
+  )
+  if (consumedWork > 0) {
+    zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+    markZombieEscapeNavigationIntentFirstService(state, slot)
+  }
+  if (
+    status === 'pending' &&
+    !zombieEscapeSparseFlowSearchCanProgress(search, state.navigationField)
+  ) {
+    zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 1
+    zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+    if (zombies.navigationIntentHasReceivedFirstService[slot] === 0) {
+      zombies.navigationIntentFirstServiceEligibleSinceTick[slot] = state.navigationIntentTick >>> 0
+    }
+  }
+  if (status === 'invalidated') {
+    restartZombieEscapeSparseFlowSearch(state, slot, 'worldChanged')
+    return false
+  }
+  if (status === 'routePublished') {
+    if (restartZombieEscapeSparseFlowSearch(state, slot, 'routePublished')) {
+      zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 0
+    }
+    return false
+  }
+  if (status === 'pending') return false
+  if (zombieEscapeSparseFlowSearchHasAttachmentHeapLease(search, state.navigationField)) {
+    cancelZombieEscapeSparseFlowSearch(state, slot)
+    return false
+  }
+
+  zombies.navigationSparseFlowSearchActive[slot] = 0
+  copyZombieEscapeNavigationSample(state.navigationSampleScratch, sample)
+  const committedBlockingHit = search.blockingHit
+  const blockerObjectId = resolveZombieEscapeCollisionHitObjectId(
+    state.collisionWorld,
+    committedBlockingHit,
+  )
+  const blockerObjectOrdinal = resolveZombieEscapeCollisionHitObjectOrdinal(
+    state.collisionWorld,
+    committedBlockingHit,
+  )
+  const blockerIsBreakable = isZombieEscapeCollisionHitBreakable(
+    state.collisionWorld,
+    committedBlockingHit,
+  )
+  if (!sample.reachable && !blockerIsBreakable) {
+    state.navigationIntentResolveCount += 1
+    state.navigationIntentResolveCountThisTick += 1
+    resolveZombieEscapeNavigationIntentDemand(state, slot)
+    zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+    zombies.navigationSparseFlowSearchStartedForDemand[slot] = 0
+    search.preferredWaypointNode = -1
+    search.preferredWaypointUsesFallback = false
+    state.navigationSparseSearchCompletedCount += 1
+    cancelZombieEscapeDeferredNavigationIntentAdmission(state, slot)
+    rejectZombieEscapeUnanchoredZombieFromNavigation(state, slot)
+    return true
+  }
+  if (!sample.reachable && blockerIsBreakable) {
+    const blockerDirectionX = sample.blockingX - zombies.x[slot]!
+    const blockerDirectionZ = sample.blockingZ - zombies.z[slot]!
+    const blockerDistance = Math.hypot(blockerDirectionX, blockerDirectionZ)
+    if (blockerDistance > ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackReachMeters) {
+      sample.reachable = true
+      sample.x = blockerDirectionX / blockerDistance
+      sample.z = blockerDirectionZ / blockerDistance
+    }
+  }
+  cacheZombieEscapeNavigationIntent(
+    state,
+    slot,
+    navigationIntentTick,
+    blockerObjectId,
+    blockerObjectOrdinal,
+    blockerIsBreakable,
+    getZombieEscapeSparseFlowSearchRouteGeneration(search),
+    state.navigationTargetRequestedRevision,
+  )
+  commitZombieEscapeSparseFlowSearchRouteCorridor(state, slot, search, sample)
+  state.navigationIntentResolveCount += 1
+  state.navigationIntentResolveCountThisTick += 1
+  resolveZombieEscapeNavigationIntentDemand(state, slot)
+  zombies.navigationSparseFlowSearchRestartToken[slot] = 0
+  zombies.navigationSparseFlowSearchStartedForDemand[slot] = 0
+  search.preferredWaypointNode = -1
+  search.preferredWaypointUsesFallback = false
+  state.navigationSparseSearchCompletedCount += 1
+  return true
+}
+
+function finalizeZombieEscapeSparseSearchTickMetrics(state: ZombieEscapeSimulation) {
+  const compactTarget =
+    state.collisionWorld.navigationGraph.nodeIds.length <=
+    ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumNodeCount
+  const maximumTargetCandidateVisits = compactTarget
+    ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumCandidateVisitsPerTick
+    : ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetCandidateVisitsPerTick
+  const maximumTargetGraphEdgeVisits = compactTarget
+    ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumGraphEdgeVisitsPerTick
+    : ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetGraphEdgeVisitsPerTick
+  const maximumTargetHeapOperations = compactTarget
+    ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumHeapOperationsPerTick
+    : ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetHeapOperationsPerTick
+  state.navigationSparseSearchCandidateVisitsMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchCandidateVisitsMaximumObservedPerTick,
+    state.navigationSparseSearchCandidateVisitsThisTick,
+  )
+  state.navigationSparseSearchCollisionPredicatesMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchCollisionPredicatesMaximumObservedPerTick,
+    state.navigationSparseSearchCollisionPredicatesThisTick,
+  )
+  state.navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick,
+    state.navigationSparseSearchGraphEdgeVisitsThisTick,
+  )
+  state.navigationSparseSearchHeapOperationsMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchHeapOperationsMaximumObservedPerTick,
+    state.navigationSparseSearchHeapOperationsThisTick,
+  )
+  state.navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick,
+    state.navigationSparseSearchHierarchyNodeVisitsThisTick,
+  )
+  state.navigationSparseSearchSupportPredicatesMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchSupportPredicatesMaximumObservedPerTick,
+    state.navigationSparseSearchSupportPredicatesThisTick,
+  )
+  state.navigationSparseSearchTargetBuildsMaximumObservedPerTick = Math.max(
+    state.navigationSparseSearchTargetBuildsMaximumObservedPerTick,
+    state.navigationSparseSearchTargetBuildsThisTick,
+  )
+  finalizeZombieEscapeSparseWorkMetrics(state.navigationSparseCachedFollowWork)
+  finalizeZombieEscapeSparseWorkMetrics(state.navigationSparseFlowSearchWork)
+  finalizeZombieEscapeSparseAttachmentWorkMetrics(state.navigationSparseSpawnWork)
+  finalizeZombieEscapeSparseTargetWorkMetrics(state.navigationSparseTargetWork)
+  finalizeZombieEscapeNavigationVisibilityWorkMetrics(state.navigationVisibilityWork)
+  if (
+    state.navigationSparseSearchCandidateVisitsThisTick -
+      state.navigationSparseTargetWork.candidateVisitsThisTick >
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCandidateVisitsPerTick ||
+    state.navigationSparseTargetWork.candidateVisitsThisTick > maximumTargetCandidateVisits ||
+    state.navigationSparseSearchCollisionPredicatesThisTick >
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCollisionPredicatesPerTick ||
+    state.navigationSparseTargetWork.graphEdgeVisitsThisTick > maximumTargetGraphEdgeVisits ||
+    state.navigationSparseSearchHeapOperationsThisTick -
+      state.navigationSparseTargetWork.heapOperationsThisTick >
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHeapOperationsPerTick ||
+    state.navigationSparseTargetWork.heapOperationsThisTick > maximumTargetHeapOperations ||
+    state.navigationSparseSearchHierarchyNodeVisitsThisTick >
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHierarchyNodeVisitsPerTick ||
+    state.navigationSparseSearchSupportPredicatesThisTick >
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumSupportPredicatesPerTick ||
+    state.navigationSparseSearchTargetBuildsThisTick >
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetBuildsPerTick
+  ) {
+    state.navigationSparseSearchBudgetViolationCount += 1
+  }
+  const targetPending =
+    state.collisionWorld.navigationMode === 'sparse' &&
+    state.navigationField.graphSparseTargetUpdate.status === 'pending'
+  if (!targetPending) {
+    state.navigationSparseSearchTargetNoProgressAgeTicks = 0
+  } else if (state.navigationSparseSearchTargetProgressSliceCountThisTick > 0) {
+    state.navigationSparseSearchTargetNoProgressAgeTicks = 0
+  } else {
+    state.navigationSparseSearchTargetNoProgressAgeTicks += 1
+    state.navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved = Math.max(
+      state.navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved,
+      state.navigationSparseSearchTargetNoProgressAgeTicks,
+    )
+  }
+  if (
+    !state.navigationSparseSpawnSearchActive ||
+    state.navigationSparseSpawnSearchDependencyWaiting
+  ) {
+    state.navigationSparseSearchSpawnNoProgressAgeTicks = 0
+  } else if (state.navigationSparseSearchSpawnProgressSliceCountThisTick > 0) {
+    state.navigationSparseSearchSpawnNoProgressAgeTicks = 0
+  } else {
+    state.navigationSparseSearchSpawnNoProgressAgeTicks += 1
+    state.navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved = Math.max(
+      state.navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved,
+      state.navigationSparseSearchSpawnNoProgressAgeTicks,
+    )
+  }
+}
+
+function restoreZombieEscapeNavigationIntent(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  const sample = state.navigationSampleScratch
+  sample.blockingDistance = zombies.navigationBlockingDistance[slot]!
+  sample.blockingX = zombies.navigationBlockingX[slot]!
+  sample.blockingZ = zombies.navigationBlockingZ[slot]!
+  sample.connectorIndex = zombies.navigationRequestedConnector[slot]!
+  sample.connectorTargetEnd = zombies.navigationRequestedConnectorTargetEnd[slot] !== 0
+  sample.reachable = zombies.navigationReachable[slot] !== 0
+  sample.waypointNode = zombies.navigationWaypointNode[slot]!
+  sample.waypointUsesFallback = zombies.navigationWaypointFallback[slot] !== 0
+  sample.x = zombies.navigationDirectionX[slot]!
+  sample.z = zombies.navigationDirectionZ[slot]!
+  resetZombieEscapeNavigationHit(state.navigationHitScratch)
+}
+
+function resetZombieEscapeUnresolvedNavigationSample(
+  state: ZombieEscapeSimulation,
+  x: number,
+  z: number,
+) {
+  const sample = state.navigationSampleScratch
+  sample.blockingDistance = Number.POSITIVE_INFINITY
+  sample.blockingX = x
+  sample.blockingZ = z
+  sample.connectorIndex = -1
+  sample.connectorTargetEnd = false
+  sample.reachable = false
+  sample.waypointNode = -1
+  sample.waypointUsesFallback = false
+  sample.x = 0
+  sample.z = 0
+  resetZombieEscapeNavigationHit(state.navigationHitScratch)
+}
+
+export function writeZombieEscapeDeferredNavigationDirection(
+  _status: 'pending' | 'refresh',
+  agentRadius: number,
+  sourceX: number,
+  sourceZ: number,
+  waypointX: number,
+  waypointZ: number,
+  output: Pick<ZombieEscapeFlowSample, 'x' | 'z'>,
+) {
+  const directionX = waypointX - sourceX
+  const directionZ = waypointZ - sourceZ
+  const directionLength = Math.hypot(directionX, directionZ)
+  const arrivalRadius = Math.max(0.08, agentRadius * 0.5)
+  output.x = directionLength > arrivalRadius ? directionX / directionLength : 0
+  output.z = directionLength > arrivalRadius ? directionZ / directionLength : 0
+}
+
+function updateZombieEscapeSparseNavigationTarget(
+  state: ZombieEscapeSimulation,
+  reservedCommonWorkSlices: number,
+  liveGoalRegionIndex: number,
+) {
+  const field = state.navigationField
+  const targetUpdate = field.graphSparseTargetUpdate
+  const requestedRevisionBeforeBegin = getZombieEscapeSparseRequestedTargetRevision(field)
+  state.navigationTargetRequestedLayerHint =
+    targetUpdate.requestedTargetLayerHint >= 0
+      ? targetUpdate.requestedTargetLayerHint
+      : targetUpdate.status === 'ready'
+        ? targetUpdate.routeTargetLayerIndex
+        : state.navigationTargetRequestedLayerHint
+  const routeTargetChanged = updateZombieEscapeNavigationRouteTarget(state, liveGoalRegionIndex)
+  beginZombieEscapeSparseTargetUpdate(
+    field,
+    state.navigationRouteTargetX,
+    state.navigationRouteTargetZ,
+    state.navigationRouteTargetY,
+    routeTargetChanged,
+  )
+  if (getZombieEscapeSparseRequestedTargetRevision(field) !== requestedRevisionBeforeBegin) {
+    state.navigationTargetRequestedLayerHint = -1
+  }
+  if (targetUpdate.status === 'pending') {
+    preemptZombieEscapeSparseSearchesBlockingTargetPublication(state)
+    const previousCompletedBuilds =
+      targetUpdate.completedStrictBuilds + targetUpdate.completedFallbackBuilds
+    const status = stepZombieEscapeSparseTargetUpdate(
+      field,
+      resolveZombieEscapeSparseTargetSearchBudget(state, reservedCommonWorkSlices),
+    )
+    const consumedWork = accumulateZombieEscapeSparseSearchWork(
+      state,
+      targetUpdate,
+      state.navigationSparseTargetWork,
+    )
+    const completedBuilds =
+      targetUpdate.completedStrictBuilds +
+      targetUpdate.completedFallbackBuilds -
+      previousCompletedBuilds
+    state.navigationSparseSearchTargetBuildsThisTick += completedBuilds
+    state.navigationSparseSearchTargetBuildsTotal += completedBuilds
+    recordZombieEscapeSparseServiceSlice(
+      state,
+      'target',
+      true,
+      consumedWork,
+      completedBuilds > 0 || status !== 'pending',
+    )
+  }
+  state.navigationTargetRequestedLayerHint =
+    targetUpdate.requestedTargetLayerHint >= 0
+      ? targetUpdate.requestedTargetLayerHint
+      : targetUpdate.status === 'ready'
+        ? targetUpdate.routeTargetLayerIndex
+        : state.navigationTargetRequestedLayerHint
+  state.navigationTargetRequestedRevision = getZombieEscapeSparseRequestedTargetRevision(field)
+  state.navigationTargetCommittedRouteGeneration =
+    getZombieEscapeSparseCommittedRouteGeneration(field)
+}
+
+function preemptZombieEscapeSparseSearchesBlockingTargetPublication(state: ZombieEscapeSimulation) {
+  const targetUpdate = state.navigationField.graphSparseTargetUpdate
+  if (targetUpdate.phase !== 'wait-staging-bank') return 0
+  const zombies = state.zombies
+  let preemptedCount = 0
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    const search = zombies.navigationSparseFlowSearch[slot]!
+    if (
+      zombies.pool.active[slot] === 0 ||
+      zombies.navigationSparseFlowSearchActive[slot] === 0 ||
+      !zombieEscapeSparseFlowSearchHoldsStagingReverseFieldBankLease(search, state.navigationField)
+    ) {
+      continue
+    }
+    if (zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] !== 0) {
+      const searchRouteGeneration = getZombieEscapeSparseFlowSearchRouteGeneration(search)
+      if (
+        searchRouteGeneration > 0 &&
+        searchRouteGeneration < state.navigationTargetCommittedRouteGeneration
+      ) {
+        restartZombieEscapeSparseFlowSearch(state, slot, 'routePublished')
+        preemptedCount += 1
+      }
+      continue
+    }
+    if (restartZombieEscapeSparseFlowSearch(state, slot, 'targetPublicationPreemption')) {
+      preemptedCount += 1
+    }
+  }
+  return preemptedCount
+}
+
+function releaseZombieEscapePreemptedDemandsAfterTargetPublication(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (
+      zombies.pool.active[slot] === 0 ||
+      zombies.health[slot]! <= 0 ||
+      zombies.navigationIntentPending[slot] === 0 ||
+      zombies.navigationIntentHasCached[slot] !== 0 ||
+      zombies.navigationSparseFlowSearchActive[slot] !== 0 ||
+      zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] === 0
+    ) {
+      continue
+    }
+    if (
+      zombies.navigationConnector[slot]! < 0 &&
+      zombies.navigationIntentPoolGeneration[slot] === zombies.pool.generation[slot] &&
+      zombies.navigationIntentWorldGeneration[slot] === state.collisionWorldGeneration &&
+      writeZombieEscapeSparseRegionWitnessNavigationSample(
+        state,
+        slot,
+        zombies.x[slot]!,
+        zombies.y[slot]!,
+        zombies.z[slot]!,
+      )
+    ) {
+      completeZombieEscapeRecoveredNavigationIntent(state, slot, state.navigationIntentTick)
+      continue
+    }
+    zombies.navigationSparseFlowSearchDependencyWaiting[slot] = 0
+    zombies.navigationSparseFlowSearchLastProgressTick[slot] = state.navigationIntentTick >>> 0
+    zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] = 0
+  }
+}
+
+function recoverZombieEscapeUnanchoredDemandsAfterTargetPublication(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (
+      zombies.pool.active[slot] === 0 ||
+      zombies.health[slot]! <= 0 ||
+      zombies.navigationConnector[slot]! >= 0 ||
+      zombies.navigationIntentPending[slot] === 0 ||
+      zombies.navigationIntentHasCached[slot] !== 0 ||
+      zombies.navigationIntentValid[slot] !== 0 ||
+      zombies.navigationWaypointNode[slot]! >= 0 ||
+      zombies.navigationIntentPoolGeneration[slot] !== zombies.pool.generation[slot] ||
+      zombies.navigationIntentWorldGeneration[slot] !== state.collisionWorldGeneration ||
+      !writeZombieEscapeSparseRegionWitnessNavigationSample(
+        state,
+        slot,
+        zombies.x[slot]!,
+        zombies.y[slot]!,
+        zombies.z[slot]!,
+      )
+    ) {
+      continue
+    }
+    completeZombieEscapeRecoveredNavigationIntent(state, slot, state.navigationIntentTick)
+  }
+}
+
+function updateZombieEscapeNavigationRouteTarget(
+  state: ZombieEscapeSimulation,
+  liveGoalRegionIndex: number,
+) {
+  const cellSize = Math.max(0.000_001, state.collisionWorld.cellSize)
+  const liveGoalCellX = Math.floor(state.navigationGoalX / cellSize)
+  const liveGoalCellZ = Math.floor(state.navigationGoalZ / cellSize)
+  const targetUpdate = state.navigationField.graphSparseTargetUpdate
+  if (state.navigationRouteTargetInitialized) {
+    const horizontalTerminalDrift = Math.hypot(
+      state.navigationGoalX - state.navigationRouteTargetX,
+      state.navigationGoalZ - state.navigationRouteTargetZ,
+    )
+    if (
+      horizontalTerminalDrift <= 0.000_001 &&
+      liveGoalRegionIndex === state.navigationRouteTargetRegionIndex
+    ) {
+      return false
+    }
+    const queuedTargetDrift = Math.hypot(
+      state.navigationGoalX - targetUpdate.requestedTargetX,
+      state.navigationGoalZ - targetUpdate.requestedTargetZ,
+    )
+    if (
+      targetUpdate.status === 'pending' &&
+      queuedTargetDrift <= ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        targetUpdate.requestedTargetX,
+        targetUpdate.requestedTargetY,
+        targetUpdate.requestedTargetZ,
+        state.navigationGoalX,
+        state.navigationGoalY,
+        state.navigationGoalZ,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    ) {
+      state.navigationRouteTargetCellX = Math.floor(targetUpdate.requestedTargetX / cellSize)
+      state.navigationRouteTargetCellZ = Math.floor(targetUpdate.requestedTargetZ / cellSize)
+      state.navigationRouteTargetX = targetUpdate.requestedTargetX
+      state.navigationRouteTargetY = targetUpdate.requestedTargetY
+      state.navigationRouteTargetZ = targetUpdate.requestedTargetZ
+      state.navigationRouteTargetRegionIndex = liveGoalRegionIndex
+      return false
+    }
+    const committedTargetDrift = Math.hypot(
+      state.navigationGoalX - targetUpdate.routeTargetX,
+      state.navigationGoalZ - targetUpdate.routeTargetZ,
+    )
+    if (
+      targetUpdate.status === 'pending' &&
+      targetUpdate.routeTargetInitialized &&
+      committedTargetDrift <= ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        targetUpdate.routeTargetX,
+        targetUpdate.routeTargetY,
+        targetUpdate.routeTargetZ,
+        state.navigationGoalX,
+        state.navigationGoalY,
+        state.navigationGoalZ,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    ) {
+      state.navigationRouteTargetCellX = Math.floor(targetUpdate.routeTargetX / cellSize)
+      state.navigationRouteTargetCellZ = Math.floor(targetUpdate.routeTargetZ / cellSize)
+      state.navigationRouteTargetX = targetUpdate.routeTargetX
+      state.navigationRouteTargetY = targetUpdate.routeTargetY
+      state.navigationRouteTargetZ = targetUpdate.routeTargetZ
+      state.navigationRouteTargetRegionIndex = liveGoalRegionIndex
+      return false
+    }
+    const activeTargetDrift = Math.hypot(
+      state.navigationGoalX - targetUpdate.activeTargetX,
+      state.navigationGoalZ - targetUpdate.activeTargetZ,
+    )
+    if (
+      targetUpdate.status === 'pending' &&
+      activeTargetDrift <= ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        targetUpdate.activeTargetX,
+        targetUpdate.activeTargetY,
+        targetUpdate.activeTargetZ,
+        state.navigationGoalX,
+        state.navigationGoalY,
+        state.navigationGoalZ,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    ) {
+      state.navigationRouteTargetCellX = Math.floor(targetUpdate.activeTargetX / cellSize)
+      state.navigationRouteTargetCellZ = Math.floor(targetUpdate.activeTargetZ / cellSize)
+      state.navigationRouteTargetX = targetUpdate.activeTargetX
+      state.navigationRouteTargetY = targetUpdate.activeTargetY
+      state.navigationRouteTargetZ = targetUpdate.activeTargetZ
+      state.navigationRouteTargetRegionIndex = liveGoalRegionIndex
+      return false
+    }
+    const requestedTargetDrift = Math.hypot(
+      state.navigationGoalX - state.navigationRouteTargetX,
+      state.navigationGoalZ - state.navigationRouteTargetZ,
+    )
+    if (
+      requestedTargetDrift <= ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        state.navigationRouteTargetX,
+        state.navigationRouteTargetY,
+        state.navigationRouteTargetZ,
+        state.navigationGoalX,
+        state.navigationGoalY,
+        state.navigationGoalZ,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    ) {
+      state.navigationRouteTargetRegionIndex = liveGoalRegionIndex
+      return false
+    }
+  }
+  state.navigationRouteTargetCellX = liveGoalCellX
+  state.navigationRouteTargetCellZ = liveGoalCellZ
+  state.navigationRouteTargetInitialized = true
+  state.navigationRouteTargetX = state.navigationGoalX
+  state.navigationRouteTargetY = state.navigationGoalY
+  state.navigationRouteTargetZ = state.navigationGoalZ
+  state.navigationRouteTargetRegionIndex = liveGoalRegionIndex
+  return true
+}
+
+function resolveZombieEscapeSparseLayerAtPosition(
+  state: ZombieEscapeSimulation,
+  x: number,
+  y: number,
+  z: number,
+) {
+  const graph = state.collisionWorld.navigationGraph
+  let bestLayerIndex = -1
+  let bestElevationDistance = Number.POSITIVE_INFINITY
+  for (
+    let layerIndex = 0;
+    layerIndex < state.collisionWorld.navigationLayers.length;
+    layerIndex += 1
+  ) {
+    const layer = state.collisionWorld.navigationLayers[layerIndex]!
+    const elevationDistance = Math.abs(layer.elevation - y)
+    if (
+      elevationDistance > ZOMBIE_ESCAPE_LIVE_GOAL_LAYER_TOLERANCE_METERS ||
+      elevationDistance >= bestElevationDistance ||
+      resolveSparseNavigationStrictRegionIndex(graph.targetRegionIndex, layerIndex, x, z) < 0
+    ) {
+      continue
+    }
+    bestLayerIndex = layerIndex
+    bestElevationDistance = elevationDistance
+  }
+  return bestLayerIndex
+}
+
+function updateZombieEscapePersistentNavigationGoal(state: ZombieEscapeSimulation) {
+  const resolvedTick = state.navigationIntentTick >>> 0
+  if (state.collisionWorld.navigationMode !== 'sparse') {
+    state.navigationGoalInitialized = true
+    state.navigationGoalLayerIndex = -1
+    state.navigationGoalRegionIndex = -1
+    state.navigationGoalResolvedTick = resolvedTick
+    state.navigationGoalX = state.player.x
+    state.navigationGoalY = state.player.y
+    state.navigationGoalZ = state.player.z
+    state.navigationTargetY = state.player.y
+    return -1
+  }
+
+  const graph = state.collisionWorld.navigationGraph
+  let goalX = state.player.x
+  let goalZ = state.player.z
+  let layerIndex = resolveZombieEscapeSparseLayerAtPosition(
+    state,
+    state.player.x,
+    state.player.y,
+    state.player.z,
+  )
+  let regionIndex =
+    layerIndex >= 0
+      ? resolveSparseNavigationStrictRegionIndex(
+          graph.targetRegionIndex,
+          layerIndex,
+          state.player.x,
+          state.player.z,
+        )
+      : -1
+
+  if (layerIndex < 0) {
+    let bestConnectorDistanceSquared = Number.POSITIVE_INFINITY
+    const connectorEndpointInset = state.collisionWorld.agentRadius + 0.05
+    for (const connector of state.collisionWorld.navigationConnectors) {
+      const connectorX = connector.endX - connector.startX
+      const connectorY = connector.endY - connector.startY
+      const connectorZ = connector.endZ - connector.startZ
+      const connectorLengthSquared =
+        connectorX * connectorX + connectorY * connectorY + connectorZ * connectorZ
+      const amount =
+        connectorLengthSquared <= 0.000_001
+          ? 0
+          : Math.max(
+              0,
+              Math.min(
+                1,
+                ((state.player.x - connector.startX) * connectorX +
+                  (state.player.y - connector.startY) * connectorY +
+                  (state.player.z - connector.startZ) * connectorZ) /
+                  connectorLengthSquared,
+              ),
+            )
+      const closestX = connector.startX + connectorX * amount
+      const closestY = connector.startY + connectorY * amount
+      const closestZ = connector.startZ + connectorZ * amount
+      const connectorDistanceSquared =
+        (state.player.x - closestX) ** 2 +
+        (state.player.y - closestY) ** 2 +
+        (state.player.z - closestZ) ** 2
+      const connectorCaptureRadius = connector.halfWidth + state.collisionWorld.agentRadius + 0.35
+      if (connectorDistanceSquared > connectorCaptureRadius * connectorCaptureRadius) continue
+      const usesStart = amount < 0.5
+      const endpointX = usesStart
+        ? connector.startX - connector.directionX * connectorEndpointInset
+        : connector.endX + connector.directionX * connectorEndpointInset
+      const endpointY = usesStart ? connector.startY : connector.endY
+      const endpointZ = usesStart
+        ? connector.startZ - connector.directionZ * connectorEndpointInset
+        : connector.endZ + connector.directionZ * connectorEndpointInset
+      const endpointLayerIndex = resolveZombieEscapeSparseLayerAtPosition(
+        state,
+        endpointX,
+        endpointY,
+        endpointZ,
+      )
+      if (endpointLayerIndex < 0) continue
+      const endpointRegionIndex = resolveSparseNavigationStrictRegionIndex(
+        graph.targetRegionIndex,
+        endpointLayerIndex,
+        endpointX,
+        endpointZ,
+      )
+      const endpointDistanceSquared =
+        (endpointX - state.player.x) ** 2 +
+        (endpointY - state.player.y) ** 2 +
+        (endpointZ - state.player.z) ** 2
+      if (endpointRegionIndex < 0 || endpointDistanceSquared >= bestConnectorDistanceSquared) {
+        continue
+      }
+      bestConnectorDistanceSquared = endpointDistanceSquared
+      layerIndex = endpointLayerIndex
+      regionIndex = endpointRegionIndex
+      goalX = endpointX
+      goalZ = endpointZ
+    }
+  }
+
+  if (layerIndex < 0) {
+    const previousLayer = state.collisionWorld.navigationLayers[state.navigationGoalLayerIndex]
+    if (
+      state.navigationGoalInitialized &&
+      previousLayer !== undefined &&
+      Math.abs(previousLayer.elevation - state.player.y) <=
+        ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_LAYER_DISTANCE_METERS &&
+      resolveSparseNavigationNearestStrictTargetProjection(
+        graph.targetRegionIndex,
+        state.navigationGoalLayerIndex,
+        state.player.x,
+        state.player.z,
+        ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_DISTANCE_METERS,
+        state.navigationGoalProjectionScratch,
+      )
+    ) {
+      layerIndex = state.navigationGoalLayerIndex
+      regionIndex = state.navigationGoalProjectionScratch.regionIndex
+      goalX = state.navigationGoalProjectionScratch.x
+      goalZ = state.navigationGoalProjectionScratch.z
+    }
+  }
+
+  if (layerIndex < 0) {
+    let bestElevationDistance = Number.POSITIVE_INFINITY
+    let bestProjectionDistanceSquared = Number.POSITIVE_INFINITY
+    for (
+      let candidateLayerIndex = 0;
+      candidateLayerIndex < state.collisionWorld.navigationLayers.length;
+      candidateLayerIndex += 1
+    ) {
+      const candidateLayer = state.collisionWorld.navigationLayers[candidateLayerIndex]!
+      const elevationDistance = Math.abs(candidateLayer.elevation - state.player.y)
+      if (
+        elevationDistance > ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_LAYER_DISTANCE_METERS ||
+        !resolveSparseNavigationNearestStrictTargetProjection(
+          graph.targetRegionIndex,
+          candidateLayerIndex,
+          state.player.x,
+          state.player.z,
+          ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_DISTANCE_METERS,
+          state.navigationGoalProjectionScratch,
+        )
+      ) {
+        continue
+      }
+      const projectionDistanceSquared = state.navigationGoalProjectionScratch.distanceSquared
+      if (
+        elevationDistance > bestElevationDistance + 0.000_001 ||
+        (Math.abs(elevationDistance - bestElevationDistance) <= 0.000_001 &&
+          projectionDistanceSquared >= bestProjectionDistanceSquared)
+      ) {
+        continue
+      }
+      bestElevationDistance = elevationDistance
+      bestProjectionDistanceSquared = projectionDistanceSquared
+      layerIndex = candidateLayerIndex
+      regionIndex = state.navigationGoalProjectionScratch.regionIndex
+      goalX = state.navigationGoalProjectionScratch.x
+      goalZ = state.navigationGoalProjectionScratch.z
+    }
+  }
+
+  if (layerIndex >= 0 && regionIndex >= 0) {
+    state.navigationGoalInitialized = true
+    state.navigationGoalLayerIndex = layerIndex
+    state.navigationGoalRegionIndex = regionIndex
+    state.navigationGoalResolvedTick = resolvedTick
+    state.navigationGoalX = goalX
+    state.navigationGoalY = state.collisionWorld.navigationLayers[layerIndex]!.elevation
+    state.navigationGoalZ = goalZ
+  } else {
+    state.navigationGoalInitialized = false
+    state.navigationGoalLayerIndex = -1
+    state.navigationGoalRegionIndex = -1
+    state.navigationGoalResolvedTick = resolvedTick
+    state.navigationGoalX = state.player.x
+    state.navigationGoalY = state.player.y
+    state.navigationGoalZ = state.player.z
+  }
+  state.navigationTargetY = state.navigationGoalInitialized ? state.navigationGoalY : state.player.y
+  return state.navigationGoalInitialized ? state.navigationGoalRegionIndex : -1
+}
+
+function findZombieEscapeProtectedStagingReaderForDrain(state: ZombieEscapeSimulation) {
+  const zombies = state.zombies
+  const capacity = zombies.pool.capacity
+  for (let offset = 0; offset < capacity; offset += 1) {
+    const slot = (state.navigationSparseSearchProtectedDrainCursor + offset) % capacity
+    const search = zombies.navigationSparseFlowSearch[slot]!
+    if (
+      zombies.pool.active[slot] === 0 ||
+      zombies.health[slot]! <= 0 ||
+      zombies.navigationConnector[slot]! >= 0 ||
+      zombies.navigationIntentPending[slot] === 0 ||
+      zombies.navigationSparseFlowSearchActive[slot] === 0 ||
+      zombies.navigationSparseFlowSearchTargetPreemptionUsed[slot] === 0 ||
+      !zombieEscapeProtectedSearchOwnerMatchesSlot(state, slot) ||
+      !zombieEscapeSparseFlowSearchHoldsStagingReverseFieldBankLease(
+        search,
+        state.navigationField,
+      ) ||
+      !zombieEscapeSparseFlowSearchCanProgress(search, state.navigationField)
+    ) {
+      continue
+    }
+    state.navigationSparseSearchProtectedDrainCursor = (slot + 1) % capacity
+    return slot
+  }
+  return -1
+}
+
+function resolveZombieEscapeProtectedStagingOwnerSlot(state: ZombieEscapeSimulation) {
+  const slot = state.navigationSparseSearchProtectedOwnerSlot
+  if (
+    state.navigationField.graphSparseTargetUpdate.phase !== 'wait-staging-bank' ||
+    !zombieEscapeProtectedSearchOwnerIsLive(state) ||
+    state.zombies.navigationSparseFlowSearchActive[slot] === 0 ||
+    !zombieEscapeSparseFlowSearchHoldsStagingReverseFieldBankLease(
+      state.zombies.navigationSparseFlowSearch[slot]!,
+      state.navigationField,
+    )
+  ) {
+    return -1
+  }
+  return slot
+}
+
+function drainZombieEscapeProtectedStagingReaders(
+  state: ZombieEscapeSimulation,
+  navigationIntentTick: number,
+) {
+  const maximumSlices = ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick
+  while (
+    state.navigationField.graphSparseTargetUpdate.phase === 'wait-staging-bank' &&
+    state.navigationSparseSearchAgentServiceSliceCountThisTick < maximumSlices
+  ) {
+    const slot = findZombieEscapeProtectedStagingReaderForDrain(state)
+    if (slot < 0) return
+    const previousServiceSliceCount = state.navigationSparseSearchAgentServiceSliceCountThisTick
+    resolveZombieEscapeSparseNavigationIntentSlice(
+      state,
+      slot,
+      navigationIntentTick,
+      maximumSlices - previousServiceSliceCount,
+      false,
+    )
+    if (state.navigationSparseSearchAgentServiceSliceCountThisTick <= previousServiceSliceCount) {
+      return
+    }
+  }
+}
+
+function drainZombieEscapeActiveSparseSearches(
+  state: ZombieEscapeSimulation,
+  navigationIntentTick: number,
+) {
+  const zombies = state.zombies
+  const capacity = zombies.pool.capacity
+  const maximumSlices = ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick
+  let firstServiceOnly = true
+  let scansWithoutService = 0
+  while (
+    capacity > 0 &&
+    state.navigationSparseSearchAgentServiceSliceCountThisTick < maximumSlices
+  ) {
+    if (scansWithoutService >= capacity) {
+      if (!firstServiceOnly) return
+      firstServiceOnly = false
+      scansWithoutService = 0
+    }
+    const slot = state.navigationSparseSearchAgentDrainCursor % capacity
+    state.navigationSparseSearchAgentDrainCursor = (slot + 1) % capacity
+    scansWithoutService += 1
+    const search = zombies.navigationSparseFlowSearch[slot]!
+    const searchRouteGeneration = getZombieEscapeSparseFlowSearchRouteGeneration(search)
+    if (
+      zombies.pool.active[slot] === 0 ||
+      zombies.health[slot]! <= 0 ||
+      zombies.navigationConnector[slot]! >= 0 ||
+      zombies.navigationIntentPoolGeneration[slot] !== zombies.pool.generation[slot] ||
+      zombies.navigationIntentPending[slot] === 0 ||
+      (firstServiceOnly && zombies.navigationIntentHasReceivedFirstService[slot] !== 0) ||
+      zombies.navigationSparseFlowSearchActive[slot] === 0 ||
+      zombies.navigationSparseFlowSearchWorldRevision[slot] !== state.navigationWorldRevision ||
+      search.status !== 'pending' ||
+      search.worldRevision !== state.navigationField.world.revision ||
+      (searchRouteGeneration > 0 &&
+        searchRouteGeneration !== state.navigationTargetCommittedRouteGeneration) ||
+      !zombieEscapeSparseFlowSearchCanProgress(search, state.navigationField)
+    ) {
+      continue
+    }
+    const previousServiceSliceCount = state.navigationSparseSearchAgentServiceSliceCountThisTick
+    resolveZombieEscapeSparseNavigationIntentSlice(
+      state,
+      slot,
+      navigationIntentTick,
+      maximumSlices - previousServiceSliceCount,
+      false,
+    )
+    if (state.navigationSparseSearchAgentServiceSliceCountThisTick > previousServiceSliceCount) {
+      scansWithoutService = 0
+    }
+  }
+}
+
 function updateZombies(state: ZombieEscapeSimulation, delta: number) {
   const zombies = state.zombies
-  state.navigationTargetY = resolveZombieEscapeNavigationTargetElevation(
+  resetZombieEscapeObstacleDeltaMetricsThisTick(state.obstacleDeltaMetrics)
+  resetZombieEscapeSparseSearchTickMetrics(state)
+  state.navigationIntentAdmissionDeferredPromotedCountThisTick = 0
+  state.navigationIntentAdmissionDeferredQueueOperationCountThisTick = 0
+  state.navigationObstacleRefreshDeferredPromotedCountThisTick = 0
+  state.navigationRefreshAdmissionCountThisTick = 0
+  state.navigationRefreshCandidateInspectionsThisTick = 0
+  state.navigationWorldRefreshPromotedCountThisTick = 0
+  state.navigationWorldRefreshRestartedCountThisTick = 0
+  const navigationIntentTick = state.navigationIntentTick
+  state.navigationIntentTick = (navigationIntentTick + 1) >>> 0
+  state.simulationTick = state.navigationIntentTick
+  const liveGoalRegionIndex = updateZombieEscapePersistentNavigationGoal(state)
+  const committedRouteGenerationBeforeNavigationUpdate =
+    state.navigationTargetCommittedRouteGeneration
+  if (state.collisionWorld.navigationMode === 'sparse') {
+    updateZombieEscapeSparseNavigationTarget(
+      state,
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+      liveGoalRegionIndex,
+    )
+  } else {
+    const navigationRouteInvalidated = updateZombieEscapeFlowTarget(
+      state.navigationField,
+      state.player.x,
+      state.player.z,
+      state.navigationTargetY,
+    )
+    if (navigationRouteInvalidated) {
+      state.navigationTargetRequestedRevision += 1
+      state.navigationTargetCommittedRouteGeneration += 1
+    }
+  }
+  const sparseTargetUpdate = state.navigationField.graphSparseTargetUpdate
+  const pendingCommittedTargetConnectsToCurrentGoal =
+    state.collisionWorld.navigationMode === 'sparse' &&
+    state.navigationGoalInitialized &&
+    sparseTargetUpdate.status === 'pending' &&
+    sparseTargetUpdate.routeTargetInitialized &&
+    Math.hypot(
+      sparseTargetUpdate.routeTargetX - state.navigationGoalX,
+      sparseTargetUpdate.routeTargetZ - state.navigationGoalZ,
+    ) <= ZOMBIE_ESCAPE_PENDING_ROUTE_TERMINAL_CONTINUATION_MAXIMUM_DISTANCE_METERS &&
+    zombieEscapeSameLayerNavigationSegmentIsClear(
+      state.collisionWorld,
+      sparseTargetUpdate.routeTargetX,
+      sparseTargetUpdate.routeTargetY,
+      sparseTargetUpdate.routeTargetZ,
+      state.navigationGoalX,
+      state.navigationGoalY,
+      state.navigationGoalZ,
+      state.collisionWorld.agentRadius,
+      state.navigationHitScratch,
+    )
+  if (
+    state.collisionWorld.navigationMode === 'sparse' &&
+    state.navigationTargetCommittedRouteGeneration !==
+      committedRouteGenerationBeforeNavigationUpdate
+  ) {
+    releaseZombieEscapePreemptedDemandsAfterTargetPublication(state)
+    recoverZombieEscapeUnanchoredDemandsAfterTargetPublication(state)
+  }
+  rebuildZombieEscapeAgentSpatialIndex(
+    state.agentSpatialIndex,
     state.collisionWorld,
-    state.player.y,
-    state.navigationTargetY,
+    zombies.pool.active,
+    zombies.health,
+    zombies.x,
+    zombies.y,
+    zombies.z,
+    zombies.navigationConnector,
   )
-  updateZombieEscapeFlowTarget(
-    state.navigationField,
-    state.player.x,
-    state.player.z,
-    state.navigationTargetY,
-  )
+  admitZombieEscapeDeferredNavigationRefreshes(state)
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0 || zombies.health[slot]! <= 0) {
+      cancelZombieEscapeNavigationIntentDemand(state, slot)
+      continue
+    }
+    if (zombies.navigationConnector[slot]! >= 0) {
+      cancelZombieEscapeNavigationIntentDemand(state, slot)
+      zombies.navigationIntentUrgentRefreshUsed[slot] = 0
+      continue
+    }
+    if (zombies.navigationIntentPoolGeneration[slot] !== zombies.pool.generation[slot]) {
+      deferZombieEscapeNavigationIntentAdmission(state, slot, 'spawn')
+    } else if (zombies.navigationIntentWorldGeneration[slot] !== state.collisionWorldGeneration) {
+      if (zombies.navigationIntentPending[slot] === 0) {
+        deferZombieEscapeNavigationIntentAdmission(state, slot, 'worldChanged')
+      }
+    } else if (
+      zombies.navigationConnector[slot]! < 0 &&
+      zombies.navigationIntentValid[slot] === 0 &&
+      zombies.navigationIntentPending[slot] === 0
+    ) {
+      deferZombieEscapeNavigationIntentAdmission(state, slot, 'cachedAnchorLost')
+    }
+  }
+  if (state.collisionWorld.navigationMode === 'sparse' && state.navigationIntentPendingCount > 0) {
+    refreshZombieEscapeSparseFlowSearchEligibility(state)
+  }
+  if (state.navigationIntentPendingCount > 0) {
+    state.navigationIntentResolveCursor = scheduleZombieEscapeNavigationIntentResolutions(
+      zombies.pool.active,
+      zombies.health,
+      zombies.navigationConnector,
+      zombies.navigationIntentValid,
+      zombies.navigationIntentPending,
+      state.navigationIntentResolveCursor,
+      state.navigationIntentResolveScheduled,
+      state.collisionWorld.navigationMode === 'sparse'
+        ? ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick
+        : ZOMBIE_ESCAPE_SIMULATION.navigationIntentResolveBudgetPerTick,
+      state.collisionWorld.navigationMode === 'sparse'
+        ? state.navigationIntentResolveEligible
+        : undefined,
+    )
+  }
+  let remainingScheduledAgentSlices = 0
+  if (state.collisionWorld.navigationMode === 'sparse' && state.navigationIntentPendingCount > 0) {
+    const protectedStagingOwnerSlot = resolveZombieEscapeProtectedStagingOwnerSlot(state)
+    let eligiblePendingCount = 0
+    for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+      if (state.navigationIntentResolveEligible[slot] !== 0) eligiblePendingCount += 1
+      if (state.navigationIntentResolveScheduled[slot] !== 0) {
+        if (
+          protectedStagingOwnerSlot >= 0 &&
+          slot !== protectedStagingOwnerSlot &&
+          zombies.navigationIntentHasReceivedFirstService[slot] !== 0
+        ) {
+          state.navigationIntentResolveScheduled[slot] = 0
+          continue
+        }
+        remainingScheduledAgentSlices += 1
+      }
+    }
+    state.navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick = eligiblePendingCount
+  }
+  state.navigationIntentResolveCountThisTick = 0
   for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
     if (zombies.pool.active[slot] === 0) continue
     zombies.hitFlash[slot] = Math.max(
@@ -1444,7 +5670,6 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       }
       continue
     }
-    zombies.attackCooldown[slot] = zombies.attackCooldown[slot]! - delta
     const x = zombies.x[slot]!
     const y = zombies.y[slot]!
     const z = zombies.z[slot]!
@@ -1452,47 +5677,632 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
     const toPlayerZ = state.player.z - z
     const playerDistance = Math.max(0.000_1, Math.hypot(toPlayerX, toPlayerZ))
     const catalogEntry = getZombieEscapeZombieCatalogEntry(zombies.variant[slot]!)
+    const collisionRadius = getZombieEscapeZombieCollisionRadiusMeters(zombies.variant[slot]!)
     const activeConnector =
       state.collisionWorld.navigationConnectors[zombies.navigationConnector[slot]!]
+    if (
+      x !== zombies.navigationSourceCertifiedX[slot] ||
+      y !== zombies.navigationSourceCertifiedY[slot] ||
+      z !== zombies.navigationSourceCertifiedZ[slot]
+    ) {
+      zombies.navigationSourceNeedsValidation[slot] = 1
+    }
+    if (
+      !activeConnector &&
+      zombies.navigationSourceNeedsValidation[slot] !== 0 &&
+      state.collisionWorld.navigationMode === 'sparse' &&
+      state.navigationField.graphSparseTargetUpdate.status === 'ready' &&
+      state.navigationTargetCommittedRouteGeneration > 0 &&
+      !validateZombieEscapeReconciledSparseSource(state, slot, x, y, z, navigationIntentTick)
+    ) {
+      rejectZombieEscapeUnanchoredZombieFromNavigation(state, slot)
+      continue
+    }
+    if (
+      zombies.navigationSourceNeedsValidation[slot] !== 0 &&
+      (state.collisionWorld.navigationMode !== 'sparse' ||
+        (!activeConnector && state.navigationField.graphSparseTargetUpdate.status === 'ready'))
+    ) {
+      certifyZombieEscapeNavigationSource(zombies, slot, x, y, z)
+    }
+    let directBlockingObjectId: string | null = null
+    let directBlockingObjectOrdinal = -1
+    let directBlockerIsBreakable = false
+    const liveGoalVisibilityWasTested =
+      !activeConnector && state.collisionWorld.navigationMode === 'sparse'
+    const liveGoalVisible =
+      liveGoalVisibilityWasTested &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        x,
+        y,
+        z,
+        state.navigationGoalX,
+        state.navigationGoalY,
+        state.navigationGoalZ,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    const liveGoalBlockingObjectId =
+      liveGoalVisibilityWasTested && !liveGoalVisible
+        ? resolveZombieEscapeCollisionHitObjectId(state.collisionWorld, state.navigationHitScratch)
+        : null
+    const liveGoalBlockingObjectOrdinal =
+      liveGoalVisibilityWasTested && !liveGoalVisible
+        ? resolveZombieEscapeCollisionHitObjectOrdinal(
+            state.collisionWorld,
+            state.navigationHitScratch,
+          )
+        : -1
+    const liveGoalBlockerIsBreakable =
+      liveGoalVisibilityWasTested &&
+      !liveGoalVisible &&
+      isZombieEscapeCollisionHitBreakable(state.collisionWorld, state.navigationHitScratch)
+    const liveGoalBlockingX = x + (state.navigationGoalX - x) * state.navigationHitScratch.time
+    const liveGoalBlockingZ = z + (state.navigationGoalZ - z) * state.navigationHitScratch.time
+    let navigationIntentUpdated = false
+    let usesCurrentTargetCertifiedBearing = false
+    let usesCurrentTargetDirectFallback = false
     if (activeConnector) {
-      const targetEnd = zombies.navigationConnectorTargetEnd[slot] !== 0
+      let targetEnd = zombies.navigationConnectorTargetEnd[slot] !== 0
+      if (
+        state.navigationGoalInitialized &&
+        state.navigationGoalResolvedTick === state.navigationIntentTick
+      ) {
+        const startDistanceSquared =
+          (activeConnector.startX - state.navigationGoalX) ** 2 +
+          (activeConnector.startY - state.navigationGoalY) ** 2 +
+          (activeConnector.startZ - state.navigationGoalZ) ** 2
+        const endDistanceSquared =
+          (activeConnector.endX - state.navigationGoalX) ** 2 +
+          (activeConnector.endY - state.navigationGoalY) ** 2 +
+          (activeConnector.endZ - state.navigationGoalZ) ** 2
+        if (Math.abs(endDistanceSquared - startDistanceSquared) > 0.000_001) {
+          targetEnd = endDistanceSquared < startDistanceSquared
+        }
+        zombies.navigationConnectorTargetEnd[slot] = targetEnd ? 1 : 0
+        zombies.navigationIntentTargetRevision[slot] = state.navigationTargetRequestedRevision
+      }
       const directionAmount = targetEnd ? 1 : -1
       state.navigationSampleScratch.blockingDistance = Number.POSITIVE_INFINITY
       state.navigationSampleScratch.blockingX = x
       state.navigationSampleScratch.blockingZ = z
+      state.navigationSampleScratch.connectorIndex = -1
+      state.navigationSampleScratch.connectorTargetEnd = false
       state.navigationSampleScratch.reachable = true
+      state.navigationSampleScratch.waypointNode = -1
+      state.navigationSampleScratch.waypointUsesFallback = false
       state.navigationSampleScratch.x = activeConnector.directionX * directionAmount
       state.navigationSampleScratch.z = activeConnector.directionZ * directionAmount
       resetZombieEscapeNavigationHit(state.navigationHitScratch)
     } else {
-      resolveZombieEscapeFlowDirection(
-        state.navigationField,
-        x,
-        z,
-        state.player.x,
-        state.player.z,
-        state.navigationSampleScratch,
-        state.navigationHitScratch,
-        y,
-      )
+      const navigationIntentResolutionIsScheduled =
+        state.navigationIntentResolveScheduled[slot] !== 0
+      if (navigationIntentResolutionIsScheduled) {
+        state.navigationIntentResolveScheduled[slot] = 0
+        if (state.collisionWorld.navigationMode === 'sparse') {
+          navigationIntentUpdated = resolveZombieEscapeSparseNavigationIntentSlice(
+            state,
+            slot,
+            navigationIntentTick,
+            remainingScheduledAgentSlices,
+            false,
+          )
+          remainingScheduledAgentSlices -= 1
+        } else {
+          resolveZombieEscapeFlowDirection(
+            state.navigationField,
+            x,
+            z,
+            state.player.x,
+            state.player.z,
+            state.navigationSampleScratch,
+            state.navigationHitScratch,
+            y,
+            zombies.navigationWaypointNode[slot]!,
+            zombies.navigationWaypointFallback[slot] !== 0,
+          )
+          const blockerObjectId = resolveZombieEscapeCollisionHitObjectId(
+            state.collisionWorld,
+            state.navigationHitScratch,
+          )
+          const blockerObjectOrdinal = resolveZombieEscapeCollisionHitObjectOrdinal(
+            state.collisionWorld,
+            state.navigationHitScratch,
+          )
+          const blockerIsBreakable = isZombieEscapeCollisionHitBreakable(
+            state.collisionWorld,
+            state.navigationHitScratch,
+          )
+          cacheZombieEscapeNavigationIntent(
+            state,
+            slot,
+            navigationIntentTick,
+            blockerObjectId,
+            blockerObjectOrdinal,
+            blockerIsBreakable,
+            state.navigationTargetCommittedRouteGeneration,
+            state.navigationTargetRequestedRevision,
+          )
+          state.navigationIntentResolveCount += 1
+          state.navigationIntentResolveCountThisTick += 1
+          markZombieEscapeNavigationIntentFirstService(state, slot)
+          resolveZombieEscapeNavigationIntentDemand(state, slot)
+          navigationIntentUpdated = true
+        }
+      }
+      if (zombies.pool.active[slot] === 0) continue
+      let reuseNavigationIntent =
+        zombies.navigationIntentValid[slot] !== 0 ||
+        (zombies.navigationIntentPending[slot] !== 0 &&
+          zombies.navigationIntentHasCached[slot] !== 0)
+      if (
+        reuseNavigationIntent &&
+        !zombieEscapeCollisionObjectOrdinalIsActive(
+          state.collisionWorld,
+          zombies.navigationBlockerObjectOrdinal[slot]!,
+        )
+      ) {
+        zombies.navigationBlockerBreakable[slot] = 0
+        zombies.navigationBlockerObjectId[slot] = null
+      }
+      if (reuseNavigationIntent) {
+        restoreZombieEscapeNavigationIntent(state, slot)
+        if (state.collisionWorld.navigationMode === 'sparse' && !navigationIntentUpdated) {
+          const navigationIntentIsPending = zombies.navigationIntentPending[slot] !== 0
+          {
+            const waypointNode = state.navigationSampleScratch.waypointNode ?? -1
+            if (waypointNode >= state.collisionWorld.navigationGraph.nodeIds.length) {
+              state.navigationAnchorInvalidationCount += 1
+              if (writeZombieEscapeSparseRegionWitnessNavigationSample(state, slot, x, y, z)) {
+                completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+              } else if (navigationIntentIsPending) {
+                zombies.navigationWaypointFallback[slot] = 0
+                zombies.navigationWaypointNode[slot] = -1
+                clearZombieEscapeSparseFlowSearchRouteCorridor(
+                  zombies.navigationSparseCommittedFlowSearch[slot]!,
+                )
+                writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+              } else {
+                clearZombieEscapeSparseFlowSearchRouteCorridor(
+                  zombies.navigationSparseCommittedFlowSearch[slot]!,
+                )
+                zombies.navigationIntentHasCached[slot] = 0
+                zombies.navigationWaypointFallback[slot] = 0
+                zombies.navigationWaypointNode[slot] = -1
+                deferZombieEscapeNavigationIntentAdmission(state, slot, 'cachedAnchorLost')
+                reuseNavigationIntent = false
+              }
+            } else if (
+              waypointNode < 0 &&
+              zombies.navigationIntentCommittedRouteGeneration[slot] ===
+                state.navigationTargetCommittedRouteGeneration
+            ) {
+              if (!liveGoalVisible && state.navigationSampleScratch.reachable) {
+                if (writeZombieEscapeSparseRegionWitnessNavigationSample(state, slot, x, y, z)) {
+                  completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+                } else {
+                  const routePublicationIsPending =
+                    state.navigationField.graphSparseTargetUpdate.status === 'pending'
+                  writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                  if (!navigationIntentIsPending && !routePublicationIsPending) {
+                    restartZombieEscapeSparseFlowSearch(state, slot, 'routePublished')
+                    demandZombieEscapeNavigationIntent(state, slot, 'routePublished', false)
+                  }
+                }
+              } else {
+                state.navigationSampleScratch.x = 0
+                state.navigationSampleScratch.z = 0
+              }
+            } else {
+              const routeGenerationChanged =
+                zombies.navigationIntentCommittedRouteGeneration[slot] !==
+                state.navigationTargetCommittedRouteGeneration
+              let adoptedPublishedRoute = false
+              let followCommittedRoute = !routeGenerationChanged
+              if (routeGenerationChanged) {
+                const search = zombies.navigationSparseCommittedFlowSearch[slot]!
+                if (liveGoalVisible) {
+                  cancelZombieEscapeSparseFlowSearch(state, slot)
+                  resetZombieEscapeSparseFlowSearch(zombies.navigationSparseFlowSearch[slot]!)
+                  clearZombieEscapeSparseFlowSearchRouteCorridor(search)
+                  writeZombieEscapeDirectNavigationSample(state, x, z)
+                  completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+                } else {
+                  const graph = state.collisionWorld.navigationGraph
+                  const adoption = adoptZombieEscapeSparsePublishedRouteAtWaypoint(
+                    search,
+                    state.navigationField,
+                    waypointNode,
+                  )
+                  let adoptedWaypointNode = -1
+                  if (adoption === 'adopted') {
+                    const successorNode = search.cachedOriginalNextNode
+                    const waypointLayerIndex = graph.layerIndices[waypointNode] ?? -1
+                    const successorLayerIndex = graph.layerIndices[successorNode] ?? -1
+                    const waypointLayer = state.collisionWorld.navigationLayers[waypointLayerIndex]
+                    const successorLayer =
+                      state.collisionWorld.navigationLayers[successorLayerIndex]
+                    if (
+                      successorNode >= 0 &&
+                      successorLayerIndex === waypointLayerIndex &&
+                      successorLayer !== undefined &&
+                      zombieEscapeSameLayerNavigationSegmentIsClear(
+                        state.collisionWorld,
+                        x,
+                        y,
+                        z,
+                        graph.x[successorNode]!,
+                        successorLayer.elevation,
+                        graph.z[successorNode]!,
+                        state.collisionWorld.agentRadius,
+                        state.navigationHitScratch,
+                      )
+                    ) {
+                      adoptedWaypointNode = successorNode
+                    } else if (
+                      waypointLayer !== undefined &&
+                      zombieEscapeSameLayerNavigationSegmentIsClear(
+                        state.collisionWorld,
+                        x,
+                        y,
+                        z,
+                        graph.x[waypointNode]!,
+                        waypointLayer.elevation,
+                        graph.z[waypointNode]!,
+                        state.collisionWorld.agentRadius,
+                        state.navigationHitScratch,
+                      )
+                    ) {
+                      adoptedWaypointNode = waypointNode
+                    }
+                  }
+                  if (adoptedWaypointNode >= 0) {
+                    state.navigationSampleScratch.waypointNode = adoptedWaypointNode
+                    state.navigationSampleScratch.waypointUsesFallback =
+                      search.routeCorridorUsesFallback
+                    if (
+                      adoptedWaypointNode !== waypointNode &&
+                      !seedZombieEscapeSparseFlowSearchRouteCorridor(
+                        search,
+                        state.navigationField,
+                        adoptedWaypointNode,
+                        search.routeCorridorUsesFallback,
+                      )
+                    ) {
+                      adoptedWaypointNode = -1
+                    }
+                  }
+                  if (adoption === 'requiresSearch') {
+                    restartZombieEscapeSparseFlowSearch(state, slot, 'routePublished')
+                    writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                    if (!navigationIntentIsPending) {
+                      demandZombieEscapeNavigationIntent(state, slot, 'routePublished', false)
+                    }
+                  } else if (adoptedWaypointNode >= 0) {
+                    zombies.navigationIntentCommittedRouteGeneration[slot] =
+                      state.navigationTargetCommittedRouteGeneration
+                    zombies.navigationIntentTargetRevision[slot] =
+                      state.navigationTargetRequestedRevision
+                    adoptedPublishedRoute = true
+                    followCommittedRoute = true
+                  } else {
+                    if (waypointNode >= 0) state.navigationAnchorInvalidationCount += 1
+                    clearZombieEscapeSparseFlowSearchRouteCorridor(search)
+                    if (
+                      writeZombieEscapeSparseRegionWitnessNavigationSample(state, slot, x, y, z)
+                    ) {
+                      completeZombieEscapeRecoveredNavigationIntent(
+                        state,
+                        slot,
+                        navigationIntentTick,
+                      )
+                    } else {
+                      restartZombieEscapeSparseFlowSearch(state, slot, 'routePublished')
+                      writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                      if (!navigationIntentIsPending) {
+                        demandZombieEscapeNavigationIntent(state, slot, 'routePublished', false)
+                      }
+                    }
+                  }
+                }
+              }
+              if (followCommittedRoute) {
+                const cachedStatus = followZombieEscapeCachedSparseWaypoint(
+                  state.navigationField,
+                  x,
+                  z,
+                  y,
+                  state.navigationSampleScratch,
+                  zombies.navigationSparseCommittedFlowSearch[slot]!,
+                  ZOMBIE_ESCAPE_ZERO_SPARSE_SEARCH_BUDGET,
+                )
+                if (
+                  adoptedPublishedRoute &&
+                  (cachedStatus === 'followed' || cachedStatus === 'reacquiring')
+                ) {
+                  completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+                }
+                if (cachedStatus === 'followed') {
+                  const followedWaypointNode = state.navigationSampleScratch.waypointNode ?? -1
+                  const committed = zombies.navigationSparseCommittedFlowSearch[slot]!
+                  if (
+                    followedWaypointNode < 0 ||
+                    !seedZombieEscapeSparseFlowSearchRouteCorridor(
+                      committed,
+                      state.navigationField,
+                      followedWaypointNode,
+                      state.navigationSampleScratch.waypointUsesFallback === true,
+                    )
+                  ) {
+                    clearZombieEscapeSparseFlowSearchRouteCorridor(committed)
+                  }
+                }
+                if (cachedStatus === 'held') {
+                  zombies.navigationBlockerBreakable[slot] = 0
+                  zombies.navigationBlockerObjectId[slot] = null
+                  zombies.navigationBlockerObjectOrdinal[slot] = -1
+                  zombies.navigationBlockingDistance[slot] =
+                    state.navigationSampleScratch.blockingDistance
+                  zombies.navigationBlockingX[slot] = state.navigationSampleScratch.blockingX
+                  zombies.navigationBlockingZ[slot] = state.navigationSampleScratch.blockingZ
+                }
+                if (cachedStatus === 'pending') {
+                  if (navigationIntentIsPending) {
+                    writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                  } else {
+                    deferZombieEscapeNavigationIntentAdmission(state, slot, 'cachedAnchorLost')
+                    const heldWaypointNode = state.navigationSampleScratch.waypointNode ?? -1
+                    const heldWaypointX =
+                      heldWaypointNode >= 0
+                        ? state.collisionWorld.navigationGraph.x[heldWaypointNode]!
+                        : state.player.x
+                    const heldWaypointZ =
+                      heldWaypointNode >= 0
+                        ? state.collisionWorld.navigationGraph.z[heldWaypointNode]!
+                        : state.player.z
+                    writeZombieEscapeDeferredNavigationDirection(
+                      'pending',
+                      state.collisionWorld.agentRadius,
+                      x,
+                      z,
+                      heldWaypointX,
+                      heldWaypointZ,
+                      state.navigationSampleScratch,
+                    )
+                  }
+                } else if (cachedStatus === 'refresh') {
+                  if (navigationIntentIsPending) {
+                    writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                  } else {
+                    deferZombieEscapeNavigationIntentAdmission(state, slot, 'cachedAnchorLost')
+                  }
+                  const heldWaypointNode = state.navigationSampleScratch.waypointNode ?? -1
+                  const heldWaypointX =
+                    heldWaypointNode >= 0
+                      ? state.collisionWorld.navigationGraph.x[heldWaypointNode]!
+                      : state.player.x
+                  const heldWaypointZ =
+                    heldWaypointNode >= 0
+                      ? state.collisionWorld.navigationGraph.z[heldWaypointNode]!
+                      : state.player.z
+                  if (!navigationIntentIsPending) {
+                    writeZombieEscapeDeferredNavigationDirection(
+                      'refresh',
+                      state.collisionWorld.agentRadius,
+                      x,
+                      z,
+                      heldWaypointX,
+                      heldWaypointZ,
+                      state.navigationSampleScratch,
+                    )
+                  }
+                } else if (cachedStatus === 'invalidated') {
+                  if (navigationIntentIsPending) {
+                    writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                  } else {
+                    deferZombieEscapeNavigationIntentAdmission(state, slot, 'worldChanged')
+                    reuseNavigationIntent = false
+                  }
+                } else if (cachedStatus === 'routePublished') {
+                  if (navigationIntentIsPending) {
+                    writeZombieEscapeRetainedCommittedNavigationIntent(state, slot, x, z)
+                  } else {
+                    restartZombieEscapeSparseFlowSearch(state, slot, 'routePublished')
+                    demandZombieEscapeNavigationIntent(state, slot, 'routePublished', false)
+                    reuseNavigationIntent = false
+                  }
+                } else if (cachedStatus !== 'reacquiring') {
+                  zombies.navigationIntentCommittedRouteGeneration[slot] =
+                    state.navigationTargetCommittedRouteGeneration
+                }
+              }
+            }
+          }
+        } else if (state.collisionWorld.navigationMode === 'dense' && !navigationIntentUpdated) {
+          resolveZombieEscapeFlowDirection(
+            state.navigationField,
+            x,
+            z,
+            state.player.x,
+            state.player.z,
+            state.navigationSampleScratch,
+            state.navigationHitScratch,
+            y,
+          )
+          zombies.navigationBlockerObjectId[slot] = resolveZombieEscapeCollisionHitObjectId(
+            state.collisionWorld,
+            state.navigationHitScratch,
+          )
+          zombies.navigationBlockerObjectOrdinal[slot] =
+            resolveZombieEscapeCollisionHitObjectOrdinal(
+              state.collisionWorld,
+              state.navigationHitScratch,
+            )
+          zombies.navigationBlockerBreakable[slot] = isZombieEscapeCollisionHitBreakable(
+            state.collisionWorld,
+            state.navigationHitScratch,
+          )
+            ? 1
+            : 0
+        }
+        if (
+          state.collisionWorld.navigationMode === 'sparse' &&
+          state.navigationGoalInitialized &&
+          state.navigationGoalResolvedTick === state.navigationIntentTick &&
+          (state.navigationField.graphSparseTargetUpdate.status === 'pending' ||
+            zombies.navigationIntentTargetRevision[slot] !==
+              state.navigationTargetRequestedRevision)
+        ) {
+          const currentGoalOffsetX = state.navigationGoalX - x
+          const currentGoalOffsetZ = state.navigationGoalZ - z
+          const cachedRouteConnectsToCurrentGoal =
+            pendingCommittedTargetConnectsToCurrentGoal &&
+            zombies.navigationIntentCommittedRouteGeneration[slot] ===
+              state.navigationTargetCommittedRouteGeneration
+          const cachedBearingTargetsCurrentGoal =
+            state.navigationField.graphSparseTargetUpdate.status === 'pending' &&
+            (cachedRouteConnectsToCurrentGoal ||
+              (state.navigationSampleScratch.reachable &&
+                state.navigationSampleScratch.x * currentGoalOffsetX +
+                  state.navigationSampleScratch.z * currentGoalOffsetZ >=
+                  0))
+          usesCurrentTargetCertifiedBearing = !cachedRouteConnectsToCurrentGoal
+          if (!cachedBearingTargetsCurrentGoal) {
+            writeZombieEscapeDirectNavigationSample(state, x, z)
+            usesCurrentTargetDirectFallback = true
+            zombies.attackTargetObjectId[slot] = null
+            zombies.attackTargetObjectOrdinal[slot] = -1
+            zombies.navigationBlockerBreakable[slot] = 0
+            zombies.navigationBlockerObjectId[slot] = null
+            zombies.navigationBlockerObjectOrdinal[slot] = -1
+            zombies.navigationIntentCommittedRouteGeneration[slot] =
+              state.navigationTargetCommittedRouteGeneration
+          }
+          zombies.navigationIntentCurrentTargetFallback[slot] = usesCurrentTargetDirectFallback
+            ? 1
+            : 0
+          zombies.navigationIntentTargetRevision[slot] = state.navigationTargetRequestedRevision
+          reuseNavigationIntent = true
+        }
+        if (reuseNavigationIntent) {
+          zombies.navigationDirectionX[slot] = state.navigationSampleScratch.x
+          zombies.navigationDirectionZ[slot] = state.navigationSampleScratch.z
+          zombies.navigationReachable[slot] = state.navigationSampleScratch.reachable ? 1 : 0
+          zombies.navigationRequestedConnector[slot] = state.navigationSampleScratch.connectorIndex
+          zombies.navigationRequestedConnectorTargetEnd[slot] = state.navigationSampleScratch
+            .connectorTargetEnd
+            ? 1
+            : 0
+          if (!usesCurrentTargetDirectFallback) {
+            zombies.navigationWaypointNode[slot] = state.navigationSampleScratch.waypointNode ?? -1
+            zombies.navigationWaypointFallback[slot] = state.navigationSampleScratch
+              .waypointUsesFallback
+              ? 1
+              : 0
+          }
+        } else {
+          clearZombieEscapeNavigationWaypoint(state, slot)
+          if (
+            zombies.navigationIntentPending[slot] === 0 &&
+            zombies.navigationIntentWorldGeneration[slot] === state.collisionWorldGeneration
+          ) {
+            deferZombieEscapeNavigationIntentAdmission(state, slot, 'cachedAnchorLost')
+          }
+        }
+      }
+      if (
+        !reuseNavigationIntent &&
+        state.collisionWorld.navigationMode === 'sparse' &&
+        state.navigationGoalInitialized &&
+        state.navigationGoalResolvedTick === state.navigationIntentTick
+      ) {
+        writeZombieEscapeDirectNavigationSample(state, x, z)
+        usesCurrentTargetCertifiedBearing = true
+        usesCurrentTargetDirectFallback = true
+        zombies.attackTargetObjectId[slot] = null
+        zombies.attackTargetObjectOrdinal[slot] = -1
+        zombies.navigationBlockerBreakable[slot] = 0
+        zombies.navigationBlockerObjectId[slot] = null
+        zombies.navigationBlockerObjectOrdinal[slot] = -1
+        zombies.navigationDirectionX[slot] = state.navigationSampleScratch.x
+        zombies.navigationDirectionZ[slot] = state.navigationSampleScratch.z
+        zombies.navigationIntentCommittedRouteGeneration[slot] =
+          state.navigationTargetCommittedRouteGeneration
+        zombies.navigationIntentCurrentTargetFallback[slot] = 1
+        zombies.navigationIntentTargetRevision[slot] = state.navigationTargetRequestedRevision
+        reuseNavigationIntent = true
+      }
+      if (reuseNavigationIntent) {
+        directBlockingObjectId = zombies.navigationBlockerObjectId[slot] ?? null
+        directBlockingObjectOrdinal = zombies.navigationBlockerObjectOrdinal[slot]!
+        directBlockerIsBreakable = zombies.navigationBlockerBreakable[slot] !== 0
+      } else {
+        resetZombieEscapeUnresolvedNavigationSample(state, x, z)
+      }
     }
-    let steerX = state.navigationSampleScratch.x
-    let steerZ = state.navigationSampleScratch.z
-    const directBlockingObjectId =
-      playerDistance > 0.000_2
-        ? resolveZombieEscapeCollisionHitObjectId(state.collisionWorld, state.navigationHitScratch)
-        : null
+    if (liveGoalVisible) {
+      directBlockingObjectId = null
+      directBlockingObjectOrdinal = -1
+      directBlockerIsBreakable = false
+      clearZombieEscapeSparseFlowSearchRouteCorridor(
+        zombies.navigationSparseCommittedFlowSearch[slot]!,
+      )
+      writeZombieEscapeDirectNavigationSample(state, x, z)
+      completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+    }
+    if (
+      !state.navigationSampleScratch.reachable &&
+      state.collisionWorld.navigationMode === 'sparse' &&
+      writeZombieEscapeSparseRegionWitnessNavigationSample(state, slot, x, y, z)
+    ) {
+      completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+    }
+    if (liveGoalBlockerIsBreakable) {
+      directBlockingObjectId = liveGoalBlockingObjectId
+      directBlockingObjectOrdinal = liveGoalBlockingObjectOrdinal
+      directBlockerIsBreakable = true
+      state.navigationSampleScratch.blockingX = liveGoalBlockingX
+      state.navigationSampleScratch.blockingZ = liveGoalBlockingZ
+    }
+    const routeSteerX = state.navigationSampleScratch.x
+    const routeSteerZ = state.navigationSampleScratch.z
+    const directlyTracksCurrentGoal = liveGoalVisible || usesCurrentTargetCertifiedBearing
+    const currentGoalSteerX = state.navigationGoalX - x
+    const currentGoalSteerZ = state.navigationGoalZ - z
+    const currentGoalSteeringLength = Math.hypot(currentGoalSteerX, currentGoalSteerZ)
+    let steerX = routeSteerX
+    let steerZ = routeSteerZ
+    let advisorySeparationApplied = false
+    if (playerDistance <= 0.000_2) {
+      directBlockingObjectId = null
+      directBlockingObjectOrdinal = -1
+      directBlockerIsBreakable = false
+    }
     const directHitDistance = directBlockingObjectId
-      ? state.navigationSampleScratch.blockingDistance
+      ? Math.hypot(
+          state.navigationSampleScratch.blockingX - x,
+          state.navigationSampleScratch.blockingZ - z,
+        )
       : Number.POSITIVE_INFINITY
-    const directBlockerIsBreakable =
-      directBlockingObjectId !== null &&
-      isZombieEscapeCollisionHitBreakable(state.collisionWorld, state.navigationHitScratch)
-    const previousObstacleTarget = zombies.attackTargetObjectId[slot] ?? null
+    const previousIntent = zombies.intent[slot]!
+    let previousObstacleTarget = zombies.attackTargetObjectId[slot] ?? null
+    let previousObstacleTargetOrdinal = zombies.attackTargetObjectOrdinal[slot]!
+    if (
+      previousObstacleTarget !== null &&
+      !zombieEscapeCollisionObjectOrdinalIsActive(
+        state.collisionWorld,
+        previousObstacleTargetOrdinal,
+      )
+    ) {
+      zombies.attackTargetObjectId[slot] = null
+      previousObstacleTarget = null
+    }
     const storedFocusDistance = previousObstacleTarget
       ? Math.hypot(zombies.attackFocusX[slot]! - x, zombies.attackFocusZ[slot]! - z)
       : Number.POSITIVE_INFINITY
     const storedObstacleTargetIsHeld =
+      !liveGoalVisible &&
       previousObstacleTarget !== null &&
       isZombieEscapeCollisionObjectBreakableAtElevation(
         state.collisionWorld,
@@ -1508,6 +6318,11 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       : directObstacleTargetIsInRange
         ? directBlockingObjectId
         : null
+    const obstacleTargetObjectOrdinal = storedObstacleTargetIsHeld
+      ? previousObstacleTargetOrdinal
+      : directObstacleTargetIsInRange
+        ? directBlockingObjectOrdinal
+        : -1
     const combatLayersOverlap = resolveZombieEscapeCombatVerticalRange(
       state.player.y,
       zombies.y[slot]!,
@@ -1532,17 +6347,26 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
     let holdsPosition = false
     let facingX = steerX
     let facingZ = steerZ
+    let navigationProgressTargetNode = ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED
+    let navigationProjectedProgress = 0
+    let navigationMinimumProgress = 0
     if (obstacleTargetObjectId) {
+      const continuesAttack =
+        previousIntent === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle &&
+        previousObstacleTarget === obstacleTargetObjectId
       holdsPosition = true
       zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle
       zombies.attackTargetObjectId[slot] = obstacleTargetObjectId
+      zombies.attackTargetObjectOrdinal[slot] = obstacleTargetObjectOrdinal
       if (directBlockingObjectId === obstacleTargetObjectId) {
         zombies.attackFocusX[slot] = state.navigationSampleScratch.blockingX
         zombies.attackFocusZ[slot] = state.navigationSampleScratch.blockingZ
       }
       facingX = zombies.attackFocusX[slot]! - x
       facingZ = zombies.attackFocusZ[slot]! - z
-      if (zombies.attackCooldown[slot]! <= 0) {
+      if (!continuesAttack) {
+        beginZombieEscapeAttackCycle(zombies, slot)
+      } else if (advanceZombieEscapeAttackCycle(zombies, slot, delta)) {
         const destroyed = hitZombieEscapeObstacle(
           state,
           slot,
@@ -1550,49 +6374,55 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
           zombies.attackFocusX[slot]!,
           zombies.attackFocusZ[slot]!,
         )
-        if (destroyed) zombies.attackTargetObjectId[slot] = null
+        if (destroyed) {
+          zombies.attackTargetObjectId[slot] = null
+          zombies.attackTargetObjectOrdinal[slot] = -1
+        }
       }
     } else if (playerInAttackRange) {
       holdsPosition = true
       zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer
       zombies.attackTargetObjectId[slot] = null
+      zombies.attackTargetObjectOrdinal[slot] = -1
       zombies.attackFocusX[slot] = state.player.x
       zombies.attackFocusZ[slot] = state.player.z
       facingX = toPlayerX
       facingZ = toPlayerZ
-      if (zombies.attackCooldown[slot]! <= 0) {
+      if (previousIntent !== ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer) {
+        beginZombieEscapeAttackCycle(zombies, slot)
+      } else if (advanceZombieEscapeAttackCycle(zombies, slot, delta)) {
         applyZombieEscapePlayerDamage(state, slot, 8)
-        zombies.attackCooldown[slot] = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
       }
     } else if (!state.navigationSampleScratch.reachable) {
-      holdsPosition = true
-      zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.blocked
-      zombies.attackTargetObjectId[slot] = null
-      zombies.attackFocusX[slot] = directBlockingObjectId
-        ? state.navigationSampleScratch.blockingX
-        : state.player.x
-      zombies.attackFocusZ[slot] = directBlockingObjectId
-        ? state.navigationSampleScratch.blockingZ
-        : state.player.z
-      facingX = zombies.attackFocusX[slot]! - x
-      facingZ = zombies.attackFocusZ[slot]! - z
+      rejectZombieEscapeUnanchoredZombieFromNavigation(state, slot)
+      continue
     } else {
       zombies.intent[slot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase
       zombies.attackTargetObjectId[slot] = null
+      zombies.attackTargetObjectOrdinal[slot] = -1
 
-      for (let other = 0; !activeConnector && other < zombies.pool.capacity; other += 1) {
-        if (other === slot || zombies.pool.active[other] === 0 || zombies.health[other]! <= 0) {
-          continue
-        }
-        const separateX = x - zombies.x[other]!
-        const separateZ = z - zombies.z[other]!
-        if (Math.abs(y - zombies.y[other]!) > 0.75) continue
-        const distanceSquared = separateX * separateX + separateZ * separateZ
-        if (distanceSquared <= 0.000_1 || distanceSquared >= 1.75 * 1.75) continue
-        const distance = Math.sqrt(distanceSquared)
-        const amount = (1.75 - distance) / 1.75
-        steerX += (separateX / distance) * amount * 1.55
-        steerZ += (separateZ / distance) * amount * 1.55
+      if (!activeConnector) {
+        resolveZombieEscapeAgentSeparation(
+          state.agentSpatialIndex,
+          slot,
+          zombies.pool.active,
+          zombies.health,
+          zombies.x,
+          zombies.y,
+          zombies.z,
+          state.agentSeparationScratch,
+        )
+        constrainZombieEscapeAgentSeparationToRoute(
+          state.agentSeparationScratch,
+          routeSteerX,
+          routeSteerZ,
+        )
+        advisorySeparationApplied =
+          state.agentSeparationScratch.x * state.agentSeparationScratch.x +
+            state.agentSeparationScratch.z * state.agentSeparationScratch.z >
+          0.000_001
+        steerX += state.agentSeparationScratch.x
+        steerZ += state.agentSeparationScratch.z
       }
 
       const steeringLength = Math.hypot(steerX, steerZ)
@@ -1629,22 +6459,129 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       zombies.vx[slot] = 0
       zombies.vz[slot] = 0
     } else {
-      const response = 1 - Math.exp(-7 * delta)
+      if (directlyTracksCurrentGoal && currentGoalSteeringLength > 0.000_001) {
+        const liveGoalDirectionX = currentGoalSteerX / currentGoalSteeringLength
+        const liveGoalDirectionZ = currentGoalSteerZ / currentGoalSteeringLength
+        const opposingSpeed =
+          zombies.vx[slot]! * liveGoalDirectionX + zombies.vz[slot]! * liveGoalDirectionZ
+        if (opposingSpeed < 0) {
+          zombies.vx[slot] = zombies.vx[slot]! - opposingSpeed * liveGoalDirectionX
+          zombies.vz[slot] = zombies.vz[slot]! - opposingSpeed * liveGoalDirectionZ
+        }
+      }
+      const velocityResponsePerSecond = directlyTracksCurrentGoal
+        ? ZOMBIE_ESCAPE_LIVE_GOAL_VELOCITY_RESPONSE_PER_SECOND
+        : ZOMBIE_ESCAPE_ROUTE_VELOCITY_RESPONSE_PER_SECOND
+      const response = 1 - Math.exp(-velocityResponsePerSecond * delta)
       zombies.vx[slot] = zombies.vx[slot]! + (steerX * desiredSpeed - zombies.vx[slot]!) * response
       zombies.vz[slot] = zombies.vz[slot]! + (steerZ * desiredSpeed - zombies.vz[slot]!) * response
+      let requestedDisplacementX = zombies.vx[slot]! * delta
+      let requestedDisplacementZ = zombies.vz[slot]! * delta
+      const previousConnectorIndex = zombies.navigationConnector[slot]!
+      const navigationCollisionRadius = state.collisionWorld.agentRadius
       moveZombieEscapeNavigationAgent(
         state.collisionWorld,
         x,
         y,
         z,
-        zombies.vx[slot]! * delta,
-        zombies.vz[slot]! * delta,
-        getZombieEscapeZombieCollisionRadiusMeters(zombies.variant[slot]!),
+        requestedDisplacementX,
+        requestedDisplacementZ,
+        navigationCollisionRadius,
         zombies.navigationConnector[slot]!,
         zombies.navigationConnectorTargetEnd[slot] !== 0,
         state.collisionHitScratch,
         state.navigationMoveScratch,
+        state.navigationSampleScratch.connectorIndex,
+        state.navigationSampleScratch.connectorTargetEnd,
+        collisionRadius,
       )
+      let requestedDistanceSquared =
+        requestedDisplacementX * requestedDisplacementX +
+        requestedDisplacementZ * requestedDisplacementZ
+      let actualDisplacementX = state.navigationMoveScratch.x - x
+      let actualDisplacementZ = state.navigationMoveScratch.z - z
+      let actualDistanceSquared =
+        actualDisplacementX * actualDisplacementX + actualDisplacementZ * actualDisplacementZ
+      let stalledByCollision =
+        state.navigationMoveScratch.collided &&
+        requestedDistanceSquared > 0.000_001 &&
+        actualDistanceSquared < requestedDistanceSquared * 0.0625
+      const routeSteeringLength = Math.hypot(routeSteerX, routeSteerZ)
+      const movedAwayFromVisibleGoal =
+        directlyTracksCurrentGoal &&
+        currentGoalSteeringLength > 0.000_1 &&
+        actualDisplacementX * currentGoalSteerX + actualDisplacementZ * currentGoalSteerZ <
+          actualDistanceSquared
+      if (
+        ((stalledByCollision && advisorySeparationApplied) || movedAwayFromVisibleGoal) &&
+        routeSteeringLength > 0.000_1
+      ) {
+        const routeTravel = desiredSpeed * delta
+        requestedDisplacementX = (routeSteerX / routeSteeringLength) * routeTravel
+        requestedDisplacementZ = (routeSteerZ / routeSteeringLength) * routeTravel
+        moveZombieEscapeNavigationAgent(
+          state.collisionWorld,
+          x,
+          y,
+          z,
+          requestedDisplacementX,
+          requestedDisplacementZ,
+          navigationCollisionRadius,
+          previousConnectorIndex,
+          zombies.navigationConnectorTargetEnd[slot] !== 0,
+          state.collisionHitScratch,
+          state.navigationMoveScratch,
+          state.navigationSampleScratch.connectorIndex,
+          state.navigationSampleScratch.connectorTargetEnd,
+          collisionRadius,
+        )
+        requestedDistanceSquared =
+          requestedDisplacementX * requestedDisplacementX +
+          requestedDisplacementZ * requestedDisplacementZ
+        actualDisplacementX = state.navigationMoveScratch.x - x
+        actualDisplacementZ = state.navigationMoveScratch.z - z
+        actualDistanceSquared =
+          actualDisplacementX * actualDisplacementX + actualDisplacementZ * actualDisplacementZ
+        stalledByCollision =
+          state.navigationMoveScratch.collided &&
+          requestedDistanceSquared > 0.000_001 &&
+          actualDistanceSquared < requestedDistanceSquared * 0.0625
+      }
+      if (
+        directlyTracksCurrentGoal &&
+        currentGoalSteeringLength > 0.000_1 &&
+        actualDisplacementX * currentGoalSteerX + actualDisplacementZ * currentGoalSteerZ <
+          actualDistanceSquared
+      ) {
+        state.navigationMoveScratch.x = x
+        state.navigationMoveScratch.y = y
+        state.navigationMoveScratch.z = z
+        state.navigationMoveScratch.connectorIndex = previousConnectorIndex
+        state.navigationMoveScratch.connectorTargetEnd =
+          zombies.navigationConnectorTargetEnd[slot] !== 0
+        actualDisplacementX = 0
+        actualDisplacementZ = 0
+        actualDistanceSquared = 0
+        stalledByCollision = true
+      }
+      if (
+        !directlyTracksCurrentGoal &&
+        previousConnectorIndex < 0 &&
+        state.navigationMoveScratch.connectorIndex < 0 &&
+        state.navigationSampleScratch.reachable &&
+        zombies.navigationIntentPending[slot] === 0 &&
+        zombies.navigationSparseFlowSearchActive[slot] === 0 &&
+        zombies.navigationIntentAdmissionDeferredReasons[slot] === 0 &&
+        requestedDistanceSquared > 0.000_001
+      ) {
+        const routeLength = Math.hypot(routeSteerX, routeSteerZ)
+        navigationProgressTargetNode = state.navigationSampleScratch.waypointNode ?? -1
+        navigationProjectedProgress =
+          routeLength > 0.000_1
+            ? (actualDisplacementX * routeSteerX + actualDisplacementZ * routeSteerZ) / routeLength
+            : 0
+        navigationMinimumProgress = Math.max(0.000_1, Math.sqrt(requestedDistanceSquared) * 0.05)
+      }
       zombies.x[slot] = state.navigationMoveScratch.x
       zombies.y[slot] = state.navigationMoveScratch.y
       zombies.z[slot] = state.navigationMoveScratch.z
@@ -1652,10 +6589,105 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       zombies.navigationConnectorTargetEnd[slot] = state.navigationMoveScratch.connectorTargetEnd
         ? 1
         : 0
-      if (state.navigationMoveScratch.collided) {
-        zombies.vx[slot] = (zombies.x[slot]! - x) / delta
-        zombies.vz[slot] = (zombies.z[slot]! - z) / delta
+      zombies.vx[slot] = (zombies.x[slot]! - x) / delta
+      zombies.vz[slot] = (zombies.z[slot]! - z) / delta
+      if (zombies.navigationConnector[slot] !== previousConnectorIndex) {
+        if (zombies.navigationConnector[slot]! < 0) {
+          if (state.collisionWorld.navigationMode !== 'sparse') {
+            deferZombieEscapeNavigationIntentAdmission(state, slot, 'connectorChanged')
+          } else if (
+            writeZombieEscapeSparseRegionWitnessNavigationSample(
+              state,
+              slot,
+              zombies.x[slot]!,
+              zombies.y[slot]!,
+              zombies.z[slot]!,
+            )
+          ) {
+            completeZombieEscapeRecoveredNavigationIntent(state, slot, navigationIntentTick)
+          } else {
+            rejectZombieEscapeUnanchoredZombieFromNavigation(state, slot)
+            continue
+          }
+        } else {
+          cancelZombieEscapeNavigationIntentDemand(state, slot)
+        }
       }
+      if (
+        zombies.navigationIntentUrgentRefreshUsed[slot] !== 0 &&
+        hasZombieEscapeNavigationCollisionRecoveryProgressed(
+          zombies.navigationCollisionRecoveryOriginX[slot]!,
+          zombies.navigationCollisionRecoveryOriginZ[slot]!,
+          zombies.x[slot]!,
+          zombies.z[slot]!,
+          collisionRadius,
+        )
+      ) {
+        zombies.navigationIntentUrgentRefreshUsed[slot] = 0
+        clearZombieEscapeDeferredNavigationIntentReason(state, slot, 'collisionRecovery')
+      }
+      if (stalledByCollision) {
+        const movementBlockerObjectId = resolveZombieEscapeCollisionHitObjectId(
+          state.collisionWorld,
+          state.collisionHitScratch,
+        )
+        const movementBlockerObjectOrdinal = resolveZombieEscapeCollisionHitObjectOrdinal(
+          state.collisionWorld,
+          state.collisionHitScratch,
+        )
+        if (
+          movementBlockerObjectId &&
+          isZombieEscapeCollisionObjectBreakableAtElevation(
+            state.collisionWorld,
+            movementBlockerObjectId,
+            zombies.y[slot]!,
+          )
+        ) {
+          const hitAmount = Number.isFinite(state.collisionHitScratch.time)
+            ? Math.max(0, Math.min(1, state.collisionHitScratch.time))
+            : 1
+          zombies.attackTargetObjectId[slot] = movementBlockerObjectId
+          zombies.attackTargetObjectOrdinal[slot] = movementBlockerObjectOrdinal
+          zombies.attackFocusX[slot] = x + requestedDisplacementX * hitAmount
+          zombies.attackFocusZ[slot] = z + requestedDisplacementZ * hitAmount
+        }
+        if (!navigationIntentUpdated && zombies.navigationIntentUrgentRefreshUsed[slot] === 0) {
+          const reanchored = tryReanchorZombieEscapeSparseCollision(state, slot, x, y, z)
+          if (!reanchored) {
+            zombies.navigationCollisionRecoveryOriginX[slot] = zombies.x[slot]!
+            zombies.navigationCollisionRecoveryOriginZ[slot] = zombies.z[slot]!
+            zombies.navigationIntentUrgentRefreshUsed[slot] = 1
+            deferZombieEscapeNavigationIntentAdmission(state, slot, 'collisionRecovery')
+          }
+          zombies.navigationRecoveryCooldownTicks[slot] =
+            ZOMBIE_ESCAPE_NAVIGATION_RECOVERY_COOLDOWN_TICKS
+        }
+      }
+    }
+    if (
+      advanceZombieEscapeNavigationProgressWatchdog(
+        zombies.navigationNoProgressTicks,
+        zombies.navigationProgressTargetNode,
+        zombies.navigationRecoveryCooldownTicks,
+        slot,
+        navigationProgressTargetNode,
+        navigationProjectedProgress,
+        navigationMinimumProgress,
+      )
+    ) {
+      zombies.navigationIntentUrgentRefreshUsed[slot] = 1
+      zombies.navigationCollisionRecoveryOriginX[slot] = zombies.x[slot]!
+      zombies.navigationCollisionRecoveryOriginZ[slot] = zombies.z[slot]!
+      deferZombieEscapeNavigationIntentAdmission(state, slot, 'collisionRecovery')
+    }
+    if (zombies.navigationSourceNeedsValidation[slot] === 0) {
+      certifyZombieEscapeNavigationSource(
+        zombies,
+        slot,
+        zombies.x[slot]!,
+        zombies.y[slot]!,
+        zombies.z[slot]!,
+      )
     }
     const speed = Math.hypot(zombies.vx[slot]!, zombies.vz[slot]!)
     zombies.locomotionBlend[slot] =
@@ -1664,6 +6696,71 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
     zombies.locomotionPhase[slot] =
       zombies.locomotionPhase[slot]! + speed * delta * (2.2 + zombies.runBlend[slot]!)
   }
+  if (state.collisionWorld.navigationMode === 'sparse') {
+    drainZombieEscapeProtectedStagingReaders(state, navigationIntentTick)
+    drainZombieEscapeActiveSparseSearches(state, navigationIntentTick)
+  }
+  state.navigationIntentMaximumResolveCountObservedPerTick = Math.max(
+    state.navigationIntentMaximumResolveCountObservedPerTick,
+    state.navigationIntentResolveCountThisTick,
+  )
+  if (
+    state.navigationIntentResolveCountThisTick >
+    ZOMBIE_ESCAPE_SIMULATION.navigationIntentResolveBudgetPerTick
+  ) {
+    state.navigationIntentResolveBudgetViolationCount += 1
+  }
+}
+
+export function advanceZombieEscapeNavigationProgressWatchdog(
+  noProgressTicks: Uint16Array,
+  progressTargetNodes: Int32Array,
+  recoveryCooldownTicks: Uint16Array,
+  slot: number,
+  targetNode: number,
+  projectedProgress: number,
+  minimumProgress: number,
+  timeoutTicks = ZOMBIE_ESCAPE_NAVIGATION_NO_PROGRESS_TIMEOUT_TICKS,
+  cooldownTicks = ZOMBIE_ESCAPE_NAVIGATION_RECOVERY_COOLDOWN_TICKS,
+) {
+  const nextCooldown = Math.max(0, recoveryCooldownTicks[slot]! - 1)
+  recoveryCooldownTicks[slot] = nextCooldown
+  if (targetNode === ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED) {
+    noProgressTicks[slot] = 0
+    progressTargetNodes[slot] = ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED
+    return false
+  }
+  if (progressTargetNodes[slot] !== targetNode) {
+    progressTargetNodes[slot] = targetNode
+    noProgressTicks[slot] = 0
+    return false
+  }
+  if (projectedProgress >= Math.max(0, minimumProgress)) {
+    noProgressTicks[slot] = 0
+    return false
+  }
+  const nextNoProgressTicks = Math.min(0xffff, noProgressTicks[slot]! + 1)
+  noProgressTicks[slot] = nextNoProgressTicks
+  if (nextNoProgressTicks < Math.max(1, Math.trunc(timeoutTicks)) || nextCooldown > 0) {
+    return false
+  }
+  noProgressTicks[slot] = 0
+  recoveryCooldownTicks[slot] = Math.min(0xffff, Math.max(1, Math.trunc(cooldownTicks)))
+  return true
+}
+
+export function hasZombieEscapeNavigationCollisionRecoveryProgressed(
+  originX: number,
+  originZ: number,
+  currentX: number,
+  currentZ: number,
+  collisionRadius: number,
+) {
+  const threshold =
+    Math.max(0, collisionRadius) * ZOMBIE_ESCAPE_COLLISION_RECOVERY_REARM_RADIUS_MULTIPLIER
+  const deltaX = currentX - originX
+  const deltaZ = currentZ - originZ
+  return deltaX * deltaX + deltaZ * deltaZ >= threshold * threshold
 }
 
 function resetZombieEscapeNavigationHit(hit: ZombieEscapeCollisionHit) {
@@ -1673,6 +6770,58 @@ function resetZombieEscapeNavigationHit(hit: ZombieEscapeCollisionHit) {
   hit.normalY = 0
   hit.normalZ = 0
   hit.time = Number.POSITIVE_INFINITY
+}
+
+type ZombieEscapeAttackCycleState = Pick<
+  ZombieEscapeZombiePool,
+  'attackContactResolved' | 'attackCooldown'
+>
+const ZOMBIE_ESCAPE_ATTACK_CYCLE_EPSILON_SECONDS = 0.000_001
+
+export function beginZombieEscapeAttackCycle(zombies: ZombieEscapeAttackCycleState, slot: number) {
+  const duration = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
+  const remaining = zombies.attackCooldown[slot]!
+  zombies.attackCooldown[slot] =
+    Number.isFinite(remaining) && remaining > duration ? remaining : duration
+  zombies.attackContactResolved[slot] = 0
+}
+
+export function advanceZombieEscapeAttackCycle(
+  zombies: ZombieEscapeAttackCycleState,
+  slot: number,
+  deltaSeconds: number,
+) {
+  const duration = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
+  const contactSeconds = duration * ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackContactPhase
+  const delta = Math.max(
+    0,
+    Math.min(
+      ZOMBIE_ESCAPE_SIMULATION.maximumFrameDeltaSeconds,
+      Number.isFinite(deltaSeconds) ? deltaSeconds : 0,
+    ),
+  )
+  let remaining = Number.isFinite(zombies.attackCooldown[slot])
+    ? Math.max(0, zombies.attackCooldown[slot]!)
+    : duration
+  if (remaining > duration + ZOMBIE_ESCAPE_ATTACK_CYCLE_EPSILON_SECONDS) {
+    zombies.attackCooldown[slot] = Math.max(duration, remaining - delta)
+    return false
+  }
+  remaining = Math.min(duration, remaining)
+
+  const nextElapsed = duration - remaining + delta
+  const contact =
+    zombies.attackContactResolved[slot] === 0 &&
+    nextElapsed + ZOMBIE_ESCAPE_ATTACK_CYCLE_EPSILON_SECONDS >= contactSeconds
+  if (nextElapsed + ZOMBIE_ESCAPE_ATTACK_CYCLE_EPSILON_SECONDS >= duration) {
+    const nextCycleElapsed = nextElapsed >= duration ? nextElapsed % duration : 0
+    zombies.attackCooldown[slot] = nextCycleElapsed > 0 ? duration - nextCycleElapsed : duration
+    zombies.attackContactResolved[slot] = nextCycleElapsed >= contactSeconds ? 1 : 0
+  } else {
+    zombies.attackCooldown[slot] = duration - nextElapsed
+    if (contact) zombies.attackContactResolved[slot] = 1
+  }
+  return contact
 }
 
 function hitZombieEscapeObstacle(
@@ -1699,25 +6848,89 @@ function hitZombieEscapeObstacle(
     focusZ,
     attackerSlot,
   )
+  if (!state.obstacleDamageEnabled) return false
+
   const hitCount = (state.obstacleHitCounts.get(objectId) ?? 0) + 1
-  zombies.attackCooldown[attackerSlot] =
-    ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
   if (hitCount < ZOMBIE_ESCAPE_SIMULATION.obstacleHitsToBreak) {
     state.obstacleHitCounts.set(objectId, hitCount)
     return false
   }
 
   state.obstacleHitCounts.delete(objectId)
-  state.destroyedObstacleIds.add(objectId)
-  state.obstacleRevision += 1
-  applyZombieEscapeEffectiveCollisionWorld(state)
-  updateZombieEscapeFlowTarget(
-    state.navigationField,
-    state.player.x,
-    state.player.z,
-    state.navigationTargetY,
-  )
-  return true
+  return applyZombieEscapeObstacleDelta(state, objectId, attackerSlot).applied
+}
+
+function normalizeZombieEscapeNavigationIntentsAfterObstacleRemoval(
+  state: ZombieEscapeSimulation,
+  attackerSlot: number,
+  objectId: string,
+  previousWorld: ZombieEscapeCollisionWorld,
+  previousWorldGeneration: number,
+  collisionWorldChanged: boolean,
+) {
+  const zombies = state.zombies
+  const navigationTopologyPreserved =
+    collisionWorldChanged &&
+    zombieEscapeNavigationTopologyMatches(previousWorld, state.collisionWorld)
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0) continue
+    const targetsRemovedObject =
+      slot === attackerSlot ||
+      zombies.navigationBlockerObjectId[slot] === objectId ||
+      zombies.attackTargetObjectId[slot] === objectId
+    if (targetsRemovedObject) {
+      zombies.attackTargetObjectId[slot] = null
+      zombies.attackTargetObjectOrdinal[slot] = -1
+      zombies.navigationBlockerBreakable[slot] = 0
+      zombies.navigationBlockerObjectId[slot] = null
+      zombies.navigationBlockerObjectOrdinal[slot] = -1
+      if (
+        navigationTopologyPreserved &&
+        zombies.navigationReachable[slot] === 0 &&
+        writeZombieEscapeSparseRegionWitnessNavigationSample(
+          state,
+          slot,
+          zombies.x[slot]!,
+          zombies.y[slot]!,
+          zombies.z[slot]!,
+        )
+      ) {
+        cacheZombieEscapeNavigationIntent(
+          state,
+          slot,
+          state.navigationIntentTick,
+          null,
+          -1,
+          false,
+          state.navigationTargetCommittedRouteGeneration,
+          state.navigationTargetRequestedRevision,
+          false,
+        )
+      }
+    }
+    if (
+      navigationTopologyPreserved &&
+      zombies.navigationIntentValid[slot] !== 0 &&
+      zombies.navigationIntentPoolGeneration[slot] === zombies.pool.generation[slot] &&
+      zombies.navigationIntentWorldGeneration[slot] === previousWorldGeneration
+    ) {
+      zombies.navigationIntentWorldGeneration[slot] = state.collisionWorldGeneration
+      zombies.navigationIntentUrgentRefreshUsed[slot] = 0
+    } else if (!navigationTopologyPreserved) {
+      zombies.navigationIntentHasCached[slot] = 0
+      zombies.navigationIntentValid[slot] = 0
+      zombies.navigationRequestedConnector[slot] = -1
+      zombies.navigationRequestedConnectorTargetEnd[slot] = 0
+    }
+  }
+}
+
+function clearZombieEscapeRemovedObstacleReferences(zombies: ZombieEscapeZombiePool, slot: number) {
+  zombies.attackTargetObjectId[slot] = null
+  zombies.attackTargetObjectOrdinal[slot] = -1
+  zombies.navigationBlockerBreakable[slot] = 0
+  zombies.navigationBlockerObjectId[slot] = null
+  zombies.navigationBlockerObjectOrdinal[slot] = -1
 }
 
 function turnZombieEscapeHeadingToward(current: number, target: number, maximumDelta: number) {
@@ -1728,22 +6941,291 @@ function turnZombieEscapeHeadingToward(current: number, target: number, maximumD
 }
 
 function applyZombieEscapeEffectiveCollisionWorld(state: ZombieEscapeSimulation) {
-  const navigationWorld = createZombieEscapeCollisionWorldWithoutObjects(
-    state.collisionSourceWorld,
-    state.destroyedObstacleIds,
-  )
-  const combatWorld = createZombieEscapeCollisionWorldWithoutObjects(
-    state.combatCollisionSourceWorld,
-    state.destroyedObstacleIds,
-  )
+  const previousNavigationWorld = state.collisionWorld
+  const previousNavigationGraph = previousNavigationWorld.navigationGraph
+  let navigationWorld = createZombieEscapeCollisionWorldActiveView(state.collisionSourceWorld)
+  let combatWorld = createZombieEscapeCollisionWorldActiveView(state.combatCollisionSourceWorld)
+  let requiresRecompile = false
+  for (const objectId of state.destroyedObstacleIds) {
+    const navigationStatus = classifyZombieEscapeCollisionObjectDelta(
+      navigationWorld,
+      objectId,
+      state.obstacleDeltaNavigationResult,
+    )
+    const combatStatus = classifyZombieEscapeCollisionObjectDelta(
+      combatWorld,
+      objectId,
+      state.obstacleDeltaCombatResult,
+    )
+    if (navigationStatus === 'requires-recompile' || combatStatus === 'requires-recompile') {
+      requiresRecompile = true
+      break
+    }
+    if (navigationStatus === 'changed') {
+      deactivateZombieEscapeCollisionObject(navigationWorld, state.obstacleDeltaNavigationResult)
+    }
+    if (combatStatus === 'changed') {
+      deactivateZombieEscapeCollisionObject(combatWorld, state.obstacleDeltaCombatResult)
+    }
+  }
+  if (requiresRecompile) {
+    navigationWorld = createZombieEscapeCollisionWorldActiveView(
+      createZombieEscapeCollisionWorldWithoutObjects(
+        state.collisionSourceWorld,
+        state.destroyedObstacleIds,
+      ),
+    )
+    combatWorld = createZombieEscapeCollisionWorldActiveView(
+      createZombieEscapeCollisionWorldWithoutObjects(
+        state.combatCollisionSourceWorld,
+        state.destroyedObstacleIds,
+      ),
+    )
+  }
   const changed =
-    navigationWorld.semanticKey !== state.collisionWorld.semanticKey ||
-    combatWorld.semanticKey !== state.combatCollisionWorld.semanticKey
+    navigationWorld.revision !== state.collisionWorld.revision ||
+    combatWorld.revision !== state.combatCollisionWorld.revision
+  if (!changed) return false
+  const navigationTopologyPreserved = zombieEscapeNavigationTopologyMatches(
+    previousNavigationWorld,
+    navigationWorld,
+  )
+  const previousTargetRequestedRevision = state.navigationTargetRequestedRevision
+  if (state.navigationSparseSpawnSearchActive) {
+    state.navigationSparseSpawnSearchInvalidatedCount += 1
+    state.navigationSparseSpawnSearchDependencyWaiting = false
+    state.navigationSparseSpawnSearchNeedsRestart = true
+  }
   setZombieEscapeFlowFieldWorld(state.navigationField, navigationWorld)
+  state.navigationRouteTargetInitialized = false
+  state.navigationRouteTargetRegionIndex = -1
+  state.navigationTargetCommittedRouteGeneration = getZombieEscapeSparseCommittedRouteGeneration(
+    state.navigationField,
+  )
+  state.navigationTargetRequestedLayerHint =
+    state.navigationField.graphSparseTargetUpdate.requestedTargetLayerHint
+  state.navigationTargetRequestedRevision = getZombieEscapeSparseRequestedTargetRevision(
+    state.navigationField,
+  )
+  if (navigationTopologyPreserved) {
+    for (let slot = 0; slot < state.zombies.pool.capacity; slot += 1) {
+      if (
+        state.zombies.pool.active[slot] !== 0 &&
+        state.zombies.navigationIntentTargetRevision[slot] === previousTargetRequestedRevision
+      ) {
+        state.zombies.navigationIntentTargetRevision[slot] = state.navigationTargetRequestedRevision
+      }
+    }
+  }
+  if (navigationWorld.navigationConnectors !== previousNavigationWorld.navigationConnectors) {
+    remapZombieEscapeActiveNavigationConnectors(
+      state.zombies,
+      previousNavigationWorld,
+      navigationWorld,
+    )
+  }
   state.collisionWorld = navigationWorld
   state.combatCollisionWorld = combatWorld
-  if (changed) state.collisionWorldGeneration += 1
-  return changed
+  if (!navigationTopologyPreserved) {
+    state.navigationGoalInitialized = false
+    state.navigationGoalLayerIndex = -1
+    state.navigationGoalRegionIndex = -1
+  }
+  if (navigationWorld.navigationGraph !== previousNavigationGraph) {
+    remapZombieEscapeNavigationWaypoints(state, previousNavigationWorld, navigationWorld)
+  }
+  state.collisionWorldGeneration += 1
+  state.navigationWorldRevision += 1
+  if (!navigationTopologyPreserved && navigationWorld.navigationMode === 'sparse') {
+    for (let slot = 0; slot < state.zombies.pool.capacity; slot += 1) {
+      if (state.zombies.pool.active[slot] === 0) continue
+      rejectZombieEscapeUnanchoredZombieFromNavigation(state, slot)
+    }
+  }
+  beginZombieEscapeWorldRefreshAdmissionEpoch(state)
+  return true
+}
+
+function invalidateZombieEscapeRuntimeForCollisionMaskDelta(state: ZombieEscapeSimulation) {
+  acknowledgeZombieEscapeFlowFieldCollisionMaskRemoval(state.navigationField)
+  state.navigationWorldRevision += 1
+}
+
+function remapZombieEscapeActiveNavigationConnectors(
+  zombies: ZombieEscapeZombiePool,
+  previousWorld: ZombieEscapeCollisionWorld,
+  nextWorld: ZombieEscapeCollisionWorld,
+) {
+  const nextConnectorByKey = new Map<string, number>()
+  for (let index = 0; index < nextWorld.navigationConnectors.length; index += 1) {
+    nextConnectorByKey.set(
+      zombieEscapeNavigationConnectorTraversalKey(nextWorld.navigationConnectors[index]!),
+      index,
+    )
+  }
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0 || zombies.navigationConnector[slot]! < 0) continue
+    const previousConnector = previousWorld.navigationConnectors[zombies.navigationConnector[slot]!]
+    const nextConnectorIndex = previousConnector
+      ? nextConnectorByKey.get(zombieEscapeNavigationConnectorTraversalKey(previousConnector))
+      : undefined
+    zombies.navigationConnector[slot] = nextConnectorIndex ?? -1
+    if (nextConnectorIndex === undefined) zombies.navigationConnectorTargetEnd[slot] = 0
+  }
+}
+
+function zombieEscapeNavigationConnectorTraversalKey(
+  connector: ZombieEscapeCollisionWorld['navigationConnectors'][number],
+) {
+  return `${connector.id}\u0000${connector.objectId}\u0000${connector.chainId}\u0000${String(connector.chainOrder)}`
+}
+
+function zombieEscapeNavigationTopologyMatches(
+  previousWorld: ZombieEscapeCollisionWorld,
+  nextWorld: ZombieEscapeCollisionWorld,
+) {
+  const previousGraph = previousWorld.navigationGraph
+  const nextGraph = nextWorld.navigationGraph
+  if (
+    previousGraph.nodeKeys.length !== nextGraph.nodeKeys.length ||
+    previousWorld.navigationConnectors.length !== nextWorld.navigationConnectors.length
+  ) {
+    return false
+  }
+  for (let node = 0; node < previousGraph.nodeKeys.length; node += 1) {
+    if (previousGraph.nodeKeys[node] !== nextGraph.nodeKeys[node]) return false
+  }
+  for (let connector = 0; connector < previousWorld.navigationConnectors.length; connector += 1) {
+    if (
+      zombieEscapeNavigationConnectorTraversalKey(
+        previousWorld.navigationConnectors[connector]!,
+      ) !== zombieEscapeNavigationConnectorTraversalKey(nextWorld.navigationConnectors[connector]!)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+function remapZombieEscapeNavigationWaypoints(
+  state: ZombieEscapeSimulation,
+  previousWorld: ZombieEscapeCollisionWorld,
+  nextWorld: ZombieEscapeCollisionWorld,
+) {
+  const zombies = state.zombies
+  const previousGraph = previousWorld.navigationGraph
+  const nextGraph = nextWorld.navigationGraph
+  let hasCachedWaypoint = false
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0) continue
+    const waypointNode = zombies.navigationWaypointNode[slot]!
+    if (waypointNode >= 0 && waypointNode < previousGraph.nodeKeys.length) {
+      hasCachedWaypoint = true
+    } else if (waypointNode >= 0) {
+      clearZombieEscapeNavigationWaypoint(state, slot)
+    }
+  }
+  if (!hasCachedWaypoint) return
+
+  const nextNodeByKey = new Map<string, number>()
+  for (let node = 0; node < nextGraph.nodeKeys.length; node += 1) {
+    nextNodeByKey.set(nextGraph.nodeKeys[node]!, node)
+  }
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0) continue
+    const previousNode = zombies.navigationWaypointNode[slot]!
+    if (previousNode < 0 || previousNode >= previousGraph.nodeKeys.length) continue
+    const nextNode = nextNodeByKey.get(previousGraph.nodeKeys[previousNode]!)
+    if (
+      nextNode === undefined ||
+      !sparseNavigationWaypointLayersMatch(
+        previousGraph,
+        previousNode,
+        previousWorld,
+        nextGraph,
+        nextNode,
+        nextWorld,
+      )
+    ) {
+      clearZombieEscapeNavigationWaypoint(state, slot)
+      continue
+    }
+    zombies.navigationWaypointNode[slot] = nextNode
+  }
+}
+
+function sparseNavigationWaypointLayersMatch(
+  previousGraph: ZombieEscapeSparseNavigationGraph,
+  previousNode: number,
+  previousWorld: ZombieEscapeCollisionWorld,
+  nextGraph: ZombieEscapeSparseNavigationGraph,
+  nextNode: number,
+  nextWorld: ZombieEscapeCollisionWorld,
+) {
+  const previousLayer = previousWorld.navigationLayers[previousGraph.layerIndices[previousNode]!]
+  const nextLayer = nextWorld.navigationLayers[nextGraph.layerIndices[nextNode]!]
+  return (
+    previousLayer !== undefined &&
+    nextLayer !== undefined &&
+    previousLayer.elevation === nextLayer.elevation
+  )
+}
+
+function clearZombieEscapeNavigationWaypoint(state: ZombieEscapeSimulation, slot: number) {
+  const zombies = state.zombies
+  if (zombies.navigationWaypointNode[slot]! >= 0) state.navigationAnchorInvalidationCount += 1
+  clearZombieEscapeSparseFlowSearchRouteCorridor(zombies.navigationSparseCommittedFlowSearch[slot]!)
+  zombies.navigationIntentHasCached[slot] = 0
+  zombies.navigationIntentCurrentTargetFallback[slot] = 0
+  zombies.navigationWaypointFallback[slot] = 0
+  zombies.navigationWaypointNode[slot] = -1
+}
+
+function writeZombieEscapeRetainedCommittedNavigationIntent(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  sourceX: number,
+  sourceZ: number,
+) {
+  const zombies = state.zombies
+  if (zombies.navigationIntentHasCached[slot] === 0 || zombies.navigationIntentValid[slot] === 0) {
+    return false
+  }
+  restoreZombieEscapeNavigationIntent(state, slot)
+  const sample = state.navigationSampleScratch
+  const waypointNode = sample.waypointNode ?? -1
+  if (waypointNode >= 0 && waypointNode < state.collisionWorld.navigationGraph.nodeIds.length) {
+    writeZombieEscapeDeferredNavigationDirection(
+      'pending',
+      state.collisionWorld.agentRadius,
+      sourceX,
+      sourceZ,
+      state.collisionWorld.navigationGraph.x[waypointNode]!,
+      state.collisionWorld.navigationGraph.z[waypointNode]!,
+      sample,
+    )
+    sample.reachable = true
+    return true
+  }
+  const directionLength = Math.hypot(sample.x, sample.z)
+  if (directionLength > 0.000_001) {
+    sample.x /= directionLength
+    sample.z /= directionLength
+    sample.reachable = true
+    sample.waypointNode = -1
+    sample.waypointUsesFallback = false
+    return true
+  }
+  const goalDistance = Math.hypot(state.navigationGoalX - sourceX, state.navigationGoalZ - sourceZ)
+  if (goalDistance <= Math.max(0.08, state.collisionWorld.agentRadius * 0.5)) {
+    sample.reachable = true
+    sample.waypointNode = -1
+    sample.waypointUsesFallback = false
+    sample.x = 0
+    sample.z = 0
+    return true
+  }
+  return false
 }
 
 function restoreZombieEscapeObstacleState(state: ZombieEscapeSimulation) {
@@ -1790,6 +7272,87 @@ function resolveZombieEscapeCombatVerticalRange(
   return output.maximumY >= output.minimumY
 }
 
+function resolveZombieEscapeNextAvailablePoolSlot(pool: ZombieEscapeFixedPool) {
+  for (let offset = 0; offset < pool.capacity; offset += 1) {
+    const slot = (pool.cursor + offset) % pool.capacity
+    if (pool.active[slot] === 0) return slot
+  }
+  return -1
+}
+
+function trySpawnZombieEscapeSparseZombie(state: ZombieEscapeSimulation, isReplacement: boolean) {
+  if (
+    !state.navigationGoalInitialized ||
+    state.navigationGoalResolvedTick !== state.navigationIntentTick
+  ) {
+    return false
+  }
+  const zombies = state.zombies
+  const nextSlot = resolveZombieEscapeNextAvailablePoolSlot(zombies.pool)
+  if (nextSlot < 0) return false
+  const candidateRadius = getZombieEscapeZombieCollisionRadiusMeters(
+    state.variantByPoolSlot[nextSlot]!,
+  )
+  const minimumPlayerDistance = isReplacement
+    ? ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS
+    : ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS
+  const minimumPlayerDistanceSquared = minimumPlayerDistance * minimumPlayerDistance
+  const seedPhase = ((Math.imul(state.seed | 0, 0x9e37_79b1) >>> 0) / 0x1_0000_0000) * Math.PI * 2
+  state.navigationSparseSpawnMinimumTargetDistanceMeters = minimumPlayerDistance
+  state.navigationSparseSpawnIsReplacement = isReplacement
+  let probes = 0
+  while (probes < ZOMBIE_ESCAPE_WAVE_SPAWN_MAXIMUM_PROBES_PER_ADMISSION) {
+    const ordinal = state.navigationSparseSpawnProbeOrdinal >>> 0
+    state.navigationSparseSpawnProbeOrdinal = (ordinal + 1) >>> 0
+    probes += 1
+    const angle = seedPhase + ordinal * ZOMBIE_ESCAPE_WAVE_SPAWN_GOLDEN_ANGLE_RADIANS
+    const radialUnit = ((ordinal + 1) * 0.754_877_666_246_692_7) % 1
+    const minimumRadiusSquared = ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS ** 2
+    const maximumRadiusSquared = ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MAXIMUM_RADIUS_METERS ** 2
+    const radius = Math.sqrt(
+      minimumRadiusSquared + (maximumRadiusSquared - minimumRadiusSquared) * radialUnit,
+    )
+    const desiredX = Math.sin(angle) * radius
+    const desiredZ = Math.cos(angle) * radius
+    state.navigationSparseSpawnDesiredX = desiredX
+    state.navigationSparseSpawnDesiredZ = desiredZ
+    const playerOffsetX = desiredX - state.player.x
+    const playerOffsetZ = desiredZ - state.player.z
+    if (
+      playerOffsetX * playerOffsetX + playerOffsetZ * playerOffsetZ <
+      minimumPlayerDistanceSquared
+    ) {
+      continue
+    }
+    if (
+      spawnZombieEscapeSparseAnchoredZombie(
+        state,
+        desiredX,
+        desiredZ,
+        nextSlot,
+        candidateRadius,
+        minimumPlayerDistanceSquared,
+      ) < 0
+    ) {
+      continue
+    }
+    state.navigationSparseSpawnSearchStartedCount += 1
+    state.navigationSparseSpawnSearchCompletedCount += 1
+    state.navigationSparseSpawnProbeCountTotal += probes
+    state.navigationSparseSpawnProbeMaximumObservedPerAdmission = Math.max(
+      state.navigationSparseSpawnProbeMaximumObservedPerAdmission,
+      probes,
+    )
+    return true
+  }
+  state.navigationSparseSpawnProbeCountTotal += probes
+  state.navigationSparseSpawnProbeMaximumObservedPerAdmission = Math.max(
+    state.navigationSparseSpawnProbeMaximumObservedPerAdmission,
+    probes,
+  )
+  return false
+}
+
 function updateWaves(state: ZombieEscapeSimulation, delta: number) {
   if (state.waveState === 'escape') return
   if (state.waveState === 'intermission') {
@@ -1797,47 +7360,70 @@ function updateWaves(state: ZombieEscapeSimulation, delta: number) {
     if (state.waveIntermissionSeconds <= 0) {
       state.wave += 1
       state.waveState = 'active'
-      state.waveSpawnRemaining = zombieEscapeWaveSize(state.wave)
-      state.waveSpawnTimerSeconds = 0.3
+      state.waveSpawnRemaining = Math.min(
+        state.zombies.pool.capacity,
+        zombieEscapeWaveSize(state.wave),
+      )
+      state.waveSpawnTimerSeconds = 0
     }
     return
   }
 
   state.waveSpawnTimerSeconds -= delta
-  while (
-    (state.replacementSpawnRemaining > 0 || state.waveSpawnRemaining > 0) &&
-    state.waveSpawnTimerSeconds <= 0 &&
-    state.zombies.pool.activeCount < state.zombies.pool.capacity
-  ) {
-    const isReplacement = state.replacementSpawnRemaining > 0
-    const angle = nextZombieEscapeRandom(state.random) * Math.PI * 2
-    const radius =
-      ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS +
-      nextZombieEscapeRandom(state.random) *
-        (ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MAXIMUM_RADIUS_METERS -
-          ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS)
-    const desiredX = Math.sin(angle) * radius
-    const desiredZ = Math.cos(angle) * radius
-    state.waveSpawnTimerSeconds += Math.max(0.28, 0.74 - state.wave * 0.08)
-    if (
-      !resolveZombieEscapeReachableSpawn(
-        state.navigationField,
-        desiredX,
-        desiredZ,
-        state.player.x,
-        state.player.z,
-        isReplacement
-          ? ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS
-          : ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
-        state.reachableSpawnScratch,
-        state.navigationTargetY,
-      )
+  let admissionsRemaining = ZOMBIE_ESCAPE_SIMULATION.zombieSpawnMaximumAdmissionsPerTick
+  if (state.collisionWorld.navigationMode === 'sparse') {
+    while (
+      admissionsRemaining > 0 &&
+      (state.replacementSpawnRemaining > 0 || state.waveSpawnRemaining > 0) &&
+      state.waveSpawnTimerSeconds <= 0 &&
+      state.zombies.pool.activeCount < state.zombies.pool.capacity
     ) {
-      break
+      const isReplacement = state.replacementSpawnRemaining > 0
+      state.waveSpawnTimerSeconds += ZOMBIE_ESCAPE_SIMULATION.zombieSpawnIntervalSeconds
+      admissionsRemaining -= 1
+      if (trySpawnZombieEscapeSparseZombie(state, isReplacement)) {
+        if (isReplacement) state.replacementSpawnRemaining -= 1
+        else state.waveSpawnRemaining -= 1
+      }
     }
-    spawnZombieEscapeZombie(state, state.reachableSpawnScratch.x, state.reachableSpawnScratch.z)
-    if (isReplacement) state.replacementSpawnRemaining -= 1
-    else state.waveSpawnRemaining -= 1
+  } else {
+    while (
+      admissionsRemaining > 0 &&
+      (state.replacementSpawnRemaining > 0 || state.waveSpawnRemaining > 0) &&
+      state.waveSpawnTimerSeconds <= 0 &&
+      state.zombies.pool.activeCount < state.zombies.pool.capacity
+    ) {
+      const isReplacement = state.replacementSpawnRemaining > 0
+      const angle = nextZombieEscapeRandom(state.random) * Math.PI * 2
+      const radius =
+        ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS +
+        nextZombieEscapeRandom(state.random) *
+          (ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MAXIMUM_RADIUS_METERS -
+            ZOMBIE_ESCAPE_WAVE_SPAWN_DESIRED_MINIMUM_RADIUS_METERS)
+      const desiredX = Math.sin(angle) * radius
+      const desiredZ = Math.cos(angle) * radius
+      state.waveSpawnTimerSeconds += ZOMBIE_ESCAPE_SIMULATION.zombieSpawnIntervalSeconds
+      admissionsRemaining -= 1
+      if (
+        !resolveZombieEscapeReachableSpawn(
+          state.navigationField,
+          desiredX,
+          desiredZ,
+          state.player.x,
+          state.player.z,
+          isReplacement
+            ? ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS
+            : ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+          state.reachableSpawnScratch,
+          state.navigationTargetY,
+        )
+      ) {
+        break
+      }
+      spawnZombieEscapeZombie(state, state.reachableSpawnScratch.x, state.reachableSpawnScratch.z)
+      if (isReplacement) state.replacementSpawnRemaining -= 1
+      else state.waveSpawnRemaining -= 1
+    }
   }
 
   if (
@@ -1960,8 +7546,10 @@ function segmentSphereFirstIntersectionAmount(
 
 function zombieEscapeWaveSize(wave: number) {
   const normalizedWave = Math.max(1, Math.trunc(wave))
-  const population = 4 + normalizedWave * 3
-  return normalizedWave === 1 ? population * 2 : population
+  return (
+    ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount +
+    (normalizedWave - 1) * ZOMBIE_ESCAPE_SIMULATION.zombiePopulationGrowthPerNight
+  )
 }
 
 export function advanceZombieEscapePhaseClock(
@@ -1986,6 +7574,8 @@ function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
   if (state.night <= 0) state.night = 1
   resetShotEventPool(state.shots)
   resetZombiePool(state.zombies)
+  resetZombieEscapeAgentSpatialIndex(state.agentSpatialIndex)
+  resetZombieEscapeNavigationIntentScheduler(state)
   state.extractionOpen = false
   state.fireCooldownSeconds = 0
   resetZombieEscapeMeleeState(state.player)
@@ -1994,8 +7584,8 @@ function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
   state.replacementSpawnRemaining = 0
   state.wave = state.night
   state.waveIntermissionSeconds = 0
-  state.waveSpawnRemaining = zombieEscapeWaveSize(state.wave)
-  state.waveSpawnTimerSeconds = 0.35
+  state.waveSpawnRemaining = Math.min(state.zombies.pool.capacity, zombieEscapeWaveSize(state.wave))
+  state.waveSpawnTimerSeconds = 0
   state.waveState = 'active'
   if (state.player.ammo === 0) {
     state.player.weaponIndex = 0
@@ -2010,6 +7600,8 @@ function enterZombieEscapeBuild(state: ZombieEscapeSimulation) {
   state.phaseSecondsRemaining = ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds
   resetShotEventPool(state.shots)
   resetZombiePool(state.zombies)
+  resetZombieEscapeAgentSpatialIndex(state.agentSpatialIndex)
+  resetZombieEscapeNavigationIntentScheduler(state)
   restoreZombieEscapeObstacleState(state)
   state.extractionOpen = false
   state.fireCooldownSeconds = 0
@@ -2200,11 +7792,17 @@ function createShotPhaseMetricView(
 }
 
 function createZombiePool(capacity: number): ZombieEscapeZombiePool {
+  const navigationBlockingDistance = new Float64Array(capacity)
+  navigationBlockingDistance.fill(Number.POSITIVE_INFINITY)
+  const navigationRequestedConnector = new Int16Array(capacity)
+  navigationRequestedConnector.fill(-1)
   return {
     attackCooldown: new Float32Array(capacity),
+    attackContactResolved: new Uint8Array(capacity),
     attackFocusX: new Float32Array(capacity),
     attackFocusZ: new Float32Array(capacity),
     attackTargetObjectId: Array.from({ length: capacity }, () => null),
+    attackTargetObjectOrdinal: new Int32Array(capacity).fill(-1),
     deathPresentationSeconds: new Float32Array(capacity),
     gait: new Uint8Array(capacity),
     health: new Float32Array(capacity),
@@ -2217,10 +7815,73 @@ function createZombiePool(capacity: number): ZombieEscapeZombiePool {
     intent: new Uint8Array(capacity),
     locomotionBlend: new Float32Array(capacity),
     locomotionPhase: new Float32Array(capacity),
+    navigationBlockerBreakable: new Uint8Array(capacity),
+    navigationBlockerObjectId: Array.from({ length: capacity }, () => null),
+    navigationBlockerObjectOrdinal: new Int32Array(capacity).fill(-1),
+    navigationBlockingDistance,
+    navigationBlockingX: new Float64Array(capacity),
+    navigationBlockingZ: new Float64Array(capacity),
     navigationConnector: new Int16Array(capacity).fill(-1),
     navigationConnectorTargetEnd: new Uint8Array(capacity),
+    navigationDirectionX: new Float64Array(capacity),
+    navigationDirectionZ: new Float64Array(capacity),
+    navigationCollisionRecoveryOriginX: new Float64Array(capacity),
+    navigationCollisionRecoveryOriginZ: new Float64Array(capacity),
+    navigationIntentAdmissionDeferredNext: new Int32Array(capacity).fill(-1),
+    navigationIntentAdmissionDeferredPrevious: new Int32Array(capacity).fill(-1),
+    navigationIntentAdmissionDeferredReasons: new Uint8Array(capacity),
+    navigationIntentHasCached: new Uint8Array(capacity),
+    navigationIntentHasReceivedFirstService: new Uint8Array(capacity),
+    navigationIntentAdmissionWorldGeneration: new Uint32Array(capacity),
+    navigationIntentFirstServiceEligibleSinceTick: new Uint32Array(capacity),
+    navigationIntentFirstServiceTick: new Uint32Array(capacity),
+    navigationIntentPending: new Uint8Array(capacity),
+    navigationIntentPendingSinceTick: new Uint32Array(capacity),
+    navigationIntentPoolGeneration: new Uint32Array(capacity),
+    navigationIntentResolvedTick: new Uint32Array(capacity),
+    navigationIntentCommittedRouteGeneration: new Uint32Array(capacity),
+    navigationIntentCurrentTargetFallback: new Uint8Array(capacity),
+    navigationIntentTargetRevision: new Uint32Array(capacity),
+    navigationIntentUrgentRefreshUsed: new Uint8Array(capacity),
+    navigationIntentValid: new Uint8Array(capacity),
+    navigationIntentWorldGeneration: new Uint32Array(capacity),
+    navigationNoProgressTicks: new Uint16Array(capacity),
+    navigationProgressTargetNode: new Int32Array(capacity).fill(
+      ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED,
+    ),
+    navigationRecoveryCooldownTicks: new Uint16Array(capacity),
+    navigationReachable: new Uint8Array(capacity),
+    navigationRequestedConnector,
+    navigationRequestedConnectorTargetEnd: new Uint8Array(capacity),
+    navigationSparseCommittedFlowSearch: Array.from({ length: capacity }, () =>
+      createZombieEscapeSparseFlowSearch(),
+    ),
+    navigationSparseFlowHit: Array.from({ length: capacity }, () =>
+      createZombieEscapeCollisionHit(),
+    ),
+    navigationSparseFlowSample: Array.from({ length: capacity }, () =>
+      createZombieEscapeNavigationSample(),
+    ),
+    navigationSparseFlowSearch: Array.from({ length: capacity }, () =>
+      createZombieEscapeSparseFlowSearch(),
+    ),
+    navigationSparseFlowSearchActive: new Uint8Array(capacity),
+    navigationSparseFlowSearchDependencyWaiting: new Uint8Array(capacity),
+    navigationSparseFlowSearchLastProgressTick: new Uint32Array(capacity),
+    navigationSparseFlowSearchRestartToken: new Uint8Array(capacity),
+    navigationSparseFlowSearchStartedForDemand: new Uint8Array(capacity),
+    navigationSparseFlowSearchTargetPreemptionUsed: new Uint8Array(capacity),
+    navigationSparseFlowSearchWorldRevision: new Uint32Array(capacity),
+    navigationSourceCertifiedX: new Float32Array(capacity),
+    navigationSourceCertifiedY: new Float32Array(capacity),
+    navigationSourceCertifiedZ: new Float32Array(capacity),
+    navigationSourceNeedsValidation: new Uint8Array(capacity),
+    navigationWaypointFallback: new Uint8Array(capacity),
+    navigationWaypointNode: new Int32Array(capacity).fill(-1),
     pool: createZombieEscapeFixedPool(capacity),
+    projectileHitOrdinal: new Uint32Array(capacity),
     runBlend: new Float32Array(capacity),
+    spawnOrdinal: new Uint32Array(capacity),
     speedScale: new Float32Array(capacity),
     variant: new Uint8Array(capacity),
     vx: new Float32Array(capacity),
@@ -2269,11 +7930,19 @@ function resetShotEventPool(shots: ZombieEscapeShotEventPool) {
 }
 
 function resetZombiePool(zombies: ZombieEscapeZombiePool) {
+  for (const search of zombies.navigationSparseCommittedFlowSearch) {
+    resetZombieEscapeSparseFlowSearch(search)
+  }
+  for (const search of zombies.navigationSparseFlowSearch) {
+    resetZombieEscapeSparseFlowSearch(search)
+  }
   resetZombieEscapeFixedPool(zombies.pool)
   zombies.attackCooldown.fill(0)
+  zombies.attackContactResolved.fill(0)
   zombies.attackFocusX.fill(0)
   zombies.attackFocusZ.fill(0)
   zombies.attackTargetObjectId.fill(null)
+  zombies.attackTargetObjectOrdinal.fill(-1)
   zombies.deathPresentationSeconds.fill(0)
   zombies.gait.fill(ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker)
   zombies.health.fill(0)
@@ -2286,9 +7955,58 @@ function resetZombiePool(zombies: ZombieEscapeZombiePool) {
   zombies.intent.fill(ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase)
   zombies.locomotionBlend.fill(0)
   zombies.locomotionPhase.fill(0)
+  zombies.navigationBlockerBreakable.fill(0)
+  zombies.navigationBlockerObjectId.fill(null)
+  zombies.navigationBlockerObjectOrdinal.fill(-1)
+  zombies.navigationBlockingDistance.fill(Number.POSITIVE_INFINITY)
+  zombies.navigationBlockingX.fill(0)
+  zombies.navigationBlockingZ.fill(0)
   zombies.navigationConnector.fill(-1)
   zombies.navigationConnectorTargetEnd.fill(0)
+  zombies.navigationDirectionX.fill(0)
+  zombies.navigationDirectionZ.fill(0)
+  zombies.navigationCollisionRecoveryOriginX.fill(0)
+  zombies.navigationCollisionRecoveryOriginZ.fill(0)
+  zombies.navigationIntentAdmissionDeferredNext.fill(-1)
+  zombies.navigationIntentAdmissionDeferredPrevious.fill(-1)
+  zombies.navigationIntentAdmissionDeferredReasons.fill(0)
+  zombies.navigationIntentHasCached.fill(0)
+  zombies.navigationIntentHasReceivedFirstService.fill(0)
+  zombies.navigationIntentAdmissionWorldGeneration.fill(0)
+  zombies.navigationIntentFirstServiceEligibleSinceTick.fill(0)
+  zombies.navigationIntentFirstServiceTick.fill(0)
+  zombies.navigationIntentPending.fill(0)
+  zombies.navigationIntentPendingSinceTick.fill(0)
+  zombies.navigationIntentPoolGeneration.fill(0)
+  zombies.navigationIntentResolvedTick.fill(0)
+  zombies.navigationIntentCommittedRouteGeneration.fill(0)
+  zombies.navigationIntentCurrentTargetFallback.fill(0)
+  zombies.navigationIntentTargetRevision.fill(0)
+  zombies.navigationIntentUrgentRefreshUsed.fill(0)
+  zombies.navigationIntentValid.fill(0)
+  zombies.navigationIntentWorldGeneration.fill(0)
+  zombies.navigationNoProgressTicks.fill(0)
+  zombies.navigationProgressTargetNode.fill(ZOMBIE_ESCAPE_NAVIGATION_PROGRESS_TARGET_UNTRACKED)
+  zombies.navigationRecoveryCooldownTicks.fill(0)
+  zombies.navigationReachable.fill(0)
+  zombies.navigationRequestedConnector.fill(-1)
+  zombies.navigationRequestedConnectorTargetEnd.fill(0)
+  zombies.navigationSparseFlowSearchActive.fill(0)
+  zombies.navigationSparseFlowSearchDependencyWaiting.fill(0)
+  zombies.navigationSparseFlowSearchLastProgressTick.fill(0)
+  zombies.navigationSparseFlowSearchRestartToken.fill(0)
+  zombies.navigationSparseFlowSearchStartedForDemand.fill(0)
+  zombies.navigationSparseFlowSearchTargetPreemptionUsed.fill(0)
+  zombies.navigationSparseFlowSearchWorldRevision.fill(0)
+  zombies.navigationSourceCertifiedX.fill(0)
+  zombies.navigationSourceCertifiedY.fill(0)
+  zombies.navigationSourceCertifiedZ.fill(0)
+  zombies.navigationSourceNeedsValidation.fill(0)
+  zombies.navigationWaypointFallback.fill(0)
+  zombies.navigationWaypointNode.fill(-1)
+  zombies.projectileHitOrdinal.fill(0)
   zombies.runBlend.fill(0)
+  zombies.spawnOrdinal.fill(0)
   zombies.speedScale.fill(0)
   zombies.variant.fill(0)
   zombies.vx.fill(0)

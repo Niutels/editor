@@ -73,15 +73,12 @@ export function resolveBVHEcctrlStanceShape({
 export function resolveBVHEcctrlCrouchingState({
   crouching,
   crouchRequested,
-  stanceTransitionAllowed = true,
   standingClear,
 }: {
   crouching: boolean
   crouchRequested: boolean
-  stanceTransitionAllowed?: boolean
   standingClear: boolean
 }) {
-  if (!stanceTransitionAllowed) return crouching
   return crouchRequested || (crouching && !standingClear)
 }
 

@@ -47,8 +47,8 @@ import { SceneBvh } from './scene-bvh'
 import {
   advanceSceneReadinessState,
   getSceneReadinessBlockerNames,
-  shouldWaitForSceneReadiness,
   type SceneReadinessState,
+  shouldWaitForSceneReadiness,
 } from './scene-readiness'
 import { SelectionManager } from './selection-manager'
 import { UnsupportedGpuViewerFallback } from './unsupported-gpu-fallback'
@@ -102,17 +102,15 @@ const DIRTY_BUILD_KINDS = new Set([
   'window',
 ])
 
-const warnedEmptyDraw = process.env.NODE_ENV === 'production' ? null : new WeakSet<object>()
+let warnedNonDrawableDraw = false
 
 /**
- * Renderer-level safety net against the empty-vertex-buffer crash.
+ * Renderer-level safety net against non-drawable geometry reaching WebGPU.
  *
- * Wraps the per-object render function so any draw whose geometry has a count-0
- * `position` attribute is skipped instead of submitted. One such draw leaves
- * WebGPU vertex buffer slot 0 unbound, which the validator rejects and which
- * poisons the *whole* command encoder — so a single stray empty mesh (e.g. a
- * transient placeholder, or a derived edge/outline geometry) flickers the entire
- * canvas, not just itself. See `hasDrawableGeometry`.
+ * Wraps the per-object render function so empty buffers and invisible
+ * zero-area placeholders are skipped instead of submitted. Invalid vertex
+ * bindings poison the *whole* command encoder, so one stray mesh can flicker
+ * the entire canvas rather than only itself. See `hasDrawableGeometry`.
  *
  * The custom render-object function is the documented three.js hook for this
  * (`Renderer.setRenderObjectFunction`); it must call `renderObject()` for
@@ -120,7 +118,7 @@ const warnedEmptyDraw = process.env.NODE_ENV === 'production' ? null : new WeakS
  * around its passes, so the guard survives outline rendering (its own passes
  * carry the same check inline).
  */
-function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
+function installDrawableGeometryGuard(renderer: THREE.WebGPURenderer) {
   renderer.setRenderObjectFunction(
     (
       object: any,
@@ -134,10 +132,10 @@ function installEmptyDrawGuard(renderer: THREE.WebGPURenderer) {
       passId: any,
     ) => {
       if (!hasDrawableGeometry(geometry)) {
-        if (warnedEmptyDraw && !warnedEmptyDraw.has(geometry ?? object)) {
-          warnedEmptyDraw.add(geometry ?? object)
+        if (process.env.NODE_ENV !== 'production' && !warnedNonDrawableDraw) {
+          warnedNonDrawableDraw = true
           console.warn(
-            '[viewer] skipped a draw with an empty position buffer (would poison the WebGPU command encoder)',
+            '[viewer] skipped a draw with non-drawable geometry (would poison the WebGPU command encoder)',
             { name: object?.name, type: object?.type, material: material?.name },
           )
         }
@@ -368,11 +366,7 @@ function SceneReadyTracker({
       geometryOrSceneChanged ||
       observed.material !== materialRevision ||
       observed.dirtyNodes !== dirtyNodeCount
-    if (
-      readinessStateRef.current.ready &&
-      !forceEvaluationRef.current &&
-      !revisionsChanged
-    ) {
+    if (readinessStateRef.current.ready && !forceEvaluationRef.current && !revisionsChanged) {
       return
     }
     observedRevisionsRef.current = {
@@ -711,7 +705,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
               },
             })
             if (result.status === 'ready') {
-              installEmptyDrawGuard(result.renderer)
+              installDrawableGeometryGuard(result.renderer)
               return result.renderer
             }
 

@@ -2,6 +2,7 @@ import type { ZombieEscapeControlState } from './zombie-escape-controls'
 import {
   advanceZombieEscapePhaseClock,
   resetZombieEscapeSimulation,
+  setZombieEscapeGamePhase,
   stepZombieEscapeSimulationPhysics,
   type ZombieEscapeGamePhase,
   type ZombieEscapeGameStatus,
@@ -121,6 +122,32 @@ export function canAdvanceLandrushZombieEscapeIntegratedSimulation({
   simulation: ZombieEscapeSimulation
 }) {
   return phaseReady && simulation.phase === expectedPhase
+}
+
+export function requestLandrushZombieEscapeNightStart({
+  expectedPhase,
+  phaseReady,
+  simulation,
+}: {
+  expectedPhase: ZombieEscapeGamePhase
+  phaseReady: boolean
+  simulation: ZombieEscapeSimulation
+}) {
+  if (
+    expectedPhase !== 'build' ||
+    !canAdvanceLandrushZombieEscapeIntegratedSimulation({
+      expectedPhase,
+      phaseReady,
+      simulation,
+    }) ||
+    simulation.paused ||
+    simulation.status !== 'playing'
+  ) {
+    return false
+  }
+
+  setZombieEscapeGamePhase(simulation, 'night')
+  return true
 }
 
 export function stepLandrushZombieEscapeIntegratedSimulation({

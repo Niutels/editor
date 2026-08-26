@@ -1,3 +1,9 @@
+import {
+  type LandrushNavigationPoint2,
+  landrushIslandNavigationSegmentIntersectsPolygon,
+  pointInPolygonOrNearEdge,
+} from '@landrush/runtime'
+
 import { advanceLandrushRobotScreenRevealAmount } from './robot-screen-reveal-curve'
 
 export const LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY = 'landrushRobotRevealAmount'
@@ -101,4 +107,28 @@ export function shouldKeepLandrushRobotRevealSlabOpaque({
 }) {
   if (!Number.isFinite(robotLevelBaseY) || !Number.isFinite(slabLevelBaseY)) return false
   return slabLevelBaseY <= robotLevelBaseY + Math.max(0, tolerance)
+}
+
+export function shouldKeepLandrushRobotRevealStairOpaque({
+  cameraPoint,
+  footprints,
+  robotPoint,
+  standingTolerance,
+}: {
+  cameraPoint: LandrushNavigationPoint2
+  footprints: readonly (readonly LandrushNavigationPoint2[])[]
+  robotPoint: LandrushNavigationPoint2
+  standingTolerance: number
+}) {
+  if (
+    footprints.some((footprint) =>
+      pointInPolygonOrNearEdge(robotPoint, footprint, Math.max(0, standingTolerance)),
+    )
+  ) {
+    return true
+  }
+
+  return !footprints.some((footprint) =>
+    landrushIslandNavigationSegmentIntersectsPolygon(cameraPoint, robotPoint, footprint),
+  )
 }

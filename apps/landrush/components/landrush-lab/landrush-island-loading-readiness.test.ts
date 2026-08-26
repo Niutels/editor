@@ -187,12 +187,20 @@ describe('Landrush island paint readiness', () => {
     })
   })
 
-  test('shows a compact resync veil only after initial handoff and until the generation is ready', () => {
+  test('shows a compact resync veil only while a replacement authority is not ready', () => {
     expect(
       resolveLandrushAuthorityResyncActive({
         authorityKey: '2:world-a',
         handedOff: false,
         presentedAuthorityKey: null,
+        ready: false,
+      }),
+    ).toBe(false)
+    expect(
+      resolveLandrushAuthorityResyncActive({
+        authorityKey: '2:world-a',
+        handedOff: true,
+        presentedAuthorityKey: '2:world-a',
         ready: false,
       }),
     ).toBe(false)
@@ -204,6 +212,14 @@ describe('Landrush island paint readiness', () => {
         ready: false,
       }),
     ).toBe(true)
+    expect(
+      resolveLandrushAuthorityResyncActive({
+        authorityKey: '3:world-a',
+        handedOff: true,
+        presentedAuthorityKey: '2:world-a',
+        ready: true,
+      }),
+    ).toBe(false)
     expect(
       resolveLandrushAuthorityResyncActive({
         authorityKey: '3:world-a',
@@ -351,17 +367,53 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(clientSource).toContain('useLandrushIslandPaintReadiness(loadingAssetsReady)')
     expect(clientSource).toContain('ambientLoadReadiness?.ready === true')
-    expect(clientSource).toContain('assetsReady={loadingPaintReady}')
-    expect(clientSource).toContain('readinessGeneration={initialParcelAuthorityKey}')
-    expect(clientSource).toContain('createLandrushIslandLoadingHandoffGate({')
-    expect(clientSource).toContain('requestHandoff(loadingRun.generation)')
-    expect(clientSource).toContain('readinessGenerationRef.current === loadingRun.generation')
-    expect(clientSource).toContain('if (!handedOff || loadedRef.current) return')
+    expect(clientSource).toContain('runGeneration={loadingRunGenerationRef.current}')
+    expect(clientSource).toContain('sampleInvalidationKey={initialParcelAuthorityKey}')
+    expect(clientSource).toContain('topologySignature={loadingTopologySignature}')
+    expect(clientSource).toContain('profileKey={loadingProfileKey}')
+    expect(clientSource).toContain('tasks={loadingTasks}')
+    expect(clientSource).toContain('useLandrushIslandLoadingTimeline({')
+    expect(clientSource).toContain('ref={fillRef}')
+    expect(clientSource).toContain('ref={overlayRef}')
+    expect(clientSource).toContain("id: 'ambient-assets'")
+    expect(clientSource).toContain("id: 'natural-road-plan'")
+    expect(clientSource).toContain("id: 'procedural-cliffs'")
+    expect(clientSource).toContain("id: 'zombie-assets'")
+    expect(clientSource).toContain("id: 'zombie-pipeline'")
+    expect(clientSource).toContain('total: LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS.length')
+    expect(clientSource).toContain('total: ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS.length')
+    expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_DAY_PROFILE_KEY')
+    expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_ZOMBIE_PROFILE_KEY')
+    expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE')
+    expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE')
+    expect(clientSource).toContain('|natural-road-plan:${')
+    expect(clientSource).toContain("naturalRoadPlanRequired ? 'required' : 'omitted'")
+    expect(clientSource).toContain('|procedural-cliffs:')
+    expect(clientSource).toContain('loadingActive ? (')
+    expect(clientSource).not.toContain('generation={initialParcelAuthorityKey}')
+    expect(clientSource).not.toContain('function useLandrushIslandLoadingProgress')
+    expect(clientSource).not.toContain('LANDRUSH_ISLAND_LOADING_EXPECTED_MS')
     expect(clientSource).toContain('<LandrushIslandAuthorityResyncVeil')
     expect(clientSource).toContain('Syncing world…')
     expect(clientSource).toContain('currentInitialParcelReadiness.ready')
     expect(clientSource).toContain('admitted={initialParcelMaterializationReady}')
     expect(clientSource).toContain('onLoadReadinessChange={handleAmbientLoadReadinessChange}')
+    expect(clientSource).toContain(
+      'onLoadReadinessChange={handleProceduralCliffsLoadReadinessChange}',
+    )
+    expect(clientSource).toContain(
+      'const naturalRoadPlanResource = useNaturalRoadPlanResource(naturalRoadPlanInput)',
+    )
+    expect(clientSource).toContain(
+      'if (naturalRoadPlanResource.error) throw naturalRoadPlanResource.error',
+    )
+    expect(clientSource).not.toContain('createNaturalRoadPlan({')
+    expect(clientSource).toContain('naturalRoadPlanReady &&')
+    expect(clientSource).toContain('proceduralCliffsReady &&')
+    expect(clientSource).toContain('const reportedGeneration = proceduralCliffsLoadGeneration')
+    expect(clientSource).toContain(
+      'currentGeneration: currentProceduralCliffsLoadGenerationRef.current',
+    )
     expect(clientSource).not.toContain('admitted={!loadingActive}')
     expect(clientSource).toMatch(
       /data-landrush-loading-ambient-ready=\{\s*ambientLoadReadiness\?\.ready === true \? 'true' : 'false'\s*\}/,
@@ -374,6 +426,18 @@ describe('Landrush island paint readiness', () => {
     )
     expect(clientSource).toContain(
       "data-landrush-loading-paint-ready={loadingPaintReady ? 'true' : 'false'}",
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-natural-road-ready={naturalRoadPlanReady ? 'true' : 'false'}",
+    )
+    expect(clientSource).toContain(
+      'data-landrush-loading-natural-road-status={naturalRoadPlanResource.status}',
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-procedural-cliffs-ready={proceduralCliffsReady ? 'true' : 'false'}",
+    )
+    expect(clientSource).toContain(
+      'data-landrush-loading-procedural-cliffs-generation={proceduralCliffsLoadGeneration}',
     )
     expect(clientSource).toMatch(
       /data-landrush-loading-stylized-ground-ready=\{\s*stylizedGroundTextureReady \? 'true' : 'false'\s*\}/,
@@ -391,28 +455,20 @@ describe('Landrush island paint readiness', () => {
       /data-landrush-loading-zombie-assets-ready=\{\s*zombieEscapeGeneratedAssetsReady \? 'true' : 'false'\s*\}/,
     )
 
-    const loadingProgressStart = clientSource.indexOf('function useLandrushIslandLoadingProgress')
-    const loadingProgressEnd = clientSource.indexOf(
-      'function useProgressiveRenderValue',
-      loadingProgressStart,
+    const timelineSource = readFileSync(
+      new URL('./landrush-island-loading-timeline-react.tsx', import.meta.url),
+      'utf8',
     )
-    expect(loadingProgressStart).toBeGreaterThanOrEqual(0)
-    expect(loadingProgressEnd).toBeGreaterThan(loadingProgressStart)
-    const loadingProgressSource = clientSource.slice(loadingProgressStart, loadingProgressEnd)
-
-    expect(loadingProgressSource).toContain(
-      'readinessGenerationRef.current === loadingRun.generation',
-    )
-    expect(loadingProgressSource).toContain('assetsReadyRef.current')
-    expect(loadingProgressSource).toContain("document.readyState !== 'loading'")
-    expect(loadingProgressSource).toContain('elapsed >= LANDRUSH_ISLAND_LOADING_MINIMUM_MS')
-    expect(loadingProgressSource).not.toContain('PerformanceObserver')
-    expect(loadingProgressSource).not.toContain('lastLongTaskAt')
-    expect(loadingProgressSource).not.toContain('quietFor')
-    expect(loadingProgressSource).not.toContain('LANDRUSH_ISLAND_LOADING_QUIET_MS')
+    expect(timelineSource).toContain("document.readyState !== 'loading'")
+    expect(timelineSource).toContain('createLandrushIslandLoadingVisualPreview(')
+    expect(timelineSource).toContain('fadingOut: true')
+    expect(timelineSource).not.toContain('PerformanceObserver')
   })
 
-  test('keeps the route shell dark only until the canonical runtime world paints a frame', () => {
+  test('keeps one streamed gauge through runtime ownership and final fade', () => {
+    const layoutPath = fileURLToPath(
+      new URL('../../app/landrush-lab/pascal-multiplayer-island/layout.tsx', import.meta.url),
+    )
     const pagePath = fileURLToPath(
       new URL('../../app/landrush-lab/pascal-multiplayer-island/page.tsx', import.meta.url),
     )
@@ -420,16 +476,53 @@ describe('Landrush island paint readiness', () => {
     const routeLoadingPath = fileURLToPath(
       new URL('../../app/landrush-lab/pascal-multiplayer-island/loading.tsx', import.meta.url),
     )
+    const startupGatePath = fileURLToPath(
+      new URL('./landrush-island-startup-presentation-gate.tsx', import.meta.url),
+    )
     const shellPath = fileURLToPath(new URL('./landrush-island-loading-shell.tsx', import.meta.url))
     const globalsSource = readFileSync(globalsPath, 'utf8')
     const shellSource = readFileSync(shellPath, 'utf8')
+    const startupGateSource = readFileSync(startupGatePath, 'utf8')
 
-    expect(readFileSync(pagePath, 'utf8')).toContain('fallback={<LandrushIslandLoadingShell />}')
-    expect(readFileSync(routeLoadingPath, 'utf8')).toContain('<LandrushIslandLoadingShell />')
+    const layoutSource = readFileSync(layoutPath, 'utf8')
+    const pageSource = readFileSync(pagePath, 'utf8')
+    expect(layoutSource).toContain('<LandrushIslandLoadingShell />')
+    expect(layoutSource.indexOf('<LandrushIslandLoadingShell />')).toBeLessThan(
+      layoutSource.indexOf('{children}'),
+    )
+    expect(layoutSource).not.toContain('<LandrushIslandLoadingBootScript />')
+    expect(pageSource).toContain('<Suspense fallback={null}>')
+    expect(pageSource).toContain('<LandrushIslandStartupPresentationGate>')
+    expect(pageSource).not.toContain('<LandrushIslandLoadingBootScript />')
+    expect(pageSource).not.toContain('<LandrushIslandLoadingShell />')
+    expect(pageSource.indexOf('<LandrushIslandStartupPresentationGate>')).toBeLessThan(
+      pageSource.indexOf('<LandrushIslandClient'),
+    )
+    expect(startupGateSource).toContain('LANDRUSH_ISLAND_STARTUP_PRESENTATION_FRAME_COUNT = 2')
+    expect(startupGateSource).toContain('scheduleLandrushIslandStartupAfterPresentationFrames({')
+    expect(readFileSync(routeLoadingPath, 'utf8')).toContain('return null')
     expect(shellSource).toContain('bg-[#0f1720]')
     expect(shellSource).toContain('data-landrush-island-loading-shell')
+    expect(shellSource).toContain('function LandrushIslandLoadingBootScript()')
+    expect(shellSource).toContain('async')
+    expect(shellSource).toContain('data-landrush-island-loading-bootstrap')
+    expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_BOOTSTRAP_SOURCE')
+    expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_FILL_ATTRIBUTE')
+    expect(shellSource).toContain('data-landrush-island-loading-shell-percent')
+    expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE')
+    expect(shellSource).not.toContain('data-landrush-island-loading-shell-percent-strip')
+    expect(globalsSource).not.toContain('body:has([data-landrush-island-loading-runtime-owned])')
     expect(globalsSource).toContain('body:has([data-landrush-island-world-frame-ready])')
-    expect(globalsSource).toContain('[data-landrush-island-loading-shell] {\n  display: none;')
+    expect(globalsSource).toContain('background-color: transparent')
+    expect(globalsSource).toContain('@keyframes landrush-island-loading-shell-progress')
+    expect(globalsSource).toContain(
+      'animation: landrush-island-loading-shell-progress 136.667s linear both',
+    )
+    expect(globalsSource).toContain(
+      'animation-delay: var(--landrush-island-loading-shell-delay, 0ms)',
+    )
+    expect(globalsSource).toContain('@keyframes landrush-island-loading-shell-percent')
+    expect(globalsSource).not.toContain('[data-landrush-island-loading-shell] {\n  display: none;')
   })
 
   test('reveals the blurred mounted island through a transparent runtime overlay', () => {
@@ -498,15 +591,21 @@ describe('Landrush island paint readiness', () => {
 
     expect(clientSource).toContain('zombieEscapeGeneratedAssetsReady &&')
     expect(clientSource).not.toContain('setZombieEscapeGeneratedAssetsReady(!zombieEscapeEnabled)')
-    expect(clientSource).toContain('reportedGeneration: zombieEscapeGeneratedAssetGeneration')
     expect(clientSource).toContain(
-      'onGeneratedAssetsReadyChange={onZombieEscapeGeneratedAssetsReadyChange}',
+      'reportedMountGeneration !== currentZombieEscapeGeneratedAssetGenerationRef.current',
     )
-    expect(generatedAssetsSource).toContain('GENERATED_BALANCED_ASSET_KEYS')
+    expect(clientSource).toContain(
+      'onGeneratedAssetsReadinessChange={onZombieEscapeGeneratedAssetsReadinessChange}',
+    )
+    expect(generatedAssetsSource).toContain('ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS')
+    expect(generatedAssetsSource).toContain(
+      'ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE',
+    )
     expect(generatedAssetsSource).toContain('...GENERATED_WEAPON_ASSET_KEYS')
     expect(generatedAssetsSource).toContain('...GENERATED_ZOMBIE_ASSET_KEYS')
     expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetSettlement(')
-    expect(generatedAssetsSource).toContain('onGeneratedAssetsReadyChange?.(settlement.ready)')
+    expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetReadinessSnapshot({')
+    expect(generatedAssetsSource).toContain('onGeneratedAssetsReadinessChange?.(')
     expect(generatedAssetsSource).toContain("onAssetStatusChange(assetKey, { state: 'ready' })")
   })
 })

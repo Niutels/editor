@@ -15,7 +15,7 @@ import {
 import type { Node as TSLNode } from 'three/webgpu'
 
 const REVEAL_DISABLED_CENTER_PX = -100000
-const REVEAL_DEPTH_FEATHER_METERS = 0.04
+export const LANDRUSH_ROBOT_SCREEN_REVEAL_DEPTH_FEATHER_METERS = 0.04
 
 export const LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_DEFAULT = 2
 export const LANDRUSH_ROBOT_SCREEN_REVEAL_OUTER_RADIUS_SCALE_MAX = 32
@@ -40,7 +40,6 @@ export function createLandrushRobotScreenRevealOpacityNode(
   baseOpacity: TSLNode<'float'> = float(1),
   revealAmount: TSLNode<'float'> = float(1),
   effectiveLayerCount = 1,
-  { depthAware = true }: { depthAware?: boolean } = {},
 ) {
   const distancePx = createLandrushRobotScreenRevealDistanceNode()
   const transitionRatio = distancePx
@@ -50,19 +49,17 @@ export function createLandrushRobotScreenRevealOpacityNode(
   const smoothness = radialTransitionSmoothness.div(100)
   const endpointSmoothFade = transitionRatio.pow(2).mul(float(3).sub(transitionRatio.mul(2)))
   const radialFade = mix(transitionRatio, endpointSmoothFade, smoothness)
-  const combinedFade = depthAware
-    ? float(1).sub(
-        radialFade
-          .oneMinus()
-          .mul(
-            smoothstep(
-              -REVEAL_DEPTH_FEATHER_METERS / 2,
-              REVEAL_DEPTH_FEATHER_METERS / 2,
-              sub(positionView.z.negate(), robotNearDepth),
-            ).oneMinus(),
-          ),
-      )
-    : radialFade
+  const combinedFade = float(1).sub(
+    radialFade
+      .oneMinus()
+      .mul(
+        smoothstep(
+          -LANDRUSH_ROBOT_SCREEN_REVEAL_DEPTH_FEATHER_METERS / 2,
+          LANDRUSH_ROBOT_SCREEN_REVEAL_DEPTH_FEATHER_METERS / 2,
+          sub(positionView.z.negate(), robotNearDepth),
+        ).oneMinus(),
+      ),
+  )
   const revealFade =
     effectiveLayerCount > 1
       ? float(1).sub(combinedFade.oneMinus().pow(1 / effectiveLayerCount))
@@ -141,9 +138,32 @@ export function updateLandrushRobotScreenRevealMask({
 }) {
   viewportPx.set(width, height)
   centerPx.set(centerX, centerY)
-  robotNearDepth.value = Math.max(0, nextRobotNearDepth)
+  robotNearDepth.value = Number.isFinite(nextRobotNearDepth) ? Math.max(0, nextRobotNearDepth) : 0
   innerRadiusPx.value = Math.max(0, innerRadius)
   outerRadiusPx.value = Math.max(innerRadiusPx.value + 1, outerRadius)
+}
+
+export function sampleLandrushRobotScreenRevealDepthAmount(
+  fragmentViewDepth: number,
+  nextRobotNearDepth: number,
+) {
+  if (
+    !Number.isFinite(fragmentViewDepth) ||
+    !Number.isFinite(nextRobotNearDepth) ||
+    nextRobotNearDepth <= 0
+  ) {
+    return 0
+  }
+  const halfFeather = LANDRUSH_ROBOT_SCREEN_REVEAL_DEPTH_FEATHER_METERS / 2
+  const amount = Math.max(
+    0,
+    Math.min(
+      1,
+      (fragmentViewDepth - nextRobotNearDepth + halfFeather) /
+        LANDRUSH_ROBOT_SCREEN_REVEAL_DEPTH_FEATHER_METERS,
+    ),
+  )
+  return 1 - amount * amount * (3 - 2 * amount)
 }
 
 export function clearLandrushRobotScreenRevealMask() {

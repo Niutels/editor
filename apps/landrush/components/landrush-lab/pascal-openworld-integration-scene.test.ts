@@ -9,6 +9,10 @@ describe('Pascal multiplayer-island composition', () => {
       'utf8',
     )
     const clientSource = readFileSync(join(import.meta.dir, 'landrush-island-client.tsx'), 'utf8')
+    const ambientLifeSource = readFileSync(
+      join(import.meta.dir, 'landrush-island-ambient-life.tsx'),
+      'utf8',
+    )
     const hostSource = readFileSync(
       join(
         import.meta.dir,
@@ -47,6 +51,36 @@ describe('Pascal multiplayer-island composition', () => {
     const runtimeOverlaySource = clientSource.slice(runtimeOverlayStart, runtimeOverlayEnd)
     expect(runtimeOverlaySource).toContain('bg-transparent')
     expect(runtimeOverlaySource).not.toContain('bg-[#0f1720]')
+    expect(clientSource.match(/createLandrushIslandPalmLayout\(\{/g)).toHaveLength(1)
+    expect(clientSource).toContain('roadClearance: liveNaturalRoadPlan?.footprints.clearance ?? []')
+    expect(clientSource.match(/palmLayout=\{livePalmLayout\}/g)).toHaveLength(2)
+    expect(clientSource.match(/palmLayout=\{palmLayout\}/g)).toHaveLength(1)
+    expect(ambientLifeSource).not.toContain('createLandrushIslandPalmLayout')
+    expect(ambientLifeSource).toContain('palmLayout: readonly LandrushIslandPalmPlacement[]')
+    expect(clientSource).toContain("window.addEventListener('blur', handleBlur)")
+    expect(clientSource).toContain(
+      "document.addEventListener('visibilitychange', handleVisibilityChange)",
+    )
+    const clearHeldInputStart = clientSource.indexOf('const clearHeldInput = useCallback(() => {')
+    const clearHeldInputEnd = clientSource.indexOf('\n  }, [])', clearHeldInputStart)
+    expect(clearHeldInputStart).toBeGreaterThanOrEqual(0)
+    expect(clearHeldInputEnd).toBeGreaterThan(clearHeldInputStart)
+    const clearHeldInputSource = clientSource.slice(clearHeldInputStart, clearHeldInputEnd)
+    expect(clearHeldInputSource).toContain('keyboardJumpRawHeldRef.current = false')
+    expect(clearHeldInputSource).toContain('keyboardJumpButtonStateRef.current.armed = false')
+    expect(clearHeldInputSource).toContain('gamepadJumpButtonStateRef.current.armed = false')
+    expect(clearHeldInputSource).toContain(
+      'resetLandrushIslandJumpRequestState(jumpRequestRef.current)',
+    )
+    expect(clearHeldInputSource).toMatch(
+      /setMovement\(\{\s+crouch: false,\s+jump: false,\s+run: false,\s+worldDirection: null,/,
+    )
+    expect(clientSource).toContain('motion.crouching = physicsController.crouching')
+    expect(clientSource).toContain('const webGLClippingPlanesRef = useRef([')
+    expect(clientSource).toContain('updateLandrushRobotScreenRevealWebGLDepthPlane({')
+    expect(clientSource.match(/clippingPlanes: webGLClippingPlanesRef\.current/g)).toHaveLength(1)
+    expect(clientSource).not.toContain('clippingPlanes: clippingPlanesRef.current')
+    expect(clientSource).not.toContain('renderer.clippingPlanes')
     expect(hostSource.match(/<Viewer\b/g)).toHaveLength(1)
     expect(hostSource).toContain('{children}')
     expect(hostSource).toContain('onSceneReadyChange: (ready: boolean) => void')

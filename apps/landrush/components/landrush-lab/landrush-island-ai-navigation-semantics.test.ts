@@ -12,10 +12,15 @@ import {
 import {
   createLandrushIslandAiNavigationSnapshot,
   createLandrushIslandRuntimeDoorPassabilityKey,
+  createLandrushZombieEscapeCollisionWorld,
+  createLandrushZombieEscapeCollisionWorldCompilation,
+  createLandrushZombieEscapeCollisionWorldSignature,
   resolveLandrushIslandRuntimeDoorPassabilityKey,
 } from './landrush-island-ai-navigation-semantics'
 import { distanceToLandrushIslandAmbientObstacles } from './landrush-island-ambient-navigation'
 import { createLandrushIslandAmbientSemanticNavigationObstacles } from './landrush-island-ambient-navigation-semantics'
+import { resolveLandrushZombieEscapeCollisionWorldPhaseReady } from './landrush-zombie-escape-collision-world-lifecycle'
+import { ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND } from './zombie-escape-collision-world'
 
 function indexNodes(nodes: readonly AnyNode[]) {
   return Object.fromEntries(nodes.map((node) => [node.id, node])) as Record<string, AnyNode>
@@ -61,8 +66,15 @@ describe('Landrush island shared AI navigation semantics', () => {
       shaftDepth: 2,
       shaftWidth: 1.8,
     })
+    const nodes = indexNodes([building, level, wall, opening, shelf, column, elevator])
     const snapshot = createLandrushIslandAiNavigationSnapshot({
-      nodes: indexNodes([building, level, wall, opening, shelf, column, elevator]),
+      nodes,
+      spawn: { x: 2, z: 1 },
+    })
+    const compilation = createLandrushZombieEscapeCollisionWorldCompilation({
+      agentRadius: 0.34,
+      nodes,
+      playRadius: 20,
       spawn: { x: 2, z: 1 },
     })
 
@@ -72,6 +84,24 @@ describe('Landrush island shared AI navigation semantics', () => {
       expect.arrayContaining([shelf.id, column.id, elevator.id]),
     )
     expect(snapshot.combatBoxes).toEqual(snapshot.navigationBoxes)
+    expect(snapshot.objectSemantics).toEqual(
+      [...snapshot.objectSemantics].sort((first, second) =>
+        first.objectId.localeCompare(second.objectId),
+      ),
+    )
+    expect(snapshot.objectSemantics).toEqual(
+      expect.arrayContaining([
+        {
+          objectId: shelf.id,
+          semanticKind: ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.furniture,
+        },
+        {
+          objectId: column.id,
+          semanticKind: ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.other,
+        },
+      ]),
+    )
+    expect(compilation.payload.objectSemantics).toEqual(snapshot.objectSemantics)
 
     const obstacles = createLandrushIslandAmbientSemanticNavigationObstacles({
       agentRadius: 0.3,
@@ -149,6 +179,15 @@ describe('Landrush island shared AI navigation semantics', () => {
       nodes: indexNodes([level, wall, door]),
       spawn: { x: 0, z: 0 },
     })
+    const closedSnapshot = createLandrushIslandAiNavigationSnapshot({
+      doorPassability: { [door.id]: false },
+      nodes: indexNodes([level, wall, door]),
+      spawn: { x: 0, z: 0 },
+    })
+    expect(closedSnapshot.objectSemantics).toContainEqual({
+      objectId: door.id,
+      semanticKind: ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.door,
+    })
     const wallObstacles = createLandrushIslandAmbientSemanticNavigationObstacles({
       agentRadius: 0.3,
       groundY: 0,
@@ -171,5 +210,118 @@ describe('Landrush island shared AI navigation semantics', () => {
     expect(
       distanceToLandrushIslandAmbientObstacles({ x: 4.3, z: 0.3 }, wallObstacles),
     ).toBeGreaterThan(0)
+  })
+
+  test('gates night readiness across a closed-to-open door threshold until that signature is applied', () => {
+    const level = LevelNode.parse({ level: 0 })
+    const wall = WallNode.parse({
+      end: [4, 0],
+      parentId: level.id,
+      start: [0, 0],
+      thickness: 0.18,
+    })
+    const door = DoorNode.parse({
+      parentId: wall.id,
+      position: [2, 0, 0],
+      wallId: wall.id,
+      width: 1,
+    })
+    const nodes = indexNodes([level, wall, door])
+    const createInput = (operationState: number) => ({
+      agentRadius: 0.3,
+      doorPassability: resolveLandrushIslandRuntimeDoorPassabilityKey(
+        createLandrushIslandRuntimeDoorPassabilityKey({
+          [door.id]: { operationState },
+        }),
+      ),
+      nodes,
+      playRadius: 20,
+      spawn: { x: 0, z: 0 },
+    })
+    const closedSignature = createLandrushZombieEscapeCollisionWorldSignature(createInput(0.849))
+    const openSignature = createLandrushZombieEscapeCollisionWorldSignature(createInput(0.85))
+    const appliedClosedState = {
+      generation: 1,
+      pendingSignature: null,
+      ready: true,
+      signature: closedSignature,
+      worlds: { signature: closedSignature },
+    } as const
+
+    expect(openSignature).not.toBe(closedSignature)
+    expect(
+      resolveLandrushZombieEscapeCollisionWorldPhaseReady({
+        desiredSignature: openSignature,
+        expectedPhase: 'night',
+        phaseReady: true,
+        state: appliedClosedState,
+      }),
+    ).toBe(false)
+    expect(
+      resolveLandrushZombieEscapeCollisionWorldPhaseReady({
+        desiredSignature: closedSignature,
+        expectedPhase: 'night',
+        phaseReady: true,
+        state: appliedClosedState,
+      }),
+    ).toBe(true)
+    expect(
+      resolveLandrushZombieEscapeCollisionWorldPhaseReady({
+        desiredSignature: openSignature,
+        expectedPhase: 'night',
+        phaseReady: true,
+        state: {
+          ...appliedClosedState,
+          generation: 2,
+          signature: openSignature,
+          worlds: { signature: openSignature },
+        },
+      }),
+    ).toBe(true)
+  })
+
+  test('keys the exact surface boundary and selects sparse navigation without a radial boundary', () => {
+    const firstSurfaceSupport = {
+      boundary: true as const,
+      elevation: 0 as const,
+      id: 'island-surface',
+      polygon: [
+        { x: -8, z: -6 },
+        { x: 8, z: -6 },
+        { x: 8, z: 6 },
+        { x: -8, z: 6 },
+      ],
+    }
+    const secondSurfaceSupport = {
+      ...firstSurfaceSupport,
+      polygon: [...firstSurfaceSupport.polygon.slice(0, 2), { x: 9, z: 6 }, { x: -8, z: 6 }],
+    }
+    const createSnapshot = (surfaceSupport: typeof firstSurfaceSupport) =>
+      createLandrushIslandAiNavigationSnapshot({
+        nodes: {},
+        spawn: { x: 0, z: 0 },
+        surfaceSupport,
+      })
+    const createWorld = (surfaceSupport: typeof firstSurfaceSupport) =>
+      createLandrushZombieEscapeCollisionWorld({
+        agentRadius: 0.3,
+        nodes: {},
+        playRadius: 1,
+        spawn: { x: 0, z: 0 },
+        surfaceSupport,
+      })
+
+    const firstSnapshot = createSnapshot(firstSurfaceSupport)
+    const secondSnapshot = createSnapshot(secondSurfaceSupport)
+    const firstWorld = createWorld(firstSurfaceSupport)
+    const secondWorld = createWorld(secondSurfaceSupport)
+
+    expect(firstSnapshot.navigationSupports).toEqual([firstSurfaceSupport])
+    expect(firstSnapshot.semanticKey).not.toBe(secondSnapshot.semanticKey)
+    expect(firstWorld.semanticKey).not.toBe(secondWorld.semanticKey)
+    expect(firstWorld.navigationMode).toBe('sparse')
+    expect(firstWorld.boundaryPolicy).toBe('none')
+    expect(firstWorld.gridWidth).toBe(1)
+    expect(firstWorld.gridHeight).toBe(1)
   })
 })

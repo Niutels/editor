@@ -59,7 +59,7 @@ export const ZOMBIE_ESCAPE_ARENA = {
 export const ZOMBIE_ESCAPE_CAPACITY = {
   impactSparksPerShot: 6,
   shots: 64,
-  zombies: 64,
+  zombies: 100,
 } as const
 
 export const ZOMBIE_ESCAPE_SIMULATION = {
@@ -69,10 +69,40 @@ export const ZOMBIE_ESCAPE_SIMULATION = {
   escapeRadius: 2.25,
   fixedDeltaSeconds: 1 / 60,
   impactLifetimeSeconds: 0.28,
+  initialNightZombieCount: 50,
+  initialZombiePopulationAdmissionDeadlineSeconds: 6,
   killReward: 10,
   maximumFrameDeltaSeconds: 0.05,
   maximumSubsteps: 4,
   muzzleFlashSeconds: 0.085,
+  navigationIntentResolveBudgetPerTick: 16,
+  navigationRefreshCandidateInspectionBudgetPerTick: 64,
+  navigationRouteTargetMaximumPublicationLatencyTicks: 14,
+  navigationRouteTargetCellHysteresisRatio: 0.2,
+  navigationRouteTargetLayerHysteresisMeters: 1.8,
+  navigationSparseSearchAgentSlicesPerTick: 8,
+  navigationSparseSearchCompactTargetMaximumNodeCount: 256,
+  navigationSparseSearchCompactTargetMaximumCandidateVisitsPerTick: 256,
+  navigationSparseSearchCompactTargetMaximumGraphEdgeVisitsPerTick: 512,
+  navigationSparseSearchCompactTargetMaximumHeapOperationsPerTick: 512,
+  navigationSparseSearchMinimumWorkUnitsPerAgentSlice: 1,
+  navigationSparseSearchMaximumCandidateVisitsPerAgentSlice: 32,
+  navigationSparseSearchMaximumCandidateVisitsPerTick: 256,
+  navigationSparseSearchMaximumTargetCandidateVisitsPerTick: 1024,
+  navigationSparseSearchMaximumCollisionPredicatesPerAgentSlice: 8,
+  navigationSparseSearchMaximumCollisionPredicatesPerTick: 64,
+  navigationSparseSearchMaximumHierarchyNodeVisitsPerAgentSlice: 32,
+  navigationSparseSearchMaximumHierarchyNodeVisitsPerTick: 256,
+  navigationSparseSearchMaximumGraphEdgeVisitsPerTick: 512,
+  navigationSparseSearchMaximumTargetGraphEdgeVisitsPerTick: 1024,
+  navigationSparseSearchMaximumHeapOperationsPerAgentSlice: 32,
+  navigationSparseSearchMaximumHeapOperationsPerTick: 256,
+  navigationSparseSearchMaximumTargetHeapOperationsPerTick: 3072,
+  navigationSparseSearchMaximumSupportPredicatesPerAgentSlice: 16,
+  navigationSparseSearchMaximumSupportPredicatesPerTick: 128,
+  navigationSparseSearchMaximumTargetBuildsPerTick: 2,
+  navigationSparseSearchSpawnSlicesPerTick: 1,
+  navigationSparseSearchTargetSlicesPerTick: 1,
   nightDurationSeconds: 180,
   obstacleHitsToBreak: 2,
   pickupInteractionRadius: 1.35,
@@ -86,13 +116,28 @@ export const ZOMBIE_ESCAPE_SIMULATION = {
   zombieHitImpulseDecay: 7.5,
   zombieHitReactionSeconds: 0.3,
   zombieNavigationRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+  zombieNavigationRoutePlanningSpeedMetersPerSecond: 3.2,
+  zombieObstacleAttackContactPhase: 0.42,
   zombieObstacleAttackCooldownSeconds: 0.72,
   zombieObstacleAttackReachMeters: 0.9,
   zombieObstacleAttackReleaseMeters: 1.1,
   zombiePlayerAttackReachMeters: 1.05,
   zombieRadius: 0.48,
+  zombieSeparationRadiusMeters: 1.75,
+  zombieSeparationStrength: 1.55,
+  zombieSeparationVerticalToleranceMeters: 0.75,
+  zombieSpawnIntervalSeconds: 0.075,
+  zombieSpawnMaximumAdmissionsPerTick: 1,
+  zombiePopulationGrowthPerNight: 3,
+  zombieSpatialMaximumCandidateInspectionsPerQuery: 48,
   zombieTurnSpeedRadiansPerSecond: Math.PI * 3,
 } as const
+
+export const ZOMBIE_ESCAPE_OBSTACLE_BREACH_DURATION_SECONDS =
+  (ZOMBIE_ESCAPE_SIMULATION.obstacleHitsToBreak -
+    1 +
+    ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackContactPhase) *
+  ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
 
 export const ZOMBIE_ESCAPE_MELEE = {
   activeSeconds: 0.07,

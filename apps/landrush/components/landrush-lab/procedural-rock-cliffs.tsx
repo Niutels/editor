@@ -1,12 +1,9 @@
 'use client'
 
-import {
-  LANDRUSH_WATER_SURFACE_ELEVATION,
-  type PascalWaterLandSurface,
-} from '@landrush/pascal-plugin'
+import type { PascalWaterLandSurface } from '@landrush/pascal-plugin'
 import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   type BufferGeometry,
   DataTexture,
@@ -24,7 +21,6 @@ import {
   GRASS_FIELD_RESOLUTION,
 } from './grass-field-texture'
 import {
-  createProceduralRockCliffPlan,
   DEFAULT_PROCEDURAL_BEACH_CONTROLS,
   type ProceduralBeachControls,
   type ProceduralRockCliffDebugMode,
@@ -34,11 +30,14 @@ import {
   type ProceduralRockOffshoreControls,
   type ProceduralRockToneControls,
 } from './procedural-rock-cliff-geometry'
-import { ProceduralStylizedGrassGround } from './stylized-grass-ground-material'
+import { loadProceduralRockCliffBundle } from './procedural-rock-cliff-worker-client'
 import {
-  createWaterlineInteractionField,
-  type WaterlineInteractionField,
-} from './waterline-interaction-field'
+  createProceduralRockCliffWorkerSignature,
+  type ProceduralRockCliffWorkerCompileInput,
+  restoreProceduralRockCliffBundle,
+} from './procedural-rock-cliff-worker-transport'
+import { ProceduralStylizedGrassGround } from './stylized-grass-ground-material'
+import type { WaterlineInteractionField } from './waterline-interaction-field'
 
 export type ProceduralRockCliffRuntimeMetrics = {
   drawCalls: number
@@ -52,6 +51,7 @@ export function ProceduralRockCliffs({
   cutCount,
   debugMode,
   offshoreControls,
+  onLoadReadinessChange,
   onMetrics,
   onRuntimeMetrics,
   onWaterlineInteractionField,
@@ -70,6 +70,7 @@ export function ProceduralRockCliffs({
   cutCount: number
   debugMode: ProceduralRockCliffDebugMode
   offshoreControls: ProceduralRockOffshoreControls
+  onLoadReadinessChange?: (ready: boolean) => void
   onMetrics?: (metrics: ProceduralRockCliffMetrics) => void
   onRuntimeMetrics?: (metrics: ProceduralRockCliffRuntimeMetrics) => void
   onWaterlineInteractionField?: (field: WaterlineInteractionField | null) => void
@@ -84,26 +85,29 @@ export function ProceduralRockCliffs({
   wallControls: ProceduralRockCliffWallControls
   waterSurfaceElevation?: number
 }) {
-  const plan = useMemo(() => {
-    const build = () =>
-      createProceduralRockCliffPlan({
-        beachControls,
-        cutCount,
-        offshoreControls,
-        quality,
-        rockScale,
-        seed,
-        surface,
-        toneControls,
-        wallControls,
-        waterSurfaceElevation,
-      })
-    return profileMeasure ? profileMeasure('setup.cliffs.geometry-plan', build) : build()
+  const includeWaterlineInteractionField = Boolean(onWaterlineInteractionField)
+  const compileInput = useMemo<ProceduralRockCliffWorkerCompileInput>(() => {
+    return {
+      beachControls,
+      cutCount,
+      includeWaterlineInteractionField,
+      offshoreControls,
+      quality,
+      rockScale,
+      seed,
+      surface,
+      toneControls,
+      wallControls,
+      waterSurfaceElevation: waterSurfaceElevation ?? null,
+      waterlineElevationRangeMeters: 2.5,
+      waterlineMaximumDistanceMeters: 6,
+      waterlineResolution: quality === 'dense' ? 1280 : 1024,
+    }
   }, [
     beachControls,
     cutCount,
+    includeWaterlineInteractionField,
     offshoreControls,
-    profileMeasure,
     quality,
     rockScale,
     seed,
@@ -112,6 +116,43 @@ export function ProceduralRockCliffs({
     wallControls,
     waterSurfaceElevation,
   ])
+  const compileSignature = useMemo(
+    () => createProceduralRockCliffWorkerSignature(compileInput),
+    [compileInput],
+  )
+  const profileMeasureRef = useRef(profileMeasure)
+  profileMeasureRef.current = profileMeasure
+  const [loadedBundle, setLoadedBundle] = useState<LoadedProceduralRockCliffBundle | null>(null)
+  const [loadFailure, setLoadFailure] = useState<ProceduralRockCliffLoadFailure | null>(null)
+
+  useEffect(() => {
+    let active = true
+    setLoadFailure(null)
+    void loadProceduralRockCliffBundle(compileInput).then(
+      (serializedBundle) => {
+        if (!active) return
+        const restore = () => restoreProceduralRockCliffBundle(serializedBundle)
+        const bundle = profileMeasureRef.current
+          ? profileMeasureRef.current('setup.cliffs.worker-restore', restore)
+          : restore()
+        if (!active) return
+        setLoadedBundle({ bundle, signature: compileSignature })
+      },
+      (error: unknown) => {
+        if (!active) return
+        setLoadFailure({
+          error: error instanceof Error ? error : new Error(String(error)),
+          signature: compileSignature,
+        })
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [compileInput, compileSignature])
+
+  const activeBundle = loadedBundle?.signature === compileSignature ? loadedBundle.bundle : null
+  const plan = activeBundle?.plan ?? null
   const grassField = useMemo(
     () =>
       showGround
@@ -127,34 +168,31 @@ export function ProceduralRockCliffs({
         : null,
     [showGround, surface.grassSurfacePoints],
   )
-  const waterlineInteractionField = useMemo(() => {
-    if (!onWaterlineInteractionField) return null
-    const build = () =>
-      createWaterlineInteractionField(
-        plan.geometry,
-        waterSurfaceElevation ?? LANDRUSH_WATER_SURFACE_ELEVATION,
-        {
-          elevationRangeMeters: 2.5,
-          maximumDistanceMeters: 6,
-          resolution: quality === 'dense' ? 1280 : 1024,
-        },
-      )
-    return profileMeasure ? profileMeasure('setup.cliffs.waterline-sdf', build) : build()
-  }, [onWaterlineInteractionField, plan.geometry, profileMeasure, quality, waterSurfaceElevation])
+  const waterlineInteractionField = activeBundle?.waterlineInteractionField ?? null
   const toonGradient = useMemo(createRockToonGradientTexture, [])
 
-  useGpuResourceLifetime(plan.coverageGeometry)
-  useGpuResourceLifetime(plan.geometry)
-  useGpuResourceLifetime(plan.variantGeometry)
+  useGpuResourceLifetime(plan?.coverageGeometry)
+  useGpuResourceLifetime(plan?.geometry)
+  useGpuResourceLifetime(plan?.variantGeometry)
   useGpuResourceLifetime(grassField?.texture)
   useGpuResourceLifetime(toonGradient)
   useGpuResourceLifetime(waterlineInteractionField?.texture)
 
-  useEffect(() => onMetrics?.(plan.metrics), [onMetrics, plan.metrics])
+  useEffect(() => {
+    if (plan) onMetrics?.(plan.metrics)
+  }, [onMetrics, plan])
   useEffect(() => {
     onWaterlineInteractionField?.(waterlineInteractionField)
     return () => onWaterlineInteractionField?.(null)
   }, [onWaterlineInteractionField, waterlineInteractionField])
+  const loadReady = isProceduralRockCliffLoadReady(compileSignature, loadedBundle?.signature)
+  useEffect(() => {
+    onLoadReadinessChange?.(loadReady)
+    return () => onLoadReadinessChange?.(false)
+  }, [loadReady, onLoadReadinessChange])
+
+  if (loadFailure?.signature === compileSignature) throw loadFailure.error
+  if (!plan) return null
 
   const rockGeometry =
     debugMode === 'coverage'
@@ -182,6 +220,23 @@ export function ProceduralRockCliffs({
       {onRuntimeMetrics ? <ProceduralRockRuntimeProbe onMetrics={onRuntimeMetrics} /> : null}
     </group>
   )
+}
+
+type LoadedProceduralRockCliffBundle = Readonly<{
+  bundle: ReturnType<typeof restoreProceduralRockCliffBundle>
+  signature: string
+}>
+
+type ProceduralRockCliffLoadFailure = Readonly<{
+  error: Error
+  signature: string
+}>
+
+export function isProceduralRockCliffLoadReady(
+  activeSignature: string,
+  loadedSignature: string | undefined,
+) {
+  return loadedSignature === activeSignature
 }
 
 function ProceduralRockMesh({

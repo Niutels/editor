@@ -276,6 +276,47 @@ test('presentation classification is unmeasured without explicit display Hz', as
   })
 })
 
+test('scenario contracts hard-gate raw cadence p95 and measured console errors', async () => {
+  const scenarioContract = { cadence: { maximumP95Ms: 17.42 } }
+  await withSyntheticRun(
+    {
+      frames: makeFrames({ count: 120, dt: () => 1000 / 60 }),
+      options: { meta: { displayHz: 60, scenarioContract } },
+    },
+    async ({ report }) => {
+      assert.equal(findGate(report, 'Cadence p95').status, 'pass')
+      assert.equal(findGate(report, 'Zero page errors').status, 'pass')
+      assert.equal(report.verdict, 'PARTIAL')
+    },
+  )
+
+  await withSyntheticRun(
+    {
+      frames: makeFrames({ count: 120, dt: () => 17.421 }),
+      options: { meta: { displayHz: 60, scenarioContract } },
+    },
+    async ({ report }) => {
+      assert.equal(report.cadence.dt.p95, 17.42)
+      assert.equal(findGate(report, 'Cadence p95').status, 'fail')
+      assert.equal(report.verdict, 'FAIL')
+    },
+  )
+
+  await withSyntheticRun(
+    {
+      events: [{ t: 1_000, type: 'console:error', data: ['synthetic failure'] }],
+      frames: makeFrames({ count: 120, dt: () => 1000 / 60 }),
+      options: { meta: { displayHz: 60, scenarioContract } },
+    },
+    async ({ report }) => {
+      assert.equal(report.detectors.consoleErrors, 1)
+      assert.equal(findGate(report, 'Cadence p95').status, 'pass')
+      assert.equal(findGate(report, 'Zero page errors').status, 'fail')
+      assert.equal(report.verdict, 'FAIL')
+    },
+  )
+})
+
 test('boundary operators distinguish expected quantization, misses, and severe frames', async () => {
   const budgetMs = 1000 / 60
   const displayIntervalMs = 1000 / 144

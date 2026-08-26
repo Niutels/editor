@@ -7,6 +7,7 @@ import {
   LANDRUSH_ISLAND_AMBIENT_FISH,
   LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_NPCS,
+  LANDRUSH_ISLAND_AMBIENT_PALM_DIMENSION_SCALE,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALMS,
 } from './landrush-island-ambient-catalog'
@@ -15,15 +16,27 @@ describe('Landrush island ambient Meshy catalog', () => {
   test('contains the requested non-zombie asset set', () => {
     expect(LANDRUSH_ISLAND_AMBIENT_BOATS).toHaveLength(3)
     expect(LANDRUSH_ISLAND_AMBIENT_PALMS).toHaveLength(3)
-    expect(
-      LANDRUSH_ISLAND_AMBIENT_PALMS.map(({ heightMeters, id }) => ({ heightMeters, id })),
-    ).toEqual([
-      { heightMeters: 9, id: 'classic-coconut-palm' },
-      { heightMeters: 5, id: 'short-fan-palm' },
-      { heightMeters: 7.5, id: 'twin-trunk-date-palm' },
-    ])
+    expect(LANDRUSH_ISLAND_AMBIENT_PALM_DIMENSION_SCALE).toBe(1.3)
+    const baseDimensions = [
+      { heightMeters: 9, id: 'classic-coconut-palm', trunkRadiusMeters: 0.24 },
+      { heightMeters: 5, id: 'short-fan-palm', trunkRadiusMeters: 0.28 },
+      { heightMeters: 7.5, id: 'twin-trunk-date-palm', trunkRadiusMeters: 0.38 },
+    ]
+    for (let index = 0; index < baseDimensions.length; index += 1) {
+      const base = baseDimensions[index]!
+      const palm = LANDRUSH_ISLAND_AMBIENT_PALMS[index]!
+      expect(palm.id).toBe(base.id)
+      expect(palm.heightMeters).toBeCloseTo(
+        base.heightMeters * LANDRUSH_ISLAND_AMBIENT_PALM_DIMENSION_SCALE,
+        12,
+      )
+      expect(palm.trunkRadiusMeters).toBeCloseTo(
+        base.trunkRadiusMeters * LANDRUSH_ISLAND_AMBIENT_PALM_DIMENSION_SCALE,
+        12,
+      )
+    }
     expect(LANDRUSH_ISLAND_AMBIENT_FISH).toHaveLength(10)
-    expect(LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT).toBe(60)
+    expect(LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT).toBe(200)
     expect(LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT).toBeGreaterThanOrEqual(50)
     expect(LANDRUSH_ISLAND_AMBIENT_NPCS).toHaveLength(10)
     expect(LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT).toBe(4)

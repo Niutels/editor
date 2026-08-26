@@ -84,6 +84,9 @@ describe('Zombie shooting debug blood proof', () => {
   test('mounts the shared blood renderer without legacy enemy flash or ring pools', () => {
     const source = readFileSync(join(import.meta.dir, 'zombie-shooting-debug-client.tsx'), 'utf8')
     expect(source).toContain('<ZombieEscapeBloodPresentation')
+    expect(source).toContain('resolveWorldAttachment={resolveWorldAttachment}')
+    expect(source).toContain('captureZombieEscapeSkinnedImpact(')
+    expect(source).toContain('data-capture-ready')
     expect(source).toContain('resolveZombieEscapeHitFlickerPhase')
     expect(source).not.toContain('impactFlashRef')
     expect(source).not.toContain('impactRingRef')

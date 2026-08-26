@@ -1,5 +1,10 @@
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import {
+  buildLandrushRuntimeWorkers,
+  createLandrushRuntimeWorkerWatchArguments,
+  landrushRuntimeWorkerWatchDirectory,
+} from './build-landrush-runtime-workers.mjs'
 
 const execFileAsync = promisify(execFile)
 const bun = process.platform === 'win32' ? 'bun.exe' : 'bun'
@@ -16,9 +21,21 @@ let nextRestartRequested = false
 let nextOverLimitSamples = 0
 let shuttingDown = false
 
-start('landrush-ws', bun, ['scripts/landrush-world-multiplayer-ws.mjs'], () => {
-  if (!shuttingDown) console.log('landrush-ws exited')
-})
+await buildLandrushRuntimeWorkers()
+start(
+  'landrush-worker-watch',
+  bun,
+  createLandrushRuntimeWorkerWatchArguments(),
+  () => {
+    failCoordinator('landrush-worker-watch exited unexpectedly')
+  },
+  { cwd: landrushRuntimeWorkerWatchDirectory, fatal: true },
+)
+if (!process.argv.includes('--next-only')) {
+  start('landrush-ws', bun, ['scripts/landrush-world-multiplayer-ws.mjs'], () => {
+    if (!shuttingDown) console.log('landrush-ws exited')
+  })
+}
 startNext()
 
 const memoryMonitor = setInterval(() => void inspectNextMemory(), memoryPollMs)
@@ -51,8 +68,9 @@ function startNext() {
   })
 }
 
-function start(label, command, args, onExit) {
+function start(label, command, args, onExit, { cwd, fatal = false } = {}) {
   const child = spawn(command, args, {
+    cwd,
     detached: process.platform !== 'win32',
     env: process.env,
     shell: false,
@@ -66,9 +84,18 @@ function start(label, command, args, onExit) {
   })
   child.on('error', (error) => {
     console.error(`${label} failed to start: ${error.message}`)
+    if (fatal) failCoordinator(`${label} cannot continue`, 1)
   })
 
   return child
+}
+
+function failCoordinator(message, exitCode = 1) {
+  if (shuttingDown) return
+  shuttingDown = true
+  process.exitCode = exitCode > 0 ? exitCode : 1
+  console.error(message)
+  stopChildren()
 }
 
 async function inspectNextMemory() {

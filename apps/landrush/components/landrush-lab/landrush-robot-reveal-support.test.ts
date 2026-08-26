@@ -5,7 +5,30 @@ import {
   LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY,
   readLandrushRobotRevealObjectAmount,
   shouldKeepLandrushRobotRevealSlabOpaque,
+  shouldKeepLandrushRobotRevealStairOpaque,
 } from './landrush-robot-reveal-support'
+
+const reportedStairSegmentFootprint = [
+  { x: -7, z: -8.5 },
+  { x: -6, z: -8.5 },
+  { x: -6, z: -5.5 },
+  { x: -7, z: -5.5 },
+] as const
+
+function shouldKeepReportedStairOpaque({
+  cameraPoint,
+  robotPoint,
+}: {
+  cameraPoint: { x: number; z: number }
+  robotPoint: { x: number; z: number }
+}) {
+  return shouldKeepLandrushRobotRevealStairOpaque({
+    cameraPoint,
+    footprints: [reportedStairSegmentFootprint],
+    robotPoint,
+    standingTolerance: 0.16,
+  })
+}
 
 describe('Landrush robot reveal support slabs', () => {
   test('keeps the current support floor opaque', () => {
@@ -31,6 +54,52 @@ describe('Landrush robot reveal support slabs', () => {
         robotLevelBaseY: 2.8,
         slabLevelBaseY: 5.6,
         tolerance: 0.08,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('Landrush robot reveal stair eligibility', () => {
+  test('keeps the hiding_a_bit report stair opaque because the camera path misses it', () => {
+    expect(
+      shouldKeepReportedStairOpaque({
+        cameraPoint: { x: 0.21084142717642432, z: -16.20872419434368 },
+        robotPoint: { x: -5.32524387381096, z: -6.211350250472211 },
+      }),
+    ).toBe(true)
+  })
+
+  test('keeps the not_hiding report stair opaque because the camera path misses it', () => {
+    expect(
+      shouldKeepReportedStairOpaque({
+        cameraPoint: { x: -0.21291469871516489, z: -16.084167412469505 },
+        robotPoint: { x: -5.749, z: -6.086793468352119 },
+      }),
+    ).toBe(true)
+  })
+
+  test('allows reveal when the camera path crosses the reported stair run', () => {
+    expect(
+      shouldKeepReportedStairOpaque({
+        cameraPoint: { x: -6.5, z: -16 },
+        robotPoint: { x: -6.5, z: -4.5 },
+      }),
+    ).toBe(false)
+  })
+
+  test('applies one 0.16 meter standing tolerance to the physical footprint', () => {
+    const cameraPoint = { x: -6.8, z: -12 }
+
+    expect(
+      shouldKeepReportedStairOpaque({
+        cameraPoint,
+        robotPoint: { x: -5.85, z: -7 },
+      }),
+    ).toBe(true)
+    expect(
+      shouldKeepReportedStairOpaque({
+        cameraPoint,
+        robotPoint: { x: -5.76, z: -7 },
       }),
     ).toBe(false)
   })

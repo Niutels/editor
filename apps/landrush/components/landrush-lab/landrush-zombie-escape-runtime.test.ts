@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   advanceLandrushZombieEscapeRestartButtonState,
   createLandrushZombieEscapeRestartButtonState,
+  requestLandrushZombieEscapeNightStart,
   resolveLandrushZombieEscapeIntegratedLocomotionEnabled,
   restartLandrushZombieEscapeIntegratedSimulation,
   stepLandrushZombieEscapeIntegratedSimulation,
@@ -20,12 +21,9 @@ describe('integrated Zombie Escape terminal lifecycle', () => {
   test('keeps a lethal step in terminal night instead of resetting to Day', () => {
     const { arena, input, simulation } = createLethalIntegratedSimulation()
 
-    const outcome = stepLandrushZombieEscapeIntegratedSimulation({
+    const outcome = stepUntilIntegratedTerminal({
       arena,
-      deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
-      expectedPhase: 'night',
       input,
-      phaseReady: true,
       simulation,
     })
     const snapshot = createZombieEscapeHudSnapshot(simulation)
@@ -113,6 +111,7 @@ describe('integrated Zombie Escape terminal lifecycle', () => {
     const simulation = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED)
     const input = createZombieEscapeControlState()
     setZombieEscapeGamePhase(simulation, 'night')
+    const beforeHandoff = createZombieEscapeHudSnapshot(simulation)
 
     for (let frame = 0; frame < 84; frame += 1) {
       stepLandrushZombieEscapeIntegratedSimulation({
@@ -124,26 +123,35 @@ describe('integrated Zombie Escape terminal lifecycle', () => {
         simulation,
       })
     }
-    expect(simulation.elapsedSeconds).toBe(0)
-    expect(simulation.player.health).toBe(100)
+    expect(createZombieEscapeHudSnapshot(simulation)).toMatchObject({
+      elapsedSeconds: beforeHandoff.elapsedSeconds,
+      health: beforeHandoff.health,
+      zombies: beforeHandoff.zombies,
+    })
 
-    let firstDamageAt = Number.POSITIVE_INFINITY
-    for (let frame = 1; frame <= 720; frame += 1) {
-      stepLandrushZombieEscapeIntegratedSimulation({
-        arena,
-        deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
-        expectedPhase: 'night',
-        input,
-        phaseReady: true,
-        simulation,
-      })
-      if (simulation.player.health < 100) {
-        firstDamageAt = simulation.elapsedSeconds
-        break
-      }
-    }
+    const baselineArena = createIntegratedArena()
+    const baselineSimulation = createZombieEscapeSimulation(baselineArena, ZOMBIE_ESCAPE_SEED)
+    const baselineInput = createZombieEscapeControlState()
+    setZombieEscapeGamePhase(baselineSimulation, 'night')
 
-    expect(firstDamageAt).toBeCloseTo(437 * ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, 6)
+    const firstDamageTick = stepUntilFirstIntegratedDamage({
+      arena,
+      input,
+      simulation,
+    })
+    const baselineFirstDamageTick = stepUntilFirstIntegratedDamage({
+      arena: baselineArena,
+      input: baselineInput,
+      simulation: baselineSimulation,
+    })
+
+    expect(firstDamageTick).toBe(baselineFirstDamageTick)
+    expect(firstDamageTick).toBeGreaterThan(0)
+    expect(firstDamageTick).toBeLessThanOrEqual(720)
+    expect(simulation.elapsedSeconds).toBeCloseTo(
+      firstDamageTick * ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      6,
+    )
     expect(simulation.player.health).toBe(92)
     expect(simulation.phase).toBe('night')
     expect(simulation.status).toBe('playing')
@@ -222,6 +230,56 @@ describe('integrated Zombie Escape terminal lifecycle', () => {
       expect(advanceLandrushZombieEscapeRestartButtonState(buttonState, true, status)).toBe(false)
     }
   })
+
+  test('starts night exactly once from a ready, playing Day', () => {
+    const simulation = createZombieEscapeSimulation(createIntegratedArena(), ZOMBIE_ESCAPE_SEED)
+
+    simulation.paused = true
+    expect(
+      requestLandrushZombieEscapeNightStart({
+        expectedPhase: 'build',
+        phaseReady: true,
+        simulation,
+      }),
+    ).toBe(false)
+    simulation.paused = false
+    expect(
+      requestLandrushZombieEscapeNightStart({
+        expectedPhase: 'build',
+        phaseReady: false,
+        simulation,
+      }),
+    ).toBe(false)
+    expect(
+      requestLandrushZombieEscapeNightStart({
+        expectedPhase: 'night',
+        phaseReady: true,
+        simulation,
+      }),
+    ).toBe(false)
+
+    expect(
+      requestLandrushZombieEscapeNightStart({
+        expectedPhase: 'build',
+        phaseReady: true,
+        simulation,
+      }),
+    ).toBe(true)
+    expect(simulation.phase).toBe('night')
+    expect(simulation.night).toBe(1)
+    expect(simulation.phaseSecondsRemaining).toBe(ZOMBIE_ESCAPE_SIMULATION.nightDurationSeconds)
+    const scheduledZombieCount = simulation.waveSpawnRemaining
+
+    expect(
+      requestLandrushZombieEscapeNightStart({
+        expectedPhase: 'build',
+        phaseReady: true,
+        simulation,
+      }),
+    ).toBe(false)
+    expect(simulation.night).toBe(1)
+    expect(simulation.waveSpawnRemaining).toBe(scheduledZombieCount)
+  })
 })
 
 function createIntegratedArena() {
@@ -230,6 +288,30 @@ function createIntegratedArena() {
   arena.playerStartX = 0
   arena.playerStartZ = 0
   return arena
+}
+
+function stepUntilFirstIntegratedDamage({
+  arena,
+  input,
+  simulation,
+}: {
+  arena: ReturnType<typeof createIntegratedArena>
+  input: ReturnType<typeof createZombieEscapeControlState>
+  simulation: ReturnType<typeof createZombieEscapeSimulation>
+}) {
+  const initialHealth = simulation.player.health
+  for (let tick = 1; tick <= 720; tick += 1) {
+    stepLandrushZombieEscapeIntegratedSimulation({
+      arena,
+      deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      expectedPhase: 'night',
+      input,
+      phaseReady: true,
+      simulation,
+    })
+    if (simulation.player.health < initialHealth) return tick
+  }
+  return Number.POSITIVE_INFINITY
 }
 
 function createLethalIntegratedSimulation() {
@@ -246,7 +328,6 @@ function createLethalIntegratedSimulation() {
     simulation.player.z - 0.7,
     120,
   )
-  simulation.zombies.attackCooldown[zombie] = 0
   return { arena, input, simulation }
 }
 
@@ -266,14 +347,34 @@ function createWinningIntegratedSimulation() {
 function createTerminalIntegratedSimulation(status: 'lost' | 'won') {
   const state =
     status === 'lost' ? createLethalIntegratedSimulation() : createWinningIntegratedSimulation()
-  stepLandrushZombieEscapeIntegratedSimulation({
+  stepUntilIntegratedTerminal({
     arena: state.arena,
-    deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
-    expectedPhase: 'night',
     input: state.input,
-    phaseReady: true,
     simulation: state.simulation,
   })
   expect(state.simulation.status).toBe(status)
   return state
+}
+
+function stepUntilIntegratedTerminal({
+  arena,
+  input,
+  simulation,
+}: {
+  arena: ReturnType<typeof createIntegratedArena>
+  input: ReturnType<typeof createZombieEscapeControlState>
+  simulation: ReturnType<typeof createZombieEscapeSimulation>
+}) {
+  for (let tick = 0; tick < 120; tick += 1) {
+    const outcome = stepLandrushZombieEscapeIntegratedSimulation({
+      arena,
+      deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      expectedPhase: 'night',
+      input,
+      phaseReady: true,
+      simulation,
+    })
+    if (outcome.terminal) return outcome
+  }
+  throw new Error('Integrated Zombie Escape simulation did not reach a terminal state')
 }

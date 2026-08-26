@@ -926,9 +926,8 @@ const BVHEcctrl = forwardRef<BVHEcctrlApi, EcctrlProps>(
           : resolveBVHEcctrlCrouchingState({
               crouching: crouchingState.current,
               crouchRequested: nextCrouching,
-              stanceTransitionAllowed: locomotionState.current.grounded,
               standingClear:
-                !nextCrouching && locomotionState.current.grounded ? hasStandingClearance() : false,
+                !nextCrouching && crouchingState.current ? hasStandingClearance() : true,
             })
         if (crouchingState.current === resolvedCrouching) return false
 

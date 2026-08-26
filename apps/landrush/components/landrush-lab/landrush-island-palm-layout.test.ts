@@ -8,6 +8,10 @@ import {
 import {
   createLandrushIslandPalmCollisionCircles,
   createLandrushIslandPalmLayout,
+  createLandrushIslandPalmPlacementQuery,
+  isLandrushIslandPalmDiskPlacementLegal,
+  type LandrushIslandPalmPlacement,
+  type LandrushIslandPalmRoadClearance,
   resolveLandrushIslandAmbientPalmPosition,
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-palm-layout'
@@ -22,14 +26,45 @@ import {
 
 const AGENT_RADIUS_METERS = 0.37
 const CENTER = { x: 2, z: -1 }
+const EMPTY_ROAD_CLEARANCE: LandrushIslandPalmRoadClearance = []
 const SHORELINE = Array.from({ length: 64 }, (_, index) => {
   const angle = (index / 64) * Math.PI * 2
   return { x: CENTER.x + Math.cos(angle) * 12, z: CENTER.z + Math.sin(angle) * 9 }
 })
 
+function rectangleRoadClearance(
+  minimumX: number,
+  minimumZ: number,
+  maximumX: number,
+  maximumZ: number,
+): LandrushIslandPalmRoadClearance {
+  return [
+    [
+      [
+        [minimumX, minimumZ],
+        [maximumX, minimumZ],
+        [maximumX, maximumZ],
+        [minimumX, maximumZ],
+        [minimumX, minimumZ],
+      ],
+    ],
+  ]
+}
+
+const LARGE_SQUARE_SHORELINE = [
+  { x: -10, z: -10 },
+  { x: 10, z: -10 },
+  { x: 10, z: 10 },
+  { x: -10, z: 10 },
+]
+
 describe('Landrush island canonical palm layout', () => {
   test('allocates the same 24 stable placements used by ambient render slots', () => {
-    const layout = createLandrushIslandPalmLayout({ center: CENTER, shoreline: SHORELINE })
+    const layout = createLandrushIslandPalmLayout({
+      center: CENTER,
+      roadClearance: EMPTY_ROAD_CLEARANCE,
+      shoreline: SHORELINE,
+    })
     const renderedSlots = LANDRUSH_ISLAND_AMBIENT_PALMS.flatMap((_, catalogIndex) =>
       resolveLandrushIslandAmbientPalmSlots({
         catalogIndex,
@@ -66,7 +101,11 @@ describe('Landrush island canonical palm layout', () => {
   })
 
   test('derives one readiness-independent physical trunk circle per rendered placement', () => {
-    const layout = createLandrushIslandPalmLayout({ center: CENTER, shoreline: SHORELINE })
+    const layout = createLandrushIslandPalmLayout({
+      center: CENTER,
+      roadClearance: EMPTY_ROAD_CLEARANCE,
+      shoreline: SHORELINE,
+    })
     const circles = createLandrushIslandPalmCollisionCircles({ layout, origin: CENTER })
 
     expect(circles).toHaveLength(LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT)
@@ -88,7 +127,11 @@ describe('Landrush island canonical palm layout', () => {
 
   test('sweeps agents and projectiles against the physical trunk with one radius inflation', () => {
     const [circle] = createLandrushIslandPalmCollisionCircles({
-      layout: createLandrushIslandPalmLayout({ center: CENTER, shoreline: SHORELINE }),
+      layout: createLandrushIslandPalmLayout({
+        center: CENTER,
+        roadClearance: EMPTY_ROAD_CLEARANCE,
+        shoreline: SHORELINE,
+      }),
       origin: CENTER,
     })
     expect(circle).toBeDefined()
@@ -138,7 +181,11 @@ describe('Landrush island canonical palm layout', () => {
 
   test('reuses cached worlds across cloned circle arrays and invalidates physical edits', () => {
     const circles = createLandrushIslandPalmCollisionCircles({
-      layout: createLandrushIslandPalmLayout({ center: CENTER, shoreline: SHORELINE }),
+      layout: createLandrushIslandPalmLayout({
+        center: CENTER,
+        roadClearance: EMPTY_ROAD_CLEARANCE,
+        shoreline: SHORELINE,
+      }),
       origin: CENTER,
     })
     const resolveWorlds = createLandrushZombieEscapeCollisionWorldsResolver()
@@ -165,5 +212,155 @@ describe('Landrush island canonical palm layout', () => {
     expect(changed).not.toBe(initial)
     expect(changed.navigation.semanticKey).not.toBe(initial.navigation.semanticKey)
     expect(changed.combat.semanticKey).not.toBe(initial.combat.semanticKey)
+  })
+
+  test('models road MultiPolygon fill and holes with full-disk tangent legality', () => {
+    const roadClearance: LandrushIslandPalmRoadClearance = [
+      [
+        [
+          [-2, -2],
+          [2, -2],
+          [2, 2],
+          [-2, 2],
+          [-2, -2],
+        ],
+        [
+          [-0.75, -0.75],
+          [-0.75, 0.75],
+          [0.75, 0.75],
+          [0.75, -0.75],
+          [-0.75, -0.75],
+        ],
+      ],
+    ]
+    const placementQuery = createLandrushIslandPalmPlacementQuery({
+      roadClearance,
+      shoreline: LARGE_SQUARE_SHORELINE,
+    })
+    const legal = (position: { x: number; z: number }, trunkRadiusMeters: number) =>
+      isLandrushIslandPalmDiskPlacementLegal({
+        acceptedPlacements: [],
+        placementQuery,
+        position,
+        trunkRadiusMeters,
+      })
+
+    expect(legal({ x: 1.5, z: 0 }, 0.1)).toBe(false)
+    expect(legal({ x: 0, z: 0 }, 0.75)).toBe(true)
+    expect(legal({ x: 0, z: 0 }, 0.750_1)).toBe(false)
+    expect(legal({ x: 3, z: 0 }, 1)).toBe(true)
+    expect(legal({ x: 3, z: 0 }, 1.000_1)).toBe(false)
+  })
+
+  test('requires the full trunk disk inside the shoreline and permits exact tangency', () => {
+    const placementQuery = createLandrushIslandPalmPlacementQuery({
+      roadClearance: EMPTY_ROAD_CLEARANCE,
+      shoreline: [
+        { x: -5, z: -5 },
+        { x: 5, z: -5 },
+        { x: 5, z: 5 },
+        { x: -5, z: 5 },
+      ],
+    })
+    const legal = (position: { x: number; z: number }, trunkRadiusMeters: number) =>
+      isLandrushIslandPalmDiskPlacementLegal({
+        acceptedPlacements: [],
+        placementQuery,
+        position,
+        trunkRadiusMeters,
+      })
+
+    expect(legal({ x: 4, z: 0 }, 1)).toBe(true)
+    expect(legal({ x: 4, z: 0 }, 1.000_1)).toBe(false)
+    expect(legal({ x: 5.1, z: 0 }, 0)).toBe(false)
+  })
+
+  test('prevents accepted trunk disks from overlapping while permitting tangency', () => {
+    const placementQuery = createLandrushIslandPalmPlacementQuery({
+      roadClearance: EMPTY_ROAD_CLEARANCE,
+      shoreline: LARGE_SQUARE_SHORELINE,
+    })
+    const acceptedPlacements: readonly Pick<
+      LandrushIslandPalmPlacement,
+      'position' | 'trunkRadiusMeters'
+    >[] = [{ position: { x: 0, z: 0 }, trunkRadiusMeters: 1 }]
+    const legal = (x: number) =>
+      isLandrushIslandPalmDiskPlacementLegal({
+        acceptedPlacements,
+        placementQuery,
+        position: { x, z: 0 },
+        trunkRadiusMeters: 1,
+      })
+
+    expect(legal(2)).toBe(true)
+    expect(legal(1.999_9)).toBe(false)
+  })
+
+  test('relocates only an illegal preferred palm with stable identity and deterministic output', () => {
+    const baseline = createLandrushIslandPalmLayout({
+      center: CENTER,
+      instanceCount: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+      roadClearance: EMPTY_ROAD_CLEARANCE,
+      shoreline: SHORELINE,
+    })
+    const blockedPosition = baseline[0]!.position
+    const roadClearance = rectangleRoadClearance(
+      blockedPosition.x - 0.05,
+      blockedPosition.z - 0.05,
+      blockedPosition.x + 0.05,
+      blockedPosition.z + 0.05,
+    )
+    const first = createLandrushIslandPalmLayout({
+      center: CENTER,
+      instanceCount: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+      roadClearance,
+      shoreline: SHORELINE,
+    })
+    const second = createLandrushIslandPalmLayout({
+      center: CENTER,
+      instanceCount: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+      roadClearance,
+      shoreline: SHORELINE,
+    })
+
+    expect(first).toEqual(second)
+    expect(first.map(({ id }) => id)).toEqual(baseline.map(({ id }) => id))
+    expect(first[0]!.position).not.toEqual(baseline[0]!.position)
+    for (let index = 1; index < baseline.length; index += 1) {
+      expect(first[index]!.position).toEqual(baseline[index]!.position)
+    }
+
+    const placementQuery = createLandrushIslandPalmPlacementQuery({
+      roadClearance,
+      shoreline: SHORELINE,
+    })
+    const acceptedPlacements: LandrushIslandPalmPlacement[] = []
+    for (const placement of first) {
+      expect(
+        isLandrushIslandPalmDiskPlacementLegal({
+          acceptedPlacements,
+          placementQuery,
+          position: placement.position,
+          trunkRadiusMeters: placement.trunkRadiusMeters,
+        }),
+      ).toBe(true)
+      acceptedPlacements.push(placement)
+    }
+  })
+
+  test('fails explicitly when no bounded relocation candidate is legal', () => {
+    expect(() =>
+      createLandrushIslandPalmLayout({
+        center: { x: 0, z: 0 },
+        instanceCount: 1,
+        roadClearance: rectangleRoadClearance(-10, -10, 10, 10),
+        shoreline: [
+          { x: -5, z: -5 },
+          { x: 5, z: -5 },
+          { x: 5, z: 5 },
+          { x: -5, z: 5 },
+        ],
+      }),
+    ).toThrow('Unable to place palm:0')
   })
 })

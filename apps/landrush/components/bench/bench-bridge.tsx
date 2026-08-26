@@ -99,6 +99,7 @@ type BenchGlobal = {
   mark(label: string): void
   digest(): BenchDigest
   renderRegistry(): Record<string, unknown>
+  sceneObjectUserData(name: string, key: string): unknown
   getCheckpoint(): BenchCheckpoint
   restoreCheckpoint(cp: BenchCheckpoint): Promise<{ settledAtFrame: number; timedOut: boolean }>
   waitForSettle(opts?: { stableFrames?: number; timeoutMs?: number }): Promise<{
@@ -310,6 +311,7 @@ function collectParentChain(object: Object3D) {
 
 function BenchBridgeCollector() {
   const gl = useThree((state) => state.gl)
+  const threeScene = useThree((state) => state.scene)
   const camera = useThree((state) => state.camera)
   const controls = useThree((state) => state.controls)
   const gpuTimerRef = useRef<GpuFrameTimer | null>(null)
@@ -460,6 +462,7 @@ function BenchBridgeCollector() {
       },
       digest: () => computeSceneDigest(),
       renderRegistry: () => computeRenderRegistryDigest(),
+      sceneObjectUserData: (name, key) => threeScene.getObjectByName(name)?.userData[key] ?? null,
       getCheckpoint: () => captureCheckpoint(cameraRef.current, controlsRef.current),
       restoreCheckpoint: async (cp) => {
         restoreCheckpointState(cp, cameraRef.current, controlsRef.current)
@@ -495,7 +498,7 @@ function BenchBridgeCollector() {
     return () => {
       if (window.__PASCAL_BENCH__ === api) delete window.__PASCAL_BENCH__
     }
-  }, [gl])
+  }, [gl, threeScene])
 
   useFrame((state) => {
     const now = performance.now()

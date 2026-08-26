@@ -24,20 +24,16 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Group } from 'three'
 import {
+  type FloorPlacementClickTriggerEvent,
   getLevelLocalSnappedPosition,
   resolveAlignedFloorPlacement,
+  stopPlacementCommitPropagation,
+  subscribeFloorPlacementClicks,
 } from '../shared/floor-placement'
+import { resolveLevelSpawnSingleton } from './placement'
 import { SpawnPreview } from './renderer'
 
 const ROTATION_STEP = Math.PI / 4
-
-function getExistingSpawnIds() {
-  const nodes = useScene.getState().nodes
-  return Object.values(nodes)
-    .filter((node) => node.type === 'spawn')
-    .map((node) => node.id)
-    .sort()
-}
 
 /**
  * Registry-driven spawn placement tool. Reads `activeLevelId` from useViewer
@@ -68,7 +64,11 @@ const SpawnTool = () => {
     cursorVisibleRef.current = false
     setCursorVisible(false)
     const lastCursorRef: { current: [number, number, number] | null } = { current: null }
-    let alignmentCandidates = collectAlignmentAnchors(useScene.getState().nodes, previewNode.id)
+    const initialSpawn = resolveLevelSpawnSingleton(useScene.getState().nodes, activeLevelId)
+    let alignmentCandidates = collectAlignmentAnchors(
+      useScene.getState().nodes,
+      initialSpawn.existingId ?? previewNode.id,
+    )
 
     const onGridMove = (event: GridEvent) => {
       if (!cursorVisibleRef.current) {
@@ -114,16 +114,19 @@ const SpawnTool = () => {
       }
     }
 
-    const onGridClick = (event: GridEvent) => {
-      const next =
-        lastCursorRef.current ??
-        getLevelLocalSnappedPosition(
-          activeLevelId,
-          event,
-          useEditor.getState().gridSnapStep,
-          !isGridSnapActive(),
-        )
-      const [existingSpawnId, ...duplicates] = getExistingSpawnIds()
+    const commitAtCursor = (event: FloorPlacementClickTriggerEvent) => {
+      stopPlacementCommitPropagation(event)
+      const clickedPosition = getLevelLocalSnappedPosition(
+        activeLevelId,
+        event,
+        useEditor.getState().gridSnapStep,
+        !isGridSnapActive(),
+      )
+      const next = lastCursorRef.current ?? clickedPosition
+      const { duplicateIds, existingId: existingSpawnId } = resolveLevelSpawnSingleton(
+        useScene.getState().nodes,
+        activeLevelId,
+      )
       let placedId: SpawnNode['id']
 
       if (existingSpawnId) {
@@ -140,8 +143,8 @@ const SpawnTool = () => {
           rotation: rotationRef.current,
           ...resolveSupportSlabPatch(effectiveSpawn, useScene.getState().nodes),
         })
-        if (duplicates.length > 0) {
-          useScene.getState().deleteNodes(duplicates)
+        if (duplicateIds.length > 0) {
+          useScene.getState().deleteNodes(duplicateIds)
         }
         placedId = existingSpawnId
       } else {
@@ -159,13 +162,19 @@ const SpawnTool = () => {
         placedId = committedSpawn.id
       }
 
-      useViewer.getState().setSelection({ selectedIds: [placedId] })
       triggerSFX('sfx:structure-build')
-      alignmentCandidates = collectAlignmentAnchors(useScene.getState().nodes, previewNode.id)
       useAlignmentGuides.getState().clear()
       usePlacementPreview.getState().clear()
-      useEditor.getState().setTool(null)
-      useEditor.getState().setMode('select')
+      if (useEditor.getState().getContinuation('point') === 'repeat') {
+        useViewer.getState().setSelection({ selectedIds: [] })
+        alignmentCandidates = collectAlignmentAnchors(useScene.getState().nodes, placedId)
+      } else {
+        cursorVisibleRef.current = false
+        setCursorVisible(false)
+        useViewer.getState().setSelection({ selectedIds: [placedId] })
+        useEditor.getState().setTool(null)
+        useEditor.getState().setMode('select')
+      }
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -201,12 +210,12 @@ const SpawnTool = () => {
     }
 
     emitter.on('grid:move', onGridMove)
-    emitter.on('grid:click', onGridClick)
+    const unsubscribePlacementClicks = subscribeFloorPlacementClicks(commitAtCursor)
     window.addEventListener('keydown', onKeyDown, true)
 
     return () => {
       emitter.off('grid:move', onGridMove)
-      emitter.off('grid:click', onGridClick)
+      unsubscribePlacementClicks()
       window.removeEventListener('keydown', onKeyDown, true)
       useAlignmentGuides.getState().clear()
       usePlacementPreview.getState().clear()

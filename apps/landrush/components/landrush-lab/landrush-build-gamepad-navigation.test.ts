@@ -70,6 +70,8 @@ describe('Landrush build gamepad navigation', () => {
       "buildMode && gamepadBuildFocusModeRef.current === 'placement'",
     )
     expect(islandClientSource).toContain('cancelLandrushPascalEditingRuntime()')
+    expect(islandClientSource).toContain("editor.setContinuation('point', 'repeat')")
+    expect(islandClientSource).toContain("useEditor.getState().setContinuation('point', 'once')")
     expect(islandClientSource).toContain("gamepadBuildFocusModeRef.current = 'palette'")
   })
 

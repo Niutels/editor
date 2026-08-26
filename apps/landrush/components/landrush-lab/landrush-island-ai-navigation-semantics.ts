@@ -12,14 +12,30 @@ import {
   sampleWallCenterline,
 } from '@pascal-app/core'
 import {
+  createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
+  createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
+  type LandrushZombieEscapeCollisionWorldCompilePayload,
+  type LandrushZombieEscapeCollisionWorlds,
+} from './landrush-zombie-escape-collision-world-compiler'
+import {
   createZombieEscapeCollisionWorld,
+  ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
   type ZombieEscapeCollisionBoxSource,
   type ZombieEscapeCollisionCircleSource,
+  type ZombieEscapeCollisionObjectSemanticSource,
   type ZombieEscapeCollisionSegmentSource,
   type ZombieEscapeCollisionWorld,
   type ZombieEscapeNavigationConnectorSource,
   type ZombieEscapeNavigationSupportSource,
 } from './zombie-escape-collision-world'
+
+export {
+  assertLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
+  createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
+  createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
+  type LandrushZombieEscapeCollisionWorldCompilePayload,
+  type LandrushZombieEscapeCollisionWorlds,
+} from './landrush-zombie-escape-collision-world-compiler'
 
 const MINIMUM_SOLID_WALL_RUN_METERS = 0.04
 const MINIMUM_CENTERLINE_PIECE_METERS = 0.000_001
@@ -91,12 +107,20 @@ export type LandrushZombieEscapeCollisionWorldInput = {
   nodes: Record<string, AnyNode>
   playRadius: number
   spawn: Readonly<{ x: number; z: number }>
+  surfaceSupport?: LandrushZombieEscapeSurfaceNavigationSupport
   verticalOriginY?: number
 }
 
-export type LandrushZombieEscapeCollisionWorlds = Readonly<{
-  combat: ZombieEscapeCollisionWorld
-  navigation: ZombieEscapeCollisionWorld
+export type LandrushZombieEscapeSurfaceNavigationSupport = ZombieEscapeNavigationSupportSource &
+  Readonly<{
+    boundary: true
+    elevation: 0
+  }>
+
+export type LandrushZombieEscapeCollisionWorldCompilation = Readonly<{
+  payload: LandrushZombieEscapeCollisionWorldCompilePayload
+  payloadIntegrity: string
+  signature: string
 }>
 
 export type LandrushIslandAiNavigationSnapshot = Readonly<{
@@ -104,6 +128,7 @@ export type LandrushIslandAiNavigationSnapshot = Readonly<{
   navigationBoxes: readonly ZombieEscapeCollisionBoxSource[]
   navigationConnectors: readonly ZombieEscapeNavigationConnectorSource[]
   navigationSupports: readonly ZombieEscapeNavigationSupportSource[]
+  objectSemantics: readonly ZombieEscapeCollisionObjectSemanticSource[]
   originX: number
   originZ: number
   segments: readonly ZombieEscapeCollisionSegmentSource[]
@@ -115,40 +140,167 @@ export function createLandrushIslandAiNavigationSnapshot({
   doorPassability = {},
   nodes,
   spawn,
+  surfaceSupport,
   verticalOriginY = 0,
 }: Pick<
   LandrushZombieEscapeCollisionWorldInput,
-  'doorPassability' | 'nodes' | 'spawn' | 'verticalOriginY'
+  'doorPassability' | 'nodes' | 'spawn' | 'surfaceSupport' | 'verticalOriginY'
 >): LandrushIslandAiNavigationSnapshot {
+  const semanticKey = createLandrushZombieEscapeScopedCollisionSemanticsKey(
+    nodes,
+    doorPassability,
+    surfaceSupport,
+  )
+  return createLandrushIslandAiNavigationSnapshotFromSemanticKey(
+    { doorPassability, nodes, spawn, surfaceSupport, verticalOriginY },
+    semanticKey,
+  )
+}
+
+function createLandrushIslandAiNavigationSnapshotFromSemanticKey(
+  {
+    doorPassability = {},
+    nodes,
+    spawn,
+    surfaceSupport,
+    verticalOriginY = 0,
+  }: Pick<
+    LandrushZombieEscapeCollisionWorldInput,
+    'doorPassability' | 'nodes' | 'spawn' | 'surfaceSupport' | 'verticalOriginY'
+  >,
+  semanticKey: string,
+): LandrushIslandAiNavigationSnapshot {
+  const authoredNavigationSupports = createLandrushZombieEscapeNavigationSupports(
+    nodes,
+    spawn,
+    verticalOriginY,
+  )
+  const combatBoxes = createLandrushZombieEscapeCollisionBoxesForScope(
+    nodes,
+    spawn,
+    verticalOriginY,
+    'combat',
+  )
+  const navigationBoxes = createLandrushZombieEscapeCollisionBoxesForScope(
+    nodes,
+    spawn,
+    verticalOriginY,
+    'navigation',
+  )
+  const navigationConnectors = createLandrushZombieEscapeNavigationConnectors(
+    nodes,
+    spawn,
+    verticalOriginY,
+  )
+  const segments = createLandrushZombieEscapeCollisionSegmentsForScope(
+    nodes,
+    spawn,
+    doorPassability,
+    verticalOriginY,
+  )
   return {
-    combatBoxes: createLandrushZombieEscapeCollisionBoxesForScope(
+    combatBoxes,
+    navigationBoxes,
+    navigationConnectors,
+    navigationSupports: surfaceSupport
+      ? [surfaceSupport, ...authoredNavigationSupports]
+      : authoredNavigationSupports,
+    objectSemantics: createLandrushZombieEscapeCollisionObjectSemantics(
       nodes,
-      spawn,
-      verticalOriginY,
-      'combat',
+      combatBoxes,
+      navigationBoxes,
+      segments,
+      navigationConnectors,
     ),
-    navigationBoxes: createLandrushZombieEscapeCollisionBoxesForScope(
-      nodes,
-      spawn,
-      verticalOriginY,
-      'navigation',
-    ),
-    navigationConnectors: createLandrushZombieEscapeNavigationConnectors(
-      nodes,
-      spawn,
-      verticalOriginY,
-    ),
-    navigationSupports: createLandrushZombieEscapeNavigationSupports(nodes, spawn, verticalOriginY),
     originX: spawn.x,
     originZ: spawn.z,
-    segments: createLandrushZombieEscapeCollisionSegmentsForScope(
-      nodes,
-      spawn,
-      doorPassability,
-      verticalOriginY,
-    ),
-    semanticKey: createLandrushZombieEscapeScopedCollisionSemanticsKey(nodes, doorPassability),
+    segments,
+    semanticKey,
     verticalOriginY,
+  }
+}
+
+function createLandrushZombieEscapeCollisionObjectSemantics(
+  nodes: Record<string, AnyNode>,
+  ...sources: readonly (readonly Readonly<{ id: string; objectId?: string }>[])[]
+) {
+  const objectIds = new Set<string>()
+  for (const source of sources) {
+    for (const candidate of source) objectIds.add(candidate.objectId ?? candidate.id)
+  }
+  return [...objectIds]
+    .sort((first, second) => first.localeCompare(second))
+    .map((objectId): ZombieEscapeCollisionObjectSemanticSource => {
+      const type = nodes[objectId]?.type
+      const semanticKind =
+        type === 'door'
+          ? ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.door
+          : type === 'item' || type === 'shelf'
+            ? ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.furniture
+            : ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.other
+      return { objectId, semanticKind }
+    })
+}
+
+function appendLandrushZombieEscapeCollisionObjectSemantics(
+  objectSemantics: readonly ZombieEscapeCollisionObjectSemanticSource[],
+  sources: readonly Readonly<{ id: string; objectId?: string }>[],
+) {
+  const semanticKindsByObjectId = new Map(
+    objectSemantics.map(({ objectId, semanticKind }) => [objectId, semanticKind]),
+  )
+  for (const source of sources) {
+    const objectId = source.objectId ?? source.id
+    if (!semanticKindsByObjectId.has(objectId)) {
+      semanticKindsByObjectId.set(objectId, ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.other)
+    }
+  }
+  return [...semanticKindsByObjectId]
+    .sort(([firstId], [secondId]) => firstId.localeCompare(secondId))
+    .map(([objectId, semanticKind]) => ({ objectId, semanticKind }))
+}
+
+export function createLandrushZombieEscapeCollisionWorldCompilation(
+  input: LandrushZombieEscapeCollisionWorldInput,
+): LandrushZombieEscapeCollisionWorldCompilation {
+  const semanticKey = createLandrushZombieEscapeScopedCollisionSemanticsKey(
+    input.nodes,
+    input.doorPassability ?? {},
+    input.surfaceSupport,
+  )
+  const signature = createLandrushZombieEscapeCollisionWorldSignatureFromSemanticKey(
+    input,
+    semanticKey,
+  )
+  const snapshot = createLandrushIslandAiNavigationSnapshotFromSemanticKey(input, semanticKey)
+  const payload = createLandrushZombieEscapeCollisionWorldCompilePayload(input, snapshot)
+  return {
+    payload,
+    payloadIntegrity: createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity(
+      payload,
+      signature,
+    ),
+    signature,
+  }
+}
+
+function createLandrushZombieEscapeCollisionWorldCompilePayload(
+  { agentRadius, circles = [], playRadius }: LandrushZombieEscapeCollisionWorldInput,
+  snapshot: LandrushIslandAiNavigationSnapshot,
+): LandrushZombieEscapeCollisionWorldCompilePayload {
+  return {
+    agentRadius,
+    circles,
+    combatBoxes: snapshot.combatBoxes,
+    navigationBoxes: snapshot.navigationBoxes,
+    navigationConnectors: snapshot.navigationConnectors,
+    navigationSupports: snapshot.navigationSupports,
+    objectSemantics: appendLandrushZombieEscapeCollisionObjectSemantics(
+      snapshot.objectSemantics,
+      circles,
+    ),
+    playRadius,
+    segments: snapshot.segments,
   }
 }
 
@@ -159,10 +311,20 @@ export function createLandrushZombieEscapeCollisionWorld({
   nodes,
   playRadius,
   spawn,
+  surfaceSupport,
   verticalOriginY = 0,
 }: LandrushZombieEscapeCollisionWorldInput) {
   return createLandrushZombieEscapeScopedCollisionWorld(
-    { agentRadius, circles, doorPassability, nodes, playRadius, spawn, verticalOriginY },
+    {
+      agentRadius,
+      circles,
+      doorPassability,
+      nodes,
+      playRadius,
+      spawn,
+      surfaceSupport,
+      verticalOriginY,
+    },
     'navigation',
   )
 }
@@ -181,6 +343,7 @@ function createLandrushZombieEscapeScopedCollisionWorld(
     nodes,
     playRadius,
     spawn,
+    surfaceSupport,
     verticalOriginY = 0,
   }: LandrushZombieEscapeCollisionWorldInput,
   scope: LandrushZombieEscapeCollisionScope,
@@ -189,6 +352,7 @@ function createLandrushZombieEscapeScopedCollisionWorld(
     doorPassability,
     nodes,
     spawn,
+    surfaceSupport,
     verticalOriginY,
   })
   return createLandrushZombieEscapeScopedCollisionWorldFromSnapshot(
@@ -207,14 +371,21 @@ function createLandrushZombieEscapeScopedCollisionWorldFromSnapshot(
   snapshot: LandrushIslandAiNavigationSnapshot,
   scope: LandrushZombieEscapeCollisionScope,
 ) {
+  const hasNavigationBoundarySupport = snapshot.navigationSupports.some(
+    (support) => support.boundary === true,
+  )
   return createZombieEscapeCollisionWorld({
     agentRadius,
-    boundaryPolicy: scope === 'combat' ? 'none' : 'solid',
+    boundaryPolicy: scope === 'combat' || hasNavigationBoundarySupport ? 'none' : 'solid',
     boxes: scope === 'combat' ? snapshot.combatBoxes : snapshot.navigationBoxes,
     cellSize: scope === 'combat' ? Math.max(1, playRadius * 2) : undefined,
     circles,
     navigationConnectors: scope === 'navigation' ? snapshot.navigationConnectors : [],
     navigationSupports: scope === 'navigation' ? snapshot.navigationSupports : [],
+    objectSemantics: appendLandrushZombieEscapeCollisionObjectSemantics(
+      snapshot.objectSemantics,
+      circles,
+    ),
     playRadius,
     segments: snapshot.segments,
   })
@@ -244,22 +415,22 @@ export function createLandrushZombieEscapeCollisionWorldsResolver() {
   let cachedWorlds: LandrushZombieEscapeCollisionWorlds | null = null
 
   return (input: LandrushZombieEscapeCollisionWorldInput) => {
-    const signature = createLandrushZombieEscapeCollisionWorldSignature(input)
+    const semanticKey = createLandrushZombieEscapeScopedCollisionSemanticsKey(
+      input.nodes,
+      input.doorPassability ?? {},
+      input.surfaceSupport,
+    )
+    const signature = createLandrushZombieEscapeCollisionWorldSignatureFromSemanticKey(
+      input,
+      semanticKey,
+    )
     if (cachedWorlds && signature === cachedSignature) return cachedWorlds
-    const snapshot = createLandrushIslandAiNavigationSnapshot(input)
-    const navigation = createLandrushZombieEscapeScopedCollisionWorldFromSnapshot(
-      input,
-      snapshot,
-      'navigation',
-    )
-    const combat = createLandrushZombieEscapeScopedCollisionWorldFromSnapshot(
-      input,
-      snapshot,
-      'combat',
-    )
+    const snapshot = createLandrushIslandAiNavigationSnapshotFromSemanticKey(input, semanticKey)
+    const payload = createLandrushZombieEscapeCollisionWorldCompilePayload(input, snapshot)
+    const nextWorlds = createLandrushZombieEscapeCollisionWorldsFromCompilePayload(payload)
     cachedSignature = signature
-    cachedWorlds = { combat, navigation }
-    return cachedWorlds
+    cachedWorlds = nextWorlds
+    return nextWorlds
   }
 }
 
@@ -295,6 +466,7 @@ export function createLandrushZombieEscapeCombatCollisionSemanticsKey(
 function createLandrushZombieEscapeScopedCollisionSemanticsKey(
   nodes: Record<string, AnyNode>,
   doorPassability: Readonly<Record<string, boolean>>,
+  surfaceSupport?: LandrushZombieEscapeSurfaceNavigationSupport,
 ) {
   const collisionNodes: LandrushCollisionNode[] = []
   const collisionWallIds = new Set<string>()
@@ -561,20 +733,56 @@ function createLandrushZombieEscapeScopedCollisionSemanticsKey(
       isDoorPassable(node, doorPassability),
     ])
   }
+  if (surfaceSupport) {
+    entries.push([
+      'surface-support',
+      surfaceSupport.id,
+      surfaceSupport.boundary,
+      surfaceSupport.elevation,
+      surfaceSupport.polygon.map(({ x, z }) => [x, z]),
+      (surfaceSupport.holes ?? []).map((hole) => hole.map(({ x, z }) => [x, z])),
+    ])
+  }
 
   entries.sort(compareCollisionSemanticEntries)
   return JSON.stringify(entries)
 }
 
-function createLandrushZombieEscapeCollisionWorldSignature({
+export function createLandrushZombieEscapeCollisionWorldSignature({
   agentRadius,
   circles = [],
   doorPassability = {},
   nodes,
   playRadius,
   spawn,
+  surfaceSupport,
   verticalOriginY = 0,
 }: LandrushZombieEscapeCollisionWorldInput) {
+  return createLandrushZombieEscapeCollisionWorldSignatureFromSemanticKey(
+    {
+      agentRadius,
+      circles,
+      doorPassability,
+      nodes,
+      playRadius,
+      spawn,
+      surfaceSupport,
+      verticalOriginY,
+    },
+    createLandrushZombieEscapeScopedCollisionSemanticsKey(nodes, doorPassability, surfaceSupport),
+  )
+}
+
+function createLandrushZombieEscapeCollisionWorldSignatureFromSemanticKey(
+  {
+    agentRadius,
+    circles = [],
+    playRadius,
+    spawn,
+    verticalOriginY = 0,
+  }: LandrushZombieEscapeCollisionWorldInput,
+  semanticKey: string,
+) {
   const circleSemantics = circles
     .map(({ breakable, id, maximumY, minimumY, navigationLayerY, objectId, radius, x, z }) => [
       id,
@@ -595,7 +803,7 @@ function createLandrushZombieEscapeCollisionWorldSignature({
     spawn.z,
     verticalOriginY,
     circleSemantics,
-    createLandrushZombieEscapeScopedCollisionSemanticsKey(nodes, doorPassability),
+    semanticKey,
   ])
 }
 

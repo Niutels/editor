@@ -17,6 +17,7 @@ import {
   moveZombieEscapeNavigationAgent,
   resolveZombieEscapeCollisionHitObjectId,
   resolveZombieEscapeFlowDirection,
+  resolveZombieEscapeNavigationTargetElevation,
   updateZombieEscapeFlowTarget,
   type ZombieEscapeCollisionWorld,
 } from './zombie-escape-collision-world'
@@ -31,9 +32,11 @@ import {
   setZombieEscapeExternalPlayerPose,
   setZombieEscapeGamePhase,
   spawnZombieEscapeZombie,
+  spawnZombieEscapeZombieAtNavigationElevation,
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
 } from './zombie-escape-simulation'
+import { resolveSparseNavigationStrictRegionWitnessNode } from './zombie-escape-sparse-navigation'
 import { createZombieEscapeArena } from './zombie-escape-world'
 
 const AGENT_RADIUS = 0.22
@@ -96,49 +99,50 @@ describe('Zombie Escape layered navigation', () => {
       stepCount: 12,
       sweepAngle: -Math.PI * 2,
     },
-  ])(
-    'traverses authored $direction-turning $stairType step-center connectors upward and downward',
-    ({ stairType, stepCount, sweepAngle }) => {
-      const world = createArcStairWorld(stairType, stepCount, sweepAngle)
-      expect(world.navigationConnectors).toHaveLength(stepCount + 1)
-      expect(
-        world.boxes
-          .filter(({ objectId }) => objectId.includes(`stair_layered_${stairType}`))
-          .every(({ id }) => !id.includes(':navigation-blocker:')),
-      ).toBe(true)
-      expect(
-        world.navigationConnectors
-          .map(({ chainOrder }) => chainOrder)
-          .sort((first, second) => first - second),
-      ).toEqual(Array.from({ length: stepCount + 1 }, (_, index) => index))
-      const first = world.navigationConnectors.find(({ chainOrder }) => chainOrder === 0)!
-      const last = world.navigationConnectors.find(({ chainOrder }) => chainOrder === stepCount)!
-      const lowerTarget = {
-        x: first.startX - first.directionX * 1.5,
-        y: first.chainLowerY,
-        z: first.startZ - first.directionZ * 1.5,
-      }
-      const upperTarget = {
-        x: last.endX + last.directionX * 1.5,
-        y: last.chainUpperY,
-        z: last.endZ + last.directionZ * 1.5,
-      }
+  ])('traverses authored $direction-turning $stairType step-center connectors upward and downward', ({
+    stairType,
+    stepCount,
+    sweepAngle,
+  }) => {
+    const world = createArcStairWorld(stairType, stepCount, sweepAngle)
+    expect(world.navigationConnectors).toHaveLength(stepCount + 1)
+    expect(
+      world.boxes
+        .filter(({ objectId }) => objectId.includes(`stair_layered_${stairType}`))
+        .every(({ id }) => !id.includes(':navigation-blocker:')),
+    ).toBe(true)
+    expect(
+      world.navigationConnectors
+        .map(({ chainOrder }) => chainOrder)
+        .sort((first, second) => first - second),
+    ).toEqual(Array.from({ length: stepCount + 1 }, (_, index) => index))
+    const first = world.navigationConnectors.find(({ chainOrder }) => chainOrder === 0)!
+    const last = world.navigationConnectors.find(({ chainOrder }) => chainOrder === stepCount)!
+    const lowerTarget = {
+      x: first.startX - first.directionX * 1.5,
+      y: first.chainLowerY,
+      z: first.startZ - first.directionZ * 1.5,
+    }
+    const upperTarget = {
+      x: last.endX + last.directionX * 1.5,
+      y: last.chainUpperY,
+      z: last.endZ + last.directionZ * 1.5,
+    }
 
-      const ascending = traverseNavigation(world, lowerTarget, upperTarget)
-      expect(ascending.reached).toBe(true)
-      expect(ascending.y).toBeCloseTo(upperTarget.y, 5)
-      expect([...ascending.connectorIds]).toEqual(
-        expect.arrayContaining(world.navigationConnectors.map(({ id }) => id)),
-      )
+    const ascending = traverseNavigation(world, lowerTarget, upperTarget)
+    expect(ascending.reached).toBe(true)
+    expect(ascending.y).toBeCloseTo(upperTarget.y, 5)
+    expect([...ascending.connectorIds]).toEqual(
+      expect.arrayContaining(world.navigationConnectors.map(({ id }) => id)),
+    )
 
-      const descending = traverseNavigation(world, upperTarget, lowerTarget)
-      expect(descending.reached).toBe(true)
-      expect(descending.y).toBeCloseTo(lowerTarget.y, 5)
-      expect([...descending.connectorIds]).toEqual(
-        expect.arrayContaining(world.navigationConnectors.map(({ id }) => id)),
-      )
-    },
-  )
+    const descending = traverseNavigation(world, upperTarget, lowerTarget)
+    expect(descending.reached).toBe(true)
+    expect(descending.y).toBeCloseTo(lowerTarget.y, 5)
+    expect([...descending.connectorIds]).toEqual(
+      expect.arrayContaining(world.navigationConnectors.map(({ id }) => id)),
+    )
+  })
 
   test('isolates same-XZ furniture and paths by floor while routing a ground zombie to stairs', () => {
     const world = createZombieEscapeCollisionWorld({
@@ -381,7 +385,7 @@ describe('Zombie Escape layered navigation', () => {
     expect(field.rebuildCount).toBe(1)
   })
 
-  test('does not create a floating floor over unsupported upper-layer voids and falls to support below', () => {
+  test('does not create a floating floor or implicitly change floors by walking off an upper support', () => {
     const world = createZombieEscapeCollisionWorld({
       agentRadius: AGENT_RADIUS,
       navigationSupports: [
@@ -406,10 +410,459 @@ describe('Zombie Escape layered navigation', () => {
     const hit = createZombieEscapeCollisionHit()
     const move = createZombieEscapeNavigationMoveResult()
     moveZombieEscapeNavigationAgent(world, 1.7, 3, 0, 0.8, 0, AGENT_RADIUS, -1, false, hit, move)
-    expect(move.x).toBeGreaterThan(2)
+    expect(move.collided).toBe(true)
+    expect(move.x).toBeLessThanOrEqual(2 - AGENT_RADIUS + 0.002)
+    expect(move.y).toBe(3)
+  })
+
+  test('pins overlapping sparse ground and upper layers until an explicit connector is requested', () => {
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: AGENT_RADIUS,
+      boundaryPolicy: 'none',
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'ground',
+          polygon: [
+            { x: -6, z: -6 },
+            { x: 6, z: -6 },
+            { x: 6, z: 6 },
+            { x: -6, z: 6 },
+          ],
+        },
+        {
+          elevation: 3,
+          id: 'upper',
+          polygon: [
+            { x: -2, z: -2 },
+            { x: 2, z: -2 },
+            { x: 2, z: 2 },
+            { x: -2, z: 2 },
+          ],
+        },
+      ],
+      playRadius: 8,
+    })
+    const hit = createZombieEscapeCollisionHit()
+    const move = createZombieEscapeNavigationMoveResult()
+
+    moveZombieEscapeNavigationAgent(world, 1.7, 3, 0, 0.8, 0, AGENT_RADIUS, -1, false, hit, move)
+    expect(move.collided).toBe(true)
+    expect(move.x).toBeLessThanOrEqual(2 - AGENT_RADIUS + 0.002)
+    expect(move.y).toBe(3)
+
+    moveZombieEscapeNavigationAgent(world, 1.7, 0, 0, 0.8, 0, AGENT_RADIUS, -1, false, hit, move)
+    expect(move.collided).toBe(false)
+    expect(move.x).toBeCloseTo(2.5, 5)
     expect(move.y).toBe(0)
+
+    expect(resolveZombieEscapeNavigationTargetElevation(world, 0, 0, 1.5, 0)).toBe(0)
+    expect(resolveZombieEscapeNavigationTargetElevation(world, 4, 0, 3, 0)).toBe(0)
+  })
+
+  test('retains a smaller zombie on a descending connector from its compiled upper source', () => {
+    const upperY = 2.56
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boundaryPolicy: 'none',
+      navigationConnectors: [
+        {
+          ascendingEnd: true,
+          chainId: 'retention-stair',
+          chainLowerY: 0,
+          chainOrder: 0,
+          chainUpperY: upperY,
+          endX: 0,
+          endY: upperY,
+          endZ: 3,
+          halfWidth: 0.9,
+          id: 'retention-stair:flight',
+          startX: 0,
+          startY: 0,
+          startZ: 0,
+        },
+      ],
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'retention-ground',
+          polygon: [
+            { x: -4, z: -3 },
+            { x: 4, z: -3 },
+            { x: 4, z: 5 },
+            { x: -4, z: 5 },
+          ],
+        },
+        {
+          elevation: upperY,
+          id: 'retention-upper',
+          polygon: [
+            { x: -4, z: -3 },
+            { x: 4, z: -3 },
+            { x: 4, z: 5 },
+            { x: -4, z: 5 },
+          ],
+        },
+      ],
+      playRadius: 8,
+    })
+    const connector = world.navigationConnectors[0]!
+    const upperLayerIndex = world.navigationLayers.findIndex(
+      ({ elevation }) => elevation === upperY,
+    )
+    const graph = world.navigationGraph
+    const upperSourceNode = graph.connectorIndices.findIndex(
+      (connectorIndex, node) =>
+        connectorIndex === 0 &&
+        graph.connectorEnds[node] === 0 &&
+        graph.layerIndices[node] === upperLayerIndex,
+    )
+    expect(upperSourceNode).toBeGreaterThanOrEqual(0)
+
+    let x = graph.x[upperSourceNode]!
+    let y = upperY
+    let z = graph.z[upperSourceNode]!
+    const compiledSourceProjection =
+      (x - connector.startX) * connector.directionX + (z - connector.startZ) * connector.directionZ
+    expect(compiledSourceProjection).toBeCloseTo(
+      connector.length + world.agentRadius + world.cellSize,
+      10,
+    )
+
+    const zombieRadius = 0.3
+    const stepMeters = world.cellSize * 0.2
+    expect(stepMeters).toBeLessThan(world.cellSize * 0.5)
+    const displacementX = -connector.directionX * stepMeters
+    const displacementZ = -connector.directionZ * stepMeters
+    const hit = createZombieEscapeCollisionHit()
+    const move = createZombieEscapeNavigationMoveResult()
+
+    moveZombieEscapeNavigationAgent(
+      world,
+      x,
+      y,
+      z,
+      displacementX,
+      displacementZ,
+      world.agentRadius,
+      -1,
+      false,
+      hit,
+      move,
+      0,
+      false,
+      zombieRadius,
+    )
+    expect(move.connectorIndex).toBe(0)
+    expect(move.y).toBe(upperY)
+    x = move.x
+    y = move.y
+    z = move.z
+
+    moveZombieEscapeNavigationAgent(
+      world,
+      x,
+      y,
+      z,
+      displacementX,
+      displacementZ,
+      world.agentRadius,
+      move.connectorIndex,
+      move.connectorTargetEnd,
+      hit,
+      move,
+      -1,
+      false,
+      zombieRadius,
+    )
+    expect(move.connectorIndex).toBe(0)
+    expect(move.y).toBeLessThanOrEqual(y)
+    x = move.x
+    y = move.y
+    z = move.z
+
+    let descended = false
+    let exitedLower = false
+    for (let step = 0; step < 128; step += 1) {
+      const previousY = y
+      moveZombieEscapeNavigationAgent(
+        world,
+        x,
+        y,
+        z,
+        displacementX,
+        displacementZ,
+        world.agentRadius,
+        move.connectorIndex,
+        move.connectorTargetEnd,
+        hit,
+        move,
+        -1,
+        false,
+        zombieRadius,
+      )
+      expect(move.y).toBeLessThanOrEqual(previousY + 1e-10)
+      descended ||= move.y < previousY - 1e-10
+      x = move.x
+      y = move.y
+      z = move.z
+      if (move.connectorIndex < 0) {
+        exitedLower = true
+        break
+      }
+    }
+
+    expect(descended).toBe(true)
+    expect(exitedLower).toBe(true)
+    expect(y).toBeCloseTo(connector.startY, 10)
+  })
+
+  test('preserves authored-ground admission through the legacy spawn API', () => {
+    const world = createSparseSpawnAdmissionWorld(true)
+    const state = createReadySparseSpawnAdmissionState(world)
+    const graph = state.collisionWorld.navigationGraph
+    const layerIndex = state.collisionWorld.navigationLayers.findIndex(
+      ({ elevation }) => elevation === 0,
+    )
+    const expectedWitness = resolveSparseNavigationStrictRegionWitnessNode(
+      graph.targetRegionIndex,
+      layerIndex,
+      3,
+      1,
+    )
+
+    const slot = spawnZombieEscapeZombie(state, 3, 1, 97)
+
+    expect(slot).toBe(0)
+    expect(expectedWitness).toBeGreaterThanOrEqual(0)
+    expect(state.zombies.pool.activeCount).toBe(1)
+    expect(state.zombies.health[slot]).toBe(97)
+    expect(state.zombies.y[slot]).toBe(0)
+    expect(state.navigationSparseSpawnAnchorScratch).toMatchObject({
+      elevation: 0,
+      generation: state.navigationTargetCommittedRouteGeneration,
+      layerIndex,
+      reachable: true,
+      witnessNode: expectedWitness,
+    })
+    expect(state.zombies.navigationWaypointNode[slot]).toBe(expectedWitness)
+    expect(state.zombies.navigationIntentCommittedRouteGeneration[slot]).toBe(
+      state.navigationTargetCommittedRouteGeneration,
+    )
+  })
+
+  test('admits an upper-layer zombie with a current certified sparse anchor', () => {
+    const world = createSparseSpawnAdmissionWorld(true)
+    const state = createReadySparseSpawnAdmissionState(world)
+    const graph = state.collisionWorld.navigationGraph
+    const layerIndex = state.collisionWorld.navigationLayers.findIndex(
+      ({ elevation }) => elevation === 3,
+    )
+    const expectedWitness = resolveSparseNavigationStrictRegionWitnessNode(
+      graph.targetRegionIndex,
+      layerIndex,
+      1,
+      1,
+    )
+
+    const slot = spawnZombieEscapeZombieAtNavigationElevation(state, 1, 1, 3, 103)
+
+    expect(slot).toBe(0)
+    expect(expectedWitness).toBeGreaterThanOrEqual(0)
+    expect(state.zombies.pool.activeCount).toBe(1)
+    expect(state.zombies.health[slot]).toBe(103)
+    expect(state.zombies.y[slot]).toBe(3)
+    expect(state.zombies.navigationSourceCertifiedY[slot]).toBe(3)
+    expect(state.navigationSparseSpawnAnchorScratch).toMatchObject({
+      elevation: 3,
+      generation: state.navigationTargetCommittedRouteGeneration,
+      layerIndex,
+      reachable: true,
+      witnessNode: expectedWitness,
+    })
+    expect(graph.layerIndices[expectedWitness]).toBe(layerIndex)
+    expect(state.zombies.navigationWaypointNode[slot]).toBe(expectedWitness)
+    expect(state.zombies.navigationIntentCommittedRouteGeneration[slot]).toBe(
+      state.navigationTargetCommittedRouteGeneration,
+    )
+    expect(state.zombies.navigationIntentTargetRevision[slot]).toBe(
+      state.navigationTargetRequestedRevision,
+    )
+  })
+
+  test('rejects invalid, unsupported, and unreachable elevations without pool mutation', () => {
+    const connectedState = createReadySparseSpawnAdmissionState(
+      createSparseSpawnAdmissionWorld(true),
+    )
+    const connectedPoolBefore = inspectZombiePoolAdmissionState(connectedState)
+
+    expect(spawnZombieEscapeZombieAtNavigationElevation(connectedState, 1, 1, NaN)).toBe(-1)
+    expect(spawnZombieEscapeZombieAtNavigationElevation(connectedState, 1, 1, 1.5)).toBe(-1)
+    expect(inspectZombiePoolAdmissionState(connectedState)).toEqual(connectedPoolBefore)
+
+    const disconnectedState = createReadySparseSpawnAdmissionState(
+      createSparseSpawnAdmissionWorld(false),
+    )
+    const disconnectedPoolBefore = inspectZombiePoolAdmissionState(disconnectedState)
+
+    expect(spawnZombieEscapeZombieAtNavigationElevation(disconnectedState, 1, 1, 3)).toBe(-1)
+    expect(inspectZombiePoolAdmissionState(disconnectedState)).toEqual(disconnectedPoolBefore)
+  })
+
+  test('reaches the parcel-11 player coordinate on its pinned floor and changes floor only by stair', () => {
+    const player = { x: 22.61534685, z: 18.6765284 }
+    const upperY = 2.56
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: AGENT_RADIUS,
+      boundaryPolicy: 'none',
+      navigationConnectors: [
+        {
+          ascendingEnd: true,
+          chainId: 'parcel-11-stair',
+          chainLowerY: 0,
+          chainOrder: 0,
+          chainUpperY: upperY,
+          endX: 19,
+          endY: upperY,
+          endZ: player.z,
+          halfWidth: 0.7,
+          id: 'parcel-11-stair:flight',
+          startX: 17,
+          startY: 0,
+          startZ: player.z,
+        },
+      ],
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'parcel-11-ground',
+          polygon: [
+            { x: 14, z: 10 },
+            { x: 30, z: 10 },
+            { x: 30, z: 26 },
+            { x: 14, z: 26 },
+          ],
+        },
+        {
+          elevation: upperY,
+          id: 'parcel-11-upper',
+          polygon: [
+            { x: 18, z: 14 },
+            { x: 27, z: 14 },
+            { x: 27, z: 23 },
+            { x: 18, z: 23 },
+          ],
+        },
+      ],
+      playRadius: 32,
+    })
+    const start = { x: 15, y: 0, z: player.z }
+
+    const ground = traverseNavigation(world, start, { ...player, y: 0 })
+    expect(ground.reached).toBe(true)
+    expect(ground.y).toBe(0)
+    expect(ground.connectorIds.size).toBe(0)
+
+    const upper = traverseNavigation(world, start, { ...player, y: upperY })
+    expect(upper.reached).toBe(true)
+    expect(upper.y).toBeCloseTo(upperY, 5)
+    expect(upper.connectorIds).toContain('parcel-11-stair:flight')
   })
 })
+
+function createSparseSpawnAdmissionWorld(connectUpper: boolean) {
+  return createZombieEscapeCollisionWorld({
+    agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+    boundaryPolicy: 'none',
+    navigationConnectors: connectUpper
+      ? [
+          {
+            ascendingEnd: true,
+            chainId: 'spawn-admission-stair',
+            chainLowerY: 0,
+            chainOrder: 0,
+            chainUpperY: 3,
+            endX: -1,
+            endY: 3,
+            endZ: 0,
+            halfWidth: 0.7,
+            id: 'spawn-admission-stair:flight',
+            startX: -3,
+            startY: 0,
+            startZ: 0,
+          },
+        ]
+      : [],
+    navigationSupports: [
+      {
+        boundary: true,
+        elevation: 0,
+        id: 'spawn-admission-ground',
+        polygon: [
+          { x: -6, z: -6 },
+          { x: 6, z: -6 },
+          { x: 6, z: 6 },
+          { x: -6, z: 6 },
+        ],
+      },
+      {
+        elevation: 3,
+        id: 'spawn-admission-upper',
+        polygon: [
+          { x: -2, z: -2 },
+          { x: 2, z: -2 },
+          { x: 2, z: 2 },
+          { x: -2, z: 2 },
+        ],
+      },
+    ],
+    playRadius: 8,
+  })
+}
+
+function createReadySparseSpawnAdmissionState(world: ZombieEscapeCollisionWorld) {
+  const arena = createZombieEscapeArena(0x51ca_1e5)
+  arena.obstacleCount = 0
+  const state = createZombieEscapeSimulation(arena, 0x51ca_1e5, [], {
+    requireSparseNavigation: true,
+  })
+  setZombieEscapeExternalPlayerPose(state, true)
+  setZombieEscapeCollisionWorld(state, world)
+  setZombieEscapeGamePhase(state, 'night')
+  state.waveSpawnRemaining = 0
+  state.replacementSpawnRemaining = 0
+  state.waveState = 'escape'
+  state.player.x = 4
+  state.player.y = 0
+  state.player.z = 0
+  const input = createZombieEscapeControlState()
+  for (let tick = 0; tick < 4_096; tick += 1) {
+    stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    if (
+      state.navigationGoalInitialized &&
+      state.navigationGoalResolvedTick === state.navigationIntentTick &&
+      state.navigationField.graphSparseTargetUpdate.status === 'ready' &&
+      state.navigationTargetCommittedRouteGeneration > 0
+    ) {
+      return state
+    }
+  }
+  throw new Error('sparse spawn admission target did not publish')
+}
+
+function inspectZombiePoolAdmissionState(state: ReturnType<typeof createZombieEscapeSimulation>) {
+  return {
+    active: Array.from(state.zombies.pool.active),
+    activeCount: state.zombies.pool.activeCount,
+    cursor: state.zombies.pool.cursor,
+    generation: Array.from(state.zombies.pool.generation),
+    nextGeneration: state.zombies.pool.nextGeneration,
+    nextZombieSpawnOrdinal: state.nextZombieSpawnOrdinal,
+  }
+}
 
 function createBlockedStairWorld(playRadius: number) {
   return createZombieEscapeCollisionWorld({
@@ -716,6 +1169,8 @@ function traverseNavigation(
       connectorTargetEnd,
       hit,
       move,
+      sample.connectorIndex,
+      sample.connectorTargetEnd,
     )
     x = move.x
     y = move.y
@@ -731,6 +1186,8 @@ function createFlowSample() {
     blockingDistance: Number.POSITIVE_INFINITY,
     blockingX: 0,
     blockingZ: 0,
+    connectorIndex: -1,
+    connectorTargetEnd: false,
     reachable: false,
     x: 0,
     z: 0,

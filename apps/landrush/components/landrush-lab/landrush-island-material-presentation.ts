@@ -26,7 +26,11 @@ export type LandrushIslandMaterialReadinessMesh = Readonly<{
 
 type LandrushIslandPresentationNodeMaterial = Material & {
   alphaTestNode?: TSLNode<'float'> | null
+  backdropAlphaNode?: unknown | null
+  backdropNode?: unknown | null
   opacityNode?: TSLNode<'float'> | null
+  transmission?: number
+  transmissionNode?: unknown | null
 }
 
 type LandrushIslandPresentationSlot = {
@@ -804,7 +808,6 @@ export class LandrushIslandMaterialPresentationOwner {
         opacityNode,
         this.revealAmountNode,
         1,
-        { depthAware: false },
       )
     }
     if (variant.floor || variant.reveal === 'soft') nodeMaterial.opacityNode = opacityNode
@@ -812,17 +815,23 @@ export class LandrushIslandMaterialPresentationOwner {
       material.clippingPlanes = variant.clippingPlanes
       material.clipIntersection = true
     }
-    const usesFractionalPresentation =
-      variant.reveal === 'soft' || (variant.floor && variant.floorTranslucent)
+    const usesDepthWritingSoftReveal = canUseDepthWritingSoftReveal(
+      source,
+      sourceNodeMaterial,
+      variant,
+    )
+    const usesSortedFractionalPresentation =
+      (variant.floor && variant.floorTranslucent) ||
+      (variant.reveal === 'soft' && !usesDepthWritingSoftReveal)
     material.transparent = source.transparent
     material.blending = source.blending
-    material.alphaHash = source.alphaHash
-    material.alphaToCoverage = source.alphaToCoverage
-    if (usesFractionalPresentation) {
+    material.alphaHash = source.alphaHash || (usesDepthWritingSoftReveal && !source.alphaToCoverage)
+    material.alphaToCoverage = variant.reveal === 'clip' ? true : source.alphaToCoverage
+    if (usesSortedFractionalPresentation) {
       material.transparent = true
       if (material.blending === NoBlending) material.blending = NormalBlending
     }
-    material.depthWrite = usesFractionalPresentation ? false : source.depthWrite
+    material.depthWrite = usesSortedFractionalPresentation ? false : source.depthWrite
     material.needsUpdate = true
     variants.set(variant.key, material)
     this.ownedVariantCount += 1
@@ -993,4 +1002,24 @@ function sameRevealPresentationOrNull(
 
 function isSoftRevealSource(material: Material) {
   return material.userData?.landrushRobotScreenRevealSoftMask === true
+}
+
+function canUseDepthWritingSoftReveal(
+  source: Material,
+  sourceNodeMaterial: LandrushIslandPresentationNodeMaterial,
+  variant: LandrushIslandPresentationVariant,
+) {
+  return (
+    variant.reveal === 'soft' &&
+    !(variant.floor && variant.floorTranslucent) &&
+    !source.transparent &&
+    source.opacity === 1 &&
+    source.depthTest &&
+    source.depthWrite &&
+    source.blending === NormalBlending &&
+    (sourceNodeMaterial.transmission ?? 0) <= 0 &&
+    sourceNodeMaterial.transmissionNode == null &&
+    sourceNodeMaterial.backdropNode == null &&
+    sourceNodeMaterial.backdropAlphaNode == null
+  )
 }

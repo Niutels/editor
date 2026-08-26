@@ -12,6 +12,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,9 +21,13 @@ import {
   type AnimationAction,
   AnimationMixer,
   Box3,
+  DynamicDrawUsage,
   type Group,
+  type InstancedMesh,
   LoopRepeat,
+  Matrix4,
   type Mesh,
+  Quaternion,
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
@@ -84,15 +89,20 @@ import {
 } from './landrush-island-ambient-npc-motion'
 import {
   createLandrushIslandFishLanes,
+  createLandrushIslandFishMotionSample,
+  createLandrushIslandFishMotionScratch,
   createLandrushIslandFishTrajectory,
   type LandrushIslandFishMotionSample,
   type LandrushIslandFishTrajectory,
   measureLandrushIslandFishShoreDistance,
-  sampleLandrushIslandFishMotion,
+  sampleLandrushIslandFishMotionInto,
 } from './landrush-island-fish-motion'
 import {
+  createLandrushIslandFishRuntime,
+  type LandrushIslandFishRuntime,
+} from './landrush-island-fish-runtime'
+import {
   createLandrushIslandPalmCollisionCircles,
-  createLandrushIslandPalmLayout,
   type LandrushIslandPalmPlacement,
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-palm-layout'
@@ -123,6 +133,8 @@ type AmbientMotionDebugRuntime = {
 const AMBIENT_NPC_POSITIONS = new Map<string, LandrushPoint2>()
 const EMPTY_AMBIENT_SCENE_NODES: Record<string, AnyNode> = {}
 const AMBIENT_NPC_COLLISION_RADIUS_METERS = 0.3
+const AMBIENT_FISH_Y_AXIS = new Vector3(0, 1, 0)
+const AMBIENT_FISH_Z_AXIS = new Vector3(0, 0, 1)
 
 const LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS = createLandrushIslandAmbientLoadUnits({
   boatIds: LANDRUSH_ISLAND_AMBIENT_BOATS.map((boat) => boat.id),
@@ -130,11 +142,18 @@ const LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS = createLandrushIslandAmbientLoadUnits(
   npcIds: LANDRUSH_ISLAND_AMBIENT_NPCS.map((npc) => npc.id),
   palmIds: LANDRUSH_ISLAND_AMBIENT_PALMS.map((palm) => palm.id),
 })
+export const LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS = Object.freeze(
+  LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS.map((unit) => unit.id),
+)
+export const LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE = `ambient-assets:${JSON.stringify(
+  LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS,
+)}`
 
 export function LandrushIslandAmbientLife({
   admitted,
   npcsVisible,
   onLoadReadinessChange,
+  palmLayout,
   roads,
   surface,
   waterY,
@@ -143,6 +162,7 @@ export function LandrushIslandAmbientLife({
   admitted: boolean
   npcsVisible: boolean
   onLoadReadinessChange: (readiness: LandrushIslandAmbientLoadReadiness) => void
+  palmLayout: readonly LandrushIslandPalmPlacement[]
   roads: readonly LandrushRoadSegment[]
   surface: PascalWaterLandSurface
   waterY: number
@@ -158,6 +178,7 @@ export function LandrushIslandAmbientLife({
   )
   const [loadQueue, setLoadQueue] = useState(createLandrushIslandAmbientLoadQueueStateForMount)
   const [renderReadinessCoordinator] = useState(createLandrushRenderReadinessCoordinator)
+  const [fishRuntime] = useState(createLandrushIslandFishRuntime)
   const [pageVisible, setPageVisible] = useState(readAmbientPageVisible)
   const pageVisibleRef = useRef(pageVisible)
   pageVisibleRef.current = pageVisible
@@ -166,10 +187,10 @@ export function LandrushIslandAmbientLife({
   }, [])
   const terminalUnitCount = Object.keys(loadQueue.terminalOutcomes).length
   const previousTerminalUnitCountRef = useRef(terminalUnitCount)
-  const ambientLoadReady = resolveLandrushIslandAmbientLoadReadiness(
-    loadQueue,
-    LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS,
-  ).ready
+  const ambientLoadReadiness = useMemo(
+    () => resolveLandrushIslandAmbientLoadReadiness(loadQueue, LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS),
+    [loadQueue],
+  )
   const center = useMemo(
     () => averagePoint(surface.grassSurfacePoints),
     [surface.grassSurfacePoints],
@@ -178,14 +199,6 @@ export function LandrushIslandAmbientLife({
   const visiblePalmInstanceCount = zombieIslandActive
     ? LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT
     : LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT
-  const palmLayout = useMemo(
-    () =>
-      createLandrushIslandPalmLayout({
-        center,
-        shoreline: surface.grassSurfacePoints,
-      }),
-    [center, surface.grassSurfacePoints],
-  )
   const palmCollisionCircles = useMemo(
     () => createLandrushIslandPalmCollisionCircles({ layout: palmLayout, origin: { x: 0, z: 0 } }),
     [palmLayout],
@@ -275,6 +288,11 @@ export function LandrushIslandAmbientLife({
     if (result.pendingCount > 0) renderScheduler.requestFrame('animation')
   }, -5.5)
 
+  useFrame(function updateLandrushIslandFishBatches({ clock }) {
+    if (!admitted) return
+    fishRuntime.advance(motionDebug.timeSeconds ?? clock.elapsedTime, waterY)
+  }, -6)
+
   useEffect(() => {
     if (
       !admitted ||
@@ -311,8 +329,8 @@ export function LandrushIslandAmbientLife({
   }, [terminalUnitCount])
 
   useEffect(() => {
-    onLoadReadinessChange({ generation: loadQueue.generation, ready: ambientLoadReady })
-  }, [ambientLoadReady, loadQueue.generation, onLoadReadinessChange])
+    onLoadReadinessChange(ambientLoadReadiness)
+  }, [ambientLoadReadiness, onLoadReadinessChange])
 
   if (!admitted) return null
 
@@ -322,6 +340,7 @@ export function LandrushIslandAmbientLife({
         boatModelCount: LANDRUSH_ISLAND_AMBIENT_BOATS.length,
         fishInstanceCount: LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
         fishModelCount: LANDRUSH_ISLAND_AMBIENT_FISH.length,
+        fishUpdatePhaseCount: fishRuntime.snapshot().updatePhaseCount,
         npcModelCount: npcsVisible ? LANDRUSH_ISLAND_AMBIENT_NPCS.length : 0,
         npcNavigationObstacleCount: navigationObstacles.length,
         palmInstanceCount: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
@@ -340,6 +359,7 @@ export function LandrushIslandAmbientLife({
         >
           <AmbientLoadUnitModel
             center={center}
+            fishRuntime={fishRuntime}
             groundY={surface.grassSurfaceElevation}
             motionDebug={motionDebug}
             navigationWorld={navigationWorld}
@@ -361,6 +381,7 @@ export function LandrushIslandAmbientLife({
 
 function AmbientLoadUnitModel({
   center,
+  fishRuntime,
   groundY,
   motionDebug,
   navigationWorld,
@@ -375,6 +396,7 @@ function AmbientLoadUnitModel({
   zombieIslandActive,
 }: {
   center: LandrushPoint2
+  fishRuntime: LandrushIslandFishRuntime
   groundY: number
   motionDebug: AmbientMotionDebugRuntime
   navigationWorld: LandrushIslandAmbientNavigationWorld
@@ -426,6 +448,7 @@ function AmbientLoadUnitModel({
         debugTimeSeconds={motionDebug.timeSeconds}
         fish={fish}
         index={unit.catalogIndex}
+        runtime={fishRuntime}
         shoreline={shoreline}
         waterY={waterY}
       />
@@ -639,6 +662,7 @@ export function LandrushIslandMeshyFishSchool({
   debugTimeSeconds,
   fish,
   index,
+  runtime,
   shoreline,
   waterY,
 }: {
@@ -647,16 +671,16 @@ export function LandrushIslandMeshyFishSchool({
   debugTimeSeconds: number | null
   fish: LandrushIslandAmbientFish
   index: number
+  runtime: LandrushIslandFishRuntime
   shoreline: readonly LandrushPoint2[]
   waterY: number
 }) {
   const gltf = useGLTFKTX2(fish.modelPath)
-  const models = useMemo(
-    () => Array.from({ length: fish.schoolSize }, () => gltf.scene.clone(true)),
-    [fish.schoolSize, gltf.scene],
+  const instancingSource = useMemo(
+    () => resolveAmbientFishInstancingSource(gltf.scene),
+    [gltf.scene],
   )
-  const rootRefs = useRef<Array<Group | null>>([])
-  const bankRefs = useRef<Array<Group | null>>([])
+  const meshRef = useRef<InstancedMesh>(null)
   const lanes = useMemo(
     () => createLandrushIslandFishLanes(fish, shoreline, center, index),
     [center, fish, index, shoreline],
@@ -672,65 +696,115 @@ export function LandrushIslandMeshyFishSchool({
     () => computeCenteredTransform(gltf.scene, fish.lengthMeters),
     [fish.lengthMeters, gltf.scene],
   )
-  useEffect(() => {
-    for (const model of models) prepareMeshes(model)
-    return () => clearLandrushIslandFishMotionDebug(debugStore, fish.id)
-  }, [debugStore, fish.id, models])
-  useFrame(({ clock }) => {
-    const elapsedSeconds = debugTimeSeconds ?? clock.elapsedTime
-    for (let schoolIndex = 0; schoolIndex < fish.schoolSize; schoolIndex += 1) {
-      const root = rootRefs.current[schoolIndex]
-      const bank = bankRefs.current[schoolIndex]
-      const trajectory = trajectories[schoolIndex]
-      if (!(root && bank && trajectory)) continue
-      const sample = sampleLandrushIslandFishMotion(trajectory, elapsedSeconds, waterY)
-      root.position.set(sample.position.x, sample.position.y, sample.position.z)
-      root.rotation.set(0, sample.yawRadians, 0)
-      bank.rotation.z = sample.bankRadians
-      if (debugStore) {
-        recordLandrushIslandFishMotionDebug(
-          debugStore,
-          fish,
-          schoolIndex,
-          sample,
-          shoreline,
+  const baseMatrix = useMemo(
+    () =>
+      new Matrix4()
+        .compose(
+          transform.offset,
+          new Quaternion().setFromAxisAngle(AMBIENT_FISH_Y_AXIS, fish.modelForwardYaw),
+          new Vector3(transform.scale, transform.scale, transform.scale),
+        )
+        .multiply(instancingSource.matrix),
+    [fish.modelForwardYaw, instancingSource.matrix, transform.offset, transform.scale],
+  )
+  const instancedGeometry = useMemo(
+    () => instancingSource.geometry.clone().applyMatrix4(baseMatrix),
+    [baseMatrix, instancingSource.geometry],
+  )
+  const samples = useMemo(
+    () => Array.from({ length: fish.schoolSize }, createLandrushIslandFishMotionSample),
+    [fish.schoolSize],
+  )
+  const motionScratch = useMemo(createLandrushIslandFishMotionScratch, [])
+  const matrixScratch = useMemo(
+    () => ({
+      bankQuaternion: new Quaternion(),
+      matrix: new Matrix4(),
+      position: new Vector3(),
+      quaternion: new Quaternion(),
+      scale: new Vector3(1, 1, 1),
+      yawQuaternion: new Quaternion(),
+    }),
+    [],
+  )
+  const updateBatch = useCallback(
+    (elapsedSeconds: number, currentWaterY: number, phase = 0, phaseCount = 1) => {
+      const mesh = meshRef.current
+      if (!mesh) return
+      for (let schoolIndex = phase; schoolIndex < fish.schoolSize; schoolIndex += phaseCount) {
+        const trajectory = trajectories[schoolIndex]
+        const sample = samples[schoolIndex]
+        if (!(trajectory && sample)) continue
+        sampleLandrushIslandFishMotionInto(
           trajectory,
           elapsedSeconds,
+          currentWaterY,
+          sample,
+          motionScratch,
         )
+        matrixScratch.position.set(sample.position.x, sample.position.y, sample.position.z)
+        matrixScratch.yawQuaternion.setFromAxisAngle(AMBIENT_FISH_Y_AXIS, sample.yawRadians)
+        matrixScratch.bankQuaternion.setFromAxisAngle(AMBIENT_FISH_Z_AXIS, sample.bankRadians)
+        matrixScratch.quaternion.multiplyQuaternions(
+          matrixScratch.yawQuaternion,
+          matrixScratch.bankQuaternion,
+        )
+        matrixScratch.matrix.compose(
+          matrixScratch.position,
+          matrixScratch.quaternion,
+          matrixScratch.scale,
+        )
+        mesh.setMatrixAt(schoolIndex, matrixScratch.matrix)
+        if (debugStore) {
+          recordLandrushIslandFishMotionDebug(
+            debugStore,
+            fish,
+            schoolIndex,
+            sample,
+            shoreline,
+            trajectory,
+            elapsedSeconds,
+          )
+        }
       }
+      mesh.instanceMatrix.needsUpdate = true
+    },
+    [debugStore, fish, matrixScratch, motionScratch, samples, shoreline, trajectories],
+  )
+  useGpuResourceLifetime(instancedGeometry)
+  useLayoutEffect(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    updateBatch(debugTimeSeconds ?? 0, waterY)
+    const unregister = runtime.register({
+      id: fish.id,
+      instanceCount: fish.schoolSize,
+      update: updateBatch,
+    })
+    return () => {
+      unregister()
+      clearLandrushIslandFishMotionDebug(debugStore, fish.id)
     }
-  }, -6)
+  }, [debugStore, debugTimeSeconds, fish.id, fish.schoolSize, runtime, updateBatch, waterY])
   return (
-    <group
+    <instancedMesh
+      args={[instancedGeometry, instancingSource.material, fish.schoolSize]}
+      castShadow={false}
+      dispose={null}
+      frustumCulled={false}
+      matrixAutoUpdate={false}
+      receiveShadow={false}
+      ref={meshRef}
       userData={{
+        fishBatchCount: 1,
         fishModelForwardAxis: fish.modelForwardAxis,
         fishModelForwardYaw: fish.modelForwardYaw,
         fishModelId: fish.id,
+        rendering: 'instanced',
         schoolSize: fish.schoolSize,
       }}
-    >
-      {models.map((model, schoolIndex) => (
-        <group
-          key={schoolIndex}
-          ref={(root) => {
-            rootRefs.current[schoolIndex] = root
-          }}
-        >
-          <group
-            ref={(bank) => {
-              bankRefs.current[schoolIndex] = bank
-            }}
-          >
-            <primitive
-              object={model}
-              position={transform.offset}
-              rotation={[0, fish.modelForwardYaw, 0]}
-              scale={transform.scale}
-            />
-          </group>
-        </group>
-      ))}
-    </group>
+    />
   )
 }
 
@@ -960,6 +1034,27 @@ function computeCenteredTransform(source: Group, lengthMeters: number) {
   return {
     offset: center.multiplyScalar(-scale),
     scale,
+  }
+}
+
+function resolveAmbientFishInstancingSource(source: Group) {
+  const meshes: Array<Mesh & { isSkinnedMesh?: boolean }> = []
+  source.updateWorldMatrix(true, true)
+  source.traverse((object) => {
+    const mesh = object as Mesh & { isSkinnedMesh?: boolean }
+    if (mesh.isMesh) meshes.push(mesh)
+  })
+  if (meshes.length !== 1) {
+    throw new Error(`Ambient fish instancing requires one mesh; received ${meshes.length}.`)
+  }
+  const mesh = meshes[0]!
+  if (mesh.isSkinnedMesh || (mesh.morphTargetInfluences?.length ?? 0) > 0) {
+    throw new Error('Ambient fish instancing requires a static source mesh.')
+  }
+  return {
+    geometry: mesh.geometry,
+    material: mesh.material,
+    matrix: mesh.matrixWorld.clone(),
   }
 }
 

@@ -4,6 +4,7 @@ import { renderScheduler } from '@landrush/runtime'
 import { useInteractive, useScene } from '@pascal-app/core'
 import { useFrame, useThree } from '@react-three/fiber'
 import {
+  lazy,
   type MutableRefObject,
   Suspense,
   useCallback,
@@ -15,12 +16,21 @@ import {
 } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { type Group, Plane, Raycaster, Vector2, Vector3 } from 'three'
+import {
+  LandrushControllerCommandHud,
+  type LandrushControllerCommands,
+} from './landrush-controller-command-hud'
 import { readLandrushGamepadInput } from './landrush-gamepad-input'
 import {
   createLandrushIslandRuntimeDoorPassabilityKey,
-  createLandrushZombieEscapeCollisionWorldsResolver,
+  createLandrushZombieEscapeCollisionWorldSignature,
+  type LandrushZombieEscapeCollisionWorldCompilation,
+  type LandrushZombieEscapeCollisionWorldInput,
+  type LandrushZombieEscapeCollisionWorlds,
+  type LandrushZombieEscapeSurfaceNavigationSupport,
   resolveLandrushIslandRuntimeDoorPassabilityKey,
 } from './landrush-island-ai-navigation-semantics'
+import { landrushIslandInputTargetBlocksGameplay } from './landrush-island-input-capture'
 import type {
   LandrushIslandMaterialPresentationOwner,
   LandrushIslandMaterialReadinessMesh,
@@ -31,8 +41,7 @@ import {
 } from './landrush-island-material-presentation-readiness'
 import {
   createLandrushIslandPalmCollisionCircles,
-  createLandrushIslandPalmLayout,
-  resolveLandrushIslandPalmLayoutCenter,
+  type LandrushIslandPalmPlacement,
 } from './landrush-island-palm-layout'
 import {
   createLandrushRobotWeaponCombatState,
@@ -40,6 +49,16 @@ import {
   LandrushRobotWeaponRig,
 } from './landrush-robot-weapon-rig'
 import { resolveLandrushZombieEscapeAimPlaneElevation } from './landrush-zombie-escape-aim'
+import { createLandrushZombieEscapeIntegratedArena } from './landrush-zombie-escape-arena'
+import {
+  createBrowserLandrushZombieEscapeCollisionWorldBuildScheduleHost,
+  createLandrushZombieEscapeCollisionWorldBuildCoordinator,
+  createLandrushZombieEscapeCollisionWorldBuildState,
+  type LandrushZombieEscapeCollisionWorldBuildCoordinator,
+  resolveLandrushZombieEscapeCollisionWorldBuildPriority,
+  resolveLandrushZombieEscapeCollisionWorldPhaseReady,
+} from './landrush-zombie-escape-collision-world-lifecycle'
+import { createBrowserLandrushZombieEscapeCollisionWorldWorkerCompiler } from './landrush-zombie-escape-collision-world-worker-client'
 import { shouldShowLandrushZombieEscapeMoney } from './landrush-zombie-escape-hud-visibility'
 import {
   advanceLandrushZombieEscapePhaseClock,
@@ -47,23 +66,32 @@ import {
   canAdvanceLandrushZombieEscapeIntegratedSimulation,
   createLandrushZombieEscapePhaseClock,
   createLandrushZombieEscapeRestartButtonState,
+  requestLandrushZombieEscapeNightStart,
   restartLandrushZombieEscapeIntegratedSimulation,
   stepLandrushZombieEscapeIntegratedSimulation,
 } from './landrush-zombie-escape-runtime'
 import { LandrushZombieEscapeStructurePresentation } from './landrush-zombie-escape-structure-presentation'
 import { ZombieEscapeActors } from './zombie-escape-actors'
 import { ZombieEscapeAudio } from './zombie-escape-audio'
-import { ZOMBIE_ESCAPE_SEED, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+import { inspectZombieEscapeSparseAttachmentHeapLeases } from './zombie-escape-collision-world'
+import {
+  ZOMBIE_ESCAPE_CAPACITY,
+  ZOMBIE_ESCAPE_SEED,
+  ZOMBIE_ESCAPE_SIMULATION,
+} from './zombie-escape-config'
 import {
   createZombieEscapeControlState,
   isZombieEscapeGamepadFirePressed,
 } from './zombie-escape-controls'
 import { ZombieEscapeEffects } from './zombie-escape-effects'
+import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
   clearZombieEscapeGeneratedAssetCaches,
   type ZombieEscapeGeneratedAssetFailure,
 } from './zombie-escape-generated-assets'
 import { ZombieEscapeMoneyBadge } from './zombie-escape-hud'
+import type { LandrushZombieEscapeNavigationScaleProofResult } from './zombie-escape-navigation-scale-proof'
+import type { LandrushZombieEscapeNavigationScaleProofFixtureWorldSummary } from './zombie-escape-navigation-scale-proof-fixture'
 import {
   createZombieEscapeRenderReadinessRegistry,
   getZombieEscapeRenderRepresentativeKeys,
@@ -73,15 +101,18 @@ import {
   createZombieEscapeHudSnapshot,
   createZombieEscapeSimulation,
   getZombieEscapeMeleeProgress,
+  requestZombieEscapeDeterministicObstacleDelta,
   restoreZombieEscapeDefaultMuzzlePose,
   setZombieEscapeCollisionWorld,
   setZombieEscapeExternalPlayerPose,
+  setZombieEscapeObstacleDamageEnabled,
   setZombieEscapePlayerMuzzlePose,
   setZombieEscapeWeaponPickupPlacements,
   ZOMBIE_ESCAPE_SHOT_PHASE,
   type ZombieEscapeGamePhase,
   type ZombieEscapeGameStatus,
   type ZombieEscapeHudSnapshot,
+  type ZombieEscapeObstacleDeltaRequestResult,
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
@@ -90,16 +121,23 @@ import {
   resolveZombieEscapeWeaponPickupPlacements,
   translateZombieEscapeWeaponPickupPlacements,
 } from './zombie-escape-weapon-placement'
-import { createZombieEscapeArena, type ZombieEscapeArenaData } from './zombie-escape-world'
+import type { ZombieEscapeArenaData } from './zombie-escape-world'
 
 const RECOIL_DURATION_SECONDS = 0.13
 const GENERATED_ASSET_AUTO_RETRY_DELAYS_MS = [650, 1_300] as const
+const LANDRUSH_ZOMBIE_ESCAPE_SURFACE_SUPPORT_ID = 'landrush-island:surface-boundary'
+const LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK_PROTECTED_HEALTH = 1_000_000_000
+
+const LazyLandrushZombieNavigationOverlay = lazy(
+  () => import('./landrush-zombie-navigation-overlay'),
+)
 
 export const LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER = {
   effects: 0.9,
   floorPresentation: 0.92,
   input: 0.3,
   motion: 0.4,
+  navigationOverlay: 0.97,
   passthrough: 0.95,
   presentation: 0.85,
   robot: 0.6,
@@ -111,12 +149,138 @@ export const LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER = {
 declare global {
   interface Window {
     __LANDRUSH_ZOMBIE_ESCAPE__?: unknown
+    __LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__?: LandrushZombieEscapeRoomSoakBridge
     __LANDRUSH_ZOMBIE_ESCAPE_HUD_PORTAL__?: {
       container: HTMLDivElement
       owner: symbol
       release: () => void
     }
   }
+}
+
+export type LandrushZombieEscapeRoomSoakState = {
+  active: boolean
+  enabled: boolean
+  originalObstacleDamageEnabled: boolean | null
+  originalPlayerHealth: number | null
+  playerProtected: boolean
+  targetZombieCount: number
+}
+
+export type LandrushZombieEscapeRoomSoakSnapshot = Readonly<{
+  active: boolean
+  activeZombieCount: number
+  enabled: boolean
+  obstacleDamageSuppressed: boolean
+  obstacleDeltaAppliedRevision: number
+  obstacleDeltaRequestedRevision: number
+  phaseHeld: boolean
+  playerProtected: boolean
+  reachableSpawnCompletedCount: number
+  representedZombieCount: number
+  rosterRealized: boolean
+  scheduledZombieCount: number
+  targetZombieCount: number
+  zombieCapacity: number
+}>
+
+type LandrushZombieEscapeRoomSoakBridge = {
+  begin: () => LandrushZombieEscapeRoomSoakSnapshot
+  end: () => LandrushZombieEscapeRoomSoakSnapshot
+  getState: () => LandrushZombieEscapeRoomSoakSnapshot
+  requestObstacleDelta: () => ZombieEscapeObstacleDeltaRequestResult
+  requestTargetRoster: () => LandrushZombieEscapeRoomSoakSnapshot
+}
+
+type LandrushZombieEscapeNavigationScaleProofRunner =
+  () => Promise<LandrushZombieEscapeNavigationScaleProofResult>
+
+type LandrushZombieEscapeNavigationScaleProofFixtureCapture = Readonly<{
+  compilation: LandrushZombieEscapeCollisionWorldCompilation
+  expectedWorld: LandrushZombieEscapeNavigationScaleProofFixtureWorldSummary
+  proofInput: Readonly<{
+    collisionWorldGeneration: number
+    worldOrigin: Readonly<{ x: number; y: number; z: number }>
+  }>
+}>
+
+type LandrushZombieEscapeNavigationScaleProofFixtureCaptureRunner =
+  () => Promise<LandrushZombieEscapeNavigationScaleProofFixtureCapture>
+
+type LandrushZombieEscapeNavigationScaleProofCache = {
+  controller: AbortController
+  key: string
+  promise: Promise<LandrushZombieEscapeNavigationScaleProofResult>
+}
+
+const LANDRUSH_ZOMBIE_ESCAPE_NAVIGATION_SCALE_PROOF_TIMEOUT_MS = 120_000
+
+export function createLandrushZombieEscapeNavigationScaleProofCacheKey({
+  collisionWorldGeneration,
+  collisionWorldSignature,
+  world,
+}: {
+  collisionWorldGeneration: number
+  collisionWorldSignature: string
+  world: Pick<
+    ZombieEscapeSimulation['collisionWorld'],
+    'activationRevision' | 'revision' | 'semanticKey'
+  >
+}) {
+  return JSON.stringify([
+    collisionWorldGeneration,
+    world.revision,
+    world.activationRevision,
+    world.semanticKey,
+    collisionWorldSignature,
+  ])
+}
+
+export function shouldEnableLandrushZombieEscapeNavigationScaleProof(search: string) {
+  const params = new URLSearchParams(search)
+  return params.get('bench') === '1' && params.get('landrushNavScaleProof') === '1'
+}
+
+export function shouldEnableLandrushZombieEscapeNavigationScaleProofFixtureCapture(search: string) {
+  const params = new URLSearchParams(search)
+  return params.get('bench') === '1' && params.get('landrushNavFixtureCapture') === '1'
+}
+
+export function shouldEnableLandrushZombieNavigationOverlay(search: string) {
+  const params = new URLSearchParams(search)
+  return params.get('landrushNavOverlay') === '1' || params.get('navOverlay') === '1'
+}
+
+export function isLandrushZombieEscapeNavigationScaleProofFixtureCaptureReady({
+  buildReady,
+  captureEnabled,
+  compilationSignature,
+  desiredSignature,
+  effectiveNavigationWorld,
+  installedNavigationWorld,
+  installedSignature,
+  sourceNavigationWorld,
+}: {
+  buildReady: boolean
+  captureEnabled: boolean
+  compilationSignature: string | null
+  desiredSignature: string
+  effectiveNavigationWorld: unknown
+  installedNavigationWorld: unknown
+  installedSignature: string | null
+  sourceNavigationWorld: unknown
+}) {
+  return (
+    buildReady &&
+    captureEnabled &&
+    compilationSignature !== null &&
+    effectiveNavigationWorld !== null &&
+    installedNavigationWorld !== null &&
+    sourceNavigationWorld !== null &&
+    compilationSignature === installedSignature &&
+    installedSignature === desiredSignature &&
+    installedNavigationWorld === sourceNavigationWorld
+  )
 }
 
 export type LandrushZombieEscapePlayerMotion = {
@@ -143,10 +307,13 @@ export type LandrushZombieEscapeModeProps = {
    * structures but must not mutate the canonical scene graph.
    */
   onDestroyedFurnitureIdsChange?: (nodeIds: ReadonlySet<string>) => void
-  onGeneratedAssetsReadyChange?: (ready: boolean) => void
+  onGeneratedAssetsReadinessChange?: (
+    readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
+  ) => void
   onPhaseChange: (phase: ZombieEscapeGamePhase) => void
   onResetExternalPlayerMotion: () => void
   onStatusChange: (status: ZombieEscapeGameStatus) => void
+  palmLayout: readonly LandrushIslandPalmPlacement[]
   phaseReady: boolean
   playerColor: string
   spawn: Readonly<{ x: number; z: number }>
@@ -176,6 +343,637 @@ export function acquireLandrushZombieEscapeCanvasPointerOwnership({
   }
 }
 
+export function createLandrushZombieEscapeRoomSoakState(): LandrushZombieEscapeRoomSoakState {
+  return {
+    active: false,
+    enabled: false,
+    originalObstacleDamageEnabled: null,
+    originalPlayerHealth: null,
+    playerProtected: false,
+    targetZombieCount: 0,
+  }
+}
+
+export function readLandrushZombieEscapeRoomSoakSnapshot(
+  state: LandrushZombieEscapeRoomSoakState,
+  simulation: ZombieEscapeSimulation,
+): LandrushZombieEscapeRoomSoakSnapshot {
+  const scheduledZombieCount =
+    simulation.zombies.pool.activeCount +
+    Math.max(0, simulation.replacementSpawnRemaining) +
+    Math.max(0, simulation.waveSpawnRemaining)
+  let representedZombieCount = 0
+  const zombies = simulation.zombies
+  for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+    if (zombies.pool.active[slot] === 0 || zombies.health[slot]! <= 0) continue
+    if (
+      zombies.navigationConnector[slot]! >= 0 ||
+      zombies.navigationWaypointNode[slot]! >= 0 ||
+      zombies.navigationIntentValid[slot] !== 0 ||
+      zombies.navigationIntentPending[slot] !== 0 ||
+      zombies.navigationIntentAdmissionDeferredReasons[slot] !== 0
+    ) {
+      representedZombieCount += 1
+    }
+  }
+  const rosterRealized =
+    state.targetZombieCount > 0 &&
+    simulation.collisionWorld.navigationMode === 'sparse' &&
+    simulation.zombies.pool.activeCount === state.targetZombieCount &&
+    scheduledZombieCount === state.targetZombieCount &&
+    representedZombieCount === state.targetZombieCount &&
+    simulation.navigationSparseSpawnSearchCompletedCount >= state.targetZombieCount &&
+    !simulation.navigationSparseSpawnSearchActive
+  return {
+    active: state.active,
+    activeZombieCount: simulation.zombies.pool.activeCount,
+    enabled: state.enabled,
+    obstacleDamageSuppressed: !simulation.obstacleDamageEnabled,
+    obstacleDeltaAppliedRevision: simulation.obstacleDeltaMetrics.appliedRevision,
+    obstacleDeltaRequestedRevision: simulation.obstacleDeltaMetrics.requestedRevision,
+    phaseHeld: state.active,
+    playerProtected: state.active && state.playerProtected,
+    reachableSpawnCompletedCount: simulation.navigationSparseSpawnSearchCompletedCount,
+    representedZombieCount,
+    rosterRealized,
+    scheduledZombieCount,
+    targetZombieCount: state.targetZombieCount,
+    zombieCapacity: simulation.zombies.pool.capacity,
+  }
+}
+
+export function requestLandrushZombieEscapeRoomSoakTargetRoster(
+  state: LandrushZombieEscapeRoomSoakState,
+  simulation: ZombieEscapeSimulation,
+) {
+  if (
+    !state.enabled ||
+    !state.active ||
+    simulation.phase !== 'night' ||
+    simulation.status !== 'playing'
+  ) {
+    return readLandrushZombieEscapeRoomSoakSnapshot(state, simulation)
+  }
+
+  state.targetZombieCount = ZOMBIE_ESCAPE_CAPACITY.zombies
+  if (simulation.zombies.pool.capacity !== state.targetZombieCount) {
+    return readLandrushZombieEscapeRoomSoakSnapshot(state, simulation)
+  }
+
+  const scheduledZombieCount =
+    simulation.zombies.pool.activeCount +
+    Math.max(0, simulation.replacementSpawnRemaining) +
+    Math.max(0, simulation.waveSpawnRemaining)
+  if (scheduledZombieCount < state.targetZombieCount) {
+    simulation.replacementSpawnRemaining += state.targetZombieCount - scheduledZombieCount
+  }
+  return readLandrushZombieEscapeRoomSoakSnapshot(state, simulation)
+}
+
+export function requestLandrushZombieEscapeRoomSoakObstacleDelta(
+  simulation: ZombieEscapeSimulation,
+) {
+  return requestZombieEscapeDeterministicObstacleDelta(simulation)
+}
+
+export function beginLandrushZombieEscapeRoomSoak(
+  state: LandrushZombieEscapeRoomSoakState,
+  simulation: ZombieEscapeSimulation,
+) {
+  if (!state.active && simulation.phase === 'night' && simulation.status === 'playing') {
+    state.originalObstacleDamageEnabled = simulation.obstacleDamageEnabled
+    state.originalPlayerHealth = simulation.player.health
+    setZombieEscapeObstacleDamageEnabled(simulation, false)
+    simulation.player.health = Math.max(
+      simulation.player.health,
+      LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK_PROTECTED_HEALTH,
+    )
+    state.active = true
+    state.playerProtected = true
+  }
+  return readLandrushZombieEscapeRoomSoakSnapshot(state, simulation)
+}
+
+export function endLandrushZombieEscapeRoomSoak(
+  state: LandrushZombieEscapeRoomSoakState,
+  simulation: ZombieEscapeSimulation,
+) {
+  if (state.active && state.originalPlayerHealth !== null) {
+    simulation.player.health = state.originalPlayerHealth
+  }
+  if (state.originalObstacleDamageEnabled !== null) {
+    setZombieEscapeObstacleDamageEnabled(simulation, state.originalObstacleDamageEnabled)
+  }
+  state.active = false
+  state.originalObstacleDamageEnabled = null
+  state.originalPlayerHealth = null
+  state.playerProtected = false
+  state.targetZombieCount = 0
+  return readLandrushZombieEscapeRoomSoakSnapshot(state, simulation)
+}
+
+export function createLandrushZombieEscapeRoutingDebugSnapshot(simulation: ZombieEscapeSimulation) {
+  const attachmentHeapLeases = inspectZombieEscapeSparseAttachmentHeapLeases(
+    simulation.navigationField,
+  )
+  const cachedFollowWork = simulation.navigationSparseCachedFollowWork
+  const flowSearchWork = simulation.navigationSparseFlowSearchWork
+  const obstacleDelta = simulation.obstacleDeltaMetrics
+  const spawnSearchWork = simulation.navigationSparseSpawnWork
+  const targetUpdate = simulation.navigationField.graphSparseTargetUpdate
+  const targetUpdateWork = simulation.navigationSparseTargetWork
+  const visibilityWork = simulation.navigationVisibilityWork
+  return {
+    fallbackRebuildCount: simulation.navigationField.fallbackRebuildCount,
+    graphAttachmentCandidateCount: simulation.navigationField.graphAttachmentCandidateCount,
+    graphAttachmentFullSearchCount: simulation.navigationField.graphAttachmentFullSearchCount,
+    graphAttachmentSupportCheckCount: simulation.navigationField.graphAttachmentSupportCheckCount,
+    navigationSparseAttachmentActiveAgentLeaseCount: attachmentHeapLeases.activeAgentLeases,
+    navigationSparseAttachmentAvailableAgentLeaseCount: attachmentHeapLeases.availableAgentLeases,
+    navigationSparseAttachmentFieldSingletonLeaseReserved: attachmentHeapLeases.singletonReserved,
+    navigationSparseAttachmentLeaseInvariantViolationCount:
+      attachmentHeapLeases.leaseInvariantViolationCount,
+    navigationSparseAttachmentMaximumActiveAgentLeaseCountObserved:
+      attachmentHeapLeases.maximumActiveAgentLeases,
+    navigationSparseAttachmentMaximumHierarchyNodeCount:
+      attachmentHeapLeases.maximumHierarchyNodeCount,
+    navigationSparseAttachmentSpawnLeaseReserved: attachmentHeapLeases.spawnReserved,
+    maximumResolveCountObservedPerTick:
+      simulation.navigationIntentMaximumResolveCountObservedPerTick,
+    navigationVisibilityColliderCandidateVisitsMaximumObservedPerTick:
+      visibilityWork.colliderCandidateVisitsMaximumObservedPerTick,
+    navigationVisibilityColliderCandidateVisitsThisTick:
+      visibilityWork.colliderCandidateVisitsThisTick,
+    navigationVisibilityColliderCandidateVisitsTotal: visibilityWork.colliderCandidateVisitsTotal,
+    navigationVisibilityColliderHierarchyNodeVisitsMaximumObservedPerTick:
+      visibilityWork.colliderHierarchyNodeVisitsMaximumObservedPerTick,
+    navigationVisibilityColliderHierarchyNodeVisitsThisTick:
+      visibilityWork.colliderHierarchyNodeVisitsThisTick,
+    navigationVisibilityColliderHierarchyNodeVisitsTotal:
+      visibilityWork.colliderHierarchyNodeVisitsTotal,
+    navigationVisibilitySupportHierarchyNodeVisitsMaximumObservedPerTick:
+      visibilityWork.supportHierarchyNodeVisitsMaximumObservedPerTick,
+    navigationVisibilitySupportHierarchyNodeVisitsThisTick:
+      visibilityWork.supportHierarchyNodeVisitsThisTick,
+    navigationVisibilitySupportHierarchyNodeVisitsTotal:
+      visibilityWork.supportHierarchyNodeVisitsTotal,
+    navigationVisibilitySupportHoleVisitsMaximumObservedPerTick:
+      visibilityWork.supportHoleVisitsMaximumObservedPerTick,
+    navigationVisibilitySupportHoleVisitsThisTick: visibilityWork.supportHoleVisitsThisTick,
+    navigationVisibilitySupportHoleVisitsTotal: visibilityWork.supportHoleVisitsTotal,
+    navigationVisibilitySupportItemVisitsMaximumObservedPerTick:
+      visibilityWork.supportItemVisitsMaximumObservedPerTick,
+    navigationVisibilitySupportItemVisitsThisTick: visibilityWork.supportItemVisitsThisTick,
+    navigationVisibilitySupportItemVisitsTotal: visibilityWork.supportItemVisitsTotal,
+    navigationVisibilitySupportRingEdgeVisitsMaximumObservedPerTick:
+      visibilityWork.supportRingEdgeVisitsMaximumObservedPerTick,
+    navigationVisibilitySupportRingEdgeVisitsThisTick: visibilityWork.supportRingEdgeVisitsThisTick,
+    navigationVisibilitySupportRingEdgeVisitsTotal: visibilityWork.supportRingEdgeVisitsTotal,
+    navigationVisibilitySupportRingHierarchyNodeVisitsMaximumObservedPerTick:
+      visibilityWork.supportRingHierarchyNodeVisitsMaximumObservedPerTick,
+    navigationVisibilitySupportRingHierarchyNodeVisitsThisTick:
+      visibilityWork.supportRingHierarchyNodeVisitsThisTick,
+    navigationVisibilitySupportRingHierarchyNodeVisitsTotal:
+      visibilityWork.supportRingHierarchyNodeVisitsTotal,
+    obstacleDeltaAllocationCountMaximumObservedPerTick:
+      obstacleDelta.allocationCount.maximumObservedPerTick,
+    obstacleDeltaAllocationCountThisTick: obstacleDelta.allocationCount.thisTick,
+    obstacleDeltaAllocationCountTotal: obstacleDelta.allocationCount.total,
+    obstacleDeltaAppliedCount: obstacleDelta.appliedCount,
+    obstacleDeltaAppliedRevision: obstacleDelta.appliedRevision,
+    obstacleDeltaConnectorMaskWritesMaximumObservedPerTick:
+      obstacleDelta.connectorMaskWrites.maximumObservedPerTick,
+    obstacleDeltaConnectorMaskWritesThisTick: obstacleDelta.connectorMaskWrites.thisTick,
+    obstacleDeltaConnectorMaskWritesTotal: obstacleDelta.connectorMaskWrites.total,
+    obstacleDeltaFullArrayClearCountMaximumObservedPerTick:
+      obstacleDelta.fullArrayClearCount.maximumObservedPerTick,
+    obstacleDeltaFullArrayClearCountThisTick: obstacleDelta.fullArrayClearCount.thisTick,
+    obstacleDeltaFullArrayClearCountTotal: obstacleDelta.fullArrayClearCount.total,
+    obstacleDeltaObjectLookupComparisonsMaximumObservedPerTick:
+      obstacleDelta.objectLookupComparisons.maximumObservedPerTick,
+    obstacleDeltaObjectLookupComparisonsThisTick: obstacleDelta.objectLookupComparisons.thisTick,
+    obstacleDeltaObjectLookupComparisonsTotal: obstacleDelta.objectLookupComparisons.total,
+    obstacleDeltaObjectMaskWritesMaximumObservedPerTick:
+      obstacleDelta.objectMaskWrites.maximumObservedPerTick,
+    obstacleDeltaObjectMaskWritesThisTick: obstacleDelta.objectMaskWrites.thisTick,
+    obstacleDeltaObjectMaskWritesTotal: obstacleDelta.objectMaskWrites.total,
+    obstacleDeltaRequestCount: obstacleDelta.requestCount,
+    obstacleDeltaRequestedRevision: obstacleDelta.requestedRevision,
+    obstacleDeltaRequiresRecompileCount: obstacleDelta.requiresRecompileCount,
+    obstacleDeltaRevisionAdvanceCount: obstacleDelta.revisionAdvanceCount,
+    obstacleDeltaUnchangedCount: obstacleDelta.unchangedCount,
+    obstacleDeltaViewRevisionAdvanceCount: obstacleDelta.viewRevisionAdvanceCount,
+    obstacleDeltaWorldCompileCountMaximumObservedPerTick:
+      obstacleDelta.worldCompileCount.maximumObservedPerTick,
+    obstacleDeltaWorldCompileCountThisTick: obstacleDelta.worldCompileCount.thisTick,
+    obstacleDeltaWorldCompileCountTotal: obstacleDelta.worldCompileCount.total,
+    navigationAnchorInvalidationCount: simulation.navigationAnchorInvalidationCount,
+    navigationAnchoredAgentCount: simulation.navigationAnchoredAgentCount,
+    navigationGraphNodeCount: simulation.collisionWorld.navigationGraph.nodeIds.length,
+    navigationGoalResolvedTick: simulation.navigationGoalResolvedTick,
+    navigationIntentCanceledCount: simulation.navigationIntentCanceledCount,
+    navigationIntentDemandCachedAnchorLostCount:
+      simulation.navigationIntentDemandCachedAnchorLostCount,
+    navigationIntentDemandCollisionRecoveryCount:
+      simulation.navigationIntentDemandCollisionRecoveryCount,
+    navigationIntentDemandConnectorChangedCount:
+      simulation.navigationIntentDemandConnectorChangedCount,
+    navigationIntentDemandRoutePublishedCount: simulation.navigationIntentDemandRoutePublishedCount,
+    navigationIntentDemandSpawnCount: simulation.navigationIntentDemandSpawnCount,
+    navigationIntentDemandWorldChangedCount: simulation.navigationIntentDemandWorldChangedCount,
+    navigationIntentFirstServiceCount: simulation.navigationIntentFirstServiceCount,
+    navigationIntentIssuedCount: simulation.navigationIntentIssuedCount,
+    navigationIntentMaximumResolveCountObservedPerTick:
+      simulation.navigationIntentMaximumResolveCountObservedPerTick,
+    navigationIntentMaximumUnservicedAgeTicksObserved:
+      simulation.navigationIntentMaximumUnservicedAgeTicksObserved,
+    navigationIntentOldestPendingAgeTicks: simulation.navigationIntentOldestPendingAgeTicks,
+    navigationIntentOldestUnservicedAgeTicks: simulation.navigationIntentOldestUnservicedAgeTicks,
+    navigationIntentPendingCount: simulation.navigationIntentPendingCount,
+    navigationIntentResolvedCount: simulation.navigationIntentResolvedCount,
+    navigationIntentResolveBudgetPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationIntentResolveBudgetPerTick,
+    navigationIntentResolveBudgetViolationCount:
+      simulation.navigationIntentResolveBudgetViolationCount,
+    navigationIntentResolveCountThisTick: simulation.navigationIntentResolveCountThisTick,
+    navigationIntentUnservicedPendingCount: simulation.navigationIntentUnservicedPendingCount,
+    navigationLivingWithoutCommittedActionCount:
+      simulation.navigationLivingWithoutCommittedActionCount,
+    navigationRetainedPendingActionCount: simulation.navigationRetainedPendingActionCount,
+    navigationStaleTargetCount: simulation.navigationStaleTargetCount,
+    navigationIntentAdmissionDeferredCanceledCount:
+      simulation.navigationIntentAdmissionDeferredCanceledCount,
+    navigationIntentAdmissionDeferredMarkedCount:
+      simulation.navigationIntentAdmissionDeferredMarkedCount,
+    navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick:
+      simulation.navigationIntentAdmissionDeferredMaximumPromotedCountObservedPerTick,
+    navigationIntentAdmissionDeferredPendingCount:
+      simulation.navigationIntentAdmissionDeferredPendingCount,
+    navigationIntentAdmissionDeferredPromotionBudgetPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+    navigationIntentAdmissionDeferredPromotedCachedAnchorLostCount:
+      simulation.navigationIntentAdmissionDeferredPromotedCachedAnchorLostCount,
+    navigationIntentAdmissionDeferredPromotedCollisionRecoveryCount:
+      simulation.navigationIntentAdmissionDeferredPromotedCollisionRecoveryCount,
+    navigationIntentAdmissionDeferredPromotedConnectorChangedCount:
+      simulation.navigationIntentAdmissionDeferredPromotedConnectorChangedCount,
+    navigationIntentAdmissionDeferredPromotedCount:
+      simulation.navigationIntentAdmissionDeferredPromotedCount,
+    navigationIntentAdmissionDeferredPromotedCountThisTick:
+      simulation.navigationIntentAdmissionDeferredPromotedCountThisTick,
+    navigationIntentAdmissionDeferredPromotedSpawnCount:
+      simulation.navigationIntentAdmissionDeferredPromotedSpawnCount,
+    navigationIntentAdmissionDeferredPromotedWorldChangedCount:
+      simulation.navigationIntentAdmissionDeferredPromotedWorldChangedCount,
+    navigationIntentAdmissionDeferredQueueOperationCountThisTick:
+      simulation.navigationIntentAdmissionDeferredQueueOperationCountThisTick,
+    navigationIntentAdmissionDeferredQueueOperationCountTotal:
+      simulation.navigationIntentAdmissionDeferredQueueOperationCountTotal,
+    navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick:
+      simulation.navigationIntentAdmissionDeferredQueueOperationMaximumObservedPerTick,
+    navigationObstacleRefreshDeferredCanceledCount:
+      simulation.navigationObstacleRefreshDeferredCanceledCount,
+    navigationObstacleRefreshDeferredMarkedCount:
+      simulation.navigationObstacleRefreshDeferredMarkedCount,
+    navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick:
+      simulation.navigationObstacleRefreshDeferredMaximumPromotedCountObservedPerTick,
+    navigationObstacleRefreshDeferredPendingCount:
+      simulation.navigationObstacleRefreshDeferredPendingCount,
+    navigationObstacleRefreshDeferredPromotedCount:
+      simulation.navigationObstacleRefreshDeferredPromotedCount,
+    navigationObstacleRefreshDeferredPromotedCountThisTick:
+      simulation.navigationObstacleRefreshDeferredPromotedCountThisTick,
+    navigationObstacleRefreshDeferredPromotionBudgetPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+    navigationObstacleRefreshDiscoveryAppliedRevision:
+      simulation.navigationObstacleRefreshDiscoveryAppliedRevision,
+    navigationObstacleRefreshDiscoveryEpochRevision:
+      simulation.navigationObstacleRefreshDiscoveryEpochRevision,
+    navigationObstacleRefreshDiscoveryRemainingSlotCount:
+      simulation.navigationObstacleRefreshDiscoveryRemainingSlotCount,
+    navigationRefreshAdmissionBudgetPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+    navigationRefreshAdmissionCountThisTick: simulation.navigationRefreshAdmissionCountThisTick,
+    navigationRefreshAdmissionCountTotal: simulation.navigationRefreshAdmissionCountTotal,
+    navigationRefreshAdmissionMaximumCountObservedPerTick:
+      simulation.navigationRefreshAdmissionMaximumCountObservedPerTick,
+    navigationRefreshCandidateInspectionBudgetPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationRefreshCandidateInspectionBudgetPerTick,
+    navigationRefreshSlotCapacity: simulation.zombies.pool.capacity,
+    navigationRefreshCandidateInspectionsMaximumObservedPerTick:
+      simulation.navigationRefreshCandidateInspectionsMaximumObservedPerTick,
+    navigationRefreshCandidateInspectionsThisTick:
+      simulation.navigationRefreshCandidateInspectionsThisTick,
+    navigationRefreshCandidateInspectionsTotal:
+      simulation.navigationRefreshCandidateInspectionsTotal,
+    navigationSparseCachedFollowCandidateVisitsMaximumObservedPerTick:
+      cachedFollowWork.candidateVisitsMaximumObservedPerTick,
+    navigationSparseCachedFollowCandidateVisitsThisTick: cachedFollowWork.candidateVisitsThisTick,
+    navigationSparseCachedFollowCandidateVisitsTotal: cachedFollowWork.candidateVisitsTotal,
+    navigationSparseCachedFollowCollisionPredicatesMaximumObservedPerTick:
+      cachedFollowWork.collisionPredicatesMaximumObservedPerTick,
+    navigationSparseCachedFollowCollisionPredicatesThisTick:
+      cachedFollowWork.collisionPredicatesThisTick,
+    navigationSparseCachedFollowCollisionPredicatesTotal: cachedFollowWork.collisionPredicatesTotal,
+    navigationSparseCachedFollowHeapOperationsMaximumObservedPerTick:
+      cachedFollowWork.heapOperationsMaximumObservedPerTick,
+    navigationSparseCachedFollowHeapOperationsThisTick: cachedFollowWork.heapOperationsThisTick,
+    navigationSparseCachedFollowHeapOperationsTotal: cachedFollowWork.heapOperationsTotal,
+    navigationSparseCachedFollowHierarchyNodeVisitsMaximumObservedPerTick:
+      cachedFollowWork.hierarchyNodeVisitsMaximumObservedPerTick,
+    navigationSparseCachedFollowHierarchyNodeVisitsThisTick:
+      cachedFollowWork.hierarchyNodeVisitsThisTick,
+    navigationSparseCachedFollowHierarchyNodeVisitsTotal: cachedFollowWork.hierarchyNodeVisitsTotal,
+    navigationSparseCachedFollowSupportPredicatesMaximumObservedPerTick:
+      cachedFollowWork.supportPredicatesMaximumObservedPerTick,
+    navigationSparseCachedFollowSupportPredicatesThisTick:
+      cachedFollowWork.supportPredicatesThisTick,
+    navigationSparseCachedFollowSupportPredicatesTotal: cachedFollowWork.supportPredicatesTotal,
+    navigationSparseCollisionReanchorAttemptCount:
+      simulation.navigationSparseCollisionReanchorAttemptCount,
+    navigationSparseCollisionReanchorCompletedCount:
+      simulation.navigationSparseCollisionReanchorCompletedCount,
+    navigationSparseCollisionReanchorFailedCount:
+      simulation.navigationSparseCollisionReanchorFailedCount,
+    navigationSparseFlowSearchCandidateVisitsMaximumObservedPerTick:
+      flowSearchWork.candidateVisitsMaximumObservedPerTick,
+    navigationSparseFlowSearchCandidateVisitsThisTick: flowSearchWork.candidateVisitsThisTick,
+    navigationSparseFlowSearchCandidateVisitsTotal: flowSearchWork.candidateVisitsTotal,
+    navigationSparseFlowSearchCollisionPredicatesMaximumObservedPerTick:
+      flowSearchWork.collisionPredicatesMaximumObservedPerTick,
+    navigationSparseFlowSearchCollisionPredicatesThisTick:
+      flowSearchWork.collisionPredicatesThisTick,
+    navigationSparseFlowSearchCollisionPredicatesTotal: flowSearchWork.collisionPredicatesTotal,
+    navigationSparseFlowSearchHeapOperationsMaximumObservedPerTick:
+      flowSearchWork.heapOperationsMaximumObservedPerTick,
+    navigationSparseFlowSearchHeapOperationsThisTick: flowSearchWork.heapOperationsThisTick,
+    navigationSparseFlowSearchHeapOperationsTotal: flowSearchWork.heapOperationsTotal,
+    navigationSparseFlowSearchHierarchyNodeVisitsMaximumObservedPerTick:
+      flowSearchWork.hierarchyNodeVisitsMaximumObservedPerTick,
+    navigationSparseFlowSearchHierarchyNodeVisitsThisTick:
+      flowSearchWork.hierarchyNodeVisitsThisTick,
+    navigationSparseFlowSearchHierarchyNodeVisitsTotal: flowSearchWork.hierarchyNodeVisitsTotal,
+    navigationSparseFlowSearchSupportPredicatesMaximumObservedPerTick:
+      flowSearchWork.supportPredicatesMaximumObservedPerTick,
+    navigationSparseFlowSearchSupportPredicatesThisTick: flowSearchWork.supportPredicatesThisTick,
+    navigationSparseFlowSearchSupportPredicatesTotal: flowSearchWork.supportPredicatesTotal,
+    navigationSparseSearchAgentSlicesPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+    navigationSparseSearchActiveAgentCount: simulation.navigationSparseSearchActiveAgentCount,
+    navigationSparseSearchWorldStaleActiveCount:
+      simulation.navigationSparseSearchWorldStaleActiveCount,
+    navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick:
+      simulation.navigationSparseSearchAgentEligiblePendingCountAtScheduleThisTick,
+    navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved:
+      simulation.navigationSparseSearchAgentMaximumPendingNoProgressAgeTicksObserved,
+    navigationSparseSearchAgentOldestPendingNoProgressAgeTicks:
+      simulation.navigationSparseSearchAgentOldestPendingNoProgressAgeTicks,
+    navigationSparseSearchAgentProgressSliceCountThisTick:
+      simulation.navigationSparseSearchAgentProgressSliceCountThisTick,
+    navigationSparseSearchAgentProgressSliceCountTotal:
+      simulation.navigationSparseSearchAgentProgressSliceCountTotal,
+    navigationSparseSearchAgentServiceSliceCountThisTick:
+      simulation.navigationSparseSearchAgentServiceSliceCountThisTick,
+    navigationSparseSearchAgentServiceSliceCountTotal:
+      simulation.navigationSparseSearchAgentServiceSliceCountTotal,
+    navigationSparseSearchBudgetViolationCount:
+      simulation.navigationSparseSearchBudgetViolationCount,
+    navigationSparseSearchCanceledCount: simulation.navigationSparseSearchCanceledCount,
+    navigationSparseSearchCandidateVisitsMaximumObservedPerTick:
+      simulation.navigationSparseSearchCandidateVisitsMaximumObservedPerTick,
+    navigationSparseSearchCandidateVisitsThisTick:
+      simulation.navigationSparseSearchCandidateVisitsThisTick,
+    navigationSparseSearchCandidateVisitsTotal:
+      simulation.navigationSparseSearchCandidateVisitsTotal,
+    navigationSparseSearchCollisionPredicatesMaximumObservedPerTick:
+      simulation.navigationSparseSearchCollisionPredicatesMaximumObservedPerTick,
+    navigationSparseSearchCollisionPredicatesThisTick:
+      simulation.navigationSparseSearchCollisionPredicatesThisTick,
+    navigationSparseSearchCollisionPredicatesTotal:
+      simulation.navigationSparseSearchCollisionPredicatesTotal,
+    navigationSparseSearchCompletedCount: simulation.navigationSparseSearchCompletedCount,
+    navigationSparseSearchCompletionProgressThisTick:
+      simulation.navigationSparseSearchCompletionProgressThisTick,
+    navigationSparseSearchCompletionProgressTotal:
+      simulation.navigationSparseSearchCompletionProgressTotal,
+    navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick:
+      simulation.navigationSparseSearchGraphEdgeVisitsMaximumObservedPerTick,
+    navigationSparseSearchGraphEdgeVisitsThisTick:
+      simulation.navigationSparseSearchGraphEdgeVisitsThisTick,
+    navigationSparseSearchGraphEdgeVisitsTotal:
+      simulation.navigationSparseSearchGraphEdgeVisitsTotal,
+    navigationSparseSearchHeapOperationsMaximumObservedPerTick:
+      simulation.navigationSparseSearchHeapOperationsMaximumObservedPerTick,
+    navigationSparseSearchHeapOperationsThisTick:
+      simulation.navigationSparseSearchHeapOperationsThisTick,
+    navigationSparseSearchHeapOperationsTotal: simulation.navigationSparseSearchHeapOperationsTotal,
+    navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick:
+      simulation.navigationSparseSearchHierarchyNodeVisitsMaximumObservedPerTick,
+    navigationSparseSearchHierarchyNodeVisitsThisTick:
+      simulation.navigationSparseSearchHierarchyNodeVisitsThisTick,
+    navigationSparseSearchHierarchyNodeVisitsTotal:
+      simulation.navigationSparseSearchHierarchyNodeVisitsTotal,
+    navigationSparseSearchInvalidatedCount: simulation.navigationSparseSearchInvalidatedCount,
+    navigationSparseSearchCompactTargetMaximumNodeCount:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumNodeCount,
+    navigationSparseSearchCompactTargetMaximumCandidateVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumCandidateVisitsPerTick,
+    navigationSparseSearchCompactTargetMaximumGraphEdgeVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumGraphEdgeVisitsPerTick,
+    navigationSparseSearchCompactTargetMaximumHeapOperationsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchCompactTargetMaximumHeapOperationsPerTick,
+    navigationSparseSearchMaximumCandidateVisitsPerAgentSlice:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCandidateVisitsPerAgentSlice,
+    navigationSparseSearchMaximumCandidateVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCandidateVisitsPerTick,
+    navigationSparseSearchMaximumCollisionPredicatesPerAgentSlice:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCollisionPredicatesPerAgentSlice,
+    navigationSparseSearchMaximumCollisionPredicatesPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumCollisionPredicatesPerTick,
+    navigationSparseSearchMaximumHierarchyNodeVisitsPerAgentSlice:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHierarchyNodeVisitsPerAgentSlice,
+    navigationSparseSearchMaximumHierarchyNodeVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHierarchyNodeVisitsPerTick,
+    navigationSparseSearchMaximumGraphEdgeVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumGraphEdgeVisitsPerTick,
+    navigationSparseSearchMaximumHeapOperationsPerAgentSlice:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHeapOperationsPerAgentSlice,
+    navigationSparseSearchMaximumHeapOperationsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumHeapOperationsPerTick,
+    navigationSparseSearchMinimumWorkUnitsPerAgentSlice:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMinimumWorkUnitsPerAgentSlice,
+    navigationSparseSearchMaximumSupportPredicatesPerAgentSlice:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumSupportPredicatesPerAgentSlice,
+    navigationSparseSearchMaximumSupportPredicatesPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumSupportPredicatesPerTick,
+    navigationSparseSearchMaximumTargetCandidateVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetCandidateVisitsPerTick,
+    navigationSparseSearchMaximumTargetGraphEdgeVisitsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetGraphEdgeVisitsPerTick,
+    navigationSparseSearchMaximumTargetHeapOperationsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetHeapOperationsPerTick,
+    navigationSparseSearchMaximumTargetBuildsPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchMaximumTargetBuildsPerTick,
+    navigationSparseSearchMaximumNoProgressAgeTicksObserved:
+      simulation.navigationSparseSearchMaximumNoProgressAgeTicksObserved,
+    navigationSparseSearchNoProgressAgeTicks: simulation.navigationSparseSearchNoProgressAgeTicks,
+    navigationSparseSearchPendingAgentCount: simulation.navigationSparseSearchPendingAgentCount,
+    navigationSparseSearchRestartedCollisionRecoveryCount:
+      simulation.navigationSparseSearchRestartedCollisionRecoveryCount,
+    navigationSparseSearchRestartedCount: simulation.navigationSparseSearchRestartedCount,
+    navigationSparseSearchRestartedRoutePublishedCount:
+      simulation.navigationSparseSearchRestartedRoutePublishedCount,
+    navigationSparseSearchRestartedWorldChangedCount:
+      simulation.navigationSparseSearchRestartedWorldChangedCount,
+    navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved:
+      simulation.navigationSparseSearchSpawnMaximumNoProgressAgeTicksObserved,
+    navigationSparseSearchSpawnNoProgressAgeTicks:
+      simulation.navigationSparseSearchSpawnNoProgressAgeTicks,
+    navigationSparseSearchSpawnProgressSliceCountThisTick:
+      simulation.navigationSparseSearchSpawnProgressSliceCountThisTick,
+    navigationSparseSearchSpawnProgressSliceCountTotal:
+      simulation.navigationSparseSearchSpawnProgressSliceCountTotal,
+    navigationSparseSearchSpawnServiceSliceCountThisTick:
+      simulation.navigationSparseSearchSpawnServiceSliceCountThisTick,
+    navigationSparseSearchSpawnServiceSliceCountTotal:
+      simulation.navigationSparseSearchSpawnServiceSliceCountTotal,
+    navigationSparseSearchSpawnSlicesPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchSpawnSlicesPerTick,
+    navigationSparseSearchServiceSliceCountThisTick:
+      simulation.navigationSparseSearchServiceSliceCountThisTick,
+    navigationSparseSearchServiceSliceCountTotal:
+      simulation.navigationSparseSearchServiceSliceCountTotal,
+    navigationSparseSearchStartedCount: simulation.navigationSparseSearchStartedCount,
+    navigationSparseSearchSupportPredicatesMaximumObservedPerTick:
+      simulation.navigationSparseSearchSupportPredicatesMaximumObservedPerTick,
+    navigationSparseSearchSupportPredicatesThisTick:
+      simulation.navigationSparseSearchSupportPredicatesThisTick,
+    navigationSparseSearchSupportPredicatesTotal:
+      simulation.navigationSparseSearchSupportPredicatesTotal,
+    navigationSparseSearchTargetBuildsMaximumObservedPerTick:
+      simulation.navigationSparseSearchTargetBuildsMaximumObservedPerTick,
+    navigationSparseSearchTargetBuildsThisTick:
+      simulation.navigationSparseSearchTargetBuildsThisTick,
+    navigationSparseSearchTargetBuildsTotal: simulation.navigationSparseSearchTargetBuildsTotal,
+    navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved:
+      simulation.navigationSparseSearchTargetMaximumNoProgressAgeTicksObserved,
+    navigationSparseSearchTargetNoProgressAgeTicks:
+      simulation.navigationSparseSearchTargetNoProgressAgeTicks,
+    navigationSparseSearchTargetProgressSliceCountThisTick:
+      simulation.navigationSparseSearchTargetProgressSliceCountThisTick,
+    navigationSparseSearchTargetProgressSliceCountTotal:
+      simulation.navigationSparseSearchTargetProgressSliceCountTotal,
+    navigationSparseSearchTargetServiceSliceCountThisTick:
+      simulation.navigationSparseSearchTargetServiceSliceCountThisTick,
+    navigationSparseSearchTargetServiceSliceCountTotal:
+      simulation.navigationSparseSearchTargetServiceSliceCountTotal,
+    navigationSparseSearchTargetSlicesPerTick:
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchTargetSlicesPerTick,
+    navigationSparseSearchUncausedStartViolationCount:
+      simulation.navigationSparseSearchUncausedStartViolationCount,
+    navigationTargetCommittedRouteGeneration: simulation.navigationTargetCommittedRouteGeneration,
+    navigationTargetRequestedRevision: simulation.navigationTargetRequestedRevision,
+    navigationWorldRefreshAdmissionGeneration: simulation.navigationWorldRefreshAdmissionGeneration,
+    navigationWorldRefreshEpochGeneration: simulation.navigationWorldRefreshEpochGeneration,
+    navigationWorldRefreshInspectionRemaining: simulation.navigationWorldRefreshInspectionRemaining,
+    navigationWorldRefreshMaximumPromotedCountObservedPerTick:
+      simulation.navigationWorldRefreshMaximumPromotedCountObservedPerTick,
+    navigationWorldRefreshMinimumAppliedGeneration:
+      simulation.navigationWorldRefreshMinimumAppliedGeneration,
+    navigationWorldRefreshPendingCount: simulation.navigationWorldRefreshPendingCount,
+    navigationWorldRefreshPromotedCountThisTick:
+      simulation.navigationWorldRefreshPromotedCountThisTick,
+    navigationWorldRefreshPromotedCountTotal: simulation.navigationWorldRefreshPromotedCountTotal,
+    navigationWorldRefreshRestartedCountThisTick:
+      simulation.navigationWorldRefreshRestartedCountThisTick,
+    navigationWorldRefreshRestartedCountTotal: simulation.navigationWorldRefreshRestartedCountTotal,
+    navigationSparseSpawnSearchAttachmentHierarchyNodeVisitsMaximumObservedPerTick:
+      spawnSearchWork.attachmentHierarchyNodeVisitsMaximumObservedPerTick,
+    navigationSparseSpawnSearchAttachmentHierarchyNodeVisitsThisTick:
+      spawnSearchWork.attachmentHierarchyNodeVisitsThisTick,
+    navigationSparseSpawnSearchAttachmentHierarchyNodeVisitsTotal:
+      spawnSearchWork.attachmentHierarchyNodeVisitsTotal,
+    navigationSparseSpawnSearchCandidateVisitsMaximumObservedPerTick:
+      spawnSearchWork.candidateVisitsMaximumObservedPerTick,
+    navigationSparseSpawnSearchCandidateVisitsThisTick: spawnSearchWork.candidateVisitsThisTick,
+    navigationSparseSpawnSearchCandidateVisitsTotal: spawnSearchWork.candidateVisitsTotal,
+    navigationSparseSpawnSearchCollisionPredicatesMaximumObservedPerTick:
+      spawnSearchWork.collisionPredicatesMaximumObservedPerTick,
+    navigationSparseSpawnSearchCollisionPredicatesThisTick:
+      spawnSearchWork.collisionPredicatesThisTick,
+    navigationSparseSpawnSearchCollisionPredicatesTotal: spawnSearchWork.collisionPredicatesTotal,
+    navigationSparseSpawnSearchCompletedCount: simulation.navigationSparseSpawnSearchCompletedCount,
+    navigationSparseSpawnSearchHeapOperationsMaximumObservedPerTick:
+      spawnSearchWork.heapOperationsMaximumObservedPerTick,
+    navigationSparseSpawnSearchHeapOperationsThisTick: spawnSearchWork.heapOperationsThisTick,
+    navigationSparseSpawnSearchHeapOperationsTotal: spawnSearchWork.heapOperationsTotal,
+    navigationSparseSpawnSearchHierarchyNodeVisitsMaximumObservedPerTick:
+      spawnSearchWork.hierarchyNodeVisitsMaximumObservedPerTick,
+    navigationSparseSpawnSearchHierarchyNodeVisitsThisTick:
+      spawnSearchWork.hierarchyNodeVisitsThisTick,
+    navigationSparseSpawnSearchHierarchyNodeVisitsTotal: spawnSearchWork.hierarchyNodeVisitsTotal,
+    navigationSparseSpawnSearchInvalidatedCount:
+      simulation.navigationSparseSpawnSearchInvalidatedCount,
+    navigationSparseSpawnSearchDependencyWaiting:
+      simulation.navigationSparseSpawnSearchDependencyWaiting,
+    navigationSparseSpawnSearchPendingCount: simulation.navigationSparseSpawnSearchActive ? 1 : 0,
+    navigationSparseSpawnSearchStartedCount: simulation.navigationSparseSpawnSearchStartedCount,
+    navigationSparseSpawnSearchSupportPredicatesMaximumObservedPerTick:
+      spawnSearchWork.supportPredicatesMaximumObservedPerTick,
+    navigationSparseSpawnSearchSupportPredicatesThisTick: spawnSearchWork.supportPredicatesThisTick,
+    navigationSparseSpawnSearchSupportPredicatesTotal: spawnSearchWork.supportPredicatesTotal,
+    navigationSparseTargetUpdateCandidateOffset: targetUpdate.candidateOffset,
+    navigationSparseTargetUpdateCandidateVisitsMaximumObservedPerTick:
+      targetUpdateWork.candidateVisitsMaximumObservedPerTick,
+    navigationSparseTargetUpdateCandidateVisitsThisTick: targetUpdateWork.candidateVisitsThisTick,
+    navigationSparseTargetUpdateCandidateVisitsTotal: targetUpdateWork.candidateVisitsTotal,
+    navigationSparseTargetUpdateCollisionPredicatesMaximumObservedPerTick:
+      targetUpdateWork.collisionPredicatesMaximumObservedPerTick,
+    navigationSparseTargetUpdateCollisionPredicatesThisTick:
+      targetUpdateWork.collisionPredicatesThisTick,
+    navigationSparseTargetUpdateCollisionPredicatesTotal: targetUpdateWork.collisionPredicatesTotal,
+    navigationSparseTargetUpdateCompletedFallbackBuilds: targetUpdate.completedFallbackBuilds,
+    navigationSparseTargetUpdateCompletedStrictBuilds: targetUpdate.completedStrictBuilds,
+    navigationSparseTargetUpdateCurrentEdge: targetUpdate.currentEdge,
+    navigationSparseTargetUpdateCurrentNode: targetUpdate.currentNode,
+    navigationSparseTargetUpdateGraphEdgeVisitsMaximumObservedPerTick:
+      targetUpdateWork.graphEdgeVisitsMaximumObservedPerTick,
+    navigationSparseTargetUpdateGraphEdgeVisitsThisTick: targetUpdateWork.graphEdgeVisitsThisTick,
+    navigationSparseTargetUpdateGraphEdgeVisitsTotal: targetUpdateWork.graphEdgeVisitsTotal,
+    navigationSparseTargetUpdateHeapOperationsMaximumObservedPerTick:
+      targetUpdateWork.heapOperationsMaximumObservedPerTick,
+    navigationSparseTargetUpdateHeapOperationsThisTick: targetUpdateWork.heapOperationsThisTick,
+    navigationSparseTargetUpdateHeapOperationsTotal: targetUpdateWork.heapOperationsTotal,
+    navigationSparseTargetUpdateHeapSize: targetUpdate.heapSize,
+    navigationSparseTargetUpdateHierarchyNodeVisitsMaximumObservedPerTick:
+      targetUpdateWork.hierarchyNodeVisitsMaximumObservedPerTick,
+    navigationSparseTargetUpdateHierarchyNodeVisitsThisTick:
+      targetUpdateWork.hierarchyNodeVisitsThisTick,
+    navigationSparseTargetUpdateHierarchyNodeVisitsTotal: targetUpdateWork.hierarchyNodeVisitsTotal,
+    navigationSparseTargetUpdateInitializationOffset: targetUpdate.initializationOffset,
+    navigationSparseTargetUpdatePhase: targetUpdate.phase,
+    navigationSparseTargetUpdateReachableCount: targetUpdate.reachableCount,
+    navigationSparseTargetUpdateRestartCount: targetUpdate.restartCount,
+    navigationSparseTargetUpdateRouteInvalidationCount: targetUpdate.routeInvalidationCount,
+    navigationSparseTargetUpdateStatus: targetUpdate.status,
+    navigationSparseTargetUpdateSupportPredicatesMaximumObservedPerTick:
+      targetUpdateWork.supportPredicatesMaximumObservedPerTick,
+    navigationSparseTargetUpdateSupportPredicatesThisTick:
+      targetUpdateWork.supportPredicatesThisTick,
+    navigationSparseTargetUpdateSupportPredicatesTotal: targetUpdateWork.supportPredicatesTotal,
+    navigationSparseTargetUpdateTargetNodeOffset: targetUpdate.targetNodeOffset,
+    navigationSparseTargetUpdateValidationNodeOffset: targetUpdate.validationNodeOffset,
+    navigationWorldRevision: simulation.navigationWorldRevision,
+    navigationMode: simulation.navigationField.world.navigationMode,
+    rebuildCount: simulation.navigationField.rebuildCount,
+    resolveBudgetPerTick: ZOMBIE_ESCAPE_SIMULATION.navigationIntentResolveBudgetPerTick,
+    resolveCount: simulation.navigationIntentResolveCount,
+    resolveCountThisTick: simulation.navigationIntentResolveCountThisTick,
+    simulationTick: simulation.simulationTick,
+    targetLayerIndex: simulation.navigationField.targetLayerIndex,
+  }
+}
+
 export function LandrushZombieEscapeMode({
   active,
   combatHeadingRef,
@@ -185,10 +983,11 @@ export function LandrushZombieEscapeMode({
   materialPresentationReadinessMeshes,
   motionRef,
   onDestroyedFurnitureIdsChange,
-  onGeneratedAssetsReadyChange,
+  onGeneratedAssetsReadinessChange,
   onPhaseChange,
   onResetExternalPlayerMotion,
   onStatusChange,
+  palmLayout,
   phaseReady,
   playerColor,
   spawn,
@@ -197,10 +996,8 @@ export function LandrushZombieEscapeMode({
   visualRootRef,
 }: LandrushZombieEscapeModeProps) {
   const { camera, get, gl, setEvents } = useThree()
+  const zombieMaterialPhaseActive = expectedPhase === 'night'
   const sceneNodes = useScene((state) => state.nodes)
-  const [resolveCollisionWorlds] = useState(() =>
-    createLandrushZombieEscapeCollisionWorldsResolver(),
-  )
   const interactiveDoorPassabilityKey = useInteractive((state) =>
     createLandrushIslandRuntimeDoorPassabilityKey(state.doors),
   )
@@ -209,16 +1006,17 @@ export function LandrushZombieEscapeMode({
     [interactiveDoorPassabilityKey],
   )
   const arena = useMemo(
-    () => createIntegratedZombieEscapeArena(surfacePoints, spawn),
+    () => createLandrushZombieEscapeIntegratedArena(surfacePoints, spawn),
     [spawn, surfacePoints],
   )
-  const palmLayout = useMemo(
-    () =>
-      createLandrushIslandPalmLayout({
-        center: resolveLandrushIslandPalmLayoutCenter(surfacePoints),
-        shoreline: surfacePoints,
-      }),
-    [surfacePoints],
+  const surfaceSupport = useMemo<LandrushZombieEscapeSurfaceNavigationSupport>(
+    () => ({
+      boundary: true,
+      elevation: 0,
+      id: LANDRUSH_ZOMBIE_ESCAPE_SURFACE_SUPPORT_ID,
+      polygon: surfacePoints.map(({ x, z }) => ({ x: x - spawn.x, z: z - spawn.z })),
+    }),
+    [spawn, surfacePoints],
   )
   const palmCollisionCircles = useMemo(
     () => createLandrushIslandPalmCollisionCircles({ layout: palmLayout, origin: spawn }),
@@ -232,30 +1030,45 @@ export function LandrushZombieEscapeMode({
       ),
     [sceneNodes, spawn],
   )
-  const collisionWorlds = useMemo(
-    () =>
-      resolveCollisionWorlds({
-        agentRadius: ZOMBIE_ESCAPE_SIMULATION.zombieNavigationRadius,
-        circles: palmCollisionCircles,
-        doorPassability: interactiveDoorPassability,
-        nodes: sceneNodes,
-        playRadius: arena.playRadius,
-        spawn,
-        verticalOriginY: groundY,
-      }),
+  const collisionWorldInput = useMemo<LandrushZombieEscapeCollisionWorldInput>(
+    () => ({
+      agentRadius: ZOMBIE_ESCAPE_SIMULATION.zombieNavigationRadius,
+      circles: palmCollisionCircles,
+      doorPassability: interactiveDoorPassability,
+      nodes: sceneNodes,
+      playRadius: arena.playRadius,
+      spawn,
+      surfaceSupport,
+      verticalOriginY: groundY,
+    }),
     [
       arena.playRadius,
       groundY,
       interactiveDoorPassability,
       palmCollisionCircles,
-      resolveCollisionWorlds,
       sceneNodes,
       spawn,
+      surfaceSupport,
     ],
   )
+  const collisionWorldDesiredSignature = useMemo(
+    () => createLandrushZombieEscapeCollisionWorldSignature(collisionWorldInput),
+    [collisionWorldInput],
+  )
+  const [collisionWorldBuildState, setCollisionWorldBuildState] = useState(() =>
+    createLandrushZombieEscapeCollisionWorldBuildState<LandrushZombieEscapeCollisionWorlds>(),
+  )
+  const collisionWorldBuildCoordinatorRef =
+    useRef<
+      LandrushZombieEscapeCollisionWorldBuildCoordinator<
+        LandrushZombieEscapeCollisionWorldInput,
+        LandrushZombieEscapeCollisionWorlds
+      >
+    >(null)
   const [simulation] = useState(() => {
-    const state = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED)
-    setZombieEscapeCollisionWorld(state, collisionWorlds.navigation, collisionWorlds.combat)
+    const state = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED, undefined, {
+      requireSparseNavigation: true,
+    })
     setZombieEscapeExternalPlayerPose(state, true)
     return state
   })
@@ -274,6 +1087,14 @@ export function LandrushZombieEscapeMode({
   const controlsRef = useRef(createZombieEscapeControlState())
   const accumulatorRef = useRef(0)
   const phaseClockRef = useRef(createLandrushZombieEscapePhaseClock())
+  const roomSoakStateRef = useRef<LandrushZombieEscapeRoomSoakState>(
+    createLandrushZombieEscapeRoomSoakState(),
+  )
+  const navigationScaleProofCacheRef = useRef<LandrushZombieEscapeNavigationScaleProofCache | null>(
+    null,
+  )
+  const navigationScaleProofPreparedCompilationRef =
+    useRef<LandrushZombieEscapeCollisionWorldCompilation | null>(null)
   const fireMouseRef = useRef(false)
   const gamepadInteractHeldRef = useRef(false)
   const gamepadRestartButtonStateRef = useRef(createLandrushZombieEscapeRestartButtonState())
@@ -295,13 +1116,169 @@ export function LandrushZombieEscapeMode({
   const [generatedAssetRetryAttempt, setGeneratedAssetRetryAttempt] = useState(0)
   const [generatedAssetRetryGeneration, setGeneratedAssetRetryGeneration] = useState(0)
   const [generatedAssetsRetrying, setGeneratedAssetsRetrying] = useState(false)
+  const [navigationOverlayEnabled, setNavigationOverlayEnabled] = useState(false)
   const snapshotAtRef = useRef(Number.NEGATIVE_INFINITY)
   const debugAtRef = useRef(Number.NEGATIVE_INFINITY)
   const frameMsRef = useRef(16.7)
   const publishedObstacleRevisionRef = useRef(simulation.obstacleRevision)
-  const combatOwnsCanvasPointerEvents = shouldLandrushZombieEscapeOwnCanvasPointerEvents(
-    active,
+  const runtimePhaseReady = resolveLandrushZombieEscapeCollisionWorldPhaseReady({
+    desiredSignature: collisionWorldDesiredSignature,
     expectedPhase,
+    phaseReady,
+    state: collisionWorldBuildState,
+  })
+  const collisionGameplayActive = active && runtimePhaseReady
+  const combatOwnsCanvasPointerEvents = shouldLandrushZombieEscapeOwnCanvasPointerEvents(
+    collisionGameplayActive,
+    expectedPhase,
+  )
+  const navigationScaleProofEnabled =
+    typeof window !== 'undefined' &&
+    shouldEnableLandrushZombieEscapeNavigationScaleProof(window.location.search)
+  const navigationScaleProofFixtureCaptureEnabled =
+    typeof window !== 'undefined' &&
+    shouldEnableLandrushZombieEscapeNavigationScaleProofFixtureCapture(window.location.search)
+
+  useEffect(() => {
+    if (shouldEnableLandrushZombieNavigationOverlay(window.location.search)) {
+      setNavigationOverlayEnabled(true)
+    }
+  }, [])
+
+  const runNavigationScaleProof =
+    useCallback<LandrushZombieEscapeNavigationScaleProofRunner>(() => {
+      const collisionWorld = simulation.collisionWorld
+      const collisionWorldGeneration = simulation.collisionWorldGeneration
+      const collisionWorldSignature = collisionWorldBuildState.signature
+      if (
+        !collisionWorldBuildState.ready ||
+        collisionWorldBuildState.worlds === null ||
+        collisionWorldSignature === null ||
+        collisionWorldSignature !== collisionWorldDesiredSignature
+      ) {
+        return Promise.reject(
+          new Error('Landrush Zombie Escape navigation scale proof world is not phase-ready'),
+        )
+      }
+      const cacheKey = createLandrushZombieEscapeNavigationScaleProofCacheKey({
+        collisionWorldGeneration,
+        collisionWorldSignature,
+        world: collisionWorld,
+      })
+      const existing = navigationScaleProofCacheRef.current
+      if (existing?.key === cacheKey) return existing.promise
+      existing?.controller.abort()
+      const controller = new AbortController()
+      const timeoutHandle = window.setTimeout(
+        () => controller.abort(),
+        LANDRUSH_ZOMBIE_ESCAPE_NAVIGATION_SCALE_PROOF_TIMEOUT_MS,
+      )
+      let running: Promise<LandrushZombieEscapeNavigationScaleProofResult>
+      running = import('./zombie-escape-navigation-scale-proof')
+        .then(({ runLandrushZombieEscapeNavigationScaleProof }) =>
+          runLandrushZombieEscapeNavigationScaleProof({
+            arena,
+            collisionWorld,
+            collisionWorldGeneration,
+            collisionWorldSignature,
+            fixedDeltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+            signal: controller.signal,
+            timeoutMs: LANDRUSH_ZOMBIE_ESCAPE_NAVIGATION_SCALE_PROOF_TIMEOUT_MS,
+            worldOrigin: { x: spawn.x, y: groundY, z: spawn.z },
+          }),
+        )
+        .then((result) => {
+          if (
+            simulation.collisionWorld !== collisionWorld ||
+            simulation.collisionWorldGeneration !== collisionWorldGeneration ||
+            collisionWorld.revision !== result.world.revision ||
+            collisionWorld.activationRevision !== result.world.activationRevision ||
+            result.world.collisionWorldGeneration !== collisionWorldGeneration
+          ) {
+            throw new Error(
+              'Landrush Zombie Escape navigation scale proof world generation changed',
+            )
+          }
+          return result
+        })
+        .catch((error: unknown) => {
+          if (navigationScaleProofCacheRef.current?.promise === running) {
+            navigationScaleProofCacheRef.current = null
+          }
+          throw error
+        })
+        .finally(() => window.clearTimeout(timeoutHandle))
+      navigationScaleProofCacheRef.current = { controller, key: cacheKey, promise: running }
+      return running
+    }, [
+      arena,
+      collisionWorldBuildState,
+      collisionWorldDesiredSignature,
+      groundY,
+      simulation,
+      spawn,
+    ])
+
+  const captureNavigationScaleProofFixture =
+    useCallback<LandrushZombieEscapeNavigationScaleProofFixtureCaptureRunner>(async () => {
+      const compilation = navigationScaleProofPreparedCompilationRef.current
+      const collisionWorld = simulation.collisionWorld
+      const collisionWorldGeneration = simulation.collisionWorldGeneration
+      const collisionWorldSignature = collisionWorldBuildState.signature
+      if (
+        !compilation ||
+        !isLandrushZombieEscapeNavigationScaleProofFixtureCaptureReady({
+          buildReady: collisionWorldBuildState.ready,
+          captureEnabled: navigationScaleProofFixtureCaptureEnabled,
+          compilationSignature: compilation?.signature ?? null,
+          desiredSignature: collisionWorldDesiredSignature,
+          effectiveNavigationWorld: collisionWorld,
+          installedNavigationWorld: collisionWorldBuildState.worlds?.navigation ?? null,
+          installedSignature: collisionWorldSignature,
+          sourceNavigationWorld: simulation.collisionSourceWorld,
+        })
+      ) {
+        throw new Error('Landrush Zombie Escape fixture capture world is not phase-ready')
+      }
+      const { createLandrushZombieEscapeNavigationScaleProofFixtureWorldSummary } = await import(
+        './zombie-escape-navigation-scale-proof-fixture'
+      )
+      if (
+        simulation.collisionWorld !== collisionWorld ||
+        simulation.collisionWorldGeneration !== collisionWorldGeneration ||
+        collisionWorldBuildState.signature !== collisionWorldSignature
+      ) {
+        throw new Error('Landrush Zombie Escape fixture capture world generation changed')
+      }
+      return {
+        compilation: structuredClone(compilation),
+        expectedWorld: createLandrushZombieEscapeNavigationScaleProofFixtureWorldSummary(
+          collisionWorld,
+          compilation.signature,
+        ),
+        proofInput: {
+          collisionWorldGeneration,
+          worldOrigin: { x: spawn.x, y: groundY, z: spawn.z },
+        },
+      }
+    }, [
+      collisionWorldBuildState,
+      collisionWorldDesiredSignature,
+      groundY,
+      navigationScaleProofFixtureCaptureEnabled,
+      simulation,
+      spawn,
+    ])
+
+  useEffect(
+    () => () => {
+      const cached = navigationScaleProofCacheRef.current
+      if (cached) {
+        cached.controller.abort()
+        navigationScaleProofCacheRef.current = null
+      }
+    },
+    [],
   )
 
   const activateInputMode = useCallback((mode: 'gamepad' | 'keyboard') => {
@@ -310,15 +1287,15 @@ export function LandrushZombieEscapeMode({
     setInputMode(mode)
   }, [])
 
-  const handleGeneratedAssetsReadyChange = useCallback(
-    (ready: boolean) => {
-      onGeneratedAssetsReadyChange?.(ready)
-      if (!ready) return
+  const handleGeneratedAssetsReadinessChange = useCallback(
+    (readiness: ZombieEscapeGeneratedAssetReadinessSnapshot) => {
+      onGeneratedAssetsReadinessChange?.(readiness)
+      if (!readiness.ready) return
       setGeneratedAssetFailures([])
       setGeneratedAssetRetryAttempt(0)
       setGeneratedAssetsRetrying(false)
     },
-    [onGeneratedAssetsReadyChange],
+    [onGeneratedAssetsReadinessChange],
   )
 
   const handleGeneratedAssetsFailureChange = useCallback(
@@ -338,11 +1315,10 @@ export function LandrushZombieEscapeMode({
     (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => {
       if (failures.length === 0) return
       setGeneratedAssetsRetrying(true)
-      onGeneratedAssetsReadyChange?.(false)
       clearZombieEscapeGeneratedAssetCaches(failures.map((failure) => failure.key))
       setGeneratedAssetRetryGeneration((generation) => generation + 1)
     },
-    [onGeneratedAssetsReadyChange],
+    [],
   )
 
   useEffect(() => {
@@ -367,8 +1343,48 @@ export function LandrushZombieEscapeMode({
     beginGeneratedAssetsRetry(generatedAssetFailures)
   }, [beginGeneratedAssetsRetry, generatedAssetFailures])
 
+  useEffect(() => {
+    const workerCompiler = createBrowserLandrushZombieEscapeCollisionWorldWorkerCompiler({
+      ...(navigationScaleProofFixtureCaptureEnabled
+        ? {
+            onPreparedCompilation: (compilation: LandrushZombieEscapeCollisionWorldCompilation) => {
+              navigationScaleProofPreparedCompilationRef.current = compilation
+            },
+          }
+        : {}),
+    })
+    const coordinator = createLandrushZombieEscapeCollisionWorldBuildCoordinator({
+      compile: workerCompiler.compile,
+      host: createBrowserLandrushZombieEscapeCollisionWorldBuildScheduleHost(),
+      onError: (error) => {
+        console.error('Failed to compile the current Zombie Escape collision world.', error)
+      },
+      onStateChange: setCollisionWorldBuildState,
+      resolveSignature: createLandrushZombieEscapeCollisionWorldSignature,
+    })
+    collisionWorldBuildCoordinatorRef.current = coordinator
+    return () => {
+      if (collisionWorldBuildCoordinatorRef.current === coordinator) {
+        collisionWorldBuildCoordinatorRef.current = null
+      }
+      coordinator.dispose()
+      workerCompiler.dispose()
+      navigationScaleProofPreparedCompilationRef.current = null
+    }
+  }, [navigationScaleProofFixtureCaptureEnabled])
+
+  useEffect(() => {
+    collisionWorldBuildCoordinatorRef.current?.request(
+      collisionWorldInput,
+      resolveLandrushZombieEscapeCollisionWorldBuildPriority(expectedPhase),
+    )
+  }, [collisionWorldInput, expectedPhase])
+
+  const collisionWorlds = collisionWorldBuildState.worlds
   useLayoutEffect(() => {
+    if (!collisionWorlds) return
     setZombieEscapeCollisionWorld(simulation, collisionWorlds.navigation, collisionWorlds.combat)
+    renderScheduler.requestFrame('geometry:changed')
   }, [collisionWorlds, simulation])
 
   const publishDestroyedFurnitureIds = useCallback(() => {
@@ -393,6 +1409,32 @@ export function LandrushZombieEscapeMode({
       ),
     )
   }, [gl, simulation])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('bench') !== '1' || params.get('landrushZombieRoomSoak') !== '1') return
+
+    const soakState = roomSoakStateRef.current
+    soakState.enabled = true
+    const getState = () => readLandrushZombieEscapeRoomSoakSnapshot(soakState, simulation)
+    const end = () => endLandrushZombieEscapeRoomSoak(soakState, simulation)
+    const bridge: LandrushZombieEscapeRoomSoakBridge = {
+      begin: () => beginLandrushZombieEscapeRoomSoak(soakState, simulation),
+      end,
+      getState,
+      requestObstacleDelta: () => requestLandrushZombieEscapeRoomSoakObstacleDelta(simulation),
+      requestTargetRoster: () =>
+        requestLandrushZombieEscapeRoomSoakTargetRoster(soakState, simulation),
+    }
+    window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__ = bridge
+    return () => {
+      end()
+      soakState.enabled = false
+      if (window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__ === bridge) {
+        delete window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__
+      }
+    }
+  }, [simulation])
 
   const runAgain = useCallback(() => {
     restartLandrushZombieEscapeIntegratedSimulation({
@@ -425,6 +1467,22 @@ export function LandrushZombieEscapeMode({
     simulation,
   ])
 
+  const startZombie = useCallback(() => {
+    if (
+      !requestLandrushZombieEscapeNightStart({
+        expectedPhase,
+        phaseReady: runtimePhaseReady,
+        simulation,
+      })
+    ) {
+      return
+    }
+    accumulatorRef.current = 0
+    publishDestroyedFurnitureIds()
+    publishSnapshot()
+    renderScheduler.requestFrame('animation')
+  }, [expectedPhase, publishDestroyedFurnitureIds, publishSnapshot, runtimePhaseReady, simulation])
+
   useEffect(() => onPhaseChange(snapshot.phase), [onPhaseChange, snapshot.phase])
   useEffect(() => onStatusChange(snapshot.status), [onStatusChange, snapshot.status])
 
@@ -442,7 +1500,7 @@ export function LandrushZombieEscapeMode({
   }, [simulation, snapshot.phase, weaponPickupPlacements])
 
   useEffect(() => {
-    if (!active) {
+    if (!collisionGameplayActive) {
       fireMouseRef.current = false
       gamepadInteractHeldRef.current = false
       interactPulseRef.current = false
@@ -476,7 +1534,7 @@ export function LandrushZombieEscapeMode({
         event.code !== 'KeyE' ||
         event.defaultPrevented ||
         event.repeat ||
-        isZombieEscapeEditableTarget(event.target)
+        landrushIslandInputTargetBlocksGameplay(event.target)
       ) {
         return
       }
@@ -501,7 +1559,7 @@ export function LandrushZombieEscapeMode({
       interactPulseRef.current = false
       combatHeadingRef.current = null
     }
-  }, [activateInputMode, active, combatHeadingRef, gl])
+  }, [activateInputMode, collisionGameplayActive, combatHeadingRef, gl])
 
   useEffect(
     () => () => {
@@ -513,7 +1571,7 @@ export function LandrushZombieEscapeMode({
   )
 
   useFrame(() => {
-    if (!active) return
+    if (!collisionGameplayActive) return
     const motion = motionRef.current
     if (!motion) return
 
@@ -624,7 +1682,7 @@ export function LandrushZombieEscapeMode({
       authorityNowSeconds: state.clock.elapsedTime,
       clock: phaseClockRef.current,
       expectedPhase,
-      phaseReady: phaseReady && motion !== null,
+      phaseReady: runtimePhaseReady && motion !== null && !roomSoakStateRef.current.active,
       simulation,
     })
     if (!motion) return
@@ -637,7 +1695,7 @@ export function LandrushZombieEscapeMode({
     const controls = controlsRef.current
     const phaseCanAdvance = canAdvanceLandrushZombieEscapeIntegratedSimulation({
       expectedPhase,
-      phaseReady,
+      phaseReady: runtimePhaseReady,
       simulation,
     })
     if (phaseClockAdvance.phaseChanged) {
@@ -646,7 +1704,7 @@ export function LandrushZombieEscapeMode({
       snapshotAtRef.current = state.clock.elapsedTime
       publishSnapshot()
     }
-    if (!active) {
+    if (!collisionGameplayActive) {
       controls.aimStrength = 0
       controls.fire = false
       controls.interactPressed = false
@@ -658,7 +1716,7 @@ export function LandrushZombieEscapeMode({
     syncIntegratedPlayerPose(simulation, motion, groundY, spawn)
 
     const muzzlePose = muzzlePoseRef.current
-    if (active && muzzlePose.ready) {
+    if (collisionGameplayActive && muzzlePose.ready) {
       setZombieEscapePlayerMuzzlePose(simulation, {
         directionX: muzzlePose.direction.x,
         directionY: muzzlePose.direction.y,
@@ -670,8 +1728,8 @@ export function LandrushZombieEscapeMode({
     } else {
       restoreZombieEscapeDefaultMuzzlePose(simulation)
     }
-    controls.fire = active && controls.fire && muzzlePose.ready
-    controls.interactPressed = active && interactPulseRef.current
+    controls.fire = collisionGameplayActive && controls.fire && muzzlePose.ready
+    controls.interactPressed = collisionGameplayActive && interactPulseRef.current
 
     if (!phaseCanAdvance) {
       accumulatorRef.current = 0
@@ -695,7 +1753,7 @@ export function LandrushZombieEscapeMode({
           deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
           expectedPhase,
           input: controls,
-          phaseReady,
+          phaseReady: runtimePhaseReady,
           simulation,
         })
         controls.interactPressed = false
@@ -738,7 +1796,12 @@ export function LandrushZombieEscapeMode({
         expectedPhase,
         groundY,
         muzzlePose: muzzlePoseRef.current,
-        phaseReady,
+        navigationScaleProofFixtureCapture: navigationScaleProofFixtureCaptureEnabled
+          ? captureNavigationScaleProofFixture
+          : null,
+        navigationScaleProofRunner: navigationScaleProofEnabled ? runNavigationScaleProof : null,
+        phaseReady: runtimePhaseReady,
+        roomSoakState: roomSoakStateRef.current,
         simulation,
         spawn,
       })
@@ -758,7 +1821,7 @@ export function LandrushZombieEscapeMode({
         <ZombieEscapeActors
           impactVisualRegistry={impactVisualRegistry}
           onGeneratedAssetsFailureChange={handleGeneratedAssetsFailureChange}
-          onGeneratedAssetsReadyChange={handleGeneratedAssetsReadyChange}
+          onGeneratedAssetsReadinessChange={handleGeneratedAssetsReadinessChange}
           presentationFramePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.presentation}
           playerColor={playerColor}
           quality="balanced"
@@ -766,6 +1829,7 @@ export function LandrushZombieEscapeMode({
           renderPlayer={false}
           retryGeneratedAssetsGeneration={generatedAssetRetryGeneration}
           simulationRef={simulationRef}
+          zombieMaterialPhaseActive={zombieMaterialPhaseActive}
         />
         <ZombieEscapeEffects
           framePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.effects}
@@ -782,6 +1846,17 @@ export function LandrushZombieEscapeMode({
         simulationRef={simulationRef}
       />
       <LandrushZombieEscapeStructurePresentation active={active} simulationRef={simulationRef} />
+      {navigationOverlayEnabled && active && runtimePhaseReady && expectedPhase === 'night' ? (
+        <Suspense fallback={null}>
+          <LazyLandrushZombieNavigationOverlay
+            framePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.navigationOverlay}
+            originX={spawn.x}
+            originY={groundY}
+            originZ={spawn.z}
+            simulationRef={simulationRef}
+          />
+        </Suspense>
+      ) : null}
       <Suspense fallback={null}>
         <LandrushRobotWeaponRig
           active={active}
@@ -799,8 +1874,9 @@ export function LandrushZombieEscapeMode({
         inputMode={inputMode}
         onRetryGeneratedAssets={retryGeneratedAssets}
         onRunAgain={runAgain}
+        onStartZombie={startZombie}
         ownerDocument={gl.domElement.ownerDocument}
-        phaseReady={phaseReady}
+        phaseReady={runtimePhaseReady}
         snapshot={snapshot}
       />
     </>
@@ -814,8 +1890,25 @@ type LandrushZombieEscapeHudProps = {
   inputMode: 'gamepad' | 'keyboard'
   onRetryGeneratedAssets: () => void
   onRunAgain: () => void
+  onStartZombie: () => void
   phaseReady: boolean
   snapshot: ZombieEscapeHudSnapshot
+}
+
+export function resolveLandrushZombieEscapeControllerCommands({
+  pickupAvailable,
+  terminal,
+}: {
+  pickupAvailable: boolean
+  terminal: boolean
+}): LandrushControllerCommands {
+  return {
+    cross: { label: 'Jump' },
+    l2: { label: 'Crouch' },
+    r2: { label: 'Attack' },
+    square: { label: pickupAvailable ? 'Buy' : 'Interact' },
+    ...(terminal ? { triangle: { label: 'Run again' } } : {}),
+  }
 }
 
 function LandrushZombieEscapeHudPortal({
@@ -825,6 +1918,7 @@ function LandrushZombieEscapeHudPortal({
   inputMode,
   onRetryGeneratedAssets,
   onRunAgain,
+  onStartZombie,
   ownerDocument,
   phaseReady,
   snapshot,
@@ -879,6 +1973,7 @@ function LandrushZombieEscapeHudPortal({
         inputMode={inputMode}
         onRetryGeneratedAssets={onRetryGeneratedAssets}
         onRunAgain={onRunAgain}
+        onStartZombie={onStartZombie}
         phaseReady={phaseReady}
         snapshot={snapshot}
       />,
@@ -890,6 +1985,7 @@ function LandrushZombieEscapeHudPortal({
     inputMode,
     onRetryGeneratedAssets,
     onRunAgain,
+    onStartZombie,
     phaseReady,
     snapshot,
   ])
@@ -904,6 +2000,7 @@ function LandrushZombieEscapeHud({
   inputMode,
   onRetryGeneratedAssets,
   onRunAgain,
+  onStartZombie,
   phaseReady,
   snapshot,
 }: LandrushZombieEscapeHudProps) {
@@ -914,6 +2011,10 @@ function LandrushZombieEscapeHud({
   const pickupPrompt = snapshot.pickupPrompt
   const health = Math.max(0, Math.min(100, snapshot.health))
   const terminal = snapshot.status !== 'playing'
+  const controllerCommands = resolveLandrushZombieEscapeControllerCommands({
+    pickupAvailable: pickupPrompt !== null,
+    terminal,
+  })
   const moneyVisible = shouldShowLandrushZombieEscapeMoney({
     actualPhase: snapshot.phase,
     expectedPhase,
@@ -934,13 +2035,19 @@ function LandrushZombieEscapeHud({
       {moneyVisible ? (
         <ZombieEscapeMoneyBadge className="absolute top-4 left-4" money={snapshot.money} />
       ) : null}
+      {phase === 'night' && inputMode === 'gamepad' ? (
+        <LandrushControllerCommandHud
+          className="absolute top-14 right-3 z-30 md:top-[18vh] md:right-5"
+          commands={controllerCommands}
+          label="Zombie Escape controller commands"
+        />
+      ) : null}
       {phase === 'build' ? (
-        <div
-          className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full border border-white/15 bg-slate-950/58 px-3 py-1.5 font-medium text-[11px] text-white/90 shadow-lg backdrop-blur-md"
-          data-testid="landrush-zombie-escape-build-countdown"
-        >
-          Day · {formatZombieEscapePhaseTime(phaseSecondsRemaining)}
-        </div>
+        <LandrushZombieEscapeDayCountdown
+          disabled={!phaseReady || expectedPhase !== 'build' || terminal}
+          onStartZombie={onStartZombie}
+          phaseSecondsRemaining={phaseSecondsRemaining}
+        />
       ) : (
         <div
           aria-label={`Robot health ${String(Math.ceil(health))}%`}
@@ -1024,6 +2131,38 @@ function LandrushZombieEscapeHud({
   )
 }
 
+export function LandrushZombieEscapeDayCountdown({
+  disabled,
+  onStartZombie,
+  phaseSecondsRemaining,
+}: {
+  disabled: boolean
+  onStartZombie: () => void
+  phaseSecondsRemaining: number
+}) {
+  return (
+    <button
+      aria-label="Start zombie"
+      className="group pointer-events-auto absolute top-4 left-1/2 grid min-w-[7rem] -translate-x-1/2 place-items-center overflow-hidden rounded-full border border-white/15 bg-slate-950/58 px-3 py-1.5 font-medium text-[11px] text-white/90 shadow-lg backdrop-blur-md transition-[border-color,background-color,box-shadow] duration-200 enabled:cursor-pointer enabled:hover:border-amber-200/45 enabled:hover:bg-slate-950/72 enabled:hover:shadow-xl focus-visible:border-amber-200/55 focus-visible:bg-slate-950/72 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/45 disabled:cursor-wait disabled:opacity-60"
+      data-testid="landrush-zombie-escape-build-countdown"
+      disabled={disabled}
+      onClick={onStartZombie}
+      title="Start zombie"
+      type="button"
+    >
+      <span className="col-start-1 row-start-1 whitespace-nowrap transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0">
+        Day · {formatZombieEscapePhaseTime(phaseSecondsRemaining)}
+      </span>
+      <span
+        aria-hidden="true"
+        className="col-start-1 row-start-1 whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+      >
+        Start zombie
+      </span>
+    </button>
+  )
+}
+
 function generatedAssetFailuresMatch(
   first: readonly ZombieEscapeGeneratedAssetFailure[],
   second: readonly ZombieEscapeGeneratedAssetFailure[],
@@ -1039,66 +2178,6 @@ function formatZombieEscapePhaseTime(seconds: number) {
   const roundedSeconds = Math.max(0, Math.ceil(seconds))
   const minutes = Math.floor(roundedSeconds / 60)
   return `${String(minutes)}:${String(roundedSeconds % 60).padStart(2, '0')}`
-}
-
-function isZombieEscapeEditableTarget(target: EventTarget | null) {
-  return (
-    target instanceof HTMLElement &&
-    (target.isContentEditable ||
-      target.tagName === 'INPUT' ||
-      target.tagName === 'SELECT' ||
-      target.tagName === 'TEXTAREA')
-  )
-}
-
-function createIntegratedZombieEscapeArena(
-  surfacePoints: readonly Readonly<{ x: number; z: number }>[],
-  spawn: Readonly<{ x: number; z: number }>,
-): ZombieEscapeArenaData {
-  const arena = createZombieEscapeArena(ZOMBIE_ESCAPE_SEED)
-  const edgeDistance = minimumDistanceToPolygonEdges(spawn, surfacePoints)
-  const playRadius = Math.max(14, Math.min(48, edgeDistance - 1.5))
-  return {
-    ...arena,
-    escapeX: 0,
-    escapeZ: -Math.max(10, playRadius - 2),
-    obstacleCount: 0,
-    playerStartX: 0,
-    playerStartZ: 0,
-    playRadius,
-    radius: playRadius + 3,
-  }
-}
-
-function minimumDistanceToPolygonEdges(
-  point: Readonly<{ x: number; z: number }>,
-  polygon: readonly Readonly<{ x: number; z: number }>[],
-) {
-  if (polygon.length < 2) return 32
-  let minimum = Number.POSITIVE_INFINITY
-  for (let index = 0; index < polygon.length; index += 1) {
-    const start = polygon[index]
-    const end = polygon[(index + 1) % polygon.length]
-    if (!(start && end)) continue
-    const edgeX = end.x - start.x
-    const edgeZ = end.z - start.z
-    const lengthSquared = edgeX * edgeX + edgeZ * edgeZ
-    const amount =
-      lengthSquared <= 0.000_001
-        ? 0
-        : Math.max(
-            0,
-            Math.min(
-              1,
-              ((point.x - start.x) * edgeX + (point.z - start.z) * edgeZ) / lengthSquared,
-            ),
-          )
-    minimum = Math.min(
-      minimum,
-      Math.hypot(point.x - (start.x + edgeX * amount), point.z - (start.z + edgeZ * amount)),
-    )
-  }
-  return Number.isFinite(minimum) ? minimum : 32
 }
 
 function syncIntegratedPlayerPose(
@@ -1130,7 +2209,10 @@ function publishIntegratedDebugState({
   expectedPhase,
   groundY,
   muzzlePose,
+  navigationScaleProofFixtureCapture,
+  navigationScaleProofRunner,
   phaseReady,
+  roomSoakState,
   simulation,
   spawn,
 }: {
@@ -1138,7 +2220,10 @@ function publishIntegratedDebugState({
   expectedPhase: ZombieEscapeGamePhase
   groundY: number
   muzzlePose: ReturnType<typeof createLandrushRobotWeaponMuzzlePose>
+  navigationScaleProofFixtureCapture: LandrushZombieEscapeNavigationScaleProofFixtureCaptureRunner | null
+  navigationScaleProofRunner: LandrushZombieEscapeNavigationScaleProofRunner | null
   phaseReady: boolean
+  roomSoakState: LandrushZombieEscapeRoomSoakState
   simulation: ZombieEscapeSimulation
   spawn: Readonly<{ x: number; z: number }>
 }) {
@@ -1180,6 +2265,7 @@ function publishIntegratedDebugState({
   window.__LANDRUSH_ZOMBIE_ESCAPE__ = {
     actualAvatar: '/navigation/proto_pascal_robot.glb',
     arena: { playRadius: arena.playRadius, worldOrigin: [spawn.x, groundY, spawn.z] },
+    benchmarkRoomSoak: readLandrushZombieEscapeRoomSoakSnapshot(roomSoakState, simulation),
     frameOrder: LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER,
     integratedIntoExistingCanvas: true,
     economy: {
@@ -1206,7 +2292,29 @@ function publishIntegratedDebugState({
     phase: simulation.phase,
     phaseReady,
     phaseSecondsRemaining: simulation.phaseSecondsRemaining,
+    performance: {
+      collisionWorldGeneration: simulation.collisionWorldGeneration,
+      routing: createLandrushZombieEscapeRoutingDebugSnapshot(simulation),
+      spatial: {
+        buildCount: simulation.agentSpatialIndex.buildCount,
+        candidateInspectionCount: simulation.agentSpatialIndex.candidateInspectionCount,
+        indexedAgentCount: simulation.agentSpatialIndex.indexedAgentCount,
+        maximumCandidateInspectionsObserved:
+          simulation.agentSpatialIndex.maximumCandidateInspectionsObserved,
+        maximumCandidateInspectionsPerQuery:
+          simulation.agentSpatialIndex.maximumCandidateInspectionsPerQuery,
+        overflowQueryCount: simulation.agentSpatialIndex.overflowQueryCount,
+        pairInspectionCount: simulation.agentSpatialIndex.pairInspectionCount,
+        queryCount: simulation.agentSpatialIndex.queryCount,
+        separationNeighborCount: simulation.agentSpatialIndex.separationNeighborCount,
+        unindexedAgentCount: simulation.agentSpatialIndex.unindexedAgentCount,
+      },
+    },
     night: simulation.night,
+    ...(navigationScaleProofRunner ? { runNavigationScaleProof: navigationScaleProofRunner } : {}),
+    ...(navigationScaleProofFixtureCapture
+      ? { captureNavigationScaleProofFixture: navigationScaleProofFixtureCapture }
+      : {}),
     pickups: simulation.weaponPickups.map((pickup) => ({
       available: simulation.purchasedWeapons[pickup.weaponIndex] === 0,
       scopeId: pickup.scopeId,

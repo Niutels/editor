@@ -1,10 +1,28 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import {
+  createLandrushBenchmarkFixtureFromSourceReplay,
+  loadLandrushSourceReplay,
+} from './landrush-source-replay.mjs'
 
 const OFFLINE_PARCEL_STATE_STORAGE_KEY = 'landrush-lab-world-multiplayer-offline-parcels'
 const PLAYER_STORAGE_KEY = 'landrush-lab-world-multiplayer-player'
+const ZOMBIE_NAVIGATION_REAL_ISLAND_FIXTURE_NAME = 'zombie-navigation-real-island'
 
 export async function loadLandrushBenchmarkFixture({ name, repoRoot }) {
+  if (name === ZOMBIE_NAVIGATION_REAL_ISLAND_FIXTURE_NAME) {
+    const sourcePath = path.join(
+      repoRoot,
+      'tooling',
+      'bench',
+      'fixtures',
+      'landrush-zombie-navigation-real-island-source.v1.json',
+    )
+    return createLandrushBenchmarkFixtureFromSourceReplay(
+      await loadLandrushSourceReplay(sourcePath),
+      { name, sourcePath },
+    )
+  }
   if (!['build', 'inside', 'outside'].includes(name)) {
     throw new Error(`unsupported Landrush benchmark fixture "${name}"`)
   }

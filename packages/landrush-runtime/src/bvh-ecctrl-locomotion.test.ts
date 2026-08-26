@@ -256,31 +256,67 @@ describe('BVHEcctrl locomotion', () => {
     }
   })
 
-  test('defers both stance transitions while airborne and honors held input after landing', () => {
+  test('allows unsupported shrinking while only full-capsule clearance controls expansion', () => {
     expect(
       resolveBVHEcctrlCrouchingState({
         crouching: false,
         crouchRequested: true,
-        stanceTransitionAllowed: false,
-        standingClear: true,
+        standingClear: false,
       }),
-    ).toBe(false)
+    ).toBe(true)
     expect(
       resolveBVHEcctrlCrouchingState({
         crouching: true,
         crouchRequested: false,
-        stanceTransitionAllowed: false,
-        standingClear: true,
+        standingClear: false,
       }),
     ).toBe(true)
     expect(
       resolveBVHEcctrlCrouchingState({
-        crouching: false,
-        crouchRequested: true,
-        stanceTransitionAllowed: true,
+        crouching: true,
+        crouchRequested: false,
         standingClear: true,
       }),
+    ).toBe(false)
+  })
+
+  test('preserves the semantic foot through unsupported shrink and clear expansion', () => {
+    const capsuleRadius = 0.25
+    const standingShape = { capsuleLength: 0.8, floatHeight: 0.5 }
+    const crouchingShape = resolveBVHEcctrlStanceShape({
+      ...standingShape,
+      capsuleRadius,
+      totalClearance: 0.9,
+    })
+    const standingCenterFromFoot = resolveBVHEcctrlCapsuleCenterFromFoot({
+      ...standingShape,
+      capsuleRadius,
+    })
+    const crouchingCenterFromFoot = resolveBVHEcctrlCapsuleCenterFromFoot({
+      ...crouchingShape,
+      capsuleRadius,
+    })
+    const standingRootY = 2.4
+    const footY = standingRootY - standingCenterFromFoot
+    const crouchingRootY = standingRootY + crouchingCenterFromFoot - standingCenterFromFoot
+    const restoredStandingRootY = crouchingRootY + standingCenterFromFoot - crouchingCenterFromFoot
+
+    expect(
+      resolveBVHEcctrlCrouchingState({
+        crouching: false,
+        crouchRequested: true,
+        standingClear: false,
+      }),
     ).toBe(true)
+    expect(crouchingRootY - crouchingCenterFromFoot).toBeCloseTo(footY)
+    expect(
+      resolveBVHEcctrlCrouchingState({
+        crouching: true,
+        crouchRequested: false,
+        standingClear: true,
+      }),
+    ).toBe(false)
+    expect(restoredStandingRootY - standingCenterFromFoot).toBeCloseTo(footY)
   })
 
   test('rejects air jumps until this controller instance establishes real support', () => {

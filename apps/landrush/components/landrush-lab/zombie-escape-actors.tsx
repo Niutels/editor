@@ -3,16 +3,8 @@
 import { LandrushWorldNode } from '@landrush/pascal-plugin'
 import { LandrushRobot } from '@landrush/pascal-plugin/landrush-world/robot'
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import {
-  Color,
-  DynamicDrawUsage,
-  type Group,
-  type InstancedMesh,
-  Object3D,
-  Quaternion,
-  Vector3,
-} from 'three'
+import { type MutableRefObject, Suspense, useEffect, useMemo, useRef } from 'react'
+import type { Group } from 'three'
 import {
   createLandrushRobotWeaponCombatState,
   createLandrushRobotWeaponMuzzlePose,
@@ -24,19 +16,11 @@ import {
 } from './zombie-escape-aim'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
 import { ZOMBIE_ESCAPE_DEFAULT_WEAPON } from './zombie-escape-config'
+import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
   type ZombieEscapeGeneratedAssetFailure,
   ZombieEscapeGeneratedAssets,
 } from './zombie-escape-generated-assets'
-import { resolveZombieEscapeHitFlickerPhase } from './zombie-escape-hit-flicker'
-import {
-  createZombieEscapePresentationPoint,
-  createZombieEscapePresentationPose,
-  resolveZombieEscapePresentationPose,
-  transformZombieEscapePresentationPoint,
-  type ZombieEscapePresentationPoint,
-  type ZombieEscapePresentationPose,
-} from './zombie-escape-presentation-pose'
 import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 import {
   getZombieEscapeMeleeProgress,
@@ -45,25 +29,18 @@ import {
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
 import type { ZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
+import {
+  createZombieEscapePresentationLodDebugSnapshot,
+  type ZombieEscapePresentationLodDebugSnapshot,
+} from './zombie-escape-visual-lod'
 import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
-const ZOMBIE_COLORS = ['#d86d5f', '#d18c55', '#b66073', '#c77745', '#b95f4f'] as const
 const ZOMBIE_ESCAPE_RECOIL_DURATION_SECONDS = 0.13
-const ZOMBIE_LOCAL_X_AXIS = new Vector3(1, 0, 0)
-const ZOMBIE_ASSET_SLOTS = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((entry) => ({
-  id: entry.id,
-  riggedClip: entry.glb.riggedBase.expectedClipName,
-  rigged: entry.glb.riggedBase.path,
-  runClip: entry.glb.run.expectedClipName,
-  run: entry.glb.run.path,
-  walkClip: entry.glb.walk.expectedClipName,
-  walk: entry.glb.walk.path,
-}))
 
 export function ZombieEscapeActors({
   impactVisualRegistry,
   onGeneratedAssetsFailureChange,
-  onGeneratedAssetsReadyChange,
+  onGeneratedAssetsReadinessChange,
   playerColor = '#fff0a2',
   presentationFramePriority,
   quality,
@@ -71,10 +48,13 @@ export function ZombieEscapeActors({
   renderPlayer = true,
   retryGeneratedAssetsGeneration = 0,
   simulationRef,
+  zombieMaterialPhaseActive = true,
 }: {
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   onGeneratedAssetsFailureChange?: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
-  onGeneratedAssetsReadyChange?: (ready: boolean) => void
+  onGeneratedAssetsReadinessChange?: (
+    readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
+  ) => void
   playerColor?: string
   presentationFramePriority?: number
   quality: ZombieEscapeQuality
@@ -82,34 +62,45 @@ export function ZombieEscapeActors({
   renderPlayer?: boolean
   retryGeneratedAssetsGeneration?: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  zombieMaterialPhaseActive?: boolean
 }) {
   const loadedZombieVariantsRef = useRef(new Set<number>())
+  const detailedZombieSlotsRef = useRef(new Uint8Array(simulationRef.current.zombies.pool.capacity))
+  const presentationLodDebugRef = useRef<ZombieEscapePresentationLodDebugSnapshot | null>(null)
+  if (!presentationLodDebugRef.current) {
+    presentationLodDebugRef.current = createZombieEscapePresentationLodDebugSnapshot(
+      ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+    )
+  }
+  const presentationUserData = useMemo(
+    () => ({ presentationLod: presentationLodDebugRef.current }),
+    [],
+  )
   return (
-    <>
+    <group name="zombie-escape-presentation" userData={presentationUserData}>
       {renderPlayer ? <ZombieEscapeOrbot simulationRef={simulationRef} /> : null}
       <ZombieEscapeGeneratedAssets
+        detailedZombieSlotsRef={detailedZombieSlotsRef}
         impactVisualRegistry={impactVisualRegistry}
         loadedZombieVariantsRef={loadedZombieVariantsRef}
         omitHeldWeapon
         onGeneratedAssetsFailureChange={onGeneratedAssetsFailureChange}
-        onGeneratedAssetsReadyChange={onGeneratedAssetsReadyChange}
+        onGeneratedAssetsReadinessChange={onGeneratedAssetsReadinessChange}
+        presentationLodDebugRef={presentationLodDebugRef}
         quality={quality}
         renderReadinessRegistry={renderReadinessRegistry}
         retryGeneration={retryGeneratedAssetsGeneration}
         simulationRef={simulationRef}
+        zombieMaterialPhaseActive={zombieMaterialPhaseActive}
         zombiePresentationFramePriority={presentationFramePriority}
-      />
-      <ZombieEscapeZombieInstances
-        framePriority={presentationFramePriority ?? -19}
-        loadedZombieVariantsRef={loadedZombieVariantsRef}
-        simulationRef={simulationRef}
+        zombieSelectionFramePriority={(presentationFramePriority ?? -19) - 0.01}
       />
       <ZombieEscapeAimReticle
         framePriority={presentationFramePriority ?? -18}
         playerColor={playerColor}
         simulationRef={simulationRef}
       />
-    </>
+    </group>
   )
 }
 
@@ -206,217 +197,6 @@ function resolveZombieEscapeWeaponRecoil(simulation: ZombieEscapeSimulation) {
   return Math.max(0, 1 - shotAge / ZOMBIE_ESCAPE_RECOIL_DURATION_SECONDS)
 }
 
-function ZombieEscapeZombieInstances({
-  framePriority,
-  loadedZombieVariantsRef,
-  simulationRef,
-}: {
-  framePriority: number
-  loadedZombieVariantsRef: MutableRefObject<Set<number>>
-  simulationRef: MutableRefObject<ZombieEscapeSimulation>
-}) {
-  const capacity = simulationRef.current.zombies.pool.capacity
-  const groupRef = useRef<Group>(null)
-  const bodyRef = useRef<InstancedMesh>(null)
-  const headRef = useRef<InstancedMesh>(null)
-  const leftLegRef = useRef<InstancedMesh>(null)
-  const rightLegRef = useRef<InstancedMesh>(null)
-  const dummy = useMemo(() => new Object3D(), [])
-  const bodyColor = useMemo(() => new Color(), [])
-  const headColor = useMemo(() => new Color(), [])
-  const legColor = useMemo(() => new Color('#5e4d55'), [])
-  const hitBlack = useMemo(() => new Color('#030104'), [])
-  const hitRed = useMemo(() => new Color('#ff1738'), [])
-  const palette = useMemo(() => ZOMBIE_COLORS.map((value) => new Color(value)), [])
-  const presentationPose = useMemo(() => createZombieEscapePresentationPose(), [])
-  const presentationPoint = useMemo(() => createZombieEscapePresentationPoint(), [])
-  const rootQuaternion = useMemo(() => new Quaternion(), [])
-  const localQuaternion = useMemo(() => new Quaternion(), [])
-
-  useLayoutEffect(() => {
-    for (const mesh of [
-      bodyRef.current,
-      headRef.current,
-      leftLegRef.current,
-      rightLegRef.current,
-    ]) {
-      mesh?.instanceMatrix.setUsage(DynamicDrawUsage)
-    }
-  }, [])
-
-  useFrame(() => {
-    const allVariantsLoaded =
-      loadedZombieVariantsRef.current.size === ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length
-    if (groupRef.current) groupRef.current.visible = !allVariantsLoaded
-    if (allVariantsLoaded) return
-
-    const simulation = simulationRef.current
-    const zombies = simulation.zombies
-    for (let index = 0; index < zombies.pool.capacity; index += 1) {
-      if (zombies.pool.active[index] === 0) {
-        hideZombieInstance(bodyRef.current, index, dummy)
-        hideZombieInstance(headRef.current, index, dummy)
-        hideZombieInstance(leftLegRef.current, index, dummy)
-        hideZombieInstance(rightLegRef.current, index, dummy)
-        continue
-      }
-      const locomotion = zombies.locomotionBlend[index]!
-      const runBlend = zombies.runBlend[index]!
-      const phase = zombies.locomotionPhase[index]!
-      const variant = zombies.variant[index]!
-      if (loadedZombieVariantsRef.current.has(variant)) {
-        hideZombieInstance(bodyRef.current, index, dummy)
-        hideZombieInstance(headRef.current, index, dummy)
-        hideZombieInstance(leftLegRef.current, index, dummy)
-        hideZombieInstance(rightLegRef.current, index, dummy)
-        continue
-      }
-      resolveZombieEscapePresentationPose(
-        zombies.x[index]!,
-        zombies.y[index]!,
-        zombies.z[index]!,
-        zombies.heading[index]!,
-        zombies.hitReaction[index]!,
-        zombies.hitImpulseX[index]!,
-        zombies.hitImpulseY[index]!,
-        zombies.hitImpulseZ[index]!,
-        presentationPose,
-      )
-      rootQuaternion.set(
-        presentationPose.quaternionX,
-        presentationPose.quaternionY,
-        presentationPose.quaternionZ,
-        presentationPose.quaternionW,
-      )
-      const variantScale = 0.93 + (variant % 4) * 0.035
-      const bob = Math.abs(Math.sin(phase * 2)) * 0.07 * locomotion
-      const lean = 0.12 + runBlend * 0.16
-      const stride = Math.sin(phase * 2) * (0.18 + runBlend * 0.2) * locomotion
-      const side = 0.19 * variantScale
-
-      applyZombiePresentationInstance(
-        bodyRef.current,
-        index,
-        dummy,
-        presentationPose,
-        presentationPoint,
-        rootQuaternion,
-        localQuaternion,
-        0,
-        0.99 + bob,
-        0,
-        0.72 * variantScale,
-        0.86 * variantScale,
-        0.5 * variantScale,
-        lean,
-      )
-      applyZombiePresentationInstance(
-        headRef.current,
-        index,
-        dummy,
-        presentationPose,
-        presentationPoint,
-        rootQuaternion,
-        localQuaternion,
-        0,
-        1.69 + bob,
-        0,
-        0.34 * variantScale,
-        0.34 * variantScale,
-        0.34 * variantScale,
-        lean * 0.4,
-      )
-      applyZombiePresentationInstance(
-        leftLegRef.current,
-        index,
-        dummy,
-        presentationPose,
-        presentationPoint,
-        rootQuaternion,
-        localQuaternion,
-        -side,
-        0.39,
-        stride,
-        0.23,
-        0.62,
-        0.25,
-        stride * 1.7,
-      )
-      applyZombiePresentationInstance(
-        rightLegRef.current,
-        index,
-        dummy,
-        presentationPose,
-        presentationPoint,
-        rootQuaternion,
-        localQuaternion,
-        side,
-        0.39,
-        -stride,
-        0.23,
-        0.62,
-        0.25,
-        -stride * 1.7,
-      )
-
-      if (simulation.debugMode === 'navigation') {
-        const distance = Math.hypot(
-          presentationPose.x - simulation.player.x,
-          presentationPose.z - simulation.player.z,
-        )
-        bodyColor.setHSL(Math.min(0.33, distance / 60), 0.9, 0.55)
-      } else {
-        bodyColor.copy(palette[variant % palette.length] ?? palette[0]!)
-      }
-      headColor.copy(bodyColor).offsetHSL(0.02, -0.12, 0.12)
-      legColor.set('#5e4d55')
-      const hitPhase = resolveZombieEscapeHitFlickerPhase(zombies.hitFlash[index]!)
-      if (hitPhase !== 'none') {
-        const hitColor = hitPhase === 'red' ? hitRed : hitBlack
-        bodyColor.copy(hitColor)
-        headColor.copy(hitColor)
-        legColor.copy(hitColor)
-      }
-      bodyRef.current?.setColorAt(index, bodyColor)
-      headRef.current?.setColorAt(index, headColor)
-      leftLegRef.current?.setColorAt(index, legColor)
-      rightLegRef.current?.setColorAt(index, legColor)
-    }
-    markZombieInstanceMeshDirty(bodyRef.current, capacity)
-    markZombieInstanceMeshDirty(headRef.current, capacity)
-    markZombieInstanceMeshDirty(leftLegRef.current, capacity)
-    markZombieInstanceMeshDirty(rightLegRef.current, capacity)
-  }, framePriority)
-
-  return (
-    <group
-      ref={groupRef}
-      userData={{ assetSlots: ZOMBIE_ASSET_SLOTS, placeholder: 'procedural-zombie-pool' }}
-    >
-      <instancedMesh args={[undefined, undefined, capacity]} frustumCulled={false} ref={bodyRef}>
-        <capsuleGeometry args={[0.5, 0.7, 3, 7]} />
-        <meshBasicMaterial />
-      </instancedMesh>
-      <instancedMesh args={[undefined, undefined, capacity]} frustumCulled={false} ref={headRef}>
-        <dodecahedronGeometry args={[1, 0]} />
-        <meshBasicMaterial />
-      </instancedMesh>
-      <instancedMesh args={[undefined, undefined, capacity]} frustumCulled={false} ref={leftLegRef}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshBasicMaterial />
-      </instancedMesh>
-      <instancedMesh
-        args={[undefined, undefined, capacity]}
-        frustumCulled={false}
-        ref={rightLegRef}
-      >
-        <boxGeometry args={[1, 1, 1]} />
-        <meshBasicMaterial />
-      </instancedMesh>
-    </group>
-  )
-}
-
 function ZombieEscapeAimReticle({
   framePriority,
   playerColor,
@@ -453,46 +233,4 @@ function ZombieEscapeAimReticle({
       </mesh>
     </group>
   )
-}
-
-function applyZombiePresentationInstance(
-  mesh: InstancedMesh | null,
-  index: number,
-  dummy: Object3D,
-  pose: ZombieEscapePresentationPose,
-  point: ZombieEscapePresentationPoint,
-  rootQuaternion: Quaternion,
-  localQuaternion: Quaternion,
-  localX: number,
-  localY: number,
-  localZ: number,
-  scaleX: number,
-  scaleY: number,
-  scaleZ: number,
-  localPitch: number,
-) {
-  if (!mesh) return
-  transformZombieEscapePresentationPoint(pose, localX, localY, localZ, point)
-  dummy.position.set(point.x, point.y, point.z)
-  localQuaternion.setFromAxisAngle(ZOMBIE_LOCAL_X_AXIS, localPitch)
-  dummy.quaternion.copy(rootQuaternion).multiply(localQuaternion)
-  dummy.scale.set(scaleX, scaleY, scaleZ)
-  dummy.updateMatrix()
-  mesh.setMatrixAt(index, dummy.matrix)
-}
-
-function hideZombieInstance(mesh: InstancedMesh | null, index: number, dummy: Object3D) {
-  if (!mesh) return
-  dummy.position.set(0, -30, 0)
-  dummy.quaternion.identity()
-  dummy.scale.set(0, 0, 0)
-  dummy.updateMatrix()
-  mesh.setMatrixAt(index, dummy.matrix)
-}
-
-function markZombieInstanceMeshDirty(mesh: InstancedMesh | null, capacity: number) {
-  if (!mesh) return
-  mesh.count = capacity
-  mesh.instanceMatrix.needsUpdate = true
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
 }

@@ -11,17 +11,26 @@ import {
   Matrix4,
   Object3D,
   Quaternion,
+  Shape,
   Vector3,
 } from 'three'
 import {
   deriveZombieEscapeBloodParticleSeed,
   reconcileZombieEscapeBloodEventPool,
   resolveZombieEscapeBloodEnvelope,
-  ZOMBIE_ESCAPE_BLOOD_EFFECT,
   type ZombieEscapeBloodEnvelope,
   type ZombieEscapeBloodEventPool,
   zombieEscapeBloodHashUnit,
 } from './zombie-escape-blood-effects'
+import {
+  DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT,
+  getZombieEscapeBloodVariantProfile,
+  ZOMBIE_ESCAPE_BLOOD_MAX_DROPLET_COUNT,
+  ZOMBIE_ESCAPE_BLOOD_MAX_RESIDUE_COUNT,
+  ZOMBIE_ESCAPE_BLOOD_MAX_SPLASH_COUNT,
+  type ZombieEscapeBloodVariant,
+  type ZombieEscapeBloodVariantProfile,
+} from './zombie-escape-blood-variants'
 import {
   createZombieEscapeBallisticSample,
   resolveZombieEscapeBallisticSample,
@@ -34,6 +43,7 @@ const HIDDEN_Y = -100
 const TWO_PI = Math.PI * 2
 const Y_AXIS = new Vector3(0, 1, 0)
 const Z_AXIS = new Vector3(0, 0, 1)
+const BLOOD_STAIN_SHAPE = createBloodStainShape()
 
 export type ZombieEscapeBloodPresentationLayer = 'droplet' | 'residue' | 'splash'
 
@@ -60,6 +70,13 @@ export function resolveZombieEscapeBloodSlotAction(active: boolean, wasVisible: 
 
 export function isZombieEscapeBloodPoolVisible(activeCount: number) {
   return Number.isFinite(activeCount) && activeCount > 0
+}
+
+export function doesZombieEscapeBloodEventMatchVariant(
+  eventVariantCode: number,
+  presentationVariantCode: number,
+) {
+  return eventVariantCode === presentationVariantCode
 }
 
 export function shouldAttachZombieEscapeBloodLayer(layer: ZombieEscapeBloodPresentationLayer) {
@@ -94,15 +111,21 @@ export function transformZombieEscapeBloodWorldAttachmentToLocal(
 export function ZombieEscapeBloodPresentation({
   events,
   getElapsedSeconds,
+  filterEventsByVariant = false,
+  ownsLifecycle = true,
   producerFramePriority,
   renderReadinessRegistry,
   resolveWorldAttachment,
+  variant = DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT,
 }: {
   events: ZombieEscapeBloodEventPool
+  filterEventsByVariant?: boolean
   getElapsedSeconds: () => number
+  ownsLifecycle?: boolean
   producerFramePriority: number
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   resolveWorldAttachment?: ZombieEscapeBloodWorldAttachmentResolver
+  variant?: ZombieEscapeBloodVariant
 }) {
   const rootRef = useRef<Group>(null)
   const splashRef = useRef<InstancedMesh>(null)
@@ -111,12 +134,14 @@ export function ZombieEscapeBloodPresentation({
   useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:blood', rootRef)
   const visible = useMemo(() => new Uint8Array(events.pool.capacity), [events])
   const previousElapsedRef = useRef(getElapsedSeconds())
+  const profile = useMemo(() => getZombieEscapeBloodVariantProfile(variant), [variant])
   const priorities = useMemo(
     () => resolveZombieEscapeBloodFramePriorities(producerFramePriority),
     [producerFramePriority],
   )
   const dummy = useMemo(() => new Object3D(), [])
   const ballisticSample = useMemo(() => createZombieEscapeBallisticSample(), [])
+  const previousBallisticSample = useMemo(() => createZombieEscapeBallisticSample(), [])
   const envelope = useMemo<ZombieEscapeBloodEnvelope>(
     () => ({ droplet: 0, normalizedAge: 0, residue: 0, splash: 0 }),
     [],
@@ -139,7 +164,8 @@ export function ZombieEscapeBloodPresentation({
   useLayoutEffect(() => {
     previousElapsedRef.current = getElapsedSeconds()
     if (rootRef.current) {
-      rootRef.current.visible = isZombieEscapeBloodPoolVisible(events.pool.activeCount)
+      rootRef.current.visible =
+        !filterEventsByVariant && isZombieEscapeBloodPoolVisible(events.pool.activeCount)
     }
     for (const mesh of [splashRef.current, residueRef.current, dropletRef.current]) {
       mesh?.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -156,9 +182,10 @@ export function ZombieEscapeBloodPresentation({
     markInstanceMeshDirty(splashRef.current)
     markInstanceMeshDirty(residueRef.current)
     markInstanceMeshDirty(dropletRef.current)
-  }, [dummy, events, getElapsedSeconds])
+  }, [dummy, events, filterEventsByVariant, getElapsedSeconds])
 
   useFrame(() => {
+    if (!ownsLifecycle) return
     const elapsedSeconds = getElapsedSeconds()
     reconcileZombieEscapeBloodEventPool(events, elapsedSeconds, previousElapsedRef.current)
     previousElapsedRef.current = elapsedSeconds
@@ -171,10 +198,14 @@ export function ZombieEscapeBloodPresentation({
     let splashDirty = false
     let residueDirty = false
     let dropletDirty = false
+    let renderedEventCount = 0
 
     for (let eventSlot = 0; eventSlot < events.pool.capacity; eventSlot += 1) {
+      const matchesVariant =
+        !filterEventsByVariant ||
+        doesZombieEscapeBloodEventMatchVariant(events.variantCode[eventSlot]!, profile.code)
       const action = resolveZombieEscapeBloodSlotAction(
-        events.pool.active[eventSlot] !== 0,
+        events.pool.active[eventSlot] !== 0 && matchesVariant,
         visible[eventSlot] !== 0,
       )
       if (action === 'idle') continue
@@ -233,17 +264,37 @@ export function ZombieEscapeBloodPresentation({
       resolveBloodTangentFrame(impactNormal, tangent, bitangent)
       const eventSeed = events.seed[eventSlot]!
 
-      for (let splash = 0; splash < ZOMBIE_ESCAPE_BLOOD_EFFECT.splashLobesPerEvent; splash += 1) {
-        const instance = eventSlot * ZOMBIE_ESCAPE_BLOOD_EFFECT.splashLobesPerEvent + splash
+      for (let splash = 0; splash < profile.splashCount; splash += 1) {
+        const instance = eventSlot * ZOMBIE_ESCAPE_BLOOD_MAX_SPLASH_COUNT + splash
         const seed = deriveZombieEscapeBloodParticleSeed(eventSeed, 0, splash)
         const angle = zombieEscapeBloodHashUnit(seed) * TWO_PI
-        const radialSpeed = 0.7 + zombieEscapeBloodHashUnit(seed ^ 0x27d4_eb2f) * 1.1
-        const outwardSpeed = 1.3 + zombieEscapeBloodHashUnit(seed ^ 0x1656_67b1) * 1.25
-        const upwardSpeed = 0.15 + zombieEscapeBloodHashUnit(seed ^ 0xd3a2_646c) * 0.55
+        const speedScale =
+          variant === 'fine-mist'
+            ? 1.42
+            : variant === 'heavy-clots'
+              ? 0.68
+              : variant === 'surface-splat'
+                ? 0.82
+                : 1
+        const radialSpeed = (0.7 + zombieEscapeBloodHashUnit(seed ^ 0x27d4_eb2f) * 1.1) * speedScale
+        const outwardSpeed =
+          (1.3 + zombieEscapeBloodHashUnit(seed ^ 0x1656_67b1) * 1.25) * speedScale
+        const upwardSpeed =
+          (0.15 + zombieEscapeBloodHashUnit(seed ^ 0xd3a2_646c) * 0.55) * speedScale
         const flowSpeed = 0.25 + zombieEscapeBloodHashUnit(seed ^ 0x94d0_49bb) * 0.45
         const radialX = tangent.x * Math.cos(angle) + bitangent.x * Math.sin(angle)
         const radialY = tangent.y * Math.cos(angle) + bitangent.y * Math.sin(angle)
         const radialZ = tangent.z * Math.cos(angle) + bitangent.z * Math.sin(angle)
+        const velocityX =
+          radialX * radialSpeed + impactNormal.x * outwardSpeed + flowDirection.x * flowSpeed
+        const velocityY =
+          radialY * radialSpeed +
+          impactNormal.y * outwardSpeed +
+          flowDirection.y * flowSpeed +
+          upwardSpeed
+        const velocityZ =
+          radialZ * radialSpeed + impactNormal.z * outwardSpeed + flowDirection.z * flowSpeed
+        const sampleAge = Math.min(age, 0.2)
         resolveZombieEscapeBallisticSample(
           impactPoint.x,
           impactPoint.y,
@@ -252,47 +303,113 @@ export function ZombieEscapeBloodPresentation({
           impactNormal.y,
           impactNormal.z,
           0.035,
-          radialX * radialSpeed + impactNormal.x * outwardSpeed + flowDirection.x * flowSpeed,
-          radialY * radialSpeed +
-            impactNormal.y * outwardSpeed +
-            flowDirection.y * flowSpeed +
-            upwardSpeed,
-          radialZ * radialSpeed + impactNormal.z * outwardSpeed + flowDirection.z * flowSpeed,
+          velocityX,
+          velocityY,
+          velocityZ,
           7.6,
-          Math.min(age, 0.2),
+          sampleAge,
           ballisticSample,
         )
-        direction.set(
-          ballisticSample.velocityX,
-          ballisticSample.velocityY,
-          ballisticSample.velocityZ,
-        )
+        if (variant === 'viscous-strings') {
+          resolveZombieEscapeBallisticSample(
+            impactPoint.x,
+            impactPoint.y,
+            impactPoint.z,
+            impactNormal.x,
+            impactNormal.y,
+            impactNormal.z,
+            0.035,
+            velocityX,
+            velocityY,
+            velocityZ,
+            7.6,
+            Math.max(0, sampleAge - 0.055),
+            previousBallisticSample,
+          )
+          direction.set(
+            ballisticSample.x - previousBallisticSample.x,
+            ballisticSample.y - previousBallisticSample.y,
+            ballisticSample.z - previousBallisticSample.z,
+          )
+        } else {
+          direction.set(
+            ballisticSample.velocityX,
+            ballisticSample.velocityY,
+            ballisticSample.velocityZ,
+          )
+        }
+        const segmentLength = direction.length()
         normalizeBloodDirection(direction, impactNormal)
         quaternion.setFromUnitVectors(Y_AXIS, direction)
+        const splashUnit = zombieEscapeBloodHashUnit(seed ^ 0xfd70_46c5)
         const radius =
-          (0.045 + zombieEscapeBloodHashUnit(seed ^ 0xfd70_46c5) * 0.025) * envelope.splash
+          (variant === 'fine-mist'
+            ? 0.007 + splashUnit * 0.005
+            : variant === 'heavy-clots'
+              ? 0.028 + splashUnit * 0.014
+              : variant === 'surface-splat'
+                ? 0.018 + splashUnit * 0.009
+                : variant === 'viscous-strings'
+                  ? 0.014 + splashUnit * 0.008
+                  : 0.022 + splashUnit * 0.012) * envelope.splash
+        const instanceX =
+          variant === 'viscous-strings'
+            ? (ballisticSample.x + previousBallisticSample.x) * 0.5
+            : ballisticSample.x
+        const instanceY =
+          variant === 'viscous-strings'
+            ? (ballisticSample.y + previousBallisticSample.y) * 0.5
+            : ballisticSample.y
+        const instanceZ =
+          variant === 'viscous-strings'
+            ? (ballisticSample.z + previousBallisticSample.z) * 0.5
+            : ballisticSample.z
+        const lengthScale =
+          variant === 'viscous-strings'
+            ? Math.max(radius * 2.2, segmentLength)
+            : radius *
+              (variant === 'fine-mist'
+                ? 6
+                : variant === 'heavy-clots'
+                  ? 1.3
+                  : variant === 'surface-splat'
+                    ? 3.2
+                    : 3.2 + zombieEscapeBloodHashUnit(seed ^ 0xb55a_4f09) * 1.1)
         applyBloodInstance(
           splashRef.current,
           instance,
           dummy,
-          ballisticSample.x,
-          ballisticSample.y,
-          ballisticSample.z,
+          instanceX,
+          instanceY,
+          instanceZ,
           quaternion,
           radius,
-          radius * (2.8 + zombieEscapeBloodHashUnit(seed ^ 0xb55a_4f09) * 1.8),
+          lengthScale,
           radius,
         )
       }
       splashDirty = true
 
-      for (let droplet = 0; droplet < ZOMBIE_ESCAPE_BLOOD_EFFECT.dropletsPerEvent; droplet += 1) {
-        const instance = eventSlot * ZOMBIE_ESCAPE_BLOOD_EFFECT.dropletsPerEvent + droplet
+      for (let droplet = 0; droplet < profile.dropletCount; droplet += 1) {
+        const instance = eventSlot * ZOMBIE_ESCAPE_BLOOD_MAX_DROPLET_COUNT + droplet
         const seed = deriveZombieEscapeBloodParticleSeed(eventSeed, 1, droplet)
         const angle = zombieEscapeBloodHashUnit(seed) * TWO_PI
-        const radialSpeed = 0.5 + zombieEscapeBloodHashUnit(seed ^ 0x27d4_eb2f) * 1.45
-        const outwardSpeed = 0.35 + zombieEscapeBloodHashUnit(seed ^ 0x1656_67b1) * 0.9
-        const upwardSpeed = 0.25 + zombieEscapeBloodHashUnit(seed ^ 0xd3a2_646c) * 1.15
+        const speedScale =
+          variant === 'fine-mist'
+            ? 1.55
+            : variant === 'heavy-clots'
+              ? 0.7
+              : variant === 'surface-splat'
+                ? 0.58
+                : variant === 'viscous-strings'
+                  ? 0.88
+                  : 1
+        const radialSpeed =
+          (0.5 + zombieEscapeBloodHashUnit(seed ^ 0x27d4_eb2f) * 1.45) * speedScale
+        const outwardSpeed =
+          (0.35 + zombieEscapeBloodHashUnit(seed ^ 0x1656_67b1) * 0.9) * speedScale
+        const upwardSpeed =
+          (0.25 + zombieEscapeBloodHashUnit(seed ^ 0xd3a2_646c) * 1.15) * speedScale
         const flowSpeed = 0.1 + zombieEscapeBloodHashUnit(seed ^ 0x94d0_49bb) * 0.3
         const radialX = tangent.x * Math.cos(angle) + bitangent.x * Math.sin(angle)
         const radialY = tangent.y * Math.cos(angle) + bitangent.y * Math.sin(angle)
@@ -322,8 +439,17 @@ export function ZombieEscapeBloodPresentation({
         )
         normalizeBloodDirection(direction, impactNormal)
         quaternion.setFromUnitVectors(Y_AXIS, direction)
+        const dropletUnit = zombieEscapeBloodHashUnit(seed ^ 0xfd70_46c5)
         const radius =
-          (0.022 + zombieEscapeBloodHashUnit(seed ^ 0xfd70_46c5) * 0.024) * envelope.droplet
+          (variant === 'fine-mist'
+            ? 0.004 + dropletUnit * 0.005
+            : variant === 'heavy-clots'
+              ? 0.02 + dropletUnit * 0.015
+              : variant === 'surface-splat'
+                ? 0.012 + dropletUnit * 0.008
+                : variant === 'viscous-strings'
+                  ? 0.009 + dropletUnit * 0.009
+                  : 0.009 + dropletUnit * 0.009) * envelope.droplet
         applyBloodInstance(
           dropletRef.current,
           instance,
@@ -333,7 +459,10 @@ export function ZombieEscapeBloodPresentation({
           ballisticSample.z,
           quaternion,
           radius,
-          radius * (1.7 + zombieEscapeBloodHashUnit(seed ^ 0xb55a_4f09) * 1.4),
+          radius *
+            (variant === 'heavy-clots'
+              ? 1.25
+              : 1.7 + zombieEscapeBloodHashUnit(seed ^ 0xb55a_4f09) * 1.4),
           radius,
         )
       }
@@ -366,19 +495,24 @@ export function ZombieEscapeBloodPresentation({
         resolveBloodTangentFrame(impactNormal, tangent, bitangent)
       }
 
-      for (
-        let residue = 0;
-        residue < ZOMBIE_ESCAPE_BLOOD_EFFECT.residueBlotsPerEvent;
-        residue += 1
-      ) {
-        const instance = eventSlot * ZOMBIE_ESCAPE_BLOOD_EFFECT.residueBlotsPerEvent + residue
+      for (let residue = 0; residue < profile.residueCount; residue += 1) {
+        const instance = eventSlot * ZOMBIE_ESCAPE_BLOOD_MAX_RESIDUE_COUNT + residue
         const seed = deriveZombieEscapeBloodParticleSeed(eventSeed, 2, residue)
         const angle = zombieEscapeBloodHashUnit(seed) * TWO_PI
+        const spreadScale = variant === 'surface-splat' ? 0.28 : variant === 'fine-mist' ? 0.68 : 1
         const spread =
           (0.03 + zombieEscapeBloodHashUnit(seed ^ 0xa511_e9b3) * 0.13) *
+          spreadScale *
           Math.min(1, envelope.normalizedAge * 12)
+        const scaleUnit = zombieEscapeBloodHashUnit(seed ^ 0x63d8_35f1)
         const scale =
-          (0.12 + zombieEscapeBloodHashUnit(seed ^ 0x63d8_35f1) * 0.085) * envelope.residue
+          (variant === 'fine-mist'
+            ? 0.02 + scaleUnit * 0.015
+            : variant === 'surface-splat'
+              ? 0.04 + scaleUnit * 0.02
+              : variant === 'heavy-clots'
+                ? 0.04 + scaleUnit * 0.02
+                : 0.035 + scaleUnit * 0.02) * envelope.residue
         quaternion.setFromUnitVectors(Z_AXIS, impactNormal)
         rollQuaternion.setFromAxisAngle(Z_AXIS, angle)
         quaternion.multiply(rollQuaternion)
@@ -387,15 +521,15 @@ export function ZombieEscapeBloodPresentation({
           instance,
           dummy,
           impactPoint.x +
-            impactNormal.x * 0.028 +
+            impactNormal.x * 0.007 +
             tangent.x * Math.cos(angle) * spread +
             bitangent.x * Math.sin(angle) * spread,
           impactPoint.y +
-            impactNormal.y * 0.028 +
+            impactNormal.y * 0.007 +
             tangent.y * Math.cos(angle) * spread +
             bitangent.y * Math.sin(angle) * spread,
           impactPoint.z +
-            impactNormal.z * 0.028 +
+            impactNormal.z * 0.007 +
             tangent.z * Math.cos(angle) * spread +
             bitangent.z * Math.sin(angle) * spread,
           quaternion,
@@ -406,9 +540,10 @@ export function ZombieEscapeBloodPresentation({
       }
       residueDirty = true
       visible[eventSlot] = 1
+      renderedEventCount += 1
     }
 
-    if (root) root.visible = isZombieEscapeBloodPoolVisible(events.pool.activeCount)
+    if (root) root.visible = renderedEventCount > 0
     if (splashDirty) markInstanceMeshDirty(splashRef.current)
     if (residueDirty) markInstanceMeshDirty(residueRef.current)
     if (dropletDirty) markInstanceMeshDirty(dropletRef.current)
@@ -420,61 +555,75 @@ export function ZombieEscapeBloodPresentation({
       userData={{
         allocation: 'fixed-capacity-instanced-blood-pool',
         capacity: events.pool.capacity,
+        filterEventsByVariant,
+        ownsLifecycle,
         perEventObjectAllocation: false,
+        variant,
       }}
-      visible={isZombieEscapeBloodPoolVisible(events.pool.activeCount)}
+      visible={!filterEventsByVariant && isZombieEscapeBloodPoolVisible(events.pool.activeCount)}
     >
       <instancedMesh
-        args={[
-          undefined,
-          undefined,
-          events.pool.capacity * ZOMBIE_ESCAPE_BLOOD_EFFECT.splashLobesPerEvent,
-        ]}
+        args={[undefined, undefined, events.pool.capacity * ZOMBIE_ESCAPE_BLOOD_MAX_SPLASH_COUNT]}
         frustumCulled={false}
         ref={splashRef}
       >
-        <coneGeometry args={[0.55, 1, 5, 1, true]} />
-        <meshBasicMaterial
-          color="#d62d4f"
-          depthWrite={false}
-          opacity={0.88}
-          toneMapped={false}
-          transparent
-        />
+        <BloodSplashGeometry profile={profile} />
+        <meshStandardMaterial color="#a50d27" metalness={0} roughness={0.2} />
       </instancedMesh>
       <instancedMesh
-        args={[
-          undefined,
-          undefined,
-          events.pool.capacity * ZOMBIE_ESCAPE_BLOOD_EFFECT.residueBlotsPerEvent,
-        ]}
+        args={[undefined, undefined, events.pool.capacity * ZOMBIE_ESCAPE_BLOOD_MAX_RESIDUE_COUNT]}
         frustumCulled={false}
         ref={residueRef}
       >
-        <circleGeometry args={[1, 7]} />
-        <meshBasicMaterial
-          color="#85162d"
-          depthWrite={false}
-          opacity={0.82}
+        <shapeGeometry args={[BLOOD_STAIN_SHAPE]} />
+        <meshStandardMaterial
+          color="#650612"
+          metalness={0}
+          polygonOffset
+          polygonOffsetFactor={-2}
+          roughness={0.3}
           side={DoubleSide}
-          toneMapped={false}
-          transparent
         />
       </instancedMesh>
       <instancedMesh
-        args={[
-          undefined,
-          undefined,
-          events.pool.capacity * ZOMBIE_ESCAPE_BLOOD_EFFECT.dropletsPerEvent,
-        ]}
+        args={[undefined, undefined, events.pool.capacity * ZOMBIE_ESCAPE_BLOOD_MAX_DROPLET_COUNT]}
         frustumCulled={false}
         ref={dropletRef}
       >
-        <dodecahedronGeometry args={[1, 0]} />
-        <meshBasicMaterial color="#bd2445" depthWrite={false} toneMapped={false} />
+        <BloodDropletGeometry profile={profile} />
+        <meshStandardMaterial color="#8e0a20" metalness={0} roughness={0.16} />
       </instancedMesh>
     </group>
   )
+}
+
+function BloodSplashGeometry({ profile }: { profile: ZombieEscapeBloodVariantProfile }) {
+  if (profile.splashGeometry === 'fan') return <coneGeometry args={[0.68, 1, 7, 1, true]} />
+  if (profile.splashGeometry === 'clot') return <dodecahedronGeometry args={[1, 0]} />
+  if (profile.splashGeometry === 'needle') return <capsuleGeometry args={[0.3, 0.72, 2, 5]} />
+  if (profile.splashGeometry === 'string') return <capsuleGeometry args={[0.46, 0.16, 3, 6]} />
+  return <coneGeometry args={[0.52, 1, 6, 1, true]} />
+}
+
+function BloodDropletGeometry({ profile }: { profile: ZombieEscapeBloodVariantProfile }) {
+  if (profile.dropletGeometry === 'tetrahedron') return <tetrahedronGeometry args={[1, 0]} />
+  if (profile.dropletGeometry === 'dodecahedron') return <dodecahedronGeometry args={[1, 0]} />
+  return <icosahedronGeometry args={[1, 0]} />
+}
+
+function createBloodStainShape() {
+  const shape = new Shape()
+  const radii = [0.9, 1.12, 0.84, 1.03, 0.78, 1.08, 0.88, 1.15, 0.82, 1.05, 0.76, 1.1]
+  for (let index = 0; index < radii.length; index += 1) {
+    const angle = (index / radii.length) * TWO_PI
+    const radius = radii[index]!
+    const x = Math.cos(angle) * radius
+    const y = Math.sin(angle) * radius
+    if (index === 0) shape.moveTo(x, y)
+    else shape.lineTo(x, y)
+  }
+  shape.closePath()
+  return shape
 }
 
 function resolveBloodTangentFrame(normal: Vector3, tangent: Vector3, bitangent: Vector3) {
@@ -515,24 +664,20 @@ function hideZombieEscapeBloodEventInstances(
   dropletMesh: InstancedMesh | null,
   dummy: Object3D,
 ) {
-  for (let splash = 0; splash < ZOMBIE_ESCAPE_BLOOD_EFFECT.splashLobesPerEvent; splash += 1) {
-    hideBloodInstance(
-      splashMesh,
-      eventSlot * ZOMBIE_ESCAPE_BLOOD_EFFECT.splashLobesPerEvent + splash,
-      dummy,
-    )
+  for (let splash = 0; splash < ZOMBIE_ESCAPE_BLOOD_MAX_SPLASH_COUNT; splash += 1) {
+    hideBloodInstance(splashMesh, eventSlot * ZOMBIE_ESCAPE_BLOOD_MAX_SPLASH_COUNT + splash, dummy)
   }
-  for (let residue = 0; residue < ZOMBIE_ESCAPE_BLOOD_EFFECT.residueBlotsPerEvent; residue += 1) {
+  for (let residue = 0; residue < ZOMBIE_ESCAPE_BLOOD_MAX_RESIDUE_COUNT; residue += 1) {
     hideBloodInstance(
       residueMesh,
-      eventSlot * ZOMBIE_ESCAPE_BLOOD_EFFECT.residueBlotsPerEvent + residue,
+      eventSlot * ZOMBIE_ESCAPE_BLOOD_MAX_RESIDUE_COUNT + residue,
       dummy,
     )
   }
-  for (let droplet = 0; droplet < ZOMBIE_ESCAPE_BLOOD_EFFECT.dropletsPerEvent; droplet += 1) {
+  for (let droplet = 0; droplet < ZOMBIE_ESCAPE_BLOOD_MAX_DROPLET_COUNT; droplet += 1) {
     hideBloodInstance(
       dropletMesh,
-      eventSlot * ZOMBIE_ESCAPE_BLOOD_EFFECT.dropletsPerEvent + droplet,
+      eventSlot * ZOMBIE_ESCAPE_BLOOD_MAX_DROPLET_COUNT + droplet,
       dummy,
     )
   }

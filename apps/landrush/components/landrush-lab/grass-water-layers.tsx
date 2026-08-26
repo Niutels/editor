@@ -5,12 +5,13 @@ import {
   stylizedGroundByte255 as byte255,
   createStylizedGroundTextureFromCanvas,
   createStylizedPathGrid,
-  type PascalWaterLandSurface as WaterLandSurface,
   type StylizedGroundRgbByte as RgbByte,
   type StylizedPathGrid,
   sampleStylizedGroundMaskRgba as sampleMaskRgba,
   stylizedPathSignedDistance,
+  type PascalWaterLandSurface as WaterLandSurface,
 } from '@landrush/pascal-plugin'
+import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { DoubleSide, type Texture } from 'three'
 import type { LandrushRoadSegment, LandrushTree } from '@/components/landrush/types'
@@ -112,20 +113,6 @@ const GRASS_TREE_MIN_ALPHA = 0.12
 const GRASS_TREE_MIN_COUNT = 7
 const GRASS_TREE_MAX_COUNT = 34
 
-type DisposableGpuResource = {
-  dispose: () => void
-}
-
-function disposeGrassWaterGpuResourceLater(resource: DisposableGpuResource | null | undefined) {
-  if (!resource) return
-  if (typeof requestAnimationFrame !== 'function') {
-    resource.dispose()
-    return
-  }
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => resource.dispose())
-  })
-}
 const EMPTY_GRASS_ROADS: readonly LandrushRoadSegment[] = []
 const EMPTY_GRASS_BLOCKERS: readonly GrassFieldBlocker[] = []
 const DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS = 5
@@ -302,14 +289,8 @@ export function GrassWaterLandLayers({
     tuning.density,
   ])
 
-  useEffect(
-    () => () => disposeGrassWaterGpuResourceLater(groundField.texture),
-    [groundField.texture],
-  )
-  useEffect(
-    () => () => disposeGrassWaterGpuResourceLater(spawnPreviewField.texture),
-    [spawnPreviewField.texture],
-  )
+  useGpuResourceLifetime(groundField.texture)
+  useGpuResourceLifetime(spawnPreviewField.texture)
 
   return (
     <>
@@ -489,7 +470,7 @@ function useAsyncGrassFieldTexture({
     shouldGenerate,
   ])
 
-  useEffect(() => () => disposeGrassWaterGpuResourceLater(field?.texture), [field])
+  useGpuResourceLifetime(field?.texture)
 
   return field
 }
@@ -748,21 +729,13 @@ function CanvasStylizedGrassGroundLayer({
     onTextureReady?.(Boolean(finalGroundTexture), finalGroundTexture ?? undefined)
   }, [finalGroundTexture, onTextureReady])
 
-  useEffect(
-    () => () => {
-      if (previewGroundTexture.userData.landrushGeneratedStylizedGrassGround) {
-        disposeGrassWaterGpuResourceLater(previewGroundTexture)
-      }
-    },
-    [previewGroundTexture],
+  useGpuResourceLifetime(
+    previewGroundTexture.userData.landrushGeneratedStylizedGrassGround
+      ? previewGroundTexture
+      : null,
   )
-  useEffect(
-    () => () => {
-      if (finalGroundTexture?.userData.landrushGeneratedStylizedGrassGround) {
-        disposeGrassWaterGpuResourceLater(finalGroundTexture)
-      }
-    },
-    [finalGroundTexture],
+  useGpuResourceLifetime(
+    finalGroundTexture?.userData.landrushGeneratedStylizedGrassGround ? finalGroundTexture : null,
   )
 
   return (
@@ -877,7 +850,7 @@ function useDeferredStylizedGrassGroundTexture({
         },
       )
       if (cancelled) {
-        disposeGrassWaterGpuResourceLater(generatedTexture)
+        generatedTexture.dispose()
         return
       }
       setTexture(generatedTexture)
@@ -1038,7 +1011,7 @@ export function GrassBladeLayerWebGPU({
     ],
   )
 
-  useEffect(() => () => disposeGrassWaterGpuResourceLater(bladeGeometry), [bladeGeometry])
+  useGpuResourceLifetime(bladeGeometry)
 
   return (
     <mesh

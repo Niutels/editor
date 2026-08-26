@@ -4,18 +4,16 @@ import {
   type LandrushBuildingFloorInteriorRegion,
   resolveLandrushBuildingFloorStacks,
 } from './landrush-building-floor-visibility'
-import { ZOMBIE_ESCAPE_WEAPON_PICKUPS } from './zombie-escape-config'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
+import type { ZombieEscapeWeaponPickupPlacement } from './zombie-escape-weapon-pickup-data'
+
+export {
+  createZombieEscapeFallbackWeaponPickupPlacements,
+  translateZombieEscapeWeaponPickupPlacements,
+  type ZombieEscapeWeaponPickupPlacement,
+} from './zombie-escape-weapon-pickup-data'
 
 const INTERIOR_SAMPLE_STEPS = 24
-
-export type ZombieEscapeWeaponPickupPlacement = Readonly<{
-  scopeId: string
-  weaponIndex: number
-  x: number
-  y: number
-  z: number
-}>
 
 export function resolveZombieEscapeWeaponPickupPlacements(
   nodes: Record<string, AnyNode>,
@@ -49,27 +47,6 @@ export function resolveZombieEscapeWeaponPickupPlacements(
       y,
       z: point.z,
     }))
-}
-
-export function createZombieEscapeFallbackWeaponPickupPlacements(): readonly ZombieEscapeWeaponPickupPlacement[] {
-  return ZOMBIE_ESCAPE_WEAPON_PICKUPS.map((pickup, weaponIndex) => ({
-    scopeId: `standalone:${String(weaponIndex)}`,
-    weaponIndex,
-    x: pickup.x,
-    y: 0,
-    z: pickup.z,
-  }))
-}
-
-export function translateZombieEscapeWeaponPickupPlacements(
-  placements: readonly ZombieEscapeWeaponPickupPlacement[],
-  origin: Readonly<{ x: number; z: number }>,
-): readonly ZombieEscapeWeaponPickupPlacement[] {
-  return placements.map((placement) => ({
-    ...placement,
-    x: placement.x - origin.x,
-    z: placement.z - origin.z,
-  }))
 }
 
 function compareInteriorRegions(

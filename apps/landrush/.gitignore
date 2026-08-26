@@ -11,7 +11,7 @@
 
 # next.js
 /.next/
-/.next-bench/
+/.next-*/
 /out/
 
 # production
@@ -51,3 +51,4 @@ next-env.d.ts
 /public/icons/
 /public/items/
 /public/material/
+/public/landrush-lab/workers/

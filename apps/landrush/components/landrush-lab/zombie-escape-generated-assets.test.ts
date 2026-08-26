@@ -1,10 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, type Object3D, Vector3 } from 'three'
+import { Bone, BoxGeometry, Group, Mesh, MeshStandardMaterial, type Object3D, Vector3 } from 'three'
+import {
+  createZombieEscapeAttackClip,
+  ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS,
+} from './zombie-escape-attack-presentation'
 import {
   createZombieVisual,
+  resolveZombieEscapeGeneratedVariantAdmissionCount,
   resolveZombieEscapeRenderPipelineSettlement,
+  updateZombieVisualLocomotion,
 } from './zombie-escape-generated-assets'
+import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
+import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
 
@@ -33,9 +41,50 @@ describe('generated asset render-pipeline readiness', () => {
       diagnostic: null,
     })
   })
+
+  test('admits one expensive zombie presentation only after the prior one settles', () => {
+    const settled = new Set<number>()
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(0, settled, 3)).toBe(1)
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(1, settled, 3)).toBe(1)
+    settled.add(0)
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(1, settled, 3)).toBe(2)
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(2, settled, 3)).toBe(2)
+    settled.add(1)
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(2, settled, 3)).toBe(3)
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(3, settled, 3)).toBe(3)
+  })
 })
 
 describe('generated zombie visual construction', () => {
+  test('prewarms a skinned root without allocating an animation mixer', () => {
+    const group = new Group()
+    const source = new Group()
+    const geometry = new BoxGeometry()
+    const material = new MeshStandardMaterial()
+    source.add(new Mesh(geometry, material))
+
+    const visual = createZombieVisual({
+      active: false,
+      attackClip: null,
+      generation: 0,
+      group,
+      impactVisualRegistry: createZombieEscapeImpactVisualRegistry(),
+      modelTransform: MODEL_TRANSFORM,
+      runClip: null,
+      slot: null,
+      source,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+      zombieShaderSeed: 0,
+    })
+
+    expect(visual.mixer).toBeNull()
+    expect(visual.root.visible).toBe(false)
+    for (const ownedMaterial of visual.ownedMaterials) ownedMaterial.dispose()
+    geometry.dispose()
+    material.dispose()
+  })
+
   test('disposes materials cloned before a later material clone fails', () => {
     const group = new Group()
     const source = new Group()
@@ -60,6 +109,7 @@ describe('generated zombie visual construction', () => {
     expect(() =>
       createZombieVisual({
         active: false,
+        attackClip: null,
         generation: 0,
         group,
         impactVisualRegistry: createZombieEscapeImpactVisualRegistry(),
@@ -68,6 +118,8 @@ describe('generated zombie visual construction', () => {
         slot: null,
         source,
         walkClip: null,
+        zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+        zombieShaderSeed: 0,
       }),
     ).toThrow('material clone failed')
     expect(group.children).toHaveLength(0)
@@ -106,6 +158,7 @@ describe('generated zombie visual construction', () => {
     expect(() =>
       createZombieVisual({
         active: true,
+        attackClip: null,
         generation: 4,
         group,
         impactVisualRegistry,
@@ -114,12 +167,66 @@ describe('generated zombie visual construction', () => {
         slot: 3,
         source,
         walkClip: null,
+        zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+        zombieShaderSeed: 0,
       }),
     ).toThrow('scene attachment failed')
     expect(group.children).toHaveLength(0)
     expect(impactVisualRegistry.bindings.size).toBe(0)
     expect(disposedMaterials).toBe(1)
 
+    geometry.dispose()
+    material.dispose()
+  })
+
+  test('drives a detailed authored strike from semantic attack intent and cooldown', () => {
+    const group = new Group()
+    const source = new Group()
+    for (const name of ['Spine', 'Spine01', 'LeftArm', 'LeftForeArm', 'RightArm', 'RightForeArm']) {
+      const bone = new Bone()
+      bone.name = name
+      source.add(bone)
+    }
+    const geometry = new BoxGeometry()
+    const material = new MeshStandardMaterial()
+    source.add(new Mesh(geometry, material))
+    const attackClip = createZombieEscapeAttackClip(source)
+    const visual = createZombieVisual({
+      active: true,
+      attackClip,
+      generation: 1,
+      group,
+      impactVisualRegistry: createZombieEscapeImpactVisualRegistry(),
+      modelTransform: MODEL_TRANSFORM,
+      runClip: null,
+      slot: null,
+      source,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+      zombieShaderSeed: 0,
+    })
+
+    updateZombieVisualLocomotion({
+      attackCooldown: ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS * 0.5,
+      attackIntent: ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle,
+      delta: 1 / 60,
+      horizontalSpeed: 0,
+      paused: false,
+      runBlend: 0,
+      runMetersPerSecond: 3,
+      visual,
+      walkMetersPerSecond: 1,
+    })
+
+    expect(visual.attackAction).not.toBeNull()
+    expect(visual.attackAction?.getEffectiveWeight()).toBe(1)
+    expect(visual.attackAction?.time).toBeCloseTo(
+      ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS * 0.5,
+      6,
+    )
+    visual.mixer?.stopAllAction()
+    visual.mixer?.uncacheRoot(visual.animationRoot)
+    for (const ownedMaterial of visual.ownedMaterials) ownedMaterial.dispose()
     geometry.dispose()
     material.dispose()
   })

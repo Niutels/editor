@@ -27,8 +27,12 @@ export type LandrushIslandAmbientLoadSettlement = {
 }
 
 export type LandrushIslandAmbientLoadReadiness = {
+  completed: number
   generation: number
   ready: boolean
+  terminalUnitIds: readonly string[]
+  total: number
+  totalUnitIds: readonly string[]
 }
 
 export type LandrushIslandAmbientLoadYieldHost = {
@@ -226,11 +230,17 @@ export function resolveLandrushIslandAmbientLoadReadiness(
   state: LandrushIslandAmbientLoadQueueState,
   units: readonly LandrushIslandAmbientLoadUnit[],
 ): LandrushIslandAmbientLoadReadiness {
+  const totalUnitIds = units.map((unit) => unit.id)
+  const terminalUnitIds = totalUnitIds.filter(
+    (unitId) => state.terminalOutcomes[unitId] !== undefined,
+  )
   return {
+    completed: terminalUnitIds.length,
     generation: state.generation,
-    ready:
-      state.inFlightUnitId === null &&
-      units.every((unit) => state.terminalOutcomes[unit.id] !== undefined),
+    ready: state.inFlightUnitId === null && terminalUnitIds.length === totalUnitIds.length,
+    terminalUnitIds,
+    total: totalUnitIds.length,
+    totalUnitIds,
   }
 }
 
@@ -239,7 +249,23 @@ export function reconcileLandrushIslandAmbientLoadReadiness(
   reported: LandrushIslandAmbientLoadReadiness,
 ): LandrushIslandAmbientLoadReadiness {
   if (current === null || reported.generation > current.generation) return reported
-  if (reported.generation < current.generation || current.ready || !reported.ready) return current
+  if (reported.generation < current.generation) return current
+  if (
+    current.total !== reported.total ||
+    !haveSameOrderedUnitIds(current.totalUnitIds, reported.totalUnitIds) ||
+    reported.completed < current.completed ||
+    !isOrderedUnitIdPrefix(current.terminalUnitIds, reported.terminalUnitIds) ||
+    (current.ready && !reported.ready)
+  ) {
+    return current
+  }
+  if (
+    reported.completed === current.completed &&
+    reported.ready === current.ready &&
+    haveSameOrderedUnitIds(current.terminalUnitIds, reported.terminalUnitIds)
+  ) {
+    return current
+  }
   return reported
 }
 
@@ -289,4 +315,14 @@ function createKindUnits(
     id: `${kind}:${assetId}`,
     kind,
   }))
+}
+
+function haveSameOrderedUnitIds(first: readonly string[], second: readonly string[]) {
+  return first.length === second.length && first.every((unitId, index) => unitId === second[index])
+}
+
+function isOrderedUnitIdPrefix(prefix: readonly string[], unitIds: readonly string[]) {
+  return (
+    prefix.length <= unitIds.length && prefix.every((unitId, index) => unitId === unitIds[index])
+  )
 }

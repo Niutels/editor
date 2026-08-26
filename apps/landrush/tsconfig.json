@@ -13,6 +13,9 @@
   "include": [
     "app/**/*.ts",
     "app/**/*.tsx",
+    "components/landrush-lab/natural-road-plan.worker.ts",
+    "components/landrush-lab/procedural-rock-cliff.worker.ts",
+    "components/landrush-lab/landrush-zombie-escape-collision-world.worker.ts",
     "next-env.d.ts",
     "next.config.ts",
     ".next/types/**/*.ts"

@@ -11,19 +11,22 @@ describe('Zombie Escape audio event ring', () => {
     const events = createZombieEscapeAudioEventRing(3)
     const kinds = events.kind
     const sequences = events.sequence
+    const subjectIndices = events.subjectIndex
 
     expect(
       emitZombieEscapeAudioEvent(events, ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired, 1, 2, 3, 2),
     ).toBe(1)
     expect(
-      emitZombieEscapeAudioEvent(events, ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyHit, 5, 6, 7, 4),
+      emitZombieEscapeAudioEvent(events, ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyHit, 5, 6, 7, 4_096),
     ).toBe(2)
 
     expect(events.kind).toBe(kinds)
     expect(events.sequence).toBe(sequences)
+    expect(events.subjectIndex).toBe(subjectIndices)
+    expect(events.subjectIndex).toBeInstanceOf(Uint16Array)
     expect(events.writeSequence).toBe(2)
     expect(events.kind[1]).toBe(ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyHit)
-    expect(events.subjectIndex[1]).toBe(4)
+    expect(events.subjectIndex[1]).toBe(4_096)
     expect(events.x[1]).toBe(5)
     expect(events.y[1]).toBe(6)
     expect(events.z[1]).toBe(7)

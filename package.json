@@ -11,6 +11,7 @@
     "check": "biome check",
     "check:fix": "biome check --write",
     "check:landrush-boundary": "node tooling/landrush/check-upstream-boundary.mjs",
+    "proof:landrush-zombie-navigation": "node apps/landrush/scripts/run-zombie-navigation-scale-proof.mjs",
     "check-types": "turbo run check-types",
     "test": "turbo run test",
     "kill": "lsof -ti:3002 | xargs kill -9 2>/dev/null || echo 'No processes found on port 3002'",

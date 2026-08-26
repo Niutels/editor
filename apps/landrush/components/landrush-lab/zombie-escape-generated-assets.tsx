@@ -1,6 +1,6 @@
 'use client'
 
-import { useGLTFKTX2 } from '@pascal-app/viewer'
+import { useGLTFKTX2, useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import {
@@ -11,6 +11,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -29,13 +30,29 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import {
+  createZombieEscapeAttackClip,
+  isZombieEscapeAttackPresentationActive,
+  resolveZombieEscapeAttackNormalizedPhase,
+} from './zombie-escape-attack-presentation'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
 import {
+  resolveZombieEscapeGeneratedAssetReadinessSnapshot,
   resolveZombieEscapeGeneratedAssetSettlement,
   tryCreateZombieEscapeGeneratedAsset,
+  type ZombieEscapeGeneratedAssetReadinessSnapshot,
   type ZombieEscapeGeneratedAssetTerminalStatus,
 } from './zombie-escape-generated-asset-readiness'
 import { resolveZombieEscapeHitFlickerPhase } from './zombie-escape-hit-flicker'
+import {
+  countZombieEscapeAuthoredVariantCapacity,
+  createZombieEscapeAuthoredInstancePresentationCooperatively,
+  type ZombieEscapeAuthoredInstancePresentation,
+} from './zombie-escape-instanced-skinned-presentation'
+import {
+  resolveZombieEscapeLocomotionPlaybackRate,
+  resolveZombieEscapeLocomotionWeight,
+} from './zombie-escape-locomotion-playback'
 import {
   createZombieEscapePresentationPose,
   resolveZombieEscapePresentationPose,
@@ -58,6 +75,17 @@ import {
   type ZombieEscapeImpactVisualRegistry,
 } from './zombie-escape-skinned-impact-attachment'
 import {
+  createZombieEscapeVisualLodState,
+  resolveZombieEscapeDetailedRootPoolSize,
+  updateZombieEscapePresentationLodDebugAuthoredVariant,
+  updateZombieEscapePresentationLodDebugSelection,
+  updateZombieEscapePresentationLodDebugVariant,
+  updateZombieEscapeVisualLod,
+  type ZombieEscapePresentationLodDebugSnapshot,
+  type ZombieEscapeVisualLodInput,
+  type ZombieEscapeVisualLodState,
+} from './zombie-escape-visual-lod'
+import {
   ZOMBIE_ESCAPE_WEAPON_CATALOG,
   type ZombieEscapeWeaponSpecification,
 } from './zombie-escape-weapon-catalog'
@@ -65,9 +93,14 @@ import {
   ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
   type ZombieEscapeZombieCatalogEntry,
 } from './zombie-escape-zombie-catalog'
+import {
+  createZombieEscapeZombieShader,
+  type ZombieEscapeZombieShader,
+} from './zombie-escape-zombie-material'
 
 export type GeneratedZombieVisual = {
   animationRoot: Group
+  attackAction: ReturnType<AnimationMixer['clipAction']> | null
   generation: number
   hitMaterials: Array<{
     baseColor: Color | null
@@ -75,7 +108,7 @@ export type GeneratedZombieVisual = {
     baseEmissiveIntensity: number
     material: Material & { color?: Color; emissive: Color; emissiveIntensity: number }
   }>
-  mixer: AnimationMixer
+  mixer: AnimationMixer | null
   ownedMaterials: Material[]
   root: Group
   runAction: ReturnType<AnimationMixer['clipAction']> | null
@@ -102,10 +135,13 @@ const GENERATED_WEAPON_ASSET_KEYS = ZOMBIE_ESCAPE_WEAPON_CATALOG.map(
 const GENERATED_ZOMBIE_ASSET_KEYS = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map(
   (zombie) => `zombie:${zombie.id}`,
 )
-const GENERATED_BALANCED_ASSET_KEYS = [
+export const ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS = Object.freeze([
   ...GENERATED_WEAPON_ASSET_KEYS,
   ...GENERATED_ZOMBIE_ASSET_KEYS,
-]
+])
+export const ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE = `zombie-balanced-assets:${JSON.stringify(
+  ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS,
+)}`
 const GENERATED_ASSET_PATH_ENTRIES: Array<readonly [string, readonly string[]]> = [
   ...ZOMBIE_ESCAPE_WEAPON_CATALOG.map((weapon): readonly [string, readonly string[]] => [
     `weapon:${weapon.assetPath}`,
@@ -125,6 +161,20 @@ const EMPTY_RENDER_READINESS_SNAPSHOT: ZombieEscapeRenderReadinessSnapshot = {
 }
 const subscribeToNoRenderReadinessRegistry = () => () => undefined
 const getEmptyRenderReadinessSnapshot = () => EMPTY_RENDER_READINESS_SNAPSHOT
+const EMPTY_READY_ZOMBIE_VARIANTS = new Set<number>()
+
+export function resolveZombieEscapeGeneratedVariantAdmissionCount(
+  admittedCount: number,
+  settledVariantIndices: ReadonlySet<number>,
+  totalCount = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+) {
+  const boundedTotal = Math.max(0, Math.floor(totalCount))
+  const boundedCount = Math.min(boundedTotal, Math.max(0, Math.floor(admittedCount)))
+  if (boundedCount >= boundedTotal) return boundedCount
+  return boundedCount === 0 || settledVariantIndices.has(boundedCount - 1)
+    ? boundedCount + 1
+    : boundedCount
+}
 
 export type ZombieEscapeGeneratedAssetFailure = Readonly<{
   key: string
@@ -154,31 +204,97 @@ export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly stri
 }
 
 export function ZombieEscapeGeneratedAssets({
+  detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
   omitHeldWeapon = false,
   onGeneratedAssetsFailureChange,
-  onGeneratedAssetsReadyChange,
+  onGeneratedAssetsReadinessChange,
+  presentationLodDebugRef,
   quality,
   renderReadinessRegistry,
   retryGeneration = 0,
   simulationRef,
+  zombieMaterialPhaseActive,
   zombiePresentationFramePriority,
+  zombieSelectionFramePriority,
 }: {
+  detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
   omitHeldWeapon?: boolean
   onGeneratedAssetsFailureChange?: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
-  onGeneratedAssetsReadyChange?: (ready: boolean) => void
+  onGeneratedAssetsReadinessChange?: (
+    readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
+  ) => void
+  presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>
   quality: ZombieEscapeQuality
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   retryGeneration?: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  zombieMaterialPhaseActive: boolean
   zombiePresentationFramePriority?: number
+  zombieSelectionFramePriority: number
 }) {
   const { camera, gl, scene } = useThree()
+  const [zombieShader] = useState(() =>
+    createZombieEscapeZombieShader({ phaseAmount: zombieMaterialPhaseActive ? 1 : 0 }),
+  )
+  useLayoutEffect(() => {
+    zombieShader.setPhaseAmount(zombieMaterialPhaseActive ? 1 : 0)
+  }, [zombieMaterialPhaseActive, zombieShader])
+  const visualLodStateRef = useRef<ZombieEscapeVisualLodState | null>(null)
+  const visualLodInputRef = useRef<ZombieEscapeVisualLodInput | null>(null)
+  useFrame(() => {
+    const simulation = simulationRef.current
+    const capacity = simulation.zombies.pool.capacity
+    let visualLodState = visualLodStateRef.current
+    if (!visualLodState || visualLodState.capacity !== capacity) {
+      visualLodState = createZombieEscapeVisualLodState(
+        capacity,
+        ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+      )
+      visualLodStateRef.current = visualLodState
+      detailedZombieSlotsRef.current = visualLodState.selected
+    }
+    let visualLodInput = visualLodInputRef.current
+    if (!visualLodInput) {
+      visualLodInput = {
+        active: simulation.zombies.pool.active,
+        elapsedSeconds: simulation.elapsedSeconds,
+        generation: simulation.zombies.pool.generation,
+        hitFlash: simulation.zombies.hitFlash,
+        hitReaction: simulation.zombies.hitReaction,
+        observerX: simulation.player.x,
+        observerZ: simulation.player.z,
+        readyVariants: EMPTY_READY_ZOMBIE_VARIANTS,
+        variant: simulation.zombies.variant,
+        x: simulation.zombies.x,
+        z: simulation.zombies.z,
+      }
+      visualLodInputRef.current = visualLodInput
+    }
+    visualLodInput.active = simulation.zombies.pool.active
+    visualLodInput.elapsedSeconds = simulation.elapsedSeconds
+    visualLodInput.generation = simulation.zombies.pool.generation
+    visualLodInput.hitFlash = simulation.zombies.hitFlash
+    visualLodInput.hitReaction = simulation.zombies.hitReaction
+    visualLodInput.observerX = simulation.player.x
+    visualLodInput.observerZ = simulation.player.z
+    visualLodInput.readyVariants =
+      quality === 'balanced' ? loadedZombieVariantsRef.current : EMPTY_READY_ZOMBIE_VARIANTS
+    visualLodInput.variant = simulation.zombies.variant
+    visualLodInput.x = simulation.zombies.x
+    visualLodInput.z = simulation.zombies.z
+    const counts = updateZombieEscapeVisualLod(visualLodState, visualLodInput)
+    if (presentationLodDebugRef.current) {
+      updateZombieEscapePresentationLodDebugSelection(presentationLodDebugRef.current, counts)
+    }
+  }, zombieSelectionFramePriority)
   const expectedKeys =
-    quality === 'balanced' ? GENERATED_BALANCED_ASSET_KEYS : GENERATED_WEAPON_ASSET_KEYS
+    quality === 'balanced'
+      ? ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS
+      : GENERATED_WEAPON_ASSET_KEYS
   const [allocationReadiness, setAllocationReadiness] = useState({
     generation: retryGeneration,
     ready: false,
@@ -198,9 +314,42 @@ export function ZombieEscapeGeneratedAssets({
     generation: number
     statuses: Map<string, ZombieEscapeGeneratedAssetTerminalStatus>
   }>({ generation: retryGeneration, statuses: new Map() })
+  const pipelineReadinessRef = useRef({
+    generation: retryGeneration,
+    ready: !renderReadinessRegistry,
+    required: Boolean(renderReadinessRegistry),
+  })
   if (readinessRef.current.generation !== retryGeneration) {
     readinessRef.current = { generation: retryGeneration, statuses: new Map() }
   }
+  if (
+    pipelineReadinessRef.current.generation !== retryGeneration ||
+    pipelineReadinessRef.current.required !== Boolean(renderReadinessRegistry)
+  ) {
+    pipelineReadinessRef.current = {
+      generation: retryGeneration,
+      ready: !renderReadinessRegistry,
+      required: Boolean(renderReadinessRegistry),
+    }
+  }
+  const publishReadiness = useCallback(() => {
+    const readiness = readinessRef.current
+    const pipelineReadiness = pipelineReadinessRef.current
+    if (
+      readiness.generation !== retryGeneration ||
+      pipelineReadiness.generation !== retryGeneration
+    ) {
+      return
+    }
+    onGeneratedAssetsReadinessChange?.(
+      resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+        expectedKeys,
+        generation: retryGeneration,
+        pipelineReady: pipelineReadiness.ready,
+        statuses: readiness.statuses,
+      }),
+    )
+  }, [expectedKeys, onGeneratedAssetsReadinessChange, retryGeneration])
   const reportAssetStatus = useCallback<GeneratedAssetStatusReporter>(
     (key, status) => {
       const readiness = readinessRef.current
@@ -212,35 +361,44 @@ export function ZombieEscapeGeneratedAssets({
         readiness.statuses,
       )
       onGeneratedAssetsFailureChange?.(settlement.failed)
-      if (renderReadinessRegistry) {
-        setAllocationReadiness((current) =>
-          current.generation === retryGeneration && current.ready === settlement.ready
-            ? current
-            : { generation: retryGeneration, ready: settlement.ready },
-        )
-        if (!settlement.ready) onGeneratedAssetsReadyChange?.(false)
-      } else {
-        onGeneratedAssetsReadyChange?.(settlement.ready)
+      setAllocationReadiness((current) =>
+        current.generation === retryGeneration && current.ready === settlement.ready
+          ? current
+          : { generation: retryGeneration, ready: settlement.ready },
+      )
+      if (renderReadinessRegistry && !settlement.ready) {
+        pipelineReadinessRef.current.ready = false
       }
+      publishReadiness()
     },
     [
       expectedKeys,
       onGeneratedAssetsFailureChange,
-      onGeneratedAssetsReadyChange,
+      publishReadiness,
       renderReadinessRegistry,
       retryGeneration,
     ],
   )
 
+  useEffect(() => publishReadiness(), [publishReadiness])
+
   useEffect(() => {
     const coordinator = coordinatorRef.current
-    if (!(coordinator && renderReadinessRegistry)) return
-    onGeneratedAssetsReadyChange?.(false)
+    const pipelineReadiness = pipelineReadinessRef.current
+    if (pipelineReadiness.generation !== retryGeneration) return
+    if (!(coordinator && renderReadinessRegistry)) {
+      pipelineReadiness.ready = true
+      publishReadiness()
+      return
+    }
+    pipelineReadiness.ready = false
+    publishReadiness()
     if (!(allocationReady && renderReadinessSnapshot.complete)) {
       coordinator.invalidate()
       return
     }
 
+    let active = true
     void coordinator.request(
       {
         camera,
@@ -251,6 +409,7 @@ export function ZombieEscapeGeneratedAssets({
         targetScene: scene,
       },
       (status) => {
+        if (!active || readinessRef.current.generation !== retryGeneration) return
         const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
         if (settlement.diagnostic?.level === 'error') {
           console.error(
@@ -263,14 +422,20 @@ export function ZombieEscapeGeneratedAssets({
             settlement.diagnostic.message,
           )
         }
-        onGeneratedAssetsReadyChange?.(settlement.contentReady)
+        const currentPipelineReadiness = pipelineReadinessRef.current
+        if (currentPipelineReadiness.generation !== retryGeneration) return
+        currentPipelineReadiness.ready = settlement.contentReady
+        publishReadiness()
       },
     )
+    return () => {
+      active = false
+    }
   }, [
     allocationReady,
     camera,
     gl,
-    onGeneratedAssetsReadyChange,
+    publishReadiness,
     renderReadinessRegistry,
     renderReadinessSnapshot,
     retryGeneration,
@@ -295,12 +460,15 @@ export function ZombieEscapeGeneratedAssets({
       />
       {quality === 'balanced' ? (
         <ZombieEscapeGeneratedZombies
+          detailedZombieSlotsRef={detailedZombieSlotsRef}
           impactVisualRegistry={impactVisualRegistry}
           loadedZombieVariantsRef={loadedZombieVariantsRef}
           onAssetStatusChange={reportAssetStatus}
+          presentationLodDebugRef={presentationLodDebugRef}
           renderReadinessRegistry={renderReadinessRegistry}
           retryGeneration={retryGeneration}
           simulationRef={simulationRef}
+          zombieShader={zombieShader}
           zombiePresentationFramePriority={zombiePresentationFramePriority}
         />
       ) : null}
@@ -526,26 +694,90 @@ function LoadedGeneratedWeaponModel({
 }
 
 function ZombieEscapeGeneratedZombies({
+  detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
   onAssetStatusChange,
+  presentationLodDebugRef,
   renderReadinessRegistry,
   retryGeneration,
   simulationRef,
+  zombieShader,
   zombiePresentationFramePriority,
 }: {
+  detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
   onAssetStatusChange: GeneratedAssetStatusReporter
+  presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   retryGeneration: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  zombieShader: ZombieEscapeZombieShader
   zombiePresentationFramePriority?: number
 }) {
   const prewarmCoordinatorRef = useRef<ZombieVisualPrewarmCoordinator>({
     claimed: false,
     frameToken: Number.NaN,
   })
+  const admissionFrameRef = useRef<{ generation: number; id: number } | null>(null)
+  const settledVariantsRef = useRef({
+    generation: retryGeneration,
+    indices: new Set<number>(),
+  })
+  const [admission, setAdmission] = useState({ count: 0, generation: retryGeneration })
+  if (settledVariantsRef.current.generation !== retryGeneration) {
+    settledVariantsRef.current = { generation: retryGeneration, indices: new Set() }
+  }
+  const admittedVariantCount = admission.generation === retryGeneration ? admission.count : 0
+  const scheduleNextVariantAdmission = useCallback(() => {
+    if (admissionFrameRef.current !== null) return
+    const generation = retryGeneration
+    const id = window.requestAnimationFrame(() => {
+      if (admissionFrameRef.current?.generation === generation) {
+        admissionFrameRef.current = null
+      }
+      setAdmission((current) => {
+        const currentCount = current.generation === generation ? current.count : 0
+        const settled =
+          settledVariantsRef.current.generation === generation
+            ? settledVariantsRef.current.indices
+            : new Set<number>()
+        const nextCount = resolveZombieEscapeGeneratedVariantAdmissionCount(currentCount, settled)
+        return current.generation === generation && current.count === nextCount
+          ? current
+          : { count: nextCount, generation }
+      })
+    })
+    admissionFrameRef.current = { generation, id }
+  }, [retryGeneration])
+  const handleVariantPresentationSettled = useCallback(
+    (variantIndex: number) => {
+      if (settledVariantsRef.current.generation !== retryGeneration) return
+      settledVariantsRef.current.indices.add(variantIndex)
+      scheduleNextVariantAdmission()
+    },
+    [retryGeneration, scheduleNextVariantAdmission],
+  )
+  useEffect(() => {
+    const settled = settledVariantsRef.current.indices
+    if (
+      admittedVariantCount === 0 ||
+      (admittedVariantCount < ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length &&
+        settled.has(admittedVariantCount - 1))
+    ) {
+      scheduleNextVariantAdmission()
+    }
+  }, [admittedVariantCount, scheduleNextVariantAdmission])
+  useEffect(
+    () => () => {
+      if (admissionFrameRef.current?.generation === retryGeneration) {
+        window.cancelAnimationFrame(admissionFrameRef.current.id)
+        admissionFrameRef.current = null
+      }
+    },
+    [retryGeneration],
+  )
   return (
     <group
       userData={{
@@ -561,18 +793,24 @@ function ZombieEscapeGeneratedZombies({
             assetKey={`zombie:${zombie.id}`}
             key={`${zombie.id}:${retryGeneration}`}
             onAssetStatusChange={onAssetStatusChange}
+            onTerminal={() => handleVariantPresentationSettled(variantIndex)}
           >
             <Suspense fallback={null}>
               <GeneratedZombieVariant
+                admitted={variantIndex < admittedVariantCount}
+                detailedZombieSlotsRef={detailedZombieSlotsRef}
                 framePriority={zombiePresentationFramePriority ?? -17}
                 impactVisualRegistry={impactVisualRegistry}
                 loadedZombieVariantsRef={loadedZombieVariantsRef}
                 onAssetStatusChange={onAssetStatusChange}
+                onPresentationSettled={handleVariantPresentationSettled}
+                presentationLodDebugRef={presentationLodDebugRef}
                 prewarmCoordinatorRef={prewarmCoordinatorRef}
                 renderReadinessRegistry={renderReadinessRegistry}
                 simulationRef={simulationRef}
                 variantIndex={variantIndex}
                 zombie={zombie}
+                zombieShader={zombieShader}
               />
             </Suspense>
           </GeneratedAssetErrorBoundary>
@@ -583,29 +821,97 @@ function ZombieEscapeGeneratedZombies({
 }
 
 function GeneratedZombieVariant({
+  admitted,
+  detailedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
   loadedZombieVariantsRef,
   onAssetStatusChange,
+  onPresentationSettled,
+  presentationLodDebugRef,
   prewarmCoordinatorRef,
   renderReadinessRegistry,
   simulationRef,
   variantIndex,
   zombie,
+  zombieShader,
 }: {
+  admitted: boolean
+  detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
   onAssetStatusChange: GeneratedAssetStatusReporter
+  onPresentationSettled: (variantIndex: number) => void
+  presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>
   prewarmCoordinatorRef: MutableRefObject<ZombieVisualPrewarmCoordinator>
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
   variantIndex: number
   zombie: ZombieEscapeZombieCatalogEntry
+  zombieShader: ZombieEscapeZombieShader
 }) {
   const riggedGltf = useGLTFKTX2(zombie.glb.riggedBase.path)
   const runGltf = useGLTF(zombie.glb.run.path)
   const walkGltf = useGLTF(zombie.glb.walk.path)
+  if (!admitted) return null
+  return (
+    <PreparedGeneratedZombieVariant
+      detailedZombieSlotsRef={detailedZombieSlotsRef}
+      framePriority={framePriority}
+      impactVisualRegistry={impactVisualRegistry}
+      loadedZombieVariantsRef={loadedZombieVariantsRef}
+      onAssetStatusChange={onAssetStatusChange}
+      onPresentationSettled={onPresentationSettled}
+      presentationLodDebugRef={presentationLodDebugRef}
+      prewarmCoordinatorRef={prewarmCoordinatorRef}
+      renderReadinessRegistry={renderReadinessRegistry}
+      riggedScene={riggedGltf.scene}
+      runAnimations={runGltf.animations}
+      simulationRef={simulationRef}
+      variantIndex={variantIndex}
+      walkAnimations={walkGltf.animations}
+      zombie={zombie}
+      zombieShader={zombieShader}
+    />
+  )
+}
+
+function PreparedGeneratedZombieVariant({
+  detailedZombieSlotsRef,
+  framePriority,
+  impactVisualRegistry,
+  loadedZombieVariantsRef,
+  onAssetStatusChange,
+  onPresentationSettled,
+  presentationLodDebugRef,
+  prewarmCoordinatorRef,
+  renderReadinessRegistry,
+  riggedScene,
+  runAnimations,
+  simulationRef,
+  variantIndex,
+  walkAnimations,
+  zombie,
+  zombieShader,
+}: {
+  detailedZombieSlotsRef: MutableRefObject<Uint8Array>
+  framePriority: number
+  impactVisualRegistry: ZombieEscapeImpactVisualRegistry
+  loadedZombieVariantsRef: MutableRefObject<Set<number>>
+  onAssetStatusChange: GeneratedAssetStatusReporter
+  onPresentationSettled: (variantIndex: number) => void
+  presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>
+  prewarmCoordinatorRef: MutableRefObject<ZombieVisualPrewarmCoordinator>
+  renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
+  riggedScene: Group
+  runAnimations: readonly AnimationClip[]
+  simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  variantIndex: number
+  walkAnimations: readonly AnimationClip[]
+  zombie: ZombieEscapeZombieCatalogEntry
+  zombieShader: ZombieEscapeZombieShader
+}) {
   const groupRef = useRef<Group>(null)
   const visualsRef = useRef(new Map<number, GeneratedZombieVisual>())
   const pooledVisualsRef = useRef<GeneratedZombieVisual[]>([])
@@ -613,35 +919,100 @@ function GeneratedZombieVariant({
   const visualCreationFailedRef = useRef(false)
   const unregisterRenderRepresentativeRef = useRef<(() => void) | null>(null)
   const assetKey = `zombie:${zombie.id}`
-  const targetPoolSize = useMemo(() => {
-    let count = 0
-    for (const rosterVariant of simulationRef.current.variantByPoolSlot) {
-      if (rosterVariant === variantIndex) count += 1
-    }
-    return count
-  }, [simulationRef, variantIndex])
+  const targetPoolSize = useMemo(
+    () =>
+      resolveZombieEscapeDetailedRootPoolSize(
+        simulationRef.current.variantByPoolSlot,
+        variantIndex,
+      ),
+    [simulationRef, variantIndex],
+  )
   const presentationPose = useMemo(() => createZombieEscapePresentationPose(), [])
   const modelTransform = useMemo(
-    () => computeZombieTransform(riggedGltf.scene, zombie.characterHeightMeters),
-    [riggedGltf.scene, zombie.characterHeightMeters],
+    () => computeZombieTransform(riggedScene, zombie.characterHeightMeters),
+    [riggedScene, zombie.characterHeightMeters],
   )
   const runClip = useMemo(
-    () => runGltf.animations.find((clip) => clip.name === zombie.glb.run.expectedClipName) ?? null,
-    [runGltf.animations, zombie.glb.run.expectedClipName],
+    () => runAnimations.find((clip) => clip.name === zombie.glb.run.expectedClipName) ?? null,
+    [runAnimations, zombie.glb.run.expectedClipName],
   )
   const walkClip = useMemo(
-    () =>
-      walkGltf.animations.find((clip) => clip.name === zombie.glb.walk.expectedClipName) ?? null,
-    [walkGltf.animations, zombie.glb.walk.expectedClipName],
+    () => walkAnimations.find((clip) => clip.name === zombie.glb.walk.expectedClipName) ?? null,
+    [walkAnimations, zombie.glb.walk.expectedClipName],
   )
+  const attackClip = useMemo(() => createZombieEscapeAttackClip(riggedScene), [riggedScene])
+  const authoredInstanceCapacity = useMemo(
+    () =>
+      countZombieEscapeAuthoredVariantCapacity(
+        simulationRef.current.variantByPoolSlot,
+        variantIndex,
+      ),
+    [simulationRef, variantIndex],
+  )
+  const [authoredPresentation, setAuthoredPresentation] =
+    useState<ZombieEscapeAuthoredInstancePresentation | null>(null)
+  useEffect(() => {
+    const abortController = new AbortController()
+    let active = true
+    setAuthoredPresentation(null)
+    visualCreationFailedRef.current = false
+    void createZombieEscapeAuthoredInstancePresentationCooperatively({
+      attackClip,
+      instanceCapacity: authoredInstanceCapacity,
+      modelTransform,
+      runClip,
+      signal: abortController.signal,
+      source: riggedScene,
+      variantIndex,
+      waitForBuildSlice: () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve())
+        }),
+      walkClip,
+      zombieShader,
+    })
+      .then((presentation) => {
+        if (!active) {
+          presentation.dispose()
+          return
+        }
+        setAuthoredPresentation(presentation)
+      })
+      .catch((error: unknown) => {
+        if (!active || abortController.signal.aborted) return
+        visualCreationFailedRef.current = true
+        loadedZombieVariantsRef.current.delete(variantIndex)
+        const message = error instanceof Error ? error.message : String(error)
+        console.error(`[zombie-escape] Failed to prepare generated asset ${assetKey}.`, message)
+        onAssetStatusChange(assetKey, { message, state: 'failed' })
+        onPresentationSettled(variantIndex)
+      })
+    return () => {
+      active = false
+      abortController.abort()
+    }
+  }, [
+    assetKey,
+    authoredInstanceCapacity,
+    attackClip,
+    loadedZombieVariantsRef,
+    modelTransform,
+    onAssetStatusChange,
+    onPresentationSettled,
+    riggedScene,
+    runClip,
+    variantIndex,
+    walkClip,
+    zombieShader,
+  ])
+  useGpuResourceLifetime(authoredPresentation)
 
   useEffect(() => {
-    loadedZombieVariantsRef.current.add(variantIndex)
+    if (authoredPresentation) onPresentationSettled(variantIndex)
+  }, [authoredPresentation, onPresentationSettled, variantIndex])
+
+  useEffect(() => {
     visualCreationFailedRef.current = false
-    if (targetPoolSize === 0) {
-      prewarmReadyRef.current = true
-      onAssetStatusChange(assetKey, { state: 'ready' })
-    }
     return () => {
       loadedZombieVariantsRef.current.delete(variantIndex)
       prewarmReadyRef.current = false
@@ -653,45 +1024,85 @@ function GeneratedZombieVariant({
       for (const visual of pooledVisualsRef.current) disposeZombieVisual(visual, groupRef.current)
       visualsRef.current.clear()
       pooledVisualsRef.current.length = 0
+      if (presentationLodDebugRef.current) {
+        updateZombieEscapePresentationLodDebugAuthoredVariant(
+          presentationLodDebugRef.current,
+          variantIndex,
+          0,
+          0,
+        )
+        updateZombieEscapePresentationLodDebugVariant(
+          presentationLodDebugRef.current,
+          variantIndex,
+          0,
+          0,
+        )
+      }
     }
-  }, [assetKey, loadedZombieVariantsRef, onAssetStatusChange, targetPoolSize, variantIndex])
+  }, [
+    assetKey,
+    loadedZombieVariantsRef,
+    onAssetStatusChange,
+    presentationLodDebugRef,
+    variantIndex,
+  ])
 
   useFrame((state, delta) => {
     const group = groupRef.current
-    if (!group || visualCreationFailedRef.current) return
+    const presentation = authoredPresentation
+    if (!group || !presentation || visualCreationFailedRef.current) return
     const frameUpdate = tryCreateZombieEscapeGeneratedAsset(() => {
       const simulation = simulationRef.current
       const zombies = simulation.zombies
       const visuals = visualsRef.current
+      presentation.update({
+        detailedSlots: detailedZombieSlotsRef.current,
+        elapsedSeconds: simulation.elapsedSeconds,
+        zombies,
+      })
+      const authoredDebug = presentation.getDebugSnapshot()
+      if (presentationLodDebugRef.current) {
+        updateZombieEscapePresentationLodDebugAuthoredVariant(
+          presentationLodDebugRef.current,
+          variantIndex,
+          authoredDebug.activeCount,
+          authoredDebug.batchCount,
+        )
+      }
+      registerZombieRenderRepresentative(
+        group,
+        unregisterRenderRepresentativeRef,
+        renderReadinessRegistry,
+        zombie.id,
+      )
 
       if (!prewarmReadyRef.current) {
         const visualCount = visuals.size + pooledVisualsRef.current.length
-        if (visualCount >= targetPoolSize) {
+        if (visualCount >= targetPoolSize && presentation.getReadinessSnapshot().ready) {
           prewarmReadyRef.current = true
+          loadedZombieVariantsRef.current.add(variantIndex)
           onAssetStatusChange(assetKey, { state: 'ready' })
         } else if (
           claimZombieVisualPrewarmFrame(prewarmCoordinatorRef.current, state.clock.elapsedTime)
         ) {
           const visual = createZombieVisual({
             active: false,
+            attackClip,
             group,
             generation: 0,
             impactVisualRegistry,
             modelTransform,
             runClip,
-            source: riggedGltf.scene,
+            source: riggedScene,
             slot: null,
             walkClip,
+            zombieShader,
+            zombieShaderSeed: variantIndex,
           })
-          registerZombieRenderRepresentative(
-            visual,
-            unregisterRenderRepresentativeRef,
-            renderReadinessRegistry,
-            zombie.id,
-          )
           pooledVisualsRef.current.push(visual)
-          if (visualCount + 1 >= targetPoolSize) {
+          if (visualCount + 1 >= targetPoolSize && presentation.getReadinessSnapshot().ready) {
             prewarmReadyRef.current = true
+            loadedZombieVariantsRef.current.add(variantIndex)
             onAssetStatusChange(assetKey, { state: 'ready' })
           }
         }
@@ -701,7 +1112,8 @@ function GeneratedZombieVariant({
         if (
           zombies.pool.active[slot] !== 0 &&
           zombies.pool.generation[slot] === visual.generation &&
-          zombies.variant[slot] === variantIndex
+          zombies.variant[slot] === variantIndex &&
+          detailedZombieSlotsRef.current[slot] !== 0
         ) {
           continue
         }
@@ -711,31 +1123,31 @@ function GeneratedZombieVariant({
       }
 
       for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
-        if (zombies.pool.active[slot] === 0 || zombies.variant[slot] !== variantIndex) continue
+        if (
+          zombies.pool.active[slot] === 0 ||
+          zombies.variant[slot] !== variantIndex ||
+          detailedZombieSlotsRef.current[slot] === 0
+        ) {
+          continue
+        }
         let visual = visuals.get(slot)
         if (!visual) {
           const generation = zombies.pool.generation[slot] ?? 0
           visual = pooledVisualsRef.current.pop()
           if (visual) {
             visuals.set(slot, visual)
-            activateZombieVisual(visual, impactVisualRegistry, slot, generation)
-          } else {
-            visual = createZombieVisual({
-              active: true,
-              group,
-              generation,
-              impactVisualRegistry,
-              modelTransform,
-              runClip,
-              source: riggedGltf.scene,
-              slot,
-              walkClip,
-            })
-            registerZombieRenderRepresentative(
+            activateZombieVisual(
               visual,
-              unregisterRenderRepresentativeRef,
-              renderReadinessRegistry,
-              zombie.id,
+              impactVisualRegistry,
+              slot,
+              generation,
+              attackClip,
+              runClip,
+              walkClip,
+            )
+          } else {
+            throw new Error(
+              `Detailed zombie root pool exhausted for variant ${zombie.id}; cap=${targetPoolSize}.`,
             )
           }
           visuals.set(slot, visual)
@@ -773,29 +1185,81 @@ function GeneratedZombieVariant({
           materialState.material.emissive.copy(hitColor)
           materialState.material.emissiveIntensity = hitPhase === 'red' ? 3.6 : 0
         }
-        const runBlend = zombies.runBlend[slot] ?? 0
-        visual.walkAction?.setEffectiveWeight(1 - runBlend)
-        visual.walkAction?.setEffectiveTimeScale(0.82 + (zombies.speedScale[slot] ?? 1) * 0.18)
-        visual.runAction?.setEffectiveWeight(runBlend)
-        visual.runAction?.setEffectiveTimeScale(0.9 + runBlend * 0.35)
-        visual.mixer.update(simulation.paused ? 0 : Math.min(0.05, Math.max(0, delta)))
+        updateZombieVisualLocomotion({
+          attackCooldown: zombies.attackCooldown[slot] ?? 0,
+          attackIntent: zombies.intent[slot] ?? 0,
+          delta,
+          horizontalSpeed: Math.hypot(zombies.vx[slot] ?? 0, zombies.vz[slot] ?? 0),
+          paused: simulation.paused,
+          runBlend: zombies.runBlend[slot] ?? 0,
+          runMetersPerSecond: zombie.movement.runMetersPerSecond,
+          visual,
+          walkMetersPerSecond: zombie.movement.walkMetersPerSecond,
+        })
       }
+      reportGeneratedZombieVariantPresentationMetrics(
+        presentationLodDebugRef,
+        variantIndex,
+        visuals,
+        pooledVisualsRef.current,
+      )
     })
     if (!frameUpdate.ok) {
       visualCreationFailedRef.current = true
+      loadedZombieVariantsRef.current.delete(variantIndex)
+      for (const visual of visualsRef.current.values()) {
+        parkZombieVisual(visual)
+        pooledVisualsRef.current.push(visual)
+      }
+      visualsRef.current.clear()
       console.error(
         `[zombie-escape] Failed to update generated asset ${assetKey}.`,
         frameUpdate.message,
       )
       onAssetStatusChange(assetKey, { message: frameUpdate.message, state: 'failed' })
+      reportGeneratedZombieVariantPresentationMetrics(
+        presentationLodDebugRef,
+        variantIndex,
+        visualsRef.current,
+        pooledVisualsRef.current,
+      )
+      if (presentationLodDebugRef.current) {
+        updateZombieEscapePresentationLodDebugAuthoredVariant(
+          presentationLodDebugRef.current,
+          variantIndex,
+          0,
+          0,
+        )
+      }
     }
   }, framePriority)
 
-  return <group ref={groupRef} userData={{ zombieAssetId: zombie.id }} />
+  return (
+    <group ref={groupRef} userData={{ zombieAssetId: zombie.id }}>
+      {authoredPresentation ? <primitive object={authoredPresentation.root} /> : null}
+    </group>
+  )
+}
+
+function reportGeneratedZombieVariantPresentationMetrics(
+  presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>,
+  variantIndex: number,
+  activeVisuals: ReadonlyMap<number, GeneratedZombieVisual>,
+  pooledVisuals: readonly GeneratedZombieVisual[],
+) {
+  const snapshot = presentationLodDebugRef.current
+  if (!snapshot) return
+  updateZombieEscapePresentationLodDebugVariant(
+    snapshot,
+    variantIndex,
+    activeVisuals.size + pooledVisuals.length,
+    activeVisuals.size,
+  )
 }
 
 export function createZombieVisual({
   active,
+  attackClip,
   group,
   generation,
   impactVisualRegistry,
@@ -804,8 +1268,11 @@ export function createZombieVisual({
   source,
   slot,
   walkClip,
+  zombieShader,
+  zombieShaderSeed,
 }: {
   active: boolean
+  attackClip: AnimationClip | null
   group: Group
   generation: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
@@ -814,6 +1281,8 @@ export function createZombieVisual({
   source: Group
   slot: number | null
   walkClip: AnimationClip | null
+  zombieShader: ZombieEscapeZombieShader
+  zombieShaderSeed: number
 }) {
   const hitMaterials: GeneratedZombieVisual['hitMaterials'] = []
   const ownedMaterials: Material[] = []
@@ -830,7 +1299,11 @@ export function createZombieVisual({
       if (!mesh.isMesh) return
       const clonedMaterials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]).map(
         (sourceMaterial) => {
-          const material = sourceMaterial.clone()
+          const material = zombieShader.createMaterial(
+            sourceMaterial,
+            mesh.geometry,
+            zombieShaderSeed,
+          )
           ownedMaterials.push(material)
           const flashable = material as Material & {
             color?: Color
@@ -860,12 +1333,16 @@ export function createZombieVisual({
     root = new Group()
     root.add(visualRoot)
     root.visible = active
-    mixer = new AnimationMixer(visualRoot)
-    const walkAction = walkClip ? mixer.clipAction(walkClip, visualRoot) : null
-    const runAction = runClip ? mixer.clipAction(runClip, visualRoot) : null
-    for (const action of [walkAction, runAction]) {
+    mixer = active ? new AnimationMixer(visualRoot) : null
+    const walkAction = mixer && walkClip ? mixer.clipAction(walkClip, visualRoot) : null
+    const runAction = mixer && runClip ? mixer.clipAction(runClip, visualRoot) : null
+    const attackAction = mixer && attackClip ? mixer.clipAction(attackClip, visualRoot) : null
+    for (const action of [attackAction, walkAction, runAction])
       action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
-      if (active) action?.play()
+    if (active) {
+      attackAction?.play()
+      walkAction?.play()
+      runAction?.play()
     }
     unregisterImpactVisual =
       active && slot !== null
@@ -873,6 +1350,7 @@ export function createZombieVisual({
         : () => undefined
     const visual = {
       animationRoot: visualRoot,
+      attackAction,
       generation,
       hitMaterials,
       mixer,
@@ -897,8 +1375,52 @@ export function createZombieVisual({
   }
 }
 
+export function updateZombieVisualLocomotion({
+  attackCooldown,
+  attackIntent,
+  delta,
+  horizontalSpeed,
+  paused,
+  runBlend,
+  runMetersPerSecond,
+  visual,
+  walkMetersPerSecond,
+}: {
+  attackCooldown: number
+  attackIntent: number
+  delta: number
+  horizontalSpeed: number
+  paused: boolean
+  runBlend: number
+  runMetersPerSecond: number
+  visual: GeneratedZombieVisual
+  walkMetersPerSecond: number
+}) {
+  const attackActive = isZombieEscapeAttackPresentationActive(attackIntent)
+  const locomotionWeight = attackActive ? 0 : resolveZombieEscapeLocomotionWeight(horizontalSpeed)
+  const playbackRate = resolveZombieEscapeLocomotionPlaybackRate(
+    horizontalSpeed,
+    walkMetersPerSecond,
+    runMetersPerSecond,
+    runBlend,
+  )
+  visual.walkAction?.setEffectiveWeight((1 - runBlend) * locomotionWeight)
+  visual.walkAction?.setEffectiveTimeScale(playbackRate)
+  visual.runAction?.setEffectiveWeight(runBlend * locomotionWeight)
+  visual.runAction?.setEffectiveTimeScale(playbackRate)
+  visual.attackAction?.setEffectiveWeight(attackActive ? 1 : 0)
+  visual.attackAction?.setEffectiveTimeScale(0)
+  if (attackActive && visual.attackAction) {
+    visual.attackAction.time =
+      resolveZombieEscapeAttackNormalizedPhase(attackCooldown) *
+      visual.attackAction.getClip().duration
+  }
+  if (!visual.mixer) throw new Error('Active detailed zombie has no animation mixer.')
+  visual.mixer.update(paused ? 0 : Math.min(0.05, Math.max(0, delta)))
+}
+
 function registerZombieRenderRepresentative(
-  visual: GeneratedZombieVisual,
+  root: Group,
   unregisterRef: MutableRefObject<(() => void) | null>,
   registry: ZombieEscapeRenderReadinessRegistry | undefined,
   zombieId: string,
@@ -906,7 +1428,7 @@ function registerZombieRenderRepresentative(
   if (!(registry && !unregisterRef.current)) return
   unregisterRef.current = registry.register(
     createZombieEscapeZombieRenderRepresentativeKey(zombieId),
-    visual.root,
+    root,
   )
 }
 
@@ -945,7 +1467,21 @@ function activateZombieVisual(
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry,
   slot: number,
   generation: number,
+  attackClip: AnimationClip | null,
+  runClip: AnimationClip | null,
+  walkClip: AnimationClip | null,
 ) {
+  if (!visual.mixer) {
+    visual.mixer = new AnimationMixer(visual.animationRoot)
+    visual.attackAction = attackClip
+      ? visual.mixer.clipAction(attackClip, visual.animationRoot)
+      : null
+    visual.walkAction = walkClip ? visual.mixer.clipAction(walkClip, visual.animationRoot) : null
+    visual.runAction = runClip ? visual.mixer.clipAction(runClip, visual.animationRoot) : null
+    for (const action of [visual.attackAction, visual.walkAction, visual.runAction]) {
+      action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
+    }
+  }
   visual.generation = generation
   visual.unregisterImpactVisual = registerZombieEscapeImpactVisual(
     impactVisualRegistry,
@@ -953,6 +1489,7 @@ function activateZombieVisual(
     generation,
     visual.animationRoot,
   )
+  visual.attackAction?.reset().play()
   visual.walkAction?.reset().play()
   visual.runAction?.reset().play()
   visual.root.visible = true
@@ -961,8 +1498,14 @@ function activateZombieVisual(
 function parkZombieVisual(visual: GeneratedZombieVisual) {
   visual.unregisterImpactVisual()
   visual.unregisterImpactVisual = () => undefined
+  visual.attackAction?.stop()
   visual.walkAction?.stop()
   visual.runAction?.stop()
+  visual.mixer?.uncacheRoot(visual.animationRoot)
+  visual.mixer = null
+  visual.attackAction = null
+  visual.walkAction = null
+  visual.runAction = null
   visual.root.visible = false
 }
 
@@ -971,10 +1514,10 @@ function disposeZombieVisual(visual: GeneratedZombieVisual, group: Group | null)
     visual.unregisterImpactVisual()
   } catch {}
   try {
-    visual.mixer.stopAllAction()
+    visual.mixer?.stopAllAction()
   } catch {}
   try {
-    visual.mixer.uncacheRoot(visual.animationRoot)
+    visual.mixer?.uncacheRoot(visual.animationRoot)
   } catch {}
   for (const material of visual.ownedMaterials) {
     try {
@@ -1002,6 +1545,7 @@ class GeneratedAssetErrorBoundary extends Component<
     assetKey: string
     children: ReactNode
     onAssetStatusChange?: GeneratedAssetStatusReporter
+    onTerminal?: () => void
   },
   { failed: boolean }
 > {
@@ -1015,6 +1559,7 @@ class GeneratedAssetErrorBoundary extends Component<
     const message = error instanceof Error ? error.message : String(error)
     console.error(`[zombie-escape] Failed to load generated asset ${this.props.assetKey}.`, error)
     this.props.onAssetStatusChange?.(this.props.assetKey, { message, state: 'failed' })
+    this.props.onTerminal?.()
   }
 
   componentWillUnmount() {

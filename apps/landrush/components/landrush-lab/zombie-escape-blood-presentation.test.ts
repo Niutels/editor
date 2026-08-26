@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Euler, Matrix3, Matrix4, Object3D, Quaternion, Vector3 } from 'three'
 import {
+  doesZombieEscapeBloodEventMatchVariant,
   isZombieEscapeBloodAttachmentGenerationCurrent,
   isZombieEscapeBloodPoolVisible,
   resolveZombieEscapeBloodFramePriorities,
@@ -8,6 +9,7 @@ import {
   shouldAttachZombieEscapeBloodLayer,
   transformZombieEscapeBloodWorldAttachmentToLocal,
 } from './zombie-escape-blood-presentation'
+import { getZombieEscapeBloodVariantProfile } from './zombie-escape-blood-variants'
 
 describe('Zombie Escape shared blood presentation', () => {
   test('strictly brackets the producer while staying inside the integrated render gap', () => {
@@ -27,6 +29,15 @@ describe('Zombie Escape shared blood presentation', () => {
     expect(resolveZombieEscapeBloodSlotAction(false, false)).toBe('idle')
     expect(resolveZombieEscapeBloodSlotAction(true, true)).toBe('render')
     expect(resolveZombieEscapeBloodSlotAction(true, false)).toBe('render')
+  })
+
+  test('moves an overwritten slot between fixed variant passes', () => {
+    const wet = getZombieEscapeBloodVariantProfile('wet-hybrid').code
+    const heavy = getZombieEscapeBloodVariantProfile('heavy-clots').code
+
+    expect(doesZombieEscapeBloodEventMatchVariant(wet, wet)).toBe(true)
+    expect(doesZombieEscapeBloodEventMatchVariant(heavy, wet)).toBe(false)
+    expect(doesZombieEscapeBloodEventMatchVariant(heavy, heavy)).toBe(true)
   })
 
   test('removes every pooled layer from rendering while no blood event is active', () => {

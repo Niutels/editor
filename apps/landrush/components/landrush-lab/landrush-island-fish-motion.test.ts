@@ -5,10 +5,13 @@ import {
 } from './landrush-island-ambient-catalog'
 import {
   createLandrushIslandFishLanes,
+  createLandrushIslandFishMotionSample,
+  createLandrushIslandFishMotionScratch,
   createLandrushIslandFishTrajectory,
   LANDRUSH_ISLAND_FISH_LANE_COUNT_PER_SPECIES,
   measureLandrushIslandFishShoreDistance,
   sampleLandrushIslandFishMotion,
+  sampleLandrushIslandFishMotionInto,
 } from './landrush-island-fish-motion'
 
 const center = { x: 0, z: 0 }
@@ -88,6 +91,24 @@ describe('Landrush island fish motion contracts', () => {
           sampleLandrushIslandFishMotion(first, time, 2),
         )
       }
+    }
+  })
+
+  test('samples into stable storage without replacing per-frame objects', () => {
+    const school = schools[0]
+    const trajectory = school?.trajectories[0]
+    if (!trajectory) throw new Error('Expected a fish trajectory.')
+    const target = createLandrushIslandFishMotionSample()
+    const targetPosition = target.position
+    const scratch = createLandrushIslandFishMotionScratch()
+    const scratchAhead = scratch.ahead
+
+    for (const time of sampleTimes) {
+      const expected = sampleLandrushIslandFishMotion(trajectory, time, 2)
+      expect(sampleLandrushIslandFishMotionInto(trajectory, time, 2, target, scratch)).toBe(target)
+      expect(target).toEqual(expected)
+      expect(target.position).toBe(targetPosition)
+      expect(scratch.ahead).toBe(scratchAhead)
     }
   })
 

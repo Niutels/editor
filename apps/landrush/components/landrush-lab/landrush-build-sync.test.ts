@@ -8,6 +8,7 @@ import {
   collectLandrushBuildSyncDescendantIds,
   collectLandrushBuildSyncGraphNodeIds,
   collectLandrushBuildSyncRequiredLiveNodeIds,
+  createLandrushBuildSpawnFootprint,
   createLandrushBuildSyncSnapshotNodes,
   createLandrushBuildSyncTransportNodes,
   hasLandrushBuildPlacementDraftAncestry,
@@ -39,6 +40,42 @@ function createSnapshot(
 }
 
 describe('Landrush build sync', () => {
+  test('syncs spawn points as level-owned structural nodes', () => {
+    expect(
+      isLandrushBuildSyncStructuralObject(
+        { id: 'spawn-local', parentId: 'level-local', type: 'spawn' },
+        (parentId) => parentId === 'level-local',
+      ),
+    ).toBe(true)
+    expect(
+      isLandrushBuildSyncStructuralObject(
+        { id: 'spawn-foreign', parentId: 'level-foreign', type: 'spawn' },
+        (parentId) => parentId === 'level-local',
+      ),
+    ).toBe(false)
+  })
+
+  test('uses the spawn marker footprint for parcel-boundary validation', () => {
+    const parcel = [
+      { x: 0, z: 0 },
+      { x: 4, z: 0 },
+      { x: 4, z: 4 },
+      { x: 0, z: 4 },
+    ]
+    const containsPoint = (point: { x: number; z: number }) =>
+      pointInPolygonOrNearEdge(point, parcel)
+
+    const inside = createLandrushBuildSpawnFootprint({ position: [2, 0, 2], rotation: Math.PI / 4 })
+    const crossingEdge = createLandrushBuildSpawnFootprint({
+      position: [0.1, 0, 2],
+      rotation: 0,
+    })
+
+    expect(inside).toHaveLength(4)
+    expect(areLandrushBuildFootprintsInsideBoundary([inside], containsPoint)).toBe(true)
+    expect(areLandrushBuildFootprintsInsideBoundary([crossingEdge], containsPoint)).toBe(false)
+  })
+
   test('keeps committed wall children and excludes Pascal placement drafts', () => {
     const nodes: Record<string, LandrushBuildSyncGraphNode> = {
       'committed-door': {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  resolveZombieEscapeGeneratedAssetReadinessSnapshot,
   resolveZombieEscapeGeneratedAssetSettlement,
   tryCreateZombieEscapeGeneratedAsset,
   type ZombieEscapeGeneratedAssetTerminalStatus,
@@ -69,5 +70,59 @@ describe('Zombie Escape generated asset readiness', () => {
       resolveZombieEscapeGeneratedAssetSettlement(['weapon:pistol', 'zombie:dockworker'], statuses)
         .ready,
     ).toBe(true)
+  })
+
+  test('reports stable catalog-ordered task keys and terminal progress', () => {
+    const statuses = new Map<string, ZombieEscapeGeneratedAssetTerminalStatus>([
+      ['zombie:dockworker', { message: 'HTTP 503', state: 'failed' }],
+      ['weapon:pistol', { state: 'ready' }],
+      ['unexpected:asset', { state: 'ready' }],
+    ])
+
+    expect(
+      resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+        expectedKeys: ['weapon:pistol', 'weapon:carbine', 'zombie:dockworker', 'weapon:pistol'],
+        generation: 4,
+        pipelineReady: true,
+        statuses,
+      }),
+    ).toEqual({
+      allocationReady: false,
+      completed: 2,
+      expectedKeys: ['weapon:pistol', 'weapon:carbine', 'zombie:dockworker'],
+      generation: 4,
+      pipelineReady: true,
+      ready: false,
+      readyKeys: ['weapon:pistol'],
+      settledKeys: ['weapon:pistol', 'zombie:dockworker'],
+      total: 3,
+    })
+  })
+
+  test('keeps successful allocation distinct from render-pipeline readiness', () => {
+    const statuses = new Map<string, ZombieEscapeGeneratedAssetTerminalStatus>([
+      ['weapon:pistol', { state: 'ready' }],
+      ['zombie:dockworker', { state: 'ready' }],
+    ])
+    const resolve = (pipelineReady: boolean) =>
+      resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+        expectedKeys: ['weapon:pistol', 'zombie:dockworker'],
+        generation: 9,
+        pipelineReady,
+        statuses,
+      })
+
+    expect(resolve(false)).toMatchObject({
+      allocationReady: true,
+      completed: 2,
+      pipelineReady: false,
+      ready: false,
+    })
+    expect(resolve(true)).toMatchObject({
+      allocationReady: true,
+      completed: 2,
+      pipelineReady: true,
+      ready: true,
+    })
   })
 })

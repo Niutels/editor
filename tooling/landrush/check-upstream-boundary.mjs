@@ -112,6 +112,7 @@ const allowedPageRoutes = new Set([
   'pascal-multiplayer-island-water-debug',
   'weapon-fit-debug',
   'zombie-escape',
+  'zombie-render-scale',
   'zombie-running-debug',
   'zombie-shooting-debug',
 ])

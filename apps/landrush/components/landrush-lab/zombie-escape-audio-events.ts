@@ -17,7 +17,7 @@ export type ZombieEscapeAudioEventRing = {
   capacity: number
   kind: Uint8Array
   sequence: Float64Array
-  subjectIndex: Uint8Array
+  subjectIndex: Uint16Array
   writeSequence: number
   x: Float32Array
   y: Float32Array
@@ -35,7 +35,7 @@ export function createZombieEscapeAudioEventRing(capacity = 128): ZombieEscapeAu
     capacity: resolvedCapacity,
     kind: new Uint8Array(resolvedCapacity),
     sequence: new Float64Array(resolvedCapacity),
-    subjectIndex: new Uint8Array(resolvedCapacity),
+    subjectIndex: new Uint16Array(resolvedCapacity),
     writeSequence: 0,
     x: new Float32Array(resolvedCapacity),
     y: new Float32Array(resolvedCapacity),

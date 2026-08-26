@@ -1,4 +1,9 @@
 import {
+  DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+  resolveZombieEscapeBloodVariantCode,
+  type ZombieEscapeBloodVariantCode,
+} from './zombie-escape-blood-variants'
+import {
   acquireZombieEscapePoolSlot,
   createZombieEscapeFixedPool,
   releaseZombieEscapePoolSlot,
@@ -29,6 +34,7 @@ export type ZombieEscapeBloodEventPool = {
   spawnElapsedSeconds: Float64Array
   targetGeneration: Uint32Array
   targetSlot: Int32Array
+  variantCode: Uint8Array
 }
 
 export type ZombieEscapeBloodEvent = {
@@ -45,6 +51,7 @@ export type ZombieEscapeBloodEvent = {
   spawnElapsedSeconds: number
   targetGeneration: number
   targetSlot: number
+  variantCode?: ZombieEscapeBloodVariantCode
 }
 
 export type ZombieEscapeBloodEnvelope = {
@@ -73,6 +80,7 @@ export function createZombieEscapeBloodEventPool(capacity: number): ZombieEscape
     spawnElapsedSeconds: new Float64Array(pool.capacity),
     targetGeneration: new Uint32Array(pool.capacity),
     targetSlot,
+    variantCode: new Uint8Array(pool.capacity),
   }
 }
 
@@ -94,6 +102,7 @@ export function spawnZombieEscapeBloodEvent(
   events.spawnElapsedSeconds[slot] = event.spawnElapsedSeconds
   events.targetGeneration[slot] = event.targetGeneration >>> 0
   events.targetSlot[slot] = event.targetSlot
+  events.variantCode[slot] = resolveZombieEscapeBloodVariantCode(event.variantCode)
   return slot
 }
 
@@ -104,6 +113,7 @@ export function releaseZombieEscapeBloodEvent(events: ZombieEscapeBloodEventPool
 export function resetZombieEscapeBloodEvents(events: ZombieEscapeBloodEventPool) {
   resetZombieEscapeFixedPool(events.pool)
   events.targetSlot.fill(-1)
+  events.variantCode.fill(DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE)
 }
 
 export function reconcileZombieEscapeBloodEventPool(

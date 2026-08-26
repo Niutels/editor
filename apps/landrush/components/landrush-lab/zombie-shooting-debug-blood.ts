@@ -5,8 +5,8 @@ import {
 import type { ZombieShootingDebugSequenceEvent } from './zombie-shooting-debug-sequence'
 
 export const ZOMBIE_SHOOTING_DEBUG_IMPACT_POSITION = Object.freeze({
-  x: 0,
-  y: 1.24,
+  x: 0.08,
+  y: 1.38,
   z: -5.42,
 })
 

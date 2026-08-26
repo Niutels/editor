@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "../../../styles/elevation.css";
 @source "../../../packages/editor/src";
+@source not "../.next";
+@source not "../.next-render-vat-bench";
+@source not "../.next-zombie-scale";
+@source not "../assets";
+@source not "../public";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -147,9 +152,50 @@
   }
 }
 
+[data-landrush-island-loading-shell] {
+  opacity: 1;
+  transition:
+    background-color 500ms ease-out,
+    opacity 360ms ease-out,
+    visibility 0s linear 0s;
+}
+
 body:has([data-landrush-island-world-frame-ready])
   [data-landrush-island-loading-shell] {
-  display: none;
+  background-color: transparent;
+}
+
+[data-landrush-island-loading-shell-fill] {
+  animation: landrush-island-loading-shell-progress 136.667s linear both;
+  animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
+  transform: scaleX(0);
+  transform-origin: left center;
+  will-change: transform;
+}
+
+[data-landrush-island-loading-shell-percent-reel] {
+  animation: landrush-island-loading-shell-percent 136.667s steps(82, end) both;
+  animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+}
+
+@keyframes landrush-island-loading-shell-progress {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(0.82);
+  }
+}
+
+@keyframes landrush-island-loading-shell-percent {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(0, -82rem, 0);
+  }
 }
 
 /* Apple-style smooth corners (squircle) — progressive enhancement */
@@ -179,6 +225,16 @@ body:has([data-landrush-island-world-frame-ready])
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  [data-landrush-island-loading-shell-fill] {
+    animation: none;
+    transform: scaleX(0.2);
+    will-change: auto;
+  }
+  [data-landrush-island-loading-shell-percent-reel] {
+    animation: none;
+    transform: translate3d(0, -20rem, 0);
+    will-change: auto;
   }
 }
 

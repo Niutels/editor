@@ -86,7 +86,7 @@ export function resolveLandrushAuthorityResyncActive({
   presentedAuthorityKey: string | null
   ready: boolean
 }) {
-  return handedOff && (!ready || presentedAuthorityKey !== authorityKey)
+  return handedOff && !ready && presentedAuthorityKey !== authorityKey
 }
 
 export function shouldPersistLandrushIslandOfflineState({

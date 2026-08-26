@@ -1,106 +1,15 @@
 import {
   benchmarkParams,
+  findTraversableLandrushExteriorEntryRoute,
+  placeLandrushPlayerAt,
   readFloorVisibility,
   restoreLandrushBenchmarkFixture,
   scenarioDurationMs,
+  waitForStableFloorState,
   waitForWorldLayout,
 } from '../scenario-utils.mjs'
 
 let preparedEntryRoute = null
-
-async function placePlayerAt(page, point, label) {
-  return page.evaluate(
-    ({ nextLabel, nextPoint }) =>
-      window.__LANDRUSH_ISLAND_NAV_TEST__?.setupStart({
-        label: nextLabel,
-        start: nextPoint,
-      }) ?? false,
-    { nextLabel: label, nextPoint: point },
-  )
-}
-
-async function waitForStableFloorState(page, sleep, timeoutMs = 3_000) {
-  const startedAt = Date.now()
-  let lastSignature = null
-  let consecutive = 0
-  let last = null
-  while (Date.now() - startedAt < timeoutMs) {
-    last = await readFloorVisibility(page)
-    const signature = JSON.stringify({
-      buildingScopeId: last?.buildingScopeId ?? null,
-      insideBuilding: last?.insideBuilding ?? null,
-      levelId: last?.levelId ?? null,
-      regionSource: last?.regionSource ?? null,
-    })
-    if (signature === lastSignature) consecutive += 1
-    else {
-      lastSignature = signature
-      consecutive = 1
-    }
-    if (consecutive >= 3) return last
-    await sleep(100)
-  }
-  return last
-}
-
-async function discoverExteriorEntryRoutes(page, sleep) {
-  const portals = await page.evaluate(
-    () => window.__LANDRUSH_ISLAND_NAV_TEST__?.getState().doorPortals ?? [],
-  )
-  const routes = []
-  for (const portal of portals.filter((candidate) => Math.abs(candidate.baseY) < 0.75)) {
-    const sides = [portal.sideA, portal.sideB]
-    const observations = []
-    for (const [index, side] of sides.entries()) {
-      const point = { ...side, y: portal.baseY }
-      if (!(await placePlayerAt(page, point, `benchmark-entry-probe-${portal.doorId}-${index}`))) {
-        continue
-      }
-      observations.push({ floor: await waitForStableFloorState(page, sleep), point })
-    }
-    const outside = observations.find(({ floor }) => floor?.insideBuilding === false)
-    const inside = observations.find(({ floor }) => floor?.insideBuilding === true)
-    if (outside && inside) {
-      routes.push({
-        buildingScopeId: inside.floor.buildingScopeId,
-        doorId: portal.doorId,
-        inside: inside.point,
-        outside: outside.point,
-      })
-    }
-  }
-  return routes
-}
-
-async function findTraversableEntryRoute(page, sleep) {
-  const routes = await discoverExteriorEntryRoutes(page, sleep)
-  for (const route of routes) {
-    const started = await page.evaluate((candidate) => {
-      const navigation = window.__LANDRUSH_ISLAND_NAV_TEST__
-      return (
-        navigation?.startMove({
-          label: `benchmark-entry-validation-${candidate.doorId}`,
-          start: candidate.outside,
-          target: candidate.inside,
-        }) ?? false
-      )
-    }, route)
-    if (!started) continue
-
-    const startedAt = Date.now()
-    while (Date.now() - startedAt < 8_000) {
-      const floor = await readFloorVisibility(page)
-      if (
-        floor?.insideBuilding &&
-        (!route.buildingScopeId || floor.buildingScopeId === route.buildingScopeId)
-      ) {
-        return route
-      }
-      await sleep(100)
-    }
-  }
-  return null
-}
 
 export default {
   name: 'landrush-enter-house',
@@ -109,11 +18,17 @@ export default {
   async prepare({ bridge, page, sleep }) {
     await waitForWorldLayout(page)
     await restoreLandrushBenchmarkFixture(page, bridge, { player: true })
-    preparedEntryRoute ??= await findTraversableEntryRoute(page, sleep)
+    preparedEntryRoute ??= await findTraversableLandrushExteriorEntryRoute(page, sleep)
     if (!preparedEntryRoute) {
       throw new Error('enter-house benchmark could not find a traversable exterior doorway')
     }
-    if (!(await placePlayerAt(page, preparedEntryRoute.outside, 'benchmark-entry-ready'))) {
+    if (
+      !(await placeLandrushPlayerAt(
+        page,
+        preparedEntryRoute.outside,
+        'benchmark-entry-ready',
+      ))
+    ) {
       throw new Error('enter-house benchmark could not stage the player outside')
     }
     const floor = await waitForStableFloorState(page, sleep)

@@ -11,6 +11,10 @@ import {
   ZOMBIE_ESCAPE_BLOOD_EFFECT,
   type ZombieEscapeBloodEnvelope,
 } from './zombie-escape-blood-effects'
+import {
+  DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+  getZombieEscapeBloodVariantProfile,
+} from './zombie-escape-blood-variants'
 
 const event = {
   directionX: 0,
@@ -38,11 +42,13 @@ describe('Zombie Escape blood event pool', () => {
     expect(events.pool.activeCount).toBe(2)
     expect(events.seed[0]).toBe(19)
     expect(events.seed[1]).toBe(18)
+    expect(events.variantCode[0]).toBe(DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE)
   })
 
   test('releases and resets without replacing fixed storage', () => {
     const events = createZombieEscapeBloodEventPool(2)
     const origins = events.originX
+    const variants = events.variantCode
     const slot = spawnZombieEscapeBloodEvent(events, event)
 
     expect(releaseZombieEscapeBloodEvent(events, slot)).toBe(true)
@@ -50,8 +56,13 @@ describe('Zombie Escape blood event pool', () => {
     resetZombieEscapeBloodEvents(events)
 
     expect(events.originX).toBe(origins)
+    expect(events.variantCode).toBe(variants)
     expect(events.pool.activeCount).toBe(0)
     expect([...events.targetSlot]).toEqual([-1, -1])
+    expect([...events.variantCode]).toEqual([
+      DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+      DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+    ])
   })
 
   test('expires before the next acquire and preserves a same-frame spawn after rewind', () => {
@@ -77,6 +88,32 @@ describe('Zombie Escape blood event pool', () => {
     expect(events.pool.activeCount).toBe(1)
     expect(events.seed[0]).toBe(29)
     expect(events.originX).toBe(storage)
+  })
+
+  test('retains simultaneous event variants and sanitizes invalid codes to Wet Hybrid', () => {
+    const events = createZombieEscapeBloodEventPool(3)
+    const heavy = getZombieEscapeBloodVariantProfile('heavy-clots').code
+    const viscous = getZombieEscapeBloodVariantProfile('viscous-strings').code
+
+    spawnZombieEscapeBloodEvent(events, event)
+    spawnZombieEscapeBloodEvent(events, { ...event, seed: 18, variantCode: heavy })
+    spawnZombieEscapeBloodEvent(events, {
+      ...event,
+      seed: 19,
+      variantCode: 99 as never,
+    })
+
+    expect([...events.variantCode]).toEqual([
+      DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+      heavy,
+      DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+    ])
+    spawnZombieEscapeBloodEvent(events, { ...event, seed: 20, variantCode: viscous })
+    expect([...events.variantCode]).toEqual([
+      viscous,
+      heavy,
+      DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+    ])
   })
 })
 

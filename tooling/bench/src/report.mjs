@@ -1214,6 +1214,9 @@ export function buildReport({
     .map((frame) => frame.dtMs)
     .filter((value) => Number.isFinite(value) && value > 0)
   const dtStats = stats(dts)
+  const rawCadenceP95Ms = percentile([...dts].sort((left, right) => left - right), 95)
+  const cadenceContract = meta.scenarioContract?.cadence
+  const maximumCadenceP95Ms = cadenceContract?.maximumP95Ms
   const fpsEffective = dtStats.avg ? round1(1000 / dtStats.avg) : null
   const display = resolveDisplayTiming(dts, meta)
   const classifiedBudget = classifyFrameBudget(cadenceFrames, targetFps, display)
@@ -1419,6 +1422,22 @@ export function buildReport({
       frames.length > 0 && cadenceFrames.length > 0 && frameBudget.eligibleFrameCount > 0,
       `${frames.length} boundary-inclusive frame(s), ${frameBudget.eligibleFrameCount} authoritative cadence interval(s) from ${allFrames.length} captured frame(s)`,
     ),
+    ...(cadenceContract
+      ? [
+          measuredGate(
+            Number.isFinite(maximumCadenceP95Ms) && maximumCadenceP95Ms > 0
+              ? `Cadence p95 <= ${round2(maximumCadenceP95Ms)}ms`
+              : 'Scenario cadence p95 contract is valid',
+            Number.isFinite(maximumCadenceP95Ms) &&
+              maximumCadenceP95Ms > 0 &&
+              rawCadenceP95Ms !== null &&
+              rawCadenceP95Ms <= maximumCadenceP95Ms,
+            Number.isFinite(maximumCadenceP95Ms) && maximumCadenceP95Ms > 0
+              ? `cadence p95 = ${round2(rawCadenceP95Ms)}ms over ${dts.length} interval(s)`
+              : `maximumP95Ms=${String(maximumCadenceP95Ms)}`,
+          ),
+        ]
+      : []),
     measuredGate(
       'Input trace has one ordered measurement window',
       input.measurementWindow.valid,
@@ -1539,8 +1558,11 @@ export function buildReport({
           `watchdog ${meta.watchdog?.enabled === false ? 'disabled' : 'measurement unavailable'}`,
         ),
     measuredGate(
-      'Zero page errors / crashes / device-lost',
-      pageErrors.length === 0 && crashes.length === 0 && deviceLost.length === 0,
+      'Zero page errors / console errors / crashes / device-lost',
+      pageErrors.length === 0 &&
+        consoleErrors.length === 0 &&
+        crashes.length === 0 &&
+        deviceLost.length === 0,
       `${pageErrors.length} pageerror, ${crashes.length} crash, ${deviceLost.length} device-lost, ${consoleErrors.length} console errors`,
     ),
     measuredGate(

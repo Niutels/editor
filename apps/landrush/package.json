@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "sync:pascal-assets": "node scripts/sync-pascal-assets.mjs",
+    "build:runtime-workers": "bun scripts/build-landrush-runtime-workers.mjs --minify",
     "generate:island-ambient-assets": "node scripts/generate-island-ambient-assets.mjs",
     "optimize:island-ambient-assets": "node scripts/optimize-island-ambient-assets.mjs",
     "audit:island-ambient-assets": "node scripts/audit-island-ambient-assets.mjs",
@@ -16,10 +17,10 @@
     "audit:zombie-escape-audio:shipping": "node scripts/audit-zombie-escape-audio.mjs --require-ready --skip-media-probe",
     "test:zombie-escape-audio-pipeline": "node --test scripts/audit-zombie-escape-audio.test.mjs",
     "dev": "bun run sync:pascal-assets && dotenv -e ../../.env.local -- bun scripts/dev-with-landrush-ws.mjs",
-    "dev:next": "bun run sync:pascal-assets && dotenv -e ../../.env.local -- next dev --port 3002",
+    "dev:next": "bun run sync:pascal-assets && dotenv -e ../../.env.local -- bun scripts/dev-with-landrush-ws.mjs --next-only",
     "dev:world-multiplayer-ws": "bun scripts/landrush-world-multiplayer-ws.mjs",
-    "build": "bun run sync:pascal-assets && bun run audit:zombie-escape-audio:shipping && dotenv -e ../../.env.local -- next build",
-    "start": "bun run sync:pascal-assets && next start",
+    "build": "bun run sync:pascal-assets && bun run build:runtime-workers && bun run audit:zombie-escape-audio:shipping && dotenv -e ../../.env.local -- next build",
+    "start": "bun run sync:pascal-assets && bun run build:runtime-workers && next start",
     "lint": "biome lint",
     "check-types": "next typegen && tsc --noEmit",
     "test": "bun test components/landrush-lab lib"
@@ -42,6 +43,7 @@
     "@react-three/fiber": "^9.5.0",
     "@tailwindcss/postcss": "^4.2.1",
     "clsx": "^2.1.1",
+    "earcut": "3.0.2",
     "geist": "^1.7.0",
     "howler": "^2.2.4",
     "lucide-react": "^1.7.0",
@@ -59,6 +61,7 @@
   },
   "devDependencies": {
     "@pascal/typescript-config": "*",
+    "@types/earcut": "3.0.0",
     "@types/howler": "^2.2.12",
     "@types/node": "^22.19.12",
     "@types/react": "19.2.2",

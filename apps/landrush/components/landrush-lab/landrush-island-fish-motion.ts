@@ -49,6 +49,28 @@ export type LandrushIslandFishMotionSample = {
   yawRadians: number
 }
 
+export type LandrushIslandFishMotionScratch = {
+  ahead: LandrushMutablePoint2
+}
+
+type LandrushMutablePoint2 = { x: number; z: number }
+
+export function createLandrushIslandFishMotionSample(): LandrushIslandFishMotionSample {
+  return {
+    bankRadians: 0,
+    forwardX: 0,
+    forwardZ: 1,
+    position: { x: 0, y: 0, z: 0 },
+    speedMetersPerSecond: 0,
+    trajectoryId: '',
+    yawRadians: 0,
+  }
+}
+
+export function createLandrushIslandFishMotionScratch(): LandrushIslandFishMotionScratch {
+  return { ahead: { x: 0, z: 0 } }
+}
+
 export function createLandrushIslandFishLanes(
   config: LandrushIslandFishMotionConfig,
   shoreline: readonly LandrushPoint2[],
@@ -151,39 +173,53 @@ export function sampleLandrushIslandFishMotion(
   elapsedSeconds: number,
   waterY: number,
 ): LandrushIslandFishMotionSample {
+  return sampleLandrushIslandFishMotionInto(
+    trajectory,
+    elapsedSeconds,
+    waterY,
+    createLandrushIslandFishMotionSample(),
+    createLandrushIslandFishMotionScratch(),
+  )
+}
+
+export function sampleLandrushIslandFishMotionInto(
+  trajectory: LandrushIslandFishTrajectory,
+  elapsedSeconds: number,
+  waterY: number,
+  target: LandrushIslandFishMotionSample,
+  scratch: LandrushIslandFishMotionScratch,
+): LandrushIslandFishMotionSample {
   const pathDistance = positiveModulo(
     trajectory.phaseDistanceMeters +
       elapsedSeconds * trajectory.speedMetersPerSecond * trajectory.direction,
     trajectory.lane.totalLengthMeters,
   )
-  const point = sampleClosedPath(trajectory.lane, pathDistance)
+  sampleClosedPathInto(trajectory.lane, pathDistance, target.position)
   const lookAheadDistance = Math.max(0.08, trajectory.speedMetersPerSecond * 0.4)
-  const ahead = sampleClosedPath(
+  sampleClosedPathInto(
     trajectory.lane,
     positiveModulo(
       pathDistance + lookAheadDistance * trajectory.direction,
       trajectory.lane.totalLengthMeters,
     ),
+    scratch.ahead,
   )
-  const forward = normalizePoint(ahead.x - point.x, ahead.z - point.z)
+  const forwardX = scratch.ahead.x - target.position.x
+  const forwardZ = scratch.ahead.z - target.position.z
+  const forwardLength = Math.hypot(forwardX, forwardZ)
+  const normalizedForwardX = forwardLength <= 0.000_001 ? 0 : forwardX / forwardLength
+  const normalizedForwardZ = forwardLength <= 0.000_001 ? 1 : forwardZ / forwardLength
   const verticalPhase =
     elapsedSeconds * trajectory.verticalFrequencyRadiansPerSecond + trajectory.verticalPhase
-  return {
-    bankRadians: Math.sin(verticalPhase * 0.73) * 0.028,
-    forwardX: forward.x,
-    forwardZ: forward.z,
-    position: {
-      x: point.x,
-      y:
-        waterY -
-        trajectory.depthMeters +
-        Math.sin(verticalPhase) * trajectory.verticalAmplitudeMeters,
-      z: point.z,
-    },
-    speedMetersPerSecond: trajectory.speedMetersPerSecond,
-    trajectoryId: trajectory.id,
-    yawRadians: Math.atan2(forward.x, forward.z),
-  }
+  target.bankRadians = Math.sin(verticalPhase * 0.73) * 0.028
+  target.forwardX = normalizedForwardX
+  target.forwardZ = normalizedForwardZ
+  target.position.y =
+    waterY - trajectory.depthMeters + Math.sin(verticalPhase) * trajectory.verticalAmplitudeMeters
+  target.speedMetersPerSecond = trajectory.speedMetersPerSecond
+  target.trajectoryId = trajectory.id
+  target.yawRadians = Math.atan2(normalizedForwardX, normalizedForwardZ)
+  return target
 }
 
 export function measureLandrushIslandFishShoreDistance(
@@ -269,19 +305,26 @@ function smoothClosedPath(points: readonly LandrushPoint2[], iterations: number)
   return current
 }
 
-function sampleClosedPath(lane: LandrushIslandFishLane, distance: number) {
+function sampleClosedPathInto(
+  lane: LandrushIslandFishLane,
+  distance: number,
+  target: LandrushMutablePoint2,
+) {
   const segmentIndex = findSegmentIndex(lane.cumulativeLengths, distance)
   const start = lane.points[segmentIndex]
   const end = lane.points[(segmentIndex + 1) % lane.points.length]
-  if (!(start && end)) return { x: 0, z: 0 }
+  if (!(start && end)) {
+    target.x = 0
+    target.z = 0
+    return target
+  }
   const segmentStart = lane.cumulativeLengths[segmentIndex] ?? 0
   const segmentEnd = lane.cumulativeLengths[segmentIndex + 1] ?? lane.totalLengthMeters
   const segmentLength = Math.max(0.000_001, segmentEnd - segmentStart)
   const progress = (distance - segmentStart) / segmentLength
-  return {
-    x: start.x + (end.x - start.x) * progress,
-    z: start.z + (end.z - start.z) * progress,
-  }
+  target.x = start.x + (end.x - start.x) * progress
+  target.z = start.z + (end.z - start.z) * progress
+  return target
 }
 
 function findSegmentIndex(cumulativeLengths: readonly number[], distance: number) {

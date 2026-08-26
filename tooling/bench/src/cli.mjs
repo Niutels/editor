@@ -156,6 +156,7 @@ export async function runScenario(args) {
   const serverMode = args['server-mode'] ?? 'dev'
 
   const scenario = await loadScenario(scenarioName)
+  const scenarioContract = scenario.measurementContract?.({ args }) ?? null
   const scenarioLifecycle = resolveScenarioLifecycle(scenario, args)
   const { warmupSeconds } = scenarioLifecycle
   const watchdogPolicy = resolveWatchdogPolicy(scenarioLifecycle, args)
@@ -203,6 +204,9 @@ export async function runScenario(args) {
   let frameContinuityTracker = null
   let eventContinuityTracker = null
   const scenarioEvidence = {}
+  const recordScenarioEvidence = (name, evidence) => {
+    scenarioEvidence[name] = evidence
+  }
   let pumpLoop = null
   let pumping = false
   let cpuProfilerStarted = false
@@ -378,6 +382,7 @@ export async function runScenario(args) {
       gpuProfile,
       periodicCheckpoints,
       bridgeFrame,
+      scenarioContract,
       frameContinuity,
       eventContinuity,
       measureFromFrame,
@@ -442,7 +447,7 @@ export async function runScenario(args) {
       )
     }
 
-    const scenarioParams = scenario.urlParams?.({ seed }) ?? ''
+    const scenarioParams = scenario.urlParams?.({ args, scenarioContract, seed }) ?? ''
     url = `${BASE_URL}/landrush-lab/${page}?offline=1&bench=1${frameProfile ? '&frameProfile=1' : ''}${gpuProfile ? '' : '&benchNoGpu=1'}${scenarioParams ? `&${scenarioParams}` : ''}`
     log(`opening ${url}`)
     await browser.page.goto(url, {
@@ -460,7 +465,17 @@ export async function runScenario(args) {
 
     if (scenario.prepare) {
       log('waiting for scenario state')
-      await scenario.prepare({ bridge, input, page: bridgeTarget, sleep, trace: traceOut })
+      await scenario.prepare({
+        args,
+        bridge,
+        input,
+        minutes,
+        page: bridgeTarget,
+        recordEvidence: recordScenarioEvidence,
+        scenarioContract,
+        sleep,
+        trace: traceOut,
+      })
       const ready = (await bridge.beacon()).beacon
       log(
         `scenario state ready at frame ${ready?.frameIdx ?? 'unknown'} ` +
@@ -472,7 +487,17 @@ export async function runScenario(args) {
     // out of the measurement window.
     if (warmupSeconds > 0) await sleep(warmupSeconds * 1000)
     if (scenario.prepare && scenarioLifecycle.prepareAfterWarmup) {
-      await scenario.prepare({ bridge, input, page: bridgeTarget, sleep, trace: traceOut })
+      await scenario.prepare({
+        args,
+        bridge,
+        input,
+        minutes,
+        page: bridgeTarget,
+        recordEvidence: recordScenarioEvidence,
+        scenarioContract,
+        sleep,
+        trace: traceOut,
+      })
     }
     // Capture replay state before the timed window. Serializing the complete
     // scene during measurement can itself create the hitch under test.
@@ -574,6 +599,7 @@ export async function runScenario(args) {
         })()
 
     const context = {
+      args,
       page: bridgeTarget,
       cdp: browser.cdp,
       bridge,
@@ -581,6 +607,7 @@ export async function runScenario(args) {
       rng,
       minutes,
       displayHz,
+      scenarioContract,
       runDir,
       log,
       sleep,
@@ -589,9 +616,7 @@ export async function runScenario(args) {
         traceOut.write({ t: performance.now(), frameIdx, kind: 'mark', label })
         return frameIdx
       },
-      recordEvidence: (name, evidence) => {
-        scenarioEvidence[name] = evidence
-      },
+      recordEvidence: recordScenarioEvidence,
       trace: traceOut,
       events: eventsOut,
     }
@@ -782,6 +807,7 @@ export async function runScenario(args) {
       gpuProfile,
       periodicCheckpoints,
       bridgeFrame,
+      scenarioContract,
       frameContinuity,
       eventContinuity,
       measureFromFrame,

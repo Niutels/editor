@@ -23,6 +23,7 @@ import {
   ZombieEscapeBloodPresentation,
   type ZombieEscapeBloodWorldAttachmentResolver,
 } from './zombie-escape-blood-presentation'
+import { resolveZombieEscapeBloodHitVariantCode } from './zombie-escape-blood-variants'
 import { ZOMBIE_ESCAPE_CAPACITY, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
   createZombieEscapeBallisticSample,
@@ -91,6 +92,7 @@ export function ZombieEscapeEffects({
   const impactFlashRef = useRef<InstancedMesh>(null)
   const impactRingRef = useRef<InstancedMesh>(null)
   const impactRootRef = useRef<Group>(null)
+  const bloodRootRef = useRef<Group>(null)
   const bloodEvents = useMemo(
     () => createZombieEscapeBloodEventPool(simulationRef.current.shots.pool.capacity),
     [simulationRef],
@@ -110,6 +112,7 @@ export function ZombieEscapeEffects({
   useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:tracer', travelRef)
   useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:muzzle', muzzleRef)
   useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:impact', impactRootRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:blood', bloodRootRef)
   useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:sparks', sparkRef)
   const dummy = useMemo(() => new Object3D(), [])
   const direction = useMemo(() => new Vector3(), [])
@@ -141,6 +144,7 @@ export function ZombieEscapeEffects({
       spawnElapsedSeconds: 0,
       targetGeneration: 0,
       targetSlot: -1,
+      variantCode: 0,
     }),
     [],
   )
@@ -290,6 +294,15 @@ export function ZombieEscapeEffects({
             )
             bloodEventScratch.targetGeneration = targetGeneration
             bloodEventScratch.targetSlot = targetSlot
+            const bloodTravelX = shots.hitX[slot]! - shots.originX[slot]!
+            const bloodTravelY = shots.hitY[slot]! - shots.originY[slot]!
+            const bloodTravelZ = shots.hitZ[slot]! - shots.originZ[slot]!
+            bloodEventScratch.variantCode = resolveZombieEscapeBloodHitVariantCode(
+              shots.damage[slot]!,
+              bloodTravelX * bloodTravelX +
+                bloodTravelY * bloodTravelY +
+                bloodTravelZ * bloodTravelZ,
+            )
             const bloodEventSlot = spawnZombieEscapeBloodEvent(bloodEvents, bloodEventScratch)
             const skinnedAttachment = skinnedBloodAttachments[bloodEventSlot]!
             if (
@@ -576,13 +589,34 @@ export function ZombieEscapeEffects({
           />
         </instancedMesh>
       </group>
-      <ZombieEscapeBloodPresentation
-        events={bloodEvents}
-        getElapsedSeconds={getBloodElapsedSeconds}
-        producerFramePriority={framePriority}
-        renderReadinessRegistry={renderReadinessRegistry}
-        resolveWorldAttachment={resolveBloodWorldAttachment}
-      />
+      <group ref={bloodRootRef}>
+        <ZombieEscapeBloodPresentation
+          events={bloodEvents}
+          filterEventsByVariant
+          getElapsedSeconds={getBloodElapsedSeconds}
+          producerFramePriority={framePriority}
+          resolveWorldAttachment={resolveBloodWorldAttachment}
+          variant="wet-hybrid"
+        />
+        <ZombieEscapeBloodPresentation
+          events={bloodEvents}
+          filterEventsByVariant
+          getElapsedSeconds={getBloodElapsedSeconds}
+          ownsLifecycle={false}
+          producerFramePriority={framePriority}
+          resolveWorldAttachment={resolveBloodWorldAttachment}
+          variant="heavy-clots"
+        />
+        <ZombieEscapeBloodPresentation
+          events={bloodEvents}
+          filterEventsByVariant
+          getElapsedSeconds={getBloodElapsedSeconds}
+          ownsLifecycle={false}
+          producerFramePriority={framePriority}
+          resolveWorldAttachment={resolveBloodWorldAttachment}
+          variant="viscous-strings"
+        />
+      </group>
       <instancedMesh
         args={[
           undefined,

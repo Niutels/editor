@@ -167,8 +167,12 @@ describe('Landrush island ambient load queue', () => {
     for (const [index, unitId] of unitIds.entries()) {
       state = yieldAdmission(state)
       expect(resolveLandrushIslandAmbientLoadReadiness(state, UNITS)).toEqual({
+        completed: index,
         generation: 4,
         ready: false,
+        terminalUnitIds: unitIds.slice(0, index),
+        total: unitIds.length,
+        totalUnitIds: unitIds,
       })
       state = settleLandrushIslandAmbientLoadQueue(state, {
         generation: state.generation,
@@ -178,12 +182,16 @@ describe('Landrush island ambient load queue', () => {
     }
 
     expect(resolveLandrushIslandAmbientLoadReadiness(state, UNITS)).toEqual({
+      completed: unitIds.length,
       generation: 4,
       ready: true,
+      terminalUnitIds: unitIds,
+      total: unitIds.length,
+      totalUnitIds: unitIds,
     })
   })
 
-  test('accepts a newer unready generation and rejects a stale ready report', () => {
+  test('reconciles only monotonic progress against the stable unit order of a generation', () => {
     let completedState = createLandrushIslandAmbientLoadQueueState(8)
     for (const unit of UNITS) {
       completedState = yieldAdmission(completedState)
@@ -194,25 +202,43 @@ describe('Landrush island ambient load queue', () => {
       })
     }
     const completed = resolveLandrushIslandAmbientLoadReadiness(completedState, UNITS)
-    const reset = resolveLandrushIslandAmbientLoadReadiness(
-      resetLandrushIslandAmbientLoadQueue(completedState),
-      UNITS,
+    const resetState = resetLandrushIslandAmbientLoadQueue(completedState)
+    const reset = resolveLandrushIslandAmbientLoadReadiness(resetState, UNITS)
+    let firstTerminalState = resetState
+    firstTerminalState = yieldAdmission(firstTerminalState)
+    firstTerminalState = settleLandrushIslandAmbientLoadQueue(firstTerminalState, {
+      generation: firstTerminalState.generation,
+      outcome: 'loaded',
+      unitId: UNITS[0]!.id,
+    })
+    const firstTerminal = resolveLandrushIslandAmbientLoadReadiness(firstTerminalState, UNITS)
+    let secondTerminalState = yieldAdmission(firstTerminalState)
+    secondTerminalState = settleLandrushIslandAmbientLoadQueue(secondTerminalState, {
+      generation: secondTerminalState.generation,
+      outcome: 'failed',
+      unitId: UNITS[1]!.id,
+    })
+    const secondTerminal = resolveLandrushIslandAmbientLoadReadiness(secondTerminalState, UNITS)
+    const changedUnitSet = resolveLandrushIslandAmbientLoadReadiness(
+      secondTerminalState,
+      UNITS.slice(0, -1),
     )
 
     expect(reconcileLandrushIslandAmbientLoadReadiness(completed, reset)).toBe(reset)
     expect(reconcileLandrushIslandAmbientLoadReadiness(reset, completed)).toBe(reset)
-    expect(
-      reconcileLandrushIslandAmbientLoadReadiness(reset, {
-        generation: reset.generation,
-        ready: true,
-      }),
-    ).toEqual({ generation: reset.generation, ready: true })
-    expect(
-      reconcileLandrushIslandAmbientLoadReadiness(
-        { generation: reset.generation, ready: true },
-        { generation: reset.generation, ready: false },
-      ),
-    ).toEqual({ generation: reset.generation, ready: true })
+    expect(reconcileLandrushIslandAmbientLoadReadiness(reset, firstTerminal)).toBe(firstTerminal)
+    expect(reconcileLandrushIslandAmbientLoadReadiness(firstTerminal, secondTerminal)).toBe(
+      secondTerminal,
+    )
+    expect(reconcileLandrushIslandAmbientLoadReadiness(secondTerminal, firstTerminal)).toBe(
+      secondTerminal,
+    )
+    expect(reconcileLandrushIslandAmbientLoadReadiness(secondTerminal, changedUnitSet)).toBe(
+      secondTerminal,
+    )
+    expect(reconcileLandrushIslandAmbientLoadReadiness(secondTerminal, secondTerminal)).toBe(
+      secondTerminal,
+    )
   })
 
   test('allocates a monotonically newer queue generation for every component mount', () => {
@@ -221,7 +247,16 @@ describe('Landrush island ambient load queue', () => {
 
     const firstMount = createLandrushIslandAmbientLoadQueueStateForMount()
     const remount = createLandrushIslandAmbientLoadQueueStateForMount()
-    const previousReady = { generation: firstMount.generation, ready: true }
+    let previousState = firstMount
+    for (const unit of UNITS) {
+      previousState = yieldAdmission(previousState)
+      previousState = settleLandrushIslandAmbientLoadQueue(previousState, {
+        generation: previousState.generation,
+        outcome: 'loaded',
+        unitId: unit.id,
+      })
+    }
+    const previousReady = resolveLandrushIslandAmbientLoadReadiness(previousState, UNITS)
     const remountPending = resolveLandrushIslandAmbientLoadReadiness(remount, UNITS)
 
     expect(remount.generation).toBeGreaterThan(firstMount.generation)

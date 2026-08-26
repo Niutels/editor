@@ -1,10 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { type AnyNode, BuildingNode, CeilingNode, LevelNode, WallNode } from '@pascal-app/core'
 import { findLandrushBuildingFloorInteriorRegion } from './landrush-building-floor-visibility'
-import {
-  resolveZombieEscapeWeaponPickupPlacements,
-  translateZombieEscapeWeaponPickupPlacements,
-} from './zombie-escape-weapon-placement'
+import { resolveZombieEscapeWeaponPickupPlacements } from './zombie-escape-weapon-placement'
 
 describe('Zombie Escape weapon placement', () => {
   test('deterministically places at most five weapons with one ground-floor pickup per building', () => {
@@ -87,15 +84,6 @@ describe('Zombie Escape weapon placement', () => {
 
     expect(placement).toBeDefined()
     expect(findLandrushBuildingFloorInteriorRegion(placement!, [region])).not.toBeNull()
-  })
-
-  test('translates world placements into simulation-local coordinates without mutation', () => {
-    const placements = [{ scopeId: 'building:a', weaponIndex: 2, x: 14, y: 3, z: -3 }] as const
-
-    expect(translateZombieEscapeWeaponPickupPlacements(placements, { x: 10, z: -8 })).toEqual([
-      { scopeId: 'building:a', weaponIndex: 2, x: 4, y: 3, z: 5 },
-    ])
-    expect(placements[0]).toEqual({ scopeId: 'building:a', weaponIndex: 2, x: 14, y: 3, z: -3 })
   })
 })
 

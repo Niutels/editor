@@ -9,6 +9,18 @@ export type ZombieEscapeGeneratedAssetSettlement = Readonly<{
   settled: boolean
 }>
 
+export type ZombieEscapeGeneratedAssetReadinessSnapshot = Readonly<{
+  allocationReady: boolean
+  completed: number
+  expectedKeys: readonly string[]
+  generation: number
+  pipelineReady: boolean
+  ready: boolean
+  readyKeys: readonly string[]
+  settledKeys: readonly string[]
+  total: number
+}>
+
 export type ZombieEscapeGeneratedAssetCreationResult<Value> =
   | Readonly<{ ok: true; value: Value }>
   | Readonly<{ message: string; ok: false }>
@@ -45,5 +57,40 @@ export function resolveZombieEscapeGeneratedAssetSettlement(
     pending,
     ready: pending.length === 0 && failed.length === 0,
     settled: pending.length === 0,
+  }
+}
+
+export function resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+  expectedKeys,
+  generation,
+  pipelineReady,
+  statuses,
+}: {
+  expectedKeys: readonly string[]
+  generation: number
+  pipelineReady: boolean
+  statuses: ReadonlyMap<string, ZombieEscapeGeneratedAssetTerminalStatus>
+}): ZombieEscapeGeneratedAssetReadinessSnapshot {
+  const stableExpectedKeys = Array.from(new Set(expectedKeys))
+  const readyKeys: string[] = []
+  const settledKeys: string[] = []
+  for (const key of stableExpectedKeys) {
+    const status = statuses.get(key)
+    if (!status) continue
+    settledKeys.push(key)
+    if (status.state === 'ready') readyKeys.push(key)
+  }
+  const allocationReady = readyKeys.length === stableExpectedKeys.length
+
+  return {
+    allocationReady,
+    completed: settledKeys.length,
+    expectedKeys: stableExpectedKeys,
+    generation,
+    pipelineReady,
+    ready: allocationReady && pipelineReady,
+    readyKeys,
+    settledKeys,
+    total: stableExpectedKeys.length,
   }
 }
