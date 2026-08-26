@@ -1,5 +1,4 @@
 import {
-  LANDRUSH_ISLAND_LOADING_SHELL_BOOTSTRAP_SOURCE,
   LANDRUSH_ISLAND_LOADING_SHELL_FILL_ATTRIBUTE,
   LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE,
 } from './landrush-island-loading-shell-bootstrap'
@@ -7,17 +6,6 @@ import { LandrushIslandLoadingShellClientBridge } from './landrush-island-loadin
 import { LANDRUSH_ISLAND_LOADING_INITIAL_STATUS } from './landrush-island-loading-status'
 
 const LANDRUSH_ISLAND_LOADING_PERCENT_VALUES = Array.from({ length: 101 }, (_, percent) => percent)
-
-function LandrushIslandLoadingBootScript() {
-  return (
-    <script
-      async
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: this clock must run from streamed HTML before the client bundle and its potentially blocking render.
-      dangerouslySetInnerHTML={{ __html: LANDRUSH_ISLAND_LOADING_SHELL_BOOTSTRAP_SOURCE }}
-      data-landrush-island-loading-bootstrap
-    />
-  )
-}
 
 export function LandrushIslandLoadingShell() {
   return (
@@ -32,7 +20,6 @@ export function LandrushIslandLoadingShell() {
       role="progressbar"
       suppressHydrationWarning
     >
-      <LandrushIslandLoadingBootScript />
       <LandrushIslandLoadingShellClientBridge />
       <div className="w-[50vw] max-w-[760px]">
         <div className="mb-3 flex items-center justify-between">

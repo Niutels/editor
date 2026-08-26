@@ -4,9 +4,7 @@ import {
   bootstrapLandrushIslandLoadingShellClient,
   createLandrushIslandLoadingShellPercentKeyframes,
   LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
-  LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL,
   LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL,
-  LANDRUSH_ISLAND_LOADING_SHELL_BOOTSTRAP_SOURCE,
   LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY,
   LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
   LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE,
@@ -16,93 +14,71 @@ import {
 } from './landrush-island-loading-shell-bootstrap'
 
 type BootstrapWindow = Record<string, unknown> & {
+  location?: { pathname: string; search: string }
   navigation: { currentEntry: { key: string } | null }
+  performance?: { now: () => number; timeOrigin: number }
 }
 
 function executeBootstrap({
-  insideShell = true,
   navigationKey,
   nowMs,
   routeKey = '/landrush-lab/pascal-multiplayer-island?game=zombie-escape',
   target,
 }: {
-  insideShell?: boolean
   navigationKey?: string
   nowMs: number
   routeKey?: string
   target: BootstrapWindow
 }) {
   target.navigation.currentEntry = navigationKey ? { key: navigationKey } : null
-  const attributes = new Map<string, string>()
-  const styles = new Map<string, string>()
-  const run = new Function(
-    'window',
-    'performance',
-    'location',
-    'document',
-    LANDRUSH_ISLAND_LOADING_SHELL_BOOTSTRAP_SOURCE,
-  )
-  run(
-    target,
-    { now: () => nowMs, timeOrigin: 1_725_000_000_000 },
-    {
-      pathname: routeKey.split('?')[0],
-      search: routeKey.includes('?') ? `?${routeKey.split('?').slice(1).join('?')}` : '',
-    },
-    {
-      currentScript: {
-        closest: () =>
-          insideShell
-            ? {
-                setAttribute: (name: string, value: string) => attributes.set(name, value),
-                style: {
-                  setProperty: (name: string, value: string) => styles.set(name, value),
-                },
-              }
-            : null,
-      },
-    },
+  target.location = {
+    pathname: routeKey.split('?')[0] ?? routeKey,
+    search: routeKey.includes('?') ? `?${routeKey.split('?').slice(1).join('?')}` : '',
+  }
+  target.performance = { now: () => nowMs, timeOrigin: 1_725_000_000_000 }
+  const shellTarget = createShellTarget()
+  const bootRun = bootstrapLandrushIslandLoadingShellClient(
+    shellTarget.shell,
+    target as Parameters<typeof bootstrapLandrushIslandLoadingShellClient>[1],
   )
   return {
-    attributes,
-    bootRun: target[LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL] as LandrushIslandLoadingBootRun,
-    styles,
+    attributes: shellTarget.attributes,
+    bootRun,
+    styles: shellTarget.styles,
   }
 }
 
 describe('Landrush island loading shell bootstrap', () => {
-  test('starts outside Suspense and lets a later fallback adopt the same run', () => {
+  test('starts one client run and lets an idempotent bridge adopt it', () => {
     const target: BootstrapWindow = { navigation: { currentEntry: { key: 'entry-a' } } }
-    const pageBoot = executeBootstrap({
-      insideShell: false,
+    const firstBridge = executeBootstrap({
       navigationKey: 'entry-a',
       nowMs: 8,
       target,
     })
-    const fallbackBoot = executeBootstrap({ navigationKey: 'entry-a', nowMs: 580, target })
+    const duplicateBridge = executeBootstrap({ navigationKey: 'entry-a', nowMs: 580, target })
 
-    expect(pageBoot.attributes.size).toBe(0)
-    expect(fallbackBoot.bootRun).toEqual(pageBoot.bootRun)
-    expect(fallbackBoot.bootRun.startedAtMs).toBe(8)
-    expect(fallbackBoot.attributes.get(LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE)).toBe(
-      pageBoot.bootRun.runId,
+    expect(duplicateBridge.bootRun).toBe(firstBridge.bootRun)
+    expect(duplicateBridge.bootRun.startedAtMs).toBe(8)
+    expect(firstBridge.attributes.get(LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE)).toBe(
+      firstBridge.bootRun.runId,
     )
-    expect(fallbackBoot.styles.get(LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY)).toBe('-572ms')
+    expect(duplicateBridge.styles.get(LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY)).toBe('-572ms')
   })
 
-  test('keeps the first shell clock when the navigation entry key becomes available', () => {
+  test('keeps the first client clock when the navigation entry key becomes available', () => {
     const target: BootstrapWindow = { navigation: { currentEntry: null } }
-    const streamedFallback = executeBootstrap({ nowMs: 8, target })
-    const pageShell = executeBootstrap({ navigationKey: 'entry-a', nowMs: 580, target })
+    const routeKeyedBridge = executeBootstrap({ nowMs: 8, target })
+    const entryKeyedBridge = executeBootstrap({ navigationKey: 'entry-a', nowMs: 580, target })
 
-    expect(pageShell.bootRun).toBe(streamedFallback.bootRun)
-    expect(pageShell.bootRun.navigationKey).toBe('entry:entry-a')
-    expect(pageShell.bootRun.startedAtMs).toBe(8)
-    expect(pageShell.styles.get(LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY)).toBe('-572ms')
+    expect(entryKeyedBridge.bootRun).toBe(routeKeyedBridge.bootRun)
+    expect(entryKeyedBridge.bootRun.navigationKey).toBe('entry:entry-a')
+    expect(entryKeyedBridge.bootRun.startedAtMs).toBe(8)
+    expect(entryKeyedBridge.styles.get(LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY)).toBe('-572ms')
     expect(target[LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL]).toBe(1)
   })
 
-  test('reuses one timestamp and run ID across duplicate fallbacks in a navigation', () => {
+  test('reuses one timestamp and run ID across duplicate bridges in a navigation', () => {
     const target: BootstrapWindow = { navigation: { currentEntry: { key: 'entry-a' } } }
     const first = executeBootstrap({ navigationKey: 'entry-a', nowMs: 12, target })
     const duplicate = executeBootstrap({ navigationKey: 'entry-a', nowMs: 830, target })
@@ -128,7 +104,7 @@ describe('Landrush island loading shell bootstrap', () => {
     expect(target[LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL]).toBe(3)
   })
 
-  test('does not reuse an inline run when a soft navigation keeps the same entry key', () => {
+  test('does not reuse a client run when a soft navigation keeps the same entry key', () => {
     const target: BootstrapWindow = { navigation: { currentEntry: { key: 'entry-a' } } }
     const day = executeBootstrap({
       navigationKey: 'entry-a',
@@ -180,7 +156,7 @@ describe('Landrush island loading shell bootstrap', () => {
     expect(target[LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL]).toBe(2)
   })
 
-  test('does not reapply elapsed delay to a parser-stamped live shell', () => {
+  test('does not reapply elapsed delay to an already-stamped live shell', () => {
     let nowMs = 100
     const target = {
       location: {
