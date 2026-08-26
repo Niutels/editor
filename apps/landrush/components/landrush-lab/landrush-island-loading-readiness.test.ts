@@ -479,10 +479,14 @@ describe('Landrush island paint readiness', () => {
     const startupGatePath = fileURLToPath(
       new URL('./landrush-island-startup-presentation-gate.tsx', import.meta.url),
     )
+    const deferredClientPath = fileURLToPath(
+      new URL('./landrush-island-deferred-client.tsx', import.meta.url),
+    )
     const shellPath = fileURLToPath(new URL('./landrush-island-loading-shell.tsx', import.meta.url))
     const globalsSource = readFileSync(globalsPath, 'utf8')
     const shellSource = readFileSync(shellPath, 'utf8')
     const startupGateSource = readFileSync(startupGatePath, 'utf8')
+    const deferredClientSource = readFileSync(deferredClientPath, 'utf8')
 
     const layoutSource = readFileSync(layoutPath, 'utf8')
     const pageSource = readFileSync(pagePath, 'utf8')
@@ -492,14 +496,18 @@ describe('Landrush island paint readiness', () => {
     )
     expect(layoutSource).not.toContain('<LandrushIslandLoadingBootScript />')
     expect(pageSource).toContain('<Suspense fallback={null}>')
-    expect(pageSource).toContain('<LandrushIslandStartupPresentationGate>')
+    expect(pageSource).toContain('<LandrushIslandDeferredClient />')
+    expect(pageSource).not.toContain("from '@/components/landrush-lab/landrush-island-client'")
     expect(pageSource).not.toContain('<LandrushIslandLoadingBootScript />')
     expect(pageSource).not.toContain('<LandrushIslandLoadingShell />')
-    expect(pageSource.indexOf('<LandrushIslandStartupPresentationGate>')).toBeLessThan(
-      pageSource.indexOf('<LandrushIslandClient'),
+    expect(deferredClientSource).toContain("lazy(() =>\n  import('./landrush-island-client')")
+    expect(deferredClientSource.indexOf('<LandrushIslandStartupPresentationGate>')).toBeLessThan(
+      deferredClientSource.indexOf('<DeferredLandrushIslandClient'),
     )
     expect(startupGateSource).toContain('LANDRUSH_ISLAND_STARTUP_PRESENTATION_FRAME_COUNT = 2')
     expect(startupGateSource).toContain('scheduleLandrushIslandStartupAfterPresentationFrames({')
+    expect(startupGateSource).toContain('startLandrushIslandLoadingShellMotion(')
+    expect(startupGateSource).toContain('currentTimeMs > observedCurrentTimeMs')
     expect(readFileSync(routeLoadingPath, 'utf8')).toContain('return null')
     expect(shellSource).toContain('bg-[#0f1720]')
     expect(shellSource).toContain('data-landrush-island-loading-shell')

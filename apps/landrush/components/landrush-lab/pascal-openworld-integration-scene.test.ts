@@ -8,6 +8,10 @@ describe('Pascal multiplayer-island composition', () => {
       join(import.meta.dir, '../../app/landrush-lab/pascal-multiplayer-island/page.tsx'),
       'utf8',
     )
+    const deferredClientSource = readFileSync(
+      join(import.meta.dir, 'landrush-island-deferred-client.tsx'),
+      'utf8',
+    )
     const clientSource = readFileSync(join(import.meta.dir, 'landrush-island-client.tsx'), 'utf8')
     const ambientLifeSource = readFileSync(
       join(import.meta.dir, 'landrush-island-ambient-life.tsx'),
@@ -21,8 +25,12 @@ describe('Pascal multiplayer-island composition', () => {
       'utf8',
     )
 
-    expect(routeSource).toContain("from '@/components/landrush-lab/landrush-island-client'")
-    expect(routeSource).toContain('<LandrushIslandClient')
+    expect(routeSource).toContain(
+      "from '@/components/landrush-lab/landrush-island-deferred-client'",
+    )
+    expect(routeSource).toContain('<LandrushIslandDeferredClient')
+    expect(deferredClientSource).toContain("import('./landrush-island-client')")
+    expect(deferredClientSource).toContain('<DeferredLandrushIslandClient')
     expect(routeSource).not.toContain('progressive')
     expect(clientSource).toContain("from '@landrush/pascal-host'")
     expect(clientSource.match(/<LandrushPascalHost\b/g)).toHaveLength(1)

@@ -39,6 +39,9 @@ const COMPOSITOR_SAMPLE_INTERVAL_MS = 1_000 / 30
 const COMPOSITOR_MAXIMUM_SEGMENT_COUNT = 900
 const COMPOSITOR_RETARGET_INTERVAL_MS = 80
 const MAXIMUM_PRESENTED_FRAME_DELTA_MS = 1_000 / 30
+const PRESENTATION_WATCHDOG_INTERVAL_MS = 1_000 / 30
+const PRESENTATION_WATCHDOG_STALL_MS = 100
+export const LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS = MAXIMUM_PRESENTED_FRAME_DELTA_MS * 2
 const STREAMED_SHELL_VELOCITY_PER_SECOND = 0.006
 const PREVIEW_RECONCILIATION_THRESHOLD = 0.001
 const COMPOSITOR_TIMELINE_DURATION_MS = LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS
@@ -379,7 +382,10 @@ export function useLandrushIslandLoadingTimeline({
         animationElapsedMs = boundedTimeMs
         return true
       }
-      const elapsedMs = Math.max(0, boundedTimeMs - animationElapsedMs)
+      const elapsedMs = resolveLandrushIslandLoadingCompositorElapsedDelta(
+        boundedTimeMs,
+        animationElapsedMs,
+      )
       if (elapsedMs > 0) progressController.step(elapsedMs)
       animationElapsedMs = boundedTimeMs
       return true
@@ -420,7 +426,7 @@ export function useLandrushIslandLoadingTimeline({
       const segment = createLandrushIslandLoadingVisualPreview(
         progressController,
         readNow(),
-        COMPOSITOR_TIMELINE_DURATION_MS,
+        LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
       )
       visualSegmentRef.current = segment
       const animation = animateLandrushIslandLoadingPreview(presentationFill, segment)
@@ -495,7 +501,7 @@ export function useLandrushIslandLoadingTimeline({
             const segment = createLandrushIslandLoadingVisualPreview(
               progressController,
               readNow(),
-              remainingDurationMs,
+              Math.min(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS, remainingDurationMs),
             )
             visualSegmentRef.current = segment
             const fillRetargeted = retargetLandrushIslandLoadingPreview(
@@ -770,6 +776,8 @@ export function useLandrushIslandLoadingTimeline({
         ) {
           freezeRenderedPresentation()
           startCompositorAnimation()
+        } else if (!fadeStarted) {
+          refreshCompositorAnimation()
         }
       } else if (reducedMotion || fadeStarted) {
         progress = progressController.getSnapshot().displayedProgress
@@ -787,11 +795,37 @@ export function useLandrushIslandLoadingTimeline({
       if (!handedOff) frameId = window.requestAnimationFrame(onPresentationFrame)
     }
     frameId = window.requestAnimationFrame(onPresentationFrame)
-    const interval = window.setInterval(drive, Math.max(100, accessibilityUpdateMs))
+    const presentationWatchdogInterval = window.setInterval(() => {
+      const timestamp = readNow()
+      if (
+        runRef.current !== run ||
+        handedOff ||
+        !motionAdopted ||
+        reducedMotion ||
+        fadeStarted ||
+        !shouldAdvanceLandrushIslandLoadingFrameFallback(timestamp, lastFrameAtMs)
+      ) {
+        return
+      }
+      if (animationRef.current) freezeRenderedPresentation()
+      progressController.step(
+        resolveLandrushIslandLoadingPresentedFrameDelta(timestamp, lastFrameAtMs),
+      )
+      const progress = progressController.getSnapshot().displayedProgress
+      publishProgress(progress)
+      lastFrameAtMs = timestamp
+      if (completionRequested && progressController.readyToDismiss()) {
+        beginHandoffFade()
+      } else {
+        startCompositorAnimation()
+      }
+    }, PRESENTATION_WATCHDOG_INTERVAL_MS)
+    const accessibilityInterval = window.setInterval(drive, Math.max(100, accessibilityUpdateMs))
 
     return () => {
       driveRef.current = null
-      window.clearInterval(interval)
+      window.clearInterval(accessibilityInterval)
+      window.clearInterval(presentationWatchdogInterval)
       clearPendingStageRetarget()
       if (frameId !== null) window.cancelAnimationFrame(frameId)
       if (compositorRefreshFrameId !== null) {
@@ -1091,6 +1125,27 @@ export function resolveLandrushIslandLoadingPresentedFrameDelta(
     Math.max(
       0,
       Number.isFinite(timestampMs - previousTimestampMs) ? timestampMs - previousTimestampMs : 0,
+    ),
+  )
+}
+
+export function shouldAdvanceLandrushIslandLoadingFrameFallback(
+  timestampMs: number,
+  previousTimestampMs: number,
+) {
+  const elapsedMs = timestampMs - previousTimestampMs
+  return Number.isFinite(elapsedMs) && elapsedMs >= PRESENTATION_WATCHDOG_STALL_MS
+}
+
+export function resolveLandrushIslandLoadingCompositorElapsedDelta(
+  currentTimeMs: number,
+  previousTimeMs: number,
+) {
+  return Math.min(
+    LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+    Math.max(
+      0,
+      Number.isFinite(currentTimeMs - previousTimeMs) ? currentTimeMs - previousTimeMs : 0,
     ),
   )
 }

@@ -118,7 +118,10 @@ export function createLandrushIslandLoadingProgressController(
 
   return {
     adoptRenderedProgress(value) {
-      state.displayedProgress = clampProgress(value, state.displayedProgress)
+      state.displayedProgress = Math.max(
+        state.displayedProgress,
+        clampProgress(value, state.displayedProgress),
+      )
       state.stageCeiling = Math.max(state.stageCeiling, state.displayedProgress)
       return getSnapshot()
     },

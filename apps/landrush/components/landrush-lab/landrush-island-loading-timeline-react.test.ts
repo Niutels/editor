@@ -14,7 +14,9 @@ import {
   createLandrushIslandLoadingProgressPresentation,
   createLandrushIslandLoadingRetargetKeyframes,
   createLandrushIslandLoadingVisualPreview,
+  LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
   resolveDisplayedLoadingProgress,
+  resolveLandrushIslandLoadingCompositorElapsedDelta,
   resolveLandrushIslandLoadingCompositorSampleInterval,
   resolveLandrushIslandLoadingPresentedFrameDelta,
   resolveLandrushIslandLoadingReducedMotion,
@@ -22,6 +24,7 @@ import {
   retargetLandrushIslandLoadingAnimationsWhileRunning,
   retargetLandrushIslandLoadingPercentPreview,
   retargetLandrushIslandLoadingPreview,
+  shouldAdvanceLandrushIslandLoadingFrameFallback,
   shouldReconcileLandrushIslandLoadingPreview,
 } from './landrush-island-loading-timeline-react'
 
@@ -232,6 +235,47 @@ describe('Landrush island loading presentation handoff', () => {
       3,
     )
     expect(resolveLandrushIslandLoadingPresentedFrameDelta(100, 120)).toBe(0)
+    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(9_000, 1_000)).toBe(
+      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+    )
+    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(1_016.667, 1_000)).toBeCloseTo(
+      16.667,
+      3,
+    )
+    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(100, 120)).toBe(0)
+    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(99.999, 0)).toBe(false)
+    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(100, 0)).toBe(true)
+    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(100, 120)).toBe(false)
+  })
+
+  test('holds a short compositor lease instead of banking hidden progress through a stall', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.165_092,
+      initialVelocityPerSecond: LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+    })
+    controller.setConfirmedProgress(0.8, {
+      ceiling: 0.984,
+      estimatedDurationMs: 8_000,
+    })
+    const segment = createLandrushIslandLoadingVisualPreview(
+      controller,
+      0,
+      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+    )
+    const keyframes = createLandrushIslandLoadingRetargetKeyframes(segment, 5_935.534)
+    const maximumLeaseProgress =
+      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND *
+      (LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS / 1_000)
+
+    expect(segment.to - segment.from).toBeLessThanOrEqual(maximumLeaseProgress + 0.000_001)
+    expect(keyframes.at(-1)?.offset).toBe(1)
+    expect(keyframes.at(-2)?.progress).toBeCloseTo(segment.to, 12)
+    expect(keyframes.at(-2)?.offset).toBeCloseTo(
+      (5_935.534 + LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS) /
+        LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+      12,
+    )
+    expect(keyframes.at(-1)?.progress).toBeCloseTo(segment.to, 12)
   })
 
   test('does not reinterpret a pending compositor clock as time zero', () => {

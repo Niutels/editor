@@ -86,7 +86,7 @@ describe('Landrush island loading progress controller', () => {
     expect(controller.getSnapshot().displayedProgress).toBe(reconciled)
   })
 
-  test('adopts the rendered position without changing its motion derivatives', () => {
+  test('adopts only a forward rendered position without changing its motion derivatives', () => {
     const controller = createLandrushIslandLoadingProgressController({
       initialProgress: 0.3,
       initialVelocityPerSecond: 0.02,
@@ -95,10 +95,13 @@ describe('Landrush island loading progress controller', () => {
     controller.step(500)
     const before = controller.getSnapshot()
 
-    controller.adoptRenderedProgress(0.3)
+    controller.adoptRenderedProgress(0.2)
+    expect(controller.getSnapshot().displayedProgress).toBe(before.displayedProgress)
+
+    controller.adoptRenderedProgress(0.5)
     const adopted = controller.getSnapshot()
 
-    expect(adopted.displayedProgress).toBe(0.3)
+    expect(adopted.displayedProgress).toBe(0.5)
     expect(adopted.velocityPerSecond).toBe(before.velocityPerSecond)
     expect(adopted.accelerationPerSecondSquared).toBe(before.accelerationPerSecondSquared)
   })
