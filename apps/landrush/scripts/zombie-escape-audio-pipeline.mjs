@@ -61,6 +61,7 @@ const SHOT_WEAPON_IDS = new Set([
 ])
 const MOVEMENT_KINDS = new Set(['jump'])
 const PRESENCE_KINDS = new Set(['zombie-vocalization'])
+const ZOMBIE_VARIANT_EVENT_KINDS = new Set(['enemy-hit', 'enemy-killed'])
 
 export async function readZombieEscapeAudioContract(
   catalogPath = DEFAULT_AUDIO_CATALOG_PATH,
@@ -78,7 +79,7 @@ export async function readZombieEscapeAudioContract(
 
 export function validateZombieEscapeAudioCatalog(catalog) {
   requireRecord(catalog, 'catalog')
-  if (catalog.schemaVersion !== 3) throw new Error('catalog.schemaVersion must be 3')
+  if (catalog.schemaVersion !== 4) throw new Error('catalog.schemaVersion must be 4')
   requireNonEmptyString(catalog.catalogVersion, 'catalog.catalogVersion')
   if (catalog.modelId !== 'eleven_text_to_sound_v2') {
     throw new Error('catalog.modelId must be eleven_text_to_sound_v2')
@@ -138,6 +139,10 @@ export function validateZombieEscapeAudioCatalog(catalog) {
     if (!Array.isArray(cue.files) || cue.files.length === 0) {
       throw new Error(`${cueLabel}.files must be a non-empty array`)
     }
+    const requiresZombieVariants = ZOMBIE_VARIANT_EVENT_KINDS.has(cue.eventKind)
+    const variantPrompts = requiresZombieVariants
+      ? requireVariantPrompts(cue.variantPrompts, cue.files.length, cueLabel)
+      : null
 
     for (const [variantIndex, publicPath] of cue.files.entries()) {
       requireNonEmptyString(publicPath, `${cueLabel}.files[${variantIndex}]`)
@@ -153,7 +158,7 @@ export function validateZombieEscapeAudioCatalog(catalog) {
       publicPaths.add(publicPath)
       const masteringProfile = requireMasteringProfile(
         cue.masteringProfile,
-        cue.eventKind === 'shot-fired',
+        cue.eventKind === 'shot-fired' || requiresZombieVariants,
         cueLabel,
       )
       assets.push({
@@ -161,7 +166,7 @@ export function validateZombieEscapeAudioCatalog(catalog) {
         durationSeconds: cue.durationSeconds,
         kind: 'event',
         masteringProfile,
-        prompt: cue.prompt,
+        prompt: variantPrompts?.[variantIndex] ?? cue.prompt,
         promptInfluence: cue.promptInfluence,
         publicPath,
         variantIndex,
@@ -274,6 +279,11 @@ export function validateZombieEscapeAudioCatalog(catalog) {
     if (!Array.isArray(cue.files) || cue.files.length !== 3) {
       throw new Error(`${cueLabel}.files must contain exactly three variants`)
     }
+    const variantPrompts = requireVariantPrompts(
+      cue.variantPrompts,
+      cue.files.length,
+      cueLabel,
+    )
     validatePresencePlayback(cue.playback, `${cueLabel}.playback`)
     validatePresenceSchedule(cue.schedule, `${cueLabel}.schedule`)
     for (const [variantIndex, publicPath] of cue.files.entries()) {
@@ -292,8 +302,8 @@ export function validateZombieEscapeAudioCatalog(catalog) {
         cueId: cue.id,
         durationSeconds: cue.durationSeconds,
         kind: 'presence',
-        masteringProfile: requireMasteringProfile(cue.masteringProfile, false, cueLabel),
-        prompt: cue.prompt,
+        masteringProfile: requireMasteringProfile(cue.masteringProfile, true, cueLabel),
+        prompt: variantPrompts[variantIndex],
         promptInfluence: cue.promptInfluence,
         publicPath,
         variantIndex,
@@ -711,6 +721,29 @@ function requireMasteringProfile(value, required, label) {
     throw new Error(`${label}.masteringProfile is only valid for mastered one-shot cues`)
   }
   return null
+}
+
+function requireVariantPrompts(value, fileCount, label) {
+  if (fileCount !== 3) throw new Error(`${label}.files must contain exactly three variants`)
+  if (!Array.isArray(value) || value.length !== fileCount) {
+    throw new Error(`${label}.variantPrompts must match its three files`)
+  }
+  const normalized = new Set()
+  return value.map((prompt, index) => {
+    requireNonEmptyString(prompt, `${label}.variantPrompts[${index}]`)
+    if (prompt.length > 450) {
+      throw new Error(`${label}.variantPrompts[${index}] must be at most 450 characters`)
+    }
+    const normalizedPrompt = prompt.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
+    if (normalizedPrompt.length === 0) {
+      throw new Error(`${label}.variantPrompts[${index}] must contain text`)
+    }
+    if (normalized.has(normalizedPrompt)) {
+      throw new Error(`${label}.variantPrompts must be unique after normalization`)
+    }
+    normalized.add(normalizedPrompt)
+    return prompt
+  })
 }
 
 function validatePresencePlayback(value, label) {

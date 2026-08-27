@@ -6,9 +6,11 @@ import {
   createZombieEscapePresenceAudioSchedule,
   resetZombieEscapePresenceAudioSchedule,
   resolveZombieEscapeAudioEventCursor,
+  resolveZombieEscapeAudioListenerTransform,
   resolveZombieEscapeAudioSpatialMix,
   resolveZombieEscapePresenceAudioSpatialMix,
   resolveZombieEscapePresenceScheduleDelay,
+  resolveZombieEscapePresenceVariation,
   selectZombieEscapePresenceAudioCandidate,
   shouldPlayZombieEscapePresenceAudio,
   type ZombieEscapeAudioSpatialMix,
@@ -29,10 +31,17 @@ describe('Zombie Escape audio readiness', () => {
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE.files[0],
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE.playback.maxVoices,
       loadState,
+      ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE.playback,
     )
 
     expect(options.src).toEqual([ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE.files[0]])
     expect(options.pool).toBe(ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE.playback.maxVoices)
+    expect(options.distanceModel).toBe('inverse')
+    expect(options.panningModel).toBe('HRTF')
+    expect(options.refDistance).toBe(
+      ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE.playback.referenceDistance,
+    )
+    expect(options.rolloffFactor).toBe(0)
     expect(loadState.failed).toBe(false)
     options.onloaderror()
     expect(loadState.failed).toBe(true)
@@ -40,7 +49,7 @@ describe('Zombie Escape audio readiness', () => {
 })
 
 describe('Zombie Escape spatial audio mix', () => {
-  test('pans in camera-right space and fades smoothly to the bounded distance', () => {
+  test('pans in camera-right space with audible inverse-distance rolloff', () => {
     const output: ZombieEscapeAudioSpatialMix = { gain: 0, pan: 0 }
 
     expect(resolveZombieEscapeAudioSpatialMix(4, 0, 0, 1, 0, 0, 4, 20, output)).toBe(output)
@@ -48,13 +57,31 @@ describe('Zombie Escape spatial audio mix', () => {
 
     resolveZombieEscapeAudioSpatialMix(-12, 0, 0, 1, 0, 0, 4, 20, output)
     expect(output.pan).toBe(-1)
-    expect(output.gain).toBeCloseTo(0.5, 6)
+    expect(output.gain).toBeCloseTo(0.454_545, 6)
+
+    resolveZombieEscapeAudioSpatialMix(18, 0, 0, 1, 0, 0, 4, 20, output)
+    expect(output.gain).toBeCloseTo(0.161_29, 5)
 
     resolveZombieEscapeAudioSpatialMix(20, 0, 0, 1, 0, 0, 4, 20, output)
     expect(output).toEqual({ gain: 0, pan: 0 })
   })
 
-  test('uses player-relative distance and horizontal camera-right panning for presence', () => {
+  test('anchors hearing distance at the player while retaining camera orientation', () => {
+    const source = createPresenceSource(1)
+    source.player.x = 2
+    source.player.y = 1
+    source.player.z = -3
+    const cameraElements = [1, 0, 0, 0, 0, 0.8, -0.6, 0, 0, 0.6, 0.8, 0, 18, 14, 18, 1]
+    const output = Array.from({ length: 16 }, () => 0)
+
+    expect(
+      resolveZombieEscapeAudioListenerTransform(source, 100, 4, 200, cameraElements, output),
+    ).toBe(output)
+    expect(output.slice(0, 12)).toEqual(cameraElements.slice(0, 12))
+    expect(output.slice(12, 15)).toEqual([102, 5, 197])
+  })
+
+  test('uses listener-relative distance and horizontal camera-right panning for presence', () => {
     const output: ZombieEscapeAudioSpatialMix = { gain: 0, pan: 0 }
 
     resolveZombieEscapePresenceAudioSpatialMix(8, 0, 0, 1, 0, 4, 20, output)
@@ -167,6 +194,9 @@ describe('Zombie Escape presence audio schedule', () => {
         schedule,
         source,
         ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+        source.player.x,
+        source.player.y,
+        source.player.z,
         owners,
         ownerGenerations,
       ),
@@ -179,6 +209,9 @@ describe('Zombie Escape presence audio schedule', () => {
       schedule,
       source,
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      source.player.x,
+      source.player.y,
+      source.player.z,
       owners,
       ownerGenerations,
     )
@@ -200,6 +233,9 @@ describe('Zombie Escape presence audio schedule', () => {
         schedule,
         source,
         ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+        source.player.x,
+        source.player.y,
+        source.player.z,
         owners,
         ownerGenerations,
       ),
@@ -215,6 +251,9 @@ describe('Zombie Escape presence audio schedule', () => {
       schedule,
       source,
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      source.player.x,
+      source.player.y,
+      source.player.z,
       owners,
       ownerGenerations,
     )
@@ -226,6 +265,9 @@ describe('Zombie Escape presence audio schedule', () => {
         schedule,
         source,
         ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+        source.player.x,
+        source.player.y,
+        source.player.z,
         owners,
         ownerGenerations,
       ),
@@ -233,6 +275,39 @@ describe('Zombie Escape presence audio schedule', () => {
     expect(schedule.observedGeneration[0]).toBe(99)
     expect(schedule.utteranceOrdinal[0]).toBe(0)
     expect(schedule.nextEligibleAt[0]).toBeGreaterThanOrEqual(20.35)
+  })
+
+  test('admits presence using the supplied gameplay listener position', () => {
+    const source = createPresenceSource(1)
+    const schedule = createZombieEscapePresenceAudioSchedule(1)
+    const owners = new Int16Array(1)
+    owners.fill(-1)
+    const ownerGenerations = new Uint32Array(1)
+    source.player.x = 100
+
+    selectZombieEscapePresenceAudioCandidate(
+      schedule,
+      source,
+      ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      0,
+      0,
+      0,
+      owners,
+      ownerGenerations,
+    )
+    expect(schedule.audible[0]).toBe(1)
+
+    selectZombieEscapePresenceAudioCandidate(
+      schedule,
+      source,
+      ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      100,
+      0,
+      0,
+      owners,
+      ownerGenerations,
+    )
+    expect(schedule.audible[0]).toBe(0)
   })
 
   test('uses hysteresis at range boundaries and clears dead zombies', () => {
@@ -246,6 +321,9 @@ describe('Zombie Escape presence audio schedule', () => {
       schedule,
       source,
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      source.player.x,
+      source.player.y,
+      source.player.z,
       owners,
       ownerGenerations,
     )
@@ -256,6 +334,9 @@ describe('Zombie Escape presence audio schedule', () => {
       schedule,
       source,
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      source.player.x,
+      source.player.y,
+      source.player.z,
       owners,
       ownerGenerations,
     )
@@ -266,6 +347,9 @@ describe('Zombie Escape presence audio schedule', () => {
       schedule,
       source,
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      source.player.x,
+      source.player.y,
+      source.player.z,
       owners,
       ownerGenerations,
     )
@@ -276,6 +360,9 @@ describe('Zombie Escape presence audio schedule', () => {
       schedule,
       source,
       ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+      source.player.x,
+      source.player.y,
+      source.player.z,
       owners,
       ownerGenerations,
     )
@@ -293,5 +380,17 @@ describe('Zombie Escape presence audio schedule', () => {
     expect(resolveZombieEscapePresenceScheduleDelay(91_337, 3, 18, 2, 41, range)).not.toBe(first)
     expect(first).toBeGreaterThanOrEqual(range[0])
     expect(first).toBeLessThanOrEqual(range[1])
+  })
+
+  test('cycles each zombie through all three presence variants without immediate repeats', () => {
+    const sequence = Array.from({ length: 6 }, (_, ordinal) =>
+      resolveZombieEscapePresenceVariation(91_337, 3, 17, ordinal, 3),
+    )
+
+    expect(new Set(sequence.slice(0, 3))).toEqual(new Set([0, 1, 2]))
+    expect(sequence.slice(3)).toEqual(sequence.slice(0, 3))
+    for (let index = 1; index < sequence.length; index += 1) {
+      expect(sequence[index]).not.toBe(sequence[index - 1])
+    }
   })
 })

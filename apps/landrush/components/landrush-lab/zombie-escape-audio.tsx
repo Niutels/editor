@@ -105,6 +105,7 @@ const PRESENCE_INTERVAL_SALT = 0x9e37_79b9
 const PRESENCE_RATE_SALT = 0x85eb_ca6b
 const PRESENCE_VARIATION_SALT = 0xc2b2_ae35
 const PRESENCE_MIX_EPSILON = 0.002
+const SPATIAL_ROLLOFF_FACTOR = 0.6
 
 export function resumeZombieEscapeAudioContext() {
   if (Howler.ctx?.state !== 'suspended') return Promise.resolve()
@@ -127,8 +128,18 @@ export function createZombieEscapeAudioSoundOptions(
   source: string,
   maxVoices: number,
   loadState: ZombieEscapeAudioLoadState,
+  playback?: ZombieEscapeAudioCue['playback'],
 ) {
   return {
+    ...(playback?.spatial
+      ? {
+          distanceModel: 'inverse' as const,
+          maxDistance: playback.maxDistance ?? 10_000,
+          panningModel: 'HRTF' as const,
+          refDistance: playback.referenceDistance ?? 1,
+          rolloffFactor: 0,
+        }
+      : {}),
     onloaderror: () => {
       loadState.failed = true
     },
@@ -160,6 +171,7 @@ export function ZombieEscapeAudio({
   const runtimeRef = useRef<ZombieEscapeAudioRuntime | null>(null)
   const retryAtRef = useRef(0)
   const cursorRef = useRef(simulationRef.current.audioEvents.writeSequence)
+  const listenerTransformRef = useRef(Array.from({ length: 16 }, () => 0))
   const spatialMixRef = useRef<ZombieEscapeAudioSpatialMix>({ gain: 1, pan: 0 })
 
   useEffect(() => {
@@ -242,6 +254,15 @@ export function ZombieEscapeAudio({
       const firstSequence = Math.max(firstAvailableSequence, cursorRef.current + 1)
       const volumeScale = (masterVolume / 100) * (sfxVolume / 100)
       const cameraElements = camera.matrixWorld.elements
+      const listenerElements = resolveZombieEscapeAudioListenerTransform(
+        source,
+        originX,
+        originY,
+        originZ,
+        cameraElements,
+        listenerTransformRef.current,
+      )
+      updateZombieEscapeAudioListener(listenerElements)
       for (let sequence = firstSequence; sequence <= latestSequence; sequence += 1) {
         const slot = (sequence - 1) % events.capacity
         if (events.sequence[slot] !== sequence) continue
@@ -255,7 +276,7 @@ export function ZombieEscapeAudio({
           originX,
           originY,
           originZ,
-          cameraElements,
+          listenerElements,
           spatialMixRef.current,
         )
         cursorRef.current = sequence
@@ -269,13 +290,16 @@ export function ZombieEscapeAudio({
           runtime.presence,
           source,
           volumeScale,
-          cameraElements,
+          originX,
+          originY,
+          originZ,
+          listenerElements,
           spatialMixRef.current,
         )
       } else {
         stopZombieEscapePresenceAudioRuntime(runtime.presence)
       }
-    } catch {
+    } catch (error) {
       cursorRef.current = resolveZombieEscapeAudioEventCursor(
         cursorRef.current,
         latestSequence,
@@ -284,6 +308,7 @@ export function ZombieEscapeAudio({
       runtimeRef.current = null
       if (runtime) disposeZombieEscapeAudioRuntime(runtime)
       retryAtRef.current = now + AUDIO_FAILURE_BACKOFF_MS
+      console.warn('[zombie-escape] Audio runtime failed; retrying.', error)
     }
   }, framePriority)
 
@@ -325,6 +350,25 @@ export function resolveZombieEscapeAudioSpatialMix(
     ),
   )
   output.gain = resolveZombieEscapeDistanceGain(distance, referenceDistance, maximumDistance)
+  return output
+}
+
+export function resolveZombieEscapeAudioListenerTransform(
+  source: ZombieEscapeAudioEventSource,
+  originX: number,
+  originY: number,
+  originZ: number,
+  cameraElements: readonly number[],
+  output: number[],
+) {
+  for (let index = 0; index < 16; index += 1) {
+    output[index] = cameraElements[index] ?? (index % 5 === 0 ? 1 : 0)
+  }
+  if (isZombieEscapePresenceAudioSource(source)) {
+    output[12] = source.player.x + originX
+    output[13] = source.player.y + originY
+    output[14] = source.player.z + originZ
+  }
   return output
 }
 
@@ -390,6 +434,9 @@ export function selectZombieEscapePresenceAudioCandidate(
   schedule: ZombieEscapePresenceAudioSchedule,
   source: ZombieEscapePresenceAudioSource,
   cue: ZombieEscapePresenceAudioCue,
+  listenerX: number,
+  listenerY: number,
+  listenerZ: number,
   voiceOwnerSlots: Int16Array,
   voiceOwnerGenerations: Uint32Array,
 ) {
@@ -409,9 +456,9 @@ export function selectZombieEscapePresenceAudioCandidate(
       continue
     }
     const generation = zombies.pool.generation[slot]!
-    const offsetX = zombies.x[slot]! - source.player.x
-    const offsetY = zombies.y[slot]! - source.player.y
-    const offsetZ = zombies.z[slot]! - source.player.z
+    const offsetX = zombies.x[slot]! - listenerX
+    const offsetY = zombies.y[slot]! - listenerY
+    const offsetZ = zombies.z[slot]! - listenerZ
     const distanceSquared = offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ
 
     if (schedule.observedGeneration[slot] !== generation) {
@@ -513,18 +560,49 @@ export function resolveZombieEscapePresenceScheduleDelay(
   return range[0] + (range[1] - range[0]) * randomUnit
 }
 
+export function resolveZombieEscapePresenceVariation(
+  seed: number,
+  slot: number,
+  generation: number,
+  ordinal: number,
+  variationCount: number,
+) {
+  const count = Math.max(1, Math.trunc(variationCount))
+  const startingVariation = Math.floor(
+    resolveZombieEscapePresenceHash(seed, slot, generation, 0, PRESENCE_VARIATION_SALT) * count,
+  )
+  return (startingVariation + ordinal) % count
+}
+
 function resolveZombieEscapeDistanceGain(
   distance: number,
   referenceDistance: number,
   maximumDistance: number,
 ) {
   if (distance <= referenceDistance) return 1
-  const progress = Math.min(
-    1,
-    (distance - referenceDistance) / Math.max(0.000_001, maximumDistance - referenceDistance),
+  if (distance >= maximumDistance) return 0
+  const inverseGain =
+    referenceDistance /
+    (referenceDistance + SPATIAL_ROLLOFF_FACTOR * (distance - referenceDistance))
+  const edgeFadeDistance = Math.min(6, (maximumDistance - referenceDistance) * 0.25)
+  const edgeFadeStart = maximumDistance - edgeFadeDistance
+  if (distance <= edgeFadeStart) return inverseGain
+  const edgeProgress = (distance - edgeFadeStart) / Math.max(0.000_001, edgeFadeDistance)
+  const smoothEdgeProgress = edgeProgress * edgeProgress * (3 - 2 * edgeProgress)
+  return inverseGain * (1 - smoothEdgeProgress)
+}
+
+function updateZombieEscapeAudioListener(listenerElements: readonly number[]) {
+  if (!Howler.usingWebAudio) return
+  Howler.pos(listenerElements[12] ?? 0, listenerElements[13] ?? 0, listenerElements[14] ?? 0)
+  Howler.orientation(
+    -(listenerElements[8] ?? 0),
+    -(listenerElements[9] ?? 0),
+    -(listenerElements[10] ?? 1),
+    listenerElements[4] ?? 0,
+    listenerElements[5] ?? 1,
+    listenerElements[6] ?? 0,
   )
-  const smoothProgress = progress * progress * (3 - 2 * progress)
-  return 1 - smoothProgress
 }
 
 function createZombieEscapeAudioRuntime(presenceCapacity: number): ZombieEscapeAudioRuntime {
@@ -550,7 +628,12 @@ function createZombieEscapeAudioRuntime(presenceCapacity: number): ZombieEscapeA
   for (const cue of ZOMBIE_ESCAPE_AUDIO_CUES) {
     const cueSounds = cue.files.map((source) => {
       const sound = new Howl(
-        createZombieEscapeAudioSoundOptions(source, cue.playback.maxVoices, loadState),
+        createZombieEscapeAudioSoundOptions(
+          source,
+          cue.playback.maxVoices,
+          loadState,
+          cue.playback,
+        ),
       )
       sounds.push(sound)
       return sound
@@ -586,7 +669,7 @@ function createZombieEscapePresenceAudioRuntime(
 ) {
   const sounds = cue.files.map((source) => {
     const sound = new Howl(
-      createZombieEscapeAudioSoundOptions(source, cue.playback.maxVoices, loadState),
+      createZombieEscapeAudioSoundOptions(source, cue.playback.maxVoices, loadState, cue.playback),
     )
     allSounds.push(sound)
     return sound
@@ -620,7 +703,7 @@ function playZombieEscapeAudioEvent(
   originX: number,
   originY: number,
   originZ: number,
-  cameraElements: readonly number[],
+  listenerElements: readonly number[],
   spatialMix: ZombieEscapeAudioSpatialMix,
 ) {
   const kind = events.kind[eventSlot]!
@@ -639,14 +722,17 @@ function playZombieEscapeAudioEvent(
   let spatialGain = 1
   let pan = 0
   const playback = cueRuntime.cue.playback
+  const sourceX = events.x[eventSlot]! + originX
+  const sourceY = events.y[eventSlot]! + originY
+  const sourceZ = events.z[eventSlot]! + originZ
   if (playback.spatial) {
     resolveZombieEscapeAudioSpatialMix(
-      events.x[eventSlot]! + originX - (cameraElements[12] ?? 0),
-      events.y[eventSlot]! + originY - (cameraElements[13] ?? 0),
-      events.z[eventSlot]! + originZ - (cameraElements[14] ?? 0),
-      cameraElements[0] ?? 1,
-      cameraElements[1] ?? 0,
-      cameraElements[2] ?? 0,
+      sourceX - (listenerElements[12] ?? 0),
+      sourceY - (listenerElements[13] ?? 0),
+      sourceZ - (listenerElements[14] ?? 0),
+      listenerElements[0] ?? 1,
+      listenerElements[1] ?? 0,
+      listenerElements[2] ?? 0,
       playback.referenceDistance ?? 1,
       playback.maxDistance ?? 1,
       spatialMix,
@@ -670,7 +756,10 @@ function playZombieEscapeAudioEvent(
   const randomUnit = ((Math.imul(sequence, 1_664_525) + 1_013_904_223) >>> 0) * HASH_SCALE
   sound.rate(minimumRate + (maximumRate - minimumRate) * randomUnit, id)
   sound.volume(playback.volume * volumeScale * spatialGain, id)
-  if (playback.spatial) sound.stereo(pan, id)
+  if (playback.spatial) {
+    if (Howler.usingWebAudio) sound.pos(sourceX, sourceY, sourceZ, id)
+    else sound.stereo(pan, id)
+  }
   if (Howler.ctx?.state === 'suspended') void Howler.ctx.resume().catch(() => {})
 }
 
@@ -678,7 +767,10 @@ function updateZombieEscapePresenceAudio(
   runtime: ZombieEscapePresenceAudioRuntime,
   source: ZombieEscapePresenceAudioSource,
   volumeScale: number,
-  cameraElements: readonly number[],
+  originX: number,
+  originY: number,
+  originZ: number,
+  listenerElements: readonly number[],
   spatialMix: ZombieEscapeAudioSpatialMix,
 ) {
   if (runtime.schedule.audible.length !== source.zombies.pool.capacity) {
@@ -690,7 +782,10 @@ function updateZombieEscapePresenceAudio(
     runtime,
     source,
     volumeScale,
-    cameraElements,
+    originX,
+    originY,
+    originZ,
+    listenerElements,
     stopDistance,
     spatialMix,
   )
@@ -698,18 +793,34 @@ function updateZombieEscapePresenceAudio(
     runtime.schedule,
     source,
     runtime.cue,
+    (listenerElements[12] ?? 0) - originX,
+    (listenerElements[13] ?? 0) - originY,
+    (listenerElements[14] ?? 0) - originZ,
     runtime.voices.ownerSlots,
     runtime.voices.ownerGenerations,
   )
   if (slot < 0) return
-  playZombieEscapePresenceAudio(runtime, source, slot, volumeScale, cameraElements, spatialMix)
+  playZombieEscapePresenceAudio(
+    runtime,
+    source,
+    slot,
+    volumeScale,
+    originX,
+    originY,
+    originZ,
+    listenerElements,
+    spatialMix,
+  )
 }
 
 function updateZombieEscapePresenceAudioVoices(
   runtime: ZombieEscapePresenceAudioRuntime,
   source: ZombieEscapePresenceAudioSource,
   volumeScale: number,
-  cameraElements: readonly number[],
+  originX: number,
+  originY: number,
+  originZ: number,
+  listenerElements: readonly number[],
   stopDistance: number,
   spatialMix: ZombieEscapeAudioSpatialMix,
 ) {
@@ -734,9 +845,12 @@ function updateZombieEscapePresenceAudioVoices(
       clearZombieEscapePresenceVoice(voices, voice, true)
       continue
     }
-    const offsetX = source.zombies.x[slot]! - source.player.x
-    const offsetY = source.zombies.y[slot]! - source.player.y
-    const offsetZ = source.zombies.z[slot]! - source.player.z
+    const sourceX = source.zombies.x[slot]! + originX
+    const sourceY = source.zombies.y[slot]! + originY
+    const sourceZ = source.zombies.z[slot]! + originZ
+    const offsetX = sourceX - (listenerElements[12] ?? 0)
+    const offsetY = sourceY - (listenerElements[13] ?? 0)
+    const offsetZ = sourceZ - (listenerElements[14] ?? 0)
     if (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ >= stopDistanceSquared) {
       clearZombieEscapePresenceVoice(voices, voice, true)
       continue
@@ -745,8 +859,8 @@ function updateZombieEscapePresenceAudioVoices(
       offsetX,
       offsetY,
       offsetZ,
-      cameraElements[0] ?? 1,
-      cameraElements[2] ?? 0,
+      listenerElements[0] ?? 1,
+      listenerElements[2] ?? 0,
       runtime.cue.playback.referenceDistance,
       stopDistance,
       spatialMix,
@@ -756,7 +870,9 @@ function updateZombieEscapePresenceAudioVoices(
       sound.volume(volume, id)
       voices.volumes[voice] = volume
     }
-    if (Math.abs(spatialMix.pan - voices.pans[voice]!) > PRESENCE_MIX_EPSILON) {
+    if (Howler.usingWebAudio) {
+      sound.pos(sourceX, sourceY, sourceZ, id)
+    } else if (Math.abs(spatialMix.pan - voices.pans[voice]!) > PRESENCE_MIX_EPSILON) {
       sound.stereo(spatialMix.pan, id)
       voices.pans[voice] = spatialMix.pan
     }
@@ -769,39 +885,44 @@ function playZombieEscapePresenceAudio(
   source: ZombieEscapePresenceAudioSource,
   slot: number,
   volumeScale: number,
-  cameraElements: readonly number[],
+  originX: number,
+  originY: number,
+  originZ: number,
+  listenerElements: readonly number[],
   spatialMix: ZombieEscapeAudioSpatialMix,
 ) {
   const generation = source.zombies.pool.generation[slot]!
   const ordinal = runtime.schedule.utteranceOrdinal[slot]!
-  const variation = Math.floor(
-    resolveZombieEscapePresenceHash(
-      source.seed,
-      slot,
-      generation,
-      ordinal,
-      PRESENCE_VARIATION_SALT,
-    ) * runtime.sounds.length,
+  const variation = resolveZombieEscapePresenceVariation(
+    source.seed,
+    slot,
+    generation,
+    ordinal,
+    runtime.sounds.length,
   )
-  const sound = runtime.sounds[Math.min(runtime.sounds.length - 1, variation)]
+  const sound = runtime.sounds[variation]
   if (sound?.state() !== 'loaded') throw new Error('Zombie presence audio is not loaded')
-  const voice = acquireZombieEscapePresenceVoice(runtime.voices)
-  clearZombieEscapePresenceVoice(runtime.voices, voice, true)
-  const id = sound.play()
-  const offsetX = source.zombies.x[slot]! - source.player.x
-  const offsetY = source.zombies.y[slot]! - source.player.y
-  const offsetZ = source.zombies.z[slot]! - source.player.z
+  const sourceX = source.zombies.x[slot]! + originX
+  const sourceY = source.zombies.y[slot]! + originY
+  const sourceZ = source.zombies.z[slot]! + originZ
+  const offsetX = sourceX - (listenerElements[12] ?? 0)
+  const offsetY = sourceY - (listenerElements[13] ?? 0)
+  const offsetZ = sourceZ - (listenerElements[14] ?? 0)
   const stopDistance = runtime.cue.playback.maxDistance + runtime.cue.schedule.rangeHysteresisMeters
   resolveZombieEscapePresenceAudioSpatialMix(
     offsetX,
     offsetY,
     offsetZ,
-    cameraElements[0] ?? 1,
-    cameraElements[2] ?? 0,
+    listenerElements[0] ?? 1,
+    listenerElements[2] ?? 0,
     runtime.cue.playback.referenceDistance,
     stopDistance,
     spatialMix,
   )
+  if (spatialMix.gain <= 0) return
+  const voice = acquireZombieEscapePresenceVoice(runtime.voices)
+  clearZombieEscapePresenceVoice(runtime.voices, voice, true)
+  const id = sound.play()
   const rateUnit = resolveZombieEscapePresenceHash(
     source.seed,
     slot,
@@ -813,7 +934,8 @@ function playZombieEscapePresenceAudio(
   const volume = runtime.cue.playback.volume * volumeScale * spatialMix.gain
   sound.rate(minimumRate + (maximumRate - minimumRate) * rateUnit, id)
   sound.volume(volume, id)
-  sound.stereo(spatialMix.pan, id)
+  if (Howler.usingWebAudio) sound.pos(sourceX, sourceY, sourceZ, id)
+  else sound.stereo(spatialMix.pan, id)
   runtime.voices.ids[voice] = id
   runtime.voices.ownerGenerations[voice] = generation
   runtime.voices.ownerSlots[voice] = slot

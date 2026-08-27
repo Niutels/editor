@@ -90,6 +90,9 @@ export async function auditZombieEscapeAudio({
   for (const diskPath of diskPublicPaths) {
     if (!expectedPaths.has(diskPath)) failures.push(`unexpected audio file ${diskPath}`)
   }
+  failures.push(
+    ...findDuplicateZombieEscapeAudioArtifactHashes(contract.assets, artifactRecords),
+  )
 
   for (const asset of contract.assets) {
     const label = asset.publicPath
@@ -182,6 +185,25 @@ export async function auditZombieEscapeAudio({
     failures.length === 0 ? 'ready' : 'invalid',
     artifactKeys.length,
   )
+}
+
+export function findDuplicateZombieEscapeAudioArtifactHashes(assets, artifactRecords) {
+  const failures = []
+  const firstPathByCueAndHash = new Map()
+  for (const asset of assets) {
+    const artifact = artifactRecords[asset.publicPath]
+    if (!isRecord(artifact) || !isSha256(artifact.sha256)) continue
+    const key = `${asset.cueId}\0${artifact.sha256}`
+    const firstPath = firstPathByCueAndHash.get(key)
+    if (firstPath) {
+      failures.push(
+        `${asset.publicPath}: sha256 duplicates ${firstPath} within cue ${asset.cueId}`,
+      )
+    } else {
+      firstPathByCueAndHash.set(key, asset.publicPath)
+    }
+  }
+  return failures
 }
 
 function validateArtifactMetadata(failures, artifact, asset) {

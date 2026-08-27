@@ -37,6 +37,7 @@ export type ZombieEscapeAudioCue = Readonly<{
   }>
   prompt: string
   promptInfluence: number
+  variantPrompts?: readonly [string, string, string]
   weaponId?: string
   weaponIndex: number
 }>
@@ -56,7 +57,7 @@ export type ZombieEscapePresenceAudioCue = Readonly<{
   durationSeconds: number
   files: readonly [string, string, string]
   id: string
-  masteringProfile: null
+  masteringProfile: ZombieEscapeAudioMasteringProfile
   playback: ZombieEscapeAudioCue['playback'] &
     Readonly<{
       maxDistance: number
@@ -71,6 +72,7 @@ export type ZombieEscapePresenceAudioCue = Readonly<{
     intervalSeconds: readonly [number, number]
     rangeHysteresisMeters: number
   }>
+  variantPrompts: readonly [string, string, string]
 }>
 
 export type ZombieEscapeAudioArtifactProvenance = Readonly<{
@@ -163,7 +165,7 @@ export function createZombieEscapeAudioCatalogState(
   rawProvenance: unknown,
 ): ZombieEscapeAudioCatalogState {
   const catalog = requireRecord(rawCatalog, 'audio catalog')
-  if (catalog.schemaVersion !== 3) throw new Error('Zombie Escape audio catalog schema must be 3')
+  if (catalog.schemaVersion !== 4) throw new Error('Zombie Escape audio catalog schema must be 4')
   const catalogVersion = requireString(catalog.catalogVersion, 'catalogVersion')
   const modelId = requireString(catalog.modelId, 'modelId')
   const outputFormat = requireString(catalog.outputFormat, 'outputFormat')
@@ -181,12 +183,16 @@ export function createZombieEscapeAudioCatalogState(
     if (ids.has(id)) throw new Error(`Duplicate Zombie Escape audio cue: ${id}`)
     ids.add(id)
     const eventKind = requireEventKind(cue.eventKind, id)
+    const requiresZombieVariants = eventKind === 'enemy-hit' || eventKind === 'enemy-killed'
     const masteringProfile = requireMasteringProfile(
       cue.masteringProfile,
-      eventKind === 'shot-fired',
+      eventKind === 'shot-fired' || requiresZombieVariants,
       id,
     )
     const files = requireFiles(cue.files, id, paths)
+    const variantPrompts = requiresZombieVariants
+      ? requireVariantPrompts(cue.variantPrompts, files.length, id)
+      : undefined
     const durationSeconds = requireFiniteNumber(cue.durationSeconds, `${id}.durationSeconds`)
     const promptInfluence = requireFiniteNumber(cue.promptInfluence, `${id}.promptInfluence`)
     if (durationSeconds < 0.5 || durationSeconds > 30) {
@@ -224,6 +230,7 @@ export function createZombieEscapeAudioCatalogState(
       playback,
       prompt,
       promptInfluence,
+      ...(variantPrompts ? { variantPrompts } : {}),
       ...(weaponId ? { weaponId } : {}),
       weaponIndex,
     } satisfies ZombieEscapeAudioCue
@@ -300,6 +307,7 @@ export function createZombieEscapeAudioCatalogState(
     }
     const files = requireFiles(cue.files, id, paths)
     if (files.length !== 3) throw new Error(`${id}.files must contain exactly three variants`)
+    const variantPrompts = requireVariantPrompts(cue.variantPrompts, files.length, id)
     const playback = requirePlayback(cue.playback, id)
     if (
       !playback.spatial ||
@@ -313,7 +321,7 @@ export function createZombieEscapeAudioCatalogState(
       durationSeconds,
       files: files as [string, string, string],
       id,
-      masteringProfile: requireMasteringProfile(cue.masteringProfile, false, id),
+      masteringProfile: requireMasteringProfile(cue.masteringProfile, true, id),
       playback: {
         ...playback,
         maxDistance: playback.maxDistance,
@@ -324,6 +332,7 @@ export function createZombieEscapeAudioCatalogState(
       prompt: requireString(cue.prompt, `${id}.prompt`),
       promptInfluence,
       schedule,
+      variantPrompts,
     } satisfies ZombieEscapePresenceAudioCue
   })
   if (presenceKinds.size !== 1) {
@@ -490,6 +499,38 @@ function requireFiles(value: unknown, cueId: string, paths: Set<string>) {
     paths.add(path)
     return path
   })
+}
+
+function requireVariantPrompts(
+  value: unknown,
+  fileCount: number,
+  cueId: string,
+): readonly [string, string, string] {
+  if (fileCount !== 3) throw new Error(`${cueId}.files must contain exactly three variants`)
+  if (!Array.isArray(value) || value.length !== fileCount) {
+    throw new Error(`${cueId}.variantPrompts must match its three files`)
+  }
+  const normalized = new Set<string>()
+  const prompts = value.map((entry, index) => {
+    const prompt = requireString(entry, `${cueId}.variantPrompts[${String(index)}]`)
+    if (prompt.length > 450) {
+      throw new Error(`${cueId}.variantPrompts[${String(index)}] must be at most 450 characters`)
+    }
+    const normalizedPrompt = normalizeVariantPrompt(prompt)
+    if (normalizedPrompt.length === 0) {
+      throw new Error(`${cueId}.variantPrompts[${String(index)}] must contain text`)
+    }
+    if (normalized.has(normalizedPrompt)) {
+      throw new Error(`${cueId}.variantPrompts must be unique after normalization`)
+    }
+    normalized.add(normalizedPrompt)
+    return prompt
+  })
+  return prompts as [string, string, string]
+}
+
+function normalizeVariantPrompt(value: string) {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
 function requirePlayback(value: unknown, cueId: string): ZombieEscapeAudioCue['playback'] {

@@ -47,6 +47,59 @@ describe('Zombie Escape audio catalog', () => {
     ])
   })
 
+  test('requires explicit mastered prompts for all three zombie sound families', () => {
+    expect(catalog.schemaVersion).toBe(4)
+    expect(catalog.catalogVersion).toBe('2026-08-26.1')
+    const rawZombieCues = [
+      catalog.cues.find((cue) => cue.id === 'enemy-hit')!,
+      catalog.cues.find((cue) => cue.id === 'enemy-death')!,
+      catalog.presenceCues.find((cue) => cue.id === 'enemy-presence')!,
+    ]
+    const runtimeZombieCues = [
+      ZOMBIE_ESCAPE_AUDIO_CATALOG.cues.find((cue) => cue.id === 'enemy-hit')!,
+      ZOMBIE_ESCAPE_AUDIO_CATALOG.cues.find((cue) => cue.id === 'enemy-death')!,
+      ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
+    ]
+
+    for (const [index, cue] of rawZombieCues.entries()) {
+      expect(cue.files).toHaveLength(3)
+      expect(cue.variantPrompts).toHaveLength(cue.files.length)
+      expect(cue.variantPrompts.every((prompt) => prompt.length <= 450)).toBe(true)
+      expect(
+        new Set(
+          cue.variantPrompts.map((prompt) =>
+            prompt.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase(),
+          ),
+        ).size,
+      ).toBe(3)
+      expect(cue.masteringProfile).toBe('one-shot-v1')
+      expect(cue.playback.referenceDistance).toBe(2.5)
+      expect(runtimeZombieCues[index]?.variantPrompts).toEqual(cue.variantPrompts)
+      expect(runtimeZombieCues[index]?.masteringProfile).toBe('one-shot-v1')
+    }
+  })
+
+  test('rejects missing, duplicate, and overlong zombie variant prompts', () => {
+    const missing = structuredClone(catalog)
+    missing.cues.find((cue) => cue.id === 'enemy-hit')!.variantPrompts.pop()
+    expect(() => createZombieEscapeAudioCatalogState(missing, {})).toThrow(
+      'variantPrompts must match its three files',
+    )
+
+    const duplicate = structuredClone(catalog)
+    const duplicateDeath = duplicate.cues.find((cue) => cue.id === 'enemy-death')!
+    duplicateDeath.variantPrompts[1] = `  ${duplicateDeath.variantPrompts[0]!.toUpperCase()}  `
+    expect(() => createZombieEscapeAudioCatalogState(duplicate, {})).toThrow(
+      'variantPrompts must be unique after normalization',
+    )
+
+    const overlong = structuredClone(catalog)
+    overlong.presenceCues[0]!.variantPrompts[2] = 'x'.repeat(451)
+    expect(() => createZombieEscapeAudioCatalogState(overlong, {})).toThrow(
+      'must be at most 450 characters',
+    )
+  })
+
   test('activates only when provenance covers every exact catalog artifact', () => {
     const artifacts = Object.fromEntries(
       [...catalog.cues, ...catalog.movementCues, ...catalog.presenceCues].flatMap((cue) =>
@@ -133,7 +186,11 @@ describe('Zombie Escape audio catalog', () => {
     const enemyHit = duplicate.cues.find((cue) => cue.eventKind === 'enemy-hit')!
     duplicate.cues.push({
       ...enemyHit,
-      files: ['/audios/sfx/zombie-escape/enemy/duplicate-hit-0.mp3'],
+      files: [
+        '/audios/sfx/zombie-escape/enemy/duplicate-hit-0.mp3',
+        '/audios/sfx/zombie-escape/enemy/duplicate-hit-1.mp3',
+        '/audios/sfx/zombie-escape/enemy/duplicate-hit-2.mp3',
+      ],
       id: 'enemy-hit-duplicate',
     })
     expect(() => createZombieEscapeAudioCatalogState(duplicate, {})).toThrow(

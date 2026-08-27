@@ -1,16 +1,47 @@
 import { describe, expect, test } from 'bun:test'
+import { PerspectiveCamera, Vector3 } from 'three'
 import {
   advanceRobotGamepadAudioPromptState,
   advanceRobotJumpAudioPlaybackState,
   createRobotJumpAudioPlaybackState,
   hasRobotGamepadAudioUnlockInput,
   isRobotJumpAudioCueConfigurationValid,
+  ROBOT_FOOTSTEP_BASE_VOLUME,
   ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS,
   type RobotAudioUnlockGamepad,
   type RobotJumpAudioBufferStatus,
   type RobotJumpAudioCue,
+  resolveRobotAudioListenerLocalPosition,
+  resolveRobotFootstepVolume,
   resolveRobotJumpAudioPlaybackDisposition,
 } from './robot-footstep-audio'
+
+describe('robot local footstep mix', () => {
+  test('keeps the listener at the player while inheriting camera orientation', () => {
+    const camera = new PerspectiveCamera()
+    camera.position.set(12, 14, 18)
+    camera.lookAt(2, 0, -3)
+    camera.updateMatrixWorld(true)
+    const playerPosition = new Vector3(2, 0, -3)
+    const localPosition = resolveRobotAudioListenerLocalPosition(
+      camera,
+      playerPosition,
+      new Vector3(),
+    )
+
+    expect(camera.localToWorld(localPosition.clone()).distanceTo(playerPosition)).toBeLessThan(
+      0.000_001,
+    )
+  })
+
+  test('keeps walking and running steps above an audible floor at default settings', () => {
+    const defaultVolumeScale = 0.7 * 0.5
+
+    expect(ROBOT_FOOTSTEP_BASE_VOLUME).toBe(0.24)
+    expect(resolveRobotFootstepVolume(defaultVolumeScale, 0, 0.86)).toBeGreaterThan(0.05)
+    expect(resolveRobotFootstepVolume(defaultVolumeScale, 1, 0.86)).toBeGreaterThan(0.07)
+  })
+})
 
 describe('robot jump audio playback lifecycle', () => {
   test('keeps the newest accepted jump pending through load and resume, then plays it once', () => {

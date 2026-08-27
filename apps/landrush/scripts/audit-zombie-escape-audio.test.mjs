@@ -5,13 +5,17 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import { promisify } from 'node:util'
-import { auditZombieEscapeAudio } from './audit-zombie-escape-audio.mjs'
+import {
+  auditZombieEscapeAudio,
+  findDuplicateZombieEscapeAudioArtifactHashes,
+} from './audit-zombie-escape-audio.mjs'
 import {
   DEFAULT_AUDIO_PROVENANCE_PATH,
   DEFAULT_PUBLIC_ROOT,
   inspectZombieEscapeAudioIntegrity,
   masterZombieEscapeOneShotAudio,
   readZombieEscapeAudioContract,
+  validateZombieEscapeAudioCatalog,
   validateZombieEscapeOneShotMastering,
   validateZombieEscapeOneShotVariantSpread,
 } from './zombie-escape-audio-pipeline.mjs'
@@ -19,23 +23,52 @@ import {
 const execFileAsync = promisify(execFile)
 const generatorPath = resolve(import.meta.dirname, 'generate-zombie-escape-audio.mjs')
 
-test('expands the dedicated zombie presence cue into exactly three pipeline assets', async () => {
+test('expands each explicit zombie variant with its matching mastered prompt', async () => {
   const contract = await readZombieEscapeAudioContract()
-  const presenceAssets = contract.assets.filter((asset) => asset.kind === 'presence')
+  const zombieCues = [
+    contract.catalog.cues.find((cue) => cue.id === 'enemy-hit'),
+    contract.catalog.cues.find((cue) => cue.id === 'enemy-death'),
+    contract.catalog.presenceCues.find((cue) => cue.id === 'enemy-presence'),
+  ]
 
-  assert.deepEqual(
-    presenceAssets.map((asset) => asset.publicPath),
-    [
-      '/audios/sfx/zombie-escape/enemy/presence-0.mp3',
-      '/audios/sfx/zombie-escape/enemy/presence-1.mp3',
-      '/audios/sfx/zombie-escape/enemy/presence-2.mp3',
-    ],
-  )
-  assert.ok(presenceAssets.every((asset) => asset.cueId === 'enemy-presence'))
-  assert.ok(presenceAssets.every((asset) => asset.masteringProfile === null))
+  for (const cue of zombieCues) {
+    assert.ok(cue)
+    const assets = contract.assets.filter((asset) => asset.cueId === cue.id)
+    assert.deepEqual(
+      assets.map((asset) => asset.publicPath),
+      cue.files,
+    )
+    assert.deepEqual(
+      assets.map((asset) => asset.prompt),
+      cue.variantPrompts,
+    )
+    assert.deepEqual(
+      assets.map((asset) => asset.variantIndex),
+      [0, 1, 2],
+    )
+    assert.ok(assets.every((asset) => asset.masteringProfile === 'one-shot-v1'))
+  }
 })
 
-test('audits every checked-in ElevenLabs web artifact against measured file metadata', async () => {
+test('rejects ambiguous or oversized explicit zombie variant prompts', async () => {
+  const contract = await readZombieEscapeAudioContract()
+  const duplicate = structuredClone(contract.catalog)
+  const duplicateHit = duplicate.cues.find((cue) => cue.id === 'enemy-hit')
+  duplicateHit.variantPrompts[1] = ` ${duplicateHit.variantPrompts[0].toUpperCase()} `
+  assert.throws(
+    () => validateZombieEscapeAudioCatalog(duplicate),
+    /variantPrompts must be unique after normalization/,
+  )
+
+  const oversized = structuredClone(contract.catalog)
+  oversized.presenceCues[0].variantPrompts[0] = 'x'.repeat(451)
+  assert.throws(
+    () => validateZombieEscapeAudioCatalog(oversized),
+    /must be at most 450 characters/,
+  )
+})
+
+test('audits every checked-in ElevenLabs artifact against measured file metadata', async () => {
   const audit = await auditZombieEscapeAudio({ requireReady: true })
 
   assert.equal(audit.pass, true, audit.failures.join('\n'))
@@ -71,18 +104,43 @@ test('rejects provenance that does not match immutable audio bytes', async () =>
   }
 })
 
+test('rejects duplicate artifact hashes within one cue but permits reuse across cues', () => {
+  const duplicateHash = 'a'.repeat(64)
+  const uniqueHash = 'b'.repeat(64)
+  const firstPath = '/audios/sfx/zombie-escape/enemy/hit-0.mp3'
+  const duplicatePath = '/audios/sfx/zombie-escape/enemy/hit-1.mp3'
+  const otherCuePath = '/audios/sfx/zombie-escape/enemy/death-0.mp3'
+  const uniquePath = '/audios/sfx/zombie-escape/enemy/hit-2.mp3'
+  const assets = [
+    { cueId: 'enemy-hit', publicPath: firstPath },
+    { cueId: 'enemy-hit', publicPath: duplicatePath },
+    { cueId: 'enemy-death', publicPath: otherCuePath },
+    { cueId: 'enemy-hit', publicPath: uniquePath },
+  ]
+  const artifacts = {
+    [firstPath]: { sha256: duplicateHash },
+    [duplicatePath]: { sha256: duplicateHash },
+    [otherCuePath]: { sha256: duplicateHash },
+    [uniquePath]: { sha256: uniqueHash },
+  }
+
+  assert.deepEqual(findDuplicateZombieEscapeAudioArtifactHashes(assets, artifacts), [
+    `${duplicatePath}: sha256 duplicates ${firstPath} within cue enemy-hit`,
+  ])
+})
+
 test('allows a clean pending catalog but --require-ready rejects it', async () => {
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), 'zombie-audio-pending-'))
   try {
     const provenancePath = resolve(temporaryRoot, 'provenance.json')
     const publicRoot = resolve(temporaryRoot, 'public')
-    const checkedIn = JSON.parse(await readFile(DEFAULT_AUDIO_PROVENANCE_PATH, 'utf8'))
+    const contract = await readZombieEscapeAudioContract()
     await writeFile(
       provenancePath,
       JSON.stringify({
         artifacts: {},
         catalogSha256: null,
-        catalogVersion: checkedIn.catalogVersion,
+        catalogVersion: contract.catalog.catalogVersion,
         generatedAt: null,
         schemaVersion: 2,
         source: null,

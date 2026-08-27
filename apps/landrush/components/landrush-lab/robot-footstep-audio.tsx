@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   AudioListener,
   AudioLoader,
+  type Camera,
   type Group,
   MathUtils,
   PositionalAudio,
@@ -37,7 +38,7 @@ const FOOTSTEP_RUN_STRIDE_METERS = 1.08
 const FOOTSTEP_LATERAL_OFFSET_METERS = 0.23
 const FOOTSTEP_FORWARD_OFFSET_METERS = 0.08
 const FOOTSTEP_HEIGHT_METERS = 0.08
-const FOOTSTEP_BASE_VOLUME = 0.033
+export const ROBOT_FOOTSTEP_BASE_VOLUME = 0.24
 const FOOTSTEP_REF_DISTANCE = 5.2
 const FOOTSTEP_MAX_DISTANCE = 22
 const FOOTSTEP_ROLLOFF = 0.8
@@ -360,6 +361,10 @@ export function LandrushRobotFootstepAudio({
     const pool = audioPoolRef.current
     const jumpPool = jumpAudioPoolRef.current
     const motion = motionRef.current
+    if (listener && motion) {
+      resolveRobotAudioListenerLocalPosition(camera, motion.position, listener.position)
+      listener.updateMatrixWorld()
+    }
     const volumeScale = muted ? 0 : (masterVolume / 100) * (sfxVolume / 100)
     const audioContextRunning = listener?.context.state === 'running'
     const audioContextSuspended = listener?.context.state === 'suspended'
@@ -761,12 +766,7 @@ function playFootstep({
       MathUtils.lerp(FOOTSTEP_WALK_PLAYBACK_SPEED, FOOTSTEP_RUN_PLAYBACK_SPEED, runBlend) *
       MathUtils.randFloat(0.96, 1.04),
   )
-  audio.setVolume(
-    FOOTSTEP_BASE_VOLUME *
-      volumeScale *
-      MathUtils.lerp(0.72, 1, runBlend) *
-      MathUtils.randFloat(0.86, 1),
-  )
+  audio.setVolume(resolveRobotFootstepVolume(volumeScale, runBlend, MathUtils.randFloat(0.86, 1)))
 
   const side = leftStep ? -1 : 1
   const rightX = Math.cos(motion.heading)
@@ -784,6 +784,23 @@ function playFootstep({
   )
   audio.updateMatrixWorld()
   audio.play()
+}
+
+export function resolveRobotAudioListenerLocalPosition(
+  camera: Camera,
+  playerWorldPosition: Vector3,
+  output: Vector3,
+) {
+  return camera.worldToLocal(output.copy(playerWorldPosition))
+}
+
+export function resolveRobotFootstepVolume(volumeScale: number, runBlend: number, variation = 1) {
+  return (
+    ROBOT_FOOTSTEP_BASE_VOLUME *
+    Math.max(0, volumeScale) *
+    MathUtils.lerp(0.72, 1, MathUtils.clamp(runBlend, 0, 1)) *
+    MathUtils.clamp(variation, 0, 1)
+  )
 }
 
 function pickFootstepBuffer(buffers: readonly AudioBuffer[], lastIndex: number) {

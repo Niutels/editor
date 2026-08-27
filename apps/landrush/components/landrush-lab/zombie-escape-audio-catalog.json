@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 3,
-  "catalogVersion": "2026-08-23.1",
+  "schemaVersion": 4,
+  "catalogVersion": "2026-08-26.1",
   "modelId": "eleven_text_to_sound_v2",
   "outputFormat": "mp3_44100_128",
   "cues": [
@@ -92,9 +92,15 @@
     {
       "id": "enemy-hit",
       "eventKind": "enemy-hit",
+      "masteringProfile": "one-shot-v1",
       "durationSeconds": 0.6,
       "promptInfluence": 0.6,
       "prompt": "Short cartoony undead enemy pain grunt blended with a compact projectile body impact, non-gory and playful, isolated game one-shot, no words, no ambience, no music, quick decay.",
+      "variantPrompts": [
+        "One short high raspy zombie pain bark with a sharp light projectile impact against flesh and torn clothing. Dry isolated stylized game one-shot, non-gory, no intelligible words, no ambience, music, reverb, footsteps, or weapon sound; immediate 0.6-second decay.",
+        "One very short low chesty zombie grunt over a dull compact torso thud. Heavy rounded attack, tiny breath release, immediate decay, dry close-miked stylized game one-shot, playful and non-gory. No words, extra vocalizations, footsteps, ambience, reverb, or music.",
+        "One very short mid-register raspy recoil snarl with a light glancing impact and brief scraping texture. Tight broken attack, fast dry decay, stylized game one-shot, playful and non-gory. No words, extra vocalizations, footsteps, ambience, reverb, or music."
+      ],
       "files": [
         "/audios/sfx/zombie-escape/enemy/hit-0.mp3",
         "/audios/sfx/zombie-escape/enemy/hit-1.mp3",
@@ -105,7 +111,7 @@
         "maxVoices": 8,
         "minIntervalMs": 42,
         "rateRange": [0.94, 1.06],
-        "referenceDistance": 4,
+        "referenceDistance": 2.5,
         "spatial": true,
         "volume": 0.48
       }
@@ -113,9 +119,15 @@
     {
       "id": "enemy-death",
       "eventKind": "enemy-killed",
+      "masteringProfile": "one-shot-v1",
       "durationSeconds": 1.2,
       "promptInfluence": 0.58,
       "prompt": "Stylized cartoony undead enemy defeated, brief raspy nonverbal groan collapsing into a soft body fall, non-gory and playful, isolated game one-shot, no words, no ambience, no music.",
+      "variantPrompts": [
+        "One low-pitched undead defeat groan that drops in pitch as a heavy body folds forward into a soft ground thump. Clear two-part vocal-then-fall contour, dry close-miked stylized game one-shot, non-gory. No words, footsteps, ambience, reverb, or music.",
+        "One sharp mid-high zombie defeat rasp, abruptly choked off, followed by a quick knee buckle and light sideways slump. Short broken rhythm, dry close-miked stylized game one-shot, non-gory. No words, footsteps, ambience, reverb, or music.",
+        "One breathy exhausted undead exhale with almost no voiced groan, then a slow loose-bodied backward topple and small clothing settle. Airy fading contour, dry close-miked stylized game one-shot, non-gory. No words, footsteps, ambience, reverb, or music."
+      ],
       "files": [
         "/audios/sfx/zombie-escape/enemy/death-0.mp3",
         "/audios/sfx/zombie-escape/enemy/death-1.mp3",
@@ -126,7 +138,7 @@
         "maxVoices": 6,
         "minIntervalMs": 70,
         "rateRange": [0.94, 1.055],
-        "referenceDistance": 4.5,
+        "referenceDistance": 2.5,
         "spatial": true,
         "volume": 0.58
       }
@@ -243,9 +255,15 @@
     {
       "id": "enemy-presence",
       "presenceKind": "zombie-vocalization",
+      "masteringProfile": "one-shot-v1",
       "durationSeconds": 1.4,
       "promptInfluence": 0.68,
       "prompt": "Three distinct short nonverbal undead zombie presence vocalizations for a stylized game: dry raspy breaths, low hungry groans, and brief strained snarls, close-miked and isolated. Each variation should feel like an approaching creature, threatening but not gory, with no intelligible words, footsteps, impacts, ambience, music, reverb, or long tail. One vocalization per variation, fast natural decay. Duration 1.4 seconds.",
+      "variantPrompts": [
+        "One high, thin undead nasal wheeze: two tense short breaths joined as a single 1.4-second presence vocalization. Alert and prowling, dry close-miked stylized game sound, threatening but non-gory. No words, growl, footsteps, impact, ambience, reverb, music, or long tail.",
+        "One low chest-resonant hungry zombie groan held for about one second, with a rough onset and descending finish. Slow and heavy, dry close-miked stylized game presence vocalization, threatening but non-gory. No words, wheezing, footsteps, impact, ambience, reverb, music, or long tail.",
+        "One mid-register broken undead snarl: a clipped inhale followed by a brief three-pulse rasp, contained within 1.4 seconds. Agitated and searching, dry close-miked stylized game presence vocalization, threatening but non-gory. No words, sustained groan, footsteps, impact, ambience, reverb, music, or long tail."
+      ],
       "files": [
         "/audios/sfx/zombie-escape/enemy/presence-0.mp3",
         "/audios/sfx/zombie-escape/enemy/presence-1.mp3",
@@ -256,7 +274,7 @@
         "maxVoices": 6,
         "minIntervalMs": 220,
         "rateRange": [0.94, 1.06],
-        "referenceDistance": 4.5,
+        "referenceDistance": 2.5,
         "spatial": true,
         "volume": 0.46
       },
