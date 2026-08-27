@@ -58,6 +58,11 @@ import {
 import { resolveLandrushZombieEscapeAimPlaneElevation } from './landrush-zombie-escape-aim'
 import { createLandrushZombieEscapeIntegratedArena } from './landrush-zombie-escape-arena'
 import {
+  prepareLandrushZombieEscapeCameraForRenderReadiness,
+  resolveLandrushZombieEscapeCamera,
+  resolveLandrushZombieEscapeCameraLayout,
+} from './landrush-zombie-escape-camera'
+import {
   createBrowserLandrushZombieEscapeCollisionWorldBuildScheduleHost,
   createLandrushZombieEscapeCollisionWorldBuildCoordinator,
   createLandrushZombieEscapeCollisionWorldBuildState,
@@ -1044,7 +1049,36 @@ export function LandrushZombieEscapeMode({
   visualRootRef,
   zombieEscapeTouchInputRef,
 }: LandrushZombieEscapeModeProps) {
-  const { camera, get, gl, setEvents } = useThree()
+  const { camera, get, gl, setEvents, size } = useThree()
+  const renderReadinessCamera = useMemo(
+    () => resolveLandrushZombieEscapeCamera(motionRef),
+    [motionRef],
+  )
+  const renderReadinessCameraLayout = useMemo(
+    () => resolveLandrushZombieEscapeCameraLayout(size.width, size.height),
+    [size.height, size.width],
+  )
+  const renderReadinessCameraOffset = useMemo(() => new Vector3(), [])
+  const renderReadinessCameraTarget = useMemo(() => new Vector3(), [])
+  const prepareRenderReadinessCamera = useCallback(() => {
+    prepareLandrushZombieEscapeCameraForRenderReadiness({
+      camera: renderReadinessCamera,
+      layout: renderReadinessCameraLayout,
+      motion: motionRef.current,
+      offset: renderReadinessCameraOffset,
+      target: renderReadinessCameraTarget,
+    })
+  }, [
+    motionRef,
+    renderReadinessCamera,
+    renderReadinessCameraLayout,
+    renderReadinessCameraOffset,
+    renderReadinessCameraTarget,
+  ])
+  useLayoutEffect(prepareRenderReadinessCamera, [prepareRenderReadinessCamera])
+  useFrame(() => {
+    if (expectedPhase === 'build') prepareRenderReadinessCamera()
+  }, LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.input - 0.02)
   const zombieMaterialPhaseActive = expectedPhase === 'night'
   const sceneNodes = useScene((state) => state.nodes)
   const interactiveDoorPassabilityKey = useInteractive((state) =>
@@ -1972,6 +2006,7 @@ export function LandrushZombieEscapeMode({
           presentationFramePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.presentation}
           playerColor={playerColor}
           quality="balanced"
+          renderReadinessCamera={renderReadinessCamera}
           renderReadinessRegistry={renderReadinessRegistry}
           renderPlayer={false}
           retryGeneratedAssetsGeneration={generatedAssetRetryGeneration}

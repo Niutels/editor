@@ -131,12 +131,19 @@ describe('Zombie Escape render compilation', () => {
     const fixture = createCompileFixture()
     const compilation = deferred<unknown>()
     const events: string[] = []
+    let compileCount = 0
     const renderer: ZombieEscapePipelineRenderer = {
       async compileAsync(root, camera, targetScene) {
-        events.push('compile')
-        expect(root).toBe(fixture.root)
+        compileCount += 1
+        events.push(compileCount === 1 ? 'compile:representative' : 'compile:scene')
         expect(camera).toBe(fixture.camera)
         expect(targetScene).toBe(fixture.targetScene)
+        if (compileCount === 2) {
+          expect(root).toBe(fixture.targetScene)
+          expect(fixture.ancestor.visible).toBe(false)
+          return undefined
+        }
+        expect(root).toBe(fixture.root)
         expect(fixture.ancestor.visible).toBe(true)
         expect(fixture.root.visible).toBe(true)
         expect(fixture.child.visible).toBe(true)
@@ -157,7 +164,7 @@ describe('Zombie Escape render compilation', () => {
     })
     await Promise.resolve()
     await Promise.resolve()
-    expect(events).toEqual(['init', 'compile'])
+    expect(events).toEqual(['init', 'compile:representative'])
     expect(fixture.ancestor.visible).toBe(false)
     expect(fixture.root.visible).toBe(false)
     expect(fixture.child.visible).toBe(false)
@@ -166,6 +173,12 @@ describe('Zombie Escape render compilation', () => {
     expect(fixture.mesh.frustumCulled).toBe(true)
     compilation.resolve(undefined)
     await pending
+    expect(events).toEqual(['init', 'compile:representative', 'compile:scene'])
+    expect(fixture.ancestor.visible).toBe(false)
+    expect(fixture.root.visible).toBe(false)
+    expect(fixture.child.visible).toBe(false)
+    expect(fixture.mesh.visible).toBe(false)
+    expect(fixture.mesh.frustumCulled).toBe(true)
     fixture.mesh.geometry.dispose()
     fixture.mesh.material.dispose()
   })
@@ -227,6 +240,7 @@ describe('Zombie Escape render compilation', () => {
     expect(calls).toBe(2)
     second.resolve(undefined)
     await pending
+    expect(calls).toBe(3)
     expect(maximumActive).toBe(1)
   })
 })

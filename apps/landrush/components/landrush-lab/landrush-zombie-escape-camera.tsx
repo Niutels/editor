@@ -38,6 +38,24 @@ export type LandrushZombieEscapeCameraTransitionSample = {
   projectionCenterY: number
 }
 
+const LANDRUSH_ZOMBIE_ESCAPE_CAMERAS = new WeakMap<
+  MutableRefObject<LandrushZombieEscapeCameraMotion | null>,
+  OrthographicCamera
+>()
+
+export function resolveLandrushZombieEscapeCamera(
+  motionRef: MutableRefObject<LandrushZombieEscapeCameraMotion | null>,
+) {
+  const existing = LANDRUSH_ZOMBIE_ESCAPE_CAMERAS.get(motionRef)
+  if (existing) return existing
+  const camera = new OrthographicCamera()
+  camera.name = 'LandrushZombieEscapeCamera'
+  camera.userData.landrushCameraMode = 'zombie-escape'
+  camera.userData.landrushCameraOwner = 'LandrushZombieEscapeCamera'
+  LANDRUSH_ZOMBIE_ESCAPE_CAMERAS.set(motionRef, camera)
+  return camera
+}
+
 export function resolveLandrushZombieEscapeCameraLayout(
   viewportWidth: number,
   viewportHeight: number,
@@ -129,6 +147,42 @@ export function handoffLandrushZombieEscapeCameraPose(source: Camera, target: Ca
   target.updateMatrixWorld(true)
 }
 
+export function prepareLandrushZombieEscapeCameraForRenderReadiness({
+  camera,
+  layout,
+  motion,
+  offset,
+  target,
+}: {
+  camera: OrthographicCamera
+  layout: LandrushZombieEscapeCameraLayout
+  motion: LandrushZombieEscapeCameraMotion | null
+  offset: Vector3
+  target: Vector3
+}) {
+  if (motion) {
+    target.copy(motion.position)
+    target.y = (motion.cameraTargetY ?? motion.position.y) + CAMERA.targetHeightMeters
+  } else {
+    target.set(0, CAMERA.targetHeightMeters, 0)
+  }
+  offset.fromArray(layout.offset)
+  camera.near = layout.near
+  camera.far = layout.far
+  camera.zoom = layout.zoom
+  camera.position.copy(target).add(offset)
+  camera.up.set(0, 1, 0)
+  camera.lookAt(target)
+  applyLandrushZombieEscapeCameraProjection(
+    camera,
+    layout.halfHeight,
+    layout.right / layout.halfHeight,
+    layout.projectionCenterY,
+  )
+  camera.updateMatrixWorld(true)
+  camera.userData.landrushCameraTarget = target
+}
+
 function applyLandrushZombieEscapeCameraProjection(
   camera: OrthographicCamera,
   halfHeight: number,
@@ -178,13 +232,7 @@ export function LandrushZombieEscapeCamera({
   const get = useThree((state) => state.get)
   const set = useThree((state) => state.set)
   const size = useThree((state) => state.size)
-  const camera = useMemo(() => {
-    const ownedCamera = new OrthographicCamera()
-    ownedCamera.name = 'LandrushZombieEscapeCamera'
-    ownedCamera.userData.landrushCameraMode = 'zombie-escape'
-    ownedCamera.userData.landrushCameraOwner = 'LandrushZombieEscapeCamera'
-    return ownedCamera
-  }, [])
+  const camera = useMemo(() => resolveLandrushZombieEscapeCamera(motionRef), [motionRef])
   const previousCameraRef = useRef<RootState['camera'] | null>(null)
   const transitionRef = useRef<LandrushZombieEscapeCameraTransition | null>(null)
   const currentHalfHeightRef = useRef<number>(CAMERA.halfHeightMeters)

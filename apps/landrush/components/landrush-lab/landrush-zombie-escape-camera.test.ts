@@ -3,6 +3,8 @@ import { MathUtils, OrthographicCamera, PerspectiveCamera, Vector3 } from 'three
 import {
   handoffLandrushZombieEscapeCameraPose,
   LANDRUSH_ZOMBIE_ESCAPE_CAMERA_FRAME_PRIORITY,
+  prepareLandrushZombieEscapeCameraForRenderReadiness,
+  resolveLandrushZombieEscapeCamera,
   resolveLandrushZombieEscapeCameraLayout,
   resolveLandrushZombieEscapeCameraProjectionHalfHeight,
   sampleLandrushZombieEscapeCameraTransition,
@@ -15,6 +17,34 @@ import {
 } from './zombie-escape-config'
 
 describe('Landrush Zombie Escape camera', () => {
+  test('prepares and reuses the exact orthographic camera needed after loading', () => {
+    const motionRef = {
+      current: { cameraTargetY: 3, position: new Vector3(12, 2, -7) },
+    }
+    const replacementMotionRef = { current: { position: new Vector3() } }
+    const camera = resolveLandrushZombieEscapeCamera(motionRef)
+    const layout = resolveLandrushZombieEscapeCameraLayout(1920, 1080)
+    const target = new Vector3()
+    const offset = new Vector3()
+
+    prepareLandrushZombieEscapeCameraForRenderReadiness({
+      camera,
+      layout,
+      motion: motionRef.current,
+      offset,
+      target,
+    })
+
+    expect(resolveLandrushZombieEscapeCamera(motionRef)).toBe(camera)
+    expect(resolveLandrushZombieEscapeCamera(replacementMotionRef)).not.toBe(camera)
+    expect(camera.isOrthographicCamera).toBe(true)
+    expect(camera.position.toArray()).toEqual(target.clone().add(offset).toArray())
+    expect(target.clone().project(camera).x).toBeCloseTo(0, 12)
+    expect(target.clone().project(camera).y).toBeCloseTo(0, 12)
+    expect(camera.near).toBe(layout.near)
+    expect(camera.far).toBe(layout.far)
+  })
+
   test('preserves the Orbot animation-debug pose and centers its projection', () => {
     const layout = resolveLandrushZombieEscapeCameraLayout(1920, 1080)
     const camera = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE

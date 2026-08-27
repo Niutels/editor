@@ -4,7 +4,7 @@ import { LandrushWorldNode } from '@landrush/pascal-plugin'
 import { LandrushRobot } from '@landrush/pascal-plugin/landrush-world/robot'
 import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, Suspense, useEffect, useMemo, useRef } from 'react'
-import type { Group } from 'three'
+import type { Camera, Group } from 'three'
 import {
   createLandrushRobotWeaponCombatState,
   createLandrushRobotWeaponMuzzlePose,
@@ -44,6 +44,7 @@ export function ZombieEscapeActors({
   playerColor = '#fff0a2',
   presentationFramePriority,
   quality,
+  renderReadinessCamera,
   renderReadinessRegistry,
   renderPlayer = true,
   retryGeneratedAssetsGeneration = 0,
@@ -58,6 +59,7 @@ export function ZombieEscapeActors({
   playerColor?: string
   presentationFramePriority?: number
   quality: ZombieEscapeQuality
+  renderReadinessCamera?: Camera
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   renderPlayer?: boolean
   retryGeneratedAssetsGeneration?: number
@@ -88,6 +90,7 @@ export function ZombieEscapeActors({
         onGeneratedAssetsReadinessChange={onGeneratedAssetsReadinessChange}
         presentationLodDebugRef={presentationLodDebugRef}
         quality={quality}
+        renderReadinessCamera={renderReadinessCamera}
         renderReadinessRegistry={renderReadinessRegistry}
         retryGeneration={retryGeneratedAssetsGeneration}
         simulationRef={simulationRef}

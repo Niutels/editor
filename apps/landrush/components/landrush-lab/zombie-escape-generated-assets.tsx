@@ -21,6 +21,7 @@ import {
   type AnimationClip,
   AnimationMixer,
   Box3,
+  type Camera,
   Color,
   Euler,
   Group,
@@ -194,10 +195,19 @@ export function resolveZombieEscapeRenderPipelineSettlement(
   if (status.state === 'ready') {
     return { contentReady: true as const, diagnostic: null }
   }
+  if (status.state === 'degraded') {
+    return {
+      contentReady: false as const,
+      diagnostic: {
+        level: 'warning' as const,
+        message: status.message,
+      },
+    }
+  }
   return {
     contentReady: true as const,
     diagnostic: {
-      level: status.state === 'failed' ? ('error' as const) : ('warning' as const),
+      level: 'error' as const,
       message: status.message,
     },
   }
@@ -219,6 +229,7 @@ export function ZombieEscapeGeneratedAssets({
   onGeneratedAssetsReadinessChange,
   presentationLodDebugRef,
   quality,
+  renderReadinessCamera,
   renderReadinessRegistry,
   retryGeneration = 0,
   simulationRef,
@@ -236,6 +247,7 @@ export function ZombieEscapeGeneratedAssets({
   ) => void
   presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>
   quality: ZombieEscapeQuality
+  renderReadinessCamera?: Camera
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   retryGeneration?: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
@@ -243,7 +255,8 @@ export function ZombieEscapeGeneratedAssets({
   zombiePresentationFramePriority?: number
   zombieSelectionFramePriority: number
 }) {
-  const { camera, gl, scene } = useThree()
+  const { camera: activeCamera, gl, scene } = useThree()
+  const pipelineCamera = renderReadinessCamera ?? activeCamera
   const [zombieShader] = useState(() =>
     createZombieEscapeZombieShader({ phaseAmount: zombieMaterialPhaseActive ? 1 : 0 }),
   )
@@ -408,7 +421,7 @@ export function ZombieEscapeGeneratedAssets({
     let active = true
     void coordinator.request(
       {
-        camera,
+        camera: pipelineCamera,
         generation: retryGeneration,
         identity: renderReadinessSnapshot,
         representatives: renderReadinessSnapshot.representatives,
@@ -425,7 +438,7 @@ export function ZombieEscapeGeneratedAssets({
           )
         } else if (settlement.diagnostic) {
           console.warn(
-            '[zombie-escape] Render pipeline prewarm timed out; continuing with loaded content.',
+            '[zombie-escape] Render pipeline prewarm exceeded its warning threshold; keeping loading active until it settles.',
             settlement.diagnostic.message,
           )
         }
@@ -440,8 +453,8 @@ export function ZombieEscapeGeneratedAssets({
     }
   }, [
     allocationReady,
-    camera,
     gl,
+    pipelineCamera,
     publishReadiness,
     renderReadinessRegistry,
     renderReadinessSnapshot,

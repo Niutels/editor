@@ -126,12 +126,13 @@ export async function compileZombieEscapeRenderRepresentatives({
   renderer,
   targetScene,
 }: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>) {
-  return compileLandrushRenderRepresentatives({
+  await compileLandrushRenderRepresentatives({
     camera,
     renderer,
     representatives,
     targetScene,
   })
+  await renderer.compileAsync(targetScene, camera, targetScene)
 }
 
 export function createZombieEscapeRenderReadinessCoordinator({
