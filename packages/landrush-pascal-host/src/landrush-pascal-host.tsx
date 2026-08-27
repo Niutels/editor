@@ -20,7 +20,12 @@ import {
   useEditor,
   useSidebarStore,
 } from '@pascal-app/editor'
-import { InteractiveSystem, useViewer, Viewer } from '@pascal-app/viewer'
+import {
+  InteractiveSystem,
+  useViewer,
+  Viewer,
+  type ViewerPresentationEffectRef,
+} from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type Group, Vector3 } from 'three'
@@ -49,6 +54,7 @@ export type LandrushPascalHostProps = {
   onLoad: () => Promise<SceneGraph | null>
   onSceneReadyChange: (ready: boolean) => void
   ownedHorizontalGridPlaneY: number | null
+  presentationEffectRef?: ViewerPresentationEffectRef
   projectId?: string | null
   sceneReadyKey?: string | number | null
   sceneReadyMaxWaitMs?: number
@@ -66,6 +72,7 @@ export function LandrushPascalHost({
   onLoad,
   onSceneReadyChange,
   ownedHorizontalGridPlaneY,
+  presentationEffectRef,
   projectId = null,
   sceneReadyKey = null,
   sceneReadyMaxWaitMs,
@@ -149,6 +156,7 @@ export function LandrushPascalHost({
           disablePostFx={disablePostFx}
           maxFps={maxFps}
           onSceneReadyChange={onSceneReadyChange}
+          presentationEffectRef={presentationEffectRef}
           renderContext="editor"
           sceneReadyKey={viewerSceneReadyKey}
           sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}

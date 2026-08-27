@@ -10,6 +10,7 @@ import { BenchBridgeProbe } from '@/components/bench/bench-bridge'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
 import { LandrushZombieEscapeCamera } from './landrush-zombie-escape-camera'
 import { createZombieEscapeAttackClip } from './zombie-escape-attack-presentation'
+import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
   createZombieVisual,
   type GeneratedZombieVisual,
@@ -121,20 +122,24 @@ function createDetailedSlots(count: number, presentation: ZombieRenderScalePrese
 function createAuthoredInstanceState(count: number): ZombieEscapeAuthoredInstanceState {
   const active = new Uint8Array(count)
   const heading = new Float32Array(count)
+  const health = new Float32Array(count)
   const locomotionBlend = new Float32Array(count)
   const locomotionPhase = new Float32Array(count)
   const runBlend = new Float32Array(count)
+  const spawnOrdinal = new Uint32Array(count)
   const variant = new Uint8Array(count)
   const x = new Float32Array(count)
   const y = new Float32Array(count)
   const z = new Float32Array(count)
   active.fill(1)
+  health.fill(1)
   locomotionBlend.fill(1)
   runBlend.fill(1)
   for (let slot = 0; slot < count; slot += 1) {
     const position = NESTED_LAYOUT[slot]!
     heading[slot] = ((slot * 17) % 24) * (Math.PI / 12)
     locomotionPhase[slot] = ((slot * 37) % 100) * (Math.PI / 50)
+    spawnOrdinal[slot] = slot + 1
     variant[slot] = slot % ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length
     x[slot] = position.x
     y[slot] = 0
@@ -142,16 +147,19 @@ function createAuthoredInstanceState(count: number): ZombieEscapeAuthoredInstanc
   }
   return {
     attackCooldown: new Float32Array(count),
+    deathPresentationSeconds: new Float32Array(count),
     heading,
     hitImpulseX: new Float32Array(count),
     hitImpulseY: new Float32Array(count),
     hitImpulseZ: new Float32Array(count),
     hitReaction: new Float32Array(count),
+    health,
     intent: new Uint8Array(count),
     locomotionBlend,
     locomotionPhase,
     pool: { active },
     runBlend,
+    spawnOrdinal,
     variant,
     x,
     y,
@@ -527,15 +535,17 @@ function ZombieRenderScaleVariant({
     [walkGltf.animations, zombie.glb.walk.expectedClipName],
   )
   const attackClip = useMemo(
-    () => createZombieEscapeAttackClip(riggedGltf.scene),
-    [riggedGltf.scene],
+    () => createZombieEscapeAttackClip(riggedGltf.scene, walkClip),
+    [riggedGltf.scene, walkClip],
   )
+  const deathClip = useMemo(() => createZombieEscapeDeathClip(riggedGltf.scene), [riggedGltf.scene])
   const modelTransform = useMemo(() => {
     const bounds = new Box3().setFromObject(riggedGltf.scene)
     const size = bounds.getSize(new Vector3())
     const center = bounds.getCenter(new Vector3())
     const scale = zombie.characterHeightMeters / Math.max(0.000_1, size.y)
     return {
+      bodyCenterY: (center.y - bounds.min.y) * scale,
       offset: new Vector3(-center.x * scale, -bounds.min.y * scale, -center.z * scale),
       scale,
     }
@@ -545,6 +555,7 @@ function ZombieRenderScaleVariant({
       authoredInstanceCapacity > 0
         ? createZombieEscapeAuthoredInstancePresentation({
             attackClip,
+            deathClip,
             instanceCapacity: authoredInstanceCapacity,
             modelTransform,
             runClip,
@@ -557,6 +568,7 @@ function ZombieRenderScaleVariant({
     [
       authoredInstanceCapacity,
       attackClip,
+      deathClip,
       modelTransform,
       riggedGltf.scene,
       runClip,
@@ -581,6 +593,7 @@ function ZombieRenderScaleVariant({
         const visual = createZombieVisual({
           active: true,
           attackClip,
+          deathClip,
           generation: 1,
           group,
           impactVisualRegistry,
@@ -618,6 +631,7 @@ function ZombieRenderScaleVariant({
   }, [
     impactVisualRegistry,
     attackClip,
+    deathClip,
     modelTransform,
     onStatusChange,
     riggedGltf.scene,

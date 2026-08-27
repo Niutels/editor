@@ -25,6 +25,7 @@ Public, open-source home of `@pascal-app/{core,viewer,editor,mcp}` and the stand
 - **`packages/core`** owns domain data and pure logic. It must not import Three.js, `packages/viewer`, `apps/editor`, rendering/UI concepts, tools, modes, phases, or view-specific concepts such as floorplan or paint preview.
 - **`packages/viewer`** owns the standalone 3D canvas, renderers, viewer systems, and genuine presentation state. It must not know about `useEditor`, editor tools, phases, modes, paint mode, floorplan state, or editor-only presentation vocabulary.
 - **`apps/editor`** owns the editing experience: tools, `useEditor`, panels, floorplan helpers, paint mode, keyboard shortcuts, command palette, action menus, cursor badges, and editor-only overlays. Editor features are injected into `<Viewer>` via props and children.
+- **Landrush integration:** For Landrush work, prefer `apps/landrush` and `packages/landrush-*`; change `apps/editor` or `packages/{core,viewer,editor,nodes,mcp,cli,plugin-trees}` carefully so future pulls from `pascalorg/editor/main` remain clean and manageable.
 
 Details, examples, and rationale live in `wiki/architecture/layers.md`, `wiki/architecture/viewer-isolation.md`, `wiki/architecture/systems.md`, `wiki/architecture/renderers.md`, `wiki/architecture/tools.md`.
 

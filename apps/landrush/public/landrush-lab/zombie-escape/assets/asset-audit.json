@@ -11,16 +11,29 @@
         "model": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 6687408,
-            "recordedSha256": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 387448,
+              "recordedSha256": "edb8666a35a5f8eae4798bdda786b8f6d750ae49468f9096657b626fb2157f77"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 6687408,
+              "recordedSha256": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/sunflare-pistol.glb",
+          "semanticContract": {
+            "preserved": true,
+            "runtimeHash": "af11e9ff0c05e22ce92ac6657d17be42199996f50c40d19c32c60c47cbefabf2",
+            "sourceHash": "af11e9ff0c05e22ce92ac6657d17be42199996f50c40d19c32c60c47cbefabf2"
+          },
           "animationCount": 0,
           "animationNames": [],
           "animations": [],
           "assetVersion": "2.0",
-          "byteLength": 6687408,
-          "contentHash": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6",
+          "byteLength": 387448,
+          "contentHash": "edb8666a35a5f8eae4798bdda786b8f6d750ae49468f9096657b626fb2157f77",
           "extensionsRequired": [],
           "extensionsUsed": [],
           "glbVersion": 2,
@@ -28,10 +41,10 @@
           "images": [
             {
               "basisMode": null,
-              "byteLength": 3045820,
+              "byteLength": 147724,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 0,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -39,14 +52,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1586341,
+              "byteLength": 57103,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 1,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -54,14 +67,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1846033,
+              "byteLength": 38060,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 2,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -69,14 +82,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 67238,
+              "byteLength": 3345,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 3,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -84,7 +97,7 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             }
           ],
           "materialCount": 1,
@@ -99,7 +112,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 0,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -109,7 +122,7 @@
                   "texCoord": 0,
                   "textureIndex": 0,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "emissive": {
                   "basisMode": null,
@@ -117,7 +130,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 3,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -125,9 +138,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 3,
                   "texCoord": 0,
-                  "textureIndex": 3,
+                  "textureIndex": 1,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "metallicRoughness": {
                   "basisMode": null,
@@ -135,7 +148,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 1,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -143,9 +156,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 1,
                   "texCoord": 0,
-                  "textureIndex": 1,
+                  "textureIndex": 3,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "normal": {
                   "basisMode": null,
@@ -153,7 +166,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 2,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -163,7 +176,7 @@
                   "texCoord": 0,
                   "textureIndex": 2,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "occlusion": null
               }
@@ -184,13 +197,14 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": true,
-            "profile": "full-pbr-2048",
+            "profile": "full-pbr-512-jpeg",
             "requiredMaterialTextureSlots": [
               "baseColor",
+              "emissive",
               "metallicRoughness",
               "normal"
             ]
@@ -214,16 +228,29 @@
         "model": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 6720928,
-            "recordedSha256": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 393300,
+              "recordedSha256": "a738e8e8657e729390d917fced819bb692062f0940e4df9e3fae74f6dae829c9"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 6720928,
+              "recordedSha256": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb",
+          "semanticContract": {
+            "preserved": true,
+            "runtimeHash": "abd7adcc90d1af598281b242c355973411ba8a62acd983f1903f76f50f7decf6",
+            "sourceHash": "abd7adcc90d1af598281b242c355973411ba8a62acd983f1903f76f50f7decf6"
+          },
           "animationCount": 0,
           "animationNames": [],
           "animations": [],
           "assetVersion": "2.0",
-          "byteLength": 6720928,
-          "contentHash": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5",
+          "byteLength": 393300,
+          "contentHash": "a738e8e8657e729390d917fced819bb692062f0940e4df9e3fae74f6dae829c9",
           "extensionsRequired": [],
           "extensionsUsed": [],
           "glbVersion": 2,
@@ -231,10 +258,10 @@
           "images": [
             {
               "basisMode": null,
-              "byteLength": 3111906,
+              "byteLength": 143510,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 0,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -242,14 +269,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1455594,
+              "byteLength": 65682,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 1,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -257,14 +284,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1944616,
+              "byteLength": 43865,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 2,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -272,14 +299,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 71231,
+              "byteLength": 3416,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 3,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -287,7 +314,7 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             }
           ],
           "materialCount": 1,
@@ -302,7 +329,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 0,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -312,7 +339,7 @@
                   "texCoord": 0,
                   "textureIndex": 0,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "emissive": {
                   "basisMode": null,
@@ -320,7 +347,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 3,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -328,9 +355,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 3,
                   "texCoord": 0,
-                  "textureIndex": 3,
+                  "textureIndex": 1,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "metallicRoughness": {
                   "basisMode": null,
@@ -338,7 +365,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 1,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -346,9 +373,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 1,
                   "texCoord": 0,
-                  "textureIndex": 1,
+                  "textureIndex": 3,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "normal": {
                   "basisMode": null,
@@ -356,7 +383,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 2,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -366,7 +393,7 @@
                   "texCoord": 0,
                   "textureIndex": 2,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "occlusion": null
               }
@@ -387,13 +414,14 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": true,
-            "profile": "full-pbr-2048",
+            "profile": "full-pbr-512-jpeg",
             "requiredMaterialTextureSlots": [
               "baseColor",
+              "emissive",
               "metallicRoughness",
               "normal"
             ]
@@ -417,16 +445,29 @@
         "model": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7224932,
-            "recordedSha256": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 402084,
+              "recordedSha256": "5456d5f01063f77b886a194dd8a9717a212c5c5fc4dc95bb9c1fae16ec17bca5"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 7224932,
+              "recordedSha256": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/driftwood-scattergun.glb",
+          "semanticContract": {
+            "preserved": true,
+            "runtimeHash": "441fde4836e665b045a641e5366410c7a138eb61c9b424d23e51688eef5922d1",
+            "sourceHash": "441fde4836e665b045a641e5366410c7a138eb61c9b424d23e51688eef5922d1"
+          },
           "animationCount": 0,
           "animationNames": [],
           "animations": [],
           "assetVersion": "2.0",
-          "byteLength": 7224932,
-          "contentHash": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051",
+          "byteLength": 402084,
+          "contentHash": "5456d5f01063f77b886a194dd8a9717a212c5c5fc4dc95bb9c1fae16ec17bca5",
           "extensionsRequired": [],
           "extensionsUsed": [],
           "glbVersion": 2,
@@ -434,10 +475,10 @@
           "images": [
             {
               "basisMode": null,
-              "byteLength": 3359235,
+              "byteLength": 145514,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 0,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -445,14 +486,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1456788,
+              "byteLength": 56602,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 1,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -460,14 +501,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 2187638,
+              "byteLength": 48059,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 2,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -475,14 +516,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 72015,
+              "byteLength": 3401,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 3,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -490,7 +531,7 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             }
           ],
           "materialCount": 1,
@@ -505,7 +546,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 0,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -515,7 +556,7 @@
                   "texCoord": 0,
                   "textureIndex": 0,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "emissive": {
                   "basisMode": null,
@@ -523,7 +564,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 3,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -531,9 +572,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 3,
                   "texCoord": 0,
-                  "textureIndex": 3,
+                  "textureIndex": 1,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "metallicRoughness": {
                   "basisMode": null,
@@ -541,7 +582,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 1,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -549,9 +590,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 1,
                   "texCoord": 0,
-                  "textureIndex": 1,
+                  "textureIndex": 3,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "normal": {
                   "basisMode": null,
@@ -559,7 +600,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 2,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -569,7 +610,7 @@
                   "texCoord": 0,
                   "textureIndex": 2,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "occlusion": null
               }
@@ -590,13 +631,14 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": true,
-            "profile": "full-pbr-2048",
+            "profile": "full-pbr-512-jpeg",
             "requiredMaterialTextureSlots": [
               "baseColor",
+              "emissive",
               "metallicRoughness",
               "normal"
             ]
@@ -620,16 +662,29 @@
         "model": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 6168944,
-            "recordedSha256": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 367656,
+              "recordedSha256": "d9b0ee89382879206278c4b5c2d0c8305c2a2f1e1f1482da2101b675b157ff3c"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 6168944,
+              "recordedSha256": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/storm-coil-repeater.glb",
+          "semanticContract": {
+            "preserved": true,
+            "runtimeHash": "06b43fc58eb8d86919adfe29e2c4677e00baca36dd422610173b7648c56e9753",
+            "sourceHash": "06b43fc58eb8d86919adfe29e2c4677e00baca36dd422610173b7648c56e9753"
+          },
           "animationCount": 0,
           "animationNames": [],
           "animations": [],
           "assetVersion": "2.0",
-          "byteLength": 6168944,
-          "contentHash": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da",
+          "byteLength": 367656,
+          "contentHash": "d9b0ee89382879206278c4b5c2d0c8305c2a2f1e1f1482da2101b675b157ff3c",
           "extensionsRequired": [],
           "extensionsUsed": [],
           "glbVersion": 2,
@@ -637,10 +692,10 @@
           "images": [
             {
               "basisMode": null,
-              "byteLength": 2649784,
+              "byteLength": 104531,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 0,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -648,14 +703,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1533037,
+              "byteLength": 68356,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 1,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -663,14 +718,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1607320,
+              "byteLength": 29824,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 2,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -678,14 +733,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 227286,
+              "byteLength": 14241,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 3,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -693,7 +748,7 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             }
           ],
           "materialCount": 1,
@@ -708,7 +763,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 0,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -718,7 +773,7 @@
                   "texCoord": 0,
                   "textureIndex": 0,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "emissive": {
                   "basisMode": null,
@@ -726,7 +781,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 3,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -734,9 +789,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 3,
                   "texCoord": 0,
-                  "textureIndex": 3,
+                  "textureIndex": 1,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "metallicRoughness": {
                   "basisMode": null,
@@ -744,7 +799,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 1,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -752,9 +807,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 1,
                   "texCoord": 0,
-                  "textureIndex": 1,
+                  "textureIndex": 3,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "normal": {
                   "basisMode": null,
@@ -762,7 +817,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 2,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -772,7 +827,7 @@
                   "texCoord": 0,
                   "textureIndex": 2,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "occlusion": null
               }
@@ -793,13 +848,14 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": true,
-            "profile": "full-pbr-2048",
+            "profile": "full-pbr-512-jpeg",
             "requiredMaterialTextureSlots": [
               "baseColor",
+              "emissive",
               "metallicRoughness",
               "normal"
             ]
@@ -823,16 +879,29 @@
         "model": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7555376,
-            "recordedSha256": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 488060,
+              "recordedSha256": "25388da6ae4787d9965352c0db9c0dc55144aa374a22e7d9cb0d05abf020a420"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 7555376,
+              "recordedSha256": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/tidebreak-launcher.glb",
+          "semanticContract": {
+            "preserved": true,
+            "runtimeHash": "5da100597fcb538f9d65b9c0236178316d7a372d6c87a04f9e9a019c1fb3a62a",
+            "sourceHash": "5da100597fcb538f9d65b9c0236178316d7a372d6c87a04f9e9a019c1fb3a62a"
+          },
           "animationCount": 0,
           "animationNames": [],
           "animations": [],
           "assetVersion": "2.0",
-          "byteLength": 7555376,
-          "contentHash": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af",
+          "byteLength": 488060,
+          "contentHash": "25388da6ae4787d9965352c0db9c0dc55144aa374a22e7d9cb0d05abf020a420",
           "extensionsRequired": [],
           "extensionsUsed": [],
           "glbVersion": 2,
@@ -840,10 +909,10 @@
           "images": [
             {
               "basisMode": null,
-              "byteLength": 3147322,
+              "byteLength": 152699,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 0,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -851,14 +920,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 1932717,
+              "byteLength": 108355,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 1,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -866,14 +935,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 2164913,
+              "byteLength": 66758,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 2,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -881,14 +950,14 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             },
             {
               "basisMode": null,
-              "byteLength": 156911,
+              "byteLength": 7490,
               "embedded": true,
               "hasFullMipChain": null,
-              "height": 2048,
+              "height": 512,
               "index": 3,
               "levelCount": null,
               "mimeType": "image/jpeg",
@@ -896,7 +965,7 @@
               "supercompressionScheme": null,
               "uncompressedRgbaMipByteLength": null,
               "vkFormat": null,
-              "width": 2048
+              "width": 512
             }
           ],
           "materialCount": 1,
@@ -911,7 +980,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 0,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -921,7 +990,7 @@
                   "texCoord": 0,
                   "textureIndex": 0,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "emissive": {
                   "basisMode": null,
@@ -929,7 +998,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 3,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -937,9 +1006,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 3,
                   "texCoord": 0,
-                  "textureIndex": 3,
+                  "textureIndex": 1,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "metallicRoughness": {
                   "basisMode": null,
@@ -947,7 +1016,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 1,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -955,9 +1024,9 @@
                   "supercompressionScheme": null,
                   "sourceImageIndex": 1,
                   "texCoord": 0,
-                  "textureIndex": 1,
+                  "textureIndex": 3,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "normal": {
                   "basisMode": null,
@@ -965,7 +1034,7 @@
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
                   "hasFullMipChain": null,
-                  "height": 2048,
+                  "height": 512,
                   "imageIndex": 2,
                   "ktx2ExtensionSource": false,
                   "levelCount": null,
@@ -975,7 +1044,7 @@
                   "texCoord": 0,
                   "textureIndex": 2,
                   "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "width": 512
                 },
                 "occlusion": null
               }
@@ -996,13 +1065,14 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": true,
-            "profile": "full-pbr-2048",
+            "profile": "full-pbr-512-jpeg",
             "requiredMaterialTextureSlots": [
               "baseColor",
+              "emissive",
               "metallicRoughness",
               "normal"
             ]
@@ -1036,6 +1106,7 @@
             "recordedSha256": "47e1ed27416ef2e395244008f6a2e7eb37d3e1bc87debd4fa5fc4431f67727c3"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/dockworker/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -1171,7 +1242,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -1188,6 +1259,7 @@
             "recordedSha256": "dfdca0ed504e355936a38d0a364be48c0c6ec3bcb4b85d5c4d1d20208fb519de"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/dockworker/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -1323,7 +1395,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -1340,6 +1412,7 @@
             "recordedSha256": "04fda64e5ca243be96fdce0eeff6ab25bc3fe92fe334a87c65e85a4669a22698"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/dockworker/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -1475,7 +1548,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -1513,6 +1586,7 @@
             "recordedSha256": "f3a1a74beb1e01aab37dd3b47aba6fbe4ffa0654c9325bf708f8bbcc87a9efe3"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -1648,7 +1722,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -1665,6 +1739,7 @@
             "recordedSha256": "9d44e2a642cfcb8bddb250904d2f36dcb6d5fb43b7c1c80a4c97138c8a8a931b"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -1800,7 +1875,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -1817,6 +1892,7 @@
             "recordedSha256": "0b2d69242631eb87fa4f37b17e4a8dcc6c9032dd16ec852bed745e7c1677c27d"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -1952,7 +2028,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -1990,6 +2066,7 @@
             "recordedSha256": "d6aab089829b1b20cadd2c89ed64073c9fe80db649e3d785d0a59928afd30977"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -2125,7 +2202,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -2142,6 +2219,7 @@
             "recordedSha256": "68e2608fe668efe05493301ca4da2be7f1a3877835bd795d9a0e0a07d1ff580f"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -2277,7 +2355,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -2294,6 +2372,7 @@
             "recordedSha256": "6febf13e0582574fa45394c114e4e07e850f8c021e6fd466cbcab60c24d239e1"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -2429,7 +2508,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -2467,6 +2546,7 @@
             "recordedSha256": "2c1f367d5d8b8e3889d02b840c3a4027031d8a728c3ad8212bfdd0630cdd9946"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/tourist/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -2602,7 +2682,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -2619,6 +2699,7 @@
             "recordedSha256": "f4f33b565ee81f730be232d12aeb6f92fd85caf0ccb740b61bcde9d056f7319c"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/tourist/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -2754,7 +2835,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -2771,6 +2852,7 @@
             "recordedSha256": "3687c13ebc4e2184478d517d8f7861bcb54ba3916832d28a4d62252e89520857"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/tourist/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -2906,7 +2988,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -2944,6 +3026,7 @@
             "recordedSha256": "66540d9fb88c2bf6d396279e582f4131fed2044071b2aef48406319ce94f3054"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -3079,7 +3162,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -3096,6 +3179,7 @@
             "recordedSha256": "6e35ed322628646794a65cc6094e566d9a5e0bb1da4d971281b32f8576a88a17"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -3231,7 +3315,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -3248,6 +3332,7 @@
             "recordedSha256": "6a375d591eebd02b9e7acf628750508e66f123855e513077ce570bab00ad6621"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -3383,7 +3468,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -3421,6 +3506,7 @@
             "recordedSha256": "c518f0bee5f0776dedc18c607e50b3086c9fb72aa9b8f31f210e6eab57226d62"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -3556,7 +3642,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -3573,6 +3659,7 @@
             "recordedSha256": "ec7dcac9467e5f739ffbb0601bdc4c9259879e060ac24a8e9e858910462af65f"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -3708,7 +3795,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -3725,6 +3812,7 @@
             "recordedSha256": "9ba7bb7bb45c917c5c61fea9f3c45c431456dc7f1839f8a9997b02187b26d652"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -3860,7 +3948,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -3898,6 +3986,7 @@
             "recordedSha256": "9ff353044a2d2ea921117e7ac4e30f9e791028b80dc9822ec5eef09848cb6c71"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -4033,7 +4122,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -4050,6 +4139,7 @@
             "recordedSha256": "dcce97362863203bb82d1f17259800f12afb76ade14416e7c15d478894738a45"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -4185,7 +4275,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -4202,6 +4292,7 @@
             "recordedSha256": "638c4c6f2116600b36cecaa491516a0edfce422eed0ca998aeea42b96fad74f7"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -4337,7 +4428,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -4375,6 +4466,7 @@
             "recordedSha256": "c044b098299dbd57d2b414816b728c9fa820e6451762db476b0cebaac57e4ec9"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -4510,7 +4602,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -4527,6 +4619,7 @@
             "recordedSha256": "0269c29f0e3a00fe1ca38d265245263f82ea5ccd2039778726aa76192d76a75c"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -4662,7 +4755,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -4679,6 +4772,7 @@
             "recordedSha256": "c4e2f84376fb3af8b0f24d92e454246420f58aa39d4237509db56771e326b7a5"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -4814,7 +4908,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -4852,6 +4946,7 @@
             "recordedSha256": "bdefb7b7983a7404f34cc6c4e423516f73f4f91b243d34759d4ff306ed648748"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -4987,7 +5082,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -5004,6 +5099,7 @@
             "recordedSha256": "b25f2ac249390dbf7aa7b6e79ede41dea6235b3d8d7ec5ba2620956d94790690"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -5139,7 +5235,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -5156,6 +5252,7 @@
             "recordedSha256": "1f2ec4b4eeadddd00e35fab7c154b8d4d57953f057f69af9ebd83fad917554b4"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -5291,7 +5388,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -5329,6 +5426,7 @@
             "recordedSha256": "1f5c5d7b6cb9875dc6340136b8ef44dfcf2b0ecee635c8b1825b3fc7148d196c"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/rigged.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|clip0|baselayer"
@@ -5464,7 +5562,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -5481,6 +5579,7 @@
             "recordedSha256": "7c56056e2472038cdc71d831180fdc501a9d69d5b2c7817b53754b60a597521d"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/run.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|running|baselayer"
@@ -5616,7 +5715,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -5633,6 +5732,7 @@
             "recordedSha256": "17b3e8744fa16f1866e1d9179842cca39a7383d7e281be6e2326ab3ef8cd30d1"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/walk.glb",
+          "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
             "Armature|walking_man|baselayer"
@@ -5768,7 +5868,7 @@
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
-            "allImages2048": true,
+            "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
             "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
@@ -5797,16 +5897,19 @@
     },
     "textures": {
       "weapon": {
-        "profile": "full-pbr-2048",
+        "maximumRuntimeBytes": 5242880,
+        "profile": "full-pbr-512-jpeg",
         "requiredImageDimensions": [
-          2048,
-          2048
+          512,
+          512
         ],
         "requiredMaterialTextureSlots": [
           "baseColor",
+          "emissive",
           "metallicRoughness",
           "normal"
-        ]
+        ],
+        "sourceProfile": "full-pbr-2048"
       },
       "zombie": {
         "profile": "base-color-2048",
@@ -5830,7 +5933,7 @@
     "zombies": 10
   },
   "failures": [],
-  "generatedAt": "2026-08-22T09:22:37.805Z",
+  "generatedAt": "2026-08-26T16:23:09.991Z",
   "pass": true,
   "provenance": {
     "stateCatalogDifferences": []
@@ -5842,5 +5945,6 @@
     "zombieEntries": 10
   },
   "targetFaceCount": 3000,
-  "textureResolution": "2k"
+  "textureResolution": "2k",
+  "weaponRuntimeBytes": 2038548
 }

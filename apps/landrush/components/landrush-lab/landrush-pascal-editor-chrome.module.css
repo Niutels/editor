@@ -1,0 +1,174 @@
+.chrome {
+  --landrush-editor-mobile-width: 25vw;
+}
+
+.sidebar {
+  width: var(--landrush-editor-sidebar-width);
+}
+
+.sidebarNav {
+  display: flex;
+  width: 3.5rem;
+  height: 100%;
+  flex-direction: column;
+  padding-block: 0.5rem;
+  border-right-width: 1px;
+}
+
+.sidebarTabButton {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.sidebarTabIcon {
+  width: 2rem;
+  height: 2rem;
+}
+
+.panel {
+  width: var(--landrush-editor-panel-width);
+  height: 100%;
+}
+
+.panelViewport {
+  overflow: hidden;
+}
+
+.viewerOverlays {
+  left: var(--landrush-editor-viewer-inset);
+}
+
+.topToolbar {
+  top: 0.75rem;
+  right: 0.75rem;
+  left: 0.75rem;
+  gap: 0.5rem;
+}
+
+.leftToolbar,
+.rightToolbar {
+  gap: 0.5rem;
+}
+
+.selectToolbar {
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 1023px) {
+  .sidebar {
+    width: var(--landrush-editor-mobile-width);
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebarNav {
+    display: grid;
+    width: 100%;
+    height: auto;
+    grid-template-columns: repeat(auto-fit, minmax(2.75rem, 1fr));
+    grid-auto-rows: 2.75rem;
+    padding: 0.25rem;
+    border-right-width: 0;
+    border-bottom-width: 1px;
+  }
+
+  .sidebarTabButton {
+    width: 100%;
+    min-width: 0;
+    height: 2.75rem;
+  }
+
+  .sidebarTabIcon {
+    width: min(1.5rem, 75%);
+    height: min(1.5rem, 75%);
+  }
+
+  .panel {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .panelViewport {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  .resizer {
+    display: none;
+  }
+
+  .viewerOverlays {
+    left: 0;
+  }
+
+  .chrome[data-landrush-pascal-editor-open='true'] .viewerOverlays {
+    left: var(--landrush-editor-mobile-width);
+  }
+
+  .chrome[data-landrush-pascal-editor-open='true'][data-landrush-pascal-editor-collapsed='true']
+    .sidebar {
+    bottom: auto;
+    height: auto;
+  }
+
+  .chrome[data-landrush-pascal-editor-open='true'][data-landrush-pascal-editor-collapsed='true']
+    .viewerOverlays {
+    left: 0;
+  }
+
+  .topToolbar {
+    top: 3.25rem;
+    right: 0.5rem;
+    left: 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .leftToolbar,
+  .rightToolbar {
+    gap: 0.25rem;
+  }
+
+  .exitBuildButton {
+    width: 2rem;
+    padding-inline: 0;
+  }
+
+  .exitBuildLabel {
+    display: none;
+  }
+
+  .rightToolbar :global(button) {
+    width: 2rem !important;
+    min-width: 2rem;
+    padding-inline: 0 !important;
+  }
+
+  .rightToolbar :global(button > span) {
+    display: none;
+  }
+
+  .selectToolbar {
+    bottom: 0.5rem;
+    left: 0.5rem;
+    transform: none;
+  }
+
+  .levelSelectorContainer > div:first-child {
+    top: 6rem;
+    left: 0.5rem;
+  }
+
+  .chrome[data-landrush-pascal-editor-open='true'][data-landrush-pascal-editor-collapsed='true']
+    .topToolbar,
+  .chrome[data-landrush-pascal-editor-open='true'][data-landrush-pascal-editor-collapsed='true']
+    .levelSelectorContainer
+    > div:first-child {
+    left: calc(var(--landrush-editor-mobile-width) + 0.5rem);
+  }
+}

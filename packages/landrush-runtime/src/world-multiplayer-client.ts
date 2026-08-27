@@ -47,6 +47,7 @@ import {
 } from './parcel-build-content-authority'
 import { type ParcelBuildSyncConflict, ParcelBuildSyncQueue } from './parcel-build-sync-queue'
 import { renderScheduler } from './render-scheduler'
+import { resolveWorldMultiplayerWebSocketUrl } from './world-multiplayer-websocket-url'
 
 export type MultiplayerRemotePlayerStore = RemotePresentationStore<MultiplayerPlayerSnapshot>
 
@@ -951,7 +952,12 @@ export function useLandrushWorldMultiplayer({
         reconnectAttempt: reconnectAttemptRef.current,
       }))
 
-      const socket = new WebSocket(resolveWebSocketUrl())
+      const socket = new WebSocket(
+        resolveWorldMultiplayerWebSocketUrl({
+          currentUrl: window.location.href,
+          hostedUrl: HOSTED_MULTIPLAYER_WEBSOCKET_URL,
+        }),
+      )
       socketRef.current = socket
       const isCurrentSocket = () =>
         isMultiplayerTransportCallbackCurrent({
@@ -1638,32 +1644,6 @@ function hashString(value: string) {
 
 export function sanitizeRoomId(roomId: string) {
   return sanitizeMultiplayerRoomId(roomId)
-}
-
-function resolveWebSocketUrl() {
-  const explicitUrl = new URLSearchParams(window.location.search).get('ws')
-  if (explicitUrl) return normalizeWebSocketUrl(explicitUrl)
-
-  const url = new URL('/api/landrush-lab/world-multiplayer/ws', window.location.href)
-  if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-    url.port = '3003'
-    url.protocol = 'ws:'
-    return url.toString()
-  }
-
-  if (HOSTED_MULTIPLAYER_WEBSOCKET_URL) {
-    return normalizeWebSocketUrl(HOSTED_MULTIPLAYER_WEBSOCKET_URL)
-  }
-
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  return url.toString()
-}
-
-function normalizeWebSocketUrl(rawUrl: string) {
-  const url = new URL(rawUrl, window.location.href)
-  if (url.protocol === 'https:') url.protocol = 'wss:'
-  if (url.protocol === 'http:') url.protocol = 'ws:'
-  return url.toString()
 }
 
 function parseServerMessage(data: unknown): ServerMessage | null {

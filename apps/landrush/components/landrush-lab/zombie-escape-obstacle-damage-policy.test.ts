@@ -90,6 +90,15 @@ describe('Zombie Escape obstacle-damage policy', () => {
     expect(state.zombies.attackTargetObjectId[zombie]).toBe('table')
     expect(state.zombies.vx[zombie]).toBe(0)
     expect(state.zombies.vz[zombie]).toBe(0)
+    expect(state.obstacleHitFeedback.get('table')).toBe(1)
+
+    stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    expect(state.obstacleHitFeedback.get('table')).toBeCloseTo(
+      1 -
+        ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds /
+          ZOMBIE_ESCAPE_SIMULATION.zombieHitReactionSeconds,
+      6,
+    )
 
     stepUntil(
       () => readAudioEventKinds(state, firstImpactAfterSequence).length === 2,
@@ -101,6 +110,7 @@ describe('Zombie Escape obstacle-damage policy', () => {
     ])
     expect(state.obstacleHitCounts.size).toBe(0)
     expect(state.destroyedObstacleIds.size).toBe(0)
+    expect(state.obstacleHitFeedback.get('table')).toBe(1)
     expect(state.obstacleRevision).toBe(obstacleRevision)
     expect(state.collisionWorldGeneration).toBe(collisionWorldGeneration)
     expect(state.collisionWorld).toBe(collisionWorld)
@@ -113,6 +123,7 @@ describe('Zombie Escape obstacle-damage policy', () => {
     )
     expect(state.obstacleHitCounts.get('table')).toBe(1)
     expect(state.destroyedObstacleIds.has('table')).toBe(false)
+    expect(state.obstacleHitFeedback.get('table')).toBe(1)
 
     const combatCollisionWorld = state.combatCollisionWorld
     const navigationWorldRevision = state.navigationWorldRevision
@@ -124,6 +135,7 @@ describe('Zombie Escape obstacle-damage policy', () => {
     expect(state.obstacleDamageEnabled).toBe(true)
     expect(state.obstacleHitCounts.has('table')).toBe(false)
     expect(state.destroyedObstacleIds.has('table')).toBe(true)
+    expect(state.obstacleHitFeedback.has('table')).toBe(false)
     expect(state.obstacleRevision).toBe(obstacleRevision + 1)
     expect(state.collisionWorldGeneration).toBe(collisionWorldGeneration)
     expect(state.navigationWorldRevision).toBe(navigationWorldRevision + 1)
@@ -139,6 +151,65 @@ describe('Zombie Escape obstacle-damage policy', () => {
     expect(state.obstacleDeltaMetrics.worldCompileCount.total).toBe(0)
     expect(state.obstacleDeltaMetrics.fullArrayClearCount.total).toBe(0)
     expect(state.obstacleDeltaMetrics.allocationCount.total).toBe(0)
+  })
+
+  test('decays obstacle hit feedback over the zombie reaction interval and clears it on reset', () => {
+    const arena = createZombieEscapeArena(91_103)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 91_104)
+    const input = createZombieEscapeControlState()
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.obstacleHitFeedback.set('table', 1)
+
+    stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    expect(state.obstacleHitFeedback.get('table')).toBeCloseTo(
+      1 -
+        ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds /
+          ZOMBIE_ESCAPE_SIMULATION.zombieHitReactionSeconds,
+      6,
+    )
+
+    stepUntil(
+      () => !state.obstacleHitFeedback.has('table'),
+      () =>
+        stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena),
+      Math.ceil(
+        ZOMBIE_ESCAPE_SIMULATION.zombieHitReactionSeconds /
+          ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      ) + 1,
+    )
+
+    state.obstacleHitFeedback.set('table', 1)
+    resetZombieEscapeSimulation(state, arena)
+    expect(state.obstacleHitFeedback.size).toBe(0)
+  })
+
+  test('clears obstacle hit feedback on terminal win and loss transitions', () => {
+    const arena = createZombieEscapeArena(91_105)
+    arena.obstacleCount = 0
+    const input = createZombieEscapeControlState()
+    const wonState = createZombieEscapeSimulation(arena, 91_106)
+    wonState.extractionOpen = true
+    wonState.player.x = arena.escapeX
+    wonState.player.z = arena.escapeZ
+    wonState.obstacleHitFeedback.set('table', 1)
+
+    stepZombieEscapeSimulation(wonState, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    expect(wonState.status).toBe('won')
+    expect(wonState.obstacleHitFeedback.size).toBe(0)
+
+    const lostState = createZombieEscapeSimulation(arena, 91_107)
+    setZombieEscapeGamePhase(lostState, 'night')
+    lostState.waveSpawnRemaining = 0
+    lostState.waveState = 'escape'
+    lostState.player.health = 0
+    lostState.obstacleHitFeedback.set('table', 1)
+
+    stepZombieEscapeSimulation(lostState, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    expect(lostState.status).toBe('lost')
+    expect(lostState.obstacleHitFeedback.size).toBe(0)
   })
 })
 

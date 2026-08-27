@@ -41,7 +41,11 @@ import FrameLimiter from './frame-limiter'
 import { Lights } from './lights'
 import { PerfMonitor } from './perf-monitor'
 import { PointerRaycastLayers } from './pointer-raycast-layers'
-import PostProcessing, { DEFAULT_HOVER_STYLES, type HoverStyles } from './post-processing'
+import PostProcessing, {
+  DEFAULT_HOVER_STYLES,
+  type HoverStyles,
+  type ViewerPresentationEffectRef,
+} from './post-processing'
 import { RegisteredSystems } from './registered-systems'
 import { SceneBvh } from './scene-bvh'
 import {
@@ -530,9 +534,11 @@ interface ViewerProps {
    * the scene directly. For headless/capture surfaces (the bake page) where
    * frame quality is irrelevant: on a software-rasterised worker the pipeline
    * consumes the whole CPU budget and bakes time out. Equivalent to the
-   * `?disable=postFx` diagnostic URL flag, but host-controlled.
+   * `?disable=postFx` diagnostic URL flag, but host-controlled. When a
+   * `presentationEffectRef` is supplied, its lightweight image pass remains.
    */
   disablePostFx?: boolean
+  presentationEffectRef?: ViewerPresentationEffectRef
   /** Keep the mounted renderer/context warm without advancing scene frames. */
   renderPaused?: boolean
 }
@@ -565,6 +571,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     sceneReadyMaxWaitMs,
     maxFps = 50,
     disablePostFx = false,
+    presentationEffectRef,
     renderPaused = false,
   },
   ref,
@@ -773,7 +780,11 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
             kind's `def.system` is loaded via lazy() and rendered here,
             ordered by `system.priority`. */}
         <RegisteredSystems />
-        <PostProcessing disablePostFx={disablePostFx} hoverStyles={hoverStyles} />
+        <PostProcessing
+          disablePostFx={disablePostFx}
+          hoverStyles={hoverStyles}
+          presentationEffectRef={presentationEffectRef}
+        />
         {selectionManager === 'default' && <SelectionManager />}
         {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
         {children}

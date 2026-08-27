@@ -18,6 +18,7 @@ import {
 import { color, float } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { LandrushIslandMaterialPresentationOwner } from './landrush-island-material-presentation'
+import { LANDRUSH_ROBOT_SCREEN_REVEAL_ALPHA_HASH_SCALE } from './robot-screen-reveal-alpha-hash'
 
 const originalTextureLoadAsync = TextureLoader.prototype.loadAsync
 
@@ -42,6 +43,7 @@ function disposeMesh(mesh: Mesh) {
 
 describe('Landrush island material presentation ownership', () => {
   test('reuses one shared-source reveal variant across leave and re-entry without retaining inactive meshes', () => {
+    expect(LANDRUSH_ROBOT_SCREEN_REVEAL_ALPHA_HASH_SCALE).toBe(4)
     const owner = new LandrushIslandMaterialPresentationOwner()
     const source = new MeshBasicMaterial({ transparent: false })
     const foreground = createMesh(source)
@@ -58,9 +60,9 @@ describe('Landrush island material presentation ownership', () => {
     expect(Object.hasOwn(source, 'opacityNode')).toBe(false)
     expect(source.alphaHash).toBe(false)
     expect(reveal.transparent).toBe(false)
-    expect(reveal.alphaHash).toBe(true)
+    expect(reveal.alphaHash).toBe(false)
     expect(reveal.alphaToCoverage).toBe(false)
-    expect(readAlphaTestNode(reveal)).toBeNull()
+    expect(readAlphaTestNode(reveal)).not.toBeNull()
     expect(reveal.depthWrite).toBe(true)
     expect(Object.hasOwn(reveal, 'opacityNode')).toBe(true)
 
@@ -112,8 +114,8 @@ describe('Landrush island material presentation ownership', () => {
     const firstCombined = firstMesh.material as Material
     expect(firstCombined).not.toBe(firstFloor)
     expect(firstCombined.transparent).toBe(false)
-    expect(firstCombined.alphaHash).toBe(true)
-    expect(readAlphaTestNode(firstCombined)).toBeNull()
+    expect(firstCombined.alphaHash).toBe(false)
+    expect(readAlphaTestNode(firstCombined)).not.toBeNull()
     expect(firstCombined.depthWrite).toBe(true)
     firstOwner.releaseFloorFade(firstMesh)
     expect(firstMesh.material).not.toBe(firstCombined)
@@ -135,8 +137,8 @@ describe('Landrush island material presentation ownership', () => {
     const secondCombined = secondMesh.material as Material
     expect(secondCombined).not.toBe(secondReveal)
     expect(secondCombined.transparent).toBe(false)
-    expect(secondCombined.alphaHash).toBe(true)
-    expect(readAlphaTestNode(secondCombined)).toBeNull()
+    expect(secondCombined.alphaHash).toBe(false)
+    expect(readAlphaTestNode(secondCombined)).not.toBeNull()
     expect(secondCombined.depthWrite).toBe(true)
     secondOwner.clearReveal()
     const secondFloor = secondMesh.material
@@ -177,8 +179,8 @@ describe('Landrush island material presentation ownership', () => {
     expect(combinedMaterials[0]).not.toBe(firstSource)
     expect(combinedMaterials[1]).not.toBe(integratedRevealSource)
     expect(combinedMaterials[0]?.transparent).toBe(false)
-    expect(combinedMaterials[0]?.alphaHash).toBe(true)
-    expect(readAlphaTestNode(combinedMaterials[0]!)).toBeNull()
+    expect(combinedMaterials[0]?.alphaHash).toBe(false)
+    expect(readAlphaTestNode(combinedMaterials[0]!)).not.toBeNull()
     expect(combinedMaterials[0]?.depthWrite).toBe(true)
     expect(combinedMaterials[1]?.transparent).toBe(false)
     expect(combinedMaterials[1]?.alphaHash).toBe(false)
@@ -395,10 +397,12 @@ describe('Landrush island material presentation ownership', () => {
     expect(secondRepresentatives).toHaveLength(5)
     expect(preparedMaterials.size).toBe(5)
     expect((firstRepresentatives[2]!.material as Material).transparent).toBe(false)
-    expect((firstRepresentatives[2]!.material as Material).alphaHash).toBe(true)
+    expect((firstRepresentatives[2]!.material as Material).alphaHash).toBe(false)
+    expect(readAlphaTestNode(firstRepresentatives[2]!.material as Material)).not.toBeNull()
     expect((firstRepresentatives[2]!.material as Material).depthWrite).toBe(true)
     expect((firstRepresentatives[3]!.material as Material).transparent).toBe(false)
-    expect((firstRepresentatives[3]!.material as Material).alphaHash).toBe(true)
+    expect((firstRepresentatives[3]!.material as Material).alphaHash).toBe(false)
+    expect(readAlphaTestNode(firstRepresentatives[3]!.material as Material)).not.toBeNull()
     expect((firstRepresentatives[3]!.material as Material).depthWrite).toBe(true)
     expect((firstRepresentatives[4]!.material as Material).transparent).toBe(true)
     expect((firstRepresentatives[4]!.material as Material).alphaHash).toBe(false)
@@ -667,7 +671,7 @@ describe('Landrush island material presentation ownership', () => {
     noBlendingSource.dispose()
   })
 
-  test('preserves authored cutout modes without adding a presentation alpha test', () => {
+  test('preserves authored cutout modes while composing the soft-reveal threshold', () => {
     const owner = new LandrushIslandMaterialPresentationOwner()
     const hashedSource = new MeshBasicMaterial()
     hashedSource.alphaHash = true
@@ -689,9 +693,9 @@ describe('Landrush island material presentation ownership', () => {
     const hashedReveal = hashedMesh.material as Material
     const coverageReveal = coverageMesh.material as Material
     const alphaTestReveal = alphaTestMesh.material as Material
-    expect(hashedReveal.alphaHash).toBe(true)
+    expect(hashedReveal.alphaHash).toBe(false)
     expect(hashedReveal.alphaToCoverage).toBe(false)
-    expect(readAlphaTestNode(hashedReveal)).toBeNull()
+    expect(readAlphaTestNode(hashedReveal)).not.toBeNull()
     expect(hashedReveal.transparent).toBe(false)
     expect(hashedReveal.depthWrite).toBe(true)
     expect(coverageReveal.alphaHash).toBe(false)
@@ -699,10 +703,11 @@ describe('Landrush island material presentation ownership', () => {
     expect(readAlphaTestNode(coverageReveal)).toBeNull()
     expect(coverageReveal.transparent).toBe(false)
     expect(coverageReveal.depthWrite).toBe(true)
-    expect(alphaTestReveal.alphaHash).toBe(true)
+    expect(alphaTestReveal.alphaHash).toBe(false)
     expect(alphaTestReveal.alphaToCoverage).toBe(false)
     expect(alphaTestReveal.alphaTest).toBe(0.35)
-    expect(readAlphaTestNode(alphaTestReveal)).toBe(authoredAlphaTestNode)
+    expect(readAlphaTestNode(alphaTestReveal)).not.toBeNull()
+    expect(readAlphaTestNode(alphaTestReveal)).not.toBe(authoredAlphaTestNode)
     expect(alphaTestReveal.transparent).toBe(false)
     expect(alphaTestReveal.depthWrite).toBe(true)
     expect(hashedSource.alphaHash).toBe(true)
@@ -718,7 +723,7 @@ describe('Landrush island material presentation ownership', () => {
     alphaTestSource.dispose()
   })
 
-  test('preserves numeric alpha testing without creating a custom presentation threshold', () => {
+  test('preserves numeric alpha testing while composing the soft-reveal threshold', () => {
     const owner = new LandrushIslandMaterialPresentationOwner()
     const source = new MeshBasicMaterial({ alphaTest: 0.3 })
     const mesh = createMesh(source)
@@ -727,9 +732,9 @@ describe('Landrush island material presentation ownership', () => {
 
     const reveal = mesh.material as Material
     expect(reveal.alphaTest).toBe(0.3)
-    expect(reveal.alphaHash).toBe(true)
+    expect(reveal.alphaHash).toBe(false)
     expect(reveal.alphaToCoverage).toBe(false)
-    expect(readAlphaTestNode(reveal)).toBeNull()
+    expect(readAlphaTestNode(reveal)).not.toBeNull()
     expect(reveal.transparent).toBe(false)
     expect(reveal.depthWrite).toBe(true)
     expect(readAlphaTestNode(source)).toBeNull()
@@ -754,6 +759,8 @@ describe('Landrush island material presentation ownership', () => {
     expect(reveal).not.toBe(source)
     expect(reveal.clippingPlanes).toBe(revealPlanes)
     expect(reveal.clipIntersection).toBe(true)
+    expect(reveal.alphaHash).toBe(false)
+    expect(readAlphaTestNode(reveal)).toBeNull()
     expect(reveal.alphaToCoverage).toBe(true)
     expect(source.clippingPlanes).toEqual([sourcePlane])
     expect(source.clipIntersection).toBe(false)

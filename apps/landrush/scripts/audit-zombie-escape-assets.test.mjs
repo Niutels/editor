@@ -5,22 +5,56 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { auditZombieEscapeAssets } from './audit-zombie-escape-assets.mjs'
 import { inspectGlb } from './landrush-glb-audit.mjs'
+import {
+  ZOMBIE_ESCAPE_WEAPON_IDS,
+  inspectZombieEscapeWeaponSemanticContract,
+  zombieEscapeWeaponSourcePath,
+} from './zombie-escape-weapon-glb-optimizer.mjs'
 
 const assetRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../public/landrush-lab/zombie-escape/assets',
 )
 
-test('inspects 2048 material slots and compatible bundled zombie skins', async () => {
+test('inspects optimized weapon textures, pristine sources, and compatible zombie skins', async () => {
   const weapon = await inspectGlb(resolve(assetRoot, 'weapons/sunflare-pistol.glb'))
   assert.equal(weapon.meshCount, 1)
   assert.equal(weapon.primitiveCount, 1)
   assert.ok(
-    ['baseColor', 'metallicRoughness', 'normal'].every(
+    ['baseColor', 'emissive', 'metallicRoughness', 'normal'].every(
       (slot) => weapon.materials[0].textureSlots[slot],
     ),
   )
-  assert.ok(weapon.images.every(({ height, width }) => height === 2048 && width === 2048))
+  assert.ok(
+    weapon.images.every(
+      ({ height, mimeType, width }) =>
+        height === 512 && mimeType === 'image/jpeg' && width === 512,
+    ),
+  )
+
+  const weaponSource = await inspectGlb(zombieEscapeWeaponSourcePath('sunflare-pistol'))
+  assert.equal(weapon.triangleCount, weaponSource.triangleCount)
+  assert.ok(
+    weaponSource.images.every(
+      ({ height, mimeType, width }) =>
+        height === 2048 && mimeType === 'image/jpeg' && width === 2048,
+    ),
+  )
+  const semanticContracts = await Promise.all(
+    ZOMBIE_ESCAPE_WEAPON_IDS.map(async (id) => ({
+      runtime: await inspectZombieEscapeWeaponSemanticContract(
+        resolve(assetRoot, `weapons/${id}.glb`),
+      ),
+      source: await inspectZombieEscapeWeaponSemanticContract(
+        zombieEscapeWeaponSourcePath(id),
+      ),
+    })),
+  )
+  assert.ok(
+    semanticContracts.every(
+      ({ runtime, source }) => runtime.semanticHash === source.semanticHash,
+    ),
+  )
 
   const zombieOutputs = await Promise.all(
     ['rigged', 'walk', 'run'].map((output) =>
@@ -71,7 +105,10 @@ test('audits the checked-in asset contract without writing a report', async () =
     audit.assets.dockworker.canonicalOutputs.rigged,
     '/landrush-lab/zombie-escape/assets/zombies/dockworker/rigged.glb',
   )
-  assert.equal(audit.assets['sunflare-pistol'].outputs.model.textureContract.profile, 'full-pbr-2048')
+  assert.equal(
+    audit.assets['sunflare-pistol'].outputs.model.textureContract.profile,
+    'full-pbr-512-jpeg',
+  )
   assert.equal(
     audit.assets.dockworker.outputs.rigged.textureContract.profile,
     'base-color-2048',
@@ -88,6 +125,12 @@ test('audits the checked-in asset contract without writing a report', async () =
     ),
   )
   assert.equal(audit.contract.rootMotion.status, 'not-audited')
+  assert.equal(audit.weaponRuntimeBytes, 2_038_548)
+  assert.ok(
+    ZOMBIE_ESCAPE_WEAPON_IDS.every(
+      (id) => audit.assets[id].outputs.model.semanticContract.preserved,
+    ),
+  )
 })
 
 test('rejects corrupt state paths, task fingerprints, and artifact hashes', async () => {
@@ -100,8 +143,14 @@ test('rejects corrupt state paths, task fingerprints, and artifact hashes', asyn
     '/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb'
   weapon.previewTaskIdFingerprint = 'f'.repeat(64)
   weapon.artifacts.model.sha256 = '0'.repeat(64)
+  weapon.runtimeArtifacts.model.runtimeSha256 = '1'.repeat(64)
+  weapon.runtimeArtifacts.model.semanticHash = '2'.repeat(64)
 
-  const audit = await auditZombieEscapeAssets({ assetRoot, generation: corrupted })
+  const audit = await auditZombieEscapeAssets({
+    assetRoot,
+    generation: corrupted,
+    weaponRuntimeBudgetBytes: 1,
+  })
   assert.ok(
     audit.failures.some((failure) =>
       failure.startsWith('sunflare-pistol/model: canonical state path'),
@@ -116,5 +165,18 @@ test('rejects corrupt state paths, task fingerprints, and artifact hashes', asyn
     audit.failures.some((failure) =>
       failure.startsWith('sunflare-pistol/model: state artifact sha256'),
     ),
+  )
+  assert.ok(
+    audit.failures.some((failure) =>
+      failure.startsWith('sunflare-pistol/model: runtime artifact runtimeSha256'),
+    ),
+  )
+  assert.ok(
+    audit.failures.some((failure) =>
+      failure.startsWith('sunflare-pistol/model: runtime artifact semanticHash'),
+    ),
+  )
+  assert.ok(
+    audit.failures.some((failure) => failure.startsWith('weapon runtime payload:')),
   )
 })

@@ -8,10 +8,11 @@ import {
   type Object3D,
   type Plane,
 } from 'three'
-import { materialOpacity, mul, uniform } from 'three/tsl'
+import { materialAlphaTest, materialOpacity, mul, uniform } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
 import { readLandrushIslandFloorFadeOpacity } from './landrush-floor-fade-opacity'
 import { readLandrushRobotRevealObjectAmount } from './landrush-robot-reveal-support'
+import { createLandrushRobotScreenRevealAlphaHashThresholdNode } from './robot-screen-reveal-alpha-hash'
 import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
 
 export type LandrushIslandRevealMaterialPresentation =
@@ -820,12 +821,23 @@ export class LandrushIslandMaterialPresentationOwner {
       sourceNodeMaterial,
       variant,
     )
+    const usesScaledRevealAlphaHash = usesDepthWritingSoftReveal && !source.alphaToCoverage
+    if (usesScaledRevealAlphaHash) {
+      const authoredAlphaTestNode =
+        sourceNodeMaterial.alphaTestNode != null
+          ? sourceNodeMaterial.alphaTestNode
+          : source.alphaTest > 0
+            ? (materialAlphaTest as unknown as TSLNode<'float'>)
+            : null
+      nodeMaterial.alphaTestNode =
+        createLandrushRobotScreenRevealAlphaHashThresholdNode(authoredAlphaTestNode)
+    }
     const usesSortedFractionalPresentation =
       (variant.floor && variant.floorTranslucent) ||
       (variant.reveal === 'soft' && !usesDepthWritingSoftReveal)
     material.transparent = source.transparent
     material.blending = source.blending
-    material.alphaHash = source.alphaHash || (usesDepthWritingSoftReveal && !source.alphaToCoverage)
+    material.alphaHash = usesScaledRevealAlphaHash ? false : source.alphaHash
     material.alphaToCoverage = variant.reveal === 'clip' ? true : source.alphaToCoverage
     if (usesSortedFractionalPresentation) {
       material.transparent = true

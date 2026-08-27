@@ -154,6 +154,8 @@ export function ZombieEscapeHud({
               LS move · RS aim · RT fire · L3 run · Menu pause · Y reset · View debug · D-pad
               camera/quality
             </span>
+          ) : inputMode === 'touch' ? (
+            <span>Left stick move · Right stick aim · Push the right stick outward to fire</span>
           ) : (
             <span>
               WASD move · Mouse aim · LMB/Space fire · Shift run · P pause · R reset · F1 debug · C

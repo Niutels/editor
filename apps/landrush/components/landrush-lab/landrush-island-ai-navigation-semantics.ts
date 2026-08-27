@@ -70,6 +70,48 @@ export function resolveLandrushIslandRuntimeDoorPassabilityKey(key: string) {
   ) as Readonly<Record<string, boolean>>
 }
 
+export function createLandrushZombieEscapeStableClosedDoorPassability(
+  nodes: Record<string, AnyNode>,
+) {
+  return Object.fromEntries(
+    Object.values(nodes)
+      .filter(
+        (node): node is LandrushCollisionDoor =>
+          node.type === 'door' &&
+          isSemanticCollisionNodeVisible(node, nodes) &&
+          !isLandrushPermanentDoorOpening(node),
+      )
+      .sort((first, second) => first.id.localeCompare(second.id))
+      .map((door) => [door.id, false]),
+  ) as Readonly<Record<string, false>>
+}
+
+export function resolveLandrushZombieEscapeLiveOperableDoorIds(nodes: Record<string, AnyNode>) {
+  return Object.values(nodes)
+    .filter(
+      (node): node is LandrushCollisionDoor =>
+        node.type === 'door' && !isLandrushPermanentDoorOpening(node),
+    )
+    .map(({ id }) => id)
+    .sort((first, second) => first.localeCompare(second))
+}
+
+export function resolveLandrushZombieEscapeRuntimePassableDoorIds(
+  nodes: Record<string, AnyNode>,
+  doorPassability: Readonly<Record<string, boolean>> = {},
+) {
+  return Object.values(nodes)
+    .filter(
+      (node): node is LandrushCollisionDoor =>
+        node.type === 'door' &&
+        isSemanticCollisionNodeVisible(node, nodes) &&
+        !isLandrushPermanentDoorOpening(node) &&
+        isDoorPassable(node, doorPassability),
+    )
+    .map(({ id }) => id)
+    .sort((first, second) => first.localeCompare(second))
+}
+
 type LandrushCollisionNode = Extract<AnyNode, { type: 'fence' | 'wall' }>
 type LandrushCollisionWall = Extract<AnyNode, { type: 'wall' }>
 type LandrushCollisionDoor = Extract<AnyNode, { type: 'door' }>
@@ -1592,6 +1634,7 @@ function appendCollisionNodeSegments(
     node.type === 'wall'
       ? collectDoorOpenings(node, nodes, collisionIndex.doorsByWallId, length, doorPassability)
       : []
+  const breakable = node.type === 'fence'
   let cursor = 0
   let runIndex = 0
   for (const opening of openings) {
@@ -1599,7 +1642,7 @@ function appendCollisionNodeSegments(
       appendCenterlineRun(
         segments,
         node.id,
-        false,
+        breakable,
         runIndex++,
         centerline,
         cumulativeDistances,
@@ -1619,7 +1662,7 @@ function appendCollisionNodeSegments(
     appendCenterlineRun(
       segments,
       node.id,
-      false,
+      breakable,
       runIndex,
       centerline,
       cumulativeDistances,
@@ -1887,13 +1930,18 @@ function isDoorPassable(
   door: Extract<AnyNode, { type: 'door' }>,
   doorPassability: Readonly<Record<string, boolean>>,
 ) {
-  if (door.openingKind === 'opening') return true
-  if (door.segments.every((segment) => segment.type === 'empty')) return true
+  if (isLandrushPermanentDoorOpening(door)) return true
   if (Object.hasOwn(doorPassability, door.id)) return doorPassability[door.id] === true
   if (door.doorType === 'hinged' || door.doorType === 'double' || door.doorType === 'french') {
     return door.swingAngle >= LANDRUSH_ISLAND_DOOR_SWING_PASSABLE_RADIANS
   }
   return door.operationState >= LANDRUSH_ISLAND_DOOR_OPERATION_PASSABLE_AMOUNT
+}
+
+function isLandrushPermanentDoorOpening(door: LandrushCollisionDoor) {
+  return (
+    door.openingKind === 'opening' || door.segments.every((segment) => segment.type === 'empty')
+  )
 }
 
 function isCollisionNode(

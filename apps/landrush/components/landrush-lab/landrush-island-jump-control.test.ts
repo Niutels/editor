@@ -100,38 +100,138 @@ describe('Landrush island jump control', () => {
     const requestedAtMs = 1_000
 
     queueLandrushIslandJumpRequest(request, 'keyboard-space', requestedAtMs)
-    expect(consumeLandrushIslandJumpRequest(request, false, false, requestedAtMs)).toBeNull()
     expect(
-      consumeLandrushIslandJumpRequest(
-        request,
-        true,
-        false,
-        requestedAtMs + LANDRUSH_ISLAND_JUMP_INPUT_BUFFER_MS,
-      ),
+      consumeLandrushIslandJumpRequest({
+        canJump: false,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: requestedAtMs,
+        state: request,
+      }),
+    ).toBeNull()
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: requestedAtMs + LANDRUSH_ISLAND_JUMP_INPUT_BUFFER_MS,
+        state: request,
+      }),
     ).toBe('keyboard-space')
-    expect(consumeLandrushIslandJumpRequest(request, true, false, requestedAtMs + 1)).toBeNull()
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: requestedAtMs + 1,
+        state: request,
+      }),
+    ).toBeNull()
   })
 
   test('does not repeat a consumed request while its physical button remains held', () => {
     const request = createLandrushIslandJumpRequestState()
 
     queueLandrushIslandJumpRequest(request, 'gamepad', 50)
-    expect(consumeLandrushIslandJumpRequest(request, true, false, 50)).toBe('gamepad')
-    expect(consumeLandrushIslandJumpRequest(request, true, false, 51)).toBeNull()
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 50,
+        state: request,
+      }),
+    ).toBe('gamepad')
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 51,
+        state: request,
+      }),
+    ).toBeNull()
+  })
+
+  test('buffers touch requests through the same authoritative jump queue', () => {
+    const request = createLandrushIslandJumpRequestState()
+
+    queueLandrushIslandJumpRequest(request, 'touch', 75)
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: false,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 75,
+        state: request,
+      }),
+    ).toBeNull()
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 76,
+        state: request,
+      }),
+    ).toBe('touch')
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 77,
+        state: request,
+      }),
+    ).toBeNull()
+  })
+
+  test('clears buffered requests as soon as jump command authority is suspended', () => {
+    const request = createLandrushIslandJumpRequestState()
+
+    queueLandrushIslandJumpRequest(request, 'touch', 90)
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: false,
+        falling: false,
+        nowMs: 90,
+        state: request,
+      }),
+    ).toBeNull()
+    expect(request.source).toBeNull()
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 91,
+        state: request,
+      }),
+    ).toBeNull()
   })
 
   test('expires old requests and never consumes while falling', () => {
     const request = createLandrushIslandJumpRequestState()
 
     queueLandrushIslandJumpRequest(request, 'runtime-probe', 100)
-    expect(consumeLandrushIslandJumpRequest(request, true, true, 100)).toBeNull()
     expect(
-      consumeLandrushIslandJumpRequest(
-        request,
-        true,
-        false,
-        100 + LANDRUSH_ISLAND_JUMP_INPUT_BUFFER_MS + 1,
-      ),
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: true,
+        nowMs: 100,
+        state: request,
+      }),
+    ).toBeNull()
+    expect(
+      consumeLandrushIslandJumpRequest({
+        canJump: true,
+        commandsEnabled: true,
+        falling: false,
+        nowMs: 100 + LANDRUSH_ISLAND_JUMP_INPUT_BUFFER_MS + 1,
+        state: request,
+      }),
     ).toBeNull()
     expect(request.source).toBeNull()
   })

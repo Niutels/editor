@@ -4,6 +4,7 @@ import {
   type AnyNodeId,
   BuildingNode,
   DoorNode,
+  FenceNode,
   ItemNode,
   LevelNode,
   SlabNode,
@@ -44,6 +45,7 @@ const ZOMBIE_X = -3
 describe('Zombie Escape real Pascal obstacle attack integration', () => {
   test.each([
     ['DoorNode', createPascalDoorFixture],
+    ['FenceNode', createPascalFenceFixture],
     ['ItemNode', createPascalItemFixture],
   ] as const)('contact-aligns two authored strikes, removes the %s collider/root, and resumes pursuit', (_, createFixture) => {
     const arena = createZombieEscapeArena(97_101)
@@ -175,6 +177,20 @@ function createPascalDoorFixture() {
     width: 1,
   })
   return { objectId: door.id, world: compilePascalWorld([building, level, slab, wall, door]) }
+}
+
+function createPascalFenceFixture() {
+  const building = BuildingNode.parse({})
+  const level = LevelNode.parse({ level: 0, parentId: building.id })
+  const slab = createPascalSlab(level.id)
+  const fence = FenceNode.parse({
+    end: [0, 8],
+    height: 1.2,
+    parentId: level.id,
+    start: [0, -8],
+    thickness: 0.12,
+  })
+  return { objectId: fence.id, world: compilePascalWorld([building, level, slab, fence]) }
 }
 
 function createPascalItemFixture() {

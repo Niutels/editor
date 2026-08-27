@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createLandrushZombieEscapeCollisionWorldBuildCoordinator,
+  isLandrushZombieEscapeDesiredCollisionWorldReady,
   LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_EXECUTION_TIMEOUT_MS,
   LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_RETRY_DELAYS_MS,
   type LandrushZombieEscapeCollisionWorldBuildCoordinator,
@@ -14,6 +15,39 @@ type Input = Readonly<{ semanticKey: string; value: number }>
 type Worlds = Readonly<{ combat: string; navigation: string }>
 
 describe('Zombie Escape collision-world lifecycle', () => {
+  test('accepts only a settled bundle with the exact desired signature', () => {
+    const exactWorlds = createWorlds(1)
+    const exactState: LandrushZombieEscapeCollisionWorldBuildState<Worlds> = {
+      generation: 1,
+      pendingSignature: null,
+      ready: true,
+      signature: 'exact',
+      worlds: exactWorlds,
+    }
+
+    expect(
+      isLandrushZombieEscapeDesiredCollisionWorldReady({
+        desiredSignature: 'exact',
+        state: exactState,
+      }),
+    ).toBe(true)
+
+    for (const state of [
+      { ...exactState, pendingSignature: 'next', ready: false },
+      { ...exactState, pendingSignature: 'next' },
+      { ...exactState, ready: false },
+      { ...exactState, signature: 'stale' },
+      { ...exactState, worlds: null },
+    ] as const) {
+      expect(
+        isLandrushZombieEscapeDesiredCollisionWorldReady({
+          desiredSignature: 'exact',
+          state,
+        }),
+      ).toBe(false)
+    }
+  })
+
   test('debounces background edits and compiles only the latest input during idle time', () => {
     const schedule = createDeterministicScheduleHost()
     const compiled: Input[] = []
@@ -700,7 +734,7 @@ describe('Zombie Escape collision-world lifecycle', () => {
     expect(coordinator.getState()).toMatchObject({ ready: false, signature: null, worlds: null })
   })
 
-  test('times out a never-settling build, exhausts bounded retries, and remains not ready', () => {
+  test('times out a never-settling build once without restarting the same cold work', () => {
     const schedule = createDeterministicScheduleHost()
     const errors: unknown[] = []
     const signals: AbortSignal[] = []
@@ -724,21 +758,11 @@ describe('Zombie Escape collision-world lifecycle', () => {
     expect(schedule.pending('timeout')).toEqual([{ delayMs: 40, id: 2 }])
 
     schedule.runNext('timeout')
-    expect(schedule.pending('timeout')).toEqual([{ delayMs: 5, id: 3 }])
-    schedule.runNext('timeout')
-    expect(schedule.pending('timeout')).toEqual([{ delayMs: 40, id: 4 }])
-    schedule.runNext('timeout')
-    expect(schedule.pending('timeout')).toEqual([{ delayMs: 7, id: 5 }])
-    schedule.runNext('timeout')
-    expect(schedule.pending('timeout')).toEqual([{ delayMs: 40, id: 6 }])
-    schedule.runNext('timeout')
 
-    expect(compileCount).toBe(3)
+    expect(compileCount).toBe(1)
     expect(signals.every((signal) => signal.aborted)).toBe(true)
-    expect(errors).toHaveLength(3)
-    expect(errors.every((error) => error instanceof Error && error.name === 'TimeoutError')).toBe(
-      true,
-    )
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ name: 'TimeoutError' })
     expect(schedule.pending('timeout')).toEqual([])
     expect(coordinator.getState()).toEqual({
       generation: 1,
@@ -749,57 +773,12 @@ describe('Zombie Escape collision-world lifecycle', () => {
     })
   })
 
-  test('retries successfully after an execution timeout', () => {
+  test('ignores a timed-out attempt that completes after terminal failure', async () => {
     const schedule = createDeterministicScheduleHost()
-    const errors: unknown[] = []
-    let compileCount = 0
-    let firstSignal: AbortSignal | null = null
-    const coordinator = createLandrushZombieEscapeCollisionWorldBuildCoordinator({
-      compile: (input: Input, signal) => {
-        compileCount += 1
-        if (compileCount === 1) {
-          firstSignal = signal
-          return new Promise<Worlds>(() => undefined)
-        }
-        return createWorlds(input.value)
-      },
-      executionTimeoutMs: 40,
-      host: schedule.host,
-      onError: (error) => errors.push(error),
-      onStateChange: () => undefined,
-      resolveSignature: (input: Input) => input.semanticKey,
-      retryDelaysMs: [5],
-    })
-
-    coordinator.request({ semanticKey: 'retry', value: 8 }, 'urgent')
-    schedule.runNext('timeout')
-    schedule.runNext('timeout')
-    expect(schedule.pending('timeout')).toEqual([{ delayMs: 5, id: 3 }])
-    schedule.runNext('timeout')
-
-    expect(firstSignal?.aborted).toBe(true)
-    expect(compileCount).toBe(2)
-    expect(errors).toHaveLength(1)
-    expect(coordinator.getState()).toEqual({
-      generation: 1,
-      pendingSignature: null,
-      ready: true,
-      signature: 'retry',
-      worlds: createWorlds(8),
-    })
-    expect(schedule.pending('timeout')).toEqual([])
-  })
-
-  test('ignores a timed-out attempt that completes after a successful retry', async () => {
-    const schedule = createDeterministicScheduleHost()
-    const builds: Array<ReturnType<typeof createDeferred<Worlds>>> = []
+    const build = createDeferred<Worlds>()
     const errors: unknown[] = []
     const coordinator = createLandrushZombieEscapeCollisionWorldBuildCoordinator({
-      compile: () => {
-        const build = createDeferred<Worlds>()
-        builds.push(build)
-        return build.promise
-      },
+      compile: () => build.promise,
       executionTimeoutMs: 40,
       host: schedule.host,
       onError: (error) => errors.push(error),
@@ -811,23 +790,19 @@ describe('Zombie Escape collision-world lifecycle', () => {
     coordinator.request({ semanticKey: 'late', value: 9 }, 'urgent')
     schedule.runNext('timeout')
     schedule.runNext('timeout')
-    schedule.runNext('timeout')
-
-    builds[1]?.resolve(createWorlds(9))
-    await flushPromises()
-    const completedState = coordinator.getState()
-    expect(completedState).toEqual({
+    const terminalState = coordinator.getState()
+    expect(terminalState).toEqual({
       generation: 1,
       pendingSignature: null,
-      ready: true,
-      signature: 'late',
-      worlds: createWorlds(9),
+      ready: false,
+      signature: null,
+      worlds: null,
     })
     expect(schedule.pending('timeout')).toEqual([])
 
-    builds[0]?.resolve(createWorlds(99))
+    build.resolve(createWorlds(99))
     await flushPromises()
-    expect(coordinator.getState()).toBe(completedState)
+    expect(coordinator.getState()).toBe(terminalState)
     expect(errors).toHaveLength(1)
   })
 

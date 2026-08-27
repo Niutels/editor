@@ -4,6 +4,9 @@ import {
   createZombieEscapeAttackClip,
   ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS,
 } from './zombie-escape-attack-presentation'
+import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
   createZombieVisual,
   resolveZombieEscapeGeneratedVariantAdmissionCount,
@@ -224,6 +227,89 @@ describe('generated zombie visual construction', () => {
       ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS * 0.5,
       6,
     )
+    visual.mixer?.stopAllAction()
+    visual.mixer?.uncacheRoot(visual.animationRoot)
+    for (const ownedMaterial of visual.ownedMaterials) ownedMaterial.dispose()
+    geometry.dispose()
+    material.dispose()
+  })
+
+  test('drives a detailed joint collapse to an exact nonmoving terminal pose', () => {
+    const group = new Group()
+    const source = new Group()
+    for (const name of [
+      'Hips',
+      'Spine',
+      'Spine01',
+      'Head',
+      'LeftArm',
+      'LeftForeArm',
+      'RightArm',
+      'RightForeArm',
+      'LeftUpLeg',
+      'LeftLeg',
+      'RightUpLeg',
+      'RightLeg',
+    ]) {
+      const bone = new Bone()
+      bone.name = name
+      source.add(bone)
+    }
+    const geometry = new BoxGeometry()
+    const material = new MeshStandardMaterial()
+    source.add(new Mesh(geometry, material))
+    const deathClip = createZombieEscapeDeathClip(source)
+    const visual = createZombieVisual({
+      active: true,
+      attackClip: null,
+      deathClip,
+      generation: 1,
+      group,
+      impactVisualRegistry: createZombieEscapeImpactVisualRegistry(),
+      modelTransform: MODEL_TRANSFORM,
+      runClip: null,
+      slot: null,
+      source,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+      zombieShaderSeed: 0,
+    })
+
+    updateZombieVisualLocomotion({
+      attackCooldown: 0,
+      attackIntent: ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase,
+      deathPresentationSeconds:
+        ZOMBIE_ESCAPE_SIMULATION.zombieDeathPresentationSeconds -
+        ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS * 0.5,
+      delta: 1 / 60,
+      health: 0,
+      horizontalSpeed: 0,
+      paused: false,
+      runBlend: 0,
+      runMetersPerSecond: 3,
+      visual,
+      walkMetersPerSecond: 1,
+    })
+    expect(visual.deathAction?.getEffectiveWeight()).toBe(1)
+    expect(visual.deathAction?.time).toBeCloseTo(
+      ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS * 0.5,
+      6,
+    )
+
+    updateZombieVisualLocomotion({
+      attackCooldown: 0,
+      attackIntent: ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase,
+      deathPresentationSeconds: 0.2,
+      delta: 1 / 60,
+      health: 0,
+      horizontalSpeed: 0,
+      paused: false,
+      runBlend: 0,
+      runMetersPerSecond: 3,
+      visual,
+      walkMetersPerSecond: 1,
+    })
+    expect(visual.deathAction?.time).toBeCloseTo(ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS, 6)
     visual.mixer?.stopAllAction()
     visual.mixer?.uncacheRoot(visual.animationRoot)
     for (const ownedMaterial of visual.ownedMaterials) ownedMaterial.dispose()

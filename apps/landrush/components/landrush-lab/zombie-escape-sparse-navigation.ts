@@ -975,12 +975,12 @@ function resolveSparseConnectorLandingCandidate(
   const sourceY = sourceEnd ? connector.endY : connector.startY
   const layerIndex = oracle.resolveLayerIndex(sourceY)
   const travelAmount = connectorTargetEnd ? 1 : -1
-  for (let step = 0; step < 8; step += 1) {
-    const clearance = world.agentRadius + world.cellSize * (1 + step)
+  for (let step = -1; step < 8; step += 1) {
+    const clearance = step < 0 ? 0 : world.agentRadius + world.cellSize * (1 + step)
     const x = sourceX - connector.directionX * travelAmount * clearance
     const z = sourceZ - connector.directionZ * travelAmount * clearance
     const supportIndices = oracle.resolveSupportIndices(layerIndex, x, z)
-    if (supportIndices.length === 0) continue
+    if (supportIndices.length === 0 || !oracle.candidateIsClear(layerIndex, x, z, true)) continue
     return {
       connectorIndex,
       connectorTargetEnd,

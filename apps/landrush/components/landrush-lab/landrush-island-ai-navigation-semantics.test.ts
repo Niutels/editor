@@ -15,11 +15,13 @@ import {
   createLandrushZombieEscapeCollisionWorld,
   createLandrushZombieEscapeCollisionWorldCompilation,
   createLandrushZombieEscapeCollisionWorldSignature,
+  createLandrushZombieEscapeStableClosedDoorPassability,
   resolveLandrushIslandRuntimeDoorPassabilityKey,
+  resolveLandrushZombieEscapeLiveOperableDoorIds,
+  resolveLandrushZombieEscapeRuntimePassableDoorIds,
 } from './landrush-island-ai-navigation-semantics'
 import { distanceToLandrushIslandAmbientObstacles } from './landrush-island-ambient-navigation'
 import { createLandrushIslandAmbientSemanticNavigationObstacles } from './landrush-island-ambient-navigation-semantics'
-import { resolveLandrushZombieEscapeCollisionWorldPhaseReady } from './landrush-zombie-escape-collision-world-lifecycle'
 import { ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND } from './zombie-escape-collision-world'
 
 function indexNodes(nodes: readonly AnyNode[]) {
@@ -212,7 +214,7 @@ describe('Landrush island shared AI navigation semantics', () => {
     ).toBeGreaterThan(0)
   })
 
-  test('gates night readiness across a closed-to-open door threshold until that signature is applied', () => {
+  test('keeps the compiled door topology stable while runtime passability crosses its threshold', () => {
     const level = LevelNode.parse({ level: 0 })
     const wall = WallNode.parse({
       end: [4, 0],
@@ -227,57 +229,83 @@ describe('Landrush island shared AI navigation semantics', () => {
       width: 1,
     })
     const nodes = indexNodes([level, wall, door])
-    const createInput = (operationState: number) => ({
-      agentRadius: 0.3,
-      doorPassability: resolveLandrushIslandRuntimeDoorPassabilityKey(
+    const stableDoorPassability = createLandrushZombieEscapeStableClosedDoorPassability(nodes)
+    const resolveRuntimeState = (operationState: number) => {
+      const runtimePassability = resolveLandrushIslandRuntimeDoorPassabilityKey(
         createLandrushIslandRuntimeDoorPassabilityKey({
           [door.id]: { operationState },
         }),
-      ),
+      )
+      return {
+        passableDoorIds: resolveLandrushZombieEscapeRuntimePassableDoorIds(
+          nodes,
+          runtimePassability,
+        ),
+        signature: createLandrushZombieEscapeCollisionWorldSignature({
+          agentRadius: 0.3,
+          doorPassability: stableDoorPassability,
+          nodes,
+          playRadius: 20,
+          spawn: { x: 0, z: 0 },
+        }),
+      }
+    }
+    const closed = resolveRuntimeState(0.849)
+    const open = resolveRuntimeState(0.85)
+    const compilation = createLandrushZombieEscapeCollisionWorldCompilation({
+      agentRadius: 0.3,
+      doorPassability: stableDoorPassability,
       nodes,
       playRadius: 20,
       spawn: { x: 0, z: 0 },
     })
-    const closedSignature = createLandrushZombieEscapeCollisionWorldSignature(createInput(0.849))
-    const openSignature = createLandrushZombieEscapeCollisionWorldSignature(createInput(0.85))
-    const appliedClosedState = {
-      generation: 1,
-      pendingSignature: null,
-      ready: true,
-      signature: closedSignature,
-      worlds: { signature: closedSignature },
-    } as const
 
-    expect(openSignature).not.toBe(closedSignature)
-    expect(
-      resolveLandrushZombieEscapeCollisionWorldPhaseReady({
-        desiredSignature: openSignature,
-        expectedPhase: 'night',
-        phaseReady: true,
-        state: appliedClosedState,
-      }),
-    ).toBe(false)
-    expect(
-      resolveLandrushZombieEscapeCollisionWorldPhaseReady({
-        desiredSignature: closedSignature,
-        expectedPhase: 'night',
-        phaseReady: true,
-        state: appliedClosedState,
-      }),
-    ).toBe(true)
-    expect(
-      resolveLandrushZombieEscapeCollisionWorldPhaseReady({
-        desiredSignature: openSignature,
-        expectedPhase: 'night',
-        phaseReady: true,
-        state: {
-          ...appliedClosedState,
-          generation: 2,
-          signature: openSignature,
-          worlds: { signature: openSignature },
-        },
-      }),
-    ).toBe(true)
+    expect(stableDoorPassability).toEqual({ [door.id]: false })
+    expect(resolveLandrushZombieEscapeLiveOperableDoorIds(nodes)).toEqual([door.id])
+    expect(closed.passableDoorIds).toEqual([])
+    expect(open.passableDoorIds).toEqual([door.id])
+    expect(open.signature).toBe(closed.signature)
+    expect(compilation.payload.segments).toContainEqual(
+      expect.objectContaining({ breakable: true, objectId: door.id }),
+    )
+  })
+
+  test('keeps hidden operable doors live while pruning deleted doors and permanent openings', () => {
+    const level = LevelNode.parse({ level: 0 })
+    const wall = WallNode.parse({
+      end: [6, 0],
+      parentId: level.id,
+      start: [0, 0],
+    })
+    const visibleDoor = DoorNode.parse({
+      parentId: wall.id,
+      position: [1.5, 0, 0],
+      wallId: wall.id,
+    })
+    const hiddenDoor = DoorNode.parse({
+      parentId: wall.id,
+      position: [3, 0, 0],
+      visible: false,
+      wallId: wall.id,
+    })
+    const permanentOpening = DoorNode.parse({
+      openingKind: 'opening',
+      parentId: wall.id,
+      position: [4.5, 0, 0],
+      wallId: wall.id,
+    })
+    const nodes = indexNodes([level, wall, visibleDoor, hiddenDoor, permanentOpening])
+
+    expect(resolveLandrushZombieEscapeLiveOperableDoorIds(nodes)).toEqual(
+      [visibleDoor.id, hiddenDoor.id].sort((first, second) => first.localeCompare(second)),
+    )
+    expect(createLandrushZombieEscapeStableClosedDoorPassability(nodes)).toEqual({
+      [visibleDoor.id]: false,
+    })
+
+    const afterDeletion = { ...nodes }
+    delete afterDeletion[hiddenDoor.id]
+    expect(resolveLandrushZombieEscapeLiveOperableDoorIds(afterDeletion)).toEqual([visibleDoor.id])
   })
 
   test('keys the exact surface boundary and selects sparse navigation without a radial boundary', () => {

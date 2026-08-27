@@ -25,6 +25,8 @@ const BOUNDARY_SURFACE_OFFSET_METERS = 0.035
 const BOUNDARY_STRIP_HALF_WIDTH_METERS = 0.018
 const FEATURE_SURFACE_OFFSET_METERS = 0.055
 const ROUTE_SURFACE_OFFSET_METERS = 0.075
+const GRAPH_EDGE_SURFACE_OFFSET_METERS = 0.095
+const GRAPH_NODE_SURFACE_OFFSET_METERS = 0.115
 const CIRCLE_SEGMENT_COUNT = 20
 
 const FEATURE_COLOR = {
@@ -36,6 +38,13 @@ const FEATURE_COLOR = {
   connector: [0.76, 0.36, 1] as const,
   door: [0.1, 0.88, 1] as const,
   furniture: [1, 0.48, 0.12] as const,
+  graphConnector: [0.82, 0.46, 1] as const,
+  graphFallback: [1, 0.52, 0.08] as const,
+  graphFallbackOpen: [0.14, 0.94, 0.72] as const,
+  graphNode: [0.82, 0.94, 1] as const,
+  graphOrphan: [1, 0.08, 0.26] as const,
+  graphStrict: [0.12, 0.68, 1] as const,
+  graphWitness: [1, 0.9, 0.22] as const,
   regionFallback: [1, 0.55, 0.08] as const,
   regionStrict: [0.08, 0.56, 1] as const,
   routeFallback: [1, 0.78, 0.12] as const,
@@ -53,6 +62,9 @@ export type ZombieEscapeNavigationDebugLayerGeometry = Readonly<{
   elevation: number
   featureLineColors: Float32Array
   featureLinePositions: Float32Array
+  graphFeatureLineVertexCount: number
+  graphNodeColors: Float32Array
+  graphNodePositions: Float32Array
   regionOverlapMarkerPositions: Float32Array
   regionTriangleColors: Float32Array
   regionTrianglePositions: Float32Array
@@ -63,6 +75,9 @@ export type ZombieEscapeNavigationDebugLayerGeometry = Readonly<{
 
 export type ZombieEscapeNavigationDebugStaticSnapshot = Readonly<{
   activationRevision: number
+  graphFallbackOnlyEdgeCount: number
+  graphNodeCount: number
+  graphStrictEdgeCount: number
   layers: readonly ZombieEscapeNavigationDebugLayerGeometry[]
   semanticKey: string
   staticBytes: number
@@ -116,6 +131,10 @@ export function createZombieEscapeNavigationDebugStaticSnapshot(
     elevation: layer.elevation,
     featureColors: [] as number[],
     features: [] as number[],
+    graphFeatureColors: [] as number[],
+    graphFeatures: [] as number[],
+    graphNodeColors: [] as number[],
+    graphNodes: [] as number[],
     overlapMarkers: [] as number[],
     regions: [] as number[],
     regionColors: [] as number[],
@@ -124,25 +143,39 @@ export function createZombieEscapeNavigationDebugStaticSnapshot(
     strictRegionVertexCount: 0,
   }))
   appendNavigationRegionGeometry(world, layerBuilders)
+  const graphCounts = appendNavigationGraphGeometry(world, layerBuilders)
   appendNavigationConnectorGeometry(world, layerBuilders)
   appendNavigationDoorLinkGeometry(world, layerBuilders)
   appendNavigationColliderGeometry(world, layerBuilders)
 
-  const layers = layerBuilders.map((builder) => ({
-    boundaryTriangleColors: Float32Array.from(builder.boundaryColors),
-    boundaryTrianglePositions: Float32Array.from(builder.boundaries),
-    elevation: builder.elevation,
-    featureLineColors: Float32Array.from(builder.featureColors),
-    featureLinePositions: Float32Array.from(builder.features),
-    regionOverlapMarkerPositions: Float32Array.from(builder.overlapMarkers),
-    regionTriangleColors: Float32Array.from(builder.regionColors),
-    regionTrianglePositions: Float32Array.from(builder.regions),
-    strictBoundaryVertexCount: builder.strictBoundaryVertexCount,
-    strictRegionOverlapMarkerCount: builder.strictRegionOverlapMarkerCount,
-    strictRegionVertexCount: builder.strictRegionVertexCount,
-  }))
+  const layers = layerBuilders.map((builder) => {
+    const featureLineColors = Float32Array.from([
+      ...builder.graphFeatureColors,
+      ...builder.featureColors,
+    ])
+    const featureLinePositions = Float32Array.from([...builder.graphFeatures, ...builder.features])
+    return {
+      boundaryTriangleColors: Float32Array.from(builder.boundaryColors),
+      boundaryTrianglePositions: Float32Array.from(builder.boundaries),
+      elevation: builder.elevation,
+      featureLineColors,
+      featureLinePositions,
+      graphFeatureLineVertexCount: builder.graphFeatures.length / 3,
+      graphNodeColors: Float32Array.from(builder.graphNodeColors),
+      graphNodePositions: Float32Array.from(builder.graphNodes),
+      regionOverlapMarkerPositions: Float32Array.from(builder.overlapMarkers),
+      regionTriangleColors: Float32Array.from(builder.regionColors),
+      regionTrianglePositions: Float32Array.from(builder.regions),
+      strictBoundaryVertexCount: builder.strictBoundaryVertexCount,
+      strictRegionOverlapMarkerCount: builder.strictRegionOverlapMarkerCount,
+      strictRegionVertexCount: builder.strictRegionVertexCount,
+    }
+  })
   return {
     activationRevision: world.activationRevision,
+    graphFallbackOnlyEdgeCount: graphCounts.fallbackOnlyEdgeCount,
+    graphNodeCount: world.navigationGraph.nodeIds.length,
+    graphStrictEdgeCount: graphCounts.strictEdgeCount,
     layers,
     semanticKey: world.semanticKey,
     staticBytes: layers.reduce(
@@ -152,6 +185,8 @@ export function createZombieEscapeNavigationDebugStaticSnapshot(
         layer.boundaryTrianglePositions.byteLength +
         layer.featureLineColors.byteLength +
         layer.featureLinePositions.byteLength +
+        layer.graphNodeColors.byteLength +
+        layer.graphNodePositions.byteLength +
         layer.regionOverlapMarkerPositions.byteLength +
         layer.regionTriangleColors.byteLength +
         layer.regionTrianglePositions.byteLength,
@@ -159,6 +194,153 @@ export function createZombieEscapeNavigationDebugStaticSnapshot(
     ),
     worldRevision: world.revision,
   }
+}
+
+function appendNavigationGraphGeometry(
+  world: ZombieEscapeCollisionWorld,
+  builders: Array<{
+    elevation: number
+    graphFeatureColors: number[]
+    graphFeatures: number[]
+    graphNodeColors: number[]
+    graphNodes: number[]
+  }>,
+) {
+  const graph = world.navigationGraph
+  const nodeCount = graph.nodeIds.length
+  const witnessMarks = new Uint8Array(nodeCount)
+  for (const node of graph.targetRegionIndex.witnessNodes) {
+    if (node >= 0 && node < nodeCount) witnessMarks[node] = 1
+  }
+
+  for (let node = 0; node < nodeCount; node += 1) {
+    const layerIndex = graph.layerIndices[node]!
+    const builder = builders[layerIndex]
+    if (!builder) continue
+    const fallbackDegree =
+      graph.fallbackAdjacency.nodeOffsets[node + 1]! - graph.fallbackAdjacency.nodeOffsets[node]!
+    const connectorNode = graph.connectorIndices[node]! >= 0
+    const color =
+      fallbackDegree === 0 || (connectorNode && fallbackDegree <= 1)
+        ? FEATURE_COLOR.graphOrphan
+        : connectorNode
+          ? FEATURE_COLOR.graphConnector
+          : witnessMarks[node] !== 0
+            ? FEATURE_COLOR.graphWitness
+            : FEATURE_COLOR.graphNode
+    builder.graphNodes.push(
+      graph.x[node]!,
+      builder.elevation + GRAPH_NODE_SURFACE_OFFSET_METERS,
+      graph.z[node]!,
+    )
+    builder.graphNodeColors.push(...color)
+  }
+
+  let strictEdgeCount = 0
+  let fallbackOnlyEdgeCount = 0
+  const strict = graph.strictAdjacency
+  const fallback = graph.fallbackAdjacency
+  for (let node = 0; node < nodeCount; node += 1) {
+    let strictEdge = strict.nodeOffsets[node]!
+    const strictEnd = strict.nodeOffsets[node + 1]!
+    let fallbackEdge = fallback.nodeOffsets[node]!
+    const fallbackEnd = fallback.nodeOffsets[node + 1]!
+    while (strictEdge < strictEnd || fallbackEdge < fallbackEnd) {
+      const strictNode =
+        strictEdge < strictEnd ? strict.toNodes[strictEdge]! : Number.MAX_SAFE_INTEGER
+      const fallbackNode =
+        fallbackEdge < fallbackEnd ? fallback.toNodes[fallbackEdge]! : Number.MAX_SAFE_INTEGER
+      if (strictNode === fallbackNode) {
+        if (
+          appendNavigationGraphEdge(world, builders, node, strictNode, FEATURE_COLOR.graphStrict)
+        ) {
+          strictEdgeCount += 1
+        }
+        strictEdge += 1
+        fallbackEdge += 1
+        continue
+      }
+      if (strictNode < fallbackNode) {
+        if (
+          appendNavigationGraphEdge(world, builders, node, strictNode, FEATURE_COLOR.graphStrict)
+        ) {
+          strictEdgeCount += 1
+        }
+        strictEdge += 1
+        continue
+      }
+      const fallbackColor = fallbackEdgeUsesOnlyInactiveBreaches(world, fallbackEdge)
+        ? FEATURE_COLOR.graphFallbackOpen
+        : FEATURE_COLOR.graphFallback
+      if (appendNavigationGraphEdge(world, builders, node, fallbackNode, fallbackColor)) {
+        fallbackOnlyEdgeCount += 1
+      }
+      fallbackEdge += 1
+    }
+  }
+  return { fallbackOnlyEdgeCount, strictEdgeCount }
+}
+
+function appendNavigationGraphEdge(
+  world: ZombieEscapeCollisionWorld,
+  builders: Array<{
+    elevation: number
+    graphFeatureColors: number[]
+    graphFeatures: number[]
+  }>,
+  firstNode: number,
+  secondNode: number,
+  defaultColor: readonly [number, number, number],
+) {
+  const graph = world.navigationGraph
+  if (firstNode >= secondNode || secondNode < 0 || secondNode >= graph.nodeIds.length) {
+    return false
+  }
+  const firstLayerIndex = graph.layerIndices[firstNode]!
+  const secondLayerIndex = graph.layerIndices[secondNode]!
+  const firstBuilder = builders[firstLayerIndex]
+  const secondBuilder = builders[secondLayerIndex]
+  if (!firstBuilder || !secondBuilder) return false
+  const firstConnector = graph.connectorIndices[firstNode]!
+  const secondConnector = graph.connectorIndices[secondNode]!
+  const isConnectorEdge =
+    firstLayerIndex !== secondLayerIndex ||
+    (firstConnector >= 0 &&
+      firstConnector === secondConnector &&
+      graph.connectorEnds[firstNode] !== graph.connectorEnds[secondNode])
+  const color = isConnectorEdge ? FEATURE_COLOR.graphConnector : defaultColor
+  const appendToBuilder = (builder: typeof firstBuilder) =>
+    appendColoredLine(
+      builder.graphFeatures,
+      builder.graphFeatureColors,
+      graph.x[firstNode]!,
+      firstBuilder.elevation + GRAPH_EDGE_SURFACE_OFFSET_METERS,
+      graph.z[firstNode]!,
+      graph.x[secondNode]!,
+      secondBuilder.elevation + GRAPH_EDGE_SURFACE_OFFSET_METERS,
+      graph.z[secondNode]!,
+      color,
+    )
+  appendToBuilder(firstBuilder)
+  if (firstLayerIndex !== secondLayerIndex) appendToBuilder(secondBuilder)
+  return true
+}
+
+function fallbackEdgeUsesOnlyInactiveBreaches(world: ZombieEscapeCollisionWorld, edge: number) {
+  const adjacency = world.navigationGraph.fallbackAdjacency
+  let hasKnownBreach = false
+  for (
+    let offset = adjacency.breachObjectOffsets[edge]!;
+    offset < adjacency.breachObjectOffsets[edge + 1]!;
+    offset += 1
+  ) {
+    const breachIndex = adjacency.breachObjectIndices[offset]!
+    const objectOrdinal = world.navigationGraph.breachObjectOrdinals[breachIndex] ?? -1
+    if (objectOrdinal < 0 || objectOrdinal >= world.activeObjectMask.length) continue
+    hasKnownBreach = true
+    if (world.activeObjectMask[objectOrdinal] !== 0) return false
+  }
+  return hasKnownBreach
 }
 
 export function createZombieEscapeNavigationDebugRouteSnapshot(
@@ -1321,11 +1503,25 @@ export function assertZombieEscapeNavigationDebugColoredGeometryCardinality(
   }
 }
 
+export function resolveZombieEscapeNavigationDebugFeatureDrawRange(
+  layer: Pick<
+    ZombieEscapeNavigationDebugLayerGeometry,
+    'featureLinePositions' | 'graphFeatureLineVertexCount'
+  >,
+  showFullGraph: boolean,
+) {
+  const vertexCount = layer.featureLinePositions.length / 3
+  const graphVertexCount = Math.max(0, Math.min(vertexCount, layer.graphFeatureLineVertexCount))
+  const start = showFullGraph ? 0 : graphVertexCount
+  return { count: vertexCount - start, start }
+}
+
 export function countZombieEscapeNavigationDebugDraws(
   layers: readonly ZombieEscapeNavigationDebugLayerGeometry[],
   routeLayers: readonly ZombieEscapeNavigationDebugRouteLayerGeometry[],
   selectedFloor: number,
   showFallbackRegions: boolean,
+  showFullGraph: boolean,
   visibleAgentCount: number,
   visibleLinkCount: number,
   anomalyCount: number,
@@ -1348,7 +1544,10 @@ export function countZombieEscapeNavigationDebugDraws(
       : layer.strictBoundaryVertexCount * 3
     if (regionCount > 0) drawCount += 1
     if (boundaryCount > 0) drawCount += 1
-    if (layer.featureLinePositions.length > 0) drawCount += 1
+    if (resolveZombieEscapeNavigationDebugFeatureDrawRange(layer, showFullGraph).count > 0) {
+      drawCount += 1
+    }
+    if (showFullGraph && layer.graphNodePositions.length > 0) drawCount += 1
     if ((route?.linePositions.length ?? 0) > 0) drawCount += 1
     const overlapCount = showFallbackRegions
       ? layer.regionOverlapMarkerPositions.length

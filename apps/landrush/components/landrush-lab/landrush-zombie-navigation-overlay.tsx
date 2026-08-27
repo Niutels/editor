@@ -12,6 +12,7 @@ import {
   createZombieEscapeNavigationDebugLiveBuffers,
   createZombieEscapeNavigationDebugRouteSnapshot,
   createZombieEscapeNavigationDebugStaticSnapshot,
+  resolveZombieEscapeNavigationDebugFeatureDrawRange,
   resolveZombieEscapeNavigationDebugPlayerLayer,
   updateZombieEscapeNavigationDebugLiveGeometry,
   updateZombieEscapeNavigationDebugTerminalLinks,
@@ -44,6 +45,10 @@ export type LandrushZombieNavigationOverlayDiagnostics = Readonly<{
   drawCount: number
   enabled: true
   floorSelection: number
+  fullGraphVisible: boolean
+  graphFallbackOnlyEdgeCount: number
+  graphNodeCount: number
+  graphStrictEdgeCount: number
   lastRebuildMs: number
   lastSampleCpuMs: number
   p95RebuildMs: number
@@ -109,6 +114,7 @@ export default function LandrushZombieNavigationOverlay({
     ZOMBIE_ESCAPE_NAVIGATION_DEBUG_FLOOR.auto,
   )
   const [showFallbackRegions, setShowFallbackRegions] = useState(true)
+  const [showFullGraph, setShowFullGraph] = useState(true)
   const [tablePage, setTablePage] = useState(0)
   const [effectiveFloor, setEffectiveFloor] = useState(() =>
     Math.max(0, resolveZombieEscapeNavigationDebugPlayerLayer(simulation)),
@@ -117,8 +123,10 @@ export default function LandrushZombieNavigationOverlay({
   const effectiveFloorRef = useRef(effectiveFloor)
   const floorSelectionRef = useRef(floorSelection)
   const showFallbackRegionsRef = useRef(showFallbackRegions)
+  const showFullGraphRef = useRef(showFullGraph)
   const tablePageRef = useRef(tablePage)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const controlsRef = useRef<HTMLElement>(null)
   const nextClassificationAtRef = useRef(Number.NEGATIVE_INFINITY)
   const nextHudAtRef = useRef(Number.NEGATIVE_INFINITY)
   const nextRouteRetryAtRef = useRef(Number.NEGATIVE_INFINITY)
@@ -157,6 +165,7 @@ export default function LandrushZombieNavigationOverlay({
 
   floorSelectionRef.current = floorSelection
   showFallbackRegionsRef.current = showFallbackRegions
+  showFullGraphRef.current = showFullGraph
   tablePageRef.current = tablePage
 
   const publishDiagnostics = useCallback(() => {
@@ -174,6 +183,7 @@ export default function LandrushZombieNavigationOverlay({
             routeSnapshot.snapshot.layers,
             selectedFloor,
             showFallbackRegionsRef.current,
+            showFullGraphRef.current,
             visibleCountRef.current,
             liveBuffers.linkCount,
             anomalyCountRef.current,
@@ -181,6 +191,10 @@ export default function LandrushZombieNavigationOverlay({
         : 0,
       enabled: true,
       floorSelection: selectedFloor,
+      fullGraphVisible: showFullGraphRef.current,
+      graphFallbackOnlyEdgeCount: staticSnapshot.snapshot.graphFallbackOnlyEdgeCount,
+      graphNodeCount: staticSnapshot.snapshot.graphNodeCount,
+      graphStrictEdgeCount: staticSnapshot.snapshot.graphStrictEdgeCount,
       lastRebuildMs: lastRebuildMsRef.current,
       lastSampleCpuMs: lastSampleCpuMsRef.current,
       p95RebuildMs: sampleHistoryPercentile(rebuildHistory, 0.95),
@@ -323,6 +337,7 @@ export default function LandrushZombieNavigationOverlay({
         routeStaleReason,
         simulation: currentSimulation,
         size,
+        tableTop: resolveNavigationOverlayTableTop(controlsRef.current),
       })
     }
     const sampleMs = performance.now() - sampleStartedAt
@@ -355,6 +370,7 @@ export default function LandrushZombieNavigationOverlay({
             layer={layer}
             route={routeSnapshot.snapshot.layers[layerIndex]}
             showFallbackRegions={showFallbackRegions}
+            showFullGraph={showFullGraph}
             visible={
               selectedFloor === ZOMBIE_ESCAPE_NAVIGATION_DEBUG_FLOOR.all ||
               selectedFloor === layerIndex
@@ -426,7 +442,6 @@ export default function LandrushZombieNavigationOverlay({
           />
           <section
             data-landrush-zombie-navigation-overlay-controls="true"
-            onClick={(event) => event.stopPropagation()}
             onContextMenu={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
             onKeyUp={(event) => event.stopPropagation()}
@@ -434,6 +449,7 @@ export default function LandrushZombieNavigationOverlay({
             onPointerMove={(event) => event.stopPropagation()}
             onPointerUp={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
+            ref={controlsRef}
             style={{
               alignItems: 'center',
               background: 'rgba(2, 6, 23, 0.9)',
@@ -441,9 +457,11 @@ export default function LandrushZombieNavigationOverlay({
               borderRadius: 8,
               color: '#e2e8f0',
               display: 'flex',
+              flexWrap: 'wrap',
               font: '600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace',
               gap: 8,
               left: 12,
+              maxWidth: 'calc(100vw - 24px)',
               padding: '7px 9px',
               pointerEvents: 'auto',
               position: 'fixed',
@@ -482,6 +500,28 @@ export default function LandrushZombieNavigationOverlay({
               />{' '}
               fallback regions
             </label>
+            <label title="Show every sparse graph node and adjacency edge">
+              <input
+                checked={showFullGraph}
+                data-testid="landrush-zombie-navigation-full-graph-toggle"
+                onChange={(event) => setShowFullGraph(event.currentTarget.checked)}
+                type="checkbox"
+              />{' '}
+              full graph
+            </label>
+            <span title="Cyan strict · orange fallback-only · teal open breach · purple stairs">
+              <span style={{ color: '#1fadef' }}>━ strict</span>{' '}
+              <span style={{ color: '#ff8514' }}>━ fallback</span>{' '}
+              <span style={{ color: '#24f0b8' }}>━ open</span>{' '}
+              <span style={{ color: '#d176ff' }}>━ stairs</span>{' '}
+              <span style={{ color: '#ffe638' }}>● witness</span>{' '}
+              <span style={{ color: '#ff1442' }}>● orphan</span>
+            </span>
+            <span>
+              {staticSnapshot.snapshot.graphNodeCount.toLocaleString()} nodes ·{' '}
+              {staticSnapshot.snapshot.graphStrictEdgeCount.toLocaleString()} strict ·{' '}
+              {staticSnapshot.snapshot.graphFallbackOnlyEdgeCount.toLocaleString()} fallback-only
+            </span>
             <button
               disabled={tablePage <= 0}
               onClick={() => setTablePage((current) => Math.max(0, current - 1))}
@@ -510,13 +550,16 @@ function NavigationOverlayLayer({
   layer,
   route,
   showFallbackRegions,
+  showFullGraph,
   visible,
 }: {
   layer: ZombieEscapeNavigationDebugLayerGeometry
   route: ZombieEscapeNavigationDebugRouteLayerGeometry | undefined
   showFallbackRegions: boolean
+  showFullGraph: boolean
   visible: boolean
 }) {
+  const featureDrawRange = resolveZombieEscapeNavigationDebugFeatureDrawRange(layer, showFullGraph)
   return (
     <group visible={visible}>
       <mesh frustumCulled={false} renderOrder={9_990}>
@@ -550,7 +593,12 @@ function NavigationOverlayLayer({
         />
       </mesh>
       <lineSegments frustumCulled={false} renderOrder={9_994}>
-        <PackedGeometry colors={layer.featureLineColors} positions={layer.featureLinePositions} />
+        <PackedGeometry
+          colors={layer.featureLineColors}
+          drawVertexCount={featureDrawRange.count}
+          drawVertexStart={featureDrawRange.start}
+          positions={layer.featureLinePositions}
+        />
         <lineBasicMaterial depthTest={false} depthWrite={false} vertexColors />
       </lineSegments>
       <lineSegments frustumCulled={false} renderOrder={9_996}>
@@ -560,6 +608,18 @@ function NavigationOverlayLayer({
         />
         <lineBasicMaterial depthTest={false} depthWrite={false} vertexColors />
       </lineSegments>
+      {showFullGraph ? (
+        <points frustumCulled={false} renderOrder={9_997}>
+          <PackedGeometry colors={layer.graphNodeColors} positions={layer.graphNodePositions} />
+          <pointsMaterial
+            depthTest={false}
+            depthWrite={false}
+            size={0.16}
+            sizeAttenuation
+            vertexColors
+          />
+        </points>
+      ) : null}
       <points frustumCulled={false} renderOrder={9_998}>
         <PackedGeometry
           drawVertexCount={showFallbackRegions ? undefined : layer.strictRegionOverlapMarkerCount}
@@ -574,10 +634,12 @@ function NavigationOverlayLayer({
 function PackedGeometry({
   colors,
   drawVertexCount,
+  drawVertexStart = 0,
   positions,
 }: {
   colors?: Float32Array
   drawVertexCount?: number
+  drawVertexStart?: number
   positions: Float32Array
 }) {
   if (positions.length % 3 !== 0) {
@@ -587,7 +649,12 @@ function PackedGeometry({
   return (
     <bufferGeometry
       ref={(geometry) => {
-        geometry?.setDrawRange(0, drawVertexCount ?? positions.length / 3)
+        const vertexCount = positions.length / 3
+        const start = Math.max(0, Math.min(vertexCount, drawVertexStart))
+        geometry?.setDrawRange(
+          start,
+          Math.max(0, Math.min(drawVertexCount ?? vertexCount - start, vertexCount - start)),
+        )
       }}
     >
       <bufferAttribute args={[positions, 3]} attach="attributes-position" />
@@ -626,6 +693,7 @@ function drawNavigationOverlayCanvas({
   routeStaleReason,
   simulation,
   size,
+  tableTop,
 }: {
   camera: Parameters<Vector3['project']>[0]
   canvas: HTMLCanvasElement | null
@@ -639,6 +707,7 @@ function drawNavigationOverlayCanvas({
   routeStaleReason: string | null
   simulation: ZombieEscapeSimulation
   size: Readonly<{ height: number; width: number }>
+  tableTop: number
 }) {
   if (!canvas || size.width <= 0 || size.height <= 0) return
   const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -670,7 +739,6 @@ function drawNavigationOverlayCanvas({
   const start = safePage * HUD_ROWS_PER_PAGE
   const end = Math.min(visibleCount, start + HUD_ROWS_PER_PAGE)
   const tableWidth = Math.min(640, Math.max(420, size.width - 24))
-  const tableTop = 94
   const rowHeight = 17
   const tableHeight = 34 + (end - start) * rowHeight
   context.fillStyle = 'rgba(2, 6, 23, 0.88)'
@@ -723,6 +791,10 @@ function drawNavigationOverlayCanvas({
     context.fillStyle = inspection.anomalyMask === 0 ? '#d9f99d' : '#ffffff'
     context.fillText(label, screenX + 1, screenY - 1)
   }
+}
+
+function resolveNavigationOverlayTableTop(controls: HTMLElement | null) {
+  return Math.max(94, Math.ceil(controls?.getBoundingClientRect().bottom ?? 118) + 8)
 }
 
 function tryCreateNavigationDebugRouteSnapshot(

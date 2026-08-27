@@ -2,12 +2,18 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { inspectGlb } from './landrush-glb-audit.mjs'
+import {
+  optimizeZombieEscapeWeaponRuntimeAssets,
+  zombieEscapeWeaponSourcePath,
+  zombieEscapeWeaponSourceReference,
+} from './zombie-escape-weapon-glb-optimizer.mjs'
 
 const API_BASE = 'https://api.meshy.ai/openapi'
 const TARGET_FACE_COUNT = 3_000
 const TERMINAL_STATUSES = new Set(['SUCCEEDED', 'FAILED', 'CANCELED'])
 const apiKey = process.env.MESHY_API_KEY
-const publicRoot = resolve(import.meta.dirname, '../public/landrush-lab/zombie-escape/assets')
+const publicDirectory = resolve(import.meta.dirname, '../public')
+const publicRoot = resolve(publicDirectory, 'landrush-lab/zombie-escape/assets')
 const statePath = resolve(publicRoot, 'meshy-generation.json')
 let persistQueue = Promise.resolve()
 const concurrency = readNumberArgument('--concurrency', 3)
@@ -230,6 +236,19 @@ await runPool(selectedAssets, concurrency, async (asset) => {
   await persistState(state)
 })
 
+const selectedWeaponIds = selectedAssets
+  .filter(({ kind }) => kind === 'weapon')
+  .map(({ id }) => id)
+if (selectedWeaponIds.length > 0) {
+  await optimizeZombieEscapeWeaponRuntimeAssets({
+    force,
+    ids: selectedWeaponIds,
+    persistState,
+    publicDirectory,
+    state,
+  })
+}
+
 state.generatedAt = new Date().toISOString()
 await persistState(state)
 console.log(`Meshy pipeline complete: ${selectedAssets.length} assets.`)
@@ -279,9 +298,11 @@ async function generateAsset(asset, pipelineState) {
   }
 
   if (asset.kind === 'weapon') {
-    const modelPath = resolve(publicRoot, 'weapons', `${asset.id}.glb`)
+    const modelPath = zombieEscapeWeaponSourcePath(asset.id)
+    const runtimeModelPath = resolve(publicRoot, 'weapons', `${asset.id}.glb`)
     const previewPath = resolve(publicRoot, 'weapons', 'previews', `${asset.id}.png`)
     await download(refined.model_urls.glb, modelPath, {
+      artifactPath: zombieEscapeWeaponSourceReference(modelPath),
       artifactKey: 'model',
       record,
       taskId: refined.id,
@@ -292,7 +313,7 @@ async function generateAsset(asset, pipelineState) {
       taskId: refined.id,
     })
     record.outputs = {
-      model: publicUrl(modelPath),
+      model: publicUrl(runtimeModelPath),
       preview: publicUrl(previewPath),
     }
     record.validation = { model: await inspectGlb(modelPath) }
@@ -388,11 +409,13 @@ async function migrateLegacyState(pipelineState) {
     }
 
     if (asset.kind === 'weapon') {
+      const modelPath = zombieEscapeWeaponSourcePath(asset.id)
       await adoptExistingArtifact(
         record,
         'model',
-        resolve(publicRoot, 'weapons', `${asset.id}.glb`),
+        modelPath,
         record.refineTaskId,
+        zombieEscapeWeaponSourceReference(modelPath),
       )
       await adoptExistingArtifact(
         record,
@@ -418,7 +441,7 @@ async function migrateLegacyState(pipelineState) {
   }
 }
 
-async function adoptExistingArtifact(record, artifactKey, path, taskId) {
+async function adoptExistingArtifact(record, artifactKey, path, taskId, artifactPath = publicUrl(path)) {
   if (!taskId) return
   try {
     const body = await readFile(path)
@@ -426,8 +449,9 @@ async function adoptExistingArtifact(record, artifactKey, path, taskId) {
     record.artifacts ??= {}
     record.artifacts[artifactKey] = {
       byteLength: body.byteLength,
-      path: publicUrl(path),
+      path: artifactPath,
       sha256: sha256(body),
+      ...(artifactPath.startsWith('/') ? {} : { sourcePath: artifactPath }),
       taskId,
     }
   } catch (error) {
@@ -547,8 +571,12 @@ async function requestJson(path, options = {}) {
   throw new Error(`Meshy request retries exhausted for ${path}.`)
 }
 
-async function download(url, destination, { artifactKey, record, taskId }) {
-  const expectedPath = publicUrl(destination)
+async function download(
+  url,
+  destination,
+  { artifactKey, artifactPath = publicUrl(destination), record, taskId },
+) {
+  const expectedPath = artifactPath
   const artifact = record.artifacts?.[artifactKey]
   if (!force && artifact?.path === expectedPath && artifact.taskId === taskId) {
     try {
@@ -576,6 +604,7 @@ async function download(url, destination, { artifactKey, record, taskId }) {
     byteLength: body.byteLength,
     path: expectedPath,
     sha256: sha256(body),
+    ...(expectedPath.startsWith('/') ? {} : { sourcePath: expectedPath }),
     taskId,
   }
 }
@@ -622,6 +651,7 @@ function invalidateGeneratedOutputs(record) {
   delete record.artifacts
   delete record.completedAt
   delete record.outputs
+  delete record.runtimeArtifacts
   delete record.validation
 }
 

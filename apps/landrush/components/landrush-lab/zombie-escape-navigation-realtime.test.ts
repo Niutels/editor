@@ -650,7 +650,7 @@ describe('Zombie Escape real-time navigation', () => {
     expect(state.zombies.z[zombie]).toBe(3)
   })
 
-  test('uses a current-target bearing while a side-switch publication is pending', () => {
+  test('retains a collision-certified wall-end route while a side-switch publication is pending', () => {
     const arena = createZombieEscapeArena(81_301)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 81_302)
@@ -715,11 +715,10 @@ describe('Zombie Escape real-time navigation', () => {
     state.player.z = 5
     state.zombies.speedScale[zombie] = 1
     let firstPublicationTick = -1
-    let consecutiveWrongWayTicks = 0
-    let maximumConsecutiveWrongWayTicks = 0
     let pendingAwayMovementTickCount = 0
     let pendingBlockedTickCount = 0
     let pendingMovementTickCount = 0
+    let pendingRetainedRouteTickCount = 0
     for (let tick = 0; tick < 120; tick += 1) {
       const previousX = state.zombies.x[zombie]!
       const previousZ = state.zombies.z[zombie]!
@@ -741,10 +740,22 @@ describe('Zombie Escape real-time navigation', () => {
         state.navigationField.graphSparseTargetUpdate.status === 'pending' &&
         state.navigationTargetCommittedRouteGeneration === generationBefore
       ) {
-        expect(inspectZombieEscapeCommittedNavigationAction(state, zombie)).not.toBe('none')
-        expect(state.zombies.navigationIntentTargetRevision[zombie]).toBe(
-          state.navigationTargetRequestedRevision,
-        )
+        expect(inspectZombieEscapeCommittedNavigationAction(state, zombie)).toBe('route')
+        expect(state.zombies.navigationIntentCurrentTargetFallback[zombie]).toBe(0)
+        expect(state.zombies.navigationIntentTargetRevision[zombie]).toBe(revisionBefore)
+        expect(
+          zombieEscapeSameLayerNavigationSegmentIsClear(
+            world,
+            state.zombies.x[zombie]!,
+            state.zombies.y[zombie]!,
+            state.zombies.z[zombie]!,
+            state.player.x,
+            state.player.y,
+            state.player.z,
+            AGENT_RADIUS,
+          ),
+        ).toBe(false)
+        pendingRetainedRouteTickCount += 1
         if (
           Math.hypot(state.zombies.x[zombie]! - previousX, state.zombies.z[zombie]! - previousZ) >
           0.000_1
@@ -755,22 +766,15 @@ describe('Zombie Escape real-time navigation', () => {
         if (state.zombies.intent[zombie] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.blocked) {
           pendingBlockedTickCount += 1
         }
-        consecutiveWrongWayTicks = velocityPointsAway ? consecutiveWrongWayTicks + 1 : 0
-        maximumConsecutiveWrongWayTicks = Math.max(
-          maximumConsecutiveWrongWayTicks,
-          consecutiveWrongWayTicks,
-        )
-      } else {
-        consecutiveWrongWayTicks = 0
       }
     }
 
     expect(state.navigationTargetRequestedRevision).toBeGreaterThan(revisionBefore)
+    expect(pendingRetainedRouteTickCount).toBeGreaterThan(0)
     expect(pendingMovementTickCount).toBeGreaterThan(0)
-    expect(pendingAwayMovementTickCount).toBe(0)
+    expect(pendingAwayMovementTickCount).toBeGreaterThan(0)
     expect(pendingBlockedTickCount).toBe(0)
     expect(firstPublicationTick).toBeGreaterThanOrEqual(0)
     expect(firstPublicationTick).toBeLessThan(14)
-    expect(maximumConsecutiveWrongWayTicks).toBe(0)
   })
 })

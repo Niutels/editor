@@ -7,7 +7,7 @@ import {
 
 export type ZombieEscapeCameraBookmark = 'design' | 'far' | 'near'
 export type ZombieEscapeDebugMode = 'final' | 'navigation' | 'no-post' | 'pools'
-export type ZombieEscapeInputMode = 'gamepad' | 'keyboard'
+export type ZombieEscapeInputMode = 'gamepad' | 'keyboard' | 'touch'
 export type ZombieEscapeQuality = 'balanced' | 'performance'
 
 export const ZOMBIE_ESCAPE_SEED = 0x5a45_2026
@@ -57,7 +57,8 @@ export const ZOMBIE_ESCAPE_ARENA = {
 } as const
 
 export const ZOMBIE_ESCAPE_CAPACITY = {
-  impactSparksPerShot: 6,
+  impactEvents: 128,
+  impactSparksPerShot: 12,
   shots: 64,
   zombies: 100,
 } as const
@@ -106,6 +107,7 @@ export const ZOMBIE_ESCAPE_SIMULATION = {
   nightDurationSeconds: 180,
   obstacleHitsToBreak: 2,
   pickupInteractionRadius: 1.35,
+  weaponPickupRespawnSeconds: 60,
   playerRadius: 0.5,
   projectileRadius: 0.035,
   projectileLifetimeSeconds: 1.05,
@@ -115,6 +117,8 @@ export const ZOMBIE_ESCAPE_SIMULATION = {
   zombieHitFlashSeconds: 0.12,
   zombieHitImpulseDecay: 7.5,
   zombieHitReactionSeconds: 0.3,
+  zombieDeathCollapseSeconds: 0.72,
+  zombieDeathPresentationSeconds: 2.4,
   zombieNavigationRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
   zombieNavigationRoutePlanningSpeedMetersPerSecond: 3.2,
   zombieObstacleAttackContactPhase: 0.42,
@@ -199,11 +203,101 @@ export function createZombieEscapeWeaponPickupGrassBlockers(
 }
 
 export const ZOMBIE_ESCAPE_WEAPON_PROFILES = [
-  { ammoGranted: 60, projectileDamage: 36, purchaseCost: 0, shotIntervalSeconds: 0.19 },
-  { ammoGranted: 168, projectileDamage: 24, purchaseCost: 5, shotIntervalSeconds: 0.095 },
-  { ammoGranted: 72, projectileDamage: 58, purchaseCost: 5, shotIntervalSeconds: 0.42 },
-  { ammoGranted: 256, projectileDamage: 20, purchaseCost: 5, shotIntervalSeconds: 0.072 },
-  { ammoGranted: 40, projectileDamage: 92, purchaseCost: 5, shotIntervalSeconds: 0.68 },
+  {
+    ammoGranted: 60,
+    blastMinimumDamageScale: 0,
+    blastRadiusMeters: 0,
+    chainDamageScale: 0,
+    chainRadiusMeters: 0,
+    chainTargetCount: 0,
+    maximumEnemyHits: 1,
+    mechanic: 'pistol',
+    pelletCount: 1,
+    presentationImpulseScale: 1,
+    projectileDamage: 36,
+    projectileLifetimeSeconds: 1.05,
+    projectileRadius: 0.035,
+    projectileSpeed: 37,
+    purchaseCost: 0,
+    shotIntervalSeconds: 0.19,
+    spreadRadians: 0,
+  },
+  {
+    ammoGranted: 168,
+    blastMinimumDamageScale: 0,
+    blastRadiusMeters: 0,
+    chainDamageScale: 0,
+    chainRadiusMeters: 0,
+    chainTargetCount: 0,
+    maximumEnemyHits: 4,
+    mechanic: 'piercing',
+    pelletCount: 1,
+    presentationImpulseScale: 1,
+    projectileDamage: 24,
+    projectileLifetimeSeconds: 0.82,
+    projectileRadius: 0.025,
+    projectileSpeed: 48,
+    purchaseCost: 5,
+    shotIntervalSeconds: 0.095,
+    spreadRadians: 0,
+  },
+  {
+    ammoGranted: 72,
+    blastMinimumDamageScale: 0,
+    blastRadiusMeters: 0,
+    chainDamageScale: 0,
+    chainRadiusMeters: 0,
+    chainTargetCount: 0,
+    maximumEnemyHits: 1,
+    mechanic: 'scatter',
+    pelletCount: 7,
+    presentationImpulseScale: 1,
+    projectileDamage: 22,
+    projectileLifetimeSeconds: 1.15,
+    projectileRadius: 0.03,
+    projectileSpeed: 34,
+    purchaseCost: 5,
+    shotIntervalSeconds: 0.42,
+    spreadRadians: 0.18,
+  },
+  {
+    ammoGranted: 256,
+    blastMinimumDamageScale: 0,
+    blastRadiusMeters: 0,
+    chainDamageScale: 0.45,
+    chainRadiusMeters: 2.8,
+    chainTargetCount: 2,
+    maximumEnemyHits: 1,
+    mechanic: 'chain',
+    pelletCount: 1,
+    presentationImpulseScale: 1,
+    projectileDamage: 20,
+    projectileLifetimeSeconds: 0.98,
+    projectileRadius: 0.035,
+    projectileSpeed: 40,
+    purchaseCost: 5,
+    shotIntervalSeconds: 0.072,
+    spreadRadians: 0,
+  },
+  {
+    ammoGranted: 40,
+    blastMinimumDamageScale: 0.3,
+    blastRadiusMeters: 3.2,
+    chainDamageScale: 0,
+    chainRadiusMeters: 0,
+    chainTargetCount: 0,
+    maximumEnemyHits: 1,
+    mechanic: 'blast',
+    pelletCount: 1,
+    presentationImpulseScale: 4,
+    projectileDamage: 180,
+    projectileLifetimeSeconds: 1.9,
+    projectileRadius: 0.12,
+    projectileSpeed: 20,
+    purchaseCost: 5,
+    shotIntervalSeconds: 0.68,
+    spreadRadians: 0,
+  },
 ] as const
 
 if (
@@ -247,7 +341,7 @@ export const ZOMBIE_ESCAPE_VISUAL_CONTRACT = {
   identity: ['chunky orbot silhouette', 'sunlit island arena', 'cyan extraction beacon'],
   invariants: [
     'Movement and aim remain independently readable.',
-    'Each shot has one traveling carrier; muzzle and impact layers share its slot generation.',
+    'Each trigger owns one primary carrier; spread volleys add generation-keyed secondary carriers and every contact emits an immutable impact event.',
     'The player, zombies, shots, hit reactions, and extraction beacon remain legible without post effects.',
     'Reset reproduces spawn order and arena layout for the fixed seed.',
   ],

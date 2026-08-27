@@ -29,6 +29,7 @@ export default function RootLayout({
     <html
       className={`${geistSans.variable} ${geistMono.variable} ${GeistPixelSquare.variable} ${barlow.variable}`}
       lang="en"
+      suppressHydrationWarning
     >
       <body className="font-sans">
         <ClientBootstrap>{children}</ClientBootstrap>

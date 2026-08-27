@@ -1,7 +1,7 @@
 import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
 
 export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_BACKGROUND_DEBOUNCE_MS = 500
-export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_EXECUTION_TIMEOUT_MS = 10_000
+export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_EXECUTION_TIMEOUT_MS = 60_000
 export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_IDLE_TIMEOUT_MS = 1_200
 export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_RETRY_DELAYS_MS = [100, 300] as const
 
@@ -34,6 +34,21 @@ export function createLandrushZombieEscapeCollisionWorldBuildState<
   return { generation: 0, pendingSignature: null, ready: false, signature: null, worlds: null }
 }
 
+export function isLandrushZombieEscapeDesiredCollisionWorldReady<TWorlds>({
+  desiredSignature,
+  state,
+}: {
+  desiredSignature: string
+  state: LandrushZombieEscapeCollisionWorldBuildState<TWorlds>
+}) {
+  return (
+    state.ready &&
+    state.pendingSignature === null &&
+    state.worlds !== null &&
+    state.signature === desiredSignature
+  )
+}
+
 export function resolveLandrushZombieEscapeCollisionWorldPhaseReady<TWorlds>({
   desiredSignature,
   expectedPhase,
@@ -48,7 +63,7 @@ export function resolveLandrushZombieEscapeCollisionWorldPhaseReady<TWorlds>({
   return (
     phaseReady &&
     (expectedPhase !== 'night' ||
-      (state.ready && state.worlds !== null && state.signature === desiredSignature))
+      isLandrushZombieEscapeDesiredCollisionWorldReady({ desiredSignature, state }))
   )
 }
 
@@ -173,6 +188,11 @@ export function createLandrushZombieEscapeCollisionWorldBuildCoordinator<TInput,
         return
       }
       onError?.(error)
+      if (isTimeoutError(error)) {
+        pendingPriority = null
+        publish({ ...state, pendingSignature: null })
+        return
+      }
       const retryDelayMs = retryDelaysMs[retryIndex]
       if (retryDelayMs !== undefined) {
         retryIndex += 1
@@ -296,6 +316,15 @@ function isAbortError(error: unknown) {
     error !== null &&
     'name' in error &&
     (error as { name?: unknown }).name === 'AbortError'
+  )
+}
+
+function isTimeoutError(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name?: unknown }).name === 'TimeoutError'
   )
 }
 

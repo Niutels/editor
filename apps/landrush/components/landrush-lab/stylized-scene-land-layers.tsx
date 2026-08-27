@@ -57,6 +57,11 @@ import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/
 import type { GrassBladeTuning } from './grass-material'
 import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
 import { STYLIZED_PATH_WIDTH_SCALE } from './stylized-path-network-layer'
+import {
+  advanceStylizedGrassFadeVisibility,
+  resolveStylizedGrassFadeSpatialVisibility,
+} from './stylized-scene-grass-fade'
+import { configureStylizedGrassWebGlFadeMaterial } from './stylized-scene-grass-webgl-material'
 
 type StylizedSceneLandLayerProps = {
   elevation: number
@@ -129,6 +134,7 @@ type StylizedGrassRoadGrid = {
 
 export type StylizedGrassBlocker = {
   clearanceMeters?: number
+  featherMeters?: number
   initialVisibility?: number
   points: readonly LandrushPoint2[]
 }
@@ -174,6 +180,7 @@ type StylizedGrassCompiledPolygon = {
 
 type StylizedGrassCompiledBlocker = StylizedGrassCompiledPolygon & {
   clearanceMeters: number
+  featherMeters: number
   points: readonly LandrushPoint2[]
 }
 
@@ -376,8 +383,6 @@ const STYLIZED_SCENE_GRASS_HEIGHT_SCALE = 0.5
 const STYLIZED_SCENE_GRASS_SEED = 15_173
 const STYLIZED_SCENE_INTERACTION_FULL_SPEED = 5.8
 const STYLIZED_SCENE_INTERACTION_MAX_BEND = 1.55
-const STYLIZED_SCENE_GRASS_FADE_SECONDS = 1.375
-const STYLIZED_SCENE_GRASS_FADE_MAX_DELTA_SECONDS = 0.25
 const STYLIZED_SCENE_GRASS_EDGE_FILL_DENSITY_MULTIPLIER = 5
 const STYLIZED_SCENE_GRASS_EDGE_FILL_ROOT_WIDTH_MULTIPLIER = 1.8
 const STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE = 0.5
@@ -2747,7 +2752,7 @@ function invalidateStylizedGrassCellsInBounds(
 }
 
 function stylizedGrassCompiledBlockerKey(blocker: StylizedGrassCompiledBlocker) {
-  return `${blocker.clearanceMeters.toFixed(3)}:${blocker.points
+  return `${blocker.clearanceMeters.toFixed(3)}:${blocker.featherMeters.toFixed(3)}:${blocker.points
     .map((point) => `${point.x.toFixed(3)}:${point.z.toFixed(3)}`)
     .join('|')}`
 }
@@ -3013,6 +3018,8 @@ function updateStylizedGrassFadeZones(
       const compiled = createStylizedGrassCompiledBlocker(blocker)
       existing.bounds = compiled.bounds
       existing.clearanceMeters = compiled.clearanceMeters
+      existing.crossingSpansByCellZ = compiled.crossingSpansByCellZ
+      existing.featherMeters = compiled.featherMeters
       existing.points = compiled.points
       existing.ring = compiled.ring
       existing.spans = compiled.spans
@@ -3045,13 +3052,14 @@ function updateStylizedGrassFadeZones(
 function advanceStylizedGrassFadeZones(zones: StylizedGrassFadeZone[], delta: number): boolean {
   if (zones.length === 0) return false
 
-  const step =
-    Math.max(0, Math.min(delta, STYLIZED_SCENE_GRASS_FADE_MAX_DELTA_SECONDS)) /
-    STYLIZED_SCENE_GRASS_FADE_SECONDS
   let changed = false
   for (const zone of zones) {
     const previousVisibility = zone.visibility
-    zone.visibility = approach(zone.visibility, zone.targetVisibility, step)
+    zone.visibility = advanceStylizedGrassFadeVisibility(
+      zone.visibility,
+      zone.targetVisibility,
+      delta,
+    )
     if (zone.visibility !== previousVisibility) {
       changed = true
       stylizedGrassZoneVisibilityById.set(zone.id, zone.visibility)
@@ -3079,12 +3087,21 @@ function resolveStylizedGrassFadeState(
   state.insideHiddenZone = false
   state.opacity = 1
   for (const zone of zones) {
-    if (pointWithinStylizedGrassBlocker({ x: instance.x, z: instance.z }, zone)) {
-      state.heightVisibility = Math.min(state.heightVisibility, zone.visibility)
-      if (zone.targetVisibility <= 0.001) state.insideHiddenZone = true
-      if (zone.targetVisibility < zone.visibility) {
-        state.opacity = Math.min(state.opacity, zone.visibility)
-      }
+    const signedDistance = signedDistanceToStylizedGrassBlocker(
+      { x: instance.x, z: instance.z },
+      zone,
+    )
+    const spatialVisibility = resolveStylizedGrassFadeSpatialVisibility(
+      signedDistance,
+      zone.featherMeters,
+    )
+    if (spatialVisibility >= 1) continue
+
+    const zoneVisibility = Math.max(zone.visibility, spatialVisibility)
+    state.heightVisibility = Math.min(state.heightVisibility, zoneVisibility)
+    if (zone.targetVisibility <= 0.001) state.insideHiddenZone = true
+    if (zone.targetVisibility < zone.visibility) {
+      state.opacity = Math.min(state.opacity, zoneVisibility)
     }
   }
 }
@@ -3146,7 +3163,10 @@ function centroidForStylizedGrassPoints(points: readonly LandrushPoint2[]) {
 }
 
 function stylizedGrassFadeZoneId(blocker: StylizedGrassBlocker) {
-  return `${Math.max(0, blocker.clearanceMeters ?? 0).toFixed(2)}:${blocker.points
+  return `${Math.max(0, blocker.clearanceMeters ?? 0).toFixed(2)}:${Math.max(
+    0,
+    blocker.featherMeters ?? 0,
+  ).toFixed(2)}:${blocker.points
     .map((point) => `${point.x.toFixed(2)}:${point.z.toFixed(2)}`)
     .join('|')}`
 }
@@ -3155,16 +3175,13 @@ function stylizedGrassBlockersSignature(blockers: readonly StylizedGrassBlocker[
   return blockers
     .map(
       (blocker) =>
-        `${(blocker.clearanceMeters ?? 0).toFixed(3)}:${blocker.points
+        `${(blocker.clearanceMeters ?? 0).toFixed(3)}:${(blocker.featherMeters ?? 0).toFixed(
+          3,
+        )}:${blocker.points
           .map((point) => `${point.x.toFixed(3)}:${point.z.toFixed(3)}`)
           .join('|')}:${(blocker.initialVisibility ?? 1).toFixed(3)}`,
     )
     .join('||')
-}
-
-function approach(value: number, target: number, step: number) {
-  if (value < target) return Math.min(target, value + step)
-  return Math.max(target, value - step)
 }
 
 function nextStylizedGrassInstanceCapacity(count: number) {
@@ -3236,6 +3253,7 @@ function createStylizedGrassNodeMaterial(
       side: DoubleSide,
       transparent: false,
     })
+    configureStylizedGrassWebGlFadeMaterial(material)
     material.depthWrite = true
     return {
       material,
@@ -3789,11 +3807,18 @@ function pointWithinStylizedGrassBlocker(
   point: LandrushPoint2,
   blocker: StylizedGrassCompiledBlocker,
 ) {
-  if (blocker.ring.length < 3) return false
-  if (!pointWithinStylizedGrassBounds(point, blocker.bounds)) return false
+  return signedDistanceToStylizedGrassBlocker(point, blocker) <= 0
+}
+
+function signedDistanceToStylizedGrassBlocker(
+  point: LandrushPoint2,
+  blocker: StylizedGrassCompiledBlocker,
+) {
+  if (blocker.ring.length < 3) return Number.POSITIVE_INFINITY
+  if (!pointWithinStylizedGrassBounds(point, blocker.bounds)) return Number.POSITIVE_INFINITY
   const boundaryDistance = distanceToClosedPolyline(point, blocker.spans)
   const signedDistance = pointInPolygon(point, blocker) ? -boundaryDistance : boundaryDistance
-  return signedDistance <= blocker.clearanceMeters
+  return signedDistance - blocker.clearanceMeters
 }
 
 function createStylizedGrassRoadGrid(
@@ -3931,10 +3956,15 @@ function createStylizedGrassCompiledBlocker(
   blocker: StylizedGrassBlocker,
 ): StylizedGrassCompiledBlocker {
   const clearanceMeters = Math.max(0, blocker.clearanceMeters ?? 0)
-  const polygon = createStylizedGrassCompiledPolygon(blocker.points, clearanceMeters)
+  const featherMeters = Math.max(0, blocker.featherMeters ?? 0)
+  const polygon = createStylizedGrassCompiledPolygon(
+    blocker.points,
+    clearanceMeters + featherMeters,
+  )
   return {
     ...polygon,
     clearanceMeters,
+    featherMeters,
     points: blocker.points,
   }
 }

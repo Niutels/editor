@@ -13,6 +13,8 @@ describe('Landrush Zombie Escape navigation overlay renderer contract', () => {
     expect(source).toContain('<bufferGeometry')
     expect(source).not.toContain('.dispose(')
     expect(source).toContain('const [showFallbackRegions, setShowFallbackRegions] = useState(true)')
+    expect(source).toContain('const [showFullGraph, setShowFullGraph] = useState(true)')
+    expect(source).toContain('data-testid="landrush-zombie-navigation-full-graph-toggle"')
   })
 
   test('fails closed before a vertex-colored pipeline can receive an absent color buffer', () => {

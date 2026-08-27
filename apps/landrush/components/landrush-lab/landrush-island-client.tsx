@@ -317,6 +317,16 @@ import {
   resetLandrushIslandJumpRequestState,
 } from './landrush-island-jump-control'
 import {
+  clearLandrushIslandJumpEdgeBlur,
+  createLandrushIslandJumpEdgeBlurPresentationState,
+  createLandrushIslandJumpEdgeBlurSample,
+  LANDRUSH_ISLAND_JUMP_EDGE_BLUR,
+  type LandrushIslandJumpEdgeBlurPresentationState,
+  resolveLandrushIslandJumpEdgeBlurDebugMode,
+  resolveLandrushIslandJumpEdgeBlurSample,
+  startLandrushIslandJumpEdgeBlur,
+} from './landrush-island-jump-edge-blur'
+import {
   advanceLandrushGeneratedAssetMountGeneration,
   type LandrushGeneratedAssetReadinessStatus,
   LandrushIslandWorldFrameReporter,
@@ -335,6 +345,10 @@ import {
   type LandrushIslandMaterialReadinessMesh,
 } from './landrush-island-material-presentation'
 import { collectLandrushIslandMaterialPresentationReadinessMeshes } from './landrush-island-material-presentation-readiness'
+import {
+  type LandrushIslandMovementSpeedEnvelope,
+  resolveLandrushIslandMovementSpeedPolicy,
+} from './landrush-island-movement-speed-policy'
 import {
   createLandrushIslandPalmNavigationFootprints,
   createLandrushIslandPalmTrunkColliderWorld,
@@ -405,12 +419,24 @@ import {
   LANDRUSH_ISLAND_ROBOT_STANCE_PROFILE,
   resolveLandrushIslandRobotStancePresentation,
 } from './landrush-robot-stance'
+import {
+  resolveLandrushZombieEscapeLocomotionBaseEnabled,
+  resolveLandrushZombieEscapePhaseReady,
+} from './landrush-zombie-escape-actionability'
 import { LandrushZombieEscapeCamera } from './landrush-zombie-escape-camera'
 import {
   LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER,
   LandrushZombieEscapeMode,
 } from './landrush-zombie-escape-mode'
 import { resolveLandrushZombieEscapeIntegratedLocomotionEnabled } from './landrush-zombie-escape-runtime'
+import {
+  clearLandrushZombieEscapeTouchJumpRequest,
+  consumeLandrushZombieEscapeTouchJumpRequest,
+  createLandrushZombieEscapeTouchInputState,
+  type LandrushZombieEscapeTouchInputState,
+  type LandrushZombieEscapeTouchMoveInput,
+  resolveLandrushZombieEscapeOwnedTouchMoveInput,
+} from './landrush-zombie-escape-touch-input'
 import { MultiplayerStatusPanel } from './multiplayer-status-panel'
 import {
   createNaturalRoadMaskSegments,
@@ -940,6 +966,7 @@ type RobotMovementInput = {
   intensity: number
   navigationKind?: LandrushIslandNavigationSteeringKind
   runAmount: number
+  speedEnvelope?: LandrushIslandMovementSpeedEnvelope
   steeringDistance?: number
   steeringPoint?: LandrushPoint2
   x: number
@@ -3131,7 +3158,6 @@ export function LandrushIslandClient({
   )
   currentZombieEscapeGeneratedAssetGenerationRef.current = zombieEscapeGeneratedAssetGeneration
   const [zombieEscapePhase, setZombieEscapePhase] = useState<ZombieEscapeGamePhase>('build')
-  const [zombieEscapeCameraSettled, setZombieEscapeCameraSettled] = useState(false)
   const [zombieEscapeGeneratedAssetStatus, setZombieEscapeGeneratedAssetStatus] = useState<{
     mountGeneration: string
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot
@@ -3170,13 +3196,11 @@ export function LandrushIslandClient({
   const handleZombieEscapePhaseChange = useCallback((phase: ZombieEscapeGamePhase) => {
     if (zombieEscapePhaseRef.current === phase) return
     zombieEscapePhaseRef.current = phase
-    setZombieEscapeCameraSettled(false)
     setZombieEscapePhase(phase)
   }, [])
   const handleZombieEscapeCameraSettled = useCallback(() => {
     if (zombieEscapePhaseRef.current !== 'night') return
     recordLandrushIslandPhaseProbe('camera-owner:zombie-settled')
-    setZombieEscapeCameraSettled(true)
   }, [])
   const bugReportReplayCameraPose = useMemo(
     () => deserializeLandrushBugReportCameraPose(bugReportReplay?.camera ?? null),
@@ -3207,6 +3231,9 @@ export function LandrushIslandClient({
     transitionBlurDebugParam === 'mask' || transitionBlurDebugParam === 'contribution'
       ? transitionBlurDebugParam
       : 'final'
+  const jumpEdgeBlurDebugMode = resolveLandrushIslandJumpEdgeBlurDebugMode(
+    searchParams.get('jumpBlurDebug') ?? searchParams.get('landrushJumpBlurDebug'),
+  )
   const startupProfileEnabled =
     searchParams.get('startupProfile') === '1' || searchParams.get('profileStartup') === '1'
   const startupProfileNoLandLayers = searchParams.get('profileNoLandLayers') === '1'
@@ -3242,6 +3269,10 @@ export function LandrushIslandClient({
   const startupProfileRef = useRef<LandrushIslandStartupProfile | null>(null)
   const grassInteractionRef = useRef<StylizedGrassInteraction | null>(null)
   const localMotionRef = useRef<RobotMotion | null>(null)
+  const jumpEdgeBlurPresentationRef = useRef(
+    createLandrushIslandJumpEdgeBlurPresentationState(jumpEdgeBlurDebugMode),
+  )
+  jumpEdgeBlurPresentationRef.current.debugMode = jumpEdgeBlurDebugMode
   const materialPresentation = useMemo(() => new LandrushIslandMaterialPresentationOwner(), [])
   useEffect(() => () => materialPresentation.dispose(), [materialPresentation])
   const playerCameraPoseRef = useRef<LandrushIslandCameraPose | null>(
@@ -3267,6 +3298,13 @@ export function LandrushIslandClient({
   const modeTransitionPresentationRef = useRef(
     createLandrushIslandModeTransitionPresentationState(transitionBlurDebugMode),
   )
+  const viewerPresentationEffectRef = useRef<ViewerPresentationEffectState>({
+    zoomBlurAmount: 0,
+    zoomBlurCenter: [0.5, 0.5],
+    zoomBlurDebugMode: 'final',
+    zoomBlurDirection: 1,
+    zoomBlurStrength: LANDRUSH_ISLAND_JUMP_EDGE_BLUR.radialStrength,
+  })
   const grassVisibilityRef = useRef(1)
   const renderedFpsRef = useRef<number | null>(null)
   const appliedBuildUpdateSequenceRef = useRef(new Map<string, number>())
@@ -4225,7 +4263,6 @@ export function LandrushIslandClient({
     if (!zombieEscapeEnabled) {
       appliedZombieEscapePhaseRef.current = null
       zombieEscapePhaseRef.current = 'build'
-      setZombieEscapeCameraSettled(false)
       setZombieEscapePhase('build')
       return
     }
@@ -4255,20 +4292,20 @@ export function LandrushIslandClient({
     zombieEscapeEnabled,
     zombieEscapePhase,
   ])
-  const zombieEscapePhaseReady =
-    zombieEscapeEnabled &&
-    zombieEscapeGeneratedAssetsReady &&
-    !loadingActive &&
-    !authorityResyncActive &&
-    modeTransitionFade === null &&
-    (zombieEscapePhase === 'build' ||
-      (cameraOwner === 'zombie' &&
-        zombieEscapeCameraSettled &&
-        viewMode === 'player' &&
-        sceneViewMode === 'player' &&
-        !buildMode &&
-        !mapView &&
-        !fpvView))
+  const zombieEscapePhaseReady = resolveLandrushZombieEscapePhaseReady({
+    authorityResyncActive,
+    buildMode,
+    cameraOwner,
+    fpvView,
+    generatedAssetsReady: zombieEscapeGeneratedAssetsReady,
+    loadingActive,
+    mapView,
+    modeTransitionActive: modeTransitionFade !== null,
+    phase: zombieEscapePhase,
+    sceneViewMode,
+    viewMode,
+    zombieEscapeEnabled,
+  })
   const selectedLevelId = useViewer((state) => state.selection.levelId)
   const activeBuildLevelBaseY = useScene((state) =>
     resolveLandrushIslandActiveLevelBaseY(
@@ -6211,6 +6248,7 @@ export function LandrushIslandClient({
                   ? activeBuildGroundY
                   : null
               }
+              presentationEffectRef={viewerPresentationEffectRef}
               projectId={experienceConfig.projectId}
               sceneReadyKey={initialParcelAuthorityKey}
               sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}
@@ -6227,7 +6265,12 @@ export function LandrushIslandClient({
                   onRender={handleStartupReactRender}
                 >
                   <LandrushRenderSchedulerBridge />
-                  <LandrushIslandModeTransitionCanvasEffect
+                  <LandrushIslandPresentationEffectDriver
+                    fallPresentationRef={fallPresentationRef}
+                    fpvActive={fpvActive}
+                    jumpPresentationRef={jumpEdgeBlurPresentationRef}
+                    localMotionRef={localMotionRef}
+                    outputPresentationRef={viewerPresentationEffectRef}
                     presentationRef={modeTransitionPresentationRef}
                   />
                   <color args={['#164a77']} attach="background" />
@@ -6302,6 +6345,7 @@ export function LandrushIslandClient({
                       fallPresentationRef={fallPresentationRef}
                       fpvActive={fpvActive}
                       grassInteractionRef={grassInteractionRef}
+                      jumpEdgeBlurPresentationRef={jumpEdgeBlurPresentationRef}
                       localMotionRef={localMotionRef}
                       localProfile={resolvedLocalProfile}
                       materialPresentation={materialPresentation}
@@ -6527,7 +6571,10 @@ export function LandrushIslandClient({
         {gamepadHintsActive && !zombieEscapeNightActive ? (
           <div
             aria-hidden={!(dayChromePresented || buildEditorChromeActive)}
-            className="pointer-events-none absolute top-20 right-3 z-[100] md:top-[18vh] md:right-5"
+            className={[
+              'pointer-events-none absolute right-3 z-[100] lg:top-[18vh] lg:right-5',
+              buildEditorChromeActive ? 'bottom-3 lg:bottom-auto' : 'top-20',
+            ].join(' ')}
             data-landrush-day-controller-command-hud
             data-landrush-ui
             inert={!dayInterfaceCommandsEnabled}
@@ -6836,41 +6883,111 @@ function LandrushIslandFallScreenEffect({
   )
 }
 
-function LandrushIslandModeTransitionCanvasEffect({
+function LandrushIslandPresentationEffectDriver({
+  fallPresentationRef,
+  fpvActive,
+  jumpPresentationRef,
+  localMotionRef,
+  outputPresentationRef,
   presentationRef,
 }: {
+  fallPresentationRef: { current: LandrushIslandFallPresentationState }
+  fpvActive: boolean
+  jumpPresentationRef: { current: LandrushIslandJumpEdgeBlurPresentationState }
+  localMotionRef: { current: RobotMotion | null }
+  outputPresentationRef: { current: ViewerPresentationEffectState }
   presentationRef: { current: LandrushIslandModeTransitionPresentationState }
 }) {
-  const canvas = useThree((state) => state.gl.domElement)
+  const { camera, invalidate } = useThree()
+  const jumpSampleRef = useRef(createLandrushIslandJumpEdgeBlurSample())
+  const jumpCenterRef = useRef<[number, number]>([0.5, 0.5])
+  const playerProjectionRef = useRef(new Vector3())
+  const reducedMotionQueryRef = useRef<MediaQueryList | null>(null)
+
+  useEffect(() => {
+    reducedMotionQueryRef.current = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+    return () => {
+      clearLandrushIslandJumpEdgeBlur(jumpPresentationRef.current)
+      reducedMotionQueryRef.current = null
+      const output = outputPresentationRef.current
+      output.zoomBlurAmount = 0
+      output.zoomBlurCenter = [0.5, 0.5]
+      output.zoomBlurDebugMode = 'final'
+      output.zoomBlurDirection = 1
+      output.zoomBlurStrength = LANDRUSH_ISLAND_JUMP_EDGE_BLUR.radialStrength
+      invalidate()
+    }
+  }, [invalidate, jumpPresentationRef, outputPresentationRef])
 
   useFrame(() => {
     const presentation = presentationRef.current
-    const amount = clamp01(presentation.zoomBlurAmount)
-    if (amount <= 0.001) {
-      canvas.style.removeProperty('filter')
-      canvas.style.removeProperty('transform')
-      canvas.style.removeProperty('transform-origin')
-      canvas.style.removeProperty('will-change')
-      return
+    const transitionAmount = clamp01(presentation.zoomBlurAmount)
+    const transitionActive = transitionAmount > 0.001
+    const fallActive = fallPresentationRef.current.active
+    if (transitionActive || fallActive) {
+      clearLandrushIslandJumpEdgeBlur(jumpPresentationRef.current)
     }
 
-    const strength = Math.max(0, presentation.zoomBlurStrength)
-    const center = presentation.zoomBlurCenter ?? [0.5, 0.5]
-    canvas.style.filter = `blur(${amount * strength * 2.4}px)`
-    canvas.style.transform = `scale(${1 + amount * strength * 0.018})`
-    canvas.style.transformOrigin = `${clamp01(center[0]) * 100}% ${clamp01(center[1]) * 100}%`
-    canvas.style.willChange = 'filter, transform'
-  })
+    const jumpSample = resolveLandrushIslandJumpEdgeBlurSample({
+      nowMs: performance.now(),
+      output: jumpSampleRef.current,
+      reducedMotion: reducedMotionQueryRef.current?.matches ?? false,
+      state: jumpPresentationRef.current,
+    })
+    const jumpActive = !transitionActive && !fallActive && jumpSample.active
+    const output = outputPresentationRef.current
 
-  useEffect(
-    () => () => {
-      canvas.style.removeProperty('filter')
-      canvas.style.removeProperty('transform')
-      canvas.style.removeProperty('transform-origin')
-      canvas.style.removeProperty('will-change')
-    },
-    [canvas],
-  )
+    if (fallActive) {
+      const center = jumpCenterRef.current
+      center[0] = 0.5
+      center[1] = 0.5
+      output.zoomBlurAmount = 0
+      output.zoomBlurCenter = center
+      output.zoomBlurDebugMode = 'final'
+      output.zoomBlurDirection = 1
+      output.zoomBlurStrength = LANDRUSH_ISLAND_JUMP_EDGE_BLUR.radialStrength
+    } else if (jumpActive) {
+      const center = jumpCenterRef.current
+      center[0] = 0.5
+      center[1] = 0.5
+      const motion = localMotionRef.current
+      if (!fpvActive && motion) {
+        const projection = playerProjectionRef.current
+          .set(motion.position.x, motion.position.y + 1, motion.position.z)
+          .project(camera)
+        if (
+          Number.isFinite(projection.x) &&
+          Number.isFinite(projection.y) &&
+          Number.isFinite(projection.z) &&
+          projection.z >= -1 &&
+          projection.z <= 1
+        ) {
+          center[0] = clamp01(projection.x * 0.5 + 0.5)
+          center[1] = clamp01(projection.y * -0.5 + 0.5)
+        }
+      }
+
+      const jumpDebugMode = jumpPresentationRef.current.debugMode
+      output.zoomBlurAmount = clamp01(jumpSample.amount)
+      output.zoomBlurCenter = center
+      output.zoomBlurDebugMode =
+        jumpDebugMode === 'mask' || jumpDebugMode === 'contribution' ? jumpDebugMode : 'final'
+      output.zoomBlurDirection = 1
+      output.zoomBlurStrength = LANDRUSH_ISLAND_JUMP_EDGE_BLUR.radialStrength
+    } else {
+      output.zoomBlurAmount = transitionAmount
+      output.zoomBlurCenter = presentation.zoomBlurCenter
+      output.zoomBlurDebugMode = presentation.zoomBlurDebugMode
+      output.zoomBlurDirection = presentation.zoomBlurDirection
+      output.zoomBlurStrength = presentation.zoomBlurStrength
+    }
+
+    if (!fallActive && (transitionAmount > 0 || jumpSample.active)) {
+      invalidate()
+      renderScheduler.requestFrame('animation')
+    }
+  })
 
   return null
 }
@@ -9772,6 +9889,7 @@ function LandrushIslandPlayerLayer({
   fallPresentationRef,
   fpvActive,
   grassInteractionRef,
+  jumpEdgeBlurPresentationRef,
   localMotionRef,
   localProfile,
   materialPresentation,
@@ -9816,6 +9934,7 @@ function LandrushIslandPlayerLayer({
   fallPresentationRef: { current: LandrushIslandFallPresentationState }
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
+  jumpEdgeBlurPresentationRef: { current: LandrushIslandJumpEdgeBlurPresentationState }
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
   materialPresentation: LandrushIslandMaterialPresentationOwner
@@ -9858,8 +9977,14 @@ function LandrushIslandPlayerLayer({
   const groundY = surface.grassSurfaceElevation + LANDRUSH_ISLAND_ROBOT_GROUND_CLEARANCE
   const mapVisible = cameraOwner === 'map'
   const [zombieEscapeStatus, setZombieEscapeStatus] = useState<ZombieEscapeGameStatus>('playing')
+  const [zombieEscapeInteractionActionable, setZombieEscapeInteractionActionable] = useState(false)
   const movementEnabled = resolveLandrushZombieEscapeIntegratedLocomotionEnabled({
-    baseMovementEnabled: viewMode !== 'build',
+    baseMovementEnabled: resolveLandrushZombieEscapeLocomotionBaseEnabled({
+      baseMovementEnabled: viewMode !== 'build',
+      interactionActionable: zombieEscapeInteractionActionable,
+      phase: zombieEscapePhase,
+      zombieEscapeEnabled,
+    }),
     status: zombieEscapeStatus,
     zombieEscapeEnabled,
   })
@@ -9868,6 +9993,7 @@ function LandrushIslandPlayerLayer({
   const localRobotVisualRootRef = useRef<Group | null>(null)
   const zombieEscapeResetPlayerMotionRef = useRef<(() => void) | null>(null)
   const zombieEscapeCombatHeadingRef = useRef<number | null>(null)
+  const zombieEscapeTouchInputRef = useRef(createLandrushZombieEscapeTouchInputState())
   const resetZombieEscapeExternalPlayerMotion = useCallback(() => {
     zombieEscapeResetPlayerMotionRef.current?.()
   }, [])
@@ -9945,12 +10071,13 @@ function LandrushIslandPlayerLayer({
       <LocalLandrushIslandRobot
         baseNode={baseNode}
         bugReportReplayPlayer={bugReportReplayPlayer}
-        combatAimActive={zombieEscapeActive}
+        combatAimActive={zombieEscapeInteractionActionable}
         fallSurfacePoints={cliffFallBoundaryPoints}
         fallPresentationRef={fallPresentationRef}
         fpvActive={playerFpvActive}
         grassInteractionRef={grassInteractionRef}
         groundY={groundY}
+        jumpEdgeBlurPresentationRef={jumpEdgeBlurPresentationRef}
         localRobotLevelIdRef={localRobotLevelIdRef}
         localMotionRef={localMotionRef}
         localProfile={localProfile}
@@ -9978,6 +10105,7 @@ function LandrushIslandPlayerLayer({
         surfacePoints={surface.grassSurfacePoints}
         visiblePalmLayout={visiblePalmLayout}
         waterY={waterY}
+        zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
       />
       {zombieEscapeEnabled ? (
         <LandrushZombieEscapeMode
@@ -9990,6 +10118,7 @@ function LandrushIslandPlayerLayer({
           motionRef={localMotionRef}
           onDestroyedFurnitureIdsChange={handleDestroyedFurnitureIdsChange}
           onGeneratedAssetsReadinessChange={onZombieEscapeGeneratedAssetsReadinessChange}
+          onInteractionActionabilityChange={setZombieEscapeInteractionActionable}
           onPhaseChange={onZombieEscapePhaseChange}
           onResetExternalPlayerMotion={resetZombieEscapeExternalPlayerMotion}
           onStatusChange={setZombieEscapeStatus}
@@ -10000,6 +10129,7 @@ function LandrushIslandPlayerLayer({
           surfacePoints={surface.grassSurfacePoints}
           viewerSceneReady={viewerSceneReady}
           visualRootRef={localRobotVisualRootRef}
+          zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
         />
       ) : null}
       <SpatialVoiceRangeRing
@@ -12405,6 +12535,7 @@ function LocalLandrushIslandRobot({
   fpvActive,
   grassInteractionRef,
   groundY,
+  jumpEdgeBlurPresentationRef,
   localRobotLevelIdRef,
   localMotionRef,
   localProfile,
@@ -12428,6 +12559,7 @@ function LocalLandrushIslandRobot({
   surfacePoints,
   visiblePalmLayout,
   waterY,
+  zombieEscapeTouchInputRef,
 }: {
   baseNode: LandrushIslandLayoutNode
   bugReportReplayPlayer: LandrushBugReportPlayer | null
@@ -12441,6 +12573,7 @@ function LocalLandrushIslandRobot({
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   groundY: number
+  jumpEdgeBlurPresentationRef: { current: LandrushIslandJumpEdgeBlurPresentationState }
   localRobotLevelIdRef: { current: LevelNode['id'] }
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
@@ -12464,6 +12597,7 @@ function LocalLandrushIslandRobot({
   surfacePoints: readonly LandrushPoint2[]
   visiblePalmLayout: readonly LandrushIslandPalmPlacement[]
   waterY: number
+  zombieEscapeTouchInputRef: { current: LandrushZombieEscapeTouchInputState }
 }) {
   const { camera, gl } = useThree()
   const builtColliderWorlds = useLandrushIslandBuiltColliderWorlds(destroyedFurnitureIds)
@@ -12743,6 +12877,7 @@ function LocalLandrushIslandRobot({
     keyboardJumpButtonStateRef.current.held = false
     gamepadJumpButtonStateRef.current.armed = false
     gamepadJumpButtonStateRef.current.held = false
+    clearLandrushZombieEscapeTouchJumpRequest(zombieEscapeTouchInputRef.current)
     resetLandrushIslandJumpRequestState(jumpRequestRef.current)
     motionRef.current.runRequested = false
     activeNavigationDebugRef.current = { kind: null, steeringPoint: null }
@@ -12752,7 +12887,7 @@ function LocalLandrushIslandRobot({
       run: false,
       worldDirection: null,
     })
-  }, [])
+  }, [zombieEscapeTouchInputRef])
 
   useEffect(() => {
     const handleBlur = () => clearHeldInput()
@@ -12850,6 +12985,7 @@ function LocalLandrushIslandRobot({
     clickMoveTargetRef.current = null
     keyboardJumpRequestedRef.current = false
     jumpProofRequestedRef.current = false
+    clearLandrushZombieEscapeTouchJumpRequest(zombieEscapeTouchInputRef.current)
     resetLandrushIslandJumpRequestState(jumpRequestRef.current)
     jumpAnimationRef.current = null
     jumpPoseRef.current = null
@@ -12897,7 +13033,7 @@ function LocalLandrushIslandRobot({
     nodeRef.current.playerStart = [currentSpawn.x, currentSpawn.y, currentSpawn.z]
     writeMotionToLandrushIslandRobotNode(nodeRef.current, motion)
     publishCurrentPlayerRef.current()
-  }, [grassInteractionRef, localRobotLevelIdRef, updateFallPresentation])
+  }, [grassInteractionRef, localRobotLevelIdRef, updateFallPresentation, zombieEscapeTouchInputRef])
 
   useLayoutEffect(() => {
     resetPlayerMotionRef.current = resetToSpawn
@@ -12994,6 +13130,7 @@ function LocalLandrushIslandRobot({
       clickMoveTargetRef.current = null
       keyboardJumpRequestedRef.current = false
       jumpProofRequestedRef.current = false
+      clearLandrushZombieEscapeTouchJumpRequest(zombieEscapeTouchInputRef.current)
       resetLandrushIslandJumpRequestState(jumpRequestRef.current)
       jumpAnimationRef.current = null
       jumpPoseRef.current = null
@@ -13066,7 +13203,13 @@ function LocalLandrushIslandRobot({
       publishCurrentPlayerRef.current()
       return true
     },
-    [colliderMeshes, groundY, navigationLiveScenario, updateFallPresentation],
+    [
+      colliderMeshes,
+      groundY,
+      navigationLiveScenario,
+      updateFallPresentation,
+      zombieEscapeTouchInputRef,
+    ],
   )
 
   useEffect(() => {
@@ -13868,6 +14011,9 @@ function LocalLandrushIslandRobot({
     const keyboardJumpRequested = jumpCommandsEnabled && keyboardJumpRequestedRef.current
     const gamepadJumpRequested = gamepadJumpEdge
     const jumpProofRequested = jumpProofRequestedRef.current
+    const touchJumpRequested = combatAimActive
+      ? consumeLandrushZombieEscapeTouchJumpRequest(zombieEscapeTouchInputRef.current)
+      : false
     keyboardJumpRequestedRef.current = false
     jumpProofRequestedRef.current = false
     const jumpInputNow = performance.now()
@@ -13877,21 +14023,28 @@ function LocalLandrushIslandRobot({
         ? 'keyboard-space'
         : gamepadJumpRequested
           ? 'gamepad'
-          : null
+          : touchJumpRequested
+            ? 'touch'
+            : null
     if (incomingJumpSource && !crouchRequested) {
       queueLandrushIslandJumpRequest(jumpRequestRef.current, incomingJumpSource, jumpInputNow)
     }
-    if (crouchRequested) resetLandrushIslandJumpRequestState(jumpRequestRef.current)
+    if (crouchRequested) {
+      clearLandrushZombieEscapeTouchJumpRequest(zombieEscapeTouchInputRef.current)
+      resetLandrushIslandJumpRequestState(jumpRequestRef.current)
+    }
     const physicsController = physicsControllerRef.current
     physicsController?.setMovement({ crouch: crouchRequested })
-    const jumpRequestSource = consumeLandrushIslandJumpRequest(
-      jumpRequestRef.current,
-      physicsController?.canJump ?? false,
+    const jumpRequestSource = consumeLandrushIslandJumpRequest({
+      canJump: physicsController?.canJump ?? false,
+      commandsEnabled: jumpCommandsEnabled,
       falling,
-      jumpInputNow,
-    )
+      nowMs: jumpInputNow,
+      state: jumpRequestRef.current,
+    })
     if (jumpRequestSource && physicsController?.requestJump()) {
       motion.grounded = false
+      startLandrushIslandJumpEdgeBlur(jumpEdgeBlurPresentationRef.current, jumpInputNow)
       if (robotAudioMode.incrementZombieJumpSequence) jumpAudioSequenceRef.current += 1
       jumpAnimationRef.current = {
         ...createLandrushIslandJumpPresentationState(physicsController.presentationSeconds),
@@ -13911,6 +14064,9 @@ function LocalLandrushIslandRobot({
     const movementReferenceFrame: LandrushIslandMovementReferenceFrame = cameraEnabled
       ? 'camera-forward'
       : 'screen-up'
+    const touchMoveInput = combatAimActive
+      ? resolveLandrushZombieEscapeOwnedTouchMoveInput(zombieEscapeTouchInputRef.current)
+      : undefined
     const movement = movementEnabled
       ? falling
         ? null
@@ -13919,6 +14075,7 @@ function LocalLandrushIslandRobot({
             state.camera,
             gamepadInput,
             movementReferenceFrame,
+            touchMoveInput,
           )
       : null
     if (movement) clickMoveTargetRef.current = null
@@ -14024,13 +14181,18 @@ function LocalLandrushIslandRobot({
         isRunPressed(pressedKeysRef.current) ||
         Boolean(gamepadInput?.run) ||
         physicsMovement.runAmount > 0.5
-      const effectiveRunRequested = runRequested && !crouchRequested
-      motion.runRequested = effectiveRunRequested
+      const speedPolicy = resolveLandrushIslandMovementSpeedPolicy({
+        crouching: crouchRequested,
+        intensity: physicsMovement.intensity,
+        requestedRun: runRequested,
+        speedEnvelope: physicsMovement.speedEnvelope,
+      })
+      motion.runRequested = speedPolicy.presentationRunRequested
       physicsControllerRef.current?.setMovement({
         crouch: crouchRequested,
         jump: false,
-        run: effectiveRunRequested,
-        speedScale: physicsMovement.intensity,
+        run: speedPolicy.controllerRun,
+        speedScale: speedPolicy.speedScale,
         worldDirection: { x: physicsMovement.x, z: physicsMovement.z },
       })
       return
@@ -14250,18 +14412,17 @@ function LocalLandrushIslandRobot({
         physicsController.isGrounded && physicsController.supportHeight !== null
           ? physicsController.supportHeight
           : null
-      const groundShadowSupportY =
-        !combatAimActive || motion.falling
-          ? null
-          : (groundedShadowSupportY ??
-            projectZombieEscapeGroundShadowSupportY(
-              colliderMeshes,
-              motion.position.x,
-              motion.position.y,
-              motion.position.z,
-              Math.max(ZOMBIE_ESCAPE_GROUND_SHADOW.maximumAltitude, motion.position.y - groundY),
-              groundShadowProjector,
-            ))
+      const groundShadowSupportY = motion.falling
+        ? null
+        : (groundedShadowSupportY ??
+          projectZombieEscapeGroundShadowSupportY(
+            colliderMeshes,
+            motion.position.x,
+            motion.position.y,
+            motion.position.z,
+            Math.max(ZOMBIE_ESCAPE_GROUND_SHADOW.maximumAltitude, motion.position.y - groundY),
+            groundShadowProjector,
+          ))
       const groundShadowPose = groundShadowPoseRef.current
       groundShadowPose.playerY = motion.position.y
       groundShadowPose.supportY = groundShadowSupportY ?? groundY
@@ -14564,15 +14725,16 @@ function LocalLandrushIslandRobot({
         runSpeed={LANDRUSH_ISLAND_ROBOT_RUN_SPEED}
         walkSpeed={LANDRUSH_ISLAND_ROBOT_WALK_SPEED}
       />
-      {combatAimActive ? (
-        <ZombieEscapePlayerGroundShadow
-          framePriority={
-            (LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.motion + LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.robot) /
-            2
-          }
-          poseRef={groundShadowPoseRef}
-        />
-      ) : null}
+      <ZombieEscapePlayerGroundShadow
+        framePriority={
+          combatAimActive
+            ? (LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.motion +
+                LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.robot) /
+              2
+            : 1.5
+        }
+        poseRef={groundShadowPoseRef}
+      />
       {fpvActive || combatAimActive ? null : (
         <LandrushIslandRobotPlayerBeacon
           color={localProfile.color}
@@ -18989,7 +19151,14 @@ function resolveCameraRelativeMovement(
   camera: Camera,
   gamepadInput: LandrushGamepadInput | null = null,
   referenceFrame: LandrushIslandMovementReferenceFrame = 'camera-forward',
+  touchInput: LandrushZombieEscapeTouchMoveInput | null | undefined = undefined,
 ): RobotMovementInput | null {
+  if (touchInput !== undefined) {
+    return touchInput && touchInput.strength > 0
+      ? resolveCameraRelativeAnalogMovement(camera, touchInput, referenceFrame)
+      : null
+  }
+
   const keyboardStrafe =
     Number(keys.has('KeyD') || keys.has('ArrowRight')) -
     Number(keys.has('KeyA') || keys.has('ArrowLeft'))
@@ -19016,6 +19185,31 @@ function resolveCameraRelativeMovement(
   const intensity = hasKeyboardInput ? 1 : hasGamepadInput ? (gamepadInput?.strength ?? 1) : 1
   const runAmount = gamepadInput?.run ? 1 : 0
   return { ...direction, heading, intensity, runAmount }
+}
+
+function resolveCameraRelativeAnalogMovement(
+  camera: Camera,
+  input: LandrushZombieEscapeTouchMoveInput,
+  referenceFrame: LandrushIslandMovementReferenceFrame,
+): RobotMovementInput | null {
+  if (input.strafe === 0 && input.forward === 0) return null
+
+  const forward =
+    referenceFrame === 'screen-up'
+      ? resolveLandrushIslandCameraScreenAxes(camera).up
+      : resolveCameraForwardXZ(camera)
+  const right = { x: -forward.z, z: forward.x }
+  const direction = normalize2(
+    right.x * input.strafe + forward.x * input.forward,
+    right.z * input.strafe + forward.z * input.forward,
+  )
+  return {
+    ...direction,
+    heading: Math.atan2(direction.x, direction.z),
+    intensity: Math.min(1, Math.max(0, input.strength)),
+    runAmount: 0,
+    speedEnvelope: 'run',
+  }
 }
 
 function resolveCameraForwardXZ(camera: Camera) {

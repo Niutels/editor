@@ -4,12 +4,20 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { inspectGlb } from './landrush-glb-audit.mjs'
 import { loadTypescriptModuleGraph } from './load-typescript-module-graph.mjs'
+import {
+  ZOMBIE_ESCAPE_WEAPON_TEXTURE_OPTIMIZER,
+  inspectZombieEscapeWeaponSemanticContract,
+  zombieEscapeWeaponOptimizerFingerprint,
+  zombieEscapeWeaponSourcePath,
+  zombieEscapeWeaponSourceReference,
+} from './zombie-escape-weapon-glb-optimizer.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const TARGET_TRIANGLES = 3_000
 const MINIMUM_TRIANGLES = 2_400
 const MAXIMUM_TRIANGLES = 3_600
-const TEXTURE_SIZE = 2_048
+const SOURCE_TEXTURE_SIZE = 2_048
+const WEAPON_RUNTIME_TEXTURE_SIZE = ZOMBIE_ESCAPE_WEAPON_TEXTURE_OPTIMIZER.resolution
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const PUBLIC_ASSET_PREFIX = '/landrush-lab/zombie-escape/assets/'
 const DEFAULT_ASSET_ROOT = resolve(
@@ -72,6 +80,7 @@ export async function auditZombieEscapeAssets({
   assetRoot = DEFAULT_ASSET_ROOT,
   generation: generationOverride,
   generationPath = resolve(assetRoot, 'meshy-generation.json'),
+  weaponRuntimeBudgetBytes = ZOMBIE_ESCAPE_WEAPON_TEXTURE_OPTIMIZER.maxRuntimeBytes,
 } = {}) {
   const generation =
     generationOverride ?? JSON.parse(await readFile(generationPath, 'utf8'))
@@ -81,6 +90,7 @@ export async function auditZombieEscapeAssets({
   const fingerprints = new Map()
   const taskIds = new Map()
   const zombieOutputHashes = new Map()
+  let weaponRuntimeBytes = 0
   const catalogs = await loadCatalogs(failures)
 
   expectEqual(failures, 'generation.schemaVersion', generation.schemaVersion, 2)
@@ -188,6 +198,40 @@ export async function auditZombieEscapeAssets({
         )
       }
 
+      let sourceInspection = null
+      let sourceArtifactContract = null
+      let sourceSemantic = null
+      let sourceReference = null
+      if (kind === 'weapon') {
+        const sourcePath = zombieEscapeWeaponSourcePath(id)
+        sourceReference = zombieEscapeWeaponSourceReference(sourcePath)
+        try {
+          sourceInspection = await inspectGlb(sourcePath)
+          sourceSemantic = await inspectZombieEscapeWeaponSemanticContract(sourcePath)
+          validateWeaponSourceInspection(failures, id, sourceInspection)
+          compareStoredValidation(
+            failures,
+            id,
+            output,
+            record.validation?.[output],
+            sourceInspection,
+          )
+          sourceArtifactContract = validateArtifactRecord({
+            expectedPath: sourceReference,
+            failures,
+            id,
+            inspection: sourceInspection,
+            output,
+            record,
+            taskId: record.refineTaskId,
+          })
+        } catch (error) {
+          failures.push(
+            `${id}/${output}: pristine source: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      }
+
       let inspection
       try {
         inspection = await inspectGlb(localPathFor(assetRoot, canonicalPublicPath))
@@ -208,7 +252,27 @@ export async function auditZombieEscapeAssets({
         inspection,
         kind,
         output,
+        sourceInspection,
       })
+      let runtimeSemantic = null
+      if (kind === 'weapon') {
+        weaponRuntimeBytes += inspection.byteLength
+        try {
+          runtimeSemantic = await inspectZombieEscapeWeaponSemanticContract(
+            localPathFor(assetRoot, canonicalPublicPath),
+          )
+          expectEqual(
+            failures,
+            `${id}/${output}: source/runtime semantic contract`,
+            runtimeSemantic.semanticHash,
+            sourceSemantic?.semanticHash,
+          )
+        } catch (error) {
+          failures.push(
+            `${id}/${output}: runtime semantic contract: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      }
       if (kind === 'zombie') {
         validateZombieOutputHash(
           failures,
@@ -218,25 +282,51 @@ export async function auditZombieEscapeAssets({
           inspection.contentHash,
         )
       }
-      compareStoredValidation(
-        failures,
-        id,
-        output,
-        record.validation?.[output],
-        inspection,
-      )
-      const artifactContract = validateArtifactRecord({
-        canonicalPublicPath,
-        failures,
-        id,
-        inspection,
-        output,
-        record,
-        taskId: record[kind === 'weapon' ? 'refineTaskId' : 'rigTaskId'],
-      })
+      if (kind === 'zombie') {
+        compareStoredValidation(
+          failures,
+          id,
+          output,
+          record.validation?.[output],
+          inspection,
+        )
+      }
+      const artifactContract =
+        kind === 'weapon'
+          ? combineWeaponArtifactContracts(
+              sourceArtifactContract,
+              validateWeaponRuntimeArtifact({
+                canonicalPublicPath,
+                failures,
+                id,
+                inspection,
+                record,
+                runtimeSemantic,
+                sourceInspection,
+                sourceReference,
+              }),
+            )
+          : validateArtifactRecord({
+              expectedPath: canonicalPublicPath,
+              failures,
+              id,
+              inspection,
+              output,
+              record,
+              taskId: record.rigTaskId,
+            })
       outputAudit[output] = {
         artifactContract,
         canonicalPath: canonicalPublicPath,
+        semanticContract:
+          kind === 'weapon'
+            ? {
+                preserved:
+                  runtimeSemantic?.semanticHash === sourceSemantic?.semanticHash,
+                runtimeHash: runtimeSemantic?.semanticHash ?? null,
+                sourceHash: sourceSemantic?.semanticHash ?? null,
+              }
+            : null,
         ...inspection,
         textureContract,
       }
@@ -259,6 +349,12 @@ export async function auditZombieEscapeAssets({
     }
   }
 
+  if (weaponRuntimeBytes > weaponRuntimeBudgetBytes) {
+    failures.push(
+      `weapon runtime payload: ${weaponRuntimeBytes} bytes exceeds ${weaponRuntimeBudgetBytes} byte budget`,
+    )
+  }
+
   return {
     assets: auditedAssets,
     catalogChecks: {
@@ -273,13 +369,20 @@ export async function auditZombieEscapeAssets({
       },
       textures: {
         weapon: {
-          profile: 'full-pbr-2048',
-          requiredImageDimensions: [TEXTURE_SIZE, TEXTURE_SIZE],
-          requiredMaterialTextureSlots: ['baseColor', 'metallicRoughness', 'normal'],
+          maximumRuntimeBytes: weaponRuntimeBudgetBytes,
+          profile: 'full-pbr-512-jpeg',
+          requiredImageDimensions: [WEAPON_RUNTIME_TEXTURE_SIZE, WEAPON_RUNTIME_TEXTURE_SIZE],
+          requiredMaterialTextureSlots: [
+            'baseColor',
+            'emissive',
+            'metallicRoughness',
+            'normal',
+          ],
+          sourceProfile: 'full-pbr-2048',
         },
         zombie: {
           profile: 'base-color-2048',
-          requiredImageDimensions: [TEXTURE_SIZE, TEXTURE_SIZE],
+          requiredImageDimensions: [SOURCE_TEXTURE_SIZE, SOURCE_TEXTURE_SIZE],
           requiredMaterialTextureSlots: ['baseColor'],
         },
       },
@@ -299,6 +402,7 @@ export async function auditZombieEscapeAssets({
     runtimeCatalogChecks,
     targetFaceCount: generation.targetFaceCount,
     textureResolution: generation.textureResolution,
+    weaponRuntimeBytes,
   }
 }
 
@@ -380,7 +484,7 @@ function validateFingerprint(record, id, key, expected, fingerprints, failures) 
 }
 
 function validateArtifactRecord({
-  canonicalPublicPath,
+  expectedPath,
   failures,
   id,
   inspection,
@@ -394,7 +498,11 @@ function validateArtifactRecord({
     failures.push(`${label} is missing`)
     return { accepted: false }
   }
-  expectEqual(failures, `${label} path`, artifact.path, canonicalPublicPath)
+  expectEqual(failures, `${label} path`, artifact.path, expectedPath)
+  const sourcePathAccepted = expectedPath.startsWith('/') || artifact.sourcePath === expectedPath
+  if (!expectedPath.startsWith('/')) {
+    expectEqual(failures, `${label} sourcePath`, artifact.sourcePath, expectedPath)
+  }
   expectEqual(failures, `${label} taskId`, artifact.taskId, taskId)
   expectEqual(failures, `${label} byteLength`, artifact.byteLength, inspection.byteLength)
   expectEqual(failures, `${label} sha256`, artifact.sha256, inspection.contentHash)
@@ -403,24 +511,93 @@ function validateArtifactRecord({
   }
   return {
     accepted:
-      artifact.path === canonicalPublicPath &&
+      artifact.path === expectedPath &&
       artifact.taskId === taskId &&
       artifact.byteLength === inspection.byteLength &&
       artifact.sha256 === inspection.contentHash &&
+      sourcePathAccepted &&
       SHA256_PATTERN.test(artifact.sha256 ?? ''),
     recordedByteLength: artifact.byteLength,
     recordedSha256: artifact.sha256,
   }
 }
 
-function validateInspection({ failures, id, inspection, kind, output }) {
+function validateWeaponRuntimeArtifact({
+  canonicalPublicPath,
+  failures,
+  id,
+  inspection,
+  record,
+  runtimeSemantic,
+  sourceInspection,
+  sourceReference,
+}) {
+  const artifact = record.runtimeArtifacts?.model
+  const label = `${id}/model: runtime artifact`
+  if (!artifact) {
+    failures.push(`${label} is missing`)
+    return { accepted: false }
+  }
+  const expected = {
+    chromaSubsampling: ZOMBIE_ESCAPE_WEAPON_TEXTURE_OPTIMIZER.chromaSubsampling,
+    format: ZOMBIE_ESCAPE_WEAPON_TEXTURE_OPTIMIZER.format,
+    optimizerFingerprint: zombieEscapeWeaponOptimizerFingerprint(),
+    path: canonicalPublicPath,
+    quality: ZOMBIE_ESCAPE_WEAPON_TEXTURE_OPTIMIZER.quality,
+    resolution: WEAPON_RUNTIME_TEXTURE_SIZE,
+    runtimeByteLength: inspection.byteLength,
+    runtimeSha256: inspection.contentHash,
+    semanticHash: runtimeSemantic?.semanticHash,
+    sourceByteLength: sourceInspection?.byteLength,
+    sourcePath: sourceReference,
+    sourceSha256: sourceInspection?.contentHash,
+    taskId: record.refineTaskId,
+    textureCount: inspection.imageCount,
+  }
+  for (const [field, value] of Object.entries(expected)) {
+    expectEqual(failures, `${label} ${field}`, artifact[field], value)
+  }
+  if (typeof artifact.runtimeSha256 !== 'string' || !SHA256_PATTERN.test(artifact.runtimeSha256)) {
+    failures.push(`${label} runtimeSha256 is not a lowercase SHA-256 digest`)
+  }
+  if (typeof artifact.semanticHash !== 'string' || !SHA256_PATTERN.test(artifact.semanticHash)) {
+    failures.push(`${label} semanticHash is not a lowercase SHA-256 digest`)
+  }
+  return {
+    accepted:
+      Object.entries(expected).every(([field, value]) => artifact[field] === value) &&
+      SHA256_PATTERN.test(artifact.runtimeSha256 ?? '') &&
+      SHA256_PATTERN.test(artifact.semanticHash ?? ''),
+    recordedByteLength: artifact.runtimeByteLength,
+    recordedSha256: artifact.runtimeSha256,
+  }
+}
+
+function combineWeaponArtifactContracts(source, runtime) {
+  return {
+    accepted: source?.accepted === true && runtime?.accepted === true,
+    runtime,
+    source,
+  }
+}
+
+function validateInspection({ failures, id, inspection, kind, output, sourceInspection }) {
   const label = `${id}/${output}`
   if (
-    inspection.triangleCount < MINIMUM_TRIANGLES ||
-    inspection.triangleCount > MAXIMUM_TRIANGLES
+    kind === 'zombie' &&
+    (inspection.triangleCount < MINIMUM_TRIANGLES ||
+      inspection.triangleCount > MAXIMUM_TRIANGLES)
   ) {
     failures.push(
       `${label}: ${inspection.triangleCount} triangles is outside ${TARGET_TRIANGLES} ±20%`,
+    )
+  }
+  if (kind === 'weapon') {
+    expectEqual(
+      failures,
+      `${label}: runtime triangle count preserves source`,
+      inspection.triangleCount,
+      sourceInspection?.triangleCount,
     )
   }
   expectEqual(failures, `${label}: mesh count`, inspection.meshCount, 1)
@@ -446,25 +623,42 @@ function validateInspection({ failures, id, inspection, kind, output }) {
   expectEqual(failures, `${label}: material count`, inspection.materialCount, 1)
 
   const expectedSlots =
-    kind === 'weapon' ? ['baseColor', 'metallicRoughness', 'normal'] : ['baseColor']
-  const allImages2048 =
+    kind === 'weapon'
+      ? ['baseColor', 'emissive', 'metallicRoughness', 'normal']
+      : ['baseColor']
+  const expectedTextureSize =
+    kind === 'weapon' ? WEAPON_RUNTIME_TEXTURE_SIZE : SOURCE_TEXTURE_SIZE
+  const allImagesAtRequiredSize =
     inspection.images.length > 0 &&
     inspection.images.every(
-      ({ embedded, height, width }) =>
-        embedded && height === TEXTURE_SIZE && width === TEXTURE_SIZE,
+      ({ embedded, height, mimeType, width }) =>
+        embedded &&
+        height === expectedTextureSize &&
+        width === expectedTextureSize &&
+        (kind !== 'weapon' || mimeType === 'image/jpeg'),
     )
-  if (!allImages2048) failures.push(`${label}: every embedded texture image must be 2048x2048`)
+  if (!allImagesAtRequiredSize) {
+    failures.push(
+      `${label}: every embedded texture image must be ${expectedTextureSize}x${expectedTextureSize}${kind === 'weapon' ? ' JPEG' : ''}`,
+    )
+  }
 
   const allMaterialsSatisfyRequiredSlots =
     inspection.materials.length > 0 &&
     inspection.materials.every(({ textureSlots }) =>
       expectedSlots.every((slot) => {
         const texture = textureSlots[slot]
-        return texture?.height === TEXTURE_SIZE && texture?.width === TEXTURE_SIZE
+        return (
+          texture?.height === expectedTextureSize &&
+          texture?.width === expectedTextureSize &&
+          (kind !== 'weapon' || texture.mimeType === 'image/jpeg')
+        )
       }),
     )
   if (!allMaterialsSatisfyRequiredSlots) {
-    failures.push(`${label}: required material texture slots are missing or not 2048x2048`)
+    failures.push(
+      `${label}: required material texture slots are missing or not ${expectedTextureSize}x${expectedTextureSize}`,
+    )
   }
 
   const fullPbrSlotsPresent =
@@ -522,14 +716,51 @@ function validateInspection({ failures, id, inspection, kind, output }) {
   }
 
   return {
-    accepted: allImages2048 && allMaterialsSatisfyRequiredSlots && distinctRequiredImageSources,
-    allImages2048,
+    accepted:
+      allImagesAtRequiredSize &&
+      allMaterialsSatisfyRequiredSlots &&
+      distinctRequiredImageSources,
+    allImagesAtRequiredSize,
     allMaterialsSatisfyRequiredSlots,
     distinctRequiredImageSources,
     fullPbrSlotsPresent,
-    profile: kind === 'weapon' ? 'full-pbr-2048' : 'base-color-2048',
+    profile: kind === 'weapon' ? 'full-pbr-512-jpeg' : 'base-color-2048',
     requiredMaterialTextureSlots: expectedSlots,
   }
+}
+
+function validateWeaponSourceInspection(failures, id, inspection) {
+  const label = `${id}/model: pristine source`
+  if (
+    inspection.triangleCount < MINIMUM_TRIANGLES ||
+    inspection.triangleCount > MAXIMUM_TRIANGLES
+  ) {
+    failures.push(
+      `${label}: ${inspection.triangleCount} triangles is outside ${TARGET_TRIANGLES} ±20%`,
+    )
+  }
+  expectEqual(failures, `${label}: mesh count`, inspection.meshCount, 1)
+  expectEqual(failures, `${label}: primitive count`, inspection.primitiveCount, 1)
+  expectEqual(failures, `${label}: material count`, inspection.materialCount, 1)
+  expectEqual(failures, `${label}: skin count`, inspection.skinCount, 0)
+  expectEqual(failures, `${label}: animation count`, inspection.animationCount, 0)
+  const validImages =
+    inspection.images.length === 4 &&
+    inspection.images.every(
+      ({ embedded, height, mimeType, width }) =>
+        embedded &&
+        height === SOURCE_TEXTURE_SIZE &&
+        width === SOURCE_TEXTURE_SIZE &&
+        mimeType === 'image/jpeg',
+    )
+  if (!validImages) failures.push(`${label}: expected four embedded 2048x2048 JPEG textures`)
+  const validSlots = inspection.materials.every(({ textureSlots }) =>
+    ['baseColor', 'emissive', 'metallicRoughness', 'normal'].every((slot) => {
+      const texture = textureSlots[slot]
+      return texture?.height === SOURCE_TEXTURE_SIZE && texture?.width === SOURCE_TEXTURE_SIZE
+    }),
+  )
+  if (!validSlots) failures.push(`${label}: expected all four authored PBR texture slots`)
 }
 
 function validateZombieCompatibility(failures, id, outputs) {
@@ -859,6 +1090,16 @@ if (isMain) {
   if (!process.argv.includes('--no-write')) {
     await writeFile(DEFAULT_AUDIT_PATH, `${JSON.stringify(audit, null, 2)}\n`)
   }
-  console.log(JSON.stringify(audit, null, 2))
+  if (process.argv.includes('--quiet')) {
+    if (audit.pass) {
+      console.log(
+        `Zombie Escape asset audit passed (${audit.weaponRuntimeBytes} weapon runtime bytes).`,
+      )
+    } else {
+      console.error(audit.failures.join('\n'))
+    }
+  } else {
+    console.log(JSON.stringify(audit, null, 2))
+  }
   if (!audit.pass) process.exitCode = 1
 }

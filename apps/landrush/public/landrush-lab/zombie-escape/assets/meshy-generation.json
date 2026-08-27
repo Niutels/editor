@@ -36,15 +36,34 @@
       "artifacts": {
         "model": {
           "byteLength": 6687408,
-          "path": "/landrush-lab/zombie-escape/assets/weapons/sunflare-pistol.glb",
+          "path": "assets/zombie-escape-meshy-source/weapons/sunflare-pistol/model.glb",
           "sha256": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6",
-          "taskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4"
+          "taskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4",
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/sunflare-pistol/model.glb"
         },
         "preview": {
           "byteLength": 115054,
           "path": "/landrush-lab/zombie-escape/assets/weapons/previews/sunflare-pistol.png",
           "sha256": "4e03e5ddd0d34e73e517932b986cc4ed1fa63030c20f3582df00e8759bd3ae82",
           "taskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4"
+        }
+      },
+      "runtimeArtifacts": {
+        "model": {
+          "chromaSubsampling": "4:4:4",
+          "format": "jpeg",
+          "optimizerFingerprint": "2c5200b6d35e855146fc4405e1d54608f20e69a6a65681806a5aed382043873f",
+          "path": "/landrush-lab/zombie-escape/assets/weapons/sunflare-pistol.glb",
+          "quality": 90,
+          "resolution": 512,
+          "runtimeByteLength": 387448,
+          "runtimeSha256": "edb8666a35a5f8eae4798bdda786b8f6d750ae49468f9096657b626fb2157f77",
+          "semanticHash": "af11e9ff0c05e22ce92ac6657d17be42199996f50c40d19c32c60c47cbefabf2",
+          "sourceByteLength": 6687408,
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/sunflare-pistol/model.glb",
+          "sourceSha256": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6",
+          "taskId": "01a01b9d-c5e8-75b8-bf2c-516b3268bbf4",
+          "textureCount": 4
         }
       }
     },
@@ -84,15 +103,34 @@
       "artifacts": {
         "model": {
           "byteLength": 6720928,
-          "path": "/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb",
+          "path": "assets/zombie-escape-meshy-source/weapons/reef-carbine/model.glb",
           "sha256": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5",
-          "taskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9"
+          "taskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9",
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/reef-carbine/model.glb"
         },
         "preview": {
           "byteLength": 48494,
           "path": "/landrush-lab/zombie-escape/assets/weapons/previews/reef-carbine.png",
           "sha256": "8118b2f8f50c41706ac819cf4d3ad0c7e5ca07f4121e0a756f65225132479f29",
           "taskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9"
+        }
+      },
+      "runtimeArtifacts": {
+        "model": {
+          "chromaSubsampling": "4:4:4",
+          "format": "jpeg",
+          "optimizerFingerprint": "2c5200b6d35e855146fc4405e1d54608f20e69a6a65681806a5aed382043873f",
+          "path": "/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb",
+          "quality": 90,
+          "resolution": 512,
+          "runtimeByteLength": 393300,
+          "runtimeSha256": "a738e8e8657e729390d917fced819bb692062f0940e4df9e3fae74f6dae829c9",
+          "semanticHash": "abd7adcc90d1af598281b242c355973411ba8a62acd983f1903f76f50f7decf6",
+          "sourceByteLength": 6720928,
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/reef-carbine/model.glb",
+          "sourceSha256": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5",
+          "taskId": "01a01b9d-c557-7720-8c40-9fd9fb494bf9",
+          "textureCount": 4
         }
       }
     },
@@ -132,15 +170,34 @@
       "artifacts": {
         "model": {
           "byteLength": 7224932,
-          "path": "/landrush-lab/zombie-escape/assets/weapons/driftwood-scattergun.glb",
+          "path": "assets/zombie-escape-meshy-source/weapons/driftwood-scattergun/model.glb",
           "sha256": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051",
-          "taskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6"
+          "taskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6",
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/driftwood-scattergun/model.glb"
         },
         "preview": {
           "byteLength": 51771,
           "path": "/landrush-lab/zombie-escape/assets/weapons/previews/driftwood-scattergun.png",
           "sha256": "cf0f575693353421941a6d5fb0d2527499290eaf5a9a939be41cea54d07b0002",
           "taskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6"
+        }
+      },
+      "runtimeArtifacts": {
+        "model": {
+          "chromaSubsampling": "4:4:4",
+          "format": "jpeg",
+          "optimizerFingerprint": "2c5200b6d35e855146fc4405e1d54608f20e69a6a65681806a5aed382043873f",
+          "path": "/landrush-lab/zombie-escape/assets/weapons/driftwood-scattergun.glb",
+          "quality": 90,
+          "resolution": 512,
+          "runtimeByteLength": 402084,
+          "runtimeSha256": "5456d5f01063f77b886a194dd8a9717a212c5c5fc4dc95bb9c1fae16ec17bca5",
+          "semanticHash": "441fde4836e665b045a641e5366410c7a138eb61c9b424d23e51688eef5922d1",
+          "sourceByteLength": 7224932,
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/driftwood-scattergun/model.glb",
+          "sourceSha256": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051",
+          "taskId": "01a01b9d-c598-7721-9c4c-ae3b33376ae6",
+          "textureCount": 4
         }
       }
     },
@@ -180,15 +237,34 @@
       "artifacts": {
         "model": {
           "byteLength": 6168944,
-          "path": "/landrush-lab/zombie-escape/assets/weapons/storm-coil-repeater.glb",
+          "path": "assets/zombie-escape-meshy-source/weapons/storm-coil-repeater/model.glb",
           "sha256": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da",
-          "taskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d"
+          "taskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d",
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/storm-coil-repeater/model.glb"
         },
         "preview": {
           "byteLength": 97559,
           "path": "/landrush-lab/zombie-escape/assets/weapons/previews/storm-coil-repeater.png",
           "sha256": "78c1817c4bd7c21f6aeec194bcc2cd377a12b75ac9397fd1a67a6377118b13ee",
           "taskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d"
+        }
+      },
+      "runtimeArtifacts": {
+        "model": {
+          "chromaSubsampling": "4:4:4",
+          "format": "jpeg",
+          "optimizerFingerprint": "2c5200b6d35e855146fc4405e1d54608f20e69a6a65681806a5aed382043873f",
+          "path": "/landrush-lab/zombie-escape/assets/weapons/storm-coil-repeater.glb",
+          "quality": 90,
+          "resolution": 512,
+          "runtimeByteLength": 367656,
+          "runtimeSha256": "d9b0ee89382879206278c4b5c2d0c8305c2a2f1e1f1482da2101b675b157ff3c",
+          "semanticHash": "06b43fc58eb8d86919adfe29e2c4677e00baca36dd422610173b7648c56e9753",
+          "sourceByteLength": 6168944,
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/storm-coil-repeater/model.glb",
+          "sourceSha256": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da",
+          "taskId": "01a01b9f-3c89-7627-a0d0-9dd83072aa2d",
+          "textureCount": 4
         }
       }
     },
@@ -228,15 +304,34 @@
       "artifacts": {
         "model": {
           "byteLength": 7555376,
-          "path": "/landrush-lab/zombie-escape/assets/weapons/tidebreak-launcher.glb",
+          "path": "assets/zombie-escape-meshy-source/weapons/tidebreak-launcher/model.glb",
           "sha256": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af",
-          "taskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8"
+          "taskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8",
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/tidebreak-launcher/model.glb"
         },
         "preview": {
           "byteLength": 72777,
           "path": "/landrush-lab/zombie-escape/assets/weapons/previews/tidebreak-launcher.png",
           "sha256": "71f87d7546e164ebdfdd6c8659d25b9a346475adad4554e40cb63746c94ffa55",
           "taskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8"
+        }
+      },
+      "runtimeArtifacts": {
+        "model": {
+          "chromaSubsampling": "4:4:4",
+          "format": "jpeg",
+          "optimizerFingerprint": "2c5200b6d35e855146fc4405e1d54608f20e69a6a65681806a5aed382043873f",
+          "path": "/landrush-lab/zombie-escape/assets/weapons/tidebreak-launcher.glb",
+          "quality": 90,
+          "resolution": 512,
+          "runtimeByteLength": 488060,
+          "runtimeSha256": "25388da6ae4787d9965352c0db9c0dc55144aa374a22e7d9cb0d05abf020a420",
+          "semanticHash": "5da100597fcb538f9d65b9c0236178316d7a372d6c87a04f9e9a019c1fb3a62a",
+          "sourceByteLength": 7555376,
+          "sourcePath": "assets/zombie-escape-meshy-source/weapons/tidebreak-launcher/model.glb",
+          "sourceSha256": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af",
+          "taskId": "01a01b9f-9d9f-77ba-9640-108a0ef2f0a8",
+          "textureCount": 4
         }
       }
     },

@@ -41,11 +41,14 @@ import {
   createZombieEscapeHudSnapshot,
   createZombieEscapeSimulation,
   inspectZombieEscapeCommittedNavigationAction,
+  isZombieEscapeWeaponPickupAvailable,
   resetZombieEscapeSimulation,
+  resolveZombieEscapeWeaponPurchaseCost,
   setZombieEscapeCollisionWorld,
   setZombieEscapeExternalPlayerPose,
   setZombieEscapeGamePhase,
   setZombieEscapePlayerMuzzlePose,
+  setZombieEscapeWeaponPickupPlacements,
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
@@ -2122,6 +2125,17 @@ describe('Zombie Escape simulation', () => {
     }
 
     expect(state.shotsFired).toBeGreaterThan(0)
+    expect(state.zombies.health[zombie]).toBe(0)
+    expect(state.zombies.pool.active[zombie]).toBe(1)
+    input.fire = false
+    for (
+      let frame = 0;
+      frame < Math.ceil(ZOMBIE_ESCAPE_SIMULATION.zombieDeathPresentationSeconds * 60) + 1 &&
+      state.zombies.pool.active[zombie] !== 0;
+      frame += 1
+    ) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
     expect(state.zombies.pool.active[zombie]).toBe(0)
     expect(state.kills).toBeGreaterThanOrEqual(1)
     expect(state.shots.pool.active.length).toBe(ZOMBIE_ESCAPE_CAPACITY.shots)
@@ -2727,7 +2741,7 @@ describe('Zombie Escape simulation', () => {
     expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.expired)
   })
 
-  test('keeps a lethally hit zombie visible through its hit reaction before releasing it', () => {
+  test('keeps a lethally hit zombie visible through collapse and its settled-corpse hold', () => {
     const arena = createZombieEscapeArena(543)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 943)
@@ -2762,6 +2776,18 @@ describe('Zombie Escape simulation', () => {
     ])
 
     for (let frame = 0; frame < 30; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+    expect(state.zombies.pool.active[zombie]).toBe(1)
+    expect(state.zombies.hitReaction[zombie]).toBe(0)
+    expect(state.zombies.deathPresentationSeconds[zombie]).toBeGreaterThan(0)
+
+    for (
+      let frame = 0;
+      frame < Math.ceil(ZOMBIE_ESCAPE_SIMULATION.zombieDeathPresentationSeconds * 60) + 1 &&
+      state.zombies.pool.active[zombie] !== 0;
+      frame += 1
+    ) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
     expect(state.zombies.pool.active[zombie]).toBe(0)
@@ -2936,6 +2962,103 @@ describe('Zombie Escape simulation', () => {
     ])
   })
 
+  test('finishes a committed swing while pursuing an out-of-range player at walking speed', () => {
+    const arena = createZombieEscapeArena(5_211)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_211)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 0
+    state.player.z = 0
+    const zombie = spawnZombieEscapeZombie(state, 0, -0.7, 120)
+    const input = createZombieEscapeControlState()
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer)
+    expect(state.zombies.attackCooldown[zombie]).toBeCloseTo(
+      ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds,
+      5,
+    )
+
+    state.player.z = 6
+    const attackStartZ = state.zombies.z[zombie]!
+    const catalogEntry = getZombieEscapeZombieCatalogEntry(state.zombies.variant[zombie]!)
+    const maximumWalkSpeed =
+      (catalogEntry.movement.walkMetersPerSecond + state.wave * 0.06) *
+      state.zombies.speedScale[zombie]!
+    let attackTicks = 0
+    let previousCooldown = state.zombies.attackCooldown[zombie]!
+    let sawContact = false
+    let maximumAttackSpeed = 0
+    let minimumAttackRunBlend = 1
+    while (
+      attackTicks < 60 &&
+      state.zombies.intent[zombie] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer
+    ) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+      attackTicks += 1
+      sawContact ||= state.zombies.attackContactResolved[zombie] !== 0
+      if (state.zombies.intent[zombie] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer) {
+        maximumAttackSpeed = Math.max(
+          maximumAttackSpeed,
+          Math.hypot(state.zombies.vx[zombie]!, state.zombies.vz[zombie]!),
+        )
+        minimumAttackRunBlend = Math.min(minimumAttackRunBlend, state.zombies.runBlend[zombie]!)
+        expect(state.zombies.attackCooldown[zombie]!).toBeLessThan(previousCooldown)
+        previousCooldown = state.zombies.attackCooldown[zombie]!
+      }
+    }
+
+    expect(attackTicks).toBeGreaterThanOrEqual(43)
+    expect(attackTicks).toBeLessThanOrEqual(44)
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase)
+    expect(state.player.health).toBe(100)
+    expect(sawContact).toBe(true)
+    expect(state.zombies.z[zombie]! - attackStartZ).toBeGreaterThan(0.1)
+    expect(maximumAttackSpeed).toBeLessThanOrEqual(maximumWalkSpeed + 0.000_1)
+    expect(minimumAttackRunBlend).toBeLessThan(0.1)
+  })
+
+  test('does not restart a committed swing when the player re-enters attack range', () => {
+    const arena = createZombieEscapeArena(5_212)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_212)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 0
+    state.player.z = 0
+    const zombie = spawnZombieEscapeZombie(state, 0, -0.7, 120)
+    const input = createZombieEscapeControlState()
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    state.player.z = 6
+    for (let frame = 0; frame < 6; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+    const cooldownBeforeReentry = state.zombies.attackCooldown[zombie]!
+    let elapsedAttackTicks = 6
+    while (elapsedAttackTicks < 30 && state.player.health === 100) {
+      state.player.x = state.zombies.x[zombie]!
+      state.player.z = state.zombies.z[zombie]! + 0.7
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+      elapsedAttackTicks += 1
+      if (elapsedAttackTicks === 7) {
+        expect(state.zombies.attackCooldown[zombie]!).toBeLessThan(cooldownBeforeReentry)
+      }
+    }
+
+    const contactSeconds =
+      ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds *
+      ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackContactPhase
+    expect(state.player.health).toBe(92)
+    expect(elapsedAttackTicks).toBeLessThanOrEqual(Math.ceil(contactSeconds * 60))
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer)
+  })
+
   test('requires E to purchase a nearby weapon and applies its finite fire profile', () => {
     const arena = createZombieEscapeArena(53)
     arena.obstacleCount = 0
@@ -2972,6 +3095,108 @@ describe('Zombie Escape simulation', () => {
     expect(state.player.ammo).toBe(profile.ammoGranted - 1)
   })
 
+  test('automatically purchases an affordable overlapping pickup exactly once for touch input', () => {
+    const arena = createZombieEscapeArena(539)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 939)
+    const weaponIndex = 1
+    const pickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[weaponIndex]!
+    const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!
+    state.player.x = pickup.x
+    state.player.z = pickup.z
+    state.money = profile.purchaseCost * 3
+    const input = createZombieEscapeControlState()
+    input.inputMode = 'touch'
+
+    for (let frame = 0; frame < 60; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
+    expect(state.weaponPurchaseCount).toBe(1)
+    expect(state.player.weaponIndex).toBe(weaponIndex)
+    expect(state.player.ammo).toBe(profile.ammoGranted)
+    expect(state.money).toBe(profile.purchaseCost * 2)
+    expect(readZombieEscapeAudioEventKinds(state)).toEqual([
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponPurchased,
+    ])
+  })
+
+  test('keeps unaffordable touch overlap quiet and purchases as soon as funds become sufficient', () => {
+    const arena = createZombieEscapeArena(5_390)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_390)
+    const weaponIndex = 1
+    const pickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[weaponIndex]!
+    const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!
+    state.player.x = pickup.x
+    state.player.z = pickup.z
+    state.money = profile.purchaseCost - 1
+    const input = createZombieEscapeControlState()
+    input.inputMode = 'touch'
+
+    for (let frame = 0; frame < 60; frame += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
+    expect(state.weaponPurchaseCount).toBe(0)
+    expect(state.player.weaponIndex).toBe(0)
+    expect(state.purchaseFeedback).toBeNull()
+    expect(state.money).toBe(profile.purchaseCost - 1)
+    expect(readZombieEscapeAudioEventKinds(state)).toEqual([])
+
+    state.money += 1
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
+    expect(state.weaponPurchaseCount).toBe(1)
+    expect(state.player.weaponIndex).toBe(weaponIndex)
+    expect(state.player.ammo).toBe(profile.ammoGranted)
+    expect(state.money).toBe(0)
+    expect(readZombieEscapeAudioEventKinds(state)).toEqual([
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponPurchased,
+    ])
+  })
+
+  test('requires an interaction pulse for keyboard and gamepad pickup overlap', () => {
+    const arena = createZombieEscapeArena(5_391)
+    arena.obstacleCount = 0
+    const weaponIndex = 1
+    const pickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[weaponIndex]!
+    const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!
+
+    for (const inputMode of ['keyboard', 'gamepad'] as const) {
+      const state = createZombieEscapeSimulation(arena, inputMode === 'keyboard' ? 9_391 : 9_392)
+      state.player.x = pickup.x
+      state.player.z = pickup.z
+      state.money = profile.purchaseCost
+      const input = createZombieEscapeControlState()
+      input.inputMode = inputMode
+
+      for (let frame = 0; frame < 60; frame += 1) {
+        stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+      }
+
+      expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
+      expect(state.weaponPurchaseCount).toBe(0)
+      expect(state.player.weaponIndex).toBe(0)
+      expect(state.money).toBe(profile.purchaseCost)
+      expect(readZombieEscapeAudioEventKinds(state)).toEqual([])
+
+      input.interactPressed = true
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+      expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
+      expect(state.weaponPurchaseCount).toBe(1)
+      expect(state.player.weaponIndex).toBe(weaponIndex)
+      expect(state.money).toBe(0)
+      expect(readZombieEscapeAudioEventKinds(state)).toEqual([
+        ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponPurchased,
+      ])
+    }
+  })
+
   test('keeps an unaffordable pickup unchanged apart from prompt feedback', () => {
     const arena = createZombieEscapeArena(530)
     const state = createZombieEscapeSimulation(arena, 930)
@@ -2985,7 +3210,8 @@ describe('Zombie Escape simulation', () => {
     const before = {
       ammo: state.player.ammo,
       money: state.money,
-      purchased: [...state.purchasedWeapons],
+      purchaseCount: state.weaponPurchaseCount,
+      respawnAt: [...state.weaponPickupRespawnAtSeconds],
       weaponIndex: state.player.weaponIndex,
     }
 
@@ -2994,7 +3220,8 @@ describe('Zombie Escape simulation', () => {
     expect({
       ammo: state.player.ammo,
       money: state.money,
-      purchased: [...state.purchasedWeapons],
+      purchaseCount: state.weaponPurchaseCount,
+      respawnAt: [...state.weaponPickupRespawnAtSeconds],
       weaponIndex: state.player.weaponIndex,
     }).toEqual(before)
     expect(state.purchaseFeedback).toBe('insufficient-funds')
@@ -3024,7 +3251,7 @@ describe('Zombie Escape simulation', () => {
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
 
     expect(state.player.weaponIndex).toBe(0)
-    expect(state.purchasedWeapons[weaponIndex]).toBe(0)
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
     expect(state.money).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!.purchaseCost)
     expect(createZombieEscapeHudSnapshot(state).pickupPrompt).toBeNull()
   })
@@ -3087,7 +3314,9 @@ describe('Zombie Escape simulation', () => {
     expect(state.shotsFired).toBe(0)
     expect(state.player.weaponIndex).toBe(0)
     expect(state.player.ammo).toBe(60)
-    expect(state.purchasedWeapons[0]).toBe(1)
+    expect(isZombieEscapeWeaponPickupAvailable(state, 0)).toBe(false)
+    expect(state.weaponPickupRespawnAtSeconds[0]).toBe(Number.POSITIVE_INFINITY)
+    expect(state.weaponPurchaseCount).toBe(0)
 
     setZombieEscapeGamePhase(state, 'night')
     state.waveSpawnRemaining = 0
@@ -3198,42 +3427,169 @@ describe('Zombie Escape simulation', () => {
     expect(state.player.ammo).toBe(0)
   })
 
-  test('makes paid pickups purchasable again each build without resetting money', () => {
+  test('charges a linear global premium for each weapon purchase', () => {
     const arena = createZombieEscapeArena(536)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 936)
+    const firstWeaponIndex = 1
+    const secondWeaponIndex = 2
+    const firstPickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[firstWeaponIndex]!
+    const secondPickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[secondWeaponIndex]!
+    const firstProfile = ZOMBIE_ESCAPE_WEAPON_PROFILES[firstWeaponIndex]!
+    const secondProfile = ZOMBIE_ESCAPE_WEAPON_PROFILES[secondWeaponIndex]!
+    state.player.x = firstPickup.x
+    state.player.z = firstPickup.z
+    state.money = 100
+    const input = createZombieEscapeControlState()
+    input.interactPressed = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    expect(state.weaponPurchaseCount).toBe(1)
+    expect(state.money).toBe(100 - firstProfile.purchaseCost)
+    expect(resolveZombieEscapeWeaponPurchaseCost(state, secondWeaponIndex)).toBe(
+      secondProfile.purchaseCost * 2,
+    )
+
+    state.player.x = secondPickup.x
+    state.player.z = secondPickup.z
+    input.interactPressed = true
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    expect(state.weaponPurchaseCount).toBe(2)
+    expect(state.player.weaponIndex).toBe(secondWeaponIndex)
+    expect(state.player.ammo).toBe(secondProfile.ammoGranted)
+    expect(state.money).toBe(100 - firstProfile.purchaseCost - secondProfile.purchaseCost * 2)
+    expect(resolveZombieEscapeWeaponPurchaseCost(state, firstWeaponIndex)).toBe(
+      firstProfile.purchaseCost * 3,
+    )
+  })
+
+  test('fails closed when purchase money or the derived price is non-finite', () => {
+    const arena = createZombieEscapeArena(5_359)
+    arena.obstacleCount = 0
+    const weaponIndex = 1
+    const pickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[weaponIndex]!
+    const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!
+    const input = createZombieEscapeControlState()
+
+    for (const money of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const state = createZombieEscapeSimulation(arena, 9_359)
+      state.player.x = pickup.x
+      state.player.z = pickup.z
+      state.money = money
+      input.interactPressed = true
+      stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+
+      expect(state.player.weaponIndex).toBe(0)
+      expect(state.weaponPurchaseCount).toBe(0)
+      expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
+      expect(state.purchaseFeedback).toBe('insufficient-funds')
+    }
+
+    for (const purchaseCount of [Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE]) {
+      const state = createZombieEscapeSimulation(arena, 9_360)
+      state.player.x = pickup.x
+      state.player.z = pickup.z
+      state.money = profile.purchaseCost
+      state.weaponPurchaseCount = purchaseCount
+      expect(resolveZombieEscapeWeaponPurchaseCost(state, weaponIndex)).toBe(
+        Number.POSITIVE_INFINITY,
+      )
+      input.interactPressed = true
+      stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+
+      expect(state.player.weaponIndex).toBe(0)
+      expect(state.weaponPurchaseCount).toBe(purchaseCount)
+      expect(state.money).toBe(profile.purchaseCost)
+      expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
+      expect(state.purchaseFeedback).toBe('insufficient-funds')
+    }
+  })
+
+  test('indexes weapon pickup placements once for constant-time presentation lookup', () => {
+    const arena = createZombieEscapeArena(5_361)
+    const placements = [
+      { scopeId: 'second', weaponIndex: 2, x: 2, y: 0, z: 0 },
+      { scopeId: 'first', weaponIndex: 1, x: 1, y: 0, z: 0 },
+    ] as const
+    const state = createZombieEscapeSimulation(arena, 9_361, placements)
+
+    expect([...state.weaponPickupIndexByWeaponIndex]).toEqual([-1, 1, 0, -1, -1])
+
+    setZombieEscapeWeaponPickupPlacements(state, [placements[1]!])
+    expect([...state.weaponPickupIndexByWeaponIndex]).toEqual([-1, 0, -1, -1, -1])
+  })
+
+  test('makes a 60-second deadline available on the exact accumulated fixed step', () => {
+    const arena = createZombieEscapeArena(5_362)
+    const state = createZombieEscapeSimulation(arena, 9_362)
+    const weaponIndex = 1
+    state.weaponPickupRespawnAtSeconds[weaponIndex] =
+      ZOMBIE_ESCAPE_SIMULATION.weaponPickupRespawnSeconds
+
+    for (let step = 0; step < 3_600; step += 1) {
+      state.elapsedSeconds += ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
+    }
+
+    expect(state.elapsedSeconds).toBeLessThan(ZOMBIE_ESCAPE_SIMULATION.weaponPickupRespawnSeconds)
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
+  })
+
+  test('respawns a pickup after 60 gameplay seconds and preserves cooldowns across phases', () => {
+    const arena = createZombieEscapeArena(5_360)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_360)
     const weaponIndex = 1
     const pickup = ZOMBIE_ESCAPE_WEAPON_PICKUPS[weaponIndex]!
     const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!
     state.player.x = pickup.x
     state.player.z = pickup.z
-    state.money = profile.purchaseCost * 2 + 7
+    state.money = profile.purchaseCost
     const input = createZombieEscapeControlState()
     input.interactPressed = true
 
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
-    expect(state.purchasedWeapons[weaponIndex]).toBe(1)
-    expect(state.money).toBe(profile.purchaseCost + 7)
+    const firstPurchaseSeconds = state.elapsedSeconds
+    const respawnAtSeconds = state.weaponPickupRespawnAtSeconds[weaponIndex]!
+
+    expect(respawnAtSeconds - firstPurchaseSeconds).toBe(
+      ZOMBIE_ESCAPE_SIMULATION.weaponPickupRespawnSeconds,
+    )
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
+    expect(state.weaponPurchaseCount).toBe(1)
 
     setZombieEscapeGamePhase(state, 'night')
-    const moneyBeforeNextBuild = state.money
     setZombieEscapeGamePhase(state, 'build')
+    expect(state.weaponPickupRespawnAtSeconds[weaponIndex]).toBe(respawnAtSeconds)
+    expect(state.weaponPurchaseCount).toBe(1)
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
 
-    expect(state.money).toBe(moneyBeforeNextBuild)
-    expect(state.purchasedWeapons[0]).toBe(1)
-    expect(state.purchasedWeapons[weaponIndex]).toBe(0)
-    expect(createZombieEscapeHudSnapshot(state).pickupPrompt).toMatchObject({
-      affordable: true,
-      weaponIndex,
-    })
+    state.paused = true
+    stepZombieEscapeSimulation(state, input, 1, arena)
+    expect(state.elapsedSeconds).toBe(firstPurchaseSeconds)
+    state.paused = false
 
-    input.interactPressed = true
-    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    state.elapsedSeconds = respawnAtSeconds - ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
+    state.money = resolveZombieEscapeWeaponPurchaseCost(state, weaponIndex)
+    input.inputMode = 'touch'
+    input.interactPressed = false
+    stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
 
-    expect(state.purchasedWeapons[weaponIndex]).toBe(1)
+    expect(state.weaponPurchaseCount).toBe(2)
     expect(state.player.weaponIndex).toBe(weaponIndex)
     expect(state.player.ammo).toBe(profile.ammoGranted)
-    expect(state.money).toBe(7)
+    expect(state.money).toBe(0)
+    expect(state.weaponPickupRespawnAtSeconds[weaponIndex]).toBe(
+      respawnAtSeconds + ZOMBIE_ESCAPE_SIMULATION.weaponPickupRespawnSeconds,
+    )
+
+    resetZombieEscapeSimulation(state, arena)
+    expect(state.weaponPurchaseCount).toBe(0)
+    expect(state.weaponPickupRespawnAtSeconds[weaponIndex]).toBe(0)
+    expect(state.weaponPickupRespawnAtSeconds[0]).toBe(Number.POSITIVE_INFINITY)
+    expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)
+    expect(isZombieEscapeWeaponPickupAvailable(state, 0)).toBe(false)
+    expect(resolveZombieEscapeWeaponPurchaseCost(state, weaponIndex)).toBe(profile.purchaseCost)
   })
 
   test('cycles through an explicit 60-second day and 180-second night while day suppresses threats', () => {

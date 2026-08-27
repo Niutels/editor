@@ -110,9 +110,10 @@ describe('Landrush Zombie Escape collision adapter', () => {
       expect.objectContaining({ breakable: true }),
     ])
     expect(
-      closed
-        .filter(({ objectId }) => objectId === wall.id || objectId === fence.id)
-        .every(({ breakable }) => breakable === false),
+      closed.filter(({ objectId }) => objectId === wall.id).every(({ breakable }) => !breakable),
+    ).toBe(true)
+    expect(
+      closed.filter(({ objectId }) => objectId === fence.id).every(({ breakable }) => breakable),
     ).toBe(true)
     expect(open).toHaveLength(3)
     expect(open.some(({ objectId }) => objectId === door.id)).toBe(false)
@@ -123,7 +124,7 @@ describe('Landrush Zombie Escape collision adapter', () => {
       playRadius: 8,
       spawn: { x: 0, z: 0 },
     })
-    expect([...closedWorld.breakableObjectIds]).toEqual([door.id])
+    expect(closedWorld.breakableObjectIds).toEqual(new Set([door.id, fence.id]))
     const afterDoorBreak = createZombieEscapeCollisionWorldWithoutObjects(
       closedWorld,
       new Set([door.id]),
@@ -179,6 +180,8 @@ describe('Landrush Zombie Escape collision adapter', () => {
 
     expect(wallSegments.length).toBeGreaterThan(20)
     expect(fenceSegments.length).toBeGreaterThan(40)
+    expect(wallSegments.every(({ breakable }) => !breakable)).toBe(true)
+    expect(fenceSegments.every(({ breakable }) => breakable)).toBe(true)
     expect(
       Math.max(...wallSegments.flatMap(({ startZ, endZ }) => [Math.abs(startZ), Math.abs(endZ)])),
     ).toBeGreaterThan(0.8)

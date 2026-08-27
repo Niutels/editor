@@ -43,7 +43,7 @@ describe('Landrush island loading status', () => {
   test('announces the playable handoff only after every readiness task finishes', () => {
     expect(resolveLandrushIslandLoadingStatus(zombieTasks())).toEqual({
       rank: 6,
-      text: 'Ready to run',
+      text: 'Almost ready',
     })
   })
 

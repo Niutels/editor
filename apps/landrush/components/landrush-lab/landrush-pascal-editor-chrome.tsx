@@ -20,6 +20,7 @@ import {
 import { LogOut } from 'lucide-react'
 import Image from 'next/image'
 import {
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
@@ -39,6 +40,7 @@ import {
   CommunityViewerToolbarRight,
 } from '@/components/viewer-toolbar'
 import { cn } from '@/lib/utils'
+import styles from './landrush-pascal-editor-chrome.module.css'
 
 const SIDEBAR_MIN_WIDTH = 300
 const SIDEBAR_MAX_WIDTH = 800
@@ -201,30 +203,45 @@ export function LandrushPascalEditorChrome({
     <div
       ref={chromeRootRef}
       aria-hidden={!layoutOpen}
-      className="dark pointer-events-none fixed inset-0 z-40 text-foreground"
+      className={cn(styles.chrome, 'dark pointer-events-none fixed inset-0 z-40 text-foreground')}
       data-editor-active-panel={activePanel}
       data-landrush-pascal-editor-active={active ? '' : undefined}
       data-landrush-pascal-editor-chrome
+      data-landrush-pascal-editor-collapsed={isCollapsed ? 'true' : 'false'}
       data-landrush-pascal-editor-interactive={interactionReady ? '' : undefined}
       data-landrush-pascal-editor-mode-transition={modeTransitionActive ? 'true' : 'false'}
+      data-landrush-pascal-editor-open={layoutOpen ? 'true' : 'false'}
       inert={!layoutOpen}
+      style={
+        {
+          '--landrush-editor-panel-width': `${width}px`,
+          '--landrush-editor-sidebar-width': `${sidebarWidth}px`,
+          '--landrush-editor-viewer-inset': `${viewerLeft}px`,
+        } as CSSProperties
+      }
     >
       <aside
         aria-hidden={!interactionReady}
-        className="fixed inset-y-0 left-0 flex bg-sidebar text-sidebar-foreground"
+        className={cn(
+          styles.sidebar,
+          'fixed inset-y-0 left-0 flex bg-sidebar text-sidebar-foreground',
+        )}
         data-landrush-editor-sidebar
         inert={!interactionReady}
         style={{
           opacity: layoutOpen ? 1 : 0,
           pointerEvents: layoutOpen && interactionReady ? 'auto' : 'none',
-          transform: `translate3d(${layoutOpen ? 0 : -sidebarWidth}px, 0, 0)`,
+          transform: `translate3d(${layoutOpen ? '0' : '-100%'}, 0, 0)`,
           transition: resizeInProgress
             ? 'none'
             : `transform ${presentationTransition}, opacity ${presentationTransition}`,
         }}
       >
         <TooltipProvider delayDuration={0} disableHoverableContent>
-          <nav className="flex h-full w-14 shrink-0 flex-col items-center gap-1 border-border/50 border-r py-2">
+          <nav
+            className={cn(styles.sidebarNav, 'shrink-0 items-center gap-1 border-border/50')}
+            data-landrush-editor-sidebar-nav
+          >
             {EDITOR_TABS.map((tab) => {
               const showActive = activePanel === tab.id && !isCollapsed
               return (
@@ -234,7 +251,8 @@ export function LandrushPascalEditorChrome({
                       aria-label={tab.label}
                       aria-pressed={showActive}
                       className={cn(
-                        'group flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200',
+                        styles.sidebarTabButton,
+                        'group flex items-center justify-center rounded-xl transition-all duration-200',
                         showActive
                           ? 'bg-accent text-foreground shadow-sm'
                           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
@@ -252,7 +270,8 @@ export function LandrushPascalEditorChrome({
                         alt=""
                         aria-hidden
                         className={cn(
-                          'h-8 w-8 object-contain transition-[opacity,filter] duration-200 group-hover:opacity-100 group-hover:grayscale-0',
+                          styles.sidebarTabIcon,
+                          'object-contain transition-[opacity,filter] duration-200 group-hover:opacity-100 group-hover:grayscale-0',
                           showActive ? 'opacity-100 grayscale-0' : 'opacity-60 grayscale',
                         )}
                         height={32}
@@ -270,18 +289,24 @@ export function LandrushPascalEditorChrome({
 
         {active && !isCollapsed ? (
           <section
-            className="relative flex h-full flex-col overflow-hidden"
+            className={cn(styles.panel, 'relative flex flex-col overflow-hidden')}
             data-landrush-editor-panel={activePanel}
             style={{
               transition: resizeInProgress ? 'none' : `width ${settledLayoutTransition}`,
-              width,
             }}
           >
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div
+              className={cn(styles.panelViewport, 'min-h-0 flex-1')}
+              data-landrush-editor-panel-viewport
+            >
               {renderPanel(activePanel, interactionReady)}
             </div>
             <div
-              className="absolute inset-y-0 -right-3 z-[100] flex w-6 cursor-col-resize items-center justify-center"
+              className={cn(
+                styles.resizer,
+                'absolute inset-y-0 -right-3 z-[100] flex w-6 cursor-col-resize items-center justify-center',
+              )}
+              data-landrush-editor-resizer
               onPointerDown={handleResizerDown}
             >
               <div className="h-8 w-1 rounded-full bg-neutral-500" />
@@ -291,18 +316,29 @@ export function LandrushPascalEditorChrome({
       </aside>
 
       <div
-        className="pointer-events-none fixed top-0 right-0 bottom-0 overflow-hidden"
+        className={cn(
+          styles.viewerOverlays,
+          'pointer-events-none fixed top-0 right-0 bottom-0 overflow-hidden',
+        )}
         data-landrush-editor-viewer-overlays
         style={{
-          left: viewerLeft,
           opacity: layoutOpen ? 1 : 0,
           transition: resizeInProgress
             ? 'none'
             : `left ${presentationTransition}, opacity ${presentationTransition}`,
         }}
       >
-        <div className="pointer-events-none absolute top-3 right-3 left-3 z-20 flex items-center justify-between gap-2">
-          <div className="pointer-events-auto flex items-center gap-2">
+        <div
+          className={cn(
+            styles.topToolbar,
+            'pointer-events-none absolute z-20 flex items-center justify-between',
+          )}
+          data-landrush-editor-top-toolbar
+        >
+          <div
+            className={cn(styles.leftToolbar, 'pointer-events-auto flex items-center')}
+            data-landrush-editor-toolbar-left
+          >
             <div
               aria-hidden={!interactionReady}
               inert={!interactionReady}
@@ -313,7 +349,10 @@ export function LandrushPascalEditorChrome({
             <button
               ref={exitBuildButtonRef}
               aria-label="Exit build"
-              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-border bg-background/90 px-2.5 font-medium text-foreground/90 text-xs shadow-2xl backdrop-blur-md transition-colors hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={cn(
+                styles.exitBuildButton,
+                'inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-border bg-background/90 px-2.5 font-medium text-foreground/90 text-xs shadow-2xl backdrop-blur-md transition-colors hover:bg-white/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              )}
               data-landrush-exit-build
               onClick={() => {
                 triggerSFX('sfx:menu-click')
@@ -322,12 +361,15 @@ export function LandrushPascalEditorChrome({
               type="button"
             >
               <LogOut className="h-3.5 w-3.5 shrink-0" />
-              <span>Exit Build</span>
+              <span className={styles.exitBuildLabel} data-landrush-editor-exit-label>
+                Exit Build
+              </span>
             </button>
           </div>
           <div
             aria-hidden={!interactionReady}
-            className="flex items-center gap-2"
+            className={cn(styles.rightToolbar, 'flex items-center')}
+            data-landrush-editor-toolbar-right
             inert={!interactionReady}
             style={{ pointerEvents: interactionReady ? 'auto' : 'none' }}
           >
@@ -336,7 +378,11 @@ export function LandrushPascalEditorChrome({
         </div>
         <div
           aria-hidden={!interactionReady}
-          className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-2xl border border-border bg-background/90 px-2 py-1.5 shadow-2xl backdrop-blur-md"
+          className={cn(
+            styles.selectToolbar,
+            'absolute z-20 rounded-2xl border border-border bg-background/90 px-2 py-1.5 shadow-2xl backdrop-blur-md',
+          )}
+          data-landrush-editor-select-toolbar
           inert={!interactionReady}
           style={{ pointerEvents: interactionReady ? 'auto' : 'none' }}
         >
@@ -390,6 +436,8 @@ export function LandrushPascalEditorChrome({
         </div>
         <div
           aria-hidden={!interactionReady}
+          className={styles.levelSelectorContainer}
+          data-landrush-editor-level-selector-container
           inert={!interactionReady}
           style={{ pointerEvents: interactionReady ? 'auto' : 'none' }}
         >

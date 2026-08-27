@@ -1,10 +1,20 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, useMemo, useRef } from 'react'
-import type { Mesh, MeshBasicMaterial } from 'three'
+import { type MutableRefObject, useEffect, useMemo, useRef } from 'react'
 import {
+  ClampToEdgeWrapping,
+  DataTexture,
+  LinearFilter,
+  type Mesh,
+  type MeshBasicMaterial,
+  RGBAFormat,
+  UnsignedByteType,
+} from 'three'
+import {
+  createZombieEscapeGroundShadowAlphaMapData,
   resolveZombieEscapeGroundShadowEnvelope,
+  ZOMBIE_ESCAPE_GROUND_SHADOW,
   type ZombieEscapeGroundShadowEnvelope,
 } from './zombie-escape-ground-shadow'
 
@@ -31,6 +41,18 @@ export function ZombieEscapePlayerGroundShadow({
     () => ({ altitude: 0, opacity: 0, radius: 0, y: 0 }),
     [],
   )
+  const alphaMap = useMemo(() => {
+    const { data, size } = createZombieEscapeGroundShadowAlphaMapData()
+    const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType)
+    texture.magFilter = LinearFilter
+    texture.minFilter = LinearFilter
+    texture.wrapS = ClampToEdgeWrapping
+    texture.wrapT = ClampToEdgeWrapping
+    texture.needsUpdate = true
+    return texture
+  }, [])
+
+  useEffect(() => () => alphaMap.dispose(), [alphaMap])
 
   useFrame(() => {
     const mesh = meshRef.current
@@ -43,7 +65,7 @@ export function ZombieEscapePlayerGroundShadow({
 
     resolveZombieEscapeGroundShadowEnvelope(pose.playerY, pose.supportY, envelope)
     mesh.position.set(pose.x, envelope.y, pose.z)
-    mesh.scale.setScalar(envelope.radius)
+    mesh.scale.set(envelope.radius, envelope.radius * ZOMBIE_ESCAPE_GROUND_SHADOW.aspectRatio, 1)
     material.opacity = envelope.opacity
   }, framePriority)
 
@@ -54,13 +76,17 @@ export function ZombieEscapePlayerGroundShadow({
       rotation={[-Math.PI / 2, 0, 0]}
       userData={{ anchor: 'support-plane', role: 'player-ground-shadow' }}
     >
-      <circleGeometry args={[1, 32]} />
+      <planeGeometry args={[2, 2]} />
       <meshBasicMaterial
+        alphaMap={alphaMap}
         color={color}
+        depthTest
         depthWrite={false}
         opacity={0}
         polygonOffset
-        polygonOffsetFactor={-1}
+        polygonOffsetFactor={-2}
+        polygonOffsetUnits={-2}
+        toneMapped={false}
         transparent
       />
     </mesh>

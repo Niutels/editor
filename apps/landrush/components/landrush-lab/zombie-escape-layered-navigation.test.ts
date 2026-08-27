@@ -526,10 +526,7 @@ describe('Zombie Escape layered navigation', () => {
     let z = graph.z[upperSourceNode]!
     const compiledSourceProjection =
       (x - connector.startX) * connector.directionX + (z - connector.startZ) * connector.directionZ
-    expect(compiledSourceProjection).toBeCloseTo(
-      connector.length + world.agentRadius + world.cellSize,
-      10,
-    )
+    expect(compiledSourceProjection).toBeCloseTo(connector.length, 10)
 
     const zombieRadius = 0.3
     const stepMeters = world.cellSize * 0.2
@@ -556,7 +553,8 @@ describe('Zombie Escape layered navigation', () => {
       zombieRadius,
     )
     expect(move.connectorIndex).toBe(0)
-    expect(move.y).toBe(upperY)
+    expect(move.y).toBeLessThan(upperY)
+    expect(move.y).toBeGreaterThan(0)
     x = move.x
     y = move.y
     z = move.z

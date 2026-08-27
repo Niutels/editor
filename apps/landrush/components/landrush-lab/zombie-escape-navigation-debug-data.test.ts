@@ -12,6 +12,7 @@ import {
   createZombieEscapeNavigationDebugLiveBuffers,
   createZombieEscapeNavigationDebugRouteSnapshot,
   createZombieEscapeNavigationDebugStaticSnapshot,
+  resolveZombieEscapeNavigationDebugFeatureDrawRange,
   updateZombieEscapeNavigationDebugLiveGeometry,
   updateZombieEscapeNavigationDebugTerminalLinks,
   ZOMBIE_ESCAPE_NAVIGATION_DEBUG_FLOOR,
@@ -80,7 +81,8 @@ describe('Zombie Escape navigation debug packed data', () => {
       objectSemanticKinds: Uint8Array.of(ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND.door),
     })
     const doorLayer = createZombieEscapeNavigationDebugStaticSnapshot(doorWorld).layers[0]!
-    expect(Array.from(doorLayer.featureLinePositions)).toEqual([
+    const doorFeatureOffset = doorLayer.graphFeatureLineVertexCount * 3
+    expect(Array.from(doorLayer.featureLinePositions.slice(doorFeatureOffset))).toEqual([
       0,
       expect.closeTo(0.055),
       0,
@@ -88,7 +90,7 @@ describe('Zombie Escape navigation debug packed data', () => {
       expect.closeTo(0.055),
       0,
     ])
-    expect(Array.from(doorLayer.featureLineColors)).toEqual([
+    expect(Array.from(doorLayer.featureLineColors.slice(doorFeatureOffset))).toEqual([
       expect.closeTo(0.1),
       expect.closeTo(0.88),
       1,
@@ -106,14 +108,120 @@ describe('Zombie Escape navigation debug packed data', () => {
     })
     expect(
       createZombieEscapeNavigationDebugStaticSnapshot(furnitureWorld).layers[0]!
-        .featureLinePositions.length,
-    ).toBe(0)
+        .graphFeatureLineVertexCount,
+    ).toBe(
+      createZombieEscapeNavigationDebugStaticSnapshot(furnitureWorld).layers[0]!
+        .featureLinePositions.length / 3,
+    )
 
     doorWorld.activeObjectMask[0] = 0
     expect(
+      createZombieEscapeNavigationDebugStaticSnapshot(doorWorld).layers[0]!
+        .graphFeatureLineVertexCount,
+    ).toBe(
       createZombieEscapeNavigationDebugStaticSnapshot(doorWorld).layers[0]!.featureLinePositions
-        .length,
-    ).toBe(0)
+        .length / 3,
+    )
+  })
+
+  test('packs every unique strict and fallback-only graph edge with layered nodes', () => {
+    const targetRegionIndex = createTargetRegionIndex([
+      { fallback: false, points: [0, 0, 1, 0, 0, 1] },
+    ])
+    const snapshot = createZombieEscapeNavigationDebugStaticSnapshot(
+      createWorld(targetRegionIndex, {
+        connectorEnds: Uint8Array.of(0, 0, 0, 1),
+        connectorIndices: Int16Array.of(-1, -1, 0, 0),
+        fallbackAdjacency: createUndirectedAdjacency(4, [
+          [0, 1],
+          [1, 2],
+          [2, 3],
+        ]),
+        layerIndices: Int16Array.of(0, 0, 0, 1),
+        navigationLayers: [{ elevation: 0 }, { elevation: 3 }],
+        strictAdjacency: createUndirectedAdjacency(4, [
+          [0, 1],
+          [2, 3],
+        ]),
+        x: Float64Array.of(0, 1, 2, 2),
+        z: Float64Array.of(0, 0, 0, 2),
+      }),
+    )
+
+    expect(snapshot.graphNodeCount).toBe(4)
+    expect(snapshot.graphStrictEdgeCount).toBe(2)
+    expect(snapshot.graphFallbackOnlyEdgeCount).toBe(1)
+    expect(snapshot.layers[0]!.graphFeatureLineVertexCount).toBe(6)
+    expect(snapshot.layers[1]!.graphFeatureLineVertexCount).toBe(2)
+    expect(Array.from(snapshot.layers[0]!.featureLinePositions.slice(0, 18))).toEqual([
+      0,
+      expect.closeTo(0.095),
+      0,
+      1,
+      expect.closeTo(0.095),
+      0,
+      1,
+      expect.closeTo(0.095),
+      0,
+      2,
+      expect.closeTo(0.095),
+      0,
+      2,
+      expect.closeTo(0.095),
+      0,
+      2,
+      expect.closeTo(3.095),
+      2,
+    ])
+    expect(Array.from(snapshot.layers[1]!.featureLinePositions.slice(0, 6))).toEqual([
+      2,
+      expect.closeTo(0.095),
+      0,
+      2,
+      expect.closeTo(3.095),
+      2,
+    ])
+    expect(Array.from(snapshot.layers[0]!.graphNodePositions)).toEqual([
+      0,
+      expect.closeTo(0.115),
+      0,
+      1,
+      expect.closeTo(0.115),
+      0,
+      2,
+      expect.closeTo(0.115),
+      0,
+    ])
+    expect(Array.from(snapshot.layers[1]!.graphNodePositions)).toEqual([
+      2,
+      expect.closeTo(3.115),
+      2,
+    ])
+    expect(Array.from(snapshot.layers[0]!.featureLineColors.slice(0, 3))).toEqual([
+      expect.closeTo(0.12),
+      expect.closeTo(0.68),
+      1,
+    ])
+    expect(Array.from(snapshot.layers[0]!.featureLineColors.slice(6, 9))).toEqual([
+      1,
+      expect.closeTo(0.52),
+      expect.closeTo(0.08),
+    ])
+    expect(Array.from(snapshot.layers[0]!.featureLineColors.slice(12, 15))).toEqual([
+      expect.closeTo(0.82),
+      expect.closeTo(0.46),
+      1,
+    ])
+    expect(Array.from(snapshot.layers[0]!.graphNodeColors.slice(0, 3))).toEqual([
+      1,
+      expect.closeTo(0.9),
+      expect.closeTo(0.22),
+    ])
+    expect(Array.from(snapshot.layers[1]!.graphNodeColors)).toEqual([
+      1,
+      expect.closeTo(0.08),
+      expect.closeTo(0.26),
+    ])
   })
 
   test('packs directional route arrows only for the authenticated target-layer bank', () => {
@@ -229,13 +337,14 @@ describe('Zombie Escape navigation debug packed data', () => {
     expect(Array.from(buffers.linkPositions.slice(3, 6))).toEqual([3, expect.closeTo(0.075), 1])
   })
 
-  test('keeps the packed visual contract at eight batched draws per visible floor', () => {
+  test('keeps the packed visual contract at nine batched draws per visible floor', () => {
     const layer = createZombieEscapeNavigationDebugStaticSnapshot(
       createWorld(
         createTargetRegionIndex([
           { fallback: false, points: [0, 0, 2, 0, 0, 2] },
           { fallback: false, points: [0.2, 0.2, 1.4, 0.2, 0.2, 1.4] },
         ]),
+        { fallbackAdjacency: createEmptyAdjacency(1) },
       ),
     ).layers[0]!
     const route = {
@@ -244,11 +353,22 @@ describe('Zombie Escape navigation debug packed data', () => {
     }
 
     expect(
-      countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, 100, 100, 1),
-    ).toBeLessThanOrEqual(8)
-    expect(countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, 1, 1, 0)).toBe(
-      countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, 1, 0, 0) + 1,
+      countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, true, 100, 100, 1),
+    ).toBeLessThanOrEqual(9)
+    expect(countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, true, 1, 1, 0)).toBe(
+      countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, true, 1, 0, 0) + 1,
     )
+    expect(countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, true, 1, 0, 0)).toBe(
+      countZombieEscapeNavigationDebugDraws([layer], [route], 0, true, false, 1, 0, 0) + 1,
+    )
+    expect(resolveZombieEscapeNavigationDebugFeatureDrawRange(layer, true)).toEqual({
+      count: layer.featureLinePositions.length / 3,
+      start: 0,
+    })
+    expect(resolveZombieEscapeNavigationDebugFeatureDrawRange(layer, false)).toEqual({
+      count: layer.featureLinePositions.length / 3 - layer.graphFeatureLineVertexCount,
+      start: layer.graphFeatureLineVertexCount,
+    })
   })
 
   test('packs active blockers in red semantic shades and connectors in purple', () => {
@@ -450,6 +570,31 @@ function createTwoNodeDoorAdjacency(): ZombieEscapeSparseNavigationAdjacency {
   }
 }
 
+function createUndirectedAdjacency(
+  nodeCount: number,
+  edges: readonly (readonly [number, number])[],
+): ZombieEscapeSparseNavigationAdjacency {
+  const directed = edges
+    .flatMap(([first, second]) => [
+      { from: first, to: second },
+      { from: second, to: first },
+    ])
+    .sort((first, second) => first.from - second.from || first.to - second.to)
+  const nodeOffsets = new Uint32Array(nodeCount + 1)
+  for (const edge of directed) nodeOffsets[edge.from + 1]! += 1
+  for (let node = 0; node < nodeCount; node += 1) {
+    nodeOffsets[node + 1] = nodeOffsets[node + 1]! + nodeOffsets[node]!
+  }
+  return {
+    breachCounts: new Uint32Array(directed.length),
+    breachObjectIndices: new Uint32Array(0),
+    breachObjectOffsets: new Uint32Array(directed.length + 1),
+    nodeOffsets,
+    toNodes: Int32Array.from(directed.map(({ to }) => to)),
+    weights: new Float32Array(directed.length).fill(1),
+  }
+}
+
 function createWorld(
   targetRegionIndex: ZombieEscapeSparseNavigationTargetRegionIndex,
   overrides: Readonly<{
@@ -460,10 +605,21 @@ function createWorld(
     objectSemanticKinds?: Uint8Array
     boxes?: ZombieEscapeCollisionWorld['boxes']
     colliderObjectOrdinals?: Int32Array
+    connectorEnds?: Uint8Array
+    connectorIndices?: Int16Array
+    layerIndices?: Int16Array
     navigationConnectors?: ZombieEscapeCollisionWorld['navigationConnectors']
+    navigationLayers?: ZombieEscapeCollisionWorld['navigationLayers']
+    strictAdjacency?: ZombieEscapeSparseNavigationAdjacency
+    x?: Float64Array
+    z?: Float64Array
   }> = {},
 ) {
-  const nodeCount = overrides.fallbackAdjacency ? 2 : 0
+  const nodeCount = Math.max(
+    overrides.x?.length ?? 0,
+    (overrides.fallbackAdjacency?.nodeOffsets.length ?? 1) - 1,
+    (overrides.strictAdjacency?.nodeOffsets.length ?? 1) - 1,
+  )
   const emptyAdjacency = createEmptyAdjacency(nodeCount)
   const objectIds = overrides.objectIds ?? []
   return {
@@ -474,17 +630,17 @@ function createWorld(
     navigationConnectors: overrides.navigationConnectors ?? [],
     navigationGraph: {
       breachObjectOrdinals: overrides.breachObjectOrdinals ?? new Uint32Array(0),
-      connectorEnds: new Uint8Array(nodeCount),
-      connectorIndices: new Int16Array(nodeCount).fill(-1),
+      connectorEnds: overrides.connectorEnds ?? new Uint8Array(nodeCount),
+      connectorIndices: overrides.connectorIndices ?? new Int16Array(nodeCount).fill(-1),
       fallbackAdjacency: overrides.fallbackAdjacency ?? emptyAdjacency,
-      layerIndices: new Int16Array(nodeCount),
+      layerIndices: overrides.layerIndices ?? new Int16Array(nodeCount),
       nodeIds: Array.from({ length: nodeCount }, (_, index) => `node-${String(index)}`),
-      strictAdjacency: emptyAdjacency,
+      strictAdjacency: overrides.strictAdjacency ?? emptyAdjacency,
       targetRegionIndex,
-      x: Float64Array.from({ length: nodeCount }, (_, index) => index * 2),
-      z: new Float64Array(nodeCount),
+      x: overrides.x ?? Float64Array.from({ length: nodeCount }, (_, index) => index * 2),
+      z: overrides.z ?? new Float64Array(nodeCount),
     },
-    navigationLayers: [{ elevation: 0 }],
+    navigationLayers: overrides.navigationLayers ?? [{ elevation: 0 }],
     objectCatalog: {
       colliderObjectOrdinals: overrides.colliderObjectOrdinals ?? new Int32Array(0),
       objectIds,

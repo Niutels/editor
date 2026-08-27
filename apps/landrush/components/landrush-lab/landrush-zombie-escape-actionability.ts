@@ -1,0 +1,84 @@
+import type {
+  LandrushIslandCameraOwner,
+  LandrushIslandViewMode,
+} from './landrush-island-camera-owner'
+import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
+
+export function resolveLandrushZombieEscapePhaseReady({
+  authorityResyncActive,
+  buildMode,
+  cameraOwner,
+  fpvView,
+  generatedAssetsReady,
+  loadingActive,
+  mapView,
+  modeTransitionActive,
+  phase,
+  sceneViewMode,
+  viewMode,
+  zombieEscapeEnabled,
+}: {
+  authorityResyncActive: boolean
+  buildMode: boolean
+  cameraOwner: LandrushIslandCameraOwner
+  fpvView: boolean
+  generatedAssetsReady: boolean
+  loadingActive: boolean
+  mapView: boolean
+  modeTransitionActive: boolean
+  phase: ZombieEscapeGamePhase
+  sceneViewMode: LandrushIslandViewMode
+  viewMode: LandrushIslandViewMode
+  zombieEscapeEnabled: boolean
+}) {
+  if (!zombieEscapeEnabled || !generatedAssetsReady || loadingActive || authorityResyncActive) {
+    return false
+  }
+  if (phase === 'build') return !modeTransitionActive
+  return (
+    cameraOwner === 'zombie' &&
+    viewMode === 'player' &&
+    sceneViewMode === 'player' &&
+    !buildMode &&
+    !mapView &&
+    !fpvView
+  )
+}
+
+export function resolveLandrushZombieEscapeInteractionActionable({
+  collisionWorldReady,
+  interactionEligible,
+}: {
+  collisionWorldReady: boolean
+  interactionEligible: boolean
+}) {
+  return interactionEligible && collisionWorldReady
+}
+
+export function resolveLandrushZombieEscapeLocomotionBaseEnabled({
+  baseMovementEnabled,
+  interactionActionable,
+  phase,
+  zombieEscapeEnabled,
+}: {
+  baseMovementEnabled: boolean
+  interactionActionable: boolean
+  phase: ZombieEscapeGamePhase
+  zombieEscapeEnabled: boolean
+}) {
+  return baseMovementEnabled && (!zombieEscapeEnabled || phase !== 'night' || interactionActionable)
+}
+
+export function resolveLandrushZombieEscapeCombatFireEnabled({
+  collisionWorldReady,
+  interactionEligible,
+  muzzleReady,
+  requested,
+}: {
+  collisionWorldReady: boolean
+  interactionEligible: boolean
+  muzzleReady: boolean
+  requested: boolean
+}) {
+  return requested && interactionEligible && collisionWorldReady && muzzleReady
+}

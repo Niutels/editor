@@ -47,7 +47,13 @@ export {
   STAND_FLOAT_HEIGHT,
   WALKTHROUGH_FOV,
 } from './components/viewer/glb-walkthrough-controller'
-export type { HoverStyle, HoverStyles } from './components/viewer/post-processing'
+export type {
+  HoverStyle,
+  HoverStyles,
+  ViewerPresentationEffectDebugMode,
+  ViewerPresentationEffectRef,
+  ViewerPresentationEffectState,
+} from './components/viewer/post-processing'
 export {
   DEFAULT_HOVER_STYLES,
   SSGI_PARAMS,

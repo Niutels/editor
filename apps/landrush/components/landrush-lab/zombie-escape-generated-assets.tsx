@@ -24,6 +24,7 @@ import {
   Color,
   Euler,
   Group,
+  LoopOnce,
   LoopRepeat,
   type Material,
   type Mesh,
@@ -35,7 +36,9 @@ import {
   isZombieEscapeAttackPresentationActive,
   resolveZombieEscapeAttackNormalizedPhase,
 } from './zombie-escape-attack-presentation'
+import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
+import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
   resolveZombieEscapeGeneratedAssetReadinessSnapshot,
   resolveZombieEscapeGeneratedAssetSettlement,
@@ -69,7 +72,10 @@ import {
   type ZombieEscapeRenderReadinessStatus,
 } from './zombie-escape-render-readiness'
 import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
+import {
+  isZombieEscapeWeaponPickupAvailable,
+  type ZombieEscapeSimulation,
+} from './zombie-escape-simulation'
 import {
   registerZombieEscapeImpactVisual,
   type ZombieEscapeImpactVisualRegistry,
@@ -101,6 +107,7 @@ import {
 export type GeneratedZombieVisual = {
   animationRoot: Group
   attackAction: ReturnType<AnimationMixer['clipAction']> | null
+  deathAction: ReturnType<AnimationMixer['clipAction']> | null
   generation: number
   hitMaterials: Array<{
     baseColor: Color | null
@@ -583,10 +590,9 @@ function GeneratedWeaponPickup({
     const marker = markerRef.current
     if (!marker) return
     const simulation = simulationRef.current
-    const pickup = simulation.weaponPickups.find(
-      (candidate) => candidate.weaponIndex === weaponIndex,
-    )
-    marker.visible = Boolean(pickup) && simulation.purchasedWeapons[weaponIndex] === 0
+    const pickupIndex = simulation.weaponPickupIndexByWeaponIndex[weaponIndex] ?? -1
+    const pickup = pickupIndex >= 0 ? simulation.weaponPickups[pickupIndex] : undefined
+    marker.visible = Boolean(pickup) && isZombieEscapeWeaponPickupAvailable(simulation, weaponIndex)
     if (!(pickup && marker.visible)) return
 
     const nearbyPickup = simulation.weaponPickups[simulation.nearbyPickupIndex]
@@ -940,7 +946,11 @@ function PreparedGeneratedZombieVariant({
     () => walkAnimations.find((clip) => clip.name === zombie.glb.walk.expectedClipName) ?? null,
     [walkAnimations, zombie.glb.walk.expectedClipName],
   )
-  const attackClip = useMemo(() => createZombieEscapeAttackClip(riggedScene), [riggedScene])
+  const attackClip = useMemo(
+    () => createZombieEscapeAttackClip(riggedScene, walkClip),
+    [riggedScene, walkClip],
+  )
+  const deathClip = useMemo(() => createZombieEscapeDeathClip(riggedScene), [riggedScene])
   const authoredInstanceCapacity = useMemo(
     () =>
       countZombieEscapeAuthoredVariantCapacity(
@@ -958,6 +968,7 @@ function PreparedGeneratedZombieVariant({
     visualCreationFailedRef.current = false
     void createZombieEscapeAuthoredInstancePresentationCooperatively({
       attackClip,
+      deathClip,
       instanceCapacity: authoredInstanceCapacity,
       modelTransform,
       runClip,
@@ -995,6 +1006,7 @@ function PreparedGeneratedZombieVariant({
     assetKey,
     authoredInstanceCapacity,
     attackClip,
+    deathClip,
     loadedZombieVariantsRef,
     modelTransform,
     onAssetStatusChange,
@@ -1088,6 +1100,7 @@ function PreparedGeneratedZombieVariant({
           const visual = createZombieVisual({
             active: false,
             attackClip,
+            deathClip,
             group,
             generation: 0,
             impactVisualRegistry,
@@ -1142,6 +1155,7 @@ function PreparedGeneratedZombieVariant({
               slot,
               generation,
               attackClip,
+              deathClip,
               runClip,
               walkClip,
             )
@@ -1162,6 +1176,11 @@ function PreparedGeneratedZombieVariant({
           zombies.hitImpulseY[slot] ?? 0,
           zombies.hitImpulseZ[slot] ?? 0,
           presentationPose,
+          modelTransform.bodyCenterY,
+          zombies.health[slot]! <= 0
+            ? resolveZombieEscapeDeathNormalizedPhase(zombies.deathPresentationSeconds[slot] ?? 0)
+            : 0,
+          zombies.spawnOrdinal[slot] ?? 0,
         )
         visual.root.position.set(presentationPose.x, presentationPose.y, presentationPose.z)
         visual.root.quaternion.set(
@@ -1188,7 +1207,9 @@ function PreparedGeneratedZombieVariant({
         updateZombieVisualLocomotion({
           attackCooldown: zombies.attackCooldown[slot] ?? 0,
           attackIntent: zombies.intent[slot] ?? 0,
+          deathPresentationSeconds: zombies.deathPresentationSeconds[slot] ?? 0,
           delta,
+          health: zombies.health[slot] ?? 0,
           horizontalSpeed: Math.hypot(zombies.vx[slot] ?? 0, zombies.vz[slot] ?? 0),
           paused: simulation.paused,
           runBlend: zombies.runBlend[slot] ?? 0,
@@ -1260,6 +1281,7 @@ function reportGeneratedZombieVariantPresentationMetrics(
 export function createZombieVisual({
   active,
   attackClip,
+  deathClip = null,
   group,
   generation,
   impactVisualRegistry,
@@ -1273,10 +1295,11 @@ export function createZombieVisual({
 }: {
   active: boolean
   attackClip: AnimationClip | null
+  deathClip?: AnimationClip | null
   group: Group
   generation: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
-  modelTransform: ReturnType<typeof computeZombieTransform>
+  modelTransform: { bodyCenterY?: number; offset: Vector3; scale: number }
   runClip: AnimationClip | null
   source: Group
   slot: number | null
@@ -1337,10 +1360,15 @@ export function createZombieVisual({
     const walkAction = mixer && walkClip ? mixer.clipAction(walkClip, visualRoot) : null
     const runAction = mixer && runClip ? mixer.clipAction(runClip, visualRoot) : null
     const attackAction = mixer && attackClip ? mixer.clipAction(attackClip, visualRoot) : null
-    for (const action of [attackAction, walkAction, runAction])
+    const deathAction = mixer && deathClip ? mixer.clipAction(deathClip, visualRoot) : null
+    for (const action of [attackAction, walkAction, runAction]) {
       action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
+    }
+    deathAction?.setLoop(LoopOnce, 1)
+    if (deathAction) deathAction.clampWhenFinished = true
     if (active) {
       attackAction?.play()
+      deathAction?.play()
       walkAction?.play()
       runAction?.play()
     }
@@ -1351,6 +1379,7 @@ export function createZombieVisual({
     const visual = {
       animationRoot: visualRoot,
       attackAction,
+      deathAction,
       generation,
       hitMaterials,
       mixer,
@@ -1378,7 +1407,9 @@ export function createZombieVisual({
 export function updateZombieVisualLocomotion({
   attackCooldown,
   attackIntent,
+  deathPresentationSeconds = 0,
   delta,
+  health = 1,
   horizontalSpeed,
   paused,
   runBlend,
@@ -1388,7 +1419,9 @@ export function updateZombieVisualLocomotion({
 }: {
   attackCooldown: number
   attackIntent: number
+  deathPresentationSeconds?: number
   delta: number
+  health?: number
   horizontalSpeed: number
   paused: boolean
   runBlend: number
@@ -1396,8 +1429,18 @@ export function updateZombieVisualLocomotion({
   visual: GeneratedZombieVisual
   walkMetersPerSecond: number
 }) {
-  const attackActive = isZombieEscapeAttackPresentationActive(attackIntent)
-  const locomotionWeight = attackActive ? 0 : resolveZombieEscapeLocomotionWeight(horizontalSpeed)
+  const deathActive = health <= 0
+  const attackIntentActive = isZombieEscapeAttackPresentationActive(attackIntent)
+  const attackActive = !deathActive && attackIntentActive
+  const deathProgress = deathActive
+    ? resolveZombieEscapeDeathNormalizedPhase(deathPresentationSeconds)
+    : 0
+  const deathBlendProgress = Math.min(1, deathProgress / 0.24)
+  const deathWeight = deathBlendProgress * deathBlendProgress * (3 - 2 * deathBlendProgress)
+  const sourceWeight = 1 - deathWeight
+  const locomotionWeight = attackIntentActive
+    ? 0
+    : resolveZombieEscapeLocomotionWeight(horizontalSpeed) * sourceWeight
   const playbackRate = resolveZombieEscapeLocomotionPlaybackRate(
     horizontalSpeed,
     walkMetersPerSecond,
@@ -1408,12 +1451,19 @@ export function updateZombieVisualLocomotion({
   visual.walkAction?.setEffectiveTimeScale(playbackRate)
   visual.runAction?.setEffectiveWeight(runBlend * locomotionWeight)
   visual.runAction?.setEffectiveTimeScale(playbackRate)
-  visual.attackAction?.setEffectiveWeight(attackActive ? 1 : 0)
+  visual.attackAction?.setEffectiveWeight(
+    attackActive || (deathActive && attackIntentActive) ? sourceWeight : 0,
+  )
   visual.attackAction?.setEffectiveTimeScale(0)
-  if (attackActive && visual.attackAction) {
+  if ((attackActive || (deathActive && attackIntentActive)) && visual.attackAction) {
     visual.attackAction.time =
       resolveZombieEscapeAttackNormalizedPhase(attackCooldown) *
       visual.attackAction.getClip().duration
+  }
+  visual.deathAction?.setEffectiveWeight(deathActive ? deathWeight : 0)
+  visual.deathAction?.setEffectiveTimeScale(0)
+  if (deathActive && visual.deathAction) {
+    visual.deathAction.time = deathProgress * visual.deathAction.getClip().duration
   }
   if (!visual.mixer) throw new Error('Active detailed zombie has no animation mixer.')
   visual.mixer.update(paused ? 0 : Math.min(0.05, Math.max(0, delta)))
@@ -1468,6 +1518,7 @@ function activateZombieVisual(
   slot: number,
   generation: number,
   attackClip: AnimationClip | null,
+  deathClip: AnimationClip | null,
   runClip: AnimationClip | null,
   walkClip: AnimationClip | null,
 ) {
@@ -1476,11 +1527,14 @@ function activateZombieVisual(
     visual.attackAction = attackClip
       ? visual.mixer.clipAction(attackClip, visual.animationRoot)
       : null
+    visual.deathAction = deathClip ? visual.mixer.clipAction(deathClip, visual.animationRoot) : null
     visual.walkAction = walkClip ? visual.mixer.clipAction(walkClip, visual.animationRoot) : null
     visual.runAction = runClip ? visual.mixer.clipAction(runClip, visual.animationRoot) : null
     for (const action of [visual.attackAction, visual.walkAction, visual.runAction]) {
       action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
     }
+    visual.deathAction?.setLoop(LoopOnce, 1)
+    if (visual.deathAction) visual.deathAction.clampWhenFinished = true
   }
   visual.generation = generation
   visual.unregisterImpactVisual = registerZombieEscapeImpactVisual(
@@ -1490,6 +1544,7 @@ function activateZombieVisual(
     visual.animationRoot,
   )
   visual.attackAction?.reset().play()
+  visual.deathAction?.reset().play()
   visual.walkAction?.reset().play()
   visual.runAction?.reset().play()
   visual.root.visible = true
@@ -1499,11 +1554,13 @@ function parkZombieVisual(visual: GeneratedZombieVisual) {
   visual.unregisterImpactVisual()
   visual.unregisterImpactVisual = () => undefined
   visual.attackAction?.stop()
+  visual.deathAction?.stop()
   visual.walkAction?.stop()
   visual.runAction?.stop()
   visual.mixer?.uncacheRoot(visual.animationRoot)
   visual.mixer = null
   visual.attackAction = null
+  visual.deathAction = null
   visual.walkAction = null
   visual.runAction = null
   visual.root.visible = false
@@ -1602,6 +1659,7 @@ function computeZombieTransform(source: Group, characterHeightMeters: number) {
   const center = bounds.getCenter(new Vector3())
   const scale = characterHeightMeters / Math.max(0.000_1, size.y)
   return {
+    bodyCenterY: (center.y - bounds.min.y) * scale,
     offset: new Vector3(-center.x * scale, -bounds.min.y * scale, -center.z * scale),
     scale,
   }

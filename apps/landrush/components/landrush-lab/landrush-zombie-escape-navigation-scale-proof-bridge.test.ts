@@ -21,9 +21,13 @@ describe('Landrush Zombie Escape navigation scale proof bridge gate', () => {
     ).toBe(false)
   })
 
-  test('keeps the visual overlay on a separate explicit non-benchmark query gate', () => {
+  test('keeps the visual overlay behind an explicit query flag', () => {
+    expect(shouldEnableLandrushZombieNavigationOverlay('')).toBe(false)
+    expect(shouldEnableLandrushZombieNavigationOverlay('?game=zombie-escape')).toBe(false)
     expect(shouldEnableLandrushZombieNavigationOverlay('?landrushNavOverlay=1')).toBe(true)
     expect(shouldEnableLandrushZombieNavigationOverlay('?navOverlay=1')).toBe(true)
+    expect(shouldEnableLandrushZombieNavigationOverlay('?landrushNavOverlay=0')).toBe(false)
+    expect(shouldEnableLandrushZombieNavigationOverlay('?navOverlay=0')).toBe(false)
     expect(shouldEnableLandrushZombieNavigationOverlay('?landrushNavDebug=1')).toBe(false)
     expect(shouldEnableLandrushZombieNavigationOverlay('?bench=1&landrushNavScaleProof=1')).toBe(
       false,

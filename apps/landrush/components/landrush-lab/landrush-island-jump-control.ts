@@ -1,6 +1,10 @@
 export const LANDRUSH_ISLAND_JUMP_INPUT_BUFFER_MS = 150
 
-export type LandrushIslandJumpRequestSource = 'gamepad' | 'keyboard-space' | 'runtime-probe'
+export type LandrushIslandJumpRequestSource =
+  | 'gamepad'
+  | 'keyboard-space'
+  | 'runtime-probe'
+  | 'touch'
 
 export type LandrushIslandJumpRequestState = {
   requestedAtMs: number
@@ -129,12 +133,23 @@ export function queueLandrushIslandJumpRequest(
   state.source = source
 }
 
-export function consumeLandrushIslandJumpRequest(
-  state: LandrushIslandJumpRequestState,
-  canJump: boolean,
-  falling: boolean,
-  nowMs: number,
-) {
+export function consumeLandrushIslandJumpRequest({
+  canJump,
+  commandsEnabled,
+  falling,
+  nowMs,
+  state,
+}: {
+  canJump: boolean
+  commandsEnabled: boolean
+  falling: boolean
+  nowMs: number
+  state: LandrushIslandJumpRequestState
+}) {
+  if (!commandsEnabled) {
+    resetLandrushIslandJumpRequestState(state)
+    return null
+  }
   const source = state.source
   if (!source) return null
 

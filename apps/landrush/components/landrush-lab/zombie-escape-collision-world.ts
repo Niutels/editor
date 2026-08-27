@@ -3837,6 +3837,9 @@ export function invalidateZombieEscapeFlowFieldForCollisionMaskDelta(field: Zomb
 export function acknowledgeZombieEscapeFlowFieldCollisionMaskRemoval(field: ZombieEscapeFlowField) {
   const update = field.graphSparseTargetUpdate
   if (update.status !== 'ready') return false
+  for (const bank of field.graphReverseFieldBanks.banks) {
+    if (bank.generation > 0) bank.worldRevision = field.world.revision
+  }
   update.worldRevision = field.world.revision
   return true
 }

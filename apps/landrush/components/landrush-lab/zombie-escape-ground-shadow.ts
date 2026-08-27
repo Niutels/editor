@@ -1,12 +1,14 @@
 import { type Intersection, Matrix3, type Mesh, Raycaster, Vector3 } from 'three'
 
 export const ZOMBIE_ESCAPE_GROUND_SHADOW = Object.freeze({
-  baseOpacity: 0.24,
-  baseRadius: 0.4,
+  aspectRatio: 0.72,
+  baseOpacity: 0.34,
+  baseRadius: 0.5,
   maximumAltitude: 2.8,
-  minimumOpacityScale: 0.22,
-  minimumRadiusScale: 0.58,
-  surfaceOffset: 0.018,
+  minimumOpacityScale: 0.08,
+  minimumRadiusScale: 0.46,
+  surfaceOffset: 0.025,
+  textureResolution: 64,
 })
 
 const GROUND_SHADOW_RAY_ORIGIN_OFFSET = 0.025
@@ -91,6 +93,29 @@ export type ZombieEscapeGroundShadowEnvelope = {
   y: number
 }
 
+export function createZombieEscapeGroundShadowAlphaMapData(
+  resolution = ZOMBIE_ESCAPE_GROUND_SHADOW.textureResolution,
+) {
+  const size = Math.max(4, Math.round(Number.isFinite(resolution) ? resolution : 4))
+  const data = new Uint8Array(size * size * 4)
+  for (let y = 0; y < size; y += 1) {
+    const normalizedY = ((y + 0.5) / size) * 2 - 1
+    for (let x = 0; x < size; x += 1) {
+      const normalizedX = ((x + 0.5) / size) * 2 - 1
+      const distance = Math.min(1, Math.hypot(normalizedX, normalizedY))
+      const edge = 1 - smoothstep(0.16, 1, distance)
+      const core = 1 - smoothstep(0, 0.7, distance)
+      const alpha = Math.round(255 * Math.min(1, edge * 0.72 + core * 0.28))
+      const offset = (y * size + x) * 4
+      data[offset] = alpha
+      data[offset + 1] = alpha
+      data[offset + 2] = alpha
+      data[offset + 3] = 255
+    }
+  }
+  return { data, size }
+}
+
 export function resolveZombieEscapeGroundShadowEnvelope(
   playerY: number,
   supportY: number,
@@ -109,4 +134,9 @@ export function resolveZombieEscapeGroundShadowEnvelope(
   output.radius = ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius * radiusScale
   output.y = resolvedSupportY + ZOMBIE_ESCAPE_GROUND_SHADOW.surfaceOffset
   return output
+}
+
+function smoothstep(minimum: number, maximum: number, value: number) {
+  const normalized = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)))
+  return normalized * normalized * (3 - normalized * 2)
 }

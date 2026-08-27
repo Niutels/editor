@@ -11,3 +11,17 @@ export function shouldShowLandrushZombieEscapeMoney({
 }) {
   return phaseReady && expectedPhase === 'night' && actualPhase === 'night'
 }
+
+export function shouldShowLandrushZombieEscapeTouchControls({
+  actualPhase,
+  expectedPhase,
+  phaseReady,
+  terminal,
+}: {
+  actualPhase: ZombieEscapeGamePhase
+  expectedPhase: ZombieEscapeGamePhase
+  phaseReady: boolean
+  terminal: boolean
+}) {
+  return phaseReady && !terminal && expectedPhase === 'night' && actualPhase === 'night'
+}

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   LandrushControllerCommandHud,
@@ -13,6 +14,11 @@ function renderedPrompt(markup: string, control: LandrushControllerCommandId) {
   expect(match).not.toBeNull()
   return match?.[0] ?? ''
 }
+
+const islandClientSource = readFileSync(
+  new URL('./landrush-island-client.tsx', import.meta.url),
+  'utf8',
+)
 
 describe('LandrushControllerCommandHud', () => {
   test('keeps the four face controls in their physical diamond positions', () => {
@@ -103,5 +109,16 @@ describe('integrated Zombie Escape controller commands', () => {
       square: { label: 'Buy' },
       triangle: { label: 'Run again' },
     })
+  })
+})
+
+describe('integrated day controller command placement', () => {
+  test('uses the bottom-right corner while narrow build chrome is presented', () => {
+    expect(islandClientSource).toContain(
+      "'pointer-events-none absolute right-3 z-[100] lg:top-[18vh] lg:right-5'",
+    )
+    expect(islandClientSource).toContain(
+      "buildEditorChromeActive ? 'bottom-3 lg:bottom-auto' : 'top-20'",
+    )
   })
 })

@@ -1,3 +1,8 @@
+import {
+  resolveZombieEscapeDeathFallbackAngle,
+  resolveZombieEscapeDeathFallRadians,
+} from './zombie-escape-character-motion'
+
 export const ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y = 0.03
 
 export type ZombieEscapePresentationPoint = {
@@ -39,27 +44,73 @@ export function resolveZombieEscapePresentationPose(
   hitImpulseY: number,
   hitImpulseZ: number,
   output: ZombieEscapePresentationPose,
+  bodyCenterY = 0,
+  deathProgress = 0,
+  deathFallOrdinal = 0,
 ) {
-  const reaction = Math.max(0, hitReaction)
-  const pitch = -hitImpulseZ * reaction * 0.16
-  const roll = hitImpulseX * reaction * 0.16
-  const halfPitch = pitch * 0.5
-  const halfHeading = heading * 0.5
-  const halfRoll = roll * 0.5
-  const cosinePitch = Math.cos(halfPitch)
-  const cosineHeading = Math.cos(halfHeading)
-  const cosineRoll = Math.cos(halfRoll)
-  const sinePitch = Math.sin(halfPitch)
-  const sineHeading = Math.sin(halfHeading)
-  const sineRoll = Math.sin(halfRoll)
+  const reaction = Number.isFinite(hitReaction) ? Math.max(0, Math.min(1, hitReaction)) : 0
+  const impulseX = Number.isFinite(hitImpulseX) ? hitImpulseX : 0
+  const impulseY = Number.isFinite(hitImpulseY) ? hitImpulseY : 0
+  const impulseZ = Number.isFinite(hitImpulseZ) ? hitImpulseZ : 0
+  const horizontalImpulse = Math.hypot(impulseX, impulseZ)
+  const boundedHorizontalImpulse = Math.min(1, horizontalImpulse)
+  const inverseHorizontalImpulse = 1 / Math.max(0.000_001, horizontalImpulse)
+  let directionX = impulseX * inverseHorizontalImpulse
+  let directionZ = impulseZ * inverseHorizontalImpulse
+  if (horizontalImpulse <= 0.000_001) {
+    const fallbackAngle = resolveZombieEscapeDeathFallbackAngle(deathFallOrdinal)
+    directionX = Math.sin(fallbackAngle)
+    directionZ = Math.cos(fallbackAngle)
+  }
 
-  output.x = rootX + hitImpulseX * reaction * 0.09
-  output.y = rootY + ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y + Math.max(0, hitImpulseY) * reaction * 0.06
-  output.z = rootZ + hitImpulseZ * reaction * 0.09
-  output.quaternionX = sinePitch * cosineHeading * cosineRoll + cosinePitch * sineHeading * sineRoll
-  output.quaternionY = cosinePitch * sineHeading * cosineRoll - sinePitch * cosineHeading * sineRoll
-  output.quaternionZ = cosinePitch * cosineHeading * sineRoll - sinePitch * sineHeading * cosineRoll
-  output.quaternionW = cosinePitch * cosineHeading * cosineRoll + sinePitch * sineHeading * sineRoll
+  const hitTilt = boundedHorizontalImpulse * reaction * 0.22
+  const halfHitTilt = hitTilt * 0.5
+  const halfHeading = heading * 0.5
+  const sineHitTilt = Math.sin(halfHitTilt)
+  const cosineHitTilt = Math.cos(halfHitTilt)
+  const cosineHeading = Math.cos(halfHeading)
+  const sineHeading = Math.sin(halfHeading)
+  const hitQuaternionX = directionZ * sineHitTilt
+  const hitQuaternionZ = -directionX * sineHitTilt
+  const baseQuaternionX = hitQuaternionX * cosineHeading - hitQuaternionZ * sineHeading
+  const baseQuaternionY = cosineHitTilt * sineHeading
+  const baseQuaternionZ = hitQuaternionZ * cosineHeading + hitQuaternionX * sineHeading
+  const baseQuaternionW = cosineHitTilt * cosineHeading
+
+  const pivotY = Number.isFinite(bodyCenterY) ? Math.max(0, bodyCenterY) : 0
+  const pivotSine = Math.sin(hitTilt) * pivotY
+  const translationAmount = boundedHorizontalImpulse * reaction * 0.115
+  output.x = rootX + directionX * translationAmount - directionX * pivotSine
+  output.y =
+    rootY +
+    ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y +
+    Math.max(0, Math.min(1, impulseY)) * reaction * 0.065 +
+    pivotY * (1 - Math.cos(hitTilt))
+  output.z = rootZ + directionZ * translationAmount - directionZ * pivotSine
+
+  const fallRadians = resolveZombieEscapeDeathFallRadians(deathProgress)
+  const halfFall = fallRadians * 0.5
+  const sineFall = Math.sin(halfFall)
+  const fallQuaternionX = directionZ * sineFall
+  const fallQuaternionZ = -directionX * sineFall
+  const fallQuaternionW = Math.cos(halfFall)
+
+  output.quaternionX =
+    fallQuaternionX * baseQuaternionW +
+    fallQuaternionW * baseQuaternionX -
+    fallQuaternionZ * baseQuaternionY
+  output.quaternionY =
+    fallQuaternionW * baseQuaternionY +
+    fallQuaternionZ * baseQuaternionX -
+    fallQuaternionX * baseQuaternionZ
+  output.quaternionZ =
+    fallQuaternionZ * baseQuaternionW +
+    fallQuaternionW * baseQuaternionZ +
+    fallQuaternionX * baseQuaternionY
+  output.quaternionW =
+    fallQuaternionW * baseQuaternionW -
+    fallQuaternionX * baseQuaternionX -
+    fallQuaternionZ * baseQuaternionZ
   return output
 }
 

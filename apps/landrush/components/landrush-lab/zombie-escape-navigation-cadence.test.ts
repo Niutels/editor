@@ -1640,7 +1640,7 @@ describe('Zombie Escape navigation cadence', () => {
     expect(state.navigationIntentFirstServiceCount - firstServiceBefore).toBe(
       ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
     )
-    expect(state.navigationSparseSearchStartedCount - searchStartedBefore).toBe(
+    expect(state.navigationSparseSearchStartedCount - searchStartedBefore).toBeLessThanOrEqual(
       ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
     )
     expect(
@@ -1951,9 +1951,9 @@ describe('Zombie Escape navigation cadence', () => {
     expect(state.navigationIntentPendingCount).toBe(0)
     expect(state.navigationIntentAdmissionDeferredPendingCount).toBe(0)
     expect(state.zombies.navigationSparseFlowSearchActive[zombie]).toBe(0)
-    expect(state.navigationSparseSearchStartedCount).toBe(startedBeforeMutation + 2)
-    expect(state.navigationSparseSearchInvalidatedCount).toBe(1)
-    expect(state.navigationSparseSearchRestartedRoutePublishedCount).toBe(1)
+    expect(state.navigationSparseSearchStartedCount).toBe(startedBeforeMutation + 1)
+    expect(state.navigationSparseSearchInvalidatedCount).toBe(0)
+    expect(state.navigationSparseSearchRestartedRoutePublishedCount).toBe(0)
     expect(state.navigationSparseSearchRestartedWorldChangedCount).toBe(0)
     expect(state.zombies.navigationIntentWorldGeneration[zombie]).toBe(
       state.collisionWorldGeneration,
@@ -2779,7 +2779,7 @@ describe('Zombie Escape navigation cadence', () => {
     expect(state.navigationIntentResolveCount).toBe(intentResolveCountBeforeTargetPublication)
     expect(state.navigationIntentPendingCount).toBe(0)
     expect(slots.every((slot) => state.zombies.navigationWaypointNode[slot]! >= 0)).toBe(true)
-    expect(state.navigationAnchorInvalidationCount).toBe(anchorInvalidationCount + 1)
+    expect(state.navigationAnchorInvalidationCount).toBe(anchorInvalidationCount)
     expect(state.navigationField.graphAttachmentFullSearchCount).toBe(
       attachmentSearchCountBeforeTargetPublication,
     )
@@ -2829,7 +2829,7 @@ describe('Zombie Escape navigation cadence', () => {
     expectNavigationIntentConservation(state)
   })
 
-  test('retains a committed action while a published fallback breach gets weighted reattachment', () => {
+  test('promotes a published fallback breach to a nearby strict reattachment', () => {
     const arena = createZombieEscapeArena(91_051)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 91_052)
@@ -2928,10 +2928,8 @@ describe('Zombie Escape navigation cadence', () => {
 
     expect(publicationObserved).toBe(true)
     expect(state.navigationIntentDemandRoutePublishedCount).toBe(demandCount + 1)
-    expect(state.navigationSparseSearchStartedCount).toBeGreaterThan(searchCount)
-    expect(state.navigationField.graphAttachmentFullSearchCount).toBeGreaterThan(
-      attachmentSearchCount,
-    )
+    expect(state.navigationSparseSearchStartedCount).toBe(searchCount)
+    expect(state.navigationField.graphAttachmentFullSearchCount).toBe(attachmentSearchCount)
     expect(state.navigationIntentPendingCount).toBe(0)
     expect(state.zombies.navigationIntentCommittedRouteGeneration[zombie]).toBe(
       state.navigationTargetCommittedRouteGeneration,

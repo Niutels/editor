@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { BoxGeometry, type BufferGeometry, Mesh, MeshBasicMaterial } from 'three'
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh'
 import {
+  createZombieEscapeGroundShadowAlphaMapData,
   createZombieEscapeGroundShadowProjector,
   projectZombieEscapeGroundShadowSupportY,
   resolveZombieEscapeGroundShadowEnvelope,
+  ZOMBIE_ESCAPE_GROUND_SHADOW,
   type ZombieEscapeGroundShadowEnvelope,
 } from './zombie-escape-ground-shadow'
 
@@ -57,7 +59,7 @@ describe('Zombie Escape ground shadow', () => {
     const shadow = sample(4.5, 3)
 
     expect(shadow.altitude).toBe(1.5)
-    expect(shadow.y).toBeCloseTo(3.018, 8)
+    expect(shadow.y).toBeCloseTo(3 + ZOMBIE_ESCAPE_GROUND_SHADOW.surfaceOffset, 8)
   })
 
   test('shrinks and fades monotonically as jump altitude increases', () => {
@@ -69,6 +71,32 @@ describe('Zombie Escape ground shadow', () => {
     expect(midair.radius).toBeGreaterThan(high.radius)
     expect(grounded.opacity).toBeGreaterThan(midair.opacity)
     expect(midair.opacity).toBeGreaterThan(high.opacity)
+  })
+
+  test('uses the authored jump height to drive an exact bounded size envelope', () => {
+    const grounded = sample(2, 2)
+    const apex = sample(3.1875, 2)
+    const beyondMaximum = sample(12, 2)
+
+    expect(grounded.radius).toBe(ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius)
+    expect(apex.radius).toBeGreaterThan(
+      ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius * ZOMBIE_ESCAPE_GROUND_SHADOW.minimumRadiusScale,
+    )
+    expect(apex.radius).toBeLessThan(ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius)
+    expect(beyondMaximum.radius).toBeCloseTo(
+      ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius * ZOMBIE_ESCAPE_GROUND_SHADOW.minimumRadiusScale,
+      8,
+    )
+  })
+
+  test('builds a deterministic soft blob with a stronger center than edge', () => {
+    const { data, size } = createZombieEscapeGroundShadowAlphaMapData(16)
+    const alphaAt = (x: number, y: number) => data[(y * size + x) * 4 + 1]!
+
+    expect(size).toBe(16)
+    expect(alphaAt(8, 8)).toBeGreaterThan(alphaAt(12, 8))
+    expect(alphaAt(12, 8)).toBeGreaterThan(alphaAt(15, 15))
+    expect(alphaAt(15, 15)).toBe(0)
   })
 
   test('clamps below-support and invalid player values to a finite grounded envelope', () => {

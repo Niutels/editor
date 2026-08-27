@@ -11,6 +11,7 @@ import {
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
+  LoopOnce,
   LoopRepeat,
   type Material,
   Matrix4,
@@ -26,12 +27,14 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import {
   attribute,
   color,
+  getCurrentStack,
   int,
   ivec2,
   materialColor,
   mix,
   normalLocal,
   positionLocal,
+  setCurrentStack,
   smoothstep,
   textureLoad,
   vec3,
@@ -43,6 +46,7 @@ import {
   isZombieEscapeAttackPresentationActive,
   resolveZombieEscapeAttackNormalizedPhase,
 } from './zombie-escape-attack-presentation'
+import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
 import {
   createZombieEscapePresentationPose,
   resolveZombieEscapePresentationPose,
@@ -50,12 +54,14 @@ import {
 import type { ZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 type ZombieEscapeModelTransform = Readonly<{
+  bodyCenterY?: number
   offset: Vector3
   scale: number
 }>
 
 type CreateZombieEscapeAuthoredInstancePresentationOptions = Readonly<{
   attackClip: AnimationClip | null
+  deathClip?: AnimationClip | null
   instanceCapacity: number
   modelTransform: ZombieEscapeModelTransform
   runClip: AnimationClip | null
@@ -68,7 +74,7 @@ type CreateZombieEscapeAuthoredInstancePresentationOptions = Readonly<{
 export const ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT = 12
 
 const ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT =
-  1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3
+  1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4
 const ZOMBIE_ESCAPE_AUTHORED_BAKED_TEXTURE_WIDTH = 4096
 const ZOMBIE_ESCAPE_AUTHORED_BATCH_BOUNDS_PADDING_METERS = 2.5
 const ZOMBIE_ESCAPE_AUTHORED_FRAME_ATTRIBUTE = 'zombieBakedFrame'
@@ -77,7 +83,7 @@ const ZOMBIE_ESCAPE_AUTHORED_HALF_FLOAT_MAX = 65_504
 const TWO_PI = Math.PI * 2
 const ONE = new Vector3(1, 1, 1)
 
-type ZombieEscapeAuthoredMotion = 'attack' | 'idle' | 'run' | 'walk'
+type ZombieEscapeAuthoredMotion = 'attack' | 'death' | 'idle' | 'run' | 'walk'
 type ZombieEscapeAuthoredMaterialMode = 'authored-texture-grade'
 
 export type ZombieEscapeAuthoredInstanceReadinessSnapshot = Readonly<{
@@ -97,6 +103,7 @@ export type ZombieEscapeAuthoredInstanceDebugSnapshot = Readonly<{
   bakedTextureFormat: 'rgba16float'
   batchCount: number
   computeDispatchCount: 0
+  deathFrameIndex: number
   materialMode: ZombieEscapeAuthoredMaterialMode
   runtimeGeometryUploadCount: 0
   runtimeMixerCount: 0
@@ -109,16 +116,19 @@ export type ZombieEscapeAuthoredInstanceDebugSnapshot = Readonly<{
 
 export type ZombieEscapeAuthoredInstanceState = Readonly<{
   attackCooldown: Float32Array
+  deathPresentationSeconds: Float32Array
   heading: Float32Array
   hitImpulseX: Float32Array
   hitImpulseY: Float32Array
   hitImpulseZ: Float32Array
   hitReaction: Float32Array
+  health: Float32Array
   intent: Uint8Array
   locomotionBlend: Float32Array
   locomotionPhase: Float32Array
   pool: Readonly<{ active: Uint8Array }>
   runBlend: Float32Array
+  spawnOrdinal: Uint32Array
   variant: Uint8Array
   x: Float32Array
   y: Float32Array
@@ -171,9 +181,15 @@ class ZombieEscapeBakedNodeMaterial extends MeshStandardNodeMaterial {
   }
 
   override setupPosition(builder: NodeBuilder) {
-    positionLocal.assign(this.bakedPositionNode).toStack()
-    normalLocal.assign(this.bakedNormalNode).toStack()
-    return super.setupPosition(builder)
+    const previousStack = getCurrentStack()
+    setCurrentStack(builder.stack)
+    try {
+      positionLocal.assign(this.bakedPositionNode)
+      normalLocal.assign(this.bakedNormalNode)
+      return super.setupPosition(builder)
+    } finally {
+      setCurrentStack(previousStack)
+    }
   }
 }
 
@@ -235,19 +251,33 @@ export function resolveZombieEscapeBakedAnimationSample(phase: number) {
 export function resolveZombieEscapeAuthoredBakedFrame({
   attackCooldown,
   attackIntent,
+  deathPresentationSeconds = 0,
+  health = 1,
   locomotionBlend,
   locomotionPhase,
   runBlend,
 }: {
   attackCooldown: number
   attackIntent: number
+  deathPresentationSeconds?: number
+  health?: number
   locomotionBlend: number
   locomotionPhase: number
   runBlend: number
 }) {
   const attackActive = isZombieEscapeAttackPresentationActive(attackIntent)
-  const motion = resolveAuthoredMotion(locomotionBlend, runBlend, attackActive)
+  const deathActive = health <= 0
+  const motion = resolveAuthoredMotion(locomotionBlend, runBlend, attackActive, deathActive)
   if (motion === 'idle') return 0
+  if (motion === 'death') {
+    return (
+      1 +
+      ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3 +
+      resolveNearestNormalizedBakedFrame(
+        resolveZombieEscapeDeathNormalizedPhase(deathPresentationSeconds),
+      )
+    )
+  }
   if (motion === 'attack') {
     return (
       1 +
@@ -305,6 +335,7 @@ export async function createZombieEscapeAuthoredInstancePresentationCooperativel
 
 function* createZombieEscapeAuthoredInstancePresentationSteps({
   attackClip,
+  deathClip = null,
   instanceCapacity,
   modelTransform,
   runClip,
@@ -352,6 +383,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
   }
   const bakedTextureSets = yield* bakeAnimationTextureSteps({
     attackClip,
+    deathClip,
     runClip,
     samplerMeshes,
     samplerRoot,
@@ -392,6 +424,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
     let activeInstanceCount = 0
     let activeBatchCount = 0
     let attackFrameIndex = 0
+    let deathFrameIndex = 0
     let runFrameIndex = 0
     let walkFrameIndex = 0
     let spatialBoundsValid = false
@@ -419,6 +452,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
           bakedTextureFormat: 'rgba16float',
           batchCount: activeBatchCount,
           computeDispatchCount: 0,
+          deathFrameIndex,
           materialMode: 'authored-texture-grade',
           runtimeGeometryUploadCount: 0,
           runtimeMixerCount: 0,
@@ -451,11 +485,13 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
         )
         activeInstanceCount = selectedCount
         attackFrameIndex = 0
+        deathFrameIndex = 0
         runFrameIndex = 0
         walkFrameIndex = 0
         let foundRunFrame = false
         let foundWalkFrame = false
         let foundAttackFrame = false
+        let foundDeathFrame = false
         let minimumX = Number.POSITIVE_INFINITY
         let minimumY = Number.POSITIVE_INFINITY
         let minimumZ = Number.POSITIVE_INFINITY
@@ -474,6 +510,11 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
             zombies.hitImpulseY[slot] ?? 0,
             zombies.hitImpulseZ[slot] ?? 0,
             presentationPose,
+            modelTransform.bodyCenterY ?? 0,
+            zombies.health[slot]! <= 0
+              ? resolveZombieEscapeDeathNormalizedPhase(zombies.deathPresentationSeconds[slot] ?? 0)
+              : 0,
+            zombies.spawnOrdinal[slot] ?? 0,
           )
           sharedPosition.set(presentationPose.x, presentationPose.y, presentationPose.z)
           sharedQuaternion.set(
@@ -487,10 +528,13 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
             zombies.locomotionBlend[slot] ?? 0,
             zombies.runBlend[slot] ?? 0,
             isZombieEscapeAttackPresentationActive(zombies.intent[slot] ?? 0),
+            zombies.health[slot]! <= 0,
           )
           const bakedFrame = resolveZombieEscapeAuthoredBakedFrame({
             attackCooldown: zombies.attackCooldown[slot] ?? 0,
             attackIntent: zombies.intent[slot] ?? 0,
+            deathPresentationSeconds: zombies.deathPresentationSeconds[slot] ?? 0,
+            health: zombies.health[slot] ?? 0,
             locomotionBlend: zombies.locomotionBlend[slot] ?? 0,
             locomotionPhase: zombies.locomotionPhase[slot] ?? 0,
             runBlend: zombies.runBlend[slot] ?? 0,
@@ -499,6 +543,10 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
           if (motion === 'attack' && !foundAttackFrame) {
             attackFrameIndex = bakedFrame - 1 - ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 2
             foundAttackFrame = true
+          }
+          if (motion === 'death' && !foundDeathFrame) {
+            deathFrameIndex = bakedFrame - 1 - ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3
+            foundDeathFrame = true
           }
           if (motion === 'run' && !foundRunFrame) {
             runFrameIndex = bakedFrame - 1 - ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT
@@ -557,12 +605,14 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
 
 function* bakeAnimationTextureSteps({
   attackClip,
+  deathClip,
   runClip,
   samplerMeshes,
   samplerRoot,
   walkClip,
 }: {
   attackClip: AnimationClip | null
+  deathClip: AnimationClip | null
   runClip: AnimationClip | null
   samplerMeshes: readonly SkinnedMesh[]
   samplerRoot: Group
@@ -585,6 +635,7 @@ function* bakeAnimationTextureSteps({
     const walkAction = createLocomotionAction(mixer, walkClip, samplerRoot)
     const runAction = createLocomotionAction(mixer, runClip, samplerRoot)
     const attackAction = createLocomotionAction(mixer, attackClip, samplerRoot)
+    const deathAction = createOneShotAction(mixer, deathClip, samplerRoot)
     for (let frame = 0; frame < ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT; frame += 1) {
       yield
       sampleAnimationClip({
@@ -592,6 +643,7 @@ function* bakeAnimationTextureSteps({
         activeClip: walkClip,
         inactiveAction: runAction,
         secondaryInactiveAction: attackAction,
+        tertiaryInactiveAction: deathAction,
         mixer,
         normalizedTime: frame / ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT,
         samplerRoot,
@@ -607,6 +659,7 @@ function* bakeAnimationTextureSteps({
         activeClip: runClip,
         inactiveAction: walkAction,
         secondaryInactiveAction: attackAction,
+        tertiaryInactiveAction: deathAction,
         mixer,
         normalizedTime: frame / ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT,
         samplerRoot,
@@ -629,12 +682,33 @@ function* bakeAnimationTextureSteps({
         normalizedTime: frame / (ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT - 1),
         samplerRoot,
         secondaryInactiveAction: runAction,
+        tertiaryInactiveAction: deathAction,
       })
       for (let meshIndex = 0; meshIndex < samplerMeshes.length; meshIndex += 1) {
         captureBakedTextureFrame(
           samplerMeshes[meshIndex]!,
           sets[meshIndex]!,
           1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 2 + frame,
+        )
+      }
+    }
+    for (let frame = 0; frame < ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT; frame += 1) {
+      yield
+      sampleAnimationClip({
+        activeAction: deathAction,
+        activeClip: deathClip,
+        inactiveAction: walkAction,
+        mixer,
+        normalizedTime: frame / (ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT - 1),
+        samplerRoot,
+        secondaryInactiveAction: runAction,
+        tertiaryInactiveAction: attackAction,
+      })
+      for (let meshIndex = 0; meshIndex < samplerMeshes.length; meshIndex += 1) {
+        captureBakedTextureFrame(
+          samplerMeshes[meshIndex]!,
+          sets[meshIndex]!,
+          1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3 + frame,
         )
       }
     }
@@ -846,6 +920,7 @@ function sampleAnimationClip({
   normalizedTime,
   samplerRoot,
   secondaryInactiveAction,
+  tertiaryInactiveAction,
 }: {
   activeAction: AnimationAction | null
   activeClip: AnimationClip | null
@@ -854,9 +929,11 @@ function sampleAnimationClip({
   normalizedTime: number
   samplerRoot: Group
   secondaryInactiveAction: AnimationAction | null
+  tertiaryInactiveAction: AnimationAction | null
 }) {
   inactiveAction?.setEffectiveWeight(0)
   secondaryInactiveAction?.setEffectiveWeight(0)
+  tertiaryInactiveAction?.setEffectiveWeight(0)
   if (activeAction && activeClip) {
     activeAction.time = normalizedTime * activeClip.duration
     activeAction.setEffectiveWeight(1)
@@ -869,6 +946,15 @@ function createLocomotionAction(mixer: AnimationMixer, clip: AnimationClip | nul
   if (!clip) return null
   const action = mixer.clipAction(clip, root)
   action.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
+  action.play()
+  return action
+}
+
+function createOneShotAction(mixer: AnimationMixer, clip: AnimationClip | null, root: Group) {
+  if (!clip) return null
+  const action = mixer.clipAction(clip, root)
+  action.setLoop(LoopOnce, 1)
+  action.clampWhenFinished = true
   action.play()
   return action
 }
@@ -929,7 +1015,9 @@ function resolveAuthoredMotion(
   locomotionBlend: number,
   runBlend: number,
   attackActive: boolean,
+  deathActive: boolean,
 ): ZombieEscapeAuthoredMotion {
+  if (deathActive) return 'death'
   if (attackActive) return 'attack'
   if (clamp01(locomotionBlend) < 0.1) return 'idle'
   return clamp01(runBlend) >= 0.5 ? 'run' : 'walk'

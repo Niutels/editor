@@ -24,11 +24,14 @@ import { readLandrushGamepadInput } from './landrush-gamepad-input'
 import {
   createLandrushIslandRuntimeDoorPassabilityKey,
   createLandrushZombieEscapeCollisionWorldSignature,
+  createLandrushZombieEscapeStableClosedDoorPassability,
   type LandrushZombieEscapeCollisionWorldCompilation,
   type LandrushZombieEscapeCollisionWorldInput,
   type LandrushZombieEscapeCollisionWorlds,
   type LandrushZombieEscapeSurfaceNavigationSupport,
   resolveLandrushIslandRuntimeDoorPassabilityKey,
+  resolveLandrushZombieEscapeLiveOperableDoorIds,
+  resolveLandrushZombieEscapeRuntimePassableDoorIds,
 } from './landrush-island-ai-navigation-semantics'
 import { landrushIslandInputTargetBlocksGameplay } from './landrush-island-input-capture'
 import type {
@@ -48,18 +51,26 @@ import {
   createLandrushRobotWeaponMuzzlePose,
   LandrushRobotWeaponRig,
 } from './landrush-robot-weapon-rig'
+import {
+  resolveLandrushZombieEscapeCombatFireEnabled,
+  resolveLandrushZombieEscapeInteractionActionable,
+} from './landrush-zombie-escape-actionability'
 import { resolveLandrushZombieEscapeAimPlaneElevation } from './landrush-zombie-escape-aim'
 import { createLandrushZombieEscapeIntegratedArena } from './landrush-zombie-escape-arena'
 import {
   createBrowserLandrushZombieEscapeCollisionWorldBuildScheduleHost,
   createLandrushZombieEscapeCollisionWorldBuildCoordinator,
   createLandrushZombieEscapeCollisionWorldBuildState,
+  isLandrushZombieEscapeDesiredCollisionWorldReady,
   type LandrushZombieEscapeCollisionWorldBuildCoordinator,
   resolveLandrushZombieEscapeCollisionWorldBuildPriority,
   resolveLandrushZombieEscapeCollisionWorldPhaseReady,
 } from './landrush-zombie-escape-collision-world-lifecycle'
 import { createBrowserLandrushZombieEscapeCollisionWorldWorkerCompiler } from './landrush-zombie-escape-collision-world-worker-client'
-import { shouldShowLandrushZombieEscapeMoney } from './landrush-zombie-escape-hud-visibility'
+import {
+  shouldShowLandrushZombieEscapeMoney,
+  shouldShowLandrushZombieEscapeTouchControls,
+} from './landrush-zombie-escape-hud-visibility'
 import {
   advanceLandrushZombieEscapePhaseClock,
   advanceLandrushZombieEscapeRestartButtonState,
@@ -71,6 +82,13 @@ import {
   stepLandrushZombieEscapeIntegratedSimulation,
 } from './landrush-zombie-escape-runtime'
 import { LandrushZombieEscapeStructurePresentation } from './landrush-zombie-escape-structure-presentation'
+import {
+  type LandrushZombieEscapeTouchInputKind,
+  type LandrushZombieEscapeTouchInputState,
+  resetLandrushZombieEscapeTouchInput,
+  resolveLandrushZombieEscapeTouchAimDirection,
+} from './landrush-zombie-escape-touch-input'
+import { LandrushZombieEscapeTouchJoysticks } from './landrush-zombie-escape-touch-joysticks'
 import { ZombieEscapeActors } from './zombie-escape-actors'
 import { ZombieEscapeAudio } from './zombie-escape-audio'
 import { inspectZombieEscapeSparseAttachmentHeapLeases } from './zombie-escape-collision-world'
@@ -78,6 +96,7 @@ import {
   ZOMBIE_ESCAPE_CAPACITY,
   ZOMBIE_ESCAPE_SEED,
   ZOMBIE_ESCAPE_SIMULATION,
+  type ZombieEscapeInputMode,
 } from './zombie-escape-config'
 import {
   createZombieEscapeControlState,
@@ -101,6 +120,7 @@ import {
   createZombieEscapeHudSnapshot,
   createZombieEscapeSimulation,
   getZombieEscapeMeleeProgress,
+  isZombieEscapeWeaponPickupAvailable,
   requestZombieEscapeDeterministicObstacleDelta,
   restoreZombieEscapeDefaultMuzzlePose,
   setZombieEscapeCollisionWorld,
@@ -108,11 +128,13 @@ import {
   setZombieEscapeObstacleDamageEnabled,
   setZombieEscapePlayerMuzzlePose,
   setZombieEscapeWeaponPickupPlacements,
+  synchronizeZombieEscapePassableObstacleIds,
   ZOMBIE_ESCAPE_SHOT_PHASE,
   type ZombieEscapeGamePhase,
   type ZombieEscapeGameStatus,
   type ZombieEscapeHudSnapshot,
   type ZombieEscapeObstacleDeltaRequestResult,
+  type ZombieEscapePickupPrompt,
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
@@ -310,6 +332,7 @@ export type LandrushZombieEscapeModeProps = {
   onGeneratedAssetsReadinessChange?: (
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
   ) => void
+  onInteractionActionabilityChange: (actionable: boolean) => void
   onPhaseChange: (phase: ZombieEscapeGamePhase) => void
   onResetExternalPlayerMotion: () => void
   onStatusChange: (status: ZombieEscapeGameStatus) => void
@@ -320,6 +343,7 @@ export type LandrushZombieEscapeModeProps = {
   surfacePoints: readonly Readonly<{ x: number; z: number }>[]
   viewerSceneReady: boolean
   visualRootRef: MutableRefObject<Group | null>
+  zombieEscapeTouchInputRef: MutableRefObject<LandrushZombieEscapeTouchInputState>
 }
 
 export function shouldLandrushZombieEscapeOwnCanvasPointerEvents(
@@ -327,6 +351,29 @@ export function shouldLandrushZombieEscapeOwnCanvasPointerEvents(
   expectedPhase: ZombieEscapeGamePhase,
 ) {
   return active && expectedPhase === 'night'
+}
+
+export function isLandrushZombieEscapeDirectCombatPointer(pointerType: string) {
+  return pointerType !== 'touch'
+}
+
+export function isLandrushZombieEscapeGameplayKeyboardCode(code: string) {
+  return (
+    code === 'KeyW' ||
+    code === 'ArrowUp' ||
+    code === 'KeyA' ||
+    code === 'ArrowLeft' ||
+    code === 'KeyS' ||
+    code === 'ArrowDown' ||
+    code === 'KeyD' ||
+    code === 'ArrowRight' ||
+    code === 'ShiftLeft' ||
+    code === 'ShiftRight' ||
+    code === 'ControlLeft' ||
+    code === 'ControlRight' ||
+    code === 'Space' ||
+    code === 'KeyE'
+  )
 }
 
 export function acquireLandrushZombieEscapeCanvasPointerOwnership({
@@ -984,6 +1031,7 @@ export function LandrushZombieEscapeMode({
   motionRef,
   onDestroyedFurnitureIdsChange,
   onGeneratedAssetsReadinessChange,
+  onInteractionActionabilityChange,
   onPhaseChange,
   onResetExternalPlayerMotion,
   onStatusChange,
@@ -994,6 +1042,7 @@ export function LandrushZombieEscapeMode({
   surfacePoints,
   viewerSceneReady,
   visualRootRef,
+  zombieEscapeTouchInputRef,
 }: LandrushZombieEscapeModeProps) {
   const { camera, get, gl, setEvents } = useThree()
   const zombieMaterialPhaseActive = expectedPhase === 'night'
@@ -1004,6 +1053,18 @@ export function LandrushZombieEscapeMode({
   const interactiveDoorPassability = useMemo(
     () => resolveLandrushIslandRuntimeDoorPassabilityKey(interactiveDoorPassabilityKey),
     [interactiveDoorPassabilityKey],
+  )
+  const stableDoorPassability = useMemo(
+    () => createLandrushZombieEscapeStableClosedDoorPassability(sceneNodes),
+    [sceneNodes],
+  )
+  const liveOperableDoorIds = useMemo(
+    () => resolveLandrushZombieEscapeLiveOperableDoorIds(sceneNodes),
+    [sceneNodes],
+  )
+  const runtimePassableDoorIds = useMemo(
+    () => resolveLandrushZombieEscapeRuntimePassableDoorIds(sceneNodes, interactiveDoorPassability),
+    [interactiveDoorPassability, sceneNodes],
   )
   const arena = useMemo(
     () => createLandrushZombieEscapeIntegratedArena(surfacePoints, spawn),
@@ -1034,7 +1095,7 @@ export function LandrushZombieEscapeMode({
     () => ({
       agentRadius: ZOMBIE_ESCAPE_SIMULATION.zombieNavigationRadius,
       circles: palmCollisionCircles,
-      doorPassability: interactiveDoorPassability,
+      doorPassability: stableDoorPassability,
       nodes: sceneNodes,
       playRadius: arena.playRadius,
       spawn,
@@ -1044,10 +1105,10 @@ export function LandrushZombieEscapeMode({
     [
       arena.playRadius,
       groundY,
-      interactiveDoorPassability,
       palmCollisionCircles,
       sceneNodes,
       spawn,
+      stableDoorPassability,
       surfaceSupport,
     ],
   )
@@ -1096,6 +1157,7 @@ export function LandrushZombieEscapeMode({
   const navigationScaleProofPreparedCompilationRef =
     useRef<LandrushZombieEscapeCollisionWorldCompilation | null>(null)
   const fireMouseRef = useRef(false)
+  const firePointerIdRef = useRef<number | null>(null)
   const gamepadInteractHeldRef = useRef(false)
   const gamepadRestartButtonStateRef = useRef(createLandrushZombieEscapeRestartButtonState())
   const interactPulseRef = useRef(false)
@@ -1105,8 +1167,9 @@ export function LandrushZombieEscapeMode({
   const raycaster = useMemo(() => new Raycaster(), [])
   const aimPlane = useMemo(() => new Plane(new Vector3(0, 1, 0)), [])
   const cameraForward = useMemo(() => new Vector3(), [])
-  const inputModeRef = useRef<'gamepad' | 'keyboard'>('keyboard')
-  const [inputMode, setInputMode] = useState<'gamepad' | 'keyboard'>('keyboard')
+  const aimInputSourceRef = useRef<'gamepad' | 'pointer' | 'touch' | null>(null)
+  const inputModeRef = useRef<ZombieEscapeInputMode>('keyboard')
+  const [inputMode, setInputMode] = useState<ZombieEscapeInputMode>('keyboard')
   const [snapshot, setSnapshot] = useState<ZombieEscapeHudSnapshot>(() =>
     createZombieEscapeHudSnapshot(simulation),
   )
@@ -1121,15 +1184,23 @@ export function LandrushZombieEscapeMode({
   const debugAtRef = useRef(Number.NEGATIVE_INFINITY)
   const frameMsRef = useRef(16.7)
   const publishedObstacleRevisionRef = useRef(simulation.obstacleRevision)
+  const desiredCollisionWorldReady = isLandrushZombieEscapeDesiredCollisionWorldReady({
+    desiredSignature: collisionWorldDesiredSignature,
+    state: collisionWorldBuildState,
+  })
   const runtimePhaseReady = resolveLandrushZombieEscapeCollisionWorldPhaseReady({
     desiredSignature: collisionWorldDesiredSignature,
     expectedPhase,
     phaseReady,
     state: collisionWorldBuildState,
   })
-  const collisionGameplayActive = active && runtimePhaseReady
-  const combatOwnsCanvasPointerEvents = shouldLandrushZombieEscapeOwnCanvasPointerEvents(
-    collisionGameplayActive,
+  const nightStartReady = phaseReady && desiredCollisionWorldReady
+  const interactionActionable = resolveLandrushZombieEscapeInteractionActionable({
+    collisionWorldReady: runtimePhaseReady,
+    interactionEligible: active,
+  })
+  const nightPresentationActive = shouldLandrushZombieEscapeOwnCanvasPointerEvents(
+    interactionActionable,
     expectedPhase,
   )
   const navigationScaleProofEnabled =
@@ -1144,6 +1215,17 @@ export function LandrushZombieEscapeMode({
       setNavigationOverlayEnabled(true)
     }
   }, [])
+
+  useLayoutEffect(() => {
+    onInteractionActionabilityChange(interactionActionable)
+  }, [interactionActionable, onInteractionActionabilityChange])
+
+  useLayoutEffect(
+    () => () => {
+      onInteractionActionabilityChange(false)
+    },
+    [onInteractionActionabilityChange],
+  )
 
   const runNavigationScaleProof =
     useCallback<LandrushZombieEscapeNavigationScaleProofRunner>(() => {
@@ -1281,11 +1363,19 @@ export function LandrushZombieEscapeMode({
     [],
   )
 
-  const activateInputMode = useCallback((mode: 'gamepad' | 'keyboard') => {
+  const activateInputMode = useCallback((mode: ZombieEscapeInputMode) => {
     if (inputModeRef.current === mode) return
     inputModeRef.current = mode
     setInputMode(mode)
   }, [])
+
+  const handleTouchInput = useCallback(
+    (input: LandrushZombieEscapeTouchInputKind) => {
+      activateInputMode('touch')
+      if (input === 'aim') aimInputSourceRef.current = 'touch'
+    },
+    [activateInputMode],
+  )
 
   const handleGeneratedAssetsReadinessChange = useCallback(
     (readiness: ZombieEscapeGeneratedAssetReadinessSnapshot) => {
@@ -1387,6 +1477,19 @@ export function LandrushZombieEscapeMode({
     renderScheduler.requestFrame('geometry:changed')
   }, [collisionWorlds, simulation])
 
+  useLayoutEffect(() => {
+    if (
+      synchronizeZombieEscapePassableObstacleIds(
+        simulation,
+        runtimePassableDoorIds,
+        liveOperableDoorIds,
+      ) === 0
+    ) {
+      return
+    }
+    renderScheduler.requestFrame('geometry:changed')
+  }, [liveOperableDoorIds, runtimePassableDoorIds, simulation])
+
   const publishDestroyedFurnitureIds = useCallback(() => {
     if (publishedObstacleRevisionRef.current === simulation.obstacleRevision) return
     publishedObstacleRevisionRef.current = simulation.obstacleRevision
@@ -1453,8 +1556,10 @@ export function LandrushZombieEscapeMode({
     controls.moveZ = 0
     controls.run = false
     fireMouseRef.current = false
+    firePointerIdRef.current = null
     gamepadInteractHeldRef.current = false
     interactPulseRef.current = false
+    resetLandrushZombieEscapeTouchInput(zombieEscapeTouchInputRef.current)
     publishDestroyedFurnitureIds()
     publishSnapshot()
     renderScheduler.requestFrame('animation')
@@ -1465,13 +1570,14 @@ export function LandrushZombieEscapeMode({
     publishDestroyedFurnitureIds,
     publishSnapshot,
     simulation,
+    zombieEscapeTouchInputRef,
   ])
 
   const startZombie = useCallback(() => {
     if (
       !requestLandrushZombieEscapeNightStart({
         expectedPhase,
-        phaseReady: runtimePhaseReady,
+        phaseReady: nightStartReady,
         simulation,
       })
     ) {
@@ -1481,18 +1587,18 @@ export function LandrushZombieEscapeMode({
     publishDestroyedFurnitureIds()
     publishSnapshot()
     renderScheduler.requestFrame('animation')
-  }, [expectedPhase, publishDestroyedFurnitureIds, publishSnapshot, runtimePhaseReady, simulation])
+  }, [expectedPhase, nightStartReady, publishDestroyedFurnitureIds, publishSnapshot, simulation])
 
   useEffect(() => onPhaseChange(snapshot.phase), [onPhaseChange, snapshot.phase])
   useEffect(() => onStatusChange(snapshot.status), [onStatusChange, snapshot.status])
 
   useEffect(() => {
-    if (!combatOwnsCanvasPointerEvents) return
+    if (!nightPresentationActive) return
     return acquireLandrushZombieEscapeCanvasPointerOwnership({
       getEnabled: () => get().events.enabled,
       setEnabled: (enabled) => setEvents({ enabled }),
     })
-  }, [combatOwnsCanvasPointerEvents, get, setEvents])
+  }, [get, nightPresentationActive, setEvents])
 
   useEffect(() => {
     if (snapshot.phase !== 'build' || simulation.phase !== 'build') return
@@ -1500,78 +1606,92 @@ export function LandrushZombieEscapeMode({
   }, [simulation, snapshot.phase, weaponPickupPlacements])
 
   useEffect(() => {
-    if (!collisionGameplayActive) {
+    if (!nightPresentationActive) {
       fireMouseRef.current = false
+      firePointerIdRef.current = null
       gamepadInteractHeldRef.current = false
       interactPulseRef.current = false
+      resetLandrushZombieEscapeTouchInput(zombieEscapeTouchInputRef.current)
       combatHeadingRef.current = null
       return
     }
     const canvas = gl.domElement
     const updatePointer = (event: PointerEvent) => {
+      if (!isLandrushZombieEscapeDirectCombatPointer(event.pointerType)) return
       const bounds = canvas.getBoundingClientRect()
       if (bounds.width <= 0 || bounds.height <= 0) return
       pointerRef.current.ndcX = ((event.clientX - bounds.left) / bounds.width) * 2 - 1
       pointerRef.current.ndcY = -((event.clientY - bounds.top) / bounds.height) * 2 + 1
       pointerRef.current.initialized = true
+      aimInputSourceRef.current = 'pointer'
       activateInputMode('keyboard')
     }
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button !== 0 || event.target !== canvas) return
+      if (
+        !isLandrushZombieEscapeDirectCombatPointer(event.pointerType) ||
+        event.button !== 0 ||
+        event.target !== canvas
+      ) {
+        return
+      }
       fireMouseRef.current = true
+      firePointerIdRef.current = event.pointerId
       updatePointer(event)
       canvas.focus()
     }
     const handlePointerUp = (event: PointerEvent) => {
-      if (event.button === 0) fireMouseRef.current = false
+      if (event.pointerId !== firePointerIdRef.current) return
+      fireMouseRef.current = false
+      firePointerIdRef.current = null
     }
     const clearFire = () => {
       fireMouseRef.current = false
+      firePointerIdRef.current = null
       interactPulseRef.current = false
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.code !== 'KeyE' ||
-        event.defaultPrevented ||
-        event.repeat ||
-        landrushIslandInputTargetBlocksGameplay(event.target)
-      ) {
-        return
+      if (landrushIslandInputTargetBlocksGameplay(event.target)) return
+      if (isLandrushZombieEscapeGameplayKeyboardCode(event.code)) {
+        activateInputMode('keyboard')
       }
+      if (event.code !== 'KeyE' || event.defaultPrevented || event.repeat) return
       event.preventDefault()
-      activateInputMode('keyboard')
       interactPulseRef.current = true
     }
 
     canvas.addEventListener('pointermove', updatePointer)
     canvas.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
     window.addEventListener('blur', clearFire)
     window.addEventListener('keydown', handleKeyDown, true)
     return () => {
       canvas.removeEventListener('pointermove', updatePointer)
       canvas.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
       window.removeEventListener('blur', clearFire)
       window.removeEventListener('keydown', handleKeyDown, true)
       fireMouseRef.current = false
+      firePointerIdRef.current = null
       gamepadInteractHeldRef.current = false
       interactPulseRef.current = false
       combatHeadingRef.current = null
     }
-  }, [activateInputMode, collisionGameplayActive, combatHeadingRef, gl])
+  }, [activateInputMode, combatHeadingRef, gl, nightPresentationActive, zombieEscapeTouchInputRef])
 
   useEffect(
     () => () => {
       combatHeadingRef.current = null
+      resetLandrushZombieEscapeTouchInput(zombieEscapeTouchInputRef.current)
       restoreZombieEscapeDefaultMuzzlePose(simulation)
       delete window.__LANDRUSH_ZOMBIE_ESCAPE__
     },
-    [combatHeadingRef, simulation],
+    [combatHeadingRef, simulation, zombieEscapeTouchInputRef],
   )
 
   useFrame(() => {
-    if (!collisionGameplayActive) return
+    if (!interactionActionable) return
     const motion = motionRef.current
     if (!motion) return
 
@@ -1611,7 +1731,9 @@ export function LandrushZombieEscapeMode({
           gamepad.rightShoulder ||
           gamepad.leftTrigger > 0),
     )
-    if (gamepadActive) activateInputMode('gamepad')
+    const touchInput = zombieEscapeTouchInputRef.current
+    const touchInputActive = touchInput.aim.pointerId !== null || touchInput.move.pointerId !== null
+    if (gamepadActive && !touchInputActive) activateInputMode('gamepad')
     let aimX = Math.sin(simulation.player.aimAngle)
     let aimZ = Math.cos(simulation.player.aimAngle)
     let aimStrength = 0
@@ -1621,7 +1743,23 @@ export function LandrushZombieEscapeMode({
     if (cameraForward.lengthSq() <= 0.000_001) cameraForward.set(0, 0, -1)
     else cameraForward.normalize()
 
-    if (gamepad && gamepad.lookStrength > 0.08) {
+    if (touchInput.aim.pointerId !== null) {
+      aimInputSourceRef.current = 'touch'
+      if (touchInput.aim.strength > 0) {
+        const direction = resolveLandrushZombieEscapeTouchAimDirection({
+          cameraForwardX: cameraForward.x,
+          cameraForwardZ: cameraForward.z,
+          screenX: touchInput.aim.screenX,
+          screenY: touchInput.aim.screenY,
+        })
+        if (direction) {
+          aimX = direction.x
+          aimZ = direction.z
+          aimStrength = touchInput.aim.strength
+        }
+      }
+    } else if (gamepad && gamepad.lookStrength > 0.08) {
+      aimInputSourceRef.current = 'gamepad'
       const rightX = -cameraForward.z
       const rightZ = cameraForward.x
       const forwardAmount = -gamepad.lookY
@@ -1633,7 +1771,7 @@ export function LandrushZombieEscapeMode({
         aimZ /= length
         aimStrength = Math.min(1, gamepad.lookStrength)
       }
-    } else if (pointerRef.current.initialized) {
+    } else if (aimInputSourceRef.current === 'pointer' && pointerRef.current.initialized) {
       pointerNdc.set(pointerRef.current.ndcX, pointerRef.current.ndcY)
       raycaster.setFromCamera(pointerNdc, camera)
       aimPlane.constant = -resolveLandrushZombieEscapeAimPlaneElevation(motion.position.y, groundY)
@@ -1652,7 +1790,8 @@ export function LandrushZombieEscapeMode({
     controls.aimX = aimX
     controls.aimZ = aimZ
     controls.aimStrength = aimStrength
-    controls.fire = fireMouseRef.current || isZombieEscapeGamepadFirePressed(gamepad)
+    controls.fire =
+      fireMouseRef.current || touchInput.firing || isZombieEscapeGamepadFirePressed(gamepad)
     controls.inputMode = inputModeRef.current
     controls.interactPressed = interactPulseRef.current
     controls.moveStrength = 0
@@ -1682,7 +1821,10 @@ export function LandrushZombieEscapeMode({
       authorityNowSeconds: state.clock.elapsedTime,
       clock: phaseClockRef.current,
       expectedPhase,
-      phaseReady: runtimePhaseReady && motion !== null && !roomSoakStateRef.current.active,
+      phaseReady:
+        (simulation.phase === 'build' ? nightStartReady : runtimePhaseReady) &&
+        motion !== null &&
+        !roomSoakStateRef.current.active,
       simulation,
     })
     if (!motion) return
@@ -1704,7 +1846,7 @@ export function LandrushZombieEscapeMode({
       snapshotAtRef.current = state.clock.elapsedTime
       publishSnapshot()
     }
-    if (!collisionGameplayActive) {
+    if (!interactionActionable) {
       controls.aimStrength = 0
       controls.fire = false
       controls.interactPressed = false
@@ -1716,7 +1858,7 @@ export function LandrushZombieEscapeMode({
     syncIntegratedPlayerPose(simulation, motion, groundY, spawn)
 
     const muzzlePose = muzzlePoseRef.current
-    if (collisionGameplayActive && muzzlePose.ready) {
+    if (interactionActionable && muzzlePose.ready) {
       setZombieEscapePlayerMuzzlePose(simulation, {
         directionX: muzzlePose.direction.x,
         directionY: muzzlePose.direction.y,
@@ -1728,8 +1870,13 @@ export function LandrushZombieEscapeMode({
     } else {
       restoreZombieEscapeDefaultMuzzlePose(simulation)
     }
-    controls.fire = collisionGameplayActive && controls.fire && muzzlePose.ready
-    controls.interactPressed = collisionGameplayActive && interactPulseRef.current
+    controls.fire = resolveLandrushZombieEscapeCombatFireEnabled({
+      collisionWorldReady: runtimePhaseReady,
+      interactionEligible: active,
+      muzzleReady: muzzlePose.ready,
+      requested: controls.fire,
+    })
+    controls.interactPressed = interactionActionable && interactPulseRef.current
 
     if (!phaseCanAdvance) {
       accumulatorRef.current = 0
@@ -1872,12 +2019,15 @@ export function LandrushZombieEscapeMode({
         generatedAssetFailureCount={generatedAssetFailures.length}
         generatedAssetsRetrying={generatedAssetsRetrying}
         inputMode={inputMode}
+        onInput={handleTouchInput}
         onRetryGeneratedAssets={retryGeneratedAssets}
         onRunAgain={runAgain}
         onStartZombie={startZombie}
         ownerDocument={gl.domElement.ownerDocument}
-        phaseReady={runtimePhaseReady}
+        nightStartReady={nightStartReady}
+        phaseReady={interactionActionable}
         snapshot={snapshot}
+        zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
       />
     </>
   )
@@ -1887,12 +2037,16 @@ type LandrushZombieEscapeHudProps = {
   expectedPhase: ZombieEscapeGamePhase
   generatedAssetFailureCount: number
   generatedAssetsRetrying: boolean
-  inputMode: 'gamepad' | 'keyboard'
+  inputMode: ZombieEscapeInputMode
+  onInput: (input: LandrushZombieEscapeTouchInputKind) => void
   onRetryGeneratedAssets: () => void
   onRunAgain: () => void
   onStartZombie: () => void
+  ownerDocument: Document
+  nightStartReady: boolean
   phaseReady: boolean
   snapshot: ZombieEscapeHudSnapshot
+  zombieEscapeTouchInputRef: MutableRefObject<LandrushZombieEscapeTouchInputState>
 }
 
 export function resolveLandrushZombieEscapeControllerCommands({
@@ -1916,13 +2070,16 @@ function LandrushZombieEscapeHudPortal({
   generatedAssetFailureCount,
   generatedAssetsRetrying,
   inputMode,
+  onInput,
   onRetryGeneratedAssets,
   onRunAgain,
   onStartZombie,
   ownerDocument,
+  nightStartReady,
   phaseReady,
   snapshot,
-}: LandrushZombieEscapeHudProps & { ownerDocument: Document }) {
+  zombieEscapeTouchInputRef,
+}: LandrushZombieEscapeHudProps) {
   const ownerRef = useRef(Symbol('landrush-zombie-escape-hud'))
   const rootRef = useRef<Root | null>(null)
 
@@ -1971,11 +2128,15 @@ function LandrushZombieEscapeHudPortal({
         generatedAssetFailureCount={generatedAssetFailureCount}
         generatedAssetsRetrying={generatedAssetsRetrying}
         inputMode={inputMode}
+        onInput={onInput}
         onRetryGeneratedAssets={onRetryGeneratedAssets}
         onRunAgain={onRunAgain}
         onStartZombie={onStartZombie}
+        ownerDocument={ownerDocument}
+        nightStartReady={nightStartReady}
         phaseReady={phaseReady}
         snapshot={snapshot}
+        zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
       />,
     )
   }, [
@@ -1983,11 +2144,15 @@ function LandrushZombieEscapeHudPortal({
     generatedAssetFailureCount,
     generatedAssetsRetrying,
     inputMode,
+    onInput,
     onRetryGeneratedAssets,
     onRunAgain,
     onStartZombie,
+    ownerDocument,
+    nightStartReady,
     phaseReady,
     snapshot,
+    zombieEscapeTouchInputRef,
   ])
 
   return null
@@ -1998,11 +2163,15 @@ function LandrushZombieEscapeHud({
   generatedAssetFailureCount,
   generatedAssetsRetrying,
   inputMode,
+  onInput,
   onRetryGeneratedAssets,
   onRunAgain,
   onStartZombie,
+  ownerDocument,
+  nightStartReady,
   phaseReady,
   snapshot,
+  zombieEscapeTouchInputRef,
 }: LandrushZombieEscapeHudProps) {
   const phase = snapshot.phase === 'night' ? 'night' : 'build'
   const phaseSecondsRemaining = Number.isFinite(snapshot.phaseSecondsRemaining)
@@ -2020,18 +2189,34 @@ function LandrushZombieEscapeHud({
     expectedPhase,
     phaseReady,
   })
+  const touchControlsVisible = shouldShowLandrushZombieEscapeTouchControls({
+    actualPhase: snapshot.phase,
+    expectedPhase,
+    phaseReady,
+    terminal,
+  })
+  const pickupPresentation = pickupPrompt
+    ? resolveLandrushZombieEscapePickupPromptPresentation({ inputMode, prompt: pickupPrompt })
+    : null
   return (
     <div
       className="pointer-events-none absolute inset-0 z-30 select-none text-white"
       data-actual-avatar="/navigation/proto_pascal_robot.glb"
       data-expected-phase={expectedPhase}
       data-integrated-landrush-world="true"
+      data-night-start-ready={nightStartReady ? 'true' : 'false'}
       data-phase={phase}
       data-phase-ready={phaseReady ? 'true' : 'false'}
       data-phase-seconds-remaining={Math.ceil(phaseSecondsRemaining)}
       data-shot-carriers-per-event="1"
       data-testid="landrush-zombie-escape-hud"
     >
+      <LandrushZombieEscapeTouchJoysticks
+        inputRef={zombieEscapeTouchInputRef}
+        onInput={onInput}
+        ownerDocument={ownerDocument}
+        visible={touchControlsVisible}
+      />
       {moneyVisible ? (
         <ZombieEscapeMoneyBadge className="absolute top-4 left-4" money={snapshot.money} />
       ) : null}
@@ -2044,7 +2229,7 @@ function LandrushZombieEscapeHud({
       ) : null}
       {phase === 'build' ? (
         <LandrushZombieEscapeDayCountdown
-          disabled={!phaseReady || expectedPhase !== 'build' || terminal}
+          disabled={!nightStartReady || expectedPhase !== 'build' || terminal}
           onStartZombie={onStartZombie}
           phaseSecondsRemaining={phaseSecondsRemaining}
         />
@@ -2064,18 +2249,17 @@ function LandrushZombieEscapeHud({
           />
         </div>
       )}
-      {pickupPrompt ? (
+      {pickupPresentation ? (
         <div
           className="absolute bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/52 px-3 py-2 text-[11px] text-white/92 shadow-lg backdrop-blur-sm"
           data-testid="landrush-zombie-escape-pickup-prompt"
         >
-          <kbd className="grid size-6 place-items-center rounded-full bg-white text-[11px] text-slate-950">
-            {inputMode === 'gamepad' ? '□' : 'E'}
-          </kbd>
-          <span>
-            {pickupPrompt.affordable ? 'Buy' : 'Need'} {pickupPrompt.displayName} · $
-            {pickupPrompt.cost}
-          </span>
+          {pickupPresentation.badge ? (
+            <kbd className="grid size-6 place-items-center rounded-full bg-white text-[11px] text-slate-950">
+              {pickupPresentation.badge}
+            </kbd>
+          ) : null}
+          <span>{pickupPresentation.message}</span>
         </div>
       ) : null}
       {generatedAssetFailureCount > 0 || generatedAssetsRetrying ? (
@@ -2129,6 +2313,27 @@ function LandrushZombieEscapeHud({
       ) : null}
     </div>
   )
+}
+
+export function resolveLandrushZombieEscapePickupPromptPresentation({
+  inputMode,
+  prompt,
+}: {
+  inputMode: ZombieEscapeInputMode
+  prompt: ZombieEscapePickupPrompt
+}) {
+  if (inputMode === 'touch') {
+    return {
+      badge: null,
+      message: prompt.affordable
+        ? `Auto-buy ${prompt.displayName} · $${String(prompt.cost)}`
+        : `Need $${String(prompt.cost)} for ${prompt.displayName}`,
+    } as const
+  }
+  return {
+    badge: inputMode === 'gamepad' ? '□' : 'E',
+    message: `${prompt.affordable ? 'Buy' : 'Need'} ${prompt.displayName} · $${String(prompt.cost)}`,
+  } as const
 }
 
 export function LandrushZombieEscapeDayCountdown({
@@ -2271,7 +2476,8 @@ function publishIntegratedDebugState({
     economy: {
       ammo: simulation.player.ammo,
       money: simulation.money,
-      purchasedWeapons: Array.from(simulation.purchasedWeapons),
+      weaponPickupRespawnAtSeconds: Array.from(simulation.weaponPickupRespawnAtSeconds),
+      weaponPurchaseCount: simulation.weaponPurchaseCount,
     },
     expectedPhase,
     lastShot,
@@ -2316,7 +2522,7 @@ function publishIntegratedDebugState({
       ? { captureNavigationScaleProofFixture: navigationScaleProofFixtureCapture }
       : {}),
     pickups: simulation.weaponPickups.map((pickup) => ({
-      available: simulation.purchasedWeapons[pickup.weaponIndex] === 0,
+      available: isZombieEscapeWeaponPickupAvailable(simulation, pickup.weaponIndex),
       scopeId: pickup.scopeId,
       weapon: ZOMBIE_ESCAPE_WEAPON_CATALOG[pickup.weaponIndex]?.id ?? null,
       world: [pickup.x + spawn.x, pickup.y + groundY, pickup.z + spawn.z],

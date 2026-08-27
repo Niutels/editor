@@ -15,7 +15,11 @@ import {
   Uint16BufferAttribute,
   Vector3,
 } from 'three'
+import { getCurrentStack, setCurrentStack, stack } from 'three/tsl'
+import type { MeshStandardNodeMaterial, NodeBuilder } from 'three/webgpu'
 import { ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS } from './zombie-escape-attack-presentation'
+import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
   collectZombieEscapeAuthoredInstanceSlots,
   countZombieEscapeAuthoredVariantCapacity,
@@ -94,7 +98,7 @@ describe('authored instanced zombie presentation', () => {
 
     try {
       expect(presentation.getReadinessSnapshot()).toEqual({
-        bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3,
+        bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4,
         failed: false,
         meshCount: 1,
         ready: true,
@@ -103,12 +107,13 @@ describe('authored instanced zombie presentation', () => {
         activeCount: 0,
         animationMode: 'baked-vertex',
         attackFrameIndex: 0,
-        bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3,
-        bakedTextureBytes: 1_776,
+        bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4,
+        bakedTextureBytes: 2_352,
         bakedTextureCount: 1,
         bakedTextureFormat: 'rgba16float',
         batchCount: 0,
         computeDispatchCount: 0,
+        deathFrameIndex: 0,
         materialMode: 'authored-texture-grade',
         runtimeGeometryUploadCount: 0,
         runtimeMixerCount: 0,
@@ -124,16 +129,19 @@ describe('authored instanced zombie presentation', () => {
         elapsedSeconds: 1,
         zombies: {
           attackCooldown: new Float32Array(1),
+          deathPresentationSeconds: new Float32Array(1),
           heading: new Float32Array(1),
           hitImpulseX: new Float32Array(1),
           hitImpulseY: new Float32Array(1),
           hitImpulseZ: new Float32Array(1),
           hitReaction: new Float32Array(1),
+          health: new Float32Array([1]),
           intent: new Uint8Array(1),
           locomotionBlend: new Float32Array([1]),
           locomotionPhase: new Float32Array([Math.PI]),
           pool: { active: new Uint8Array([1]) },
           runBlend: new Float32Array([1]),
+          spawnOrdinal: new Uint32Array(1),
           variant: new Uint8Array(1),
           x: new Float32Array([3]),
           y: new Float32Array(1),
@@ -173,9 +181,9 @@ describe('authored instanced zombie presentation', () => {
     })
 
     try {
-      expect(yieldedSliceCount).toBeGreaterThanOrEqual(39)
+      expect(yieldedSliceCount).toBeGreaterThanOrEqual(51)
       expect(presentation.getReadinessSnapshot()).toEqual({
-        bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3,
+        bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4,
         failed: false,
         meshCount: 1,
         ready: true,
@@ -255,6 +263,45 @@ describe('authored instanced zombie presentation', () => {
       source.geometry.dispose()
       source.material.dispose()
       map.dispose()
+    }
+  })
+
+  test('builds baked vertex assignments against the supplied cold-start stack', () => {
+    const source = createSkinnedSource()
+    const presentation = createZombieEscapeAuthoredInstancePresentation({
+      attackClip: null,
+      instanceCapacity: 1,
+      modelTransform: { offset: new Vector3(), scale: 1 },
+      runClip: null,
+      source: source.root,
+      variantIndex: 0,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+    const mesh = presentation.root.children[0] as InstancedMesh
+    const material = mesh.material as MeshStandardNodeMaterial
+    const builderStack = stack()
+    const previousStack = getCurrentStack()
+    const consoleError = spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      setCurrentStack(null)
+      material.setupPosition({
+        geometry: mesh.geometry,
+        object: mesh,
+        stack: builderStack,
+      } as NodeBuilder)
+
+      expect(consoleError).not.toHaveBeenCalled()
+      expect(builderStack.nodes.slice(0, 2).every((node) => 'isAssignNode' in node)).toBe(true)
+      expect(builderStack.nodes.length).toBeGreaterThan(2)
+      expect(getCurrentStack()).toBeNull()
+    } finally {
+      setCurrentStack(previousStack)
+      consoleError.mockRestore()
+      presentation.dispose()
+      source.geometry.dispose()
+      source.material.dispose()
     }
   })
 
@@ -365,6 +412,42 @@ describe('authored instanced zombie presentation', () => {
     expect(idleFrame).toBe(0)
   })
 
+  test('gives a dead instance the collapse bank and holds its exact terminal frame', () => {
+    const firstDeathFrame = resolveZombieEscapeAuthoredBakedFrame({
+      attackCooldown: 0,
+      attackIntent: ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase,
+      deathPresentationSeconds: ZOMBIE_ESCAPE_SIMULATION.zombieDeathPresentationSeconds,
+      health: 0,
+      locomotionBlend: 1,
+      locomotionPhase: Math.PI,
+      runBlend: 1,
+    })
+    const middleDeathFrame = resolveZombieEscapeAuthoredBakedFrame({
+      attackCooldown: 0,
+      attackIntent: ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase,
+      deathPresentationSeconds:
+        ZOMBIE_ESCAPE_SIMULATION.zombieDeathPresentationSeconds -
+        ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS * 0.5,
+      health: 0,
+      locomotionBlend: 1,
+      locomotionPhase: Math.PI,
+      runBlend: 1,
+    })
+    const settledDeathFrame = resolveZombieEscapeAuthoredBakedFrame({
+      attackCooldown: 0,
+      attackIntent: ZOMBIE_ESCAPE_ZOMBIE_INTENT.chase,
+      deathPresentationSeconds: 0.2,
+      health: 0,
+      locomotionBlend: 1,
+      locomotionPhase: Math.PI,
+      runBlend: 1,
+    })
+
+    expect(firstDeathFrame).toBe(1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 3)
+    expect(middleDeathFrame).toBeGreaterThan(firstDeathFrame)
+    expect(settledDeathFrame).toBe(ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4)
+  })
+
   test('keeps each retained instance frame stable when uniformly distributed membership changes', () => {
     const source = createSkinnedSource()
     const presentation = createZombieEscapeAuthoredInstancePresentation({
@@ -454,16 +537,19 @@ describe('authored instanced zombie presentation', () => {
 function createAuthoredState(capacity: number) {
   return {
     attackCooldown: new Float32Array(capacity),
+    deathPresentationSeconds: new Float32Array(capacity),
     heading: new Float32Array(capacity),
     hitImpulseX: new Float32Array(capacity),
     hitImpulseY: new Float32Array(capacity),
     hitImpulseZ: new Float32Array(capacity),
     hitReaction: new Float32Array(capacity),
+    health: new Float32Array(capacity).fill(1),
     intent: new Uint8Array(capacity),
     locomotionBlend: new Float32Array(capacity).fill(1),
     locomotionPhase: new Float32Array(capacity),
     pool: { active: new Uint8Array(capacity).fill(1) },
     runBlend: new Float32Array(capacity).fill(1),
+    spawnOrdinal: new Uint32Array(capacity),
     variant: new Uint8Array(capacity),
     x: new Float32Array(capacity),
     y: new Float32Array(capacity),
