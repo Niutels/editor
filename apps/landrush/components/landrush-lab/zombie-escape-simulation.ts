@@ -107,6 +107,16 @@ import {
   type ZombieEscapeImpactAttachment,
 } from './zombie-escape-impact-attachment'
 import {
+  createZombieEscapePlayerTrail,
+  createZombieEscapePlayerTrailPoint,
+  readZombieEscapePlayerTrailPoint,
+  recordZombieEscapePlayerTrailPoint,
+  resetZombieEscapePlayerTrail,
+  setZombieEscapePlayerTrailOutgoingConnector,
+  type ZombieEscapePlayerTrail,
+  type ZombieEscapePlayerTrailPoint,
+} from './zombie-escape-player-trail'
+import {
   acquireZombieEscapePoolSlot,
   createZombieEscapeFixedPool,
   releaseZombieEscapePoolSlot,
@@ -171,6 +181,12 @@ const ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_DISTANCE_METERS = 3
 const ZOMBIE_ESCAPE_LIVE_GOAL_PROJECTION_MAXIMUM_LAYER_DISTANCE_METERS = ZOMBIE_ESCAPE_PLAYER_HEIGHT
 const ZOMBIE_ESCAPE_LIVE_GOAL_VELOCITY_RESPONSE_PER_SECOND = 20
 const ZOMBIE_ESCAPE_ROUTE_VELOCITY_RESPONSE_PER_SECOND = 7
+const ZOMBIE_ESCAPE_PLAYER_TRAIL_MAXIMUM_CONTINUITY_DISTANCE_METERS = 4
+const ZOMBIE_ESCAPE_PLAYER_TRAIL_MAXIMUM_ADVANCES_PER_TICK = 8
+const ZOMBIE_ESCAPE_PLAYER_TRAIL_REVALIDATION_INTERVAL_TICKS = 15
+const ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_INVALID = 0
+const ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_CLEAR = 1
+const ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_BREAKABLE = 2
 const ZOMBIE_ESCAPE_ROUTE_TARGET_MAXIMUM_DRIFT_METERS =
   ZOMBIE_ESCAPE_SIMULATION.runSpeed *
   ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds *
@@ -592,6 +608,16 @@ export type ZombieEscapeZombiePool = {
   navigationWaypointNode: Int32Array
   pool: ZombieEscapeFixedPool
   projectileHitOrdinal: Uint32Array
+  pursuitTrailBlockerObjectId: Array<string | null>
+  pursuitTrailBlockerObjectOrdinal: Int32Array
+  pursuitTrailBlockingX: Float64Array
+  pursuitTrailBlockingZ: Float64Array
+  pursuitTrailConnectorSequence: Uint32Array
+  pursuitTrailGeneration: Uint32Array
+  pursuitTrailSequence: Uint32Array
+  pursuitTrailValidatedSequence: Uint32Array
+  pursuitTrailValidatedStatus: Uint8Array
+  pursuitTrailValidatedWorldRevision: Uint32Array
   runBlend: Float32Array
   spawnOrdinal: Uint32Array
   speedScale: Float32Array
@@ -816,6 +842,9 @@ export type ZombieEscapeSimulation = {
   phase: ZombieEscapeGamePhase
   phaseSecondsRemaining: number
   player: ZombieEscapePlayerState
+  playerTrail: ZombieEscapePlayerTrail
+  playerTrailPreviousScratch: ZombieEscapePlayerTrailPoint
+  playerTrailTargetScratch: ZombieEscapePlayerTrailPoint
   presentationPoseScratch: ZombieEscapePresentationPose
   projectileHitCandidateScratch: ZombieEscapeCollisionHit
   projectiles: ZombieEscapeShotPhaseMetricView
@@ -1516,6 +1545,9 @@ export function createZombieEscapeSimulation(
     phase: 'build',
     phaseSecondsRemaining: ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds,
     player: createPlayerState(arena),
+    playerTrail: createZombieEscapePlayerTrail(),
+    playerTrailPreviousScratch: createZombieEscapePlayerTrailPoint(),
+    playerTrailTargetScratch: createZombieEscapePlayerTrailPoint(),
     presentationPoseScratch: createZombieEscapePresentationPose(),
     projectileHitCandidateScratch: createZombieEscapeCollisionHit(),
     projectiles: createShotPhaseMetricView(shots, ZOMBIE_ESCAPE_SHOT_PHASE.travel),
@@ -1586,6 +1618,7 @@ export function resetZombieEscapeSimulation(
   resetShotEventPool(state.shots)
   resetWeaponImpactEventPool(state.impactEvents)
   resetZombiePool(state.zombies)
+  resetZombieEscapePlayerTrail(state.playerTrail)
   resetZombieEscapeAgentSpatialIndex(state.agentSpatialIndex)
   state.elapsedSeconds = 0
   state.extractionOpen = false
@@ -2275,6 +2308,7 @@ function initializeZombieEscapeZombie(
   zombies.navigationWaypointFallback[slot] = 0
   zombies.navigationWaypointNode[slot] = -1
   zombies.projectileHitOrdinal[slot] = 0
+  clearZombieEscapePlayerTrailPursuit(zombies, slot)
   zombies.attackCooldown[slot] = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
   zombies.attackContactResolved[slot] = 0
   zombies.attackFocusX[slot] = x
@@ -6283,6 +6317,341 @@ function updateZombieEscapePersistentNavigationGoal(state: ZombieEscapeSimulatio
   return state.navigationGoalInitialized ? state.navigationGoalRegionIndex : -1
 }
 
+function resolveZombieEscapePlayerTrailConnector(
+  state: ZombieEscapeSimulation,
+  source: ZombieEscapePlayerTrailPoint,
+  targetLayerIndex: number,
+  targetX: number,
+  targetY: number,
+  targetZ: number,
+) {
+  let bestDirectConnector = 0
+  let bestDirectScore = Number.POSITIVE_INFINITY
+  for (
+    let connectorIndex = 0;
+    connectorIndex < state.collisionWorld.navigationConnectors.length;
+    connectorIndex += 1
+  ) {
+    const connector = state.collisionWorld.navigationConnectors[connectorIndex]!
+    for (const targetEnd of [true, false]) {
+      const sourceLayerIndex = targetEnd ? connector.startLayerIndex : connector.endLayerIndex
+      const destinationLayerIndex = targetEnd ? connector.endLayerIndex : connector.startLayerIndex
+      if (sourceLayerIndex !== source.layerIndex || destinationLayerIndex !== targetLayerIndex) {
+        continue
+      }
+      const sourceX = targetEnd ? connector.startX : connector.endX
+      const sourceY = targetEnd ? connector.startY : connector.endY
+      const sourceZ = targetEnd ? connector.startZ : connector.endZ
+      const destinationX = targetEnd ? connector.endX : connector.startX
+      const destinationY = targetEnd ? connector.endY : connector.startY
+      const destinationZ = targetEnd ? connector.endZ : connector.startZ
+      const maximumEndpointDistance = connector.halfWidth + state.collisionWorld.agentRadius + 0.75
+      const sourceDistanceSquared =
+        (source.x - sourceX) ** 2 + (source.y - sourceY) ** 2 + (source.z - sourceZ) ** 2
+      const destinationDistanceSquared =
+        (targetX - destinationX) ** 2 +
+        (targetY - destinationY) ** 2 +
+        (targetZ - destinationZ) ** 2
+      if (
+        sourceDistanceSquared > maximumEndpointDistance ** 2 ||
+        destinationDistanceSquared > maximumEndpointDistance ** 2
+      ) {
+        continue
+      }
+      const score = sourceDistanceSquared + destinationDistanceSquared
+      if (score < bestDirectScore) {
+        bestDirectScore = score
+        bestDirectConnector = targetEnd ? connectorIndex + 1 : -(connectorIndex + 1)
+      }
+    }
+  }
+  if (bestDirectConnector !== 0) return bestDirectConnector
+
+  const ascending = targetY > source.y
+  let bestChainConnector = 0
+  let bestChainScore = Number.POSITIVE_INFINITY
+  for (
+    let connectorIndex = 0;
+    connectorIndex < state.collisionWorld.navigationConnectors.length;
+    connectorIndex += 1
+  ) {
+    const connector = state.collisionWorld.navigationConnectors[connectorIndex]!
+    const targetEnd = ascending ? connector.ascendingEnd : !connector.ascendingEnd
+    const sourceLayerIndex = targetEnd ? connector.startLayerIndex : connector.endLayerIndex
+    const chainTargetY = ascending ? connector.chainUpperY : connector.chainLowerY
+    if (
+      sourceLayerIndex !== source.layerIndex ||
+      Math.abs(chainTargetY - targetY) > ZOMBIE_ESCAPE_LIVE_GOAL_LAYER_TOLERANCE_METERS
+    ) {
+      continue
+    }
+    let isChainEntry = true
+    for (const candidate of state.collisionWorld.navigationConnectors) {
+      if (
+        candidate.chainId === connector.chainId &&
+        (ascending
+          ? candidate.chainOrder < connector.chainOrder
+          : candidate.chainOrder > connector.chainOrder)
+      ) {
+        isChainEntry = false
+        break
+      }
+    }
+    if (!isChainEntry) continue
+    const sourceX = targetEnd ? connector.startX : connector.endX
+    const sourceY = targetEnd ? connector.startY : connector.endY
+    const sourceZ = targetEnd ? connector.startZ : connector.endZ
+    const sourceDistanceSquared =
+      (source.x - sourceX) ** 2 + (source.y - sourceY) ** 2 + (source.z - sourceZ) ** 2
+    const maximumEndpointDistance = connector.halfWidth + state.collisionWorld.agentRadius + 0.75
+    if (sourceDistanceSquared > maximumEndpointDistance ** 2) continue
+    if (sourceDistanceSquared < bestChainScore) {
+      bestChainScore = sourceDistanceSquared
+      bestChainConnector = targetEnd ? connectorIndex + 1 : -(connectorIndex + 1)
+    }
+  }
+  return bestChainConnector
+}
+
+function updateZombieEscapePlayerTrail(state: ZombieEscapeSimulation) {
+  const trail = state.playerTrail
+  if (!state.navigationGoalInitialized) {
+    if (trail.count > 0) resetZombieEscapePlayerTrail(trail)
+    return
+  }
+  const input = {
+    layerIndex: state.navigationGoalLayerIndex,
+    regionIndex: state.navigationGoalRegionIndex,
+    tick: state.navigationIntentTick,
+    x: state.navigationGoalX,
+    y: state.navigationGoalY,
+    z: state.navigationGoalZ,
+  }
+  if (
+    trail.count <= 0 ||
+    !readZombieEscapePlayerTrailPoint(trail, trail.newestSequence, state.playerTrailPreviousScratch)
+  ) {
+    recordZombieEscapePlayerTrailPoint(trail, input, true)
+    return
+  }
+  const previous = state.playerTrailPreviousScratch
+  const distanceSquared =
+    (input.x - previous.x) ** 2 + (input.y - previous.y) ** 2 + (input.z - previous.z) ** 2
+  if (
+    input.layerIndex === previous.layerIndex &&
+    distanceSquared > ZOMBIE_ESCAPE_PLAYER_TRAIL_MAXIMUM_CONTINUITY_DISTANCE_METERS ** 2
+  ) {
+    resetZombieEscapePlayerTrail(trail)
+    recordZombieEscapePlayerTrailPoint(trail, input, true)
+    return
+  }
+  if (input.layerIndex !== previous.layerIndex) {
+    const encodedConnector = resolveZombieEscapePlayerTrailConnector(
+      state,
+      previous,
+      input.layerIndex,
+      input.x,
+      input.y,
+      input.z,
+    )
+    if (encodedConnector === 0) {
+      resetZombieEscapePlayerTrail(trail)
+      recordZombieEscapePlayerTrailPoint(trail, input, true)
+      return
+    }
+    const sourceSequence = previous.sequence
+    recordZombieEscapePlayerTrailPoint(trail, input, true)
+    setZombieEscapePlayerTrailOutgoingConnector(
+      trail,
+      sourceSequence,
+      Math.abs(encodedConnector) - 1,
+      encodedConnector > 0,
+    )
+    return
+  }
+  recordZombieEscapePlayerTrailPoint(trail, input)
+}
+
+function resetZombieEscapePlayerTrailValidation(zombies: ZombieEscapeZombiePool, slot: number) {
+  zombies.pursuitTrailBlockerObjectId[slot] = null
+  zombies.pursuitTrailBlockerObjectOrdinal[slot] = -1
+  zombies.pursuitTrailBlockingX[slot] = 0
+  zombies.pursuitTrailBlockingZ[slot] = 0
+  zombies.pursuitTrailValidatedSequence[slot] = 0
+  zombies.pursuitTrailValidatedStatus[slot] = ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_INVALID
+  zombies.pursuitTrailValidatedWorldRevision[slot] = 0
+}
+
+function clearZombieEscapePlayerTrailPursuit(zombies: ZombieEscapeZombiePool, slot: number) {
+  zombies.pursuitTrailConnectorSequence[slot] = 0
+  zombies.pursuitTrailGeneration[slot] = 0
+  zombies.pursuitTrailSequence[slot] = 0
+  resetZombieEscapePlayerTrailValidation(zombies, slot)
+}
+
+function synchronizeZombieEscapePlayerTrailPursuit(state: ZombieEscapeSimulation, slot: number) {
+  const trail = state.playerTrail
+  if (trail.count <= 0 || trail.newestSequence <= 0) return
+  const zombies = state.zombies
+  if (
+    zombies.pursuitTrailGeneration[slot] !== trail.generation ||
+    zombies.pursuitTrailSequence[slot] !== trail.newestSequence
+  ) {
+    zombies.pursuitTrailGeneration[slot] = trail.generation
+    zombies.pursuitTrailSequence[slot] = trail.newestSequence
+    resetZombieEscapePlayerTrailValidation(zombies, slot)
+  }
+  zombies.pursuitTrailConnectorSequence[slot] = 0
+}
+
+function writeZombieEscapePlayerTrailNavigationSample(
+  state: ZombieEscapeSimulation,
+  slot: number,
+  sourceX: number,
+  sourceY: number,
+  sourceZ: number,
+  collisionRadius: number,
+) {
+  const trail = state.playerTrail
+  const zombies = state.zombies
+  zombies.pursuitTrailConnectorSequence[slot] = 0
+  if (
+    zombies.pursuitTrailGeneration[slot] !== trail.generation ||
+    zombies.pursuitTrailSequence[slot]! <= 0
+  ) {
+    clearZombieEscapePlayerTrailPursuit(zombies, slot)
+    return false
+  }
+  const target = state.playerTrailTargetScratch
+  const arrivalRadius = Math.max(0.18, collisionRadius * 0.8)
+  let sequence = zombies.pursuitTrailSequence[slot]!
+  for (
+    let advance = 0;
+    advance < ZOMBIE_ESCAPE_PLAYER_TRAIL_MAXIMUM_ADVANCES_PER_TICK;
+    advance += 1
+  ) {
+    if (!readZombieEscapePlayerTrailPoint(trail, sequence, target)) {
+      clearZombieEscapePlayerTrailPursuit(zombies, slot)
+      return false
+    }
+    const distanceSquared =
+      (target.x - sourceX) ** 2 + (target.y - sourceY) ** 2 + (target.z - sourceZ) ** 2
+    if (
+      target.connectorIndex >= 0 ||
+      distanceSquared > arrivalRadius * arrivalRadius ||
+      sequence >= trail.newestSequence
+    ) {
+      break
+    }
+    sequence += 1
+    zombies.pursuitTrailSequence[slot] = sequence
+    resetZombieEscapePlayerTrailValidation(zombies, slot)
+  }
+  if (!readZombieEscapePlayerTrailPoint(trail, sequence, target)) {
+    clearZombieEscapePlayerTrailPursuit(zombies, slot)
+    return false
+  }
+  const shouldRetryInvalidSegment =
+    zombies.pursuitTrailValidatedStatus[slot] === ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_INVALID &&
+    (state.navigationIntentTick + slot) % ZOMBIE_ESCAPE_PLAYER_TRAIL_REVALIDATION_INTERVAL_TICKS ===
+      0
+  if (
+    zombies.pursuitTrailValidatedSequence[slot] !== sequence ||
+    zombies.pursuitTrailValidatedWorldRevision[slot] !== state.navigationWorldRevision ||
+    shouldRetryInvalidSegment
+  ) {
+    resetZombieEscapePlayerTrailValidation(zombies, slot)
+    zombies.pursuitTrailValidatedSequence[slot] = sequence
+    zombies.pursuitTrailValidatedWorldRevision[slot] = state.navigationWorldRevision
+    const sourceLayerIndex = resolveZombieEscapeSparseLayerAtPosition(
+      state,
+      sourceX,
+      sourceY,
+      sourceZ,
+    )
+    const segmentIsClear =
+      sourceLayerIndex === target.layerIndex &&
+      zombieEscapeSameLayerNavigationSegmentIsClear(
+        state.collisionWorld,
+        sourceX,
+        sourceY,
+        sourceZ,
+        target.x,
+        target.y,
+        target.z,
+        state.collisionWorld.agentRadius,
+        state.navigationHitScratch,
+      )
+    if (segmentIsClear) {
+      zombies.pursuitTrailValidatedStatus[slot] = ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_CLEAR
+    } else if (
+      sourceLayerIndex === target.layerIndex &&
+      isZombieEscapeCollisionHitBreakable(state.collisionWorld, state.navigationHitScratch)
+    ) {
+      zombies.pursuitTrailValidatedStatus[slot] = ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_BREAKABLE
+      zombies.pursuitTrailBlockerObjectId[slot] = resolveZombieEscapeCollisionHitObjectId(
+        state.collisionWorld,
+        state.navigationHitScratch,
+      )
+      zombies.pursuitTrailBlockerObjectOrdinal[slot] = resolveZombieEscapeCollisionHitObjectOrdinal(
+        state.collisionWorld,
+        state.navigationHitScratch,
+      )
+      zombies.pursuitTrailBlockingX[slot] =
+        sourceX + (target.x - sourceX) * state.navigationHitScratch.time
+      zombies.pursuitTrailBlockingZ[slot] =
+        sourceZ + (target.z - sourceZ) * state.navigationHitScratch.time
+    }
+    resetZombieEscapeNavigationHit(state.navigationHitScratch)
+  }
+  const validationStatus = zombies.pursuitTrailValidatedStatus[slot]!
+  if (validationStatus === ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_INVALID) return false
+
+  const sample = state.navigationSampleScratch
+  const directionX = target.x - sourceX
+  const directionZ = target.z - sourceZ
+  const directionLength = Math.hypot(directionX, directionZ)
+  sample.blockingDistance =
+    validationStatus === ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_BREAKABLE
+      ? Math.hypot(
+          zombies.pursuitTrailBlockingX[slot]! - sourceX,
+          zombies.pursuitTrailBlockingZ[slot]! - sourceZ,
+        )
+      : Number.POSITIVE_INFINITY
+  sample.blockingX =
+    validationStatus === ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_BREAKABLE
+      ? zombies.pursuitTrailBlockingX[slot]!
+      : target.x
+  sample.blockingZ =
+    validationStatus === ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_BREAKABLE
+      ? zombies.pursuitTrailBlockingZ[slot]!
+      : target.z
+  sample.connectorIndex = -1
+  sample.connectorTargetEnd = false
+  sample.reachable = true
+  sample.waypointNode = -1
+  sample.waypointUsesFallback = false
+  sample.x = directionLength > arrivalRadius ? directionX / directionLength : 0
+  sample.z = directionLength > arrivalRadius ? directionZ / directionLength : 0
+  if (
+    target.connectorIndex >= 0 &&
+    directionLength <= Math.max(arrivalRadius, state.collisionWorld.agentRadius + 0.15)
+  ) {
+    const connector = state.collisionWorld.navigationConnectors[target.connectorIndex]
+    if (!connector) {
+      clearZombieEscapePlayerTrailPursuit(zombies, slot)
+      return false
+    }
+    const directionAmount = target.connectorTargetEnd ? 1 : -1
+    sample.connectorIndex = target.connectorIndex
+    sample.connectorTargetEnd = target.connectorTargetEnd
+    sample.x = connector.directionX * directionAmount
+    sample.z = connector.directionZ * directionAmount
+    zombies.pursuitTrailConnectorSequence[slot] = sequence
+  }
+  return true
+}
+
 function findZombieEscapeProtectedStagingReaderForDrain(state: ZombieEscapeSimulation) {
   const zombies = state.zombies
   const capacity = zombies.pool.capacity
@@ -6444,6 +6813,7 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
   state.navigationIntentTick = (navigationIntentTick + 1) >>> 0
   state.simulationTick = state.navigationIntentTick
   const liveGoalRegionIndex = updateZombieEscapePersistentNavigationGoal(state)
+  updateZombieEscapePlayerTrail(state)
   const committedRouteGenerationBeforeNavigationUpdate =
     state.navigationTargetCommittedRouteGeneration
   if (state.collisionWorld.navigationMode === 'sparse') {
@@ -6649,6 +7019,7 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
     if (activeConnector) {
       let targetEnd = zombies.navigationConnectorTargetEnd[slot] !== 0
       if (
+        zombies.pursuitTrailConnectorSequence[slot] === 0 &&
         state.navigationGoalInitialized &&
         state.navigationGoalResolvedTick === state.navigationIntentTick
       ) {
@@ -7144,6 +7515,7 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       }
     }
     if (liveGoalVisible) {
+      synchronizeZombieEscapePlayerTrailPursuit(state, slot)
       directBlockingObjectId = null
       directBlockingObjectOrdinal = -1
       directBlockerIsBreakable = false
@@ -7169,6 +7541,22 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       directBlockerIsBreakable = true
       state.navigationSampleScratch.blockingX = liveGoalBlockingX
       state.navigationSampleScratch.blockingZ = liveGoalBlockingZ
+    }
+    const playerTrailPursuitApplied =
+      !liveGoalVisible &&
+      !activeConnector &&
+      writeZombieEscapePlayerTrailNavigationSample(state, slot, x, y, z, collisionRadius)
+    if (playerTrailPursuitApplied) {
+      const trailBlockerIsBreakable =
+        zombies.pursuitTrailValidatedStatus[slot] ===
+        ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_BREAKABLE
+      directBlockingObjectId = trailBlockerIsBreakable
+        ? (zombies.pursuitTrailBlockerObjectId[slot] ?? null)
+        : null
+      directBlockingObjectOrdinal = trailBlockerIsBreakable
+        ? zombies.pursuitTrailBlockerObjectOrdinal[slot]!
+        : -1
+      directBlockerIsBreakable = trailBlockerIsBreakable
     }
     const routeSteerX = state.navigationSampleScratch.x
     const routeSteerZ = state.navigationSampleScratch.z
@@ -7545,6 +7933,12 @@ function updateZombies(state: ZombieEscapeSimulation, delta: number) {
       zombies.vz[slot] = (zombies.z[slot]! - z) / delta
       if (zombies.navigationConnector[slot] !== previousConnectorIndex) {
         if (zombies.navigationConnector[slot]! < 0) {
+          const completedTrailConnectorSequence = zombies.pursuitTrailConnectorSequence[slot]!
+          if (completedTrailConnectorSequence > 0) {
+            zombies.pursuitTrailSequence[slot] = completedTrailConnectorSequence + 1
+            resetZombieEscapePlayerTrailValidation(zombies, slot)
+          }
+          zombies.pursuitTrailConnectorSequence[slot] = 0
           if (state.collisionWorld.navigationMode !== 'sparse') {
             deferZombieEscapeNavigationIntentAdmission(state, slot, 'connectorChanged')
           } else {
@@ -8015,6 +8409,7 @@ function applyZombieEscapeEffectiveCollisionWorld(state: ZombieEscapeSimulation)
     state.navigationGoalInitialized = false
     state.navigationGoalLayerIndex = -1
     state.navigationGoalRegionIndex = -1
+    resetZombieEscapePlayerTrail(state.playerTrail)
   }
   if (navigationWorld.navigationGraph !== previousNavigationGraph) {
     remapZombieEscapeNavigationWaypoints(state, previousNavigationWorld, navigationWorld)
@@ -8561,6 +8956,7 @@ function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
   resetShotEventPool(state.shots)
   resetWeaponImpactEventPool(state.impactEvents)
   resetZombiePool(state.zombies)
+  resetZombieEscapePlayerTrail(state.playerTrail)
   resetZombieEscapeAgentSpatialIndex(state.agentSpatialIndex)
   resetZombieEscapeNavigationIntentScheduler(state)
   state.extractionOpen = false
@@ -8589,6 +8985,7 @@ function enterZombieEscapeBuild(state: ZombieEscapeSimulation) {
   resetShotEventPool(state.shots)
   resetWeaponImpactEventPool(state.impactEvents)
   resetZombiePool(state.zombies)
+  resetZombieEscapePlayerTrail(state.playerTrail)
   resetZombieEscapeAgentSpatialIndex(state.agentSpatialIndex)
   resetZombieEscapeNavigationIntentScheduler(state)
   restoreZombieEscapeObstacleState(state)
@@ -8953,6 +9350,16 @@ function createZombiePool(capacity: number): ZombieEscapeZombiePool {
     navigationWaypointNode: new Int32Array(capacity).fill(-1),
     pool: createZombieEscapeFixedPool(capacity),
     projectileHitOrdinal: new Uint32Array(capacity),
+    pursuitTrailBlockerObjectId: Array.from({ length: capacity }, () => null),
+    pursuitTrailBlockerObjectOrdinal: new Int32Array(capacity).fill(-1),
+    pursuitTrailBlockingX: new Float64Array(capacity),
+    pursuitTrailBlockingZ: new Float64Array(capacity),
+    pursuitTrailConnectorSequence: new Uint32Array(capacity),
+    pursuitTrailGeneration: new Uint32Array(capacity),
+    pursuitTrailSequence: new Uint32Array(capacity),
+    pursuitTrailValidatedSequence: new Uint32Array(capacity),
+    pursuitTrailValidatedStatus: new Uint8Array(capacity),
+    pursuitTrailValidatedWorldRevision: new Uint32Array(capacity),
     runBlend: new Float32Array(capacity),
     spawnOrdinal: new Uint32Array(capacity),
     speedScale: new Float32Array(capacity),
@@ -9113,6 +9520,16 @@ function resetZombiePool(zombies: ZombieEscapeZombiePool) {
   zombies.navigationWaypointFallback.fill(0)
   zombies.navigationWaypointNode.fill(-1)
   zombies.projectileHitOrdinal.fill(0)
+  zombies.pursuitTrailBlockerObjectId.fill(null)
+  zombies.pursuitTrailBlockerObjectOrdinal.fill(-1)
+  zombies.pursuitTrailBlockingX.fill(0)
+  zombies.pursuitTrailBlockingZ.fill(0)
+  zombies.pursuitTrailConnectorSequence.fill(0)
+  zombies.pursuitTrailGeneration.fill(0)
+  zombies.pursuitTrailSequence.fill(0)
+  zombies.pursuitTrailValidatedSequence.fill(0)
+  zombies.pursuitTrailValidatedStatus.fill(ZOMBIE_ESCAPE_PLAYER_TRAIL_VALIDATION_INVALID)
+  zombies.pursuitTrailValidatedWorldRevision.fill(0)
   zombies.runBlend.fill(0)
   zombies.spawnOrdinal.fill(0)
   zombies.speedScale.fill(0)
