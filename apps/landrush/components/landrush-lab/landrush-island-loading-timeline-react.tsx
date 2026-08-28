@@ -266,12 +266,11 @@ export function useLandrushIslandLoadingTimeline({
     animationRef.current = inheritedMotion?.animation ?? null
     percentAnimationRef.current = inheritedMotion?.percentAnimation ?? null
     visualSegmentRef.current = inheritedVisualSegment
-    let animationElapsedMs =
-      Number.isFinite(inheritedMotion?.animationElapsedMs)
-        ? Math.max(0, inheritedMotion?.animationElapsedMs ?? 0)
-        : inheritedMotion?.animation.currentTime === null
-          ? null
-          : Math.max(0, Number(inheritedMotion?.animation.currentTime) || 0)
+    let animationElapsedMs = Number.isFinite(inheritedMotion?.animationElapsedMs)
+      ? Math.max(0, inheritedMotion?.animationElapsedMs ?? 0)
+      : inheritedMotion?.animation.currentTime === null
+        ? null
+        : Math.max(0, Number(inheritedMotion?.animation.currentTime) || 0)
     let completionRequested = false
     let fadeStarted = false
     let fadeAttempt = 0
@@ -865,13 +864,13 @@ export function animateLandrushIslandLoadingHandoffFade(
 ) {
   const boundedDurationMs = Math.max(0, durationMs)
   element.style.opacity = '1'
-  element.style.willChange = 'opacity'
   if (!(boundedDurationMs > 0 && typeof element.animate === 'function')) {
     element.style.opacity = '0'
     element.style.removeProperty('will-change')
     onFinish()
     return null
   }
+  element.style.willChange = 'opacity'
   const animation = element.animate([{ opacity: 1 }, { opacity: 0 }], {
     duration: boundedDurationMs,
     easing: 'ease-out',
@@ -1170,8 +1169,7 @@ export function createLandrushIslandLoadingRetargetKeyframes(
     const previous = keyframes.at(-1)!
     const boundedOffset = Math.min(1, Math.max(previous.offset, clamp01(offset)))
     if (Math.abs(previous.offset - boundedOffset) <= Number.EPSILON) return
-    const elapsedSeconds =
-      ((boundedOffset - previous.offset) * timelineDurationMs) / 1_000
+    const elapsedSeconds = ((boundedOffset - previous.offset) * timelineDurationMs) / 1_000
     const maximumProgress =
       previous.progress + LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND * elapsedSeconds
     keyframes.push({

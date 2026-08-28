@@ -84,7 +84,7 @@ describe('Landrush island Zombie startup staging', () => {
     expect(resolveLandrushIslandZombieStartupGates(state).cosmeticAssetsAdmitted).toBe(true)
   })
 
-  test('requires successful real-scene submissions and a settled WebGL fence', () => {
+  test('requires successful real-scene submissions and a settled GPU fence', () => {
     expect(
       resolveLandrushIslandZombieScenePrimeAction({
         attempts: 0,
@@ -298,6 +298,8 @@ describe('Landrush island Zombie startup staging', () => {
       /sceneDrawSubmissionRef=\{\s*zombieEscapeEnabled \? sceneDrawSubmissionRef : undefined\s*\}/,
     )
     expect(client).toContain('sceneDrawSubmissionRef={sceneDrawSubmissionRef}')
+    expect(client).toContain('queue.onSubmittedWorkDone()')
+    expect(client).toContain('context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0)')
     expect(client).toMatch(/zombieEscapeEnabled \? \(\s*<LandrushIslandZombieScenePrimeReporter/)
     expect(client).toContain('LANDRUSH_ISLAND_ZOMBIE_STARTUP_TERMINAL_DEADLINE_MS')
     expect(client).toContain('zombieStartupDeadlineStartedAtRef.current ??= now')

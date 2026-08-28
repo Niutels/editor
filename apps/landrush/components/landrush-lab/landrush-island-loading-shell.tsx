@@ -10,7 +10,7 @@ export function LandrushIslandLoadingShell() {
       aria-valuemin={0}
       aria-valuenow={0}
       aria-valuetext={`${LANDRUSH_ISLAND_LOADING_INITIAL_STATUS}, 0%`}
-      className="fixed inset-0 z-[230] grid place-items-center bg-[#0f1720] text-white"
+      className="fixed inset-0 z-[230] grid place-items-center bg-[#0f1720] text-white [contain:strict] [font-family:Arial,sans-serif]"
       data-landrush-island-loading-shell
       role="progressbar"
       suppressHydrationWarning
@@ -18,24 +18,21 @@ export function LandrushIslandLoadingShell() {
       <LandrushIslandLoadingShellClientBridge />
       <div className="w-[50vw] max-w-[760px]">
         <div className="mb-3 flex items-center justify-between">
-          <span
-            className="font-medium text-sm tracking-[0.18em] uppercase"
-            data-landrush-island-loading-shell-status
-          >
+          <span className="font-semibold text-sm" data-landrush-island-loading-shell-status>
             {LANDRUSH_ISLAND_LOADING_INITIAL_STATUS}
           </span>
           <span
             aria-hidden
-            className="w-[4ch] text-right font-mono text-sm tabular-nums"
+            className="w-[4ch] text-right text-sm tabular-nums"
             data-landrush-island-loading-shell-percent
             data-landrush-island-loading-shell-percent-value="0"
           >
             0%
           </span>
         </div>
-        <div className="h-3 overflow-hidden rounded-full border border-white/24 bg-slate-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+        <div className="h-2 overflow-hidden bg-[#27313d]">
           <div
-            className="h-full w-full rounded-full bg-amber-200 opacity-70"
+            className="h-full w-full bg-[#fde68a]"
             {...{ [LANDRUSH_ISLAND_LOADING_SHELL_FILL_ATTRIBUTE]: '' }}
           />
         </div>

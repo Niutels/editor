@@ -7402,6 +7402,10 @@ type LandrushIslandWebGLFenceContext = Pick<
   | 'flush'
 >
 
+type LandrushIslandGpuQueue = Readonly<{
+  onSubmittedWorkDone: () => Promise<unknown>
+}>
+
 function resolveLandrushIslandWebGLFenceContext(renderer: unknown) {
   const context = (renderer as { getContext?: () => unknown }).getContext?.() as
     | Partial<LandrushIslandWebGLFenceContext>
@@ -7420,6 +7424,12 @@ function resolveLandrushIslandWebGLFenceContext(renderer: unknown) {
     return null
   }
   return context as LandrushIslandWebGLFenceContext
+}
+
+function resolveLandrushIslandGpuQueue(renderer: unknown) {
+  const queue = (renderer as { backend?: { device?: { queue?: Partial<LandrushIslandGpuQueue> } } })
+    .backend?.device?.queue
+  return typeof queue?.onSubmittedWorkDone === 'function' ? (queue as LandrushIslandGpuQueue) : null
 }
 
 function disposeLandrushIslandWebGLFence(
@@ -7465,6 +7475,7 @@ function LandrushIslandZombieScenePrimeReporter({
   const generationRef = useRef(0)
   const sceneDrawSubmissionBaselineRef = useRef({ ...sceneDrawSubmissionRef.current })
   const primeStartedAtRef = useRef(0)
+  const gpuQueueRef = useRef<LandrushIslandGpuQueue | null>(null)
   const fenceContextRef = useRef<LandrushIslandWebGLFenceContext | null>(null)
   const fenceRef = useRef<WebGLSync | null>(null)
   const fenceStatusRef = useRef<LandrushIslandZombieScenePrimeFenceStatus>('missing')
@@ -7540,7 +7551,9 @@ function LandrushIslandZombieScenePrimeReporter({
     disposeLandrushIslandWebGLFence(fenceContextRef.current, fenceRef.current)
     fenceRef.current = null
     fenceContextRef.current = resolveLandrushIslandWebGLFenceContext(gl)
-    fenceStatusRef.current = fenceContextRef.current ? 'missing' : 'unavailable'
+    gpuQueueRef.current = resolveLandrushIslandGpuQueue(gl)
+    fenceStatusRef.current =
+      fenceContextRef.current || gpuQueueRef.current ? 'missing' : 'unavailable'
     if (active) {
       deadlineTimeoutIdRef.current = window.setTimeout(() => {
         if (!activeRef.current || outcomeScheduledRef.current) return
@@ -7574,6 +7587,7 @@ function LandrushIslandZombieScenePrimeReporter({
       outcomeFrameIdsRef.current.clear()
       disposeLandrushIslandWebGLFence(fenceContextRef.current, fenceRef.current)
       fenceRef.current = null
+      gpuQueueRef.current = null
     }
   }, [
     active,
@@ -7589,6 +7603,7 @@ function LandrushIslandZombieScenePrimeReporter({
     if (!activeRef.current || outcomeScheduledRef.current) return
     const progress = readPrimeProgress()
     const context = fenceContextRef.current
+    const queue = gpuQueueRef.current
     const fence = fenceRef.current
     if (context && fence && fenceStatusRef.current === 'pending') {
       try {
@@ -7609,18 +7624,51 @@ function LandrushIslandZombieScenePrimeReporter({
       fenceStatus: fenceStatusRef.current,
       successfulSubmissions: progress.successfulSubmissions,
     })
-    if (action === 'insert-fence' && context) {
-      try {
-        const nextFence = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0)
-        if (nextFence) {
-          fenceRef.current = nextFence
-          fenceStatusRef.current = 'pending'
-          context.flush()
-        } else {
+    if (action === 'insert-fence') {
+      if (context) {
+        try {
+          const nextFence = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0)
+          if (nextFence) {
+            fenceRef.current = nextFence
+            fenceStatusRef.current = 'pending'
+            context.flush()
+          } else {
+            fenceStatusRef.current = 'failed'
+          }
+        } catch {
           fenceStatusRef.current = 'failed'
         }
-      } catch {
-        fenceStatusRef.current = 'failed'
+      } else if (queue) {
+        const generation = generationRef.current
+        fenceStatusRef.current = 'pending'
+        try {
+          void queue.onSubmittedWorkDone().then(
+            () => {
+              if (
+                activeRef.current &&
+                generationRef.current === generation &&
+                fenceStatusRef.current === 'pending'
+              ) {
+                fenceStatusRef.current = 'settled'
+                invalidate()
+                renderScheduler.requestFrame('animation')
+              }
+            },
+            () => {
+              if (
+                activeRef.current &&
+                generationRef.current === generation &&
+                fenceStatusRef.current === 'pending'
+              ) {
+                fenceStatusRef.current = 'failed'
+                invalidate()
+                renderScheduler.requestFrame('animation')
+              }
+            },
+          )
+        } catch {
+          fenceStatusRef.current = 'failed'
+        }
       }
       action = resolveLandrushIslandZombieScenePrimeAction({
         attempts: progress.attempts,
@@ -7707,23 +7755,20 @@ function LandrushIslandLoadingOverlay({
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={percent}
-      className="pointer-events-auto absolute inset-0 z-[220] grid place-items-center bg-[#0f1720]"
+      className="pointer-events-auto absolute inset-0 z-[220] grid place-items-center bg-[#0f1720] [contain:strict] [font-family:Arial,sans-serif]"
       ref={overlayRef}
       role="progressbar"
     >
       <div className="w-[50vw] max-w-[760px]">
         <div className="mb-3 flex items-center justify-between text-white">
-          <span
-            className="font-medium text-sm tracking-[0.18em] uppercase"
-            data-landrush-island-loading-shell-status
-          >
+          <span className="font-semibold text-sm" data-landrush-island-loading-shell-status>
             {statusText}
           </span>
-          <span className="font-mono text-sm tabular-nums">{percent}%</span>
+          <span className="text-sm tabular-nums">{percent}%</span>
         </div>
-        <div className="h-3 overflow-hidden rounded-full border border-white/24 bg-slate-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+        <div className="h-2 overflow-hidden bg-[#27313d]">
           <div
-            className="h-full origin-left rounded-full bg-amber-200 opacity-70"
+            className="h-full origin-left bg-[#fde68a]"
             ref={fillRef}
             style={{ transform: 'scaleX(0)' }}
           />
