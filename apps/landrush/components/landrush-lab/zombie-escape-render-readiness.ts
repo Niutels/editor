@@ -370,21 +370,27 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(currentUnits)
       activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
       applyZombieEscapeWebGLRealizationCohort(currentUnits, cohort)
-      await submitZombieEscapeWebGLRealizationDraw(
-        () => {
-          try {
-            webglRenderer.render(targetScene, camera)
-          } finally {
-            restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
-            restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
-            activeObjectSnapshots = undefined
-            activeRendererSnapshot = undefined
-          }
-        },
-        context,
-        waitForAdmissionOpportunity,
-        isCurrent,
-      )
+      const diagnosticLabel = describeZombieEscapeWebGLRealizationCohort(submittedCohorts, cohort)
+      markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:start`)
+      try {
+        await submitZombieEscapeWebGLRealizationDraw(
+          () => {
+            try {
+              webglRenderer.render(targetScene, camera)
+            } finally {
+              restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
+              restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
+              activeObjectSnapshots = undefined
+              activeRendererSnapshot = undefined
+            }
+          },
+          context,
+          waitForAdmissionOpportunity,
+          isCurrent,
+        )
+      } finally {
+        markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:end`)
+      }
       for (const unit of cohort.units) {
         for (const renderable of unit.renderables) realizedRenderables.add(renderable)
       }
@@ -410,6 +416,46 @@ function isZombieEscapeRenderableObject(object: Object3D) {
   return Boolean(
     renderable.isMesh || renderable.isLine || renderable.isPoints || renderable.isSprite,
   )
+}
+
+function describeZombieEscapeWebGLRealizationCohort(
+  cohortIndex: number,
+  cohort: ZombieEscapeWebGLRealizationCohort,
+) {
+  const units = cohort.units.map((unit) => {
+    const renderable = unit.root as Object3D & {
+      count?: number
+      geometry?: Readonly<{
+        attributes?: Readonly<Record<string, unknown>>
+        type?: string
+      }>
+      material?: Readonly<{ type?: string }> | Readonly<{ type?: string }>[]
+    }
+    const material = Array.isArray(renderable.material)
+      ? renderable.material.map(({ type }) => type ?? 'Material').join('+')
+      : (renderable.material?.type ?? 'Material')
+    return [
+      renderable.name || renderable.type,
+      `weight=${String(unit.weight)}`,
+      `count=${String(renderable.count ?? 1)}`,
+      `geometry=${renderable.geometry?.type ?? 'none'}`,
+      `attributes=${Object.keys(renderable.geometry?.attributes ?? {})
+        .sort()
+        .join('+')}`,
+      `material=${material}`,
+    ].join(',')
+  })
+  return `landrush:webgl-realization:cohort=${String(cohortIndex)}:${units.join(';')}`
+}
+
+function markZombieEscapeWebGLRealizationDiagnostic(label: string) {
+  if (
+    typeof window === 'undefined' ||
+    new URLSearchParams(window.location.search).get('bench') !== '1'
+  ) {
+    return
+  }
+  window.performance.mark(label)
 }
 
 function estimateZombieEscapeWebGLRealizationWeight(object: Object3D) {
