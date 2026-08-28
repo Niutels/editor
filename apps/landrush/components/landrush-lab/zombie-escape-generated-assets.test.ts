@@ -31,14 +31,14 @@ import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
 
 describe('generated asset render-pipeline readiness', () => {
-  test('releases timed-out or failed critical compilation through the bounded fallback', () => {
+  test('keeps degraded or failed critical compilation fail-closed until ready', () => {
     expect(
       resolveZombieEscapeRenderPipelineSettlement({
         message: 'prewarm timed out',
         state: 'degraded',
       }),
     ).toEqual({
-      contentReady: true,
+      contentReady: false,
       diagnostic: { level: 'warning', message: 'prewarm timed out' },
     })
     expect(
@@ -47,7 +47,7 @@ describe('generated asset render-pipeline readiness', () => {
         state: 'failed',
       }),
     ).toEqual({
-      contentReady: true,
+      contentReady: false,
       diagnostic: { level: 'error', message: 'shader compile rejected' },
     })
     expect(resolveZombieEscapeRenderPipelineSettlement({ state: 'ready' })).toEqual({

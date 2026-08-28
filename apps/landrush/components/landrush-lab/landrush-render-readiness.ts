@@ -73,18 +73,26 @@ export async function compileLandrushRenderRepresentatives(
     targetScene,
   }: Omit<LandrushRenderReadinessRequest, 'generation' | 'identity'>,
   waitForAdmissionOpportunity = waitForLandrushRenderAdmissionOpportunity,
+  isRequestCurrent = () => true,
 ) {
+  if (!isRequestCurrent()) return
   await renderer.init?.()
+  if (!isRequestCurrent()) return
 
   const compiledRenderables = new Set<Object3D>()
   for (const representative of representatives) {
+    if (!isRequestCurrent()) return
     if (representative.root === targetScene) {
       await renderer.compileAsync(targetScene, camera, targetScene)
+      if (!isRequestCurrent()) return
       await renderer.backend?.device?.queue?.onSubmittedWorkDone?.()
+      if (!isRequestCurrent()) return
       await waitForAdmissionOpportunity()
+      if (!isRequestCurrent()) return
       continue
     }
     for (const renderable of collectLandrushRepresentativeRenderables(representative.root)) {
+      if (!isRequestCurrent()) return
       if (compiledRenderables.has(renderable)) continue
       compiledRenderables.add(renderable)
       let pendingCompilation: Promise<unknown>
@@ -95,8 +103,11 @@ export async function compileLandrushRenderRepresentatives(
         restore()
       }
       await pendingCompilation
+      if (!isRequestCurrent()) return
       await renderer.backend?.device?.queue?.onSubmittedWorkDone?.()
+      if (!isRequestCurrent()) return
       await waitForAdmissionOpportunity()
+      if (!isRequestCurrent()) return
     }
   }
 }
@@ -200,7 +211,11 @@ export function createLandrushRenderReadinessCoordinator({
           return 'stale'
         }
         try {
-          await Promise.resolve().then(() => compile(request))
+          await Promise.resolve().then(() =>
+            compile(request, undefined, () =>
+              isLandrushRenderReadinessRequestCurrent(entry, current, disposed),
+            ),
+          )
         } catch (error) {
           if (!isLandrushRenderReadinessRequestCurrent(entry, current, disposed)) {
             entry.callbacks.clear()

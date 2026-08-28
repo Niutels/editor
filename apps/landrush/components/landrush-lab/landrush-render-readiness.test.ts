@@ -105,4 +105,27 @@ describe('Landrush render readiness compile coordination', () => {
     expect(await first).toBe('ready')
     expect(await second).toBe('ready')
   })
+
+  test('withdraws the current-request guard when an in-flight compilation is invalidated', async () => {
+    const compilation = deferred<void>()
+    const started = deferred<void>()
+    const renderer = { compileAsync: async () => undefined }
+    const observedGuards: Array<() => boolean> = []
+    const coordinator = createLandrushRenderReadinessCoordinator({
+      compile: async (_request, _waitForAdmissionOpportunity, isRequestCurrent) => {
+        observedGuards.push(isRequestCurrent)
+        started.resolve()
+        await compilation.promise
+      },
+    })
+
+    const pending = coordinator.request(createRequest(renderer), () => undefined)
+    await started.promise
+    expect(observedGuards[0]?.()).toBe(true)
+
+    coordinator.invalidate()
+    expect(observedGuards[0]?.()).toBe(false)
+    compilation.resolve()
+    expect(await pending).toBe('stale')
+  })
 })

@@ -611,6 +611,10 @@ describe('Landrush island paint readiness', () => {
     ).toContain("setAttribute('data-landrush-island-world-frame-ready', '')")
     expect(runtimeOverlaySource).toContain('bg-[#0f1720]')
     expect(runtimeOverlaySource).not.toContain('bg-transparent')
+    expect(runtimeOverlaySource).toContain(
+      "document.querySelector('[data-landrush-island-loading-shell]:not([hidden])')",
+    )
+    expect(runtimeOverlaySource).toContain('if (!visible || streamedShellOwned) return null')
   })
 
   test('keeps eager Zombie Escape weapon assets behind a local suspense boundary', () => {

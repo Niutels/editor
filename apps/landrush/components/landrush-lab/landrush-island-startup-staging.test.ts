@@ -278,6 +278,10 @@ describe('Landrush island Zombie startup staging', () => {
     const globalCss = readFileSync(new URL('../../app/globals.css', import.meta.url), 'utf8')
 
     expect(client).toContain('antialias={!zombieEscapeEnabled}')
+    expect(client).toContain("display: zombieEscapeEnabled ? 'none' : undefined")
+    expect(client).toContain(
+      '!zombieEscapeEnabled && gamepadHintsActive && !zombieEscapeNightActive',
+    )
     expect(client).toContain('sceneDrawDisabledKeepalive={!zombieEscapeEnabled}')
     expect(client).toContain("rendererBackend={zombieEscapeEnabled ? 'webgl' : undefined}")
     expect(client).toContain(

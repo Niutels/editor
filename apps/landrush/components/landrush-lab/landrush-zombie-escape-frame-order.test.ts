@@ -33,4 +33,21 @@ describe('Landrush Zombie Escape frame order', () => {
     expect(source.slice(modeStart, modeEnd)).toContain('<LandrushZombieEscapePresentation')
     expect(source.slice(modeStart, modeEnd)).toContain('<LandrushZombieEscapeHudPortal')
   })
+
+  test('defers the HUD portal until startup presentation is admitted', () => {
+    const source = readFileSync(
+      new URL('./landrush-zombie-escape-mode.tsx', import.meta.url),
+      'utf8',
+    )
+    const modeStart = source.indexOf('export function LandrushZombieEscapeMode')
+    const modeEnd = source.indexOf('type LandrushZombieEscapePresentationProps', modeStart)
+    const modeSource = source.slice(modeStart, modeEnd)
+
+    expect(modeStart).toBeGreaterThanOrEqual(0)
+    expect(modeEnd).toBeGreaterThan(modeStart)
+    expect(modeSource).toContain('const [hudPortalAdmitted, setHudPortalAdmitted] = useState(phaseReady)')
+    expect(modeSource).toContain('if (phaseReady) setHudPortalAdmitted(true)')
+    expect(modeSource).toContain('{hudPortalAdmitted ? (\n        <LandrushZombieEscapeHudPortal')
+    expect(modeSource).toContain('phaseReady={interactionActionable}')
+  })
 })

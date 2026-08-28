@@ -6874,7 +6874,7 @@ export function LandrushIslandClient({
             </LandrushPascalHost>
           </LandrushIslandStartupReactProfiler>
         </LandrushIslandStartupReactProfiler>
-        {gamepadHintsActive && !zombieEscapeNightActive ? (
+        {!zombieEscapeEnabled && gamepadHintsActive && !zombieEscapeNightActive ? (
           <div
             aria-hidden={!(dayChromePresented || buildEditorChromeActive)}
             className={[
@@ -6913,6 +6913,7 @@ export function LandrushIslandClient({
           data-landrush-day-chrome-interactive={dayChromeInteractionReady ? 'true' : 'false'}
           inert={!dayChromeInteractionReady}
           style={{
+            display: zombieEscapeEnabled ? 'none' : undefined,
             opacity: dayChromePresented ? 1 : 0,
             transition: `opacity ${dayChromeTransition}`,
           }}
@@ -7752,8 +7753,13 @@ function LandrushIslandLoadingOverlay({
     topologySignature,
   })
   const percent = Math.round(clamp(progress, 0, 100))
+  const [streamedShellOwned] = useState(
+    () =>
+      typeof document !== 'undefined' &&
+      document.querySelector('[data-landrush-island-loading-shell]:not([hidden])') !== null,
+  )
 
-  if (!visible) return null
+  if (!visible || streamedShellOwned) return null
 
   return (
     <div

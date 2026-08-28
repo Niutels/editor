@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import type { Object3D } from 'three'
-import { Group, Mesh, MeshBasicMaterial, PerspectiveCamera, Scene, SphereGeometry } from 'three'
 import {
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  PerspectiveCamera,
+  Scene,
+  SphereGeometry,
+  Vector4,
+} from 'three'
+import {
+  collectZombieEscapeWebGLRealizationUnits,
   compileZombieEscapeRenderRepresentatives,
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
@@ -10,9 +19,13 @@ import {
   createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
+  planZombieEscapeWebGLRealizationCohorts,
   ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
+  ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT,
+  ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORTS,
   type ZombieEscapePipelineRenderer,
+  type ZombieEscapeRenderReadinessCoordinator,
   type ZombieEscapeRenderReadinessTimer,
 } from './zombie-escape-render-readiness'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
@@ -90,6 +103,127 @@ function createCompileFixture() {
     root,
     targetScene,
   }
+}
+
+const WEBGL_FENCE_STATUS = {
+  alreadySignaled: 1,
+  conditionSatisfied: 2,
+  timeoutExpired: 3,
+  waitFailed: 4,
+} as const
+
+function createWebGLRealizationRenderer({
+  fenceStatuses = [],
+  onRender,
+}: {
+  fenceStatuses?: number[]
+  onRender?: (scene: Scene, call: number) => void
+} = {}) {
+  const events: string[] = []
+  const renderTarget = { id: 'initial-target' }
+  const state = {
+    activeCubeFace: 2,
+    activeMipmapLevel: 3,
+    autoClear: false,
+    renderTarget: renderTarget as unknown,
+    scissor: new Vector4(5, 6, 7, 8),
+    scissorTest: true,
+    viewport: new Vector4(1, 2, 300, 200),
+  }
+  const initial = {
+    ...state,
+    scissor: state.scissor.clone(),
+    viewport: state.viewport.clone(),
+  }
+  let deletedFences = 0
+  let nextFence = 0
+  let renderCalls = 0
+  const context = {
+    ALREADY_SIGNALED: WEBGL_FENCE_STATUS.alreadySignaled,
+    CONDITION_SATISFIED: WEBGL_FENCE_STATUS.conditionSatisfied,
+    SYNC_GPU_COMMANDS_COMPLETE: 5,
+    TIMEOUT_EXPIRED: WEBGL_FENCE_STATUS.timeoutExpired,
+    WAIT_FAILED: WEBGL_FENCE_STATUS.waitFailed,
+    clientWaitSync() {
+      events.push('fence:poll')
+      return fenceStatuses.shift() ?? WEBGL_FENCE_STATUS.conditionSatisfied
+    },
+    deleteSync() {
+      deletedFences += 1
+      events.push('fence:delete')
+    },
+    fenceSync() {
+      nextFence += 1
+      events.push('fence:create')
+      return { id: nextFence }
+    },
+    flush() {
+      events.push('fence:flush')
+    },
+  }
+  const renderer = {
+    get autoClear() {
+      return state.autoClear
+    },
+    set autoClear(value: boolean) {
+      state.autoClear = value
+    },
+    async compileAsync(root: Object3D) {
+      events.push(root.isScene ? 'compile:scene' : 'compile:renderable')
+    },
+    getActiveCubeFace: () => state.activeCubeFace,
+    getActiveMipmapLevel: () => state.activeMipmapLevel,
+    getContext: () => context,
+    getRenderTarget: () => state.renderTarget,
+    getScissor(target: Vector4) {
+      return target.copy(state.scissor)
+    },
+    getScissorTest: () => state.scissorTest,
+    getViewport(target: Vector4) {
+      return target.copy(state.viewport)
+    },
+    render(scene: Scene) {
+      renderCalls += 1
+      events.push(scene.children.length === 0 ? 'render:empty' : 'render:scene')
+      onRender?.(scene, renderCalls)
+    },
+    setRenderTarget(target: unknown, activeCubeFace = 0, activeMipmapLevel = 0) {
+      state.renderTarget = target
+      state.activeCubeFace = activeCubeFace
+      state.activeMipmapLevel = activeMipmapLevel
+    },
+    setScissor(scissor: Vector4) {
+      state.scissor.copy(scissor)
+    },
+    setScissorTest(enabled: boolean) {
+      state.scissorTest = enabled
+    },
+    setViewport(viewport: Vector4) {
+      state.viewport.copy(viewport)
+    },
+  } as unknown as ZombieEscapePipelineRenderer
+
+  return {
+    context,
+    get deletedFences() {
+      return deletedFences
+    },
+    events,
+    initial,
+    renderer,
+    state,
+  }
+}
+
+function makeHeavyRealizationMesh(name: string) {
+  const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial()) as Mesh & {
+    count: number
+    isInstancedMesh: boolean
+  }
+  mesh.name = name
+  mesh.count = 1_000_000
+  mesh.isInstancedMesh = true
+  return mesh
 }
 
 describe('Zombie Escape render representative coverage', () => {
@@ -338,7 +472,7 @@ describe('Zombie Escape render compilation', () => {
     mesh.material.dispose()
   })
 
-  test('lets the renderer compile the attached scene as one deduplicated pipeline batch', async () => {
+  test('lets WebGPU compile the attached scene as one deduplicated pipeline batch', async () => {
     const targetScene = new Scene()
     const first = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
     const second = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
@@ -350,6 +484,7 @@ describe('Zombie Escape render compilation', () => {
       {
         camera: new PerspectiveCamera(),
         renderer: {
+          backend: { device: {} },
           async compileAsync(root) {
             compiled.push(root)
           },
@@ -368,6 +503,323 @@ describe('Zombie Escape render compilation', () => {
     first.material.dispose()
     second.geometry.dispose()
     second.material.dispose()
+  })
+
+  test('collects effective renderable subtrees once and plans deterministic bounded cohorts', () => {
+    const targetScene = new Scene()
+    const parent = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    const nested = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    const sibling = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    const hiddenParent = new Group()
+    const hidden = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    parent.name = 'parent'
+    nested.name = 'nested'
+    sibling.name = 'sibling'
+    hidden.name = 'hidden'
+    hiddenParent.visible = false
+    parent.add(nested)
+    hiddenParent.add(hidden)
+    targetScene.add(parent, sibling, hiddenParent)
+
+    const units = collectZombieEscapeWebGLRealizationUnits(targetScene)
+    expect(units.map(({ root }) => root.name)).toEqual(['parent', 'sibling'])
+    expect(units[0]!.renderables.map(({ name }) => name)).toEqual(['parent', 'nested'])
+    expect(units.flatMap(({ renderables }) => renderables)).toHaveLength(3)
+    expect(new Set(units.flatMap(({ renderables }) => renderables)).size).toBe(3)
+    expect(units.flatMap(({ renderables }) => renderables)).not.toContain(hidden)
+
+    const weightedUnits = units.map((unit, index) => ({ ...unit, weight: index + 2 }))
+    const firstPlan = planZombieEscapeWebGLRealizationCohorts(weightedUnits, {
+      maxCohorts: 2,
+      maxWeight: 3,
+    })
+    const secondPlan = planZombieEscapeWebGLRealizationCohorts(weightedUnits, {
+      maxCohorts: 2,
+      maxWeight: 3,
+    })
+    expect(
+      firstPlan.map(({ units: cohortUnits }) => cohortUnits.map(({ root }) => root.name)),
+    ).toEqual([['parent'], ['sibling']])
+    expect(
+      secondPlan.map(({ units: cohortUnits }) => cohortUnits.map(({ root }) => root.name)),
+    ).toEqual([['parent'], ['sibling']])
+    expect(firstPlan.every(({ weight }) => weight <= 3)).toBe(true)
+    expect(() =>
+      planZombieEscapeWebGLRealizationCohorts(weightedUnits, {
+        maxCohorts: 1,
+        maxWeight: 3,
+      }),
+    ).toThrow('bounded maximum is 1')
+    expect(ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT).toBeGreaterThan(0)
+    expect(ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORTS).toBeGreaterThan(0)
+
+    for (const mesh of [parent, nested, sibling, hidden]) {
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+    }
+  })
+
+  test('rehearses empty output and isolated weighted cohorts before scene-prime full draws', async () => {
+    const targetScene = new Scene()
+    const first = makeHeavyRealizationMesh('first')
+    const second = makeHeavyRealizationMesh('second')
+    const hiddenParent = new Group()
+    const hidden = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    hidden.name = 'hidden'
+    hiddenParent.visible = false
+    hiddenParent.add(hidden)
+    targetScene.add(first, second, hiddenParent)
+    const sceneSignatures: string[][] = []
+    const frustumSignatures: boolean[][] = []
+    const harness = createWebGLRealizationRenderer({
+      fenceStatuses: [WEBGL_FENCE_STATUS.timeoutExpired, WEBGL_FENCE_STATUS.conditionSatisfied],
+      onRender(scene) {
+        if (scene !== targetScene) return
+        const visibleMeshes: Mesh[] = []
+        scene.traverseVisible((object) => {
+          if ((object as Mesh).isMesh) visibleMeshes.push(object as Mesh)
+        })
+        sceneSignatures.push(visibleMeshes.map(({ name }) => name))
+        frustumSignatures.push(visibleMeshes.map(({ frustumCulled }) => frustumCulled))
+      },
+    })
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => {
+        harness.events.push('admission')
+      },
+    )
+
+    expect(sceneSignatures).toEqual([['first'], ['second']])
+    expect(frustumSignatures).toEqual([[false], [false]])
+    expect(first.visible).toBe(true)
+    expect(second.visible).toBe(true)
+    expect(first.frustumCulled).toBe(true)
+    expect(second.frustumCulled).toBe(true)
+    expect(hiddenParent.visible).toBe(false)
+    expect(hidden.visible).toBe(true)
+    expect(harness.events.filter((event) => event === 'render:empty')).toHaveLength(1)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(2)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(3)
+    expect(harness.events.filter((event) => event === 'fence:flush')).toHaveLength(3)
+    expect(harness.events.filter((event) => event === 'admission')).toHaveLength(5)
+    expect(harness.deletedFences).toBe(3)
+    expect(harness.state.autoClear).toBe(harness.initial.autoClear)
+    expect(harness.state.renderTarget).toBe(harness.initial.renderTarget)
+    expect(harness.state.activeCubeFace).toBe(harness.initial.activeCubeFace)
+    expect(harness.state.activeMipmapLevel).toBe(harness.initial.activeMipmapLevel)
+    expect(harness.state.viewport.equals(harness.initial.viewport)).toBe(true)
+    expect(harness.state.scissor.equals(harness.initial.scissor)).toBe(true)
+    expect(harness.state.scissorTest).toBe(harness.initial.scissorTest)
+
+    for (const mesh of [first, second, hidden]) {
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+    }
+  })
+
+  test('recollects renderables attached or revealed during fenced cohort admission', async () => {
+    const targetScene = new Scene()
+    const first = makeHeavyRealizationMesh('first')
+    const revealedParent = new Group()
+    const revealed = makeHeavyRealizationMesh('revealed')
+    const attached = makeHeavyRealizationMesh('attached')
+    revealedParent.visible = false
+    revealedParent.add(revealed)
+    targetScene.add(first, revealedParent)
+    const sceneSignatures: string[][] = []
+    const harness = createWebGLRealizationRenderer({
+      onRender(scene) {
+        if (scene !== targetScene) return
+        const visibleNames: string[] = []
+        scene.traverseVisible((object) => {
+          if ((object as Mesh).isMesh) visibleNames.push(object.name)
+        })
+        sceneSignatures.push(visibleNames)
+      },
+    })
+    let admissions = 0
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => {
+        admissions += 1
+        if (admissions !== 3) return
+        revealedParent.visible = true
+        targetScene.add(attached)
+      },
+    )
+
+    expect(sceneSignatures).toEqual([['first'], ['revealed'], ['attached']])
+    expect(sceneSignatures.every((signature) => signature.length === 1)).toBe(true)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(3)
+    expect(harness.deletedFences).toBe(4)
+    expect(revealedParent.visible).toBe(true)
+    expect(attached.parent).toBe(targetScene)
+
+    for (const mesh of [first, revealed, attached]) {
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+    }
+  })
+
+  test('restores object and renderer state when a cohort draw throws', async () => {
+    const targetScene = new Scene()
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    targetScene.add(mesh)
+    let harness: ReturnType<typeof createWebGLRealizationRenderer>
+    harness = createWebGLRealizationRenderer({
+      onRender(_scene, call) {
+        harness.state.autoClear = true
+        harness.state.renderTarget = { id: 'mutated' }
+        harness.state.activeCubeFace = 8
+        harness.state.activeMipmapLevel = 9
+        harness.state.viewport.set(9, 9, 9, 9)
+        harness.state.scissor.set(8, 8, 8, 8)
+        harness.state.scissorTest = false
+        if (call === 2) throw new Error('cohort draw failed')
+      },
+    })
+
+    await expect(
+      compileZombieEscapeRenderRepresentatives(
+        {
+          camera: new PerspectiveCamera(),
+          renderer: harness.renderer,
+          representatives: [{ key: 'attached-scene', root: targetScene }],
+          targetScene,
+        },
+        async () => undefined,
+      ),
+    ).rejects.toThrow('cohort draw failed')
+    expect(mesh.visible).toBe(true)
+    expect(mesh.frustumCulled).toBe(true)
+    expect(harness.state.autoClear).toBe(harness.initial.autoClear)
+    expect(harness.state.renderTarget).toBe(harness.initial.renderTarget)
+    expect(harness.state.activeCubeFace).toBe(harness.initial.activeCubeFace)
+    expect(harness.state.activeMipmapLevel).toBe(harness.initial.activeMipmapLevel)
+    expect(harness.state.viewport.equals(harness.initial.viewport)).toBe(true)
+    expect(harness.state.scissor.equals(harness.initial.scissor)).toBe(true)
+    expect(harness.state.scissorTest).toBe(harness.initial.scissorTest)
+    expect(harness.deletedFences).toBe(1)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('preserves visibility and renderer changes made by frame systems between cohorts', async () => {
+    const targetScene = new Scene()
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    const originalLayerMask = mesh.layers.mask
+    targetScene.add(mesh)
+    const sceneVisibility: boolean[] = []
+    const harness = createWebGLRealizationRenderer({
+      onRender(scene) {
+        if (scene === targetScene) sceneVisibility.push(mesh.visible)
+      },
+    })
+    let admissions = 0
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => {
+        admissions += 1
+        if (admissions !== 2) return
+        mesh.visible = false
+        mesh.frustumCulled = false
+        harness.state.viewport.set(11, 12, 130, 140)
+        harness.state.scissor.set(21, 22, 30, 40)
+        harness.state.scissorTest = false
+      },
+    )
+
+    expect(sceneVisibility).toEqual([])
+    expect(mesh.visible).toBe(false)
+    expect(mesh.frustumCulled).toBe(false)
+    expect(mesh.layers.mask).toBe(originalLayerMask)
+    expect(harness.state.viewport.equals(new Vector4(11, 12, 130, 140))).toBe(true)
+    expect(harness.state.scissor.equals(new Vector4(21, 22, 30, 40))).toBe(true)
+    expect(harness.state.scissorTest).toBe(false)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('fails readiness on an unsupported WebGL contract or failed fence', async () => {
+    const createRequest = (renderer: ZombieEscapePipelineRenderer) => {
+      const targetScene = new Scene()
+      return {
+        camera: new PerspectiveCamera(),
+        renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      }
+    }
+    await expect(
+      compileZombieEscapeRenderRepresentatives(
+        createRequest({ compileAsync: async () => undefined }),
+        async () => undefined,
+      ),
+    ).rejects.toThrow('state-preserving Three renderer contract')
+
+    const failedFence = createWebGLRealizationRenderer({
+      fenceStatuses: [WEBGL_FENCE_STATUS.waitFailed],
+    })
+    await expect(
+      compileZombieEscapeRenderRepresentatives(
+        createRequest(failedFence.renderer),
+        async () => undefined,
+      ),
+    ).rejects.toThrow('GPU fence wait failed')
+    expect(failedFence.deletedFences).toBe(1)
+
+    const missingFence = createWebGLRealizationRenderer()
+    missingFence.context.fenceSync = () => null
+    await expect(
+      compileZombieEscapeRenderRepresentatives(
+        createRequest(missingFence.renderer),
+        async () => undefined,
+      ),
+    ).rejects.toThrow('could not create a GPU fence')
+    expect(missingFence.deletedFences).toBe(0)
+  })
+
+  test('skips direct realization for a WebGPU renderer even with an attached scene', async () => {
+    const targetScene = new Scene()
+    let rendered = false
+    const renderer = {
+      backend: { device: {} },
+      async compileAsync() {},
+      render() {
+        rendered = true
+      },
+    } as unknown as ZombieEscapePipelineRenderer
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => undefined,
+    )
+
+    expect(rendered).toBe(false)
   })
 
   test('prewarms newly registered representatives immediately and exactly once in queue order', async () => {
@@ -436,6 +888,122 @@ describe('Zombie Escape render compilation', () => {
 })
 
 describe('Zombie Escape render readiness coordinator', () => {
+  test('stops reentrant invalidation after the draw without creating a fence', async () => {
+    const targetScene = new Scene()
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    targetScene.add(mesh)
+    let coordinator: ZombieEscapeRenderReadinessCoordinator
+    const harness = createWebGLRealizationRenderer({
+      onRender() {
+        coordinator.invalidate()
+      },
+    })
+    coordinator = createZombieEscapeRenderReadinessCoordinator()
+
+    const result = await coordinator.request(
+      {
+        camera: new PerspectiveCamera(),
+        generation: 1,
+        identity: {},
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      () => undefined,
+    )
+
+    expect(result).toBe('stale')
+    expect(harness.events.filter((event) => event === 'render:empty')).toHaveLength(1)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(0)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(0)
+    expect(harness.deletedFences).toBe(0)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('cancels an older generation manual realization at the next fence admission', async () => {
+    const targetScene = new Scene()
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    targetScene.add(mesh)
+    const harness = createWebGLRealizationRenderer()
+    const waits: Array<ReturnType<typeof deferred<void>>> = []
+    const waitForAdmissionOpportunity = () => {
+      const wait = deferred<void>()
+      waits.push(wait)
+      return wait.promise
+    }
+    let compileCalls = 0
+    const firstStatuses: unknown[] = []
+    const secondStatuses: unknown[] = []
+    const coordinator = createZombieEscapeRenderReadinessCoordinator({
+      compile: (request, _waitForAdmissionOpportunity, isCurrent) => {
+        compileCalls += 1
+        if (compileCalls > 1) return Promise.resolve()
+        return compileZombieEscapeRenderRepresentatives(
+          request,
+          waitForAdmissionOpportunity,
+          isCurrent,
+        )
+      },
+    })
+    const common = {
+      camera: new PerspectiveCamera(),
+      renderer: harness.renderer,
+      representatives: [{ key: 'attached-scene', root: targetScene }],
+      targetScene,
+    }
+    const first = coordinator.request({ ...common, generation: 1, identity: {} }, (status) =>
+      firstStatuses.push(status),
+    )
+
+    await flushMicrotasksUntil(() => waits.length === 1)
+    waits[0]!.resolve()
+    await flushMicrotasksUntil(() => waits.length === 2)
+    expect(harness.events.filter((event) => event === 'render:empty')).toHaveLength(1)
+    const second = coordinator.request({ ...common, generation: 2, identity: {} }, (status) =>
+      secondStatuses.push(status),
+    )
+    waits[1]!.resolve()
+
+    expect(await first).toBe('stale')
+    expect(await second).toBe('ready')
+    expect(firstStatuses).toEqual([])
+    expect(secondStatuses).toEqual([{ state: 'ready' }])
+    expect(compileCalls).toBe(2)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(0)
+    expect(harness.deletedFences).toBe(1)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('keeps unsupported attached-scene realization in the failed readiness state', async () => {
+    const targetScene = new Scene()
+    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const statuses: unknown[] = []
+
+    const result = await coordinator.request(
+      {
+        camera: new PerspectiveCamera(),
+        generation: 1,
+        identity: {},
+        renderer: { compileAsync: async () => undefined },
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      (status) => statuses.push(status),
+    )
+
+    expect(result).toBe('failed')
+    expect(statuses).toEqual([
+      {
+        message:
+          'Zombie Escape WebGL realization requires a state-preserving Three renderer contract.',
+        state: 'failed',
+      },
+    ])
+    coordinator.dispose()
+  })
+
   test('deduplicates one pending compile for the exact current request', async () => {
     let calls = 0
     const coordinator = createZombieEscapeRenderReadinessCoordinator({

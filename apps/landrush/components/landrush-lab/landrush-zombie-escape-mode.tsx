@@ -1234,6 +1234,7 @@ export function LandrushZombieEscapeMode({
     createZombieEscapeGeneratedAssetRetryState,
   )
   const [navigationOverlayEnabled, setNavigationOverlayEnabled] = useState(false)
+  const [hudPortalAdmitted, setHudPortalAdmitted] = useState(phaseReady)
   const snapshotAtRef = useRef(Number.NEGATIVE_INFINITY)
   const debugAtRef = useRef(Number.NEGATIVE_INFINITY)
   const frameMsRef = useRef(16.7)
@@ -1275,6 +1276,10 @@ export function LandrushZombieEscapeMode({
       setNavigationOverlayEnabled(true)
     }
   }, [])
+
+  useEffect(() => {
+    if (phaseReady) setHudPortalAdmitted(true)
+  }, [phaseReady])
 
   useLayoutEffect(() => {
     onInteractionActionabilityChange(interactionActionable)
@@ -2044,23 +2049,25 @@ export function LandrushZombieEscapeMode({
         visualRootRef={visualRootRef}
         zombieMaterialPhaseActive={zombieMaterialPhaseActive}
       />
-      <LandrushZombieEscapeHudPortal
-        expectedPhase={expectedPhase}
-        generatedAssetFailureCount={generatedAssetRetryState.failures.length}
-        generatedAssetsRetrying={
-          generatedAssetRetryState.retrying.core || generatedAssetRetryState.retrying.cosmetic
-        }
-        inputMode={inputMode}
-        onInput={handleTouchInput}
-        onRetryGeneratedAssets={retryGeneratedAssets}
-        onRunAgain={runAgain}
-        onStartZombie={startZombie}
-        ownerDocument={gl.domElement.ownerDocument}
-        nightStartReady={nightStartReady}
-        phaseReady={interactionActionable}
-        snapshot={snapshot}
-        zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
-      />
+      {hudPortalAdmitted ? (
+        <LandrushZombieEscapeHudPortal
+          expectedPhase={expectedPhase}
+          generatedAssetFailureCount={generatedAssetRetryState.failures.length}
+          generatedAssetsRetrying={
+            generatedAssetRetryState.retrying.core || generatedAssetRetryState.retrying.cosmetic
+          }
+          inputMode={inputMode}
+          onInput={handleTouchInput}
+          onRetryGeneratedAssets={retryGeneratedAssets}
+          onRunAgain={runAgain}
+          onStartZombie={startZombie}
+          ownerDocument={gl.domElement.ownerDocument}
+          nightStartReady={nightStartReady}
+          phaseReady={interactionActionable}
+          snapshot={snapshot}
+          zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
+        />
+      ) : null}
     </>
   )
 }

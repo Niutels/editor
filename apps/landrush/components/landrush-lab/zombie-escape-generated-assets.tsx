@@ -267,7 +267,7 @@ export function resolveZombieEscapeRenderPipelineSettlement(
   }
   if (status.state === 'degraded') {
     return {
-      contentReady: true as const,
+      contentReady: false as const,
       diagnostic: {
         level: 'warning' as const,
         message: status.message,
@@ -275,7 +275,7 @@ export function resolveZombieEscapeRenderPipelineSettlement(
     }
   }
   return {
-    contentReady: true as const,
+    contentReady: false as const,
     diagnostic: {
       level: 'error' as const,
       message: status.message,
@@ -719,12 +719,12 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
         const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
         if (settlement.diagnostic?.level === 'error') {
           console.error(
-            '[zombie-escape] Critical render pipeline prewarm failed; continuing with the bounded fallback presentation.',
+            '[zombie-escape] Critical render pipeline prewarm failed; loading remains blocked until the startup deadline.',
             settlement.diagnostic.message,
           )
         } else if (settlement.diagnostic) {
           console.warn(
-            '[zombie-escape] Visible-scene render pipeline prewarm exceeded its bounded warning threshold; continuing with the fallback presentation while it settles.',
+            '[zombie-escape] Visible-scene render pipeline prewarm exceeded its bounded warning threshold; loading remains blocked while it settles.',
             settlement.diagnostic.message,
           )
         }
