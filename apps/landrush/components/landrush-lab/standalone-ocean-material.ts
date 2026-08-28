@@ -1,4 +1,4 @@
-import { BackSide, Color, DoubleSide } from 'three'
+import { BackSide, Color, DoubleSide, MeshBasicMaterial } from 'three'
 import {
   cameraFar,
   cameraNear,
@@ -50,6 +50,8 @@ export type StandaloneOceanDebugMode =
   | 'reflection'
   | 'submerged-rocks'
   | 'waterline'
+
+export type StandaloneOceanMaterialMode = 'detailed' | 'zombie-bounded'
 
 export type StandaloneOceanWaveBandParameters = {
   amplitude: number
@@ -328,7 +330,14 @@ const createStandaloneOceanPackedVarying = varying as unknown as <
   name: string,
 ) => TSLNode<T>
 
-export type StandaloneOceanMaterialBundle = ReturnType<typeof createStandaloneOceanMaterials>
+type DetailedStandaloneOceanMaterialBundle = ReturnType<
+  typeof createDetailedStandaloneOceanMaterials
+>
+type BoundedStandaloneOceanMaterialBundle = ReturnType<typeof createBoundedStandaloneOceanMaterials>
+
+export type StandaloneOceanMaterialBundle =
+  | DetailedStandaloneOceanMaterialBundle
+  | BoundedStandaloneOceanMaterialBundle
 
 type StandaloneOceanGeometryContract = {
   cloudDetailOctaves: number
@@ -350,6 +359,92 @@ type StandaloneOceanWaveBundle = {
 }
 
 export function createStandaloneOceanMaterials(
+  parameters: StandaloneOceanParameters,
+  debugMode: StandaloneOceanDebugMode,
+  geometry: StandaloneOceanGeometryContract,
+  waterlineInteractionField?: WaterlineInteractionField | null,
+  submergedRockRefraction?: boolean,
+  materialMode?: 'detailed',
+): DetailedStandaloneOceanMaterialBundle
+export function createStandaloneOceanMaterials(
+  parameters: StandaloneOceanParameters,
+  debugMode: StandaloneOceanDebugMode,
+  geometry: StandaloneOceanGeometryContract,
+  waterlineInteractionField: WaterlineInteractionField | null,
+  submergedRockRefraction: boolean,
+  materialMode: 'zombie-bounded',
+): BoundedStandaloneOceanMaterialBundle
+export function createStandaloneOceanMaterials(
+  parameters: StandaloneOceanParameters,
+  debugMode: StandaloneOceanDebugMode,
+  geometry: StandaloneOceanGeometryContract,
+  waterlineInteractionField: WaterlineInteractionField | null,
+  submergedRockRefraction: boolean,
+  materialMode: StandaloneOceanMaterialMode,
+): StandaloneOceanMaterialBundle
+export function createStandaloneOceanMaterials(
+  parameters: StandaloneOceanParameters,
+  debugMode: StandaloneOceanDebugMode,
+  geometry: StandaloneOceanGeometryContract,
+  waterlineInteractionField: WaterlineInteractionField | null = null,
+  submergedRockRefraction = false,
+  materialMode: StandaloneOceanMaterialMode = 'detailed',
+) {
+  if (materialMode === 'zombie-bounded') {
+    return createBoundedStandaloneOceanMaterials(parameters)
+  }
+  return createDetailedStandaloneOceanMaterials(
+    parameters,
+    debugMode,
+    geometry,
+    waterlineInteractionField,
+    submergedRockRefraction,
+  )
+}
+
+function createBoundedStandaloneOceanMaterials(parameters: StandaloneOceanParameters) {
+  const surface = new MeshBasicMaterial({
+    color: parameters.oceanColorA,
+    depthTest: true,
+    depthWrite: true,
+    side: DoubleSide,
+    toneMapped: false,
+  })
+  surface.name = 'zombie-bounded-ocean-surface'
+  surface.userData.standaloneOcean = {
+    complexity: 'bounded-flat-color',
+    waves: 'disabled',
+  }
+
+  const sky = new MeshBasicMaterial({
+    color: parameters.skyZenithColor,
+    depthTest: false,
+    depthWrite: false,
+    side: BackSide,
+    toneMapped: false,
+  })
+  sky.name = 'zombie-bounded-ocean-sky'
+  sky.userData.standaloneOceanClouds = {
+    complexity: 'bounded-flat-color',
+    field: 'disabled',
+  }
+
+  return {
+    dispose() {
+      surface.dispose()
+      sky.dispose()
+    },
+    setParameters(next: StandaloneOceanParameters) {
+      surface.color.set(next.oceanColorA)
+      sky.color.set(next.skyZenithColor)
+    },
+    sky,
+    surface,
+    time: { value: 0 },
+  }
+}
+
+function createDetailedStandaloneOceanMaterials(
   parameters: StandaloneOceanParameters,
   debugMode: StandaloneOceanDebugMode,
   geometry: StandaloneOceanGeometryContract,

@@ -23,6 +23,7 @@ const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
 ] as const
 
 export const ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY = 'weapon-pickup'
+export const ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY = 'zombie:fallback'
 export const ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS = LANDRUSH_RENDER_READINESS_TIMEOUT_MS
 
 export type ZombieEscapeRenderRepresentativeKey = string
@@ -80,6 +81,7 @@ export function getZombieEscapeRenderRepresentativeKeys(
       createZombieEscapeHeldWeaponRenderRepresentativeKey(weapon.id),
     ),
     ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY,
+    ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY,
     ...(quality === 'balanced'
       ? ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((zombie) =>
           createZombieEscapeZombieRenderRepresentativeKey(zombie.id),
@@ -87,6 +89,37 @@ export function getZombieEscapeRenderRepresentativeKeys(
       : []),
     ...ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS,
   ]
+}
+
+export function createZombieEscapeRenderReadinessSnapshotSelector(
+  requiredKeys: readonly ZombieEscapeRenderRepresentativeKey[],
+) {
+  const uniqueRequiredKeys = Array.from(new Set(requiredKeys))
+  let previous: ZombieEscapeRenderReadinessSnapshot | undefined
+  return (snapshot: ZombieEscapeRenderReadinessSnapshot) => {
+    const roots = new Map(snapshot.representatives.map(({ key, root }) => [key, root]))
+    const missingKeys: ZombieEscapeRenderRepresentativeKey[] = []
+    const representatives: ZombieEscapeRenderRepresentative[] = []
+    for (const key of uniqueRequiredKeys) {
+      const root = roots.get(key)
+      if (root) representatives.push({ key, root })
+      else missingKeys.push(key)
+    }
+    if (
+      previous &&
+      equalZombieEscapeReadinessKeys(previous.missingKeys, missingKeys) &&
+      equalZombieEscapeReadinessRepresentatives(previous.representatives, representatives)
+    ) {
+      return previous
+    }
+    previous = {
+      complete: missingKeys.length === 0,
+      missingKeys,
+      representatives,
+      revision: snapshot.revision,
+    }
+    return previous
+  }
 }
 
 export function createZombieEscapeRenderReadinessRegistry(
@@ -139,9 +172,6 @@ export async function compileZombieEscapeRenderRepresentatives({
     representatives,
     targetScene,
   })
-  // A WebGPU whole-scene compile can bind viewport-depth placeholders before their first real render establishes matching MSAA textures.
-  if (renderer.isWebGPURenderer === true) return
-  await renderer.compileAsync(targetScene, camera, targetScene)
 }
 
 export function createZombieEscapeRenderReadinessCoordinator({
@@ -283,4 +313,24 @@ function createRegistrySnapshot(
     representatives,
     revision,
   }
+}
+
+function equalZombieEscapeReadinessKeys(
+  left: readonly ZombieEscapeRenderRepresentativeKey[],
+  right: readonly ZombieEscapeRenderRepresentativeKey[],
+) {
+  return left.length === right.length && left.every((key, index) => key === right[index])
+}
+
+function equalZombieEscapeReadinessRepresentatives(
+  left: readonly ZombieEscapeRenderRepresentative[],
+  right: readonly ZombieEscapeRenderRepresentative[],
+) {
+  return (
+    left.length === right.length &&
+    left.every(
+      (representative, index) =>
+        representative.key === right[index]?.key && representative.root === right[index]?.root,
+    )
+  )
 }

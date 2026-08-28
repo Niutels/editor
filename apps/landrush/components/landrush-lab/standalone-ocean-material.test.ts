@@ -248,3 +248,50 @@ describe('standalone ocean material stage ownership', () => {
     }
   })
 })
+
+describe('bounded Zombie ocean materials', () => {
+  test('uses disposable classic materials without constructing the detailed TSL graphs', () => {
+    const parameters = createDefaultStandaloneOceanParameters()
+    const materials = createStandaloneOceanMaterials(
+      parameters,
+      'final',
+      {
+        cloudDetailOctaves: 3,
+        detailRadius: 600,
+        outerRadius: 1_800,
+        vertexSpacing: 6.25,
+      },
+      null,
+      true,
+      'zombie-bounded',
+    )
+    let surfaceDisposals = 0
+    let skyDisposals = 0
+    materials.surface.addEventListener('dispose', () => {
+      surfaceDisposals += 1
+    })
+    materials.sky.addEventListener('dispose', () => {
+      skyDisposals += 1
+    })
+
+    expect(materials.surface.isMeshBasicMaterial).toBe(true)
+    expect(materials.sky.isMeshBasicMaterial).toBe(true)
+    expect('positionNode' in materials.surface).toBe(false)
+    expect('colorNode' in materials.surface).toBe(false)
+    expect('colorNode' in materials.sky).toBe(false)
+    expect(materials.surface.name).toBe('zombie-bounded-ocean-surface')
+    expect(materials.sky.name).toBe('zombie-bounded-ocean-sky')
+    expect(materials.time).toEqual({ value: 0 })
+
+    const next = createDefaultStandaloneOceanParameters()
+    next.oceanColorA = '#123456'
+    next.skyZenithColor = '#654321'
+    materials.setParameters(next)
+    expect(materials.surface.color.getHexString()).toBe('123456')
+    expect(materials.sky.color.getHexString()).toBe('654321')
+
+    materials.dispose()
+    expect(surfaceDisposals).toBe(1)
+    expect(skyDisposals).toBe(1)
+  })
+})

@@ -3,7 +3,11 @@ import type { Camera, Object3D, Scene } from 'three'
 export const LANDRUSH_RENDER_READINESS_TIMEOUT_MS = 15_000
 
 export type LandrushPipelineRenderer = Readonly<{
-  backend?: Readonly<{ device?: unknown }>
+  backend?: Readonly<{
+    device?: Readonly<{
+      queue?: Readonly<{ onSubmittedWorkDone?: () => Promise<unknown> }>
+    }>
+  }>
   compileAsync: (root: Object3D, camera: Camera, targetScene: Scene) => Promise<unknown>
   getContext?: () => unknown
   init?: () => Promise<unknown> | unknown
@@ -70,15 +74,29 @@ export async function compileLandrushRenderRepresentatives({
   await renderer.init?.()
 
   for (const representative of representatives) {
-    let pendingCompilation: Promise<unknown>
-    const restore = forceLandrushRepresentativeRenderable(representative.root)
-    try {
-      pendingCompilation = renderer.compileAsync(representative.root, camera, targetScene)
-    } finally {
-      restore()
+    for (const renderable of collectLandrushRepresentativeRenderables(representative.root)) {
+      let pendingCompilation: Promise<unknown>
+      const restore = forceLandrushRepresentativeRenderable(renderable)
+      try {
+        pendingCompilation = renderer.compileAsync(renderable, camera, targetScene)
+      } finally {
+        restore()
+      }
+      await pendingCompilation
+      await renderer.backend?.device?.queue?.onSubmittedWorkDone?.()
+      await waitForLandrushRenderAdmissionOpportunity()
     }
-    await pendingCompilation
   }
+}
+
+export function waitForLandrushRenderAdmissionOpportunity() {
+  return new Promise<void>((resolve) => {
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      globalThis.requestAnimationFrame(() => resolve())
+      return
+    }
+    globalThis.setTimeout(resolve, 0)
+  })
 }
 
 export function createLandrushRenderReadinessCoordinator({
@@ -297,6 +315,14 @@ function isLandrushRenderableObject(object: Object3D) {
   return Boolean(
     renderable.isMesh || renderable.isLine || renderable.isPoints || renderable.isSprite,
   )
+}
+
+function collectLandrushRepresentativeRenderables(root: Object3D) {
+  const renderables: Object3D[] = []
+  root.traverse((object) => {
+    if (isLandrushRenderableObject(object)) renderables.push(object)
+  })
+  return renderables
 }
 
 function getLandrushRendererContext(renderer: LandrushPipelineRenderer) {

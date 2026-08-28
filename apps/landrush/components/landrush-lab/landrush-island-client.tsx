@@ -6260,6 +6260,7 @@ export function LandrushIslandClient({
               sceneReadyKey={initialParcelAuthorityKey}
               sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}
               sceneReadyPrerequisitesReady={initialParcelMaterializationReady}
+              sceneDrawDisabled={zombieEscapeEnabled && loadingActive}
             >
               <LandrushIslandStartupReactProfiler
                 enabled={editorRuntimeReactProfileEnabled}
@@ -6289,6 +6290,7 @@ export function LandrushIslandClient({
                           cameraPreset="design"
                           debugMode="final"
                           elevation={liveOceanElevation}
+                          materialMode={zombieEscapeEnabled ? 'zombie-bounded' : 'detailed'}
                           parameters={multiplayerOceanParameters}
                           profileMeasure={activeProfileMeasure}
                           quality="balanced"
@@ -6525,6 +6527,9 @@ export function LandrushIslandClient({
                             showTrees={false}
                             spawnResolution={LANDRUSH_ISLAND_PROGRESSIVE_GRASS_FIELD_RESOLUTION}
                             stylizedGroundTexture={!startupProfileNoStylizedGround}
+                            stylizedGroundMaterialMode={
+                              zombieEscapeEnabled ? 'zombie-bounded' : 'detailed'
+                            }
                             stylizedGroundTextureWorldSizeMeters={
                               LANDRUSH_ISLAND_GRASS_TEXTURE_TILE_METERS
                             }

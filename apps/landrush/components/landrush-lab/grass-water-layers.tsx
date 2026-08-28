@@ -33,6 +33,7 @@ import {
   canUseProceduralStylizedGrassGround,
   ProceduralStylizedGrassGround,
   type StylizedGrassGroundDebugMode,
+  type StylizedGrassGroundMaterialMode,
   type StylizedGrassGroundTextureReadyHandler,
 } from './stylized-grass-ground-material'
 import { StylizedPathNetworkLayer } from './stylized-path-network-layer'
@@ -68,6 +69,7 @@ type GrassWaterLandLayersProps = {
   spawnResolution?: number
   stylizedGroundTexture?: boolean
   stylizedGroundDebugMode?: StylizedGrassGroundDebugMode
+  stylizedGroundMaterialMode?: StylizedGrassGroundMaterialMode
   stylizedSceneLayout?: boolean
   stylizedGroundTint?: string
   stylizedGroundTextureWorldSizeMeters?: number
@@ -85,6 +87,7 @@ type GrassGroundLayerProps = {
   roads: readonly LandrushRoadSegment[]
   stylizedTexture: boolean
   stylizedTextureDebugMode: StylizedGrassGroundDebugMode
+  stylizedTextureMaterialMode: StylizedGrassGroundMaterialMode
   stylizedTextureTint: string
   stylizedTextureWorldSizeMeters: number
   texture: Texture
@@ -148,6 +151,7 @@ export function GrassWaterLandLayers({
   spawnResolution,
   stylizedGroundTexture = false,
   stylizedGroundDebugMode = 'final',
+  stylizedGroundMaterialMode = 'detailed',
   stylizedSceneLayout = false,
   stylizedGroundTint = '#ffffff',
   stylizedGroundTextureWorldSizeMeters = DEFAULT_STYLIZED_TEXTURE_WORLD_SIZE_METERS,
@@ -303,6 +307,7 @@ export function GrassWaterLandLayers({
           onTextureReady={handleStylizedGroundTextureReady}
           stylizedTexture={stylizedGroundTexture}
           stylizedTextureDebugMode={stylizedGroundDebugMode}
+          stylizedTextureMaterialMode={stylizedGroundMaterialMode}
           stylizedTextureTint={stylizedGroundTint}
           stylizedTextureWorldSizeMeters={stylizedGroundTextureWorldSizeMeters}
           texture={renderedGroundField.texture}
@@ -598,6 +603,7 @@ export function GrassGroundLayer({
   roads,
   stylizedTexture,
   stylizedTextureDebugMode,
+  stylizedTextureMaterialMode,
   stylizedTextureTint,
   stylizedTextureWorldSizeMeters,
   texture,
@@ -615,6 +621,7 @@ export function GrassGroundLayer({
         renderOrder={renderOrder}
         roads={roads}
         debugMode={stylizedTextureDebugMode}
+        materialMode={stylizedTextureMaterialMode}
         tint={stylizedTextureTint}
         texture={texture}
         textureWorldSizeMeters={stylizedTextureWorldSizeMeters}
@@ -635,6 +642,7 @@ export function GrassGroundLayer({
 function StylizedGrassGroundLayer({
   debugMode,
   elevation,
+  materialMode,
   profileMeasure,
   renderOrder,
   roads,
@@ -645,6 +653,7 @@ function StylizedGrassGroundLayer({
 }: {
   debugMode: StylizedGrassGroundDebugMode
   elevation: number
+  materialMode: StylizedGrassGroundMaterialMode
   onTextureReady?: StylizedGrassGroundTextureReadyHandler
   profileMeasure?: ProfileMeasure
   renderOrder: number
@@ -659,6 +668,7 @@ function StylizedGrassGroundLayer({
         debugMode={debugMode}
         elevation={elevation}
         maskTexture={texture}
+        materialMode={materialMode}
         onReady={onTextureReady}
         renderOrder={renderOrder}
         color={tint}

@@ -7,6 +7,7 @@ import {
   FrontSide,
   LinearFilter,
   LinearMipmapLinearFilter,
+  MeshBasicMaterial,
   PlaneGeometry,
   RenderTarget,
   type Texture,
@@ -33,6 +34,7 @@ import { GRASS_FIELD_PLANE_SIZE } from './grass-field-texture'
 import { ORGANIC_GRASS_PALETTE } from './organic-grass-pattern'
 
 export type StylizedGrassGroundDebugMode = 'final' | 'footprint' | 'hierarchy' | 'macro'
+export type StylizedGrassGroundMaterialMode = 'detailed' | 'zombie-bounded'
 export type StylizedGrassGroundTextureReadyHandler = (ready: boolean, texture?: Texture) => void
 
 const STYLIZED_GRASS_GROUND_BAKE_RESOLUTION = 1024
@@ -49,11 +51,116 @@ export function ProceduralStylizedGrassGround({
   debugMode = 'final',
   elevation,
   maskTexture,
+  materialMode = 'detailed',
   onReady,
   renderOrder,
 }: {
   color?: string
   debugMode?: StylizedGrassGroundDebugMode
+  elevation: number
+  maskTexture: Texture
+  materialMode?: StylizedGrassGroundMaterialMode
+  onReady?: StylizedGrassGroundTextureReadyHandler
+  renderOrder: number
+}) {
+  if (materialMode === 'zombie-bounded') {
+    return (
+      <BoundedStylizedGrassGround
+        color={color}
+        elevation={elevation}
+        maskTexture={maskTexture}
+        onReady={onReady}
+        renderOrder={renderOrder}
+      />
+    )
+  }
+
+  return (
+    <DetailedStylizedGrassGround
+      color={color}
+      debugMode={debugMode}
+      elevation={elevation}
+      maskTexture={maskTexture}
+      onReady={onReady}
+      renderOrder={renderOrder}
+    />
+  )
+}
+
+function BoundedStylizedGrassGround({
+  color,
+  elevation,
+  maskTexture,
+  onReady,
+  renderOrder,
+}: {
+  color: string
+  elevation: number
+  maskTexture: Texture
+  onReady?: StylizedGrassGroundTextureReadyHandler
+  renderOrder: number
+}) {
+  const [material] = useState(() => createBoundedStylizedGrassGroundMaterial(color, maskTexture))
+
+  useEffect(() => {
+    updateBoundedStylizedGrassGroundMaterial(material, color, maskTexture)
+  }, [color, maskTexture, material])
+  useEffect(() => () => material.dispose(), [material])
+  useEffect(() => {
+    onReady?.(true, maskTexture)
+    return () => onReady?.(false)
+  }, [maskTexture, onReady])
+
+  return (
+    <mesh
+      position={[0, elevation + 0.018, 0]}
+      renderOrder={renderOrder}
+      rotation={[-Math.PI / 2, 0, 0]}
+    >
+      <planeGeometry args={[GRASS_FIELD_PLANE_SIZE, GRASS_FIELD_PLANE_SIZE]} />
+      <primitive attach="material" object={material} />
+    </mesh>
+  )
+}
+
+export function createBoundedStylizedGrassGroundMaterial(color: string, maskTexture: Texture) {
+  const material = new MeshBasicMaterial({
+    alphaTest: STYLIZED_GRASS_GROUND_EDGE_ALPHA_TEST,
+    color,
+    depthWrite: true,
+    map: maskTexture,
+    side: FrontSide,
+    toneMapped: false,
+    transparent: false,
+  })
+  material.name = 'zombie-bounded-stylized-grass-ground'
+  material.userData.landrushProceduralStylizedGrass = {
+    complexity: 'bounded-texture-mask',
+    coordinateSpace: 'uv',
+  }
+  return material
+}
+
+export function updateBoundedStylizedGrassGroundMaterial(
+  material: MeshBasicMaterial,
+  color: string,
+  maskTexture: Texture,
+) {
+  material.color.set(color)
+  material.map = maskTexture
+  return material
+}
+
+function DetailedStylizedGrassGround({
+  color,
+  debugMode,
+  elevation,
+  maskTexture,
+  onReady,
+  renderOrder,
+}: {
+  color: string
+  debugMode: StylizedGrassGroundDebugMode
   elevation: number
   maskTexture: Texture
   onReady?: StylizedGrassGroundTextureReadyHandler

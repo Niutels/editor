@@ -4,7 +4,7 @@ import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { Canvas, type RootState, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ACESFilmicToneMapping, type Mesh, SphereGeometry, Vector3 } from 'three'
+import { ACESFilmicToneMapping, type Mesh, PlaneGeometry, SphereGeometry, Vector3 } from 'three'
 import * as THREE from 'three/webgpu'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
 import { createStandaloneOceanCloudProfile } from './standalone-ocean-clouds'
@@ -17,6 +17,7 @@ import {
   createStandaloneOceanMaterials,
   STANDALONE_OCEAN_SPECTRAL_MODE_COUNT,
   type StandaloneOceanDebugMode,
+  type StandaloneOceanMaterialMode,
   type StandaloneOceanParameters,
 } from './standalone-ocean-material'
 import { StandaloneOceanParameterControls } from './standalone-ocean-parameter-controls'
@@ -323,6 +324,7 @@ export function StandaloneOceanWorld({
   cameraPreset,
   debugMode,
   elevation = 0,
+  materialMode = 'detailed',
   parameters,
   profileMeasure,
   quality,
@@ -334,6 +336,7 @@ export function StandaloneOceanWorld({
   cameraPreset: StandaloneOceanCameraPreset
   debugMode: StandaloneOceanDebugMode
   elevation?: number
+  materialMode?: StandaloneOceanMaterialMode
   parameters: StandaloneOceanParameters
   profileMeasure?: <T>(id: string, callback: () => T) => T
   quality: StandaloneOceanQuality
@@ -344,25 +347,47 @@ export function StandaloneOceanWorld({
   const qualitySettings = STANDALONE_OCEAN_QUALITY[quality]
   const diskGeometry = useMemo(
     () =>
-      createStandaloneOceanDiskGeometry({
-        detailRadialSegments: qualitySettings.segments / 2,
-        detailRadius: STANDALONE_OCEAN_DETAIL_RADIUS,
-        horizonAngularSegments: qualitySettings.segments,
-        horizonRadialSegments: Math.ceil(qualitySettings.segments / 6),
-        outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
-      }),
-    [qualitySettings.segments],
+      materialMode === 'zombie-bounded'
+        ? new PlaneGeometry(
+            STANDALONE_OCEAN_HORIZON_RADIUS * 2,
+            STANDALONE_OCEAN_HORIZON_RADIUS * 2,
+          )
+        : createStandaloneOceanDiskGeometry({
+            detailRadialSegments: qualitySettings.segments / 2,
+            detailRadius: STANDALONE_OCEAN_DETAIL_RADIUS,
+            horizonAngularSegments: qualitySettings.segments,
+            horizonRadialSegments: Math.ceil(qualitySettings.segments / 6),
+            outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
+          }),
+    [materialMode, qualitySettings.segments],
   )
-  const diskMetrics = diskGeometry.userData
-    .standaloneOceanDisk as StandaloneOceanDiskGeometryMetrics
+  const diskMetrics = (diskGeometry.userData.standaloneOceanDisk as
+    | StandaloneOceanDiskGeometryMetrics
+    | undefined) ?? {
+    detailRadialSegments: 1,
+    detailRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
+    horizonRadialSegments: 1,
+    outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
+    triangleCount: 2,
+    vertexCount: 4,
+  }
   const cloudProfile = useMemo(
     () => createStandaloneOceanCloudProfile({ quality, seed: parameters.seed }),
     [parameters.seed, quality],
   )
-  const skyGeometry = useMemo(() => new SphereGeometry(STANDALONE_OCEAN_SKY_RADIUS, 32, 18), [])
+  const skyGeometry = useMemo(
+    () =>
+      materialMode === 'zombie-bounded'
+        ? new SphereGeometry(STANDALONE_OCEAN_SKY_RADIUS, 12, 8)
+        : new SphereGeometry(STANDALONE_OCEAN_SKY_RADIUS, 32, 18),
+    [materialMode],
+  )
   const parametersRef = useRef(parameters)
   parametersRef.current = parameters
-  const submergedRockRefractionActive = submergedRockRefraction && parameters.underwaterRocksEnabled
+  const detailedMaterial = materialMode === 'detailed'
+  const materialWaterlineInteractionField = detailedMaterial ? waterlineInteractionField : null
+  const submergedRockRefractionActive =
+    detailedMaterial && submergedRockRefraction && parameters.underwaterRocksEnabled
   const materials = useMemo(() => {
     const build = () =>
       createStandaloneOceanMaterials(
@@ -374,17 +399,19 @@ export function StandaloneOceanWorld({
           outerRadius: STANDALONE_OCEAN_HORIZON_RADIUS,
           vertexSpacing: STANDALONE_OCEAN_DETAIL_RADIUS / Math.max(1, qualitySettings.segments / 2),
         },
-        waterlineInteractionField,
+        materialWaterlineInteractionField,
         submergedRockRefractionActive,
+        materialMode,
       )
     return profileMeasure ? profileMeasure('setup.ocean.materials', build) : build()
   }, [
     cloudProfile.metrics.detailOctaves,
     debugMode,
+    materialMode,
+    materialWaterlineInteractionField,
     profileMeasure,
     qualitySettings.segments,
     submergedRockRefractionActive,
-    waterlineInteractionField,
   ])
   const timeRef = useRef(0)
   const resetRevisionRef = useRef(resetRevision)
