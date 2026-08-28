@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import { createElement, useState } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import type { LandrushRoadSegment } from '@/components/landrush/types'
 import type { NaturalRoadPlan } from './natural-road-plan'
-import { createNaturalRoadPlanAsyncResource } from './natural-road-plan-resource'
+import {
+  createNaturalRoadPlanAsyncResource,
+  useNaturalRoadPlanResource,
+} from './natural-road-plan-resource'
 import {
   createNaturalRoadPlanSignature,
   type NaturalRoadPlanInput,
@@ -27,6 +32,32 @@ const roads: readonly LandrushRoadSegment[] = [
 ]
 
 describe('natural-road plan async resource', () => {
+  test('serializes a stable hook input identity only once across rerenders', () => {
+    const input = createInput()
+
+    const serializationCount = countNaturalRoadSignatureSerializations(() => {
+      renderToStaticMarkup(
+        createElement(NaturalRoadPlanResourceRenderSequence, { inputs: [input, input] }),
+      )
+    })
+
+    expect(serializationCount).toBe(1)
+  })
+
+  test('computes the signature when a null hook input becomes available', () => {
+    const input = createInput()
+    let markup = ''
+
+    const serializationCount = countNaturalRoadSignatureSerializations(() => {
+      markup = renderToStaticMarkup(
+        createElement(NaturalRoadPlanResourceRenderSequence, { inputs: [null, input] }),
+      )
+    })
+
+    expect(serializationCount).toBe(1)
+    expect(markup).toContain('data-key="natural-road-plan:v1:')
+  })
+
   test('shares one in-flight build for equivalent Strict Mode requests', async () => {
     const pending = deferred<NaturalRoadPlan>()
     let buildCount = 0
@@ -82,6 +113,28 @@ describe('natural-road plan async resource', () => {
     )
   })
 
+  test('starts a new build when the rendered input changes', async () => {
+    let buildCount = 0
+    const resource = createNaturalRoadPlanAsyncResource({
+      build: async () => {
+        buildCount += 1
+        return createPlan()
+      },
+    })
+    const firstInput = createInput()
+    const changedInput = createInput({
+      roads: [{ ...roads[0]!, width: roads[0]!.width + 0.1 }],
+    })
+
+    const first = resource.load(firstInput)
+    const changed = resource.load(changedInput)
+
+    expect(changed).not.toBe(first)
+    await expect(first).resolves.toBeDefined()
+    await expect(changed).resolves.toBeDefined()
+    expect(buildCount).toBe(2)
+  })
+
   test('evicts failed builds so a revisit retries in the worker', async () => {
     let buildCount = 0
     const resource = createNaturalRoadPlanAsyncResource({
@@ -126,6 +179,45 @@ describe('natural-road plan async resource', () => {
     expect(buildCount).toBe(2)
   })
 })
+
+function NaturalRoadPlanResourceRenderSequence({
+  inputs,
+}: {
+  inputs: readonly (NaturalRoadPlanInput | null)[]
+}) {
+  const [index, setIndex] = useState(0)
+  const input = inputs[index] ?? null
+  const snapshot = useNaturalRoadPlanResource(input)
+  if (index < inputs.length - 1) setIndex(index + 1)
+  return createElement('output', { 'data-key': snapshot.key ?? '' })
+}
+
+function countNaturalRoadSignatureSerializations(run: () => void) {
+  const stringify = JSON.stringify
+  let count = 0
+  JSON.stringify = ((value: unknown, ...args: unknown[]) => {
+    if (isNaturalRoadSignaturePayload(value)) count += 1
+    return Reflect.apply(stringify, JSON, [value, ...args])
+  }) as typeof JSON.stringify
+  try {
+    run()
+  } finally {
+    JSON.stringify = stringify
+  }
+  return count
+}
+
+function isNaturalRoadSignaturePayload(value: unknown) {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<Record<keyof NaturalRoadPlanInput, unknown>>
+  return (
+    typeof candidate.elevation === 'number' &&
+    Array.isArray(candidate.perimeter) &&
+    typeof candidate.quality === 'string' &&
+    Array.isArray(candidate.roads) &&
+    typeof candidate.seed === 'string'
+  )
+}
 
 function createInput(overrides: Partial<NaturalRoadPlanInput> = {}): NaturalRoadPlanInput {
   return {

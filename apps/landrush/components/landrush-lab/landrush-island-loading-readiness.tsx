@@ -282,7 +282,6 @@ export function LandrushIslandWorldFrameReporter({ onReady }: { onReady: () => v
   const invalidate = useThree((state) => state.invalidate)
   const reportedRef = useRef(false)
   const handleReadyRef = useRef(onReady)
-  const runtimeRootRef = useRef<Element | null>(null)
 
   useEffect(() => {
     handleReadyRef.current = onReady
@@ -292,19 +291,10 @@ export function LandrushIslandWorldFrameReporter({ onReady }: { onReady: () => v
     invalidate()
   }, [invalidate])
 
-  useEffect(
-    () => () => {
-      runtimeRootRef.current?.removeAttribute('data-landrush-island-world-frame-ready')
-      runtimeRootRef.current = null
-    },
-    [],
-  )
-
   useFrame(() => {
     if (reportedRef.current) return
     reportedRef.current = true
-    runtimeRootRef.current = canvas.closest('main')
-    runtimeRootRef.current?.setAttribute('data-landrush-island-world-frame-ready', '')
+    canvas.closest('main')?.setAttribute('data-landrush-island-world-frame-ready', '')
     handleReadyRef.current()
   })
 

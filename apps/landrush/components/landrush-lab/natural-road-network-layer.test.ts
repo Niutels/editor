@@ -10,6 +10,8 @@ import {
   auditNaturalRoadGeometry,
   createNaturalRoadPlan,
   NATURAL_ROAD_STYLE,
+  NaturalRoadNetworkLayer,
+  resolveNaturalRoadDebugMode,
 } from './natural-road-network-layer'
 import {
   PASCAL_WORLD_ELEVATION_PARAMETERS,
@@ -49,6 +51,39 @@ const perimeter = [
 ] as const
 
 describe('natural road network geometry', () => {
+  test('keeps the memoized layer props unchanged for an unrelated game query', () => {
+    const planIdentity = {}
+    const before = {
+      debugMode: resolveNaturalRoadDebugMode(new URLSearchParams(), 'final'),
+      plan: planIdentity,
+    }
+    const after = {
+      debugMode: resolveNaturalRoadDebugMode(new URLSearchParams('game=zombie-escape'), 'final'),
+      plan: planIdentity,
+    }
+    const memoizedComponent = NaturalRoadNetworkLayer as unknown as {
+      $$typeof: symbol
+      compare: null | ((left: unknown, right: unknown) => boolean)
+    }
+
+    expect(memoizedComponent.$$typeof).toBe(Symbol.for('react.memo'))
+    expect(memoizedComponent.compare).toBeNull()
+    expect(after.debugMode).toBe(before.debugMode)
+    expect(after.plan).toBe(before.plan)
+  })
+
+  test('changes the exact layer debug prop for the width-audit query', () => {
+    const before = resolveNaturalRoadDebugMode(new URLSearchParams(), 'final')
+    const after = resolveNaturalRoadDebugMode(
+      new URLSearchParams('naturalRoadDebug=width'),
+      'final',
+    )
+
+    expect(before).toBe('final')
+    expect(after).toBe('width-audit')
+    expect(after).not.toBe(before)
+  })
+
   test('builds the default multiplayer island road plan deterministically', () => {
     const { landrushLayoutNode, sceneGraph } = createLandrushIslandSceneGraph({
       elevationParameters: PASCAL_WORLD_ELEVATION_PARAMETERS,

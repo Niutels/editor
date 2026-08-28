@@ -56,6 +56,7 @@ import {
 import { MeshBasicNodeMaterial, MeshStandardNodeMaterial, type Node as TSLNode } from 'three/webgpu'
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
 import type { GrassBladeTuning } from './grass-material'
+import { LandrushRobotRevealVisualRoot } from './landrush-robot-reveal-visual-root'
 import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
 import { STYLIZED_PATH_WIDTH_SCALE } from './stylized-path-network-layer'
 import {
@@ -1322,12 +1323,11 @@ function StylizedSceneTree({
   if (!leavesGeometry) return null
 
   return (
-    <group
+    <LandrushRobotRevealVisualRoot
       position={[position[0], elevation + 0.03, position[2]]}
       ref={treeRef}
       rotation={[0, rotationY, 0]}
       scale={scale}
-      userData={{ landrushRobotOccluder: true }}
     >
       <primitive object={trunk} scale={STYLIZED_TREE_TRUNK_SCALE} />
       <instancedMesh
@@ -1336,7 +1336,7 @@ function StylizedSceneTree({
         frustumCulled={false}
         ref={bushesRef}
       />
-    </group>
+    </LandrushRobotRevealVisualRoot>
   )
 }
 

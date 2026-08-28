@@ -2,7 +2,7 @@
 
 import { type AnyNodeId, sceneRegistry } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, useEffect, useRef } from 'react'
+import { type MutableRefObject, useEffect, useLayoutEffect, useRef } from 'react'
 import type { Object3D } from 'three'
 import {
   LandrushZombieEscapeStructureHitPresentation,
@@ -23,63 +23,111 @@ export function LandrushZombieEscapeStructurePresentation({
   active: boolean
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
 }) {
-  const hiddenRootsRef = useRef(new Map<Object3D, boolean>())
-  const destroyedRootsRef = useRef(new Set<Object3D>())
-  const hitRootsRef = useRef(new Map<Object3D, LandrushZombieEscapeStructureHitSample>())
-  const hitPresentationRef = useRef<LandrushZombieEscapeStructureHitPresentation | null>(null)
-  hitPresentationRef.current ??= new LandrushZombieEscapeStructureHitPresentation()
+  const runtimeRef = useRef<LandrushZombieEscapeStructurePresentationRuntime | null>(null)
+  runtimeRef.current ??= new LandrushZombieEscapeStructurePresentationRuntime()
 
   useEffect(
     () => () => {
-      restoreLandrushZombieEscapeStructureRoots(hiddenRootsRef.current)
-      hitPresentationRef.current?.dispose()
+      runtimeRef.current?.dispose()
     },
     [],
   )
 
-  useFrame(() => {
-    if (!active) {
-      restoreLandrushZombieEscapeStructureRoots(hiddenRootsRef.current)
-      return
-    }
+  return active ? (
+    <LandrushZombieEscapeStructurePresentationActive
+      runtime={runtimeRef.current}
+      simulationRef={simulationRef}
+    />
+  ) : null
+}
 
-    const destroyedObjectIds = simulationRef.current.destroyedObstacleIds
-    const destroyedRoots = destroyedRootsRef.current
-    destroyedRoots.clear()
-    for (const objectId of destroyedObjectIds) {
-      const root = sceneRegistry.nodes.get(objectId as AnyNodeId)
-      if (root) destroyedRoots.add(root)
-    }
-    syncLandrushZombieEscapeStructureRoots(destroyedRoots, hiddenRootsRef.current)
-  }, LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER.visibility)
+function LandrushZombieEscapeStructurePresentationActive({
+  runtime,
+  simulationRef,
+}: {
+  runtime: LandrushZombieEscapeStructurePresentationRuntime
+  simulationRef: MutableRefObject<ZombieEscapeSimulation>
+}) {
+  useLayoutEffect(() => () => runtime.deactivate(), [runtime])
+
+  useFrame(
+    () => runtime.syncVisibility(simulationRef.current),
+    LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER.visibility,
+  )
 
   // Apply after floor fade/passthrough, then restore immediately after the viewer-owned render so
   // gameplay never observes the temporary material or transform lease.
-  useFrame(() => {
-    const hitPresentation = hitPresentationRef.current
-    if (!hitPresentation) return
-    const hitRoots = hitRootsRef.current
-    hitRoots.clear()
-    const simulation = simulationRef.current
-    if (!active || simulation.status !== 'playing') {
-      hitPresentation.dispose()
+  useFrame(
+    () => runtime.syncHits(simulationRef.current),
+    LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER.hitApply,
+  )
+
+  useFrame(
+    () => runtime.restoreHits(),
+    LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER.hitRestore,
+  )
+
+  return null
+}
+
+type StructureHitPresentation = Pick<
+  LandrushZombieEscapeStructureHitPresentation,
+  'dispose' | 'restore' | 'sync'
+>
+
+type StructurePresentationSimulation = Pick<
+  ZombieEscapeSimulation,
+  'destroyedObstacleIds' | 'obstacleHitFeedback' | 'status'
+>
+
+export class LandrushZombieEscapeStructurePresentationRuntime {
+  private readonly destroyedRoots = new Set<Object3D>()
+  private readonly hiddenRoots = new Map<Object3D, boolean>()
+  private readonly hitRoots = new Map<Object3D, LandrushZombieEscapeStructureHitSample>()
+
+  constructor(
+    private readonly hitPresentation: StructureHitPresentation = new LandrushZombieEscapeStructureHitPresentation(),
+  ) {}
+
+  syncVisibility(simulation: StructurePresentationSimulation) {
+    const destroyedObjectIds = simulation.destroyedObstacleIds
+    this.destroyedRoots.clear()
+    for (const objectId of destroyedObjectIds) {
+      const root = sceneRegistry.nodes.get(objectId as AnyNodeId)
+      if (root) this.destroyedRoots.add(root)
+    }
+    syncLandrushZombieEscapeStructureRoots(this.destroyedRoots, this.hiddenRoots)
+  }
+
+  syncHits(simulation: StructurePresentationSimulation) {
+    this.hitRoots.clear()
+    if (simulation.status !== 'playing') {
+      this.hitPresentation.dispose()
       return
     }
 
     for (const [objectId, amount] of simulation.obstacleHitFeedback) {
       if (amount <= 0 || simulation.destroyedObstacleIds.has(objectId)) continue
       const root = sceneRegistry.nodes.get(objectId as AnyNodeId)
-      if (root) hitRoots.set(root, { amount, objectId })
+      if (root) this.hitRoots.set(root, { amount, objectId })
     }
-    hitPresentation.sync(hitRoots)
-  }, LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER.hitApply)
+    this.hitPresentation.sync(this.hitRoots)
+  }
 
-  useFrame(
-    () => hitPresentationRef.current?.restore(),
-    LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER.hitRestore,
-  )
+  restoreHits() {
+    this.hitPresentation.restore()
+  }
 
-  return null
+  deactivate() {
+    restoreLandrushZombieEscapeStructureRoots(this.hiddenRoots)
+    this.destroyedRoots.clear()
+    this.hitRoots.clear()
+    this.hitPresentation.dispose()
+  }
+
+  dispose() {
+    this.deactivate()
+  }
 }
 
 export function syncLandrushZombieEscapeStructureRoots(

@@ -1,9 +1,8 @@
 'use client'
 
 import { createWorldPolygonSurfaceGeometry } from '@landrush/runtime'
-import { useSearchParams } from 'next/navigation'
 import type { MultiPolygon } from 'polygon-clipping'
-import { useEffect, useMemo } from 'react'
+import { memo, useEffect, useMemo } from 'react'
 import { BufferGeometry, DoubleSide, Float32BufferAttribute } from 'three'
 import type { LandrushRoadSegment } from '@/components/landrush/types'
 import { createRoundedWorldPolygonBoundaryWallsGeometry } from './natural-road-curb-geometry'
@@ -109,7 +108,14 @@ const NATURAL_ROAD_PALETTES: Record<
   },
 }
 
-export function NaturalRoadNetworkLayer({
+export function resolveNaturalRoadDebugMode(
+  searchParams: Pick<URLSearchParams, 'get'>,
+  fallback: NaturalRoadDebugMode,
+): NaturalRoadDebugMode {
+  return searchParams.get('naturalRoadDebug') === 'width' ? 'width-audit' : fallback
+}
+
+export const NaturalRoadNetworkLayer = memo(function NaturalRoadNetworkLayer({
   debugMode,
   plan,
   renderOrder = 30,
@@ -122,15 +128,12 @@ export function NaturalRoadNetworkLayer({
   sidewalkStyle?: NaturalRoadSidewalkStyle
   visible?: boolean
 }) {
-  const searchParams = useSearchParams()
   const geometries = useMemo(
     () => createNaturalRoadGeometryBundle(plan, sidewalkStyle),
     [plan, sidewalkStyle],
   )
   const palette = NATURAL_ROAD_PALETTES[plan.seed]
   const multiplayerSidewalkStyle = sidewalkStyle === 'multiplayer-island'
-  const activeDebugMode =
-    searchParams.get('naturalRoadDebug') === 'width' ? 'width-audit' : debugMode
 
   useEffect(
     () => () => {
@@ -139,7 +142,7 @@ export function NaturalRoadNetworkLayer({
     [geometries],
   )
 
-  if (activeDebugMode === 'clearance') {
+  if (debugMode === 'clearance') {
     return (
       <group name="natural-road-clearance-debug" visible={visible}>
         <mesh geometry={geometries.clearance} renderOrder={renderOrder}>
@@ -162,7 +165,7 @@ export function NaturalRoadNetworkLayer({
     )
   }
 
-  if (activeDebugMode === 'structure') {
+  if (debugMode === 'structure') {
     return (
       <group name="natural-road-structure-debug" visible={visible}>
         <mesh geometry={geometries.curbWalls} renderOrder={renderOrder}>
@@ -184,7 +187,7 @@ export function NaturalRoadNetworkLayer({
     )
   }
 
-  if (activeDebugMode === 'topology') {
+  if (debugMode === 'topology') {
     return (
       <group name="natural-road-topology-debug" visible={visible}>
         <mesh geometry={geometries.asphalt} renderOrder={renderOrder}>
@@ -223,7 +226,7 @@ export function NaturalRoadNetworkLayer({
     )
   }
 
-  if (activeDebugMode === 'width-audit') {
+  if (debugMode === 'width-audit') {
     return (
       <group
         name="natural-road-width-audit"
@@ -327,7 +330,7 @@ export function NaturalRoadNetworkLayer({
       </mesh>
     </group>
   )
-}
+})
 
 function createNaturalRoadGeometryBundle(
   plan: NaturalRoadPlan,

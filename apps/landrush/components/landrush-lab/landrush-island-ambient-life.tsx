@@ -8,7 +8,9 @@ import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import {
   Component,
+  memo,
   type ReactNode,
+  type RefObject,
   Suspense,
   useCallback,
   useEffect,
@@ -32,6 +34,7 @@ import {
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
+import { createLandrushIdentityCachedSelector } from './landrush-identity-cached-selector'
 import {
   createLandrushIslandAiNavigationSnapshot,
   createLandrushIslandRuntimeDoorPassabilityKey,
@@ -127,6 +130,7 @@ type AmbientMotionDebugRuntime = {
 
 const AMBIENT_NPC_POSITIONS = new Map<string, LandrushPoint2>()
 const EMPTY_AMBIENT_SCENE_NODES: Record<string, AnyNode> = {}
+const EMPTY_AMBIENT_RUNTIME_DOOR_PASSABILITY_KEY = '[]'
 const AMBIENT_NPC_COLLISION_RADIUS_METERS = 0.3
 const AMBIENT_FISH_Y_AXIS = new Vector3(0, 1, 0)
 const AMBIENT_FISH_Z_AXIS = new Vector3(0, 0, 1)
@@ -164,9 +168,17 @@ export function LandrushIslandAmbientLife({
   zombieIslandActive: boolean
 }) {
   const sceneNodes = useScene((state) => (admitted ? state.nodes : EMPTY_AMBIENT_SCENE_NODES))
-  const interactiveDoorPassabilityKey = useInteractive((state) =>
-    createLandrushIslandRuntimeDoorPassabilityKey(state.doors),
+  const interactiveDoorPassabilityKeySelector = useMemo(
+    () =>
+      admitted
+        ? createLandrushIdentityCachedSelector({
+            derive: createLandrushIslandRuntimeDoorPassabilityKey,
+            selectInput: (state: ReturnType<typeof useInteractive.getState>) => state.doors,
+          })
+        : () => EMPTY_AMBIENT_RUNTIME_DOOR_PASSABILITY_KEY,
+    [admitted],
   )
+  const interactiveDoorPassabilityKey = useInteractive(interactiveDoorPassabilityKeySelector)
   const interactiveDoorPassability = useMemo(
     () => resolveLandrushIslandRuntimeDoorPassabilityKey(interactiveDoorPassabilityKey),
     [interactiveDoorPassabilityKey],
@@ -231,15 +243,19 @@ export function LandrushIslandAmbientLife({
       }),
     [admitted, palmNavigationObstacles, semanticNavigationSnapshot, surface.grassSurfaceElevation],
   )
-  const navigationWorld = useMemo<LandrushIslandAmbientNavigationWorld>(
-    () =>
-      createLandrushIslandAmbientNavigationWorld({
-        obstacles: navigationObstacles,
-        roads,
-        surfacePoints: surface.grassSurfacePoints,
-      }),
-    [navigationObstacles, roads, surface.grassSurfacePoints],
-  )
+  const retainedNavigationWorldRef = useRef<LandrushIslandAmbientNavigationWorld | null>(null)
+  const navigationWorld = useMemo<LandrushIslandAmbientNavigationWorld>(() => {
+    if (!admitted && retainedNavigationWorldRef.current) {
+      return retainedNavigationWorldRef.current
+    }
+    const nextWorld = createLandrushIslandAmbientNavigationWorld({
+      obstacles: navigationObstacles,
+      roads,
+      surfacePoints: surface.grassSurfacePoints,
+    })
+    retainedNavigationWorldRef.current = nextWorld
+    return nextWorld
+  }, [admitted, navigationObstacles, roads, surface.grassSurfacePoints])
   const npcJourneyPlanner = useMemo(
     () => createLandrushIslandAmbientNpcJourneyPlanner(navigationWorld),
     [navigationWorld],
@@ -249,6 +265,7 @@ export function LandrushIslandAmbientLife({
     loadQueue,
     LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS,
   )
+  const ambientNpcsVisible = admitted && npcsVisible
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -266,19 +283,6 @@ export function LandrushIslandAmbientLife({
     },
     [npcJourneyPlanner],
   )
-
-  useFrame(() => {
-    if (!(admitted && npcsVisible)) return
-    const result = npcJourneyPlanner.advance(
-      LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME,
-    )
-    if (result.pendingCount > 0) renderScheduler.requestFrame('animation')
-  }, -5.5)
-
-  useFrame(function updateLandrushIslandFishBatches({ clock }) {
-    if (!admitted) return
-    fishRuntime.advance(motionDebug.timeSeconds ?? clock.elapsedTime, waterY)
-  }, -6)
 
   useEffect(() => {
     if (
@@ -325,23 +329,30 @@ export function LandrushIslandAmbientLife({
     onLoadReadinessChange(ambientLoadReadiness)
   }, [ambientLoadReadiness, onLoadReadinessChange])
 
-  if (!admitted) return null
-
   return (
     <group
+      visible={admitted}
       userData={{
         boatModelCount: LANDRUSH_ISLAND_AMBIENT_BOATS.length,
         fishInstanceCount: LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
         fishModelCount: LANDRUSH_ISLAND_AMBIENT_FISH.length,
         fishUpdatePhaseCount: fishRuntime.snapshot().updatePhaseCount,
-        npcModelCount: npcsVisible ? LANDRUSH_ISLAND_AMBIENT_NPCS.length : 0,
-        npcNavigationObstacleCount: navigationObstacles.length,
+        npcModelCount: ambientNpcsVisible ? LANDRUSH_ISLAND_AMBIENT_NPCS.length : 0,
+        npcNavigationObstacleCount: navigationWorld.obstacles.length,
         palmInstanceCount: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
         palmModelCount: LANDRUSH_ISLAND_AMBIENT_PALMS.length,
         source: 'meshy-image-to-3d',
         visiblePalmInstanceCount,
       }}
     >
+      {admitted ? (
+        <AmbientFishDriver
+          debugTimeSeconds={motionDebug.timeSeconds}
+          runtime={fishRuntime}
+          waterY={waterY}
+        />
+      ) : null}
+      {ambientNpcsVisible ? <AmbientNpcPlannerDriver planner={npcJourneyPlanner} /> : null}
       {mountedLoadUnits.map((unit) => (
         <AmbientProgressiveLoadUnit
           generation={loadQueue.generation}
@@ -350,13 +361,14 @@ export function LandrushIslandAmbientLife({
           unitId={unit.id}
         >
           <AmbientLoadUnitModel
+            active={admitted}
             center={center}
             fishRuntime={fishRuntime}
             groundY={surface.grassSurfaceElevation}
             motionDebug={motionDebug}
             navigationWorld={navigationWorld}
             npcJourneyPlanner={npcJourneyPlanner}
-            npcsVisible={npcsVisible}
+            npcsVisible={ambientNpcsVisible}
             orbitRadiusX={Math.max(oceanBounds.width * 0.54 + 4, 1)}
             orbitRadiusZ={Math.max(oceanBounds.depth * 0.54 + 4, 1)}
             palmLayout={palmLayout}
@@ -371,7 +383,31 @@ export function LandrushIslandAmbientLife({
   )
 }
 
+function AmbientFishDriver({
+  debugTimeSeconds,
+  runtime,
+  waterY,
+}: {
+  debugTimeSeconds: number | null
+  runtime: LandrushIslandFishRuntime
+  waterY: number
+}) {
+  useFrame(function updateLandrushIslandFishBatches({ clock }) {
+    runtime.advance(debugTimeSeconds ?? clock.elapsedTime, waterY)
+  }, -6)
+  return null
+}
+
+function AmbientNpcPlannerDriver({ planner }: { planner: LandrushIslandAmbientNpcJourneyPlanner }) {
+  useFrame(() => {
+    const result = planner.advance(LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME)
+    if (result.pendingCount > 0) renderScheduler.requestFrame('animation')
+  }, -5.5)
+  return null
+}
+
 function AmbientLoadUnitModel({
+  active,
   center,
   fishRuntime,
   groundY,
@@ -387,6 +423,7 @@ function AmbientLoadUnitModel({
   waterY,
   zombieIslandActive,
 }: {
+  active: boolean
   center: LandrushPoint2
   fishRuntime: LandrushIslandFishRuntime
   groundY: number
@@ -421,7 +458,9 @@ function AmbientLoadUnitModel({
             <group key={slot.instanceIndex} visible={slot.visible}>
               <LandrushIslandMeshyPalm
                 modelPath={palm.modelPath}
-                position={[position.x, groundY, position.z]}
+                positionX={position.x}
+                positionY={groundY}
+                positionZ={position.z}
                 targetSizeMeters={placement?.heightMeters ?? palm.heightMeters}
               />
             </group>
@@ -451,6 +490,7 @@ function AmbientLoadUnitModel({
     if (!boat) throw new Error(`Unknown ambient boat load unit ${unit.id}.`)
     return (
       <LandrushIslandMeshyBoat
+        active={active}
         boat={boat}
         center={center}
         index={unit.catalogIndex}
@@ -579,13 +619,17 @@ class AmbientLoadErrorBoundary extends Component<
   }
 }
 
-export function LandrushIslandMeshyPalm({
+export const LandrushIslandMeshyPalm = memo(function LandrushIslandMeshyPalm({
   modelPath,
-  position,
+  positionX,
+  positionY,
+  positionZ,
   targetSizeMeters,
 }: {
   modelPath: string
-  position: readonly [number, number, number]
+  positionX: number
+  positionY: number
+  positionZ: number
   targetSizeMeters: number
 }) {
   const gltf = useGLTFKTX2(modelPath)
@@ -596,11 +640,11 @@ export function LandrushIslandMeshyPalm({
   )
   useEffect(() => prepareMeshes(model), [model])
   return (
-    <group position={position} rotation={[0, hashAngle(modelPath), 0]}>
+    <group position={[positionX, positionY, positionZ]} rotation={[0, hashAngle(modelPath), 0]}>
       <primitive object={model} position={transform.offset} scale={transform.scale} />
     </group>
   )
-}
+})
 
 export function LandrushIslandMeshyFishSchool({
   center,
@@ -755,6 +799,7 @@ export function LandrushIslandMeshyFishSchool({
 }
 
 export function LandrushIslandMeshyBoat({
+  active,
   boat,
   center,
   index,
@@ -762,6 +807,7 @@ export function LandrushIslandMeshyBoat({
   orbitRadiusZ,
   waterY,
 }: {
+  active: boolean
   boat: LandrushIslandAmbientBoat
   center: LandrushPoint2
   index: number
@@ -787,24 +833,17 @@ export function LandrushIslandMeshyBoat({
   }, [boat.id, center.x, center.z, index, orbitRadiusX, orbitRadiusZ])
 
   useEffect(() => prepareMeshes(model), [model])
-  useFrame(({ clock }) => {
-    const root = rootRef.current
-    if (!root) return
-    const time = clock.elapsedTime
-    root.position.set(
-      placement.x,
-      waterY - transform.waterlineDepth + Math.sin(time * 0.55 + placement.phase) * 0.13,
-      placement.z,
-    )
-    root.rotation.set(
-      Math.sin(time * 0.42 + placement.phase * 0.8) * 0.018,
-      placement.baseYaw + Math.sin(time * 0.2 + placement.phase) * 0.035,
-      Math.sin(time * 0.48 + placement.phase * 1.7) * 0.026,
-    )
-  }, -6)
 
   return (
     <group ref={rootRef} userData={{ ambientBoatId: boat.id, motion: 'buoyant' }}>
+      {active ? (
+        <AmbientBoatMotionDriver
+          placement={placement}
+          rootRef={rootRef}
+          waterlineDepth={transform.waterlineDepth}
+          waterY={waterY}
+        />
+      ) : null}
       <primitive
         object={model}
         position={transform.offset}
@@ -813,6 +852,35 @@ export function LandrushIslandMeshyBoat({
       />
     </group>
   )
+}
+
+function AmbientBoatMotionDriver({
+  placement,
+  rootRef,
+  waterlineDepth,
+  waterY,
+}: {
+  placement: Readonly<{ baseYaw: number; phase: number; x: number; z: number }>
+  rootRef: RefObject<Group | null>
+  waterlineDepth: number
+  waterY: number
+}) {
+  useFrame(({ clock }) => {
+    const root = rootRef.current
+    if (!root) return
+    const time = clock.elapsedTime
+    root.position.set(
+      placement.x,
+      waterY - waterlineDepth + Math.sin(time * 0.55 + placement.phase) * 0.13,
+      placement.z,
+    )
+    root.rotation.set(
+      Math.sin(time * 0.42 + placement.phase * 0.8) * 0.018,
+      placement.baseYaw + Math.sin(time * 0.2 + placement.phase) * 0.035,
+      Math.sin(time * 0.48 + placement.phase * 1.7) * 0.026,
+    )
+  }, -6)
+  return null
 }
 
 function AmbientNpc({
@@ -875,11 +943,84 @@ function AmbientNpc({
     }
   }, [idleGltf.animations, model, runGltf.animations, walkGltf.animations])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = rootRef.current
     if (!root) return
-    let motion = motionRef.current
+    const motion = motionRef.current
     if (!motion) return
+    root.position.set(motion.position.x, groundY, motion.position.z)
+    root.rotation.y = motion.yaw
+    AMBIENT_NPC_POSITIONS.set(npc.id, { ...motion.position })
+  }, [groundY, npc.id])
+
+  useEffect(
+    () => () => {
+      AMBIENT_NPC_POSITIONS.delete(npc.id)
+      clearLandrushIslandNpcMotionDebug(debugStore, npc.id)
+    },
+    [debugStore, npc.id],
+  )
+
+  return (
+    <group
+      ref={rootRef}
+      userData={{
+        ambientNpcId: npc.id,
+        collision: 'scene-obstacles+npc-separation',
+        navigation: 'player-surface-visibility-graph',
+      }}
+    >
+      {active ? (
+        <AmbientNpcMotionDriver
+          actionsRef={actionsRef}
+          debugStore={debugStore}
+          groundY={groundY}
+          index={index}
+          motionRef={motionRef}
+          motionWorldRef={motionWorldRef}
+          navigationWorld={navigationWorld}
+          npcId={npc.id}
+          planner={planner}
+          rootRef={rootRef}
+        />
+      ) : null}
+      <primitive
+        dispose={null}
+        object={model}
+        position={transform.offset}
+        scale={transform.scale}
+      />
+    </group>
+  )
+}
+
+function AmbientNpcMotionDriver({
+  actionsRef,
+  debugStore,
+  groundY,
+  index,
+  motionRef,
+  motionWorldRef,
+  navigationWorld,
+  npcId,
+  planner,
+  rootRef,
+}: {
+  actionsRef: RefObject<AmbientNpcActions | null>
+  debugStore: AmbientMotionDebugStore | null
+  groundY: number
+  index: number
+  motionRef: RefObject<LandrushIslandAmbientNpcMotionState | null>
+  motionWorldRef: RefObject<LandrushIslandAmbientNavigationWorld>
+  navigationWorld: LandrushIslandAmbientNavigationWorld
+  npcId: string
+  planner: LandrushIslandAmbientNpcJourneyPlanner
+  rootRef: RefObject<Group | null>
+}) {
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    let motion = motionRef.current
+    if (!(root && motion)) return
     if (motionWorldRef.current !== navigationWorld) {
       motion = reconcileLandrushIslandAmbientNpcMotionStateForWorld(motion, index, navigationWorld)
       motionRef.current = motion
@@ -887,22 +1028,17 @@ function AmbientNpc({
     }
     root.position.set(motion.position.x, groundY, motion.position.z)
     root.rotation.y = motion.yaw
-    AMBIENT_NPC_POSITIONS.set(npc.id, { ...motion.position })
-    return () => {
-      AMBIENT_NPC_POSITIONS.delete(npc.id)
-      clearLandrushIslandNpcMotionDebug(debugStore, npc.id)
-    }
-  }, [debugStore, groundY, index, navigationWorld, npc.id])
+    AMBIENT_NPC_POSITIONS.set(npcId, { ...motion.position })
+  }, [groundY, index, motionRef, motionWorldRef, navigationWorld, npcId, rootRef])
 
   useFrame((_, delta) => {
-    if (!active) return
     const root = rootRef.current
     const actions = actionsRef.current
     if (!(root && actions)) return
     const frameDelta = Math.min(0.1, Math.max(0, delta))
     const neighbors: LandrushIslandAmbientNpcNeighbor[] = []
     for (const [id, position] of AMBIENT_NPC_POSITIONS) {
-      if (id !== npc.id) neighbors.push({ id, position })
+      if (id !== npcId) neighbors.push({ id, position })
     }
     const currentMotion = motionRef.current
     if (!currentMotion) return
@@ -915,7 +1051,7 @@ function AmbientNpc({
     )
     root.position.set(motion.position.x, groundY, motion.position.z)
     root.rotation.y = motion.yaw
-    AMBIENT_NPC_POSITIONS.set(npc.id, { ...motion.position })
+    AMBIENT_NPC_POSITIONS.set(npcId, { ...motion.position })
     setAmbientNpcActionWeights(
       actions,
       motion.phase === 'idle' ? 1 : 0,
@@ -925,28 +1061,12 @@ function AmbientNpc({
     root.userData.phase = motion.phase
     root.userData.destinationPreference = motion.destinationPreference
     if (debugStore) {
-      recordLandrushIslandNpcMotionDebug(debugStore, npc.id, motion, navigationWorld)
+      recordLandrushIslandNpcMotionDebug(debugStore, npcId, motion, navigationWorld)
     }
     actions.mixer.update(frameDelta)
   }, -5)
 
-  return (
-    <group
-      ref={rootRef}
-      userData={{
-        ambientNpcId: npc.id,
-        collision: 'scene-obstacles+npc-separation',
-        navigation: 'player-surface-visibility-graph',
-      }}
-    >
-      <primitive
-        dispose={null}
-        object={model}
-        position={transform.offset}
-        scale={transform.scale}
-      />
-    </group>
-  )
+  return null
 }
 
 function setAmbientNpcActionWeights(

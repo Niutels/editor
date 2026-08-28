@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   type AnyNode,
   type AnyNodeId,
+  acquireSceneHistoryPause,
   applySceneOperationPatch,
   BuildingNode,
   clearSceneHistory,
@@ -624,25 +625,203 @@ describe('Landrush build host sync', () => {
     expect(published).toEqual([14])
   })
 
-  test('revalidates queued invalid placements before deleting them', () => {
+  test('coalesces a scene-change burst into one final invalid-node scan', () => {
+    const microtasks: Array<() => void> = []
+    const deleted: string[][] = []
+    let invalidIds: string[] = []
+    let readCount = 0
+    const scheduler = createLandrushBuildInvalidNodeDeletionScheduler({
+      deleteInvalidNodeIds: (ids) => deleted.push([...ids]),
+      readInvalidNodeIds: () => {
+        readCount += 1
+        return invalidIds
+      },
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+
+    scheduler.handleSceneChange()
+    scheduler.handleSceneChange()
+    scheduler.handleSceneChange()
+
+    expect(readCount).toBe(0)
+    expect(microtasks).toHaveLength(1)
+
+    invalidIds = ['edge-wall']
+    microtasks.shift()?.()
+
+    expect(readCount).toBe(1)
+    expect(deleted).toEqual([['edge-wall']])
+  })
+
+  test('retains a queued invalid placement that is valid in the final scene', () => {
     const microtasks: Array<() => void> = []
     const deleted: string[][] = []
     let invalidIds = ['edge-wall']
+    let readCount = 0
     const scheduler = createLandrushBuildInvalidNodeDeletionScheduler({
       deleteInvalidNodeIds: (ids) => deleted.push([...ids]),
-      readInvalidNodeIds: () => invalidIds,
+      readInvalidNodeIds: () => {
+        readCount += 1
+        return invalidIds
+      },
       scheduleMicrotask: (callback) => microtasks.push(callback),
     })
 
     scheduler.handleSceneChange()
     invalidIds = []
     microtasks.shift()?.()
-    expect(deleted).toEqual([])
 
-    invalidIds = ['edge-wall']
+    expect(readCount).toBe(1)
+    expect(deleted).toEqual([])
+  })
+
+  test('ignores a disposed parcel scan while a replacement uses the shared queue', () => {
+    const microtasks: Array<() => void> = []
+    const deleted: string[][] = []
+    let disposedReadCount = 0
+    let replacementReadCount = 0
+    const disposedScheduler = createLandrushBuildInvalidNodeDeletionScheduler({
+      deleteInvalidNodeIds: (ids) => deleted.push([...ids]),
+      readInvalidNodeIds: () => {
+        disposedReadCount += 1
+        return ['old-parcel-wall']
+      },
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+
+    disposedScheduler.handleSceneChange()
+    disposedScheduler.dispose()
+
+    const replacementScheduler = createLandrushBuildInvalidNodeDeletionScheduler({
+      deleteInvalidNodeIds: (ids) => deleted.push([...ids]),
+      readInvalidNodeIds: () => {
+        replacementReadCount += 1
+        return ['new-parcel-wall']
+      },
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+    replacementScheduler.handleSceneChange()
+
+    expect(disposedReadCount).toBe(0)
+    expect(replacementReadCount).toBe(0)
+    while (microtasks.length > 0) microtasks.shift()?.()
+
+    expect(disposedReadCount).toBe(0)
+    expect(replacementReadCount).toBe(1)
+    expect(deleted).toEqual([['new-parcel-wall']])
+  })
+
+  test('queues exactly one follow-up scan for reentrant deletion notifications', () => {
+    const microtasks: Array<() => void> = []
+    const deleted: string[][] = []
+    let invalidIds = ['edge-wall']
+    let readCount = 0
+    let handleSceneChange = () => {}
+    const scheduler = createLandrushBuildInvalidNodeDeletionScheduler({
+      deleteInvalidNodeIds: (ids) => {
+        deleted.push([...ids])
+        invalidIds = []
+        handleSceneChange()
+        handleSceneChange()
+      },
+      readInvalidNodeIds: () => {
+        readCount += 1
+        return invalidIds
+      },
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+    handleSceneChange = scheduler.handleSceneChange
+
     scheduler.handleSceneChange()
     microtasks.shift()?.()
+
     expect(deleted).toEqual([['edge-wall']])
+    expect(readCount).toBe(1)
+    expect(microtasks).toHaveLength(1)
+
+    microtasks.shift()?.()
+
+    expect(readCount).toBe(2)
+    expect(deleted).toEqual([['edge-wall']])
+    expect(microtasks).toHaveLength(0)
+  })
+
+  test.each([
+    'validation-first',
+    'publisher-first',
+  ] as const)('publishes the final validated scene with %s subscription order', (subscriptionOrder) => {
+    const microtasks: Array<() => void> = []
+    const published: string[] = []
+    const deleted: string[][] = []
+    let desired = 'invalid'
+    let invalidIds = ['edge-wall']
+    const publisher = createLandrushBuildCommitPublishScheduler({
+      publish: (next) => published.push(next),
+      readDesired: () => desired,
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+    const validator = createLandrushBuildInvalidNodeDeletionScheduler({
+      deleteInvalidNodeIds: (ids) => {
+        deleted.push([...ids])
+        invalidIds = []
+        desired = 'valid'
+        emitSceneChange()
+      },
+      readInvalidNodeIds: () => invalidIds,
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+    const commit = sceneCommit({}, {})
+    function emitSceneChange() {
+      if (subscriptionOrder === 'validation-first') {
+        validator.handleSceneChange()
+        publisher.handleCommit(commit)
+      } else {
+        publisher.handleCommit(commit)
+        validator.handleSceneChange()
+      }
+    }
+
+    emitSceneChange()
+    while (microtasks.length > 0) microtasks.shift()?.()
+
+    expect(deleted).toEqual([['edge-wall']])
+    expect(published).toEqual(['valid'])
+  })
+
+  test('keeps automatic invalid-node deletion out of scene history', () => {
+    const wall = WallNode.parse({
+      end: [4, 0],
+      id: 'wall_edge',
+      parentId: null,
+      start: [0, 0],
+    })
+
+    withTestScene({ [wall.id]: wall }, [wall.id], () => {
+      const microtasks: Array<() => void> = []
+      const scheduler = createLandrushBuildInvalidNodeDeletionScheduler({
+        deleteInvalidNodeIds: (ids) => {
+          const scene = useScene.getState()
+          const releaseHistoryPause = acquireSceneHistoryPause(useScene)
+          try {
+            for (const id of ids) scene.deleteNode(id as AnyNodeId)
+          } finally {
+            releaseHistoryPause()
+          }
+        },
+        readInvalidNodeIds: () => [wall.id],
+        scheduleMicrotask: (callback) => microtasks.push(callback),
+      })
+
+      scheduler.handleSceneChange()
+      expect(useScene.getState().nodes[wall.id]).toEqual(wall)
+      expect(useScene.temporal.getState().pastStates).toHaveLength(0)
+
+      microtasks.shift()?.()
+
+      expect(useScene.getState().nodes[wall.id]).toBeUndefined()
+      expect(useScene.temporal.getState().pastStates).toHaveLength(0)
+      expect(useScene.temporal.getState().isTracking).toBe(true)
+    })
   })
 
   test('does not treat an old self acknowledgement or conflict as inbound scene content', () => {

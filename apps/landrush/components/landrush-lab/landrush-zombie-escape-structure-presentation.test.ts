@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { type AnyNodeId, sceneRegistry } from '@pascal-app/core'
 import {
   DataTexture,
   Group,
@@ -18,10 +19,12 @@ import {
 } from './landrush-zombie-escape-structure-hit-presentation'
 import {
   LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER,
+  LandrushZombieEscapeStructurePresentationRuntime,
   restoreLandrushZombieEscapeStructureRoots,
   syncLandrushZombieEscapeStructureRoots,
 } from './landrush-zombie-escape-structure-presentation'
 import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
 
 describe('Landrush Zombie Escape structure presentation', () => {
   test('applies structure hits after passthrough and restores them after the owned render', () => {
@@ -78,6 +81,62 @@ describe('Landrush Zombie Escape structure presentation', () => {
     restoreLandrushZombieEscapeStructureRoots(hiddenRoots)
 
     expect(root.visible).toBe(true)
+  })
+
+  test('keeps destruction through terminal play and restores a replaced root on deactivation', () => {
+    const objectId = 'structure-presentation-runtime-replacement'
+    const first = new Group()
+    const replacement = new Group()
+    let disposeCount = 0
+    let restoreCount = 0
+    const syncedSamples: Array<Map<Object3D, { amount: number; objectId: string }>> = []
+    const runtime = new LandrushZombieEscapeStructurePresentationRuntime({
+      dispose: () => {
+        disposeCount += 1
+      },
+      restore: () => {
+        restoreCount += 1
+      },
+      sync: (samples) => {
+        syncedSamples.push(new Map(samples))
+      },
+    })
+    const simulation = {
+      destroyedObstacleIds: new Set([objectId]),
+      obstacleHitFeedback: new Map([[objectId, 1]]),
+      status: 'won',
+    } as ZombieEscapeSimulation
+
+    try {
+      sceneRegistry.nodes.set(objectId as AnyNodeId, first)
+      runtime.syncVisibility(simulation)
+      expect(first.visible).toBe(false)
+
+      sceneRegistry.nodes.set(objectId as AnyNodeId, replacement)
+      runtime.syncVisibility(simulation)
+      expect(first.visible).toBe(true)
+      expect(replacement.visible).toBe(false)
+
+      runtime.syncHits(simulation)
+      expect(disposeCount).toBe(1)
+      expect(syncedSamples).toHaveLength(0)
+
+      simulation.status = 'playing'
+      simulation.destroyedObstacleIds.clear()
+      simulation.obstacleHitFeedback.set(objectId, 0.7)
+      runtime.syncHits(simulation)
+      expect(syncedSamples).toHaveLength(1)
+      expect(syncedSamples[0]?.get(replacement)).toEqual({ amount: 0.7, objectId })
+      runtime.restoreHits()
+      expect(restoreCount).toBe(1)
+
+      runtime.deactivate()
+      expect(replacement.visible).toBe(true)
+      expect(disposeCount).toBe(2)
+    } finally {
+      runtime.dispose()
+      sceneRegistry.nodes.delete(objectId as AnyNodeId)
+    }
   })
 
   test('maps the zombie hit cadence to white and black before leaving only a bounded wiggle', () => {

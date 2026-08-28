@@ -70,14 +70,29 @@ export function LandrushIslandBuildGridOverlay({
 
   useLayoutEffect(() => {
     if (parcel) setRenderParcel(parcel)
-    materialState.visibility.value = fadeRef.current.opacity
-    if (targetVisible) setRenderVisible(true)
+    const targetOpacity = targetVisible ? 1 : 0
+    const currentOpacity = fadeRef.current.opacity
+    materialState.visibility.value = currentOpacity
+    if (!shouldAnimateLandrushBuildGridFade(currentOpacity, targetOpacity)) {
+      fadeRef.current = {
+        from: targetOpacity,
+        opacity: targetOpacity,
+        startedAt: 0,
+        to: targetOpacity,
+      }
+      materialState.visibility.value = targetOpacity
+      setRenderVisible(targetVisible)
+      invalidate()
+      return
+    }
+
+    setRenderVisible(true)
     invalidate()
     fadeRef.current = {
-      from: fadeRef.current.opacity,
-      opacity: fadeRef.current.opacity,
+      from: currentOpacity,
+      opacity: currentOpacity,
       startedAt: performance.now(),
-      to: targetVisible ? 1 : 0,
+      to: targetOpacity,
     }
 
     let animationFrame = 0
@@ -180,4 +195,8 @@ function createLandrushBuildGridMaterial(initialVisibility: number) {
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value))
+}
+
+export function shouldAnimateLandrushBuildGridFade(currentOpacity: number, targetOpacity: number) {
+  return Math.abs(currentOpacity - targetOpacity) > Number.EPSILON
 }

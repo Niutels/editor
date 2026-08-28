@@ -48,7 +48,7 @@ describe('Viewer scene draw admission', () => {
     const postProcessingSource = readFileSync(
       new URL('./post-processing.tsx', import.meta.url),
       'utf8',
-    )
+    ).replaceAll('\r\n', '\n')
     const emptyBranchStart = postProcessingSource.indexOf(
       'if (shouldRenderViewerEmptyScene(sceneDrawDisabled, PERF_DRAW_DISABLED))',
     )

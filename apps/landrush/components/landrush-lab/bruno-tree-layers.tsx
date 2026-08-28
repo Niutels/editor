@@ -28,6 +28,7 @@ import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
 import type { LandrushTree } from '@/components/landrush/types'
 import { measureLandrushFrameSlice } from './frame-load-profiler'
 import type { GrassBladeTuning } from './grass-material'
+import { LandrushRobotRevealVisualRoot } from './landrush-robot-reveal-visual-root'
 import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
 
 export type BrunoTreeReference = {
@@ -251,7 +252,7 @@ function TreeBodies({
   if (count === 0 || !geometry) return null
 
   return (
-    <group userData={{ landrushRobotOccluder: true }}>
+    <LandrushRobotRevealVisualRoot>
       <instancedMesh
         args={[undefined, undefined, count]}
         frustumCulled={false}
@@ -261,7 +262,7 @@ function TreeBodies({
         <primitive attach="geometry" object={geometry} />
         <primitive attach="material" object={material} />
       </instancedMesh>
-    </group>
+    </LandrushRobotRevealVisualRoot>
   )
 }
 
@@ -314,7 +315,7 @@ function FoliageInstances({
   if (count === 0) return null
 
   return (
-    <group userData={{ landrushRobotOccluder: true }}>
+    <LandrushRobotRevealVisualRoot>
       <instancedMesh
         args={[undefined, undefined, count]}
         frustumCulled={false}
@@ -324,7 +325,7 @@ function FoliageInstances({
         <primitive attach="geometry" object={geometry} />
         <primitive attach="material" object={material} />
       </instancedMesh>
-    </group>
+    </LandrushRobotRevealVisualRoot>
   )
 }
 

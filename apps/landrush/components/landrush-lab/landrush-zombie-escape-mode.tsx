@@ -23,6 +23,7 @@ import {
   type LandrushControllerCommands,
 } from './landrush-controller-command-hud'
 import { readLandrushGamepadInput } from './landrush-gamepad-input'
+import { createLandrushIdentityCachedSelector } from './landrush-identity-cached-selector'
 import {
   createLandrushIslandRuntimeDoorPassabilityKey,
   createLandrushZombieEscapeCollisionWorldSignature,
@@ -1101,9 +1102,15 @@ export function LandrushZombieEscapeMode({
   }, LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.input - 0.02)
   const zombieMaterialPhaseActive = expectedPhase === 'night'
   const sceneNodes = useScene((state) => state.nodes)
-  const interactiveDoorPassabilityKey = useInteractive((state) =>
-    createLandrushIslandRuntimeDoorPassabilityKey(state.doors),
+  const interactiveDoorPassabilityKeySelector = useMemo(
+    () =>
+      createLandrushIdentityCachedSelector({
+        derive: createLandrushIslandRuntimeDoorPassabilityKey,
+        selectInput: (state: ReturnType<typeof useInteractive.getState>) => state.doors,
+      }),
+    [],
   )
+  const interactiveDoorPassabilityKey = useInteractive(interactiveDoorPassabilityKeySelector)
   const interactiveDoorPassability = useMemo(
     () => resolveLandrushIslandRuntimeDoorPassabilityKey(interactiveDoorPassabilityKey),
     [interactiveDoorPassabilityKey],

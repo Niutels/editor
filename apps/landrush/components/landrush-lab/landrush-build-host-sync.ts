@@ -206,28 +206,23 @@ export function createLandrushBuildInvalidNodeDeletionScheduler({
   scheduleMicrotask?: (callback: () => void) => void
 }) {
   let disposed = false
-  let deleteQueued = false
-  const pendingIds = new Set<string>()
+  let scanQueued = false
 
   return {
     dispose() {
       disposed = true
-      pendingIds.clear()
     },
     handleSceneChange() {
-      if (disposed) return
-      for (const id of readInvalidNodeIds()) pendingIds.add(id)
-      if (deleteQueued || pendingIds.size === 0) return
+      if (disposed || scanQueued) return
 
-      deleteQueued = true
+      scanQueued = true
       scheduleMicrotask(() => {
-        deleteQueued = false
         if (disposed) return
+        scanQueued = false
 
-        const currentInvalidIds = new Set(readInvalidNodeIds())
-        const ids = [...pendingIds].filter((id) => currentInvalidIds.has(id))
-        pendingIds.clear()
-        if (ids.length > 0) deleteInvalidNodeIds(ids)
+        const ids = [...readInvalidNodeIds()]
+        if (disposed || ids.length === 0) return
+        deleteInvalidNodeIds(ids)
       })
     },
   }

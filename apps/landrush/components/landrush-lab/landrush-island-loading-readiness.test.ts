@@ -444,7 +444,7 @@ describe('Landrush island paint readiness', () => {
 
   test('wires the loader to a Landrush world frame and the presentation gate', () => {
     const clientPath = fileURLToPath(new URL('./landrush-island-client.tsx', import.meta.url))
-    const clientSource = readFileSync(clientPath, 'utf8')
+    const clientSource = readFileSync(clientPath, 'utf8').replaceAll('\r\n', '\n')
 
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(clientSource).toContain('useLandrushIslandPaintReadiness(loadingAssetsReady)')
@@ -512,9 +512,9 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toMatch(
       /deferBuiltColliderRebuild=\{\s*zombieEscapeEnabled && !colliderRebuildAdmitted\s*\}/,
     )
-    expect(clientSource).toContain(
-      "deferRebuild ? 'deferred' : createLandrushIslandPhysicsNodeSignature(state.nodes)",
-    )
+    expect(clientSource.match(/deferRebuild\s+\? \(\) => 'deferred'/g)).toHaveLength(2)
+    expect(clientSource).toContain('derive: createLandrushIslandPhysicsNodeSignature')
+    expect(clientSource).toContain('derive: createLandrushIslandDoorAnimationSignature')
     expect(clientSource).toContain('if (deferRebuild) return')
     expect(clientSource).toMatch(
       /data-landrush-loading-ambient-ready=\{\s*ambientLoadReadiness\?\.ready === true \? 'true' : 'false'\s*\}/,
@@ -552,6 +552,10 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain(
       "data-landrush-loading-world-frame-ready={worldFrameReady ? 'true' : 'false'}",
     )
+    expect(clientSource).toContain(
+      "data-landrush-island-world-frame-ready={worldFrameReady ? '' : undefined}",
+    )
+    expect(clientSource).toMatch(/\{!worldFrameReady \? \(\s+<LandrushIslandWorldFrameReporter/)
     expect(clientSource).toMatch(
       /data-landrush-loading-zombie-assets-ready=\{\s*zombieEscapeGeneratedAssetsReady \? 'true' : 'false'\s*\}/,
     )
@@ -642,10 +646,10 @@ describe('Landrush island paint readiness', () => {
       new URL('./landrush-island-deferred-client.tsx', import.meta.url),
     )
     const shellPath = fileURLToPath(new URL('./landrush-island-loading-shell.tsx', import.meta.url))
-    const globalsSource = readFileSync(globalsPath, 'utf8')
+    const globalsSource = readFileSync(globalsPath, 'utf8').replaceAll('\r\n', '\n')
     const shellSource = readFileSync(shellPath, 'utf8')
     const startupGateSource = readFileSync(startupGatePath, 'utf8')
-    const deferredClientSource = readFileSync(deferredClientPath, 'utf8')
+    const deferredClientSource = readFileSync(deferredClientPath, 'utf8').replaceAll('\r\n', '\n')
 
     const layoutSource = readFileSync(layoutPath, 'utf8')
     const pageSource = readFileSync(pagePath, 'utf8')
@@ -727,7 +731,7 @@ describe('Landrush island paint readiness', () => {
 
   test('keeps scene priming opaque while preserving the day-mode backdrop treatment', () => {
     const clientPath = fileURLToPath(new URL('./landrush-island-client.tsx', import.meta.url))
-    const clientSource = readFileSync(clientPath, 'utf8')
+    const clientSource = readFileSync(clientPath, 'utf8').replaceAll('\r\n', '\n')
     const backdropStart = clientSource.indexOf('aria-hidden={loadingPresentationActive}')
     const backdropEnd = clientSource.indexOf('<LandrushIslandStartupReactProfiler', backdropStart)
     const overlayStart = clientSource.indexOf('function LandrushIslandLoadingOverlay')
@@ -753,6 +757,9 @@ describe('Landrush island paint readiness', () => {
       "document.querySelector('[data-landrush-island-loading-shell]:not([hidden])')",
     )
     expect(runtimeOverlaySource).toContain('if (!visible || streamedShellOwned) return null')
+    expect(
+      readFileSync(new URL('./landrush-island-loading-readiness.tsx', import.meta.url), 'utf8'),
+    ).not.toContain("removeAttribute('data-landrush-island-world-frame-ready')")
   })
 
   test('keeps eager Zombie Escape weapon assets behind a local suspense boundary', () => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NaturalRoadPlan } from './natural-road-plan'
 import { createBrowserNaturalRoadPlanWorkerCompiler } from './natural-road-plan-worker-client'
 import {
@@ -120,7 +120,7 @@ const browserNaturalRoadPlanResource = createNaturalRoadPlanAsyncResource({
 export function useNaturalRoadPlanResource(
   input: NaturalRoadPlanInput | null,
 ): NaturalRoadPlanResourceSnapshot {
-  const key = input ? createNaturalRoadPlanSignature(input) : null
+  const key = useMemo(() => (input ? createNaturalRoadPlanSignature(input) : null), [input])
   const inputRef = useRef(input)
   inputRef.current = input
   const [snapshot, setSnapshot] = useState<NaturalRoadPlanResourceSnapshot>(
