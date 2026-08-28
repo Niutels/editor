@@ -21,6 +21,7 @@ import {
 import {
   LANDRUSH_ROBOT_CROUCH_RESPONSE,
   LANDRUSH_ROBOT_HOVER_RESPONSE,
+  LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED,
   LandrushRobot,
   type LandrushRobotAnimationState,
   type LandrushRobotHoverPoseSample,
@@ -10726,6 +10727,7 @@ function LandrushIslandPlayerLayer({
         baseNode={baseNode}
         bugReportReplayPlayer={bugReportReplayPlayer}
         combatAimActive={zombieEscapeInteractionActionable}
+        deferTextureUpload={zombieEscapeEnabled}
         deferBuiltColliderRebuild={deferBuiltColliderRebuild}
         fallSurfacePoints={cliffFallBoundaryPoints}
         fallPresentationRef={fallPresentationRef}
@@ -10797,6 +10799,7 @@ function LandrushIslandPlayerLayer({
       {remotePlayers.map((player) => (
         <RemoteLandrushIslandRobot
           baseNode={baseNode}
+          deferTextureUpload={zombieEscapeEnabled}
           groundY={groundY}
           key={player.id}
           player={player}
@@ -13301,6 +13304,7 @@ function LocalLandrushIslandRobot({
   cameraEnabled,
   combatAimActive,
   dayInterfaceCommandsEnabled,
+  deferTextureUpload,
   deferBuiltColliderRebuild,
   destroyedFurnitureIds,
   fallSurfacePoints,
@@ -13340,6 +13344,7 @@ function LocalLandrushIslandRobot({
   cameraEnabled: boolean
   combatAimActive: boolean
   dayInterfaceCommandsEnabled: boolean
+  deferTextureUpload: boolean
   deferBuiltColliderRebuild: boolean
   destroyedFurnitureIds: ReadonlySet<string>
   fallSurfacePoints: readonly LandrushPoint2[]
@@ -15459,7 +15464,10 @@ function LocalLandrushIslandRobot({
           />
         ) : null
       ) : null}
-      <group visible={!fpvActive}>
+      <group
+        userData={{ [LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED]: deferTextureUpload }}
+        visible={!fpvActive}
+      >
         <Suspense
           fallback={
             effectivePresentationMode === 'hover' ? null : (
@@ -15476,6 +15484,7 @@ function LocalLandrushIslandRobot({
         >
           <LandrushRobot
             crouchingRef={crouchingPresentationRef}
+            deferTextureUpload={deferTextureUpload}
             framePriority={
               combatAimActive
                 ? LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.robot
@@ -16293,11 +16302,13 @@ function RemoteSpatialVoiceRangeRing({
 
 function RemoteLandrushIslandRobot({
   baseNode,
+  deferTextureUpload,
   groundY,
   player,
   remotePlayerStore,
 }: {
   baseNode: LandrushIslandLayoutNode
+  deferTextureUpload: boolean
   groundY: number
   player: MultiplayerPlayerSnapshot
   remotePlayerStore: MultiplayerRemotePlayerStore
@@ -16406,6 +16417,7 @@ function RemoteLandrushIslandRobot({
       >
         <LandrushRobot
           crouchingRef={crouchingRef}
+          deferTextureUpload={deferTextureUpload}
           framePriority={LANDRUSH_ISLAND_REMOTE_ROBOT_FRAME_PRIORITY}
           node={nodeRef.current}
           presentationMode={presentationMode}

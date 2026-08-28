@@ -47,6 +47,11 @@ export {
   resolveLandrushRobotJumpContact,
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
+export {
+  LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED,
+  type LandrushRobotStagedTextureUpload,
+  readLandrushRobotStagedTextureUpload,
+} from './landrush-robot-texture'
 
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
 const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot-jpeg-4fc9f04e.glb'
@@ -142,6 +147,7 @@ type LandrushRobotProps = {
   animationPace?: number
   crouching?: boolean
   crouchingRef?: { current: boolean }
+  deferTextureUpload?: boolean
   fallControlRotation?: Quaternion
   fallIntensity?: number
   fallMotionScale?: number
@@ -160,6 +166,7 @@ export function LandrushRobot({
   animationPace = 1,
   crouching = false,
   crouchingRef,
+  deferTextureUpload = false,
   fallControlRotation,
   fallIntensity = 1,
   fallMotionScale = 1,
@@ -192,15 +199,21 @@ export function LandrushRobot({
       ),
     [animations, measure],
   )
-  const clonedScene = useMemo(
+  const robotScene = useMemo(
     () =>
       measure('setup.robot-glb.clone-skeleton', () => {
         const clone = cloneSkeleton(scene) as Group
-        applyLandrushRobotRuntimeTexture(clone)
-        return clone
+        const runtimeTextureApplication = applyLandrushRobotRuntimeTexture(clone, {
+          deferred: deferTextureUpload,
+        })
+        return {
+          clone,
+          ownedMaterials: runtimeTextureApplication.ownedMaterials,
+        }
       }),
-    [measure, scene],
+    [deferTextureUpload, measure, scene],
   )
+  const clonedScene = robotScene.clone
   const hoverRestPose = useMemo(
     () =>
       measure('setup.robot-glb.capture-hover-rest-pose', () =>
@@ -603,6 +616,13 @@ export function LandrushRobot({
   }, [clonedScene, measure])
 
   useEffect(() => () => resetLandrushRobotCrouchPose(crouchRig), [crouchRig])
+
+  useEffect(
+    () => () => {
+      for (const material of robotScene.ownedMaterials) material.dispose()
+    },
+    [robotScene],
+  )
 
   useEffect(() => {
     measure('setup.robot-glb.configure-hover-fill', () => {

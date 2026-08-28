@@ -1,4 +1,17 @@
-import { type Camera, type Object3D, Scene, type Texture, Vector4 } from 'three'
+import {
+  LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED,
+  readLandrushRobotStagedTextureUpload,
+} from '@landrush/pascal-plugin/landrush-world/robot'
+import {
+  Box2,
+  type Camera,
+  DataTexture,
+  type Object3D,
+  Scene,
+  type Texture,
+  Vector2,
+  Vector4,
+} from 'three'
 import {
   compileLandrushRenderRepresentatives,
   createLandrushRenderReadinessCoordinator,
@@ -29,6 +42,9 @@ export const ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS = LANDRUSH_RENDER_READINE
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT = 8
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORTS = 24
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_FENCE_POLLS = 8
+export const ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_DISCOVERY_TIMEOUT_MS = 10_000
+export const ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_DISCOVERY_ADMISSIONS = 720
+export const ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_BYTES = 64 * 1024
 
 // This is an empirical scheduling score, not a millisecond bound.
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_GEOMETRY_BYTES_PER_WEIGHT = 1024 * 1024
@@ -92,6 +108,46 @@ type ZombieEscapeWebGLFenceContext = Readonly<{
   flush: () => void
 }>
 
+type ZombieEscapeWebGLTextureUploadContext = ZombieEscapeWebGLFenceContext &
+  Readonly<{
+    ACTIVE_TEXTURE: number
+    PIXEL_UNPACK_BUFFER: number
+    PIXEL_UNPACK_BUFFER_BINDING: number
+    TEXTURE_2D: number
+    TEXTURE_BINDING_2D: number
+    UNPACK_ALIGNMENT: number
+    UNPACK_COLORSPACE_CONVERSION_WEBGL: number
+    UNPACK_FLIP_Y_WEBGL: number
+    UNPACK_IMAGE_HEIGHT: number
+    UNPACK_PREMULTIPLY_ALPHA_WEBGL: number
+    UNPACK_ROW_LENGTH: number
+    UNPACK_SKIP_IMAGES: number
+    UNPACK_SKIP_PIXELS: number
+    UNPACK_SKIP_ROWS: number
+    bindBuffer: (target: number, buffer: unknown) => void
+    getParameter: (parameter: number) => unknown
+  }>
+
+type ZombieEscapeWebGLBackend = Readonly<{
+  copyTextureToTexture: (
+    source: Texture,
+    destination: Texture,
+    sourceRegion: Box2,
+    destinationPosition: Vector2,
+    sourceLevel: number,
+    destinationLevel: number,
+  ) => void
+  get: (value: object) => unknown
+  has: (value: object) => boolean
+  isWebGLBackend: true
+  state: Readonly<{
+    activeTexture: (slot: number) => void
+    bindTexture: (type: number, texture: unknown, slot?: number) => void
+    getParameter: (parameter: number) => unknown
+    pixelStorei: (parameter: number, value: boolean | number) => void
+  }>
+}>
+
 type ZombieEscapeWebGLRealizationRenderer = ZombieEscapePipelineRenderer & {
   autoClear: boolean
   getActiveCubeFace: () => number
@@ -108,6 +164,12 @@ type ZombieEscapeWebGLRealizationRenderer = ZombieEscapePipelineRenderer & {
   setScissorTest: (enabled: boolean) => void
   setViewport: (viewport: Vector4) => void
 }
+
+type ZombieEscapeWebGLTextureUploadRenderer = ZombieEscapeWebGLRealizationRenderer & {
+  backend: ZombieEscapeWebGLBackend
+}
+
+const stagedZombieEscapeTexturesByBackend = new WeakMap<object, WeakMap<Texture, object>>()
 
 type ZombieEscapeWebGLRendererStateSnapshot = Readonly<{
   activeCubeFace: number
@@ -236,6 +298,13 @@ export async function compileZombieEscapeRenderRepresentatives(
   waitForAdmissionOpportunity?: () => Promise<void>,
   isRequestCurrent: () => boolean = () => true,
 ) {
+  const wait = waitForAdmissionOpportunity ?? waitForLandrushRenderAdmissionOpportunity
+  assertZombieEscapeRenderReadinessCurrent(isRequestCurrent)
+  await renderer.init?.()
+  assertZombieEscapeRenderReadinessCurrent(isRequestCurrent)
+  if (!renderer.backend?.device && shouldStageZombieEscapeWebGLTextures(targetScene)) {
+    await stageZombieEscapeWebGLTextures({ renderer, targetScene }, wait, isRequestCurrent)
+  }
   await compileLandrushRenderRepresentatives(
     {
       camera,
@@ -243,18 +312,142 @@ export async function compileZombieEscapeRenderRepresentatives(
       representatives,
       targetScene,
     },
-    waitForAdmissionOpportunity,
+    wait,
     isRequestCurrent,
+    { rendererInitialized: true },
   )
   assertZombieEscapeRenderReadinessCurrent(isRequestCurrent)
+  if (!renderer.backend?.device && shouldStageZombieEscapeWebGLTextures(targetScene)) {
+    await stageZombieEscapeWebGLTextures({ renderer, targetScene }, wait, isRequestCurrent)
+  }
 
   if (!representatives.some((representative) => representative.root === targetScene)) return
 
   await realizeZombieEscapeWebGLAttachedScene(
     { camera, renderer, targetScene },
-    waitForAdmissionOpportunity ?? waitForLandrushRenderAdmissionOpportunity,
+    wait,
     isRequestCurrent,
   )
+}
+
+export async function stageZombieEscapeWebGLTextures(
+  {
+    renderer,
+    targetScene,
+  }: Readonly<{
+    renderer: ZombieEscapePipelineRenderer
+    targetScene: Scene
+  }>,
+  waitForAdmissionOpportunity = waitForLandrushRenderAdmissionOpportunity,
+  isCurrent: () => boolean = () => true,
+) {
+  assertZombieEscapeRenderReadinessCurrent(isCurrent)
+  if (renderer.backend?.device) return
+
+  const webglRenderer = resolveZombieEscapeWebGLTextureUploadRenderer(renderer)
+  const backend = webglRenderer.backend
+  const context = resolveZombieEscapeWebGLTextureUploadContext(webglRenderer)
+  let completedTextures = stagedZombieEscapeTexturesByBackend.get(backend)
+  if (!completedTextures) {
+    completedTextures = new WeakMap()
+    stagedZombieEscapeTexturesByBackend.set(backend, completedTextures)
+  }
+  const discoveryStartedAt = readZombieEscapeReadinessNow()
+  let discoveryAdmissions = 0
+
+  while (true) {
+    assertZombieEscapeRenderReadinessCurrent(isCurrent)
+    const snapshot = collectZombieEscapeStagedTextureUploads(targetScene)
+    const pendingUploads = snapshot.uploads.filter(
+      ({ texture }) => !isZombieEscapeStagedTextureComplete(backend, completedTextures!, texture),
+    )
+    if (pendingUploads.length === 0) {
+      if (!snapshot.expected || snapshot.uploads.length > 0) return
+      if (
+        discoveryAdmissions >= ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_DISCOVERY_ADMISSIONS ||
+        readZombieEscapeReadinessNow() - discoveryStartedAt >=
+          ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_DISCOVERY_TIMEOUT_MS
+      ) {
+        throw new Error(
+          'Zombie Escape expected the staged player texture, but the robot did not attach before the readiness deadline.',
+        )
+      }
+      discoveryAdmissions += 1
+      await waitForAdmissionOpportunity()
+      continue
+    }
+
+    for (const upload of pendingUploads) {
+      assertZombieEscapeRenderReadinessCurrent(isCurrent)
+      upload.texture.source.dataReady = false
+      const textureVersion = upload.texture.version
+      const sourceVersion = upload.texture.source.version
+      await waitForAdmissionOpportunity()
+      assertZombieEscapeRenderReadinessCurrent(isCurrent)
+      await submitZombieEscapeWebGLRealizationDraw(
+        () =>
+          initializeZombieEscapeStagedTexture({
+            backend,
+            context,
+            renderer: webglRenderer,
+            texture: upload.texture,
+          }),
+        context,
+        waitForAdmissionOpportunity,
+        isCurrent,
+      )
+
+      const textureResource = resolveZombieEscapeWebGLTextureResource(backend, upload.texture)
+      if (!textureResource) {
+        throw new Error('Zombie Escape staged texture allocation produced no WebGL resource.')
+      }
+      const stagingTexture = new DataTexture(upload.pixels, upload.width, upload.height)
+      const rowsPerChunk = Math.max(
+        1,
+        Math.floor(ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_BYTES / (upload.width * 4)),
+      )
+      try {
+        for (let y = 0; y < upload.height; y += rowsPerChunk) {
+          const rowCount = Math.min(rowsPerChunk, upload.height - y)
+          const sourceRegion = new Box2(new Vector2(0, y), new Vector2(upload.width, y + rowCount))
+          const destinationPosition = new Vector2(0, y)
+          await waitForAdmissionOpportunity()
+          assertZombieEscapeRenderReadinessCurrent(isCurrent)
+          assertZombieEscapeStagedTextureIdentity({
+            backend,
+            sourceVersion,
+            texture: upload.texture,
+            textureResource,
+            textureVersion,
+          })
+          await submitZombieEscapeWebGLRealizationDraw(
+            () =>
+              copyZombieEscapeStagedTextureRows({
+                backend,
+                context,
+                destination: upload.texture,
+                destinationPosition,
+                source: stagingTexture,
+                sourceRegion,
+              }),
+            context,
+            waitForAdmissionOpportunity,
+            isCurrent,
+          )
+        }
+        assertZombieEscapeStagedTextureIdentity({
+          backend,
+          sourceVersion,
+          texture: upload.texture,
+          textureResource,
+          textureVersion,
+        })
+        completedTextures.set(upload.texture, textureResource)
+      } finally {
+        stagingTexture.dispose()
+      }
+    }
+  }
 }
 
 export function collectZombieEscapeWebGLRealizationUnits(
@@ -334,6 +527,22 @@ export async function realizeZombieEscapeWebGLAttachedScene(
   const emptyScene = new Scene()
   const realizedRenderables = new Set<Object3D>()
   const realizedTextures = new Set<Texture>()
+  const completedStagedTextures = webglRenderer.backend
+    ? stagedZombieEscapeTexturesByBackend.get(webglRenderer.backend)
+    : undefined
+  if (completedStagedTextures) {
+    for (const upload of collectZombieEscapeStagedTextureUploads(targetScene).uploads) {
+      if (
+        isZombieEscapeStagedTextureComplete(
+          webglRenderer.backend as ZombieEscapeWebGLBackend,
+          completedStagedTextures,
+          upload.texture,
+        )
+      ) {
+        realizedTextures.add(upload.texture)
+      }
+    }
+  }
   let submittedCohorts = 0
   let activeObjectSnapshots: readonly ZombieEscapeWebGLObjectFlagSnapshot[] | undefined
   let activeRendererSnapshot: ZombieEscapeWebGLRendererStateSnapshot | undefined
@@ -554,6 +763,222 @@ function resolveZombieEscapeWebGLRealizationRenderer(
   return candidate as ZombieEscapeWebGLRealizationRenderer
 }
 
+function resolveZombieEscapeWebGLTextureUploadRenderer(
+  renderer: ZombieEscapePipelineRenderer,
+): ZombieEscapeWebGLTextureUploadRenderer {
+  const candidate = resolveZombieEscapeWebGLRealizationRenderer(
+    renderer,
+  ) as Partial<ZombieEscapeWebGLTextureUploadRenderer>
+  if (
+    candidate.backend?.isWebGLBackend !== true ||
+    typeof candidate.backend.copyTextureToTexture !== 'function' ||
+    typeof candidate.backend.get !== 'function' ||
+    typeof candidate.backend.has !== 'function' ||
+    typeof candidate.backend.state?.activeTexture !== 'function' ||
+    typeof candidate.backend.state.bindTexture !== 'function' ||
+    typeof candidate.backend.state?.getParameter !== 'function' ||
+    typeof candidate.backend.state.pixelStorei !== 'function'
+  ) {
+    throw new Error(
+      'Zombie Escape staged texture upload requires the Three WebGL backend contract.',
+    )
+  }
+  return candidate as ZombieEscapeWebGLTextureUploadRenderer
+}
+
+function shouldStageZombieEscapeWebGLTextures(targetScene: Object3D) {
+  const snapshot = collectZombieEscapeStagedTextureUploads(targetScene)
+  return snapshot.expected || snapshot.uploads.length > 0
+}
+
+function collectZombieEscapeStagedTextureUploads(targetScene: Object3D) {
+  const uploads = new Map<
+    Texture,
+    NonNullable<ReturnType<typeof readLandrushRobotStagedTextureUpload>>
+  >()
+  let expected = false
+  targetScene.traverse((object) => {
+    if (object.userData[LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED] === true) expected = true
+    const materialOwner = object as Object3D & { material?: unknown }
+    const materials = [
+      ...(Array.isArray(materialOwner.material)
+        ? materialOwner.material
+        : [materialOwner.material]),
+      ...(Array.isArray(object.userData.landrushOriginalMaterial)
+        ? object.userData.landrushOriginalMaterial
+        : [object.userData.landrushOriginalMaterial]),
+    ]
+    for (const candidate of materials) {
+      if (!candidate || typeof candidate !== 'object') continue
+      for (const value of Object.values(candidate)) {
+        if (!isZombieEscapeWebGLTexture(value) || uploads.has(value)) continue
+        const upload = readLandrushRobotStagedTextureUpload(value)
+        if (upload) uploads.set(value, upload)
+      }
+    }
+  })
+  return { expected, uploads: Array.from(uploads.values()) }
+}
+
+function isZombieEscapeStagedTextureComplete(
+  backend: ZombieEscapeWebGLBackend,
+  completedTextures: WeakMap<Texture, object>,
+  texture: Texture,
+) {
+  const completedResource = completedTextures.get(texture)
+  if (!completedResource) return false
+  const currentResource = resolveZombieEscapeWebGLTextureResource(backend, texture)
+  if (currentResource === completedResource) return true
+  completedTextures.delete(texture)
+  return false
+}
+
+function resolveZombieEscapeWebGLTextureResource(
+  backend: Pick<ZombieEscapeWebGLBackend, 'get' | 'has'>,
+  texture: Texture,
+) {
+  if (!backend.has(texture)) return null
+  const textureData = backend.get(texture) as Readonly<{ textureGPU?: unknown }> | null
+  const textureGPU = textureData?.textureGPU
+  return textureGPU && typeof textureGPU === 'object' ? textureGPU : null
+}
+
+function assertZombieEscapeStagedTextureIdentity({
+  backend,
+  sourceVersion,
+  texture,
+  textureResource,
+  textureVersion,
+}: Readonly<{
+  backend: ZombieEscapeWebGLBackend
+  sourceVersion: number
+  texture: Texture
+  textureResource: object
+  textureVersion: number
+}>) {
+  if (
+    texture.version !== textureVersion ||
+    texture.source.version !== sourceVersion ||
+    texture.source.dataReady !== false ||
+    resolveZombieEscapeWebGLTextureResource(backend, texture) !== textureResource
+  ) {
+    throw new Error('Zombie Escape staged texture identity changed during row upload.')
+  }
+}
+
+function initializeZombieEscapeStagedTexture({
+  backend,
+  context,
+  renderer,
+  texture,
+}: Readonly<{
+  backend: ZombieEscapeWebGLBackend
+  context: ZombieEscapeWebGLTextureUploadContext
+  renderer: ZombieEscapeWebGLTextureUploadRenderer
+  texture: Texture
+}>) {
+  const state = snapshotZombieEscapeWebGLTextureOperationState(backend, context, [
+    context.UNPACK_FLIP_Y_WEBGL,
+    context.UNPACK_PREMULTIPLY_ALPHA_WEBGL,
+    context.UNPACK_ALIGNMENT,
+    context.UNPACK_COLORSPACE_CONVERSION_WEBGL,
+  ])
+  backend.state.activeTexture(state.activeTexture)
+  try {
+    renderer.initTexture(texture)
+  } finally {
+    restoreZombieEscapeWebGLTextureOperationState(backend, context, state)
+  }
+}
+
+function copyZombieEscapeStagedTextureRows({
+  backend,
+  context,
+  destination,
+  destinationPosition,
+  source,
+  sourceRegion,
+}: Readonly<{
+  backend: ZombieEscapeWebGLBackend
+  context: ZombieEscapeWebGLTextureUploadContext
+  destination: Texture
+  destinationPosition: Vector2
+  source: Texture
+  sourceRegion: Box2
+}>) {
+  if (backend.has(source)) {
+    throw new Error(
+      'Zombie Escape staged texture source was unexpectedly registered with the renderer.',
+    )
+  }
+  const state = snapshotZombieEscapeWebGLTextureOperationState(backend, context, [
+    context.UNPACK_FLIP_Y_WEBGL,
+    context.UNPACK_PREMULTIPLY_ALPHA_WEBGL,
+    context.UNPACK_ALIGNMENT,
+    context.UNPACK_ROW_LENGTH,
+    context.UNPACK_IMAGE_HEIGHT,
+    context.UNPACK_SKIP_PIXELS,
+    context.UNPACK_SKIP_ROWS,
+    context.UNPACK_SKIP_IMAGES,
+  ])
+  const previousPixelUnpackBuffer = context.getParameter(context.PIXEL_UNPACK_BUFFER_BINDING)
+
+  backend.state.activeTexture(state.activeTexture)
+  context.bindBuffer(context.PIXEL_UNPACK_BUFFER, null)
+  try {
+    backend.copyTextureToTexture(source, destination, sourceRegion, destinationPosition, 0, 0)
+  } finally {
+    try {
+      restoreZombieEscapeWebGLTextureOperationState(backend, context, state)
+    } finally {
+      context.bindBuffer(context.PIXEL_UNPACK_BUFFER, previousPixelUnpackBuffer)
+    }
+  }
+}
+
+function snapshotZombieEscapeWebGLTextureOperationState(
+  backend: ZombieEscapeWebGLBackend,
+  context: ZombieEscapeWebGLTextureUploadContext,
+  pixelStoreParameters: readonly number[],
+) {
+  const activeTexture = context.getParameter(context.ACTIVE_TEXTURE)
+  if (typeof activeTexture !== 'number') {
+    throw new Error('Zombie Escape staged texture upload could not snapshot active texture state.')
+  }
+  const texture2D = context.getParameter(context.TEXTURE_BINDING_2D)
+  const pixelStore = pixelStoreParameters.map((parameter) => {
+    const value = backend.state.getParameter(parameter)
+    if (typeof value !== 'boolean' && typeof value !== 'number') {
+      throw new Error('Zombie Escape staged texture upload could not snapshot pixel-store state.')
+    }
+    return [parameter, value] as const
+  })
+  return { activeTexture, pixelStore, texture2D }
+}
+
+function restoreZombieEscapeWebGLTextureOperationState(
+  backend: ZombieEscapeWebGLBackend,
+  context: ZombieEscapeWebGLTextureUploadContext,
+  state: Readonly<{
+    activeTexture: number
+    pixelStore: readonly (readonly [number, boolean | number])[]
+    texture2D: unknown
+  }>,
+) {
+  try {
+    for (const [parameter, value] of state.pixelStore) {
+      backend.state.pixelStorei(parameter, value)
+    }
+  } finally {
+    backend.state.bindTexture(context.TEXTURE_2D, state.texture2D, state.activeTexture)
+    backend.state.activeTexture(state.activeTexture)
+  }
+}
+
+function readZombieEscapeReadinessNow() {
+  return globalThis.performance?.now() ?? Date.now()
+}
+
 function collectZombieEscapeWebGLRealizationTextures(
   cohort: ZombieEscapeWebGLRealizationCohort,
 ): readonly Texture[] {
@@ -598,6 +1023,37 @@ function resolveZombieEscapeWebGLFenceContext(
     )
   }
   return candidate as ZombieEscapeWebGLFenceContext
+}
+
+function resolveZombieEscapeWebGLTextureUploadContext(
+  renderer: ZombieEscapeWebGLRealizationRenderer,
+): ZombieEscapeWebGLTextureUploadContext {
+  const candidate = resolveZombieEscapeWebGLFenceContext(
+    renderer,
+  ) as Partial<ZombieEscapeWebGLTextureUploadContext>
+  if (
+    typeof candidate.ACTIVE_TEXTURE !== 'number' ||
+    typeof candidate.PIXEL_UNPACK_BUFFER !== 'number' ||
+    typeof candidate.PIXEL_UNPACK_BUFFER_BINDING !== 'number' ||
+    typeof candidate.TEXTURE_2D !== 'number' ||
+    typeof candidate.TEXTURE_BINDING_2D !== 'number' ||
+    typeof candidate.UNPACK_ALIGNMENT !== 'number' ||
+    typeof candidate.UNPACK_COLORSPACE_CONVERSION_WEBGL !== 'number' ||
+    typeof candidate.UNPACK_FLIP_Y_WEBGL !== 'number' ||
+    typeof candidate.UNPACK_IMAGE_HEIGHT !== 'number' ||
+    typeof candidate.UNPACK_PREMULTIPLY_ALPHA_WEBGL !== 'number' ||
+    typeof candidate.UNPACK_ROW_LENGTH !== 'number' ||
+    typeof candidate.UNPACK_SKIP_IMAGES !== 'number' ||
+    typeof candidate.UNPACK_SKIP_PIXELS !== 'number' ||
+    typeof candidate.UNPACK_SKIP_ROWS !== 'number' ||
+    typeof candidate.bindBuffer !== 'function' ||
+    typeof candidate.getParameter !== 'function'
+  ) {
+    throw new Error(
+      'Zombie Escape staged texture upload requires WebGL2 pixel-unpack state access.',
+    )
+  }
+  return candidate as ZombieEscapeWebGLTextureUploadContext
 }
 
 function snapshotZombieEscapeWebGLRealizationObjects(

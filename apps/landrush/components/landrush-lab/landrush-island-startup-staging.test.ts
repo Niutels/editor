@@ -294,6 +294,8 @@ describe('Landrush island Zombie startup staging', () => {
     expect(client).toContain("id: 'zombie-scene-prime'")
     expect(client).toContain('bg-[#0f1720]')
     expect(client).toContain('cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}')
+    expect(client.match(/deferTextureUpload=\{zombieEscapeEnabled\}/g)).toHaveLength(2)
+    expect(client).toContain('[LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED]: deferTextureUpload')
     expect(client).toContain('key={loadingOverlayKey}')
     expect(client).toContain(
       'handoffFadeMs={zombieEscapeEnabled ? 0 : LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS}',

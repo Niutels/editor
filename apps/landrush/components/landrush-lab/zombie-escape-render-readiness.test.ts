@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { Camera, Object3D, Texture } from 'three'
+import { LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED } from '@landrush/pascal-plugin/landrush-world/robot'
+import type { Box2, Camera, Object3D, Texture, Vector2 } from 'three'
 import {
   DataTexture,
   Group,
@@ -21,10 +22,12 @@ import {
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
   planZombieEscapeWebGLRealizationCohorts,
+  stageZombieEscapeWebGLTextures,
   ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
   ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT,
   ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORTS,
+  ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_BYTES,
   type ZombieEscapePipelineRenderer,
   type ZombieEscapeRenderReadinessCoordinator,
   type ZombieEscapeRenderReadinessTimer,
@@ -115,12 +118,23 @@ const WEBGL_FENCE_STATUS = {
 
 function createWebGLRealizationRenderer({
   fenceStatuses = [],
+  mutateTextureStateOnInit = false,
+  onCopyTexture,
   onInitTexture,
   onRender,
+  pixelUnpackBuffer = null,
 }: {
   fenceStatuses?: number[]
+  mutateTextureStateOnInit?: boolean
+  onCopyTexture?: (
+    source: Texture,
+    destination: Texture,
+    sourceRegion: Box2,
+    destinationPosition: Vector2,
+  ) => void
   onInitTexture?: (texture: Texture) => void
   onRender?: (scene: Scene, camera: Camera, call: number) => void
+  pixelUnpackBuffer?: unknown
 } = {}) {
   const events: string[] = []
   const renderTarget = { id: 'initial-target' }
@@ -141,12 +155,36 @@ function createWebGLRealizationRenderer({
   let deletedFences = 0
   let nextFence = 0
   let renderCalls = 0
+  let currentPixelUnpackBuffer = pixelUnpackBuffer
+  let currentTextureSlot = 20
+  const textureResources = new WeakMap<object, { textureGPU: object }>()
+  const textureBindings = new Map<number, unknown>([[currentTextureSlot, { id: 'bound-texture' }]])
+  const pixelStore = new Map<number, boolean | number>()
   const context = {
+    ACTIVE_TEXTURE: 13,
     ALREADY_SIGNALED: WEBGL_FENCE_STATUS.alreadySignaled,
     CONDITION_SATISFIED: WEBGL_FENCE_STATUS.conditionSatisfied,
     SYNC_GPU_COMMANDS_COMPLETE: 5,
     TIMEOUT_EXPIRED: WEBGL_FENCE_STATUS.timeoutExpired,
     WAIT_FAILED: WEBGL_FENCE_STATUS.waitFailed,
+    PIXEL_UNPACK_BUFFER: 6,
+    PIXEL_UNPACK_BUFFER_BINDING: 7,
+    TEXTURE_2D: 14,
+    TEXTURE_BINDING_2D: 15,
+    UNPACK_ALIGNMENT: 16,
+    UNPACK_COLORSPACE_CONVERSION_WEBGL: 19,
+    UNPACK_FLIP_Y_WEBGL: 17,
+    UNPACK_IMAGE_HEIGHT: 8,
+    UNPACK_ROW_LENGTH: 9,
+    UNPACK_SKIP_IMAGES: 10,
+    UNPACK_SKIP_PIXELS: 11,
+    UNPACK_SKIP_ROWS: 12,
+    UNPACK_PREMULTIPLY_ALPHA_WEBGL: 18,
+    bindBuffer(target: number, buffer: unknown) {
+      if (target !== context.PIXEL_UNPACK_BUFFER) throw new Error('unexpected buffer target')
+      currentPixelUnpackBuffer = buffer
+      events.push(buffer === null ? 'unpack-buffer:null' : 'unpack-buffer:restore')
+    },
     clientWaitSync() {
       events.push('fence:poll')
       return fenceStatuses.shift() ?? WEBGL_FENCE_STATUS.conditionSatisfied
@@ -163,8 +201,71 @@ function createWebGLRealizationRenderer({
     flush() {
       events.push('fence:flush')
     },
+    getParameter(parameter: number) {
+      if (parameter === context.ACTIVE_TEXTURE) return currentTextureSlot
+      if (parameter === context.TEXTURE_BINDING_2D) {
+        return textureBindings.get(currentTextureSlot) ?? null
+      }
+      if (parameter === context.PIXEL_UNPACK_BUFFER_BINDING) return currentPixelUnpackBuffer
+      const value = pixelStore.get(parameter)
+      if (value === undefined) throw new Error('unexpected WebGL parameter')
+      return value
+    },
+  }
+  for (const parameter of [
+    context.UNPACK_IMAGE_HEIGHT,
+    context.UNPACK_ALIGNMENT,
+    context.UNPACK_COLORSPACE_CONVERSION_WEBGL,
+    context.UNPACK_FLIP_Y_WEBGL,
+    context.UNPACK_PREMULTIPLY_ALPHA_WEBGL,
+    context.UNPACK_ROW_LENGTH,
+    context.UNPACK_SKIP_IMAGES,
+    context.UNPACK_SKIP_PIXELS,
+    context.UNPACK_SKIP_ROWS,
+  ]) {
+    pixelStore.set(
+      parameter,
+      parameter === context.UNPACK_FLIP_Y_WEBGL ||
+        parameter === context.UNPACK_PREMULTIPLY_ALPHA_WEBGL
+        ? false
+        : parameter * 10,
+    )
+  }
+  const backend = {
+    copyTextureToTexture(
+      source: Texture,
+      destination: Texture,
+      sourceRegion: Box2,
+      destinationPosition: Vector2,
+    ) {
+      events.push('texture:copy')
+      onCopyTexture?.(source, destination, sourceRegion, destinationPosition)
+    },
+    get(value: object) {
+      return textureResources.get(value) ?? {}
+    },
+    has(value: object) {
+      return textureResources.has(value)
+    },
+    isWebGLBackend: true as const,
+    state: {
+      activeTexture(slot: number) {
+        currentTextureSlot = slot
+      },
+      bindTexture(_type: number, texture: unknown, slot = currentTextureSlot) {
+        currentTextureSlot = slot
+        textureBindings.set(slot, texture)
+      },
+      getParameter(parameter: number) {
+        return pixelStore.get(parameter)
+      },
+      pixelStorei(parameter: number, value: boolean | number) {
+        pixelStore.set(parameter, value)
+      },
+    },
   }
   const renderer = {
+    backend,
     get autoClear() {
       return state.autoClear
     },
@@ -187,6 +288,15 @@ function createWebGLRealizationRenderer({
     },
     initTexture(texture: Texture) {
       events.push('texture:init')
+      if (mutateTextureStateOnInit) {
+        backend.state.activeTexture(998)
+        backend.state.bindTexture(context.TEXTURE_2D, {}, 998)
+        backend.state.pixelStorei(context.UNPACK_FLIP_Y_WEBGL, true)
+        backend.state.pixelStorei(context.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
+        backend.state.pixelStorei(context.UNPACK_ALIGNMENT, 8)
+        backend.state.pixelStorei(context.UNPACK_COLORSPACE_CONVERSION_WEBGL, 999)
+      }
+      if (!textureResources.has(texture)) textureResources.set(texture, { textureGPU: {} })
       onInitTexture?.(texture)
     },
     render(scene: Scene, camera: Camera) {
@@ -211,14 +321,33 @@ function createWebGLRealizationRenderer({
   } as unknown as ZombieEscapePipelineRenderer
 
   return {
+    backend,
     context,
     get deletedFences() {
       return deletedFences
     },
     events,
     initial,
+    invalidateTexture(texture: Texture) {
+      textureResources.delete(texture)
+    },
+    replaceTextureResource(texture: Texture) {
+      textureResources.set(texture, { textureGPU: {} })
+    },
     renderer,
     state,
+    get pixelUnpackBuffer() {
+      return currentPixelUnpackBuffer
+    },
+    get pixelStore() {
+      return new Map(pixelStore)
+    },
+    get textureState() {
+      return {
+        activeTexture: currentTextureSlot,
+        texture2D: textureBindings.get(currentTextureSlot) ?? null,
+      }
+    },
   }
 }
 
@@ -231,6 +360,14 @@ function makeHeavyRealizationMesh(name: string) {
   mesh.count = 1_000_000
   mesh.isInstancedMesh = true
   return mesh
+}
+
+function createDeferredRobotTexture(pixels: Uint8Array, width: number, height: number) {
+  const texture = new DataTexture(pixels, width, height)
+  texture.userData.landrushRobotStagedTextureUpload = true
+  texture.source.dataReady = false
+  texture.needsUpdate = true
+  return texture
 }
 
 describe('Zombie Escape render representative coverage', () => {
@@ -569,6 +706,229 @@ describe('Zombie Escape render compilation', () => {
       mesh.geometry.dispose()
       mesh.material.dispose()
     }
+  })
+
+  test('uploads the deferred robot texture in exact fenced 64 KiB row regions per backend', async () => {
+    const width = 512
+    const height = 512
+    const pixels = new Uint8Array(width * height * 4)
+    const texture = createDeferredRobotTexture(pixels, width, height)
+    const material = new MeshBasicMaterial({ map: texture })
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), material)
+    const targetScene = new Scene()
+    targetScene.add(mesh)
+    const previousPixelUnpackBuffer = { id: 'previous-pbo' }
+    const copies: Array<{
+      bytes: number
+      destination: Texture
+      destinationY: number
+      maxY: number
+      minY: number
+      source: Texture
+      width: number
+    }> = []
+    const harness = createWebGLRealizationRenderer({
+      mutateTextureStateOnInit: true,
+      onCopyTexture(source, destination, sourceRegion, destinationPosition) {
+        copies.push({
+          bytes: (sourceRegion.max.y - sourceRegion.min.y) * width * 4,
+          destination,
+          destinationY: destinationPosition.y,
+          maxY: sourceRegion.max.y,
+          minY: sourceRegion.min.y,
+          source,
+          width: sourceRegion.max.x - sourceRegion.min.x,
+        })
+      },
+      pixelUnpackBuffer: previousPixelUnpackBuffer,
+    })
+    const previousPixelStore = harness.pixelStore
+    const previousTextureState = harness.textureState
+    let admissions = 0
+    const waitForAdmissionOpportunity = async () => {
+      admissions += 1
+    }
+
+    await stageZombieEscapeWebGLTextures(
+      { renderer: harness.renderer, targetScene },
+      waitForAdmissionOpportunity,
+    )
+
+    expect(harness.events.filter((event) => event === 'texture:init')).toHaveLength(1)
+    expect(copies).toHaveLength(16)
+    expect(copies.map(({ minY, maxY }) => [minY, maxY])).toEqual(
+      Array.from({ length: 16 }, (_, index) => [index * 32, (index + 1) * 32]),
+    )
+    expect(copies.every(({ destinationY, minY }) => destinationY === minY)).toBe(true)
+    expect(copies.every(({ width: copiedWidth }) => copiedWidth === width)).toBe(true)
+    expect(copies.every(({ bytes }) => bytes <= ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_BYTES)).toBe(
+      true,
+    )
+    expect(copies.reduce((total, { bytes }) => total + bytes, 0)).toBe(pixels.byteLength)
+    expect(copies.every(({ destination }) => destination === texture)).toBe(true)
+    expect(
+      copies.every(
+        ({ source }) =>
+          source instanceof DataTexture &&
+          source.image.data === pixels &&
+          !harness.backend.has(source),
+      ),
+    ).toBe(true)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(17)
+    expect(harness.events.filter((event) => event === 'fence:delete')).toHaveLength(17)
+    expect(admissions).toBe(34)
+    expect(harness.pixelUnpackBuffer).toBe(previousPixelUnpackBuffer)
+    expect(harness.pixelStore).toEqual(previousPixelStore)
+    expect(harness.textureState).toEqual(previousTextureState)
+    expect(texture.source.dataReady).toBe(false)
+
+    await stageZombieEscapeWebGLTextures(
+      { renderer: harness.renderer, targetScene },
+      waitForAdmissionOpportunity,
+    )
+    expect(copies).toHaveLength(16)
+    expect(admissions).toBe(34)
+
+    harness.replaceTextureResource(texture)
+    await stageZombieEscapeWebGLTextures(
+      { renderer: harness.renderer, targetScene },
+      waitForAdmissionOpportunity,
+    )
+    expect(copies).toHaveLength(32)
+    expect(admissions).toBe(68)
+
+    const replacementHarness = createWebGLRealizationRenderer()
+    await stageZombieEscapeWebGLTextures(
+      { renderer: replacementHarness.renderer, targetScene },
+      async () => undefined,
+    )
+    expect(replacementHarness.events.filter((event) => event === 'texture:copy')).toHaveLength(16)
+
+    mesh.geometry.dispose()
+    material.dispose()
+    texture.dispose()
+  })
+
+  test('waits for the expected suspended robot before compiling its staged texture', async () => {
+    const targetScene = new Scene()
+    const expectation = new Group()
+    expectation.userData[LANDRUSH_ROBOT_STAGED_TEXTURE_EXPECTED] = true
+    targetScene.add(expectation)
+    const pixels = new Uint8Array(64 * 64 * 4)
+    const texture = createDeferredRobotTexture(pixels, 64, 64)
+    const material = new MeshBasicMaterial({ map: texture })
+    const hoverMaterial = new MeshBasicMaterial()
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), hoverMaterial)
+    mesh.userData.landrushOriginalMaterial = material
+    const harness = createWebGLRealizationRenderer()
+    let admissions = 0
+
+    await stageZombieEscapeWebGLTextures({ renderer: harness.renderer, targetScene }, async () => {
+      admissions += 1
+      if (admissions === 2) expectation.add(mesh)
+    })
+
+    expect(admissions).toBe(6)
+    expect(harness.events.filter((event) => event === 'texture:init')).toHaveLength(1)
+    expect(harness.events.filter((event) => event === 'texture:copy')).toHaveLength(1)
+
+    mesh.geometry.dispose()
+    hoverMaterial.dispose()
+    material.dispose()
+    texture.dispose()
+  })
+
+  test('restores the unpack buffer after a failed row copy and retries from allocation', async () => {
+    const pixels = new Uint8Array(64 * 64 * 4)
+    const texture = createDeferredRobotTexture(pixels, 64, 64)
+    const material = new MeshBasicMaterial({ map: texture })
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), material)
+    const targetScene = new Scene()
+    targetScene.add(mesh)
+    const previousPixelUnpackBuffer = { id: 'previous-pbo' }
+    let shouldThrow = true
+    let harness!: ReturnType<typeof createWebGLRealizationRenderer>
+    harness = createWebGLRealizationRenderer({
+      onCopyTexture() {
+        if (!shouldThrow) return
+        harness.backend.state.activeTexture(999)
+        harness.backend.state.bindTexture(harness.context.TEXTURE_2D, {}, 999)
+        for (const parameter of [
+          harness.context.UNPACK_ALIGNMENT,
+          harness.context.UNPACK_FLIP_Y_WEBGL,
+          harness.context.UNPACK_IMAGE_HEIGHT,
+          harness.context.UNPACK_PREMULTIPLY_ALPHA_WEBGL,
+          harness.context.UNPACK_ROW_LENGTH,
+          harness.context.UNPACK_SKIP_IMAGES,
+          harness.context.UNPACK_SKIP_PIXELS,
+          harness.context.UNPACK_SKIP_ROWS,
+        ]) {
+          harness.backend.state.pixelStorei(parameter, 999)
+        }
+        throw new Error('injected row upload failure')
+      },
+      pixelUnpackBuffer: previousPixelUnpackBuffer,
+    })
+    const previousPixelStore = harness.pixelStore
+    const previousTextureState = harness.textureState
+
+    await expect(
+      stageZombieEscapeWebGLTextures(
+        { renderer: harness.renderer, targetScene },
+        async () => undefined,
+      ),
+    ).rejects.toThrow('injected row upload failure')
+    expect(harness.pixelUnpackBuffer).toBe(previousPixelUnpackBuffer)
+    expect(harness.pixelStore).toEqual(previousPixelStore)
+    expect(harness.textureState).toEqual(previousTextureState)
+    expect(harness.events.slice(-3)).toEqual([
+      'unpack-buffer:null',
+      'texture:copy',
+      'unpack-buffer:restore',
+    ])
+
+    shouldThrow = false
+    await stageZombieEscapeWebGLTextures(
+      { renderer: harness.renderer, targetScene },
+      async () => undefined,
+    )
+    expect(harness.events.filter((event) => event === 'texture:init')).toHaveLength(2)
+    expect(harness.events.filter((event) => event === 'texture:copy')).toHaveLength(2)
+    expect(harness.pixelUnpackBuffer).toBe(previousPixelUnpackBuffer)
+
+    mesh.geometry.dispose()
+    material.dispose()
+    texture.dispose()
+  })
+
+  test('restores texture and unpack state when staged allocation throws', async () => {
+    const pixels = new Uint8Array(64 * 64 * 4)
+    const texture = createDeferredRobotTexture(pixels, 64, 64)
+    const material = new MeshBasicMaterial({ map: texture })
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), material)
+    const targetScene = new Scene()
+    targetScene.add(mesh)
+    const harness = createWebGLRealizationRenderer({
+      mutateTextureStateOnInit: true,
+      onInitTexture() {
+        throw new Error('injected allocation failure')
+      },
+    })
+    const previousPixelStore = harness.pixelStore
+    const previousTextureState = harness.textureState
+
+    await expect(
+      stageZombieEscapeWebGLTextures(
+        { renderer: harness.renderer, targetScene },
+        async () => undefined,
+      ),
+    ).rejects.toThrow('injected allocation failure')
+    expect(harness.pixelStore).toEqual(previousPixelStore)
+    expect(harness.textureState).toEqual(previousTextureState)
+
+    mesh.geometry.dispose()
+    material.dispose()
+    texture.dispose()
   })
 
   test('rehearses empty output and isolated weighted cohorts before scene-prime full draws', async () => {

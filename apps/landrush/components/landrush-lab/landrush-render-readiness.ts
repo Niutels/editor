@@ -74,9 +74,10 @@ export async function compileLandrushRenderRepresentatives(
   }: Omit<LandrushRenderReadinessRequest, 'generation' | 'identity'>,
   waitForAdmissionOpportunity = waitForLandrushRenderAdmissionOpportunity,
   isRequestCurrent = () => true,
+  { rendererInitialized = false }: Readonly<{ rendererInitialized?: boolean }> = {},
 ) {
   if (!isRequestCurrent()) return
-  await renderer.init?.()
+  if (!rendererInitialized) await renderer.init?.()
   if (!isRequestCurrent()) return
 
   const compiledRenderables = new Set<Object3D>()
