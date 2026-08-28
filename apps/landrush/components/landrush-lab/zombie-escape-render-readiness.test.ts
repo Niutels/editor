@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import type { Camera, Object3D } from 'three'
+import type { Camera, Object3D, Texture } from 'three'
 import {
+  DataTexture,
   Group,
   Mesh,
   MeshBasicMaterial,
@@ -114,9 +115,11 @@ const WEBGL_FENCE_STATUS = {
 
 function createWebGLRealizationRenderer({
   fenceStatuses = [],
+  onInitTexture,
   onRender,
 }: {
   fenceStatuses?: number[]
+  onInitTexture?: (texture: Texture) => void
   onRender?: (scene: Scene, camera: Camera, call: number) => void
 } = {}) {
   const events: string[] = []
@@ -181,6 +184,10 @@ function createWebGLRealizationRenderer({
     getScissorTest: () => state.scissorTest,
     getViewport(target: Vector4) {
       return target.copy(state.viewport)
+    },
+    initTexture(texture: Texture) {
+      events.push('texture:init')
+      onInitTexture?.(texture)
     },
     render(scene: Scene, camera: Camera) {
       renderCalls += 1
@@ -690,9 +697,15 @@ describe('Zombie Escape render compilation', () => {
     mesh.castShadow = true
     targetScene.add(mesh)
     const castShadowSignatures: boolean[] = []
-    const harness = createWebGLRealizationRenderer({
+    const viewportSignatures: Vector4[] = []
+    const scissorTestSignatures: boolean[] = []
+    let harness: ReturnType<typeof createWebGLRealizationRenderer>
+    harness = createWebGLRealizationRenderer({
       onRender(scene) {
-        if (scene === targetScene) castShadowSignatures.push(mesh.castShadow)
+        if (scene !== targetScene) return
+        castShadowSignatures.push(mesh.castShadow)
+        viewportSignatures.push(harness.state.viewport.clone())
+        scissorTestSignatures.push(harness.state.scissorTest)
       },
     })
 
@@ -707,8 +720,15 @@ describe('Zombie Escape render compilation', () => {
     )
 
     expect(castShadowSignatures).toEqual([false, true])
+    expect(viewportSignatures.every((viewport) => viewport.equals(new Vector4(0, 0, 1, 1)))).toBe(
+      true,
+    )
+    expect(scissorTestSignatures).toEqual([true, true])
     expect(mesh.castShadow).toBe(true)
     expect(mesh.frustumCulled).toBe(true)
+    expect(harness.state.viewport.equals(harness.initial.viewport)).toBe(true)
+    expect(harness.state.scissor.equals(harness.initial.scissor)).toBe(true)
+    expect(harness.state.scissorTest).toBe(harness.initial.scissorTest)
     expect(harness.events.filter((event) => event === 'render:empty')).toHaveLength(1)
     expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(2)
     expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(3)
@@ -750,6 +770,46 @@ describe('Zombie Escape render compilation', () => {
     expect(harness.deletedFences).toBe(4)
     mesh.geometry.dispose()
     mesh.material.dispose()
+  })
+
+  test('initializes each shared material texture once before its realization cohorts', async () => {
+    const targetScene = new Scene()
+    const texture = new DataTexture(Uint8Array.of(255, 255, 255, 255), 1, 1)
+    const first = makeHeavyRealizationMesh('first-textured')
+    const second = makeHeavyRealizationMesh('second-textured')
+    first.material.dispose()
+    second.material.dispose()
+    first.material = new MeshBasicMaterial({ alphaMap: texture, map: texture })
+    second.material = new MeshBasicMaterial({ map: texture })
+    first.castShadow = true
+    targetScene.add(first, second)
+    const initializedTextures: Texture[] = []
+    const harness = createWebGLRealizationRenderer({
+      onInitTexture: (initialized) => initializedTextures.push(initialized),
+    })
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => undefined,
+    )
+
+    expect(initializedTextures).toEqual([texture])
+    expect(harness.events.indexOf('texture:init')).toBeLessThan(
+      harness.events.indexOf('render:scene'),
+    )
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(3)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(5)
+    expect(harness.deletedFences).toBe(5)
+    first.geometry.dispose()
+    first.material.dispose()
+    second.geometry.dispose()
+    second.material.dispose()
+    texture.dispose()
   })
 
   test('restores object and renderer state when a cohort draw throws', async () => {

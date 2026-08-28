@@ -1,4 +1,4 @@
-import { type Camera, type Object3D, Scene, Vector4 } from 'three'
+import { type Camera, type Object3D, Scene, type Texture, Vector4 } from 'three'
 import {
   compileLandrushRenderRepresentatives,
   createLandrushRenderReadinessCoordinator,
@@ -33,6 +33,7 @@ export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_FENCE_POLLS = 8
 // This is an empirical scheduling score, not a millisecond bound.
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_GEOMETRY_BYTES_PER_WEIGHT = 1024 * 1024
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VERTEX_INVOCATIONS_PER_WEIGHT = 100_000
+const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VIEWPORT = new Vector4(0, 0, 1, 1)
 
 export type ZombieEscapeRenderRepresentativeKey = string
 
@@ -100,6 +101,7 @@ type ZombieEscapeWebGLRealizationRenderer = ZombieEscapePipelineRenderer & {
   getScissor: (target: Vector4) => Vector4
   getScissorTest: () => boolean
   getViewport: (target: Vector4) => Vector4
+  initTexture: (texture: Texture) => void
   render: (scene: Scene, camera: Camera) => void
   setRenderTarget: (target: unknown, activeCubeFace?: number, activeMipmapLevel?: number) => void
   setScissor: (scissor: Vector4) => void
@@ -331,6 +333,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
   const context = resolveZombieEscapeWebGLFenceContext(webglRenderer)
   const emptyScene = new Scene()
   const realizedRenderables = new Set<Object3D>()
+  const realizedTextures = new Set<Texture>()
   let submittedCohorts = 0
   let activeObjectSnapshots: readonly ZombieEscapeWebGLObjectFlagSnapshot[] | undefined
   let activeRendererSnapshot: ZombieEscapeWebGLRendererStateSnapshot | undefined
@@ -368,6 +371,18 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       const cohort = planZombieEscapeWebGLRealizationCohorts(coldUnits, {
         maxCohorts: remainingCohorts,
       })[0]!
+      const coldTextures = collectZombieEscapeWebGLRealizationTextures(cohort).filter(
+        (texture) => !realizedTextures.has(texture),
+      )
+      for (const texture of coldTextures) {
+        await submitZombieEscapeWebGLRealizationDraw(
+          () => webglRenderer.initTexture(texture),
+          context,
+          waitForAdmissionOpportunity,
+          isCurrent,
+        )
+        realizedTextures.add(texture)
+      }
       const hasShadowCasters = cohort.units.some((unit) =>
         unit.renderables.some((renderable) => renderable.castShadow),
       )
@@ -375,6 +390,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       if (hasShadowCasters) {
         activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(currentUnits)
         activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
+        applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
         applyZombieEscapeWebGLRealizationCohort(currentUnits, cohort)
         for (const unit of cohort.units) {
           for (const renderable of unit.renderables) renderable.castShadow = false
@@ -407,6 +423,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       )
       activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(combinedUnits)
       activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
+      applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
       applyZombieEscapeWebGLRealizationCohort(combinedUnits, cohort)
       await submitZombieEscapeWebGLRealizationDraw(
         () => {
@@ -523,6 +540,7 @@ function resolveZombieEscapeWebGLRealizationRenderer(
     typeof candidate.getScissor !== 'function' ||
     typeof candidate.getScissorTest !== 'function' ||
     typeof candidate.getViewport !== 'function' ||
+    typeof candidate.initTexture !== 'function' ||
     typeof candidate.render !== 'function' ||
     typeof candidate.setRenderTarget !== 'function' ||
     typeof candidate.setScissor !== 'function' ||
@@ -534,6 +552,29 @@ function resolveZombieEscapeWebGLRealizationRenderer(
     )
   }
   return candidate as ZombieEscapeWebGLRealizationRenderer
+}
+
+function collectZombieEscapeWebGLRealizationTextures(
+  cohort: ZombieEscapeWebGLRealizationCohort,
+): readonly Texture[] {
+  const textures = new Set<Texture>()
+  for (const unit of cohort.units) {
+    for (const renderable of unit.renderables) {
+      const material = (renderable as Object3D & { material?: unknown }).material
+      const materials = Array.isArray(material) ? material : [material]
+      for (const candidate of materials) {
+        if (!candidate || typeof candidate !== 'object') continue
+        for (const value of Object.values(candidate)) {
+          if (isZombieEscapeWebGLTexture(value)) textures.add(value)
+        }
+      }
+    }
+  }
+  return Array.from(textures)
+}
+
+function isZombieEscapeWebGLTexture(value: unknown): value is Texture {
+  return Boolean(value && typeof value === 'object' && (value as { isTexture?: boolean }).isTexture)
 }
 
 function resolveZombieEscapeWebGLFenceContext(
@@ -633,6 +674,14 @@ function restoreZombieEscapeWebGLRendererState(
   renderer.setViewport(snapshot.viewport)
   renderer.setScissor(snapshot.scissor)
   renderer.setScissorTest(snapshot.scissorTest)
+}
+
+function applyZombieEscapeWebGLRealizationRendererState(
+  renderer: ZombieEscapeWebGLRealizationRenderer,
+) {
+  renderer.setViewport(ZOMBIE_ESCAPE_WEBGL_REALIZATION_VIEWPORT)
+  renderer.setScissor(ZOMBIE_ESCAPE_WEBGL_REALIZATION_VIEWPORT)
+  renderer.setScissorTest(true)
 }
 
 async function submitZombieEscapeWebGLRealizationDraw(
