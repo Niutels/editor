@@ -14,7 +14,7 @@ import {
   LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE,
   LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE,
   type LandrushIslandLoadingBootRun,
-  STREAMED_SHELL_VELOCITY_PER_SECOND,
+  resolveLandrushIslandLoadingShellVelocity,
 } from './landrush-island-loading-shell-bootstrap'
 import {
   LANDRUSH_ISLAND_LOADING_INITIAL_STATUS,
@@ -149,6 +149,7 @@ export function useLandrushIslandLoadingTimeline({
     }
     const overlay = shellPresentation?.shell ?? runtimeOverlay
     const fill = shellPresentation?.fill ?? fillRef.current
+    fill?.setAttribute('data-landrush-island-loading-activity-fill', '')
     const percent = shellPresentation?.percent ?? null
     const percentReel = shellPresentation?.percentReel ?? null
     const status = shellPresentation?.status ?? null
@@ -171,7 +172,9 @@ export function useLandrushIslandLoadingTimeline({
     const controller = createLandrushIslandLoadingProgressController({
       inheritedVelocityHoldMs: resolveLandrushIslandLoadingObservationDelay(readNow(), lastClockMs),
       initialProgress,
-      initialVelocityPerSecond: shellPresentation ? STREAMED_SHELL_VELOCITY_PER_SECOND : 0,
+      initialVelocityPerSecond: shellPresentation
+        ? resolveLandrushIslandLoadingShellVelocity(retained)
+        : 0,
     })
     if (retained?.progressSnapshot) {
       controller.restoreMotionSnapshot(retained.progressSnapshot)

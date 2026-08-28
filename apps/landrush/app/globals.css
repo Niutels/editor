@@ -167,6 +167,38 @@
   will-change: transform;
 }
 
+[data-landrush-island-loading-shell-fill],
+[data-landrush-island-loading-activity-fill] {
+  position: relative;
+  overflow: hidden;
+}
+
+/* A settled percentage still needs visible activity and changing compositor pixels. */
+[data-landrush-island-loading-shell-fill]::after,
+[data-landrush-island-loading-activity-fill]::after {
+  content: "";
+  position: absolute;
+  inset: 0 -32px 0 0;
+  background: repeating-linear-gradient(
+    90deg,
+    #ffffff00 0px,
+    #ffffff66 16px,
+    #ffffff00 32px
+  );
+  animation: landrush-island-loading-activity 1600ms linear infinite;
+  pointer-events: none;
+  will-change: transform;
+}
+
+@keyframes landrush-island-loading-activity {
+  from {
+    transform: translate3d(-32px, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 [data-landrush-island-loading-shell-percent-reel] {
   animation: landrush-island-loading-shell-percent 120s steps(72, end) both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
@@ -227,6 +259,11 @@
   [data-landrush-island-loading-shell-percent-reel] {
     animation-duration: 120s !important;
     will-change: transform;
+  }
+  [data-landrush-island-loading-shell-fill]::after,
+  [data-landrush-island-loading-activity-fill]::after {
+    animation-duration: 1600ms !important;
+    animation-iteration-count: infinite !important;
   }
 }
 

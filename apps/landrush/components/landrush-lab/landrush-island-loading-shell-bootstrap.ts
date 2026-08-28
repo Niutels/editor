@@ -194,6 +194,27 @@ export function startLandrushIslandLoadingShellMotion(
   return motion
 }
 
+export function resolveLandrushIslandLoadingShellVelocity(
+  motion?: Readonly<{
+    animation: Pick<Animation, 'currentTime' | 'playState'>
+    durationMs: number
+    velocityPerSecond: number
+  }> | null,
+) {
+  if (!motion) return STREAMED_SHELL_VELOCITY_PER_SECOND
+  const currentTime = motion.animation.currentTime
+  return motion.animation.playState === 'running' &&
+    typeof currentTime === 'number' &&
+    Number.isFinite(currentTime) &&
+    currentTime >= 0 &&
+    Number.isFinite(motion.durationMs) &&
+    currentTime < motion.durationMs &&
+    Number.isFinite(motion.velocityPerSecond) &&
+    motion.velocityPerSecond > 0
+    ? motion.velocityPerSecond
+    : 0
+}
+
 export function createStreamedShellMotionSegment(fromProgress: number, maximumDurationMs: number) {
   const from = Math.min(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS, clamp01(fromProgress))
   const requestedDurationMs = Math.max(

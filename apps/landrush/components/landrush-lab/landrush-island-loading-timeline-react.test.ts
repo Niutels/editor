@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   createLandrushIslandLoadingProgressController,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED,
@@ -27,6 +28,31 @@ import {
 } from './landrush-island-loading-timeline-react'
 
 describe('Landrush island loading presentation handoff', () => {
+  test('keeps visible compositor activity when the evidence-bounded fill is stationary', () => {
+    const css = readFileSync(new URL('../../app/globals.css', import.meta.url), 'utf8')
+    const activity = css.slice(
+      css.indexOf('[data-landrush-island-loading-shell-fill]::after'),
+      css.indexOf('[data-landrush-island-loading-shell-percent-reel]'),
+    )
+    expect(activity).toContain('[data-landrush-island-loading-activity-fill]::after')
+    expect(activity).toContain('landrush-island-loading-activity 1600ms linear infinite')
+    expect(activity).toContain('will-change: transform')
+    expect(activity).toContain('inset: 0 -32px 0 0')
+    expect(activity).toContain('#ffffff00 32px')
+    expect(activity).toContain('translate3d(-32px, 0, 0)')
+    expect(activity).toContain('translate3d(0, 0, 0)')
+    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toContain('animation-duration: 1600ms !important')
+    expect(reduced).toContain('animation-iteration-count: infinite !important')
+
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.08 })
+    controller.setConfirmedProgress(0.279)
+    controller.step(120_000)
+    expect(controller.getSnapshot().displayedProgress).toBe(0.279)
+    expect(controller.getSnapshot().velocityPerSecond).toBe(0)
+    expect(controller.readyToDismiss()).toBe(false)
+  })
+
   test('requires a later foreground frame after the fill actually renders 100%', () => {
     const gate = createLandrushIslandLoadingCompletionGate()
     const observe = (frameTimeMs: number, renderedProgress: number, ready = true, visible = true) =>

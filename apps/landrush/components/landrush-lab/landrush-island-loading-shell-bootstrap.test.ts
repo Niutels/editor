@@ -11,6 +11,7 @@ import {
   LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
   LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE,
   type LandrushIslandLoadingBootRun,
+  resolveLandrushIslandLoadingShellVelocity,
   STREAMED_SHELL_VELOCITY_PER_SECOND,
   startLandrushIslandLoadingShellMotion,
 } from './landrush-island-loading-shell-bootstrap'
@@ -235,6 +236,71 @@ describe('Landrush island loading shell bootstrap', () => {
     })
   })
 
+  test('preserves the CSS velocity fallback when no retained shell motion exists', () => {
+    expect(resolveLandrushIslandLoadingShellVelocity()).toBe(STREAMED_SHELL_VELOCITY_PER_SECOND)
+    expect(resolveLandrushIslandLoadingShellVelocity(undefined)).toBe(
+      STREAMED_SHELL_VELOCITY_PER_SECOND,
+    )
+    expect(resolveLandrushIslandLoadingShellVelocity(null)).toBe(STREAMED_SHELL_VELOCITY_PER_SECOND)
+  })
+
+  test('inherits the exact linear shell velocity only during its active interval', () => {
+    for (const currentTime of [0, 640, 119_999.999]) {
+      const motion = createShellMotionForVelocity({ currentTime, playState: 'running' })
+      expect(resolveLandrushIslandLoadingShellVelocity(motion)).toBe(
+        STREAMED_SHELL_VELOCITY_PER_SECOND,
+      )
+    }
+  })
+
+  test('does not inject velocity after the 120-second forward-filled shell finishes', () => {
+    const finished = createShellMotionForVelocity({ currentTime: 120_000, playState: 'finished' })
+    expect(resolveLandrushIslandLoadingShellVelocity(finished)).toBe(0)
+    for (const currentTime of [120_000, 120_001]) {
+      expect(
+        resolveLandrushIslandLoadingShellVelocity(
+          createShellMotionForVelocity({ currentTime, playState: 'running' }),
+        ),
+      ).toBe(0)
+    }
+    expect(
+      resolveLandrushIslandLoadingShellVelocity(
+        createShellMotionForVelocity({ currentTime: 1_000, playState: 'running' }, 1_000),
+      ),
+    ).toBe(0)
+  })
+
+  test('inherits no motion from paused or cancelled animations', () => {
+    for (const animation of [
+      { currentTime: 640, playState: 'paused' },
+      { currentTime: null, playState: 'idle' },
+    ] satisfies Array<Pick<Animation, 'currentTime' | 'playState'>>) {
+      expect(
+        resolveLandrushIslandLoadingShellVelocity(createShellMotionForVelocity(animation)),
+      ).toBe(0)
+    }
+  })
+
+  test('does not treat unresolved or invalid animation time as an active zero-time sample', () => {
+    for (const currentTime of [null, Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(
+        resolveLandrushIslandLoadingShellVelocity(
+          createShellMotionForVelocity({ currentTime, playState: 'running' }),
+        ),
+      ).toBe(0)
+    }
+  })
+
+  test('rejects invalid retained leases and velocities without inventing a fallback slope', () => {
+    const active = createShellMotionForVelocity({ currentTime: 640, playState: 'running' })
+    for (const durationMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(resolveLandrushIslandLoadingShellVelocity({ ...active, durationMs })).toBe(0)
+    }
+    for (const velocityPerSecond of [0, -0.006, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(resolveLandrushIslandLoadingShellVelocity({ ...active, velocityPerSecond })).toBe(0)
+    }
+  })
+
   test('cannot exhaust its initial compositor runway before crossing 50 percent', () => {
     expect(
       STREAMED_SHELL_VELOCITY_PER_SECOND *
@@ -430,6 +496,13 @@ function createBootRun(): LandrushIslandLoadingBootRun {
     startedAtMs: 0,
     version: LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
   }
+}
+
+function createShellMotionForVelocity(
+  animation: Pick<Animation, 'currentTime' | 'playState'>,
+  durationMs = LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+) {
+  return { animation, durationMs, velocityPerSecond: STREAMED_SHELL_VELOCITY_PER_SECOND }
 }
 
 function createShellTarget() {
