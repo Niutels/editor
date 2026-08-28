@@ -4,6 +4,13 @@ import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, type RefObject, Suspense, useMemo, useRef } from 'react'
 import { Euler, type Group, MathUtils, type Object3D, Quaternion, Vector3 } from 'three'
 import {
+  captureLandrushRobotWeaponRelativeHandQuaternion,
+  createLandrushRobotTwoBoneIkScratch,
+  type LandrushRobotTwoBoneIkScratch,
+  resolveLandrushRobotTwoBoneElbowTarget,
+  resolveLandrushRobotWeaponHandQuaternion,
+} from './landrush-robot-weapon-arm-kinematics'
+import {
   createZombieEscapeMeleePresentationPose,
   dampZombieEscapeAngle,
   resolveZombieEscapeMeleePresentationPose,
@@ -21,15 +28,22 @@ import {
   type ZombieEscapeWeaponHandFitPose,
   type ZombieEscapeWeaponSpecification,
 } from './zombie-escape-weapon-catalog'
+import {
+  createZombieEscapeWeaponRecoilPose,
+  createZombieEscapeWeaponRecoilState,
+  resetZombieEscapeWeaponRecoil,
+  stepZombieEscapeWeaponRecoil,
+} from './zombie-escape-weapon-recoil'
 
 const WORLD_UP = new Vector3(0, 1, 0)
+const LOCAL_RIGHT = new Vector3(1, 0, 0)
 
 export type LandrushRobotWeaponCombatState = {
   aimAngle: number
   meleePhase: ZombieEscapeMeleePhase
   meleeProgress: number
   movementHeading: number
-  recoil: number
+  shotSequence: number
   weaponIndex: number
 }
 
@@ -64,7 +78,7 @@ export function createLandrushRobotWeaponCombatState(): LandrushRobotWeaponComba
     meleePhase: 'idle',
     meleeProgress: 0,
     movementHeading: 0,
-    recoil: 0,
+    shotSequence: 0,
     weaponIndex: 0,
   }
 }
@@ -94,11 +108,16 @@ type LandrushRobotArmBones = {
 
 type LandrushRobotWeaponRigScratch = {
   anchorOffset: Vector3
+  armKinematics: LandrushRobotTwoBoneIkScratch
+  ballisticForward: Vector3
+  ballisticQuaternion: Quaternion
   currentEnd: Vector3
   currentJoint: Vector3
   currentWorldQuaternion: Quaternion
   deltaQuaternion: Quaternion
   desiredWorldQuaternion: Quaternion
+  elbowPoleDirection: Vector3
+  elbowTarget: Vector3
   fitEuler: Euler
   fitOffset: Vector3
   fitQuaternion: Quaternion
@@ -124,6 +143,18 @@ type LandrushRobotWeaponRigScratch = {
   weaponForward: Vector3
   weaponOrigin: Vector3
   weaponQuaternion: Quaternion
+  wristPosition: Vector3
+}
+
+type LandrushRobotWeaponArmBinding = {
+  dominantHand: 'left' | 'right'
+  initialized: boolean
+  primaryElbowPoleWeaponSpace: Vector3
+  primaryWeaponRelativeHandQuaternion: Quaternion
+  secondaryElbowPoleWeaponSpace: Vector3
+  secondaryWeaponRelativeHandQuaternion: Quaternion
+  supportHandEnabled: boolean
+  weaponIndex: number
 }
 
 export function LandrushRobotWeaponRig({
@@ -163,11 +194,16 @@ export function LandrushRobotWeaponRig({
   const scratch = useMemo<LandrushRobotWeaponRigScratch>(
     () => ({
       anchorOffset: new Vector3(),
+      armKinematics: createLandrushRobotTwoBoneIkScratch(),
+      ballisticForward: new Vector3(),
+      ballisticQuaternion: new Quaternion(),
       currentEnd: new Vector3(),
       currentJoint: new Vector3(),
       currentWorldQuaternion: new Quaternion(),
       deltaQuaternion: new Quaternion(),
       desiredWorldQuaternion: new Quaternion(),
+      elbowPoleDirection: new Vector3(),
+      elbowTarget: new Vector3(),
       fitEuler: new Euler(),
       fitOffset: new Vector3(),
       fitQuaternion: new Quaternion(),
@@ -193,20 +229,41 @@ export function LandrushRobotWeaponRig({
       weaponForward: new Vector3(),
       weaponOrigin: new Vector3(),
       weaponQuaternion: new Quaternion(),
+      wristPosition: new Vector3(),
     }),
     [],
   )
+  const armBindingRef = useRef<LandrushRobotWeaponArmBinding>({
+    dominantHand,
+    initialized: false,
+    primaryElbowPoleWeaponSpace: new Vector3(),
+    primaryWeaponRelativeHandQuaternion: new Quaternion(),
+    secondaryElbowPoleWeaponSpace: new Vector3(),
+    secondaryWeaponRelativeHandQuaternion: new Quaternion(),
+    supportHandEnabled,
+    weaponIndex: -1,
+  })
+  const recoilStateRef = useRef(createZombieEscapeWeaponRecoilState())
+  const recoilPoseRef = useRef(createZombieEscapeWeaponRecoilPose())
 
   useFrame((_, delta) => {
     const weaponRoot = weaponRootRef.current
     if (!active) {
       if (weaponRoot) weaponRoot.visible = false
+      armBindingRef.current.initialized = false
+      const combatState = combatStateRef.current
+      resetZombieEscapeWeaponRecoil(
+        recoilStateRef.current,
+        combatState?.weaponIndex ?? 0,
+        combatState?.shotSequence ?? 0,
+      )
       return
     }
     const visualRoot = visualRootRef.current
     const combatState = combatStateRef.current
     if (!weaponRoot || !visualRoot || !combatState) {
       if (weaponRoot) weaponRoot.visible = false
+      armBindingRef.current.initialized = false
       muzzlePoseRef.current.ready = false
       return
     }
@@ -219,6 +276,7 @@ export function LandrushRobotWeaponRig({
     const weapon = ZOMBIE_ESCAPE_WEAPON_CATALOG[weaponIndex]
     if (!weapon) {
       weaponRoot.visible = false
+      armBindingRef.current.initialized = false
       muzzlePoseRef.current.ready = false
       return
     }
@@ -227,6 +285,7 @@ export function LandrushRobotWeaponRig({
     bonesRef.current = bones
     if (!bones) {
       weaponRoot.visible = false
+      armBindingRef.current.initialized = false
       muzzlePoseRef.current.ready = false
       return
     }
@@ -275,19 +334,71 @@ export function LandrushRobotWeaponRig({
     scratch.weaponForward.set(0, 0, 1).applyQuaternion(scratch.weaponQuaternion)
     scratch.deltaQuaternion.setFromAxisAngle(scratch.weaponForward, meleePose.roll)
     scratch.weaponQuaternion.premultiply(scratch.deltaQuaternion).multiply(scratch.fitQuaternion)
-    scratch.weaponForward.set(0, 0, 1).applyQuaternion(scratch.weaponQuaternion)
-    scratch.rightDirection.set(1, 0, 0).applyQuaternion(scratch.weaponQuaternion)
+    scratch.ballisticQuaternion.copy(scratch.weaponQuaternion)
+    scratch.ballisticForward.set(0, 0, 1).applyQuaternion(scratch.ballisticQuaternion)
     const primaryArm = dominantHand === 'right' ? bones.rightArm : bones.leftArm
     const primaryForeArm = dominantHand === 'right' ? bones.rightForeArm : bones.leftForeArm
     const primaryHand = dominantHand === 'right' ? bones.rightHand : bones.leftHand
     const secondaryArm = dominantHand === 'right' ? bones.leftArm : bones.rightArm
     const secondaryForeArm = dominantHand === 'right' ? bones.leftForeArm : bones.rightForeArm
     const secondaryHand = dominantHand === 'right' ? bones.leftHand : bones.rightHand
+    const armBinding = armBindingRef.current
+    if (
+      !armBinding.initialized ||
+      armBinding.weaponIndex !== weaponIndex ||
+      armBinding.dominantHand !== dominantHand ||
+      armBinding.supportHandEnabled !== supportHandEnabled
+    ) {
+      scratch.inverseWeaponQuaternion.copy(scratch.ballisticQuaternion).invert()
+      primaryHand.getWorldQuaternion(scratch.currentWorldQuaternion)
+      captureLandrushRobotWeaponRelativeHandQuaternion(
+        scratch.ballisticQuaternion,
+        scratch.currentWorldQuaternion,
+        armBinding.primaryWeaponRelativeHandQuaternion,
+      )
+      secondaryHand.getWorldQuaternion(scratch.currentWorldQuaternion)
+      captureLandrushRobotWeaponRelativeHandQuaternion(
+        scratch.ballisticQuaternion,
+        scratch.currentWorldQuaternion,
+        armBinding.secondaryWeaponRelativeHandQuaternion,
+      )
+      primaryArm.getWorldPosition(scratch.currentJoint)
+      primaryForeArm.getWorldPosition(scratch.currentEnd)
+      armBinding.primaryElbowPoleWeaponSpace
+        .copy(scratch.currentEnd)
+        .sub(scratch.currentJoint)
+        .applyQuaternion(scratch.inverseWeaponQuaternion)
+      secondaryArm.getWorldPosition(scratch.currentJoint)
+      secondaryForeArm.getWorldPosition(scratch.currentEnd)
+      armBinding.secondaryElbowPoleWeaponSpace
+        .copy(scratch.currentEnd)
+        .sub(scratch.currentJoint)
+        .applyQuaternion(scratch.inverseWeaponQuaternion)
+      armBinding.dominantHand = dominantHand
+      armBinding.initialized = true
+      armBinding.supportHandEnabled = supportHandEnabled
+      armBinding.weaponIndex = weaponIndex
+    }
+    const recoilPose = stepZombieEscapeWeaponRecoil(
+      recoilStateRef.current,
+      {
+        deltaSeconds: delta,
+        shotSequence: combatState.shotSequence,
+        weaponIndex,
+      },
+      recoilPoseRef.current,
+    )
+    scratch.deltaQuaternion.setFromAxisAngle(LOCAL_RIGHT, -recoilPose.muzzleClimbRadians)
+    scratch.weaponQuaternion.multiply(scratch.deltaQuaternion).normalize()
+    scratch.weaponForward.set(0, 0, 1).applyQuaternion(scratch.weaponQuaternion)
+    scratch.rightDirection.set(1, 0, 0).applyQuaternion(scratch.weaponQuaternion)
     const handSide = dominantHand === 'right' ? -1 : 1
-    const recoil = MathUtils.clamp(combatState.recoil, 0, 1)
     scratch.primaryGripTarget
       .copy(scratch.shoulderCenter)
-      .addScaledVector(scratch.weaponForward, 0.38 - recoil * 0.075 + meleePose.forwardOffset)
+      .addScaledVector(
+        scratch.ballisticForward,
+        0.38 - recoilPose.backwardTravelMeters + meleePose.forwardOffset,
+      )
       .addScaledVector(
         scratch.rightDirection,
         handSide * (weapon.wield === 'one-hand' ? 0.2 : 0.15),
@@ -329,6 +440,8 @@ export function LandrushRobotWeaponRig({
       primaryForeArm,
       primaryHand,
       scratch.primaryGripTarget,
+      armBinding.primaryElbowPoleWeaponSpace,
+      scratch.ballisticQuaternion,
       scratch,
     )
     if (weapon.grip.secondaryAnchorMeters && supportHandEnabled) {
@@ -337,6 +450,8 @@ export function LandrushRobotWeaponRig({
         secondaryForeArm,
         secondaryHand,
         scratch.leftGripTarget,
+        armBinding.secondaryElbowPoleWeaponSpace,
+        scratch.ballisticQuaternion,
         scratch,
       )
     }
@@ -359,6 +474,8 @@ export function LandrushRobotWeaponRig({
         secondaryForeArm,
         secondaryHand,
         scratch.leftGripTarget,
+        armBinding.secondaryElbowPoleWeaponSpace,
+        scratch.ballisticQuaternion,
         scratch,
       )
     }
@@ -367,6 +484,7 @@ export function LandrushRobotWeaponRig({
       weapon.handFitDefaults.primary,
       dominantHand === 'left',
       scratch.weaponQuaternion,
+      armBinding.primaryWeaponRelativeHandQuaternion,
       scratch,
     )
     if (weapon.handFitDefaults.secondary && supportHandEnabled) {
@@ -375,6 +493,7 @@ export function LandrushRobotWeaponRig({
         weapon.handFitDefaults.secondary,
         dominantHand === 'left',
         scratch.weaponQuaternion,
+        armBinding.secondaryWeaponRelativeHandQuaternion,
         scratch,
       )
     }
@@ -396,7 +515,7 @@ export function LandrushRobotWeaponRig({
     muzzlePose.position.copy(scratch.weaponOrigin).add(scratch.muzzleOffset)
     muzzlePose.direction
       .fromArray(weapon.muzzle.forwardAxis)
-      .applyQuaternion(scratch.weaponQuaternion)
+      .applyQuaternion(scratch.ballisticQuaternion)
       .normalize()
     muzzlePose.poseRevision += 1
     muzzlePose.ready = !meleeActive
@@ -520,12 +639,28 @@ function solveLandrushRobotArmToTarget(
   foreArm: Object3D,
   hand: Object3D,
   target: Vector3,
+  elbowPoleWeaponSpace: Vector3,
+  weaponQuaternion: Quaternion,
   scratch: LandrushRobotWeaponRigScratch,
 ) {
-  for (let iteration = 0; iteration < 3; iteration += 1) {
-    rotateLandrushRobotJointTowardTarget(foreArm, hand, target, scratch)
-    rotateLandrushRobotJointTowardTarget(upperArm, hand, target, scratch)
-  }
+  upperArm.updateWorldMatrix(true, true)
+  upperArm.getWorldPosition(scratch.currentJoint)
+  foreArm.getWorldPosition(scratch.currentEnd)
+  hand.getWorldPosition(scratch.wristPosition)
+  const upperArmLength = scratch.currentJoint.distanceTo(scratch.currentEnd)
+  const foreArmLength = scratch.currentEnd.distanceTo(scratch.wristPosition)
+  scratch.elbowPoleDirection.copy(elbowPoleWeaponSpace).applyQuaternion(weaponQuaternion)
+  resolveLandrushRobotTwoBoneElbowTarget(
+    scratch.currentJoint,
+    target,
+    upperArmLength,
+    foreArmLength,
+    scratch.elbowPoleDirection,
+    scratch.elbowTarget,
+    scratch.armKinematics,
+  )
+  rotateLandrushRobotJointTowardTarget(upperArm, foreArm, scratch.elbowTarget, scratch)
+  rotateLandrushRobotJointTowardTarget(foreArm, hand, target, scratch)
 }
 
 function rotateLandrushRobotJointTowardTarget(
@@ -603,6 +738,7 @@ function applyLandrushRobotPalmPose(
   pose: ZombieEscapeWeaponHandFitPose,
   mirrored: boolean,
   weaponQuaternion: Quaternion,
+  weaponRelativeHandQuaternion: Quaternion,
   scratch: LandrushRobotWeaponRigScratch,
 ) {
   const parent = hand.parent
@@ -615,21 +751,26 @@ function applyLandrushRobotPalmPose(
     'XYZ',
   )
   scratch.palmQuaternion.setFromEuler(scratch.palmEuler)
-  scratch.inverseWeaponQuaternion.copy(weaponQuaternion).invert()
-  scratch.deltaQuaternion
-    .copy(weaponQuaternion)
-    .multiply(scratch.palmQuaternion)
-    .multiply(scratch.inverseWeaponQuaternion)
-  hand.getWorldQuaternion(scratch.currentWorldQuaternion)
-  scratch.desiredWorldQuaternion
-    .copy(scratch.deltaQuaternion)
-    .multiply(scratch.currentWorldQuaternion)
-    .normalize()
+  resolveLandrushRobotWeaponHandQuaternion(
+    weaponQuaternion,
+    scratch.palmQuaternion,
+    weaponRelativeHandQuaternion,
+    scratch.desiredWorldQuaternion,
+  )
   parent.getWorldQuaternion(scratch.parentWorldQuaternion).invert()
-  hand.quaternion
+  scratch.deltaQuaternion
     .copy(scratch.parentWorldQuaternion)
     .multiply(scratch.desiredWorldQuaternion)
     .normalize()
+  if (hand.quaternion.dot(scratch.deltaQuaternion) < 0) {
+    scratch.deltaQuaternion.set(
+      -scratch.deltaQuaternion.x,
+      -scratch.deltaQuaternion.y,
+      -scratch.deltaQuaternion.z,
+      -scratch.deltaQuaternion.w,
+    )
+  }
+  hand.quaternion.copy(scratch.deltaQuaternion)
   hand.updateWorldMatrix(false, true)
 }
 

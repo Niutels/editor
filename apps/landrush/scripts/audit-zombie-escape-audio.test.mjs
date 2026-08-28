@@ -73,7 +73,7 @@ test('audits every checked-in ElevenLabs artifact against measured file metadata
 
   assert.equal(audit.pass, true, audit.failures.join('\n'))
   assert.equal(audit.ready, true)
-  assert.equal(audit.artifactCount, 27)
+  assert.equal(audit.artifactCount, 31)
   assert.equal(audit.artifactCount, audit.expectedArtifactCount)
 
   const shippingAudit = await auditZombieEscapeAudio({

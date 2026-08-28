@@ -10,8 +10,8 @@ export type LandrushIslandAmbientLoadUnit = {
 export type LandrushIslandAmbientLoadOutcome = 'degraded' | 'failed' | 'loaded'
 
 export type LandrushIslandAmbientLoadQueueState = {
+  admittedUnitIds: readonly string[]
   generation: number
-  inFlightUnitId: string | null
   terminalOutcomes: Readonly<Record<string, LandrushIslandAmbientLoadOutcome>>
 }
 
@@ -37,9 +37,7 @@ export type LandrushIslandAmbientLoadReadiness = {
 
 export type LandrushIslandAmbientLoadYieldHost = {
   cancelAnimationFrame: (handle: number) => void
-  cancelIdleCallback?: (handle: number) => void
   requestAnimationFrame: (callback: () => void) => number
-  requestIdleCallback?: (callback: () => void, options: { timeout: number }) => number
 }
 
 export type LandrushIslandAmbientLoadWatchdogHost = {
@@ -56,7 +54,6 @@ export type LandrushIslandAmbientLoadGenerationAllocator = (
   minimumExclusiveGeneration?: number,
 ) => number
 
-export const LANDRUSH_ISLAND_AMBIENT_LOAD_IDLE_TIMEOUT_MS = 250
 export const LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_TIMEOUT_MS = 15_000
 
 const allocateLandrushIslandAmbientLoadMountGeneration =
@@ -85,8 +82,8 @@ export function createLandrushIslandAmbientLoadQueueState(
   generation = 0,
 ): LandrushIslandAmbientLoadQueueState {
   return {
+    admittedUnitIds: [],
     generation,
-    inFlightUnitId: null,
     terminalOutcomes: {},
   }
 }
@@ -128,15 +125,15 @@ export function advanceLandrushIslandAmbientLoadQueueAfterYield(
     policy: LandrushIslandAmbientLoadPolicy
   },
 ): LandrushIslandAmbientLoadQueueState {
-  if (
-    generation !== state.generation ||
-    !(policy.admitted && policy.pageVisible && state.inFlightUnitId === null)
-  ) {
+  if (generation !== state.generation || !(policy.admitted && policy.pageVisible)) {
     return state
   }
 
-  const nextUnit = units.find((unit) => state.terminalOutcomes[unit.id] === undefined)
-  return nextUnit ? { ...state, inFlightUnitId: nextUnit.id } : state
+  const admittedUnitIdSet = new Set(state.admittedUnitIds)
+  const nextUnit = units.find((unit) => !admittedUnitIdSet.has(unit.id))
+  return nextUnit
+    ? { ...state, admittedUnitIds: [...state.admittedUnitIds, nextUnit.id] }
+    : state
 }
 
 export function scheduleLandrushIslandAmbientLoadAdmissionYield({
@@ -152,24 +149,12 @@ export function scheduleLandrushIslandAmbientLoadAdmissionYield({
     pending = false
     onYield()
   }
-  const requestIdleCallback = host.requestIdleCallback
-  const cancelIdleCallback = host.cancelIdleCallback
-  let cancelScheduled: () => void
-
-  if (requestIdleCallback && cancelIdleCallback) {
-    const handle = requestIdleCallback(complete, {
-      timeout: LANDRUSH_ISLAND_AMBIENT_LOAD_IDLE_TIMEOUT_MS,
-    })
-    cancelScheduled = () => cancelIdleCallback(handle)
-  } else {
-    const handle = host.requestAnimationFrame(complete)
-    cancelScheduled = () => host.cancelAnimationFrame(handle)
-  }
+  const handle = host.requestAnimationFrame(complete)
 
   return () => {
     if (!pending) return
     pending = false
-    cancelScheduled()
+    host.cancelAnimationFrame(handle)
   }
 }
 
@@ -212,13 +197,16 @@ export function settleLandrushIslandAmbientLoadQueue(
   state: LandrushIslandAmbientLoadQueueState,
   settlement: LandrushIslandAmbientLoadSettlement,
 ): LandrushIslandAmbientLoadQueueState {
-  if (settlement.generation !== state.generation || settlement.unitId !== state.inFlightUnitId) {
+  if (
+    settlement.generation !== state.generation ||
+    !state.admittedUnitIds.includes(settlement.unitId) ||
+    state.terminalOutcomes[settlement.unitId] !== undefined
+  ) {
     return state
   }
 
   return {
     ...state,
-    inFlightUnitId: null,
     terminalOutcomes: {
       ...state.terminalOutcomes,
       [settlement.unitId]: settlement.outcome,
@@ -234,10 +222,13 @@ export function resolveLandrushIslandAmbientLoadReadiness(
   const terminalUnitIds = totalUnitIds.filter(
     (unitId) => state.terminalOutcomes[unitId] !== undefined,
   )
+  const admittedUnitIds = new Set(state.admittedUnitIds)
   return {
     completed: terminalUnitIds.length,
     generation: state.generation,
-    ready: state.inFlightUnitId === null && terminalUnitIds.length === totalUnitIds.length,
+    ready:
+      terminalUnitIds.length === totalUnitIds.length &&
+      totalUnitIds.every((unitId) => admittedUnitIds.has(unitId)),
     terminalUnitIds,
     total: totalUnitIds.length,
     totalUnitIds,
@@ -254,7 +245,7 @@ export function reconcileLandrushIslandAmbientLoadReadiness(
     current.total !== reported.total ||
     !haveSameOrderedUnitIds(current.totalUnitIds, reported.totalUnitIds) ||
     reported.completed < current.completed ||
-    !isOrderedUnitIdPrefix(current.terminalUnitIds, reported.terminalUnitIds) ||
+    !isOrderedUnitIdSubset(current.terminalUnitIds, reported.terminalUnitIds) ||
     (current.ready && !reported.ready)
   ) {
     return current
@@ -273,29 +264,17 @@ export function resolveMountedLandrushIslandAmbientLoadUnits(
   state: LandrushIslandAmbientLoadQueueState,
   units: readonly LandrushIslandAmbientLoadUnit[],
 ): readonly LandrushIslandAmbientLoadUnit[] {
+  const admittedUnitIds = new Set(state.admittedUnitIds)
   return units.filter(
-    (unit) =>
-      unit.id === state.inFlightUnitId ||
-      state.terminalOutcomes[unit.id] === 'loaded' ||
-      state.terminalOutcomes[unit.id] === 'degraded',
+    (unit) => admittedUnitIds.has(unit.id) && state.terminalOutcomes[unit.id] !== 'failed',
   )
 }
 
 function createBrowserLandrushIslandAmbientLoadYieldHost(): LandrushIslandAmbientLoadYieldHost {
-  const browserWindow = window as Window & {
-    cancelIdleCallback?: (handle: number) => void
-    requestIdleCallback?: (callback: () => void, options: { timeout: number }) => number
+  return {
+    cancelAnimationFrame: (handle) => window.cancelAnimationFrame(handle),
+    requestAnimationFrame: (callback) => window.requestAnimationFrame(callback),
   }
-  const host: LandrushIslandAmbientLoadYieldHost = {
-    cancelAnimationFrame: (handle) => browserWindow.cancelAnimationFrame(handle),
-    requestAnimationFrame: (callback) => browserWindow.requestAnimationFrame(callback),
-  }
-  if (browserWindow.requestIdleCallback && browserWindow.cancelIdleCallback) {
-    host.requestIdleCallback = (callback, options) =>
-      browserWindow.requestIdleCallback!(callback, options)
-    host.cancelIdleCallback = (handle) => browserWindow.cancelIdleCallback!(handle)
-  }
-  return host
 }
 
 function createBrowserLandrushIslandAmbientLoadWatchdogHost(): LandrushIslandAmbientLoadWatchdogHost {
@@ -321,8 +300,7 @@ function haveSameOrderedUnitIds(first: readonly string[], second: readonly strin
   return first.length === second.length && first.every((unitId, index) => unitId === second[index])
 }
 
-function isOrderedUnitIdPrefix(prefix: readonly string[], unitIds: readonly string[]) {
-  return (
-    prefix.length <= unitIds.length && prefix.every((unitId, index) => unitId === unitIds[index])
-  )
+function isOrderedUnitIdSubset(subset: readonly string[], unitIds: readonly string[]) {
+  const unitIdSet = new Set(unitIds)
+  return subset.every((unitId) => unitIdSet.has(unitId))
 }

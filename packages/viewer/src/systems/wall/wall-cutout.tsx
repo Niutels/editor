@@ -19,6 +19,7 @@ import {
   getMaterialsForWall,
   getSelectionHighlightMaterials,
   getWallMaterialHash,
+  type WallMaterials,
 } from './wall-materials'
 
 const tmpVec = new Vector3()
@@ -59,8 +60,53 @@ export function getWallHideState(
   return hideWall
 }
 
-function sameMaterialArray(a: Material | Material[], b: Material[]): boolean {
-  return Array.isArray(a) && a.length === b.length && a.every((material, i) => material === b[i])
+function sameMaterialAssignment(a: Material | Material[], b: Material | Material[]): boolean {
+  if (a === b) return true
+  return (
+    Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length === b.length &&
+    a.every((material, i) => material === b[i])
+  )
+}
+
+function isWallCutoutMaterialAssignment(
+  assignment: Material | Material[],
+  materials: WallMaterials,
+): boolean {
+  const directAssignments = [
+    materials.visible,
+    materials.invisible,
+    materials.translucent,
+    materials.deleteVisible,
+    materials.deleteInvisible,
+    materials.deleteTranslucent,
+  ]
+  if (directAssignments.some((candidate) => sameMaterialAssignment(assignment, candidate))) {
+    return true
+  }
+  return [materials.visible, materials.invisible, materials.translucent].some((candidate) =>
+    sameMaterialAssignment(assignment, getSelectionHighlightMaterials(candidate)),
+  )
+}
+
+export type WallCutoutMaterialOwnership = Readonly<{
+  key: string
+  mesh: Mesh
+}>
+
+export function applyWallCutoutMaterial(
+  ownership: WallCutoutMaterialOwnership | undefined,
+  mesh: Mesh,
+  assignment: Material | Material[],
+  key: string,
+  currentAssignmentIsWallOwned = true,
+): WallCutoutMaterialOwnership {
+  const ownsMesh = ownership?.mesh === mesh
+  if (ownsMesh && ownership.key === key) return ownership
+  if (!ownsMesh && !currentAssignmentIsWallOwned) return { key, mesh }
+  mesh.material = assignment
+  return { key, mesh }
 }
 
 export const WallCutout = () => {
@@ -72,6 +118,8 @@ export const WallCutout = () => {
   const lastNumberOfWalls = useRef(0)
   const lastHighlightKey = useRef('')
   const lastWallAppearanceKey = useRef('')
+  const materialOwnershipEpoch = useRef(0)
+  const materialOwnership = useRef(new Map<string, WallCutoutMaterialOwnership>())
   const wallAppearanceKeyRef = useRef('')
   const wallAppearanceInputs = useRef({
     nodes: null as object | null,
@@ -151,6 +199,15 @@ export const WallCutout = () => {
       lastHighlightKey.current !== highlightKey ||
       lastWallAppearanceKey.current !== wallAppearanceKey
     ) {
+      if (
+        lastShading.current !== shading ||
+        lastTextures.current !== textures ||
+        lastColorPreset.current !== colorPreset ||
+        lastSceneTheme.current !== sceneTheme ||
+        lastWallAppearanceKey.current !== wallAppearanceKey
+      ) {
+        materialOwnershipEpoch.current += 1
+      }
       lastCameraPosition.current.copy(currentCameraPosition)
       lastCameraTarget.current.copy(tmpVec)
       lastUpdateTime.current = currentTime
@@ -204,26 +261,45 @@ export const WallCutout = () => {
           sceneState.materials,
         )
 
-        if (wallMode === 'translucent') {
-          ;(wallMesh as Mesh).material = isDeleteHighlighted
-            ? materials.deleteTranslucent
-            : shouldSelectionHighlight
-              ? getSelectionHighlightMaterials(materials.translucent)
-              : materials.translucent
-        } else if (hideWall) {
-          ;(wallMesh as Mesh).material = isDeleteHighlighted
-            ? materials.deleteInvisible
-            : shouldSelectionHighlight
-              ? getSelectionHighlightMaterials(materials.invisible)
-              : materials.invisible
-        } else {
-          ;(wallMesh as Mesh).material = isDeleteHighlighted
-            ? materials.deleteVisible
-            : shouldSelectionHighlight
-              ? getSelectionHighlightMaterials(materials.visible)
-              : materials.visible
-        }
+        const materialKind =
+          wallMode === 'translucent' ? 'translucent' : hideWall ? 'invisible' : 'visible'
+        const highlightKind = isDeleteHighlighted
+          ? 'delete'
+          : shouldSelectionHighlight
+            ? 'selection'
+            : 'normal'
+        const nextMaterial =
+          materialKind === 'translucent'
+            ? isDeleteHighlighted
+              ? materials.deleteTranslucent
+              : shouldSelectionHighlight
+                ? getSelectionHighlightMaterials(materials.translucent)
+                : materials.translucent
+            : materialKind === 'invisible'
+              ? isDeleteHighlighted
+                ? materials.deleteInvisible
+                : shouldSelectionHighlight
+                  ? getSelectionHighlightMaterials(materials.invisible)
+                  : materials.invisible
+              : isDeleteHighlighted
+                ? materials.deleteVisible
+                : shouldSelectionHighlight
+                  ? getSelectionHighlightMaterials(materials.visible)
+                  : materials.visible
+        materialOwnership.current.set(
+          wallId,
+          applyWallCutoutMaterial(
+            materialOwnership.current.get(wallId),
+            wallMesh as Mesh,
+            nextMaterial,
+            `${materialOwnershipEpoch.current}:${materialKind}:${highlightKind}`,
+            isWallCutoutMaterialAssignment((wallMesh as Mesh).material, materials),
+          ),
+        )
       })
+      for (const wallId of materialOwnership.current.keys()) {
+        if (!walls.has(wallId)) materialOwnership.current.delete(wallId)
+      }
       lastWallMode.current = wallMode
       lastShading.current = shading
       lastTextures.current = textures
@@ -260,7 +336,7 @@ export const WallCutout = () => {
           wallMesh.material = mats.invisible
         } else if (
           current === mats.deleteTranslucent ||
-          sameMaterialArray(current, getSelectionHighlightMaterials(mats.translucent))
+          sameMaterialAssignment(current, getSelectionHighlightMaterials(mats.translucent))
         ) {
           wallMesh.material = mats.translucent
         }

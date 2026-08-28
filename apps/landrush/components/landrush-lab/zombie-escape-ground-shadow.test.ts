@@ -2,10 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { BoxGeometry, type BufferGeometry, Mesh, MeshBasicMaterial } from 'three'
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh'
 import {
-  createZombieEscapeGroundShadowAlphaMapData,
   createZombieEscapeGroundShadowProjector,
   projectZombieEscapeGroundShadowSupportY,
   resolveZombieEscapeGroundShadowEnvelope,
+  resolveZombieEscapeGroundShadowMovementRotation,
+  resolveZombieEscapeGroundShadowRenderSupportY,
   ZOMBIE_ESCAPE_GROUND_SHADOW,
   type ZombieEscapeGroundShadowEnvelope,
 } from './zombie-escape-ground-shadow'
@@ -89,14 +90,102 @@ describe('Zombie Escape ground shadow', () => {
     )
   })
 
-  test('builds a deterministic soft blob with a stronger center than edge', () => {
-    const { data, size } = createZombieEscapeGroundShadowAlphaMapData(16)
-    const alphaAt = (x: number, y: number) => data[(y * size + x) * 4 + 1]!
+  test('authors a compact near-round footprint around the character', () => {
+    expect(ZOMBIE_ESCAPE_GROUND_SHADOW.aspectRatio).toBeGreaterThanOrEqual(0.84)
+    expect(ZOMBIE_ESCAPE_GROUND_SHADOW.aspectRatio).toBeLessThan(1)
+    expect(ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius * 2).toBeLessThanOrEqual(0.56)
+    expect(
+      ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius * ZOMBIE_ESCAPE_GROUND_SHADOW.aspectRatio * 2,
+    ).toBeLessThanOrEqual(0.49)
+    expect(ZOMBIE_ESCAPE_GROUND_SHADOW.baseOpacity).toBeGreaterThan(0.5)
+  })
 
-    expect(size).toBe(16)
-    expect(alphaAt(8, 8)).toBeGreaterThan(alphaAt(12, 8))
-    expect(alphaAt(12, 8)).toBeGreaterThan(alphaAt(15, 15))
-    expect(alphaAt(15, 15)).toBe(0)
+  test('keeps most of the shadow visible through the jump envelope', () => {
+    const grounded = sample(2, 2)
+    const maximumHeight = sample(2 + ZOMBIE_ESCAPE_GROUND_SHADOW.maximumAltitude, 2)
+
+    expect(maximumHeight.opacity / grounded.opacity).toBeGreaterThanOrEqual(0.6)
+    expect(maximumHeight.radius / grounded.radius).toBeGreaterThanOrEqual(0.6)
+  })
+
+  test('turns the ellipse long axis toward movement with frame-rate-independent response', () => {
+    const oneStep = resolveZombieEscapeGroundShadowMovementRotation({
+      currentRotation: 0,
+      deltaSeconds: 1 / 30,
+      deltaX: 0,
+      deltaZ: 0.1,
+    })
+    const firstHalfStep = resolveZombieEscapeGroundShadowMovementRotation({
+      currentRotation: 0,
+      deltaSeconds: 1 / 60,
+      deltaX: 0,
+      deltaZ: 0.05,
+    })
+    const twoHalfSteps = resolveZombieEscapeGroundShadowMovementRotation({
+      currentRotation: firstHalfStep,
+      deltaSeconds: 1 / 60,
+      deltaX: 0,
+      deltaZ: 0.05,
+    })
+
+    expect(oneStep).toBeLessThan(0)
+    expect(oneStep).toBeGreaterThan(-Math.PI / 2)
+    expect(twoHalfSteps).toBeCloseTo(oneStep, 10)
+  })
+
+  test('does not spin for stationary frames, teleports, or equivalent half turns', () => {
+    const currentRotation = 0.37
+    expect(
+      resolveZombieEscapeGroundShadowMovementRotation({
+        currentRotation,
+        deltaSeconds: 1 / 60,
+        deltaX: 0,
+        deltaZ: 0,
+      }),
+    ).toBe(currentRotation)
+    expect(
+      resolveZombieEscapeGroundShadowMovementRotation({
+        currentRotation,
+        deltaSeconds: 1 / 60,
+        deltaX: 10,
+        deltaZ: 0,
+      }),
+    ).toBe(currentRotation)
+    expect(
+      resolveZombieEscapeGroundShadowMovementRotation({
+        currentRotation: 0,
+        deltaSeconds: 1 / 60,
+        deltaX: -0.1,
+        deltaZ: 0,
+      }),
+    ).toBeCloseTo(0, 10)
+  })
+
+  test('keeps the last valid support plane while the player is airborne', () => {
+    expect(
+      resolveZombieEscapeGroundShadowRenderSupportY({
+        lastSupportY: 2,
+        playerY: 2.8,
+        projectedSupportY: 0,
+        projectedVisible: false,
+      }),
+    ).toBe(2)
+    expect(
+      resolveZombieEscapeGroundShadowRenderSupportY({
+        lastSupportY: 2,
+        playerY: 2,
+        projectedSupportY: 0,
+        projectedVisible: false,
+      }),
+    ).toBeNull()
+    expect(
+      resolveZombieEscapeGroundShadowRenderSupportY({
+        lastSupportY: 2,
+        playerY: 1.9,
+        projectedSupportY: 0,
+        projectedVisible: false,
+      }),
+    ).toBeNull()
   })
 
   test('clamps below-support and invalid player values to a finite grounded envelope', () => {

@@ -49,5 +49,6 @@ Invoke the `review-architecture` skill (`.agents/skills/review-architecture/SKIL
 - Read the full file before editing. Plan all changes, then make one complete edit.
 - When the user corrects you, stop and re-read their message.
 - After two consecutive tool failures, stop and change approach.
+- Close every tab opened by the current Codex thread before finishing or presenting results, without exception; leave tabs that predated the thread untouched.
 - Don't introduce backwards-compatibility shims, dead code, or speculative abstractions.
 - Don't write new comments unless they explain a non-obvious *why*.

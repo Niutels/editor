@@ -71,7 +71,7 @@ describe('Landrush island ambient lifecycle', () => {
     })
   })
 
-  test('keeps all palm slots and keys stable while visibility expands from four to twenty-four', () => {
+  test('keeps all twenty-four palm slots visible with stable keys across phases', () => {
     const daySlots = resolveSlots(false)
     const zombieSlots = resolveSlots(true)
 
@@ -84,12 +84,12 @@ describe('Landrush island ambient lifecycle', () => {
       daySlots.map((slot) => slot.instanceIndex),
     )
     expect(daySlots.filter((slot) => slot.visible).map((slot) => slot.instanceIndex)).toEqual(
-      Array.from({ length: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT }, (_, index) => index),
+      Array.from({ length: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT }, (_, index) => index),
     )
     expect(zombieSlots.every((slot) => slot.visible)).toBe(true)
   })
 
-  test('preserves the four legacy day positions inside one phase-invariant twenty-four-slot layout', () => {
+  test('uses one phase-invariant twenty-four-slot shoreline layout', () => {
     const center = { x: 2, z: -3 }
     const shoreline = Array.from({ length: 32 }, (_, index) => ({
       x: index * 1.25 - 11,
@@ -106,7 +106,7 @@ describe('Landrush island ambient lifecycle', () => {
           shoreline,
         }),
     )
-    const legacyDayPositions = Array.from(
+    const expectedDayPositions = Array.from(
       { length: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT },
       (_, instanceIndex) => {
         const point =
@@ -127,12 +127,12 @@ describe('Landrush island ambient lifecycle', () => {
       resolveSlots(zombieIslandActive).map((slot) => positions[slot.instanceIndex])
 
     expect(positions.slice(0, LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT)).toEqual(
-      legacyDayPositions,
+      expectedDayPositions,
     )
     expect(positionsForPhase(false)).toEqual(positionsForPhase(true))
   })
 
-  test('keeps ambient NPC navigation on the four day-visible palm trunks across phases', () => {
+  test('keeps ambient NPC navigation on every visible palm trunk across phases', () => {
     const physicalPalmCollisions = Array.from(
       { length: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT },
       (_, index) => ({ id: `palm:${String(index)}` }),
@@ -143,12 +143,12 @@ describe('Landrush island ambient lifecycle', () => {
       LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
     )
 
-    expect(npcPalmCollisions.map((collision) => collision.id)).toEqual([
-      'palm:0',
-      'palm:1',
-      'palm:2',
-      'palm:3',
-    ])
+    expect(npcPalmCollisions.map((collision) => collision.id)).toEqual(
+      Array.from(
+        { length: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT },
+        (_, index) => `palm:${String(index)}`,
+      ),
+    )
     expect(physicalPalmCollisions).toHaveLength(LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT)
   })
 })

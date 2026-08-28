@@ -81,9 +81,9 @@ describe('jump edge blur presentation', () => {
     expect(resolveLandrushIslandJumpEdgeBlurDebugMode(null)).toBe('final')
   })
 
-  test('clamps the capture strength ladder to the shipped range', () => {
-    expect(resolveLandrushIslandJumpEdgeBlurStrength(null)).toBe(2)
-    expect(resolveLandrushIslandJumpEdgeBlurStrength('invalid')).toBe(2)
+  test('ships 0.89 while keeping the diagnostic strength ladder bounded', () => {
+    expect(resolveLandrushIslandJumpEdgeBlurStrength(null)).toBe(0.89)
+    expect(resolveLandrushIslandJumpEdgeBlurStrength('invalid')).toBe(0.89)
     expect(resolveLandrushIslandJumpEdgeBlurStrength('-1')).toBe(0)
     expect(resolveLandrushIslandJumpEdgeBlurStrength('0')).toBe(0)
     expect(resolveLandrushIslandJumpEdgeBlurStrength('1.25')).toBe(1.25)

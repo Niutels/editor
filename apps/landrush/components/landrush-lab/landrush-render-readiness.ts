@@ -7,6 +7,7 @@ export type LandrushPipelineRenderer = Readonly<{
   compileAsync: (root: Object3D, camera: Camera, targetScene: Scene) => Promise<unknown>
   getContext?: () => unknown
   init?: () => Promise<unknown> | unknown
+  isWebGPURenderer?: boolean
 }>
 
 export type LandrushRenderRepresentative = Readonly<{

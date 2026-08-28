@@ -37,6 +37,7 @@ type WeaponFitSubjectProps = {
   onPoseDiagnosticChange: (diagnostics: Pick<WeaponFitDebugDiagnostics, 'arms' | 'grips'>) => void
   playerGroundY?: number
   settings: WeaponFitDebugSettings
+  shotSequenceRef?: MutableRefObject<number>
 }
 
 export const WeaponFitSubject = forwardRef<Group, WeaponFitSubjectProps>(function WeaponFitSubject(
@@ -46,6 +47,7 @@ export const WeaponFitSubject = forwardRef<Group, WeaponFitSubjectProps>(functio
     onPoseDiagnosticChange,
     playerGroundY = 0.8,
     settings,
+    shotSequenceRef,
   },
   forwardedRef,
 ) {
@@ -73,7 +75,8 @@ export const WeaponFitSubject = forwardRef<Group, WeaponFitSubjectProps>(functio
   )
 
   combatStateRef.current.aimAngle = Math.PI
-  combatStateRef.current.recoil = 0
+  combatStateRef.current.movementHeading = Math.PI
+  combatStateRef.current.shotSequence = shotSequenceRef?.current ?? 0
   combatStateRef.current.weaponIndex = weaponIndex
 
   useImperativeHandle(forwardedRef, () => subjectRef.current as Group, [])
@@ -124,6 +127,7 @@ export const WeaponFitSubject = forwardRef<Group, WeaponFitSubjectProps>(functio
   )
 
   useFrame(() => {
+    combatStateRef.current.shotSequence = shotSequenceRef?.current ?? 0
     node.playerHeading = combatStateRef.current.aimAngle
     node.playerMoving = false
     node.playerSpeed = 0

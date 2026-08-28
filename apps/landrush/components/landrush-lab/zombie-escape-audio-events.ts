@@ -8,6 +8,7 @@ export const ZOMBIE_ESCAPE_AUDIO_EVENT_KIND = {
   purchaseDenied: 7,
   shotFired: 8,
   weaponPurchased: 9,
+  weaponImpact: 10,
 } as const
 
 export type ZombieEscapeAudioEventKind =

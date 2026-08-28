@@ -163,13 +163,14 @@ describe('authored instanced zombie presentation', () => {
     }
   })
 
-  test('cooperatively yields between authored animation bake slices', async () => {
+  test('advances several authored animation bake steps within each bounded cooperative slice', async () => {
     const source = createSkinnedSource()
     let yieldedSliceCount = 0
     const presentation = await createZombieEscapeAuthoredInstancePresentationCooperatively({
       attackClip: null,
       instanceCapacity: 1,
       modelTransform: { offset: new Vector3(), scale: 1 },
+      readBuildTimeMs: () => 0,
       runClip: null,
       source: source.root,
       variantIndex: 0,
@@ -181,13 +182,44 @@ describe('authored instanced zombie presentation', () => {
     })
 
     try {
-      expect(yieldedSliceCount).toBeGreaterThanOrEqual(51)
+      expect(yieldedSliceCount).toBe(7)
       expect(presentation.getReadinessSnapshot()).toEqual({
         bakedFrameCount: 1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4,
         failed: false,
         meshCount: 1,
         ready: true,
       })
+    } finally {
+      presentation.dispose()
+    }
+  })
+
+  test('starts a new cooperative slice when its foreground-time budget is consumed', async () => {
+    const source = createSkinnedSource()
+    let yieldedSliceCount = 0
+    let buildTimeMs = 0
+    const presentation = await createZombieEscapeAuthoredInstancePresentationCooperatively({
+      attackClip: null,
+      instanceCapacity: 1,
+      modelTransform: { offset: new Vector3(), scale: 1 },
+      readBuildTimeMs: () => {
+        const current = buildTimeMs
+        buildTimeMs += 4
+        return current
+      },
+      runClip: null,
+      source: source.root,
+      variantIndex: 0,
+      waitForBuildSlice: async () => {
+        yieldedSliceCount += 1
+      },
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+
+    try {
+      expect(yieldedSliceCount).toBe(27)
+      expect(presentation.getReadinessSnapshot().ready).toBe(true)
     } finally {
       presentation.dispose()
     }
@@ -233,10 +265,16 @@ describe('authored instanced zombie presentation', () => {
     }
   })
 
-  test('preserves the authored texture map with a deterministic crowd material grade', () => {
+  test('preserves the authored texture map with the shared phase-scoped zombie shader', () => {
     const source = createSkinnedSource()
     const map = new Texture()
     source.material.map = map
+    const zombieShader = createZombieEscapeZombieShader({ phaseAmount: 0 })
+    const referenceMaterial = zombieShader.createMaterial(
+      source.material,
+      source.geometry,
+      0,
+    ) as MeshStandardNodeMaterial
     const presentation = createZombieEscapeAuthoredInstancePresentation({
       attackClip: null,
       instanceCapacity: 2,
@@ -245,21 +283,30 @@ describe('authored instanced zombie presentation', () => {
       source: source.root,
       variantIndex: 0,
       walkClip: null,
-      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+      zombieShader,
     })
 
     try {
       const mesh = presentation.root.children[0] as InstancedMesh
-      const material = mesh.material as MeshStandardMaterial & { colorNode?: unknown }
+      const material = mesh.material as MeshStandardNodeMaterial
       expect(material.map).toBe(map)
-      expect(material.colorNode).toBeDefined()
+      expect(material.colorNode).toBe(referenceMaterial.colorNode)
+      expect(material.emissiveNode).toBe(referenceMaterial.emissiveNode)
+      expect(material.roughnessNode).toBe(referenceMaterial.roughnessNode)
       expect(material.userData).toMatchObject({
         authoredZombieCrowdLod: 'baked-texture-instanced',
         crowdMaterialMode: 'authored-texture-grade',
+        zombieTextureShader: {
+          phaseScoped: true,
+          seed: 0,
+        },
       })
+      zombieShader.setPhaseAmount(1)
+      expect(zombieShader.getPhaseAmount()).toBe(1)
       expect(presentation.getDebugSnapshot().materialMode).toBe('authored-texture-grade')
     } finally {
       presentation.dispose()
+      referenceMaterial.dispose()
       source.geometry.dispose()
       source.material.dispose()
       map.dispose()

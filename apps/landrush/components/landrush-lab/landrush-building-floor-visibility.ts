@@ -72,6 +72,11 @@ export type LandrushBuildingFloorCover = {
   scopeId: string
 }
 
+export type LandrushBuildingFloorPresentationOwnership = {
+  coverNodeIds: ReadonlySet<AnyNode['id']>
+  upperLevelIds: ReadonlySet<LevelNode['id']>
+}
+
 export function resolveLandrushBuildingFloorStacks(
   nodes: Record<string, AnyNode>,
 ): readonly LandrushBuildingFloorStack[] {
@@ -301,6 +306,24 @@ export function resolveLandrushBuildingFloorCovers(
       first.levelId.localeCompare(second.levelId) ||
       first.nodeId.localeCompare(second.nodeId),
   )
+}
+
+export function resolveLandrushBuildingFloorPresentationOwnership(
+  stacks: readonly LandrushBuildingFloorStack[],
+  covers: readonly LandrushBuildingFloorCover[],
+): LandrushBuildingFloorPresentationOwnership {
+  const upperLevelIds = new Set<LevelNode['id']>()
+  for (const stack of stacks) {
+    for (let floorIndex = 1; floorIndex < stack.floors.length; floorIndex += 1) {
+      const floor = stack.floors[floorIndex]
+      if (!floor) continue
+      for (const levelId of floor.levelIds) upperLevelIds.add(levelId)
+    }
+  }
+  return {
+    coverNodeIds: new Set(covers.map((cover) => cover.nodeId)),
+    upperLevelIds,
+  }
 }
 
 export function resolveLandrushBuildingActiveFloorCoverNodeIds(

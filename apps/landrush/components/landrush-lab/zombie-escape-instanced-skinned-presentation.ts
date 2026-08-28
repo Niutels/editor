@@ -26,19 +26,13 @@ import {
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import {
   attribute,
-  color,
   getCurrentStack,
   int,
   ivec2,
-  materialColor,
-  mix,
   normalLocal,
   positionLocal,
   setCurrentStack,
-  smoothstep,
   textureLoad,
-  vec3,
-  vec4,
   vertexIndex,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial, type NodeBuilder, type Node as TSLNode } from 'three/webgpu'
@@ -75,6 +69,8 @@ export const ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT = 12
 
 const ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT =
   1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4
+const ZOMBIE_ESCAPE_AUTHORED_BUILD_SLICE_BUDGET_MS = 6
+const ZOMBIE_ESCAPE_AUTHORED_BUILD_MAX_STEPS_PER_SLICE = 8
 const ZOMBIE_ESCAPE_AUTHORED_BAKED_TEXTURE_WIDTH = 4096
 const ZOMBIE_ESCAPE_AUTHORED_BATCH_BOUNDS_PADDING_METERS = 2.5
 const ZOMBIE_ESCAPE_AUTHORED_FRAME_ATTRIBUTE = 'zombieBakedFrame'
@@ -308,11 +304,13 @@ export function createZombieEscapeAuthoredInstancePresentation(
 }
 
 export async function createZombieEscapeAuthoredInstancePresentationCooperatively({
+  readBuildTimeMs = () => performance.now(),
   signal,
   waitForBuildSlice,
   ...options
 }: CreateZombieEscapeAuthoredInstancePresentationOptions &
   Readonly<{
+    readBuildTimeMs?: () => number
     signal?: AbortSignal
     waitForBuildSlice: () => Promise<void>
   }>): Promise<ZombieEscapeAuthoredInstancePresentation> {
@@ -322,8 +320,17 @@ export async function createZombieEscapeAuthoredInstancePresentationCooperativel
       throwIfZombieEscapeAuthoredBuildAborted(signal)
       await waitForZombieEscapeAuthoredBuildSlice(waitForBuildSlice, signal)
       throwIfZombieEscapeAuthoredBuildAborted(signal)
-      const step = build.next()
-      if (step.done) return step.value
+      const sliceDeadlineMs = readBuildTimeMs() + ZOMBIE_ESCAPE_AUTHORED_BUILD_SLICE_BUDGET_MS
+      for (
+        let stepCount = 0;
+        stepCount < ZOMBIE_ESCAPE_AUTHORED_BUILD_MAX_STEPS_PER_SLICE;
+        stepCount += 1
+      ) {
+        const step = build.next()
+        if (step.done) return step.value
+        if (readBuildTimeMs() >= sliceDeadlineMs) break
+        throwIfZombieEscapeAuthoredBuildAborted(signal)
+      }
     }
   } catch (error) {
     try {
@@ -342,6 +349,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
   source,
   variantIndex,
   walkClip,
+  zombieShader,
 }: CreateZombieEscapeAuthoredInstancePresentationOptions): Generator<
   void,
   ZombieEscapeAuthoredInstancePresentation,
@@ -407,6 +415,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
         sourceMesh: samplerMeshes[meshIndex]!,
         textureSet: bakedTextureSets[meshIndex]!,
         variantIndex,
+        zombieShader,
       })
       bakedMeshes.push(state)
       root.add(state.mesh)
@@ -796,6 +805,7 @@ function createBakedMeshState({
   sourceMesh,
   textureSet,
   variantIndex,
+  zombieShader,
 }: {
   instanceCapacity: number
   modelMatrix: Matrix4
@@ -803,6 +813,7 @@ function createBakedMeshState({
   sourceMesh: SkinnedMesh
   textureSet: BakedTextureSet
   variantIndex: number
+  zombieShader: ZombieEscapeZombieShader
 }): BakedMeshState {
   const frameAttribute = new InstancedBufferAttribute(new Float32Array(instanceCapacity), 1)
   frameAttribute.setUsage(DynamicDrawUsage)
@@ -817,9 +828,11 @@ function createBakedMeshState({
     for (const sourceMaterial of sourceMaterials) {
       materials.push(
         createAuthoredCrowdMaterial({
+          geometry: sourceMesh.geometry,
           nodes,
           source: sourceMaterial,
           variantIndex,
+          zombieShader,
         }),
       )
     }
@@ -870,21 +883,31 @@ function createBakedVertexNodes(textureSet: BakedTextureSet): BakedVertexNodes {
 }
 
 function createAuthoredCrowdMaterial({
+  geometry,
   nodes,
   source,
   variantIndex,
+  zombieShader,
 }: {
+  geometry: BufferGeometry
   nodes: BakedVertexNodes
   source: Material
   variantIndex: number
+  zombieShader: ZombieEscapeZombieShader
 }) {
   if (!isStandardMaterial(source)) {
     throw new Error(`Authored zombie crowd material ${source.type} is not a standard PBR material.`)
   }
+  const zombieMaterial = zombieShader.createMaterial(source, geometry, variantIndex)
+  if (!(zombieMaterial instanceof MeshStandardNodeMaterial)) {
+    zombieMaterial.dispose()
+    throw new Error(
+      `Authored zombie crowd material ${source.type} could not use the zombie shader.`,
+    )
+  }
   const material = new ZombieEscapeBakedNodeMaterial(nodes)
   try {
-    material.copy(source as unknown as MeshStandardNodeMaterial)
-    material.colorNode = createAuthoredCrowdColorNode()
+    material.copy(zombieMaterial)
     material.userData = {
       ...material.userData,
       authoredZombieCrowdLod: 'baked-texture-instanced',
@@ -895,21 +918,9 @@ function createAuthoredCrowdMaterial({
   } catch (error) {
     material.dispose()
     throw error
+  } finally {
+    zombieMaterial.dispose()
   }
-}
-
-function createAuthoredCrowdColorNode() {
-  const sourceColor = materialColor as unknown as TSLNode<'vec4'>
-  const sourceRgb = sourceColor.rgb
-  const luminance = sourceRgb.dot(vec3(0.2126, 0.7152, 0.0722))
-  const warmTone = smoothstep(0.015, 0.16, sourceRgb.r.sub(sourceRgb.b))
-  const visibleTone = smoothstep(0.075, 0.32, luminance)
-  const notNearWhite = smoothstep(0.72, 0.96, luminance).oneMinus()
-  const skinCandidate = warmTone.mul(visibleTone).mul(notNearWhite)
-  const corpseTone = mix(asVec3(color('#315f5b')), asVec3(color('#abc39f')), luminance.clamp(0, 1))
-  const corpseAmount = skinCandidate.mul(0.48).add(0.38).clamp(0, 1)
-  const gradedRgb = mix(sourceRgb, corpseTone, corpseAmount)
-  return vec4(gradedRgb, sourceColor.a)
 }
 
 function sampleAnimationClip({
@@ -1001,10 +1012,6 @@ function disposeBakedMeshes(states: readonly BakedMeshState[]) {
     disposeBakedTextureSet(state.textureSet)
     for (const material of state.materials) material.dispose()
   }
-}
-
-function asVec3(node: unknown) {
-  return node as TSLNode<'vec3'>
 }
 
 function isStandardMaterial(material: Material): material is MeshStandardMaterial {

@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import {
   resolveZombieEscapeCoilArcPoint,
+  resolveZombieEscapeScattergunMuzzlePetalEnvelope,
   resolveZombieEscapeVfxBlastScale,
   resolveZombieEscapeVfxImpactEnvelope,
   resolveZombieEscapeVfxNormalizedAge,
   resolveZombieEscapeWeaponVfxStyle,
   ZOMBIE_ESCAPE_BLAST_CLOUD_PUFF_COUNT,
   ZOMBIE_ESCAPE_COIL_ARC_SEGMENT_COUNT,
+  ZOMBIE_ESCAPE_PRODUCTION_WEAPON_VFX_VARIANT_INDICES,
+  ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT,
   ZOMBIE_ESCAPE_WEAPON_VFX_STYLES,
   ZOMBIE_ESCAPE_WEAPON_VFX_VARIANT_COUNT,
   ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS,
@@ -53,6 +56,24 @@ describe('Zombie Escape weapon VFX', () => {
     expect(resolveZombieEscapeWeaponVfxStyle(4, 4).blastPattern).toBe('implosion')
   })
 
+  test('uses the approved production variant for each weapon without overriding proof variants', () => {
+    expect(ZOMBIE_ESCAPE_PRODUCTION_WEAPON_VFX_VARIANT_INDICES).toEqual([0, 4, 1, 1, 1])
+    expect(ZOMBIE_ESCAPE_WEAPON_VFX_STYLES.map(({ variantLabel }) => variantLabel)).toEqual([
+      'Ember Snap',
+      'Wake Ribbon',
+      'Classic Boom Fan',
+      'Twin Fork',
+      'Coral Shard Bloom',
+    ])
+    expect(resolveZombieEscapeWeaponVfxStyle(1).variantLabel).toBe('Wake Ribbon')
+    expect(resolveZombieEscapeWeaponVfxStyle(2).variantLabel).toBe('Classic Boom Fan')
+    expect(resolveZombieEscapeWeaponVfxStyle(3).variantLabel).toBe('Twin Fork')
+    expect(resolveZombieEscapeWeaponVfxStyle(4).variantLabel).toBe('Coral Shard Bloom')
+    expect(resolveZombieEscapeWeaponVfxStyle(4).blastCloudScale).toBe(2)
+    expect(resolveZombieEscapeWeaponVfxStyle(4, 0).blastCloudScale).toBe(1)
+    expect(resolveZombieEscapeWeaponVfxStyle(1, Number.NaN).variantLabel).toBe('Wake Ribbon')
+  })
+
   test('encodes the approved silhouette hierarchy', () => {
     const pistol = resolveZombieEscapeWeaponVfxStyle(0)
     const carbine = resolveZombieEscapeWeaponVfxStyle(1)
@@ -62,14 +83,18 @@ describe('Zombie Escape weapon VFX', () => {
 
     expect(carbine.tracerRadius).toBeLessThan(pistol.tracerRadius)
     expect(carbine.tracerLengthScale).toBeGreaterThan(pistol.tracerLengthScale)
-    expect(scattergun.muzzleRadiusScale).toBeGreaterThan(pistol.muzzleRadiusScale)
+    expect(scattergun.muzzleRadiusScale).toBeLessThan(pistol.muzzleRadiusScale)
+    expect(scattergun.muzzleLengthScale).toBeLessThan(pistol.muzzleLengthScale)
+    expect(scattergun.muzzleLengthScale).toBeLessThan(scattergun.muzzleRadiusScale)
+    expect(ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT).toBe(5)
     expect(scattergun.tracerRadius).toBeLessThan(pistol.tracerRadius)
     expect(coil.arcColorA).not.toBe(coil.arcColorB)
     expect(launcher.tracerRadius).toBeGreaterThan(pistol.tracerRadius)
     expect(launcher.accentRadius).toBeGreaterThan(0)
     expect(launcher.sparkCount).toBeGreaterThan(pistol.sparkCount)
     expect(carbine.impactStretchScale).toBeGreaterThan(pistol.impactStretchScale)
-    expect(launcher.sparkCount).toBe(12)
+    expect(launcher.sparkCount).toBe(8)
+    expect(resolveZombieEscapeWeaponVfxStyle(4, 0).sparkCount).toBe(12)
     expect(ZOMBIE_ESCAPE_BLAST_CLOUD_PUFF_COUNT).toBe(12)
     expect('impactRingScale' in launcher).toBe(false)
   })
@@ -87,6 +112,19 @@ describe('Zombie Escape weapon VFX', () => {
     )
     expect(resolveZombieEscapeVfxBlastScale(1)).toBe(0)
     expect(resolveZombieEscapeVfxBlastScale(Number.NaN)).toBe(0)
+  })
+
+  test('gives the scattergun muzzle petals a fast attack and monotonic decay', () => {
+    const early = resolveZombieEscapeScattergunMuzzlePetalEnvelope(0.08)
+    const peak = resolveZombieEscapeScattergunMuzzlePetalEnvelope(0.18)
+    const middle = resolveZombieEscapeScattergunMuzzlePetalEnvelope(0.5)
+
+    expect(resolveZombieEscapeScattergunMuzzlePetalEnvelope(0)).toBe(0)
+    expect(early).toBeGreaterThan(0)
+    expect(peak).toBeGreaterThan(early)
+    expect(middle).toBeLessThan(peak)
+    expect(resolveZombieEscapeScattergunMuzzlePetalEnvelope(1)).toBe(0)
+    expect(resolveZombieEscapeScattergunMuzzlePetalEnvelope(Number.NaN)).toBe(0)
   })
 
   test('builds a deterministic segmented coil arc with exact endpoints', () => {

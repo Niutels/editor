@@ -13,8 +13,10 @@ import {
   resolveZombieEscapePresenceVariation,
   selectZombieEscapePresenceAudioCandidate,
   shouldPlayZombieEscapePresenceAudio,
+  visitZombieEscapeWeaponImpactAudioEvents,
   type ZombieEscapeAudioSpatialMix,
   type ZombieEscapePresenceAudioSource,
+  type ZombieEscapeWeaponImpactAudioEvents,
 } from './zombie-escape-audio'
 import { ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE } from './zombie-escape-audio-catalog'
 import {
@@ -23,6 +25,7 @@ import {
   visitZombieEscapeAudioEventsAfter,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
 } from './zombie-escape-audio-events'
+import { ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND } from './zombie-escape-simulation'
 
 describe('Zombie Escape audio readiness', () => {
   test('wires presence Howl load errors into the shared runtime failure state', () => {
@@ -128,6 +131,45 @@ describe('Zombie Escape realtime audio cursor', () => {
 
     expect(recoveredEvents).toEqual([liveSequence])
     expect(cursor).toBe(liveSequence)
+  })
+
+  test('visits each impact generation once and suppresses launcher blast-victim fan-out', () => {
+    const impacts: ZombieEscapeWeaponImpactAudioEvents = {
+      effectKind: Uint8Array.of(
+        ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.projectile,
+        ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.blastVictim,
+        ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.chain,
+      ),
+      pool: {
+        active: Uint8Array.of(1, 1, 1),
+        capacity: 3,
+        generation: Uint32Array.of(4, 5, 6),
+      },
+      weaponIndex: Uint8Array.of(1, 4, 3),
+      x: Float32Array.of(1, 2, 3),
+      y: Float32Array.of(4, 5, 6),
+      z: Float32Array.of(7, 8, 9),
+    }
+    const observed = new Uint32Array(3)
+    const visited: Array<readonly [number, number, number]> = []
+    const visit = (events: ZombieEscapeWeaponImpactAudioEvents, slot: number, generation: number) =>
+      visited.push([slot, generation, events.weaponIndex[slot]!])
+
+    visitZombieEscapeWeaponImpactAudioEvents(impacts, observed, visit)
+    expect(visited).toEqual([
+      [0, 4, 1],
+      [2, 6, 3],
+    ])
+    expect([...observed]).toEqual([4, 5, 6])
+
+    visitZombieEscapeWeaponImpactAudioEvents(impacts, observed, visit)
+    expect(visited).toHaveLength(2)
+
+    impacts.pool.generation[0] = 7
+    impacts.pool.active[2] = 0
+    visitZombieEscapeWeaponImpactAudioEvents(impacts, observed, visit)
+    expect(visited.at(-1)).toEqual([0, 7, 1])
+    expect(observed[2]).toBe(0)
   })
 })
 

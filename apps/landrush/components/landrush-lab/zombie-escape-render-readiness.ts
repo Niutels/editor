@@ -52,6 +52,13 @@ export type ZombieEscapeRenderReadinessCoordinator = LandrushRenderReadinessCoor
 
 export type ZombieEscapeRenderReadinessTimer = LandrushRenderReadinessTimer
 
+export type ZombieEscapeRenderRepresentativePrewarmQueue = Readonly<{
+  dispose: () => void
+  invalidate: () => void
+  synchronize: (request: Omit<ZombieEscapeRenderReadinessRequest, 'identity'>) => void
+  waitForSettled: () => Promise<'failed' | 'ready' | 'stale'>
+}>
+
 type RegisteredRepresentative = Readonly<{
   registration: symbol
   root: Object3D
@@ -132,6 +139,8 @@ export async function compileZombieEscapeRenderRepresentatives({
     representatives,
     targetScene,
   })
+  // A WebGPU whole-scene compile can bind viewport-depth placeholders before their first real render establishes matching MSAA textures.
+  if (renderer.isWebGPURenderer === true) return
   await renderer.compileAsync(targetScene, camera, targetScene)
 }
 
@@ -151,6 +160,109 @@ export function createZombieEscapeRenderReadinessCoordinator({
     timeoutMs,
     timer,
   })
+}
+
+export function createZombieEscapeRenderRepresentativePrewarmQueue({
+  compile = compileLandrushRenderRepresentatives,
+  onStatus,
+  timeoutMs = ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
+  timer,
+}: {
+  compile?: typeof compileLandrushRenderRepresentatives
+  onStatus?: (key: string, status: ZombieEscapeRenderReadinessStatus) => void
+  timeoutMs?: number
+  timer?: ZombieEscapeRenderReadinessTimer
+} = {}): ZombieEscapeRenderRepresentativePrewarmQueue {
+  const coordinator = createLandrushRenderReadinessCoordinator({
+    compile,
+    formatTimeoutMessage: (boundedTimeoutMs) =>
+      `Zombie Escape render representative prewarm timed out after ${String(boundedTimeoutMs)}ms.`,
+    timeoutMs,
+    timer,
+  })
+  let context:
+    | Pick<ZombieEscapeRenderReadinessRequest, 'camera' | 'generation' | 'renderer' | 'targetScene'>
+    | undefined
+  let disposed = false
+  let failed = false
+  let revision = 0
+  let roots = new Map<string, Object3D>()
+  let tail = Promise.resolve()
+
+  const invalidate = () => {
+    revision += 1
+    context = undefined
+    failed = false
+    roots = new Map()
+    tail = Promise.resolve()
+    coordinator.invalidate()
+  }
+
+  return {
+    dispose() {
+      if (disposed) return
+      disposed = true
+      invalidate()
+      coordinator.dispose()
+    },
+    invalidate,
+    synchronize(request) {
+      if (disposed) return
+      if (
+        !context ||
+        context.camera !== request.camera ||
+        context.generation !== request.generation ||
+        context.renderer !== request.renderer ||
+        context.targetScene !== request.targetScene
+      ) {
+        invalidate()
+        context = request
+      }
+
+      const currentKeys = new Set(request.representatives.map(({ key }) => key))
+      for (const key of roots.keys()) {
+        if (!currentKeys.has(key)) roots.delete(key)
+      }
+      for (const representative of request.representatives) {
+        if (roots.get(representative.key) === representative.root) continue
+        roots.set(representative.key, representative.root)
+        const queuedRevision = revision
+        const queuedRequest: ZombieEscapeRenderReadinessRequest = {
+          ...request,
+          identity: representative.root,
+          representatives: [representative],
+        }
+        tail = tail.then(async () => {
+          if (
+            disposed ||
+            revision !== queuedRevision ||
+            roots.get(representative.key) !== representative.root
+          ) {
+            return
+          }
+          const result = await coordinator.request(queuedRequest, (status) => {
+            if (
+              disposed ||
+              revision !== queuedRevision ||
+              roots.get(representative.key) !== representative.root
+            ) {
+              return
+            }
+            onStatus?.(representative.key, status)
+          })
+          if (revision === queuedRevision && result === 'failed') failed = true
+        })
+      }
+    },
+    waitForSettled() {
+      const queuedRevision = revision
+      const queuedTail = tail
+      return queuedTail.then(() => {
+        if (disposed || revision !== queuedRevision) return 'stale'
+        return failed ? 'failed' : 'ready'
+      })
+    },
+  }
 }
 
 function createRegistrySnapshot(

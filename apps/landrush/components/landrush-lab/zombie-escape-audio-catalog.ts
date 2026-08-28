@@ -15,6 +15,7 @@ type ZombieEscapeAudioCatalogEventKind =
   | 'player-killed'
   | 'purchase-denied'
   | 'shot-fired'
+  | 'weapon-impact'
   | 'weapon-purchased'
 
 type ZombieEscapeAudioMasteringProfile = 'one-shot-v1'
@@ -128,6 +129,7 @@ const EVENT_KIND_BY_NAME = {
   'player-killed': ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerKilled,
   'purchase-denied': ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.purchaseDenied,
   'shot-fired': ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired,
+  'weapon-impact': ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponImpact,
   'weapon-purchased': ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponPurchased,
 } as const satisfies Record<ZombieEscapeAudioCatalogEventKind, ZombieEscapeAudioEventKind>
 const SINGLETON_EVENT_KINDS = [
@@ -139,7 +141,16 @@ const SINGLETON_EVENT_KINDS = [
   'player-killed',
   'purchase-denied',
   'weapon-purchased',
-] as const satisfies readonly Exclude<ZombieEscapeAudioCatalogEventKind, 'shot-fired'>[]
+] as const satisfies readonly Exclude<
+  ZombieEscapeAudioCatalogEventKind,
+  'shot-fired' | 'weapon-impact'
+>[]
+const WEAPON_IMPACT_WEAPON_IDS = new Set([
+  'reef-carbine',
+  'driftwood-scattergun',
+  'storm-coil-repeater',
+  'tidebreak-launcher',
+])
 
 const AUDIO_PATH_PREFIX = '/audios/sfx/zombie-escape/'
 const SHA256_PATTERN = /^[a-f0-9]{64}$/
@@ -165,7 +176,7 @@ export function createZombieEscapeAudioCatalogState(
   rawProvenance: unknown,
 ): ZombieEscapeAudioCatalogState {
   const catalog = requireRecord(rawCatalog, 'audio catalog')
-  if (catalog.schemaVersion !== 4) throw new Error('Zombie Escape audio catalog schema must be 4')
+  if (catalog.schemaVersion !== 5) throw new Error('Zombie Escape audio catalog schema must be 5')
   const catalogVersion = requireString(catalog.catalogVersion, 'catalogVersion')
   const modelId = requireString(catalog.modelId, 'modelId')
   const outputFormat = requireString(catalog.outputFormat, 'outputFormat')
@@ -176,6 +187,7 @@ export function createZombieEscapeAudioCatalogState(
   const ids = new Set<string>()
   const paths = new Set<string>()
   const shotWeapons = new Set<string>()
+  const weaponImpactWeapons = new Set<string>()
   const singletonEventKinds = new Set<ZombieEscapeAudioCatalogEventKind>()
   const cues = catalog.cues.map((value, cueIndex) => {
     const cue = requireRecord(value, `cues[${String(cueIndex)}]`)
@@ -186,7 +198,7 @@ export function createZombieEscapeAudioCatalogState(
     const requiresZombieVariants = eventKind === 'enemy-hit' || eventKind === 'enemy-killed'
     const masteringProfile = requireMasteringProfile(
       cue.masteringProfile,
-      eventKind === 'shot-fired' || requiresZombieVariants,
+      eventKind === 'shot-fired' || eventKind === 'weapon-impact' || requiresZombieVariants,
       id,
     )
     const files = requireFiles(cue.files, id, paths)
@@ -205,14 +217,24 @@ export function createZombieEscapeAudioCatalogState(
     const playback = requirePlayback(cue.playback, id)
     const weaponId = cue.weaponId === undefined ? undefined : requireString(cue.weaponId, id)
     let weaponIndex = -1
-    if (eventKind === 'shot-fired') {
+    if (eventKind === 'shot-fired' || eventKind === 'weapon-impact') {
       if (!weaponId) throw new Error(`${id} requires weaponId`)
       weaponIndex = ZOMBIE_ESCAPE_WEAPON_CATALOG.findIndex((weapon) => weapon.id === weaponId)
       if (weaponIndex < 0) throw new Error(`${id} references unknown weapon ${weaponId}`)
-      if (shotWeapons.has(weaponId)) throw new Error(`Duplicate shot cue for ${weaponId}`)
-      shotWeapons.add(weaponId)
+      if (eventKind === 'weapon-impact') {
+        if (!WEAPON_IMPACT_WEAPON_IDS.has(weaponId)) {
+          throw new Error(`${id} may not define impact audio for ${weaponId}`)
+        }
+        if (weaponImpactWeapons.has(weaponId)) {
+          throw new Error(`Duplicate weapon impact cue for ${weaponId}`)
+        }
+        weaponImpactWeapons.add(weaponId)
+      } else {
+        if (shotWeapons.has(weaponId)) throw new Error(`Duplicate shot cue for ${weaponId}`)
+        shotWeapons.add(weaponId)
+      }
     } else if (weaponId) {
-      throw new Error(`${id} may only set weaponId for shot-fired`)
+      throw new Error(`${id} may only set weaponId for shot-fired or weapon-impact`)
     } else {
       if (singletonEventKinds.has(eventKind)) {
         throw new Error(`Duplicate Zombie Escape audio event kind: ${eventKind}`)
@@ -238,6 +260,9 @@ export function createZombieEscapeAudioCatalogState(
 
   if (shotWeapons.size !== ZOMBIE_ESCAPE_WEAPON_CATALOG.length) {
     throw new Error('Zombie Escape audio catalog requires exactly one shot cue per weapon')
+  }
+  if (weaponImpactWeapons.size !== WEAPON_IMPACT_WEAPON_IDS.size) {
+    throw new Error('Zombie Escape audio catalog requires one impact cue per selected weapon')
   }
   if (singletonEventKinds.size !== SINGLETON_EVENT_KINDS.length) {
     throw new Error('Zombie Escape audio catalog requires exactly one cue per non-shot event kind')

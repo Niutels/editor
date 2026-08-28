@@ -78,6 +78,7 @@ import {
 } from './zombie-escape-skinned-impact-attachment'
 import {
   resolveZombieEscapeCoilArcPoint,
+  resolveZombieEscapeScattergunMuzzlePetalEnvelope,
   resolveZombieEscapeVfxBlastScale,
   resolveZombieEscapeVfxImpactEnvelope,
   resolveZombieEscapeVfxNormalizedAge,
@@ -87,6 +88,7 @@ import {
   ZOMBIE_ESCAPE_COIL_ARC_NODE_COUNT,
   ZOMBIE_ESCAPE_COIL_ARC_SEGMENT_COUNT,
   ZOMBIE_ESCAPE_IMPACT_DETAIL_COUNT,
+  ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT,
   ZOMBIE_ESCAPE_TRAVEL_DETAIL_COUNT,
   type ZombieEscapeWeaponVfxPoint,
 } from './zombie-escape-weapon-vfx'
@@ -142,7 +144,7 @@ export function ZombieEscapeEffects({
   impactVisualRegistry,
   renderReadinessRegistry,
   simulationRef,
-  vfxVariantIndex = 0,
+  vfxVariantIndex,
 }: {
   deathDustVariant?: ZombieEscapeDeathDustVariant
   framePriority?: number
@@ -157,6 +159,7 @@ export function ZombieEscapeEffects({
   const arcCapacity =
     impactCapacity * ZOMBIE_ESCAPE_COIL_ARC_SEGMENT_COUNT * ZOMBIE_ESCAPE_COIL_ARC_BRANCH_COUNT
   const travelDetailCapacity = shotCapacity * ZOMBIE_ESCAPE_TRAVEL_DETAIL_COUNT
+  const muzzlePetalCapacity = shotCapacity * ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT
   const impactDetailCapacity = impactCapacity * ZOMBIE_ESCAPE_IMPACT_DETAIL_COUNT
   const blastCloudCapacity = impactCapacity * ZOMBIE_ESCAPE_BLAST_CLOUD_PUFF_COUNT
   const effectsRootRef = useRef<Group>(null)
@@ -165,6 +168,7 @@ export function ZombieEscapeEffects({
   const travelDetailRef = useRef<InstancedMesh>(null)
   const travelRibbonRef = useRef<InstancedMesh>(null)
   const muzzleRef = useRef<InstancedMesh>(null)
+  const muzzlePetalRef = useRef<InstancedMesh>(null)
   const impactFlashRef = useRef<InstancedMesh>(null)
   const impactDetailRef = useRef<InstancedMesh>(null)
   const impactShardRef = useRef<InstancedMesh>(null)
@@ -295,6 +299,7 @@ export function ZombieEscapeEffects({
     initializeEffectInstanceMesh(travelDetailRef.current, travelDetailCapacity, colorScratch)
     initializeEffectInstanceMesh(travelRibbonRef.current, shotCapacity, colorScratch)
     initializeEffectInstanceMesh(muzzleRef.current, shotCapacity, colorScratch)
+    initializeEffectInstanceMesh(muzzlePetalRef.current, muzzlePetalCapacity, colorScratch)
     initializeEffectInstanceMesh(impactFlashRef.current, impactCapacity, colorScratch)
     initializeEffectInstanceMesh(impactDetailRef.current, impactDetailCapacity, colorScratch)
     initializeEffectInstanceMesh(impactShardRef.current, impactDetailCapacity, colorScratch)
@@ -307,6 +312,7 @@ export function ZombieEscapeEffects({
     colorScratch,
     impactCapacity,
     impactDetailCapacity,
+    muzzlePetalCapacity,
     shotCapacity,
     sparkCapacity,
     travelDetailCapacity,
@@ -397,6 +403,7 @@ export function ZombieEscapeEffects({
     let renderedTravelDetailCount = 0
     let renderedTravelRibbonCount = 0
     let renderedMuzzleCount = 0
+    let renderedMuzzlePetalCount = 0
     for (let slot = 0; slot < shots.pool.capacity; slot += 1) {
       if (shots.pool.active[slot] === 0) continue
       const phase = shots.phase[slot] as ZombieEscapeShotPhase
@@ -421,17 +428,21 @@ export function ZombieEscapeEffects({
           muzzleFlashTransform.directionY,
           muzzleFlashTransform.directionZ,
         )
+        const muzzleSocketX = muzzleFlashTransform.x - direction.x * muzzleFlashTransform.scaleY
+        const muzzleSocketY = muzzleFlashTransform.y - direction.y * muzzleFlashTransform.scaleY
+        const muzzleSocketZ = muzzleFlashTransform.z - direction.z * muzzleFlashTransform.scaleY
+        const muzzleHalfLength = muzzleFlashTransform.scaleY * style.muzzleLengthScale
         quaternion.setFromUnitVectors(Y_AXIS, direction)
         applyEffectInstance(
           muzzleRef.current,
           renderedMuzzleCount,
           dummy,
-          muzzleFlashTransform.x,
-          muzzleFlashTransform.y,
-          muzzleFlashTransform.z,
+          muzzleSocketX + direction.x * muzzleHalfLength,
+          muzzleSocketY + direction.y * muzzleHalfLength,
+          muzzleSocketZ + direction.z * muzzleHalfLength,
           quaternion,
           muzzleFlashTransform.scaleX * style.muzzleRadiusScale,
-          muzzleFlashTransform.scaleY * style.muzzleLengthScale,
+          muzzleHalfLength,
           muzzleFlashTransform.scaleZ * style.muzzleRadiusScale,
         )
         setEffectInstanceColor(
@@ -441,6 +452,53 @@ export function ZombieEscapeEffects({
           colorScratch,
         )
         renderedMuzzleCount += 1
+        if (style.id === 'scattergun' && style.travelPattern === 'boom') {
+          const petalEnvelope = Math.sqrt(
+            resolveZombieEscapeScattergunMuzzlePetalEnvelope(muzzleProgress),
+          )
+          if (petalEnvelope > 0.001) {
+            travelSide.crossVectors(direction, Y_AXIS)
+            if (travelSide.lengthSq() <= 0.000_001) travelSide.set(1, 0, 0)
+            else travelSide.normalize()
+            travelUp.crossVectors(travelSide, direction).normalize()
+            const shotSeed = shots.pool.generation[slot]! ^ Math.imul(slot + 1, 0x9e37_79b1)
+            for (let petal = 0; petal < ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT; petal += 1) {
+              const seed = shotSeed ^ Math.imul(petal + 1, 0x85eb_ca6b)
+              const angle =
+                (petal / ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT) * TWO_PI +
+                (hashUnit(seed) - 0.5) * 0.46
+              const splay = 0.58 + hashUnit(seed ^ 0xc2b2_ae35) * 0.32
+              detailDirection
+                .copy(direction)
+                .addScaledVector(travelSide, Math.cos(angle) * splay)
+                .addScaledVector(travelUp, Math.sin(angle) * splay)
+                .normalize()
+              const petalLength = (0.42 + hashUnit(seed ^ 0x27d4_eb2f) * 0.2) * petalEnvelope
+              const petalRadius = (0.085 + hashUnit(seed ^ 0x1656_67b1) * 0.035) * petalEnvelope
+              quaternion.setFromUnitVectors(Y_AXIS, detailDirection)
+              applyEffectInstance(
+                muzzlePetalRef.current,
+                renderedMuzzlePetalCount,
+                dummy,
+                muzzleSocketX + detailDirection.x * petalLength * 0.5,
+                muzzleSocketY + detailDirection.y * petalLength * 0.5,
+                muzzleSocketZ + detailDirection.z * petalLength * 0.5,
+                quaternion,
+                petalRadius,
+                petalLength,
+                petalRadius,
+              )
+              setEffectInstanceColorScaled(
+                muzzlePetalRef.current,
+                renderedMuzzlePetalCount,
+                petal % 2 === 0 ? style.detailColorA : style.detailColorB,
+                0.72 + petalEnvelope * 0.12,
+                colorScratch,
+              )
+              renderedMuzzlePetalCount += 1
+            }
+          }
+        }
       }
 
       if (
@@ -996,9 +1054,9 @@ export function ZombieEscapeEffects({
             worldImpactPoint.y + height,
             worldImpactPoint.z + Math.sin(angle) * radius,
             quaternion,
-            puffScale * (0.78 + hashUnit(seed ^ 0xa5a3_58cf) * 0.45),
-            puffScale,
-            puffScale * (0.82 + hashUnit(seed ^ 0x3c6e_f372) * 0.38),
+            puffScale * style.blastCloudScale * (0.78 + hashUnit(seed ^ 0xa5a3_58cf) * 0.45),
+            puffScale * style.blastCloudScale,
+            puffScale * style.blastCloudScale * (0.82 + hashUnit(seed ^ 0x3c6e_f372) * 0.38),
           )
           setEffectInstanceColorScaled(
             blastCloudRef.current,
@@ -1299,6 +1357,7 @@ export function ZombieEscapeEffects({
     finalizeEffectInstanceMesh(travelDetailRef.current, renderedTravelDetailCount)
     finalizeEffectInstanceMesh(travelRibbonRef.current, renderedTravelRibbonCount)
     finalizeEffectInstanceMesh(muzzleRef.current, renderedMuzzleCount)
+    finalizeEffectInstanceMesh(muzzlePetalRef.current, renderedMuzzlePetalCount)
     finalizeEffectInstanceMesh(impactFlashRef.current, renderedImpactFlashCount)
     finalizeEffectInstanceMesh(impactDetailRef.current, renderedImpactDetailCount)
     finalizeEffectInstanceMesh(impactShardRef.current, renderedImpactShardCount)
@@ -1319,6 +1378,7 @@ export function ZombieEscapeEffects({
         deathDustVariant,
         impactEventCapacity: simulation.impactEvents.pool.capacity,
         muzzleOwnership: 'primary-carrier-per-volley',
+        scattergunMuzzlePetalCount: ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT,
         perEventObjectAllocation: false,
         travelingCarriersPerTrigger: 'weapon-profile',
         vfxVariantIndex,
@@ -1400,6 +1460,21 @@ export function ZombieEscapeEffects({
           color="#ffffff"
           depthWrite={false}
           toneMapped={false}
+          transparent
+        />
+      </instancedMesh>
+      <instancedMesh
+        args={[undefined, undefined, muzzlePetalCapacity]}
+        frustumCulled={false}
+        ref={muzzlePetalRef}
+      >
+        <coneGeometry args={[1, 1, 5, 1, true]} />
+        <meshBasicMaterial
+          blending={AdditiveBlending}
+          color="#ffffff"
+          depthWrite={false}
+          opacity={0.62}
+          side={DoubleSide}
           transparent
         />
       </instancedMesh>

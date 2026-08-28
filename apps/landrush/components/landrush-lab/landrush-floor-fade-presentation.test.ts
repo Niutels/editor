@@ -1128,6 +1128,52 @@ describe('Landrush floor fade presentation owner', () => {
     replacementSource.dispose()
   })
 
+  test('adopts an opaque same-mesh material source change without hiding it', () => {
+    const levelId = asLevelId('level-opaque-source-change')
+    const scene = new Scene()
+    const source = new MeshBasicMaterial()
+    const replacementSource = new MeshBasicMaterial()
+    const root = new Group()
+    const mesh = createMesh(source)
+    root.add(mesh)
+    scene.add(root)
+    const owners = createOwners()
+
+    ensureLevel({
+      floorPresentation: owners.floorPresentation,
+      levelId,
+      root,
+      structuralToken: 0,
+    })
+    prepareUntilReady(owners.floorPresentation, levelId)
+
+    mesh.material = replacementSource
+    ensureLevel({
+      floorPresentation: owners.floorPresentation,
+      levelId,
+      root,
+      structuralToken: 0,
+    })
+    expect(owners.floorPresentation.hasPendingWork).toBe(true)
+
+    while (owners.floorPresentation.hasPendingWork) {
+      owners.floorPresentation.prepareFrame(1 / 60)
+      expect(mesh.visible).toBe(true)
+    }
+
+    expect(owners.floorPresentation.readLevel(levelId)).toMatchObject({
+      assignmentMismatchCount: 0,
+      quarantineCount: 0,
+      ready: true,
+    })
+    expect(mesh.material).not.toBe(replacementSource)
+
+    disposeOwners(owners)
+    mesh.geometry.dispose()
+    source.dispose()
+    replacementSource.dispose()
+  })
+
   test('releases completed child and canonical leases across repeated churn', () => {
     const levelId = asLevelId('level-lease-churn')
     const scene = new Scene()

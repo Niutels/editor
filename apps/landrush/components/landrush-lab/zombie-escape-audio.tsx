@@ -15,6 +15,7 @@ import {
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
   type ZombieEscapeAudioEventRing,
 } from './zombie-escape-audio-events'
+import { ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND } from './zombie-escape-simulation'
 
 export type ZombieEscapePresenceAudioSource = Readonly<{
   elapsedSeconds: number
@@ -38,8 +39,28 @@ export type ZombieEscapePresenceAudioSource = Readonly<{
 
 export type ZombieEscapeAudioEventSource = Readonly<{
   audioEvents: ZombieEscapeAudioEventRing
+  impactEvents?: ZombieEscapeWeaponImpactAudioEvents
 }> &
   Partial<ZombieEscapePresenceAudioSource>
+
+export type ZombieEscapeWeaponImpactAudioEvents = Readonly<{
+  effectKind: Uint8Array
+  pool: Readonly<{
+    active: Uint8Array
+    capacity: number
+    generation: Uint32Array
+  }>
+  weaponIndex: Uint8Array
+  x: Float32Array
+  y: Float32Array
+  z: Float32Array
+}>
+
+export type ZombieEscapeWeaponImpactAudioEventVisitor = (
+  events: ZombieEscapeWeaponImpactAudioEvents,
+  slot: number,
+  generation: number,
+) => void
 
 type ZombieEscapeAudioVoicePool = {
   cursor: number
@@ -86,6 +107,7 @@ type ZombieEscapePresenceAudioRuntime = {
 type ZombieEscapeAudioRuntime = {
   audioContext: AudioContext | null
   byKind: Array<ZombieEscapeAudioCueRuntime | undefined>
+  impactByWeapon: Array<ZombieEscapeAudioCueRuntime | undefined>
   loadState: ZombieEscapeAudioLoadState
   presence: ZombieEscapePresenceAudioRuntime
   ready: boolean
@@ -106,6 +128,7 @@ const PRESENCE_RATE_SALT = 0x85eb_ca6b
 const PRESENCE_VARIATION_SALT = 0xc2b2_ae35
 const PRESENCE_MIX_EPSILON = 0.002
 const SPATIAL_ROLLOFF_FACTOR = 0.6
+const DISCARD_WEAPON_IMPACT_AUDIO_EVENT: ZombieEscapeWeaponImpactAudioEventVisitor = () => {}
 
 export function resumeZombieEscapeAudioContext() {
   if (Howler.ctx?.state !== 'suspended') return Promise.resolve()
@@ -118,6 +141,29 @@ export function resolveZombieEscapeAudioEventCursor(
   realtimePlaybackAvailable: boolean,
 ) {
   return realtimePlaybackAvailable ? currentSequence : latestSequence
+}
+
+export function visitZombieEscapeWeaponImpactAudioEvents(
+  events: ZombieEscapeWeaponImpactAudioEvents,
+  observedGeneration: Uint32Array,
+  visitor: ZombieEscapeWeaponImpactAudioEventVisitor,
+) {
+  if (observedGeneration.length !== events.pool.capacity) {
+    throw new Error('Weapon impact audio cursor capacity does not match its event pool')
+  }
+  for (let slot = 0; slot < events.pool.capacity; slot += 1) {
+    if (events.pool.active[slot] === 0) {
+      observedGeneration[slot] = 0
+      continue
+    }
+    const generation = events.pool.generation[slot]!
+    if (generation === 0 || observedGeneration[slot] === generation) continue
+    observedGeneration[slot] = generation
+    if (events.effectKind[slot] === ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.blastVictim) {
+      continue
+    }
+    visitor(events, slot, generation)
+  }
 }
 
 export function createZombieEscapeAudioLoadState(): ZombieEscapeAudioLoadState {
@@ -171,6 +217,10 @@ export function ZombieEscapeAudio({
   const runtimeRef = useRef<ZombieEscapeAudioRuntime | null>(null)
   const retryAtRef = useRef(0)
   const cursorRef = useRef(simulationRef.current.audioEvents.writeSequence)
+  const impactGenerationRef = useRef(
+    new Uint32Array(simulationRef.current.impactEvents?.pool.capacity ?? 0),
+  )
+  const impactElapsedSecondsRef = useRef(simulationRef.current.elapsedSeconds ?? 0)
   const listenerTransformRef = useRef(Array.from({ length: 16 }, () => 0))
   const spatialMixRef = useRef<ZombieEscapeAudioSpatialMix>({ gain: 1, pan: 0 })
 
@@ -200,6 +250,20 @@ export function ZombieEscapeAudio({
   useFrame(() => {
     const source = simulationRef.current
     const events = source.audioEvents
+    const impactEvents = source.impactEvents
+    if (impactEvents && impactGenerationRef.current.length !== impactEvents.pool.capacity) {
+      impactGenerationRef.current = new Uint32Array(impactEvents.pool.capacity)
+    }
+    if (
+      impactEvents &&
+      source.elapsedSeconds !== undefined &&
+      source.elapsedSeconds < impactElapsedSecondsRef.current
+    ) {
+      impactGenerationRef.current.fill(0)
+    }
+    if (source.elapsedSeconds !== undefined) {
+      impactElapsedSecondsRef.current = source.elapsedSeconds
+    }
     const latestSequence = events.writeSequence
     if (
       !ZOMBIE_ESCAPE_AUDIO_ASSETS_READY ||
@@ -213,6 +277,13 @@ export function ZombieEscapeAudio({
         latestSequence,
         false,
       )
+      if (impactEvents) {
+        visitZombieEscapeWeaponImpactAudioEvents(
+          impactEvents,
+          impactGenerationRef.current,
+          DISCARD_WEAPON_IMPACT_AUDIO_EVENT,
+        )
+      }
       return
     }
 
@@ -223,6 +294,13 @@ export function ZombieEscapeAudio({
         latestSequence,
         false,
       )
+      if (impactEvents) {
+        visitZombieEscapeWeaponImpactAudioEvents(
+          impactEvents,
+          impactGenerationRef.current,
+          DISCARD_WEAPON_IMPACT_AUDIO_EVENT,
+        )
+      }
       return
     }
     let runtime = runtimeRef.current
@@ -246,6 +324,13 @@ export function ZombieEscapeAudio({
             latestSequence,
             false,
           )
+          if (impactEvents) {
+            visitZombieEscapeWeaponImpactAudioEvents(
+              impactEvents,
+              impactGenerationRef.current,
+              DISCARD_WEAPON_IMPACT_AUDIO_EVENT,
+            )
+          }
           return
         }
       }
@@ -281,6 +366,28 @@ export function ZombieEscapeAudio({
         )
         cursorRef.current = sequence
       }
+      if (impactEvents) {
+        const impactRuntime = runtime
+        visitZombieEscapeWeaponImpactAudioEvents(
+          impactEvents,
+          impactGenerationRef.current,
+          (impactPool, slot, generation) => {
+            const cueRuntime = impactRuntime.impactByWeapon[impactPool.weaponIndex[slot]!]
+            if (!cueRuntime) return
+            playZombieEscapeAudioCueRuntime(
+              cueRuntime,
+              (Math.imul(generation, 0x9e37_79b1) + slot) >>> 0,
+              now,
+              volumeScale,
+              impactPool.x[slot]! + originX,
+              impactPool.y[slot]! + originY,
+              impactPool.z[slot]! + originZ,
+              listenerElements,
+              spatialMixRef.current,
+            )
+          },
+        )
+      }
 
       if (
         isZombieEscapePresenceAudioSource(source) &&
@@ -305,6 +412,13 @@ export function ZombieEscapeAudio({
         latestSequence,
         false,
       )
+      if (impactEvents) {
+        visitZombieEscapeWeaponImpactAudioEvents(
+          impactEvents,
+          impactGenerationRef.current,
+          DISCARD_WEAPON_IMPACT_AUDIO_EVENT,
+        )
+      }
       runtimeRef.current = null
       if (runtime) disposeZombieEscapeAudioRuntime(runtime)
       retryAtRef.current = now + AUDIO_FAILURE_BACKOFF_MS
@@ -607,6 +721,7 @@ function updateZombieEscapeAudioListener(listenerElements: readonly number[]) {
 
 function createZombieEscapeAudioRuntime(presenceCapacity: number): ZombieEscapeAudioRuntime {
   const byKind: Array<ZombieEscapeAudioCueRuntime | undefined> = []
+  const impactByWeapon: Array<ZombieEscapeAudioCueRuntime | undefined> = []
   const shotByWeapon: Array<ZombieEscapeAudioCueRuntime | undefined> = []
   const sounds: Howl[] = []
   const loadState = createZombieEscapeAudioLoadState()
@@ -619,6 +734,7 @@ function createZombieEscapeAudioRuntime(presenceCapacity: number): ZombieEscapeA
   const runtime: ZombieEscapeAudioRuntime = {
     audioContext: null,
     byKind,
+    impactByWeapon,
     loadState,
     presence,
     ready: false,
@@ -652,6 +768,8 @@ function createZombieEscapeAudioRuntime(presenceCapacity: number): ZombieEscapeA
     }
     if (cue.kind === ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired) {
       shotByWeapon[cue.weaponIndex] = cueRuntime
+    } else if (cue.kind === ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponImpact) {
+      impactByWeapon[cue.weaponIndex] = cueRuntime
     } else {
       byKind[cue.kind] = cueRuntime
     }
@@ -712,7 +830,32 @@ function playZombieEscapeAudioEvent(
     kind === ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired
       ? runtime.shotByWeapon[subjectIndex]
       : runtime.byKind[kind]
-  if (!cueRuntime || now - cueRuntime.lastPlayedAt < cueRuntime.cue.playback.minIntervalMs) return
+  if (!cueRuntime) return
+  playZombieEscapeAudioCueRuntime(
+    cueRuntime,
+    sequence,
+    now,
+    volumeScale,
+    events.x[eventSlot]! + originX,
+    events.y[eventSlot]! + originY,
+    events.z[eventSlot]! + originZ,
+    listenerElements,
+    spatialMix,
+  )
+}
+
+function playZombieEscapeAudioCueRuntime(
+  cueRuntime: ZombieEscapeAudioCueRuntime,
+  sequence: number,
+  now: number,
+  volumeScale: number,
+  sourceX: number,
+  sourceY: number,
+  sourceZ: number,
+  listenerElements: readonly number[],
+  spatialMix: ZombieEscapeAudioSpatialMix,
+) {
+  if (now - cueRuntime.lastPlayedAt < cueRuntime.cue.playback.minIntervalMs) return
 
   const variation = cueRuntime.nextVariation % cueRuntime.sounds.length
   cueRuntime.nextVariation += 1
@@ -722,9 +865,6 @@ function playZombieEscapeAudioEvent(
   let spatialGain = 1
   let pan = 0
   const playback = cueRuntime.cue.playback
-  const sourceX = events.x[eventSlot]! + originX
-  const sourceY = events.y[eventSlot]! + originY
-  const sourceZ = events.z[eventSlot]! + originZ
   if (playback.spatial) {
     resolveZombieEscapeAudioSpatialMix(
       sourceX - (listenerElements[12] ?? 0),

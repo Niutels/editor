@@ -5,7 +5,7 @@ import { renderScheduler } from '@landrush/runtime'
 import { type AnyNode, useInteractive, useScene } from '@pascal-app/core'
 import { useGLTFKTX2, useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import {
   Component,
   type ReactNode,
@@ -106,11 +106,6 @@ import {
   type LandrushIslandPalmPlacement,
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-palm-layout'
-import {
-  createLandrushRenderReadinessCoordinator,
-  type LandrushPipelineRenderer,
-  type LandrushRenderReadinessCoordinator,
-} from './landrush-render-readiness'
 import type { ZombieEscapeCollisionCircleSource } from './zombie-escape-collision-world'
 
 type AmbientNpcActions = {
@@ -177,7 +172,6 @@ export function LandrushIslandAmbientLife({
     [interactiveDoorPassabilityKey],
   )
   const [loadQueue, setLoadQueue] = useState(createLandrushIslandAmbientLoadQueueStateForMount)
-  const [renderReadinessCoordinator] = useState(createLandrushRenderReadinessCoordinator)
   const [fishRuntime] = useState(createLandrushIslandFishRuntime)
   const [pageVisible, setPageVisible] = useState(readAmbientPageVisible)
   const pageVisibleRef = useRef(pageVisible)
@@ -268,13 +262,6 @@ export function LandrushIslandAmbientLife({
 
   useEffect(
     () => () => {
-      renderReadinessCoordinator.dispose()
-    },
-    [renderReadinessCoordinator],
-  )
-
-  useEffect(
-    () => () => {
       npcJourneyPlanner.dispose()
     },
     [npcJourneyPlanner],
@@ -297,7 +284,7 @@ export function LandrushIslandAmbientLife({
     if (
       !admitted ||
       !pageVisible ||
-      loadQueue.inFlightUnitId !== null ||
+      loadQueue.admittedUnitIds.length === LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS.length ||
       terminalUnitCount === LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS.length
     ) {
       return
@@ -320,7 +307,13 @@ export function LandrushIslandAmbientLife({
         )
       },
     })
-  }, [admitted, loadQueue.generation, loadQueue.inFlightUnitId, pageVisible, terminalUnitCount])
+  }, [
+    admitted,
+    loadQueue.admittedUnitIds.length,
+    loadQueue.generation,
+    pageVisible,
+    terminalUnitCount,
+  ])
 
   useEffect(() => {
     if (terminalUnitCount === previousTerminalUnitCountRef.current) return
@@ -354,7 +347,6 @@ export function LandrushIslandAmbientLife({
           generation={loadQueue.generation}
           key={`${loadQueue.generation}:${unit.id}`}
           onSettled={handleLoadUnitSettled}
-          renderReadinessCoordinator={renderReadinessCoordinator}
           unitId={unit.id}
         >
           <AmbientLoadUnitModel
@@ -490,13 +482,11 @@ function AmbientProgressiveLoadUnit({
   children,
   generation,
   onSettled,
-  renderReadinessCoordinator,
   unitId,
 }: {
   children: ReactNode
   generation: number
   onSettled: (settlement: LandrushIslandAmbientLoadSettlement) => void
-  renderReadinessCoordinator: LandrushRenderReadinessCoordinator
   unitId: string
 }) {
   const watchdogRef = useRef<LandrushIslandAmbientLoadUnitWatchdog | null>(null)
@@ -535,12 +525,7 @@ function AmbientProgressiveLoadUnit({
   return (
     <AmbientLoadErrorBoundary generation={generation} onSettled={handleSettled} unitId={unitId}>
       <Suspense fallback={null}>
-        <AmbientLoadCompletion
-          coordinator={renderReadinessCoordinator}
-          generation={generation}
-          onSettled={handleSettled}
-          unitId={unitId}
-        >
+        <AmbientLoadCompletion generation={generation} onSettled={handleSettled} unitId={unitId}>
           {children}
         </AmbientLoadCompletion>
       </Suspense>
@@ -550,58 +535,19 @@ function AmbientProgressiveLoadUnit({
 
 function AmbientLoadCompletion({
   children,
-  coordinator,
   generation,
   onSettled,
   unitId,
 }: {
   children: ReactNode
-  coordinator: LandrushRenderReadinessCoordinator
   generation: number
   onSettled: (settlement: LandrushIslandAmbientLoadSettlement) => void
   unitId: string
 }) {
-  const { camera, gl, scene } = useThree()
-  const rootRef = useRef<Group>(null)
-
   useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
-    let active = true
-    void coordinator.request(
-      {
-        camera,
-        generation,
-        identity: root,
-        renderer: gl as unknown as LandrushPipelineRenderer,
-        representatives: [{ key: unitId, root }],
-        targetScene: scene,
-      },
-      (status) => {
-        if (!active) return
-        if (status.state === 'failed') {
-          console.error(
-            `[Landrush ambient] Render pipeline prewarm failed for ${unitId}; continuing with loaded content.`,
-            status.message,
-          )
-        } else if (status.state === 'degraded') {
-          console.warn(
-            `[Landrush ambient] Render pipeline prewarm timed out for ${unitId}; continuing with loaded content.`,
-            status.message,
-          )
-        }
-        onSettled({
-          generation,
-          outcome: status.state === 'ready' ? 'loaded' : 'degraded',
-          unitId,
-        })
-      },
-    )
-    return () => {
-      active = false
-    }
-  }, [camera, coordinator, generation, gl, onSettled, scene, unitId])
-  return <group ref={rootRef}>{children}</group>
+    onSettled({ generation, outcome: 'loaded', unitId })
+  }, [generation, onSettled, unitId])
+  return children
 }
 
 class AmbientLoadErrorBoundary extends Component<

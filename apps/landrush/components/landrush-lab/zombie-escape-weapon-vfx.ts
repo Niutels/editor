@@ -50,6 +50,7 @@ export type ZombieEscapeWeaponVfxStyle = Readonly<{
   arcPattern: ZombieEscapeWeaponVfxArcPattern
   arcColorA: number
   arcColorB: number
+  blastCloudScale: number
   blastPattern: ZombieEscapeWeaponVfxBlastPattern
   detailColorA: number
   detailColorB: number
@@ -85,6 +86,7 @@ export const ZOMBIE_ESCAPE_COIL_ARC_NODE_COUNT = 7
 export const ZOMBIE_ESCAPE_BLAST_CLOUD_PUFF_COUNT = 12
 export const ZOMBIE_ESCAPE_TRAVEL_DETAIL_COUNT = 8
 export const ZOMBIE_ESCAPE_IMPACT_DETAIL_COUNT = 12
+export const ZOMBIE_ESCAPE_SCATTERGUN_MUZZLE_PETAL_COUNT = 5
 export const ZOMBIE_ESCAPE_WEAPON_VFX_VARIANT_COUNT = 5
 
 type ZombieEscapeWeaponVfxVariantFields = Pick<
@@ -114,6 +116,7 @@ const PISTOL_BASE_STYLE = {
   accentRadius: 0,
   arcColorA: 0,
   arcColorB: 0,
+  blastCloudScale: 1,
   id: 'pistol',
   impactColor: 0xff9a3d,
   impactFlashScale: 0.22,
@@ -137,6 +140,7 @@ const CARBINE_BASE_STYLE = {
   accentRadius: 0.047,
   arcColorA: 0,
   arcColorB: 0,
+  blastCloudScale: 1,
   id: 'carbine',
   impactColor: 0x66f3ff,
   impactFlashScale: 0.14,
@@ -160,6 +164,7 @@ const SCATTERGUN_BASE_STYLE = {
   accentRadius: 0,
   arcColorA: 0,
   arcColorB: 0,
+  blastCloudScale: 1,
   id: 'scattergun',
   impactColor: 0xffbd5e,
   impactFlashScale: 0.13,
@@ -183,6 +188,7 @@ const COIL_BASE_STYLE = {
   accentRadius: 0.057,
   arcColorA: 0x68f5ff,
   arcColorB: 0xe38a42,
+  blastCloudScale: 1,
   id: 'coil',
   impactColor: 0x70f5ff,
   impactFlashScale: 0.16,
@@ -206,6 +212,7 @@ const LAUNCHER_BASE_STYLE = {
   accentRadius: 0.19,
   arcColorA: 0,
   arcColorB: 0,
+  blastCloudScale: 1,
   id: 'launcher',
   impactColor: 0xff715a,
   impactFlashScale: 0.82,
@@ -371,13 +378,14 @@ export const ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS = [
   createWeaponVfxStyle(SCATTERGUN_BASE_STYLE, {
     arcPattern: 'none',
     blastPattern: 'none',
-    detailColorA: 0xffedaa,
-    detailColorB: 0xff8d3d,
+    detailColorA: 0xff8e28,
+    detailColorB: 0xff4d12,
     impactColor: 0xffd078,
     impactFlashScale: 0.2,
     impactPattern: 'compact',
-    muzzleLengthScale: 1.15,
-    muzzleRadiusScale: 2.2,
+    muzzleColor: 0xffc465,
+    muzzleLengthScale: 0.32,
+    muzzleRadiusScale: 0.65,
     sparkCount: 1,
     tracerLengthScale: 0.48,
     tracerRadius: 0.035,
@@ -515,6 +523,7 @@ export const ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS = [
   createWeaponVfxStyle(LAUNCHER_BASE_STYLE, {
     accentColor: 0xff8e75,
     arcPattern: 'none',
+    blastCloudScale: 2,
     blastPattern: 'shards',
     detailColorA: 0xff765e,
     detailColorB: 0xffc487,
@@ -574,31 +583,36 @@ export const ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS = [
   }),
 ] as const satisfies readonly ZombieEscapeWeaponVfxStyle[]
 
+export const ZOMBIE_ESCAPE_PRODUCTION_WEAPON_VFX_VARIANT_INDICES = [0, 4, 1, 1, 1] as const
+
 export const ZOMBIE_ESCAPE_WEAPON_VFX_STYLES = [
   ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[0],
-  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[5],
-  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[10],
-  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[15],
-  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[20],
+  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[9],
+  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[11],
+  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[16],
+  ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[21],
 ] as const satisfies readonly ZombieEscapeWeaponVfxStyle[]
 
 const FALLBACK_STYLE = ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[0]
 
 export function resolveZombieEscapeWeaponVfxStyle(
   weaponIndex: number,
-  variantIndex = 0,
+  variantIndex?: number,
 ): ZombieEscapeWeaponVfxStyle {
   if (!Number.isFinite(weaponIndex)) return FALLBACK_STYLE
   const resolvedWeaponIndex = Math.trunc(weaponIndex)
   if (resolvedWeaponIndex < 0 || resolvedWeaponIndex >= ZOMBIE_ESCAPE_WEAPON_VFX_STYLES.length) {
     return FALLBACK_STYLE
   }
+  const productionVariantIndex =
+    ZOMBIE_ESCAPE_PRODUCTION_WEAPON_VFX_VARIANT_INDICES[resolvedWeaponIndex] ?? 0
   const resolvedVariantIndex =
+    variantIndex !== undefined &&
     Number.isFinite(variantIndex) &&
     Math.trunc(variantIndex) >= 0 &&
     Math.trunc(variantIndex) < ZOMBIE_ESCAPE_WEAPON_VFX_VARIANT_COUNT
       ? Math.trunc(variantIndex)
-      : 0
+      : productionVariantIndex
   return (
     ZOMBIE_ESCAPE_WEAPON_VFX_VARIANTS[
       resolvedWeaponIndex * ZOMBIE_ESCAPE_WEAPON_VFX_VARIANT_COUNT + resolvedVariantIndex
@@ -622,6 +636,13 @@ export function resolveZombieEscapeVfxImpactEnvelope(normalizedAge: number) {
   const progress = Number.isFinite(normalizedAge) ? Math.min(1, Math.max(0, normalizedAge)) : 1
   const remaining = 1 - progress
   return remaining * remaining
+}
+
+export function resolveZombieEscapeScattergunMuzzlePetalEnvelope(normalizedAge: number) {
+  if (!Number.isFinite(normalizedAge)) return 0
+  const progress = Math.min(1, Math.max(0, normalizedAge))
+  const attack = Math.min(1, progress / 0.18)
+  return attack * (1 - progress) ** 1.65
 }
 
 export function resolveZombieEscapeVfxBlastScale(normalizedAge: number) {

@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import type { Object3D } from 'three'
 import { Group, Mesh, MeshBasicMaterial, PerspectiveCamera, Scene, SphereGeometry } from 'three'
 import {
   compileZombieEscapeRenderRepresentatives,
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
   createZombieEscapeRenderReadinessRegistry,
+  createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
@@ -183,6 +185,40 @@ describe('Zombie Escape render compilation', () => {
     fixture.mesh.material.dispose()
   })
 
+  test('keeps targeted WebGPU prewarm but skips the unsafe whole-scene compile', async () => {
+    const fixture = createCompileFixture()
+    const compiledRoots: Object3D[] = []
+    let initialized = false
+    const renderer: ZombieEscapePipelineRenderer = {
+      async compileAsync(root, camera, targetScene) {
+        expect(camera).toBe(fixture.camera)
+        expect(targetScene).toBe(fixture.targetScene)
+        compiledRoots.push(root)
+      },
+      init() {
+        initialized = true
+      },
+      isWebGPURenderer: true,
+    }
+
+    await compileZombieEscapeRenderRepresentatives({
+      camera: fixture.camera,
+      renderer,
+      representatives: [{ key: 'hidden', root: fixture.root }],
+      targetScene: fixture.targetScene,
+    })
+
+    expect(initialized).toBe(true)
+    expect(compiledRoots).toEqual([fixture.root])
+    expect(fixture.ancestor.visible).toBe(false)
+    expect(fixture.root.visible).toBe(false)
+    expect(fixture.child.visible).toBe(false)
+    expect(fixture.mesh.visible).toBe(false)
+    expect(fixture.mesh.frustumCulled).toBe(true)
+    fixture.mesh.geometry.dispose()
+    fixture.mesh.material.dispose()
+  })
+
   test('restores every flag after synchronous throw and asynchronous rejection', async () => {
     for (const failure of ['throw', 'reject'] as const) {
       const fixture = createCompileFixture()
@@ -242,6 +278,70 @@ describe('Zombie Escape render compilation', () => {
     await pending
     expect(calls).toBe(3)
     expect(maximumActive).toBe(1)
+  })
+
+  test('prewarms newly registered representatives immediately and exactly once in queue order', async () => {
+    const firstCompilation = deferred<void>()
+    const secondCompilation = deferred<void>()
+    const calls: string[] = []
+    let active = 0
+    let maximumActive = 0
+    const queue = createZombieEscapeRenderRepresentativePrewarmQueue({
+      compile: async ({ representatives }) => {
+        const key = representatives[0]!.key
+        calls.push(key)
+        active += 1
+        maximumActive = Math.max(maximumActive, active)
+        await (key === 'first' ? firstCompilation.promise : secondCompilation.promise)
+        active -= 1
+      },
+    })
+    const camera = new PerspectiveCamera()
+    const renderer = { compileAsync: async () => undefined }
+    const targetScene = new Scene()
+    const first = { key: 'first', root: new Group() }
+    const second = { key: 'second', root: new Group() }
+    const synchronize = (representatives: Array<typeof first>) =>
+      queue.synchronize({ camera, generation: 1, renderer, representatives, targetScene })
+
+    synchronize([first])
+    await flushMicrotasksUntil(() => calls.length === 1)
+    synchronize([first, second])
+    synchronize([first, second])
+    expect(calls).toEqual(['first'])
+
+    firstCompilation.resolve()
+    await flushMicrotasksUntil(() => calls.length === 2)
+    expect(calls).toEqual(['first', 'second'])
+    secondCompilation.resolve()
+    expect(await queue.waitForSettled()).toBe('ready')
+    expect(maximumActive).toBe(1)
+    queue.dispose()
+  })
+
+  test('continues the representative prewarm queue after one compilation fails', async () => {
+    const calls: string[] = []
+    const queue = createZombieEscapeRenderRepresentativePrewarmQueue({
+      compile: async ({ representatives }) => {
+        const key = representatives[0]!.key
+        calls.push(key)
+        if (key === 'first') throw new Error('first failed')
+      },
+    })
+    queue.synchronize({
+      camera: new PerspectiveCamera(),
+      generation: 1,
+      renderer: { compileAsync: async () => undefined },
+      representatives: [
+        { key: 'first', root: new Group() },
+        { key: 'second', root: new Group() },
+      ],
+      targetScene: new Scene(),
+    })
+
+    expect(await queue.waitForSettled()).toBe('failed')
+    expect(calls).toEqual(['first', 'second'])
+    queue.dispose()
   })
 })
 

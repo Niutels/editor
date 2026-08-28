@@ -35,8 +35,6 @@ import {
 } from './zombie-escape-visual-lod'
 import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
-const ZOMBIE_ESCAPE_RECOIL_DURATION_SECONDS = 0.13
-
 export function ZombieEscapeActors({
   impactVisualRegistry,
   onGeneratedAssetsFailureChange,
@@ -145,7 +143,7 @@ function ZombieEscapeOrbot({
     combatState.meleePhase = player.meleePhase
     combatState.meleeProgress = getZombieEscapeMeleeProgress(player)
     combatState.movementHeading = player.movementHeading
-    combatState.recoil = resolveZombieEscapeWeaponRecoil(simulation)
+    combatState.shotSequence = simulation.nextShotVolleySequence
     combatState.weaponIndex = player.weaponIndex
   }, -20)
 
@@ -190,14 +188,6 @@ function ZombieEscapeOrbot({
       </Suspense>
     </group>
   )
-}
-
-function resolveZombieEscapeWeaponRecoil(simulation: ZombieEscapeSimulation) {
-  const slot = simulation.lastShotSlot
-  if (slot < 0 || simulation.shots.pool.active[slot] === 0) return 0
-  if (simulation.shots.pool.generation[slot] !== simulation.lastShotGeneration) return 0
-  const shotAge = simulation.shots.travelAge[slot]! + simulation.shots.impactAge[slot]!
-  return Math.max(0, 1 - shotAge / ZOMBIE_ESCAPE_RECOIL_DURATION_SECONDS)
 }
 
 function ZombieEscapeAimReticle({

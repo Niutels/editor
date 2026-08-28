@@ -64,6 +64,7 @@ import {
 import {
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
+  createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY,
   type ZombieEscapePipelineRenderer,
@@ -170,6 +171,13 @@ const EMPTY_RENDER_READINESS_SNAPSHOT: ZombieEscapeRenderReadinessSnapshot = {
 const subscribeToNoRenderReadinessRegistry = () => () => undefined
 const getEmptyRenderReadinessSnapshot = () => EMPTY_RENDER_READINESS_SNAPSHOT
 const EMPTY_READY_ZOMBIE_VARIANTS = new Set<number>()
+const ZOMBIE_ESCAPE_BACKGROUND_RENDER_PREWARM_DELAY_MS = 2_000
+
+function yieldZombieEscapeAuthoredBuildSlice() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve())
+  })
+}
 
 export function resolveZombieEscapeGeneratedVariantAdmissionCount(
   admittedCount: number,
@@ -323,6 +331,26 @@ export function ZombieEscapeGeneratedAssets({
   if (!coordinatorRef.current) {
     coordinatorRef.current = createZombieEscapeRenderReadinessCoordinator()
   }
+  const representativePrewarmQueueRef = useRef<ReturnType<
+    typeof createZombieEscapeRenderRepresentativePrewarmQueue
+  > | null>(null)
+  if (!representativePrewarmQueueRef.current) {
+    representativePrewarmQueueRef.current = createZombieEscapeRenderRepresentativePrewarmQueue({
+      onStatus(key, status) {
+        if (status.state === 'degraded') {
+          console.warn(
+            `[zombie-escape] Render representative ${key} is still prewarming.`,
+            status.message,
+          )
+        } else if (status.state === 'failed') {
+          console.error(
+            `[zombie-escape] Render representative ${key} failed to prewarm.`,
+            status.message,
+          )
+        }
+      },
+    })
+  }
   const renderReadinessSnapshot = useSyncExternalStore(
     renderReadinessRegistry?.subscribe ?? subscribeToNoRenderReadinessRegistry,
     renderReadinessRegistry?.getSnapshot ?? getEmptyRenderReadinessSnapshot,
@@ -404,9 +432,10 @@ export function ZombieEscapeGeneratedAssets({
 
   useEffect(() => {
     const coordinator = coordinatorRef.current
+    const representativePrewarmQueue = representativePrewarmQueueRef.current
     const pipelineReadiness = pipelineReadinessRef.current
     if (pipelineReadiness.generation !== retryGeneration) return
-    if (!(coordinator && renderReadinessRegistry)) {
+    if (!(coordinator && representativePrewarmQueue && renderReadinessRegistry)) {
       pipelineReadiness.ready = true
       publishReadiness()
       return
@@ -415,16 +444,18 @@ export function ZombieEscapeGeneratedAssets({
     publishReadiness()
     if (!(allocationReady && renderReadinessSnapshot.complete)) {
       coordinator.invalidate()
+      representativePrewarmQueue.invalidate()
       return
     }
 
     let active = true
+    let backgroundPrewarmTimer: number | null = null
     void coordinator.request(
       {
         camera: pipelineCamera,
         generation: retryGeneration,
         identity: renderReadinessSnapshot,
-        representatives: renderReadinessSnapshot.representatives,
+        representatives: [],
         renderer: gl as unknown as ZombieEscapePipelineRenderer,
         targetScene: scene,
       },
@@ -433,12 +464,12 @@ export function ZombieEscapeGeneratedAssets({
         const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
         if (settlement.diagnostic?.level === 'error') {
           console.error(
-            '[zombie-escape] Render pipeline prewarm failed; continuing with loaded content.',
+            '[zombie-escape] Visible-scene render pipeline prewarm failed; continuing with loaded content.',
             settlement.diagnostic.message,
           )
         } else if (settlement.diagnostic) {
           console.warn(
-            '[zombie-escape] Render pipeline prewarm exceeded its warning threshold; keeping loading active until it settles.',
+            '[zombie-escape] Visible-scene render pipeline prewarm exceeded its warning threshold; keeping loading active until it settles.',
             settlement.diagnostic.message,
           )
         }
@@ -446,10 +477,23 @@ export function ZombieEscapeGeneratedAssets({
         if (currentPipelineReadiness.generation !== retryGeneration) return
         currentPipelineReadiness.ready = settlement.contentReady
         publishReadiness()
+        if (status.state !== 'ready' || backgroundPrewarmTimer !== null) return
+        backgroundPrewarmTimer = window.setTimeout(() => {
+          backgroundPrewarmTimer = null
+          if (!active || readinessRef.current.generation !== retryGeneration) return
+          representativePrewarmQueue.synchronize({
+            camera: pipelineCamera,
+            generation: retryGeneration,
+            renderer: gl as unknown as ZombieEscapePipelineRenderer,
+            representatives: renderReadinessSnapshot.representatives,
+            targetScene: scene,
+          })
+        }, ZOMBIE_ESCAPE_BACKGROUND_RENDER_PREWARM_DELAY_MS)
       },
     )
     return () => {
       active = false
+      if (backgroundPrewarmTimer !== null) window.clearTimeout(backgroundPrewarmTimer)
     }
   }, [
     allocationReady,
@@ -465,6 +509,7 @@ export function ZombieEscapeGeneratedAssets({
   useEffect(
     () => () => {
       coordinatorRef.current?.invalidate()
+      representativePrewarmQueueRef.current?.dispose()
     },
     [],
   )
@@ -804,7 +849,7 @@ function ZombieEscapeGeneratedZombies({
         loading: 'before-first-spawn',
       }}
     >
-      {ZOMBIE_VARIANT_INDICES.map((variantIndex) => {
+      {ZOMBIE_VARIANT_INDICES.slice(0, admittedVariantCount).map((variantIndex) => {
         const zombie = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[variantIndex]
         if (!zombie) return null
         return (
@@ -816,7 +861,6 @@ function ZombieEscapeGeneratedZombies({
           >
             <Suspense fallback={null}>
               <GeneratedZombieVariant
-                admitted={variantIndex < admittedVariantCount}
                 detailedZombieSlotsRef={detailedZombieSlotsRef}
                 framePriority={zombiePresentationFramePriority ?? -17}
                 impactVisualRegistry={impactVisualRegistry}
@@ -840,7 +884,6 @@ function ZombieEscapeGeneratedZombies({
 }
 
 function GeneratedZombieVariant({
-  admitted,
   detailedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
@@ -855,7 +898,6 @@ function GeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
-  admitted: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
@@ -873,7 +915,6 @@ function GeneratedZombieVariant({
   const riggedGltf = useGLTFKTX2(zombie.glb.riggedBase.path)
   const runGltf = useGLTF(zombie.glb.run.path)
   const walkGltf = useGLTF(zombie.glb.walk.path)
-  if (!admitted) return null
   return (
     <PreparedGeneratedZombieVariant
       detailedZombieSlotsRef={detailedZombieSlotsRef}
@@ -988,10 +1029,7 @@ function PreparedGeneratedZombieVariant({
       signal: abortController.signal,
       source: riggedScene,
       variantIndex,
-      waitForBuildSlice: () =>
-        new Promise<void>((resolve) => {
-          window.requestAnimationFrame(() => resolve())
-        }),
+      waitForBuildSlice: yieldZombieEscapeAuthoredBuildSlice,
       walkClip,
       zombieShader,
     })

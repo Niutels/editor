@@ -149,9 +149,15 @@ export type LandrushIslandFloorFadePreparationMetrics = Readonly<{
 
 export type LandrushIslandFloorFadeLevelReadState = Readonly<{
   appliedOpacity: number
+  assignmentMismatchCount: number
+  canonicalVisible: boolean
   canonicalRoot: Object3D
   desiredOpacity: number
+  fallbackVisible: boolean | null
+  materialMode: LandrushIslandFloorFadeMaterialMode | null
   pending: boolean
+  presentationOpacity: number
+  quarantineCount: number
   ready: boolean
 }>
 
@@ -232,6 +238,12 @@ export class LandrushIslandFloorFadePresentationOwner<
     if (level.canonical.root === root) {
       level.canonical.forceVisible = forceVisible
       this.noteStructuralToken(level.canonical, structuralToken)
+      if (
+        !level.canonical.generation &&
+        this.hasCommittedAssignmentMismatch(level.canonical)
+      ) {
+        this.requestGeneration(level.canonical)
+      }
       this.settleReadyHandoffs()
       return
     }
@@ -371,11 +383,21 @@ export class LandrushIslandFloorFadePresentationOwner<
   readLevel(levelId: RootId): LandrushIslandFloorFadeLevelReadState | null {
     const level = this.levels.get(levelId)
     if (!level) return null
+    let assignmentMismatchCount = 0
+    for (const [mesh, assignment] of level.canonical.committedAssignments) {
+      if (mesh.material !== assignment) assignmentMismatchCount += 1
+    }
     return {
       appliedOpacity: level.appliedOpacity,
+      assignmentMismatchCount,
+      canonicalVisible: level.canonical.root.visible,
       canonicalRoot: level.canonical.root,
       desiredOpacity: level.desiredOpacity,
+      fallbackVisible: level.fallback?.root.visible ?? null,
+      materialMode: level.canonical.materialMode,
       pending: level.canonical.generation !== null,
+      presentationOpacity: level.canonical.presentationOpacity,
+      quarantineCount: level.canonical.quarantines.size,
       ready: this.isCanonicalReady(level),
     }
   }
@@ -568,7 +590,11 @@ export class LandrushIslandFloorFadePresentationOwner<
         const mesh = object as Mesh
         if (mesh.isMesh && mesh.material && !generation.stagesByMesh.has(mesh)) {
           const committedAssignment = rootState.committedAssignments.get(mesh)
-          if (committedAssignment && mesh.material !== committedAssignment) {
+          if (
+            committedAssignment &&
+            mesh.material !== committedAssignment &&
+            isFractionalOpacity(rootState.presentationOpacity)
+          ) {
             this.quarantineSubtree(rootState, mesh, generation.revision)
           }
           const stage: LandrushIslandFloorFadeMeshStage = {
@@ -740,6 +766,13 @@ export class LandrushIslandFloorFadePresentationOwner<
     this.quarantineSubtree(rootState, child, revision)
     if (isObservedGeometryParent(child, rootState.root)) this.observeParent(rootState, child)
     this.requestGeneration(rootState)
+  }
+
+  private hasCommittedAssignmentMismatch(rootState: LandrushIslandFloorFadeRootState) {
+    for (const [mesh, assignment] of rootState.committedAssignments) {
+      if (mesh.material !== assignment) return true
+    }
+    return false
   }
 
   private handleObservedChildRemoved(rootState: LandrushIslandFloorFadeRootState, child: Object3D) {

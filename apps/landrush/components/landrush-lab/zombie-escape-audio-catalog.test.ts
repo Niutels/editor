@@ -10,7 +10,7 @@ import catalog from './zombie-escape-audio-catalog.json'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 describe('Zombie Escape audio catalog', () => {
-  test('defines deterministic generated paths and exactly one shot cue per weapon', () => {
+  test('defines deterministic generated paths plus weapon-specific shot and impact cues', () => {
     const eventPaths = ZOMBIE_ESCAPE_AUDIO_CATALOG.cues.flatMap((cue) => cue.files)
     const paths = [
       ...eventPaths,
@@ -20,15 +20,25 @@ describe('Zombie Escape audio catalog', () => {
     const shotCues = ZOMBIE_ESCAPE_AUDIO_CATALOG.cues.filter(
       (cue) => cue.eventKind === 'shot-fired',
     )
+    const impactCues = ZOMBIE_ESCAPE_AUDIO_CATALOG.cues.filter(
+      (cue) => cue.eventKind === 'weapon-impact',
+    )
 
-    expect(eventPaths).toHaveLength(22)
-    expect(paths).toHaveLength(27)
+    expect(eventPaths).toHaveLength(26)
+    expect(paths).toHaveLength(31)
     expect(new Set(paths).size).toBe(paths.length)
     expect(paths.every((path) => path.startsWith('/audios/sfx/zombie-escape/'))).toBe(true)
     expect(ZOMBIE_ESCAPE_AUDIO_ASSETS_READY).toBe(true)
     expect(shotCues.map((cue) => cue.weaponId)).toEqual(
       ZOMBIE_ESCAPE_WEAPON_CATALOG.map((weapon) => weapon.id),
     )
+    expect(impactCues.map((cue) => cue.weaponId)).toEqual([
+      'reef-carbine',
+      'driftwood-scattergun',
+      'storm-coil-repeater',
+      'tidebreak-launcher',
+    ])
+    expect(impactCues.every((cue) => cue.playback.spatial)).toBe(true)
     expect(Object.fromEntries(shotCues.map((cue) => [cue.weaponId, cue.playback.volume]))).toEqual({
       'driftwood-scattergun': 0.9,
       'reef-carbine': 0.74,
@@ -48,8 +58,8 @@ describe('Zombie Escape audio catalog', () => {
   })
 
   test('requires explicit mastered prompts for all three zombie sound families', () => {
-    expect(catalog.schemaVersion).toBe(4)
-    expect(catalog.catalogVersion).toBe('2026-08-26.1')
+    expect(catalog.schemaVersion).toBe(5)
+    expect(catalog.catalogVersion).toBe('2026-08-27.2')
     const rawZombieCues = [
       catalog.cues.find((cue) => cue.id === 'enemy-hit')!,
       catalog.cues.find((cue) => cue.id === 'enemy-death')!,
@@ -195,6 +205,25 @@ describe('Zombie Escape audio catalog', () => {
     })
     expect(() => createZombieEscapeAudioCatalogState(duplicate, {})).toThrow(
       'Duplicate Zombie Escape audio event kind: enemy-hit',
+    )
+  })
+
+  test('requires exactly one impact identity for every selected heavy weapon', () => {
+    const missing = structuredClone(catalog)
+    missing.cues = missing.cues.filter((cue) => cue.id !== 'weapon-impact-storm-coil-repeater')
+    expect(() => createZombieEscapeAudioCatalogState(missing, {})).toThrow(
+      'requires one impact cue per selected weapon',
+    )
+
+    const duplicate = structuredClone(catalog)
+    const carbineImpact = duplicate.cues.find((cue) => cue.id === 'weapon-impact-reef-carbine')!
+    duplicate.cues.push({
+      ...carbineImpact,
+      files: ['/audios/sfx/zombie-escape/weapons/reef-carbine-impact-duplicate-0.mp3'],
+      id: 'weapon-impact-reef-carbine-duplicate',
+    })
+    expect(() => createZombieEscapeAudioCatalogState(duplicate, {})).toThrow(
+      'Duplicate weapon impact cue for reef-carbine',
     )
   })
 

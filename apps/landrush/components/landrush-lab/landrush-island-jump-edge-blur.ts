@@ -10,7 +10,8 @@ export type LandrushIslandJumpEdgeBlurSample = {
   amount: number
 }
 
-const LANDRUSH_ISLAND_JUMP_EDGE_BLUR_DEFAULT_STRENGTH = 2
+const LANDRUSH_ISLAND_JUMP_EDGE_BLUR_DEFAULT_STRENGTH = 0.89
+const LANDRUSH_ISLAND_JUMP_EDGE_BLUR_MAXIMUM_DIAGNOSTIC_STRENGTH = 2
 
 export const LANDRUSH_ISLAND_JUMP_EDGE_BLUR = Object.freeze({
   attackEndMs: 80,
@@ -26,7 +27,7 @@ export function resolveLandrushIslandJumpEdgeBlurStrength(value: string | null) 
   if (value === null) return LANDRUSH_ISLAND_JUMP_EDGE_BLUR_DEFAULT_STRENGTH
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return LANDRUSH_ISLAND_JUMP_EDGE_BLUR_DEFAULT_STRENGTH
-  return Math.min(LANDRUSH_ISLAND_JUMP_EDGE_BLUR_DEFAULT_STRENGTH, Math.max(0, parsed))
+  return Math.min(LANDRUSH_ISLAND_JUMP_EDGE_BLUR_MAXIMUM_DIAGNOSTIC_STRENGTH, Math.max(0, parsed))
 }
 
 export function resolveLandrushIslandJumpEdgeBlurDebugMode(

@@ -6,7 +6,6 @@ import {
   createLandrushIslandAmbientLoadQueueStateForMount,
   createLandrushIslandAmbientLoadUnits,
   createLandrushIslandAmbientLoadUnitWatchdog,
-  LANDRUSH_ISLAND_AMBIENT_LOAD_IDLE_TIMEOUT_MS,
   LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_TIMEOUT_MS,
   type LandrushIslandAmbientLoadSettlement,
   type LandrushIslandAmbientLoadWatchdogHost,
@@ -46,7 +45,7 @@ describe('Landrush island ambient load queue', () => {
     expect(resolveMountedLandrushIslandAmbientLoadUnits(initial, UNITS)).toEqual([])
   })
 
-  test('settlement terminalizes without synchronously admitting the next unit', () => {
+  test('admits one unit per animation-frame yield without waiting for settlement', () => {
     const initial = createLandrushIslandAmbientLoadQueueState()
     const firstYield = yieldAdmission(initial)
     const settled = settleLandrushIslandAmbientLoadQueue(firstYield, {
@@ -55,18 +54,18 @@ describe('Landrush island ambient load queue', () => {
       unitId: 'palm:palm-a',
     })
 
-    expect(firstYield.inFlightUnitId).toBe('palm:palm-a')
-    expect(settled.inFlightUnitId).toBeNull()
+    expect(firstYield.admittedUnitIds).toEqual(['palm:palm-a'])
+    expect(settled.admittedUnitIds).toBe(firstYield.admittedUnitIds)
     expect(settled.terminalOutcomes).toEqual({ 'palm:palm-a': 'loaded' })
     expect(
       resolveMountedLandrushIslandAmbientLoadUnits(settled, UNITS).map((unit) => unit.id),
     ).toEqual(['palm:palm-a'])
 
     const secondYield = yieldAdmission(settled)
-    expect(secondYield.inFlightUnitId).toBe('palm:palm-b')
+    expect(secondYield.admittedUnitIds).toEqual(['palm:palm-a', 'palm:palm-b'])
   })
 
-  test('uses deterministic palm, boat, NPC, then fish priority one yield at a time', () => {
+  test('uses deterministic palm, boat, NPC, then fish order across frame yields', () => {
     let state = createLandrushIslandAmbientLoadQueueState()
     const expectedOrder = [
       'palm:palm-a',
@@ -79,17 +78,17 @@ describe('Landrush island ambient load queue', () => {
       'fish:fish-b',
     ]
 
-    for (const unitId of expectedOrder) {
-      const beforeYield = state
+    for (const [index, unitId] of expectedOrder.entries()) {
       state = yieldAdmission(state)
-      expect(beforeYield.inFlightUnitId).toBeNull()
-      expect(state.inFlightUnitId).toBe(unitId)
+      expect(state.admittedUnitIds).toEqual(expectedOrder.slice(0, index + 1))
+      expect(state.admittedUnitIds.at(-1)).toBe(unitId)
+    }
+    for (const unitId of expectedOrder.toReversed()) {
       state = settleLandrushIslandAmbientLoadQueue(state, {
         generation: state.generation,
         outcome: 'loaded',
         unitId,
       })
-      expect(state.inFlightUnitId).toBeNull()
     }
 
     expect(yieldAdmission(state)).toBe(state)
@@ -97,49 +96,33 @@ describe('Landrush island ambient load queue', () => {
   })
 
   test('keeps loaded units mounted while failure terminalizes before the next yield', () => {
-    let state = yieldAdmission(createLandrushIslandAmbientLoadQueueState())
+    let state = createLandrushIslandAmbientLoadQueueState()
+    state = yieldAdmission(state)
+    state = yieldAdmission(state)
     state = settleLandrushIslandAmbientLoadQueue(state, {
       generation: state.generation,
       outcome: 'loaded',
       unitId: 'palm:palm-a',
     })
-    state = yieldAdmission(state)
     state = settleLandrushIslandAmbientLoadQueue(state, {
       generation: state.generation,
       outcome: 'failed',
       unitId: 'palm:palm-b',
     })
 
-    expect(state.inFlightUnitId).toBeNull()
     expect(
       resolveMountedLandrushIslandAmbientLoadUnits(state, UNITS).map((unit) => unit.id),
     ).toEqual(['palm:palm-a'])
     expect(state.terminalOutcomes['palm:palm-b']).toBe('failed')
 
     state = yieldAdmission(state)
-    expect(state.inFlightUnitId).toBe('boat:boat-a')
+    expect(state.admittedUnitIds).toEqual(['palm:palm-a', 'palm:palm-b', 'boat:boat-a'])
   })
 
   test('keeps NPC load eligibility independent from presentation visibility', () => {
-    let state = createLandrushIslandAmbientLoadQueueState()
-    for (const unitId of ['palm:palm-a', 'palm:palm-b', 'boat:boat-a', 'boat:boat-b']) {
-      state = advanceLandrushIslandAmbientLoadQueueAfterYield(state, UNITS, {
-        generation: state.generation,
-        policy: ACTIVE_POLICY,
-      })
-      expect(state.inFlightUnitId).toBe(unitId)
-      state = settleLandrushIslandAmbientLoadQueue(state, {
-        generation: state.generation,
-        outcome: 'loaded',
-        unitId,
-      })
-    }
-
-    state = advanceLandrushIslandAmbientLoadQueueAfterYield(state, UNITS, {
-      generation: state.generation,
-      policy: ACTIVE_POLICY,
-    })
-    expect(state.inFlightUnitId).toBe('npc:npc-a')
+    const state = admitAll(createLandrushIslandAmbientLoadQueueState())
+    expect(state.admittedUnitIds).toContain('npc:npc-a')
+    expect(state.admittedUnitIds).toContain('npc:npc-b')
   })
 
   test('generation-fences stale settlements and yielded admissions', () => {
@@ -157,15 +140,15 @@ describe('Landrush island ambient load queue', () => {
       policy: ACTIVE_POLICY,
     })
     expect(staleYield).toBe(reset)
-    expect(staleYield.inFlightUnitId).toBeNull()
+    expect(staleYield.admittedUnitIds).toEqual([])
   })
 
   test('reports readiness only after every load unit terminalizes, including failures', () => {
     let state = createLandrushIslandAmbientLoadQueueState(4)
     const unitIds = UNITS.map((unit) => unit.id)
+    state = admitAll(state)
 
     for (const [index, unitId] of unitIds.entries()) {
-      state = yieldAdmission(state)
       expect(resolveLandrushIslandAmbientLoadReadiness(state, UNITS)).toEqual({
         completed: index,
         generation: 4,
@@ -192,9 +175,8 @@ describe('Landrush island ambient load queue', () => {
   })
 
   test('reconciles only monotonic progress against the stable unit order of a generation', () => {
-    let completedState = createLandrushIslandAmbientLoadQueueState(8)
+    let completedState = admitAll(createLandrushIslandAmbientLoadQueueState(8))
     for (const unit of UNITS) {
-      completedState = yieldAdmission(completedState)
       completedState = settleLandrushIslandAmbientLoadQueue(completedState, {
         generation: completedState.generation,
         outcome: 'loaded',
@@ -204,15 +186,14 @@ describe('Landrush island ambient load queue', () => {
     const completed = resolveLandrushIslandAmbientLoadReadiness(completedState, UNITS)
     const resetState = resetLandrushIslandAmbientLoadQueue(completedState)
     const reset = resolveLandrushIslandAmbientLoadReadiness(resetState, UNITS)
-    let firstTerminalState = resetState
-    firstTerminalState = yieldAdmission(firstTerminalState)
+    let firstTerminalState = admitAll(resetState)
     firstTerminalState = settleLandrushIslandAmbientLoadQueue(firstTerminalState, {
       generation: firstTerminalState.generation,
       outcome: 'loaded',
       unitId: UNITS[0]!.id,
     })
     const firstTerminal = resolveLandrushIslandAmbientLoadReadiness(firstTerminalState, UNITS)
-    let secondTerminalState = yieldAdmission(firstTerminalState)
+    let secondTerminalState = firstTerminalState
     secondTerminalState = settleLandrushIslandAmbientLoadQueue(secondTerminalState, {
       generation: secondTerminalState.generation,
       outcome: 'failed',
@@ -247,9 +228,8 @@ describe('Landrush island ambient load queue', () => {
 
     const firstMount = createLandrushIslandAmbientLoadQueueStateForMount()
     const remount = createLandrushIslandAmbientLoadQueueStateForMount()
-    let previousState = firstMount
+    let previousState = admitAll(firstMount)
     for (const unit of UNITS) {
-      previousState = yieldAdmission(previousState)
       previousState = settleLandrushIslandAmbientLoadQueue(previousState, {
         generation: previousState.generation,
         outcome: 'loaded',
@@ -268,8 +248,8 @@ describe('Landrush island ambient load queue', () => {
     )
   })
 
-  test('prefers a cancellable idle turn and delivers its yield at most once', () => {
-    const controlled = createControlledYieldHost(true)
+  test('uses a cancellable animation-frame turn and delivers its yield at most once', () => {
+    const controlled = createControlledYieldHost()
     let yieldCount = 0
     const cancel = scheduleLandrushIslandAmbientLoadAdmissionYield({
       host: controlled.host,
@@ -279,14 +259,12 @@ describe('Landrush island ambient load queue', () => {
     })
 
     expect(yieldCount).toBe(0)
-    expect(controlled.idleRequests).toHaveLength(1)
-    expect(controlled.frameRequests).toHaveLength(0)
-    expect(controlled.idleRequests[0]?.timeout).toBe(LANDRUSH_ISLAND_AMBIENT_LOAD_IDLE_TIMEOUT_MS)
-    controlled.idleRequests[0]?.callback()
-    controlled.idleRequests[0]?.callback()
+    expect(controlled.frameRequests).toHaveLength(1)
+    controlled.frameRequests[0]?.callback()
+    controlled.frameRequests[0]?.callback()
     cancel()
     expect(yieldCount).toBe(1)
-    expect(controlled.cancelledIdleHandles).toEqual([])
+    expect(controlled.cancelledFrameHandles).toEqual([])
 
     const cancelBeforeYield = scheduleLandrushIslandAmbientLoadAdmissionYield({
       host: controlled.host,
@@ -295,27 +273,9 @@ describe('Landrush island ambient load queue', () => {
       },
     })
     cancelBeforeYield()
-    controlled.idleRequests[1]?.callback()
+    controlled.frameRequests[1]?.callback()
     expect(yieldCount).toBe(1)
-    expect(controlled.cancelledIdleHandles).toEqual([2])
-  })
-
-  test('falls back to a cancellable animation-frame recovery turn', () => {
-    const controlled = createControlledYieldHost(false)
-    let yielded = false
-    const cancel = scheduleLandrushIslandAmbientLoadAdmissionYield({
-      host: controlled.host,
-      onYield: () => {
-        yielded = true
-      },
-    })
-
-    expect(yielded).toBe(false)
-    expect(controlled.frameRequests).toHaveLength(1)
-    cancel()
-    controlled.frameRequests[0]?.callback()
-    expect(yielded).toBe(false)
-    expect(controlled.cancelledFrameHandles).toEqual([1])
+    expect(controlled.cancelledFrameHandles).toEqual([2])
   })
 
   test('terminalizes and retains a hung load unit after its watchdog deadline', () => {
@@ -335,7 +295,6 @@ describe('Landrush island ambient load queue', () => {
     )
     controlled.timeoutRequests[0]?.callback()
 
-    expect(state.inFlightUnitId).toBeNull()
     expect(state.terminalOutcomes['palm:palm-a']).toBe('degraded')
     expect(resolveMountedLandrushIslandAmbientLoadUnits(state, UNITS)).toEqual([UNITS[0]])
 
@@ -392,7 +351,7 @@ describe('Landrush island ambient load queue', () => {
 
     controlled.timeoutRequests[0]?.callback()
     expect(afterTimeout).toBe(current)
-    expect(afterTimeout.inFlightUnitId).toBe('palm:palm-a')
+    expect(afterTimeout.admittedUnitIds).toEqual(['palm:palm-a'])
   })
 
   test('represents each NPC and its four GLBs as one queue unit', () => {
@@ -425,10 +384,14 @@ function yieldAdmission(state: ReturnType<typeof createLandrushIslandAmbientLoad
   })
 }
 
-function createControlledYieldHost(withIdleCallback: boolean) {
-  const idleRequests: Array<{ callback: () => void; handle: number; timeout: number }> = []
+function admitAll(state: ReturnType<typeof createLandrushIslandAmbientLoadQueueState>) {
+  let admitted = state
+  for (let index = 0; index < UNITS.length; index += 1) admitted = yieldAdmission(admitted)
+  return admitted
+}
+
+function createControlledYieldHost() {
   const frameRequests: Array<{ callback: () => void; handle: number }> = []
-  const cancelledIdleHandles: number[] = []
   const cancelledFrameHandles: number[] = []
   const host: LandrushIslandAmbientLoadYieldHost = {
     cancelAnimationFrame: (handle) => {
@@ -440,21 +403,9 @@ function createControlledYieldHost(withIdleCallback: boolean) {
       return handle
     },
   }
-  if (withIdleCallback) {
-    host.cancelIdleCallback = (handle) => {
-      cancelledIdleHandles.push(handle)
-    }
-    host.requestIdleCallback = (callback, options) => {
-      const handle = idleRequests.length + 1
-      idleRequests.push({ callback, handle, timeout: options.timeout })
-      return handle
-    }
-  }
   return {
     cancelledFrameHandles,
-    cancelledIdleHandles,
     frameRequests,
     host,
-    idleRequests,
   }
 }

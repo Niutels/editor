@@ -2,8 +2,8 @@
 // depend on @types/bun so the import type is unresolved at compile time.
 import { describe, expect, test } from 'bun:test'
 import { WallNode } from '@pascal-app/core'
-import { Mesh, Vector3 } from 'three/webgpu'
-import { getWallHideState } from './wall-cutout'
+import { Mesh, MeshBasicMaterial, Vector3 } from 'three/webgpu'
+import { applyWallCutoutMaterial, getWallHideState } from './wall-cutout'
 
 const wall = (frontSide: string, backSide: string) =>
   WallNode.parse({ start: [0, 0], end: [4, 0], frontSide, backSide })
@@ -52,5 +52,48 @@ describe('getWallHideState', () => {
         towardsPositiveZ,
       ),
     ).toBe(true)
+  })
+})
+
+describe('applyWallCutoutMaterial', () => {
+  test('claims an existing presentation assignment without overwriting it', () => {
+    const mesh = new Mesh()
+    const presentationMaterial = new MeshBasicMaterial()
+    const wallMaterial = new MeshBasicMaterial()
+    mesh.material = presentationMaterial
+
+    const ownership = applyWallCutoutMaterial(
+      undefined,
+      mesh,
+      wallMaterial,
+      'visible:normal:1',
+      false,
+    )
+
+    expect(mesh.material).toBe(presentationMaterial)
+    expect(ownership.key).toBe('visible:normal:1')
+
+    presentationMaterial.dispose()
+    wallMaterial.dispose()
+  })
+
+  test('does not overwrite a presentation material when the owned wall assignment is unchanged', () => {
+    const mesh = new Mesh()
+    const wallMaterials = [new MeshBasicMaterial(), new MeshBasicMaterial()]
+    const presentationMaterial = new MeshBasicMaterial()
+    const changedWallMaterial = new MeshBasicMaterial()
+
+    let ownership = applyWallCutoutMaterial(undefined, mesh, wallMaterials, 'visible:normal:1')
+    mesh.material = presentationMaterial
+    ownership = applyWallCutoutMaterial(ownership, mesh, [...wallMaterials], 'visible:normal:1')
+    expect(mesh.material).toBe(presentationMaterial)
+
+    ownership = applyWallCutoutMaterial(ownership, mesh, changedWallMaterial, 'visible:normal:2')
+    expect(mesh.material).toBe(changedWallMaterial)
+    expect(ownership.key).toBe('visible:normal:2')
+
+    for (const material of [...wallMaterials, presentationMaterial, changedWallMaterial]) {
+      material.dispose()
+    }
   })
 })

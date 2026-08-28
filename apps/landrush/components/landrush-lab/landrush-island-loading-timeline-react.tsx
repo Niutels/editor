@@ -34,17 +34,22 @@ import {
 
 const DEFAULT_ACCESSIBILITY_UPDATE_MS = 250
 const DEFAULT_HANDOFF_FADE_MS = 360
-const COMPLETION_READINESS_STABILITY_MS = 250
+const COMPOSITOR_TIMELINE_DURATION_MS = LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS
+export const LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS = 20
+export const LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS =
+  1_000 / LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS
 const COMPOSITOR_SAMPLE_INTERVAL_MS = 1_000 / 30
-const COMPOSITOR_MAXIMUM_SEGMENT_COUNT = 900
+const COMPOSITOR_MAXIMUM_SEGMENT_COUNT = Math.ceil(
+  COMPOSITOR_TIMELINE_DURATION_MS / LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
+)
 const COMPOSITOR_RETARGET_INTERVAL_MS = 80
 const MAXIMUM_PRESENTED_FRAME_DELTA_MS = 1_000 / 30
-const PRESENTATION_WATCHDOG_INTERVAL_MS = 1_000 / 30
-const PRESENTATION_WATCHDOG_STALL_MS = 100
-export const LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS = MAXIMUM_PRESENTED_FRAME_DELTA_MS * 2
+const PRESENTATION_WATCHDOG_INTERVAL_MS =
+  LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS / 2
+const PRESENTATION_WATCHDOG_STALL_MS = LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS
+export const LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS = COMPOSITOR_TIMELINE_DURATION_MS
 const STREAMED_SHELL_VELOCITY_PER_SECOND = 0.006
 const PREVIEW_RECONCILIATION_THRESHOLD = 0.001
-const COMPOSITOR_TIMELINE_DURATION_MS = LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS
 
 export const LANDRUSH_ISLAND_LOADING_DOCUMENT_TASK_ID = '@landrush/document-ready'
 
@@ -249,7 +254,6 @@ export function useLandrushIslandLoadingTimeline({
         : inheritedMotion?.animation.currentTime === null
           ? null
           : Math.max(0, Number(inheritedMotion?.animation.currentTime) || 0)
-    let allReadySinceMs: number | null = null
     let completionRequested = false
     let fadeStarted = false
     let fadeFallbackTimer: number | null = null
@@ -450,6 +454,8 @@ export function useLandrushIslandLoadingTimeline({
       }
       animationRef.current = animation
       percentAnimationRef.current = percentAnimation
+      presentationFill.style.animation = 'none'
+      if (presentationPercentReel) presentationPercentReel.style.animation = 'none'
       inheritedMotionActive = false
       animationElapsedMs = 0
       if (bootRun) {
@@ -468,7 +474,7 @@ export function useLandrushIslandLoadingTimeline({
     }
 
     const refreshCompositorAnimation = (mutateController?: (renderedProgress: number) => void) => {
-      if (!presentationFill || reducedMotion || handedOff || fadeStarted) return
+      if (!presentationFill || reducedMotion || handedOff) return
       const animation = animationRef.current
       const percentAnimation = percentAnimationRef.current
       let mutationApplied = false
@@ -480,7 +486,6 @@ export function useLandrushIslandLoadingTimeline({
             if (
               runRef.current !== run ||
               handedOff ||
-              fadeStarted ||
               animationRef.current !== animation ||
               percentAnimationRef.current !== percentAnimation
             ) {
@@ -532,12 +537,7 @@ export function useLandrushIslandLoadingTimeline({
           }
           return
         }
-        if (
-          runRef.current !== run ||
-          handedOff ||
-          fadeStarted ||
-          animationRef.current !== animation
-        ) {
+        if (runRef.current !== run || handedOff || animationRef.current !== animation) {
           return
         }
       }
@@ -616,10 +616,21 @@ export function useLandrushIslandLoadingTimeline({
     }
 
     const finishHandoff = () => {
-      if (runRef.current !== run || handedOff) return
+      if (runRef.current !== run || handedOff || !progressController.readyToDismiss()) return
       handedOff = true
+      if (fadeFallbackTimer !== null) {
+        window.clearTimeout(fadeFallbackTimer)
+        fadeFallbackTimer = null
+      }
+      fadeAnimationRef.current?.cancel()
+      fadeAnimationRef.current = null
+      fadeStarted = false
+      if (presentationOverlay) {
+        presentationOverlay.style.opacity = '0'
+        presentationOverlay.style.removeProperty('will-change')
+        presentationOverlay.setAttribute('hidden', '')
+      }
       freezeRenderedPresentation()
-      cancelFade()
       progressController.snapToComplete()
       if (presentationFill) presentationFill.style.transform = 'scaleX(1)'
       if (presentationPercentReel) {
@@ -629,10 +640,6 @@ export function useLandrushIslandLoadingTimeline({
       publishProgress(1)
       run.commitSuccess()
       if (bootRun) bootRun.owner = 'complete'
-      if (presentationOverlay) {
-        presentationOverlay.style.opacity = '0'
-        presentationOverlay.setAttribute('hidden', '')
-      }
       setPresentation({
         fadingOut: false,
         handedOff: true,
@@ -682,8 +689,7 @@ export function useLandrushIslandLoadingTimeline({
       publishStatus(resolveLandrushIslandLoadingStatus(taskSnapshot))
       const displayedProgress = progressController.getSnapshot().displayedProgress
       if (update.allReady && nowMs - startTimeMs >= Math.max(0, minimumVisibleMs)) {
-        allReadySinceMs ??= nowMs
-        if (!completionRequested && nowMs - allReadySinceMs >= COMPLETION_READINESS_STABILITY_MS) {
+        if (!completionRequested) {
           completionRequested = true
           clearPendingStageRetarget()
           if (reducedMotion) {
@@ -698,8 +704,6 @@ export function useLandrushIslandLoadingTimeline({
           }
           return
         }
-      } else {
-        allReadySinceMs = null
       }
       if (completionRequested) return
       const stage = resolveLandrushIslandLoadingProgressStage({
@@ -741,11 +745,9 @@ export function useLandrushIslandLoadingTimeline({
       lastRenderedProgress = Math.max(lastRenderedProgress, renderedProgress)
       lastPresentedProgress = Math.max(lastPresentedProgress, renderedProgress)
       if (presentationFill) {
-        presentationFill.style.animation = 'none'
         presentationFill.style.transform = `scaleX(${String(lastPresentedProgress)})`
       }
       if (presentationPercentReel) {
-        presentationPercentReel.style.animation = 'none'
         presentationPercentReel.style.transform = createLandrushIslandLoadingPercentReelTransform(
           createLandrushIslandLoadingProgressPresentation(lastPresentedProgress).percent,
         )
@@ -770,16 +772,21 @@ export function useLandrushIslandLoadingTimeline({
       if (animationRef.current) {
         progress = reconcileRenderedProgress()
         if (
-          !fadeStarted &&
-          (animationRef.current?.playState === 'finished' ||
-            animationRef.current?.playState === 'idle')
+          animationRef.current?.playState === 'finished' ||
+          animationRef.current?.playState === 'idle'
         ) {
           freezeRenderedPresentation()
           startCompositorAnimation()
-        } else if (!fadeStarted) {
+        } else if (
+          shouldReconcileLandrushIslandLoadingPreview(
+            visualSegmentRef.current,
+            readNow(),
+            progressController.getSnapshot().displayedProgress,
+          )
+        ) {
           refreshCompositorAnimation()
         }
-      } else if (reducedMotion || fadeStarted) {
+      } else if (reducedMotion) {
         progress = progressController.getSnapshot().displayedProgress
       } else {
         progressController.step(
@@ -802,7 +809,6 @@ export function useLandrushIslandLoadingTimeline({
         handedOff ||
         !motionAdopted ||
         reducedMotion ||
-        fadeStarted ||
         !shouldAdvanceLandrushIslandLoadingFrameFallback(timestamp, lastFrameAtMs)
       ) {
         return

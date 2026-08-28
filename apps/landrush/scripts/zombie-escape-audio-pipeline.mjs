@@ -40,6 +40,7 @@ const EVENT_KINDS = new Set([
   'player-killed',
   'purchase-denied',
   'shot-fired',
+  'weapon-impact',
   'weapon-purchased',
 ])
 const SINGLETON_EVENT_KINDS = new Set([
@@ -54,6 +55,12 @@ const SINGLETON_EVENT_KINDS = new Set([
 ])
 const SHOT_WEAPON_IDS = new Set([
   'sunflare-pistol',
+  'reef-carbine',
+  'driftwood-scattergun',
+  'storm-coil-repeater',
+  'tidebreak-launcher',
+])
+const WEAPON_IMPACT_WEAPON_IDS = new Set([
   'reef-carbine',
   'driftwood-scattergun',
   'storm-coil-repeater',
@@ -79,7 +86,7 @@ export async function readZombieEscapeAudioContract(
 
 export function validateZombieEscapeAudioCatalog(catalog) {
   requireRecord(catalog, 'catalog')
-  if (catalog.schemaVersion !== 4) throw new Error('catalog.schemaVersion must be 4')
+  if (catalog.schemaVersion !== 5) throw new Error('catalog.schemaVersion must be 5')
   requireNonEmptyString(catalog.catalogVersion, 'catalog.catalogVersion')
   if (catalog.modelId !== 'eleven_text_to_sound_v2') {
     throw new Error('catalog.modelId must be eleven_text_to_sound_v2')
@@ -94,6 +101,7 @@ export function validateZombieEscapeAudioCatalog(catalog) {
   const cueIds = new Set()
   const publicPaths = new Set()
   const shotWeaponIds = new Set()
+  const weaponImpactWeaponIds = new Set()
   const singletonEventKinds = new Set()
   const assets = []
   for (const [cueIndex, cue] of catalog.cues.entries()) {
@@ -111,17 +119,27 @@ export function validateZombieEscapeAudioCatalog(catalog) {
       }
       singletonEventKinds.add(cue.eventKind)
     }
-    if (cue.eventKind === 'shot-fired') {
+    if (cue.eventKind === 'shot-fired' || cue.eventKind === 'weapon-impact') {
       requireNonEmptyString(cue.weaponId, `${cueLabel}.weaponId`)
       if (!SHOT_WEAPON_IDS.has(cue.weaponId)) {
         throw new Error(`${cueLabel}.weaponId is unknown`)
       }
-      if (shotWeaponIds.has(cue.weaponId)) {
-        throw new Error(`duplicate shot cue for ${cue.weaponId}`)
+      if (cue.eventKind === 'weapon-impact') {
+        if (!WEAPON_IMPACT_WEAPON_IDS.has(cue.weaponId)) {
+          throw new Error(`${cueLabel}.weaponId does not support impact audio`)
+        }
+        if (weaponImpactWeaponIds.has(cue.weaponId)) {
+          throw new Error(`duplicate weapon impact cue for ${cue.weaponId}`)
+        }
+        weaponImpactWeaponIds.add(cue.weaponId)
+      } else {
+        if (shotWeaponIds.has(cue.weaponId)) {
+          throw new Error(`duplicate shot cue for ${cue.weaponId}`)
+        }
+        shotWeaponIds.add(cue.weaponId)
       }
-      shotWeaponIds.add(cue.weaponId)
     } else if (cue.weaponId !== undefined) {
-      throw new Error(`${cueLabel}.weaponId is only valid for shot-fired cues`)
+      throw new Error(`${cueLabel}.weaponId is only valid for shot-fired or weapon-impact cues`)
     }
     requireFiniteNumber(cue.durationSeconds, `${cueLabel}.durationSeconds`)
     if (
@@ -158,7 +176,9 @@ export function validateZombieEscapeAudioCatalog(catalog) {
       publicPaths.add(publicPath)
       const masteringProfile = requireMasteringProfile(
         cue.masteringProfile,
-        cue.eventKind === 'shot-fired' || requiresZombieVariants,
+        cue.eventKind === 'shot-fired' ||
+          cue.eventKind === 'weapon-impact' ||
+          requiresZombieVariants,
         cueLabel,
       )
       assets.push({
@@ -178,6 +198,9 @@ export function validateZombieEscapeAudioCatalog(catalog) {
   }
   if (shotWeaponIds.size !== SHOT_WEAPON_IDS.size) {
     throw new Error('catalog must define exactly one shot cue for every weapon')
+  }
+  if (weaponImpactWeaponIds.size !== WEAPON_IMPACT_WEAPON_IDS.size) {
+    throw new Error('catalog must define one impact cue for every selected weapon')
   }
 
   if (!Array.isArray(catalog.movementCues) || catalog.movementCues.length === 0) {

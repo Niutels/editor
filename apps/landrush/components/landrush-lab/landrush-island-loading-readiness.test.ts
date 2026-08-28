@@ -462,6 +462,20 @@ describe('Landrush island paint readiness', () => {
     expect(timelineSource).toContain("document.readyState !== 'loading'")
     expect(timelineSource).toContain('createLandrushIslandLoadingVisualPreview(')
     expect(timelineSource).toContain('fadingOut: true')
+    expect(timelineSource).toContain('progressController.readyToDismiss()')
+    expect(timelineSource).toMatch(
+      /scheduleCompositorRefresh\(\(\) => \{\s+progressController\.complete\(\)\s+\}\)/,
+    )
+    expect(timelineSource).toContain(
+      'if (completionRequested && progressController.readyToDismiss()) beginHandoffFade()',
+    )
+    const finishHandoffSource = timelineSource.slice(
+      timelineSource.indexOf('const finishHandoff = () => {'),
+      timelineSource.indexOf('const beginHandoffFade = () => {'),
+    )
+    expect(
+      finishHandoffSource.indexOf("presentationOverlay.setAttribute('hidden', '')"),
+    ).toBeLessThan(finishHandoffSource.indexOf('progressController.snapToComplete()'))
     expect(timelineSource).not.toContain('PerformanceObserver')
   })
 
@@ -614,5 +628,16 @@ describe('Landrush island paint readiness', () => {
     expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetReadinessSnapshot({')
     expect(generatedAssetsSource).toContain('onGeneratedAssetsReadinessChange?.(')
     expect(generatedAssetsSource).toContain("onAssetStatusChange(assetKey, { state: 'ready' })")
+    expect(generatedAssetsSource).not.toContain('representativePrewarmQueue.waitForSettled()')
+    expect(generatedAssetsSource).toContain('representatives: []')
+    expect(generatedAssetsSource).toContain('window.requestAnimationFrame(() => resolve())')
+    expect(generatedAssetsSource).not.toContain('scheduler.yield()')
+    expect(generatedAssetsSource).toContain(
+      'waitForBuildSlice: yieldZombieEscapeAuthoredBuildSlice',
+    )
+    expect(generatedAssetsSource).toContain(
+      'ZOMBIE_VARIANT_INDICES.slice(0, admittedVariantCount).map',
+    )
+    expect(generatedAssetsSource).not.toContain('if (!admitted) return null')
   })
 })

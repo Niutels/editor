@@ -1,19 +1,22 @@
 import { type Intersection, Matrix3, type Mesh, Raycaster, Vector3 } from 'three'
 
 export const ZOMBIE_ESCAPE_GROUND_SHADOW = Object.freeze({
-  aspectRatio: 0.72,
-  baseOpacity: 0.34,
-  baseRadius: 0.5,
-  maximumAltitude: 2.8,
-  minimumOpacityScale: 0.08,
-  minimumRadiusScale: 0.46,
-  surfaceOffset: 0.025,
-  textureResolution: 64,
+  aspectRatio: 0.86,
+  baseOpacity: 0.58,
+  baseRadius: 0.28,
+  maximumAltitude: 1.8,
+  minimumOpacityScale: 0.62,
+  minimumRadiusScale: 0.62,
+  surfaceOffset: 0.045,
 })
 
 const GROUND_SHADOW_RAY_ORIGIN_OFFSET = 0.025
 const GROUND_SHADOW_DOWN = new Vector3(0, -1, 0)
 const GROUND_SHADOW_UP = new Vector3(0, 1, 0)
+const GROUND_SHADOW_ROTATION_RESPONSE = 18
+const GROUND_SHADOW_ROTATION_MINIMUM_TRAVEL_SQUARED = 0.000_000_01
+const GROUND_SHADOW_ROTATION_MAXIMUM_TRAVEL_SQUARED = 0.75 * 0.75
+const GROUND_SHADOW_ROTATION_MAXIMUM_DELTA_SECONDS = 0.05
 
 export type ZombieEscapeGroundShadowProjector = {
   eligibleMeshes: Mesh[]
@@ -93,27 +96,58 @@ export type ZombieEscapeGroundShadowEnvelope = {
   y: number
 }
 
-export function createZombieEscapeGroundShadowAlphaMapData(
-  resolution = ZOMBIE_ESCAPE_GROUND_SHADOW.textureResolution,
-) {
-  const size = Math.max(4, Math.round(Number.isFinite(resolution) ? resolution : 4))
-  const data = new Uint8Array(size * size * 4)
-  for (let y = 0; y < size; y += 1) {
-    const normalizedY = ((y + 0.5) / size) * 2 - 1
-    for (let x = 0; x < size; x += 1) {
-      const normalizedX = ((x + 0.5) / size) * 2 - 1
-      const distance = Math.min(1, Math.hypot(normalizedX, normalizedY))
-      const edge = 1 - smoothstep(0.16, 1, distance)
-      const core = 1 - smoothstep(0, 0.7, distance)
-      const alpha = Math.round(255 * Math.min(1, edge * 0.72 + core * 0.28))
-      const offset = (y * size + x) * 4
-      data[offset] = alpha
-      data[offset + 1] = alpha
-      data[offset + 2] = alpha
-      data[offset + 3] = 255
-    }
+export function resolveZombieEscapeGroundShadowRenderSupportY({
+  lastSupportY,
+  playerY,
+  projectedSupportY,
+  projectedVisible,
+}: {
+  lastSupportY: number
+  playerY: number
+  projectedSupportY: number
+  projectedVisible: boolean
+}) {
+  if (projectedVisible && Number.isFinite(projectedSupportY)) return projectedSupportY
+  if (!(Number.isFinite(playerY) && Number.isFinite(lastSupportY))) return null
+
+  const altitude = playerY - lastSupportY
+  if (altitude <= 0 || altitude > ZOMBIE_ESCAPE_GROUND_SHADOW.maximumAltitude) return null
+  return lastSupportY
+}
+
+export function resolveZombieEscapeGroundShadowMovementRotation({
+  currentRotation,
+  deltaSeconds,
+  deltaX,
+  deltaZ,
+}: {
+  currentRotation: number
+  deltaSeconds: number
+  deltaX: number
+  deltaZ: number
+}) {
+  const resolvedCurrentRotation = Number.isFinite(currentRotation) ? currentRotation : 0
+  if (
+    !(Number.isFinite(deltaSeconds) && deltaSeconds > 0) ||
+    !(Number.isFinite(deltaX) && Number.isFinite(deltaZ))
+  ) {
+    return resolvedCurrentRotation
   }
-  return { data, size }
+
+  const travelSquared = deltaX * deltaX + deltaZ * deltaZ
+  if (
+    travelSquared < GROUND_SHADOW_ROTATION_MINIMUM_TRAVEL_SQUARED ||
+    travelSquared > GROUND_SHADOW_ROTATION_MAXIMUM_TRAVEL_SQUARED
+  ) {
+    return resolvedCurrentRotation
+  }
+
+  const targetRotation = Math.atan2(-deltaZ, deltaX)
+  const doubledDelta = (targetRotation - resolvedCurrentRotation) * 2
+  const nearestHalfTurnDelta = Math.atan2(Math.sin(doubledDelta), Math.cos(doubledDelta)) / 2
+  const clampedDeltaSeconds = Math.min(deltaSeconds, GROUND_SHADOW_ROTATION_MAXIMUM_DELTA_SECONDS)
+  const response = 1 - Math.exp(-GROUND_SHADOW_ROTATION_RESPONSE * clampedDeltaSeconds)
+  return resolvedCurrentRotation + nearestHalfTurnDelta * response
 }
 
 export function resolveZombieEscapeGroundShadowEnvelope(
@@ -134,9 +168,4 @@ export function resolveZombieEscapeGroundShadowEnvelope(
   output.radius = ZOMBIE_ESCAPE_GROUND_SHADOW.baseRadius * radiusScale
   output.y = resolvedSupportY + ZOMBIE_ESCAPE_GROUND_SHADOW.surfaceOffset
   return output
-}
-
-function smoothstep(minimum: number, maximum: number, value: number) {
-  const normalized = Math.max(0, Math.min(1, (value - minimum) / (maximum - minimum)))
-  return normalized * normalized * (3 - normalized * 2)
 }

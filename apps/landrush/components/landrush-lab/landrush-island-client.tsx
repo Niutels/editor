@@ -252,6 +252,7 @@ import {
   resolveLandrushBuildingActiveFloorCoverNodeIds,
   resolveLandrushBuildingFloorCovers,
   resolveLandrushBuildingFloorOpacities,
+  resolveLandrushBuildingFloorPresentationOwnership,
   resolveLandrushBuildingFloorStacks,
 } from './landrush-building-floor-visibility'
 import {
@@ -1180,6 +1181,7 @@ type LandrushIslandRuntimeProbe = {
     totalMaterialsPrepared: number
     totalMeshesPrepared: number
   }
+  floorPresentationSamples: Record<string, unknown>[]
   gridSamples: Record<string, unknown>[]
   grassEvents: Record<string, unknown>[]
   grassSamples: LandrushIslandRuntimeGrassSample[]
@@ -1493,6 +1495,7 @@ function getLandrushIslandRuntimeProbe() {
     cameraSamples: [],
     frameGaps: [],
     frameSamples: [],
+    floorPresentationSamples: [],
     gridSamples: [],
     grassEvents: [],
     grassSamples: [],
@@ -1512,6 +1515,7 @@ function getLandrushIslandRuntimeProbe() {
     startedAt: performance.now(),
   }
   window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.cameraIntervalSamples ??= []
+  window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.floorPresentationSamples ??= []
   window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.longAnimationFrames ??= []
   window.__LANDRUSH_ISLAND_RUNTIME_PROBE__.remotePresentationSamples ??= {}
   return window.__LANDRUSH_ISLAND_RUNTIME_PROBE__
@@ -3685,6 +3689,7 @@ export function LandrushIslandClient({
       const latestProbe = window.__LANDRUSH_ISLAND_RUNTIME_PROBE__ ?? probe
       floorProbeOutput.textContent = JSON.stringify({
         floorFadePreparation: latestProbe.floorFadePreparation ?? null,
+        floorPresentationSamples: latestProbe.floorPresentationSamples.slice(-128),
         floorVisibility: latestProbe.floorVisibility ?? null,
         frameGaps: latestProbe.frameGaps.slice(-64),
         longTasks: latestProbe.longTasks.slice(-32),
@@ -10303,6 +10308,8 @@ function LandrushIslandRobotLevelSelectionTracker({
   } | null>(null)
   const levelOpacitiesRef = useRef(new Map<LevelNode['id'], number>())
   const coverOpacitiesRef = useRef(new Map<AnyNode['id'], number>())
+  const floorMaterialAssignmentIdsRef = useRef(new WeakMap<object, number>())
+  const nextFloorMaterialAssignmentIdRef = useRef(1)
   const floorFadePresentation = useMemo(
     () =>
       new LandrushIslandFloorFadePresentationOwner<AnyNode['id']>(materialPresentation, () =>
@@ -10637,6 +10644,78 @@ function LandrushIslandRobotLevelSelectionTracker({
         stairTransition,
         visibleLevelIds,
       }
+      const presentationRoots: Record<string, unknown>[] = []
+      for (const [rootId, root] of liveFloorFadeCanonicalRoots) {
+        const readState = floorFadePresentation.readLevel(rootId)
+        if (!readState) continue
+        let assignmentHash = 2_166_136_261
+        let maxRevealAmount = 0
+        let meshCount = 0
+        let presentedMeshCount = 0
+        let revealMeshCount = 0
+        root.traverse((object) => {
+          const mesh = object as Mesh
+          if (!mesh.isMesh || !mesh.material) return
+          meshCount += 1
+          const assignment = mesh.material as object
+          let assignmentId = floorMaterialAssignmentIdsRef.current.get(assignment)
+          if (assignmentId === undefined) {
+            assignmentId = nextFloorMaterialAssignmentIdRef.current
+            nextFloorMaterialAssignmentIdRef.current += 1
+            floorMaterialAssignmentIdsRef.current.set(assignment, assignmentId)
+          }
+          assignmentHash = Math.imul(assignmentHash ^ assignmentId, 16_777_619) >>> 0
+          let pathVisible = true
+          let current: Object3D | null = mesh
+          while (current) {
+            if (!current.visible) {
+              pathVisible = false
+              break
+            }
+            if (current === root) break
+            current = current.parent
+          }
+          if (pathVisible) presentedMeshCount += 1
+          const revealAmount = mesh.userData[LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY]
+          if (typeof revealAmount === 'number' && Number.isFinite(revealAmount)) {
+            maxRevealAmount = Math.max(maxRevealAmount, revealAmount)
+            if (revealAmount > LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON) {
+              revealMeshCount += 1
+            }
+          }
+        })
+        presentationRoots.push({
+          appliedOpacity: roundPerf(readState.appliedOpacity),
+          assignmentHash,
+          assignmentMismatchCount: readState.assignmentMismatchCount,
+          desiredOpacity: roundPerf(readState.desiredOpacity),
+          fallbackVisible: readState.fallbackVisible,
+          materialMode: readState.materialMode,
+          maxRevealAmount: roundPerf(maxRevealAmount),
+          meshCount,
+          pending: readState.pending,
+          presentationOpacity: roundPerf(readState.presentationOpacity),
+          presentedMeshCount,
+          quarantineCount: readState.quarantineCount,
+          ready: readState.ready,
+          revealMeshCount,
+          rootId,
+          visible: readState.canonicalVisible,
+        })
+      }
+      pushLandrushIslandProbeSample(
+        probe.floorPresentationSamples,
+        {
+          robot: [
+            roundPerf(motion.position.x),
+            roundPerf(motion.position.y),
+            roundPerf(motion.position.z),
+          ],
+          roots: presentationRoots,
+          timeMs: roundPerf(performance.now()),
+        },
+        1_000,
+      )
     }
   }, LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.floorPresentation)
 
@@ -11445,6 +11524,9 @@ function LandrushIslandRobotScreenRevealClipper({
   )
   const revealOwnerObservationGenerationRef = useRef(0)
   const liveRevealOwnerIdsRef = useRef(new Set<string>())
+  const floorPresentationOwnershipRef = useRef(
+    resolveLandrushBuildingFloorPresentationOwnership([], []),
+  )
   const revealBoundsCacheRef = useRef(new Map<string, LandrushIslandRobotRevealBoundsCacheEntry>())
   const presentedRevealMeshesRef = useRef(new Set<Mesh>())
   const revealMeshCollectionBufferRef = useRef(new Set<Mesh>())
@@ -11702,6 +11784,13 @@ function LandrushIslandRobotScreenRevealClipper({
     if (nodesChanged || sceneRegistryChanged) {
       revealBoundsCacheRef.current.clear()
     }
+    if (nodesChanged) {
+      const floorStacks = resolveLandrushBuildingFloorStacks(nodes)
+      floorPresentationOwnershipRef.current = resolveLandrushBuildingFloorPresentationOwnership(
+        floorStacks,
+        resolveLandrushBuildingFloorCovers(nodes, floorStacks),
+      )
+    }
     const registeredNodeRoots = registeredNodeRootsRef.current
     const refreshAge = clock.elapsedTime - lastRefreshAtRef.current
     const projectionChanged = landrushIslandRevealMatrixChanged(
@@ -11761,15 +11850,19 @@ function LandrushIslandRobotScreenRevealClipper({
       lastRevealSceneRegistryRevisionRef.current = sceneRegistryRevision
       registeredNodeRoots.clear()
       for (const object of sceneRegistry.nodes.values()) registeredNodeRoots.add(object)
-      occludersRef.current = collectLandrushIslandRobotRevealOccluders(scene, {
-        cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
-        cameraY: cameraPositionRef.current.y,
-        robotLevelBaseY,
-        robotPoint,
-        robotY: robotVisualY,
-        stairTransitionTopY,
-        structureGroundY,
-      })
+      occludersRef.current = collectLandrushIslandRobotRevealOccluders(
+        scene,
+        {
+          cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
+          cameraY: cameraPositionRef.current.y,
+          robotLevelBaseY,
+          robotPoint,
+          robotY: robotVisualY,
+          stairTransitionTopY,
+          structureGroundY,
+        },
+        floorPresentationOwnershipRef.current,
+      )
       for (const owner of occludersRef.current) {
         revealOwnerRootsRef.current.set(owner.ownerId, owner.object)
       }
@@ -11921,6 +12014,7 @@ function LandrushIslandRobotScreenRevealClipper({
     if (now - lastProbeAtRef.current > 160) {
       lastProbeAtRef.current = now
       recordLandrushIslandRevealProbe({
+        activeRevealOwnerIds: [...activeRevealOwnerIdsRef.current].sort(),
         mask: readLandrushRobotScreenRevealMaskSnapshot(),
         occluderCount: occludersRef.current.length,
         path: revealPath,
@@ -11936,6 +12030,14 @@ function LandrushIslandRobotScreenRevealClipper({
         revealScreen: [roundPerf(revealScreen.x), roundPerf(revealScreen.y)],
         revealScreenClamped,
         revealTransition: softTransition,
+        presentedRevealOwners: [...revealOwnerTransitionStatesRef.current]
+          .filter(([, state]) =>
+            isLandrushRobotRevealObjectPresented(
+              state.amount,
+              LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON,
+            ),
+          )
+          .map(([ownerId, state]) => [ownerId, roundPerf(state.amount)]),
         robotScreenBounds: null,
         screenSource: 'visual-root-segment',
         stairTransitionTopY,
@@ -12030,6 +12132,7 @@ function updateLandrushIslandRobotRevealClippingPlanes({
 function collectLandrushIslandRobotRevealOccluders(
   scene: Object3D,
   context: LandrushIslandRobotRevealOccluderContext,
+  floorPresentationOwnership: ReturnType<typeof resolveLandrushBuildingFloorPresentationOwnership>,
 ) {
   const ownersById = new Map<string, LandrushIslandRobotRevealOccluder>()
   const semanticRoots = new Set<Object3D>()
@@ -12042,13 +12145,23 @@ function collectLandrushIslandRobotRevealOccluders(
       if (doorObject) excludedRoots.add(doorObject)
     }
   }
+  for (const levelId of floorPresentationOwnership.upperLevelIds) {
+    const levelObject = sceneRegistry.nodes.get(levelId as AnyNodeId)
+    if (levelObject) excludedRoots.add(levelObject)
+  }
+  for (const coverNodeId of floorPresentationOwnership.coverNodeIds) {
+    const coverObject = sceneRegistry.nodes.get(coverNodeId as AnyNodeId)
+    if (coverObject) excludedRoots.add(coverObject)
+  }
   for (const type of LANDRUSH_ISLAND_ROBOT_REVEAL_OCCLUDER_NODE_TYPES) {
     const nodeIds = registryByType[type]
     if (!nodeIds) continue
     for (const nodeId of nodeIds) {
-      if (shouldSkipLandrushIslandRobotRevealOccluder(nodeId as AnyNodeId, context)) continue
-      const object = sceneRegistry.nodes.get(nodeId as AnyNodeId)
+      const typedNodeId = nodeId as AnyNodeId
+      const object = sceneRegistry.nodes.get(typedNodeId)
       if (!object) continue
+      if (isLandrushRevealObjectWithinRoots(object, excludedRoots)) continue
+      if (shouldSkipLandrushIslandRobotRevealOccluder(typedNodeId, context)) continue
       semanticRoots.add(object)
       ownersById.set(`node:${nodeId}`, {
         dynamicBounds: object.userData?.landrushRobotOccluderPrecise === true,
@@ -14759,6 +14872,24 @@ function LocalLandrushIslandRobot({
           <button
             data-testid="landrush-navigation-proof-trigger"
             onClick={() => startNavigationProofTarget(new URLSearchParams(window.location.search))}
+            onFocus={() => {
+              const searchParams = new URLSearchParams(window.location.search)
+              const startX = Number(searchParams.get('navProofStartX'))
+              const startY = Number(searchParams.get('navProofStartY'))
+              const startZ = Number(searchParams.get('navProofStartZ'))
+              if (Number.isFinite(startX) && Number.isFinite(startZ)) {
+                setupNavigationTestStart({
+                  label: 'nav-proof-focus-start',
+                  start: {
+                    x: startX,
+                    y: Number.isFinite(startY) ? startY : undefined,
+                    z: startZ,
+                  },
+                })
+              }
+              navigationProofAutoStartedRef.current = true
+              startNavigationProofTarget(searchParams)
+            }}
             style={{
               border: 0,
               bottom: 0,
@@ -17579,6 +17710,7 @@ function createLandrushBugReportDiagnostics(
     cameraJumps: probe.cameraJumps.slice(-32),
     cameraSamples: probe.cameraSamples.slice(-64),
     floorFadePreparation: probe.floorFadePreparation ?? null,
+    floorPresentationSamples: probe.floorPresentationSamples.slice(-128),
     floorVisibility: probe.floorVisibility ?? null,
     frameGaps: probe.frameGaps.slice(-64),
     inputEvents: probe.inputEvents.slice(-64),

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 4,
-  "catalogVersion": "2026-08-26.1",
+  "schemaVersion": 5,
+  "catalogVersion": "2026-08-27.2",
   "modelId": "eleven_text_to_sound_v2",
   "outputFormat": "mp3_44100_128",
   "cues": [
@@ -27,8 +27,8 @@
       "masteringProfile": "one-shot-v1",
       "weaponId": "reef-carbine",
       "durationSeconds": 0.5,
-      "promptInfluence": 0.72,
-      "prompt": "One very short punchy stylized rifle cartridge shot: a single crisp muzzle crack, compact low mechanical body, and tiny bolt snap. Built to layer cleanly during automatic fire. No burst within the clip, no plasma, laser, energy zap, echo, reverb, ambience, music, or voice. Isolated dry game one-shot with an immediate decay.",
+      "promptInfluence": 0.78,
+      "prompt": "One dry near-field 5.56 mm short-barrel carbine discharge: an instantaneous hard mid-high muzzle crack from escaping propellant gas, a compact lower receiver punch, then one quiet metallic bolt-carrier and ejection snap. Single shot only; no burst, distant ballistic crack, echo, reverb, ambience, music, voice, laser, or plasma. Immediate decay for rapid automatic layering.",
       "files": ["/audios/sfx/zombie-escape/weapons/reef-carbine-shot-0.mp3"],
       "playback": {
         "maxVoices": 6,
@@ -43,9 +43,9 @@
       "eventKind": "shot-fired",
       "masteringProfile": "one-shot-v1",
       "weaponId": "driftwood-scattergun",
-      "durationSeconds": 0.8,
-      "promptInfluence": 0.65,
-      "prompt": "Chunky driftwood and marine-steel scattergun blast, broad compressed thump with a short wooden pump rattle, stylized cartoony game sound effect, isolated one-shot, dry, no ambience, no music, no voice.",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.76,
+      "prompt": "DRIFTWOOD SCATTERGUN IMPACT. One isolated 12-gauge buckshot impact cluster: six tight pellet strikes spread across about 80 milliseconds, overlapping sharp small cracks, dense irregular material thuds, and brief fragment ticks. No muzzle blast, shotgun report, explosion, vocal, gore, ricochet tail, echo, reverb, ambience, or music. Dry compact one-shot.",
       "files": ["/audios/sfx/zombie-escape/weapons/driftwood-scattergun-shot-0.mp3"],
       "playback": {
         "maxVoices": 4,
@@ -60,9 +60,9 @@
       "eventKind": "shot-fired",
       "masteringProfile": "one-shot-v1",
       "weaponId": "storm-coil-repeater",
-      "durationSeconds": 0.5,
-      "promptInfluence": 0.74,
-      "prompt": "One ultra-short automatic rifle cartridge shot: a sharp compact muzzle crack with a tight mechanical receiver tick and almost no tail. Designed to repeat rapidly without becoming a noisy burst. No burst within the clip, no electricity, coil sound, plasma, laser, echo, reverb, ambience, music, or voice. Isolated dry game one-shot.",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.82,
+      "prompt": "STORM COIL REPEATER SHOT V2. One compact electromagnetic coilgun launch: an instantaneous heavy capacitor-bank discharge crack, two synchronized solenoid clacks forming a tight twin mechanical punch, and a very short projectile air snap. No laser pew, musical zap, long charging whine, loose electrical fizz, thunder tail, echo, reverb, ambience, music, or voice. Dry forceful sci-fi weapon one-shot.",
       "files": ["/audios/sfx/zombie-escape/weapons/storm-coil-repeater-shot-0.mp3"],
       "playback": {
         "maxVoices": 7,
@@ -78,8 +78,8 @@
       "masteringProfile": "one-shot-v1",
       "weaponId": "tidebreak-launcher",
       "durationSeconds": 0.9,
-      "promptInfluence": 0.65,
-      "prompt": "Heavy coast-guard rescue launcher shot, low compressed pneumatic boom with a solid marine-metal clack, stylized cartoony game sound effect, isolated one-shot, short tail, no ambience, no music, no voice.",
+      "promptInfluence": 0.8,
+      "prompt": "TIDEBREAK LAUNCHER IMPACT. One close 40 mm high-explosive grenade impact: instantaneous sharp detonation crack, powerful short low-frequency blast body, then a compact outward burst of dirt, coral-like stone fragments, and dust debris settling quickly. No launch thump, secondary explosion, fireball roar, long cinematic tail, voice, echo, reverb, ambience, or music. Isolated dry one-shot.",
       "files": ["/audios/sfx/zombie-escape/weapons/tidebreak-launcher-shot-0.mp3"],
       "playback": {
         "maxVoices": 3,
@@ -87,6 +87,82 @@
         "rateRange": [0.985, 1.015],
         "spatial": false,
         "volume": 1
+      }
+    },
+    {
+      "id": "weapon-impact-reef-carbine",
+      "eventKind": "weapon-impact",
+      "masteringProfile": "one-shot-v1",
+      "weaponId": "reef-carbine",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.8,
+      "prompt": "REEF CARBINE IMPACT V3. One close 5.56 mm projectile striking dense padded body armor and torn cloth: a loud compact low-mid armor punch with a broad 250 millisecond material body, one short fabric snap, and two tiny fragment taps. No muzzle blast, firearm report, supersonic crack, ricochet, vocal, gore, explosion, electricity, echo, reverb, ambience, or music. Impact-only one-shot.",
+      "files": ["/audios/sfx/zombie-escape/weapons/reef-carbine-impact-0.mp3"],
+      "playback": {
+        "maxDistance": 26,
+        "maxVoices": 6,
+        "minIntervalMs": 45,
+        "rateRange": [0.98, 1.02],
+        "referenceDistance": 2.5,
+        "spatial": true,
+        "volume": 0.36
+      }
+    },
+    {
+      "id": "weapon-impact-driftwood-scattergun",
+      "eventKind": "weapon-impact",
+      "masteringProfile": "one-shot-v1",
+      "weaponId": "driftwood-scattergun",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.8,
+      "prompt": "DRIFTWOOD SCATTERGUN IMPACT V2. One close buckshot hit cluster across a soft humanoid target and gear: six uneven pellet punches over 90 milliseconds, layered dull body taps, cloth snaps, and small wooden or metal gear ticks. No shotgun blast, muzzle report, explosion, vocal, gore, ricochet tail, echo, reverb, ambience, or music. Dry impact-only one-shot.",
+      "files": ["/audios/sfx/zombie-escape/weapons/driftwood-scattergun-impact-0.mp3"],
+      "playback": {
+        "maxDistance": 26,
+        "maxVoices": 4,
+        "minIntervalMs": 85,
+        "rateRange": [0.98, 1.02],
+        "referenceDistance": 2.5,
+        "spatial": true,
+        "volume": 0.48
+      }
+    },
+    {
+      "id": "weapon-impact-storm-coil-repeater",
+      "eventKind": "weapon-impact",
+      "masteringProfile": "one-shot-v1",
+      "weaponId": "storm-coil-repeater",
+      "durationSeconds": 0.6,
+      "promptInfluence": 0.8,
+      "prompt": "STORM COIL REPEATER IMPACT V2. One magnetically accelerated projectile striking a conductive armored target: a dense metal punch, brief twin resonant ticks, and a short localized induction buzz that collapses immediately. No coilgun discharge, muzzle report, laser pew, open electrical arc, thunder, explosion, vocal, echo, reverb, ambience, or music. Dry impact-only one-shot.",
+      "files": ["/audios/sfx/zombie-escape/weapons/storm-coil-repeater-impact-0.mp3"],
+      "playback": {
+        "maxDistance": 30,
+        "maxVoices": 6,
+        "minIntervalMs": 48,
+        "rateRange": [0.98, 1.02],
+        "referenceDistance": 2.5,
+        "spatial": true,
+        "volume": 0.42
+      }
+    },
+    {
+      "id": "weapon-impact-tidebreak-launcher",
+      "eventKind": "weapon-impact",
+      "masteringProfile": "one-shot-v1",
+      "weaponId": "tidebreak-launcher",
+      "durationSeconds": 0.9,
+      "promptInfluence": 0.8,
+      "prompt": "TIDEBREAK LAUNCHER IMPACT V3. One medium-distance 40 mm grenade detonating on dense sandy coral ground: a sharp external blast, broad 400 millisecond low-mid ground heave, dense dirt and coral-stone spray filling the clip, then a short rubble settle. Heavy continuous debris body, not a lone crack. No launcher thump, breech clack, muzzle report, rocket whoosh, secondary blast, voice, echo, long reverb, ambience, or music. Impact-only one-shot.",
+      "files": ["/audios/sfx/zombie-escape/weapons/tidebreak-launcher-impact-0.mp3"],
+      "playback": {
+        "maxDistance": 44,
+        "maxVoices": 3,
+        "minIntervalMs": 180,
+        "rateRange": [0.99, 1.01],
+        "referenceDistance": 4,
+        "spatial": true,
+        "volume": 0.72
       }
     },
     {

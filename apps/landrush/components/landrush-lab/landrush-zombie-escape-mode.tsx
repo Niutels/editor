@@ -150,7 +150,6 @@ import {
 } from './zombie-escape-weapon-placement'
 import type { ZombieEscapeArenaData } from './zombie-escape-world'
 
-const RECOIL_DURATION_SECONDS = 0.13
 const GENERATED_ASSET_AUTO_RETRY_DELAYS_MS = [650, 1_300] as const
 const LANDRUSH_ZOMBIE_ESCAPE_SURFACE_SUPPORT_ID = 'landrush-island:surface-boundary'
 const LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK_PROTECTED_HEALTH = 1_000_000_000
@@ -1960,7 +1959,7 @@ export function LandrushZombieEscapeMode({
       accumulatorRef.current = 0
     }
 
-    combatStateRef.current.recoil = resolveIntegratedWeaponRecoil(simulation)
+    combatStateRef.current.shotSequence = simulation.nextShotVolleySequence
     combatStateRef.current.meleePhase = simulation.player.meleePhase
     combatStateRef.current.meleeProgress = getZombieEscapeMeleeProgress(simulation.player)
     combatStateRef.current.movementHeading = motion.heading
@@ -2434,14 +2433,6 @@ function syncIntegratedPlayerPose(
   simulation.player.movementHeading = motion.heading
   simulation.player.locomotionBlend = motion.isMoving ? 1 : 0
   simulation.player.runBlend = motion.runRequested ? 1 : 0
-}
-
-function resolveIntegratedWeaponRecoil(simulation: ZombieEscapeSimulation) {
-  const slot = simulation.lastShotSlot
-  if (slot < 0 || simulation.shots.pool.active[slot] === 0) return 0
-  if (simulation.shots.pool.generation[slot] !== simulation.lastShotGeneration) return 0
-  const age = simulation.shots.travelAge[slot]! + simulation.shots.impactAge[slot]!
-  return Math.max(0, 1 - age / RECOIL_DURATION_SECONDS)
 }
 
 function publishIntegratedDebugState({

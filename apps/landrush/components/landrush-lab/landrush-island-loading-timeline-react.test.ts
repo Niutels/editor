@@ -15,6 +15,8 @@ import {
   createLandrushIslandLoadingRetargetKeyframes,
   createLandrushIslandLoadingVisualPreview,
   LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+  LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
+  LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS,
   resolveDisplayedLoadingProgress,
   resolveLandrushIslandLoadingCompositorElapsedDelta,
   resolveLandrushIslandLoadingCompositorSampleInterval,
@@ -235,7 +237,8 @@ describe('Landrush island loading presentation handoff', () => {
       3,
     )
     expect(resolveLandrushIslandLoadingPresentedFrameDelta(100, 120)).toBe(0)
-    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(9_000, 1_000)).toBe(
+    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(9_000, 1_000)).toBe(8_000)
+    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(180_000, 0)).toBe(
       LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
     )
     expect(resolveLandrushIslandLoadingCompositorElapsedDelta(1_016.667, 1_000)).toBeCloseTo(
@@ -243,39 +246,47 @@ describe('Landrush island loading presentation handoff', () => {
       3,
     )
     expect(resolveLandrushIslandLoadingCompositorElapsedDelta(100, 120)).toBe(0)
-    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(99.999, 0)).toBe(false)
-    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(100, 0)).toBe(true)
+    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(49.999, 0)).toBe(false)
+    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(50, 0)).toBe(true)
     expect(shouldAdvanceLandrushIslandLoadingFrameFallback(100, 120)).toBe(false)
   })
 
-  test('holds a short compositor lease instead of banking hidden progress through a stall', () => {
+  test('keeps a full 20 FPS compositor trajectory through the supported stall horizon', () => {
+    expect(LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS).toBe(20)
+    expect(LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS).toBe(50)
+    expect(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS).toBe(
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )
     const controller = createLandrushIslandLoadingProgressController({
-      initialProgress: 0.165_092,
-      initialVelocityPerSecond: LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+      initialProgress: 0,
+      initialVelocityPerSecond: 0.006,
     })
-    controller.setConfirmedProgress(0.8, {
+    controller.setConfirmedProgress(0, {
       ceiling: 0.984,
-      estimatedDurationMs: 8_000,
+      estimatedDurationMs: (0.984 / 0.006) * 1_000,
     })
     const segment = createLandrushIslandLoadingVisualPreview(
       controller,
       0,
       LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
     )
-    const keyframes = createLandrushIslandLoadingRetargetKeyframes(segment, 5_935.534)
-    const maximumLeaseProgress =
-      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND *
-      (LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS / 1_000)
+    const authoredGapsMs = segment.keyframes.slice(1).map((keyframe, index) => {
+      const previous = segment.keyframes[index]!
+      return (keyframe.offset - previous.offset) * segment.durationMs
+    })
+    const intervalRates = segment.keyframes.slice(1).map((keyframe, index) => {
+      const previous = segment.keyframes[index]!
+      const elapsedSeconds = (keyframe.offset - previous.offset) * (segment.durationMs / 1_000)
+      return (keyframe.progress - previous.progress) / elapsedSeconds
+    })
 
-    expect(segment.to - segment.from).toBeLessThanOrEqual(maximumLeaseProgress + 0.000_001)
-    expect(keyframes.at(-1)?.offset).toBe(1)
-    expect(keyframes.at(-2)?.progress).toBeCloseTo(segment.to, 12)
-    expect(keyframes.at(-2)?.offset).toBeCloseTo(
-      (5_935.534 + LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS) /
-        LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
-      12,
+    expect(Math.max(...authoredGapsMs)).toBeLessThanOrEqual(
+      LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS + 0.000_001,
     )
-    expect(keyframes.at(-1)?.progress).toBeCloseTo(segment.to, 12)
+    expect(Math.min(...intervalRates)).toBeGreaterThan(0)
+    expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
+      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
+    )
   })
 
   test('does not reinterpret a pending compositor clock as time zero', () => {
@@ -360,14 +371,14 @@ describe('Landrush island loading presentation handoff', () => {
     )
 
     expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS)
-    expect(preview.keyframes.length).toBeGreaterThanOrEqual(900)
-    expect(preview.keyframes.length).toBeLessThanOrEqual(902)
+    expect(preview.keyframes.length).toBeGreaterThanOrEqual(2_400)
+    expect(preview.keyframes.length).toBeLessThanOrEqual(2_402)
     expect(preview.keyframes.at(-1)?.progress).toBeGreaterThan(0.5)
     expect(
       resolveLandrushIslandLoadingCompositorSampleInterval(
         LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
       ),
-    ).toBeCloseTo(LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS / 900, 12)
+    ).toBeCloseTo(LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS, 12)
     expect(resolveLandrushIslandLoadingCompositorSampleInterval(10_000)).toBeCloseTo(1_000 / 30, 12)
   })
 
