@@ -684,28 +684,141 @@ describe('Zombie Escape render compilation', () => {
     }
   })
 
-  test('restores object and renderer state when a cohort draw throws', async () => {
+  test('fences shadow-casting cohorts as a main-only draw before the combined draw', async () => {
     const targetScene = new Scene()
-    const mesh = makeHeavyRealizationMesh('mesh')
-    const sibling = makeHeavyRealizationMesh('sibling')
-    mesh.layers.mask = 5
-    sibling.layers.mask = 9
-    const originalMeshLayerMask = mesh.layers.mask
-    const originalSiblingLayerMask = sibling.layers.mask
-    targetScene.add(mesh, sibling)
-    let harness: ReturnType<typeof createWebGLRealizationRenderer>
-    harness = createWebGLRealizationRenderer({
-      onRender(_scene, _camera, call) {
-        harness.state.autoClear = true
-        harness.state.renderTarget = { id: 'mutated' }
-        harness.state.activeCubeFace = 8
-        harness.state.activeMipmapLevel = 9
-        harness.state.viewport.set(9, 9, 9, 9)
-        harness.state.scissor.set(8, 8, 8, 8)
-        harness.state.scissorTest = false
-        if (call === 2) throw new Error('cohort draw failed')
+    const mesh = makeHeavyRealizationMesh('shadow-caster')
+    mesh.castShadow = true
+    targetScene.add(mesh)
+    const castShadowSignatures: boolean[] = []
+    const harness = createWebGLRealizationRenderer({
+      onRender(scene) {
+        if (scene === targetScene) castShadowSignatures.push(mesh.castShadow)
       },
     })
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => undefined,
+    )
+
+    expect(castShadowSignatures).toEqual([false, true])
+    expect(mesh.castShadow).toBe(true)
+    expect(mesh.frustumCulled).toBe(true)
+    expect(harness.events.filter((event) => event === 'render:empty')).toHaveLength(1)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(2)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(3)
+    expect(harness.deletedFences).toBe(3)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('reprocesses a renderable whose shadow pass is enabled during fence admission', async () => {
+    const targetScene = new Scene()
+    const mesh = makeHeavyRealizationMesh('late-shadow-caster')
+    targetScene.add(mesh)
+    const castShadowSignatures: boolean[] = []
+    const harness = createWebGLRealizationRenderer({
+      onRender(scene) {
+        if (scene === targetScene) castShadowSignatures.push(mesh.castShadow)
+      },
+    })
+    let shadowEnabled = false
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: harness.renderer,
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => {
+        if (shadowEnabled || castShadowSignatures.length !== 1) return
+        shadowEnabled = true
+        mesh.castShadow = true
+      },
+    )
+
+    expect(castShadowSignatures).toEqual([false, false, true])
+    expect(mesh.castShadow).toBe(true)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(3)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(4)
+    expect(harness.deletedFences).toBe(4)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('restores object and renderer state when a cohort draw throws', async () => {
+    for (const failingCall of [2, 3]) {
+      const targetScene = new Scene()
+      const mesh = makeHeavyRealizationMesh('mesh')
+      const sibling = makeHeavyRealizationMesh('sibling')
+      mesh.castShadow = true
+      mesh.layers.mask = 5
+      sibling.layers.mask = 9
+      const originalMeshCastShadow = mesh.castShadow
+      const originalMeshLayerMask = mesh.layers.mask
+      const originalSiblingLayerMask = sibling.layers.mask
+      targetScene.add(mesh, sibling)
+      let harness: ReturnType<typeof createWebGLRealizationRenderer>
+      harness = createWebGLRealizationRenderer({
+        onRender(_scene, _camera, call) {
+          harness.state.autoClear = true
+          harness.state.renderTarget = { id: 'mutated' }
+          harness.state.activeCubeFace = 8
+          harness.state.activeMipmapLevel = 9
+          harness.state.viewport.set(9, 9, 9, 9)
+          harness.state.scissor.set(8, 8, 8, 8)
+          harness.state.scissorTest = false
+          if (call === failingCall) throw new Error('cohort draw failed')
+        },
+      })
+
+      await expect(
+        compileZombieEscapeRenderRepresentatives(
+          {
+            camera: new PerspectiveCamera(),
+            renderer: harness.renderer,
+            representatives: [{ key: 'attached-scene', root: targetScene }],
+            targetScene,
+          },
+          async () => undefined,
+        ),
+      ).rejects.toThrow('cohort draw failed')
+      expect(mesh.visible).toBe(true)
+      expect(mesh.castShadow).toBe(originalMeshCastShadow)
+      expect(mesh.frustumCulled).toBe(true)
+      expect(mesh.layers.mask).toBe(originalMeshLayerMask)
+      expect(sibling.layers.mask).toBe(originalSiblingLayerMask)
+      expect(sibling.frustumCulled).toBe(true)
+      expect(harness.state.autoClear).toBe(harness.initial.autoClear)
+      expect(harness.state.renderTarget).toBe(harness.initial.renderTarget)
+      expect(harness.state.activeCubeFace).toBe(harness.initial.activeCubeFace)
+      expect(harness.state.activeMipmapLevel).toBe(harness.initial.activeMipmapLevel)
+      expect(harness.state.viewport.equals(harness.initial.viewport)).toBe(true)
+      expect(harness.state.scissor.equals(harness.initial.scissor)).toBe(true)
+      expect(harness.state.scissorTest).toBe(harness.initial.scissorTest)
+      expect(harness.deletedFences).toBe(failingCall - 1)
+      mesh.geometry.dispose()
+      mesh.material.dispose()
+      sibling.geometry.dispose()
+      sibling.material.dispose()
+    }
+  })
+
+  test('stops after the main-only fence when the readiness request becomes stale', async () => {
+    const targetScene = new Scene()
+    const mesh = makeHeavyRealizationMesh('stale-shadow-caster')
+    mesh.castShadow = true
+    mesh.layers.mask = 5
+    targetScene.add(mesh)
+    const originalLayerMask = mesh.layers.mask
+    let current = true
+    const harness = createWebGLRealizationRenderer()
 
     await expect(
       compileZombieEscapeRenderRepresentatives(
@@ -715,26 +828,21 @@ describe('Zombie Escape render compilation', () => {
           representatives: [{ key: 'attached-scene', root: targetScene }],
           targetScene,
         },
-        async () => undefined,
+        async () => {
+          if (harness.events.filter((event) => event === 'render:scene').length === 1) {
+            current = false
+          }
+        },
+        () => current,
       ),
-    ).rejects.toThrow('cohort draw failed')
-    expect(mesh.visible).toBe(true)
+    ).rejects.toThrow('became stale during realization')
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(1)
+    expect(harness.deletedFences).toBe(2)
+    expect(mesh.castShadow).toBe(true)
     expect(mesh.frustumCulled).toBe(true)
-    expect(mesh.layers.mask).toBe(originalMeshLayerMask)
-    expect(sibling.layers.mask).toBe(originalSiblingLayerMask)
-    expect(sibling.frustumCulled).toBe(true)
-    expect(harness.state.autoClear).toBe(harness.initial.autoClear)
-    expect(harness.state.renderTarget).toBe(harness.initial.renderTarget)
-    expect(harness.state.activeCubeFace).toBe(harness.initial.activeCubeFace)
-    expect(harness.state.activeMipmapLevel).toBe(harness.initial.activeMipmapLevel)
-    expect(harness.state.viewport.equals(harness.initial.viewport)).toBe(true)
-    expect(harness.state.scissor.equals(harness.initial.scissor)).toBe(true)
-    expect(harness.state.scissorTest).toBe(harness.initial.scissorTest)
-    expect(harness.deletedFences).toBe(1)
+    expect(mesh.layers.mask).toBe(originalLayerMask)
     mesh.geometry.dispose()
     mesh.material.dispose()
-    sibling.geometry.dispose()
-    sibling.material.dispose()
   })
 
   test('preserves visibility and renderer changes made by frame systems between cohorts', async () => {

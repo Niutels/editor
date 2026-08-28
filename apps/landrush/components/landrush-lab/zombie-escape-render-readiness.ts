@@ -118,6 +118,7 @@ type ZombieEscapeWebGLRendererStateSnapshot = Readonly<{
 }>
 
 type ZombieEscapeWebGLObjectFlagSnapshot = Readonly<{
+  castShadow: boolean
   frustumCulled: boolean
   layerMask: number
   object: Object3D
@@ -367,9 +368,46 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       const cohort = planZombieEscapeWebGLRealizationCohorts(coldUnits, {
         maxCohorts: remainingCohorts,
       })[0]!
-      activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(currentUnits)
+      const hasShadowCasters = cohort.units.some((unit) =>
+        unit.renderables.some((renderable) => renderable.castShadow),
+      )
+
+      if (hasShadowCasters) {
+        activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(currentUnits)
+        activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
+        applyZombieEscapeWebGLRealizationCohort(currentUnits, cohort)
+        for (const unit of cohort.units) {
+          for (const renderable of unit.renderables) renderable.castShadow = false
+        }
+        await submitZombieEscapeWebGLRealizationDraw(
+          () => {
+            try {
+              webglRenderer.render(targetScene, camera)
+            } finally {
+              restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
+              restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
+              activeObjectSnapshots = undefined
+              activeRendererSnapshot = undefined
+            }
+          },
+          context,
+          waitForAdmissionOpportunity,
+          isCurrent,
+        )
+      }
+
+      const combinedUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
+      const combinedRenderables = new Set(combinedUnits.flatMap((unit) => unit.renderables))
+      const combinedShadowCasters = new Set(
+        cohort.units.flatMap((unit) =>
+          unit.renderables.filter(
+            (renderable) => combinedRenderables.has(renderable) && renderable.castShadow,
+          ),
+        ),
+      )
+      activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(combinedUnits)
       activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
-      applyZombieEscapeWebGLRealizationCohort(currentUnits, cohort)
+      applyZombieEscapeWebGLRealizationCohort(combinedUnits, cohort)
       await submitZombieEscapeWebGLRealizationDraw(
         () => {
           try {
@@ -386,7 +424,14 @@ export async function realizeZombieEscapeWebGLAttachedScene(
         isCurrent,
       )
       for (const unit of cohort.units) {
-        for (const renderable of unit.renderables) realizedRenderables.add(renderable)
+        for (const renderable of unit.renderables) {
+          if (
+            combinedRenderables.has(renderable) &&
+            (!renderable.castShadow || combinedShadowCasters.has(renderable))
+          ) {
+            realizedRenderables.add(renderable)
+          }
+        }
       }
       submittedCohorts += 1
     }
@@ -524,6 +569,7 @@ function snapshotZombieEscapeWebGLRealizationObjects(
       if (seen.has(object)) continue
       seen.add(object)
       snapshots.push({
+        castShadow: object.castShadow,
         frustumCulled: object.frustumCulled,
         layerMask: object.layers.mask,
         object,
@@ -537,10 +583,10 @@ function applyZombieEscapeWebGLRealizationCohort(
   units: readonly ZombieEscapeWebGLRealizationUnit[],
   cohort: ZombieEscapeWebGLRealizationCohort,
 ) {
-  const admitted = new Set(cohort.units)
+  const admitted = new Set(cohort.units.flatMap((unit) => unit.renderables))
   for (const unit of units) {
     for (const renderable of unit.renderables) {
-      if (!admitted.has(unit)) {
+      if (!admitted.has(renderable)) {
         renderable.layers.mask = 0
         continue
       }
@@ -554,6 +600,7 @@ function restoreZombieEscapeWebGLRealizationObjects(
 ) {
   for (let index = snapshots.length - 1; index >= 0; index -= 1) {
     const snapshot = snapshots[index]!
+    snapshot.object.castShadow = snapshot.castShadow
     snapshot.object.layers.mask = snapshot.layerMask
     snapshot.object.frustumCulled = snapshot.frustumCulled
   }
