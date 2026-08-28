@@ -20,6 +20,7 @@ import {
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { createLandrushRobotCpuSkinning } from './landrush-robot-cpu-skinning'
 import {
   applyLandrushRobotCrouchPose,
   createLandrushRobotCrouchRig,
@@ -70,6 +71,8 @@ const LANDRUSH_ROBOT_FALL_SPIN_SPEED = 1.35
 const LANDRUSH_ROBOT_FALL_JOINT_MOTION_AMPLITUDE = 28.8
 // Drei's mixer writes at 0 and post-processing renders at 1, so procedural bones own the gap.
 const LANDRUSH_ROBOT_SKELETAL_POSE_FRAME_PRIORITY = 0.5
+// Zombie weapon IK writes at 0.7, so CPU deformation owns the final gap before render at 1.
+const LANDRUSH_ROBOT_CPU_SKINNING_FRAME_PRIORITY = 0.75
 const LANDRUSH_ROBOT_UP_AXIS = new Vector3(0, 1, 0)
 const LANDRUSH_ROBOT_IDENTITY_QUATERNION = new Quaternion()
 export const LANDRUSH_ROBOT_HOVER_OFFSET = 1.524
@@ -206,8 +209,10 @@ export function LandrushRobot({
         const runtimeTextureApplication = applyLandrushRobotRuntimeTexture(clone, {
           deferred: deferTextureUpload,
         })
+        const cpuSkinning = deferTextureUpload ? createLandrushRobotCpuSkinning(clone) : null
         return {
           clone,
+          cpuSkinning,
           ownedMaterials: runtimeTextureApplication.ownedMaterials,
         }
       }),
@@ -394,6 +399,11 @@ export function LandrushRobot({
       )
     })
   }, LANDRUSH_ROBOT_SKELETAL_POSE_FRAME_PRIORITY)
+
+  useFrame(() => {
+    if (!robotScene.cpuSkinning) return
+    measure('frame.robot-glb.cpu-skinning', robotScene.cpuSkinning.update)
+  }, LANDRUSH_ROBOT_CPU_SKINNING_FRAME_PRIORITY)
 
   useFrame(({ clock }, delta) => {
     measure('frame.robot-glb.total', () => {
@@ -619,6 +629,7 @@ export function LandrushRobot({
 
   useEffect(
     () => () => {
+      robotScene.cpuSkinning?.dispose()
       for (const material of robotScene.ownedMaterials) material.dispose()
     },
     [robotScene],
