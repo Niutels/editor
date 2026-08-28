@@ -8,6 +8,8 @@ describe('Landrush Pascal host', () => {
 
     expect(hostSource).toContain('sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef')
     expect(hostSource).toContain('sceneDrawSubmissionRef={sceneDrawSubmissionRef}')
+    expect(hostSource).toContain('antialias?: boolean')
+    expect(hostSource).toContain('antialias={antialias}')
     expect(hostSource).toContain(
       'onRendererInitializationFailure?: (failure: ViewerRendererInitializationFailure) => void',
     )

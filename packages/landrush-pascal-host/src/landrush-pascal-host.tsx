@@ -47,6 +47,7 @@ import {
 } from './pascal-site-presentation'
 
 export type LandrushPascalHostProps = {
+  antialias?: boolean
   children: ReactNode
   disablePostFx?: boolean
   editingActive: boolean
@@ -69,6 +70,7 @@ export type LandrushPascalHostProps = {
 }
 
 export function LandrushPascalHost({
+  antialias = true,
   children,
   disablePostFx = true,
   editingActive,
@@ -163,6 +165,7 @@ export function LandrushPascalHost({
         open={editingViewportOpen}
       >
         <Viewer
+          antialias={antialias}
           defaultRender={{ shading: 'solid' }}
           disablePostFx={disablePostFx}
           maxFps={maxFps}

@@ -488,6 +488,8 @@ function SceneReadyTracker({
 }
 
 export interface ViewerProps {
+  /** Controls renderer MSAA. Disable it when a host needs non-multisampled depth bindings. */
+  antialias?: boolean
   children?: React.ReactNode
   hoverStyles?: HoverStyles
   selectionManager?: 'default' | 'custom'
@@ -641,6 +643,7 @@ const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
 
 const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   {
+    antialias = true,
     children,
     hoverStyles = DEFAULT_HOVER_STYLES,
     selectionManager = 'default',
@@ -777,7 +780,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   }
   return (
     <Canvas
-      key={rendererBackend}
+      key={`${rendererBackend}:${antialias ? 'msaa' : 'single-sample'}`}
       camera={{ position: [50, 50, 50], fov: 50 }}
       className={`transition-colors duration-700 ${
         transparentBackground ? 'bg-transparent' : isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'
@@ -800,6 +803,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
                     ...(props as any),
                     ...backendParameters,
                     alpha: true,
+                    antialias,
                   })
                   renderer.toneMapping = THREE.ACESFilmicToneMapping
                   renderer.toneMappingExposure = getSceneTheme(

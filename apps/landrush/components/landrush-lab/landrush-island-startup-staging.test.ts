@@ -277,7 +277,8 @@ describe('Landrush island Zombie startup staging', () => {
     const actors = readFileSync(new URL('./zombie-escape-actors.tsx', import.meta.url), 'utf8')
     const globalCss = readFileSync(new URL('../../app/globals.css', import.meta.url), 'utf8')
 
-    expect(client).toContain("rendererBackend={zombieEscapeEnabled ? 'webgl' : undefined}")
+    expect(client).toContain('antialias={!zombieEscapeEnabled}')
+    expect(client).not.toContain("rendererBackend={zombieEscapeEnabled ? 'webgl' : undefined}")
     expect(client).toContain(
       'zombieEscapeEnabled ? handleZombieRendererInitializationFailure : undefined',
     )

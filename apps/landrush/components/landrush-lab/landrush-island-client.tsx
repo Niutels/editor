@@ -6498,6 +6498,7 @@ export function LandrushIslandClient({
             onRender={handleStartupReactRender}
           >
             <LandrushPascalHost
+              antialias={!zombieEscapeEnabled}
               disablePostFx={!benchPostFx}
               editingChrome={
                 zombieEscapeEnabled ? null : (
@@ -6527,7 +6528,6 @@ export function LandrushIslandClient({
               onRendererInitializationFailure={
                 zombieEscapeEnabled ? handleZombieRendererInitializationFailure : undefined
               }
-              rendererBackend={zombieEscapeEnabled ? 'webgl' : undefined}
               sceneReadyKey={initialParcelAuthorityKey}
               sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}
               sceneReadyPrerequisitesReady={initialParcelMaterializationReady}
