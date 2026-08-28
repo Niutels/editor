@@ -1,4 +1,7 @@
-import type { LandrushIslandLoadingProgressMotionSnapshot } from './landrush-island-loading-progress-controller'
+import {
+  LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+  type LandrushIslandLoadingProgressMotionSnapshot,
+} from './landrush-island-loading-progress-controller'
 
 export const LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION = 2
 export const LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL = '__LANDRUSH_ISLAND_LOADING_BOOT_RUN__'
@@ -13,16 +16,18 @@ export const LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE =
 export const LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE = 'data-landrush-island-loading-run-id'
 export const LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY = '--landrush-island-loading-shell-delay'
 export const LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS = 120_000
-export const LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND = 0.006
-const LANDRUSH_ISLAND_LOADING_SHELL_MAX_SPECULATIVE_PROGRESS = 0.984
+export const STREAMED_SHELL_VELOCITY_PER_SECOND = 0.006
 
 export type LandrushIslandLoadingShellMotion = {
   animation: Animation
   animationElapsedMs?: number
+  durationMs: number
   fill: HTMLElement
+  fromProgress: number
   percentAnimation?: Animation
   percentReel?: HTMLElement
   progressSnapshot?: LandrushIslandLoadingProgressMotionSnapshot
+  toProgress: number
   velocityPerSecond: number
 }
 
@@ -48,7 +53,6 @@ type LandrushIslandLoadingBootstrapShell = Pick<HTMLElement, 'getAttribute' | 's
 
 type LandrushIslandLoadingShellMotionEnvironment = Readonly<{
   getComputedStyle: (element: Element) => Pick<CSSStyleDeclaration, 'transform'>
-  matchMedia?: (query: string) => Pick<MediaQueryList, 'matches'>
   timeline: Pick<AnimationTimeline, 'currentTime'>
 }>
 
@@ -107,8 +111,6 @@ export function startLandrushIslandLoadingShellMotion(
   run: LandrushIslandLoadingBootRun,
   environment: LandrushIslandLoadingShellMotionEnvironment = {
     getComputedStyle: window.getComputedStyle.bind(window),
-    matchMedia:
-      typeof window.matchMedia === 'function' ? window.matchMedia.bind(window) : undefined,
     timeline: document.timeline,
   },
   percentReel?: HTMLElement | null,
@@ -116,7 +118,6 @@ export function startLandrushIslandLoadingShellMotion(
   if (run.motion?.fill === fill && (!percentReel || run.motion.percentReel === percentReel)) {
     return run.motion
   }
-  if (environment.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return null
   if (typeof fill.animate !== 'function') return null
   if (percentReel && typeof percentReel.animate !== 'function') return null
 
@@ -129,30 +130,31 @@ export function startLandrushIslandLoadingShellMotion(
     return null
   }
   if (renderedProgress === null) return null
-
-  const targetProgress = Math.min(
-    LANDRUSH_ISLAND_LOADING_SHELL_MAX_SPECULATIVE_PROGRESS,
-    renderedProgress +
-      LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND *
-        (LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS / 1_000),
+  const segment = createStreamedShellMotionSegment(
+    renderedProgress,
+    LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
   )
+  if (!segment) return null
   const currentTransform = `scaleX(${String(renderedProgress)})`
   let animation: Animation | null = null
   let percentAnimation: Animation | null = null
   try {
     animation = fill.animate(
-      [{ transform: currentTransform }, { transform: `scaleX(${String(targetProgress)})` }],
+      [{ transform: currentTransform }, { transform: `scaleX(${String(segment.toProgress)})` }],
       {
-        duration: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+        duration: segment.durationMs,
         easing: 'linear',
         fill: 'forwards',
       },
     )
     if (percentReel) {
       percentAnimation = percentReel.animate(
-        createLandrushIslandLoadingShellPercentKeyframes(renderedProgress, targetProgress),
+        createLandrushIslandLoadingShellPercentKeyframes(
+          renderedProgress,
+          segment.toProgress,
+        ),
         {
-          duration: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+          duration: segment.durationMs,
           easing: 'linear',
           fill: 'forwards',
         },
@@ -183,14 +185,37 @@ export function startLandrushIslandLoadingShellMotion(
 
   const motion: LandrushIslandLoadingShellMotion = {
     animation,
+    durationMs: segment.durationMs,
     fill,
+    fromProgress: renderedProgress,
     ...(percentAnimation && percentReel ? { percentAnimation, percentReel } : {}),
-    velocityPerSecond:
-      (targetProgress - renderedProgress) /
-      (LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS / 1_000),
+    toProgress: segment.toProgress,
+    velocityPerSecond: STREAMED_SHELL_VELOCITY_PER_SECOND,
   }
   run.motion = motion
   return motion
+}
+
+export function createStreamedShellMotionSegment(fromProgress: number, maximumDurationMs: number) {
+  const from = Math.min(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS, clamp01(fromProgress))
+  const requestedDurationMs = Math.max(
+    0,
+    Number.isFinite(maximumDurationMs) ? maximumDurationMs : 0,
+  )
+  const remainingDurationMs =
+    ((LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS - from) /
+      STREAMED_SHELL_VELOCITY_PER_SECOND) *
+    1_000
+  const durationMs = Math.min(requestedDurationMs, remainingDurationMs)
+  if (!(durationMs > 0)) return null
+  return {
+    durationMs,
+    fromProgress: from,
+    toProgress: Math.min(
+      LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+      from + STREAMED_SHELL_VELOCITY_PER_SECOND * (durationMs / 1_000),
+    ),
+  }
 }
 
 export function createLandrushIslandLoadingShellPercentKeyframes(from: number, to: number) {

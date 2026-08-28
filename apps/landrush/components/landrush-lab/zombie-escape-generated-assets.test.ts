@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { Bone, BoxGeometry, Group, Mesh, MeshStandardMaterial, type Object3D, Vector3 } from 'three'
 import {
   createZombieEscapeAttackClip,
@@ -8,26 +9,36 @@ import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-
 import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
+  clearAndRecreateZombieEscapeGeneratedAssetCacheUrls,
   createZombieVisual,
+  reconcileZombieEscapeGeneratedAssetRetryStatuses,
+  resolveZombieEscapeGeneratedAssetCachePaths,
+  resolveZombieEscapeGeneratedAssetSettlements,
   resolveZombieEscapeGeneratedVariantAdmissionCount,
+  resolveZombieEscapeGeneratedVariantRenderCount,
   resolveZombieEscapeRenderPipelineSettlement,
+  updateZombieEscapePresentationReadyVariant,
   updateZombieVisualLocomotion,
+  ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS,
+  ZOMBIE_ESCAPE_CORE_GENERATED_ASSET_KEYS,
 } from './zombie-escape-generated-assets'
+import { createZombieEscapeZombieRenderRepresentativeKey } from './zombie-escape-render-readiness'
 import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
 
 describe('generated asset render-pipeline readiness', () => {
-  test('keeps timed-out prewarm behind loading but releases failed compilation as a fallback', () => {
+  test('releases timed-out or failed critical compilation through the bounded fallback', () => {
     expect(
       resolveZombieEscapeRenderPipelineSettlement({
         message: 'prewarm timed out',
         state: 'degraded',
       }),
     ).toEqual({
-      contentReady: false,
+      contentReady: true,
       diagnostic: { level: 'warning', message: 'prewarm timed out' },
     })
     expect(
@@ -45,8 +56,104 @@ describe('generated asset render-pipeline readiness', () => {
     })
   })
 
+  test('settles core weapons independently while preserving background zombie failures', () => {
+    const coreKeySet = new Set<string>(ZOMBIE_ESCAPE_CORE_GENERATED_ASSET_KEYS)
+    const failedZombieKey = ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS.find(
+      (key) => !coreKeySet.has(key),
+    )!
+    const statuses = new Map([
+      ...ZOMBIE_ESCAPE_CORE_GENERATED_ASSET_KEYS.map(
+        (key) => [key, { state: 'ready' as const }] as const,
+      ),
+      [failedZombieKey, { message: 'zombie GLB unavailable', state: 'failed' as const }] as const,
+    ])
+
+    const settlements = resolveZombieEscapeGeneratedAssetSettlements(
+      statuses,
+      ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS,
+    )
+    expect(settlements.core).toMatchObject({ failed: [], pending: [], ready: true })
+    expect(settlements.full).toMatchObject({
+      failed: [{ key: failedZombieKey, message: 'zombie GLB unavailable' }],
+      ready: false,
+    })
+  })
+
+  test('preserves core readiness and its pipeline generation during a cosmetic-only retry', () => {
+    const coreStatuses = ZOMBIE_ESCAPE_CORE_GENERATED_ASSET_KEYS.map(
+      (key) => [key, { state: 'ready' as const }] as const,
+    )
+    const failedZombieKey = ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS.find((key) =>
+      key.startsWith('zombie:'),
+    )!
+    const statuses = new Map([
+      ...coreStatuses,
+      [failedZombieKey, { message: 'cosmetic failed', state: 'failed' as const }] as const,
+    ])
+
+    const cosmeticRetry = reconcileZombieEscapeGeneratedAssetRetryStatuses(
+      statuses,
+      { core: 4, cosmetic: 8 },
+      { core: 4, cosmetic: 9 },
+    )
+    expect(cosmeticRetry.coreChanged).toBe(false)
+    expect(cosmeticRetry.cosmeticChanged).toBe(true)
+    expect(cosmeticRetry.statuses.get(failedZombieKey)).toBeUndefined()
+    expect(
+      resolveZombieEscapeGeneratedAssetSettlements(
+        cosmeticRetry.statuses,
+        ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS,
+      ).core,
+    ).toMatchObject({ failed: [], pending: [], ready: true })
+
+    const source = readFileSync(
+      new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain('generation: coreRetryGeneration')
+    expect(source).toContain('onAssetStatusChange={reportCoreAssetStatus}')
+    expect(source).toContain('retryGeneration={coreRetryGeneration}')
+    expect(source).toContain('onAssetStatusChange={reportCosmeticAssetStatus}')
+    expect(source).toContain('retryGeneration={cosmeticRetryGeneration}')
+    expect(source).toContain(
+      'pipelineReadiness.generation !== coreRetryGeneration',
+    )
+    expect(source).not.toContain(
+      'pipelineReadiness.generation !== cosmeticRetryGeneration',
+    )
+  })
+
+  test('promotes a zombie variant only after ready and revokes it on degraded or failed compile', () => {
+    const readyVariants = new Set<number>()
+    const zombieKey = createZombieEscapeZombieRenderRepresentativeKey(
+      ZOMBIE_ESCAPE_ZOMBIE_CATALOG[0]!.id,
+    )
+
+    expect(
+      updateZombieEscapePresentationReadyVariant(readyVariants, zombieKey, { state: 'ready' }),
+    ).toBe(true)
+    expect(readyVariants).toEqual(new Set([0]))
+    updateZombieEscapePresentationReadyVariant(readyVariants, zombieKey, {
+      message: 'still compiling',
+      state: 'degraded',
+    })
+    expect(readyVariants.size).toBe(0)
+    updateZombieEscapePresentationReadyVariant(readyVariants, zombieKey, { state: 'ready' })
+    updateZombieEscapePresentationReadyVariant(readyVariants, zombieKey, {
+      message: 'compile rejected',
+      state: 'failed',
+    })
+    expect(readyVariants.size).toBe(0)
+    expect(
+      updateZombieEscapePresentationReadyVariant(readyVariants, 'weapon-held:pistol', {
+        state: 'ready',
+      }),
+    ).toBe(false)
+  })
+
   test('admits one expensive zombie presentation only after the prior one settles', () => {
     const settled = new Set<number>()
+    expect(resolveZombieEscapeGeneratedVariantAdmissionCount(0, settled, 3, false)).toBe(0)
     expect(resolveZombieEscapeGeneratedVariantAdmissionCount(0, settled, 3)).toBe(1)
     expect(resolveZombieEscapeGeneratedVariantAdmissionCount(1, settled, 3)).toBe(1)
     settled.add(0)
@@ -55,6 +162,61 @@ describe('generated asset render-pipeline readiness', () => {
     settled.add(1)
     expect(resolveZombieEscapeGeneratedVariantAdmissionCount(2, settled, 3)).toBe(3)
     expect(resolveZombieEscapeGeneratedVariantAdmissionCount(3, settled, 3)).toBe(3)
+  })
+
+  test('mounts zero cosmetic variant hooks until cosmetic admission opens', () => {
+    const admission = { count: 4, generation: 7 }
+    expect(resolveZombieEscapeGeneratedVariantRenderCount(false, admission, 7)).toBe(0)
+    expect(resolveZombieEscapeGeneratedVariantRenderCount(true, admission, 8)).toBe(0)
+    expect(resolveZombieEscapeGeneratedVariantRenderCount(true, admission, 7)).toBe(4)
+  })
+
+  test('keeps transfer warming outside retry generations and hooks Blob URLs only after admission', () => {
+    const source = readFileSync(
+      new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
+      'utf8',
+    )
+    const warmupStart = source.indexOf('const settledPathCounts = new Uint8Array')
+    const warmupEnd = source.indexOf('\n  }, [])', warmupStart)
+    expect(warmupStart).toBeGreaterThan(-1)
+    expect(warmupEnd).toBeGreaterThan(warmupStart)
+    expect(source.slice(warmupStart, warmupEnd)).not.toContain('retryGeneration')
+    expect(source).toContain('cosmeticAssetsAdmitted = true')
+    expect(source).toContain('ZOMBIE_VARIANT_INDICES.slice(0, admittedVariantCount)')
+    expect(source).toContain('assetUrls={assetUrls}')
+    expect(source).toContain('useGLTFKTX2(assetUrls.riggedBase)')
+    expect(source).toContain('useGLTF(assetUrls.run)')
+    expect(source).toContain('useGLTF(assetUrls.walk)')
+    expect(source).toContain(
+      'for (const objectUrl of warmup.getOwnedObjectUrls()) useGLTF.clear(objectUrl)',
+    )
+  })
+
+  test('clears and recreates every active Blob URL owned by a failed zombie key', () => {
+    const zombie = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[0]!
+    const failedKey = `zombie:${zombie.id}`
+    const paths = resolveZombieEscapeGeneratedAssetCachePaths([failedKey])
+    const cleared: string[] = []
+    const recreated: string[][] = []
+    const blobUrlByPath = new Map(paths.map((path) => [path, `blob:warmup:${path}`]))
+
+    clearAndRecreateZombieEscapeGeneratedAssetCacheUrls(
+      paths,
+      [
+        {
+          getAssetUrl: (path) => blobUrlByPath.get(path) ?? null,
+          recreateObjectUrls: (recreatedPaths) => {
+            recreated.push([...recreatedPaths])
+            return []
+          },
+        },
+      ],
+      (assetUrl) => cleared.push(assetUrl),
+    )
+
+    expect(paths).toEqual([zombie.glb.riggedBase.path, zombie.glb.run.path, zombie.glb.walk.path])
+    expect(cleared).toEqual([...paths, ...paths.map((path) => `blob:warmup:${path}`)])
+    expect(recreated).toEqual([paths])
   })
 })
 

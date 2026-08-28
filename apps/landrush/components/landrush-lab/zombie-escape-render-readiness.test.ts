@@ -6,9 +6,11 @@ import {
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
   createZombieEscapeRenderReadinessRegistry,
+  createZombieEscapeRenderReadinessSnapshotSelector,
   createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
+  ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
   type ZombieEscapePipelineRenderer,
   type ZombieEscapeRenderReadinessTimer,
@@ -101,6 +103,7 @@ describe('Zombie Escape render representative coverage', () => {
       expect(keys).toContain(createZombieEscapeZombieRenderRepresentativeKey(zombie.id))
     }
     expect(keys).toContain('weapon-pickup')
+    expect(keys).toContain(ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY)
     expect(keys).toContain('effect:tracer')
     expect(keys).toContain('effect:muzzle')
     expect(keys).toContain('effect:impact')
@@ -126,6 +129,23 @@ describe('Zombie Escape render representative coverage', () => {
     expect(registry.getSnapshot()).toMatchObject({ complete: false, missingKeys: ['first'] })
     unregisterSecond()
   })
+
+  test('selects strict critical coverage with stable identity across cosmetic registration', () => {
+    const registry = createZombieEscapeRenderReadinessRegistry(['critical', 'cosmetic'])
+    const selectCritical = createZombieEscapeRenderReadinessSnapshotSelector(['critical'])
+    expect(selectCritical(registry.getSnapshot())).toMatchObject({
+      complete: false,
+      missingKeys: ['critical'],
+    })
+    const unregisterCritical = registry.register('critical', new Group())
+    const ready = selectCritical(registry.getSnapshot())
+    expect(ready).toMatchObject({ complete: true, missingKeys: [] })
+    const unregisterCosmetic = registry.register('cosmetic', new Group())
+    expect(selectCritical(registry.getSnapshot())).toBe(ready)
+    unregisterCosmetic()
+    expect(selectCritical(registry.getSnapshot())).toBe(ready)
+    unregisterCritical()
+  })
 })
 
 describe('Zombie Escape render compilation', () => {
@@ -133,19 +153,12 @@ describe('Zombie Escape render compilation', () => {
     const fixture = createCompileFixture()
     const compilation = deferred<unknown>()
     const events: string[] = []
-    let compileCount = 0
     const renderer: ZombieEscapePipelineRenderer = {
       async compileAsync(root, camera, targetScene) {
-        compileCount += 1
-        events.push(compileCount === 1 ? 'compile:representative' : 'compile:scene')
+        events.push('compile:renderable')
         expect(camera).toBe(fixture.camera)
         expect(targetScene).toBe(fixture.targetScene)
-        if (compileCount === 2) {
-          expect(root).toBe(fixture.targetScene)
-          expect(fixture.ancestor.visible).toBe(false)
-          return undefined
-        }
-        expect(root).toBe(fixture.root)
+        expect(root).toBe(fixture.mesh)
         expect(fixture.ancestor.visible).toBe(true)
         expect(fixture.root.visible).toBe(true)
         expect(fixture.child.visible).toBe(true)
@@ -166,7 +179,7 @@ describe('Zombie Escape render compilation', () => {
     })
     await Promise.resolve()
     await Promise.resolve()
-    expect(events).toEqual(['init', 'compile:representative'])
+    expect(events).toEqual(['init', 'compile:renderable'])
     expect(fixture.ancestor.visible).toBe(false)
     expect(fixture.root.visible).toBe(false)
     expect(fixture.child.visible).toBe(false)
@@ -175,7 +188,7 @@ describe('Zombie Escape render compilation', () => {
     expect(fixture.mesh.frustumCulled).toBe(true)
     compilation.resolve(undefined)
     await pending
-    expect(events).toEqual(['init', 'compile:representative', 'compile:scene'])
+    expect(events).toEqual(['init', 'compile:renderable'])
     expect(fixture.ancestor.visible).toBe(false)
     expect(fixture.root.visible).toBe(false)
     expect(fixture.child.visible).toBe(false)
@@ -209,7 +222,7 @@ describe('Zombie Escape render compilation', () => {
     })
 
     expect(initialized).toBe(true)
-    expect(compiledRoots).toEqual([fixture.root])
+    expect(compiledRoots).toEqual([fixture.mesh])
     expect(fixture.ancestor.visible).toBe(false)
     expect(fixture.root.visible).toBe(false)
     expect(fixture.child.visible).toBe(false)
@@ -246,11 +259,15 @@ describe('Zombie Escape render compilation', () => {
     }
   })
 
-  test('serializes roots instead of compiling a pool concurrently', async () => {
+  test('serializes renderables with one admission opportunity after each compile', async () => {
     const first = deferred<unknown>()
     const second = deferred<unknown>()
-    const roots = [new Group(), new Group()]
+    const roots = [
+      new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial()),
+      new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial()),
+    ]
     let active = 0
+    let admissionOpportunities = 0
     let maximumActive = 0
     let calls = 0
     const renderer: ZombieEscapePipelineRenderer = {
@@ -262,22 +279,31 @@ describe('Zombie Escape render compilation', () => {
         active -= 1
       },
     }
-    const pending = compileZombieEscapeRenderRepresentatives({
-      camera: new PerspectiveCamera(),
-      renderer,
-      representatives: roots.map((root, index) => ({ key: String(index), root })),
-      targetScene: new Scene(),
-    })
+    const pending = compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer,
+        representatives: roots.map((root, index) => ({ key: String(index), root })),
+        targetScene: new Scene(),
+      },
+      async () => {
+        admissionOpportunities += 1
+      },
+    )
     await Promise.resolve()
     expect(calls).toBe(1)
     first.resolve(undefined)
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushMicrotasksUntil(() => calls === 2)
     expect(calls).toBe(2)
     second.resolve(undefined)
     await pending
-    expect(calls).toBe(3)
+    expect(calls).toBe(2)
     expect(maximumActive).toBe(1)
+    expect(admissionOpportunities).toBe(2)
+    for (const root of roots) {
+      root.geometry.dispose()
+      root.material.dispose()
+    }
   })
 
   test('prewarms newly registered representatives immediately and exactly once in queue order', async () => {

@@ -101,9 +101,7 @@ export function createLandrushIslandStartupPresentationReadyCheck() {
       `[${LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE}]`,
     )
     const motion = startLandrushIslandLoadingShellMotion(fill, run, undefined, percentReel)
-    if (!motion) {
-      return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-    }
+    if (!motion) return false
     if (
       motion.animation.playState === 'idle' ||
       motion.animation.playState === 'finished' ||

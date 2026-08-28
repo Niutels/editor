@@ -2,9 +2,12 @@
 // include Bun ambient types in its production declaration build.
 import { describe, expect, mock, test } from 'bun:test'
 import {
+  deleteCachedRendererPromise,
+  getOrCreateCachedRendererPromise,
   initializeGpuRenderer,
   type RendererBackendParameters,
   type RendererCapabilityCanvas,
+  type RendererPromiseCache,
 } from './renderer-capability'
 
 function canvasWithContexts(contexts: Partial<Record<'webgl2', unknown>>) {
@@ -29,6 +32,60 @@ describe('GPU renderer capability and initialization', () => {
 
     expect(result.status).toBe('ready')
     expect(createRenderer).toHaveBeenCalledWith({ device })
+  })
+
+  test('forces WebGL without requesting a WebGPU adapter', async () => {
+    const requestAdapter = mock(async () => ({ requestDevice: async () => ({}) }))
+    const createRenderer = mock(() => ({ init: async () => undefined }))
+
+    const result = await initializeGpuRenderer({
+      backendPreference: 'webgl',
+      createRenderer,
+      gpu: { requestAdapter },
+      probeCanvas: canvasWithContexts({ webgl2: {} }),
+    })
+
+    expect(result.status).toBe('ready')
+    if (result.status === 'ready') expect(result.backend).toBe('webgl')
+    expect(requestAdapter).not.toHaveBeenCalled()
+    expect(createRenderer).toHaveBeenCalledWith({ forceWebGL: true })
+  })
+
+  test('keys renderer promises by canvas and backend preference', async () => {
+    const firstCanvas = {}
+    const secondCanvas = {}
+    const cache: RendererPromiseCache<object, string> = new WeakMap()
+    const createAuto = mock(async () => 'auto')
+    const createWebgl = mock(async () => 'webgl')
+
+    const firstAuto = getOrCreateCachedRendererPromise(cache, firstCanvas, 'auto', createAuto)
+    const repeatedAuto = getOrCreateCachedRendererPromise(cache, firstCanvas, 'auto', createAuto)
+    const forcedWebgl = getOrCreateCachedRendererPromise(cache, firstCanvas, 'webgl', createWebgl)
+    const secondCanvasAuto = getOrCreateCachedRendererPromise(
+      cache,
+      secondCanvas,
+      'auto',
+      createAuto,
+    )
+
+    expect(repeatedAuto).toBe(firstAuto)
+    expect(forcedWebgl).not.toBe(firstAuto)
+    expect(secondCanvasAuto).not.toBe(firstAuto)
+    expect(createAuto).toHaveBeenCalledTimes(2)
+    expect(createWebgl).toHaveBeenCalledTimes(1)
+    expect(await Promise.all([firstAuto, forcedWebgl, secondCanvasAuto])).toEqual([
+      'auto',
+      'webgl',
+      'auto',
+    ])
+
+    deleteCachedRendererPromise(cache, firstCanvas, 'auto')
+    expect(getOrCreateCachedRendererPromise(cache, firstCanvas, 'webgl', createWebgl)).toBe(
+      forcedWebgl,
+    )
+    expect(getOrCreateCachedRendererPromise(cache, firstCanvas, 'auto', createAuto)).not.toBe(
+      firstAuto,
+    )
   })
 
   test('reports unsupported when neither WebGPU nor WebGL is available', async () => {

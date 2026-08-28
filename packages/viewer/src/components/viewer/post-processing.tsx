@@ -56,6 +56,11 @@ import { mergedOutline } from '../../lib/merged-outline-node'
 import { getSceneTheme } from '../../lib/scene-themes'
 import { packNormalToRGB, unpackRGBToNormal } from '../../lib/tsl-compat'
 import useViewer from '../../store/use-viewer'
+import {
+  executeViewerSceneDraw,
+  shouldRenderViewerEmptyScene,
+  type ViewerSceneDrawSubmissionRef,
+} from './scene-draw-admission'
 
 // Scene-referred grade applied before the output tone mapping (AgX). AgX rolls
 // highlights off gently but reads flat on its own; a mild mid-gray-pivot
@@ -348,11 +353,15 @@ const PostProcessingPasses = ({
   hoverStyles = DEFAULT_HOVER_STYLES,
   disablePostFx = false,
   presentationEffectRef,
+  sceneDrawDisabled = false,
+  sceneDrawSubmissionRef,
 }: {
   hoverStyles?: HoverStyles
   /** Host-controlled equivalent of `?disable=postFx` — see the Viewer prop. */
   disablePostFx?: boolean
   presentationEffectRef?: ViewerPresentationEffectRef
+  sceneDrawDisabled?: boolean
+  sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
 }) => {
   const { gl: renderer, invalidate, scene, camera, size, viewport } = useThree()
   const renderPipelineRef = useRef<RenderPipeline | null>(null)
@@ -950,7 +959,7 @@ const PostProcessingPasses = ({
     // Rendering nothing at all is NOT an option — with zero submitted frames
     // Chromium's no-damage scheduler throttles rAF to 1Hz (measured), stalling
     // the useFrame systems the bake still needs.
-    if (PERF_DRAW_DISABLED) {
+    if (shouldRenderViewerEmptyScene(sceneDrawDisabled, PERF_DRAW_DISABLED)) {
       try {
         ;(renderer as any).render(emptyScene, camera)
       } catch {
@@ -1057,7 +1066,14 @@ const PostProcessingPasses = ({
           ;(renderer as any).setClearAlpha(clearAlpha)
         }
         const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
-        ;(renderer as any).render(scene, camera)
+        if (sceneDrawSubmissionRef) {
+          executeViewerSceneDraw(
+            () => (renderer as any).render(scene, camera),
+            sceneDrawSubmissionRef,
+          )
+        } else {
+          ;(renderer as any).render(scene, camera)
+        }
         if (PERF_OVERLAY_ENABLED) {
           const queue = (renderer as any).backend?.device?.queue as
             | { onSubmittedWorkDone?: () => Promise<void> }
@@ -1086,7 +1102,11 @@ const PostProcessingPasses = ({
         })
       }
       try {
-        renderPipeline.render()
+        if (sceneDrawSubmissionRef) {
+          executeViewerSceneDraw(() => renderPipeline.render(), sceneDrawSubmissionRef)
+        } else {
+          renderPipeline.render()
+        }
       } finally {
         for (const object of unculled) object.frustumCulled = true
       }

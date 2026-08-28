@@ -160,18 +160,24 @@ export function createZombieEscapeRenderReadinessRegistry(
   }
 }
 
-export async function compileZombieEscapeRenderRepresentatives({
-  camera,
-  representatives,
-  renderer,
-  targetScene,
-}: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>) {
-  await compileLandrushRenderRepresentatives({
+export async function compileZombieEscapeRenderRepresentatives(
+  {
     camera,
-    renderer,
     representatives,
+    renderer,
     targetScene,
-  })
+  }: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>,
+  waitForAdmissionOpportunity?: () => Promise<void>,
+) {
+  await compileLandrushRenderRepresentatives(
+    {
+      camera,
+      renderer,
+      representatives,
+      targetScene,
+    },
+    waitForAdmissionOpportunity,
+  )
 }
 
 export function createZombieEscapeRenderReadinessCoordinator({

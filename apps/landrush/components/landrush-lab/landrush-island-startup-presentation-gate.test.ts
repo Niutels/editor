@@ -1,7 +1,19 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { scheduleLandrushIslandStartupAfterPresentationFrames } from './landrush-island-startup-presentation-gate'
 
 describe('Landrush island startup presentation gate', () => {
+  test('requires observed compositor progression for reduced motion too', () => {
+    const source = readFileSync(
+      new URL('./landrush-island-startup-presentation-gate.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain('if (!motion) return false')
+    expect(source).not.toContain("matchMedia?.('(prefers-reduced-motion: reduce)')")
+    expect(source).toContain('currentTimeMs > observedCurrentTimeMs')
+  })
+
   test('waits for two presentation frames before mounting the expensive island', () => {
     const callbacks: FrameRequestCallback[] = []
     let ready = false

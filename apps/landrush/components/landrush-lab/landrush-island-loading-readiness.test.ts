@@ -367,7 +367,7 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(clientSource).toContain('useLandrushIslandPaintReadiness(loadingAssetsReady)')
     expect(clientSource).toContain('(zombieEscapeEnabled || ambientLoadReadiness?.ready === true)')
-    expect(clientSource).toContain('runGeneration={loadingRunGenerationRef.current}')
+    expect(clientSource).toContain('runGeneration={loadingRunGeneration}')
     expect(clientSource).toContain('sampleInvalidationKey={initialParcelAuthorityKey}')
     expect(clientSource).toContain('topologySignature={loadingTopologySignature}')
     expect(clientSource).toContain('profileKey={loadingProfileKey}')
@@ -400,7 +400,7 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('|natural-road-plan:${')
     expect(clientSource).toContain("naturalRoadPlanRequired ? 'required' : 'omitted'")
     expect(clientSource).toContain('|procedural-cliffs:')
-    expect(clientSource).toContain('loadingActive ? (')
+    expect(clientSource).toContain('loadingPresentationActive ? (')
     expect(clientSource).not.toContain('generation={initialParcelAuthorityKey}')
     expect(clientSource).not.toContain('function useLandrushIslandLoadingProgress')
     expect(clientSource).not.toContain('LANDRUSH_ISLAND_LOADING_EXPECTED_MS')
@@ -408,7 +408,7 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('Syncing world…')
     expect(clientSource).toContain('currentInitialParcelReadiness.ready')
     expect(clientSource).toContain('admitted={initialParcelMaterializationReady}')
-    expect(clientSource).toContain('{!zombieEscapeEnabled || !loadingActive ? (')
+    expect(clientSource).toContain('{ambientLifeAdmitted ? (')
     expect(clientSource).toContain('onLoadReadinessChange={handleAmbientLoadReadinessChange}')
     expect(clientSource).toContain(
       'onLoadReadinessChange={handleProceduralCliffsLoadReadinessChange}',
@@ -427,8 +427,8 @@ describe('Landrush island paint readiness', () => {
       'currentGeneration: currentProceduralCliffsLoadGenerationRef.current',
     )
     expect(clientSource).not.toContain('admitted={!loadingActive}')
-    expect(clientSource).toContain(
-      'deferBuiltColliderRebuild={zombieEscapeEnabled && loadingActive}',
+    expect(clientSource).toMatch(
+      /deferBuiltColliderRebuild=\{\s*zombieEscapeEnabled && !colliderRebuildAdmitted\s*\}/,
     )
     expect(clientSource).toContain(
       "deferRebuild ? 'deferred' : createLandrushIslandPhysicsNodeSignature(state.nodes)",
@@ -438,7 +438,7 @@ describe('Landrush island paint readiness', () => {
       /data-landrush-loading-ambient-ready=\{\s*ambientLoadReadiness\?\.ready === true \? 'true' : 'false'\s*\}/,
     )
     expect(clientSource).toContain(
-      "data-landrush-loading-handed-off={!loadingActive ? 'true' : 'false'}",
+      "data-landrush-loading-handed-off={coreGameplayAdmitted ? 'true' : 'false'}",
     )
     expect(clientSource).toMatch(
       /data-landrush-loading-initial-parcel-ready=\{\s*initialParcelMaterializationReady \? 'true' : 'false'\s*\}/,
@@ -490,8 +490,12 @@ describe('Landrush island paint readiness', () => {
     expect(runtimeHookSource).not.toContain('scheduleCompositorRefresh')
     expect(runtimeHookSource).not.toContain('retargetLandrushIslandLoadingPreview')
     expect(runtimeHookSource).not.toContain('setKeyframes')
+    expect(runtimeHookSource).toContain('createLandrushIslandLoadingAppliedVisualSegment(')
+    expect(runtimeHookSource).toContain('const fadeDurationMs = reducedMotion ? 0')
+    expect(runtimeHookSource).not.toMatch(/if \(!?reducedMotion\)/)
+    expect(runtimeHookSource).not.toContain('reconcileDisplayedProgress(')
     const finishHandoffSource = timelineSource.slice(
-      timelineSource.indexOf('const finishHandoff = () => {'),
+      timelineSource.indexOf('const finishHandoff = (expectedFadeAttempt: number) => {'),
       timelineSource.indexOf('const beginHandoffFade = () => {'),
     )
     expect(
@@ -535,7 +539,7 @@ describe('Landrush island paint readiness', () => {
     expect(pageSource).not.toContain("from '@/components/landrush-lab/landrush-island-client'")
     expect(pageSource).not.toContain('<LandrushIslandLoadingBootScript />')
     expect(pageSource).not.toContain('<LandrushIslandLoadingShell />')
-    expect(deferredClientSource).toContain("lazy(() =>\n  import('./landrush-island-client')")
+    expect(deferredClientSource).toMatch(/lazy\(\(\) =>\s+import\('\.\/landrush-island-client'\)/)
     expect(deferredClientSource.indexOf('<LandrushIslandStartupPresentationGate>')).toBeLessThan(
       deferredClientSource.indexOf('<DeferredLandrushIslandClient'),
     )
@@ -554,23 +558,38 @@ describe('Landrush island paint readiness', () => {
     expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE')
     expect(shellSource).not.toContain('data-landrush-island-loading-shell-percent-strip')
     expect(globalsSource).not.toContain('body:has([data-landrush-island-loading-runtime-owned])')
-    expect(globalsSource).toContain('body:has([data-landrush-island-world-frame-ready])')
-    expect(globalsSource).toContain('background-color: transparent')
+    expect(globalsSource).not.toContain('body:has([data-landrush-island-world-frame-ready])')
+    expect(globalsSource).not.toContain('background-color: transparent')
     expect(globalsSource).toContain('@keyframes landrush-island-loading-shell-progress')
     expect(globalsSource).toContain(
-      'animation: landrush-island-loading-shell-progress 136.667s linear both',
+      'animation: landrush-island-loading-shell-progress 120s linear both',
     )
     expect(globalsSource).toContain(
       'animation-delay: var(--landrush-island-loading-shell-delay, 0ms)',
     )
     expect(globalsSource).toContain('@keyframes landrush-island-loading-shell-percent')
     expect(globalsSource).not.toContain('[data-landrush-island-loading-shell] {\n  display: none;')
+    const reducedMotionCss = globalsSource.slice(
+      globalsSource.indexOf('@media (prefers-reduced-motion: reduce)'),
+      globalsSource.indexOf('/* Loaders */'),
+    )
+    expect(reducedMotionCss).toContain(
+      '[data-landrush-island-loading-shell-fill] {\n    animation-duration: 120s !important;',
+    )
+    expect(reducedMotionCss).toContain(
+      '[data-landrush-island-loading-shell-percent-reel] {\n    animation-duration: 120s !important;',
+    )
+    expect(reducedMotionCss).not.toContain('animation: none')
+    expect(reducedMotionCss).not.toContain('scaleX(0.2)')
+    expect(reducedMotionCss).not.toContain('translate3d(0, -20rem, 0)')
+    expect(globalsSource).toContain('transform: scaleX(0.72)')
+    expect(0.72 / 120).toBe(0.006)
   })
 
-  test('reveals the blurred mounted island through a transparent runtime overlay', () => {
+  test('keeps scene priming opaque while preserving the day-mode backdrop treatment', () => {
     const clientPath = fileURLToPath(new URL('./landrush-island-client.tsx', import.meta.url))
     const clientSource = readFileSync(clientPath, 'utf8')
-    const backdropStart = clientSource.indexOf('aria-hidden={loadingActive}')
+    const backdropStart = clientSource.indexOf('aria-hidden={loadingPresentationActive}')
     const backdropEnd = clientSource.indexOf('<LandrushIslandStartupReactProfiler', backdropStart)
     const overlayStart = clientSource.indexOf('function LandrushIslandLoadingOverlay')
     const overlayEnd = clientSource.indexOf('function LandrushIslandTunePanel', overlayStart)
@@ -588,8 +607,8 @@ describe('Landrush island paint readiness', () => {
     expect(
       readFileSync(new URL('./landrush-island-loading-readiness.tsx', import.meta.url), 'utf8'),
     ).toContain("setAttribute('data-landrush-island-world-frame-ready', '')")
-    expect(runtimeOverlaySource).toContain('bg-transparent')
-    expect(runtimeOverlaySource).not.toContain('bg-[#0f1720]')
+    expect(runtimeOverlaySource).toContain('bg-[#0f1720]')
+    expect(runtimeOverlaySource).not.toContain('bg-transparent')
   })
 
   test('keeps eager Zombie Escape weapon assets behind a local suspense boundary', () => {
@@ -623,7 +642,7 @@ describe('Landrush island paint readiness', () => {
     expect(loaderSource).toContain('useGLTF(weapon.assetPath)')
   })
 
-  test('keeps zombie startup pending until the complete generated catalog settles', () => {
+  test('blocks startup on core generated assets while deferring cosmetic presentation', () => {
     const clientSource = readFileSync(
       new URL('./landrush-island-client.tsx', import.meta.url),
       'utf8',
@@ -649,7 +668,11 @@ describe('Landrush island paint readiness', () => {
     expect(generatedAssetsSource).toContain('...GENERATED_ZOMBIE_ASSET_KEYS')
     expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetSettlement(')
     expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetReadinessSnapshot({')
-    expect(generatedAssetsSource).toContain('onGeneratedAssetsReadinessChange?.(')
+    expect(generatedAssetsSource).toContain('expectedKeys: GENERATED_WEAPON_ASSET_KEYS')
+    expect(generatedAssetsSource).toContain(
+      'reportingRef.current.onGeneratedAssetsReadinessChange',
+    )
+    expect(generatedAssetsSource).toContain('report?.(')
     expect(generatedAssetsSource).toContain("onAssetStatusChange(assetKey, { state: 'ready' })")
     expect(generatedAssetsSource).not.toContain('representativePrewarmQueue.waitForSettled()')
     expect(generatedAssetsSource).toContain('representatives: []')
@@ -661,6 +684,7 @@ describe('Landrush island paint readiness', () => {
     expect(generatedAssetsSource).toContain(
       'ZOMBIE_VARIANT_INDICES.slice(0, admittedVariantCount).map',
     )
+    expect(generatedAssetsSource).toContain('cosmeticAssetsAdmitted')
     expect(generatedAssetsSource).not.toContain('if (!admitted) return null')
   })
 })

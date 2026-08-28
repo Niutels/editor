@@ -18,9 +18,11 @@ import type { ZombieEscapeQuality } from './zombie-escape-config'
 import { ZOMBIE_ESCAPE_DEFAULT_WEAPON } from './zombie-escape-config'
 import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
-  type ZombieEscapeGeneratedAssetFailure,
-  ZombieEscapeGeneratedAssets,
-} from './zombie-escape-generated-assets'
+  ZOMBIE_ESCAPE_INITIAL_GENERATED_ASSET_RETRY_GENERATIONS,
+  type ZombieEscapeGeneratedAssetRetryGenerations,
+  type ZombieEscapeGeneratedAssetSettlementReport,
+} from './zombie-escape-generated-asset-retry'
+import { ZombieEscapeGeneratedAssets } from './zombie-escape-generated-assets'
 import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 import {
   getZombieEscapeMeleeProgress,
@@ -36,23 +38,27 @@ import {
 import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 export const ZombieEscapeActors = memo(function ZombieEscapeActors({
+  cosmeticAssetsAdmitted = true,
   impactVisualRegistry,
-  onGeneratedAssetsFailureChange,
   onGeneratedAssetsReadinessChange,
+  onGeneratedAssetsSettlementChange,
   playerColor = '#fff0a2',
   presentationFramePriority,
   quality,
   renderReadinessCamera,
   renderReadinessRegistry,
   renderPlayer = true,
-  retryGeneratedAssetsGeneration = 0,
+  retryGeneratedAssetGenerations = ZOMBIE_ESCAPE_INITIAL_GENERATED_ASSET_RETRY_GENERATIONS,
   simulationRef,
   zombieMaterialPhaseActive = true,
 }: {
+  cosmeticAssetsAdmitted?: boolean
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
-  onGeneratedAssetsFailureChange?: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
   onGeneratedAssetsReadinessChange?: (
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
+  ) => void
+  onGeneratedAssetsSettlementChange?: (
+    settlement: ZombieEscapeGeneratedAssetSettlementReport,
   ) => void
   playerColor?: string
   presentationFramePriority?: number
@@ -60,7 +66,7 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
   renderReadinessCamera?: Camera
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   renderPlayer?: boolean
-  retryGeneratedAssetsGeneration?: number
+  retryGeneratedAssetGenerations?: ZombieEscapeGeneratedAssetRetryGenerations
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
   zombieMaterialPhaseActive?: boolean
 }) {
@@ -80,17 +86,18 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
     <group name="zombie-escape-presentation" userData={presentationUserData}>
       {renderPlayer ? <ZombieEscapeOrbot simulationRef={simulationRef} /> : null}
       <ZombieEscapeGeneratedAssets
+        cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}
         detailedZombieSlotsRef={detailedZombieSlotsRef}
         impactVisualRegistry={impactVisualRegistry}
         loadedZombieVariantsRef={loadedZombieVariantsRef}
         omitHeldWeapon
-        onGeneratedAssetsFailureChange={onGeneratedAssetsFailureChange}
         onGeneratedAssetsReadinessChange={onGeneratedAssetsReadinessChange}
+        onGeneratedAssetsSettlementChange={onGeneratedAssetsSettlementChange}
         presentationLodDebugRef={presentationLodDebugRef}
         quality={quality}
         renderReadinessCamera={renderReadinessCamera}
         renderReadinessRegistry={renderReadinessRegistry}
-        retryGeneration={retryGeneratedAssetsGeneration}
+        retryGenerations={retryGeneratedAssetGenerations}
         simulationRef={simulationRef}
         zombieMaterialPhaseActive={zombieMaterialPhaseActive}
         zombiePresentationFramePriority={presentationFramePriority}

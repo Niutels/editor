@@ -54,6 +54,10 @@ export type LandrushIslandLoadingProgressController = Readonly<{
     snapshot: LandrushIslandLoadingProgressMotionSnapshot,
   ) => LandrushIslandLoadingProgressMotionSnapshot
   snapToComplete: () => LandrushIslandLoadingProgressMotionSnapshot
+  synchronizeRenderedProgress: (
+    value: number,
+    velocityPerSecond: number,
+  ) => LandrushIslandLoadingProgressMotionSnapshot
   setConfirmedProgress: (
     value: number,
     stage?: Readonly<{ ceiling?: number; estimatedDurationMs?: number }>,
@@ -208,6 +212,19 @@ export function createLandrushIslandLoadingProgressController(
       state.accelerationPerSecondSquared = 0
       state.targetVelocityPerSecond = 0
       state.completionRequested = true
+      return getSnapshot()
+    },
+    synchronizeRenderedProgress(value, velocityPerSecond) {
+      const renderedProgress = clampProgress(value, state.displayedProgress)
+      const renderedVelocity = Math.min(
+        LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+        Math.max(0, finiteOr(velocityPerSecond, state.velocityPerSecond)),
+      )
+      state.displayedProgress = renderedProgress
+      state.stageCeiling = Math.max(state.stageCeiling, renderedProgress)
+      state.velocityPerSecond = renderedVelocity
+      state.targetVelocityPerSecond = renderedVelocity
+      state.accelerationPerSecondSquared = 0
       return getSnapshot()
     },
     setConfirmedProgress(value, stage = {}) {

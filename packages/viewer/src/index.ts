@@ -12,7 +12,12 @@ export { ErrorBoundary } from './components/error-boundary'
 // `@pascal-app/nodes/<kind>/renderer.tsx` and are loaded by the registry
 // — no per-kind re-exports needed.
 export { NodeRenderer } from './components/renderers/node-renderer'
-export { default as Viewer, type ViewerHandle } from './components/viewer'
+export {
+  default as Viewer,
+  type ViewerHandle,
+  type ViewerProps,
+  type ViewerRendererInitializationFailure,
+} from './components/viewer'
 export {
   type BVHEcctrlApi,
   default as BVHEcctrl,
@@ -58,6 +63,11 @@ export {
   DEFAULT_HOVER_STYLES,
   SSGI_PARAMS,
 } from './components/viewer/post-processing'
+export type {
+  ViewerSceneDrawSubmissionRef,
+  ViewerSceneDrawSubmissionState,
+} from './components/viewer/scene-draw-admission'
+export { createViewerSceneDrawSubmissionState } from './components/viewer/scene-draw-admission'
 export { SceneEnvironment } from './components/viewer/scene-environment'
 export { useAssetUrl } from './hooks/use-asset-url'
 export { useGLTFKTX2 } from './hooks/use-gltf-ktx2'
@@ -140,6 +150,7 @@ export {
   detectRendererCapability,
   initializeGpuRenderer,
   type RendererBackendParameters,
+  type RendererBackendPreference,
   type RendererCapability,
   type RendererCapabilityCanvas,
   type RendererInitializationResult,

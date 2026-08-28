@@ -115,8 +115,16 @@ import { ZombieEscapeEffects } from './zombie-escape-effects'
 import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
   clearZombieEscapeGeneratedAssetCaches,
-  type ZombieEscapeGeneratedAssetFailure,
 } from './zombie-escape-generated-assets'
+import {
+  applyZombieEscapeGeneratedAssetSettlementReport,
+  beginZombieEscapeGeneratedAssetRetry,
+  createZombieEscapeGeneratedAssetRetryState,
+  resolveZombieEscapeGeneratedAssetAutoRetryPlan,
+  type ZombieEscapeGeneratedAssetFailure,
+  type ZombieEscapeGeneratedAssetRetryGenerations,
+  type ZombieEscapeGeneratedAssetSettlementReport,
+} from './zombie-escape-generated-asset-retry'
 import { ZombieEscapeMoneyBadge } from './zombie-escape-hud'
 import type { LandrushZombieEscapeNavigationScaleProofResult } from './zombie-escape-navigation-scale-proof'
 import type { LandrushZombieEscapeNavigationScaleProofFixtureWorldSummary } from './zombie-escape-navigation-scale-proof-fixture'
@@ -158,7 +166,6 @@ import {
 } from './zombie-escape-weapon-placement'
 import type { ZombieEscapeArenaData } from './zombie-escape-world'
 
-const GENERATED_ASSET_AUTO_RETRY_DELAYS_MS = [650, 1_300] as const
 const LANDRUSH_ZOMBIE_ESCAPE_SURFACE_SUPPORT_ID = 'landrush-island:surface-boundary'
 const LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK_PROTECTED_HEALTH = 1_000_000_000
 
@@ -334,6 +341,7 @@ export type LandrushZombieEscapePlayerMotion = {
 export type LandrushZombieEscapeModeProps = {
   active: boolean
   combatHeadingRef: MutableRefObject<number | null>
+  cosmeticAssetsAdmitted: boolean
   expectedPhase: ZombieEscapeGamePhase
   groundY: number
   materialPresentation: LandrushIslandMaterialPresentationOwner
@@ -1040,6 +1048,7 @@ export function createLandrushZombieEscapeRoutingDebugSnapshot(simulation: Zombi
 export function LandrushZombieEscapeMode({
   active,
   combatHeadingRef,
+  cosmeticAssetsAdmitted,
   expectedPhase,
   groundY,
   materialPresentation,
@@ -1218,12 +1227,9 @@ export function LandrushZombieEscapeMode({
   const [snapshot, setSnapshot] = useState<ZombieEscapeHudSnapshot>(() =>
     createZombieEscapeHudSnapshot(simulation),
   )
-  const [generatedAssetFailures, setGeneratedAssetFailures] = useState<
-    readonly ZombieEscapeGeneratedAssetFailure[]
-  >([])
-  const [generatedAssetRetryAttempt, setGeneratedAssetRetryAttempt] = useState(0)
-  const [generatedAssetRetryGeneration, setGeneratedAssetRetryGeneration] = useState(0)
-  const [generatedAssetsRetrying, setGeneratedAssetsRetrying] = useState(false)
+  const [generatedAssetRetryState, setGeneratedAssetRetryState] = useState(
+    createZombieEscapeGeneratedAssetRetryState,
+  )
   const [navigationOverlayEnabled, setNavigationOverlayEnabled] = useState(false)
   const snapshotAtRef = useRef(Number.NEGATIVE_INFINITY)
   const debugAtRef = useRef(Number.NEGATIVE_INFINITY)
@@ -1431,58 +1437,60 @@ export function LandrushZombieEscapeMode({
   const handleGeneratedAssetsReadinessChange = useCallback(
     (readiness: ZombieEscapeGeneratedAssetReadinessSnapshot) => {
       onGeneratedAssetsReadinessChange?.(readiness)
-      if (!readiness.ready) return
-      setGeneratedAssetFailures([])
-      setGeneratedAssetRetryAttempt(0)
-      setGeneratedAssetsRetrying(false)
     },
     [onGeneratedAssetsReadinessChange],
   )
 
-  const handleGeneratedAssetsFailureChange = useCallback(
-    (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => {
-      if (failures.length === 0) return
-      setGeneratedAssetFailures((current) =>
-        generatedAssetFailuresMatch(current, failures)
-          ? current
-          : failures.map((failure) => ({ ...failure })),
+  const handleGeneratedAssetsSettlementChange = useCallback(
+    (settlement: ZombieEscapeGeneratedAssetSettlementReport) => {
+      setGeneratedAssetRetryState((current) =>
+        applyZombieEscapeGeneratedAssetSettlementReport(current, settlement),
       )
-      setGeneratedAssetsRetrying(false)
     },
     [],
   )
 
   const beginGeneratedAssetsRetry = useCallback(
-    (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => {
+    (
+      failures: readonly ZombieEscapeGeneratedAssetFailure[],
+      source: 'automatic' | 'manual',
+    ) => {
       if (failures.length === 0) return
-      setGeneratedAssetsRetrying(true)
       clearZombieEscapeGeneratedAssetCaches(failures.map((failure) => failure.key))
-      setGeneratedAssetRetryGeneration((generation) => generation + 1)
+      setGeneratedAssetRetryState((current) =>
+        beginZombieEscapeGeneratedAssetRetry(current, failures, source),
+      )
     },
     [],
   )
 
+  const coreGeneratedAssetAutoRetryPlan = useMemo(
+    () => resolveZombieEscapeGeneratedAssetAutoRetryPlan(generatedAssetRetryState, 'core'),
+    [generatedAssetRetryState],
+  )
+  const cosmeticGeneratedAssetAutoRetryPlan = useMemo(
+    () => resolveZombieEscapeGeneratedAssetAutoRetryPlan(generatedAssetRetryState, 'cosmetic'),
+    [generatedAssetRetryState],
+  )
   useEffect(() => {
-    if (generatedAssetsRetrying || generatedAssetFailures.length === 0) return
-    const delay = GENERATED_ASSET_AUTO_RETRY_DELAYS_MS[generatedAssetRetryAttempt]
-    if (delay === undefined) return
-    const failures = generatedAssetFailures
+    if (!coreGeneratedAssetAutoRetryPlan) return
     const timeout = window.setTimeout(() => {
-      setGeneratedAssetRetryAttempt((attempt) => attempt + 1)
-      beginGeneratedAssetsRetry(failures)
-    }, delay)
+      beginGeneratedAssetsRetry(coreGeneratedAssetAutoRetryPlan.failures, 'automatic')
+    }, coreGeneratedAssetAutoRetryPlan.delayMs)
     return () => window.clearTimeout(timeout)
-  }, [
-    beginGeneratedAssetsRetry,
-    generatedAssetFailures,
-    generatedAssetRetryAttempt,
-    generatedAssetsRetrying,
-  ])
+  }, [beginGeneratedAssetsRetry, coreGeneratedAssetAutoRetryPlan])
+
+  useEffect(() => {
+    if (!cosmeticGeneratedAssetAutoRetryPlan) return
+    const timeout = window.setTimeout(() => {
+      beginGeneratedAssetsRetry(cosmeticGeneratedAssetAutoRetryPlan.failures, 'automatic')
+    }, cosmeticGeneratedAssetAutoRetryPlan.delayMs)
+    return () => window.clearTimeout(timeout)
+  }, [beginGeneratedAssetsRetry, cosmeticGeneratedAssetAutoRetryPlan])
 
   const retryGeneratedAssets = useCallback(() => {
-    setGeneratedAssetRetryAttempt(0)
-    beginGeneratedAssetsRetry(generatedAssetFailures)
-  }, [beginGeneratedAssetsRetry, generatedAssetFailures])
+    beginGeneratedAssetsRetry(generatedAssetRetryState.failures, 'manual')
+  }, [beginGeneratedAssetsRetry, generatedAssetRetryState.failures])
 
   useEffect(() => {
     const workerCompiler = createBrowserLandrushZombieEscapeCollisionWorldWorkerCompiler({
@@ -2012,16 +2020,17 @@ export function LandrushZombieEscapeMode({
       <LandrushZombieEscapePresentation
         active={active}
         combatStateRef={combatStateRef}
+        cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}
         expectedPhase={expectedPhase}
-        generatedAssetRetryGeneration={generatedAssetRetryGeneration}
+        generatedAssetRetryGenerations={generatedAssetRetryState.generations}
         groundY={groundY}
         impactVisualRegistry={impactVisualRegistry}
         materialPresentation={materialPresentation}
         materialPresentationReadinessMeshes={materialPresentationReadinessMeshes}
         muzzlePoseRef={muzzlePoseRef}
         navigationOverlayEnabled={navigationOverlayEnabled}
-        onGeneratedAssetsFailureChange={handleGeneratedAssetsFailureChange}
         onGeneratedAssetsReadinessChange={handleGeneratedAssetsReadinessChange}
+        onGeneratedAssetsSettlementChange={handleGeneratedAssetsSettlementChange}
         playerColor={playerColor}
         renderReadinessCamera={renderReadinessCamera}
         renderReadinessRegistry={renderReadinessRegistry}
@@ -2034,8 +2043,10 @@ export function LandrushZombieEscapeMode({
       />
       <LandrushZombieEscapeHudPortal
         expectedPhase={expectedPhase}
-        generatedAssetFailureCount={generatedAssetFailures.length}
-        generatedAssetsRetrying={generatedAssetsRetrying}
+        generatedAssetFailureCount={generatedAssetRetryState.failures.length}
+        generatedAssetsRetrying={
+          generatedAssetRetryState.retrying.core || generatedAssetRetryState.retrying.cosmetic
+        }
         inputMode={inputMode}
         onInput={handleTouchInput}
         onRetryGeneratedAssets={retryGeneratedAssets}
@@ -2054,16 +2065,19 @@ export function LandrushZombieEscapeMode({
 type LandrushZombieEscapePresentationProps = {
   active: boolean
   combatStateRef: RefObject<LandrushRobotWeaponCombatState>
+  cosmeticAssetsAdmitted: boolean
   expectedPhase: ZombieEscapeGamePhase
-  generatedAssetRetryGeneration: number
+  generatedAssetRetryGenerations: ZombieEscapeGeneratedAssetRetryGenerations
   groundY: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   materialPresentation: LandrushIslandMaterialPresentationOwner
   materialPresentationReadinessMeshes: readonly LandrushIslandMaterialReadinessMesh[]
   muzzlePoseRef: MutableRefObject<LandrushRobotWeaponMuzzlePose>
   navigationOverlayEnabled: boolean
-  onGeneratedAssetsFailureChange: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
   onGeneratedAssetsReadinessChange: (readiness: ZombieEscapeGeneratedAssetReadinessSnapshot) => void
+  onGeneratedAssetsSettlementChange: (
+    settlement: ZombieEscapeGeneratedAssetSettlementReport,
+  ) => void
   playerColor: string
   renderReadinessCamera: Camera
   renderReadinessRegistry: ZombieEscapeRenderReadinessRegistry
@@ -2078,16 +2092,17 @@ type LandrushZombieEscapePresentationProps = {
 const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePresentation({
   active,
   combatStateRef,
+  cosmeticAssetsAdmitted,
   expectedPhase,
-  generatedAssetRetryGeneration,
+  generatedAssetRetryGenerations,
   groundY,
   impactVisualRegistry,
   materialPresentation,
   materialPresentationReadinessMeshes,
   muzzlePoseRef,
   navigationOverlayEnabled,
-  onGeneratedAssetsFailureChange,
   onGeneratedAssetsReadinessChange,
+  onGeneratedAssetsSettlementChange,
   playerColor,
   renderReadinessCamera,
   renderReadinessRegistry,
@@ -2108,16 +2123,17 @@ const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePrese
       />
       <group position={[spawn.x, groundY, spawn.z]} visible={active}>
         <ZombieEscapeActors
+          cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}
           impactVisualRegistry={impactVisualRegistry}
-          onGeneratedAssetsFailureChange={onGeneratedAssetsFailureChange}
           onGeneratedAssetsReadinessChange={onGeneratedAssetsReadinessChange}
+          onGeneratedAssetsSettlementChange={onGeneratedAssetsSettlementChange}
           presentationFramePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.presentation}
           playerColor={playerColor}
           quality="balanced"
           renderReadinessCamera={renderReadinessCamera}
           renderReadinessRegistry={renderReadinessRegistry}
           renderPlayer={false}
-          retryGeneratedAssetsGeneration={generatedAssetRetryGeneration}
+          retryGeneratedAssetGenerations={generatedAssetRetryGenerations}
           simulationRef={simulationRef}
           zombieMaterialPhaseActive={zombieMaterialPhaseActive}
         />
@@ -2493,17 +2509,6 @@ export function LandrushZombieEscapeDayCountdown({
         Start zombie
       </span>
     </button>
-  )
-}
-
-function generatedAssetFailuresMatch(
-  first: readonly ZombieEscapeGeneratedAssetFailure[],
-  second: readonly ZombieEscapeGeneratedAssetFailure[],
-) {
-  if (first.length !== second.length) return false
-  return first.every(
-    (failure, index) =>
-      failure.key === second[index]?.key && failure.message === second[index]?.message,
   )
 }
 

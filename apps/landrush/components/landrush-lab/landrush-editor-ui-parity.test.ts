@@ -495,7 +495,7 @@ describe('Landrush Pascal editor UI parity', () => {
       "import { LandrushPascalEditorChrome } from './landrush-pascal-editor-chrome'",
     )
     expect(island).toMatch(
-      /editingChrome=\{\s*<LandrushPascalEditorChrome\s+active=\{buildEditorChromeActive && !zombieEscapeNightActive\}\s+chromeRootRef=\{buildEditorChromeRootRef\}\s+exitBuildButtonRef=\{buildEditorExitButtonRef\}\s+interactionReady=\{buildEditorInteractionReady\}\s+modeTransitionActive=\{buildEditorModeTransitionActive\}\s+onExitBuild=\{enterPlayerView\}\s+open=\{buildEditorLayoutOpen\}\s*\/>/,
+      /editingChrome=\{\s*zombieEscapeEnabled \? null : \(\s*<LandrushPascalEditorChrome\s+active=\{buildEditorChromeActive && !zombieEscapeNightActive\}\s+chromeRootRef=\{buildEditorChromeRootRef\}\s+exitBuildButtonRef=\{buildEditorExitButtonRef\}\s+interactionReady=\{buildEditorInteractionReady\}\s+modeTransitionActive=\{buildEditorModeTransitionActive\}\s+onExitBuild=\{enterPlayerView\}\s+open=\{buildEditorLayoutOpen\}\s*\/>\s*\)\s*\}/,
     )
     expect(island).toContain(
       'const buildEditorRuntimeActive = buildEditorSystemsActive && !zombieEscapeNightActive',

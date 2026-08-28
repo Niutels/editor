@@ -155,18 +155,12 @@
 [data-landrush-island-loading-shell] {
   opacity: 1;
   transition:
-    background-color 500ms ease-out,
     opacity 360ms ease-out,
     visibility 0s linear 0s;
 }
 
-body:has([data-landrush-island-world-frame-ready])
-  [data-landrush-island-loading-shell] {
-  background-color: transparent;
-}
-
 [data-landrush-island-loading-shell-fill] {
-  animation: landrush-island-loading-shell-progress 136.667s linear both;
+  animation: landrush-island-loading-shell-progress 120s linear both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
   transform: scaleX(0);
   transform-origin: left center;
@@ -174,7 +168,7 @@ body:has([data-landrush-island-world-frame-ready])
 }
 
 [data-landrush-island-loading-shell-percent-reel] {
-  animation: landrush-island-loading-shell-percent 136.667s steps(82, end) both;
+  animation: landrush-island-loading-shell-percent 120s steps(72, end) both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
   transform: translate3d(0, 0, 0);
   will-change: transform;
@@ -185,7 +179,7 @@ body:has([data-landrush-island-world-frame-ready])
     transform: scaleX(0);
   }
   100% {
-    transform: scaleX(0.82);
+    transform: scaleX(0.72);
   }
 }
 
@@ -194,7 +188,7 @@ body:has([data-landrush-island-world-frame-ready])
     transform: translate3d(0, 0, 0);
   }
   100% {
-    transform: translate3d(0, -82rem, 0);
+    transform: translate3d(0, -72rem, 0);
   }
 }
 
@@ -227,14 +221,12 @@ body:has([data-landrush-island-world-frame-ready])
     scroll-behavior: auto !important;
   }
   [data-landrush-island-loading-shell-fill] {
-    animation: none;
-    transform: scaleX(0.2);
-    will-change: auto;
+    animation-duration: 120s !important;
+    will-change: transform;
   }
   [data-landrush-island-loading-shell-percent-reel] {
-    animation: none;
-    transform: translate3d(0, -20rem, 0);
-    will-change: auto;
+    animation-duration: 120s !important;
+    will-change: transform;
   }
 }
 

@@ -2,13 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import {
   bootstrapLandrushIslandLoadingShellClient,
+  createStreamedShellMotionSegment,
   createLandrushIslandLoadingShellPercentKeyframes,
   LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
   LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL,
   LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY,
   LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
   LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE,
-  LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND,
+  STREAMED_SHELL_VELOCITY_PER_SECOND,
   type LandrushIslandLoadingBootRun,
   startLandrushIslandLoadingShellMotion,
 } from './landrush-island-loading-shell-bootstrap'
@@ -183,7 +184,7 @@ describe('Landrush island loading shell bootstrap', () => {
 
   test('starts one shell-owned compositor trajectory from the rendered CSS scale', () => {
     const run = createBootRun()
-    const style = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const style = { animation: 'shell-progress 120s linear', transform: '' }
     let animateCalls = 0
     let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
     let options: KeyframeAnimationOptions | number | undefined
@@ -196,7 +197,7 @@ describe('Landrush island loading shell bootstrap', () => {
         nextFrames: Keyframe[] | PropertyIndexedKeyframes,
         nextOptions?: KeyframeAnimationOptions | number,
       ) => {
-        expect(style.animation).toBe('shell-progress 136.667s linear')
+        expect(style.animation).toBe('shell-progress 120s linear')
         animateCalls += 1
         frames = nextFrames
         options = nextOptions
@@ -206,7 +207,6 @@ describe('Landrush island loading shell bootstrap', () => {
     } as unknown as HTMLElement
     const environment = {
       getComputedStyle: () => ({ transform: 'matrix(0.24, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 640 },
     }
 
@@ -226,16 +226,39 @@ describe('Landrush island loading shell bootstrap', () => {
     expect(style.transform).toBe('scaleX(0.24)')
     expect(run.motion).toEqual({
       animation,
+      durationMs: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
       fill,
-      velocityPerSecond: LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND,
+      fromProgress: 0.24,
+      toProgress: 0.96,
+      velocityPerSecond: STREAMED_SHELL_VELOCITY_PER_SECOND,
     })
   })
 
   test('cannot exhaust its initial compositor runway before crossing 50 percent', () => {
     expect(
-      LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND *
+      STREAMED_SHELL_VELOCITY_PER_SECOND *
         (LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS / 1_000),
     ).toBeGreaterThan(0.5)
+  })
+
+  test('keeps the exact shell slope while shortening the final positive runway', () => {
+    const full = createStreamedShellMotionSegment(
+      0,
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )
+    const renewed = createStreamedShellMotionSegment(
+      0.72,
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )
+
+    expect(full).toEqual({ durationMs: 120_000, fromProgress: 0, toProgress: 0.72 })
+    expect(renewed?.durationMs).toBeCloseTo(44_000, 9)
+    expect(renewed?.toProgress).toBeCloseTo(0.984, 12)
+    expect(
+      ((renewed?.toProgress ?? 0) - (renewed?.fromProgress ?? 0)) /
+        ((renewed?.durationMs ?? 1) / 1_000),
+    ).toBeCloseTo(STREAMED_SHELL_VELOCITY_PER_SECOND, 12)
+    expect(createStreamedShellMotionSegment(0.984, 120_000)).toBeNull()
   })
 
   test('gives a replacement shell in the same run its own compositor trajectory', () => {
@@ -247,11 +270,10 @@ describe('Landrush island loading shell bootstrap', () => {
           animateCalls += 1
           return { cancel: () => undefined, startTime: 100 } as Animation
         },
-        style: { animation: 'shell-progress 136.667s linear', transform: '' },
+        style: { animation: 'shell-progress 120s linear', transform: '' },
       }) as unknown as HTMLElement
     const environment = {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 100 },
     }
     const firstFill = createFill()
@@ -287,30 +309,31 @@ describe('Landrush island loading shell bootstrap', () => {
     ])
   })
 
-  test('leaves the CSS animation running for reduced motion or WAAPI failure', () => {
+  test('adopts the CSS animation under reduced motion and retains it on WAAPI failure', () => {
     const reducedRun = createBootRun()
-    const reducedStyle = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const reducedStyle = { animation: 'shell-progress 120s linear', transform: '' }
     let reducedAnimateCalls = 0
+    const reducedAnimation = { startTime: null as CSSNumberish | null } as Animation
     const reducedFill = {
       animate: () => {
         reducedAnimateCalls += 1
-        return { startTime: null } as Animation
+        return reducedAnimation
       },
       style: reducedStyle,
     } as unknown as HTMLElement
     const reduced = startLandrushIslandLoadingShellMotion(reducedFill, reducedRun, {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: true }),
       timeline: { currentTime: 100 },
     })
 
-    expect(reduced).toBeNull()
-    expect(reducedAnimateCalls).toBe(0)
-    expect(reducedStyle.animation).toBe('shell-progress 136.667s linear')
-    expect(reducedRun.motion).toBeUndefined()
+    expect(reduced).toBe(reducedRun.motion)
+    expect(reducedAnimateCalls).toBe(1)
+    expect(reducedAnimation.startTime).toBe(100)
+    expect(reducedStyle.animation).toBe('none')
+    expect(reduced?.velocityPerSecond).toBe(STREAMED_SHELL_VELOCITY_PER_SECOND)
 
     const failedRun = createBootRun()
-    const failedStyle = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const failedStyle = { animation: 'shell-progress 120s linear', transform: '' }
     const failedFill = {
       animate: () => {
         throw new Error('WAAPI unavailable')
@@ -319,19 +342,18 @@ describe('Landrush island loading shell bootstrap', () => {
     } as unknown as HTMLElement
     const failed = startLandrushIslandLoadingShellMotion(failedFill, failedRun, {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 100 },
     })
 
     expect(failed).toBeNull()
-    expect(failedStyle.animation).toBe('shell-progress 136.667s linear')
+    expect(failedStyle.animation).toBe('shell-progress 120s linear')
     expect(failedStyle.transform).toBe('')
     expect(failedRun.motion).toBeUndefined()
   })
 
   test('cancels an unanchorable WAAPI motion without disabling the CSS animation', () => {
     const run = createBootRun()
-    const style = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const style = { animation: 'shell-progress 120s linear', transform: '' }
     let cancelled = false
     const animation = {
       cancel: () => {
@@ -351,13 +373,12 @@ describe('Landrush island loading shell bootstrap', () => {
 
     const motion = startLandrushIslandLoadingShellMotion(fill, run, {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 100 },
     })
 
     expect(motion).toBeNull()
     expect(cancelled).toBe(true)
-    expect(style.animation).toBe('shell-progress 136.667s linear')
+    expect(style.animation).toBe('shell-progress 120s linear')
     expect(style.transform).toBe('')
     expect(run.motion).toBeUndefined()
   })

@@ -34,6 +34,15 @@ describe('Pascal multiplayer-island composition', () => {
     expect(routeSource).not.toContain('progressive')
     expect(clientSource).toContain("from '@landrush/pascal-host'")
     expect(clientSource.match(/<LandrushPascalHost\b/g)).toHaveLength(1)
+    expect(clientSource).toContain(
+      'sceneDrawDisabled={zombieEscapeEnabled && zombieStartupGates.sceneDrawDisabled}',
+    )
+    expect(clientSource).toContain(
+      "materialMode={zombieEscapeEnabled ? 'zombie-bounded' : 'detailed'}",
+    )
+    expect(clientSource).toMatch(
+      /stylizedGroundMaterialMode=\{\s*zombieEscapeEnabled \? 'zombie-bounded' : 'detailed'\s*\}/,
+    )
     expect(clientSource).not.toMatch(/<Viewer\b/)
     expect(clientSource).toContain(
       'const [viewerSceneReady, setViewerSceneReady] = useState(false)',
@@ -60,8 +69,8 @@ describe('Pascal multiplayer-island composition', () => {
     expect(runtimeOverlayStart).toBeGreaterThanOrEqual(0)
     expect(runtimeOverlayEnd).toBeGreaterThan(runtimeOverlayStart)
     const runtimeOverlaySource = clientSource.slice(runtimeOverlayStart, runtimeOverlayEnd)
-    expect(runtimeOverlaySource).toContain('bg-transparent')
-    expect(runtimeOverlaySource).not.toContain('bg-[#0f1720]')
+    expect(runtimeOverlaySource).toContain('bg-[#0f1720]')
+    expect(runtimeOverlaySource).not.toContain('bg-transparent')
     expect(clientSource.match(/createLandrushIslandPalmLayout\(\{/g)).toHaveLength(1)
     expect(clientSource).toContain('roadClearance: liveNaturalRoadPlan?.footprints.clearance ?? []')
     expect(clientSource.match(/palmLayout=\{livePalmLayout\}/g)).toHaveLength(2)
@@ -100,5 +109,6 @@ describe('Pascal multiplayer-island composition', () => {
     expect(hostSource).toContain('JSON.stringify([sceneReadyKey, sceneLoadRevision])')
     expect(hostSource).toContain('sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}')
     expect(hostSource).toContain('sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}')
+    expect(hostSource).toContain('sceneDrawDisabled={sceneDrawDisabled}')
   })
 })

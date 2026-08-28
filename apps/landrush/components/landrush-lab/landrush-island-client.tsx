@@ -101,7 +101,12 @@ import {
   useEditor,
   useSidebarStore,
 } from '@pascal-app/editor'
-import { useViewer } from '@pascal-app/viewer'
+import {
+  createViewerSceneDrawSubmissionState,
+  useViewer,
+  type ViewerRendererInitializationFailure,
+  type ViewerSceneDrawSubmissionRef,
+} from '@pascal-app/viewer'
 import { Html, KeyboardControls, OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import { type RootState, useFrame, useThree } from '@react-three/fiber'
 import {
@@ -373,6 +378,20 @@ import {
 } from './landrush-island-player-spawn'
 import { resolveLandrushIslandSpawnAuthorityHandoff } from './landrush-island-player-spawn-lifecycle'
 import { resolveLandrushIslandRobotAudioMode } from './landrush-island-robot-audio-mode'
+import {
+  advanceLandrushIslandZombieStartupState,
+  canAdvanceLandrushIslandZombieStartupLifecycle,
+  canTerminateLandrushIslandZombieStartupLifecycle,
+  createLandrushIslandZombieStartupState,
+  LANDRUSH_ISLAND_ZOMBIE_SCENE_PRIME_MAXIMUM_WAIT_MS,
+  LANDRUSH_ISLAND_ZOMBIE_STARTUP_TERMINAL_DEADLINE_MS,
+  type LandrushIslandZombieScenePrimeFenceStatus,
+  type LandrushIslandZombieStartupEvent,
+  type LandrushIslandZombieStartupLifecycle,
+  reconcileLandrushIslandZombieStartupLifecycle,
+  resolveLandrushIslandZombieScenePrimeAction,
+  resolveLandrushIslandZombieStartupGates,
+} from './landrush-island-startup-staging'
 import {
   LandrushIslandPlacedTvScreens,
   type LandrushIslandTvMediaSettings,
@@ -788,7 +807,7 @@ const LANDRUSH_ISLAND_LOADING_ZOMBIE_PROFILE_KEY = 'landrush-island:zombie-balan
 const LANDRUSH_ISLAND_LOADING_RUN_GENERATION = 'landrush-island:startup:v1'
 const LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE = 'landrush-island:startup-readiness:v2'
 const LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:day|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}`
-const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
+const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|startup-staging:v1|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
 const LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS = 520
 const LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS = 45_000
 const LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
@@ -3390,6 +3409,124 @@ export function LandrushIslandClient({
     (searchParams.get('landrushEditorReactProfile') === '1' ||
       searchParams.get('editorReactProfile') === '1')
   const [loadingActive, setLoadingActive] = useState(true)
+  const sceneDrawSubmissionRef = useRef(createViewerSceneDrawSubmissionState())
+  const [zombieStartupState, setZombieStartupState] = useState(
+    createLandrushIslandZombieStartupState,
+  )
+  const [zombieStartupLifecycleGeneration, setZombieStartupLifecycleGeneration] = useState(0)
+  const zombieStartupLifecycleRef = useRef<LandrushIslandZombieStartupLifecycle | null>(null)
+  const zombieStartupStateRef = useRef(zombieStartupState)
+  zombieStartupStateRef.current = zombieStartupState
+  const advanceZombieStartup = useCallback(
+    (event: LandrushIslandZombieStartupEvent, expectedGeneration: number) => {
+      if (
+        !canAdvanceLandrushIslandZombieStartupLifecycle(
+          zombieStartupLifecycleRef.current,
+          expectedGeneration,
+        )
+      ) {
+        return false
+      }
+      const current = zombieStartupStateRef.current
+      const next = advanceLandrushIslandZombieStartupState(current, event)
+      if (next === current) return false
+      zombieStartupStateRef.current = next
+      setZombieStartupState(next)
+      return true
+    },
+    [],
+  )
+  const terminateZombieStartup = useCallback(
+    (
+      event: Extract<LandrushIslandZombieStartupEvent, 'scene-prime-failed' | 'startup-failed'>,
+      expectedGeneration: number,
+    ) => {
+      if (
+        !canTerminateLandrushIslandZombieStartupLifecycle(
+          zombieStartupLifecycleRef.current,
+          expectedGeneration,
+        )
+      ) {
+        return false
+      }
+      const current = zombieStartupStateRef.current
+      const next = advanceLandrushIslandZombieStartupState(current, event)
+      if (next === current) return false
+      zombieStartupStateRef.current = next
+      setZombieStartupState(next)
+      return true
+    },
+    [],
+  )
+  const zombieStartupGates = useMemo(
+    () => resolveLandrushIslandZombieStartupGates(zombieStartupState),
+    [zombieStartupState],
+  )
+  const loadingPresentationActive = zombieEscapeEnabled
+    ? zombieStartupGates.loadingOverlayVisible
+    : loadingActive
+  const coreGameplayAdmitted = zombieEscapeEnabled
+    ? zombieStartupGates.coreGameplayAdmitted
+    : !loadingActive
+  const ambientLifeAdmitted = zombieEscapeEnabled ? zombieStartupGates.ambientLifeAdmitted : true
+  const colliderRebuildAdmitted = zombieEscapeEnabled
+    ? zombieStartupGates.colliderRebuildAdmitted
+    : true
+  const deferredRuntimeAdmitted = zombieEscapeEnabled
+    ? zombieStartupGates.deferredRuntimeAdmitted
+    : !loadingActive
+  const cosmeticAssetsAdmitted = zombieEscapeEnabled
+    ? zombieStartupGates.cosmeticAssetsAdmitted
+    : true
+  const zombieStartupFrameIdsRef = useRef(new Set<number>())
+  const zombieStartupHandoffScheduledRef = useRef(false)
+  const zombieStartupDeadlineStartedAtRef = useRef<number | null>(null)
+  const cancelZombieStartupAdmissions = useCallback(() => {
+    for (const frameId of zombieStartupFrameIdsRef.current) {
+      window.cancelAnimationFrame(frameId)
+    }
+    zombieStartupFrameIdsRef.current.clear()
+    zombieStartupHandoffScheduledRef.current = false
+  }, [])
+  useEffect(
+    () => () => {
+      zombieStartupLifecycleRef.current = null
+      zombieStartupDeadlineStartedAtRef.current = null
+      cancelZombieStartupAdmissions()
+    },
+    [cancelZombieStartupAdmissions],
+  )
+  useEffect(() => {
+    if (
+      !zombieEscapeEnabled ||
+      zombieStartupState.phase === 'live' ||
+      zombieStartupState.phase === 'render-error'
+    ) {
+      zombieStartupDeadlineStartedAtRef.current = null
+      return
+    }
+
+    const now = performance.now()
+    zombieStartupDeadlineStartedAtRef.current ??= now
+    const remainingMs = Math.max(
+      0,
+      LANDRUSH_ISLAND_ZOMBIE_STARTUP_TERMINAL_DEADLINE_MS -
+        (now - zombieStartupDeadlineStartedAtRef.current),
+    )
+    const expectedGeneration = zombieStartupLifecycleGeneration
+    const timeoutId = window.setTimeout(() => {
+      if (terminateZombieStartup('startup-failed', expectedGeneration)) {
+        console.error('[landrush] Zombie startup exceeded its terminal loading deadline.')
+        renderScheduler.requestFrame('animation')
+      }
+    }, remainingMs)
+    return () => window.clearTimeout(timeoutId)
+  }, [
+    terminateZombieStartup,
+    zombieEscapeEnabled,
+    zombieStartupLifecycleGeneration,
+    zombieStartupState.phase,
+  ])
   const [viewerSceneReady, setViewerSceneReady] = useState(false)
   const [worldFrameReady, setWorldFrameReady] = useState(false)
   const [ambientLoadReadiness, setAmbientLoadReadiness] =
@@ -3411,8 +3548,8 @@ export function LandrushIslandClient({
     !stylizedGroundTextureRequired,
   )
   const activePerfRun = useMemo(
-    () => ({ ...perfRun, enabled: perfRun.enabled && !loadingActive }),
-    [loadingActive, perfRun],
+    () => ({ ...perfRun, enabled: perfRun.enabled && deferredRuntimeAdmitted }),
+    [deferredRuntimeAdmitted, perfRun],
   )
   const frameProfile =
     searchParams.get('frameProfile') === '1' || searchParams.get('profileFrame') === '1'
@@ -4170,16 +4307,16 @@ export function LandrushIslandClient({
   const authorityPresentationReady = initialParcelMaterializationReady && viewerSceneReady
   const authorityResyncActive = resolveLandrushAuthorityResyncActive({
     authorityKey: initialParcelAuthorityKey,
-    handedOff: !loadingActive,
+    handedOff: coreGameplayAdmitted,
     presentedAuthorityKey: presentedParcelAuthorityKey,
     ready: authorityPresentationReady,
   })
   useEffect(() => {
-    if (loadingActive || !authorityPresentationReady) return
+    if (!coreGameplayAdmitted || !authorityPresentationReady) return
     setPresentedParcelAuthorityKey((current) =>
       current === initialParcelAuthorityKey ? current : initialParcelAuthorityKey,
     )
-  }, [authorityPresentationReady, initialParcelAuthorityKey, loadingActive])
+  }, [authorityPresentationReady, coreGameplayAdmitted, initialParcelAuthorityKey])
   const buildAuthorityRef = useRef({
     epoch: multiplayer.parcelBuildContentAuthorityEpoch,
     worldId: parcelWorldId,
@@ -4271,7 +4408,7 @@ export function LandrushIslandClient({
       setZombieEscapePhase('build')
       return
     }
-    if (loadingActive) return
+    if (!coreGameplayAdmitted) return
 
     if (zombieEscapePhase === 'build') {
       appliedZombieEscapePhaseRef.current = zombieEscapePhase
@@ -4292,7 +4429,7 @@ export function LandrushIslandClient({
     buildMode,
     enterPlayerView,
     fpvView,
-    loadingActive,
+    coreGameplayAdmitted,
     mapView,
     zombieEscapeEnabled,
     zombieEscapePhase,
@@ -4303,7 +4440,7 @@ export function LandrushIslandClient({
     cameraOwner,
     fpvView,
     generatedAssetsReady: zombieEscapeGeneratedAssetsReady,
-    loadingActive,
+    loadingActive: !coreGameplayAdmitted,
     mapView,
     modeTransitionActive: modeTransitionFade !== null,
     phase: zombieEscapePhase,
@@ -4603,6 +4740,46 @@ export function LandrushIslandClient({
     naturalRoadPlanRequired ? 'required' : 'omitted'
   }|procedural-cliffs:${proceduralCliffsRequired ? 'required' : 'omitted'}`
   const loadingRunGenerationRef = useRef(LANDRUSH_ISLAND_LOADING_RUN_GENERATION)
+  const zombieStartupRunKey = `${loadingRunGenerationRef.current}|${loadingTopologySignature}`
+  useLayoutEffect(() => {
+    const reconciliation = reconcileLandrushIslandZombieStartupLifecycle({
+      authorityKey: initialParcelAuthorityKey,
+      current: zombieStartupLifecycleRef.current,
+      enabled: zombieEscapeEnabled,
+      readinessReady: loadingPaintReady,
+      runKey: zombieStartupRunKey,
+    })
+    zombieStartupLifecycleRef.current = reconciliation.lifecycle
+    if (!reconciliation.reset) return
+
+    cancelZombieStartupAdmissions()
+    const resetState = createLandrushIslandZombieStartupState()
+    zombieStartupStateRef.current = resetState
+    setZombieStartupState(resetState)
+    setZombieStartupLifecycleGeneration(reconciliation.lifecycle.generation)
+    renderScheduler.requestFrame('animation')
+  }, [
+    cancelZombieStartupAdmissions,
+    initialParcelAuthorityKey,
+    loadingPaintReady,
+    zombieEscapeEnabled,
+    zombieStartupRunKey,
+  ])
+  useLayoutEffect(() => {
+    if (!zombieEscapeEnabled || !loadingPaintReady) return
+    if (advanceZombieStartup('critical-ready', zombieStartupLifecycleGeneration)) {
+      renderScheduler.requestFrame('animation')
+    }
+  }, [
+    advanceZombieStartup,
+    loadingPaintReady,
+    zombieEscapeEnabled,
+    zombieStartupLifecycleGeneration,
+  ])
+  const loadingRunGeneration = zombieEscapeEnabled
+    ? `${loadingRunGenerationRef.current}:zombie:${String(zombieStartupLifecycleGeneration)}`
+    : loadingRunGenerationRef.current
+  const loadingOverlayKey = `${loadingProfileKey}:${loadingRunGeneration}`
   const loadingTasks = useMemo<readonly LandrushIslandLoadingTaskSnapshot[]>(() => {
     const tasks: LandrushIslandLoadingTaskSnapshot[] = [
       {
@@ -4675,6 +4852,13 @@ export function LandrushIslandClient({
           ready: zombieEscapeGeneratedAssetReadiness?.pipelineReady === true,
           total: 1,
         },
+        {
+          completed:
+            zombieStartupState.phase === 'fade' || zombieStartupState.phase === 'live' ? 1 : 0,
+          id: 'zombie-scene-prime',
+          ready: zombieStartupState.phase === 'fade' || zombieStartupState.phase === 'live',
+          total: 1,
+        },
       )
     }
 
@@ -4698,6 +4882,7 @@ export function LandrushIslandClient({
     worldFrameReady,
     zombieEscapeEnabled,
     zombieEscapeGeneratedAssetReadiness,
+    zombieStartupState.phase,
   ])
   const hasLiveWaterNode = useScene((state) =>
     Boolean(state.nodes[LANDRUSH_ISLAND_NODE_ID as never]),
@@ -6176,10 +6361,84 @@ export function LandrushIslandClient({
     setGrassGroundTintCapPercent(LANDRUSH_ISLAND_GRASS_GROUND_TINT_CAP_PERCENT)
     setTerrainFieldResolution(WATER_FIELD_RESOLUTION)
   }
-  const handleLoadingLoaded = useCallback(() => {
-    setPresentedParcelAuthorityKey(initialParcelAuthorityKey)
-    setLoadingActive(false)
-  }, [initialParcelAuthorityKey])
+  const handleZombieScenePrimeReady = useCallback(
+    (expectedGeneration: number) => {
+      if (advanceZombieStartup('scene-prime-ready', expectedGeneration)) {
+        renderScheduler.requestFrame('animation')
+      }
+    },
+    [advanceZombieStartup],
+  )
+  const handleZombieScenePrimeFailure = useCallback(
+    (expectedGeneration: number, failure: LandrushIslandZombieScenePrimeFailure) => {
+      if (terminateZombieStartup('scene-prime-failed', expectedGeneration)) {
+        console.error('[landrush] Zombie scene prime could not produce a stable frame.', failure)
+        renderScheduler.requestFrame('animation')
+      }
+    },
+    [terminateZombieStartup],
+  )
+  const handleZombieRendererInitializationFailure = useCallback(
+    (failure: ViewerRendererInitializationFailure) => {
+      const expectedGeneration = zombieStartupLifecycleGeneration
+      if (terminateZombieStartup('startup-failed', expectedGeneration)) {
+        console.error('[landrush] Zombie renderer could not initialize.', failure)
+        renderScheduler.requestFrame('animation')
+      }
+    },
+    [terminateZombieStartup, zombieStartupLifecycleGeneration],
+  )
+  const handleLoadingLoaded = useCallback(
+    (completedLifecycleGeneration: number) => {
+      if (zombieEscapeEnabled) {
+        if (
+          zombieStartupHandoffScheduledRef.current ||
+          zombieStartupStateRef.current.phase !== 'fade' ||
+          !canAdvanceLandrushIslandZombieStartupLifecycle(
+            zombieStartupLifecycleRef.current,
+            completedLifecycleGeneration,
+          )
+        ) {
+          return
+        }
+        zombieStartupHandoffScheduledRef.current = true
+        const events: readonly LandrushIslandZombieStartupEvent[] = [
+          'fade-finished',
+          'admit-collider',
+          'admit-ambient',
+          'admit-deferred',
+          'admit-cosmetics',
+        ]
+        const scheduleAdmission = (index: number) => {
+          const event = events[index]
+          if (!event) return
+          const frameId = window.requestAnimationFrame(() => {
+            zombieStartupFrameIdsRef.current.delete(frameId)
+            if (
+              !canAdvanceLandrushIslandZombieStartupLifecycle(
+                zombieStartupLifecycleRef.current,
+                completedLifecycleGeneration,
+              ) ||
+              !advanceZombieStartup(event, completedLifecycleGeneration)
+            ) {
+              return
+            }
+            if (event === 'fade-finished') {
+              setPresentedParcelAuthorityKey(initialParcelAuthorityKey)
+            }
+            renderScheduler.requestFrame('animation')
+            scheduleAdmission(index + 1)
+          })
+          zombieStartupFrameIdsRef.current.add(frameId)
+        }
+        scheduleAdmission(0)
+        return
+      }
+      setPresentedParcelAuthorityKey(initialParcelAuthorityKey)
+      setLoadingActive(false)
+    },
+    [advanceZombieStartup, initialParcelAuthorityKey, zombieEscapeEnabled],
+  )
 
   return (
     <main
@@ -6187,7 +6446,7 @@ export function LandrushIslandClient({
       className="relative h-screen w-screen overflow-hidden bg-[#0f1720] outline-none [&_canvas]:h-full [&_canvas]:w-full [&_canvas]:touch-none"
       data-landrush-interface-focus-sink
       data-landrush-loading-ambient-ready={ambientLoadReadiness?.ready === true ? 'true' : 'false'}
-      data-landrush-loading-handed-off={!loadingActive ? 'true' : 'false'}
+      data-landrush-loading-handed-off={coreGameplayAdmitted ? 'true' : 'false'}
       data-landrush-loading-initial-parcel-ready={
         initialParcelMaterializationReady ? 'true' : 'false'
       }
@@ -6211,13 +6470,19 @@ export function LandrushIslandClient({
       data-landrush-loading-zombie-assets-ready={
         zombieEscapeGeneratedAssetsReady ? 'true' : 'false'
       }
+      data-landrush-zombie-startup-admission={
+        zombieEscapeEnabled ? zombieStartupState.admission : undefined
+      }
+      data-landrush-zombie-startup-phase={
+        zombieEscapeEnabled ? zombieStartupState.phase : undefined
+      }
       tabIndex={-1}
     >
       <div
-        aria-hidden={loadingActive}
+        aria-hidden={loadingPresentationActive}
         className={[
           'absolute inset-0 transition-[filter,transform,opacity] duration-500 ease-out',
-          loadingActive
+          loadingPresentationActive && !zombieEscapeEnabled
             ? 'pointer-events-none scale-[1.01] blur-[7px]'
             : 'scale-100 blur-0 brightness-100',
         ].join(' ')}
@@ -6235,15 +6500,17 @@ export function LandrushIslandClient({
             <LandrushPascalHost
               disablePostFx={!benchPostFx}
               editingChrome={
-                <LandrushPascalEditorChrome
-                  active={buildEditorChromeActive && !zombieEscapeNightActive}
-                  chromeRootRef={buildEditorChromeRootRef}
-                  exitBuildButtonRef={buildEditorExitButtonRef}
-                  interactionReady={buildEditorInteractionReady}
-                  modeTransitionActive={buildEditorModeTransitionActive}
-                  onExitBuild={enterPlayerView}
-                  open={buildEditorLayoutOpen}
-                />
+                zombieEscapeEnabled ? null : (
+                  <LandrushPascalEditorChrome
+                    active={buildEditorChromeActive && !zombieEscapeNightActive}
+                    chromeRootRef={buildEditorChromeRootRef}
+                    exitBuildButtonRef={buildEditorExitButtonRef}
+                    interactionReady={buildEditorInteractionReady}
+                    modeTransitionActive={buildEditorModeTransitionActive}
+                    onExitBuild={enterPlayerView}
+                    open={buildEditorLayoutOpen}
+                  />
+                )
               }
               editingActive={buildEditorRuntimeActive}
               editingViewportModeTransitionActive={buildEditorModeTransitionActive}
@@ -6255,12 +6522,17 @@ export function LandrushIslandClient({
                   ? activeBuildGroundY
                   : null
               }
-              presentationEffectRef={viewerPresentationEffectRef}
+              presentationEffectRef={zombieEscapeEnabled ? undefined : viewerPresentationEffectRef}
               projectId={experienceConfig.projectId}
+              onRendererInitializationFailure={
+                zombieEscapeEnabled ? handleZombieRendererInitializationFailure : undefined
+              }
+              rendererBackend={zombieEscapeEnabled ? 'webgl' : undefined}
               sceneReadyKey={initialParcelAuthorityKey}
               sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}
               sceneReadyPrerequisitesReady={initialParcelMaterializationReady}
-              sceneDrawDisabled={zombieEscapeEnabled && loadingActive}
+              sceneDrawDisabled={zombieEscapeEnabled && zombieStartupGates.sceneDrawDisabled}
+              sceneDrawSubmissionRef={zombieEscapeEnabled ? sceneDrawSubmissionRef : undefined}
             >
               <LandrushIslandStartupReactProfiler
                 enabled={editorRuntimeReactProfileEnabled}
@@ -6273,14 +6545,16 @@ export function LandrushIslandClient({
                   onRender={handleStartupReactRender}
                 >
                   <LandrushRenderSchedulerBridge />
-                  <LandrushIslandPresentationEffectDriver
-                    fallPresentationRef={fallPresentationRef}
-                    fpvActive={fpvActive}
-                    jumpPresentationRef={jumpEdgeBlurPresentationRef}
-                    localMotionRef={localMotionRef}
-                    outputPresentationRef={viewerPresentationEffectRef}
-                    presentationRef={modeTransitionPresentationRef}
-                  />
+                  {!zombieEscapeEnabled ? (
+                    <LandrushIslandPresentationEffectDriver
+                      fallPresentationRef={fallPresentationRef}
+                      fpvActive={fpvActive}
+                      jumpPresentationRef={jumpEdgeBlurPresentationRef}
+                      localMotionRef={localMotionRef}
+                      outputPresentationRef={viewerPresentationEffectRef}
+                      presentationRef={modeTransitionPresentationRef}
+                    />
+                  ) : null}
                   <color args={['#164a77']} attach="background" />
                   {multiplayerNaturalEnvironment ? (
                     <>
@@ -6324,7 +6598,7 @@ export function LandrushIslandClient({
                       ) : null}
                     </>
                   ) : null}
-                  {!zombieEscapeEnabled || !loadingActive ? (
+                  {ambientLifeAdmitted ? (
                     <LandrushIslandAmbientLife
                       admitted={initialParcelMaterializationReady}
                       npcsVisible={!zombieEscapeNightActive}
@@ -6353,7 +6627,8 @@ export function LandrushIslandClient({
                       buildCameraPoseRef={buildCameraPoseRef}
                       cameraOwner={cameraOwner}
                       dayInterfaceCommandsEnabled={dayInterfaceCommandsEnabled}
-                      deferBuiltColliderRebuild={zombieEscapeEnabled && loadingActive}
+                      cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}
+                      deferBuiltColliderRebuild={zombieEscapeEnabled && !colliderRebuildAdmitted}
                       fallPresentationRef={fallPresentationRef}
                       fpvActive={fpvActive}
                       grassInteractionRef={grassInteractionRef}
@@ -6373,7 +6648,7 @@ export function LandrushIslandClient({
                       navigationLiveScenario={navigationLiveScenario}
                       navigationLiveScenarioAutoRun={navigationLiveScenarioAutoRun}
                       navigationLiveScenarioReady={
-                        !loadingActive || navigationLiveScenarioImmediate
+                        deferredRuntimeAdmitted || navigationLiveScenarioImmediate
                       }
                       onZombieEscapeGeneratedAssetsReadinessChange={
                         handleZombieEscapeGeneratedAssetsReadinessChange
@@ -6578,6 +6853,16 @@ export function LandrushIslandClient({
                     visibilityRef={grassVisibilityRef}
                   />
                   <LandrushIslandWorldFrameReporter onReady={() => setWorldFrameReady(true)} />
+                  {zombieEscapeEnabled ? (
+                    <LandrushIslandZombieScenePrimeReporter
+                      active={zombieStartupState.phase === 'scene-prime'}
+                      key={`zombie-scene-prime:${String(zombieStartupLifecycleGeneration)}`}
+                      lifecycleGeneration={zombieStartupLifecycleGeneration}
+                      onFailure={handleZombieScenePrimeFailure}
+                      onReady={handleZombieScenePrimeReady}
+                      sceneDrawSubmissionRef={sceneDrawSubmissionRef}
+                    />
+                  ) : null}
                 </LandrushIslandStartupReactProfiler>
               </LandrushIslandStartupReactProfiler>
             </LandrushPascalHost>
@@ -6832,11 +7117,15 @@ export function LandrushIslandClient({
         ) : null}
       </div>
       <LandrushIslandAuthorityResyncVeil active={authorityResyncActive} />
-      {loadingActive ? (
+      {zombieEscapeEnabled && zombieStartupState.phase === 'render-error' ? (
+        <LandrushIslandZombieRenderErrorFallback />
+      ) : loadingPresentationActive ? (
         <LandrushIslandLoadingOverlay
+          key={loadingOverlayKey}
+          lifecycleGeneration={zombieStartupLifecycleGeneration}
           onLoaded={handleLoadingLoaded}
           profileKey={loadingProfileKey}
-          runGeneration={loadingRunGenerationRef.current}
+          runGeneration={loadingRunGeneration}
           sampleInvalidationKey={initialParcelAuthorityKey}
           tasks={loadingTasks}
           topologySignature={loadingTopologySignature}
@@ -7100,7 +7389,287 @@ function resolveLandrushIslandMapPresentationProgress(
   return viewMode === 'map' ? 1 : 0
 }
 
+type LandrushIslandWebGLFenceContext = Pick<
+  WebGL2RenderingContext,
+  | 'ALREADY_SIGNALED'
+  | 'CONDITION_SATISFIED'
+  | 'SYNC_GPU_COMMANDS_COMPLETE'
+  | 'WAIT_FAILED'
+  | 'clientWaitSync'
+  | 'deleteSync'
+  | 'fenceSync'
+  | 'flush'
+>
+
+function resolveLandrushIslandWebGLFenceContext(renderer: unknown) {
+  const context = (renderer as { getContext?: () => unknown }).getContext?.() as
+    | Partial<LandrushIslandWebGLFenceContext>
+    | undefined
+  if (
+    !context ||
+    typeof context.clientWaitSync !== 'function' ||
+    typeof context.deleteSync !== 'function' ||
+    typeof context.fenceSync !== 'function' ||
+    typeof context.flush !== 'function' ||
+    typeof context.ALREADY_SIGNALED !== 'number' ||
+    typeof context.CONDITION_SATISFIED !== 'number' ||
+    typeof context.SYNC_GPU_COMMANDS_COMPLETE !== 'number' ||
+    typeof context.WAIT_FAILED !== 'number'
+  ) {
+    return null
+  }
+  return context as LandrushIslandWebGLFenceContext
+}
+
+function disposeLandrushIslandWebGLFence(
+  context: LandrushIslandWebGLFenceContext | null,
+  fence: WebGLSync | null,
+) {
+  if (!context || !fence) return
+  try {
+    context.deleteSync(fence)
+  } catch {
+    return
+  }
+}
+
+type LandrushIslandZombieScenePrimeProgress = Readonly<{
+  attempts: number
+  elapsedMs: number
+  failures: number
+  successfulSubmissions: number
+}>
+
+type LandrushIslandZombieScenePrimeFailure = LandrushIslandZombieScenePrimeProgress &
+  Readonly<{ fenceStatus: LandrushIslandZombieScenePrimeFenceStatus }>
+
+function LandrushIslandZombieScenePrimeReporter({
+  active,
+  lifecycleGeneration,
+  onFailure,
+  onReady,
+  sceneDrawSubmissionRef,
+}: {
+  active: boolean
+  lifecycleGeneration: number
+  onFailure: (lifecycleGeneration: number, failure: LandrushIslandZombieScenePrimeFailure) => void
+  onReady: (lifecycleGeneration: number) => void
+  sceneDrawSubmissionRef: ViewerSceneDrawSubmissionRef
+}) {
+  const { gl, invalidate } = useThree()
+  const activeRef = useRef(active)
+  const lifecycleGenerationRef = useRef(lifecycleGeneration)
+  const onFailureRef = useRef(onFailure)
+  const onReadyRef = useRef(onReady)
+  const generationRef = useRef(0)
+  const sceneDrawSubmissionBaselineRef = useRef({ ...sceneDrawSubmissionRef.current })
+  const primeStartedAtRef = useRef(0)
+  const fenceContextRef = useRef<LandrushIslandWebGLFenceContext | null>(null)
+  const fenceRef = useRef<WebGLSync | null>(null)
+  const fenceStatusRef = useRef<LandrushIslandZombieScenePrimeFenceStatus>('missing')
+  const outcomeFrameIdsRef = useRef(new Set<number>())
+  const outcomeScheduledRef = useRef(false)
+  const deadlineTimeoutIdRef = useRef<number | null>(null)
+  activeRef.current = active
+  lifecycleGenerationRef.current = lifecycleGeneration
+  onFailureRef.current = onFailure
+  onReadyRef.current = onReady
+
+  const readPrimeProgress = useCallback((): LandrushIslandZombieScenePrimeProgress => {
+    const baseline = sceneDrawSubmissionBaselineRef.current
+    const current = sceneDrawSubmissionRef.current
+    return {
+      attempts: Math.max(0, current.attempts - baseline.attempts),
+      elapsedMs: Math.max(0, performance.now() - primeStartedAtRef.current),
+      failures: Math.max(0, current.failures - baseline.failures),
+      successfulSubmissions: Math.max(
+        0,
+        current.successfulSubmissions - baseline.successfulSubmissions,
+      ),
+    }
+  }, [sceneDrawSubmissionRef])
+
+  const scheduleOutcome = useCallback(
+    (outcome: 'ready' | 'failed', progress: LandrushIslandZombieScenePrimeProgress) => {
+      if (!activeRef.current || outcomeScheduledRef.current) return
+      outcomeScheduledRef.current = true
+      if (deadlineTimeoutIdRef.current !== null) {
+        window.clearTimeout(deadlineTimeoutIdRef.current)
+        deadlineTimeoutIdRef.current = null
+      }
+      disposeLandrushIslandWebGLFence(fenceContextRef.current, fenceRef.current)
+      fenceRef.current = null
+      const generation = generationRef.current
+      const expectedLifecycleGeneration = lifecycleGenerationRef.current
+      if (outcome === 'failed') {
+        onFailureRef.current(expectedLifecycleGeneration, {
+          ...progress,
+          fenceStatus: fenceStatusRef.current,
+        })
+        return
+      }
+
+      const firstFrameId = window.requestAnimationFrame(() => {
+        outcomeFrameIdsRef.current.delete(firstFrameId)
+        const secondFrameId = window.requestAnimationFrame(() => {
+          outcomeFrameIdsRef.current.delete(secondFrameId)
+          if (activeRef.current && generationRef.current === generation) {
+            onReadyRef.current(expectedLifecycleGeneration)
+          }
+        })
+        outcomeFrameIdsRef.current.add(secondFrameId)
+      })
+      outcomeFrameIdsRef.current.add(firstFrameId)
+    },
+    [],
+  )
+
+  useLayoutEffect(() => {
+    void lifecycleGeneration
+    generationRef.current += 1
+    sceneDrawSubmissionBaselineRef.current = { ...sceneDrawSubmissionRef.current }
+    primeStartedAtRef.current = performance.now()
+    outcomeScheduledRef.current = false
+    if (deadlineTimeoutIdRef.current !== null) {
+      window.clearTimeout(deadlineTimeoutIdRef.current)
+      deadlineTimeoutIdRef.current = null
+    }
+    for (const frameId of outcomeFrameIdsRef.current) window.cancelAnimationFrame(frameId)
+    outcomeFrameIdsRef.current.clear()
+    disposeLandrushIslandWebGLFence(fenceContextRef.current, fenceRef.current)
+    fenceRef.current = null
+    fenceContextRef.current = resolveLandrushIslandWebGLFenceContext(gl)
+    fenceStatusRef.current = fenceContextRef.current ? 'missing' : 'unavailable'
+    if (active) {
+      deadlineTimeoutIdRef.current = window.setTimeout(() => {
+        if (!activeRef.current || outcomeScheduledRef.current) return
+        const progress = readPrimeProgress()
+        const boundedProgress = {
+          ...progress,
+          elapsedMs: Math.max(
+            progress.elapsedMs,
+            LANDRUSH_ISLAND_ZOMBIE_SCENE_PRIME_MAXIMUM_WAIT_MS,
+          ),
+        }
+        const action = resolveLandrushIslandZombieScenePrimeAction({
+          attempts: boundedProgress.attempts,
+          elapsedMs: boundedProgress.elapsedMs,
+          fenceStatus: fenceStatusRef.current,
+          successfulSubmissions: boundedProgress.successfulSubmissions,
+        })
+        scheduleOutcome(action === 'settle' ? 'ready' : 'failed', boundedProgress)
+      }, LANDRUSH_ISLAND_ZOMBIE_SCENE_PRIME_MAXIMUM_WAIT_MS)
+      invalidate()
+      renderScheduler.requestFrame('animation')
+    }
+
+    return () => {
+      generationRef.current += 1
+      if (deadlineTimeoutIdRef.current !== null) {
+        window.clearTimeout(deadlineTimeoutIdRef.current)
+        deadlineTimeoutIdRef.current = null
+      }
+      for (const frameId of outcomeFrameIdsRef.current) window.cancelAnimationFrame(frameId)
+      outcomeFrameIdsRef.current.clear()
+      disposeLandrushIslandWebGLFence(fenceContextRef.current, fenceRef.current)
+      fenceRef.current = null
+    }
+  }, [
+    active,
+    gl,
+    invalidate,
+    lifecycleGeneration,
+    readPrimeProgress,
+    sceneDrawSubmissionRef,
+    scheduleOutcome,
+  ])
+
+  useFrame(() => {
+    if (!activeRef.current || outcomeScheduledRef.current) return
+    const progress = readPrimeProgress()
+    const context = fenceContextRef.current
+    const fence = fenceRef.current
+    if (context && fence && fenceStatusRef.current === 'pending') {
+      try {
+        const waitStatus = context.clientWaitSync(fence, 0, 0)
+        if (waitStatus === context.ALREADY_SIGNALED || waitStatus === context.CONDITION_SATISFIED) {
+          fenceStatusRef.current = 'settled'
+        } else if (waitStatus === context.WAIT_FAILED) {
+          fenceStatusRef.current = 'failed'
+        }
+      } catch {
+        fenceStatusRef.current = 'failed'
+      }
+    }
+
+    let action = resolveLandrushIslandZombieScenePrimeAction({
+      attempts: progress.attempts,
+      elapsedMs: progress.elapsedMs,
+      fenceStatus: fenceStatusRef.current,
+      successfulSubmissions: progress.successfulSubmissions,
+    })
+    if (action === 'insert-fence' && context) {
+      try {
+        const nextFence = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0)
+        if (nextFence) {
+          fenceRef.current = nextFence
+          fenceStatusRef.current = 'pending'
+          context.flush()
+        } else {
+          fenceStatusRef.current = 'failed'
+        }
+      } catch {
+        fenceStatusRef.current = 'failed'
+      }
+      action = resolveLandrushIslandZombieScenePrimeAction({
+        attempts: progress.attempts,
+        elapsedMs: progress.elapsedMs,
+        fenceStatus: fenceStatusRef.current,
+        successfulSubmissions: progress.successfulSubmissions,
+      })
+    }
+
+    if (action === 'settle') {
+      scheduleOutcome('ready', progress)
+      return
+    }
+    if (action === 'fail') {
+      scheduleOutcome('failed', progress)
+      return
+    }
+    invalidate()
+    renderScheduler.requestFrame('animation')
+  }, LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.viewerRender + 0.1)
+
+  return null
+}
+
+function LandrushIslandZombieRenderErrorFallback() {
+  return (
+    <div
+      className="pointer-events-auto absolute inset-0 z-[230] grid place-items-center bg-[#0f1720] px-6 text-center text-white"
+      data-landrush-zombie-render-error
+      role="alert"
+    >
+      <div className="max-w-md rounded-2xl border border-red-200/20 bg-slate-950/72 px-7 py-6 shadow-2xl">
+        <p className="font-semibold text-lg">The 3D scene could not render.</p>
+        <p className="mt-2 text-sm text-white/72">
+          The game stayed hidden because no stable frame reached the screen.
+        </p>
+        <button
+          className="mt-5 rounded-full border border-white/20 bg-white/10 px-5 py-2 font-semibold text-sm transition-colors hover:bg-white/16 focus-visible:outline-2 focus-visible:outline-amber-200"
+          onClick={() => window.location.reload()}
+          type="button"
+        >
+          Reload and retry
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function LandrushIslandLoadingOverlay({
+  lifecycleGeneration,
   onLoaded,
   profileKey,
   runGeneration,
@@ -7108,7 +7677,8 @@ function LandrushIslandLoadingOverlay({
   tasks,
   topologySignature,
 }: {
-  onLoaded: () => void
+  lifecycleGeneration: number
+  onLoaded: (lifecycleGeneration: number) => void
   profileKey: string
   runGeneration: string
   sampleInvalidationKey: string
@@ -7118,7 +7688,7 @@ function LandrushIslandLoadingOverlay({
   const { fillRef, overlayRef, progress, statusText, visible } = useLandrushIslandLoadingTimeline({
     generation: runGeneration,
     handoffFadeMs: LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS,
-    onHandoff: onLoaded,
+    onHandoff: () => onLoaded(lifecycleGeneration),
     profileKey,
     sampleInvalidationKey,
     tasks,
@@ -7134,7 +7704,7 @@ function LandrushIslandLoadingOverlay({
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={percent}
-      className="pointer-events-auto absolute inset-0 z-[220] grid place-items-center bg-transparent"
+      className="pointer-events-auto absolute inset-0 z-[220] grid place-items-center bg-[#0f1720]"
       ref={overlayRef}
       role="progressbar"
     >
@@ -9905,6 +10475,7 @@ function LandrushIslandPlayerLayer({
   bugReportReplayPlayer,
   buildCameraPoseRef,
   cameraOwner,
+  cosmeticAssetsAdmitted,
   dayInterfaceCommandsEnabled,
   deferBuiltColliderRebuild,
   fallPresentationRef,
@@ -9951,6 +10522,7 @@ function LandrushIslandPlayerLayer({
   bugReportReplayPlayer: LandrushBugReportPlayer | null
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraOwner: LandrushIslandCameraOwner
+  cosmeticAssetsAdmitted: boolean
   dayInterfaceCommandsEnabled: boolean
   deferBuiltColliderRebuild: boolean
   fallPresentationRef: { current: LandrushIslandFallPresentationState }
@@ -10134,6 +10706,7 @@ function LandrushIslandPlayerLayer({
         <LandrushZombieEscapeMode
           active={zombieEscapeActive}
           combatHeadingRef={zombieEscapeCombatHeadingRef}
+          cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}
           expectedPhase={zombieEscapePhase}
           groundY={groundY}
           materialPresentation={materialPresentation}
@@ -10810,6 +11383,21 @@ function LandrushIslandParcelOwnershipLayer({
     },
     [claimParcel, localOwnership, localProfile, mapLabelsInteractive, ownershipMap, parcelWorldId],
   )
+  const handleClaimMapParcel = useCallback(
+    (parcel: ParcelAllocationParcel) => {
+      if (!mapLabelsInteractive) return
+      selectedParcelIdRef.current = parcel.id
+      setSelectedParcelId(parcel.id)
+      claimMapParcel(parcel)
+    },
+    [claimMapParcel, mapLabelsInteractive],
+  )
+  const handleSelectMapParcel = useCallback(
+    (parcel: ParcelAllocationParcel) => {
+      if (mapLabelsInteractive) setSelectedParcelId(parcel.id)
+    },
+    [mapLabelsInteractive],
+  )
 
   useEffect(() => {
     selectedParcelIdRef.current = selectedParcelId
@@ -11027,15 +11615,8 @@ function LandrushIslandParcelOwnershipLayer({
               mapOpacityRef={mapPresentationProgressRef}
               mapPresentationVisible={mapPresentationVisible}
               mapView={mapView}
-              onClaim={() => {
-                if (!mapLabelsInteractive) return
-                selectedParcelIdRef.current = parcel.id
-                setSelectedParcelId(parcel.id)
-                claimMapParcel(parcel)
-              }}
-              onSelect={() => {
-                if (mapLabelsInteractive) setSelectedParcelId(parcel.id)
-              }}
+              onClaim={handleClaimMapParcel}
+              onSelect={handleSelectMapParcel}
               owned={ownershipMap.has(parcel.id)}
               parcel={parcel}
               selected={selectedParcelId === parcel.id || buildParcelId === parcel.id}
@@ -11068,7 +11649,7 @@ function LandrushIslandParcelOwnershipLayer({
   )
 }
 
-function LandrushIslandParcelClaimMesh({
+const LandrushIslandParcelClaimMesh = memo(function LandrushIslandParcelClaimMesh({
   canClaim,
   groundY,
   hovered,
@@ -11092,8 +11673,8 @@ function LandrushIslandParcelClaimMesh({
   mapOpacityRef: { current: number }
   mapPresentationVisible: boolean
   mapView: boolean
-  onClaim: () => void
-  onSelect: () => void
+  onClaim: (parcel: ParcelAllocationParcel) => void
+  onSelect: (parcel: ParcelAllocationParcel) => void
   owned: boolean
   parcel: ParcelAllocationParcel
   selected: boolean
@@ -11173,7 +11754,7 @@ function LandrushIslandParcelClaimMesh({
         onClick={(event) => {
           if (!mapView) return
           event.stopPropagation()
-          onSelect()
+          onSelect(parcel)
         }}
         renderOrder={75}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -11224,14 +11805,14 @@ function LandrushIslandParcelClaimMesh({
               event.stopPropagation()
               if (!labelInteractive) return
               if (canClaim) {
-                onClaim()
+                onClaim(parcel)
                 return
               }
-              onSelect()
+              onSelect(parcel)
             }}
             onPointerDown={(event) => event.stopPropagation()}
             onPointerEnter={() => {
-              if (labelInteractive) onSelect()
+              if (labelInteractive) onSelect(parcel)
             }}
             ref={freeBadgeRef}
             style={{ opacity: 0, pointerEvents: labelInteractive ? 'auto' : 'none' }}
@@ -11266,7 +11847,7 @@ function LandrushIslandParcelClaimMesh({
       ) : null}
     </group>
   )
-}
+})
 
 function LandrushIslandParcelBuildMarker({
   groundY,

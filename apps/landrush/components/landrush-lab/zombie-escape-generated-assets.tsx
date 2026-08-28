@@ -33,6 +33,11 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY } from './landrush-island-material-presentation-readiness'
+import {
+  startZombieEscapeAssetTransferWarmup,
+  type ZombieEscapeAssetTransferWarmup,
+} from './zombie-escape-asset-transfer-warmup'
 import {
   createZombieEscapeAttackClip,
   isZombieEscapeAttackPresentationActive,
@@ -41,6 +46,7 @@ import {
 import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
 import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
+import { ZombieEscapeFallbackZombies } from './zombie-escape-fallback-zombies'
 import {
   resolveZombieEscapeGeneratedAssetReadinessSnapshot,
   resolveZombieEscapeGeneratedAssetSettlement,
@@ -48,6 +54,11 @@ import {
   type ZombieEscapeGeneratedAssetReadinessSnapshot,
   type ZombieEscapeGeneratedAssetTerminalStatus,
 } from './zombie-escape-generated-asset-readiness'
+import {
+  ZOMBIE_ESCAPE_INITIAL_GENERATED_ASSET_RETRY_GENERATIONS,
+  type ZombieEscapeGeneratedAssetRetryGenerations,
+  type ZombieEscapeGeneratedAssetSettlementReport,
+} from './zombie-escape-generated-asset-retry'
 import { resolveZombieEscapeHitFlickerPhase } from './zombie-escape-hit-flicker'
 import {
   countZombieEscapeAuthoredVariantCapacity,
@@ -63,9 +74,9 @@ import {
   resolveZombieEscapePresentationPose,
 } from './zombie-escape-presentation-pose'
 import {
-  createZombieEscapeRenderReadinessSnapshotSelector,
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
+  createZombieEscapeRenderReadinessSnapshotSelector,
   createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
@@ -73,14 +84,11 @@ import {
   type ZombieEscapePipelineRenderer,
   type ZombieEscapeRenderReadinessCoordinator,
   type ZombieEscapeRenderReadinessRegistry,
+  type ZombieEscapeRenderReadinessRequest,
   type ZombieEscapeRenderReadinessSnapshot,
   type ZombieEscapeRenderReadinessStatus,
 } from './zombie-escape-render-readiness'
 import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
-import {
-  shouldRenderZombieEscapeFallback,
-  ZombieEscapeFallbackZombies,
-} from './zombie-escape-fallback-zombies'
 import {
   isZombieEscapeWeaponPickupAvailable,
   type ZombieEscapeSimulation,
@@ -112,7 +120,6 @@ import {
   createZombieEscapeZombieShader,
   type ZombieEscapeZombieShader,
 } from './zombie-escape-zombie-material'
-import { LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY } from './landrush-island-material-presentation-readiness'
 
 export type GeneratedZombieVisual = {
   animationRoot: Group
@@ -143,9 +150,22 @@ type ZombieVisualPrewarmCoordinator = {
   frameToken: number
 }
 
+type ZombieEscapeZombieAssetUrls = Readonly<{
+  riggedBase: string
+  run: string
+  walk: string
+}>
+
 const ZOMBIE_HIT_BLACK = new Color('#030104')
 const ZOMBIE_HIT_RED = new Color('#ff1738')
 const ZOMBIE_VARIANT_INDICES = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((_, index) => index)
+const ZOMBIE_VARIANT_INDEX_BY_ASSET_PATH = new Map(
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG.flatMap((zombie, variantIndex) =>
+    [zombie.glb.riggedBase.path, zombie.glb.run.path, zombie.glb.walk.path].map(
+      (path): readonly [string, number] => [path, variantIndex],
+    ),
+  ),
+)
 export const ZOMBIE_ESCAPE_CORE_GENERATED_ASSET_KEYS = Object.freeze(
   ZOMBIE_ESCAPE_WEAPON_CATALOG.map((weapon) => `weapon:${weapon.assetPath}`),
 )
@@ -193,6 +213,7 @@ const ZOMBIE_VARIANT_INDEX_BY_RENDER_REPRESENTATIVE_KEY = new Map(
     index,
   ]),
 )
+const ACTIVE_ZOMBIE_ESCAPE_ASSET_TRANSFER_WARMUPS = new Set<ZombieEscapeAssetTransferWarmup>()
 
 function yieldZombieEscapeAuthoredBuildSlice() {
   return new Promise<void>((resolve) => {
@@ -204,19 +225,35 @@ export function resolveZombieEscapeGeneratedVariantAdmissionCount(
   admittedCount: number,
   settledVariantIndices: ReadonlySet<number>,
   totalCount = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+  nextVariantAssetsSettled = true,
 ) {
   const boundedTotal = Math.max(0, Math.floor(totalCount))
   const boundedCount = Math.min(boundedTotal, Math.max(0, Math.floor(admittedCount)))
   if (boundedCount >= boundedTotal) return boundedCount
-  return boundedCount === 0 || settledVariantIndices.has(boundedCount - 1)
+  return nextVariantAssetsSettled &&
+    (boundedCount === 0 || settledVariantIndices.has(boundedCount - 1))
     ? boundedCount + 1
     : boundedCount
 }
 
-export type ZombieEscapeGeneratedAssetFailure = Readonly<{
-  key: string
-  message: string
-}>
+export function resolveZombieEscapeGeneratedVariantRenderCount(
+  cosmeticAssetsAdmitted: boolean,
+  admission: Readonly<{ count: number; generation: number }>,
+  retryGeneration: number,
+) {
+  return cosmeticAssetsAdmitted && admission.generation === retryGeneration ? admission.count : 0
+}
+
+function resolveZombieEscapeZombieAssetUrls(
+  warmup: ZombieEscapeAssetTransferWarmup | null,
+  zombie: ZombieEscapeZombieCatalogEntry,
+): ZombieEscapeZombieAssetUrls | null {
+  if (!warmup) return null
+  const riggedBase = warmup.getAssetUrl(zombie.glb.riggedBase.path)
+  const run = warmup.getAssetUrl(zombie.glb.run.path)
+  const walk = warmup.getAssetUrl(zombie.glb.walk.path)
+  return riggedBase && run && walk ? { riggedBase, run, walk } : null
+}
 
 export function resolveZombieEscapeRenderPipelineSettlement(
   status: ZombieEscapeRenderReadinessStatus,
@@ -226,7 +263,7 @@ export function resolveZombieEscapeRenderPipelineSettlement(
   }
   if (status.state === 'degraded') {
     return {
-      contentReady: false as const,
+      contentReady: true as const,
       diagnostic: {
         level: 'warning' as const,
         message: status.message,
@@ -234,7 +271,7 @@ export function resolveZombieEscapeRenderPipelineSettlement(
     }
   }
   return {
-    contentReady: false as const,
+    contentReady: true as const,
     diagnostic: {
       level: 'error' as const,
       message: status.message,
@@ -254,49 +291,115 @@ export function updateZombieEscapePresentationReadyVariant(
   return true
 }
 
+export function resolveZombieEscapeGeneratedAssetSettlements(
+  statuses: ReadonlyMap<string, ZombieEscapeGeneratedAssetTerminalStatus>,
+  fullExpectedKeys: readonly string[],
+) {
+  return {
+    core: resolveZombieEscapeGeneratedAssetSettlement(
+      ZOMBIE_ESCAPE_CORE_GENERATED_ASSET_KEYS,
+      statuses,
+    ),
+    full: resolveZombieEscapeGeneratedAssetSettlement(fullExpectedKeys, statuses),
+  }
+}
+
+export function reconcileZombieEscapeGeneratedAssetRetryStatuses(
+  statuses: ReadonlyMap<string, ZombieEscapeGeneratedAssetTerminalStatus>,
+  previousGenerations: ZombieEscapeGeneratedAssetRetryGenerations,
+  nextGenerations: ZombieEscapeGeneratedAssetRetryGenerations,
+) {
+  const coreChanged = previousGenerations.core !== nextGenerations.core
+  const cosmeticChanged = previousGenerations.cosmetic !== nextGenerations.cosmetic
+  if (!(coreChanged || cosmeticChanged)) {
+    return { coreChanged, cosmeticChanged, statuses }
+  }
+  const nextStatuses = new Map(statuses)
+  if (coreChanged) {
+    for (const key of GENERATED_WEAPON_ASSET_KEYS) nextStatuses.delete(key)
+  }
+  if (cosmeticChanged) {
+    for (const key of GENERATED_ZOMBIE_ASSET_KEYS) nextStatuses.delete(key)
+  }
+  return { coreChanged, cosmeticChanged, statuses: nextStatuses }
+}
+
 export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly string[]) {
-  const paths = failedKeys
-    ? failedKeys.flatMap((key) => GENERATED_ASSET_PATHS_BY_KEY.get(key) ?? [])
-    : Array.from(GENERATED_ASSET_PATHS_BY_KEY.values()).flat()
-  for (const path of new Set(paths)) useGLTF.clear(path)
+  clearAndRecreateZombieEscapeGeneratedAssetCacheUrls(
+    resolveZombieEscapeGeneratedAssetCachePaths(failedKeys),
+    ACTIVE_ZOMBIE_ESCAPE_ASSET_TRANSFER_WARMUPS,
+    (assetUrl) => useGLTF.clear(assetUrl),
+  )
+}
+
+export function resolveZombieEscapeGeneratedAssetCachePaths(failedKeys?: readonly string[]) {
+  return Array.from(
+    new Set(
+      failedKeys
+        ? failedKeys.flatMap((key) => GENERATED_ASSET_PATHS_BY_KEY.get(key) ?? [])
+        : Array.from(GENERATED_ASSET_PATHS_BY_KEY.values()).flat(),
+    ),
+  )
+}
+
+export function clearAndRecreateZombieEscapeGeneratedAssetCacheUrls(
+  paths: readonly string[],
+  warmups: Iterable<Pick<ZombieEscapeAssetTransferWarmup, 'getAssetUrl' | 'recreateObjectUrls'>>,
+  clearAssetUrl: (assetUrl: string) => void,
+) {
+  const uniquePaths = Array.from(new Set(paths))
+  for (const path of uniquePaths) clearAssetUrl(path)
+  for (const warmup of Array.from(warmups)) {
+    for (const path of uniquePaths) {
+      const assetUrl = warmup.getAssetUrl(path)
+      if (assetUrl && assetUrl !== path) clearAssetUrl(assetUrl)
+    }
+    warmup.recreateObjectUrls(uniquePaths)
+  }
 }
 
 export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAssets({
+  cosmeticAssetsAdmitted = true,
   detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
   omitHeldWeapon = false,
-  onGeneratedAssetsFailureChange,
   onGeneratedAssetsReadinessChange,
+  onGeneratedAssetsSettlementChange,
   presentationLodDebugRef,
   quality,
   renderReadinessCamera,
   renderReadinessRegistry,
-  retryGeneration = 0,
+  retryGenerations = ZOMBIE_ESCAPE_INITIAL_GENERATED_ASSET_RETRY_GENERATIONS,
   simulationRef,
   zombieMaterialPhaseActive,
   zombiePresentationFramePriority,
   zombieSelectionFramePriority,
 }: {
+  cosmeticAssetsAdmitted?: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
   omitHeldWeapon?: boolean
-  onGeneratedAssetsFailureChange?: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
   onGeneratedAssetsReadinessChange?: (
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
+  ) => void
+  onGeneratedAssetsSettlementChange?: (
+    settlement: ZombieEscapeGeneratedAssetSettlementReport,
   ) => void
   presentationLodDebugRef: MutableRefObject<ZombieEscapePresentationLodDebugSnapshot | null>
   quality: ZombieEscapeQuality
   renderReadinessCamera?: Camera
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
-  retryGeneration?: number
+  retryGenerations?: ZombieEscapeGeneratedAssetRetryGenerations
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
   zombieMaterialPhaseActive: boolean
   zombiePresentationFramePriority?: number
   zombieSelectionFramePriority: number
 }) {
   const { camera: activeCamera, gl, scene } = useThree()
+  const coreRetryGeneration = retryGenerations.core
+  const cosmeticRetryGeneration = retryGenerations.cosmetic
   const pipelineCamera = renderReadinessCamera ?? activeCamera
   const [zombieShader] = useState(() =>
     createZombieEscapeZombieShader({ phaseAmount: zombieMaterialPhaseActive ? 1 : 0 }),
@@ -360,7 +463,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       ? ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS
       : GENERATED_WEAPON_ASSET_KEYS
   const [allocationReadiness, setAllocationReadiness] = useState({
-    generation: retryGeneration,
+    generation: coreRetryGeneration,
     ready: false,
   })
   const coordinatorRef = useRef<ZombieEscapeRenderReadinessCoordinator | null>(null)
@@ -404,102 +507,193 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       ),
     [],
   )
-  const criticalRenderReadinessSnapshot = selectCriticalRenderReadinessSnapshot(
-    renderReadinessSnapshot,
+  const criticalRenderReadinessSnapshot =
+    selectCriticalRenderReadinessSnapshot(renderReadinessSnapshot)
+  const backgroundRenderRepresentatives = useMemo(
+    () =>
+      renderReadinessSnapshot.representatives.filter(
+        ({ key }) => !ZOMBIE_ESCAPE_CRITICAL_RENDER_REPRESENTATIVE_KEY_SET.has(key),
+      ),
+    [renderReadinessSnapshot],
   )
-  const backgroundRenderRepresentatives = renderReadinessSnapshot.representatives.filter(
-    ({ key }) => !ZOMBIE_ESCAPE_CRITICAL_RENDER_REPRESENTATIVE_KEY_SET.has(key),
+  const backgroundPrewarmRequest = useMemo<Omit<ZombieEscapeRenderReadinessRequest, 'identity'>>(
+    () => ({
+      camera: pipelineCamera,
+      generation: cosmeticRetryGeneration,
+      renderer: gl as unknown as ZombieEscapePipelineRenderer,
+      representatives: backgroundRenderRepresentatives,
+      targetScene: scene,
+    }),
+    [backgroundRenderRepresentatives, cosmeticRetryGeneration, gl, pipelineCamera, scene],
   )
+  const backgroundPrewarmRequestRef = useRef(backgroundPrewarmRequest)
+  backgroundPrewarmRequestRef.current = backgroundPrewarmRequest
+  const backgroundPrewarmEnabledRef = useRef(false)
   const allocationReady =
-    allocationReadiness.generation === retryGeneration && allocationReadiness.ready
+    allocationReadiness.generation === coreRetryGeneration && allocationReadiness.ready
   const readinessRef = useRef<{
-    generation: number
+    generations: ZombieEscapeGeneratedAssetRetryGenerations
     statuses: Map<string, ZombieEscapeGeneratedAssetTerminalStatus>
-  }>({ generation: retryGeneration, statuses: new Map() })
+  }>({ generations: retryGenerations, statuses: new Map() })
   const pipelineReadinessRef = useRef({
-    generation: retryGeneration,
+    generation: coreRetryGeneration,
     ready: !renderReadinessRegistry,
     required: Boolean(renderReadinessRegistry),
   })
-  if (readinessRef.current.generation !== retryGeneration) {
-    readinessRef.current = { generation: retryGeneration, statuses: new Map() }
+  const retryReconciliation = reconcileZombieEscapeGeneratedAssetRetryStatuses(
+    readinessRef.current.statuses,
+    readinessRef.current.generations,
+    retryGenerations,
+  )
+  if (retryReconciliation.coreChanged || retryReconciliation.cosmeticChanged) {
+    readinessRef.current = {
+      generations: retryGenerations,
+      statuses: retryReconciliation.statuses as Map<
+        string,
+        ZombieEscapeGeneratedAssetTerminalStatus
+      >,
+    }
+    if (retryReconciliation.cosmeticChanged) {
+      presentationReadyZombieVariantsRef.current.clear()
+    }
   }
   if (
-    pipelineReadinessRef.current.generation !== retryGeneration ||
+    pipelineReadinessRef.current.generation !== coreRetryGeneration ||
     pipelineReadinessRef.current.required !== Boolean(renderReadinessRegistry)
   ) {
+    backgroundPrewarmEnabledRef.current = false
     pipelineReadinessRef.current = {
-      generation: retryGeneration,
+      generation: coreRetryGeneration,
       ready: !renderReadinessRegistry,
       required: Boolean(renderReadinessRegistry),
     }
   }
-  const publishReadiness = useCallback(() => {
-    const readiness = readinessRef.current
-    const pipelineReadiness = pipelineReadinessRef.current
-    if (
-      readiness.generation !== retryGeneration ||
-      pipelineReadiness.generation !== retryGeneration
-    ) {
-      return
-    }
-    onGeneratedAssetsReadinessChange?.(
-      resolveZombieEscapeGeneratedAssetReadinessSnapshot({
-        expectedKeys: GENERATED_WEAPON_ASSET_KEYS,
-        generation: retryGeneration,
-        pipelineReady: pipelineReadiness.ready,
-        statuses: readiness.statuses,
-      }),
-    )
-  }, [onGeneratedAssetsReadinessChange, retryGeneration])
-  const reportAssetStatus = useCallback<GeneratedAssetStatusReporter>(
+  const reportingRef = useRef({
+    fullExpectedKeys,
+    onGeneratedAssetsReadinessChange,
+    onGeneratedAssetsSettlementChange,
+  })
+  reportingRef.current = {
+    fullExpectedKeys,
+    onGeneratedAssetsReadinessChange,
+    onGeneratedAssetsSettlementChange,
+  }
+  const publishCoreReadiness = useCallback(
+    (report = reportingRef.current.onGeneratedAssetsReadinessChange) => {
+      const readiness = readinessRef.current
+      const pipelineReadiness = pipelineReadinessRef.current
+      if (
+        readiness.generations.core !== coreRetryGeneration ||
+        pipelineReadiness.generation !== coreRetryGeneration
+      ) {
+        return
+      }
+      report?.(
+        resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+          expectedKeys: GENERATED_WEAPON_ASSET_KEYS,
+          generation: coreRetryGeneration,
+          pipelineReady: pipelineReadiness.ready,
+          statuses: readiness.statuses,
+        }),
+      )
+    },
+    [coreRetryGeneration],
+  )
+  const publishSettlement = useCallback(
+    (
+      expectedGenerations = readinessRef.current.generations,
+      expectedKeys = reportingRef.current.fullExpectedKeys,
+      report = reportingRef.current.onGeneratedAssetsSettlementChange,
+    ) => {
+      const readiness = readinessRef.current
+      if (
+        readiness.generations.core !== expectedGenerations.core ||
+        readiness.generations.cosmetic !== expectedGenerations.cosmetic
+      ) {
+        return
+      }
+      const settlements = resolveZombieEscapeGeneratedAssetSettlements(
+        readiness.statuses,
+        expectedKeys,
+      )
+      report?.({
+        failures: settlements.full.failed,
+        pendingKeys: settlements.full.pending,
+      })
+    },
+    [],
+  )
+  const reportCoreAssetStatus = useCallback<GeneratedAssetStatusReporter>(
     (key, status) => {
       const readiness = readinessRef.current
-      if (readiness.generation !== retryGeneration) return
+      if (readiness.generations.core !== coreRetryGeneration) return
       if (status) readiness.statuses.set(key, status)
       else readiness.statuses.delete(key)
-      const coreSettlement = resolveZombieEscapeGeneratedAssetSettlement(
-        GENERATED_WEAPON_ASSET_KEYS,
+      const settlements = resolveZombieEscapeGeneratedAssetSettlements(
         readiness.statuses,
+        reportingRef.current.fullExpectedKeys,
       )
-      const fullSettlement = resolveZombieEscapeGeneratedAssetSettlement(
-        fullExpectedKeys,
-        readiness.statuses,
-      )
-      onGeneratedAssetsFailureChange?.(fullSettlement.failed)
       setAllocationReadiness((current) =>
-        current.generation === retryGeneration && current.ready === coreSettlement.ready
+        current.generation === coreRetryGeneration && current.ready === settlements.core.ready
           ? current
-          : { generation: retryGeneration, ready: coreSettlement.ready },
+          : { generation: coreRetryGeneration, ready: settlements.core.ready },
       )
-      if (renderReadinessRegistry && !coreSettlement.ready) {
+      if (renderReadinessRegistry && !settlements.core.ready) {
         pipelineReadinessRef.current.ready = false
       }
-      publishReadiness()
+      publishCoreReadiness()
+      publishSettlement()
     },
     [
-      fullExpectedKeys,
-      onGeneratedAssetsFailureChange,
-      publishReadiness,
+      coreRetryGeneration,
+      publishCoreReadiness,
+      publishSettlement,
       renderReadinessRegistry,
-      retryGeneration,
     ],
   )
+  const reportCosmeticAssetStatus = useCallback<GeneratedAssetStatusReporter>(
+    (key, status) => {
+      const readiness = readinessRef.current
+      if (readiness.generations.cosmetic !== cosmeticRetryGeneration) return
+      if (status) readiness.statuses.set(key, status)
+      else readiness.statuses.delete(key)
+      publishSettlement()
+    },
+    [cosmeticRetryGeneration, publishSettlement],
+  )
 
-  useEffect(() => publishReadiness(), [publishReadiness])
+  useEffect(
+    () => publishCoreReadiness(onGeneratedAssetsReadinessChange),
+    [onGeneratedAssetsReadinessChange, publishCoreReadiness],
+  )
+  useEffect(
+    () =>
+      publishSettlement(
+        retryGenerations,
+        fullExpectedKeys,
+        onGeneratedAssetsSettlementChange,
+      ),
+    [
+      fullExpectedKeys,
+      onGeneratedAssetsSettlementChange,
+      publishSettlement,
+      retryGenerations,
+    ],
+  )
 
   useEffect(() => {
     const coordinator = coordinatorRef.current
     const representativePrewarmQueue = representativePrewarmQueueRef.current
     const pipelineReadiness = pipelineReadinessRef.current
-    if (pipelineReadiness.generation !== retryGeneration) return
+    if (pipelineReadiness.generation !== coreRetryGeneration) return
     if (!(coordinator && representativePrewarmQueue && renderReadinessRegistry)) {
       pipelineReadiness.ready = true
-      publishReadiness()
+      publishCoreReadiness()
       return
     }
     pipelineReadiness.ready = false
-    publishReadiness()
+    backgroundPrewarmEnabledRef.current = false
+    publishCoreReadiness()
     if (!(allocationReady && criticalRenderReadinessSnapshot.complete)) {
       coordinator.invalidate()
       representativePrewarmQueue.invalidate()
@@ -510,38 +704,36 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     void coordinator.request(
       {
         camera: pipelineCamera,
-        generation: retryGeneration,
+        generation: coreRetryGeneration,
         identity: criticalRenderReadinessSnapshot,
         representatives: criticalRenderReadinessSnapshot.representatives,
         renderer: gl as unknown as ZombieEscapePipelineRenderer,
         targetScene: scene,
       },
       (status) => {
-        if (!active || readinessRef.current.generation !== retryGeneration) return
+        if (!active || readinessRef.current.generations.core !== coreRetryGeneration) return
         const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
         if (settlement.diagnostic?.level === 'error') {
           console.error(
-            '[zombie-escape] Critical render pipeline prewarm failed; keeping fallback loading active.',
+            '[zombie-escape] Critical render pipeline prewarm failed; continuing with the bounded fallback presentation.',
             settlement.diagnostic.message,
           )
         } else if (settlement.diagnostic) {
           console.warn(
-            '[zombie-escape] Visible-scene render pipeline prewarm exceeded its warning threshold; keeping loading active until it settles.',
+            '[zombie-escape] Visible-scene render pipeline prewarm exceeded its bounded warning threshold; continuing with the fallback presentation while it settles.',
             settlement.diagnostic.message,
           )
         }
         const currentPipelineReadiness = pipelineReadinessRef.current
-        if (currentPipelineReadiness.generation !== retryGeneration) return
+        if (currentPipelineReadiness.generation !== coreRetryGeneration) return
         currentPipelineReadiness.ready = settlement.contentReady
-        publishReadiness()
-        if (status.state !== 'ready') return
-        representativePrewarmQueue.synchronize({
-          camera: pipelineCamera,
-          generation: retryGeneration,
-          renderer: gl as unknown as ZombieEscapePipelineRenderer,
-          representatives: backgroundRenderRepresentatives,
-          targetScene: scene,
-        })
+        publishCoreReadiness()
+        backgroundPrewarmEnabledRef.current = status.state === 'ready'
+        if (!backgroundPrewarmEnabledRef.current) return
+        const backgroundPrewarmRequest = backgroundPrewarmRequestRef.current
+        if (backgroundPrewarmRequest) {
+          representativePrewarmQueue.synchronize(backgroundPrewarmRequest)
+        }
       },
     )
     return () => {
@@ -549,14 +741,34 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     }
   }, [
     allocationReady,
-    backgroundRenderRepresentatives,
+    coreRetryGeneration,
     criticalRenderReadinessSnapshot,
     gl,
     pipelineCamera,
-    publishReadiness,
+    publishCoreReadiness,
     renderReadinessRegistry,
-    retryGeneration,
     scene,
+  ])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: newly admitted cosmetic roots must enter the background queue without resetting critical readiness.
+  useEffect(() => {
+    const representativePrewarmQueue = representativePrewarmQueueRef.current
+    const pipelineReadiness = pipelineReadinessRef.current
+    const backgroundPrewarmRequest = backgroundPrewarmRequestRef.current
+    if (
+      !representativePrewarmQueue ||
+      !renderReadinessRegistry ||
+      !backgroundPrewarmEnabledRef.current ||
+      pipelineReadiness.generation !== coreRetryGeneration ||
+      !pipelineReadiness.ready
+    ) {
+      return
+    }
+    representativePrewarmQueue.synchronize(backgroundPrewarmRequest)
+  }, [
+    backgroundPrewarmRequest,
+    coreRetryGeneration,
+    renderReadinessRegistry,
   ])
 
   useEffect(
@@ -567,17 +779,13 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     [],
   )
 
-  useEffect(() => {
-    presentationReadyZombieVariantsRef.current.clear()
-  }, [retryGeneration])
-
   return (
     <>
       <ZombieEscapeGeneratedWeapons
         omitHeldWeapon={omitHeldWeapon}
-        onAssetStatusChange={reportAssetStatus}
+        onAssetStatusChange={reportCoreAssetStatus}
         renderReadinessRegistry={renderReadinessRegistry}
-        retryGeneration={retryGeneration}
+        retryGeneration={coreRetryGeneration}
         simulationRef={simulationRef}
       />
       <ZombieEscapeFallbackZombies
@@ -588,13 +796,14 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       />
       {quality === 'balanced' ? (
         <ZombieEscapeGeneratedZombies
+          cosmeticAssetsAdmitted={cosmeticAssetsAdmitted}
           detailedZombieSlotsRef={detailedZombieSlotsRef}
           impactVisualRegistry={impactVisualRegistry}
           loadedZombieVariantsRef={loadedZombieVariantsRef}
-          onAssetStatusChange={reportAssetStatus}
+          onAssetStatusChange={reportCosmeticAssetStatus}
           presentationLodDebugRef={presentationLodDebugRef}
           renderReadinessRegistry={renderReadinessRegistry}
-          retryGeneration={retryGeneration}
+          retryGeneration={cosmeticRetryGeneration}
           simulationRef={simulationRef}
           zombieShader={zombieShader}
           zombiePresentationFramePriority={zombiePresentationFramePriority}
@@ -821,6 +1030,7 @@ function LoadedGeneratedWeaponModel({
 }
 
 const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies({
+  cosmeticAssetsAdmitted,
   detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -832,6 +1042,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
   zombieShader,
   zombiePresentationFramePriority,
 }: {
+  cosmeticAssetsAdmitted: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
@@ -847,7 +1058,11 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
     claimed: false,
     frameToken: Number.NaN,
   })
+  const cosmeticAssetsAdmittedRef = useRef(cosmeticAssetsAdmitted)
+  cosmeticAssetsAdmittedRef.current = cosmeticAssetsAdmitted
   const admissionFrameRef = useRef<{ generation: number; id: number } | null>(null)
+  const transferWarmupRef = useRef<ZombieEscapeAssetTransferWarmup | null>(null)
+  const scheduleNextVariantAdmissionRef = useRef<() => void>(() => undefined)
   const settledVariantsRef = useRef({
     generation: retryGeneration,
     indices: new Set<number>(),
@@ -856,28 +1071,43 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
   if (settledVariantsRef.current.generation !== retryGeneration) {
     settledVariantsRef.current = { generation: retryGeneration, indices: new Set() }
   }
-  const admittedVariantCount = admission.generation === retryGeneration ? admission.count : 0
+  const admittedVariantCount = resolveZombieEscapeGeneratedVariantRenderCount(
+    cosmeticAssetsAdmitted,
+    admission,
+    retryGeneration,
+  )
   const scheduleNextVariantAdmission = useCallback(() => {
-    if (admissionFrameRef.current !== null) return
+    if (!cosmeticAssetsAdmitted || admissionFrameRef.current !== null) return
     const generation = retryGeneration
     const id = window.requestAnimationFrame(() => {
       if (admissionFrameRef.current?.generation === generation) {
         admissionFrameRef.current = null
       }
+      if (!cosmeticAssetsAdmittedRef.current) return
       setAdmission((current) => {
         const currentCount = current.generation === generation ? current.count : 0
         const settled =
           settledVariantsRef.current.generation === generation
             ? settledVariantsRef.current.indices
             : new Set<number>()
-        const nextCount = resolveZombieEscapeGeneratedVariantAdmissionCount(currentCount, settled)
+        const nextZombie = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[currentCount]
+        const nextVariantAssetsSettled = Boolean(
+          !nextZombie || resolveZombieEscapeZombieAssetUrls(transferWarmupRef.current, nextZombie),
+        )
+        const nextCount = resolveZombieEscapeGeneratedVariantAdmissionCount(
+          currentCount,
+          settled,
+          ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+          nextVariantAssetsSettled,
+        )
         return current.generation === generation && current.count === nextCount
           ? current
           : { count: nextCount, generation }
       })
     })
     admissionFrameRef.current = { generation, id }
-  }, [retryGeneration])
+  }, [cosmeticAssetsAdmitted, retryGeneration])
+  scheduleNextVariantAdmissionRef.current = scheduleNextVariantAdmission
   const handleVariantPresentationSettled = useCallback(
     (variantIndex: number) => {
       if (settledVariantsRef.current.generation !== retryGeneration) return
@@ -887,15 +1117,62 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
     [retryGeneration, scheduleNextVariantAdmission],
   )
   useEffect(() => {
+    const settledPathCounts = new Uint8Array(ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length)
+    const publishedVariants = new Uint8Array(ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length)
+    let active = true
+    const warmup = startZombieEscapeAssetTransferWarmup({
+      onSettled({ path }) {
+        const variantIndex = ZOMBIE_VARIANT_INDEX_BY_ASSET_PATH.get(path)
+        if (variantIndex === undefined || publishedVariants[variantIndex] !== 0) return
+        const settledPathCount = (settledPathCounts[variantIndex] ?? 0) + 1
+        settledPathCounts[variantIndex] = settledPathCount
+        if (settledPathCount < 3) return
+        publishedVariants[variantIndex] = 1
+        if (cosmeticAssetsAdmittedRef.current) scheduleNextVariantAdmissionRef.current()
+      },
+    })
+    transferWarmupRef.current = warmup
+    ACTIVE_ZOMBIE_ESCAPE_ASSET_TRANSFER_WARMUPS.add(warmup)
+    void warmup.completion.then((summary) => {
+      if (active && summary.failed.length > 0) {
+        console.warn(
+          `[zombie-escape] ${summary.failed.length} background zombie asset transfer(s) failed; normal GLTF loading will retry them on admission.`,
+        )
+      }
+    })
+    return () => {
+      active = false
+      ACTIVE_ZOMBIE_ESCAPE_ASSET_TRANSFER_WARMUPS.delete(warmup)
+      if (transferWarmupRef.current === warmup) transferWarmupRef.current = null
+      for (const objectUrl of warmup.getOwnedObjectUrls()) useGLTF.clear(objectUrl)
+      warmup.cleanup()
+    }
+  }, [])
+  useEffect(() => {
+    if (cosmeticAssetsAdmitted) return
+    if (admissionFrameRef.current) {
+      window.cancelAnimationFrame(admissionFrameRef.current.id)
+      admissionFrameRef.current = null
+    }
+    settledVariantsRef.current = { generation: retryGeneration, indices: new Set() }
+    setAdmission({ count: 0, generation: retryGeneration })
+  }, [cosmeticAssetsAdmitted, retryGeneration])
+  useEffect(() => {
+    if (!cosmeticAssetsAdmitted) return
     const settled = settledVariantsRef.current.indices
+    const nextZombie = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[admittedVariantCount]
+    const nextVariantAssetsSettled = Boolean(
+      !nextZombie || resolveZombieEscapeZombieAssetUrls(transferWarmupRef.current, nextZombie),
+    )
     if (
-      admittedVariantCount === 0 ||
-      (admittedVariantCount < ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length &&
-        settled.has(admittedVariantCount - 1))
+      nextVariantAssetsSettled &&
+      (admittedVariantCount === 0 ||
+        (admittedVariantCount < ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length &&
+          settled.has(admittedVariantCount - 1)))
     ) {
       scheduleNextVariantAdmission()
     }
-  }, [admittedVariantCount, scheduleNextVariantAdmission])
+  }, [admittedVariantCount, cosmeticAssetsAdmitted, scheduleNextVariantAdmission])
   useEffect(
     () => () => {
       if (admissionFrameRef.current?.generation === retryGeneration) {
@@ -915,6 +1192,8 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
       {ZOMBIE_VARIANT_INDICES.slice(0, admittedVariantCount).map((variantIndex) => {
         const zombie = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[variantIndex]
         if (!zombie) return null
+        const assetUrls = resolveZombieEscapeZombieAssetUrls(transferWarmupRef.current, zombie)
+        if (!assetUrls) return null
         return (
           <GeneratedAssetErrorBoundary
             assetKey={`zombie:${zombie.id}`}
@@ -924,6 +1203,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
           >
             <Suspense fallback={null}>
               <GeneratedZombieVariant
+                assetUrls={assetUrls}
                 detailedZombieSlotsRef={detailedZombieSlotsRef}
                 framePriority={zombiePresentationFramePriority ?? -17}
                 impactVisualRegistry={impactVisualRegistry}
@@ -947,6 +1227,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
 })
 
 const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
+  assetUrls,
   detailedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
@@ -961,6 +1242,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
+  assetUrls: ZombieEscapeZombieAssetUrls
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
@@ -975,9 +1257,9 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   zombie: ZombieEscapeZombieCatalogEntry
   zombieShader: ZombieEscapeZombieShader
 }) {
-  const riggedGltf = useGLTFKTX2(zombie.glb.riggedBase.path)
-  const runGltf = useGLTF(zombie.glb.run.path)
-  const walkGltf = useGLTF(zombie.glb.walk.path)
+  const riggedGltf = useGLTFKTX2(assetUrls.riggedBase)
+  const runGltf = useGLTF(assetUrls.run)
+  const walkGltf = useGLTF(assetUrls.walk)
   return (
     <PreparedGeneratedZombieVariant
       detailedZombieSlotsRef={detailedZombieSlotsRef}

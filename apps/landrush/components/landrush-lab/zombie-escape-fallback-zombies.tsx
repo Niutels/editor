@@ -37,6 +37,7 @@ export function ZombieEscapeFallbackZombies({
       matrix: new Matrix4(),
       position: new Vector3(),
       quaternion: new Quaternion(),
+      fall: new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), Math.PI * 0.48),
       scale: new Vector3(0.78, 0.94, 0.72),
       up: new Vector3(0, 1, 0),
     }),
@@ -58,11 +59,7 @@ export function ZombieEscapeFallbackZombies({
     for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
       const variant = zombies.variant[slot] ?? 0
       if (
-        !shouldRenderZombieEscapeFallback(
-          zombies.pool.active[slot] ?? 0,
-          variant,
-          readyVariants,
-        )
+        !shouldRenderZombieEscapeFallback(zombies.pool.active[slot] ?? 0, variant, readyVariants)
       ) {
         continue
       }
@@ -74,7 +71,7 @@ export function ZombieEscapeFallbackZombies({
       )
       scratch.quaternion.setFromAxisAngle(scratch.up, zombies.heading[slot] ?? 0)
       if ((zombies.health[slot] ?? 0) <= 0) {
-        scratch.quaternion.rotateZ(Math.PI * 0.48)
+        scratch.quaternion.multiply(scratch.fall)
         scratch.position.y = (zombies.y[slot] ?? 0) + 0.34
       }
       scratch.matrix.compose(scratch.position, scratch.quaternion, scratch.scale)
@@ -87,7 +84,11 @@ export function ZombieEscapeFallbackZombies({
 
   return (
     <group ref={rootRef} userData={{ role: 'zombie-fallback-presentation' }}>
-      <instancedMesh args={[undefined, undefined, capacity]} frustumCulled={false} ref={instancesRef}>
+      <instancedMesh
+        args={[undefined, undefined, capacity]}
+        frustumCulled={false}
+        ref={instancesRef}
+      >
         <capsuleGeometry args={[0.38, 0.95, 2, 6]} />
         <meshBasicMaterial color="#75a89c" />
       </instancedMesh>

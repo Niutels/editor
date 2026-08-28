@@ -5,6 +5,43 @@ export type RendererCapabilityCanvas = {
 /** Mirrors `GPUPowerPreference` without pulling WebGPU ambient types into the declaration build. */
 export type RendererPowerPreference = 'high-performance' | 'low-power'
 
+export type RendererBackendPreference = 'auto' | 'webgl'
+
+export type RendererPromiseCache<Canvas extends object, Renderer> = WeakMap<
+  Canvas,
+  Map<RendererBackendPreference, Promise<Renderer>>
+>
+
+export function getOrCreateCachedRendererPromise<Canvas extends object, Renderer>(
+  cache: RendererPromiseCache<Canvas, Renderer>,
+  canvas: Canvas,
+  backendPreference: RendererBackendPreference,
+  create: () => Promise<Renderer>,
+) {
+  const cached = cache.get(canvas)?.get(backendPreference)
+  if (cached) return cached
+
+  const promise = create()
+  let canvasCache = cache.get(canvas)
+  if (!canvasCache) {
+    canvasCache = new Map()
+    cache.set(canvas, canvasCache)
+  }
+  canvasCache.set(backendPreference, promise)
+  return promise
+}
+
+export function deleteCachedRendererPromise<Canvas extends object, Renderer>(
+  cache: RendererPromiseCache<Canvas, Renderer>,
+  canvas: Canvas,
+  backendPreference: RendererBackendPreference,
+) {
+  const canvasCache = cache.get(canvas)
+  if (!canvasCache) return
+  canvasCache.delete(backendPreference)
+  if (canvasCache.size === 0) cache.delete(canvas)
+}
+
 type RendererGpuAdapter = {
   features?: Iterable<string>
   requestDevice(descriptor?: { requiredFeatures?: string[] }): Promise<unknown>
@@ -120,12 +157,14 @@ export async function detectRendererCapability({
 }
 
 export async function initializeGpuRenderer<Renderer extends InitializableRenderer>({
+  backendPreference = 'auto',
   createRenderer,
   gpu,
   powerPreference,
   probeCanvas = browserCanvas(),
   webgpuTimeoutMs = WEBGPU_INITIALIZATION_TIMEOUT_MS,
 }: {
+  backendPreference?: RendererBackendPreference
   createRenderer: (parameters: RendererBackendParameters) => Renderer
   gpu?: RendererGpu | null
   powerPreference?: RendererPowerPreference
@@ -134,7 +173,7 @@ export async function initializeGpuRenderer<Renderer extends InitializableRender
 }): Promise<RendererInitializationResult<Renderer>> {
   const capability = await detectRendererCapability({
     canvas: probeCanvas,
-    gpu,
+    gpu: backendPreference === 'webgl' ? null : gpu,
     powerPreference,
     webgpuTimeoutMs,
   })

@@ -65,12 +65,15 @@ type RenderReadinessCoordinatorEntry = {
 
 const RENDER_READINESS_COMPILE_TAILS = new WeakMap<object, Promise<void>>()
 
-export async function compileLandrushRenderRepresentatives({
-  camera,
-  representatives,
-  renderer,
-  targetScene,
-}: Omit<LandrushRenderReadinessRequest, 'generation' | 'identity'>) {
+export async function compileLandrushRenderRepresentatives(
+  {
+    camera,
+    representatives,
+    renderer,
+    targetScene,
+  }: Omit<LandrushRenderReadinessRequest, 'generation' | 'identity'>,
+  waitForAdmissionOpportunity = waitForLandrushRenderAdmissionOpportunity,
+) {
   await renderer.init?.()
 
   for (const representative of representatives) {
@@ -84,7 +87,7 @@ export async function compileLandrushRenderRepresentatives({
       }
       await pendingCompilation
       await renderer.backend?.device?.queue?.onSubmittedWorkDone?.()
-      await waitForLandrushRenderAdmissionOpportunity()
+      await waitForAdmissionOpportunity()
     }
   }
 }

@@ -30,7 +30,14 @@ import {
   type RenderShading,
   retryFailedObjectMaterialTextures,
 } from '../../lib/materials'
-import { initializeGpuRenderer, type RendererPowerPreference } from '../../lib/renderer-capability'
+import {
+  deleteCachedRendererPromise,
+  getOrCreateCachedRendererPromise,
+  initializeGpuRenderer,
+  type RendererBackendPreference,
+  type RendererPowerPreference,
+  type RendererPromiseCache,
+} from '../../lib/renderer-capability'
 import { getSceneTheme } from '../../lib/scene-themes'
 import { installTextureNodeNullGuard } from '../../lib/texture-node-guard'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
@@ -49,6 +56,7 @@ import PostProcessing, {
 } from './post-processing'
 import { RegisteredSystems } from './registered-systems'
 import { SceneBvh } from './scene-bvh'
+import type { ViewerSceneDrawSubmissionRef } from './scene-draw-admission'
 import {
   advanceSceneReadinessState,
   getSceneReadinessBlockerNames,
@@ -87,12 +95,11 @@ extend(THREE as any)
 // `state.gl` but R3F's store already holds the new size/dpr, so the new
 // renderer is never resized and stays at the canvas's 300×150 default.
 //
-// Caching by canvas guarantees both branches return the same instance, so
-// "duplicate" configure calls become no-ops on an already-sized renderer.
-// We cache the in-flight Promise (not just the resolved renderer) so two
-// concurrent configure() calls await the same init instead of creating two
-// renderers in parallel and only caching the second.
-const WEBGPU_RENDERER_CACHE = new WeakMap<HTMLCanvasElement, Promise<THREE.WebGPURenderer>>()
+// Caching by canvas and requested backend guarantees duplicate configure calls
+// return the same instance without allowing a later forced-WebGL request to
+// reuse an auto-selected WebGPU renderer. We cache the in-flight Promise (not
+// just the resolved renderer) so concurrent configure calls await one init.
+const RENDERER_CACHE: RendererPromiseCache<HTMLCanvasElement, THREE.WebGPURenderer> = new WeakMap()
 const SCENE_READY_SETTLED_FRAMES = 2
 const SCENE_READY_MAX_WAIT_FRAMES = 180
 const DIRTY_BUILD_KINDS = new Set([
@@ -108,6 +115,11 @@ const DIRTY_BUILD_KINDS = new Set([
 ])
 
 let warnedNonDrawableDraw = false
+
+export type ViewerRendererInitializationFailure = Readonly<{
+  backend: RendererBackendPreference
+  error?: unknown
+}>
 
 /**
  * Renderer-level safety net against non-drawable geometry reaching WebGPU.
@@ -475,7 +487,7 @@ function SceneReadyTracker({
   return null
 }
 
-interface ViewerProps {
+export interface ViewerProps {
   children?: React.ReactNode
   hoverStyles?: HoverStyles
   selectionManager?: 'default' | 'custom'
@@ -542,6 +554,14 @@ interface ViewerProps {
   presentationEffectRef?: ViewerPresentationEffectRef
   /** Keep the mounted renderer/context warm without advancing scene frames. */
   renderPaused?: boolean
+  /** Keep frame systems ticking while admitting only the viewer's empty scene to the renderer. */
+  sceneDrawDisabled?: boolean
+  /** Tracks real-scene render attempts and outcomes without scheduling React work. */
+  sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
+  /** Prefer WebGPU automatically, or deterministically request Three's WebGL backend. */
+  rendererBackend?: RendererBackendPreference
+  /** Reports that the requested renderer backend could not initialize. */
+  onRendererInitializationFailure?: (failure: ViewerRendererInitializationFailure) => void
 }
 
 /** Imperative handle exposed via `ref` on `<Viewer>`. */
@@ -560,6 +580,8 @@ type ViewerSceneRuntimeProps = {
   hoverStyles: HoverStyles
   perf: boolean
   presentationEffectRef?: ViewerPresentationEffectRef
+  sceneDrawDisabled: boolean
+  sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
   selectionManager: NonNullable<ViewerProps['selectionManager']>
   useBvh: boolean
 }
@@ -569,6 +591,8 @@ const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
   hoverStyles,
   perf,
   presentationEffectRef,
+  sceneDrawDisabled,
+  sceneDrawSubmissionRef,
   selectionManager,
   useBvh,
 }: ViewerSceneRuntimeProps) {
@@ -606,6 +630,8 @@ const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
         disablePostFx={disablePostFx}
         hoverStyles={hoverStyles}
         presentationEffectRef={presentationEffectRef}
+        sceneDrawDisabled={sceneDrawDisabled}
+        sceneDrawSubmissionRef={sceneDrawSubmissionRef}
       />
       {selectionManager === 'default' && <SelectionManager />}
       {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
@@ -632,6 +658,10 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     disablePostFx = false,
     presentationEffectRef,
     renderPaused = false,
+    sceneDrawDisabled = false,
+    sceneDrawSubmissionRef,
+    rendererBackend = 'auto',
+    onRendererInitializationFailure,
   },
   ref,
 ) {
@@ -665,7 +695,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     }
   }, [isolate])
 
-  const [rendererInitFailed, setRendererInitFailed] = useState(false)
+  const [rendererInitializationFailure, setRendererInitializationFailure] =
+    useState<ViewerRendererInitializationFailure | null>(null)
 
   const isDark = useViewer((state) => getSceneTheme(state.sceneTheme).appearance === 'dark')
   const transparentBackground = useViewer((state) => state.transparentBackground)
@@ -727,19 +758,26 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // Desktops (fine pointer) keep the original 1.5 cap.
   const maxDpr =
     typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5
-  const showGpuFallback = rendererInitFailed
+  const activeRendererInitializationFailure =
+    rendererInitializationFailure?.backend === rendererBackend
+      ? rendererInitializationFailure
+      : null
+  const showGpuFallback = activeRendererInitializationFailure !== null
   // When we can't mount the GPU canvas, the SceneReadyTracker never mounts and
   // the host editor would otherwise wait on its scene-readiness timeout. Signal
   // readiness explicitly so the host can drop its loader immediately.
   useEffect(() => {
-    if (showGpuFallback) onSceneReadyChange?.(true)
-  }, [showGpuFallback, onSceneReadyChange])
+    if (!activeRendererInitializationFailure) return
+    onSceneReadyChange?.(true)
+    onRendererInitializationFailure?.(activeRendererInitializationFailure)
+  }, [activeRendererInitializationFailure, onRendererInitializationFailure, onSceneReadyChange])
 
   if (showGpuFallback) {
     return <UnsupportedGpuViewerFallback />
   }
   return (
     <Canvas
+      key={rendererBackend}
       camera={{ position: [50, 50, 50], fov: 50 }}
       className={`transition-colors duration-700 ${
         transparentBackground ? 'bg-transparent' : isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'
@@ -750,44 +788,54 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       gl={
         ((props: { canvas?: HTMLCanvasElement; powerPreference?: RendererPowerPreference }) => {
           const canvas = props.canvas
-          const cached = canvas ? WEBGPU_RENDERER_CACHE.get(canvas) : undefined
-          if (cached) return cached
-          const promise = (async () => {
-            const result = await initializeGpuRenderer({
-              // Supplying `device` makes three skip its own `requestAdapter`,
-              // so R3F's `powerPreference` only reaches the GPU if we forward it.
-              powerPreference: props.powerPreference,
-              createRenderer: (backendParameters) => {
-                const renderer = new THREE.WebGPURenderer({
-                  ...(props as any),
-                  ...backendParameters,
-                  alpha: true,
-                })
-                renderer.toneMapping = THREE.ACESFilmicToneMapping
-                renderer.toneMappingExposure = getSceneTheme(
-                  useViewer.getState().sceneTheme,
-                ).toneMappingExposure
-                return renderer
-              },
-            })
-            if (result.status === 'ready') {
-              installDrawableGeometryGuard(result.renderer)
-              return result.renderer
-            }
+          const createRendererPromise = () =>
+            (async () => {
+              const result = await initializeGpuRenderer({
+                backendPreference: rendererBackend,
+                // Supplying `device` makes three skip its own `requestAdapter`,
+                // so R3F's `powerPreference` only reaches the GPU if we forward it.
+                powerPreference: props.powerPreference,
+                createRenderer: (backendParameters) => {
+                  const renderer = new THREE.WebGPURenderer({
+                    ...(props as any),
+                    ...backendParameters,
+                    alpha: true,
+                  })
+                  renderer.toneMapping = THREE.ACESFilmicToneMapping
+                  renderer.toneMappingExposure = getSceneTheme(
+                    useViewer.getState().sceneTheme,
+                  ).toneMappingExposure
+                  return renderer
+                },
+              })
+              if (result.status === 'ready') {
+                installDrawableGeometryGuard(result.renderer)
+                return result.renderer
+              }
 
-            if (canvas) WEBGPU_RENDERER_CACHE.delete(canvas)
-            console.error('[viewer] WebGPURenderer init failed', result.error)
-            setRendererInitFailed(true)
-            // Never settles on purpose. Rejecting is what produced
-            // MONOREPO-EDITOR-59: R3F awaits this inside its own configure()
-            // with no catch, so a rejection surfaces as an unhandled rejection.
-            // Resolving is worse still — R3F would call render() on a renderer
-            // that has no context. The state update above unmounts this Canvas,
-            // which is what releases the pending configure().
-            return new Promise<never>(() => undefined)
-          })()
-          if (canvas) WEBGPU_RENDERER_CACHE.set(canvas, promise)
-          return promise
+              if (canvas) deleteCachedRendererPromise(RENDERER_CACHE, canvas, rendererBackend)
+              console.error('[viewer] WebGPURenderer init failed', result.error)
+              setRendererInitializationFailure({
+                backend: rendererBackend,
+                error: result.error,
+              })
+              // Never settles on purpose. Rejecting is what produced
+              // MONOREPO-EDITOR-59: R3F awaits this inside its own configure()
+              // with no catch, so a rejection surfaces as an unhandled rejection.
+              // Resolving is worse still — R3F would call render() on a renderer
+              // that has no context. The state update above unmounts this Canvas,
+              // which is what releases the pending configure().
+              return new Promise<never>(() => undefined)
+            })()
+
+          return canvas
+            ? getOrCreateCachedRendererPromise(
+                RENDERER_CACHE,
+                canvas,
+                rendererBackend,
+                createRendererPromise,
+              )
+            : createRendererPromise()
         }) as any
       }
       resize={{
@@ -816,6 +864,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           hoverStyles={hoverStyles}
           perf={perf}
           presentationEffectRef={presentationEffectRef}
+          sceneDrawDisabled={sceneDrawDisabled}
+          sceneDrawSubmissionRef={sceneDrawSubmissionRef}
           selectionManager={selectionManager}
           useBvh={useBvh}
         />

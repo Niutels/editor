@@ -4,7 +4,10 @@ import {
   LANDRUSH_ISLAND_LOADING_DISMISSAL_PROGRESS,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
 } from './landrush-island-loading-progress-controller'
-import { LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS } from './landrush-island-loading-shell-bootstrap'
+import {
+  LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+  STREAMED_SHELL_VELOCITY_PER_SECOND,
+} from './landrush-island-loading-shell-bootstrap'
 import {
   animateLandrushIslandLoadingHandoffFade,
   animateLandrushIslandLoadingPreview,
@@ -20,9 +23,11 @@ import {
   resolveDisplayedLoadingProgress,
   resolveLandrushIslandLoadingCompositorElapsedDelta,
   resolveLandrushIslandLoadingCompositorSampleInterval,
+  resolveLandrushIslandLoadingHandoffAction,
   resolveLandrushIslandLoadingPresentedFrameDelta,
   resolveLandrushIslandLoadingReducedMotion,
   resolveLandrushIslandLoadingTransformProgress,
+  restoreLandrushIslandLoadingHandoffOverlay,
   retargetLandrushIslandLoadingAnimationsWhileRunning,
   retargetLandrushIslandLoadingPercentPreview,
   retargetLandrushIslandLoadingPreview,
@@ -95,6 +100,57 @@ describe('Landrush island loading presentation handoff', () => {
     expect(returned).toBeNull()
     expect(finished).toBe(true)
     expect(style.opacity).toBe('0')
+  })
+
+  test('revokes an in-flight fade when readiness withdraws and permits a renewed fade', () => {
+    expect(
+      resolveLandrushIslandLoadingHandoffAction({
+        allReady: true,
+        completionRequested: false,
+        fadeStarted: false,
+        minimumVisibleElapsed: true,
+      }),
+    ).toBe('begin-fade')
+    expect(
+      resolveLandrushIslandLoadingHandoffAction({
+        allReady: false,
+        completionRequested: true,
+        fadeStarted: true,
+        minimumVisibleElapsed: true,
+      }),
+    ).toBe('cancel-fade')
+    expect(
+      resolveLandrushIslandLoadingHandoffAction({
+        allReady: true,
+        completionRequested: false,
+        fadeStarted: false,
+        minimumVisibleElapsed: true,
+      }),
+    ).toBe('begin-fade')
+
+    const attributes = new Map([
+      ['aria-hidden', 'true'],
+      ['hidden', ''],
+    ])
+    const style = createStyle()
+    style.opacity = '0'
+    style.visibility = 'hidden'
+    style.willChange = 'opacity'
+    restoreLandrushIslandLoadingHandoffOverlay({
+      removeAttribute: (name) => {
+        attributes.delete(name)
+      },
+      setAttribute: (name, value) => {
+        attributes.set(name, value)
+      },
+      style,
+    } as unknown as HTMLElement)
+
+    expect(style.opacity).toBe('1')
+    expect(style.visibility).toBe('')
+    expect(style.willChange).toBe('')
+    expect(attributes.get('aria-hidden')).toBe('false')
+    expect(attributes.has('hidden')).toBe(false)
   })
 
   test('adopts the exact shell compositor scale as the runtime progress floor', () => {
@@ -172,9 +228,8 @@ describe('Landrush island loading presentation handoff', () => {
     expect(currentTime).toBe(12_000)
     expect(frames).toEqual([
       { offset: 0, transform: 'scaleX(0.4)' },
-      { offset: 0.1, transform: 'scaleX(0.4)' },
-      { offset: 0.25, transform: 'scaleX(0.8)' },
-      { offset: 1, transform: 'scaleX(0.8)' },
+      { offset: 2 / 3, transform: 'scaleX(0.4)' },
+      { offset: 1, transform: 'scaleX(0.5333333333333333)' },
     ])
     expect(historicalReads).toBe(0)
     expect(style.transform).toBe('scaleX(0.4)')
@@ -285,6 +340,35 @@ describe('Landrush island loading presentation handoff', () => {
     expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
       LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
     )
+  })
+
+  test('renews from the rendered transform instead of a hidden advanced controller', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0 })
+    controller.synchronizeRenderedProgress(0.984, STREAMED_SHELL_VELOCITY_PER_SECOND)
+
+    const renewed = createLandrushIslandLoadingVisualPreview(
+      controller,
+      120_000,
+      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+      0.72,
+    )
+    const elapsedSeconds = renewed.durationMs / 1_000
+
+    expect(renewed.from).toBe(0.72)
+    expect(renewed.to).toBeCloseTo(0.984, 12)
+    expect(renewed.durationMs).toBeCloseTo(44_000, 9)
+    expect((renewed.to - renewed.from) / elapsedSeconds).toBeCloseTo(
+      STREAMED_SHELL_VELOCITY_PER_SECOND,
+      12,
+    )
+    expect(() =>
+      createLandrushIslandLoadingVisualPreview(
+        controller,
+        164_000,
+        LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+        0.984,
+      ),
+    ).toThrow('Landrush loading compositor runway is exhausted.')
   })
 
   test('does not reinterpret a pending compositor clock as time zero', () => {
@@ -409,7 +493,7 @@ describe('Landrush island loading presentation handoff', () => {
     expect(style.transform).toBe('scaleX(0.37)')
   })
 
-  test('maps a completion segment onto the remaining fixed compositor timeline', () => {
+  test('maps a segment onto its own remaining animation duration', () => {
     expect(
       createLandrushIslandLoadingRetargetKeyframes(
         {
@@ -422,13 +506,12 @@ describe('Landrush island loading presentation handoff', () => {
           startedAtMs: 5_000,
           to: 1,
         },
-        5_000,
+        500,
       ),
     ).toEqual([
       { offset: 0, progress: 0.9 },
-      { offset: 5_000 / LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS, progress: 0.9 },
-      { offset: 7_000 / LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS, progress: 1 },
-      { offset: 1, progress: 1 },
+      { offset: 0.25, progress: 0.9 },
+      { offset: 1, progress: 0.975 },
     ])
   })
 
@@ -438,15 +521,12 @@ describe('Landrush island loading presentation handoff', () => {
       initialVelocityPerSecond: 0.006,
     })
     controller.complete()
-    const keyframes = createLandrushIslandLoadingRetargetKeyframes(
-      createLandrushIslandLoadingVisualPreview(controller, 0, 18_000),
-      12_000,
-    )
+    const segment = createLandrushIslandLoadingVisualPreview(controller, 0, 18_000)
+    const keyframes = createLandrushIslandLoadingRetargetKeyframes(segment, 12_000)
     const intervalRates = keyframes.slice(1).map((keyframe, index) => {
       const previous = keyframes[index]!
       const elapsedSeconds =
-        ((keyframe.offset - previous.offset) * LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS) /
-        1_000
+        ((keyframe.offset - previous.offset) * segment.durationMs) / 1_000
       return elapsedSeconds > 0 ? (keyframe.progress - previous.progress) / elapsedSeconds : 0
     })
 
@@ -456,7 +536,7 @@ describe('Landrush island loading presentation handoff', () => {
     )
   })
 
-  test('truncates an overlong retarget instead of compressing it past the speed ceiling', () => {
+  test('truncates a retarget to its remaining duration without exceeding the speed ceiling', () => {
     const keyframes = createLandrushIslandLoadingRetargetKeyframes(
       {
         durationMs: 4_000,
@@ -468,15 +548,14 @@ describe('Landrush island loading presentation handoff', () => {
         startedAtMs: 0,
         to: 0.7,
       },
-      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS - 1_000,
+      3_000,
     )
 
     expect(keyframes).toHaveLength(3)
     expect(keyframes[0]).toEqual({ offset: 0, progress: 0.4 })
     expect(keyframes[1]).toEqual({
       offset:
-        (LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS - 1_000) /
-        LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+        3_000 / 4_000,
       progress: 0.4,
     })
     expect(keyframes[2]?.offset).toBe(1)
@@ -499,14 +578,8 @@ describe('Landrush island loading presentation handoff', () => {
       0,
     )
 
-    expect(keyframes.map(({ offset }) => offset)).toEqual([
-      0,
-      1_000 / LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
-      1,
-    ])
-    expect(keyframes.map(({ progress }) => progress)).toEqual([
-      0.4, 0.47500000000000003, 0.47500000000000003,
-    ])
+    expect(keyframes.map(({ offset }) => offset)).toEqual([0, 1])
+    expect(keyframes.map(({ progress }) => progress)).toEqual([0.4, 0.47500000000000003])
   })
 
   test('moves the visible integer at the exact fill thresholds on the same timeline', () => {
@@ -521,15 +594,14 @@ describe('Landrush island loading presentation handoff', () => {
         startedAtMs: 12_000,
         to: 0.42,
       },
-      12_000,
+      0,
     )
 
-    expect(keyframes).toHaveLength(4)
+    expect(keyframes).toHaveLength(3)
     expect(keyframes[0]).toEqual({ offset: 0, percent: 40 })
-    expect(keyframes[1]?.offset).toBeCloseTo(21_000 / 120_000, 12)
+    expect(keyframes[1]?.offset).toBeCloseTo(0.5, 12)
     expect(keyframes[1]?.percent).toBe(41)
-    expect(keyframes[2]).toEqual({ offset: 30_000 / 120_000, percent: 42 })
-    expect(keyframes[3]).toEqual({ offset: 1, percent: 42 })
+    expect(keyframes[2]).toEqual({ offset: 1, percent: 42 })
   })
 
   test('drives confirmed completion through retained sampled motion until dismissal is ready', () => {
@@ -553,14 +625,24 @@ describe('Landrush island loading presentation handoff', () => {
     expect(segments.at(-1)?.to).toBeGreaterThanOrEqual(LANDRUSH_ISLAND_LOADING_DISMISSAL_PROGRESS)
   })
 
-  test('caps the reduced-motion completion fallback at dismissal progress', () => {
+  test('keeps reduced-motion completion on the same bounded motion trajectory', () => {
     const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.96 })
     const preview = createLandrushIslandLoadingCompletionPreview(controller, 1_000, 520)
 
-    const applied = createLandrushIslandLoadingAppliedVisualSegment(preview, true, 1)
+    const applied = createLandrushIslandLoadingAppliedVisualSegment(preview, true)
+    const intervalRates = applied.keyframes.slice(1).map((keyframe, index) => {
+      const previous = applied.keyframes[index]!
+      const elapsedSeconds = (keyframe.offset - previous.offset) * (applied.durationMs / 1_000)
+      return elapsedSeconds > 0 ? (keyframe.progress - previous.progress) / elapsedSeconds : 0
+    })
 
-    expect(applied.from).toBe(LANDRUSH_ISLAND_LOADING_DISMISSAL_PROGRESS)
-    expect(applied.to).toBe(LANDRUSH_ISLAND_LOADING_DISMISSAL_PROGRESS)
+    expect(applied).toBe(preview)
+    expect(applied.from).toBe(0.96)
+    expect(applied.to).toBeGreaterThan(applied.from)
+    expect(Math.min(...intervalRates)).toBeGreaterThanOrEqual(0)
+    expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
+      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
+    )
   })
 
   test('derives the visible integer from the same scalar as the fill', () => {
@@ -575,17 +657,16 @@ describe('Landrush island loading presentation handoff', () => {
     expect(createLandrushIslandLoadingProgressPresentation(1).percent).toBe(100)
   })
 
-  test('uses static progress and no WAAPI when reduced motion is requested', () => {
+  test('keeps reduced-motion progress compositor-driven without a milestone jump', () => {
     let animateCalls = 0
+    let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
+    let options: KeyframeAnimationOptions | number | undefined
     const style = createStyle()
-    const returned = animateLandrushIslandLoadingPreview(
-      {
-        animate: () => {
-          animateCalls += 1
-          throw new Error('reduced-motion progress must not animate')
-        },
-        style,
-      } as unknown as HTMLElement,
+    const animation = { cancel() {} }
+    const reducedMotion = resolveLandrushIslandLoadingReducedMotion((query) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+    }))
+    const segment = createLandrushIslandLoadingAppliedVisualSegment(
       {
         durationMs: 30_000,
         from: 0.3,
@@ -596,18 +677,39 @@ describe('Landrush island loading presentation handoff', () => {
         startedAtMs: 0,
         to: 0.7,
       },
-      true,
+      reducedMotion,
+    )
+    const returned = animateLandrushIslandLoadingPreview(
+      {
+        animate: (nextFrames, nextOptions) => {
+          animateCalls += 1
+          frames = nextFrames
+          options = nextOptions
+          return animation as unknown as Animation
+        },
+        style,
+      } as unknown as HTMLElement,
+      segment,
     )
 
-    expect(returned).toBeNull()
-    expect(animateCalls).toBe(0)
-    expect(style.transform).toBe('scaleX(0.7)')
-    expect(style.willChange).toBe('auto')
-    expect(
-      resolveLandrushIslandLoadingReducedMotion((query) => ({
-        matches: query === '(prefers-reduced-motion: reduce)',
-      })),
-    ).toBe(true)
+    expect(reducedMotion).toBe(true)
+    expect(segment.keyframes).toEqual([
+      { offset: 0, progress: 0.3 },
+      { offset: 1, progress: 0.7 },
+    ])
+    expect(returned).toBe(animation)
+    expect(animateCalls).toBe(1)
+    expect(frames).toEqual([
+      { offset: 0, transform: 'scaleX(0.3)' },
+      { offset: 1, transform: 'scaleX(0.7)' },
+    ])
+    expect(options).toEqual({
+      duration: 30_000,
+      easing: 'linear',
+      fill: 'forwards',
+    })
+    expect(style.transform).toBe('scaleX(0.3)')
+    expect(style.willChange).toBe('transform')
     expect(resolveLandrushIslandLoadingReducedMotion(undefined)).toBe(false)
   })
 })
@@ -617,9 +719,11 @@ function createStyle() {
     opacity: '',
     removeProperty(name: string) {
       if (name === 'will-change') this.willChange = ''
+      if (name === 'visibility') this.visibility = ''
       return ''
     },
     transform: '',
+    visibility: '',
     willChange: '',
   }
 }

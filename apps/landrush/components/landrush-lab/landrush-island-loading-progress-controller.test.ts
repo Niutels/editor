@@ -106,6 +106,26 @@ describe('Landrush island loading progress controller', () => {
     expect(adopted.accelerationPerSecondSquared).toBe(before.accelerationPerSecondSquared)
   })
 
+  test('synchronizes a stale hidden model back to the exact rendered trajectory', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0,
+      initialVelocityPerSecond: 0.006,
+    })
+    controller.setConfirmedProgress(0, { ceiling: 0.984, estimatedDurationMs: 18_000 })
+    for (let elapsedMs = 0; elapsedMs < 120_000; elapsedMs += 1_000) controller.step(1_000)
+
+    expect(controller.getSnapshot().displayedProgress).toBe(0.984)
+
+    controller.synchronizeRenderedProgress(0.72, 0.006)
+
+    expect(controller.getSnapshot()).toMatchObject({
+      accelerationPerSecondSquared: 0,
+      displayedProgress: 0.72,
+      targetVelocityPerSecond: 0.006,
+      velocityPerSecond: 0.006,
+    })
+  })
+
   test('restores the full retained trajectory state across a runtime remount', () => {
     const source = createLandrushIslandLoadingProgressController({
       initialProgress: 0.14,

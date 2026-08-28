@@ -533,7 +533,7 @@ describe('Landrush island measured loading timeline', () => {
     expect(storage.entries.size).toBe(0)
   })
 
-  test('uses WAAPI for continuous transform motion without per-frame React work', () => {
+  test('uses one immutable WAAPI trajectory without per-frame React work', () => {
     let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
     let options: number | KeyframeAnimationOptions | undefined
     let finishListenerCount = 0
@@ -573,14 +573,10 @@ describe('Landrush island measured loading timeline', () => {
     expect(returned).toBe(animation)
     expect(frames).toEqual([
       { offset: 0, transform: 'scaleX(0.2)' },
-      {
-        offset: 10_000 / LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
-        transform: 'scaleX(0.7)',
-      },
       { offset: 1, transform: 'scaleX(0.7)' },
     ])
     expect(options).toEqual({
-      duration: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+      duration: 10_000,
       easing: 'linear',
       fill: 'forwards',
     })
@@ -605,7 +601,7 @@ describe('Landrush island measured loading timeline', () => {
     ).toBeCloseTo(0.45)
   })
 
-  test('builds a long sampled compositor preview from retained presentation motion', () => {
+  test('builds one long linear compositor preview from retained presentation motion', () => {
     const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0 })
     const stage = resolveLandrushIslandLoadingProgressStage({
       displayedProgress: 0,
@@ -618,8 +614,10 @@ describe('Landrush island measured loading timeline', () => {
     const preview = createLandrushIslandLoadingVisualPreview(controller, 1_000)
 
     expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS)
-    expect(preview.keyframes.length).toBeGreaterThan(2)
-    expect(preview.keyframes[0]).toEqual({ offset: 0, progress: 0 })
+    expect(preview.keyframes).toEqual([
+      { offset: 0, progress: 0 },
+      { offset: 1, progress: preview.to },
+    ])
     expect(preview.to).toBeLessThanOrEqual(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS)
     expect(
       resolveLandrushIslandLoadingVisualSegmentProgress(

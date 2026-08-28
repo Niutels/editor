@@ -22,9 +22,12 @@ import {
 } from '@pascal-app/editor'
 import {
   InteractiveSystem,
+  type RendererBackendPreference,
   useViewer,
   Viewer,
   type ViewerPresentationEffectRef,
+  type ViewerRendererInitializationFailure,
+  type ViewerSceneDrawSubmissionRef,
 } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -59,6 +62,10 @@ export type LandrushPascalHostProps = {
   sceneReadyKey?: string | number | null
   sceneReadyMaxWaitMs?: number
   sceneReadyPrerequisitesReady?: boolean
+  sceneDrawDisabled?: boolean
+  sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
+  rendererBackend?: RendererBackendPreference
+  onRendererInitializationFailure?: (failure: ViewerRendererInitializationFailure) => void
 }
 
 export function LandrushPascalHost({
@@ -77,6 +84,10 @@ export function LandrushPascalHost({
   sceneReadyKey = null,
   sceneReadyMaxWaitMs,
   sceneReadyPrerequisitesReady = true,
+  sceneDrawDisabled = false,
+  sceneDrawSubmissionRef,
+  rendererBackend = 'auto',
+  onRendererInitializationFailure,
 }: LandrushPascalHostProps) {
   const [hasLoadedScene, setHasLoadedScene] = useState(false)
   const [sceneLoadRevision, setSceneLoadRevision] = useState(0)
@@ -155,12 +166,16 @@ export function LandrushPascalHost({
           defaultRender={{ shading: 'solid' }}
           disablePostFx={disablePostFx}
           maxFps={maxFps}
+          onRendererInitializationFailure={onRendererInitializationFailure}
           onSceneReadyChange={onSceneReadyChange}
           presentationEffectRef={presentationEffectRef}
           renderContext="editor"
+          rendererBackend={rendererBackend}
           sceneReadyKey={viewerSceneReadyKey}
           sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}
           sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}
+          sceneDrawDisabled={sceneDrawDisabled}
+          sceneDrawSubmissionRef={sceneDrawSubmissionRef}
           selectionManager={selectionManager}
           useBvh={false}
         >
