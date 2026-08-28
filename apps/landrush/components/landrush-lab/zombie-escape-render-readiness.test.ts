@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { Object3D } from 'three'
+import type { Camera, Object3D } from 'three'
 import {
   Group,
   Mesh,
@@ -117,7 +117,7 @@ function createWebGLRealizationRenderer({
   onRender,
 }: {
   fenceStatuses?: number[]
-  onRender?: (scene: Scene, call: number) => void
+  onRender?: (scene: Scene, camera: Camera, call: number) => void
 } = {}) {
   const events: string[] = []
   const renderTarget = { id: 'initial-target' }
@@ -182,10 +182,10 @@ function createWebGLRealizationRenderer({
     getViewport(target: Vector4) {
       return target.copy(state.viewport)
     },
-    render(scene: Scene) {
+    render(scene: Scene, camera: Camera) {
       renderCalls += 1
       events.push(scene.children.length === 0 ? 'render:empty' : 'render:scene')
-      onRender?.(scene, renderCalls)
+      onRender?.(scene, camera, renderCalls)
     },
     setRenderTarget(target: unknown, activeCubeFace = 0, activeMipmapLevel = 0) {
       state.renderTarget = target
@@ -505,7 +505,7 @@ describe('Zombie Escape render compilation', () => {
     second.material.dispose()
   })
 
-  test('collects effective renderable subtrees once and plans deterministic bounded cohorts', () => {
+  test('collects each effective renderable once and plans deterministic bounded cohorts', () => {
     const targetScene = new Scene()
     const parent = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
     const nested = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
@@ -522,13 +522,18 @@ describe('Zombie Escape render compilation', () => {
     targetScene.add(parent, sibling, hiddenParent)
 
     const units = collectZombieEscapeWebGLRealizationUnits(targetScene)
-    expect(units.map(({ root }) => root.name)).toEqual(['parent', 'sibling'])
-    expect(units[0]!.renderables.map(({ name }) => name)).toEqual(['parent', 'nested'])
+    expect(units.map(({ root }) => root.name)).toEqual(['parent', 'nested', 'sibling'])
+    expect(units.map(({ renderables }) => renderables.map(({ name }) => name))).toEqual([
+      ['parent'],
+      ['nested'],
+      ['sibling'],
+    ])
     expect(units.flatMap(({ renderables }) => renderables)).toHaveLength(3)
     expect(new Set(units.flatMap(({ renderables }) => renderables)).size).toBe(3)
     expect(units.flatMap(({ renderables }) => renderables)).not.toContain(hidden)
 
-    const weightedUnits = units.map((unit, index) => ({ ...unit, weight: index + 2 }))
+    const weights = [2, 1, 3]
+    const weightedUnits = units.map((unit, index) => ({ ...unit, weight: weights[index]! }))
     const firstPlan = planZombieEscapeWebGLRealizationCohorts(weightedUnits, {
       maxCohorts: 2,
       maxWeight: 3,
@@ -539,10 +544,10 @@ describe('Zombie Escape render compilation', () => {
     })
     expect(
       firstPlan.map(({ units: cohortUnits }) => cohortUnits.map(({ root }) => root.name)),
-    ).toEqual([['parent'], ['sibling']])
+    ).toEqual([['parent', 'nested'], ['sibling']])
     expect(
       secondPlan.map(({ units: cohortUnits }) => cohortUnits.map(({ root }) => root.name)),
-    ).toEqual([['parent'], ['sibling']])
+    ).toEqual([['parent', 'nested'], ['sibling']])
     expect(firstPlan.every(({ weight }) => weight <= 3)).toBe(true)
     expect(() =>
       planZombieEscapeWebGLRealizationCohorts(weightedUnits, {
@@ -568,16 +573,19 @@ describe('Zombie Escape render compilation', () => {
     hidden.name = 'hidden'
     hiddenParent.visible = false
     hiddenParent.add(hidden)
-    targetScene.add(first, second, hiddenParent)
+    first.add(second)
+    targetScene.add(first, hiddenParent)
     const sceneSignatures: string[][] = []
     const frustumSignatures: boolean[][] = []
     const harness = createWebGLRealizationRenderer({
       fenceStatuses: [WEBGL_FENCE_STATUS.timeoutExpired, WEBGL_FENCE_STATUS.conditionSatisfied],
-      onRender(scene) {
+      onRender(scene, camera) {
         if (scene !== targetScene) return
         const visibleMeshes: Mesh[] = []
         scene.traverseVisible((object) => {
-          if ((object as Mesh).isMesh) visibleMeshes.push(object as Mesh)
+          if ((object as Mesh).isMesh && object.layers.test(camera.layers)) {
+            visibleMeshes.push(object as Mesh)
+          }
         })
         sceneSignatures.push(visibleMeshes.map(({ name }) => name))
         frustumSignatures.push(visibleMeshes.map(({ frustumCulled }) => frustumCulled))
@@ -635,11 +643,13 @@ describe('Zombie Escape render compilation', () => {
     targetScene.add(first, revealedParent)
     const sceneSignatures: string[][] = []
     const harness = createWebGLRealizationRenderer({
-      onRender(scene) {
+      onRender(scene, camera) {
         if (scene !== targetScene) return
         const visibleNames: string[] = []
         scene.traverseVisible((object) => {
-          if ((object as Mesh).isMesh) visibleNames.push(object.name)
+          if ((object as Mesh).isMesh && object.layers.test(camera.layers)) {
+            visibleNames.push(object.name)
+          }
         })
         sceneSignatures.push(visibleNames)
       },
@@ -676,11 +686,16 @@ describe('Zombie Escape render compilation', () => {
 
   test('restores object and renderer state when a cohort draw throws', async () => {
     const targetScene = new Scene()
-    const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
-    targetScene.add(mesh)
+    const mesh = makeHeavyRealizationMesh('mesh')
+    const sibling = makeHeavyRealizationMesh('sibling')
+    mesh.layers.mask = 5
+    sibling.layers.mask = 9
+    const originalMeshLayerMask = mesh.layers.mask
+    const originalSiblingLayerMask = sibling.layers.mask
+    targetScene.add(mesh, sibling)
     let harness: ReturnType<typeof createWebGLRealizationRenderer>
     harness = createWebGLRealizationRenderer({
-      onRender(_scene, call) {
+      onRender(_scene, _camera, call) {
         harness.state.autoClear = true
         harness.state.renderTarget = { id: 'mutated' }
         harness.state.activeCubeFace = 8
@@ -705,6 +720,9 @@ describe('Zombie Escape render compilation', () => {
     ).rejects.toThrow('cohort draw failed')
     expect(mesh.visible).toBe(true)
     expect(mesh.frustumCulled).toBe(true)
+    expect(mesh.layers.mask).toBe(originalMeshLayerMask)
+    expect(sibling.layers.mask).toBe(originalSiblingLayerMask)
+    expect(sibling.frustumCulled).toBe(true)
     expect(harness.state.autoClear).toBe(harness.initial.autoClear)
     expect(harness.state.renderTarget).toBe(harness.initial.renderTarget)
     expect(harness.state.activeCubeFace).toBe(harness.initial.activeCubeFace)
@@ -715,6 +733,8 @@ describe('Zombie Escape render compilation', () => {
     expect(harness.deletedFences).toBe(1)
     mesh.geometry.dispose()
     mesh.material.dispose()
+    sibling.geometry.dispose()
+    sibling.material.dispose()
   })
 
   test('preserves visibility and renderer changes made by frame systems between cohorts', async () => {

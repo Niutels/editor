@@ -30,8 +30,7 @@ export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT = 24
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORTS = 24
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_FENCE_POLLS = 8
 
-// This is an empirical scheduling score, not a millisecond bound; a top-level
-// renderable subtree stays indivisible so partitioning never changes layers or shadow topology.
+// This is an empirical scheduling score, not a millisecond bound.
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_GEOMETRY_BYTES_PER_WEIGHT = 1024 * 1024
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VERTEX_INVOCATIONS_PER_WEIGHT = 100_000
 
@@ -120,8 +119,8 @@ type ZombieEscapeWebGLRendererStateSnapshot = Readonly<{
 
 type ZombieEscapeWebGLObjectFlagSnapshot = Readonly<{
   frustumCulled: boolean
+  layerMask: number
   object: Object3D
-  visible: boolean
 }>
 
 type RegisteredRepresentative = Readonly<{
@@ -258,41 +257,27 @@ export async function compileZombieEscapeRenderRepresentatives(
 export function collectZombieEscapeWebGLRealizationUnits(
   targetScene: Object3D,
 ): readonly ZombieEscapeWebGLRealizationUnit[] {
-  const mutableUnits: Array<{
-    renderables: Object3D[]
-    root: Object3D
-  }> = []
+  const units: ZombieEscapeWebGLRealizationUnit[] = []
 
-  const visit = (
-    object: Object3D,
-    parentUnit: { renderables: Object3D[]; root: Object3D } | undefined,
-  ) => {
+  const visit = (object: Object3D) => {
     if (!object.visible) return
 
-    let unit = parentUnit
     if (isZombieEscapeRenderableObject(object)) {
-      if (!unit) {
-        unit = { renderables: [], root: object }
-        mutableUnits.push(unit)
-      }
-      unit.renderables.push(object)
+      units.push({
+        renderables: [object],
+        root: object,
+        weight: Math.min(
+          ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT,
+          estimateZombieEscapeWebGLRealizationWeight(object),
+        ),
+      })
     }
 
-    for (const child of object.children) visit(child, unit)
+    for (const child of object.children) visit(child)
   }
 
-  visit(targetScene, undefined)
-  return mutableUnits.map(({ renderables, root }) => ({
-    renderables,
-    root,
-    weight: Math.min(
-      ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT,
-      renderables.reduce(
-        (weight, renderable) => weight + estimateZombieEscapeWebGLRealizationWeight(renderable),
-        0,
-      ),
-    ),
-  }))
+  visit(targetScene)
+  return units
 }
 
 export function planZombieEscapeWebGLRealizationCohorts(
@@ -540,8 +525,8 @@ function snapshotZombieEscapeWebGLRealizationObjects(
       seen.add(object)
       snapshots.push({
         frustumCulled: object.frustumCulled,
+        layerMask: object.layers.mask,
         object,
-        visible: object.visible,
       })
     }
   }
@@ -553,29 +538,15 @@ function applyZombieEscapeWebGLRealizationCohort(
   cohort: ZombieEscapeWebGLRealizationCohort,
 ) {
   const admitted = new Set(cohort.units)
-  const effectivelyVisible = new Set<Object3D>()
   for (const unit of units) {
     for (const renderable of unit.renderables) {
-      if (isZombieEscapeObjectEffectivelyVisible(renderable)) effectivelyVisible.add(renderable)
+      if (!admitted.has(unit)) {
+        renderable.layers.mask = 0
+        continue
+      }
+      renderable.frustumCulled = false
     }
   }
-  for (const unit of units) {
-    const unitAdmitted = admitted.has(unit) && effectivelyVisible.has(unit.root)
-    unit.root.visible = unitAdmitted
-    if (!unitAdmitted) continue
-    for (const renderable of unit.renderables) {
-      if (effectivelyVisible.has(renderable)) renderable.frustumCulled = false
-    }
-  }
-}
-
-function isZombieEscapeObjectEffectivelyVisible(object: Object3D) {
-  let current: Object3D | null = object
-  while (current) {
-    if (!current.visible) return false
-    current = current.parent
-  }
-  return true
 }
 
 function restoreZombieEscapeWebGLRealizationObjects(
@@ -583,7 +554,7 @@ function restoreZombieEscapeWebGLRealizationObjects(
 ) {
   for (let index = snapshots.length - 1; index >= 0; index -= 1) {
     const snapshot = snapshots[index]!
-    snapshot.object.visible = snapshot.visible
+    snapshot.object.layers.mask = snapshot.layerMask
     snapshot.object.frustumCulled = snapshot.frustumCulled
   }
 }
