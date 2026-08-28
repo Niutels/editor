@@ -522,7 +522,7 @@ export function useLandrushIslandLoadingTimeline({
       fadeAnimationRef.current?.cancel()
       fadeAnimationRef.current = null
       if (presentationOverlay) {
-        restoreLandrushIslandLoadingHandoffOverlay(presentationOverlay)
+        restoreLandrushIslandLoadingHandoffOverlay(presentationOverlay, handedOff)
       }
       fadeStarted = false
     }
@@ -822,7 +822,9 @@ export function resolveLandrushIslandLoadingHandoffAction({
 
 export function restoreLandrushIslandLoadingHandoffOverlay(
   element: Pick<HTMLElement, 'removeAttribute' | 'setAttribute' | 'style'>,
+  handedOff = false,
 ) {
+  if (handedOff) return
   element.style.opacity = '1'
   element.style.removeProperty('visibility')
   element.style.removeProperty('will-change')

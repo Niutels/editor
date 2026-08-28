@@ -33,7 +33,10 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY } from './landrush-island-material-presentation-readiness'
+import {
+  LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+  LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY,
+} from './landrush-island-material-presentation-readiness'
 import {
   startZombieEscapeAssetTransferWarmup,
   type ZombieEscapeAssetTransferWarmup,
@@ -203,6 +206,7 @@ const EMPTY_READY_ZOMBIE_VARIANTS = new Set<number>()
 const ZOMBIE_ESCAPE_CRITICAL_RENDER_REPRESENTATIVE_KEYS = Object.freeze([
   ...getZombieEscapeRenderRepresentativeKeys('performance'),
   LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+  LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY,
 ])
 const ZOMBIE_ESCAPE_CRITICAL_RENDER_REPRESENTATIVE_KEY_SET = new Set(
   ZOMBIE_ESCAPE_CRITICAL_RENDER_REPRESENTATIVE_KEYS,

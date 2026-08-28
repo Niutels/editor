@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from 'three'
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Scene } from 'three'
 import { LandrushIslandMaterialPresentationOwner } from './landrush-island-material-presentation'
 import {
   collectLandrushIslandMaterialPresentationReadinessMeshes,
   LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+  LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY,
   registerLandrushIslandMaterialPresentationRenderReadiness,
+  registerLandrushIslandSceneRenderReadiness,
 } from './landrush-island-material-presentation-readiness'
 import { createZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 
@@ -104,5 +106,31 @@ describe('Landrush island material presentation render readiness', () => {
     owner.dispose()
     geometry.dispose()
     material.dispose()
+  })
+
+  test('registers the attached scene only while render readiness is active', () => {
+    const registry = createZombieEscapeRenderReadinessRegistry([
+      LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY,
+    ])
+    const scene = new Scene()
+    const mesh = new Mesh(new BoxGeometry(), new MeshStandardMaterial())
+    scene.add(mesh)
+
+    expect(
+      registerLandrushIslandSceneRenderReadiness({ ready: false, registry, scene }),
+    ).toBeUndefined()
+    expect(registry.getSnapshot().complete).toBe(false)
+
+    const cleanup = registerLandrushIslandSceneRenderReadiness({ ready: true, registry, scene })
+    expect(registry.getSnapshot()).toMatchObject({
+      complete: true,
+      representatives: [{ key: LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY, root: scene }],
+    })
+
+    cleanup?.()
+    expect(registry.getSnapshot().complete).toBe(false)
+    expect(scene.children).toEqual([mesh])
+    mesh.geometry.dispose()
+    mesh.material.dispose()
   })
 })

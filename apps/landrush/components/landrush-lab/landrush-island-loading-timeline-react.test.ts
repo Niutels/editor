@@ -153,6 +153,32 @@ describe('Landrush island loading presentation handoff', () => {
     expect(attributes.has('hidden')).toBe(false)
   })
 
+  test('does not resurrect a terminally handed-off shell during passive cleanup', () => {
+    const attributes = new Map([
+      ['aria-hidden', 'true'],
+      ['hidden', ''],
+    ])
+    const style = createStyle()
+    style.opacity = '0'
+
+    restoreLandrushIslandLoadingHandoffOverlay(
+      {
+        removeAttribute: (name) => {
+          attributes.delete(name)
+        },
+        setAttribute: (name, value) => {
+          attributes.set(name, value)
+        },
+        style,
+      } as unknown as HTMLElement,
+      true,
+    )
+
+    expect(style.opacity).toBe('0')
+    expect(attributes.get('aria-hidden')).toBe('true')
+    expect(attributes.has('hidden')).toBe(true)
+  })
+
   test('adopts the exact shell compositor scale as the runtime progress floor', () => {
     expect(resolveLandrushIslandLoadingTransformProgress('matrix(0.37, 0, 0, 1, 0, 0)')).toBe(0.37)
     expect(

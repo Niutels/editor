@@ -306,6 +306,70 @@ describe('Zombie Escape render compilation', () => {
     }
   })
 
+  test('compiles an attached renderable once when representative roots overlap', async () => {
+    const root = new Group()
+    const mesh = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    root.add(mesh)
+    const compiled: Object3D[] = []
+    let admissionOpportunities = 0
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: {
+          async compileAsync(renderable) {
+            compiled.push(renderable)
+          },
+        },
+        representatives: [
+          { key: 'root', root },
+          { key: 'mesh', root: mesh },
+        ],
+        targetScene: new Scene(),
+      },
+      async () => {
+        admissionOpportunities += 1
+      },
+    )
+
+    expect(compiled).toEqual([mesh])
+    expect(admissionOpportunities).toBe(1)
+    mesh.geometry.dispose()
+    mesh.material.dispose()
+  })
+
+  test('lets the renderer compile the attached scene as one deduplicated pipeline batch', async () => {
+    const targetScene = new Scene()
+    const first = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    const second = new Mesh(new SphereGeometry(1, 4, 3), new MeshBasicMaterial())
+    targetScene.add(first, second)
+    const compiled: Object3D[] = []
+    let admissionOpportunities = 0
+
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: new PerspectiveCamera(),
+        renderer: {
+          async compileAsync(root) {
+            compiled.push(root)
+          },
+        },
+        representatives: [{ key: 'attached-scene', root: targetScene }],
+        targetScene,
+      },
+      async () => {
+        admissionOpportunities += 1
+      },
+    )
+
+    expect(compiled).toEqual([targetScene])
+    expect(admissionOpportunities).toBe(1)
+    first.geometry.dispose()
+    first.material.dispose()
+    second.geometry.dispose()
+    second.material.dispose()
+  })
+
   test('prewarms newly registered representatives immediately and exactly once in queue order', async () => {
     const firstCompilation = deferred<void>()
     const secondCompilation = deferred<void>()

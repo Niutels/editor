@@ -7121,6 +7121,7 @@ export function LandrushIslandClient({
         <LandrushIslandZombieRenderErrorFallback />
       ) : loadingPresentationActive ? (
         <LandrushIslandLoadingOverlay
+          handoffFadeMs={zombieEscapeEnabled ? 0 : LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS}
           key={loadingOverlayKey}
           lifecycleGeneration={zombieStartupLifecycleGeneration}
           onLoaded={handleLoadingLoaded}
@@ -7669,6 +7670,7 @@ function LandrushIslandZombieRenderErrorFallback() {
 }
 
 function LandrushIslandLoadingOverlay({
+  handoffFadeMs,
   lifecycleGeneration,
   onLoaded,
   profileKey,
@@ -7677,6 +7679,7 @@ function LandrushIslandLoadingOverlay({
   tasks,
   topologySignature,
 }: {
+  handoffFadeMs: number
   lifecycleGeneration: number
   onLoaded: (lifecycleGeneration: number) => void
   profileKey: string
@@ -7687,7 +7690,7 @@ function LandrushIslandLoadingOverlay({
 }) {
   const { fillRef, overlayRef, progress, statusText, visible } = useLandrushIslandLoadingTimeline({
     generation: runGeneration,
-    handoffFadeMs: LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS,
+    handoffFadeMs,
     onHandoff: () => onLoaded(lifecycleGeneration),
     profileKey,
     sampleInvalidationKey,

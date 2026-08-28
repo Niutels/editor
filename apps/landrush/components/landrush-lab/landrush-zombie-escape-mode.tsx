@@ -42,7 +42,9 @@ import type {
 } from './landrush-island-material-presentation'
 import {
   LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+  LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY,
   LandrushIslandMaterialPresentationRenderReadiness,
+  LandrushIslandSceneRenderReadiness,
 } from './landrush-island-material-presentation-readiness'
 import {
   createLandrushIslandPalmCollisionCircles,
@@ -1194,6 +1196,7 @@ export function LandrushZombieEscapeMode({
       createZombieEscapeRenderReadinessRegistry([
         ...getZombieEscapeRenderRepresentativeKeys('balanced'),
         LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+        LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY,
       ]),
     [],
   )
@@ -2118,6 +2121,10 @@ const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePrese
       <LandrushIslandMaterialPresentationRenderReadiness
         meshes={materialPresentationReadinessMeshes}
         owner={materialPresentation}
+        ready={viewerSceneReady}
+        registry={renderReadinessRegistry}
+      />
+      <LandrushIslandSceneRenderReadiness
         ready={viewerSceneReady}
         registry={renderReadinessRegistry}
       />

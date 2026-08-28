@@ -1,7 +1,8 @@
 'use client'
 
+import { useThree } from '@react-three/fiber'
 import { useLayoutEffect, useRef } from 'react'
-import type { Mesh, Object3D } from 'three'
+import type { Mesh, Object3D, Scene } from 'three'
 import type {
   LandrushIslandMaterialPresentationOwner,
   LandrushIslandMaterialReadinessMesh,
@@ -11,6 +12,7 @@ import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render
 
 export const LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY =
   'island:material-presentation'
+export const LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY = 'island:attached-scene'
 
 export function collectLandrushIslandMaterialPresentationReadinessMeshes({
   floorRoots,
@@ -86,6 +88,19 @@ export function registerLandrushIslandMaterialPresentationRenderReadiness({
   }
 }
 
+export function registerLandrushIslandSceneRenderReadiness({
+  ready,
+  registry,
+  scene,
+}: {
+  ready: boolean
+  registry: ZombieEscapeRenderReadinessRegistry
+  scene: Scene
+}) {
+  if (!ready) return undefined
+  return registry.register(LANDRUSH_ISLAND_SCENE_RENDER_REPRESENTATIVE_KEY, scene)
+}
+
 export function LandrushIslandMaterialPresentationRenderReadiness({
   meshes,
   owner,
@@ -111,5 +126,20 @@ export function LandrushIslandMaterialPresentationRenderReadiness({
     [owner, ready, registry],
   )
 
+  return null
+}
+
+export function LandrushIslandSceneRenderReadiness({
+  ready,
+  registry,
+}: {
+  ready: boolean
+  registry: ZombieEscapeRenderReadinessRegistry
+}) {
+  const scene = useThree((state) => state.scene)
+  useLayoutEffect(
+    () => registerLandrushIslandSceneRenderReadiness({ ready, registry, scene }),
+    [ready, registry, scene],
+  )
   return null
 }

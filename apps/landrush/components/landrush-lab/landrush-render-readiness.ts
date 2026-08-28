@@ -76,8 +76,17 @@ export async function compileLandrushRenderRepresentatives(
 ) {
   await renderer.init?.()
 
+  const compiledRenderables = new Set<Object3D>()
   for (const representative of representatives) {
+    if (representative.root === targetScene) {
+      await renderer.compileAsync(targetScene, camera, targetScene)
+      await renderer.backend?.device?.queue?.onSubmittedWorkDone?.()
+      await waitForAdmissionOpportunity()
+      continue
+    }
     for (const renderable of collectLandrushRepresentativeRenderables(representative.root)) {
+      if (compiledRenderables.has(renderable)) continue
+      compiledRenderables.add(renderable)
       let pendingCompilation: Promise<unknown>
       const restore = forceLandrushRepresentativeRenderable(renderable)
       try {
