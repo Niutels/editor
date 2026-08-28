@@ -30,6 +30,7 @@ import {
   type LandrushRobotJumpPoseRef,
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
+import { applyLandrushRobotRuntimeTexture } from './landrush-robot-texture'
 import type { LandrushWorldNode } from './schema'
 
 export {
@@ -192,7 +193,12 @@ export function LandrushRobot({
     [animations, measure],
   )
   const clonedScene = useMemo(
-    () => measure('setup.robot-glb.clone-skeleton', () => cloneSkeleton(scene) as Group),
+    () =>
+      measure('setup.robot-glb.clone-skeleton', () => {
+        const clone = cloneSkeleton(scene) as Group
+        applyLandrushRobotRuntimeTexture(clone)
+        return clone
+      }),
     [measure, scene],
   )
   const hoverRestPose = useMemo(
