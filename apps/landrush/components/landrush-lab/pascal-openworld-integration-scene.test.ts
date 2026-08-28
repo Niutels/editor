@@ -34,12 +34,15 @@ describe('Pascal multiplayer-island composition', () => {
     expect(routeSource).not.toContain('progressive')
     expect(clientSource).toContain("from '@landrush/pascal-host'")
     expect(clientSource.match(/<LandrushPascalHost\b/g)).toHaveLength(1)
-    expect(clientSource).not.toContain('<Viewer')
+    expect(clientSource).not.toMatch(/<Viewer\b/)
     expect(clientSource).toContain(
       'const [viewerSceneReady, setViewerSceneReady] = useState(false)',
     )
     expect(clientSource).toMatch(
-      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+worldFrameReady &&\s+ambientLoadReadiness\?\.ready === true &&/,
+      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+worldFrameReady &&\s+\(zombieEscapeEnabled \|\| ambientLoadReadiness\?\.ready === true\) &&/,
+    )
+    expect(clientSource).toMatch(
+      /if \(!zombieEscapeEnabled\) \{\s+tasks\.push\(\{\s+completed: ambientLoadReadiness\?\.completed \?\? 0,\s+id: 'ambient-assets'/,
     )
     expect(clientSource).toContain('onSceneReadyChange={setViewerSceneReady}')
     expect(clientSource).toContain(

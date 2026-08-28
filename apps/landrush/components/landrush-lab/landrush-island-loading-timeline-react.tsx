@@ -42,10 +42,7 @@ const COMPOSITOR_SAMPLE_INTERVAL_MS = 1_000 / 30
 const COMPOSITOR_MAXIMUM_SEGMENT_COUNT = Math.ceil(
   COMPOSITOR_TIMELINE_DURATION_MS / LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
 )
-const COMPOSITOR_RETARGET_INTERVAL_MS = 80
 const MAXIMUM_PRESENTED_FRAME_DELTA_MS = 1_000 / 30
-const PRESENTATION_WATCHDOG_INTERVAL_MS =
-  LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS / 2
 const PRESENTATION_WATCHDOG_STALL_MS = LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS
 export const LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS = COMPOSITOR_TIMELINE_DURATION_MS
 const STREAMED_SHELL_VELOCITY_PER_SECOND = 0.006
@@ -247,7 +244,6 @@ export function useLandrushIslandLoadingTimeline({
     }
     animationRef.current = inheritedMotion?.animation ?? null
     percentAnimationRef.current = inheritedMotion?.percentAnimation ?? null
-    let inheritedMotionActive = inheritedMotion !== null && !inheritedProgressSnapshot
     let animationElapsedMs =
       inheritedProgressSnapshot && Number.isFinite(inheritedMotion?.animationElapsedMs)
         ? Math.max(0, inheritedMotion?.animationElapsedMs ?? 0)
@@ -258,8 +254,6 @@ export function useLandrushIslandLoadingTimeline({
     let fadeStarted = false
     let fadeFallbackTimer: number | null = null
     let frameId: number | null = null
-    let compositorRefreshFrameId: number | null = null
-    let pendingCompositorMutation: ((renderedProgress: number) => void) | null = null
     let lastFrameAtMs = initialObservationTimeMs
     let lastRenderedProgress = initialVisualFloor
     let lastPresentedProgress = initialVisualFloor
@@ -269,18 +263,6 @@ export function useLandrushIslandLoadingTimeline({
       presentationStatus?.textContent?.trim() || LANDRUSH_ISLAND_LOADING_INITIAL_STATUS
     let handedOff = false
     let motionAdopted = inheritedMotion !== null
-    let pendingStageRetargetTimer: number | null = null
-    let pendingStageRetarget: Readonly<{
-      ceiling: number
-      confirmedProgress: number
-      estimatedDurationMs: number
-    }> | null = null
-    let lastStageRetargetAtMs = initialObservationTimeMs
-    let appliedPendingStage: Readonly<{
-      ceiling: number
-      confirmedProgress: number
-      estimatedDurationMs: number
-    }> | null = inheritedPendingStage
 
     if (presentationOverlay) {
       presentationOverlay.style.opacity = '1'
@@ -367,7 +349,6 @@ export function useLandrushIslandLoadingTimeline({
       if (bootRun?.motion?.animation === animation) bootRun.motion = undefined
       animationRef.current = null
       percentAnimationRef.current = null
-      inheritedMotionActive = false
       animationElapsedMs = 0
     }
 
@@ -378,10 +359,6 @@ export function useLandrushIslandLoadingTimeline({
       const currentTimeMs = rawCurrentTime === null ? Number.NaN : Number(rawCurrentTime)
       if (!Number.isFinite(currentTimeMs)) return true
       const boundedTimeMs = Math.min(COMPOSITOR_TIMELINE_DURATION_MS, Math.max(0, currentTimeMs))
-      if (inheritedMotionActive) {
-        animationElapsedMs = boundedTimeMs
-        return true
-      }
       if (animationElapsedMs === null) {
         animationElapsedMs = boundedTimeMs
         return true
@@ -456,7 +433,6 @@ export function useLandrushIslandLoadingTimeline({
       percentAnimationRef.current = percentAnimation
       presentationFill.style.animation = 'none'
       if (presentationPercentReel) presentationPercentReel.style.animation = 'none'
-      inheritedMotionActive = false
       animationElapsedMs = 0
       if (bootRun) {
         bootRun.motion = {
@@ -471,134 +447,6 @@ export function useLandrushIslandLoadingTimeline({
         }
       }
       return true
-    }
-
-    const refreshCompositorAnimation = (mutateController?: (renderedProgress: number) => void) => {
-      if (!presentationFill || reducedMotion || handedOff) return
-      const animation = animationRef.current
-      const percentAnimation = percentAnimationRef.current
-      let mutationApplied = false
-      if (animation && animation.playState !== 'idle' && animation.playState !== 'finished') {
-        const retargeted = retargetLandrushIslandLoadingAnimationsWhileRunning(
-          animation,
-          percentAnimation,
-          (heldCurrentTimeMs) => {
-            if (
-              runRef.current !== run ||
-              handedOff ||
-              animationRef.current !== animation ||
-              percentAnimationRef.current !== percentAnimation
-            ) {
-              return false
-            }
-            const boundedCurrentTimeMs = Math.min(
-              COMPOSITOR_TIMELINE_DURATION_MS,
-              Math.max(0, heldCurrentTimeMs),
-            )
-            const currentProgress = reconcileRenderedProgress(boundedCurrentTimeMs)
-            mutateController?.(currentProgress)
-            mutationApplied = true
-            const remainingDurationMs = Math.max(
-              0,
-              COMPOSITOR_TIMELINE_DURATION_MS - boundedCurrentTimeMs,
-            )
-            if (remainingDurationMs < 1_000) return false
-            const segment = createLandrushIslandLoadingVisualPreview(
-              progressController,
-              readNow(),
-              Math.min(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS, remainingDurationMs),
-            )
-            visualSegmentRef.current = segment
-            const fillRetargeted = retargetLandrushIslandLoadingPreview(
-              animation,
-              presentationFill,
-              segment,
-              boundedCurrentTimeMs,
-            )
-            const percentRetargeted =
-              !presentationPercentReel ||
-              (percentAnimation
-                ? retargetLandrushIslandLoadingPercentPreview(
-                    percentAnimation,
-                    presentationPercentReel,
-                    segment,
-                    boundedCurrentTimeMs,
-                  )
-                : false)
-            return fillRetargeted && percentRetargeted
-          },
-        )
-        if (retargeted) {
-          inheritedMotionActive = false
-          if (bootRun?.motion?.animation === animation) {
-            bootRun.motion.animationElapsedMs = animationElapsedMs ?? undefined
-            bootRun.motion.progressSnapshot = progressController.getSnapshot()
-            bootRun.motion.velocityPerSecond = progressController.getSnapshot().velocityPerSecond
-          }
-          return
-        }
-        if (runRef.current !== run || handedOff || animationRef.current !== animation) {
-          return
-        }
-      }
-      const renderedProgress = freezeRenderedPresentation()
-      if (!mutationApplied) mutateController?.(renderedProgress)
-      startCompositorAnimation()
-    }
-
-    const scheduleCompositorRefresh = (mutateController?: (renderedProgress: number) => void) => {
-      if (mutateController) pendingCompositorMutation = mutateController
-      if (compositorRefreshFrameId !== null) return
-      compositorRefreshFrameId = window.requestAnimationFrame(() => {
-        compositorRefreshFrameId = null
-        const mutation = pendingCompositorMutation
-        pendingCompositorMutation = null
-        if (runRef.current === run && !handedOff && !fadeStarted) {
-          refreshCompositorAnimation(mutation ?? undefined)
-          if (pendingCompositorMutation && runRef.current === run && !handedOff && !fadeStarted) {
-            scheduleCompositorRefresh()
-          }
-        }
-      })
-    }
-
-    const clearPendingStageRetarget = () => {
-      if (pendingStageRetargetTimer !== null) {
-        window.clearTimeout(pendingStageRetargetTimer)
-        pendingStageRetargetTimer = null
-      }
-      pendingStageRetarget = null
-    }
-
-    const flushPendingStageRetarget = () => {
-      pendingStageRetargetTimer = null
-      const stage = pendingStageRetarget
-      pendingStageRetarget = null
-      if (!stage || completionRequested || handedOff || fadeStarted) return
-      scheduleCompositorRefresh(() => {
-        progressController.setConfirmedProgress(stage.confirmedProgress, stage)
-      })
-      lastStageRetargetAtMs = readNow()
-    }
-
-    const scheduleStageRetarget = (
-      stage: Readonly<{
-        ceiling: number
-        confirmedProgress: number
-        estimatedDurationMs: number
-      }>,
-    ) => {
-      pendingStageRetarget = stage
-      if (pendingStageRetargetTimer !== null) return
-      const waitMs = Math.max(
-        0,
-        COMPOSITOR_RETARGET_INTERVAL_MS - (readNow() - lastStageRetargetAtMs),
-      )
-      if (waitMs <= 0) {
-        flushPendingStageRetarget()
-        return
-      }
-      pendingStageRetargetTimer = window.setTimeout(flushPendingStageRetarget, waitMs)
     }
 
     const cancelFade = () => {
@@ -616,7 +464,7 @@ export function useLandrushIslandLoadingTimeline({
     }
 
     const finishHandoff = () => {
-      if (runRef.current !== run || handedOff || !progressController.readyToDismiss()) return
+      if (runRef.current !== run || handedOff) return
       handedOff = true
       if (fadeFallbackTimer !== null) {
         window.clearTimeout(fadeFallbackTimer)
@@ -691,17 +539,7 @@ export function useLandrushIslandLoadingTimeline({
       if (update.allReady && nowMs - startTimeMs >= Math.max(0, minimumVisibleMs)) {
         if (!completionRequested) {
           completionRequested = true
-          clearPendingStageRetarget()
-          if (reducedMotion) {
-            progressController.complete()
-            progressController.snapToComplete()
-            publishProgress(1)
-            beginHandoffFade()
-          } else {
-            scheduleCompositorRefresh(() => {
-              progressController.complete()
-            })
-          }
+          beginHandoffFade()
           return
         }
       }
@@ -712,20 +550,11 @@ export function useLandrushIslandLoadingTimeline({
         evidenceProgress: update.evidenceProgress,
         forecastProgress: update.progress,
       })
-      const stageNeedsRetarget =
-        !appliedPendingStage || stage.ceiling > appliedPendingStage.ceiling + 0.02
-      if (stageNeedsRetarget) {
-        appliedPendingStage = stage
-      }
+      progressController.setConfirmedProgress(stage.confirmedProgress, stage)
       if (reducedMotion) {
-        if (stageNeedsRetarget) {
-          progressController.setConfirmedProgress(stage.confirmedProgress, stage)
-        }
         const staticProgress = Math.max(displayedProgress, stage.confirmedProgress)
         progressController.reconcileDisplayedProgress(staticProgress)
         publishProgress(staticProgress)
-      } else if (stageNeedsRetarget) {
-        scheduleStageRetarget(stage)
       }
     }
     driveRef.current = drive
@@ -770,21 +599,14 @@ export function useLandrushIslandLoadingTimeline({
       }
       let progress: number
       if (animationRef.current) {
-        progress = reconcileRenderedProgress()
+        advanceControllerFromAnimation()
+        progress = progressController.getSnapshot().displayedProgress
         if (
           animationRef.current?.playState === 'finished' ||
           animationRef.current?.playState === 'idle'
         ) {
           freezeRenderedPresentation()
           startCompositorAnimation()
-        } else if (
-          shouldReconcileLandrushIslandLoadingPreview(
-            visualSegmentRef.current,
-            readNow(),
-            progressController.getSnapshot().displayedProgress,
-          )
-        ) {
-          refreshCompositorAnimation()
         }
       } else if (reducedMotion) {
         progress = progressController.getSnapshot().displayedProgress
@@ -798,46 +620,15 @@ export function useLandrushIslandLoadingTimeline({
       }
       lastFrameAtMs = timestamp
       publishProgress(progress)
-      if (completionRequested && progressController.readyToDismiss()) beginHandoffFade()
       if (!handedOff) frameId = window.requestAnimationFrame(onPresentationFrame)
     }
     frameId = window.requestAnimationFrame(onPresentationFrame)
-    const presentationWatchdogInterval = window.setInterval(() => {
-      const timestamp = readNow()
-      if (
-        runRef.current !== run ||
-        handedOff ||
-        !motionAdopted ||
-        reducedMotion ||
-        !shouldAdvanceLandrushIslandLoadingFrameFallback(timestamp, lastFrameAtMs)
-      ) {
-        return
-      }
-      if (animationRef.current) freezeRenderedPresentation()
-      progressController.step(
-        resolveLandrushIslandLoadingPresentedFrameDelta(timestamp, lastFrameAtMs),
-      )
-      const progress = progressController.getSnapshot().displayedProgress
-      publishProgress(progress)
-      lastFrameAtMs = timestamp
-      if (completionRequested && progressController.readyToDismiss()) {
-        beginHandoffFade()
-      } else {
-        startCompositorAnimation()
-      }
-    }, PRESENTATION_WATCHDOG_INTERVAL_MS)
     const accessibilityInterval = window.setInterval(drive, Math.max(100, accessibilityUpdateMs))
 
     return () => {
       driveRef.current = null
       window.clearInterval(accessibilityInterval)
-      window.clearInterval(presentationWatchdogInterval)
-      clearPendingStageRetarget()
       if (frameId !== null) window.cancelAnimationFrame(frameId)
-      if (compositorRefreshFrameId !== null) {
-        window.cancelAnimationFrame(compositorRefreshFrameId)
-      }
-      pendingCompositorMutation = null
       const animation = animationRef.current
       if (motionAdopted && bootRun?.owner === 'runtime' && animation && presentationFill) {
         advanceControllerFromAnimation()
@@ -962,19 +753,24 @@ export function createLandrushIslandLoadingVisualPreview(
   startedAtMs: number,
   durationMs = COMPOSITOR_TIMELINE_DURATION_MS,
 ): LandrushIslandLoadingVisualSegment {
-  const preview = controller.createMotionPreview(
-    durationMs,
-    resolveLandrushIslandLoadingCompositorSampleInterval(durationMs),
+  const boundedDurationMs = Math.max(
+    1,
+    Math.min(
+      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
+      Number.isFinite(durationMs) ? durationMs : COMPOSITOR_TIMELINE_DURATION_MS,
+    ),
   )
-  const from = preview.samples[0]?.progress ?? controller.getSnapshot().displayedProgress
-  const to = preview.samples.at(-1)?.progress ?? from
-  return {
-    durationMs: preview.durationMs,
+  const from = controller.getSnapshot().displayedProgress
+  const to = Math.min(
+    LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+    from + STREAMED_SHELL_VELOCITY_PER_SECOND * (boundedDurationMs / 1_000),
+  )
+  return createLinearLandrushIslandLoadingVisualSegment(
     from,
-    keyframes: preview.samples,
-    startedAtMs,
     to,
-  }
+    boundedDurationMs,
+    startedAtMs,
+  )
 }
 
 export function createLandrushIslandLoadingCompletionPreview(
@@ -1042,7 +838,7 @@ export function animateLandrushIslandLoadingPreview(
   if (!(segment.durationMs > 0 && typeof element.animate === 'function')) return null
   try {
     return element.animate(
-      createLandrushIslandLoadingRetargetKeyframes(segment, 0).map((keyframe) => ({
+      segment.keyframes.map((keyframe) => ({
         offset: keyframe.offset,
         transform: `scaleX(${String(keyframe.progress)})`,
       })),

@@ -251,7 +251,7 @@ describe('Landrush island loading presentation handoff', () => {
     expect(shouldAdvanceLandrushIslandLoadingFrameFallback(100, 120)).toBe(false)
   })
 
-  test('keeps a full 20 FPS compositor trajectory through the supported stall horizon', () => {
+  test('keeps one immutable compositor trajectory through the supported stall horizon', () => {
     expect(LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS).toBe(20)
     expect(LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS).toBe(50)
     expect(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS).toBe(
@@ -270,19 +270,17 @@ describe('Landrush island loading presentation handoff', () => {
       0,
       LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
     )
-    const authoredGapsMs = segment.keyframes.slice(1).map((keyframe, index) => {
-      const previous = segment.keyframes[index]!
-      return (keyframe.offset - previous.offset) * segment.durationMs
-    })
     const intervalRates = segment.keyframes.slice(1).map((keyframe, index) => {
       const previous = segment.keyframes[index]!
       const elapsedSeconds = (keyframe.offset - previous.offset) * (segment.durationMs / 1_000)
       return (keyframe.progress - previous.progress) / elapsedSeconds
     })
 
-    expect(Math.max(...authoredGapsMs)).toBeLessThanOrEqual(
-      LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS + 0.000_001,
-    )
+    expect(segment.keyframes).toHaveLength(2)
+    expect(segment.keyframes).toEqual([
+      { offset: 0, progress: 0 },
+      { offset: 1, progress: 0.72 },
+    ])
     expect(Math.min(...intervalRates)).toBeGreaterThan(0)
     expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
       LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
@@ -360,7 +358,7 @@ describe('Landrush island loading presentation handoff', () => {
     expect(style.transform).toBe('scaleX(0.2)')
   })
 
-  test('keeps the long runway within an Idle-sized compositor keyframe budget', () => {
+  test('keeps the long runway to one compositor-interpolated line segment', () => {
     const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.2 })
     controller.setConfirmedProgress(0.8, { ceiling: 0.984, estimatedDurationMs: 8_000 })
 
@@ -371,8 +369,10 @@ describe('Landrush island loading presentation handoff', () => {
     )
 
     expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS)
-    expect(preview.keyframes.length).toBeGreaterThanOrEqual(2_400)
-    expect(preview.keyframes.length).toBeLessThanOrEqual(2_402)
+    expect(preview.keyframes).toHaveLength(2)
+    expect(preview.keyframes[0]).toEqual({ offset: 0, progress: 0.2 })
+    expect(preview.keyframes[1]?.offset).toBe(1)
+    expect(preview.keyframes[1]?.progress).toBeCloseTo(0.92, 12)
     expect(preview.keyframes.at(-1)?.progress).toBeGreaterThan(0.5)
     expect(
       resolveLandrushIslandLoadingCompositorSampleInterval(

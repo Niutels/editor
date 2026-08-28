@@ -366,7 +366,7 @@ describe('Landrush island paint readiness', () => {
 
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(clientSource).toContain('useLandrushIslandPaintReadiness(loadingAssetsReady)')
-    expect(clientSource).toContain('ambientLoadReadiness?.ready === true')
+    expect(clientSource).toContain('(zombieEscapeEnabled || ambientLoadReadiness?.ready === true)')
     expect(clientSource).toContain('runGeneration={loadingRunGenerationRef.current}')
     expect(clientSource).toContain('sampleInvalidationKey={initialParcelAuthorityKey}')
     expect(clientSource).toContain('topologySignature={loadingTopologySignature}')
@@ -376,6 +376,9 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('ref={fillRef}')
     expect(clientSource).toContain('ref={overlayRef}')
     expect(clientSource).toContain("id: 'ambient-assets'")
+    expect(clientSource).toMatch(
+      /if \(!zombieEscapeEnabled\) \{\s+tasks\.push\(\{\s+completed: ambientLoadReadiness\?\.completed \?\? 0,\s+id: 'ambient-assets'/,
+    )
     expect(clientSource).toContain("id: 'natural-road-plan'")
     expect(clientSource).toContain("id: 'procedural-cliffs'")
     expect(clientSource).toContain("id: 'zombie-assets'")
@@ -386,6 +389,14 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_ZOMBIE_PROFILE_KEY')
     expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE')
     expect(clientSource).toContain('LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE')
+    const dayTopologyDefinition = clientSource
+      .split('\n')
+      .find((line) => line.startsWith('const LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE'))
+    const zombieTopologyDefinition = clientSource
+      .split('\n')
+      .find((line) => line.startsWith('const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE'))
+    expect(dayTopologyDefinition).toContain('LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE')
+    expect(zombieTopologyDefinition).not.toContain('LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE')
     expect(clientSource).toContain('|natural-road-plan:${')
     expect(clientSource).toContain("naturalRoadPlanRequired ? 'required' : 'omitted'")
     expect(clientSource).toContain('|procedural-cliffs:')
@@ -397,6 +408,7 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('Syncing world…')
     expect(clientSource).toContain('currentInitialParcelReadiness.ready')
     expect(clientSource).toContain('admitted={initialParcelMaterializationReady}')
+    expect(clientSource).toContain('{!zombieEscapeEnabled || !loadingActive ? (')
     expect(clientSource).toContain('onLoadReadinessChange={handleAmbientLoadReadinessChange}')
     expect(clientSource).toContain(
       'onLoadReadinessChange={handleProceduralCliffsLoadReadinessChange}',
@@ -415,6 +427,13 @@ describe('Landrush island paint readiness', () => {
       'currentGeneration: currentProceduralCliffsLoadGenerationRef.current',
     )
     expect(clientSource).not.toContain('admitted={!loadingActive}')
+    expect(clientSource).toContain(
+      'deferBuiltColliderRebuild={zombieEscapeEnabled && loadingActive}',
+    )
+    expect(clientSource).toContain(
+      "deferRebuild ? 'deferred' : createLandrushIslandPhysicsNodeSignature(state.nodes)",
+    )
+    expect(clientSource).toContain('if (deferRebuild) return')
     expect(clientSource).toMatch(
       /data-landrush-loading-ambient-ready=\{\s*ambientLoadReadiness\?\.ready === true \? 'true' : 'false'\s*\}/,
     )
@@ -462,13 +481,15 @@ describe('Landrush island paint readiness', () => {
     expect(timelineSource).toContain("document.readyState !== 'loading'")
     expect(timelineSource).toContain('createLandrushIslandLoadingVisualPreview(')
     expect(timelineSource).toContain('fadingOut: true')
-    expect(timelineSource).toContain('progressController.readyToDismiss()')
-    expect(timelineSource).toMatch(
-      /scheduleCompositorRefresh\(\(\) => \{\s+progressController\.complete\(\)\s+\}\)/,
+    const runtimeHookSource = timelineSource.slice(
+      timelineSource.indexOf('export function useLandrushIslandLoadingTimeline({'),
+      timelineSource.indexOf('export function createLandrushIslandLoadingProgressPresentation'),
     )
-    expect(timelineSource).toContain(
-      'if (completionRequested && progressController.readyToDismiss()) beginHandoffFade()',
-    )
+    expect(runtimeHookSource).toMatch(/completionRequested = true\s+beginHandoffFade\(\)/)
+    expect(runtimeHookSource).not.toContain('readyToDismiss()')
+    expect(runtimeHookSource).not.toContain('scheduleCompositorRefresh')
+    expect(runtimeHookSource).not.toContain('retargetLandrushIslandLoadingPreview')
+    expect(runtimeHookSource).not.toContain('setKeyframes')
     const finishHandoffSource = timelineSource.slice(
       timelineSource.indexOf('const finishHandoff = () => {'),
       timelineSource.indexOf('const beginHandoffFade = () => {'),

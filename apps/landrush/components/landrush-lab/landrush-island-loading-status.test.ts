@@ -16,7 +16,6 @@ const ZOMBIE_TASK_IDS = [
   'procedural-cliffs',
   'ground-texture',
   'world-frame',
-  'ambient-assets',
   'zombie-assets',
   'zombie-pipeline',
   'paint',

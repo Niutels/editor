@@ -788,7 +788,7 @@ const LANDRUSH_ISLAND_LOADING_ZOMBIE_PROFILE_KEY = 'landrush-island:zombie-balan
 const LANDRUSH_ISLAND_LOADING_RUN_GENERATION = 'landrush-island:startup:v1'
 const LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE = 'landrush-island:startup-readiness:v2'
 const LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:day|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}`
-const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
+const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
 const LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS = 520
 const LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS = 45_000
 const LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
@@ -4586,7 +4586,7 @@ export function LandrushIslandClient({
     initialParcelMaterializationReady &&
     viewerSceneReady &&
     worldFrameReady &&
-    ambientLoadReadiness?.ready === true &&
+    (zombieEscapeEnabled || ambientLoadReadiness?.ready === true) &&
     zombieEscapeGeneratedAssetsReady &&
     naturalRoadPlanReady &&
     proceduralCliffsReady &&
@@ -4638,26 +4638,28 @@ export function LandrushIslandClient({
       })
     }
 
-    tasks.push(
-      {
-        completed: worldFrameReady ? 1 : 0,
-        id: 'world-frame',
-        ready: worldFrameReady,
-        total: 1,
-      },
-      {
+    tasks.push({
+      completed: worldFrameReady ? 1 : 0,
+      id: 'world-frame',
+      ready: worldFrameReady,
+      total: 1,
+    })
+
+    if (!zombieEscapeEnabled) {
+      tasks.push({
         completed: ambientLoadReadiness?.completed ?? 0,
         id: 'ambient-assets',
         ready: ambientLoadReadiness?.ready === true,
         total: LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS.length,
-      },
-      {
-        completed: !stylizedGroundTextureRequired || stylizedGroundTextureReady ? 1 : 0,
-        id: 'ground-texture',
-        ready: !stylizedGroundTextureRequired || stylizedGroundTextureReady,
-        total: 1,
-      },
-    )
+      })
+    }
+
+    tasks.push({
+      completed: !stylizedGroundTextureRequired || stylizedGroundTextureReady ? 1 : 0,
+      id: 'ground-texture',
+      ready: !stylizedGroundTextureRequired || stylizedGroundTextureReady,
+      total: 1,
+    })
 
     if (zombieEscapeEnabled) {
       tasks.push(
@@ -6320,16 +6322,18 @@ export function LandrushIslandClient({
                       ) : null}
                     </>
                   ) : null}
-                  <LandrushIslandAmbientLife
-                    admitted={initialParcelMaterializationReady}
-                    npcsVisible={!zombieEscapeNightActive}
-                    onLoadReadinessChange={handleAmbientLoadReadinessChange}
-                    palmLayout={livePalmLayout}
-                    roads={liveGrassRoads}
-                    surface={liveViewerLandSurface}
-                    waterY={liveOceanElevation}
-                    zombieIslandActive={zombieEscapeNightActive}
-                  />
+                  {!zombieEscapeEnabled || !loadingActive ? (
+                    <LandrushIslandAmbientLife
+                      admitted={initialParcelMaterializationReady}
+                      npcsVisible={!zombieEscapeNightActive}
+                      onLoadReadinessChange={handleAmbientLoadReadinessChange}
+                      palmLayout={livePalmLayout}
+                      roads={liveGrassRoads}
+                      surface={liveViewerLandSurface}
+                      waterY={liveOceanElevation}
+                      zombieIslandActive={zombieEscapeNightActive}
+                    />
+                  ) : null}
                   <FrameLoadProfilerProbe enabled={frameProfile} />
                   {/* bench-bridge mount — self-gated on ?bench=1 / ?benchGpu=1 */}
                   <BenchBridgeProbe />
@@ -6347,6 +6351,7 @@ export function LandrushIslandClient({
                       buildCameraPoseRef={buildCameraPoseRef}
                       cameraOwner={cameraOwner}
                       dayInterfaceCommandsEnabled={dayInterfaceCommandsEnabled}
+                      deferBuiltColliderRebuild={zombieEscapeEnabled && loadingActive}
                       fallPresentationRef={fallPresentationRef}
                       fpvActive={fpvActive}
                       grassInteractionRef={grassInteractionRef}
@@ -9709,12 +9714,15 @@ function buildLandrushIslandColliderWorld(excludedRegisteredNodeIds: ReadonlySet
   }
 }
 
-function useLandrushIslandBuiltColliderWorlds(excludedRegisteredNodeIds: ReadonlySet<string>) {
+function useLandrushIslandBuiltColliderWorlds(
+  excludedRegisteredNodeIds: ReadonlySet<string>,
+  deferRebuild: boolean,
+) {
   const physicsSignature = useScene((state) =>
-    createLandrushIslandPhysicsNodeSignature(state.nodes),
+    deferRebuild ? 'deferred' : createLandrushIslandPhysicsNodeSignature(state.nodes),
   )
   const doorAnimationSignature = useInteractive((state) =>
-    createLandrushIslandDoorAnimationSignature(state.doorAnimations),
+    deferRebuild ? 'deferred' : createLandrushIslandDoorAnimationSignature(state.doorAnimations),
   )
   const [runtimeColliderVersion, setRuntimeColliderVersion] = useState(0)
   const exclusionSignature =
@@ -9760,6 +9768,8 @@ function useLandrushIslandBuiltColliderWorlds(excludedRegisteredNodeIds: Readonl
 
   useEffect(() => {
     void colliderWorldVersion
+    if (deferRebuild) return
+
     let cancelled = false
     let frame = 0
     const rebuildWhenReady = () => {
@@ -9785,7 +9795,7 @@ function useLandrushIslandBuiltColliderWorlds(excludedRegisteredNodeIds: Readonl
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [buildWorlds, colliderWorldVersion, disposeWorlds, replaceWorlds])
+  }, [buildWorlds, colliderWorldVersion, deferRebuild, disposeWorlds, replaceWorlds])
 
   useEffect(() => {
     const rebuildColliderWorld = () => setRuntimeColliderVersion((version) => version + 1)
@@ -9891,6 +9901,7 @@ function LandrushIslandPlayerLayer({
   buildCameraPoseRef,
   cameraOwner,
   dayInterfaceCommandsEnabled,
+  deferBuiltColliderRebuild,
   fallPresentationRef,
   fpvActive,
   grassInteractionRef,
@@ -9936,6 +9947,7 @@ function LandrushIslandPlayerLayer({
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraOwner: LandrushIslandCameraOwner
   dayInterfaceCommandsEnabled: boolean
+  deferBuiltColliderRebuild: boolean
   fallPresentationRef: { current: LandrushIslandFallPresentationState }
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
@@ -10077,6 +10089,7 @@ function LandrushIslandPlayerLayer({
         baseNode={baseNode}
         bugReportReplayPlayer={bugReportReplayPlayer}
         combatAimActive={zombieEscapeInteractionActionable}
+        deferBuiltColliderRebuild={deferBuiltColliderRebuild}
         fallSurfacePoints={cliffFallBoundaryPoints}
         fallPresentationRef={fallPresentationRef}
         fpvActive={playerFpvActive}
@@ -12642,6 +12655,7 @@ function LocalLandrushIslandRobot({
   cameraEnabled,
   combatAimActive,
   dayInterfaceCommandsEnabled,
+  deferBuiltColliderRebuild,
   destroyedFurnitureIds,
   fallSurfacePoints,
   fallPresentationRef,
@@ -12680,6 +12694,7 @@ function LocalLandrushIslandRobot({
   cameraEnabled: boolean
   combatAimActive: boolean
   dayInterfaceCommandsEnabled: boolean
+  deferBuiltColliderRebuild: boolean
   destroyedFurnitureIds: ReadonlySet<string>
   fallSurfacePoints: readonly LandrushPoint2[]
   fallPresentationRef: { current: LandrushIslandFallPresentationState }
@@ -12713,7 +12728,10 @@ function LocalLandrushIslandRobot({
   zombieEscapeTouchInputRef: { current: LandrushZombieEscapeTouchInputState }
 }) {
   const { camera, gl } = useThree()
-  const builtColliderWorlds = useLandrushIslandBuiltColliderWorlds(destroyedFurnitureIds)
+  const builtColliderWorlds = useLandrushIslandBuiltColliderWorlds(
+    destroyedFurnitureIds,
+    deferBuiltColliderRebuild,
+  )
   const sceneNodesForNavigation = useScene((state) => (movementEnabled ? state.nodes : null))
   const pressedKeysRef = useRef(new Set<string>())
   const clickMoveTargetRef = useRef<LandrushIslandMoveTarget | null>(null)
