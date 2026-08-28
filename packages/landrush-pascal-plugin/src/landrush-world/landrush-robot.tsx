@@ -1,6 +1,7 @@
 'use client'
 
-import { useAnimations, useGLTF } from '@react-three/drei'
+import { useGLTFKTX2 } from '@pascal-app/viewer'
+import { useAnimations } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
@@ -47,7 +48,7 @@ export {
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
 
-const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot.glb'
+const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot-ktx2-1112f038.glb'
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
 const LANDRUSH_ROBOT_TARGET_HEIGHT = 1.82
 const LANDRUSH_ROBOT_IDLE_TIME_SCALE = 0.5
@@ -183,7 +184,7 @@ export function LandrushRobot({
   const fallMotionScaleValue = MathUtils.clamp(fallMotionScale, 0.05, 1)
   const idleTimeScale = LANDRUSH_ROBOT_IDLE_TIME_SCALE
   const groupRef = useRef<Group>(null!)
-  const { animations, scene } = useGLTF(LANDRUSH_ROBOT_ASSET_PATH)
+  const { animations, scene } = useGLTFKTX2(LANDRUSH_ROBOT_ASSET_PATH)
   const locomotionClips = useMemo(
     () =>
       measure('setup.robot-glb.select-locomotion-clips', () =>
@@ -1210,5 +1211,3 @@ function getRobotObjectGeometry(object: Object3D) {
 function measureUnprofiled<T>(_id: string, callback: () => T) {
   return callback()
 }
-
-useGLTF.preload(LANDRUSH_ROBOT_ASSET_PATH)

@@ -116,9 +116,6 @@ import {
 import { ZombieEscapeEffects } from './zombie-escape-effects'
 import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
-  clearZombieEscapeGeneratedAssetCaches,
-} from './zombie-escape-generated-assets'
-import {
   applyZombieEscapeGeneratedAssetSettlementReport,
   beginZombieEscapeGeneratedAssetRetry,
   createZombieEscapeGeneratedAssetRetryState,
@@ -127,6 +124,7 @@ import {
   type ZombieEscapeGeneratedAssetRetryGenerations,
   type ZombieEscapeGeneratedAssetSettlementReport,
 } from './zombie-escape-generated-asset-retry'
+import { clearZombieEscapeGeneratedAssetCaches } from './zombie-escape-generated-assets'
 import { ZombieEscapeMoneyBadge } from './zombie-escape-hud'
 import type { LandrushZombieEscapeNavigationScaleProofResult } from './zombie-escape-navigation-scale-proof'
 import type { LandrushZombieEscapeNavigationScaleProofFixtureWorldSummary } from './zombie-escape-navigation-scale-proof-fixture'
@@ -1459,10 +1457,7 @@ export function LandrushZombieEscapeMode({
   )
 
   const beginGeneratedAssetsRetry = useCallback(
-    (
-      failures: readonly ZombieEscapeGeneratedAssetFailure[],
-      source: 'automatic' | 'manual',
-    ) => {
+    (failures: readonly ZombieEscapeGeneratedAssetFailure[], source: 'automatic' | 'manual') => {
       if (failures.length === 0) return
       clearZombieEscapeGeneratedAssetCaches(failures.map((failure) => failure.key))
       setGeneratedAssetRetryState((current) =>
@@ -2359,7 +2354,7 @@ function LandrushZombieEscapeHud({
   return (
     <div
       className="pointer-events-none absolute inset-0 z-30 select-none text-white"
-      data-actual-avatar="/navigation/proto_pascal_robot.glb"
+      data-actual-avatar="/navigation/proto_pascal_robot-ktx2-1112f038.glb"
       data-expected-phase={expectedPhase}
       data-integrated-landrush-world="true"
       data-night-start-ready={nightStartReady ? 'true' : 'false'}
@@ -2607,7 +2602,7 @@ function publishIntegratedDebugState({
         }
       : null
   window.__LANDRUSH_ZOMBIE_ESCAPE__ = {
-    actualAvatar: '/navigation/proto_pascal_robot.glb',
+    actualAvatar: '/navigation/proto_pascal_robot-ktx2-1112f038.glb',
     arena: { playRadius: arena.playRadius, worldOrigin: [spawn.x, groundY, spawn.z] },
     benchmarkRoomSoak: readLandrushZombieEscapeRoomSoakSnapshot(roomSoakState, simulation),
     frameOrder: LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER,
