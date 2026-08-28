@@ -1084,21 +1084,9 @@ describe('Zombie Escape render compilation', () => {
       async () => undefined,
     )
 
-    expect(castShadowSignatures).toEqual([false, false, false, false, false, true, true])
-    expect(drawRangeSignatures).toEqual([
-      0,
-      1,
-      3,
-      3,
-      Number.POSITIVE_INFINITY,
-      3,
-      Number.POSITIVE_INFINITY,
-    ])
+    expect(castShadowSignatures).toEqual([false, true, true])
+    expect(drawRangeSignatures).toEqual([Number.POSITIVE_INFINITY, 3, Number.POSITIVE_INFINITY])
     expect(scissorSignatures).toEqual([
-      new Vector4(0, 0, 1, 1),
-      new Vector4(0, 0, 1, 1),
-      new Vector4(0, 0, 0, 0),
-      new Vector4(0, 0, 1, 1),
       new Vector4(0, 0, 1, 1),
       new Vector4(0, 0, 1, 1),
       new Vector4(0, 0, 1, 1),
@@ -1106,7 +1094,7 @@ describe('Zombie Escape render compilation', () => {
     expect(viewportSignatures.every((viewport) => viewport.equals(new Vector4(0, 0, 1, 1)))).toBe(
       true,
     )
-    expect(scissorTestSignatures).toEqual([true, true, true, true, true, true, true])
+    expect(scissorTestSignatures).toEqual([true, true, true])
     expect(mesh.castShadow).toBe(true)
     expect(mesh.geometry.drawRange).toEqual({ count: Number.POSITIVE_INFINITY, start: 0 })
     expect(mesh.frustumCulled).toBe(true)
@@ -1114,14 +1102,14 @@ describe('Zombie Escape render compilation', () => {
     expect(harness.state.scissor.equals(harness.initial.scissor)).toBe(true)
     expect(harness.state.scissorTest).toBe(harness.initial.scissorTest)
     expect(harness.events.filter((event) => event === 'render:empty')).toHaveLength(1)
-    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(7)
-    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(8)
-    expect(harness.deletedFences).toBe(8)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(3)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(4)
+    expect(harness.deletedFences).toBe(4)
     mesh.geometry.dispose()
     mesh.material.dispose()
   })
 
-  test('masks a shadow caster attached during the main pilot until its own cohort', async () => {
+  test('masks a shadow caster attached during the main-only fence until its own cohort', async () => {
     const targetScene = new Scene()
     const first = makeHeavyRealizationMesh('first')
     const attached = makeHeavyRealizationMesh('attached')
@@ -1141,8 +1129,6 @@ describe('Zombie Escape render compilation', () => {
         sceneSignatures.push(visibleNames)
       },
     })
-    let admissions = 0
-
     await compileZombieEscapeRenderRepresentatives(
       {
         camera: new PerspectiveCamera(),
@@ -1151,8 +1137,7 @@ describe('Zombie Escape render compilation', () => {
         targetScene,
       },
       async () => {
-        admissions += 1
-        if (admissions === 5) targetScene.add(attached)
+        if (sceneSignatures.length === 1 && attached.parent === null) targetScene.add(attached)
       },
     )
 
@@ -1160,22 +1145,14 @@ describe('Zombie Escape render compilation', () => {
       ['first'],
       ['first'],
       ['first'],
-      ['first'],
-      ['first'],
-      ['first'],
-      ['first'],
-      ['attached'],
-      ['attached'],
-      ['attached'],
-      ['attached'],
       ['attached'],
       ['attached'],
       ['attached'],
     ])
     expect(sceneSignatures.every((signature) => signature.length === 1)).toBe(true)
-    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(14)
-    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(15)
-    expect(harness.deletedFences).toBe(15)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(6)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(7)
+    expect(harness.deletedFences).toBe(7)
     expect(first.castShadow).toBe(true)
     expect(attached.castShadow).toBe(true)
     expect(first.layers.mask).toBe(1)
@@ -1212,11 +1189,11 @@ describe('Zombie Escape render compilation', () => {
       },
     )
 
-    expect(castShadowSignatures).toEqual([false, false, false, false, false, false, true, true])
+    expect(castShadowSignatures).toEqual([false, false, true, true])
     expect(mesh.castShadow).toBe(true)
-    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(8)
-    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(9)
-    expect(harness.deletedFences).toBe(9)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(4)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(5)
+    expect(harness.deletedFences).toBe(5)
     mesh.geometry.dispose()
     mesh.material.dispose()
   })
@@ -1251,9 +1228,9 @@ describe('Zombie Escape render compilation', () => {
     expect(harness.events.indexOf('texture:init')).toBeLessThan(
       harness.events.indexOf('render:scene'),
     )
-    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(8)
-    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(10)
-    expect(harness.deletedFences).toBe(10)
+    expect(harness.events.filter((event) => event === 'render:scene')).toHaveLength(4)
+    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(6)
+    expect(harness.deletedFences).toBe(6)
     first.geometry.dispose()
     first.material.dispose()
     second.geometry.dispose()
@@ -1262,7 +1239,7 @@ describe('Zombie Escape render compilation', () => {
   })
 
   test('restores object and renderer state when a cohort draw throws', async () => {
-    for (const failingCall of [2, 3, 4, 5, 6, 7, 8]) {
+    for (const failingCall of [2, 3, 4]) {
       const targetScene = new Scene()
       const mesh = makeHeavyRealizationMesh('mesh')
       const sibling = makeHeavyRealizationMesh('sibling')
@@ -1326,8 +1303,6 @@ describe('Zombie Escape render compilation', () => {
       [6, 1],
       [9, 2],
       [12, 3],
-      [15, 4],
-      [21, 6],
     ] as const) {
       const targetScene = new Scene()
       const mesh = makeHeavyRealizationMesh('mesh')
@@ -1366,7 +1341,7 @@ describe('Zombie Escape render compilation', () => {
     }
   })
 
-  test('stops after the main prebind fence when the readiness request becomes stale', async () => {
+  test('stops after the main-only fence when the readiness request becomes stale', async () => {
     const targetScene = new Scene()
     const mesh = makeHeavyRealizationMesh('stale-shadow-caster')
     mesh.castShadow = true

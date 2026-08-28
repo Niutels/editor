@@ -50,13 +50,6 @@ export const ZOMBIE_ESCAPE_WEBGL_STAGED_TEXTURE_MAX_BYTES = 64 * 1024
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_GEOMETRY_BYTES_PER_WEIGHT = 1024 * 1024
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VERTEX_INVOCATIONS_PER_WEIGHT = 100_000
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VIEWPORT = new Vector4(0, 0, 1, 1)
-const ZOMBIE_ESCAPE_WEBGL_REALIZATION_EMPTY_SCISSOR = new Vector4(0, 0, 0, 0)
-const ZOMBIE_ESCAPE_WEBGL_MAIN_PILOT_STAGES = [
-  { count: 0, emptyScissor: false, label: 'main-prebind' },
-  { count: 1, emptyScissor: false, label: 'main-single-index' },
-  { count: 3, emptyScissor: true, label: 'main-empty-scissor' },
-  { count: 3, emptyScissor: false, label: 'main-pilot' },
-] as const
 
 export type ZombieEscapeRenderRepresentativeKey = string
 
@@ -614,20 +607,6 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       )
 
       if (hasShadowCasters) {
-        for (const stage of ZOMBIE_ESCAPE_WEBGL_MAIN_PILOT_STAGES) {
-          await submitZombieEscapeWebGLMainPilot({
-            camera,
-            cohort,
-            context,
-            diagnosticLabel,
-            isCurrent,
-            renderer: webglRenderer,
-            stage,
-            targetScene,
-            waitForAdmissionOpportunity,
-          })
-        }
-
         const mainUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
         const mainRenderables = new Set(mainUnits.flatMap((unit) => unit.renderables))
         activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(mainUnits)
@@ -736,63 +715,6 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot)
     }
   }
-}
-
-async function submitZombieEscapeWebGLMainPilot({
-  camera,
-  cohort,
-  context,
-  diagnosticLabel,
-  isCurrent,
-  renderer,
-  stage,
-  targetScene,
-  waitForAdmissionOpportunity,
-}: Readonly<{
-  camera: Camera
-  cohort: ZombieEscapeWebGLRealizationCohort
-  context: ZombieEscapeWebGLFenceContext
-  diagnosticLabel: string
-  isCurrent: () => boolean
-  renderer: ZombieEscapeWebGLRealizationRenderer
-  stage: (typeof ZOMBIE_ESCAPE_WEBGL_MAIN_PILOT_STAGES)[number]
-  targetScene: Scene
-  waitForAdmissionOpportunity: () => Promise<void>
-}>) {
-  const drawRanges = snapshotZombieEscapeWebGLPilotDrawRanges(cohort)
-  if (drawRanges.length === 0) return
-
-  const units = collectZombieEscapeWebGLRealizationUnits(targetScene)
-  const renderables = new Set(units.flatMap((unit) => unit.renderables))
-  const objectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(units)
-  const rendererSnapshot = snapshotZombieEscapeWebGLRendererState(renderer)
-  markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:${stage.label}:submit`)
-  await submitZombieEscapeWebGLRealizationDraw(
-    () => {
-      try {
-        applyZombieEscapeWebGLRealizationRendererState(renderer)
-        if (stage.emptyScissor) {
-          renderer.setScissor(ZOMBIE_ESCAPE_WEBGL_REALIZATION_EMPTY_SCISSOR)
-        }
-        applyZombieEscapeWebGLRealizationCohort(units, cohort)
-        for (const unit of cohort.units) {
-          for (const renderable of unit.renderables) {
-            if (renderables.has(renderable)) renderable.castShadow = false
-          }
-        }
-        applyZombieEscapeWebGLPilotDrawRanges(drawRanges, stage.count)
-        renderer.render(targetScene, camera)
-      } finally {
-        restoreZombieEscapeWebGLDrawRanges(drawRanges)
-        restoreZombieEscapeWebGLRealizationObjects(objectSnapshots)
-        restoreZombieEscapeWebGLRendererState(renderer, rendererSnapshot)
-      }
-    },
-    context,
-    waitForAdmissionOpportunity,
-    isCurrent,
-  )
-  markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:${stage.label}:settled`)
 }
 
 function isZombieEscapeRenderableObject(object: Object3D) {
