@@ -607,12 +607,50 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       )
 
       if (hasShadowCasters) {
-        activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(currentUnits)
+        const mainPilotDrawRanges = snapshotZombieEscapeWebGLPilotDrawRanges(cohort)
+        if (mainPilotDrawRanges.length > 0) {
+          const mainPilotUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
+          const mainPilotRenderables = new Set(mainPilotUnits.flatMap((unit) => unit.renderables))
+          activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(mainPilotUnits)
+          activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
+          applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
+          applyZombieEscapeWebGLRealizationCohort(mainPilotUnits, cohort)
+          for (const unit of cohort.units) {
+            for (const renderable of unit.renderables) {
+              if (mainPilotRenderables.has(renderable)) renderable.castShadow = false
+            }
+          }
+          applyZombieEscapeWebGLPilotDrawRanges(mainPilotDrawRanges)
+          markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:main-pilot:submit`)
+          await submitZombieEscapeWebGLRealizationDraw(
+            () => {
+              try {
+                webglRenderer.render(targetScene, camera)
+              } finally {
+                restoreZombieEscapeWebGLDrawRanges(mainPilotDrawRanges)
+                restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
+                restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
+                activeObjectSnapshots = undefined
+                activeRendererSnapshot = undefined
+              }
+            },
+            context,
+            waitForAdmissionOpportunity,
+            isCurrent,
+          )
+          markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:main-pilot:settled`)
+        }
+
+        const mainUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
+        const mainRenderables = new Set(mainUnits.flatMap((unit) => unit.renderables))
+        activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(mainUnits)
         activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
         applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
-        applyZombieEscapeWebGLRealizationCohort(currentUnits, cohort)
+        applyZombieEscapeWebGLRealizationCohort(mainUnits, cohort)
         for (const unit of cohort.units) {
-          for (const renderable of unit.renderables) renderable.castShadow = false
+          for (const renderable of unit.renderables) {
+            if (mainRenderables.has(renderable)) renderable.castShadow = false
+          }
         }
         markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:main-only:submit`)
         await submitZombieEscapeWebGLRealizationDraw(
@@ -634,13 +672,13 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       }
 
       const pilotUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
-      const pilotDrawRanges = snapshotZombieEscapeWebGLShadowPilotDrawRanges(cohort)
+      const pilotDrawRanges = snapshotZombieEscapeWebGLPilotDrawRanges(cohort)
       if (pilotDrawRanges.length > 0) {
         activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(pilotUnits)
         activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
         applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
         applyZombieEscapeWebGLRealizationCohort(pilotUnits, cohort)
-        applyZombieEscapeWebGLShadowPilotDrawRanges(pilotDrawRanges)
+        applyZombieEscapeWebGLPilotDrawRanges(pilotDrawRanges)
         markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:shadow-pilot:submit`)
         await submitZombieEscapeWebGLRealizationDraw(
           () => {
@@ -1163,9 +1201,7 @@ function restoreZombieEscapeWebGLRealizationObjects(
   }
 }
 
-function snapshotZombieEscapeWebGLShadowPilotDrawRanges(
-  cohort: ZombieEscapeWebGLRealizationCohort,
-) {
+function snapshotZombieEscapeWebGLPilotDrawRanges(cohort: ZombieEscapeWebGLRealizationCohort) {
   const seen = new Set<object>()
   const snapshots: ZombieEscapeWebGLDrawRangeSnapshot[] = []
   for (const unit of cohort.units) {
@@ -1207,7 +1243,7 @@ function snapshotZombieEscapeWebGLShadowPilotDrawRanges(
   return snapshots
 }
 
-function applyZombieEscapeWebGLShadowPilotDrawRanges(
+function applyZombieEscapeWebGLPilotDrawRanges(
   snapshots: readonly ZombieEscapeWebGLDrawRangeSnapshot[],
 ) {
   for (const { geometry, start } of snapshots) geometry.setDrawRange(start, 3)
