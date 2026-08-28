@@ -36,6 +36,7 @@ describe('Landrush robot runtime texture', () => {
 
     expect(runtime).toBeInstanceOf(DataTexture)
     expect(createLandrushRobotRuntimeTexture(source)).toBe(runtime)
+    expect(createLandrushRobotRuntimeTexture(runtime)).toBe(runtime)
     expect(runtime.image).toEqual({
       data: Uint8Array.of(1, 2, 3, 255, 4, 5, 6, 255),
       height: 1,

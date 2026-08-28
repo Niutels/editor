@@ -10,6 +10,7 @@ import {
 const runtimeTextures = new WeakMap<Texture, Texture>()
 
 export function createLandrushRobotRuntimeTexture(source: Texture): Texture {
+  if ((source as Texture & { isDataTexture?: boolean }).isDataTexture) return source
   const cached = runtimeTextures.get(source)
   if (cached) return cached
 
@@ -60,6 +61,7 @@ export function createLandrushRobotRuntimeTexture(source: Texture): Texture {
   runtime.userData = { ...source.userData }
   runtime.needsUpdate = true
   runtimeTextures.set(source, runtime)
+  runtimeTextures.set(runtime, runtime)
   return runtime
 }
 
