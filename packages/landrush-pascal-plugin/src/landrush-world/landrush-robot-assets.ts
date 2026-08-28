@@ -1,5 +1,4 @@
-export const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot-bc1-47d84fc6.glb'
-export const LANDRUSH_ROBOT_FALLBACK_ASSET_PATH = '/navigation/proto_pascal_robot.glb'
+export const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot-ktx2-1112f038.glb'
 
 type LandrushRobotRendererCapabilities = {
   extensions?: { has(name: string): boolean }
@@ -7,7 +6,7 @@ type LandrushRobotRendererCapabilities = {
   isWebGPURenderer?: boolean
 }
 
-export function supportsLandrushRobotNativeBc1(renderer: unknown) {
+export function supportsLandrushRobotS3tcTranscode(renderer: unknown) {
   const capabilities = renderer as LandrushRobotRendererCapabilities | null
   if (!capabilities) return false
   if (capabilities.isWebGPURenderer) {
@@ -17,10 +16,4 @@ export function supportsLandrushRobotNativeBc1(renderer: unknown) {
     capabilities.extensions?.has('WEBGL_compressed_texture_s3tc') &&
       capabilities.extensions.has('WEBGL_compressed_texture_s3tc_srgb'),
   )
-}
-
-export function resolveLandrushRobotAssetPath(renderer: unknown) {
-  return supportsLandrushRobotNativeBc1(renderer)
-    ? LANDRUSH_ROBOT_ASSET_PATH
-    : LANDRUSH_ROBOT_FALLBACK_ASSET_PATH
 }

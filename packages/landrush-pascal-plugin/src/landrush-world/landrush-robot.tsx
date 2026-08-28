@@ -20,12 +20,13 @@ import {
 } from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import {
-  resolveLandrushRobotAssetPath,
-  supportsLandrushRobotNativeBc1,
+  LANDRUSH_ROBOT_ASSET_PATH,
+  supportsLandrushRobotS3tcTranscode,
 } from './landrush-robot-assets'
 import {
   applyLandrushRobotCrouchPose,
@@ -164,13 +165,40 @@ type LandrushRobotProps = {
 // A distinct loader constructor keeps the capability-selected robot asset out of useGLTF's cache.
 class LandrushRobotGLTFLoader extends GLTFLoader {}
 
+type LandrushRobotKtx2LoaderInternals = {
+  workerConfig: Record<string, boolean> | null
+}
+type LandrushRobotKtx2Renderer = Parameters<KTX2Loader['detectSupport']>[0]
+
+const landrushRobotS3tcKtx2Loader = new KTX2Loader().setTranscoderPath('/basis/')
+let landrushRobotS3tcKtx2LoaderConfigured = false
+
+function configureLandrushRobotKtx2Loader(loader: GLTFLoader, renderer: unknown) {
+  if (!supportsLandrushRobotS3tcTranscode(renderer)) {
+    return configureKtx2Support(loader, renderer)
+  }
+  if (!landrushRobotS3tcKtx2LoaderConfigured) {
+    landrushRobotS3tcKtx2Loader.detectSupport(renderer as LandrushRobotKtx2Renderer)
+    ;(landrushRobotS3tcKtx2Loader as unknown as LandrushRobotKtx2LoaderInternals).workerConfig = {
+      astcHDRSupported: false,
+      astcSupported: false,
+      bptcSupported: false,
+      dxtSupported: true,
+      etc1Supported: false,
+      etc2Supported: false,
+      pvrtcSupported: false,
+    }
+    landrushRobotS3tcKtx2LoaderConfigured = true
+  }
+  loader.setKTX2Loader(landrushRobotS3tcKtx2Loader)
+  return true
+}
+
 function useLandrushRobotGLTF() {
   const renderer = useThree((state) => state.gl)
-  const nativeBc1 = supportsLandrushRobotNativeBc1(renderer)
-  const path = resolveLandrushRobotAssetPath(renderer)
-  return useLoader(LandrushRobotGLTFLoader, path, (loader) => {
-    if (nativeBc1 && !configureKtx2Support(loader, renderer)) {
-      throw new Error('Landrush robot BC1 texture support could not be initialized.')
+  return useLoader(LandrushRobotGLTFLoader, LANDRUSH_ROBOT_ASSET_PATH, (loader) => {
+    if (!configureLandrushRobotKtx2Loader(loader, renderer)) {
+      throw new Error('Landrush robot KTX2 texture support could not be initialized.')
     }
     loader.setMeshoptDecoder(MeshoptDecoder)
   })
@@ -178,9 +206,7 @@ function useLandrushRobotGLTF() {
 
 export {
   LANDRUSH_ROBOT_ASSET_PATH,
-  LANDRUSH_ROBOT_FALLBACK_ASSET_PATH,
-  resolveLandrushRobotAssetPath,
-  supportsLandrushRobotNativeBc1,
+  supportsLandrushRobotS3tcTranscode,
 } from './landrush-robot-assets'
 
 export function LandrushRobot({

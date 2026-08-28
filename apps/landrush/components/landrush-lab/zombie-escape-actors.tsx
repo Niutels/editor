@@ -178,7 +178,7 @@ function ZombieEscapeOrbot({
     <group
       userData={{
         assetRoot: '/landrush-lab/zombie-escape/assets/',
-        playerAsset: '/navigation/proto_pascal_robot-bc1-47d84fc6.glb',
+        playerAsset: '/navigation/proto_pascal_robot-ktx2-1112f038.glb',
         playerRenderer: 'LandrushRobot',
         weaponAsset: ZOMBIE_ESCAPE_DEFAULT_WEAPON.assetPath,
         weaponId: ZOMBIE_ESCAPE_DEFAULT_WEAPON.id,
