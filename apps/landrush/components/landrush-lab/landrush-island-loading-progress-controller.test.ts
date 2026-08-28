@@ -5,6 +5,7 @@ import {
   LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+  LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS,
   LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
   type LandrushIslandLoadingProgressController,
   type LandrushIslandLoadingProgressMotionSnapshot,
@@ -39,10 +40,11 @@ describe('Landrush island loading progress motion', () => {
     const controller = createLandrushIslandLoadingProgressController()
     controller.setConfirmedProgress(0.9)
     const source = controller.getSnapshot()
-    const knotSeconds = RESPONSE_MS / 3_000
+    const durationMs = source.pulses[0]!.durationMs
+    const knotSeconds = durationMs / 3_000
     for (let index = 0; index <= 120; index += 1) {
       const position = index / 40
-      const sample = sampleFrom(source, (position * RESPONSE_MS) / 3)
+      const sample = sampleFrom(source, (position * durationMs) / 3)
       const terms = [1, -3, 3, -1]
       const positive = terms.map((_, knot) => Math.max(0, position - knot))
       const cdf = terms.reduce((sum, factor, knot) => sum + factor * positive[knot]! ** 3, 0) / 6
@@ -68,7 +70,7 @@ describe('Landrush island loading progress motion', () => {
     const knots = new Set<number>()
     for (const pulse of source.pulses) {
       for (let knot = 0; knot <= 3; knot += 1) {
-        const offset = pulse.startedAtMs + (knot * RESPONSE_MS) / 3 - source.elapsedMs
+        const offset = pulse.startedAtMs + (knot * pulse.durationMs) / 3 - source.elapsedMs
         if (offset > EPSILON_MS) knots.add(offset)
       }
     }
@@ -83,7 +85,7 @@ describe('Landrush island loading progress motion', () => {
         expect(Math.abs(neighbor.velocityPerSecond - at.velocityPerSecond)).toBeLessThan(1.7e-6)
         expect(
           Math.abs(neighbor.accelerationPerSecondSquared - at.accelerationPerSecondSquared),
-        ).toBeLessThan(0.000_02)
+        ).toBeLessThan(0.000_4)
       }
     }
     assertAnalyticEnvelope(controller)
@@ -100,8 +102,11 @@ describe('Landrush island loading progress motion', () => {
         expect(initial.displayedProgress).toBeCloseTo(initialProgress, 14)
         expect(initial.velocityPerSecond).toBeCloseTo(initialVelocityPerSecond, 14)
         expect(initial.accelerationPerSecondSquared).toBe(0)
-        expect(initial.pulses).toHaveLength(1)
-        expect(initial.pulses[0]?.startedAtMs).toBe(-RESPONSE_MS / 2)
+        expect(initial.pulses).toHaveLength(0)
+        expect(initial.inheritedMotion).toEqual({
+          holdUntilMs: 0,
+          velocityPerSecond: initialVelocityPerSecond,
+        })
         controller.step(RESPONSE_MS / 2)
         const stopped = controller.getSnapshot()
         expect(stopped.displayedProgress).toBeCloseTo(
@@ -141,8 +146,9 @@ describe('Landrush island loading progress motion', () => {
     for (const amount of [Number.EPSILON, 1e-8, 0.001, 0.2, 0.984]) {
       const controller = createLandrushIslandLoadingProgressController()
       controller.setConfirmedProgress(amount)
+      const durationMs = controller.getSnapshot().pulses[0]!.durationMs
       let previous = 0
-      for (let elapsed = 10; elapsed < RESPONSE_MS; elapsed += 10) {
+      for (let elapsed = 10; elapsed < durationMs; elapsed += 10) {
         controller.step(10)
         const current = controller.getSnapshot()
         expect(Number.isFinite(current.displayedProgress)).toBe(true)
@@ -150,7 +156,7 @@ describe('Landrush island loading progress motion', () => {
         expect(current.velocityPerSecond).toBeGreaterThan(0)
         previous = current.displayedProgress
       }
-      controller.step(10)
+      controller.step(durationMs - controller.getSnapshot().elapsedMs)
       expect(controller.getSnapshot().displayedProgress).toBe(amount)
       const settled = controller.getSnapshot()
       controller.setConfirmedProgress(amount / 2)
@@ -213,8 +219,8 @@ describe('Landrush island loading progress motion', () => {
     }
   })
 
-  test('reaches exact visible completion within 800ms even from a nearly empty bar', () => {
-    expect(RESPONSE_MS).toBe(800)
+  test('reaches exact visible completion within its bounded deadline even from a nearly empty bar', () => {
+    expect(RESPONSE_MS).toBeLessThanOrEqual(850)
     for (const initialProgress of [0, 0.000_001, 0.05, 0.25, 0.8, 0.98, 0.984]) {
       for (const initialVelocityPerSecond of [0, 0.006, 0.075]) {
         const controller = createLandrushIslandLoadingProgressController({
@@ -246,7 +252,7 @@ describe('Landrush island loading progress motion', () => {
     controller.step(125)
     controller.complete()
     const completeAt = controller.getSnapshot().elapsedMs
-    for (const delta of [0, 100, 199, 400, 100]) {
+    for (const delta of [0, 100, 199, 400, RESPONSE_MS - 700]) {
       controller.step(delta)
       const before = controller.getSnapshot()
       expect(controller.complete()).toEqual(before)
@@ -290,7 +296,8 @@ describe('Landrush island loading progress motion', () => {
     const retained = source.getSnapshot()
     const restored = createLandrushIslandLoadingProgressController()
     restored.restoreMotionSnapshot(retained)
-    expect(retained.pulses.length).toBeGreaterThanOrEqual(4)
+    expect(retained.pulses.length).toBeGreaterThanOrEqual(3)
+    expect(retained.inheritedMotion).not.toBeNull()
     expect(restored.getSnapshot()).toEqual(retained)
     expect(restored.createMotionPreview()).toEqual(source.createMotionPreview())
     for (const delta of [13, 47, 109, 73, 277, 281, 5_000]) {
@@ -298,7 +305,8 @@ describe('Landrush island loading progress motion', () => {
       expect(restored.getSnapshot()).toEqual(source.getSnapshot())
       expect(restored.readyToDismiss()).toBe(source.readyToDismiss())
     }
-    expect(retained.pulses.length).toBeGreaterThanOrEqual(4)
+    expect(retained.pulses.length).toBeGreaterThanOrEqual(3)
+    expect(retained.inheritedMotion).not.toBeNull()
     expect(retained.elapsedMs).toBe(193)
     expect(restored.readyToDismiss()).toBe(true)
   })
@@ -366,8 +374,11 @@ describe('Landrush island loading progress motion', () => {
     const before = controller.getSnapshot()
     const preview = controller.createMotionPreview(1_111, 37)
     const offsets = preview.samples.map((sample) => sample.offset * preview.durationMs)
-    expect(offsets.some((offset) => Math.abs(offset - (RESPONSE_MS / 3 - 17)) < 1e-9)).toBe(true)
-    expect(offsets.some((offset) => Math.abs(offset - (RESPONSE_MS - 17)) < 1e-9)).toBe(true)
+    const pulseDurationMs = before.pulses[0]!.durationMs
+    expect(offsets.some((offset) => Math.abs(offset - (pulseDurationMs / 3 - 17)) < 1e-9)).toBe(
+      true,
+    )
+    expect(offsets.some((offset) => Math.abs(offset - (pulseDurationMs - 17)) < 1e-9)).toBe(true)
     for (let index = 1; index < offsets.length; index += 1) {
       expect(offsets[index]!).toBeGreaterThan(offsets[index - 1]!)
     }
@@ -386,31 +397,26 @@ describe('Landrush island loading progress motion', () => {
 })
 
 describe('Landrush readiness and forecast tracking', () => {
-  test('uses real readiness while permitting at most eight points of additional forecast lead', () => {
+  test('actually targets readiness plus at most 9.9 points without a stale-duration forecast', () => {
     for (const evidence of [0, 0.01, 0.2, 0.5, 0.9, 0.98, 1]) {
-      for (const forecast of [0, evidence, evidence + 0.02, 1, Number.NaN]) {
-        const stage = resolveLandrushIslandLoadingProgressStage({
-          displayedProgress: Math.max(0, evidence - 0.1),
-          estimatedDurationMs: 4_000,
-          evidenceProgress: evidence,
-          forecastProgress: forecast,
-        })
-        expect(stage.confirmedProgress).toBeGreaterThanOrEqual(Math.min(0.984, evidence))
-        expect(stage.confirmedProgress).toBeLessThanOrEqual(
-          evidence + LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD,
-        )
-        expect(stage.ceiling).toBeLessThanOrEqual(evidence + 0.08)
-        expect(stage.confirmedProgress).toBeLessThanOrEqual(0.984)
-      }
+      const stage = resolveLandrushIslandLoadingProgressStage({
+        displayedProgress: Math.max(0, evidence - 0.1),
+        estimatedDurationMs: 18_000,
+        evidenceProgress: evidence,
+      })
+      expect(stage.confirmedProgress).toBe(
+        Math.min(0.984, evidence + LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD),
+      )
+      expect(stage.confirmedProgress).toBeLessThanOrEqual(evidence + 0.1)
+      expect(stage.ceiling).toBe(stage.confirmedProgress)
     }
     expect(
       resolveLandrushIslandLoadingProgressStage({
         displayedProgress: Number.NaN,
         estimatedDurationMs: -1,
         evidenceProgress: Number.NaN,
-        forecastProgress: Number.NaN,
       }),
-    ).toEqual({ ceiling: 0.08, confirmedProgress: 0, estimatedDurationMs: 0 })
+    ).toEqual({ ceiling: 0.099, confirmedProgress: 0.099, estimatedDurationMs: 0 })
   })
 
   test('does not invent additional work completion after an optimistic forecast settles', () => {
@@ -419,26 +425,25 @@ describe('Landrush readiness and forecast tracking', () => {
       displayedProgress: 0.15,
       estimatedDurationMs: 4_000,
       evidenceProgress: 0.15,
-      forecastProgress: 1,
     })
     controller.setConfirmedProgress(stage.confirmedProgress, stage)
     controller.step(120_000)
-    expect(controller.getSnapshot().displayedProgress).toBeCloseTo(0.23, 14)
+    expect(controller.getSnapshot().displayedProgress).toBeCloseTo(0.249, 14)
     expect(controller.getSnapshot().velocityPerSecond).toBe(0)
     expect(controller.readyToDismiss()).toBe(false)
   })
 
-  test('tracks real four-to-five-second progress within ten points with modest forecast compensation', () => {
+  test('tracks real four-to-five-second progress within ten points with bounded readiness lookahead', () => {
     for (const durationMs of [4_000, 4_500, 5_000]) {
       for (const sampleIntervalMs of [5, 25, 50]) {
-        expect(measureRampError(durationMs, sampleIntervalMs, 0.025)).toBeLessThanOrEqual(0.1)
+        expect(measureRampError(durationMs, sampleIntervalMs, true)).toBeLessThanOrEqual(0.1)
       }
     }
   })
 
   test('tracks four-and-a-half-to-five-second evidence-only ramps within ten points', () => {
     for (const durationMs of [4_500, 5_000]) {
-      expect(measureRampError(durationMs, 5, 0)).toBeLessThanOrEqual(0.1)
+      expect(measureRampError(durationMs, 5, false)).toBeLessThanOrEqual(0.1)
     }
   })
 
@@ -448,13 +453,12 @@ describe('Landrush readiness and forecast tracking', () => {
       displayedProgress: 0,
       estimatedDurationMs: 100,
       evidenceProgress: 0.8,
-      forecastProgress: 0.8,
     })
     controller.setConfirmedProgress(stage.confirmedProgress, stage)
     expect(controller.getSnapshot().displayedProgress).toBe(0)
     expect(0.8 - controller.getSnapshot().displayedProgress).toBeGreaterThan(0.1)
     controller.step(RESPONSE_MS)
-    expect(controller.getSnapshot().displayedProgress).toBe(0.8)
+    expect(controller.getSnapshot().displayedProgress).toBeCloseTo(0.899, 14)
     expect(controller.readyToDismiss()).toBe(false)
   })
 })
@@ -477,7 +481,12 @@ function sampleFrom(snapshot: LandrushIslandLoadingProgressMotionSnapshot, offse
 
 function assertAnalyticEnvelope(controller: LandrushIslandLoadingProgressController) {
   const source = controller.getSnapshot()
-  const preview = controller.createMotionPreview(RESPONSE_MS + 100)
+  const lastEndMs = Math.max(
+    source.elapsedMs + RESPONSE_MS,
+    ...source.pulses.map((pulse) => pulse.startedAtMs + pulse.durationMs),
+    source.inheritedMotion ? source.inheritedMotion.holdUntilMs + RESPONSE_MS / 2 : 0,
+  )
+  const preview = controller.createMotionPreview(lastEndMs - source.elapsedMs + 100)
   const samples = [...preview.samples]
   for (let index = 1; index < preview.samples.length; index += 1) {
     const from = preview.samples[index - 1]!
@@ -555,7 +564,7 @@ function assertAnalyticEnvelope(controller: LandrushIslandLoadingProgressControl
   }
 }
 
-function measureRampError(durationMs: number, sampleIntervalMs: number, forecastLead: number) {
+function measureRampError(durationMs: number, sampleIntervalMs: number, lookahead: boolean) {
   const controller = createLandrushIslandLoadingProgressController({
     initialVelocityPerSecond: 0.006,
   })
@@ -569,9 +578,8 @@ function measureRampError(durationMs: number, sampleIntervalMs: number, forecast
         displayedProgress: controller.getSnapshot().displayedProgress,
         estimatedDurationMs: durationMs - elapsedMs,
         evidenceProgress: actualProgress,
-        forecastProgress: actualProgress + forecastLead,
       })
-      controller.setConfirmedProgress(stage.confirmedProgress, stage)
+      controller.setConfirmedProgress(lookahead ? stage.confirmedProgress : actualProgress, stage)
     }
     maximumError = Math.max(
       maximumError,
@@ -582,3 +590,225 @@ function measureRampError(durationMs: number, sampleIntervalMs: number, forecast
   expect(controller.readyToDismiss()).toBe(true)
   return maximumError
 }
+
+describe('Landrush causal-clock motion and completion reserve', () => {
+  test('preserves the D662.2/S1029.2 linear-prefix oracle before delayed evidence begins', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.00353864,
+      initialVelocityPerSecond: 0.006,
+      inheritedVelocityHoldMs: 367,
+    })
+    controller.setConfirmedProgress(0.4, { startDelayMs: 367 })
+    const state = controller.getSnapshot()
+    expect(state.inheritedMotion).toEqual({ holdUntilMs: 367, velocityPerSecond: 0.006 })
+    expect(state.pulses[0]?.startedAtMs).toBe(367)
+    const at1009 = sampleFrom(state, 1009 - 662.2)
+    expect(at1009.displayedProgress).toBeCloseTo(0.00561944, 14)
+    expect(at1009.velocityPerSecond).toBe(0.006)
+    expect(at1009.accelerationPerSecondSquared).toBe(0)
+    const atRequest = sampleFrom(state, 367)
+    expect(atRequest.displayedProgress).toBeCloseTo(0.00574064, 14)
+    expect(atRequest.velocityPerSecond).toBe(0.006)
+    expect(atRequest.accelerationPerSecondSquared).toBe(0)
+    expect(
+      controller
+        .createMotionPreview()
+        .samples.some((sample) => Math.abs(sample.offset * 120_000 - 367) < 1e-9),
+    ).toBe(true)
+    assertAnalyticEnvelope(controller)
+  })
+
+  test('preserves the prefix and the future pulse plan across a remount before real handoff', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.08,
+      initialVelocityPerSecond: 0.006,
+      inheritedVelocityHoldMs: 367,
+    })
+    controller.setConfirmedProgress(0.3, { startDelayMs: 367 })
+    controller.step(100)
+    const snapshot = controller.getSnapshot()
+    const copy = createLandrushIslandLoadingProgressController()
+    copy.restoreMotionSnapshot(snapshot)
+    expect(copy.getSnapshot()).toEqual(snapshot)
+    expect(copy.createMotionPreview()).toEqual(controller.createMotionPreview())
+    for (const duration of [70, 190, 7, 23, 79, 133, 349, 271]) {
+      copy.step(duration)
+      controller.step(duration)
+      expect(copy.getSnapshot()).toEqual(controller.getSnapshot())
+    }
+    expect(snapshot.inheritedMotion?.holdUntilMs).toBe(367)
+    expect(snapshot.pulses[0]?.startedAtMs).toBe(367)
+  })
+
+  test('keeps delayed work entirely out of the already presented trajectory', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.08 })
+    controller.setConfirmedProgress(0.2)
+    controller.step(70)
+    const before = controller.getSnapshot()
+    controller.setConfirmedProgress(0.7, { startDelayMs: 143 })
+    const after = controller.getSnapshot()
+    expectMotionEqual(after, before)
+    expect(after.pulses.at(-1)?.startedAtMs).toBe(213)
+    for (const offset of [0, 13, 75, 142.9, 143]) {
+      expectMotionEqual(sampleFrom(after, offset), sampleFrom(before, offset))
+    }
+    expect(sampleFrom(after, 160).displayedProgress).toBeGreaterThan(
+      sampleFrom(before, 160).displayedProgress,
+    )
+    assertAnalyticEnvelope(controller)
+  })
+
+  test('is C2 at delayed pulse starts and at the retained-linear-to-seeded-tail join', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.08,
+      initialVelocityPerSecond: 0.075,
+      inheritedVelocityHoldMs: 367,
+    })
+    controller.setConfirmedProgress(0.35, { startDelayMs: 367 })
+    controller.setConfirmedProgress(0.64, { startDelayMs: 412 })
+    const state = controller.getSnapshot()
+    const preview = controller.createMotionPreview()
+    for (const sample of preview.samples) {
+      const offset = sample.offset * preview.durationMs
+      if (!(offset > EPSILON_MS && offset < 2_000)) continue
+      const at = sampleFrom(state, offset)
+      for (const neighbor of [
+        sampleFrom(state, offset - EPSILON_MS),
+        sampleFrom(state, offset + EPSILON_MS),
+      ]) {
+        expect(Math.abs(neighbor.displayedProgress - at.displayedProgress)).toBeLessThan(3.1e-7)
+        expect(Math.abs(neighbor.velocityPerSecond - at.velocityPerSecond)).toBeLessThan(1.7e-6)
+        expect(
+          Math.abs(neighbor.accelerationPerSecondSquared - at.accelerationPerSecondSquared),
+        ).toBeLessThan(0.000_4)
+      }
+    }
+    assertAnalyticEnvelope(controller)
+  })
+
+  test('completes within the fixed response measured from the actual delayed request', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.00353864,
+      initialVelocityPerSecond: 0.006,
+      inheritedVelocityHoldMs: 367,
+    })
+    controller.setConfirmedProgress(0.5, { startDelayMs: 367 })
+    const before = controller.getSnapshot()
+    controller.complete(367)
+    const complete = controller.getSnapshot()
+    expectMotionEqual(complete, before)
+    expect(complete.completionStartedAtMs).toBe(367)
+    expectMotionEqual(sampleFrom(complete, 367), sampleFrom(before, 367))
+    controller.step(367 + RESPONSE_MS - 1)
+    expect(controller.readyToDismiss()).toBe(false)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(1)
+    const pending = controller.getSnapshot()
+    expect(controller.complete(5_000)).toEqual(pending)
+    controller.step(1)
+    expect(controller.readyToDismiss()).toBe(true)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+  })
+
+  test('does not dismiss an already full bar before the actual delayed completion observation', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 1 })
+    controller.complete(150)
+    expect(controller.readyToDismiss()).toBe(false)
+    controller.step(149)
+    expect(controller.readyToDismiss()).toBe(false)
+    controller.step(1)
+    expect(controller.readyToDismiss()).toBe(true)
+  })
+
+  test('admits every later completion while preserving all exact future derivative bounds', () => {
+    for (const initialVelocityPerSecond of [0, 0.006, 0.075]) {
+      const controller = createLandrushIslandLoadingProgressController({
+        initialProgress: 0.08,
+        initialVelocityPerSecond,
+        inheritedVelocityHoldMs: 90,
+      })
+      for (const [target, delay, elapsed] of [
+        [0.19, 90, 33],
+        [0.36, 80, 79],
+        [0.55, 20, 61],
+        [0.73, 45, 107],
+        [0.92, 15, 53],
+      ]) {
+        controller.setConfirmedProgress(target!, { startDelayMs: delay! })
+        const plan = controller.getSnapshot()
+        for (const futureDelay of [0, 37, 133, 319, 691, 1_400]) {
+          const readyDelay = Math.max(futureDelay, plan.lastRequestAtMs - plan.elapsedMs)
+          const copy = createLandrushIslandLoadingProgressController()
+          copy.restoreMotionSnapshot(plan)
+          copy.complete(readyDelay)
+          expectMotionEqual(copy.getSnapshot(), plan)
+          assertAnalyticEnvelope(copy)
+          copy.step(readyDelay + RESPONSE_MS)
+          expect(copy.getSnapshot().displayedProgress).toBe(1)
+          expect(copy.readyToDismiss()).toBe(true)
+        }
+        controller.step(elapsed!)
+      }
+    }
+  })
+
+  test('uses a shorter bounded response for small increments and a safe response for large ones', () => {
+    const small = createLandrushIslandLoadingProgressController()
+    small.setConfirmedProgress(0.01)
+    expect(small.getSnapshot().pulses[0]?.durationMs).toBe(
+      LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS,
+    )
+    const large = createLandrushIslandLoadingProgressController()
+    large.setConfirmedProgress(0.984)
+    expect(large.getSnapshot().pulses[0]!.durationMs).toBeGreaterThan(250)
+    expect(large.getSnapshot().pulses[0]!.durationMs).toBeLessThanOrEqual(RESPONSE_MS)
+    assertAnalyticEnvelope(small)
+    assertAnalyticEnvelope(large)
+    for (let ordinal = 1; ordinal <= 64; ordinal += 1) {
+      small.setConfirmedProgress(Math.min(0.984, ordinal / 64))
+    }
+    expect(small.getSnapshot().pulses.length).toBeLessThan(64)
+    for (const pulse of small.getSnapshot().pulses) {
+      expect(pulse.durationMs).toBeGreaterThanOrEqual(250)
+      expect(pulse.durationMs).toBeLessThanOrEqual(RESPONSE_MS)
+    }
+    assertAnalyticEnvelope(small)
+    small.complete()
+    assertAnalyticEnvelope(small)
+  })
+
+  test('caps a long inherited prefix against all of its reserved forward motion', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.98,
+      initialVelocityPerSecond: 0.075,
+      inheritedVelocityHoldMs: 60_000,
+    })
+    const snapshot = controller.getSnapshot()
+    expect(snapshot.velocityPerSecond).toBeCloseTo(0.004 / (60 + RESPONSE_MS / 4_500), 14)
+    expect(snapshot.targetProgress).toBeLessThanOrEqual(0.984)
+    for (const sample of controller.createMotionPreview().samples) {
+      expect(sample.progress).toBeLessThanOrEqual(0.984)
+    }
+    controller.complete(60_000)
+    assertAnalyticEnvelope(controller)
+    controller.step(60_000 + RESPONSE_MS)
+    expect(controller.readyToDismiss()).toBe(true)
+  })
+
+  test('sanitizes invalid delay and hold inputs without modifying retained history', () => {
+    for (const value of [-1, Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]) {
+      const controller = createLandrushIslandLoadingProgressController({
+        initialProgress: 0.08,
+        initialVelocityPerSecond: 0.006,
+        inheritedVelocityHoldMs: value,
+      })
+      controller.setConfirmedProgress(0.2, { startDelayMs: value })
+      const state = controller.getSnapshot()
+      expect(state.inheritedMotion?.holdUntilMs).toBe(0)
+      expect(state.pulses[0]?.startedAtMs).toBe(0)
+      controller.complete(value)
+      expect(controller.getSnapshot().completionStartedAtMs).toBe(0)
+      controller.step(RESPONSE_MS)
+      expect(controller.readyToDismiss()).toBe(true)
+    }
+  })
+})

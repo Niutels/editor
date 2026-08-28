@@ -22,7 +22,6 @@ import {
   resolveLandrushIslandLoadingStatus,
 } from './landrush-island-loading-status'
 import {
-  createLandrushIslandLoadingTaskTopologyKey,
   createLandrushIslandLoadingTimelineRun,
   type LandrushIslandLoadingTaskSnapshot,
   type LandrushIslandLoadingTimingStorage,
@@ -125,10 +124,6 @@ export function useLandrushIslandLoadingTimeline({
   const timelineTopologySignature =
     topologySignature +
     (bootRunRef.current ? '|clock:streamed-shell:v1' : '|clock:runtime-fallback:v1')
-  const topologyKey = createLandrushIslandLoadingTaskTopologyKey(
-    appendLandrushIslandDocumentReadinessTask(tasks, false),
-    timelineTopologySignature,
-  )
   const fallbackKey = fallback
     ? [fallback.expectedRunMs, fallback.maximumRunMs, fallback.minimumRunMs].join(':')
     : 'default'
@@ -157,6 +152,7 @@ export function useLandrushIslandLoadingTimeline({
     const percent = shellPresentation?.percent ?? null
     const percentReel = shellPresentation?.percentReel ?? null
     const status = shellPresentation?.status ?? null
+    let lastClockMs = readClock()
     const initialProgress = fill ? readLandrushIslandLoadingRenderedProgress(fill) : 0
     const initialInvalidationKey = sampleInvalidationKeyRef.current
     const run = createLandrushIslandLoadingTimelineRun({
@@ -173,14 +169,16 @@ export function useLandrushIslandLoadingTimeline({
     run.raiseProgressFloor(initialProgress)
     const retained = bootRun?.motion?.fill === fill ? bootRun.motion : null
     const controller = createLandrushIslandLoadingProgressController({
+      inheritedVelocityHoldMs: resolveLandrushIslandLoadingObservationDelay(readNow(), lastClockMs),
       initialProgress,
       initialVelocityPerSecond: shellPresentation ? STREAMED_SHELL_VELOCITY_PER_SECOND : 0,
     })
     if (retained?.progressSnapshot) {
       controller.restoreMotionSnapshot(retained.progressSnapshot)
-      controller.step(
-        Math.max(0, Number(retained.animation.currentTime) - (retained.animationElapsedMs ?? 0)),
-      )
+      const retainedTime = retained.animation.currentTime
+      if (retainedTime !== null && Number.isFinite(Number(retainedTime))) {
+        controller.step(Math.max(0, Number(retainedTime) - (retained.animationElapsedMs ?? 0)))
+      }
     }
     let animation: Animation | null = retained?.animation ?? null
     let percentAnimation: Animation | null = retained?.percentAnimation ?? null
@@ -188,7 +186,6 @@ export function useLandrushIslandLoadingTimeline({
     let fadeAnimation: Animation | null = null
     let fadeFallbackTimer: number | null = null
     let frameId: number | null = null
-    let lastClockMs = readClock()
     let lastDriveMs = Number.NEGATIVE_INFINITY
     let lastAnimatedTarget = Number.NaN
     let lastPercent = -1
@@ -384,6 +381,7 @@ export function useLandrushIslandLoadingTimeline({
       if (disposed || handedOff) return
       advanceMotion()
       const nowMs = readNow()
+      const startDelayMs = resolveLandrushIslandLoadingObservationDelay(nowMs, lastClockMs)
       lastDriveMs = nowMs
       if (sampleInvalidationKeyRef.current !== initialInvalidationKey) run.invalidatePersistence()
       const taskSnapshot = readTasks()
@@ -401,7 +399,7 @@ export function useLandrushIslandLoadingTimeline({
         readyAtMs ??= nowMs
         if (!completionRequested) {
           completionRequested = true
-          controller.complete()
+          controller.complete(startDelayMs)
           overlay?.setAttribute('data-landrush-island-loading-ready-at-ms', String(readyAtMs))
         }
       } else {
@@ -409,9 +407,8 @@ export function useLandrushIslandLoadingTimeline({
           displayedProgress: controller.getSnapshot().displayedProgress,
           estimatedDurationMs: run.getForecast().durationMs - (nowMs - startTimeMs),
           evidenceProgress: update.evidenceProgress,
-          forecastProgress: update.progress,
         })
-        controller.setConfirmedProgress(stage.confirmedProgress, stage)
+        controller.setConfirmedProgress(stage.confirmedProgress, { ...stage, startDelayMs })
       }
       if (!fadeStarted && controller.getSnapshot().targetProgress !== lastAnimatedTarget)
         installAnimation()
@@ -486,6 +483,16 @@ export function useLandrushIslandLoadingTimeline({
   }, [])
 
   return { ...presentation, fillRef, overlayRef }
+}
+
+export function resolveLandrushIslandLoadingObservationDelay(
+  observationTimeMs: number,
+  frameTimeMs: number,
+) {
+  // DocumentTimeline is frame-sampled; new evidence must not rewrite the already-presented past.
+  return Number.isFinite(observationTimeMs) && Number.isFinite(frameTimeMs)
+    ? Math.max(0, observationTimeMs - frameTimeMs)
+    : 0
 }
 
 export function createLandrushIslandLoadingCompletionGate() {

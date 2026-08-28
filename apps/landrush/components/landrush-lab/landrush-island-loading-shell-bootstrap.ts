@@ -16,6 +16,7 @@ export const LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE =
 export const LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE = 'data-landrush-island-loading-run-id'
 export const LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY = '--landrush-island-loading-shell-delay'
 export const LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS = 120_000
+export const LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS = 0.08
 export const STREAMED_SHELL_VELOCITY_PER_SECOND = 0.006
 
 export type LandrushIslandLoadingShellMotion = {
@@ -149,10 +150,7 @@ export function startLandrushIslandLoadingShellMotion(
     )
     if (percentReel) {
       percentAnimation = percentReel.animate(
-        createLandrushIslandLoadingShellPercentKeyframes(
-          renderedProgress,
-          segment.toProgress,
-        ),
+        createLandrushIslandLoadingShellPercentKeyframes(renderedProgress, segment.toProgress),
         {
           duration: segment.durationMs,
           easing: 'linear',

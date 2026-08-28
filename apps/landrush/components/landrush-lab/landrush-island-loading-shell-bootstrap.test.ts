@@ -2,15 +2,16 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import {
   bootstrapLandrushIslandLoadingShellClient,
-  createStreamedShellMotionSegment,
   createLandrushIslandLoadingShellPercentKeyframes,
+  createStreamedShellMotionSegment,
   LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
   LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL,
   LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY,
+  LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS,
   LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
   LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE,
-  STREAMED_SHELL_VELOCITY_PER_SECOND,
   type LandrushIslandLoadingBootRun,
+  STREAMED_SHELL_VELOCITY_PER_SECOND,
   startLandrushIslandLoadingShellMotion,
 } from './landrush-island-loading-shell-bootstrap'
 
@@ -241,6 +242,21 @@ describe('Landrush island loading shell bootstrap', () => {
     ).toBeGreaterThan(0.5)
   })
 
+  test('starts with a small forecast head start without increasing the bootstrap slope', () => {
+    expect(LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS).toBe(0.08)
+    expect(LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS).toBeLessThan(0.1)
+    const segment = createStreamedShellMotionSegment(
+      LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS,
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )!
+    expect(segment.fromProgress).toBe(0.08)
+    expect(segment.toProgress).toBeCloseTo(0.8, 12)
+    expect((segment.toProgress - segment.fromProgress) / (segment.durationMs / 1000)).toBeCloseTo(
+      STREAMED_SHELL_VELOCITY_PER_SECOND,
+      12,
+    )
+  })
+
   test('keeps the exact shell slope while shortening the final positive runway', () => {
     const full = createStreamedShellMotionSegment(
       0,
@@ -394,6 +410,11 @@ describe('Landrush island loading shell bootstrap', () => {
     )
 
     expect(shellSource).toContain('<LandrushIslandLoadingShellClientBridge />')
+    expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS * 100')
+    expect(shellSource).toContain('aria-valuenow={initialPercent}')
+    expect(shellSource).toContain(
+      'data-landrush-island-loading-shell-percent-value={String(initialPercent)}',
+    )
     expect(bridgeSource).toContain(
       'startLandrushIslandLoadingShellMotion(fill, run, undefined, percentReel)',
     )

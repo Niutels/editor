@@ -19,6 +19,7 @@ import {
   LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
   LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS,
+  resolveLandrushIslandLoadingObservationDelay,
   resolveLandrushIslandLoadingReducedMotion,
   resolveLandrushIslandLoadingTransformProgress,
   resolveLandrushIslandLoadingVisualSegmentProgress,
@@ -185,6 +186,55 @@ describe('Landrush island loading presentation handoff', () => {
     expect(resolveLandrushIslandLoadingTransformProgress('matrix(NaN, 0, 0, 1, 0, 0)')).toBe(0)
   })
 
+  test('does not backdate arriving evidence into a stale document frame, including remount', () => {
+    const frameTimeMs = 662.2
+    const observationTimeMs = 1029.2
+    const startDelayMs = resolveLandrushIslandLoadingObservationDelay(
+      observationTimeMs,
+      frameTimeMs,
+    )
+    expect(startDelayMs).toBeCloseTo(367, 12)
+    expect(resolveLandrushIslandLoadingObservationDelay(100, 110)).toBe(0)
+    expect(resolveLandrushIslandLoadingObservationDelay(Number.NaN, 110)).toBe(0)
+    expect(resolveLandrushIslandLoadingObservationDelay(100, Number.POSITIVE_INFINITY)).toBe(0)
+
+    const controller = createLandrushIslandLoadingProgressController({
+      inheritedVelocityHoldMs: startDelayMs,
+      initialProgress: 0.00353864,
+      initialVelocityPerSecond: 0.006,
+    })
+    controller.setConfirmedProgress(0.1885, { startDelayMs })
+    const preview = createLandrushIslandLoadingVisualPreview(controller, frameTimeMs)
+    const frames = createLandrushIslandLoadingVisualKeyframes(preview)
+    for (const [timeMs, progress] of [
+      [frameTimeMs, 0.00353864],
+      [1009, 0.00561944],
+      [observationTimeMs, 0.00574064],
+    ]) {
+      const rendered = evaluateCompositorCurve(frames, preview.durationMs, timeMs! - frameTimeMs)
+      expect(rendered.progress).toBeCloseTo(progress!, 11)
+      expect(rendered.velocity).toBeCloseTo(0.006, 11)
+      expect(rendered.acceleration).toBeCloseTo(0, 9)
+    }
+
+    controller.step(100)
+    const restored = createLandrushIslandLoadingProgressController()
+    restored.restoreMotionSnapshot(controller.getSnapshot())
+    const remounted = createLandrushIslandLoadingVisualPreview(restored, frameTimeMs + 100)
+    const remountedFrames = createLandrushIslandLoadingVisualKeyframes(remounted)
+    for (let elapsedMs = 100; elapsedMs <= 1300; elapsedMs += 5) {
+      const originalMotion = evaluateCompositorCurve(frames, preview.durationMs, elapsedMs)
+      const remountedMotion = evaluateCompositorCurve(
+        remountedFrames,
+        remounted.durationMs,
+        elapsedMs - 100,
+      )
+      expect(remountedMotion.progress).toBeCloseTo(originalMotion.progress, 10)
+      expect(remountedMotion.velocity).toBeCloseTo(originalMotion.velocity, 9)
+      expect(remountedMotion.acceleration).toBeCloseTo(originalMotion.acceleration, 7)
+    }
+  })
+
   test('uses exact cubic compositor pieces, not linear samples that break velocity continuity', () => {
     const controller = createLandrushIslandLoadingProgressController({
       initialProgress: 0.2,
@@ -282,7 +332,12 @@ describe('Landrush island loading presentation handoff', () => {
     expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS)
     expect(preview.keyframes).toHaveLength(5)
     expect(preview.to).toBe(0.8)
-    expect(resolveLandrushIslandLoadingVisualSegmentProgress(preview, 800)).toBeCloseTo(0.8, 12)
+    expect(
+      resolveLandrushIslandLoadingVisualSegmentProgress(
+        preview,
+        LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+      ),
+    ).toBeCloseTo(0.8, 12)
     expect(resolveLandrushIslandLoadingVisualSegmentProgress(preview, 120_000)).toBe(0.8)
   })
 
@@ -307,7 +362,10 @@ describe('Landrush island loading presentation handoff', () => {
       ).toBeLessThan(percent / 100)
       expect(frame.easing).toBe('steps(1, end)')
     }
-    expect(Number(hundred.offset) * preview.durationMs).toBeCloseTo(800, 1)
+    expect(Number(hundred.offset) * preview.durationMs).toBeCloseTo(
+      LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+      1,
+    )
     expect(frames.at(-1)?.offset).toBe(1)
     expect(frames.length).toBeLessThanOrEqual(102)
   })

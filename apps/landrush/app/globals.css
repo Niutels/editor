@@ -162,7 +162,7 @@
 [data-landrush-island-loading-shell-fill] {
   animation: landrush-island-loading-shell-progress 120s linear both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
-  transform: scaleX(0);
+  transform: scaleX(0.08);
   transform-origin: left center;
   will-change: transform;
 }
@@ -170,25 +170,25 @@
 [data-landrush-island-loading-shell-percent-reel] {
   animation: landrush-island-loading-shell-percent 120s steps(72, end) both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
-  transform: translate3d(0, 0, 0);
+  transform: translate3d(0, -8rem, 0);
   will-change: transform;
 }
 
 @keyframes landrush-island-loading-shell-progress {
   0% {
-    transform: scaleX(0);
+    transform: scaleX(0.08);
   }
   100% {
-    transform: scaleX(0.72);
+    transform: scaleX(0.8);
   }
 }
 
 @keyframes landrush-island-loading-shell-percent {
   0% {
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, -8rem, 0);
   }
   100% {
-    transform: translate3d(0, -72rem, 0);
+    transform: translate3d(0, -80rem, 0);
   }
 }
 
