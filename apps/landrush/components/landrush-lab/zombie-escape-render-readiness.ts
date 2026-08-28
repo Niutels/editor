@@ -26,7 +26,7 @@ const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
 export const ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY = 'weapon-pickup'
 export const ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY = 'zombie:fallback'
 export const ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS = LANDRUSH_RENDER_READINESS_TIMEOUT_MS
-export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT = 24
+export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT = 8
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORTS = 24
 export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_FENCE_POLLS = 8
 
@@ -370,27 +370,21 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(currentUnits)
       activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
       applyZombieEscapeWebGLRealizationCohort(currentUnits, cohort)
-      const diagnosticLabel = describeZombieEscapeWebGLRealizationCohort(submittedCohorts, cohort)
-      markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:start`)
-      try {
-        await submitZombieEscapeWebGLRealizationDraw(
-          () => {
-            try {
-              webglRenderer.render(targetScene, camera)
-            } finally {
-              restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
-              restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
-              activeObjectSnapshots = undefined
-              activeRendererSnapshot = undefined
-            }
-          },
-          context,
-          waitForAdmissionOpportunity,
-          isCurrent,
-        )
-      } finally {
-        markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:end`)
-      }
+      await submitZombieEscapeWebGLRealizationDraw(
+        () => {
+          try {
+            webglRenderer.render(targetScene, camera)
+          } finally {
+            restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
+            restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
+            activeObjectSnapshots = undefined
+            activeRendererSnapshot = undefined
+          }
+        },
+        context,
+        waitForAdmissionOpportunity,
+        isCurrent,
+      )
       for (const unit of cohort.units) {
         for (const renderable of unit.renderables) realizedRenderables.add(renderable)
       }
@@ -416,46 +410,6 @@ function isZombieEscapeRenderableObject(object: Object3D) {
   return Boolean(
     renderable.isMesh || renderable.isLine || renderable.isPoints || renderable.isSprite,
   )
-}
-
-function describeZombieEscapeWebGLRealizationCohort(
-  cohortIndex: number,
-  cohort: ZombieEscapeWebGLRealizationCohort,
-) {
-  const units = cohort.units.map((unit) => {
-    const renderable = unit.root as Object3D & {
-      count?: number
-      geometry?: Readonly<{
-        attributes?: Readonly<Record<string, unknown>>
-        type?: string
-      }>
-      material?: Readonly<{ type?: string }> | Readonly<{ type?: string }>[]
-    }
-    const material = Array.isArray(renderable.material)
-      ? renderable.material.map(({ type }) => type ?? 'Material').join('+')
-      : (renderable.material?.type ?? 'Material')
-    return [
-      renderable.name || renderable.type,
-      `weight=${String(unit.weight)}`,
-      `count=${String(renderable.count ?? 1)}`,
-      `geometry=${renderable.geometry?.type ?? 'none'}`,
-      `attributes=${Object.keys(renderable.geometry?.attributes ?? {})
-        .sort()
-        .join('+')}`,
-      `material=${material}`,
-    ].join(',')
-  })
-  return `landrush:webgl-realization:cohort=${String(cohortIndex)}:${units.join(';')}`
-}
-
-function markZombieEscapeWebGLRealizationDiagnostic(label: string) {
-  if (
-    typeof window === 'undefined' ||
-    new URLSearchParams(window.location.search).get('bench') !== '1'
-  ) {
-    return
-  }
-  window.performance.mark(label)
 }
 
 function estimateZombieEscapeWebGLRealizationWeight(object: Object3D) {
