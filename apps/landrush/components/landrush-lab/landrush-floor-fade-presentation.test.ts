@@ -58,12 +58,14 @@ function createOwners(requestFrame?: () => void) {
 }
 
 function ensureLevel({
+  excludedRoots,
   floorPresentation,
   forceVisible = false,
   levelId,
   root,
   structuralToken = 0,
 }: {
+  excludedRoots?: Iterable<Object3D>
   floorPresentation: LandrushIslandFloorFadePresentationOwner<LevelId>
   forceVisible?: boolean
   levelId: LevelId
@@ -71,6 +73,7 @@ function ensureLevel({
   structuralToken?: unknown
 }) {
   floorPresentation.ensureLevel({
+    excludedRoots,
     forceVisible,
     levelId,
     root,
@@ -596,6 +599,65 @@ describe('Landrush floor fade presentation owner', () => {
     source.dispose()
   })
 
+  test('partitions nested cover meshes while using their effective ancestor opacity', () => {
+    const parentId = asLevelId('level-partitioned-parent')
+    const coverId = asLevelId('level-partitioned-cover')
+    const scene = new Scene()
+    const parent = new Group()
+    const parentMesh = createMesh()
+    const parentSource = parentMesh.material as Material
+    const cover = new Group()
+    const coverMesh = createMesh()
+    const coverSource = coverMesh.material as Material
+    cover.add(coverMesh)
+    parent.add(parentMesh, cover)
+    scene.add(parent)
+    const owners = createOwners()
+
+    ensureLevel({
+      excludedRoots: [cover],
+      floorPresentation: owners.floorPresentation,
+      levelId: parentId,
+      root: parent,
+    })
+    ensureLevel({
+      floorPresentation: owners.floorPresentation,
+      levelId: coverId,
+      root: cover,
+    })
+    prepareUntilReady(owners.floorPresentation, parentId)
+    prepareUntilReady(owners.floorPresentation, coverId)
+
+    owners.floorPresentation.applyLevelOpacity({
+      levelId: parentId,
+      opacity: 0.35,
+      root: parent,
+    })
+    owners.floorPresentation.applyLevelOpacity({
+      effectiveOpacity: 0.35,
+      levelId: coverId,
+      opacity: 1,
+      root: cover,
+    })
+
+    expect(readLandrushIslandFloorFadeOpacity(parentMesh)).toBe(0.35)
+    expect(readLandrushIslandFloorFadeOpacity(coverMesh)).toBe(0.35)
+    expect(owners.floorPresentation.readLevel(parentId)).toMatchObject({
+      assignmentMismatchCount: 0,
+      materialMode: 'fractional',
+    })
+    expect(owners.floorPresentation.readLevel(coverId)).toMatchObject({
+      assignmentMismatchCount: 0,
+      materialMode: 'fractional',
+    })
+
+    disposeOwners(owners)
+    parentMesh.geometry.dispose()
+    coverMesh.geometry.dispose()
+    parentSource.dispose()
+    coverSource.dispose()
+  })
+
   test('bounds the first scan tick for a ten-thousand-object root', () => {
     const levelId = asLevelId('level-large')
     const scene = new Scene()
@@ -1085,7 +1147,7 @@ describe('Landrush floor fade presentation owner', () => {
     source.dispose()
   })
 
-  test('stages a same-mesh material source change before showing it again', () => {
+  test('keeps a same-mesh source change on the prepared fractional assignment while rebasing', () => {
     const levelId = asLevelId('level-source-change')
     const scene = new Scene()
     const source = new MeshBasicMaterial()
@@ -1112,15 +1174,23 @@ describe('Landrush floor fade presentation owner', () => {
       root,
       structuralToken: 1,
     })
-    while (mesh.visible) owners.floorPresentation.prepareFrame(1 / 60)
-    expect(mesh.visible).toBe(false)
-
-    prepareUntilReady(owners.floorPresentation, levelId)
-    expect(mesh.visible).toBe(true)
-    expect(mesh.material).not.toBe(replacementSource)
     expect(owners.floorPresentation.hasPendingWork).toBe(true)
-    prepareAllWork(owners.floorPresentation)
-    expect(mesh.visible).toBe(true)
+    while (owners.floorPresentation.hasPendingWork) {
+      owners.floorPresentation.prepareFrame(1 / 60)
+      expect(mesh.visible).toBe(true)
+      expect(owners.floorPresentation.readLevel(levelId)).toMatchObject({
+        assignmentMismatchCount: 0,
+        quarantineCount: 0,
+      })
+    }
+
+    expect(mesh.material).not.toBe(replacementSource)
+    expect(owners.floorPresentation.readLevel(levelId)).toMatchObject({
+      appliedOpacity: 0.35,
+      assignmentMismatchCount: 0,
+      quarantineCount: 0,
+      ready: true,
+    })
 
     disposeOwners(owners)
     mesh.geometry.dispose()

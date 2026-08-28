@@ -42,7 +42,25 @@ describe('Landrush island loading status', () => {
   test('announces the playable handoff only after every readiness task finishes', () => {
     expect(resolveLandrushIslandLoadingStatus(zombieTasks())).toEqual({
       rank: 6,
-      text: 'Almost ready',
+      text: 'Hiding the goblins — almost ready',
+    })
+  })
+
+  test('retains the goblin caption for the completion sweep when parallel work skips its stage', () => {
+    const worldFrameFinishedFirst = zombieTasks('viewer-scene').map((snapshot) =>
+      snapshot.id === 'world-frame' ? task(snapshot.id, true) : snapshot,
+    )
+    expect(resolveLandrushIslandLoadingStatus(worldFrameFinishedFirst)).toEqual({
+      rank: 1,
+      text: 'Raising roads and cliffs',
+    })
+    expect(resolveLandrushIslandLoadingStatus(zombieTasks('zombie-assets'))).toEqual({
+      rank: 3,
+      text: 'Staging weapons and infected',
+    })
+    expect(resolveLandrushIslandLoadingStatus(zombieTasks())).toEqual({
+      rank: 6,
+      text: 'Hiding the goblins — almost ready',
     })
   })
 
@@ -54,5 +72,16 @@ describe('Landrush island loading status', () => {
         task('paint', false),
       ]),
     ).toEqual({ rank: 0, text: LANDRUSH_ISLAND_LOADING_INITIAL_STATUS })
+  })
+
+  test('keeps non-Zombie living-world and completion captions unchanged', () => {
+    expect(resolveLandrushIslandLoadingStatus([task('world-frame', false)])).toEqual({
+      rank: 2,
+      text: 'Stirring the shoreline',
+    })
+    expect(resolveLandrushIslandLoadingStatus([task('world-frame', true)])).toEqual({
+      rank: 6,
+      text: 'Ready to explore',
+    })
   })
 })

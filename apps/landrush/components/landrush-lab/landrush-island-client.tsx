@@ -252,7 +252,6 @@ import {
   resolveLandrushBuildingActiveFloorCoverNodeIds,
   resolveLandrushBuildingFloorCovers,
   resolveLandrushBuildingFloorOpacities,
-  resolveLandrushBuildingFloorPresentationOwnership,
   resolveLandrushBuildingFloorStacks,
 } from './landrush-building-floor-visibility'
 import {
@@ -327,6 +326,7 @@ import {
   resolveLandrushIslandJumpEdgeBlurSample,
   startLandrushIslandJumpEdgeBlur,
 } from './landrush-island-jump-edge-blur'
+import { LandrushIslandLoadingPercent } from './landrush-island-loading-percent'
 import {
   advanceLandrushGeneratedAssetMountGeneration,
   type LandrushGeneratedAssetReadinessStatus,
@@ -469,8 +469,8 @@ import {
 import { LandrushRobotFootstepAudio } from './robot-footstep-audio'
 import {
   appendLandrushRevealOwnedMeshes,
-  isLandrushRevealObjectOwnedByRoot,
   isLandrushRevealObjectWithinRoots,
+  setLandrushRevealOwnedMeshesBounds,
 } from './robot-reveal-mesh-ownership'
 import {
   advanceLandrushRobotScreenRevealAmount,
@@ -1297,6 +1297,7 @@ type LandrushIslandResolvedStairFloorTransition = LandrushBuildingFloorTransitio
   upperLevelId: LevelNode['id']
 }
 type LandrushIslandRobotRevealOccluder = {
+  compositeRoot: boolean
   dynamicBounds: boolean
   ownerId: string
   object: Object3D
@@ -3694,6 +3695,7 @@ export function LandrushIslandClient({
         frameGaps: latestProbe.frameGaps.slice(-64),
         longTasks: latestProbe.longTasks.slice(-32),
         navigationEvents: latestProbe.navigationEvents.slice(-32),
+        revealSample: latestProbe.revealSamples.at(-1) ?? null,
         startedAt: latestProbe.startedAt,
       })
     }
@@ -7141,7 +7143,7 @@ function LandrushIslandLoadingOverlay({
           >
             {statusText}
           </span>
-          <span className="font-mono text-sm tabular-nums">{percent}%</span>
+          <LandrushIslandLoadingPercent />
         </div>
         <div className="h-3 overflow-hidden rounded-full border border-white/24 bg-slate-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
           <div
@@ -10449,6 +10451,14 @@ function LandrushIslandRobotLevelSelectionTracker({
     if (context) preparationScopeIds.add(context.scopeId)
     if (stairTransition) preparationScopeIds.add(stairTransition.scopeId)
     const robotPoint = { x: motion.position.x, z: motion.position.z }
+    const coverObjectsByLevelId = new Map<LevelNode['id'], Object3D[]>()
+    for (const cover of floorStacksCache.covers) {
+      const coverObject = sceneRegistry.nodes.get(cover.nodeId as AnyNodeId)
+      if (!coverObject) continue
+      const coverObjects = coverObjectsByLevelId.get(cover.levelId)
+      if (coverObjects) coverObjects.push(coverObject)
+      else coverObjectsByLevelId.set(cover.levelId, [coverObject])
+    }
     for (const stack of floorStacksCache.stacks) {
       if (isLandrushIslandFloorStackNearPoint(stack, robotPoint)) {
         preparationScopeIds.add(stack.scopeId)
@@ -10463,6 +10473,7 @@ function LandrushIslandRobotLevelSelectionTracker({
           const levelObject = sceneRegistry.nodes.get(floorLevelId as AnyNodeId)
           if (!levelObject) continue
           floorFadePresentation.ensureLevel({
+            excludedRoots: coverObjectsByLevelId.get(floorLevelId),
             forceVisible: true,
             levelId: floorLevelId,
             root: levelObject,
@@ -10565,6 +10576,7 @@ function LandrushIslandRobotLevelSelectionTracker({
           ? requestedTargetOpacity
           : dampedOpacity
       const { appliedOpacity } = floorFadePresentation.applyLevelOpacity({
+        effectiveOpacity: desiredOpacity * (levelOpacitiesRef.current.get(cover.levelId) ?? 1),
         levelId: cover.nodeId,
         opacity: desiredOpacity,
         root: coverObject,
@@ -11537,9 +11549,6 @@ function LandrushIslandRobotScreenRevealClipper({
   )
   const revealOwnerObservationGenerationRef = useRef(0)
   const liveRevealOwnerIdsRef = useRef(new Set<string>())
-  const floorPresentationOwnershipRef = useRef(
-    resolveLandrushBuildingFloorPresentationOwnership([], []),
-  )
   const revealBoundsCacheRef = useRef(new Map<string, LandrushIslandRobotRevealBoundsCacheEntry>())
   const presentedRevealMeshesRef = useRef(new Set<Mesh>())
   const revealMeshCollectionBufferRef = useRef(new Set<Mesh>())
@@ -11797,13 +11806,6 @@ function LandrushIslandRobotScreenRevealClipper({
     if (nodesChanged || sceneRegistryChanged) {
       revealBoundsCacheRef.current.clear()
     }
-    if (nodesChanged) {
-      const floorStacks = resolveLandrushBuildingFloorStacks(nodes)
-      floorPresentationOwnershipRef.current = resolveLandrushBuildingFloorPresentationOwnership(
-        floorStacks,
-        resolveLandrushBuildingFloorCovers(nodes, floorStacks),
-      )
-    }
     const registeredNodeRoots = registeredNodeRootsRef.current
     const refreshAge = clock.elapsedTime - lastRefreshAtRef.current
     const projectionChanged = landrushIslandRevealMatrixChanged(
@@ -11863,19 +11865,15 @@ function LandrushIslandRobotScreenRevealClipper({
       lastRevealSceneRegistryRevisionRef.current = sceneRegistryRevision
       registeredNodeRoots.clear()
       for (const object of sceneRegistry.nodes.values()) registeredNodeRoots.add(object)
-      occludersRef.current = collectLandrushIslandRobotRevealOccluders(
-        scene,
-        {
-          cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
-          cameraY: cameraPositionRef.current.y,
-          robotLevelBaseY,
-          robotPoint,
-          robotY: robotVisualY,
-          stairTransitionTopY,
-          structureGroundY,
-        },
-        floorPresentationOwnershipRef.current,
-      )
+      occludersRef.current = collectLandrushIslandRobotRevealOccluders(scene, {
+        cameraPoint: { x: cameraPositionRef.current.x, z: cameraPositionRef.current.z },
+        cameraY: cameraPositionRef.current.y,
+        robotLevelBaseY,
+        robotPoint,
+        robotY: robotVisualY,
+        stairTransitionTopY,
+        structureGroundY,
+      })
       for (const owner of occludersRef.current) {
         revealOwnerRootsRef.current.set(owner.ownerId, owner.object)
       }
@@ -11937,12 +11935,16 @@ function LandrushIslandRobotScreenRevealClipper({
       }
       const ownerRoot = revealOwnerRootsRef.current.get(ownerId)
       if (!ownerRoot) continue
+      const ownerNode = ownerId.startsWith('node:')
+        ? nodes[ownerId.slice('node:'.length) as AnyNodeId]
+        : null
       appendLandrushRevealOwnedMeshes(
         ownerRoot,
         registeredNodeRoots,
         revealMeshes,
         state.amount,
         applyLandrushIslandRobotRevealMeshAmount,
+        ownerNode?.type === 'roof',
       )
     }
     const previousRevealMeshes = presentedRevealMeshesRef.current
@@ -12035,6 +12037,25 @@ function LandrushIslandRobotScreenRevealClipper({
         revealGrowthAmount: roundPerf(revealGrowthAmountRef.current),
         revealGrowthScale: roundPerf(revealGrowthScale),
         radiusRatio: roundPerf(revealOuterRadiusPx / revealRadiusPx),
+        roofOccluders: landrushIslandRuntimeProbeIsEnabled()
+          ? occludersRef.current.flatMap(({ ownerId }) => {
+              if (!ownerId.startsWith('node:')) return []
+              const nodeId = ownerId.slice('node:'.length) as AnyNodeId
+              const node = nodes[nodeId]
+              if (node?.type !== 'roof' && node?.type !== 'roof-segment') return []
+              const bounds = revealBoundsCacheRef.current.get(ownerId)?.bounds
+              const observation = revealOwnerObservationByIdRef.current.get(ownerId)
+              return [
+                {
+                  bounds: bounds ? [bounds.min.toArray(), bounds.max.toArray()] : null,
+                  enterIntersects: observation?.enterIntersects ?? null,
+                  exitIntersects: observation?.exitIntersects ?? null,
+                  ownerId,
+                  type: node.type,
+                },
+              ]
+            })
+          : [],
         robotNdc: [roundPerf(robotNdc.x), roundPerf(robotNdc.y), roundPerf(robotNdc.z)],
         projectedCenterScreen: [
           roundPerf(projectedCenterScreen.x),
@@ -12145,7 +12166,6 @@ function updateLandrushIslandRobotRevealClippingPlanes({
 function collectLandrushIslandRobotRevealOccluders(
   scene: Object3D,
   context: LandrushIslandRobotRevealOccluderContext,
-  floorPresentationOwnership: ReturnType<typeof resolveLandrushBuildingFloorPresentationOwnership>,
 ) {
   const ownersById = new Map<string, LandrushIslandRobotRevealOccluder>()
   const semanticRoots = new Set<Object3D>()
@@ -12158,14 +12178,6 @@ function collectLandrushIslandRobotRevealOccluders(
       if (doorObject) excludedRoots.add(doorObject)
     }
   }
-  for (const levelId of floorPresentationOwnership.upperLevelIds) {
-    const levelObject = sceneRegistry.nodes.get(levelId as AnyNodeId)
-    if (levelObject) excludedRoots.add(levelObject)
-  }
-  for (const coverNodeId of floorPresentationOwnership.coverNodeIds) {
-    const coverObject = sceneRegistry.nodes.get(coverNodeId as AnyNodeId)
-    if (coverObject) excludedRoots.add(coverObject)
-  }
   for (const type of LANDRUSH_ISLAND_ROBOT_REVEAL_OCCLUDER_NODE_TYPES) {
     const nodeIds = registryByType[type]
     if (!nodeIds) continue
@@ -12177,6 +12189,7 @@ function collectLandrushIslandRobotRevealOccluders(
       if (shouldSkipLandrushIslandRobotRevealOccluder(typedNodeId, context)) continue
       semanticRoots.add(object)
       ownersById.set(`node:${nodeId}`, {
+        compositeRoot: type === 'roof',
         dynamicBounds: object.userData?.landrushRobotOccluderPrecise === true,
         object,
         ownerId: `node:${nodeId}`,
@@ -12193,6 +12206,7 @@ function collectLandrushIslandRobotRevealOccluders(
         ? `visual:${explicitOwnerId}`
         : `visual:${object.uuid}`
     ownersById.set(ownerId, {
+      compositeRoot: false,
       dynamicBounds: object.userData.landrushRobotOccluderPrecise === true,
       object,
       ownerId,
@@ -12219,15 +12233,20 @@ function refreshLandrushIslandRobotRevealOwnerBounds({
     if (
       cached &&
       !owner.dynamicBounds &&
+      (!owner.compositeRoot || !landrushIslandRevealBoundsCollapsed(cached.bounds)) &&
       cached.object === owner.object &&
       !landrushIslandRevealMatrixChanged(cached.matrixWorld, owner.object.matrixWorld)
     ) {
       bounds = cached.bounds
     } else {
-      bounds = collectLandrushIslandRobotRevealOwnerBounds(
+      bounds = setLandrushRevealOwnedMeshesBounds(
         owner.object,
         registeredNodeRoots,
         cached?.bounds ?? new Box3(),
+        {
+          includeNestedRegisteredRoots: owner.compositeRoot,
+          precise: owner.compositeRoot,
+        },
       )
       boundsCache.set(owner.ownerId, {
         bounds,
@@ -12241,21 +12260,11 @@ function refreshLandrushIslandRobotRevealOwnerBounds({
   }
 }
 
-const landrushIslandRevealOwnerMeshBounds = new Box3()
-
-function collectLandrushIslandRobotRevealOwnerBounds(
-  ownerRoot: Object3D,
-  registeredNodeRoots: ReadonlySet<Object3D>,
-  target: Box3,
-) {
-  target.makeEmpty()
-  ownerRoot.traverse((child) => {
-    const mesh = child as Mesh
-    if (!mesh.isMesh) return
-    if (!isLandrushRevealObjectOwnedByRoot(child, ownerRoot, registeredNodeRoots)) return
-    target.union(landrushIslandRevealOwnerMeshBounds.setFromObject(mesh))
-  })
-  return target
+function landrushIslandRevealBoundsCollapsed(bounds: Box3) {
+  if (bounds.isEmpty()) return true
+  return (
+    Math.abs(bounds.max.x - bounds.min.x) <= 0.001 || Math.abs(bounds.max.z - bounds.min.z) <= 0.001
+  )
 }
 
 function landrushIslandRevealMatrixChanged(first: Matrix4, second: Matrix4) {
@@ -14890,24 +14899,6 @@ function LocalLandrushIslandRobot({
           <button
             data-testid="landrush-navigation-proof-trigger"
             onClick={() => startNavigationProofTarget(new URLSearchParams(window.location.search))}
-            onFocus={() => {
-              const searchParams = new URLSearchParams(window.location.search)
-              const startX = Number(searchParams.get('navProofStartX'))
-              const startY = Number(searchParams.get('navProofStartY'))
-              const startZ = Number(searchParams.get('navProofStartZ'))
-              if (Number.isFinite(startX) && Number.isFinite(startZ)) {
-                setupNavigationTestStart({
-                  label: 'nav-proof-focus-start',
-                  start: {
-                    x: startX,
-                    y: Number.isFinite(startY) ? startY : undefined,
-                    z: startZ,
-                  },
-                })
-              }
-              navigationProofAutoStartedRef.current = true
-              startNavigationProofTarget(searchParams)
-            }}
             style={{
               border: 0,
               bottom: 0,

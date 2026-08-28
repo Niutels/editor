@@ -1,9 +1,10 @@
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three'
+import { Box3, BoxGeometry, Group, Mesh, MeshBasicMaterial, Vector3 } from 'three'
 import { describe, expect, test } from 'vitest'
 import {
   appendLandrushRevealOwnedMeshes,
   isLandrushRevealObjectOwnedByRoot,
   isLandrushRevealObjectWithinRoots,
+  setLandrushRevealOwnedMeshesBounds,
 } from './robot-reveal-mesh-ownership'
 
 function createMesh() {
@@ -59,6 +60,62 @@ describe('robot reveal mesh ownership', () => {
     expect(isLandrushRevealObjectOwnedByRoot(wallMesh, wallRoot, registeredNodeRoots)).toBe(true)
     expect(isLandrushRevealObjectOwnedByRoot(gateMesh, wallRoot, registeredNodeRoots)).toBe(false)
     expect(isLandrushRevealObjectOwnedByRoot(gateMesh, gateRoot, registeredNodeRoots)).toBe(true)
+  })
+
+  test('uses precise vertex bounds for a composite mesh with a collapsed fast bounding box', () => {
+    const roofRoot = new Group()
+    roofRoot.position.set(-24, 6, -11)
+    const roofGeometry = new BoxGeometry(10, 4, 8)
+    roofGeometry.boundingBox = new Box3(new Vector3(), new Vector3())
+    const roofMesh = new Mesh(roofGeometry, new MeshBasicMaterial())
+    roofRoot.add(roofMesh)
+    roofRoot.updateWorldMatrix(true, true)
+    const registeredNodeRoots = new Set([roofRoot])
+
+    const fastBounds = setLandrushRevealOwnedMeshesBounds(roofRoot, registeredNodeRoots, new Box3())
+    const preciseBounds = setLandrushRevealOwnedMeshesBounds(
+      roofRoot,
+      registeredNodeRoots,
+      new Box3(),
+      { precise: true },
+    )
+
+    expect(fastBounds.min.toArray()).toEqual([-24, 6, -11])
+    expect(fastBounds.max.toArray()).toEqual([-24, 6, -11])
+    expect(preciseBounds.min.toArray()).toEqual([-29, 4, -15])
+    expect(preciseBounds.max.toArray()).toEqual([-19, 8, -7])
+  })
+
+  test('lets a composite roof own geometry below its registered segment root', () => {
+    const roofRoot = new Group()
+    const segmentRoot = new Group()
+    const roofMesh = createMesh()
+    roofRoot.add(segmentRoot)
+    segmentRoot.add(roofMesh)
+    const registeredNodeRoots = new Set([roofRoot, segmentRoot])
+    const regularMeshes = new Set<Mesh>()
+    const compositeMeshes = new Set<Mesh>()
+
+    appendLandrushRevealOwnedMeshes(roofRoot, registeredNodeRoots, regularMeshes, 1, () => {})
+    appendLandrushRevealOwnedMeshes(
+      roofRoot,
+      registeredNodeRoots,
+      compositeMeshes,
+      1,
+      () => {},
+      true,
+    )
+    const compositeBounds = setLandrushRevealOwnedMeshesBounds(
+      roofRoot,
+      registeredNodeRoots,
+      new Box3(),
+      { includeNestedRegisteredRoots: true, precise: true },
+    )
+
+    expect(regularMeshes).toEqual(new Set())
+    expect(compositeMeshes).toEqual(new Set([roofMesh]))
+    expect(compositeBounds.min.toArray()).toEqual([-0.5, -0.5, -0.5])
+    expect(compositeBounds.max.toArray()).toEqual([0.5, 0.5, 0.5])
   })
 
   test('recognizes meshes inside a transient placement root', () => {

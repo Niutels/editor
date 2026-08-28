@@ -40,7 +40,7 @@ export function resolveLandrushIslandLoadingStatus(
   if (hasPendingTask(tasks, FINAL_PRESENTATION_TASK_IDS) || tasks.some((task) => !task.ready)) {
     return { rank: 5, text: zombieEscape ? 'Watching the perimeter' : 'Settling the horizon' }
   }
-  return { rank: 6, text: zombieEscape ? 'Almost ready' : 'Ready to explore' }
+  return { rank: 6, text: zombieEscape ? 'Hiding the goblins — almost ready' : 'Ready to explore' }
 }
 
 function hasPendingTask(

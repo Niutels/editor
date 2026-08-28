@@ -16,7 +16,6 @@ import {
   resolveLandrushBuildingFloorCovers,
   resolveLandrushBuildingFloorInteriorRegions,
   resolveLandrushBuildingFloorOpacities,
-  resolveLandrushBuildingFloorPresentationOwnership,
   resolveLandrushBuildingFloorStacks,
   resolveLandrushBuildingFloorVisibility,
 } from './landrush-building-floor-visibility'
@@ -452,7 +451,6 @@ describe('Landrush building floor visibility', () => {
       stacks,
     })
     const activeCoverNodeIds = resolveLandrushBuildingActiveFloorCoverNodeIds(covers, context)
-    const presentationOwnership = resolveLandrushBuildingFloorPresentationOwnership(stacks, covers)
 
     expect(parcelStack?.floors.map(({ baseY }) => baseY)).toEqual([0, 3])
     expect(context?.levelNumber).toBe(1)
@@ -461,8 +459,6 @@ describe('Landrush building floor visibility', () => {
     expect(activeCoverNodeIds).not.toContain(upperLevel.id)
     expect(activeCoverNodeIds).not.toContain(parkedSuppressor.id)
     expect(resolveLandrushBuildingActiveFloorCoverNodeIds(covers, null)).toEqual([])
-    expect([...presentationOwnership.upperLevelIds]).toEqual([upperLevel.id])
-    expect([...presentationOwnership.coverNodeIds]).toEqual([upperCeiling.id, roof.id].sort())
   })
 })
 

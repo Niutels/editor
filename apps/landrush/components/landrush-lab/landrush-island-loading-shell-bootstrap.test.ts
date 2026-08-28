@@ -3,13 +3,16 @@ import { readFileSync } from 'node:fs'
 import {
   bootstrapLandrushIslandLoadingShellClient,
   createLandrushIslandLoadingShellPercentKeyframes,
+  createStreamedShellMotionSegment,
   LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
   LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL,
   LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY,
+  LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS,
   LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
   LANDRUSH_ISLAND_LOADING_SHELL_RUN_ATTRIBUTE,
-  LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND,
   type LandrushIslandLoadingBootRun,
+  resolveLandrushIslandLoadingShellVelocity,
+  STREAMED_SHELL_VELOCITY_PER_SECOND,
   startLandrushIslandLoadingShellMotion,
 } from './landrush-island-loading-shell-bootstrap'
 
@@ -183,7 +186,7 @@ describe('Landrush island loading shell bootstrap', () => {
 
   test('starts one shell-owned compositor trajectory from the rendered CSS scale', () => {
     const run = createBootRun()
-    const style = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const style = { animation: 'shell-progress 120s linear', transform: '' }
     let animateCalls = 0
     let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
     let options: KeyframeAnimationOptions | number | undefined
@@ -196,7 +199,7 @@ describe('Landrush island loading shell bootstrap', () => {
         nextFrames: Keyframe[] | PropertyIndexedKeyframes,
         nextOptions?: KeyframeAnimationOptions | number,
       ) => {
-        expect(style.animation).toBe('shell-progress 136.667s linear')
+        expect(style.animation).toBe('shell-progress 120s linear')
         animateCalls += 1
         frames = nextFrames
         options = nextOptions
@@ -206,7 +209,6 @@ describe('Landrush island loading shell bootstrap', () => {
     } as unknown as HTMLElement
     const environment = {
       getComputedStyle: () => ({ transform: 'matrix(0.24, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 640 },
     }
 
@@ -226,16 +228,262 @@ describe('Landrush island loading shell bootstrap', () => {
     expect(style.transform).toBe('scaleX(0.24)')
     expect(run.motion).toEqual({
       animation,
+      durationMs: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
       fill,
-      velocityPerSecond: LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND,
+      fromProgress: 0.24,
+      toProgress: 0.96,
+      velocityPerSecond: STREAMED_SHELL_VELOCITY_PER_SECOND,
     })
+  })
+
+  test.each([
+    [0.08, 120_000, 0.8],
+    [0.72, 44_000, 0.984],
+  ])('starts fill and percentage together from %f, including a shortened runway', (from, durationMs, to) => {
+    const run = createBootRun()
+    const fillStyle = { animation: 'shell-progress 120s linear', transform: '' }
+    const percentStyle = { animation: 'shell-percent 120s steps(72, end)', transform: '' }
+    const fillAnimation = { cancel() {}, startTime: null as CSSNumberish | null } as Animation
+    const percentAnimation = { cancel() {}, startTime: null as CSSNumberish | null } as Animation
+    let fillCalls = 0
+    let percentCalls = 0
+    let fillFrames: Keyframe[] | PropertyIndexedKeyframes | null = null
+    let percentFrames: Keyframe[] | PropertyIndexedKeyframes | null = null
+    let fillOptions: KeyframeAnimationOptions | number | undefined
+    let percentOptions: KeyframeAnimationOptions | number | undefined
+    const fill = {
+      animate: (
+        frames: Keyframe[] | PropertyIndexedKeyframes,
+        options?: KeyframeAnimationOptions | number,
+      ) => {
+        fillCalls += 1
+        fillFrames = frames
+        fillOptions = options
+        return fillAnimation
+      },
+      style: fillStyle,
+    } as unknown as HTMLElement
+    const percentReel = {
+      animate: (
+        frames: Keyframe[] | PropertyIndexedKeyframes,
+        options?: KeyframeAnimationOptions | number,
+      ) => {
+        expect(fillStyle.animation).toBe('shell-progress 120s linear')
+        expect(percentStyle.animation).toBe('shell-percent 120s steps(72, end)')
+        percentCalls += 1
+        percentFrames = frames
+        percentOptions = options
+        return percentAnimation
+      },
+      style: percentStyle,
+    } as unknown as HTMLElement
+    const environment = {
+      getComputedStyle: () => ({ transform: `matrix(${String(from)}, 0, 0, 1, 0, 0)` }),
+      timeline: { currentTime: 640.25 },
+    }
+
+    const motion = startLandrushIslandLoadingShellMotion(fill, run, environment, percentReel)!
+    const replay = startLandrushIslandLoadingShellMotion(fill, run, environment, percentReel)
+
+    expect(replay).toBe(motion)
+    expect(fillCalls).toBe(1)
+    expect(percentCalls).toBe(1)
+    expect(motion.durationMs).toBeCloseTo(durationMs, 9)
+    expect(motion.toProgress).toBeCloseTo(to, 12)
+    expect(fillOptions).toEqual({
+      duration: motion.durationMs,
+      easing: 'linear',
+      fill: 'forwards',
+    })
+    expect(percentOptions).toEqual(fillOptions)
+    expect(fillAnimation.startTime).toBe(640.25)
+    expect(percentAnimation.startTime).toBe(fillAnimation.startTime)
+    expect(fillFrames).toEqual([
+      { transform: `scaleX(${String(from)})` },
+      { transform: `scaleX(${String(motion.toProgress)})` },
+    ])
+    expect(percentFrames).toEqual(
+      createLandrushIslandLoadingShellPercentKeyframes(from, motion.toProgress),
+    )
+    expect(fillStyle.transform).toBe(`scaleX(${String(from)})`)
+    expect(percentStyle.transform).toBe(`translate3d(0, -${String(Math.floor(from * 100))}rem, 0)`)
+    expect(fillStyle.animation).toBe('none')
+    expect(percentStyle.animation).toBe('none')
+    expect(run.motion?.animation).toBe(fillAnimation)
+    expect(run.motion?.percentAnimation).toBe(percentAnimation)
+    expect(run.motion?.percentReel).toBe(percentReel)
+  })
+
+  test.each([
+    'creation',
+    'anchoring',
+  ] as const)('cancels the pair and preserves CSS when percentage %s fails', (failure) => {
+    const run = createBootRun()
+    const fillStyle = { animation: 'shell-progress 120s linear', transform: 'scaleX(0.08)' }
+    const percentStyle = {
+      animation: 'shell-percent 120s steps(72, end)',
+      transform: 'translate3d(0, -8rem, 0)',
+    }
+    let fillCancellations = 0
+    let percentCancellations = 0
+    const fillAnimation = {
+      cancel: () => {
+        fillCancellations += 1
+      },
+      startTime: null as CSSNumberish | null,
+    } as Animation
+    const percentAnimation = {
+      cancel: () => {
+        percentCancellations += 1
+      },
+      get startTime() {
+        return null
+      },
+      set startTime(_value: CSSNumberish | null) {
+        throw new Error('percentage timeline rejected start time')
+      },
+    } as Animation
+    const fill = {
+      animate: () => fillAnimation,
+      style: fillStyle,
+    } as unknown as HTMLElement
+    const percentReel = {
+      animate: () => {
+        if (failure === 'creation') throw new Error('percentage animation unavailable')
+        return percentAnimation
+      },
+      style: percentStyle,
+    } as unknown as HTMLElement
+
+    const motion = startLandrushIslandLoadingShellMotion(
+      fill,
+      run,
+      {
+        getComputedStyle: () => ({ transform: 'matrix(0.24, 0, 0, 1, 0, 0)' }),
+        timeline: { currentTime: 640.25 },
+      },
+      percentReel,
+    )
+
+    expect(motion).toBeNull()
+    expect(fillCancellations).toBe(1)
+    expect(percentCancellations).toBe(failure === 'anchoring' ? 1 : 0)
+    expect(fillStyle).toEqual({
+      animation: 'shell-progress 120s linear',
+      transform: 'scaleX(0.08)',
+    })
+    expect(percentStyle).toEqual({
+      animation: 'shell-percent 120s steps(72, end)',
+      transform: 'translate3d(0, -8rem, 0)',
+    })
+    expect(run.motion).toBeUndefined()
+  })
+
+  test('preserves the CSS velocity fallback when no retained shell motion exists', () => {
+    expect(resolveLandrushIslandLoadingShellVelocity()).toBe(STREAMED_SHELL_VELOCITY_PER_SECOND)
+    expect(resolveLandrushIslandLoadingShellVelocity(undefined)).toBe(
+      STREAMED_SHELL_VELOCITY_PER_SECOND,
+    )
+    expect(resolveLandrushIslandLoadingShellVelocity(null)).toBe(STREAMED_SHELL_VELOCITY_PER_SECOND)
+  })
+
+  test('inherits the exact linear shell velocity only during its active interval', () => {
+    for (const currentTime of [0, 640, 119_999.999]) {
+      const motion = createShellMotionForVelocity({ currentTime, playState: 'running' })
+      expect(resolveLandrushIslandLoadingShellVelocity(motion)).toBe(
+        STREAMED_SHELL_VELOCITY_PER_SECOND,
+      )
+    }
+  })
+
+  test('does not inject velocity after the 120-second forward-filled shell finishes', () => {
+    const finished = createShellMotionForVelocity({ currentTime: 120_000, playState: 'finished' })
+    expect(resolveLandrushIslandLoadingShellVelocity(finished)).toBe(0)
+    for (const currentTime of [120_000, 120_001]) {
+      expect(
+        resolveLandrushIslandLoadingShellVelocity(
+          createShellMotionForVelocity({ currentTime, playState: 'running' }),
+        ),
+      ).toBe(0)
+    }
+    expect(
+      resolveLandrushIslandLoadingShellVelocity(
+        createShellMotionForVelocity({ currentTime: 1_000, playState: 'running' }, 1_000),
+      ),
+    ).toBe(0)
+  })
+
+  test('inherits no motion from paused or cancelled animations', () => {
+    for (const animation of [
+      { currentTime: 640, playState: 'paused' },
+      { currentTime: null, playState: 'idle' },
+    ] satisfies Array<Pick<Animation, 'currentTime' | 'playState'>>) {
+      expect(
+        resolveLandrushIslandLoadingShellVelocity(createShellMotionForVelocity(animation)),
+      ).toBe(0)
+    }
+  })
+
+  test('does not treat unresolved or invalid animation time as an active zero-time sample', () => {
+    for (const currentTime of [null, Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(
+        resolveLandrushIslandLoadingShellVelocity(
+          createShellMotionForVelocity({ currentTime, playState: 'running' }),
+        ),
+      ).toBe(0)
+    }
+  })
+
+  test('rejects invalid retained leases and velocities without inventing a fallback slope', () => {
+    const active = createShellMotionForVelocity({ currentTime: 640, playState: 'running' })
+    for (const durationMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(resolveLandrushIslandLoadingShellVelocity({ ...active, durationMs })).toBe(0)
+    }
+    for (const velocityPerSecond of [0, -0.006, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(resolveLandrushIslandLoadingShellVelocity({ ...active, velocityPerSecond })).toBe(0)
+    }
   })
 
   test('cannot exhaust its initial compositor runway before crossing 50 percent', () => {
     expect(
-      LANDRUSH_ISLAND_LOADING_SHELL_VELOCITY_PER_SECOND *
+      STREAMED_SHELL_VELOCITY_PER_SECOND *
         (LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS / 1_000),
     ).toBeGreaterThan(0.5)
+  })
+
+  test('starts with a small forecast head start without increasing the bootstrap slope', () => {
+    expect(LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS).toBe(0.08)
+    expect(LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS).toBeLessThan(0.1)
+    const segment = createStreamedShellMotionSegment(
+      LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS,
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )!
+    expect(segment.fromProgress).toBe(0.08)
+    expect(segment.toProgress).toBeCloseTo(0.8, 12)
+    expect((segment.toProgress - segment.fromProgress) / (segment.durationMs / 1000)).toBeCloseTo(
+      STREAMED_SHELL_VELOCITY_PER_SECOND,
+      12,
+    )
+  })
+
+  test('keeps the exact shell slope while shortening the final positive runway', () => {
+    const full = createStreamedShellMotionSegment(
+      0,
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )
+    const renewed = createStreamedShellMotionSegment(
+      0.72,
+      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+    )
+
+    expect(full).toEqual({ durationMs: 120_000, fromProgress: 0, toProgress: 0.72 })
+    expect(renewed?.durationMs).toBeCloseTo(44_000, 9)
+    expect(renewed?.toProgress).toBeCloseTo(0.984, 12)
+    expect(
+      ((renewed?.toProgress ?? 0) - (renewed?.fromProgress ?? 0)) /
+        ((renewed?.durationMs ?? 1) / 1_000),
+    ).toBeCloseTo(STREAMED_SHELL_VELOCITY_PER_SECOND, 12)
+    expect(createStreamedShellMotionSegment(0.984, 120_000)).toBeNull()
   })
 
   test('gives a replacement shell in the same run its own compositor trajectory', () => {
@@ -247,11 +495,10 @@ describe('Landrush island loading shell bootstrap', () => {
           animateCalls += 1
           return { cancel: () => undefined, startTime: 100 } as Animation
         },
-        style: { animation: 'shell-progress 136.667s linear', transform: '' },
+        style: { animation: 'shell-progress 120s linear', transform: '' },
       }) as unknown as HTMLElement
     const environment = {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 100 },
     }
     const firstFill = createFill()
@@ -287,30 +534,31 @@ describe('Landrush island loading shell bootstrap', () => {
     ])
   })
 
-  test('leaves the CSS animation running for reduced motion or WAAPI failure', () => {
+  test('adopts the CSS animation under reduced motion and retains it on WAAPI failure', () => {
     const reducedRun = createBootRun()
-    const reducedStyle = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const reducedStyle = { animation: 'shell-progress 120s linear', transform: '' }
     let reducedAnimateCalls = 0
+    const reducedAnimation = { startTime: null as CSSNumberish | null } as Animation
     const reducedFill = {
       animate: () => {
         reducedAnimateCalls += 1
-        return { startTime: null } as Animation
+        return reducedAnimation
       },
       style: reducedStyle,
     } as unknown as HTMLElement
     const reduced = startLandrushIslandLoadingShellMotion(reducedFill, reducedRun, {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: true }),
       timeline: { currentTime: 100 },
     })
 
-    expect(reduced).toBeNull()
-    expect(reducedAnimateCalls).toBe(0)
-    expect(reducedStyle.animation).toBe('shell-progress 136.667s linear')
-    expect(reducedRun.motion).toBeUndefined()
+    expect(reduced).toBe(reducedRun.motion)
+    expect(reducedAnimateCalls).toBe(1)
+    expect(reducedAnimation.startTime).toBe(100)
+    expect(reducedStyle.animation).toBe('none')
+    expect(reduced?.velocityPerSecond).toBe(STREAMED_SHELL_VELOCITY_PER_SECOND)
 
     const failedRun = createBootRun()
-    const failedStyle = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const failedStyle = { animation: 'shell-progress 120s linear', transform: '' }
     const failedFill = {
       animate: () => {
         throw new Error('WAAPI unavailable')
@@ -319,19 +567,18 @@ describe('Landrush island loading shell bootstrap', () => {
     } as unknown as HTMLElement
     const failed = startLandrushIslandLoadingShellMotion(failedFill, failedRun, {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 100 },
     })
 
     expect(failed).toBeNull()
-    expect(failedStyle.animation).toBe('shell-progress 136.667s linear')
+    expect(failedStyle.animation).toBe('shell-progress 120s linear')
     expect(failedStyle.transform).toBe('')
     expect(failedRun.motion).toBeUndefined()
   })
 
   test('cancels an unanchorable WAAPI motion without disabling the CSS animation', () => {
     const run = createBootRun()
-    const style = { animation: 'shell-progress 136.667s linear', transform: '' }
+    const style = { animation: 'shell-progress 120s linear', transform: '' }
     let cancelled = false
     const animation = {
       cancel: () => {
@@ -351,15 +598,35 @@ describe('Landrush island loading shell bootstrap', () => {
 
     const motion = startLandrushIslandLoadingShellMotion(fill, run, {
       getComputedStyle: () => ({ transform: 'matrix(0.12, 0, 0, 1, 0, 0)' }),
-      matchMedia: () => ({ matches: false }),
       timeline: { currentTime: 100 },
     })
 
     expect(motion).toBeNull()
     expect(cancelled).toBe(true)
-    expect(style.animation).toBe('shell-progress 136.667s linear')
+    expect(style.animation).toBe('shell-progress 120s linear')
     expect(style.transform).toBe('')
     expect(run.motion).toBeUndefined()
+  })
+
+  test('preserves the original type and rounded amber bar while retaining the live percentage', () => {
+    const shellSource = readFileSync(
+      new URL('./landrush-island-loading-shell.tsx', import.meta.url),
+      'utf8',
+    )
+    const percentSource = readFileSync(
+      new URL('./landrush-island-loading-percent.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(shellSource).not.toContain('[font-family:Arial,sans-serif]')
+    expect(shellSource).toContain('font-medium text-sm tracking-[0.18em] uppercase')
+    expect(percentSource).toContain('text-right font-mono text-sm leading-4 tabular-nums')
+    expect(shellSource).toContain(
+      'h-3 overflow-hidden rounded-full border border-white/24 bg-slate-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.35)]',
+    )
+    expect(shellSource).toContain('h-full w-full rounded-full bg-amber-200 opacity-70')
+    expect(shellSource).toContain('<LandrushIslandLoadingPercent streamed />')
+    expect(percentSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE')
   })
 
   test('mounts the callback-ref bridge in every shell', () => {
@@ -371,8 +638,17 @@ describe('Landrush island loading shell bootstrap', () => {
       new URL('./landrush-island-loading-shell-client-bridge.tsx', import.meta.url),
       'utf8',
     )
+    const percentSource = readFileSync(
+      new URL('./landrush-island-loading-percent.tsx', import.meta.url),
+      'utf8',
+    )
 
     expect(shellSource).toContain('<LandrushIslandLoadingShellClientBridge />')
+    expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS * 100')
+    expect(shellSource).toContain('aria-valuenow={initialPercent}')
+    expect(percentSource).toContain(
+      'data-landrush-island-loading-shell-percent-value={String(initialPercent)}',
+    )
     expect(bridgeSource).toContain(
       'startLandrushIslandLoadingShellMotion(fill, run, undefined, percentReel)',
     )
@@ -388,6 +664,13 @@ function createBootRun(): LandrushIslandLoadingBootRun {
     startedAtMs: 0,
     version: LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
   }
+}
+
+function createShellMotionForVelocity(
+  animation: Pick<Animation, 'currentTime' | 'playState'>,
+  durationMs = LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+) {
+  return { animation, durationMs, velocityPerSecond: STREAMED_SHELL_VELOCITY_PER_SECOND }
 }
 
 function createShellTarget() {

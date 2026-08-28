@@ -2,6 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
+  createLandrushIslandLoadingProgressController,
+  LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+} from './landrush-island-loading-progress-controller'
+import {
   advanceLandrushGeneratedAssetMountGeneration,
   createLandrushInitialParcelAuthorityKey,
   createLandrushIslandLoadingHandoffGate,
@@ -13,6 +17,16 @@ import {
   shouldPersistLandrushIslandOfflineState,
   wasLandrushInitialParcelAuthorityMaterialized,
 } from './landrush-island-loading-readiness'
+import {
+  LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS,
+  LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+  STREAMED_SHELL_VELOCITY_PER_SECOND,
+} from './landrush-island-loading-shell-bootstrap'
+import {
+  createLandrushIslandLoadingCompletionGate,
+  LANDRUSH_ISLAND_LOADING_COMPLETION_DEADLINE_MS,
+  LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
+} from './landrush-island-loading-timeline-react'
 
 function createFrameScheduler() {
   let nextId = 1
@@ -360,6 +374,74 @@ describe('Landrush island paint readiness', () => {
     expect(handoffs).toEqual([])
   })
 
+  test.each([
+    0, 367,
+  ])('requires smooth completion and a later visible 100-percent frame after a %i-ms observation delay', (startDelayMs) => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.05 })
+    const gate = createLandrushIslandLoadingCompletionGate()
+    const frameGapMs = LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS
+    const completionTimeMs = startDelayMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS
+    const observeFrame = (frameTimeMs: number) =>
+      gate.observeFrame({
+        frameTimeMs,
+        ready: controller.readyToDismiss(),
+        renderedProgress: controller.getSnapshot().displayedProgress,
+        visible: true,
+      })
+
+    controller.complete(startDelayMs)
+    expect(observeFrame(0)).toBe(false)
+    controller.step(startDelayMs)
+    expect(controller.getSnapshot().displayedProgress).toBe(0.05)
+    expect(observeFrame(startDelayMs)).toBe(false)
+    controller.step(LANDRUSH_ISLAND_LOADING_RESPONSE_MS - frameGapMs)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(1)
+    expect(observeFrame(completionTimeMs - frameGapMs)).toBe(false)
+    controller.step(frameGapMs)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(observeFrame(completionTimeMs)).toBe(false)
+    expect(gate.hasPresentedCompletion()).toBe(false)
+    expect(observeFrame(completionTimeMs)).toBe(false)
+    controller.step(frameGapMs)
+    expect(observeFrame(completionTimeMs + frameGapMs)).toBe(true)
+    expect(gate.hasPresentedCompletion()).toBe(true)
+    expect(completionTimeMs + frameGapMs - startDelayMs).toBeLessThanOrEqual(
+      LANDRUSH_ISLAND_LOADING_COMPLETION_DEADLINE_MS,
+    )
+  })
+
+  test('withdrawn readiness revokes the visible completion gate until readiness returns', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.9 })
+    const gate = createLandrushIslandLoadingCompletionGate()
+    const observeFrame = (frameTimeMs: number) =>
+      gate.observeFrame({
+        frameTimeMs,
+        ready: controller.readyToDismiss(),
+        renderedProgress: controller.getSnapshot().displayedProgress,
+        visible: true,
+      })
+
+    controller.complete()
+    controller.step(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)).toBe(false)
+    controller.step(50)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 50)).toBe(true)
+    controller.cancelCompletion()
+    gate.reset()
+    expect(gate.hasPresentedCompletion()).toBe(false)
+    controller.step(50)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 100)).toBe(false)
+    controller.complete(150)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 100)).toBe(false)
+    controller.step(149)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 249)).toBe(false)
+    controller.step(1)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 250)).toBe(false)
+    controller.step(50)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 300)).toBe(true)
+  })
+
   test('wires the loader to a Landrush world frame and the presentation gate', () => {
     const clientPath = fileURLToPath(new URL('./landrush-island-client.tsx', import.meta.url))
     const clientSource = readFileSync(clientPath, 'utf8')
@@ -483,20 +565,62 @@ describe('Landrush island paint readiness', () => {
     expect(timelineSource).toContain('fadingOut: true')
     const runtimeHookSource = timelineSource.slice(
       timelineSource.indexOf('export function useLandrushIslandLoadingTimeline({'),
-      timelineSource.indexOf('export function createLandrushIslandLoadingProgressPresentation'),
+      timelineSource.indexOf('export function createLandrushIslandLoadingCompletionGate'),
     )
-    expect(runtimeHookSource).toMatch(/completionRequested = true\s+beginHandoffFade\(\)/)
-    expect(runtimeHookSource).not.toContain('readyToDismiss()')
+    expect(runtimeHookSource).toMatch(
+      /inheritedVelocityHoldMs:\s*resolveLandrushIslandLoadingObservationDelay\(\s*readNow\(\),\s*lastClockMs,?\s*\)/,
+    )
+    expect(runtimeHookSource).toMatch(
+      /const startDelayMs = resolveLandrushIslandLoadingObservationDelay\(\s*nowMs,\s*lastClockMs,?\s*\)/,
+    )
+    expect(runtimeHookSource).toMatch(
+      /completionRequested = true\s+controller\.complete\(startDelayMs\)/,
+    )
+    expect(runtimeHookSource).toMatch(
+      /controller\.setConfirmedProgress\(stage\.confirmedProgress,\s*\{\s*\.\.\.stage,\s*startDelayMs,?\s*\}\)/,
+    )
+    expect(runtimeHookSource).toContain('evidenceProgress: update.evidenceProgress')
+    expect(runtimeHookSource).not.toContain('forecastProgress:')
+    expect(runtimeHookSource).not.toMatch(/completionRequested = true\s+beginHandoffFade\(\)/)
+    expect(runtimeHookSource).toContain(
+      'const completionGate = createLandrushIslandLoadingCompletionGate()',
+    )
+    expect(runtimeHookSource).toContain('allReady && controller.readyToDismiss()')
+    expect(runtimeHookSource).toContain('completionGate.observeFrame({')
+    expect(runtimeHookSource).toContain("visible: document.visibilityState === 'visible'")
+    expect(runtimeHookSource).toMatch(
+      /renderedProgress:\s*completed && fill \? readLandrushIslandLoadingRenderedProgress\(fill\) : 0/,
+    )
+    expect(runtimeHookSource).toMatch(
+      /if \(completionPresented\) \{[\s\S]*?'data-landrush-island-loading-100-presented'[\s\S]*?beginHandoffFade\(\)/,
+    )
+    expect(runtimeHookSource).toContain('if (!allReady && completionRequested) resetCompletion()')
+    expect(runtimeHookSource).toContain('completionGate.reset()')
     expect(runtimeHookSource).not.toContain('scheduleCompositorRefresh')
     expect(runtimeHookSource).not.toContain('retargetLandrushIslandLoadingPreview')
     expect(runtimeHookSource).not.toContain('setKeyframes')
+    expect(runtimeHookSource).toContain('animateLandrushIslandLoadingPreview(fill, nextSegment)')
+    expect(runtimeHookSource).toContain('nextAnimation.startTime = lastClockMs')
+    expect(runtimeHookSource).toContain('const fadeDurationMs = reducedMotion ? 0')
+    expect(runtimeHookSource).not.toMatch(/if \(!?reducedMotion\)/)
+    expect(runtimeHookSource).not.toContain('reconcileDisplayedProgress(')
     const finishHandoffSource = timelineSource.slice(
-      timelineSource.indexOf('const finishHandoff = () => {'),
+      timelineSource.indexOf('const finishHandoff = (expectedAttempt: number) => {'),
       timelineSource.indexOf('const beginHandoffFade = () => {'),
     )
-    expect(
-      finishHandoffSource.indexOf("presentationOverlay.setAttribute('hidden', '')"),
-    ).toBeLessThan(finishHandoffSource.indexOf('progressController.snapToComplete()'))
+    expect(finishHandoffSource).toContain(
+      '!run.update(runGeneration, readTasks(), readNow()).allReady',
+    )
+    expect(finishHandoffSource).toContain('!controller.readyToDismiss()')
+    const presentedGuardOffset = finishHandoffSource.indexOf(
+      '!completionGate.hasPresentedCompletion()',
+    )
+    const completeFillOffset = finishHandoffSource.indexOf("fill.style.transform = 'scaleX(1)'")
+    const hideOffset = finishHandoffSource.indexOf("overlay.setAttribute('hidden', '')")
+    expect(presentedGuardOffset).toBeGreaterThanOrEqual(0)
+    expect(completeFillOffset).toBeGreaterThan(presentedGuardOffset)
+    expect(hideOffset).toBeGreaterThan(completeFillOffset)
+    expect(finishHandoffSource).not.toContain('snapToComplete()')
     expect(timelineSource).not.toContain('PerformanceObserver')
   })
 
@@ -518,10 +642,14 @@ describe('Landrush island paint readiness', () => {
       new URL('./landrush-island-deferred-client.tsx', import.meta.url),
     )
     const shellPath = fileURLToPath(new URL('./landrush-island-loading-shell.tsx', import.meta.url))
-    const globalsSource = readFileSync(globalsPath, 'utf8')
+    const globalsSource = readFileSync(globalsPath, 'utf8').replaceAll('\r\n', '\n')
     const shellSource = readFileSync(shellPath, 'utf8')
+    const percentSource = readFileSync(
+      new URL('./landrush-island-loading-percent.tsx', import.meta.url),
+      'utf8',
+    )
     const startupGateSource = readFileSync(startupGatePath, 'utf8')
-    const deferredClientSource = readFileSync(deferredClientPath, 'utf8')
+    const deferredClientSource = readFileSync(deferredClientPath, 'utf8').replaceAll('\r\n', '\n')
 
     const layoutSource = readFileSync(layoutPath, 'utf8')
     const pageSource = readFileSync(pagePath, 'utf8')
@@ -535,7 +663,7 @@ describe('Landrush island paint readiness', () => {
     expect(pageSource).not.toContain("from '@/components/landrush-lab/landrush-island-client'")
     expect(pageSource).not.toContain('<LandrushIslandLoadingBootScript />')
     expect(pageSource).not.toContain('<LandrushIslandLoadingShell />')
-    expect(deferredClientSource).toContain("lazy(() =>\n  import('./landrush-island-client')")
+    expect(deferredClientSource).toMatch(/lazy\(\(\) =>\s+import\('\.\/landrush-island-client'\)/)
     expect(deferredClientSource.indexOf('<LandrushIslandStartupPresentationGate>')).toBeLessThan(
       deferredClientSource.indexOf('<DeferredLandrushIslandClient'),
     )
@@ -550,21 +678,66 @@ describe('Landrush island paint readiness', () => {
     expect(shellSource).not.toContain('LandrushIslandLoadingBootScript')
     expect(shellSource).toContain('<LandrushIslandLoadingShellClientBridge />')
     expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_FILL_ATTRIBUTE')
-    expect(shellSource).toContain('data-landrush-island-loading-shell-percent')
-    expect(shellSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE')
-    expect(shellSource).not.toContain('data-landrush-island-loading-shell-percent-strip')
+    expect(shellSource).toContain(
+      'const initialPercent = LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS * 100',
+    )
+    expect(shellSource).toContain('aria-valuenow={initialPercent}')
+    expect(shellSource).toContain('<LandrushIslandLoadingPercent streamed />')
+    expect(shellSource).not.toMatch(/<span\b[^>]*>\s*\{initialPercent\}%\s*<\/span>/)
+    expect(percentSource).toContain('LandrushIslandLoadingPercent({ streamed = false }')
+    expect(percentSource).toContain(
+      'const initialPercent = streamed ? LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS * 100 : 0',
+    )
+    expect(percentSource).toContain(
+      'data-landrush-island-loading-shell-percent-value={String(initialPercent)}',
+    )
+    expect(percentSource).toContain('data-landrush-island-loading-shell-percent')
+    expect(percentSource).toContain('LANDRUSH_ISLAND_LOADING_SHELL_PERCENT_REEL_ATTRIBUTE')
+    expect(percentSource).toContain('Array.from({ length: 101 }, (_, percent) => percent)')
+    expect(percentSource).toContain('PERCENT_VALUES.map((percent) => (')
+    expect(percentSource).toContain('data-landrush-island-loading-percent-row={percent}')
+    expect(percentSource).toContain('className="h-4 shrink-0 leading-4"')
+    expect(percentSource).toContain(
+      "style={streamed ? undefined : { animation: 'none', transform: 'translate3d(0, 0, 0)' }}",
+    )
+    expect(percentSource).not.toContain('data-landrush-island-loading-shell-percent-strip')
     expect(globalsSource).not.toContain('body:has([data-landrush-island-loading-runtime-owned])')
-    expect(globalsSource).toContain('body:has([data-landrush-island-world-frame-ready])')
-    expect(globalsSource).toContain('background-color: transparent')
+    expect(globalsSource).not.toContain('body:has([data-landrush-island-world-frame-ready])')
+    expect(globalsSource).not.toContain('background-color: transparent')
     expect(globalsSource).toContain('@keyframes landrush-island-loading-shell-progress')
     expect(globalsSource).toContain(
-      'animation: landrush-island-loading-shell-progress 136.667s linear both',
+      'animation: landrush-island-loading-shell-progress 120s linear both',
     )
     expect(globalsSource).toContain(
       'animation-delay: var(--landrush-island-loading-shell-delay, 0ms)',
     )
     expect(globalsSource).toContain('@keyframes landrush-island-loading-shell-percent')
     expect(globalsSource).not.toContain('[data-landrush-island-loading-shell] {\n  display: none;')
+    const reducedMotionCss = globalsSource.slice(
+      globalsSource.indexOf('@media (prefers-reduced-motion: reduce)'),
+      globalsSource.indexOf('/* Loaders */'),
+    )
+    expect(reducedMotionCss).toContain(
+      '[data-landrush-island-loading-shell-fill] {\n    animation-duration: 120s !important;',
+    )
+    expect(reducedMotionCss).toContain(
+      '[data-landrush-island-loading-shell-percent-reel] {\n    animation-duration: 120s !important;',
+    )
+    expect(reducedMotionCss).not.toContain('animation: none')
+    expect(reducedMotionCss).not.toContain('scaleX(0.2)')
+    expect(reducedMotionCss).not.toContain('translate3d(0, -20rem, 0)')
+    const shellProgressKeyframes = globalsSource.slice(
+      globalsSource.indexOf('@keyframes landrush-island-loading-shell-progress'),
+      globalsSource.indexOf('@keyframes landrush-island-loading-shell-percent'),
+    )
+    expect(LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS).toBe(0.08)
+    expect(shellProgressKeyframes).toContain('transform: scaleX(0.08)')
+    expect(shellProgressKeyframes).toContain('transform: scaleX(0.8)')
+    expect(STREAMED_SHELL_VELOCITY_PER_SECOND).toBe(0.006)
+    expect(
+      (0.8 - LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS) /
+        (LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS / 1_000),
+    ).toBeCloseTo(STREAMED_SHELL_VELOCITY_PER_SECOND, 12)
   })
 
   test('reveals the blurred mounted island through a transparent runtime overlay', () => {
@@ -590,6 +763,11 @@ describe('Landrush island paint readiness', () => {
     ).toContain("setAttribute('data-landrush-island-world-frame-ready', '')")
     expect(runtimeOverlaySource).toContain('bg-transparent')
     expect(runtimeOverlaySource).not.toContain('bg-[#0f1720]')
+    expect(clientSource).toContain(
+      "import { LandrushIslandLoadingPercent } from './landrush-island-loading-percent'",
+    )
+    expect(runtimeOverlaySource).toContain('<LandrushIslandLoadingPercent />')
+    expect(runtimeOverlaySource).not.toMatch(/<span\b[^>]*>\s*\{percent\}%\s*<\/span>/)
   })
 
   test('keeps eager Zombie Escape weapon assets behind a local suspense boundary', () => {

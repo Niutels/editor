@@ -1,5 +1,10 @@
 import { clamp01 } from '@landrush/runtime'
 import type { AnyNode } from '@pascal-app/core'
+import {
+  readWallCutoutMaterialAssignment,
+  releaseWallCutoutMaterialPresentation,
+  retainWallCutoutMaterialPresentation,
+} from '@pascal-app/viewer'
 import type { Material, Mesh, Object3D } from 'three'
 import { LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY } from './landrush-floor-fade-opacity'
 import type {
@@ -50,6 +55,7 @@ type LandrushIslandFloorFadeMeshStage = {
   mesh: Mesh
   prepared: boolean
   removed: boolean
+  sourceAssignment: Material | Material[] | undefined
 }
 
 type LandrushIslandFloorFadeGeneration = {
@@ -74,7 +80,9 @@ type LandrushIslandFloorFadeRootState = {
   committedGeneratedMeshes: Map<Object3D, Set<Mesh>>
   committedMeshes: Set<Mesh>
   committedRevision: number
+  committedSourceAssignments: Map<Mesh, Material | Material[]>
   disposed: boolean
+  excludedRoots: Set<Object3D>
   forceVisible: boolean
   generation: LandrushIslandFloorFadeGeneration | null
   hasCommittedPresentation: boolean
@@ -86,7 +94,9 @@ type LandrushIslandFloorFadeRootState = {
   observedParents: Set<Object3D>
   onChildAdded: (event: LandrushIslandFloorFadeChildEvent) => void
   onChildRemoved: (event: LandrushIslandFloorFadeChildEvent) => void
+  presentationEffectiveOpacity: number
   presentationOpacity: number
+  pendingSourceAssignments: Map<Mesh, Material | Material[]>
   quarantines: Map<Object3D, LandrushIslandFloorFadeQuarantine>
   queuedGenerationId: number | null
   requestedRevision: number
@@ -96,6 +106,7 @@ type LandrushIslandFloorFadeRootState = {
 type LandrushIslandFloorFadeLevelState = {
   appliedOpacity: number
   canonical: LandrushIslandFloorFadeRootState
+  desiredEffectiveOpacity: number
   desiredOpacity: number
   fallback: LandrushIslandFloorFadeRootState | null
   lastSafe: LandrushIslandFloorFadeRootState | null
@@ -208,11 +219,13 @@ export class LandrushIslandFloorFadePresentationOwner<
   }
 
   ensureLevel({
+    excludedRoots = [],
     forceVisible = false,
     levelId,
     root,
     structuralToken,
   }: {
+    excludedRoots?: Iterable<Object3D>
     forceVisible?: boolean
     levelId: RootId
     root: Object3D
@@ -222,10 +235,16 @@ export class LandrushIslandFloorFadePresentationOwner<
     this.reclaimOneDetachedSuppressedLease()
     const level = this.levels.get(levelId)
     if (!level) {
-      const canonical = this.createRootState({ forceVisible, root, structuralToken })
+      const canonical = this.createRootState({
+        excludedRoots,
+        forceVisible,
+        root,
+        structuralToken,
+      })
       const nextLevel: LandrushIslandFloorFadeLevelState = {
         appliedOpacity: 1,
         canonical,
+        desiredEffectiveOpacity: 1,
         desiredOpacity: 1,
         fallback: null,
         lastSafe: null,
@@ -237,13 +256,9 @@ export class LandrushIslandFloorFadePresentationOwner<
 
     if (level.canonical.root === root) {
       level.canonical.forceVisible = forceVisible
+      this.setExcludedRoots(level.canonical, excludedRoots)
       this.noteStructuralToken(level.canonical, structuralToken)
-      if (
-        !level.canonical.generation &&
-        this.hasCommittedAssignmentMismatch(level.canonical)
-      ) {
-        this.requestGeneration(level.canonical)
-      }
+      this.captureCommittedSourceAssignments(level.canonical)
       this.settleReadyHandoffs()
       return
     }
@@ -252,8 +267,9 @@ export class LandrushIslandFloorFadePresentationOwner<
     const requested =
       level.fallback?.root === root
         ? level.fallback
-        : this.createRootState({ forceVisible, root, structuralToken })
+        : this.createRootState({ excludedRoots, forceVisible, root, structuralToken })
     requested.forceVisible = forceVisible
+    this.setExcludedRoots(requested, excludedRoots)
     this.noteStructuralToken(requested, structuralToken)
 
     const previousCanonical = level.canonical
@@ -267,15 +283,19 @@ export class LandrushIslandFloorFadePresentationOwner<
       this.retireRootState(stale, false)
     }
 
-    if (level.fallback) this.hideRoot(level.canonical, level.desiredOpacity)
+    if (level.fallback) {
+      this.hideRoot(level.canonical, level.desiredOpacity, level.desiredEffectiveOpacity)
+    }
     this.settleReadyHandoffs()
   }
 
   applyLevelOpacity({
     levelId,
     opacity,
+    effectiveOpacity = opacity,
     root,
   }: {
+    effectiveOpacity?: number
     levelId: RootId
     opacity: number
     root: Object3D
@@ -289,6 +309,7 @@ export class LandrushIslandFloorFadePresentationOwner<
       }
     }
 
+    level.desiredEffectiveOpacity = clamp01(effectiveOpacity)
     level.desiredOpacity = clamp01(opacity)
     this.settleReadyHandoffs()
     return {
@@ -465,10 +486,12 @@ export class LandrushIslandFloorFadePresentationOwner<
   }
 
   private createRootState({
+    excludedRoots,
     forceVisible,
     root,
     structuralToken,
   }: {
+    excludedRoots: Iterable<Object3D>
     forceVisible: boolean
     root: Object3D
     structuralToken: unknown
@@ -481,7 +504,11 @@ export class LandrushIslandFloorFadePresentationOwner<
     rootState.committedGeneratedMeshes = new Map()
     rootState.committedMeshes = new Set()
     rootState.committedRevision = 0
+    rootState.committedSourceAssignments = new Map()
     rootState.disposed = false
+    rootState.excludedRoots = new Set(
+      [...excludedRoots].filter((excludedRoot) => excludedRoot !== root),
+    )
     rootState.forceVisible = forceVisible
     rootState.generation = null
     rootState.hasCommittedPresentation = false
@@ -491,6 +518,8 @@ export class LandrushIslandFloorFadePresentationOwner<
     rootState.materialOwnerToken = this.materialPresentation.createFloorFadeOwnerToken()
     rootState.materialMode = null
     rootState.observedParents = new Set()
+    rootState.pendingSourceAssignments = new Map()
+    rootState.presentationEffectiveOpacity = 1
     rootState.presentationOpacity = 1
     rootState.quarantines = new Map()
     rootState.queuedGenerationId = null
@@ -503,6 +532,18 @@ export class LandrushIslandFloorFadePresentationOwner<
     this.rootStates.set(root, rootState)
     this.startGeneration(rootState)
     return rootState
+  }
+
+  private setExcludedRoots(
+    rootState: LandrushIslandFloorFadeRootState,
+    excludedRoots: Iterable<Object3D>,
+  ) {
+    const nextExcludedRoots = new Set(
+      [...excludedRoots].filter((excludedRoot) => excludedRoot !== rootState.root),
+    )
+    if (sameObjectSet(rootState.excludedRoots, nextExcludedRoots)) return
+    rootState.excludedRoots = nextExcludedRoots
+    this.requestGeneration(rootState)
   }
 
   private noteStructuralToken(
@@ -578,6 +619,13 @@ export class LandrushIslandFloorFadePresentationOwner<
         }
 
         const object = item.object
+        if (object !== rootState.root && rootState.excludedRoots.has(object)) {
+          generation.stack.pop()
+          return preparationStep({
+            maxPendingStackDepth: generation.stack.length,
+            objectsVisited: 1,
+          })
+        }
         if (!item.generatedRoot && object !== rootState.root && isGeneratedGeometryObject(object)) {
           item.generatedRoot = object
         }
@@ -589,20 +637,18 @@ export class LandrushIslandFloorFadePresentationOwner<
 
         const mesh = object as Mesh
         if (mesh.isMesh && mesh.material && !generation.stagesByMesh.has(mesh)) {
-          const committedAssignment = rootState.committedAssignments.get(mesh)
-          if (
-            committedAssignment &&
-            mesh.material !== committedAssignment &&
-            isFractionalOpacity(rootState.presentationOpacity)
-          ) {
-            this.quarantineSubtree(rootState, mesh, generation.revision)
-          }
+          const sourceOverride =
+            rootState.pendingSourceAssignments.get(mesh) ??
+            readWallCutoutMaterialAssignment(mesh) ??
+            undefined
+          rootState.pendingSourceAssignments.delete(mesh)
           const stage: LandrushIslandFloorFadeMeshStage = {
             generatedRoot: item.generatedRoot,
-            handle: this.materialPresentation.beginFloorFadePreparation(mesh),
+            handle: this.materialPresentation.beginFloorFadePreparation(mesh, sourceOverride),
             mesh,
             prepared: false,
             removed: false,
+            sourceAssignment: sourceOverride,
           }
           generation.stages.push(stage)
           generation.stagesByMesh.set(mesh, stage)
@@ -673,7 +719,7 @@ export class LandrushIslandFloorFadePresentationOwner<
       if (!stage || stage.removed) return emptyPreparationStep()
       const result = this.materialPresentation.commitFloorFadePreparation(stage.handle, {
         ownerToken: rootState.materialOwnerToken,
-        translucent: isFractionalOpacity(rootState.presentationOpacity),
+        translucent: isFractionalOpacity(rootState.presentationEffectiveOpacity),
       })
       if (result.status === 'stale') {
         this.restartStaleGeneration(rootState, generation)
@@ -681,8 +727,14 @@ export class LandrushIslandFloorFadePresentationOwner<
           materialsPrepared: result.materialDelta,
         })
       }
+      if (!rootState.committedMeshes.has(stage.mesh)) {
+        retainWallCutoutMaterialPresentation(stage.mesh)
+      }
       rootState.committedMeshes.add(stage.mesh)
       rootState.committedAssignments.set(stage.mesh, stage.mesh.material)
+      if (stage.sourceAssignment !== undefined) {
+        rootState.committedSourceAssignments.set(stage.mesh, stage.sourceAssignment)
+      }
       return preparationStep({
         materialsPrepared: result.materialDelta,
         meshesPrepared: 1,
@@ -694,9 +746,11 @@ export class LandrushIslandFloorFadePresentationOwner<
     if (!reconciliation.done) {
       const mesh = reconciliation.value
       if (!generation.nextMeshes.has(mesh)) {
+        releaseWallCutoutMaterialPresentation(mesh)
         this.materialPresentation.releasePreparedFloorFade(mesh, rootState.materialOwnerToken)
         rootState.committedMeshes.delete(mesh)
         rootState.committedAssignments.delete(mesh)
+        rootState.committedSourceAssignments.delete(mesh)
       }
       return emptyPreparationStep()
     }
@@ -751,7 +805,7 @@ export class LandrushIslandFloorFadePresentationOwner<
     rootState.generation = null
     rootState.queuedGenerationId = null
     rootState.hasCommittedPresentation = true
-    rootState.materialMode = isFractionalOpacity(rootState.presentationOpacity)
+    rootState.materialMode = isFractionalOpacity(rootState.presentationEffectiveOpacity)
       ? 'fractional'
       : 'opaque'
 
@@ -761,18 +815,62 @@ export class LandrushIslandFloorFadePresentationOwner<
   }
 
   private handleObservedChildAdded(rootState: LandrushIslandFloorFadeRootState, child: Object3D) {
-    if (rootState.disposed || !isDescendantOrSelf(child, rootState.root)) return
+    if (
+      rootState.disposed ||
+      !isDescendantOrSelf(child, rootState.root) ||
+      isWithinRoots(child, rootState.excludedRoots)
+    ) {
+      return
+    }
     const revision = rootState.requestedRevision + 1
     this.quarantineSubtree(rootState, child, revision)
     if (isObservedGeometryParent(child, rootState.root)) this.observeParent(rootState, child)
     this.requestGeneration(rootState)
   }
 
-  private hasCommittedAssignmentMismatch(rootState: LandrushIslandFloorFadeRootState) {
+  private captureCommittedSourceAssignments(rootState: LandrushIslandFloorFadeRootState) {
+    let changed = false
     for (const [mesh, assignment] of rootState.committedAssignments) {
-      if (mesh.material !== assignment) return true
+      const wallAssignment = readWallCutoutMaterialAssignment(mesh)
+      const committedSourceAssignment = rootState.committedSourceAssignments.get(mesh)
+      if (
+        wallAssignment &&
+        !sameFloorFadeMaterialAssignment(wallAssignment, committedSourceAssignment) &&
+        !sameFloorFadeMaterialAssignment(
+          wallAssignment,
+          rootState.pendingSourceAssignments.get(mesh),
+        )
+      ) {
+        rootState.pendingSourceAssignments.set(mesh, wallAssignment)
+        changed = true
+      }
+      const ownedAssignment = this.materialPresentation.readOwnedFloorFadeAssignment(
+        mesh,
+        rootState.materialOwnerToken,
+      )
+      // Reveal may have installed another valid combined variant since the floor's last commit.
+      if (ownedAssignment) rootState.committedAssignments.set(mesh, ownedAssignment)
+      if (mesh.material === (ownedAssignment ?? assignment)) continue
+      const sourceAssignment = mesh.material
+      if (
+        !sameFloorFadeMaterialAssignment(
+          sourceAssignment,
+          rootState.pendingSourceAssignments.get(mesh),
+        )
+      ) {
+        rootState.pendingSourceAssignments.set(mesh, sourceAssignment)
+        changed = true
+      }
+      if (ownedAssignment) {
+        mesh.material = ownedAssignment
+      } else {
+        // Preserve a real replacement when the old presentation binding no longer owns it.
+        rootState.committedAssignments.set(mesh, sourceAssignment)
+        this.quarantineSubtree(rootState, mesh, rootState.requestedRevision + 1)
+        changed = true
+      }
     }
-    return false
+    if (changed) this.requestGeneration(rootState)
   }
 
   private handleObservedChildRemoved(rootState: LandrushIslandFloorFadeRootState, child: Object3D) {
@@ -794,9 +892,14 @@ export class LandrushIslandFloorFadePresentationOwner<
     for (const mesh of generation?.generatedMeshes.get(child) ?? []) knownMeshes.add(mesh)
 
     for (const mesh of knownMeshes) {
+      if (rootState.committedMeshes.has(mesh)) {
+        releaseWallCutoutMaterialPresentation(mesh)
+      }
       this.materialPresentation.detachMeshBeforeDispose(mesh)
       rootState.committedMeshes.delete(mesh)
       rootState.committedAssignments.delete(mesh)
+      rootState.committedSourceAssignments.delete(mesh)
+      rootState.pendingSourceAssignments.delete(mesh)
       generation?.nextMeshes.delete(mesh)
       const stage = generation?.stagesByMesh.get(mesh)
       if (stage) stage.removed = true
@@ -931,9 +1034,10 @@ export class LandrushIslandFloorFadePresentationOwner<
     const previousFallbackVisible = level.fallback?.root.visible
 
     const opacity = level.desiredOpacity
+    const effectiveOpacity = level.desiredEffectiveOpacity
     if (opacity <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON) {
-      this.hideRoot(level.canonical, 0)
-      if (level.fallback) this.hideRoot(level.fallback, 0)
+      this.hideRoot(level.canonical, 0, effectiveOpacity)
+      if (level.fallback) this.hideRoot(level.fallback, 0, effectiveOpacity)
       level.appliedOpacity = 0
       return didLevelPresentationChange(
         level,
@@ -949,9 +1053,14 @@ export class LandrushIslandFloorFadePresentationOwner<
       this.isCanonicalReady(level) ||
       (level.lastSafe === level.canonical && level.canonical.hasCommittedPresentation)
     const opacityIsOpaque = opacity >= 1 - LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
+    const effectiveOpacityIsOpaque = effectiveOpacity >= 1 - LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
 
-    if (canonicalPresent && (opacityIsOpaque || canonicalReady)) {
-      this.presentCanonical(level, opacityIsOpaque ? 1 : opacity)
+    if (canonicalPresent && ((opacityIsOpaque && effectiveOpacityIsOpaque) || canonicalReady)) {
+      this.presentCanonical(
+        level,
+        opacityIsOpaque ? 1 : opacity,
+        effectiveOpacityIsOpaque ? 1 : effectiveOpacity,
+      )
       return didLevelPresentationChange(
         level,
         previousAppliedOpacity,
@@ -963,9 +1072,13 @@ export class LandrushIslandFloorFadePresentationOwner<
 
     const fallback = level.fallback
     if (fallback && this.isRootDestinationPresent(fallback)) {
-      if (opacityIsOpaque || fallback.hasCommittedPresentation) {
-        this.hideRoot(level.canonical, opacity)
-        this.showRoot(fallback, opacityIsOpaque ? 1 : opacity)
+      if ((opacityIsOpaque && effectiveOpacityIsOpaque) || fallback.hasCommittedPresentation) {
+        this.hideRoot(level.canonical, opacity, effectiveOpacity)
+        this.showRoot(
+          fallback,
+          opacityIsOpaque ? 1 : opacity,
+          effectiveOpacityIsOpaque ? 1 : effectiveOpacity,
+        )
         level.lastSafe = fallback
         level.appliedOpacity = opacityIsOpaque ? 1 : opacity
         return didLevelPresentationChange(
@@ -977,8 +1090,8 @@ export class LandrushIslandFloorFadePresentationOwner<
         )
       }
       if (fallback.presentationOpacity >= 1 - LANDRUSH_ISLAND_FLOOR_FADE_EPSILON) {
-        this.hideRoot(level.canonical, opacity)
-        this.showRoot(fallback, 1)
+        this.hideRoot(level.canonical, opacity, effectiveOpacity)
+        this.showRoot(fallback, 1, effectiveOpacityIsOpaque ? 1 : effectiveOpacity)
         level.lastSafe = fallback
         level.appliedOpacity = 1
         return didLevelPresentationChange(
@@ -992,17 +1105,17 @@ export class LandrushIslandFloorFadePresentationOwner<
     }
 
     if (canonicalPresent) {
-      this.showRoot(level.canonical, 1)
+      this.showRoot(level.canonical, 1, 1)
       if (level.fallback) {
-        this.hideRoot(level.fallback, opacity)
+        this.hideRoot(level.fallback, opacity, effectiveOpacity)
         this.retireRootState(level.fallback, false)
         level.fallback = null
       }
       level.lastSafe = level.canonical
       level.appliedOpacity = 1
     } else {
-      this.hideRoot(level.canonical, opacity)
-      if (fallback) this.hideRoot(fallback, opacity)
+      this.hideRoot(level.canonical, opacity, effectiveOpacity)
+      if (fallback) this.hideRoot(fallback, opacity, effectiveOpacity)
       level.appliedOpacity = 0
     }
 
@@ -1015,10 +1128,14 @@ export class LandrushIslandFloorFadePresentationOwner<
     )
   }
 
-  private presentCanonical(level: LandrushIslandFloorFadeLevelState, opacity: number) {
-    this.showRoot(level.canonical, opacity)
+  private presentCanonical(
+    level: LandrushIslandFloorFadeLevelState,
+    opacity: number,
+    effectiveOpacity: number,
+  ) {
+    this.showRoot(level.canonical, opacity, effectiveOpacity)
     if (level.fallback && level.fallback !== level.canonical) {
-      this.hideRoot(level.fallback, opacity)
+      this.hideRoot(level.fallback, opacity, effectiveOpacity)
       this.retireRootState(level.fallback, false)
     }
     level.fallback = null
@@ -1026,20 +1143,30 @@ export class LandrushIslandFloorFadePresentationOwner<
     level.appliedOpacity = opacity
   }
 
-  private showRoot(rootState: LandrushIslandFloorFadeRootState, opacity: number) {
+  private showRoot(
+    rootState: LandrushIslandFloorFadeRootState,
+    opacity: number,
+    effectiveOpacity: number,
+  ) {
     const clampedOpacity = clamp01(opacity)
+    rootState.presentationEffectiveOpacity = clamp01(effectiveOpacity)
     rootState.presentationOpacity = clampedOpacity
     rootState.root.userData[LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY] = clampedOpacity
 
     if (rootState.hasCommittedPresentation && clampedOpacity > LANDRUSH_ISLAND_FLOOR_FADE_EPSILON) {
-      this.applyPreparedMode(rootState, isFractionalOpacity(clampedOpacity))
+      this.applyPreparedMode(rootState, isFractionalOpacity(rootState.presentationEffectiveOpacity))
     }
     rootState.root.visible =
       this.isRootDestinationPresent(rootState) &&
       clampedOpacity > LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
   }
 
-  private hideRoot(rootState: LandrushIslandFloorFadeRootState, opacity: number) {
+  private hideRoot(
+    rootState: LandrushIslandFloorFadeRootState,
+    opacity: number,
+    effectiveOpacity = opacity,
+  ) {
+    rootState.presentationEffectiveOpacity = clamp01(effectiveOpacity)
     rootState.presentationOpacity = clamp01(opacity)
     rootState.root.userData[LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY] =
       rootState.presentationOpacity
@@ -1051,20 +1178,22 @@ export class LandrushIslandFloorFadePresentationOwner<
     if (rootState.materialMode === mode) return
 
     let complete = true
+    let needsPreparation = false
     for (const mesh of rootState.committedMeshes) {
       const status = this.materialPresentation.applyPreparedFloorFade(mesh, translucent)
-      if (status === 'applied') {
+      if (status !== 'stale') {
         rootState.committedAssignments.set(mesh, mesh.material)
+        needsPreparation ||= status === 'pending'
         continue
       }
       complete = false
+      needsPreparation = true
       this.quarantineSubtree(rootState, mesh, rootState.requestedRevision + 1)
     }
-    if (!complete) {
+    if (needsPreparation && (!complete || !rootState.generation)) {
       this.requestGeneration(rootState)
-      return
     }
-    rootState.materialMode = mode
+    if (complete) rootState.materialMode = mode
   }
 
   private selectSafeState(level: LandrushIslandFloorFadeLevelState) {
@@ -1115,6 +1244,7 @@ export class LandrushIslandFloorFadePresentationOwner<
       this.cancelQuarantine(quarantine)
     }
     for (const mesh of rootState.committedMeshes) {
+      releaseWallCutoutMaterialPresentation(mesh)
       this.materialPresentation.releasePreparedFloorFade(mesh, rootState.materialOwnerToken)
     }
     rootState.committedMeshes.clear()
@@ -1291,6 +1421,36 @@ function isDescendantOrSelf(object: Object3D, root: Object3D) {
   let current: Object3D | null = object
   while (current) {
     if (current === root) return true
+    current = current.parent
+  }
+  return false
+}
+
+function sameFloorFadeMaterialAssignment(
+  first: Material | Material[] | undefined,
+  second: Material | Material[] | undefined,
+) {
+  if (first === second) return true
+  return (
+    Array.isArray(first) &&
+    Array.isArray(second) &&
+    first.length === second.length &&
+    first.every((material, index) => material === second[index])
+  )
+}
+
+function sameObjectSet(first: ReadonlySet<Object3D>, second: ReadonlySet<Object3D>) {
+  if (first.size !== second.size) return false
+  for (const object of first) {
+    if (!second.has(object)) return false
+  }
+  return true
+}
+
+function isWithinRoots(object: Object3D, roots: ReadonlySet<Object3D>) {
+  let current: Object3D | null = object
+  while (current) {
+    if (roots.has(current)) return true
     current = current.parent
   }
   return false

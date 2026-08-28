@@ -3,7 +3,13 @@
 import { describe, expect, test } from 'bun:test'
 import { WallNode } from '@pascal-app/core'
 import { Mesh, MeshBasicMaterial, Vector3 } from 'three/webgpu'
-import { applyWallCutoutMaterial, getWallHideState } from './wall-cutout'
+import {
+  applyWallCutoutMaterial,
+  getWallHideState,
+  readWallCutoutMaterialAssignment,
+  releaseWallCutoutMaterialPresentation,
+  retainWallCutoutMaterialPresentation,
+} from './wall-cutout'
 
 const wall = (frontSide: string, backSide: string) =>
   WallNode.parse({ start: [0, 0], end: [4, 0], frontSide, backSide })
@@ -72,6 +78,7 @@ describe('applyWallCutoutMaterial', () => {
 
     expect(mesh.material).toBe(presentationMaterial)
     expect(ownership.key).toBe('visible:normal:1')
+    expect(readWallCutoutMaterialAssignment(mesh)).toBe(wallMaterial)
 
     presentationMaterial.dispose()
     wallMaterial.dispose()
@@ -88,12 +95,62 @@ describe('applyWallCutoutMaterial', () => {
     ownership = applyWallCutoutMaterial(ownership, mesh, [...wallMaterials], 'visible:normal:1')
     expect(mesh.material).toBe(presentationMaterial)
 
-    ownership = applyWallCutoutMaterial(ownership, mesh, changedWallMaterial, 'visible:normal:2')
-    expect(mesh.material).toBe(changedWallMaterial)
+    ownership = applyWallCutoutMaterial(
+      ownership,
+      mesh,
+      changedWallMaterial,
+      'visible:normal:2',
+      false,
+    )
+    expect(mesh.material).toBe(presentationMaterial)
     expect(ownership.key).toBe('visible:normal:2')
+    expect(readWallCutoutMaterialAssignment(mesh)).toBe(changedWallMaterial)
 
     for (const material of [...wallMaterials, presentationMaterial, changedWallMaterial]) {
       material.dispose()
     }
+  })
+
+  test('applies a semantic change while the wall still owns the mesh assignment', () => {
+    const mesh = new Mesh()
+    const first = new MeshBasicMaterial()
+    const second = new MeshBasicMaterial()
+
+    let ownership = applyWallCutoutMaterial(undefined, mesh, first, 'visible:normal:1')
+    ownership = applyWallCutoutMaterial(ownership, mesh, second, 'invisible:normal:1')
+
+    expect(mesh.material).toBe(second)
+    expect(ownership.key).toBe('invisible:normal:1')
+    expect(readWallCutoutMaterialAssignment(mesh)).toBe(second)
+
+    first.dispose()
+    second.dispose()
+  })
+
+  test('publishes semantic changes without assigning while presentation leases are retained', () => {
+    const mesh = new Mesh()
+    const first = new MeshBasicMaterial()
+    const second = new MeshBasicMaterial()
+    const third = new MeshBasicMaterial()
+
+    let ownership = applyWallCutoutMaterial(undefined, mesh, first, 'visible:normal:1')
+    retainWallCutoutMaterialPresentation(mesh)
+    retainWallCutoutMaterialPresentation(mesh)
+    ownership = applyWallCutoutMaterial(ownership, mesh, second, 'invisible:normal:1')
+    expect(mesh.material).toBe(first)
+    expect(readWallCutoutMaterialAssignment(mesh)).toBe(second)
+
+    releaseWallCutoutMaterialPresentation(mesh)
+    ownership = applyWallCutoutMaterial(ownership, mesh, third, 'visible:normal:2')
+    expect(mesh.material).toBe(first)
+    expect(readWallCutoutMaterialAssignment(mesh)).toBe(third)
+
+    releaseWallCutoutMaterialPresentation(mesh)
+    applyWallCutoutMaterial(ownership, mesh, second, 'invisible:normal:2')
+    expect(mesh.material).toBe(second)
+
+    first.dispose()
+    second.dispose()
+    third.dispose()
   })
 })

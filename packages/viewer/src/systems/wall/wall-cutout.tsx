@@ -25,6 +25,42 @@ import {
 const tmpVec = new Vector3()
 const u = new Vector3()
 const v = new Vector3()
+const wallCutoutMaterialAssignmentKey = Symbol.for(
+  '@pascal-app/viewer/wall-cutout-material-assignment',
+)
+const wallCutoutMaterialPresentationReferencesKey = Symbol.for(
+  '@pascal-app/viewer/wall-cutout-material-presentation-references',
+)
+
+function wallCutoutMeshState(mesh: Mesh) {
+  return mesh as Mesh & Record<symbol, unknown>
+}
+
+export function readWallCutoutMaterialAssignment(mesh: Mesh) {
+  return (
+    (wallCutoutMeshState(mesh)[wallCutoutMaterialAssignmentKey] as
+      | Material
+      | Material[]
+      | undefined) ?? null
+  )
+}
+
+export function retainWallCutoutMaterialPresentation(mesh: Mesh) {
+  const state = wallCutoutMeshState(mesh)
+  const references = state[wallCutoutMaterialPresentationReferencesKey]
+  state[wallCutoutMaterialPresentationReferencesKey] =
+    (typeof references === 'number' ? references : 0) + 1
+}
+
+export function releaseWallCutoutMaterialPresentation(mesh: Mesh) {
+  const state = wallCutoutMeshState(mesh)
+  const references = state[wallCutoutMaterialPresentationReferencesKey]
+  if (typeof references !== 'number' || references <= 1) {
+    delete state[wallCutoutMaterialPresentationReferencesKey]
+    return
+  }
+  state[wallCutoutMaterialPresentationReferencesKey] = references - 1
+}
 
 /**
  * Whether a wall should be hidden or see-through for the current camera and
@@ -102,9 +138,17 @@ export function applyWallCutoutMaterial(
   key: string,
   currentAssignmentIsWallOwned = true,
 ): WallCutoutMaterialOwnership {
+  const state = wallCutoutMeshState(mesh)
+  state[wallCutoutMaterialAssignmentKey] = assignment
   const ownsMesh = ownership?.mesh === mesh
   if (ownsMesh && ownership.key === key) return ownership
-  if (!ownsMesh && !currentAssignmentIsWallOwned) return { key, mesh }
+  const presentationReferences = state[wallCutoutMaterialPresentationReferencesKey]
+  if (
+    !currentAssignmentIsWallOwned ||
+    (typeof presentationReferences === 'number' && presentationReferences > 0)
+  ) {
+    return { key, mesh }
+  }
   mesh.material = assignment
   return { key, mesh }
 }

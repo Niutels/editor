@@ -155,46 +155,72 @@
 [data-landrush-island-loading-shell] {
   opacity: 1;
   transition:
-    background-color 500ms ease-out,
     opacity 360ms ease-out,
     visibility 0s linear 0s;
 }
 
-body:has([data-landrush-island-world-frame-ready])
-  [data-landrush-island-loading-shell] {
-  background-color: transparent;
-}
-
 [data-landrush-island-loading-shell-fill] {
-  animation: landrush-island-loading-shell-progress 136.667s linear both;
+  animation: landrush-island-loading-shell-progress 120s linear both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
-  transform: scaleX(0);
+  transform: scaleX(0.08);
   transform-origin: left center;
   will-change: transform;
 }
 
+[data-landrush-island-loading-shell-fill],
+[data-landrush-island-loading-activity-fill] {
+  position: relative;
+  overflow: hidden;
+}
+
+/* A settled percentage still needs visible activity and changing compositor pixels. */
+[data-landrush-island-loading-shell-fill]::after,
+[data-landrush-island-loading-activity-fill]::after {
+  content: "";
+  position: absolute;
+  inset: 0 -32px 0 0;
+  background: repeating-linear-gradient(
+    90deg,
+    #ffffff00 0px,
+    #ffffff66 16px,
+    #ffffff00 32px
+  );
+  animation: landrush-island-loading-activity 1600ms linear infinite;
+  pointer-events: none;
+  will-change: transform;
+}
+
+@keyframes landrush-island-loading-activity {
+  from {
+    transform: translate3d(-32px, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 [data-landrush-island-loading-shell-percent-reel] {
-  animation: landrush-island-loading-shell-percent 136.667s steps(82, end) both;
+  animation: landrush-island-loading-shell-percent 120s steps(72, end) both;
   animation-delay: var(--landrush-island-loading-shell-delay, 0ms);
-  transform: translate3d(0, 0, 0);
+  transform: translate3d(0, -8rem, 0);
   will-change: transform;
 }
 
 @keyframes landrush-island-loading-shell-progress {
   0% {
-    transform: scaleX(0);
+    transform: scaleX(0.08);
   }
   100% {
-    transform: scaleX(0.82);
+    transform: scaleX(0.8);
   }
 }
 
 @keyframes landrush-island-loading-shell-percent {
   0% {
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, -8rem, 0);
   }
   100% {
-    transform: translate3d(0, -82rem, 0);
+    transform: translate3d(0, -80rem, 0);
   }
 }
 
@@ -227,14 +253,17 @@ body:has([data-landrush-island-world-frame-ready])
     scroll-behavior: auto !important;
   }
   [data-landrush-island-loading-shell-fill] {
-    animation: none;
-    transform: scaleX(0.2);
-    will-change: auto;
+    animation-duration: 120s !important;
+    will-change: transform;
   }
   [data-landrush-island-loading-shell-percent-reel] {
-    animation: none;
-    transform: translate3d(0, -20rem, 0);
-    will-change: auto;
+    animation-duration: 120s !important;
+    will-change: transform;
+  }
+  [data-landrush-island-loading-shell-fill]::after,
+  [data-landrush-island-loading-activity-fill]::after {
+    animation-duration: 1600ms !important;
+    animation-iteration-count: infinite !important;
   }
 }
 

@@ -253,7 +253,13 @@ export {
   getOpeningCutoutBottomPadding,
   hasFlatOpeningCutoutBottom,
 } from './systems/wall/opening-cutout-geometry'
-export { getWallHideState, WallCutout } from './systems/wall/wall-cutout'
+export {
+  getWallHideState,
+  readWallCutoutMaterialAssignment,
+  releaseWallCutoutMaterialPresentation,
+  retainWallCutoutMaterialPresentation,
+  WallCutout,
+} from './systems/wall/wall-cutout'
 export { getVisibleWallMaterials } from './systems/wall/wall-materials'
 // Wall internals re-exported so `@pascal-app/nodes`' registry-driven wall
 // definition can compose them into `def.system` without duplicating the

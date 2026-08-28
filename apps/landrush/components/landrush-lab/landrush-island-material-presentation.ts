@@ -100,6 +100,7 @@ type LandrushIslandFloorFadePreparationState = {
   observedMaterial: Material | Material[]
   observedMaterials: Material[]
   opaque: LandrushIslandFloorFadePreparedAssignment
+  replacesInstalledBinding: boolean
   reveal: LandrushIslandRevealMaterialPresentation | null
   sourceMaterial: Material | Material[]
   sourceEpochs: number[]
@@ -243,12 +244,29 @@ export class LandrushIslandMaterialPresentationOwner {
     return token
   }
 
-  beginFloorFadePreparation(mesh: Mesh): LandrushIslandFloorFadePreparationHandle {
+  readOwnedFloorFadeAssignment(mesh: Mesh, ownerToken: LandrushIslandFloorFadeOwnerToken) {
+    if (!this.floorFadeOwnerTokens.has(ownerToken)) return null
+    const binding = this.bindings.get(mesh)
+    if (!binding?.floorOwnerTokens.has(ownerToken)) return null
+    return isMaterialAssignmentCurrent(binding.assignedMaterial, binding.assignedMaterials)
+      ? binding.assignedMaterial
+      : null
+  }
+
+  beginFloorFadePreparation(
+    mesh: Mesh,
+    sourceOverride?: Material | Material[],
+  ): LandrushIslandFloorFadePreparationHandle {
     const binding = this.bindings.get(mesh) ?? null
     if (binding) this.refreshBindingAncestors(binding)
     const observedMaterial = mesh.material
     const usesInstalledBinding = binding !== null && observedMaterial === binding.assignedMaterial
-    const sourceMaterial = usesInstalledBinding ? binding.originalMaterial : observedMaterial
+    const sourceMaterial =
+      sourceOverride ?? (usesInstalledBinding ? binding.originalMaterial : observedMaterial)
+    const replacesInstalledBinding =
+      usesInstalledBinding &&
+      sourceOverride !== undefined &&
+      sourceMaterial !== binding.originalMaterial
     const sources = readMaterialAssignment(sourceMaterial)
     const createPreparedAssignment = (): LandrushIslandFloorFadePreparedAssignment => ({
       assignment: sources.length === 0 ? sourceMaterial : null,
@@ -268,6 +286,7 @@ export class LandrushIslandMaterialPresentationOwner {
       observedMaterial,
       observedMaterials: readMaterialAssignment(observedMaterial),
       opaque: createPreparedAssignment(),
+      replacesInstalledBinding,
       reveal: binding?.reveal ?? null,
       sourceMaterial,
       sourceEpochs: sources.map((source) => this.readSourceCacheEpoch(source)),
@@ -424,7 +443,7 @@ export class LandrushIslandMaterialPresentationOwner {
     return { materialDelta: 0, status: 'committed' }
   }
 
-  applyPreparedFloorFade(mesh: Mesh, translucent: boolean): 'applied' | 'stale' {
+  applyPreparedFloorFade(mesh: Mesh, translucent: boolean): 'applied' | 'pending' | 'stale' {
     const binding = this.bindings.get(mesh)
     if (binding) this.refreshBindingAncestors(binding)
     if (
@@ -436,19 +455,42 @@ export class LandrushIslandMaterialPresentationOwner {
       return 'stale'
     }
     const preparation = binding.preparedFloorState
-    if (!this.isPreparedFloorStateCurrent(binding, preparation)) {
+    if (!this.isPreparedFloorSourceCurrent(binding, preparation)) {
       return 'stale'
     }
-    const assignment = translucent
-      ? preparation.fractional.assignment
-      : preparation.opaque.assignment
-    const expectedMaterials = translucent
+    let assignment = translucent ? preparation.fractional.assignment : preparation.opaque.assignment
+    let expectedMaterials = translucent
       ? preparation.fractional.expectedMaterials
       : preparation.opaque.expectedMaterials
     if (!assignment || !isMaterialAssignmentCurrent(assignment, expectedMaterials)) return 'stale'
+    let status: 'applied' | 'pending' = 'applied'
+    if (!sameRevealPresentationOrNull(preparation.reveal, binding.reveal)) {
+      const materials: Material[] = []
+      const keys: string[] = []
+      for (const source of preparation.sources) {
+        const variant = this.resolveVariantState(
+          { floor: true, floorTranslucent: translucent, reveal: binding.reveal },
+          source,
+        )
+        const material = variant ? this.cachedVariants.get(source)?.get(variant.key) : source
+        if (!material) {
+          status = 'pending'
+          break
+        }
+        keys.push(variant?.key ?? 'source')
+        materials.push(material)
+      }
+      if (status === 'applied') {
+        assignment = Array.isArray(binding.originalMaterial)
+          ? this.resolvePresentationArray(binding, keys.join('|'), materials)
+          : materials[0]!
+        expectedMaterials = [...materials]
+      }
+      // A cold reveal pair may lag, but its source-valid floor pair must keep fading, not vanish.
+    }
     assignBindingMaterial(binding, assignment, expectedMaterials)
     binding.floorTranslucent = translucent
-    return 'applied'
+    return status
   }
 
   updateFloorFade(mesh: Mesh, translucent: boolean) {
@@ -714,6 +756,9 @@ export class LandrushIslandMaterialPresentationOwner {
     }
 
     const binding = preparation.binding
+    if (preparation.replacesInstalledBinding) {
+      return Boolean(binding && isBindingAssignmentCurrent(binding))
+    }
     if (!binding || preparation.mesh.material !== binding.assignedMaterial) return false
     if (binding.originalMaterial !== preparation.sourceMaterial) return false
     if (preparation.mesh.material === preparation.observedMaterial) {
@@ -730,11 +775,20 @@ export class LandrushIslandMaterialPresentationOwner {
     preparation: LandrushIslandFloorFadePreparationState,
   ) {
     return (
+      this.isPreparedFloorSourceCurrent(binding, preparation) &&
+      sameRevealPresentationOrNull(preparation.reveal, binding.reveal)
+    )
+  }
+
+  private isPreparedFloorSourceCurrent(
+    binding: LandrushIslandPresentationBinding,
+    preparation: LandrushIslandFloorFadePreparationState,
+  ) {
+    return (
       preparation.sourceMaterial === binding.originalMaterial &&
       isMaterialAssignmentCurrent(binding.originalMaterial, preparation.sources) &&
       binding.slots.length === preparation.sources.length &&
       binding.slots.every((slot, index) => slot.source === preparation.sources[index]) &&
-      sameRevealPresentationOrNull(preparation.reveal, binding.reveal) &&
       this.arePreparationSourceEpochsCurrent(preparation)
     )
   }
