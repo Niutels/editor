@@ -64,6 +64,7 @@ export type LandrushPascalHostProps = {
   sceneReadyMaxWaitMs?: number
   sceneReadyPrerequisitesReady?: boolean
   sceneDrawDisabled?: boolean
+  sceneDrawDisabledKeepalive?: boolean
   sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
   rendererBackend?: RendererBackendPreference
   onRendererInitializationFailure?: (failure: ViewerRendererInitializationFailure) => void
@@ -87,6 +88,7 @@ export function LandrushPascalHost({
   sceneReadyMaxWaitMs,
   sceneReadyPrerequisitesReady = true,
   sceneDrawDisabled = false,
+  sceneDrawDisabledKeepalive = true,
   sceneDrawSubmissionRef,
   rendererBackend = 'auto',
   onRendererInitializationFailure,
@@ -178,6 +180,7 @@ export function LandrushPascalHost({
           sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}
           sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}
           sceneDrawDisabled={sceneDrawDisabled}
+          sceneDrawDisabledKeepalive={sceneDrawDisabledKeepalive}
           sceneDrawSubmissionRef={sceneDrawSubmissionRef}
           selectionManager={selectionManager}
           useBvh={false}

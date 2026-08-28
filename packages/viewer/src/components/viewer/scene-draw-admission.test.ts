@@ -58,6 +58,7 @@ describe('Viewer scene draw admission', () => {
     expect(emptyBranchStart).toBeGreaterThanOrEqual(0)
     expect(emptyBranchEnd).toBeGreaterThan(emptyBranchStart)
     expect(emptyBranch).not.toContain('executeViewerSceneDraw')
+    expect(emptyBranch).toContain('if (sceneDrawDisabledKeepalive)')
     expect(postProcessingSource).toMatch(
       /executeViewerSceneDraw\(\s*\(\) => \(renderer as any\)\.render\(scene, camera\),\s*sceneDrawSubmissionRef,\s*\)/,
     )

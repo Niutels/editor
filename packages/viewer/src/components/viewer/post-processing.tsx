@@ -354,6 +354,7 @@ const PostProcessingPasses = ({
   disablePostFx = false,
   presentationEffectRef,
   sceneDrawDisabled = false,
+  sceneDrawDisabledKeepalive = true,
   sceneDrawSubmissionRef,
 }: {
   hoverStyles?: HoverStyles
@@ -361,6 +362,7 @@ const PostProcessingPasses = ({
   disablePostFx?: boolean
   presentationEffectRef?: ViewerPresentationEffectRef
   sceneDrawDisabled?: boolean
+  sceneDrawDisabledKeepalive?: boolean
   sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
 }) => {
   const { gl: renderer, invalidate, scene, camera, size, viewport } = useThree()
@@ -951,19 +953,16 @@ const PostProcessingPasses = ({
       return
     }
 
-    // `?disable=draw`: nothing downstream wants pixels — render an EMPTY scene
-    // instead of the real one. This is the only render call (positive-priority
-    // useFrame subscribers already disable R3F's automatic render), so the real
-    // scene is never drawn: per-frame vertex/draw cost drops to a single 64×64
-    // clear, which is what makes headless bakes viable on SwiftShader (CPU).
-    // Rendering nothing at all is NOT an option — with zero submitted frames
-    // Chromium's no-damage scheduler throttles rAF to 1Hz (measured), stalling
-    // the useFrame systems the bake still needs.
+    // Draw-disabled hosts may retain a tiny empty-scene submission when their
+    // frame systems need GPU damage to keep Chromium's scheduler awake. Hosts
+    // with an independently animated compositor surface can omit that work.
     if (shouldRenderViewerEmptyScene(sceneDrawDisabled, PERF_DRAW_DISABLED)) {
-      try {
-        ;(renderer as any).render(emptyScene, camera)
-      } catch {
-        // A failed empty draw changes nothing — systems keep ticking.
+      if (sceneDrawDisabledKeepalive) {
+        try {
+          ;(renderer as any).render(emptyScene, camera)
+        } catch {
+          // A failed empty draw changes nothing — systems keep ticking.
+        }
       }
       return
     }

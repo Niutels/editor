@@ -558,6 +558,8 @@ export interface ViewerProps {
   renderPaused?: boolean
   /** Keep frame systems ticking while admitting only the viewer's empty scene to the renderer. */
   sceneDrawDisabled?: boolean
+  /** Submit empty keepalive frames while scene drawing is disabled. */
+  sceneDrawDisabledKeepalive?: boolean
   /** Tracks real-scene render attempts and outcomes without scheduling React work. */
   sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
   /** Prefer WebGPU automatically, or deterministically request Three's WebGL backend. */
@@ -583,6 +585,7 @@ type ViewerSceneRuntimeProps = {
   perf: boolean
   presentationEffectRef?: ViewerPresentationEffectRef
   sceneDrawDisabled: boolean
+  sceneDrawDisabledKeepalive: boolean
   sceneDrawSubmissionRef?: ViewerSceneDrawSubmissionRef
   selectionManager: NonNullable<ViewerProps['selectionManager']>
   useBvh: boolean
@@ -594,6 +597,7 @@ const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
   perf,
   presentationEffectRef,
   sceneDrawDisabled,
+  sceneDrawDisabledKeepalive,
   sceneDrawSubmissionRef,
   selectionManager,
   useBvh,
@@ -633,6 +637,7 @@ const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
         hoverStyles={hoverStyles}
         presentationEffectRef={presentationEffectRef}
         sceneDrawDisabled={sceneDrawDisabled}
+        sceneDrawDisabledKeepalive={sceneDrawDisabledKeepalive}
         sceneDrawSubmissionRef={sceneDrawSubmissionRef}
       />
       {selectionManager === 'default' && <SelectionManager />}
@@ -662,6 +667,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     presentationEffectRef,
     renderPaused = false,
     sceneDrawDisabled = false,
+    sceneDrawDisabledKeepalive = true,
     sceneDrawSubmissionRef,
     rendererBackend = 'auto',
     onRendererInitializationFailure,
@@ -869,6 +875,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
           perf={perf}
           presentationEffectRef={presentationEffectRef}
           sceneDrawDisabled={sceneDrawDisabled}
+          sceneDrawDisabledKeepalive={sceneDrawDisabledKeepalive}
           sceneDrawSubmissionRef={sceneDrawSubmissionRef}
           selectionManager={selectionManager}
           useBvh={useBvh}

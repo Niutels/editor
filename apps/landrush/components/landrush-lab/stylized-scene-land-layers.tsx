@@ -3,7 +3,7 @@
 import { getMaterialRendererBackend, renderScheduler } from '@landrush/runtime'
 import { useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useGLTF, useTexture } from '@react-three/drei'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useFrame, useLoader, useThree } from '@react-three/fiber'
 import {
   startTransition,
   useCallback,
@@ -30,6 +30,7 @@ import {
   Object3D,
   Quaternion,
   type Texture,
+  TextureLoader,
   Vector3,
   Vector4,
 } from 'three'
@@ -581,7 +582,7 @@ function StylizedSceneGrassLayer({
 }) {
   const shaderTransformsGrassInstances = getMaterialRendererBackend() !== 'webgl'
   const { scene } = useGLTF(STYLIZED_SCENE_PATHS.grassBlades)
-  const pathMask = useTexture(STYLIZED_SCENE_PATHS.pathMask) as Texture
+  const pathMask = useLoader(TextureLoader, STYLIZED_SCENE_PATHS.pathMask)
   const resolvedTuning = useMemo(
     () =>
       measureStylizedScene(profileMeasure, 'setup.stylized-grass.resolve-tuning', () =>

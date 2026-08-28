@@ -6480,12 +6480,16 @@ export function LandrushIslandClient({
     >
       <div
         aria-hidden={loadingPresentationActive}
-        className={[
-          'absolute inset-0 transition-[filter,transform,opacity] duration-500 ease-out',
-          loadingPresentationActive && !zombieEscapeEnabled
-            ? 'pointer-events-none scale-[1.01] blur-[7px]'
-            : 'scale-100 blur-0 brightness-100',
-        ].join(' ')}
+        className={
+          zombieEscapeEnabled
+            ? 'absolute inset-0'
+            : [
+                'absolute inset-0 transition-[filter,transform,opacity] duration-500 ease-out',
+                loadingPresentationActive
+                  ? 'pointer-events-none scale-[1.01] blur-[7px]'
+                  : 'scale-100 blur-0 brightness-100',
+              ].join(' ')
+        }
       >
         <LandrushIslandStartupReactProfiler
           enabled={editorRuntimeReactProfileEnabled}
@@ -6528,10 +6532,12 @@ export function LandrushIslandClient({
               onRendererInitializationFailure={
                 zombieEscapeEnabled ? handleZombieRendererInitializationFailure : undefined
               }
+              rendererBackend={zombieEscapeEnabled ? 'webgl' : undefined}
               sceneReadyKey={initialParcelAuthorityKey}
               sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}
               sceneReadyPrerequisitesReady={initialParcelMaterializationReady}
               sceneDrawDisabled={zombieEscapeEnabled && zombieStartupGates.sceneDrawDisabled}
+              sceneDrawDisabledKeepalive={!zombieEscapeEnabled}
               sceneDrawSubmissionRef={zombieEscapeEnabled ? sceneDrawSubmissionRef : undefined}
             >
               <LandrushIslandStartupReactProfiler

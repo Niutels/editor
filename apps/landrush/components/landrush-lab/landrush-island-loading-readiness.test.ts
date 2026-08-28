@@ -603,6 +603,7 @@ describe('Landrush island paint readiness', () => {
     const loadingBackdropSource = clientSource.slice(backdropStart, backdropEnd)
     const runtimeOverlaySource = clientSource.slice(overlayStart, overlayEnd)
 
+    expect(loadingBackdropSource).toContain("zombieEscapeEnabled\n            ? 'absolute inset-0'")
     expect(loadingBackdropSource).toContain('scale-[1.01] blur-[7px]')
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(
