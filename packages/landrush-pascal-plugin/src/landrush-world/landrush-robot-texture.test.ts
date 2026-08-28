@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   DataTexture,
+  DoubleSide,
   LinearFilter,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   Object3D,
   SRGBColorSpace,
@@ -100,6 +102,109 @@ describe('Landrush robot runtime texture', () => {
     ownedMaterial.map?.dispose()
     ownedMaterial.dispose()
     material.dispose()
+    source.dispose()
+  })
+
+  test('uses the standard PBR pipeline for the robot physical material during deferred loading', () => {
+    installOffscreenCanvas(Uint8ClampedArray.of(10, 20, 30, 255))
+    const source = new Texture({ height: 1, width: 1 })
+    const material = new MeshPhysicalMaterial({
+      color: 0xaabbcc,
+      emissive: 0xffffff,
+      emissiveMap: source,
+      map: source,
+      metalness: 1,
+      roughness: 0.41,
+      side: DoubleSide,
+    })
+    material.alphaTest = 0.25
+    material.specularColor.setRGB(2, 2, 2)
+    const mesh = new Mesh(undefined, material)
+    const root = new Object3D()
+    root.add(mesh)
+
+    const application = applyLandrushRobotRuntimeTexture(root, { deferred: true })
+    const ownedMaterial = mesh.material as MeshStandardMaterial
+
+    expect(ownedMaterial).toBeInstanceOf(MeshStandardMaterial)
+    expect((ownedMaterial as MeshPhysicalMaterial).isMeshPhysicalMaterial).not.toBe(true)
+    expect(ownedMaterial).not.toBe(material)
+    expect(ownedMaterial.defines).toEqual({ STANDARD: '' })
+    expect(ownedMaterial.defines).not.toBe(material.defines)
+    expect(application.ownedMaterials).toEqual([ownedMaterial])
+    expect(ownedMaterial.alphaTest).toBe(material.alphaTest)
+    expect(ownedMaterial.color.getHex()).toBe(material.color.getHex())
+    expect(ownedMaterial.emissive.getHex()).toBe(material.emissive.getHex())
+    expect(ownedMaterial.metalness).toBe(material.metalness)
+    expect(ownedMaterial.roughness).toBe(material.roughness)
+    expect(ownedMaterial.side).toBe(material.side)
+    expect(ownedMaterial.map).toBeInstanceOf(DataTexture)
+    expect(ownedMaterial.emissiveMap).toBe(ownedMaterial.map)
+    expect(material.map).toBe(source)
+    expect(material.emissiveMap).toBe(source)
+
+    ownedMaterial.map?.dispose()
+    ownedMaterial.dispose()
+    material.dispose()
+    source.dispose()
+  })
+
+  test('keeps physical materials whose specular response is not standard-equivalent', () => {
+    installOffscreenCanvas(Uint8ClampedArray.of(10, 20, 30, 255))
+    const source = new Texture({ height: 1, width: 1 })
+    const material = new MeshPhysicalMaterial({
+      clearcoat: 0.2,
+      emissiveMap: source,
+      map: source,
+      metalness: 0.5,
+    })
+    const mesh = new Mesh(undefined, material)
+    const root = new Object3D()
+    root.add(mesh)
+
+    const application = applyLandrushRobotRuntimeTexture(root, { deferred: true })
+    const ownedMaterial = mesh.material as MeshPhysicalMaterial
+
+    expect(ownedMaterial).toBeInstanceOf(MeshPhysicalMaterial)
+    expect(ownedMaterial).not.toBe(material)
+    expect(ownedMaterial.clearcoat).toBe(material.clearcoat)
+    expect(ownedMaterial.metalness).toBe(material.metalness)
+    expect(application.ownedMaterials).toEqual([ownedMaterial])
+    expect(ownedMaterial.map).toBeInstanceOf(DataTexture)
+    expect(ownedMaterial.emissiveMap).toBe(ownedMaterial.map)
+
+    ownedMaterial.map?.dispose()
+    ownedMaterial.dispose()
+    material.dispose()
+    source.dispose()
+  })
+
+  test('keeps a pure-metal physical material when a metalness map can make pixels dielectric', () => {
+    installOffscreenCanvas(Uint8ClampedArray.of(10, 20, 30, 255))
+    const source = new Texture({ height: 1, width: 1 })
+    const metalnessMap = new Texture()
+    const material = new MeshPhysicalMaterial({
+      emissiveMap: source,
+      map: source,
+      metalness: 1,
+      metalnessMap,
+    })
+    const mesh = new Mesh(undefined, material)
+    const root = new Object3D()
+    root.add(mesh)
+
+    const application = applyLandrushRobotRuntimeTexture(root, { deferred: true })
+    const ownedMaterial = mesh.material as MeshPhysicalMaterial
+
+    expect(ownedMaterial).toBeInstanceOf(MeshPhysicalMaterial)
+    expect(ownedMaterial).not.toBe(material)
+    expect(ownedMaterial.metalnessMap).toBe(metalnessMap)
+    expect(application.ownedMaterials).toEqual([ownedMaterial])
+
+    ownedMaterial.map?.dispose()
+    ownedMaterial.dispose()
+    material.dispose()
+    metalnessMap.dispose()
     source.dispose()
   })
 

@@ -2,6 +2,8 @@ import {
   DataTexture,
   LinearFilter,
   type Material,
+  type MeshPhysicalMaterial,
+  MeshStandardMaterial,
   type Object3D,
   RGBAFormat,
   type Texture,
@@ -122,7 +124,9 @@ export function applyLandrushRobotRuntimeTexture(
       if (runtime === textured.map) return candidate
 
       const target = (
-        deferred ? (deferredMaterials.get(textured) ?? textured.clone()) : textured
+        deferred
+          ? (deferredMaterials.get(textured) ?? createLandrushRobotDeferredMaterial(textured))
+          : textured
       ) as typeof textured
       if (deferred) deferredMaterials.set(textured, target)
       target.map = runtime
@@ -137,6 +141,28 @@ export function applyLandrushRobotRuntimeTexture(
     materialOwner.material = Array.isArray(material) ? nextMaterials : nextMaterials[0]
   })
   return { ownedMaterials: Array.from(ownedMaterials) }
+}
+
+function createLandrushRobotDeferredMaterial(source: Material) {
+  if (!isLandrushRobotStandardCompatiblePhysicalMaterial(source)) return source.clone()
+  return new MeshStandardMaterial().copy(source)
+}
+
+function isLandrushRobotStandardCompatiblePhysicalMaterial(
+  material: Material,
+): material is MeshPhysicalMaterial {
+  const physical = material as MeshPhysicalMaterial
+  return (
+    physical.isMeshPhysicalMaterial === true &&
+    physical.metalness === 1 &&
+    physical.metalnessMap === null &&
+    physical.anisotropy === 0 &&
+    physical.clearcoat === 0 &&
+    physical.dispersion === 0 &&
+    physical.iridescence === 0 &&
+    physical.sheen === 0 &&
+    physical.transmission === 0
+  )
 }
 
 function readLandrushRobotRuntimeImage(
