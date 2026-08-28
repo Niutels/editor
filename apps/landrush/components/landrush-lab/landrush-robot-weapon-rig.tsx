@@ -1,7 +1,7 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, type RefObject, Suspense, useMemo, useRef } from 'react'
+import { type MutableRefObject, memo, type RefObject, Suspense, useMemo, useRef } from 'react'
 import { Euler, type Group, MathUtils, type Object3D, Quaternion, Vector3 } from 'three'
 import {
   captureLandrushRobotWeaponRelativeHandQuaternion,
@@ -157,7 +157,7 @@ type LandrushRobotWeaponArmBinding = {
   weaponIndex: number
 }
 
-export function LandrushRobotWeaponRig({
+export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   active = true,
   combatStateRef,
   debug = false,
@@ -580,7 +580,7 @@ export function LandrushRobotWeaponRig({
       ) : null}
     </>
   )
-}
+})
 
 function FitMarker({ color, ref }: { color: string; ref: RefObject<Group | null> }) {
   return (

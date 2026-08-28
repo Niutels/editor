@@ -2,6 +2,7 @@
 
 import {
   type MutableRefObject,
+  memo,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -29,7 +30,7 @@ type LandrushZombieEscapeTouchJoysticksProps = {
 const TOUCH_CONTROL_CLUSTER_BOTTOM =
   'bottom-[max(2.375rem,calc(env(safe-area-inset-bottom)+1.25rem))]'
 
-export function LandrushZombieEscapeTouchJoysticks({
+export const LandrushZombieEscapeTouchJoysticks = memo(function LandrushZombieEscapeTouchJoysticks({
   inputRef,
   onInput,
   ownerDocument,
@@ -113,7 +114,7 @@ export function LandrushZombieEscapeTouchJoysticks({
       </div>
     </div>
   )
-}
+})
 
 export function shouldRequestLandrushZombieEscapeTouchJumpFromClick(eventDetail: number) {
   return eventDetail === 0

@@ -1,7 +1,7 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   DoubleSide,
   DynamicDrawUsage,
@@ -72,6 +72,13 @@ export function isZombieEscapeBloodPoolVisible(activeCount: number) {
   return Number.isFinite(activeCount) && activeCount > 0
 }
 
+export function shouldUpdateZombieEscapeBloodPresentation(
+  activeCount: number,
+  visibleCount: number,
+) {
+  return activeCount > 0 || visibleCount > 0
+}
+
 export function doesZombieEscapeBloodEventMatchVariant(
   eventVariantCode: number,
   presentationVariantCode: number,
@@ -108,7 +115,7 @@ export function transformZombieEscapeBloodWorldAttachmentToLocal(
   return true
 }
 
-export function ZombieEscapeBloodPresentation({
+export const ZombieEscapeBloodPresentation = memo(function ZombieEscapeBloodPresentation({
   events,
   getElapsedSeconds,
   filterEventsByVariant = false,
@@ -133,6 +140,7 @@ export function ZombieEscapeBloodPresentation({
   const dropletRef = useRef<InstancedMesh>(null)
   useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:blood', rootRef)
   const visible = useMemo(() => new Uint8Array(events.pool.capacity), [events])
+  const visibleEventCountRef = useRef(0)
   const previousElapsedRef = useRef(getElapsedSeconds())
   const profile = useMemo(() => getZombieEscapeBloodVariantProfile(variant), [variant])
   const priorities = useMemo(
@@ -163,6 +171,7 @@ export function ZombieEscapeBloodPresentation({
 
   useLayoutEffect(() => {
     previousElapsedRef.current = getElapsedSeconds()
+    visibleEventCountRef.current = 0
     if (rootRef.current) {
       rootRef.current.visible =
         !filterEventsByVariant && isZombieEscapeBloodPoolVisible(events.pool.activeCount)
@@ -187,6 +196,10 @@ export function ZombieEscapeBloodPresentation({
   useFrame(() => {
     if (!ownsLifecycle) return
     const elapsedSeconds = getElapsedSeconds()
+    if (!isZombieEscapeBloodPoolVisible(events.pool.activeCount)) {
+      previousElapsedRef.current = elapsedSeconds
+      return
+    }
     reconcileZombieEscapeBloodEventPool(events, elapsedSeconds, previousElapsedRef.current)
     previousElapsedRef.current = elapsedSeconds
   }, priorities.lifecycle)
@@ -194,6 +207,15 @@ export function ZombieEscapeBloodPresentation({
   useFrame(() => {
     const elapsedSeconds = getElapsedSeconds()
     const root = rootRef.current
+    if (
+      !shouldUpdateZombieEscapeBloodPresentation(
+        events.pool.activeCount,
+        visibleEventCountRef.current,
+      )
+    ) {
+      if (root) root.visible = false
+      return
+    }
     root?.updateWorldMatrix(true, false)
     let splashDirty = false
     let residueDirty = false
@@ -218,6 +240,7 @@ export function ZombieEscapeBloodPresentation({
           dummy,
         )
         visible[eventSlot] = 0
+        visibleEventCountRef.current = Math.max(0, visibleEventCountRef.current - 1)
         splashDirty = true
         residueDirty = true
         dropletDirty = true
@@ -233,6 +256,9 @@ export function ZombieEscapeBloodPresentation({
           dropletRef.current,
           dummy,
         )
+        if (visible[eventSlot] !== 0) {
+          visibleEventCountRef.current = Math.max(0, visibleEventCountRef.current - 1)
+        }
         visible[eventSlot] = 0
         splashDirty = true
         residueDirty = true
@@ -539,6 +565,7 @@ export function ZombieEscapeBloodPresentation({
         )
       }
       residueDirty = true
+      if (visible[eventSlot] === 0) visibleEventCountRef.current += 1
       visible[eventSlot] = 1
       renderedEventCount += 1
     }
@@ -595,7 +622,7 @@ export function ZombieEscapeBloodPresentation({
       </instancedMesh>
     </group>
   )
-}
+})
 
 function BloodSplashGeometry({ profile }: { profile: ZombieEscapeBloodVariantProfile }) {
   if (profile.splashGeometry === 'fan') return <coneGeometry args={[0.68, 1, 7, 1, true]} />

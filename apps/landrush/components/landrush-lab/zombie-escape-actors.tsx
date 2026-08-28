@@ -3,7 +3,7 @@
 import { LandrushWorldNode } from '@landrush/pascal-plugin'
 import { LandrushRobot } from '@landrush/pascal-plugin/landrush-world/robot'
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, Suspense, useEffect, useMemo, useRef } from 'react'
+import { type MutableRefObject, memo, Suspense, useEffect, useMemo, useRef } from 'react'
 import type { Camera, Group } from 'three'
 import {
   createLandrushRobotWeaponCombatState,
@@ -35,7 +35,7 @@ import {
 } from './zombie-escape-visual-lod'
 import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
-export function ZombieEscapeActors({
+export const ZombieEscapeActors = memo(function ZombieEscapeActors({
   impactVisualRegistry,
   onGeneratedAssetsFailureChange,
   onGeneratedAssetsReadinessChange,
@@ -103,7 +103,7 @@ export function ZombieEscapeActors({
       />
     </group>
   )
-}
+})
 
 function ZombieEscapeOrbot({
   simulationRef,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useFrame, useThree } from '@react-three/fiber'
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   ClampToEdgeWrapping,
   DataTexture,
@@ -34,7 +34,15 @@ import {
 
 const Z_AXIS = new Vector3(0, 0, 1)
 
-export function ZombieEscapeDeathDustPresentation({
+export function resolveZombieEscapeDeathDustPresentationAction(
+  activeCount: number,
+  wasActive: boolean,
+) {
+  if (activeCount > 0) return 'update' as const
+  return wasActive ? ('clear' as const) : ('idle' as const)
+}
+
+export const ZombieEscapeDeathDustPresentation = memo(function ZombieEscapeDeathDustPresentation({
   events,
   framePriority,
   getElapsedSeconds,
@@ -55,6 +63,7 @@ export function ZombieEscapeDeathDustPresentation({
   const flipbookRefs = useRef<Array<InstancedMesh | null>>(Array(8).fill(null))
   const ringRef = useRef<InstancedMesh>(null)
   const clodRef = useRef<InstancedMesh>(null)
+  const hadActiveEventsRef = useRef(false)
   const dummy = useMemo(() => new Object3D(), [])
   const billboardQuaternion = useMemo(() => new Quaternion(), [])
   const rollQuaternion = useMemo(() => new Quaternion(), [])
@@ -170,6 +179,27 @@ export function ZombieEscapeDeathDustPresentation({
   ])
 
   useFrame(() => {
+    const action = resolveZombieEscapeDeathDustPresentationAction(
+      events.pool.activeCount,
+      hadActiveEventsRef.current,
+    )
+    if (action !== 'update') {
+      if (action === 'clear') {
+        for (const mesh of [
+          puffRef.current,
+          lowPolyRef.current,
+          ellipsoidRef.current,
+          ...flipbookRefs.current,
+          ringRef.current,
+          clodRef.current,
+        ]) {
+          if (mesh) mesh.count = 0
+        }
+      }
+      hadActiveEventsRef.current = false
+      return
+    }
+    hadActiveEventsRef.current = true
     const elapsedSeconds = getElapsedSeconds()
     billboardQuaternion.copy(camera.quaternion)
     if (variant === 'alpha-hash-puffs') {
@@ -292,7 +322,7 @@ export function ZombieEscapeDeathDustPresentation({
       ) : null}
     </group>
   )
-}
+})
 
 function updateBillboardDust({
   billboardQuaternion,

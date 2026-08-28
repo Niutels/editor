@@ -28,6 +28,12 @@ function createOwnerDocument({
 }
 
 describe('Landrush Zombie Escape touch joysticks', () => {
+  test('keeps the capability listener behind a shallow memo boundary', () => {
+    expect((LandrushZombieEscapeTouchJoysticks as unknown as { $$typeof: symbol }).$$typeof).toBe(
+      Symbol.for('react.memo'),
+    )
+  })
+
   test('renders both visible sticks and an accessible jump action on a touch device', () => {
     const ownerDocument = createOwnerDocument({ coarsePointer: true, maxTouchPoints: 5 })
     const inputRef = { current: createLandrushZombieEscapeTouchInputState() }

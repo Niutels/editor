@@ -5,6 +5,8 @@ import {
   shouldRenderZombieEscapeImpactSparks,
   shouldRenderZombieEscapeMuzzle,
   shouldRenderZombieEscapeTracer,
+  shouldScanZombieEscapeDeathDustCandidates,
+  shouldScanZombieEscapeEffectPool,
 } from './zombie-escape-effects'
 import {
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
@@ -13,6 +15,16 @@ import {
 } from './zombie-escape-simulation'
 
 describe('Zombie Escape effects', () => {
+  test('skips empty fixed-pool and already-observed death-dust scans', () => {
+    expect(shouldScanZombieEscapeEffectPool(0)).toBe(false)
+    expect(shouldScanZombieEscapeEffectPool(1)).toBe(true)
+    expect(shouldScanZombieEscapeEffectPool(Number.NaN)).toBe(false)
+    expect(shouldScanZombieEscapeDeathDustCandidates(0, 0)).toBe(false)
+    expect(shouldScanZombieEscapeDeathDustCandidates(1, 0)).toBe(true)
+    expect(shouldScanZombieEscapeDeathDustCandidates(1, 1)).toBe(false)
+    expect(shouldScanZombieEscapeDeathDustCandidates(0, 1)).toBe(false)
+  })
+
   test('keeps one tracer visible for travel and the complete impact lifetime', () => {
     expect(
       shouldRenderZombieEscapeTracer(

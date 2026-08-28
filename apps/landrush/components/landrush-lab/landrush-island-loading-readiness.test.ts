@@ -597,13 +597,15 @@ describe('Landrush island paint readiness', () => {
       new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
     )
     const generatedAssetsSource = readFileSync(generatedAssetsPath, 'utf8')
-    const boundaryStart = generatedAssetsSource.indexOf('export function GeneratedWeaponModel')
+    const boundaryStart = generatedAssetsSource.indexOf(
+      'export const GeneratedWeaponModel = memo(function GeneratedWeaponModel',
+    )
     const loaderStart = generatedAssetsSource.indexOf(
       'function LoadedGeneratedWeaponModel',
       boundaryStart,
     )
     const nextFunctionStart = generatedAssetsSource.indexOf(
-      'function ZombieEscapeGeneratedZombies',
+      'const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies',
       loaderStart,
     )
 

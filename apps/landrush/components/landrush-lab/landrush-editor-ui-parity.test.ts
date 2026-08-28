@@ -449,6 +449,44 @@ describe('Landrush Pascal editor UI parity', () => {
     expect(runtime).toContain("return 'custom'")
   })
 
+  test('isolates fixed Viewer and host runtimes from caller child reconciliation', () => {
+    const chrome = readSource('landrush-pascal-editor-chrome.tsx')
+    const host = readSource(
+      '../../../../packages/landrush-pascal-host/src/landrush-pascal-host.tsx',
+    )
+    const viewer = readSource('../../../../packages/viewer/src/components/viewer/index.tsx')
+
+    const viewerRuntimeProps = viewer.slice(
+      viewer.indexOf('type ViewerSceneRuntimeProps = {'),
+      viewer.indexOf('const ViewerSceneRuntime = memo'),
+    )
+    const viewerRuntimeMount = viewer.indexOf('<ViewerSceneRuntime')
+    const viewerCallerChildren = viewer.indexOf('{children}', viewerRuntimeMount)
+    const viewerSceneBoundaryEnd = viewer.indexOf('</ErrorBoundary>', viewerRuntimeMount)
+    expect(viewer).toContain('const ViewerSceneRuntime = memo(function ViewerSceneRuntime(')
+    expect(viewerRuntimeProps).not.toContain('children')
+    expect(viewerRuntimeMount).toBeGreaterThan(-1)
+    expect(viewerCallerChildren).toBeGreaterThan(viewerRuntimeMount)
+    expect(viewerCallerChildren).toBeLessThan(viewerSceneBoundaryEnd)
+
+    const hostRuntimeStart = host.indexOf(
+      'const LandrushPascalHostRuntime = memo(function LandrushPascalHostRuntime(',
+    )
+    const hostRuntimeEnd = host.indexOf('function LandrushPascalViewerViewport', hostRuntimeStart)
+    const hostRuntimeMount = host.indexOf('<LandrushPascalHostRuntime')
+    const hostCallerChildren = host.indexOf('{children}', hostRuntimeMount)
+    const hostViewerEnd = host.indexOf('</Viewer>', hostRuntimeMount)
+    expect(hostRuntimeStart).toBeGreaterThan(-1)
+    expect(host.slice(hostRuntimeStart, hostRuntimeEnd)).not.toContain('children')
+    expect(hostRuntimeMount).toBeGreaterThan(-1)
+    expect(hostCallerChildren).toBeGreaterThan(hostRuntimeMount)
+    expect(hostCallerChildren).toBeLessThan(hostViewerEnd)
+
+    expect(chrome).toContain(
+      'export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChrome(',
+    )
+  })
+
   test('mounts Pascal chrome only for the build phase and removes competing Landrush HUD', () => {
     const buildGridOverlay = readSource('landrush-build-grid-overlay.tsx')
     const island = readSource('landrush-island-client.tsx')

@@ -1,7 +1,7 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, useLayoutEffect, useMemo, useRef } from 'react'
+import { type MutableRefObject, memo, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   AdditiveBlending,
   Color,
@@ -138,7 +138,15 @@ export function shouldRenderZombieEscapeChainArc(effectKind: ZombieEscapeWeaponI
   return effectKind === ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.chain
 }
 
-export function ZombieEscapeEffects({
+export function shouldScanZombieEscapeEffectPool(activeCount: number) {
+  return Number.isFinite(activeCount) && activeCount > 0
+}
+
+export function shouldScanZombieEscapeDeathDustCandidates(kills: number, spawnedCount: number) {
+  return Number.isFinite(kills) && Number.isFinite(spawnedCount) && kills > spawnedCount
+}
+
+export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
   deathDustVariant = DEFAULT_ZOMBIE_ESCAPE_DEATH_DUST_VARIANT,
   framePriority = -16,
   impactVisualRegistry,
@@ -188,6 +196,7 @@ export function ZombieEscapeEffects({
   const observedDeathZombieGenerationRef = useRef(
     new Uint32Array(simulationRef.current.zombies.pool.capacity),
   )
+  const spawnedDeathDustKillCountRef = useRef(simulationRef.current.kills)
   const previousSimulationElapsedRef = useRef(simulationRef.current.elapsedSeconds)
   const skinnedBloodAttachments = useMemo(
     () =>
@@ -323,74 +332,86 @@ export function ZombieEscapeEffects({
     const shots = simulation.shots
     const impactEvents = simulation.impactEvents
     const previousSimulationElapsed = previousSimulationElapsedRef.current
-    if (simulation.elapsedSeconds < previousSimulationElapsed) {
+    const simulationRewound = simulation.elapsedSeconds < previousSimulationElapsed
+    if (simulationRewound || simulation.kills < spawnedDeathDustKillCountRef.current) {
       observedBloodImpactGenerationRef.current.fill(0)
       observedDeathZombieGenerationRef.current.fill(0)
+      spawnedDeathDustKillCountRef.current = Math.max(0, simulation.kills)
     }
-    reconcileZombieEscapeDeathDustEventPool(
-      deathDustEvents,
-      simulation.elapsedSeconds,
-      previousSimulationElapsed,
-    )
+    if (simulationRewound || shouldScanZombieEscapeEffectPool(deathDustEvents.pool.activeCount)) {
+      reconcileZombieEscapeDeathDustEventPool(
+        deathDustEvents,
+        simulation.elapsedSeconds,
+        previousSimulationElapsed,
+      )
+    }
     previousSimulationElapsedRef.current = simulation.elapsedSeconds
     const zombies = simulation.zombies
-    for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
-      const generation = zombies.pool.generation[slot]!
-      const deathPhase = resolveZombieEscapeDeathNormalizedPhase(
-        zombies.deathPresentationSeconds[slot]!,
+    if (
+      shouldScanZombieEscapeDeathDustCandidates(
+        simulation.kills,
+        spawnedDeathDustKillCountRef.current,
       )
-      if (
-        !shouldSpawnZombieEscapeDeathDust({
-          active: zombies.pool.active[slot] !== 0,
-          deathPhase,
+    ) {
+      for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
+        const generation = zombies.pool.generation[slot]!
+        const deathPhase = resolveZombieEscapeDeathNormalizedPhase(
+          zombies.deathPresentationSeconds[slot]!,
+        )
+        if (
+          !shouldSpawnZombieEscapeDeathDust({
+            active: zombies.pool.active[slot] !== 0,
+            deathPhase,
+            generation,
+            health: zombies.health[slot]!,
+            observedGeneration: observedDeathZombieGenerationRef.current[slot]!,
+          })
+        ) {
+          continue
+        }
+        observedDeathZombieGenerationRef.current[slot] = generation
+        const bodyCenterY =
+          getZombieEscapeZombieCatalogEntry(zombies.variant[slot]!).characterHeightMeters * 0.5
+        resolveZombieEscapePresentationPose(
+          zombies.x[slot]!,
+          zombies.y[slot]!,
+          zombies.z[slot]!,
+          zombies.heading[slot]!,
+          0,
+          zombies.hitImpulseX[slot]!,
+          0,
+          zombies.hitImpulseZ[slot]!,
+          presentationPose,
+          bodyCenterY,
+          1,
+          zombies.spawnOrdinal[slot]!,
+        )
+        transformZombieEscapePresentationPoint(
+          presentationPose,
+          0,
+          bodyCenterY,
+          0,
+          deathDustContactPoint,
+        )
+        deathDustEventScratch.directionX = deathDustContactPoint.x - zombies.x[slot]!
+        deathDustEventScratch.directionZ = deathDustContactPoint.z - zombies.z[slot]!
+        deathDustEventScratch.groundY = zombies.y[slot]!
+        deathDustEventScratch.originX = deathDustContactPoint.x
+        deathDustEventScratch.originZ = deathDustContactPoint.z
+        deathDustEventScratch.seed = createZombieEscapeDeathDustEventSeed(
           generation,
-          health: zombies.health[slot]!,
-          observedGeneration: observedDeathZombieGenerationRef.current[slot]!,
-        })
-      ) {
-        continue
+          slot,
+          zombies.spawnOrdinal[slot]!,
+        )
+        deathDustEventScratch.spawnElapsedSeconds = resolveZombieEscapeDeathDustSpawnElapsedSeconds(
+          simulation.elapsedSeconds,
+          zombies.deathPresentationSeconds[slot]!,
+        )
+        deathDustEventScratch.targetGeneration = generation
+        deathDustEventScratch.targetSlot = slot
+        spawnZombieEscapeDeathDustEvent(deathDustEvents, deathDustEventScratch)
+        spawnedDeathDustKillCountRef.current += 1
       }
-      observedDeathZombieGenerationRef.current[slot] = generation
-      const bodyCenterY =
-        getZombieEscapeZombieCatalogEntry(zombies.variant[slot]!).characterHeightMeters * 0.5
-      resolveZombieEscapePresentationPose(
-        zombies.x[slot]!,
-        zombies.y[slot]!,
-        zombies.z[slot]!,
-        zombies.heading[slot]!,
-        0,
-        zombies.hitImpulseX[slot]!,
-        0,
-        zombies.hitImpulseZ[slot]!,
-        presentationPose,
-        bodyCenterY,
-        1,
-        zombies.spawnOrdinal[slot]!,
-      )
-      transformZombieEscapePresentationPoint(
-        presentationPose,
-        0,
-        bodyCenterY,
-        0,
-        deathDustContactPoint,
-      )
-      deathDustEventScratch.directionX = deathDustContactPoint.x - zombies.x[slot]!
-      deathDustEventScratch.directionZ = deathDustContactPoint.z - zombies.z[slot]!
-      deathDustEventScratch.groundY = zombies.y[slot]!
-      deathDustEventScratch.originX = deathDustContactPoint.x
-      deathDustEventScratch.originZ = deathDustContactPoint.z
-      deathDustEventScratch.seed = createZombieEscapeDeathDustEventSeed(
-        generation,
-        slot,
-        zombies.spawnOrdinal[slot]!,
-      )
-      deathDustEventScratch.spawnElapsedSeconds = resolveZombieEscapeDeathDustSpawnElapsedSeconds(
-        simulation.elapsedSeconds,
-        zombies.deathPresentationSeconds[slot]!,
-      )
-      deathDustEventScratch.targetGeneration = generation
-      deathDustEventScratch.targetSlot = slot
-      spawnZombieEscapeDeathDustEvent(deathDustEvents, deathDustEventScratch)
     }
     const effectsRoot = effectsRootRef.current
     if (effectsRoot) {
@@ -404,7 +425,10 @@ export function ZombieEscapeEffects({
     let renderedTravelRibbonCount = 0
     let renderedMuzzleCount = 0
     let renderedMuzzlePetalCount = 0
-    for (let slot = 0; slot < shots.pool.capacity; slot += 1) {
+    const shotScanCapacity = shouldScanZombieEscapeEffectPool(shots.pool.activeCount)
+      ? shots.pool.capacity
+      : 0
+    for (let slot = 0; slot < shotScanCapacity; slot += 1) {
       if (shots.pool.active[slot] === 0) continue
       const phase = shots.phase[slot] as ZombieEscapeShotPhase
       const style = resolveZombieEscapeWeaponVfxStyle(shots.weaponIndex[slot]!, vfxVariantIndex)
@@ -664,7 +688,10 @@ export function ZombieEscapeEffects({
     let renderedBlastCloudCount = 0
     let renderedChainArcCount = 0
     let renderedSparkCount = 0
-    for (let slot = 0; slot < impactEvents.pool.capacity; slot += 1) {
+    const impactScanCapacity = shouldScanZombieEscapeEffectPool(impactEvents.pool.activeCount)
+      ? impactEvents.pool.capacity
+      : 0
+    for (let slot = 0; slot < impactScanCapacity; slot += 1) {
       if (impactEvents.pool.active[slot] === 0) continue
 
       const effectKind = impactEvents.effectKind[slot] as ZombieEscapeWeaponImpactEffectKind
@@ -1624,7 +1651,7 @@ export function ZombieEscapeEffects({
       </instancedMesh>
     </group>
   )
-}
+})
 
 function initializeEffectInstanceMesh(
   mesh: InstancedMesh | null,

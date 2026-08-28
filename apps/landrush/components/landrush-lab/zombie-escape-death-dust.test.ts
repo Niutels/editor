@@ -17,6 +17,7 @@ import {
   type ZombieEscapeDeathDustEnvelope,
   type ZombieEscapeDeathDustParticleSample,
 } from './zombie-escape-death-dust'
+import { resolveZombieEscapeDeathDustPresentationAction } from './zombie-escape-death-dust-presentation'
 
 const event = {
   directionX: 3,
@@ -31,6 +32,12 @@ const event = {
 }
 
 describe('Zombie Escape death dust events', () => {
+  test('updates active dust, clears it once, then sleeps while empty', () => {
+    expect(resolveZombieEscapeDeathDustPresentationAction(1, false)).toBe('update')
+    expect(resolveZombieEscapeDeathDustPresentationAction(0, true)).toBe('clear')
+    expect(resolveZombieEscapeDeathDustPresentationAction(0, false)).toBe('idle')
+  })
+
   test('uses bounded fixed storage and normalized event direction', () => {
     const events = createZombieEscapeDeathDustEventPool(2)
     const origins = events.originX

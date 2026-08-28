@@ -10,6 +10,7 @@ import {
 import { Canvas, extend, type ThreeElement, useFrame, useThree } from '@react-three/fiber'
 import {
   forwardRef,
+  memo,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -554,6 +555,64 @@ export type ViewerHandle = {
   setIsolated(ids: AnyNodeId[] | null): void
 }
 
+type ViewerSceneRuntimeProps = {
+  disablePostFx: boolean
+  hoverStyles: HoverStyles
+  perf: boolean
+  presentationEffectRef?: ViewerPresentationEffectRef
+  selectionManager: NonNullable<ViewerProps['selectionManager']>
+  useBvh: boolean
+}
+
+const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
+  disablePostFx,
+  hoverStyles,
+  perf,
+  presentationEffectRef,
+  selectionManager,
+  useBvh,
+}: ViewerSceneRuntimeProps) {
+  return (
+    <>
+      {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
+        /> */}
+      <Lights />
+      {useBvh ? (
+        <SceneBvh>
+          <SceneRenderer />
+        </SceneBvh>
+      ) : (
+        <SceneRenderer />
+      )}
+
+      {/* Generic slab-elevation lift for any kind that declares
+          `capabilities.floorPlaced`. Runs at frame priority 1 so it
+          lands its mesh.position.y override before the priority-2
+          systems below clear the dirty mark. */}
+      <FloorElevationSystem />
+      {/* Generic geometry rebuild loop for any registered kind that
+          ships `def.geometry`. Reads dirtyNodes, calls the kind's pure
+          builder, swaps the registered group's children. See
+          wiki/architecture/node-definitions.md. */}
+      <GeometrySystem />
+      {/* Automated stair opening sync — updates slab/ceiling cutouts
+          whenever stairs, slabs, or levels change. */}
+      <StairOpeningSystem />
+      {/* Mounts systems contributed by registry-backed kinds. Each
+          kind's `def.system` is loaded via lazy() and rendered here,
+          ordered by `system.priority`. */}
+      <RegisteredSystems />
+      <PostProcessing
+        disablePostFx={disablePostFx}
+        hoverStyles={hoverStyles}
+        presentationEffectRef={presentationEffectRef}
+      />
+      {selectionManager === 'default' && <SelectionManager />}
+      {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
+    </>
+  )
+})
+
 const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   {
     children,
@@ -752,41 +811,14 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       />
 
       <ErrorBoundary fallback={null} scope="viewer-scene">
-        {/* <directionalLight position={[10, 10, 5]} intensity={0.5} castShadow
-          /> */}
-        <Lights />
-        {useBvh ? (
-          <SceneBvh>
-            <SceneRenderer />
-          </SceneBvh>
-        ) : (
-          <SceneRenderer />
-        )}
-
-        {/* Generic slab-elevation lift for any kind that declares
-            `capabilities.floorPlaced`. Runs at frame priority 1 so it
-            lands its mesh.position.y override before the priority-2
-            systems below clear the dirty mark. */}
-        <FloorElevationSystem />
-        {/* Generic geometry rebuild loop for any registered kind that
-            ships `def.geometry`. Reads dirtyNodes, calls the kind's pure
-            builder, swaps the registered group's children. See
-            wiki/architecture/node-definitions.md. */}
-        <GeometrySystem />
-        {/* Automated stair opening sync — updates slab/ceiling cutouts
-            whenever stairs, slabs, or levels change. */}
-        <StairOpeningSystem />
-        {/* Mounts systems contributed by registry-backed kinds. Each
-            kind's `def.system` is loaded via lazy() and rendered here,
-            ordered by `system.priority`. */}
-        <RegisteredSystems />
-        <PostProcessing
+        <ViewerSceneRuntime
           disablePostFx={disablePostFx}
           hoverStyles={hoverStyles}
+          perf={perf}
           presentationEffectRef={presentationEffectRef}
+          selectionManager={selectionManager}
+          useBvh={useBvh}
         />
-        {selectionManager === 'default' && <SelectionManager />}
-        {(perf || PERF_OVERLAY_ENABLED) && <PerfMonitor />}
         {children}
       </ErrorBoundary>
     </Canvas>

@@ -21,6 +21,7 @@ import { LogOut } from 'lucide-react'
 import Image from 'next/image'
 import {
   type CSSProperties,
+  memo,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
@@ -65,7 +66,7 @@ function isEditorPanelId(value: string): value is EditorPanelId {
   return EDITOR_TABS.some((tab) => tab.id === value)
 }
 
-export function LandrushPascalEditorChrome({
+export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChrome({
   active,
   chromeRootRef,
   exitBuildButtonRef,
@@ -446,7 +447,7 @@ export function LandrushPascalEditorChrome({
       </div>
     </div>
   )
-}
+})
 
 function renderPanel(panelId: EditorPanelId, interactionReady: boolean) {
   if (panelId === 'items') {

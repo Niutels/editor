@@ -6,6 +6,8 @@ import { useFrame, useThree } from '@react-three/fiber'
 import {
   lazy,
   type MutableRefObject,
+  memo,
+  type RefObject,
   Suspense,
   useCallback,
   useEffect,
@@ -15,7 +17,7 @@ import {
   useState,
 } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { type Group, Plane, Raycaster, Vector2, Vector3 } from 'three'
+import { type Camera, type Group, Plane, Raycaster, Vector2, Vector3 } from 'three'
 import {
   LandrushControllerCommandHud,
   type LandrushControllerCommands,
@@ -49,6 +51,8 @@ import {
 import {
   createLandrushRobotWeaponCombatState,
   createLandrushRobotWeaponMuzzlePose,
+  type LandrushRobotWeaponCombatState,
+  type LandrushRobotWeaponMuzzlePose,
   LandrushRobotWeaponRig,
 } from './landrush-robot-weapon-rig'
 import {
@@ -119,6 +123,7 @@ import type { LandrushZombieEscapeNavigationScaleProofFixtureWorldSummary } from
 import {
   createZombieEscapeRenderReadinessRegistry,
   getZombieEscapeRenderRepresentativeKeys,
+  type ZombieEscapeRenderReadinessRegistry,
 } from './zombie-escape-render-readiness'
 import {
   countZombieEscapeShotsByPhase,
@@ -142,7 +147,10 @@ import {
   type ZombieEscapePickupPrompt,
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
-import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
+import {
+  createZombieEscapeImpactVisualRegistry,
+  type ZombieEscapeImpactVisualRegistry,
+} from './zombie-escape-skinned-impact-attachment'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import {
   resolveZombieEscapeWeaponPickupPlacements,
@@ -275,6 +283,10 @@ export function shouldEnableLandrushZombieEscapeNavigationScaleProofFixtureCaptu
 export function shouldEnableLandrushZombieNavigationOverlay(search: string) {
   const params = new URLSearchParams(search)
   return params.get('landrushNavOverlay') === '1' || params.get('navOverlay') === '1'
+}
+
+export function shouldPublishLandrushZombieEscapeIntegratedDebugState(search: string) {
+  return new URLSearchParams(search).get('bench') === '1'
 }
 
 export function isLandrushZombieEscapeNavigationScaleProofFixtureCaptureReady({
@@ -1242,6 +1254,12 @@ export function LandrushZombieEscapeMode({
   const navigationScaleProofFixtureCaptureEnabled =
     typeof window !== 'undefined' &&
     shouldEnableLandrushZombieEscapeNavigationScaleProofFixtureCapture(window.location.search)
+  const integratedDebugPublicationEnabled = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      shouldPublishLandrushZombieEscapeIntegratedDebugState(window.location.search),
+    [],
+  )
 
   useEffect(() => {
     if (shouldEnableLandrushZombieNavigationOverlay(window.location.search)) {
@@ -1969,7 +1987,7 @@ export function LandrushZombieEscapeMode({
       snapshotAtRef.current = state.clock.elapsedTime
       publishSnapshot()
     }
-    if (state.clock.elapsedTime - debugAtRef.current >= 0.25) {
+    if (integratedDebugPublicationEnabled && state.clock.elapsedTime - debugAtRef.current >= 0.25) {
       debugAtRef.current = state.clock.elapsedTime
       publishIntegratedDebugState({
         arena,
@@ -1991,6 +2009,97 @@ export function LandrushZombieEscapeMode({
 
   return (
     <>
+      <LandrushZombieEscapePresentation
+        active={active}
+        combatStateRef={combatStateRef}
+        expectedPhase={expectedPhase}
+        generatedAssetRetryGeneration={generatedAssetRetryGeneration}
+        groundY={groundY}
+        impactVisualRegistry={impactVisualRegistry}
+        materialPresentation={materialPresentation}
+        materialPresentationReadinessMeshes={materialPresentationReadinessMeshes}
+        muzzlePoseRef={muzzlePoseRef}
+        navigationOverlayEnabled={navigationOverlayEnabled}
+        onGeneratedAssetsFailureChange={handleGeneratedAssetsFailureChange}
+        onGeneratedAssetsReadinessChange={handleGeneratedAssetsReadinessChange}
+        playerColor={playerColor}
+        renderReadinessCamera={renderReadinessCamera}
+        renderReadinessRegistry={renderReadinessRegistry}
+        runtimePhaseReady={runtimePhaseReady}
+        simulationRef={simulationRef}
+        spawn={spawn}
+        viewerSceneReady={viewerSceneReady}
+        visualRootRef={visualRootRef}
+        zombieMaterialPhaseActive={zombieMaterialPhaseActive}
+      />
+      <LandrushZombieEscapeHudPortal
+        expectedPhase={expectedPhase}
+        generatedAssetFailureCount={generatedAssetFailures.length}
+        generatedAssetsRetrying={generatedAssetsRetrying}
+        inputMode={inputMode}
+        onInput={handleTouchInput}
+        onRetryGeneratedAssets={retryGeneratedAssets}
+        onRunAgain={runAgain}
+        onStartZombie={startZombie}
+        ownerDocument={gl.domElement.ownerDocument}
+        nightStartReady={nightStartReady}
+        phaseReady={interactionActionable}
+        snapshot={snapshot}
+        zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
+      />
+    </>
+  )
+}
+
+type LandrushZombieEscapePresentationProps = {
+  active: boolean
+  combatStateRef: RefObject<LandrushRobotWeaponCombatState>
+  expectedPhase: ZombieEscapeGamePhase
+  generatedAssetRetryGeneration: number
+  groundY: number
+  impactVisualRegistry: ZombieEscapeImpactVisualRegistry
+  materialPresentation: LandrushIslandMaterialPresentationOwner
+  materialPresentationReadinessMeshes: readonly LandrushIslandMaterialReadinessMesh[]
+  muzzlePoseRef: MutableRefObject<LandrushRobotWeaponMuzzlePose>
+  navigationOverlayEnabled: boolean
+  onGeneratedAssetsFailureChange: (failures: readonly ZombieEscapeGeneratedAssetFailure[]) => void
+  onGeneratedAssetsReadinessChange: (readiness: ZombieEscapeGeneratedAssetReadinessSnapshot) => void
+  playerColor: string
+  renderReadinessCamera: Camera
+  renderReadinessRegistry: ZombieEscapeRenderReadinessRegistry
+  runtimePhaseReady: boolean
+  simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  spawn: Readonly<{ x: number; z: number }>
+  viewerSceneReady: boolean
+  visualRootRef: MutableRefObject<Group | null>
+  zombieMaterialPhaseActive: boolean
+}
+
+const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePresentation({
+  active,
+  combatStateRef,
+  expectedPhase,
+  generatedAssetRetryGeneration,
+  groundY,
+  impactVisualRegistry,
+  materialPresentation,
+  materialPresentationReadinessMeshes,
+  muzzlePoseRef,
+  navigationOverlayEnabled,
+  onGeneratedAssetsFailureChange,
+  onGeneratedAssetsReadinessChange,
+  playerColor,
+  renderReadinessCamera,
+  renderReadinessRegistry,
+  runtimePhaseReady,
+  simulationRef,
+  spawn,
+  viewerSceneReady,
+  visualRootRef,
+  zombieMaterialPhaseActive,
+}: LandrushZombieEscapePresentationProps) {
+  return (
+    <>
       <LandrushIslandMaterialPresentationRenderReadiness
         meshes={materialPresentationReadinessMeshes}
         owner={materialPresentation}
@@ -2000,8 +2109,8 @@ export function LandrushZombieEscapeMode({
       <group position={[spawn.x, groundY, spawn.z]} visible={active}>
         <ZombieEscapeActors
           impactVisualRegistry={impactVisualRegistry}
-          onGeneratedAssetsFailureChange={handleGeneratedAssetsFailureChange}
-          onGeneratedAssetsReadinessChange={handleGeneratedAssetsReadinessChange}
+          onGeneratedAssetsFailureChange={onGeneratedAssetsFailureChange}
+          onGeneratedAssetsReadinessChange={onGeneratedAssetsReadinessChange}
           presentationFramePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.presentation}
           playerColor={playerColor}
           quality="balanced"
@@ -2048,24 +2157,9 @@ export function LandrushZombieEscapeMode({
           visualRootRef={visualRootRef}
         />
       </Suspense>
-      <LandrushZombieEscapeHudPortal
-        expectedPhase={expectedPhase}
-        generatedAssetFailureCount={generatedAssetFailures.length}
-        generatedAssetsRetrying={generatedAssetsRetrying}
-        inputMode={inputMode}
-        onInput={handleTouchInput}
-        onRetryGeneratedAssets={retryGeneratedAssets}
-        onRunAgain={runAgain}
-        onStartZombie={startZombie}
-        ownerDocument={gl.domElement.ownerDocument}
-        nightStartReady={nightStartReady}
-        phaseReady={interactionActionable}
-        snapshot={snapshot}
-        zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
-      />
     </>
   )
-}
+})
 
 type LandrushZombieEscapeHudProps = {
   expectedPhase: ZombieEscapeGamePhase

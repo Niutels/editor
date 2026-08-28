@@ -7,6 +7,7 @@ import {
   resolveZombieEscapeBloodFramePriorities,
   resolveZombieEscapeBloodSlotAction,
   shouldAttachZombieEscapeBloodLayer,
+  shouldUpdateZombieEscapeBloodPresentation,
   transformZombieEscapeBloodWorldAttachmentToLocal,
 } from './zombie-escape-blood-presentation'
 import { getZombieEscapeBloodVariantProfile } from './zombie-escape-blood-variants'
@@ -44,6 +45,12 @@ describe('Zombie Escape shared blood presentation', () => {
     expect(isZombieEscapeBloodPoolVisible(0)).toBe(false)
     expect(isZombieEscapeBloodPoolVisible(1)).toBe(true)
     expect(isZombieEscapeBloodPoolVisible(Number.NaN)).toBe(false)
+  })
+
+  test('sleeps only after the last visible blood layer has been cleared', () => {
+    expect(shouldUpdateZombieEscapeBloodPresentation(0, 0)).toBe(false)
+    expect(shouldUpdateZombieEscapeBloodPresentation(0, 1)).toBe(true)
+    expect(shouldUpdateZombieEscapeBloodPresentation(1, 0)).toBe(true)
   })
 
   test('allows only generation-current residue to follow an attachment', () => {

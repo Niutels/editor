@@ -5,9 +5,17 @@ import {
   shouldEnableLandrushZombieEscapeNavigationScaleProof,
   shouldEnableLandrushZombieEscapeNavigationScaleProofFixtureCapture,
   shouldEnableLandrushZombieNavigationOverlay,
+  shouldPublishLandrushZombieEscapeIntegratedDebugState,
 } from './landrush-zombie-escape-mode'
 
 describe('Landrush Zombie Escape navigation scale proof bridge gate', () => {
+  test('publishes integrated debug state only for benchmark runs', () => {
+    expect(shouldPublishLandrushZombieEscapeIntegratedDebugState('')).toBe(false)
+    expect(shouldPublishLandrushZombieEscapeIntegratedDebugState('?game=zombie-escape')).toBe(false)
+    expect(shouldPublishLandrushZombieEscapeIntegratedDebugState('?bench=1')).toBe(true)
+    expect(shouldPublishLandrushZombieEscapeIntegratedDebugState('?bench=0')).toBe(false)
+  })
+
   test('requires both the benchmark and dedicated proof query flags', () => {
     expect(
       shouldEnableLandrushZombieEscapeNavigationScaleProof('?bench=1&landrushNavScaleProof=1'),

@@ -27,7 +27,7 @@ import {
   type ViewerPresentationEffectRef,
 } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type Group, Vector3 } from 'three'
 import {
   didLandrushPascalEditingDeactivate,
@@ -164,12 +164,10 @@ export function LandrushPascalHost({
           selectionManager={selectionManager}
           useBvh={false}
         >
-          <LandrushWorldOwnedSitePresentation />
-          <LandrushMaterialRendererBackendBridge />
-          <InteractiveSystem />
-          {editingActive ? (
-            <LandrushPascalEditingSurface ownedHorizontalGridPlaneY={ownedHorizontalGridPlaneY} />
-          ) : null}
+          <LandrushPascalHostRuntime
+            editingActive={editingActive}
+            ownedHorizontalGridPlaneY={ownedHorizontalGridPlaneY}
+          />
           {children}
         </Viewer>
       </LandrushPascalViewerViewport>
@@ -177,6 +175,25 @@ export function LandrushPascalHost({
     </div>
   )
 }
+
+const LandrushPascalHostRuntime = memo(function LandrushPascalHostRuntime({
+  editingActive,
+  ownedHorizontalGridPlaneY,
+}: {
+  editingActive: boolean
+  ownedHorizontalGridPlaneY: number | null
+}) {
+  return (
+    <>
+      <LandrushWorldOwnedSitePresentation />
+      <LandrushMaterialRendererBackendBridge />
+      <InteractiveSystem />
+      {editingActive ? (
+        <LandrushPascalEditingSurface ownedHorizontalGridPlaneY={ownedHorizontalGridPlaneY} />
+      ) : null}
+    </>
+  )
+})
 
 function LandrushPascalViewerViewport({
   children,

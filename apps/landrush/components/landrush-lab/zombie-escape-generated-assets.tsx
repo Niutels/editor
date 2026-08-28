@@ -7,6 +7,7 @@ import {
   Component,
   type ErrorInfo,
   type MutableRefObject,
+  memo,
   type ReactNode,
   Suspense,
   useCallback,
@@ -228,7 +229,7 @@ export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly stri
   for (const path of new Set(paths)) useGLTF.clear(path)
 }
 
-export function ZombieEscapeGeneratedAssets({
+export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAssets({
   detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -539,9 +540,9 @@ export function ZombieEscapeGeneratedAssets({
       ) : null}
     </>
   )
-}
+})
 
-function ZombieEscapeGeneratedWeapons({
+const ZombieEscapeGeneratedWeapons = memo(function ZombieEscapeGeneratedWeapons({
   omitHeldWeapon,
   onAssetStatusChange,
   renderReadinessRegistry,
@@ -581,7 +582,7 @@ function ZombieEscapeGeneratedWeapons({
       ))}
     </group>
   )
-}
+})
 
 function GeneratedHeldWeapon({
   retryGeneration,
@@ -682,7 +683,7 @@ function GeneratedWeaponPickup({
   )
 }
 
-export function GeneratedWeaponModel({
+export const GeneratedWeaponModel = memo(function GeneratedWeaponModel({
   weapon,
   assetKey = `weapon:${weapon.assetPath}`,
   onAssetStatusChange,
@@ -714,7 +715,7 @@ export function GeneratedWeaponModel({
       </Suspense>
     </GeneratedAssetErrorBoundary>
   )
-}
+})
 
 function LoadedGeneratedWeaponModel({
   assetKey,
@@ -757,7 +758,7 @@ function LoadedGeneratedWeaponModel({
   )
 }
 
-function ZombieEscapeGeneratedZombies({
+const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies({
   detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -881,9 +882,9 @@ function ZombieEscapeGeneratedZombies({
       })}
     </group>
   )
-}
+})
 
-function GeneratedZombieVariant({
+const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   detailedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
@@ -935,7 +936,7 @@ function GeneratedZombieVariant({
       zombieShader={zombieShader}
     />
   )
-}
+})
 
 function PreparedGeneratedZombieVariant({
   detailedZombieSlotsRef,
