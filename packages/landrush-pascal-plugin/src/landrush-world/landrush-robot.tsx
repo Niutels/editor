@@ -1,8 +1,7 @@
 'use client'
 
-import { configureKtx2Support } from '@pascal-app/viewer'
-import { useAnimations } from '@react-three/drei'
-import { useFrame, useLoader, useThree } from '@react-three/fiber'
+import { useAnimations, useGLTF } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
   type AnimationAction,
@@ -18,16 +17,9 @@ import {
   Quaternion,
   Vector3,
 } from 'three'
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
-import {
-  LANDRUSH_ROBOT_ASSET_PATH,
-  supportsLandrushRobotS3tcTranscode,
-} from './landrush-robot-assets'
 import {
   applyLandrushRobotCrouchPose,
   createLandrushRobotCrouchRig,
@@ -56,6 +48,7 @@ export {
 } from './landrush-robot-jump'
 
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
+const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot-jpeg-4fc9f04e.glb'
 const LANDRUSH_ROBOT_TARGET_HEIGHT = 1.82
 const LANDRUSH_ROBOT_IDLE_TIME_SCALE = 0.5
 const LANDRUSH_ROBOT_WALK_TIME_SCALE = 0.88
@@ -162,53 +155,6 @@ type LandrushRobotProps = {
   visualRootRef?: { current: Group | null }
 }
 
-// A distinct loader constructor keeps the capability-selected robot asset out of useGLTF's cache.
-class LandrushRobotGLTFLoader extends GLTFLoader {}
-
-type LandrushRobotKtx2LoaderInternals = {
-  workerConfig: Record<string, boolean> | null
-}
-type LandrushRobotKtx2Renderer = Parameters<KTX2Loader['detectSupport']>[0]
-
-const landrushRobotS3tcKtx2Loader = new KTX2Loader().setTranscoderPath('/basis/')
-let landrushRobotS3tcKtx2LoaderConfigured = false
-
-function configureLandrushRobotKtx2Loader(loader: GLTFLoader, renderer: unknown) {
-  if (!supportsLandrushRobotS3tcTranscode(renderer)) {
-    return configureKtx2Support(loader, renderer)
-  }
-  if (!landrushRobotS3tcKtx2LoaderConfigured) {
-    landrushRobotS3tcKtx2Loader.detectSupport(renderer as LandrushRobotKtx2Renderer)
-    ;(landrushRobotS3tcKtx2Loader as unknown as LandrushRobotKtx2LoaderInternals).workerConfig = {
-      astcHDRSupported: false,
-      astcSupported: false,
-      bptcSupported: false,
-      dxtSupported: true,
-      etc1Supported: false,
-      etc2Supported: false,
-      pvrtcSupported: false,
-    }
-    landrushRobotS3tcKtx2LoaderConfigured = true
-  }
-  loader.setKTX2Loader(landrushRobotS3tcKtx2Loader)
-  return true
-}
-
-function useLandrushRobotGLTF() {
-  const renderer = useThree((state) => state.gl)
-  return useLoader(LandrushRobotGLTFLoader, LANDRUSH_ROBOT_ASSET_PATH, (loader) => {
-    if (!configureLandrushRobotKtx2Loader(loader, renderer)) {
-      throw new Error('Landrush robot KTX2 texture support could not be initialized.')
-    }
-    loader.setMeshoptDecoder(MeshoptDecoder)
-  })
-}
-
-export {
-  LANDRUSH_ROBOT_ASSET_PATH,
-  supportsLandrushRobotS3tcTranscode,
-} from './landrush-robot-assets'
-
 export function LandrushRobot({
   animationPace = 1,
   crouching = false,
@@ -237,7 +183,7 @@ export function LandrushRobot({
   const fallMotionScaleValue = MathUtils.clamp(fallMotionScale, 0.05, 1)
   const idleTimeScale = LANDRUSH_ROBOT_IDLE_TIME_SCALE
   const groupRef = useRef<Group>(null!)
-  const { animations, scene } = useLandrushRobotGLTF()
+  const { animations, scene } = useGLTF(LANDRUSH_ROBOT_ASSET_PATH)
   const locomotionClips = useMemo(
     () =>
       measure('setup.robot-glb.select-locomotion-clips', () =>

@@ -2354,7 +2354,7 @@ function LandrushZombieEscapeHud({
   return (
     <div
       className="pointer-events-none absolute inset-0 z-30 select-none text-white"
-      data-actual-avatar="/navigation/proto_pascal_robot-ktx2-1112f038.glb"
+      data-actual-avatar="/navigation/proto_pascal_robot-jpeg-4fc9f04e.glb"
       data-expected-phase={expectedPhase}
       data-integrated-landrush-world="true"
       data-night-start-ready={nightStartReady ? 'true' : 'false'}
@@ -2602,7 +2602,7 @@ function publishIntegratedDebugState({
         }
       : null
   window.__LANDRUSH_ZOMBIE_ESCAPE__ = {
-    actualAvatar: '/navigation/proto_pascal_robot-ktx2-1112f038.glb',
+    actualAvatar: '/navigation/proto_pascal_robot-jpeg-4fc9f04e.glb',
     arena: { playRadius: arena.playRadius, worldOrigin: [spawn.x, groundY, spawn.z] },
     benchmarkRoomSoak: readLandrushZombieEscapeRoomSoakSnapshot(roomSoakState, simulation),
     frameOrder: LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER,

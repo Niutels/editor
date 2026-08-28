@@ -1,6 +1,6 @@
 'use client'
 
-import { useGLTFKTX2 } from '@pascal-app/viewer'
+import { useGLTF } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   Component,
@@ -26,7 +26,7 @@ import {
   seededOrbotAnimationDebugPhase,
 } from './orbot-animation-debug-motion'
 
-const ORBOT_ASSET_PATH = '/navigation/proto_pascal_robot-ktx2-1112f038.glb'
+const ORBOT_ASSET_PATH = '/navigation/proto_pascal_robot-jpeg-4fc9f04e.glb'
 const ORBOT_TARGET_HEIGHT = 1.82
 const ORBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
 const ORBOT_BLEND_RESPONSE = 8
@@ -977,7 +977,7 @@ function LoadedOrbot({
   resetRevision: number
   runtimeRef: { current: DebugRuntime }
 }) {
-  const gltf = useGLTFKTX2(ORBOT_ASSET_PATH)
+  const gltf = useGLTF(ORBOT_ASSET_PATH)
   const clonedScene = useMemo(() => cloneSkeleton(gltf.scene) as THREE.Group, [gltf.scene])
   const modelTransform = useMemo(() => computeOrbotModelTransform(clonedScene), [clonedScene])
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene])

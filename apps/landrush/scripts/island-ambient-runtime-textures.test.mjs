@@ -3,13 +3,14 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import sharp from 'sharp'
 
 const componentRoot = resolve(import.meta.dirname, '../components/landrush-lab')
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
-const robotAssetName = 'proto_pascal_robot-ktx2-1112f038.glb'
+const robotAssetName = 'proto_pascal_robot-jpeg-4fc9f04e.glb'
 const robotAssetPublicPath = `/navigation/${robotAssetName}`
 
-test('runtime textured ambient GLBs use the KTX2-aware loader from their first request', async () => {
+test('runtime textured GLBs select their required loader from their first request', async () => {
   const ambientSource = await readFile(resolve(componentRoot, 'landrush-island-ambient-life.tsx'), 'utf8')
   const zombieSource = await readFile(resolve(componentRoot, 'zombie-escape-generated-assets.tsx'), 'utf8')
   const robotSource = await readFile(
@@ -35,27 +36,16 @@ test('runtime textured ambient GLBs use the KTX2-aware loader from their first r
   assert.doesNotMatch(ambientSource, /useGLTF\((?:modelPath|fish\.modelPath|boat\.modelPath|npc\.glb\.rigged)\)/u)
   assert.match(zombieSource, /useGLTFKTX2\(assetUrls\.riggedBase\)/u)
   assert.doesNotMatch(zombieSource, /useGLTF\(assetUrls\.riggedBase\)/u)
-  assert.match(robotSource, /useLandrushRobotGLTF\(\)/u)
-  assert.match(robotSource, /configureLandrushRobotKtx2Loader\(loader, renderer\)/u)
-  assert.match(robotSource, /configureKtx2Support\(loader, renderer\)/u)
-  assert.match(robotSource, /dxtSupported: true/u)
-  assert.match(robotSource, /bptcSupported: false/u)
+  assert.match(robotSource, /useGLTF\(LANDRUSH_ROBOT_ASSET_PATH\)/u)
+  assert.match(robotSource, new RegExp(escapeRegExp(robotAssetPublicPath), 'u'))
   assert.doesNotMatch(robotSource, /useGLTFKTX2/u)
   assert.doesNotMatch(robotSource, /useGLTF\.preload/u)
-  const robotAssetSource = await readFile(
-    resolve(
-      repositoryRoot,
-      'packages/landrush-pascal-plugin/src/landrush-world/landrush-robot-assets.ts',
-    ),
-    'utf8',
-  )
-  assert.match(robotAssetSource, new RegExp(escapeRegExp(robotAssetPublicPath), 'u'))
-  assert.match(orbotDebugSource, /useGLTFKTX2\(ORBOT_ASSET_PATH\)/u)
+  assert.match(orbotDebugSource, /useGLTF\(ORBOT_ASSET_PATH\)/u)
   assert.match(orbotDebugSource, new RegExp(escapeRegExp(robotAssetPublicPath), 'u'))
-  assert.doesNotMatch(orbotDebugSource, /useGLTF\(ORBOT_ASSET_PATH\)/u)
+  assert.doesNotMatch(orbotDebugSource, /useGLTFKTX2/u)
 })
 
-test('player robot uses a fingerprinted full-mip KTX2 while retaining its legacy URL', async () => {
+test('player robot uses a fingerprinted 512px core JPEG while preserving its scene contract', async () => {
   const navigationRoot = resolve(repositoryRoot, 'apps/landrush/public/navigation')
   const [optimizedBuffer, legacyBuffer] = await Promise.all([
     readFile(resolve(navigationRoot, robotAssetName)),
@@ -64,37 +54,54 @@ test('player robot uses a fingerprinted full-mip KTX2 while retaining its legacy
   const optimized = readGlb(optimizedBuffer)
   const legacy = readGlb(legacyBuffer)
 
+  assert.equal(optimizedBuffer.byteLength, 1_438_964)
   assert.ok(optimizedBuffer.byteLength < legacyBuffer.byteLength)
   assert.equal(
     createHash('sha256').update(optimizedBuffer).digest('hex').slice(0, 8),
     robotAssetName.match(/-([a-f0-9]{8})\.glb$/u)?.[1],
   )
-  assert.ok(optimized.json.extensionsUsed.includes('KHR_texture_basisu'))
-  assert.ok(optimized.json.extensionsRequired.includes('KHR_texture_basisu'))
-  assert.ok(!legacy.json.extensionsRequired?.includes('KHR_texture_basisu'))
+  assert.ok(!optimized.json.extensionsUsed?.includes('KHR_texture_basisu'))
+  assert.ok(!optimized.json.extensionsRequired?.includes('KHR_texture_basisu'))
 
   const material = optimized.json.materials[0]
   const baseColorTexture = material.pbrMetallicRoughness.baseColorTexture.index
   const emissiveTexture = material.emissiveTexture.index
   assert.equal(baseColorTexture, emissiveTexture)
   const texture = optimized.json.textures[baseColorTexture]
-  assert.equal(texture.source, undefined)
-  const imageIndex = texture.extensions.KHR_texture_basisu.source
+  assert.equal(texture.source, 0)
+  assert.equal(texture.extensions, undefined)
+  const imageIndex = texture.source
   const image = optimized.json.images[imageIndex]
-  assert.equal(image.mimeType, 'image/ktx2')
+  assert.equal(image.mimeType, 'image/jpeg')
 
   const imageView = optimized.json.bufferViews[image.bufferView]
   const imageOffset = imageView.byteOffset ?? 0
-  const ktx2 = optimized.binary.subarray(imageOffset, imageOffset + imageView.byteLength)
-  assert.deepEqual(
-    [...ktx2.subarray(0, 12)],
-    [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a],
+  const jpeg = optimized.binary.subarray(imageOffset, imageOffset + imageView.byteLength)
+  const jpegMetadata = await sharp(jpeg).metadata()
+  assert.equal(imageOffset, 1_049_144)
+  assert.equal(imageView.byteLength, 106_959)
+  assert.equal(
+    createHash('sha256').update(jpeg).digest('hex'),
+    '922be6582a7ceea427ed093e02c70c5e0060cff31717eae2503bd7bace13b4e8',
   )
-  assert.equal(ktx2.readUInt32LE(20), 1024)
-  assert.equal(ktx2.readUInt32LE(24), 1024)
-  assert.equal(ktx2.readUInt32LE(40), 11)
-  assert.equal(ktx2.readUInt32LE(12), 0)
-  assert.equal(ktx2.readUInt32LE(44), 1)
+  assert.equal(jpegMetadata.format, 'jpeg')
+  assert.equal(jpegMetadata.width, 512)
+  assert.equal(jpegMetadata.height, 512)
+  assert.equal(jpegMetadata.channels, 3)
+  assert.equal(jpegMetadata.chromaSubsampling, '4:4:4')
+  assert.equal(
+    createHash('sha256').update(optimized.binary.subarray(0, imageOffset)).digest('hex'),
+    '0e46273aac4ef79c33ede7c477c8883df7dd6a71c719750b7c4b036df510949b',
+  )
+
+  const legacyImage = legacy.json.images[0]
+  const legacyImageView = legacy.json.bufferViews[legacyImage.bufferView]
+  const legacyImageOffset = legacyImageView.byteOffset ?? 0
+  assert.deepEqual(
+    optimized.binary.subarray(0, imageOffset),
+    legacy.binary.subarray(0, legacyImageOffset),
+  )
+  assert.deepEqual(normalizeRobotJson(optimized.json), normalizeRobotJson(legacy.json))
 })
 
 test('zombie debug scenes compose optimized rigs with animation-only clips', async () => {
@@ -122,6 +129,14 @@ test('zombie debug scenes compose optimized rigs with animation-only clips', asy
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function normalizeRobotJson(json) {
+  const normalized = structuredClone(json)
+  normalized.buffers[0].byteLength = 0
+  normalized.bufferViews[normalized.images[0].bufferView].byteLength = 0
+  normalized.images[0].mimeType = 'image/runtime'
+  return normalized
 }
 
 function readGlb(buffer) {
