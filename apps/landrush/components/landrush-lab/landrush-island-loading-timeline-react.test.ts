@@ -1,46 +1,87 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createLandrushIslandLoadingProgressController,
-  LANDRUSH_ISLAND_LOADING_DISMISSAL_PROGRESS,
+  LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+  LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
 } from './landrush-island-loading-progress-controller'
-import {
-  LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
-  STREAMED_SHELL_VELOCITY_PER_SECOND,
-} from './landrush-island-loading-shell-bootstrap'
+import { LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS } from './landrush-island-loading-shell-bootstrap'
 import {
   animateLandrushIslandLoadingHandoffFade,
+  animateLandrushIslandLoadingPercentPreview,
   animateLandrushIslandLoadingPreview,
-  createLandrushIslandLoadingAppliedVisualSegment,
-  createLandrushIslandLoadingCompletionPreview,
-  createLandrushIslandLoadingPercentRetargetKeyframes,
+  createLandrushIslandLoadingCompletionGate,
+  createLandrushIslandLoadingPercentKeyframes,
   createLandrushIslandLoadingProgressPresentation,
-  createLandrushIslandLoadingRetargetKeyframes,
+  createLandrushIslandLoadingVisualKeyframes,
   createLandrushIslandLoadingVisualPreview,
+  LANDRUSH_ISLAND_LOADING_COMPLETION_DEADLINE_MS,
   LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
   LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS,
-  resolveDisplayedLoadingProgress,
-  resolveLandrushIslandLoadingCompositorElapsedDelta,
-  resolveLandrushIslandLoadingCompositorSampleInterval,
-  resolveLandrushIslandLoadingHandoffAction,
-  resolveLandrushIslandLoadingPresentedFrameDelta,
   resolveLandrushIslandLoadingReducedMotion,
   resolveLandrushIslandLoadingTransformProgress,
+  resolveLandrushIslandLoadingVisualSegmentProgress,
   restoreLandrushIslandLoadingHandoffOverlay,
-  retargetLandrushIslandLoadingAnimationsWhileRunning,
-  retargetLandrushIslandLoadingPercentPreview,
-  retargetLandrushIslandLoadingPreview,
-  shouldAdvanceLandrushIslandLoadingFrameFallback,
-  shouldReconcileLandrushIslandLoadingPreview,
 } from './landrush-island-loading-timeline-react'
 
 describe('Landrush island loading presentation handoff', () => {
-  test('finishes from the compositor animation instead of a React render timer', () => {
+  test('requires a later foreground frame after the fill actually renders 100%', () => {
+    const gate = createLandrushIslandLoadingCompletionGate()
+    const observe = (frameTimeMs: number, renderedProgress: number, ready = true, visible = true) =>
+      gate.observeFrame({ frameTimeMs, ready, renderedProgress, visible })
+
+    expect(observe(0, 0.05)).toBe(false)
+    expect(observe(50, 0.99999)).toBe(false)
+    expect(observe(100, 1)).toBe(false)
+    expect(gate.hasPresentedCompletion()).toBe(false)
+    expect(observe(100, 1)).toBe(false)
+    expect(observe(150, 1)).toBe(true)
+    expect(gate.hasPresentedCompletion()).toBe(true)
+
+    expect(observe(200, 1, false)).toBe(false)
+    expect(observe(250, 1)).toBe(false)
+    expect(observe(300, 1, true, false)).toBe(false)
+    expect(observe(350, 1)).toBe(false)
+    expect(observe(400, 1)).toBe(true)
+    gate.reset()
+    expect(gate.hasPresentedCompletion()).toBe(false)
+    expect(observe(Number.NaN, 1)).toBe(false)
+  })
+
+  test('reaches and presents 100% within one second even when readiness arrives at 5%', () => {
+    for (const initialProgress of [0, 0.05, 0.9, 0.984]) {
+      const controller = createLandrushIslandLoadingProgressController({ initialProgress })
+      const gate = createLandrushIslandLoadingCompletionGate()
+      controller.complete()
+      const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
+      let firstCompleteMs: number | null = null
+      let handoffMs: number | null = null
+      for (let nowMs = 0; nowMs <= LANDRUSH_ISLAND_LOADING_COMPLETION_DEADLINE_MS; nowMs += 50) {
+        if (nowMs > 0) controller.step(50)
+        const renderedProgress = resolveLandrushIslandLoadingVisualSegmentProgress(preview, nowMs)
+        if (controller.readyToDismiss()) firstCompleteMs ??= nowMs
+        const presented = gate.observeFrame({
+          frameTimeMs: nowMs,
+          ready: controller.readyToDismiss(),
+          renderedProgress,
+          visible: true,
+        })
+        if (presented) {
+          handoffMs = nowMs
+          break
+        }
+      }
+      expect(firstCompleteMs).toBe(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)
+      expect(handoffMs).toBe(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 50)
+      expect(handoffMs!).toBeLessThanOrEqual(LANDRUSH_ISLAND_LOADING_COMPLETION_DEADLINE_MS)
+    }
+  })
+
+  test('lets the readiness-guarded owner finish a compositor fade without hiding directly', () => {
     let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
     let options: KeyframeAnimationOptions | number | undefined
-    let finish: (() => void) | null = null
-    let cancelled = false
+    let finish: (() => void) | undefined
     let finished = 0
     const style = createStyle()
     const animation = {
@@ -49,9 +90,7 @@ describe('Landrush island loading presentation handoff', () => {
           finish = () => listener(new Event('finish'))
         }
       },
-      cancel: () => {
-        cancelled = true
-      },
+      cancel() {},
     }
     const element = {
       animate: (
@@ -64,70 +103,47 @@ describe('Landrush island loading presentation handoff', () => {
       },
       style,
     }
-
     const returned = animateLandrushIslandLoadingHandoffFade(
       element as unknown as HTMLElement,
-      360,
+      100,
       () => {
         finished += 1
       },
     )
-
     expect(returned).toBe(animation)
     expect(frames).toEqual([{ opacity: 1 }, { opacity: 0 }])
-    expect(options).toEqual({ duration: 360, easing: 'ease-out', fill: 'forwards' })
+    expect(options).toEqual({ duration: 100, easing: 'ease-out', fill: 'forwards' })
     expect(finished).toBe(0)
     finish?.()
     expect(finished).toBe(1)
-    expect(style.opacity).toBe('0')
-    expect(style.willChange).toBe('')
-    expect(cancelled).toBe(false)
+    expect(style.opacity).toBe('1')
   })
 
-  test('completes synchronously when animation is unavailable', () => {
-    let finished = false
-    const style = createStyle()
-    const element = { animate: undefined, style }
-
-    const returned = animateLandrushIslandLoadingHandoffFade(
-      element as unknown as HTMLElement,
-      360,
+  test('keeps fallback hiding under the same readiness guard', () => {
+    for (const animate of [
+      undefined,
       () => {
-        finished = true
+        throw new Error('WAAPI unavailable')
       },
-    )
-
-    expect(returned).toBeNull()
-    expect(finished).toBe(true)
-    expect(style.opacity).toBe('0')
+    ]) {
+      let finished = 0
+      const style = createStyle()
+      expect(
+        animateLandrushIslandLoadingHandoffFade(
+          { animate, style } as unknown as HTMLElement,
+          100,
+          () => {
+            finished += 1
+          },
+        ),
+      ).toBeNull()
+      expect(finished).toBe(1)
+      expect(style.opacity).toBe('1')
+      expect(style.willChange).toBe('')
+    }
   })
 
-  test('revokes an in-flight fade when readiness withdraws and permits a renewed fade', () => {
-    expect(
-      resolveLandrushIslandLoadingHandoffAction({
-        allReady: true,
-        completionRequested: false,
-        fadeStarted: false,
-        minimumVisibleElapsed: true,
-      }),
-    ).toBe('begin-fade')
-    expect(
-      resolveLandrushIslandLoadingHandoffAction({
-        allReady: false,
-        completionRequested: true,
-        fadeStarted: true,
-        minimumVisibleElapsed: true,
-      }),
-    ).toBe('cancel-fade')
-    expect(
-      resolveLandrushIslandLoadingHandoffAction({
-        allReady: true,
-        completionRequested: false,
-        fadeStarted: false,
-        minimumVisibleElapsed: true,
-      }),
-    ).toBe('begin-fade')
-
+  test('restores a revoked fade but never resurrects a terminally handed-off shell', () => {
     const attributes = new Map([
       ['aria-hidden', 'true'],
       ['hidden', ''],
@@ -135,610 +151,295 @@ describe('Landrush island loading presentation handoff', () => {
     const style = createStyle()
     style.opacity = '0'
     style.visibility = 'hidden'
-    style.willChange = 'opacity'
-    restoreLandrushIslandLoadingHandoffOverlay({
-      removeAttribute: (name) => {
+    const element = {
+      removeAttribute: (name: string) => {
         attributes.delete(name)
       },
-      setAttribute: (name, value) => {
+      setAttribute: (name: string, value: string) => {
         attributes.set(name, value)
       },
       style,
-    } as unknown as HTMLElement)
-
+    } as unknown as HTMLElement
+    restoreLandrushIslandLoadingHandoffOverlay(element, true)
+    expect(style.opacity).toBe('0')
+    expect(attributes.has('hidden')).toBe(true)
+    restoreLandrushIslandLoadingHandoffOverlay(element)
     expect(style.opacity).toBe('1')
     expect(style.visibility).toBe('')
-    expect(style.willChange).toBe('')
     expect(attributes.get('aria-hidden')).toBe('false')
     expect(attributes.has('hidden')).toBe(false)
   })
 
-  test('does not resurrect a terminally handed-off shell during passive cleanup', () => {
-    const attributes = new Map([
-      ['aria-hidden', 'true'],
-      ['hidden', ''],
-    ])
-    const style = createStyle()
-    style.opacity = '0'
-
-    restoreLandrushIslandLoadingHandoffOverlay(
-      {
-        removeAttribute: (name) => {
-          attributes.delete(name)
-        },
-        setAttribute: (name, value) => {
-          attributes.set(name, value)
-        },
-        style,
-      } as unknown as HTMLElement,
-      true,
+  test('adopts the exact shell compositor scale instead of an integer percentage', () => {
+    expect(resolveLandrushIslandLoadingTransformProgress('matrix(0.3712, 0, 0, 1, 0, 0)')).toBe(
+      0.3712,
     )
-
-    expect(style.opacity).toBe('0')
-    expect(attributes.get('aria-hidden')).toBe('true')
-    expect(attributes.has('hidden')).toBe(true)
-  })
-
-  test('adopts the exact shell compositor scale as the runtime progress floor', () => {
-    expect(resolveLandrushIslandLoadingTransformProgress('matrix(0.37, 0, 0, 1, 0, 0)')).toBe(0.37)
     expect(
       resolveLandrushIslandLoadingTransformProgress(
         'matrix3d(0.62, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)',
       ),
     ).toBe(0.62)
     expect(resolveLandrushIslandLoadingTransformProgress('scaleX(0.81)')).toBe(0.81)
+    expect(resolveLandrushIslandLoadingTransformProgress('scaleX(-0.1)')).toBe(0)
     expect(resolveLandrushIslandLoadingTransformProgress('none')).toBe(0)
+    expect(resolveLandrushIslandLoadingTransformProgress('matrix(NaN, 0, 0, 1, 0, 0)')).toBe(0)
   })
 
-  test('keeps the first runtime frame at the adopted shell floor', () => {
-    expect(resolveDisplayedLoadingProgress(null, 5_000, 0.23)).toBe(0.23)
-  })
+  test('uses exact cubic compositor pieces, not linear samples that break velocity continuity', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.2,
+      initialVelocityPerSecond: 0.006,
+    })
+    controller.setConfirmedProgress(0.4)
+    controller.step(125)
+    controller.setConfirmedProgress(0.7)
+    controller.step(165)
+    controller.complete()
+    const before = controller.getSnapshot()
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 7_000)
+    const frames = createLandrushIslandLoadingVisualKeyframes(preview)
 
-  test('reconciles sub-percent progress from an individual asset milestone', () => {
-    const segment = {
-      durationMs: 1_000,
-      from: 0.5,
-      keyframes: [
-        { offset: 0, progress: 0.5 },
-        { offset: 1, progress: 0.5 },
-      ],
-      startedAtMs: 0,
-      to: 0.5,
+    expect(controller.getSnapshot()).toEqual(before)
+    expect(preview.from).toBe(before.displayedProgress)
+    expect(preview.keyframes.length).toBeLessThan(20)
+    for (let elapsedMs = 0; elapsedMs <= 900; elapsedMs += 3) {
+      if (elapsedMs > 0) controller.step(3)
+      const expected = controller.getSnapshot().displayedProgress
+      expect(
+        resolveLandrushIslandLoadingVisualSegmentProgress(preview, 7_000 + elapsedMs),
+      ).toBeCloseTo(expected, 11)
+      expect(evaluateCompositorCurve(frames, preview.durationMs, elapsedMs).progress).toBeCloseTo(
+        expected,
+        11,
+      )
     }
-
-    expect(shouldReconcileLandrushIslandLoadingPreview(segment, 500, 0.502)).toBe(true)
-  })
-
-  test('retargets future keyframes without restarting the compositor timeline', () => {
-    const segment = {
-      durationMs: 18_000,
-      from: 0.4,
-      keyframes: [
-        { offset: 0, progress: 0.4 },
-        { offset: 1, progress: 0.8 },
-      ],
-      startedAtMs: 12_000,
-      to: 0.8,
+    for (let index = 1; index < frames.length - 1; index += 1) {
+      const left = evaluateCompositorPiece(frames, preview.durationMs, index - 1, 1)
+      const right = evaluateCompositorPiece(frames, preview.durationMs, index, 0)
+      expect(left.progress).toBeCloseTo(right.progress, 11)
+      expect(left.velocity).toBeCloseTo(right.velocity, 9)
+      expect(left.acceleration).toBeCloseTo(right.acceleration, 7)
     }
-    let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
-    let currentTime = 12_000
-    let historicalReads = 0
-    const animation = {
-      effect: {
-        getKeyframes: () => {
-          historicalReads += 1
-          return []
-        },
-        setKeyframes: (nextFrames: Keyframe[] | PropertyIndexedKeyframes) => {
-          frames = nextFrames
-        },
-      },
-      get currentTime() {
-        return currentTime
-      },
-      set currentTime(value: CSSNumberish | null) {
-        currentTime = Number(value)
-      },
-      playState: 'running' as AnimationPlayState,
+  })
+
+  test('preserves position, velocity, and acceleration when new progress retargets a running curve', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.05 })
+    controller.setConfirmedProgress(0.6)
+    const original = createLandrushIslandLoadingVisualPreview(controller, 0)
+    controller.step(350)
+    const before = controller.getSnapshot()
+    controller.complete()
+    const replacement = createLandrushIslandLoadingVisualPreview(controller, 350)
+    const oldMotion = evaluateCompositorCurve(
+      createLandrushIslandLoadingVisualKeyframes(original),
+      original.durationMs,
+      350,
+    )
+    const newMotion = evaluateCompositorCurve(
+      createLandrushIslandLoadingVisualKeyframes(replacement),
+      replacement.durationMs,
+      0,
+    )
+
+    expect(newMotion.progress).toBeCloseTo(oldMotion.progress, 12)
+    expect(newMotion.velocity).toBeCloseTo(oldMotion.velocity, 10)
+    expect(newMotion.acceleration).toBeCloseTo(oldMotion.acceleration, 8)
+    expect(replacement.from).toBe(before.displayedProgress)
+    expect(replacement.to).toBe(1)
+  })
+
+  test('bounds the actual compositor polynomial through the worst-case completion', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0,
+      initialVelocityPerSecond: 0.075,
+    })
+    controller.complete()
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
+    const frames = createLandrushIslandLoadingVisualKeyframes(preview)
+    for (let nowMs = 0; nowMs <= 850; nowMs += 1) {
+      const motion = evaluateCompositorCurve(frames, preview.durationMs, nowMs)
+      expect(motion.progress).toBeGreaterThanOrEqual(-1e-10)
+      expect(motion.progress).toBeLessThanOrEqual(1 + 1e-10)
+      expect(motion.velocity).toBeGreaterThanOrEqual(-1e-10)
+      expect(motion.velocity).toBeLessThanOrEqual(
+        LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+      )
+      expect(Math.abs(motion.acceleration)).toBeLessThanOrEqual(
+        LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED,
+      )
     }
-    const style = createStyle()
-    style.transform = 'scaleX(0.4)'
-
-    const retargeted = retargetLandrushIslandLoadingPreview(
-      animation as unknown as Animation,
-      { animate: undefined, style } as unknown as HTMLElement,
-      segment,
-    )
-
-    expect(retargeted).toBe(true)
-    expect(currentTime).toBe(12_000)
-    expect(frames).toEqual([
-      { offset: 0, transform: 'scaleX(0.4)' },
-      { offset: 2 / 3, transform: 'scaleX(0.4)' },
-      { offset: 1, transform: 'scaleX(0.5333333333333333)' },
-    ])
-    expect(historicalReads).toBe(0)
-    expect(style.transform).toBe('scaleX(0.4)')
   })
 
-  test('retargets fill and percentage immediately without pausing the running timeline', () => {
-    const events: string[] = []
-    const fillAnimation = {
-      currentTime: 4_225,
-      pause: () => events.push('fill:pause'),
-      play: () => events.push('fill:play'),
-      playState: 'running',
-      ready: new Promise<Animation>(() => undefined),
-    } as unknown as Animation
-    const percentAnimation = {
-      currentTime: 4_200,
-      pause: () => events.push('percent:pause'),
-      play: () => events.push('percent:play'),
-      playState: 'running',
-      ready: new Promise<Animation>(() => undefined),
-    } as unknown as Animation
-
-    const retargeted = retargetLandrushIslandLoadingAnimationsWhileRunning(
-      fillAnimation,
-      percentAnimation,
-      (heldCurrentTimeMs) => {
-        events.push(`retarget:${String(heldCurrentTimeMs)}`)
-        return true
-      },
-    )
-
-    expect(retargeted).toBe(true)
-    expect(percentAnimation.currentTime).toBe(4_225)
-    expect(events).toEqual(['retarget:4225'])
-  })
-
-  test('does not mutate a fill and percentage pair unless both animations are active', () => {
-    let retargetCalls = 0
-    const retargeted = retargetLandrushIslandLoadingAnimationsWhileRunning(
-      { currentTime: 1_000, playState: 'running' } as Animation,
-      { currentTime: 1_000, playState: 'finished' } as Animation,
-      () => {
-        retargetCalls += 1
-        return true
-      },
-    )
-
-    expect(retargeted).toBe(false)
-    expect(retargetCalls).toBe(0)
-  })
-
-  test('discards stalled wall-clock time instead of repaying it as progress', () => {
-    expect(resolveLandrushIslandLoadingPresentedFrameDelta(16.667, 0)).toBeCloseTo(16.667, 3)
-    expect(resolveLandrushIslandLoadingPresentedFrameDelta(1_516.667, 16.667)).toBeCloseTo(
-      1_000 / 30,
-      6,
-    )
-    expect(resolveLandrushIslandLoadingPresentedFrameDelta(1_533.334, 1_516.667)).toBeCloseTo(
-      16.667,
-      3,
-    )
-    expect(resolveLandrushIslandLoadingPresentedFrameDelta(100, 120)).toBe(0)
-    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(9_000, 1_000)).toBe(8_000)
-    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(180_000, 0)).toBe(
-      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
-    )
-    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(1_016.667, 1_000)).toBeCloseTo(
-      16.667,
-      3,
-    )
-    expect(resolveLandrushIslandLoadingCompositorElapsedDelta(100, 120)).toBe(0)
-    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(49.999, 0)).toBe(false)
-    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(50, 0)).toBe(true)
-    expect(shouldAdvanceLandrushIslandLoadingFrameFallback(100, 120)).toBe(false)
-  })
-
-  test('keeps one immutable compositor trajectory through the supported stall horizon', () => {
+  test('keeps the compositor lease compact and stops at evidence instead of drifting for minutes', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.2 })
+    controller.setConfirmedProgress(0.8)
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
     expect(LANDRUSH_ISLAND_LOADING_MINIMUM_PRESENTATION_FPS).toBe(20)
     expect(LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS).toBe(50)
     expect(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS).toBe(
       LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
     )
-    const controller = createLandrushIslandLoadingProgressController({
-      initialProgress: 0,
-      initialVelocityPerSecond: 0.006,
-    })
-    controller.setConfirmedProgress(0, {
-      ceiling: 0.984,
-      estimatedDurationMs: (0.984 / 0.006) * 1_000,
-    })
-    const segment = createLandrushIslandLoadingVisualPreview(
-      controller,
-      0,
-      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
-    )
-    const intervalRates = segment.keyframes.slice(1).map((keyframe, index) => {
-      const previous = segment.keyframes[index]!
-      const elapsedSeconds = (keyframe.offset - previous.offset) * (segment.durationMs / 1_000)
-      return (keyframe.progress - previous.progress) / elapsedSeconds
-    })
-
-    expect(segment.keyframes).toHaveLength(2)
-    expect(segment.keyframes).toEqual([
-      { offset: 0, progress: 0 },
-      { offset: 1, progress: 0.72 },
-    ])
-    expect(Math.min(...intervalRates)).toBeGreaterThan(0)
-    expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
-      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
-    )
+    expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS)
+    expect(preview.keyframes).toHaveLength(5)
+    expect(preview.to).toBe(0.8)
+    expect(resolveLandrushIslandLoadingVisualSegmentProgress(preview, 800)).toBeCloseTo(0.8, 12)
+    expect(resolveLandrushIslandLoadingVisualSegmentProgress(preview, 120_000)).toBe(0.8)
   })
 
-  test('renews from the rendered transform instead of a hidden advanced controller', () => {
-    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0 })
-    controller.synchronizeRenderedProgress(0.984, STREAMED_SHELL_VELOCITY_PER_SECOND)
+  test('moves the visible integer at the exact cubic fill thresholds on the same clock', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.05 })
+    controller.complete()
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 2_000)
+    const frames = createLandrushIslandLoadingPercentKeyframes(preview)
+    const hundred = frames.find((frame) => frame.transform === 'translate3d(0, -100rem, 0)')!
 
-    const renewed = createLandrushIslandLoadingVisualPreview(
-      controller,
-      120_000,
-      LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
-      0.72,
-    )
-    const elapsedSeconds = renewed.durationMs / 1_000
-
-    expect(renewed.from).toBe(0.72)
-    expect(renewed.to).toBeCloseTo(0.984, 12)
-    expect(renewed.durationMs).toBeCloseTo(44_000, 9)
-    expect((renewed.to - renewed.from) / elapsedSeconds).toBeCloseTo(
-      STREAMED_SHELL_VELOCITY_PER_SECOND,
-      12,
-    )
-    expect(() =>
-      createLandrushIslandLoadingVisualPreview(
-        controller,
-        164_000,
-        LANDRUSH_ISLAND_LOADING_COMPOSITOR_LEASE_MS,
-        0.984,
-      ),
-    ).toThrow('Landrush loading compositor runway is exhausted.')
-  })
-
-  test('does not reinterpret a pending compositor clock as time zero', () => {
-    let keyframeWrites = 0
-    const animation = {
-      currentTime: null,
-      effect: {
-        setKeyframes: () => {
-          keyframeWrites += 1
-        },
-      },
-      playState: 'pending' as AnimationPlayState,
+    for (let percent = 6; percent < 100; percent += 1) {
+      const frame = frames.find(
+        (candidate) => candidate.transform === `translate3d(0, -${percent}rem, 0)`,
+      )!
+      const timeMs = 2_000 + Number(frame.offset) * preview.durationMs
+      expect(resolveLandrushIslandLoadingVisualSegmentProgress(preview, timeMs)).toBeCloseTo(
+        percent / 100,
+        8,
+      )
+      expect(
+        resolveLandrushIslandLoadingVisualSegmentProgress(preview, timeMs - 0.001),
+      ).toBeLessThan(percent / 100)
+      expect(frame.easing).toBe('steps(1, end)')
     }
-    const segment = {
-      durationMs: 1_000,
-      from: 0.2,
-      keyframes: [
-        { offset: 0, progress: 0.2 },
-        { offset: 1, progress: 0.3 },
-      ],
-      startedAtMs: 0,
-      to: 0.3,
-    }
-    const style = createStyle()
-
-    expect(
-      retargetLandrushIslandLoadingPreview(
-        animation as unknown as Animation,
-        { animate: undefined, style } as unknown as HTMLElement,
-        segment,
-      ),
-    ).toBe(false)
-    expect(
-      retargetLandrushIslandLoadingPercentPreview(
-        animation as unknown as Animation,
-        { animate: undefined, style } as unknown as HTMLElement,
-        segment,
-      ),
-    ).toBe(false)
-    expect(keyframeWrites).toBe(0)
+    expect(Number(hundred.offset) * preview.durationMs).toBeCloseTo(800, 1)
+    expect(frames.at(-1)?.offset).toBe(1)
+    expect(frames.length).toBeLessThanOrEqual(102)
   })
 
-  test('never exposes a future preview endpoint before WAAPI owns the frame', () => {
+  test('never exposes a future endpoint before the compositor owns the frame', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.37 })
+    controller.setConfirmedProgress(0.8)
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
     const style = createStyle()
-    style.transform = 'scaleX(0.2)'
-    let transformObservedByAnimate = ''
+    style.transform = 'scaleX(0.37)'
+    let observedTransform = ''
     const animation = { cancel() {} }
-
     const returned = animateLandrushIslandLoadingPreview(
       {
         animate: () => {
-          transformObservedByAnimate = style.transform
+          observedTransform = style.transform
           return animation as unknown as Animation
         },
         style,
       } as unknown as HTMLElement,
-      {
-        durationMs: 30_000,
-        from: 0.2,
-        keyframes: [
-          { offset: 0, progress: 0.2 },
-          { offset: 1, progress: 0.8 },
-        ],
-        startedAtMs: 0,
-        to: 0.8,
-      },
+      preview,
     )
 
     expect(returned).toBe(animation)
-    expect(transformObservedByAnimate).toBe('scaleX(0.2)')
-    expect(style.transform).toBe('scaleX(0.2)')
-  })
-
-  test('keeps the long runway to one compositor-interpolated line segment', () => {
-    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.2 })
-    controller.setConfirmedProgress(0.8, { ceiling: 0.984, estimatedDurationMs: 8_000 })
-
-    const preview = createLandrushIslandLoadingVisualPreview(
-      controller,
-      0,
-      LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
-    )
-
-    expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS)
-    expect(preview.keyframes).toHaveLength(2)
-    expect(preview.keyframes[0]).toEqual({ offset: 0, progress: 0.2 })
-    expect(preview.keyframes[1]?.offset).toBe(1)
-    expect(preview.keyframes[1]?.progress).toBeCloseTo(0.92, 12)
-    expect(preview.keyframes.at(-1)?.progress).toBeGreaterThan(0.5)
-    expect(
-      resolveLandrushIslandLoadingCompositorSampleInterval(
-        LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
-      ),
-    ).toBeCloseTo(LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS, 12)
-    expect(resolveLandrushIslandLoadingCompositorSampleInterval(10_000)).toBeCloseTo(1_000 / 30, 12)
-  })
-
-  test('keeps the rendered floor when WAAPI animation creation fails', () => {
-    const style = createStyle()
-    style.transform = 'scaleX(0.37)'
-
-    const returned = animateLandrushIslandLoadingPreview(
-      {
-        animate: () => {
-          throw new Error('WAAPI unavailable')
-        },
-        style,
-      } as unknown as HTMLElement,
-      {
-        durationMs: 30_000,
-        from: 0.37,
-        keyframes: [
-          { offset: 0, progress: 0.37 },
-          { offset: 1, progress: 0.7 },
-        ],
-        startedAtMs: 0,
-        to: 0.7,
-      },
-    )
-
-    expect(returned).toBeNull()
+    expect(observedTransform).toBe('scaleX(0.37)')
     expect(style.transform).toBe('scaleX(0.37)')
+    expect(style.willChange).toBe('transform')
   })
 
-  test('maps a segment onto its own remaining animation duration', () => {
-    expect(
-      createLandrushIslandLoadingRetargetKeyframes(
-        {
-          durationMs: 2_000,
-          from: 0.9,
-          keyframes: [
-            { offset: 0, progress: 0.9 },
-            { offset: 1, progress: 1 },
-          ],
-          startedAtMs: 5_000,
-          to: 1,
-        },
-        500,
-      ),
-    ).toEqual([
-      { offset: 0, progress: 0.9 },
-      { offset: 0.25, progress: 0.9 },
-      { offset: 1, progress: 0.975 },
-    ])
-  })
-
-  test('does not compress a capped final runway when retargeting the compositor timeline', () => {
-    const controller = createLandrushIslandLoadingProgressController({
-      initialProgress: 0.14,
-      initialVelocityPerSecond: 0.006,
-    })
+  test('keeps the current floor when fill or percentage animation creation fails', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.37 })
     controller.complete()
-    const segment = createLandrushIslandLoadingVisualPreview(controller, 0, 18_000)
-    const keyframes = createLandrushIslandLoadingRetargetKeyframes(segment, 12_000)
-    const intervalRates = keyframes.slice(1).map((keyframe, index) => {
-      const previous = keyframes[index]!
-      const elapsedSeconds =
-        ((keyframe.offset - previous.offset) * segment.durationMs) / 1_000
-      return elapsedSeconds > 0 ? (keyframe.progress - previous.progress) / elapsedSeconds : 0
-    })
-
-    expect(Math.min(...intervalRates)).toBeGreaterThanOrEqual(0)
-    expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
-      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
-    )
-  })
-
-  test('truncates a retarget to its remaining duration without exceeding the speed ceiling', () => {
-    const keyframes = createLandrushIslandLoadingRetargetKeyframes(
-      {
-        durationMs: 4_000,
-        from: 0.4,
-        keyframes: [
-          { offset: 0, progress: 0.4 },
-          { offset: 1, progress: 0.7 },
-        ],
-        startedAtMs: 0,
-        to: 0.7,
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
+    const style = createStyle()
+    const element = {
+      animate: () => {
+        throw new Error('WAAPI unavailable')
       },
-      3_000,
-    )
+      style,
+    } as unknown as HTMLElement
 
-    expect(keyframes).toHaveLength(3)
-    expect(keyframes[0]).toEqual({ offset: 0, progress: 0.4 })
-    expect(keyframes[1]).toEqual({
-      offset:
-        3_000 / 4_000,
-      progress: 0.4,
-    })
-    expect(keyframes[2]?.offset).toBe(1)
-    expect(keyframes[2]?.progress).toBeCloseTo(0.475, 12)
+    expect(animateLandrushIslandLoadingPreview(element, preview)).toBeNull()
+    expect(style.transform).toBe('scaleX(0.37)')
+    expect(animateLandrushIslandLoadingPercentPreview(element, preview)).toBeNull()
+    expect(style.transform).toBe('translate3d(0, -37rem, 0)')
   })
 
-  test('keeps duplicate retarget offsets at their prior physical position', () => {
-    const keyframes = createLandrushIslandLoadingRetargetKeyframes(
-      {
-        durationMs: 1_000,
-        from: 0.4,
-        keyframes: [
-          { offset: 0, progress: 0.4 },
-          { offset: 0, progress: 0.6 },
-          { offset: 1, progress: 0.7 },
-        ],
-        startedAtMs: 0,
-        to: 0.7,
-      },
-      0,
-    )
-
-    expect(keyframes.map(({ offset }) => offset)).toEqual([0, 1])
-    expect(keyframes.map(({ progress }) => progress)).toEqual([0.4, 0.47500000000000003])
-  })
-
-  test('moves the visible integer at the exact fill thresholds on the same timeline', () => {
-    const keyframes = createLandrushIslandLoadingPercentRetargetKeyframes(
-      {
-        durationMs: 18_000,
-        from: 0.4,
-        keyframes: [
-          { offset: 0, progress: 0.4 },
-          { offset: 1, progress: 0.42 },
-        ],
-        startedAtMs: 12_000,
-        to: 0.42,
-      },
-      0,
-    )
-
-    expect(keyframes).toHaveLength(3)
-    expect(keyframes[0]).toEqual({ offset: 0, percent: 40 })
-    expect(keyframes[1]?.offset).toBeCloseTo(0.5, 12)
-    expect(keyframes[1]?.percent).toBe(41)
-    expect(keyframes[2]).toEqual({ offset: 1, percent: 42 })
-  })
-
-  test('drives confirmed completion through retained sampled motion until dismissal is ready', () => {
-    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.96 })
-    const segments = []
-    let startedAtMs = 1_000
-
-    while (!controller.readyToDismiss() && segments.length < 10) {
-      const segment = createLandrushIslandLoadingCompletionPreview(controller, startedAtMs, 520)
-      segments.push(segment)
-      controller.step(segment.durationMs)
-      startedAtMs += segment.durationMs
-    }
-
-    expect(segments.length).toBeGreaterThan(1)
-    expect(segments.every((segment) => segment.durationMs === 520)).toBe(true)
-    expect(segments[0]?.from).toBe(0.96)
-    expect(segments[0]?.keyframes.length).toBeGreaterThan(2)
-    expect(segments.every((segment) => segment.to <= 1)).toBe(true)
-    expect(controller.readyToDismiss()).toBe(true)
-    expect(segments.at(-1)?.to).toBeGreaterThanOrEqual(LANDRUSH_ISLAND_LOADING_DISMISSAL_PROGRESS)
-  })
-
-  test('keeps reduced-motion completion on the same bounded motion trajectory', () => {
-    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.96 })
-    const preview = createLandrushIslandLoadingCompletionPreview(controller, 1_000, 520)
-
-    const applied = createLandrushIslandLoadingAppliedVisualSegment(preview, true)
-    const intervalRates = applied.keyframes.slice(1).map((keyframe, index) => {
-      const previous = applied.keyframes[index]!
-      const elapsedSeconds = (keyframe.offset - previous.offset) * (applied.durationMs / 1_000)
-      return elapsedSeconds > 0 ? (keyframe.progress - previous.progress) / elapsedSeconds : 0
-    })
-
-    expect(applied).toBe(preview)
-    expect(applied.from).toBe(0.96)
-    expect(applied.to).toBeGreaterThan(applied.from)
-    expect(Math.min(...intervalRates)).toBeGreaterThanOrEqual(0)
-    expect(Math.max(...intervalRates)).toBeLessThanOrEqual(
-      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + 0.000_001,
-    )
-  })
-
-  test('derives the visible integer from the same scalar as the fill', () => {
+  test('derives visible integers from the same scalar without rounding to 100 early', () => {
     expect(createLandrushIslandLoadingProgressPresentation(0.794)).toEqual({
       percent: 79,
       percentText: '79%',
       progress: 0.794,
     })
-    expect(createLandrushIslandLoadingProgressPresentation(0.795_1).percent).toBe(79)
     expect(createLandrushIslandLoadingProgressPresentation(0.8).percent).toBe(80)
-    expect(createLandrushIslandLoadingProgressPresentation(0.999).percent).toBe(99)
+    expect(createLandrushIslandLoadingProgressPresentation(0.999_999_999_999).percent).toBe(99)
     expect(createLandrushIslandLoadingProgressPresentation(1).percent).toBe(100)
   })
 
-  test('keeps reduced-motion progress compositor-driven without a milestone jump', () => {
-    let animateCalls = 0
-    let frames: Keyframe[] | PropertyIndexedKeyframes | null = null
-    let options: KeyframeAnimationOptions | number | undefined
+  test('keeps reduced-motion progress on the same bounded curve; only the fade is optional', () => {
+    expect(
+      resolveLandrushIslandLoadingReducedMotion((query) => ({
+        matches: query === '(prefers-reduced-motion: reduce)',
+      })),
+    ).toBe(true)
+    expect(resolveLandrushIslandLoadingReducedMotion(undefined)).toBe(false)
+    expect(
+      resolveLandrushIslandLoadingReducedMotion(() => {
+        throw new Error('unavailable')
+      }),
+    ).toBe(false)
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.05 })
+    controller.complete()
+    const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
+    let received: Keyframe[] | PropertyIndexedKeyframes | undefined
     const style = createStyle()
-    const animation = { cancel() {} }
-    const reducedMotion = resolveLandrushIslandLoadingReducedMotion((query) => ({
-      matches: query === '(prefers-reduced-motion: reduce)',
-    }))
-    const segment = createLandrushIslandLoadingAppliedVisualSegment(
+    animateLandrushIslandLoadingPreview(
       {
-        durationMs: 30_000,
-        from: 0.3,
-        keyframes: [
-          { offset: 0, progress: 0.3 },
-          { offset: 1, progress: 0.7 },
-        ],
-        startedAtMs: 0,
-        to: 0.7,
-      },
-      reducedMotion,
-    )
-    const returned = animateLandrushIslandLoadingPreview(
-      {
-        animate: (nextFrames, nextOptions) => {
-          animateCalls += 1
-          frames = nextFrames
-          options = nextOptions
-          return animation as unknown as Animation
+        animate: (frames) => {
+          received = frames
+          return { cancel() {} } as unknown as Animation
         },
         style,
       } as unknown as HTMLElement,
-      segment,
+      preview,
     )
-
-    expect(reducedMotion).toBe(true)
-    expect(segment.keyframes).toEqual([
-      { offset: 0, progress: 0.3 },
-      { offset: 1, progress: 0.7 },
-    ])
-    expect(returned).toBe(animation)
-    expect(animateCalls).toBe(1)
-    expect(frames).toEqual([
-      { offset: 0, transform: 'scaleX(0.3)' },
-      { offset: 1, transform: 'scaleX(0.7)' },
-    ])
-    expect(options).toEqual({
-      duration: 30_000,
-      easing: 'linear',
-      fill: 'forwards',
-    })
-    expect(style.transform).toBe('scaleX(0.3)')
-    expect(style.willChange).toBe('transform')
-    expect(resolveLandrushIslandLoadingReducedMotion(undefined)).toBe(false)
+    expect(received).toEqual(createLandrushIslandLoadingVisualKeyframes(preview))
+    expect(preview.from).toBe(0.05)
+    expect(preview.to).toBe(1)
+    expect(style.transform).toBe('scaleX(0.05)')
   })
 })
+
+function evaluateCompositorCurve(frames: Keyframe[], durationMs: number, elapsedMs: number) {
+  const offset = Math.max(0, Math.min(1, elapsedMs / durationMs))
+  for (let index = 0; index < frames.length - 1; index += 1) {
+    const start = Number(frames[index]!.offset)
+    const end = Number(frames[index + 1]!.offset)
+    if (offset <= end)
+      return evaluateCompositorPiece(frames, durationMs, index, (offset - start) / (end - start))
+  }
+  return {
+    acceleration: 0,
+    progress: resolveLandrushIslandLoadingTransformProgress(String(frames.at(-1)?.transform)),
+    velocity: 0,
+  }
+}
+
+function evaluateCompositorPiece(frames: Keyframe[], durationMs: number, index: number, t: number) {
+  const first = frames[index]!
+  const last = frames[index + 1]!
+  const p0 = resolveLandrushIslandLoadingTransformProgress(String(first.transform))
+  const p1 = resolveLandrushIslandLoadingTransformProgress(String(last.transform))
+  const seconds = ((Number(last.offset) - Number(first.offset)) * durationMs) / 1_000
+  const controls = /^cubic-bezier\(([^)]+)\)$/
+    .exec(String(first.easing))?.[1]
+    ?.split(',')
+    .map(Number)
+  if (!controls)
+    return { acceleration: 0, progress: p0 + (p1 - p0) * t, velocity: (p1 - p0) / seconds }
+  expect(controls[0]).toBeCloseTo(1 / 3, 14)
+  expect(controls[2]).toBeCloseTo(2 / 3, 14)
+  const y1 = controls[1]!
+  const y2 = controls[3]!
+  const c3 = 1 - 3 * y2 + 3 * y1
+  const c2 = 3 * y2 - 6 * y1
+  const c1 = 3 * y1
+  return {
+    acceleration: ((p1 - p0) * (6 * c3 * t + 2 * c2)) / seconds ** 2,
+    progress: p0 + (p1 - p0) * ((c3 * t + c2) * t + c1) * t,
+    velocity: ((p1 - p0) * ((3 * c3 * t + 2 * c2) * t + c1)) / seconds,
+  }
+}
 
 function createStyle() {
   return {
@@ -749,6 +450,7 @@ function createStyle() {
       return ''
     },
     transform: '',
+    transformOrigin: '',
     visibility: '',
     willChange: '',
   }

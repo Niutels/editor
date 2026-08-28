@@ -2,6 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
+  createLandrushIslandLoadingProgressController,
+  LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+} from './landrush-island-loading-progress-controller'
+import {
   advanceLandrushGeneratedAssetMountGeneration,
   createLandrushInitialParcelAuthorityKey,
   createLandrushIslandLoadingHandoffGate,
@@ -13,6 +17,7 @@ import {
   shouldPersistLandrushIslandOfflineState,
   wasLandrushInitialParcelAuthorityMaterialized,
 } from './landrush-island-loading-readiness'
+import { createLandrushIslandLoadingCompletionGate } from './landrush-island-loading-timeline-react'
 
 function createFrameScheduler() {
   let nextId = 1
@@ -360,6 +365,54 @@ describe('Landrush island paint readiness', () => {
     expect(handoffs).toEqual([])
   })
 
+  test('requires smooth completion and a later visible 100-percent frame before handoff', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.05 })
+    const gate = createLandrushIslandLoadingCompletionGate()
+    const observeFrame = (frameTimeMs: number) =>
+      gate.observeFrame({
+        frameTimeMs,
+        ready: controller.readyToDismiss(),
+        renderedProgress: controller.getSnapshot().displayedProgress,
+        visible: true,
+      })
+
+    controller.complete()
+    expect(observeFrame(0)).toBe(false)
+    controller.step(LANDRUSH_ISLAND_LOADING_RESPONSE_MS - 50)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS - 50)).toBe(false)
+    controller.step(50)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)).toBe(false)
+    expect(gate.hasPresentedCompletion()).toBe(false)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)).toBe(false)
+    expect(observeFrame(LANDRUSH_ISLAND_LOADING_RESPONSE_MS + 50)).toBe(true)
+    expect(gate.hasPresentedCompletion()).toBe(true)
+  })
+
+  test('withdrawn readiness revokes the visible completion gate until readiness returns', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.9 })
+    const gate = createLandrushIslandLoadingCompletionGate()
+    const observeFrame = (frameTimeMs: number) =>
+      gate.observeFrame({
+        frameTimeMs,
+        ready: controller.readyToDismiss(),
+        renderedProgress: controller.getSnapshot().displayedProgress,
+        visible: true,
+      })
+
+    controller.complete()
+    controller.step(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)
+    expect(observeFrame(800)).toBe(false)
+    expect(observeFrame(850)).toBe(true)
+    controller.cancelCompletion()
+    gate.reset()
+    expect(gate.hasPresentedCompletion()).toBe(false)
+    expect(observeFrame(900)).toBe(false)
+    controller.complete()
+    expect(observeFrame(950)).toBe(false)
+    expect(observeFrame(1_000)).toBe(true)
+  })
+
   test('wires the loader to a Landrush world frame and the presentation gate', () => {
     const clientPath = fileURLToPath(new URL('./landrush-island-client.tsx', import.meta.url))
     const clientSource = readFileSync(clientPath, 'utf8')
@@ -483,24 +536,46 @@ describe('Landrush island paint readiness', () => {
     expect(timelineSource).toContain('fadingOut: true')
     const runtimeHookSource = timelineSource.slice(
       timelineSource.indexOf('export function useLandrushIslandLoadingTimeline({'),
-      timelineSource.indexOf('export function createLandrushIslandLoadingProgressPresentation'),
+      timelineSource.indexOf('export function createLandrushIslandLoadingCompletionGate'),
     )
-    expect(runtimeHookSource).toMatch(/completionRequested = true\s+beginHandoffFade\(\)/)
-    expect(runtimeHookSource).not.toContain('readyToDismiss()')
+    expect(runtimeHookSource).toMatch(/completionRequested = true\s+controller\.complete\(\)/)
+    expect(runtimeHookSource).not.toMatch(/completionRequested = true\s+beginHandoffFade\(\)/)
+    expect(runtimeHookSource).toContain(
+      'const completionGate = createLandrushIslandLoadingCompletionGate()',
+    )
+    expect(runtimeHookSource).toContain('allReady && controller.readyToDismiss()')
+    expect(runtimeHookSource).toContain('completionGate.observeFrame({')
+    expect(runtimeHookSource).toContain("visible: document.visibilityState === 'visible'")
+    expect(runtimeHookSource).toMatch(
+      /if \(completionPresented\) \{[\s\S]*?'data-landrush-island-loading-100-presented'[\s\S]*?beginHandoffFade\(\)/,
+    )
+    expect(runtimeHookSource).toContain('if (!allReady && completionRequested) resetCompletion()')
+    expect(runtimeHookSource).toContain('completionGate.reset()')
     expect(runtimeHookSource).not.toContain('scheduleCompositorRefresh')
     expect(runtimeHookSource).not.toContain('retargetLandrushIslandLoadingPreview')
     expect(runtimeHookSource).not.toContain('setKeyframes')
-    expect(runtimeHookSource).toContain('createLandrushIslandLoadingAppliedVisualSegment(')
+    expect(runtimeHookSource).toContain('animateLandrushIslandLoadingPreview(fill, nextSegment)')
+    expect(runtimeHookSource).toContain('nextAnimation.startTime = lastClockMs')
     expect(runtimeHookSource).toContain('const fadeDurationMs = reducedMotion ? 0')
     expect(runtimeHookSource).not.toMatch(/if \(!?reducedMotion\)/)
     expect(runtimeHookSource).not.toContain('reconcileDisplayedProgress(')
     const finishHandoffSource = timelineSource.slice(
-      timelineSource.indexOf('const finishHandoff = (expectedFadeAttempt: number) => {'),
+      timelineSource.indexOf('const finishHandoff = (expectedAttempt: number) => {'),
       timelineSource.indexOf('const beginHandoffFade = () => {'),
     )
-    expect(
-      finishHandoffSource.indexOf("presentationOverlay.setAttribute('hidden', '')"),
-    ).toBeLessThan(finishHandoffSource.indexOf('progressController.snapToComplete()'))
+    expect(finishHandoffSource).toContain(
+      '!run.update(runGeneration, readTasks(), readNow()).allReady',
+    )
+    expect(finishHandoffSource).toContain('!controller.readyToDismiss()')
+    const presentedGuardOffset = finishHandoffSource.indexOf(
+      '!completionGate.hasPresentedCompletion()',
+    )
+    const completeFillOffset = finishHandoffSource.indexOf("fill.style.transform = 'scaleX(1)'")
+    const hideOffset = finishHandoffSource.indexOf("overlay.setAttribute('hidden', '')")
+    expect(presentedGuardOffset).toBeGreaterThanOrEqual(0)
+    expect(completeFillOffset).toBeGreaterThan(presentedGuardOffset)
+    expect(hideOffset).toBeGreaterThan(completeFillOffset)
+    expect(finishHandoffSource).not.toContain('snapToComplete()')
     expect(timelineSource).not.toContain('PerformanceObserver')
   })
 
@@ -675,9 +750,7 @@ describe('Landrush island paint readiness', () => {
     expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetSettlement(')
     expect(generatedAssetsSource).toContain('resolveZombieEscapeGeneratedAssetReadinessSnapshot({')
     expect(generatedAssetsSource).toContain('expectedKeys: GENERATED_WEAPON_ASSET_KEYS')
-    expect(generatedAssetsSource).toContain(
-      'reportingRef.current.onGeneratedAssetsReadinessChange',
-    )
+    expect(generatedAssetsSource).toContain('reportingRef.current.onGeneratedAssetsReadinessChange')
     expect(generatedAssetsSource).toContain('report?.(')
     expect(generatedAssetsSource).toContain("onAssetStatusChange(assetKey, { state: 'ready' })")
     expect(generatedAssetsSource).not.toContain('representativePrewarmQueue.waitForSettled()')
