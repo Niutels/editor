@@ -188,6 +188,15 @@ type ZombieEscapeWebGLObjectFlagSnapshot = Readonly<{
   object: Object3D
 }>
 
+type ZombieEscapeWebGLDrawRangeSnapshot = Readonly<{
+  count: number
+  geometry: Readonly<{
+    drawRange: Readonly<{ count: number; start: number }>
+    setDrawRange: (start: number, count: number) => void
+  }>
+  start: number
+}>
+
 type RegisteredRepresentative = Readonly<{
   registration: symbol
   root: Object3D
@@ -580,6 +589,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       const cohort = planZombieEscapeWebGLRealizationCohorts(coldUnits, {
         maxCohorts: remainingCohorts,
       })[0]!
+      const diagnosticLabel = describeZombieEscapeWebGLRealizationCohort(submittedCohorts, cohort)
       const coldTextures = collectZombieEscapeWebGLRealizationTextures(cohort).filter(
         (texture) => !realizedTextures.has(texture),
       )
@@ -604,6 +614,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
         for (const unit of cohort.units) {
           for (const renderable of unit.renderables) renderable.castShadow = false
         }
+        markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:main-only:submit`)
         await submitZombieEscapeWebGLRealizationDraw(
           () => {
             try {
@@ -619,6 +630,35 @@ export async function realizeZombieEscapeWebGLAttachedScene(
           waitForAdmissionOpportunity,
           isCurrent,
         )
+        markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:main-only:settled`)
+      }
+
+      const pilotUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
+      const pilotDrawRanges = snapshotZombieEscapeWebGLShadowPilotDrawRanges(cohort)
+      if (pilotDrawRanges.length > 0) {
+        activeObjectSnapshots = snapshotZombieEscapeWebGLRealizationObjects(pilotUnits)
+        activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
+        applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
+        applyZombieEscapeWebGLRealizationCohort(pilotUnits, cohort)
+        applyZombieEscapeWebGLShadowPilotDrawRanges(pilotDrawRanges)
+        markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:shadow-pilot:submit`)
+        await submitZombieEscapeWebGLRealizationDraw(
+          () => {
+            try {
+              webglRenderer.render(targetScene, camera)
+            } finally {
+              restoreZombieEscapeWebGLDrawRanges(pilotDrawRanges)
+              restoreZombieEscapeWebGLRealizationObjects(activeObjectSnapshots!)
+              restoreZombieEscapeWebGLRendererState(webglRenderer, activeRendererSnapshot!)
+              activeObjectSnapshots = undefined
+              activeRendererSnapshot = undefined
+            }
+          },
+          context,
+          waitForAdmissionOpportunity,
+          isCurrent,
+        )
+        markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:shadow-pilot:settled`)
       }
 
       const combinedUnits = collectZombieEscapeWebGLRealizationUnits(targetScene)
@@ -634,6 +674,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
       activeRendererSnapshot = snapshotZombieEscapeWebGLRendererState(webglRenderer)
       applyZombieEscapeWebGLRealizationRendererState(webglRenderer)
       applyZombieEscapeWebGLRealizationCohort(combinedUnits, cohort)
+      markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:combined:submit`)
       await submitZombieEscapeWebGLRealizationDraw(
         () => {
           try {
@@ -649,6 +690,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
         waitForAdmissionOpportunity,
         isCurrent,
       )
+      markZombieEscapeWebGLRealizationDiagnostic(`${diagnosticLabel}:combined:settled`)
       for (const unit of cohort.units) {
         for (const renderable of unit.renderables) {
           if (
@@ -681,6 +723,24 @@ function isZombieEscapeRenderableObject(object: Object3D) {
   return Boolean(
     renderable.isMesh || renderable.isLine || renderable.isPoints || renderable.isSprite,
   )
+}
+
+function describeZombieEscapeWebGLRealizationCohort(
+  cohortIndex: number,
+  cohort: ZombieEscapeWebGLRealizationCohort,
+) {
+  const names = cohort.units.map(({ root }) => root.name || root.type).join('+')
+  return `landrush:webgl-realization:cohort=${String(cohortIndex)}:${names}`
+}
+
+function markZombieEscapeWebGLRealizationDiagnostic(label: string) {
+  if (
+    typeof window === 'undefined' ||
+    new URLSearchParams(window.location.search).get('bench') !== '1'
+  ) {
+    return
+  }
+  window.performance.mark(label)
 }
 
 function estimateZombieEscapeWebGLRealizationWeight(object: Object3D) {
@@ -1100,6 +1160,65 @@ function restoreZombieEscapeWebGLRealizationObjects(
     snapshot.object.castShadow = snapshot.castShadow
     snapshot.object.layers.mask = snapshot.layerMask
     snapshot.object.frustumCulled = snapshot.frustumCulled
+  }
+}
+
+function snapshotZombieEscapeWebGLShadowPilotDrawRanges(
+  cohort: ZombieEscapeWebGLRealizationCohort,
+) {
+  const seen = new Set<object>()
+  const snapshots: ZombieEscapeWebGLDrawRangeSnapshot[] = []
+  for (const unit of cohort.units) {
+    for (const object of unit.renderables) {
+      const renderable = object as Object3D & {
+        geometry?: Readonly<{
+          attributes?: Readonly<Record<string, Readonly<{ count?: number }>>>
+          drawRange?: Readonly<{ count?: number; start?: number }>
+          index?: Readonly<{ count?: number }> | null
+          setDrawRange?: (start: number, count: number) => void
+        }>
+        isMesh?: boolean
+      }
+      const geometry = renderable.geometry
+      if (!renderable.castShadow || !renderable.isMesh || !geometry || seen.has(geometry)) continue
+      if (typeof geometry.setDrawRange !== 'function') continue
+      const start = Math.max(0, Math.trunc(geometry.drawRange?.start ?? 0))
+      const sourceCount = Math.max(
+        0,
+        Math.trunc(geometry.index?.count ?? geometry.attributes?.position?.count ?? 0),
+      )
+      const requestedCount = geometry.drawRange?.count ?? Number.POSITIVE_INFINITY
+      const availableCount = Math.max(
+        0,
+        Math.min(
+          sourceCount - start,
+          Number.isFinite(requestedCount) ? requestedCount : sourceCount,
+        ),
+      )
+      if (availableCount < 3) continue
+      seen.add(geometry)
+      snapshots.push({
+        count: geometry.drawRange?.count ?? Number.POSITIVE_INFINITY,
+        geometry: geometry as ZombieEscapeWebGLDrawRangeSnapshot['geometry'],
+        start: geometry.drawRange?.start ?? 0,
+      })
+    }
+  }
+  return snapshots
+}
+
+function applyZombieEscapeWebGLShadowPilotDrawRanges(
+  snapshots: readonly ZombieEscapeWebGLDrawRangeSnapshot[],
+) {
+  for (const { geometry, start } of snapshots) geometry.setDrawRange(start, 3)
+}
+
+function restoreZombieEscapeWebGLDrawRanges(
+  snapshots: readonly ZombieEscapeWebGLDrawRangeSnapshot[],
+) {
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    const { count, geometry, start } = snapshots[index]!
+    geometry.setDrawRange(start, count)
   }
 }
 
