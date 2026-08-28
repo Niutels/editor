@@ -1,8 +1,8 @@
 'use client'
 
-import { useGLTFKTX2 } from '@pascal-app/viewer'
+import { configureKtx2Support } from '@pascal-app/viewer'
 import { useAnimations } from '@react-three/drei'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useLoader, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
   type AnimationAction,
@@ -18,9 +18,15 @@ import {
   Quaternion,
   Vector3,
 } from 'three'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
+import {
+  resolveLandrushRobotAssetPath,
+  supportsLandrushRobotNativeBc1,
+} from './landrush-robot-assets'
 import {
   applyLandrushRobotCrouchPose,
   createLandrushRobotCrouchRig,
@@ -48,7 +54,6 @@ export {
   resolveLandrushRobotJumpPose,
 } from './landrush-robot-jump'
 
-const LANDRUSH_ROBOT_ASSET_PATH = '/navigation/proto_pascal_robot-ktx2-1112f038.glb'
 const LANDRUSH_ROBOT_GLB_VISUAL_SCALE = 1 / 110.16949152542374
 const LANDRUSH_ROBOT_TARGET_HEIGHT = 1.82
 const LANDRUSH_ROBOT_IDLE_TIME_SCALE = 0.5
@@ -156,6 +161,28 @@ type LandrushRobotProps = {
   visualRootRef?: { current: Group | null }
 }
 
+// A distinct loader constructor keeps the capability-selected robot asset out of useGLTF's cache.
+class LandrushRobotGLTFLoader extends GLTFLoader {}
+
+function useLandrushRobotGLTF() {
+  const renderer = useThree((state) => state.gl)
+  const nativeBc1 = supportsLandrushRobotNativeBc1(renderer)
+  const path = resolveLandrushRobotAssetPath(renderer)
+  return useLoader(LandrushRobotGLTFLoader, path, (loader) => {
+    if (nativeBc1 && !configureKtx2Support(loader, renderer)) {
+      throw new Error('Landrush robot BC1 texture support could not be initialized.')
+    }
+    loader.setMeshoptDecoder(MeshoptDecoder)
+  })
+}
+
+export {
+  LANDRUSH_ROBOT_ASSET_PATH,
+  LANDRUSH_ROBOT_FALLBACK_ASSET_PATH,
+  resolveLandrushRobotAssetPath,
+  supportsLandrushRobotNativeBc1,
+} from './landrush-robot-assets'
+
 export function LandrushRobot({
   animationPace = 1,
   crouching = false,
@@ -184,7 +211,7 @@ export function LandrushRobot({
   const fallMotionScaleValue = MathUtils.clamp(fallMotionScale, 0.05, 1)
   const idleTimeScale = LANDRUSH_ROBOT_IDLE_TIME_SCALE
   const groupRef = useRef<Group>(null!)
-  const { animations, scene } = useGLTFKTX2(LANDRUSH_ROBOT_ASSET_PATH)
+  const { animations, scene } = useLandrushRobotGLTF()
   const locomotionClips = useMemo(
     () =>
       measure('setup.robot-glb.select-locomotion-clips', () =>

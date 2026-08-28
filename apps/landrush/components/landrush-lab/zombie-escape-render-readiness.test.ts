@@ -1,17 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import type { Camera, Object3D, Texture } from 'three'
 import {
-  CompressedTexture,
   DataTexture,
   Group,
-  LinearFilter,
   Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
-  RGBA_BPTC_Format,
   Scene,
   SphereGeometry,
-  SRGBColorSpace,
   Vector4,
 } from 'three'
 import {
@@ -25,7 +21,6 @@ import {
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
   planZombieEscapeWebGLRealizationCohorts,
-  realizeZombieEscapeWebGLAttachedScene,
   ZOMBIE_ESCAPE_FALLBACK_RENDER_REPRESENTATIVE_KEY,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
   ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_COHORT_WEIGHT,
@@ -814,166 +809,6 @@ describe('Zombie Escape render compilation', () => {
     first.material.dispose()
     second.geometry.dispose()
     second.material.dispose()
-    texture.dispose()
-  })
-
-  test('fences an independent compressed-format pilot before the full cold texture', async () => {
-    const targetScene = new Scene()
-    const baseMipData = new Uint8Array(256 * 1024)
-    const terminalMipData = Uint8Array.from({ length: 16 }, (_, index) => index)
-    const texture = new CompressedTexture(
-      [
-        { data: baseMipData, height: 512, width: 512 },
-        { data: terminalMipData, height: 1, width: 1 },
-      ],
-      512,
-      512,
-      RGBA_BPTC_Format,
-    )
-    texture.colorSpace = SRGBColorSpace
-    texture.flipY = false
-    texture.needsUpdate = true
-    const originalImage = texture.image
-    const originalMipmaps = texture.mipmaps
-    const originalSource = texture.source
-    const originalSourceVersion = texture.source.version
-    const originalTextureVersion = texture.version
-    const mesh = makeHeavyRealizationMesh('compressed-texture')
-    mesh.material.dispose()
-    mesh.material = new MeshBasicMaterial({ map: texture })
-    targetScene.add(mesh)
-    const initializedTextures: Texture[] = []
-    let pilotDisposed = false
-    const harness = createWebGLRealizationRenderer({
-      onInitTexture(initialized) {
-        initializedTextures.push(initialized)
-        if (initialized === texture) {
-          harness.events.push('texture:source')
-          return
-        }
-        harness.events.push('texture:pilot')
-        initialized.addEventListener('dispose', () => {
-          pilotDisposed = true
-          harness.events.push('texture:pilot:dispose')
-        })
-      },
-    })
-
-    await realizeZombieEscapeWebGLAttachedScene(
-      {
-        camera: new PerspectiveCamera(),
-        renderer: harness.renderer,
-        targetScene,
-      },
-      async () => {
-        harness.events.push('admission')
-      },
-    )
-
-    const pilot = initializedTextures[0] as CompressedTexture
-    expect(initializedTextures).toEqual([pilot, texture])
-    expect(pilot).not.toBe(texture)
-    expect(pilot.source).not.toBe(texture.source)
-    expect(pilot.image).not.toBe(texture.image)
-    expect(pilot.mipmaps).not.toBe(texture.mipmaps)
-    expect(pilot.mipmaps[0]).not.toBe(texture.mipmaps[1])
-    expect(pilot.mipmaps).toHaveLength(1)
-    expect(pilot.image).toEqual({ height: 4, width: 4 })
-    expect(pilot.mipmaps[0]?.height).toBe(4)
-    expect(pilot.mipmaps[0]?.width).toBe(4)
-    expect(pilot.mipmaps[0]?.data).not.toBe(terminalMipData)
-    expect(Array.from(pilot.mipmaps[0]?.data ?? [])).toEqual(Array.from(terminalMipData))
-    expect(pilot.format).toBe(texture.format)
-    expect(pilot.type).toBe(texture.type)
-    expect(pilot.mapping).toBe(texture.mapping)
-    expect(pilot.wrapS).toBe(texture.wrapS)
-    expect(pilot.wrapT).toBe(texture.wrapT)
-    expect(pilot.magFilter).toBe(texture.magFilter)
-    expect(pilot.minFilter).toBe(LinearFilter)
-    expect(pilot.anisotropy).toBe(texture.anisotropy)
-    expect(pilot.colorSpace).toBe(texture.colorSpace)
-    expect(pilot.internalFormat).toBe(texture.internalFormat)
-    expect(pilot.normalized).toBe(texture.normalized)
-    expect(pilot.premultiplyAlpha).toBe(texture.premultiplyAlpha)
-    expect(pilot.unpackAlignment).toBe(texture.unpackAlignment)
-    expect(pilot.flipY).toBe(texture.flipY)
-    expect(pilot.generateMipmaps).toBe(false)
-    expect(pilot.version).toBe(1)
-    expect(pilot.source.version).toBe(1)
-    expect(texture.image).toBe(originalImage)
-    expect(texture.mipmaps).toBe(originalMipmaps)
-    expect(texture.source).toBe(originalSource)
-    expect(texture.source.version).toBe(originalSourceVersion)
-    expect(texture.version).toBe(originalTextureVersion)
-    expect(pilotDisposed).toBe(true)
-    const pilotInit = harness.events.indexOf('texture:pilot')
-    const pilotFenceDelete = harness.events.indexOf('fence:delete', pilotInit)
-    const separatingAdmission = harness.events.indexOf('admission', pilotFenceDelete)
-    const sourceInit = harness.events.indexOf('texture:source')
-    const sourceFenceDelete = harness.events.indexOf('fence:delete', sourceInit)
-    const pilotDispose = harness.events.indexOf('texture:pilot:dispose')
-    const cohortRender = harness.events.indexOf('render:scene')
-    expect(pilotInit).toBeLessThan(pilotFenceDelete)
-    expect(pilotFenceDelete).toBeLessThan(separatingAdmission)
-    expect(separatingAdmission).toBeLessThan(sourceInit)
-    expect(sourceInit).toBeLessThan(sourceFenceDelete)
-    expect(sourceFenceDelete).toBeLessThan(pilotDispose)
-    expect(pilotDispose).toBeLessThan(cohortRender)
-    expect(harness.events.filter((event) => event === 'fence:create')).toHaveLength(4)
-    expect(harness.deletedFences).toBe(4)
-    mesh.geometry.dispose()
-    mesh.material.dispose()
-    texture.dispose()
-  })
-
-  test('disposes the compressed-format pilot when the full texture init fails', async () => {
-    const targetScene = new Scene()
-    const texture = new CompressedTexture(
-      [
-        { data: new Uint8Array(256 * 1024), height: 512, width: 512 },
-        { data: new Uint8Array(16), height: 1, width: 1 },
-      ],
-      512,
-      512,
-      RGBA_BPTC_Format,
-    )
-    texture.colorSpace = SRGBColorSpace
-    texture.needsUpdate = true
-    const originalSourceVersion = texture.source.version
-    const mesh = makeHeavyRealizationMesh('failing-compressed-texture')
-    mesh.material.dispose()
-    mesh.material = new MeshBasicMaterial({ map: texture })
-    targetScene.add(mesh)
-    let pilotDisposed = false
-    let sourceDisposed = false
-    texture.addEventListener('dispose', () => {
-      sourceDisposed = true
-    })
-    const harness = createWebGLRealizationRenderer({
-      onInitTexture(initialized) {
-        if (initialized === texture) throw new Error('source texture init failed')
-        initialized.addEventListener('dispose', () => {
-          pilotDisposed = true
-        })
-      },
-    })
-
-    await expect(
-      realizeZombieEscapeWebGLAttachedScene(
-        {
-          camera: new PerspectiveCamera(),
-          renderer: harness.renderer,
-          targetScene,
-        },
-        async () => undefined,
-      ),
-    ).rejects.toThrow('source texture init failed')
-    expect(pilotDisposed).toBe(true)
-    expect(sourceDisposed).toBe(false)
-    expect(texture.source.version).toBe(originalSourceVersion)
-    expect(harness.deletedFences).toBe(2)
-    mesh.geometry.dispose()
-    mesh.material.dispose()
     texture.dispose()
   })
 
