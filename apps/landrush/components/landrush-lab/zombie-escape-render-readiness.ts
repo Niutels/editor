@@ -1,4 +1,21 @@
-import { type Camera, type Object3D, Scene, type Texture, Vector4 } from 'three'
+import {
+  type Camera,
+  CompressedTexture,
+  LinearFilter,
+  type Mapping,
+  type Object3D,
+  RGB_ETC1_Format,
+  RGB_ETC2_Format,
+  RGB_S3TC_DXT1_Format,
+  RGBA_ASTC_4x4_Format,
+  RGBA_BPTC_Format,
+  RGBA_ETC2_EAC_Format,
+  RGBA_S3TC_DXT1_Format,
+  RGBA_S3TC_DXT5_Format,
+  Scene,
+  type Texture,
+  Vector4,
+} from 'three'
 import {
   compileLandrushRenderRepresentatives,
   createLandrushRenderReadinessCoordinator,
@@ -33,7 +50,18 @@ export const ZOMBIE_ESCAPE_WEBGL_REALIZATION_MAX_FENCE_POLLS = 8
 // This is an empirical scheduling score, not a millisecond bound.
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_GEOMETRY_BYTES_PER_WEIGHT = 1024 * 1024
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VERTEX_INVOCATIONS_PER_WEIGHT = 100_000
+const ZOMBIE_ESCAPE_WEBGL_COMPRESSED_TEXTURE_PILOT_MINIMUM_BYTES = 256 * 1024
 const ZOMBIE_ESCAPE_WEBGL_REALIZATION_VIEWPORT = new Vector4(0, 0, 1, 1)
+const ZOMBIE_ESCAPE_WEBGL_PILOT_4X4_FORMATS = new Set<number>([
+  RGBA_ASTC_4x4_Format,
+  RGBA_BPTC_Format,
+  RGBA_ETC2_EAC_Format,
+  RGBA_S3TC_DXT1_Format,
+  RGBA_S3TC_DXT5_Format,
+  RGB_ETC1_Format,
+  RGB_ETC2_Format,
+  RGB_S3TC_DXT1_Format,
+])
 
 export type ZombieEscapeRenderRepresentativeKey = string
 
@@ -334,6 +362,7 @@ export async function realizeZombieEscapeWebGLAttachedScene(
   const emptyScene = new Scene()
   const realizedRenderables = new Set<Object3D>()
   const realizedTextures = new Set<Texture>()
+  const realizedTexturePilotKeys = new Set<string>()
   let submittedCohorts = 0
   let activeObjectSnapshots: readonly ZombieEscapeWebGLObjectFlagSnapshot[] | undefined
   let activeRendererSnapshot: ZombieEscapeWebGLRendererStateSnapshot | undefined
@@ -375,13 +404,34 @@ export async function realizeZombieEscapeWebGLAttachedScene(
         (texture) => !realizedTextures.has(texture),
       )
       for (const texture of coldTextures) {
-        await submitZombieEscapeWebGLRealizationDraw(
-          () => webglRenderer.initTexture(texture),
-          context,
-          waitForAdmissionOpportunity,
-          isCurrent,
-        )
-        realizedTextures.add(texture)
+        const pilotKey = resolveZombieEscapeWebGLCompressedTexturePilotKey(texture)
+        const pilot =
+          pilotKey && !realizedTexturePilotKeys.has(pilotKey)
+            ? createZombieEscapeWebGLCompressedTexturePilot(texture)
+            : null
+        try {
+          if (pilot && pilotKey) {
+            await submitZombieEscapeWebGLRealizationDraw(
+              () => webglRenderer.initTexture(pilot),
+              context,
+              waitForAdmissionOpportunity,
+              isCurrent,
+            )
+            realizedTexturePilotKeys.add(pilotKey)
+            await waitForAdmissionOpportunity()
+            assertZombieEscapeRenderReadinessCurrent(isCurrent)
+          }
+          await submitZombieEscapeWebGLRealizationDraw(
+            () => webglRenderer.initTexture(texture),
+            context,
+            waitForAdmissionOpportunity,
+            isCurrent,
+          )
+          realizedTextures.add(texture)
+          if (pilotKey) realizedTexturePilotKeys.add(pilotKey)
+        } finally {
+          pilot?.dispose()
+        }
       }
       const hasShadowCasters = cohort.units.some((unit) =>
         unit.renderables.some((renderable) => renderable.castShadow),
@@ -575,6 +625,75 @@ function collectZombieEscapeWebGLRealizationTextures(
 
 function isZombieEscapeWebGLTexture(value: unknown): value is Texture {
   return Boolean(value && typeof value === 'object' && (value as { isTexture?: boolean }).isTexture)
+}
+
+function resolveZombieEscapeWebGLCompressedTexturePilotKey(texture: Texture) {
+  const candidate = texture as Texture & {
+    isCompressedArrayTexture?: boolean
+    isCompressedCubeTexture?: boolean
+    isCompressedTexture?: boolean
+  }
+  if (
+    !candidate.isCompressedTexture ||
+    candidate.isCompressedArrayTexture ||
+    candidate.isCompressedCubeTexture ||
+    !texture.source.dataReady ||
+    !ZOMBIE_ESCAPE_WEBGL_PILOT_4X4_FORMATS.has(texture.format)
+  ) {
+    return null
+  }
+  return [texture.format, texture.type, texture.internalFormat ?? '', texture.colorSpace].join(':')
+}
+
+function createZombieEscapeWebGLCompressedTexturePilot(texture: Texture) {
+  const source = texture as CompressedTexture
+  if (!source.isCompressedTexture || source.mipmaps.length < 2) return null
+  const baseMip = source.mipmaps[0]
+  const terminalMip = source.mipmaps.at(-1)
+  if (
+    !baseMip ||
+    !terminalMip ||
+    baseMip.data.byteLength < ZOMBIE_ESCAPE_WEBGL_COMPRESSED_TEXTURE_PILOT_MINIMUM_BYTES ||
+    !Number.isInteger(terminalMip.width) ||
+    !Number.isInteger(terminalMip.height) ||
+    terminalMip.width <= 0 ||
+    terminalMip.height <= 0
+  ) {
+    return null
+  }
+
+  const width = Math.max(4, Math.ceil(terminalMip.width / 4) * 4)
+  const height = Math.max(4, Math.ceil(terminalMip.height / 4) * 4)
+  const bytesPerBlock =
+    source.format === RGBA_ASTC_4x4_Format ||
+    source.format === RGBA_BPTC_Format ||
+    source.format === RGBA_ETC2_EAC_Format ||
+    source.format === RGBA_S3TC_DXT5_Format
+      ? 16
+      : 8
+  if (terminalMip.data.byteLength !== (width / 4) * (height / 4) * bytesPerBlock) return null
+  const pilot = new CompressedTexture(
+    [{ data: terminalMip.data.slice(), height, width }],
+    width,
+    height,
+    source.format,
+    source.type,
+    source.mapping as Mapping,
+    source.wrapS,
+    source.wrapT,
+    source.magFilter,
+    LinearFilter,
+    source.anisotropy,
+    source.colorSpace,
+  )
+  pilot.flipY = source.flipY
+  pilot.generateMipmaps = false
+  pilot.internalFormat = source.internalFormat
+  pilot.normalized = source.normalized
+  pilot.premultiplyAlpha = source.premultiplyAlpha
+  pilot.unpackAlignment = source.unpackAlignment
+  pilot.needsUpdate = true
+  return pilot
 }
 
 function resolveZombieEscapeWebGLFenceContext(
