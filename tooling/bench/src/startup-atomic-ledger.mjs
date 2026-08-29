@@ -313,9 +313,10 @@ function installAtomicStartupInstrumentation() {
     if (Array.isArray(value)) return value.map(normalizeGpuDescriptorValue)
     if (ArrayBuffer.isView(value)) return Array.from(value)
     const prototype = Object.getPrototypeOf(value)
-    if (prototype === Object.prototype || prototype === null) {
+    const keys = Object.keys(value)
+    if (keys.length > 0 || prototype === Object.prototype || prototype === null) {
       return Object.fromEntries(
-        Object.keys(value)
+        keys
           .sort()
           .map((key) => [key, normalizeGpuDescriptorValue(value[key])]),
       )
