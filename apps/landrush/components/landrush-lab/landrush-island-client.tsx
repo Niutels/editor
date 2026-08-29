@@ -364,6 +364,7 @@ import {
   createLandrushIslandPalmTrunkColliderWorld,
   resolveLandrushIslandVisiblePalmLayout,
 } from './landrush-island-palm-collider'
+import { createLandrushIslandConstructionBlockedPalmInstanceIndices } from './landrush-island-palm-construction-visibility'
 import {
   createLandrushIslandPalmLayout,
   type LandrushIslandPalmPlacement,
@@ -4985,6 +4986,14 @@ export function LandrushIslandClient({
         : [...bladeGrassBlockers, ...activeBuildParcelGrassFadeBlockers],
     [activeBuildParcelGrassFadeBlockers, bladeGrassBlockers],
   )
+  const blockedPalmInstanceIndices = useMemo(
+    () =>
+      createLandrushIslandConstructionBlockedPalmInstanceIndices({
+        blockers: treeGrassBlockers,
+        layout: livePalmLayout,
+      }),
+    [livePalmLayout, treeGrassBlockers],
+  )
   const handleLoad = useCallback(async () => {
     await loadExternalPlugins()
     return landrushIslandScene.sceneGraph
@@ -6456,6 +6465,7 @@ export function LandrushIslandClient({
                     <LandrushIslandAmbientLife
                       key={initialParcelAuthorityKey}
                       admitted={initialParcelMaterializationReady}
+                      blockedPalmInstanceIndices={blockedPalmInstanceIndices}
                       npcsVisible={!zombieEscapeNightActive}
                       onLoadReadinessChange={handleAmbientLoadReadinessChange}
                       palmLayout={livePalmLayout}
@@ -6478,6 +6488,7 @@ export function LandrushIslandClient({
                   >
                     <MemoizedLandrushIslandPlayerLayer
                       baseNode={liveLayoutNode}
+                      blockedPalmInstanceIndices={blockedPalmInstanceIndices}
                       bugReportReplayPlayer={bugReportReplay?.player ?? null}
                       buildCameraPoseRef={buildCameraPoseRef}
                       cameraOwner={cameraOwner}
@@ -10057,6 +10068,7 @@ function disposeLandrushIslandGroundColliderMesh(mesh: Mesh) {
 
 function LandrushIslandPlayerLayer({
   baseNode,
+  blockedPalmInstanceIndices,
   bugReportReplayPlayer,
   buildCameraPoseRef,
   cameraOwner,
@@ -10111,6 +10123,7 @@ function LandrushIslandPlayerLayer({
   startZombieEscapeNight,
 }: {
   baseNode: LandrushIslandLayoutNode
+  blockedPalmInstanceIndices: ReadonlySet<number>
   bugReportReplayPlayer: LandrushBugReportPlayer | null
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraOwner: LandrushIslandCameraOwner
@@ -10220,10 +10233,11 @@ function LandrushIslandPlayerLayer({
   const visiblePalmLayout = useMemo(
     () =>
       resolveLandrushIslandVisiblePalmLayout({
+        blockedInstanceIndices: blockedPalmInstanceIndices,
         layout: palmLayout,
         visibleCount: visiblePalmInstanceCount,
       }),
-    [palmLayout, visiblePalmInstanceCount],
+    [blockedPalmInstanceIndices, palmLayout, visiblePalmInstanceCount],
   )
   const localRobotLevelIdRef = useRef<LevelNode['id']>(
     resolveLandrushIslandPlayerSpawnLevelId(spawn, useScene.getState().nodes),
@@ -10338,7 +10352,7 @@ function LandrushIslandPlayerLayer({
           onPhaseChange={onZombieEscapePhaseChange}
           onResetExternalPlayerMotion={resetZombieEscapeExternalPlayerMotion}
           onStatusChange={setZombieEscapeStatus}
-          palmLayout={palmLayout}
+          palmLayout={visiblePalmLayout}
           phaseReady={zombieEscapePhaseReady}
           playerColor={localProfile.color}
           spawn={spawn}

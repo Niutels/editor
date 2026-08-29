@@ -12,7 +12,10 @@ import {
   createLandrushIslandPalmTrunkColliderWorld,
   resolveLandrushIslandVisiblePalmLayout,
 } from './landrush-island-palm-collider'
-import type { LandrushIslandPalmPlacement } from './landrush-island-palm-layout'
+import {
+  createLandrushIslandPalmCollisionCircles,
+  type LandrushIslandPalmPlacement,
+} from './landrush-island-palm-layout'
 
 const GROUND_Y = 1.25
 const PLAYER_CAPSULE_RADIUS = 0.25
@@ -67,6 +70,33 @@ describe('Landrush island palm player colliders', () => {
     ).toEqual(layout)
   })
 
+  test('uses original sparse instance indices and omits construction-hidden palms from every physics shape', () => {
+    const layout = [createPlacement(2), createPlacement(9), createPlacement(17)]
+    const visibleLayout = resolveLandrushIslandVisiblePalmLayout({
+      blockedInstanceIndices: new Set([9]),
+      layout,
+      visibleCount: 12,
+    })
+    const circles = createLandrushIslandPalmCollisionCircles({
+      layout: visibleLayout,
+      origin: { x: 0, z: 0 },
+    })
+    const navigation = createLandrushIslandPalmNavigationFootprints({
+      layout: visibleLayout,
+      paddingMeters: 0.2,
+    })
+    const world = createLandrushIslandPalmTrunkColliderWorld({
+      groundY: GROUND_Y,
+      layout: visibleLayout,
+    })
+
+    expect(visibleLayout.map((placement) => placement.instanceIndex)).toEqual([2])
+    expect(circles.map((circle) => circle.objectId)).toEqual(['palm:2'])
+    expect(navigation.map((footprint) => footprint.id)).toEqual(['palm:2:trunk'])
+    expect(world?.mesh.userData.landrushPalmTrunkColliderCount).toBe(1)
+    world?.dispose()
+  })
+
   test('retains the visible layout and collider across equal-count mode changes and rebuilds on real input changes', async () => {
     const clientSource = readFileSync(
       new URL('./landrush-island-client.tsx', import.meta.url),
@@ -79,10 +109,11 @@ describe('Landrush island palm player colliders', () => {
   const visiblePalmLayout = useMemo(
     () =>
       resolveLandrushIslandVisiblePalmLayout({
+        blockedInstanceIndices: blockedPalmInstanceIndices,
         layout: palmLayout,
         visibleCount: visiblePalmInstanceCount,
       }),
-    [palmLayout, visiblePalmInstanceCount],
+    [blockedPalmInstanceIndices, palmLayout, visiblePalmInstanceCount],
   )`)
     const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
     const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
@@ -179,7 +210,7 @@ describe('Landrush island palm player colliders', () => {
       expect(larger.layout).toEqual(layout.slice(0, 7))
       expect(larger.world?.mesh.userData.landrushPalmTrunkColliderCount).toBe(7)
       expect(buildCount).toBe(3)
-      const replacement = [createPlacement(31), createPlacement(32)]
+      const replacement = [createPlacement(4), createPlacement(5)]
       const changed = await render(replacement, 7)
       expect(changed.layout).toEqual(replacement)
       expect(changed.world).not.toBe(larger.world)

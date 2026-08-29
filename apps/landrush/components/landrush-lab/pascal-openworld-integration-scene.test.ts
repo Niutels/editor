@@ -65,7 +65,10 @@ describe('Pascal multiplayer-island composition', () => {
     expect(clientSource.match(/createLandrushIslandPalmLayout\(\{/g)).toHaveLength(1)
     expect(clientSource).toContain('roadClearance: liveNaturalRoadPlan?.footprints.clearance ?? []')
     expect(clientSource.match(/palmLayout=\{livePalmLayout\}/g)).toHaveLength(2)
-    expect(clientSource.match(/palmLayout=\{palmLayout\}/g)).toHaveLength(1)
+    expect(clientSource.match(/palmLayout=\{visiblePalmLayout\}/g)).toHaveLength(1)
+    expect(
+      clientSource.match(/blockedPalmInstanceIndices=\{blockedPalmInstanceIndices\}/g),
+    ).toHaveLength(2)
     expect(ambientLifeSource).not.toContain('createLandrushIslandPalmLayout')
     expect(ambientLifeSource).toContain('palmLayout: readonly LandrushIslandPalmPlacement[]')
     expect(clientSource).toContain("window.addEventListener('blur', handleBlur)")

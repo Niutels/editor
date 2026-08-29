@@ -9,6 +9,7 @@ import {
 const LANDRUSH_ISLAND_PALM_COLLIDER_RADIAL_SEGMENTS = 16
 const LANDRUSH_ISLAND_PALM_COLLIDER_THETA_START =
   -Math.PI / 2 - Math.PI / LANDRUSH_ISLAND_PALM_COLLIDER_RADIAL_SEGMENTS
+const EMPTY_BLOCKED_PALM_INSTANCE_INDICES: ReadonlySet<number> = new Set()
 
 export type LandrushIslandPalmNavigationFootprint = Readonly<{
   id: string
@@ -16,13 +17,20 @@ export type LandrushIslandPalmNavigationFootprint = Readonly<{
 }>
 
 export function resolveLandrushIslandVisiblePalmLayout({
+  blockedInstanceIndices = EMPTY_BLOCKED_PALM_INSTANCE_INDICES,
   layout,
   visibleCount,
 }: {
+  blockedInstanceIndices?: ReadonlySet<number>
   layout: readonly LandrushIslandPalmPlacement[]
   visibleCount: number
 }) {
-  return layout.slice(0, visibleCount)
+  const maximumVisibleInstanceIndex = Math.max(0, Math.trunc(visibleCount))
+  return layout.filter(
+    (placement) =>
+      placement.instanceIndex < maximumVisibleInstanceIndex &&
+      !blockedInstanceIndices.has(placement.instanceIndex),
+  )
 }
 
 export function createLandrushIslandPalmTrunkColliderWorld({

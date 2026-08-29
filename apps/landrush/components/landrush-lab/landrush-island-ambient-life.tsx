@@ -53,7 +53,6 @@ import { createLandrushIslandAmbientCloneSkeletonResource } from './landrush-isl
 import {
   parseLandrushIslandAmbientMotionDebugSettings,
   resolveAdmittedLandrushIslandAmbientNavigationObstacles,
-  resolveLandrushIslandAmbientNpcPalmCollisions,
 } from './landrush-island-ambient-lifecycle'
 import {
   advanceLandrushIslandAmbientLoadQueueAfterYield,
@@ -101,6 +100,8 @@ import {
   createLandrushIslandFishRuntime,
   type LandrushIslandFishRuntime,
 } from './landrush-island-fish-runtime'
+import { resolveLandrushIslandVisiblePalmLayout } from './landrush-island-palm-collider'
+import { resolveLandrushIslandAmbientPalmSlotVisible } from './landrush-island-palm-construction-visibility'
 import {
   createLandrushIslandPalmCollisionCircles,
   type LandrushIslandPalmPlacement,
@@ -147,6 +148,7 @@ export const LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE = `ambient-assets:${
 
 export function LandrushIslandAmbientLife({
   admitted,
+  blockedPalmInstanceIndices,
   npcsVisible,
   onLoadReadinessChange,
   palmLayout,
@@ -156,6 +158,7 @@ export function LandrushIslandAmbientLife({
   zombieIslandActive,
 }: {
   admitted: boolean
+  blockedPalmInstanceIndices: ReadonlySet<number>
   npcsVisible: boolean
   onLoadReadinessChange: (readiness: LandrushIslandAmbientLoadReadiness) => void
   palmLayout: readonly LandrushIslandPalmPlacement[]
@@ -194,18 +197,34 @@ export function LandrushIslandAmbientLife({
   const visiblePalmInstanceCount = zombieIslandActive
     ? LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT
     : LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT
+  const visiblePalmLayout = useMemo(
+    () =>
+      resolveLandrushIslandVisiblePalmLayout({
+        blockedInstanceIndices: blockedPalmInstanceIndices,
+        layout: palmLayout,
+        visibleCount: visiblePalmInstanceCount,
+      }),
+    [blockedPalmInstanceIndices, palmLayout, visiblePalmInstanceCount],
+  )
+  const ambientNpcPalmLayout = useMemo(
+    () =>
+      resolveLandrushIslandVisiblePalmLayout({
+        blockedInstanceIndices: blockedPalmInstanceIndices,
+        layout: palmLayout,
+        visibleCount: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+      }),
+    [blockedPalmInstanceIndices, palmLayout],
+  )
   const palmCollisionCircles = useMemo(
-    () => createLandrushIslandPalmCollisionCircles({ layout: palmLayout, origin: { x: 0, z: 0 } }),
-    [palmLayout],
+    () =>
+      createLandrushIslandPalmCollisionCircles({
+        layout: ambientNpcPalmLayout,
+        origin: { x: 0, z: 0 },
+      }),
+    [ambientNpcPalmLayout],
   )
   const palmNavigationObstacles = useMemo(
-    () =>
-      createLandrushIslandPalmNavigationObstacles(
-        resolveLandrushIslandAmbientNpcPalmCollisions(
-          palmCollisionCircles,
-          LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
-        ),
-      ),
+    () => createLandrushIslandPalmNavigationObstacles(palmCollisionCircles),
     [palmCollisionCircles],
   )
   const semanticNavigationSnapshot = useMemo(
@@ -340,7 +359,7 @@ export function LandrushIslandAmbientLife({
         palmInstanceCount: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
         palmModelCount: LANDRUSH_ISLAND_AMBIENT_PALMS.length,
         source: 'meshy-image-to-3d',
-        visiblePalmInstanceCount,
+        visiblePalmInstanceCount: visiblePalmLayout.length,
       }}
     >
       {mountedLoadUnits.map((unit) => (
@@ -352,6 +371,7 @@ export function LandrushIslandAmbientLife({
         >
           <AmbientLoadUnitModel
             center={center}
+            blockedPalmInstanceIndices={blockedPalmInstanceIndices}
             fishRuntime={fishRuntime}
             groundY={surface.grassSurfaceElevation}
             motionDebug={motionDebug}
@@ -373,6 +393,7 @@ export function LandrushIslandAmbientLife({
 }
 
 function AmbientLoadUnitModel({
+  blockedPalmInstanceIndices,
   center,
   fishRuntime,
   groundY,
@@ -388,6 +409,7 @@ function AmbientLoadUnitModel({
   waterY,
   zombieIslandActive,
 }: {
+  blockedPalmInstanceIndices: ReadonlySet<number>
   center: LandrushPoint2
   fishRuntime: LandrushIslandFishRuntime
   groundY: number
@@ -419,7 +441,14 @@ function AmbientLoadUnitModel({
           const placement = palmLayout[slot.instanceIndex]
           const position = placement?.position ?? center
           return (
-            <group key={slot.instanceIndex} visible={slot.visible}>
+            <group
+              key={slot.instanceIndex}
+              visible={resolveLandrushIslandAmbientPalmSlotVisible({
+                blockedInstanceIndices: blockedPalmInstanceIndices,
+                instanceIndex: slot.instanceIndex,
+                phaseVisible: slot.visible,
+              })}
+            >
               <LandrushIslandMeshyPalm
                 modelPath={palm.modelPath}
                 position={[position.x, groundY, position.z]}
