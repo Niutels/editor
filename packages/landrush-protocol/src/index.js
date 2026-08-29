@@ -7,6 +7,13 @@ export const MAX_MULTIPLAYER_ROOM_ID_LENGTH = 80
 export const MAX_MULTIPLAYER_COMBAT_SHOTS = 64
 export const MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS = 60_000
 export const MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS = 180_000
+export const DEFAULT_PROFILE_MONEY = 0
+export const MAX_PROFILE_MONEY = 1_000_000_000
+export const MAX_PROFILE_MONEY_OPERATION_ID_LENGTH = 120
+export const ZOMBIE_ESCAPE_KILL_REWARD = 10
+
+const MAX_PROFILE_ID_LENGTH = 120
+const MAX_ZOMBIE_ESCAPE_SESSION_ID_LENGTH = 80
 
 export function isParcelBuildSchemaVersion(value) {
   return value === PARCEL_BUILD_SCHEMA_VERSION
@@ -36,6 +43,88 @@ export function sanitizeMultiplayerRoomId(value) {
     .replace(/[^a-zA-Z0-9_-]/g, '-')
 }
 
+export function sanitizeProfileMoneyOperationId(value) {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  return normalized
+    .slice(0, MAX_PROFILE_MONEY_OPERATION_ID_LENGTH)
+    .replace(/[^a-zA-Z0-9._:-]/g, '-')
+}
+
+export function isProfileWalletSnapshot(value) {
+  if (!value || typeof value !== 'object') return false
+  return (
+    typeof value.profileId === 'string' &&
+    value.profileId.length > 0 &&
+    value.profileId.length <= MAX_PROFILE_ID_LENGTH &&
+    isProfileMoney(value.balance) &&
+    isNonnegativeSafeInteger(value.revision) &&
+    isNonnegativeSafeInteger(value.updatedAt)
+  )
+}
+
+export function sanitizeProfileWalletSnapshot(value) {
+  if (!isProfileWalletSnapshot(value)) return undefined
+  return {
+    balance: value.balance,
+    profileId: value.profileId,
+    revision: value.revision,
+    updatedAt: value.updatedAt,
+  }
+}
+
+export function isProfileMoneyOperation(value) {
+  if (!value || typeof value !== 'object') return false
+  if (
+    !isNonnegativeSafeInteger(value.baseRevision) ||
+    !isCanonicalProfileMoneyOperationId(value.operationId)
+  ) {
+    return false
+  }
+  if (value.kind === 'zombie-kill-reward') return true
+  return value.kind === 'weapon-purchase' && isPositiveProfileMoney(value.cost)
+}
+
+export function sanitizeProfileMoneyOperation(value) {
+  if (!isProfileMoneyOperation(value)) return undefined
+  if (value.kind === 'zombie-kill-reward') {
+    return {
+      baseRevision: value.baseRevision,
+      kind: value.kind,
+      operationId: value.operationId,
+    }
+  }
+  return {
+    baseRevision: value.baseRevision,
+    cost: value.cost,
+    kind: value.kind,
+    operationId: value.operationId,
+  }
+}
+
+export function isApplyProfileMoneyOperationMessage(value) {
+  if (!value || typeof value !== 'object') return false
+  return (
+    value.type === 'apply-profile-money-operation' &&
+    isProfileMoneyOperation(value.operation) &&
+    isParcelWriterEpoch(value.writerEpoch) &&
+    typeof value.writerSessionId === 'string' &&
+    value.writerSessionId.length > 0 &&
+    value.writerSessionId === sanitizeParcelWriterSessionId(value.writerSessionId)
+  )
+}
+
+export function isReportZombieEscapeDeathMessage(value) {
+  if (!value || typeof value !== 'object') return false
+  return (
+    value.type === 'report-zombie-escape-death' &&
+    typeof value.sessionId === 'string' &&
+    value.sessionId.length > 0 &&
+    value.sessionId.length <= MAX_ZOMBIE_ESCAPE_SESSION_ID_LENGTH &&
+    Number.isSafeInteger(value.night) &&
+    value.night > 0
+  )
+}
+
 export function isSpatialVoiceSignalPayload(value) {
   if (!value || typeof value !== 'object') return false
   if (value.type === 'disconnect' || value.type === 'ready') return true
@@ -59,7 +148,7 @@ export function isMultiplayerZombieEscapeStateSnapshot(value) {
   return (
     typeof value.sessionId === 'string' &&
     value.sessionId.length > 0 &&
-    value.sessionId.length <= 80 &&
+    value.sessionId.length <= MAX_ZOMBIE_ESCAPE_SESSION_ID_LENGTH &&
     Number.isSafeInteger(value.revision) &&
     value.revision >= 0 &&
     (value.phase === 'build' || value.phase === 'night') &&
@@ -69,6 +158,26 @@ export function isMultiplayerZombieEscapeStateSnapshot(value) {
     (value.phaseEndsAt === null ||
       (Number.isSafeInteger(value.phaseEndsAt) && value.phaseEndsAt >= 0))
   )
+}
+
+function isCanonicalProfileMoneyOperationId(value) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value === sanitizeProfileMoneyOperationId(value)
+  )
+}
+
+function isNonnegativeSafeInteger(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isProfileMoney(value) {
+  return isNonnegativeSafeInteger(value) && value <= MAX_PROFILE_MONEY
+}
+
+function isPositiveProfileMoney(value) {
+  return isProfileMoney(value) && value > 0
 }
 
 export function sanitizeMultiplayerZombieEscapeStateSnapshot(value) {

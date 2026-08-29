@@ -7,6 +7,10 @@ export const MAX_MULTIPLAYER_ROOM_ID_LENGTH: 80
 export const MAX_MULTIPLAYER_COMBAT_SHOTS: 64
 export const MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS: 60000
 export const MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS: 180000
+export const DEFAULT_PROFILE_MONEY: 0
+export const MAX_PROFILE_MONEY: 1000000000
+export const MAX_PROFILE_MONEY_OPERATION_ID_LENGTH: 120
+export const ZOMBIE_ESCAPE_KILL_REWARD: 10
 
 export type ParcelBuildReadableSchemaVersion =
   | typeof LEGACY_PARCEL_BUILD_SCHEMA_VERSION
@@ -16,6 +20,32 @@ export type LocalPlayerProfile = {
   color: string
   id: string
   name: string
+}
+
+export type ProfileWalletSnapshot = {
+  balance: number
+  profileId: string
+  revision: number
+  updatedAt: number
+}
+
+export type ProfileMoneyOperation =
+  | {
+      baseRevision: number
+      kind: 'zombie-kill-reward'
+      operationId: string
+    }
+  | {
+      baseRevision: number
+      cost: number
+      kind: 'weapon-purchase'
+      operationId: string
+    }
+
+export type ReportZombieEscapeDeathMessage = {
+  night: number
+  sessionId: string
+  type: 'report-zombie-escape-death'
 }
 
 export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
@@ -142,6 +172,11 @@ export type ParcelWriterSession = {
   writerSessionId: string
 }
 
+export type ApplyProfileMoneyOperationMessage = ParcelWriterSession & {
+  operation: ProfileMoneyOperation
+  type: 'apply-profile-money-operation'
+}
+
 export type ParcelBuildNodesAckMessage = ParcelWriterSession & {
   operationId: string
   parcelId: string
@@ -175,6 +210,19 @@ export function isParcelWriterEpoch(value: unknown): value is number
 export function sanitizeParcelWriterSessionId(value: unknown): string
 export function normalizeParcelBuildRevision(value: unknown, fallback?: number): number
 export function sanitizeMultiplayerRoomId(value: unknown): string
+export function sanitizeProfileMoneyOperationId(value: unknown): string
+export function isProfileWalletSnapshot(value: unknown): value is ProfileWalletSnapshot
+export function sanitizeProfileWalletSnapshot(
+  value: unknown,
+): ProfileWalletSnapshot | undefined
+export function isProfileMoneyOperation(value: unknown): value is ProfileMoneyOperation
+export function sanitizeProfileMoneyOperation(value: unknown): ProfileMoneyOperation | undefined
+export function isApplyProfileMoneyOperationMessage(
+  value: unknown,
+): value is ApplyProfileMoneyOperationMessage
+export function isReportZombieEscapeDeathMessage(
+  value: unknown,
+): value is ReportZombieEscapeDeathMessage
 export function isSpatialVoiceSignalPayload(value: unknown): value is SpatialVoiceSignalPayload
 export function isMultiplayerPlayerPose(value: unknown): value is MultiplayerPlayerPose
 export function isMultiplayerPlayerCombatSnapshot(
