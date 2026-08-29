@@ -66,6 +66,49 @@ describe('Landrush render readiness compile coordination', () => {
     ])
   })
 
+  test('attributes opt-in startup timing to each awaited representative', async () => {
+    const traceGlobal = globalThis as typeof globalThis & {
+      __LANDRUSH_ATOMIC_STARTUP__?: {
+        activeRenderRepresentative?: string | null
+        renderReadiness: Array<{
+          edge: 'settled' | 'start'
+          key: string
+          outcome?: 'failed' | 'ready'
+        }>
+        startedAt: number
+      }
+    }
+    const previousTrace = traceGlobal.__LANDRUSH_ATOMIC_STARTUP__
+    const trace = {
+      activeRenderRepresentative: null,
+      renderReadiness: [],
+      startedAt: performance.now(),
+    }
+    traceGlobal.__LANDRUSH_ATOMIC_STARTUP__ = trace
+    try {
+      const roots = [new Group(), new Group()]
+      await compileLandrushRenderRepresentatives({
+        camera: new PerspectiveCamera(),
+        renderer: { compileAsync: async () => undefined },
+        representatives: roots.map((root, index) => ({ key: `representative-${index}`, root })),
+        targetScene: new Scene(),
+      })
+
+      expect(
+        trace.renderReadiness.map(({ edge, key, outcome }) => ({ edge, key, outcome })),
+      ).toEqual([
+        { edge: 'start', key: 'representative-0', outcome: undefined },
+        { edge: 'settled', key: 'representative-0', outcome: 'ready' },
+        { edge: 'start', key: 'representative-1', outcome: undefined },
+        { edge: 'settled', key: 'representative-1', outcome: 'ready' },
+      ])
+      expect(trace.activeRenderRepresentative).toBeNull()
+    } finally {
+      if (previousTrace) traceGlobal.__LANDRUSH_ATOMIC_STARTUP__ = previousTrace
+      else delete traceGlobal.__LANDRUSH_ATOMIC_STARTUP__
+    }
+  })
+
   test('replays progress to new exact-request subscribers without duplicating existing observers', async () => {
     const compilation = deferred<void>()
     let reportProgress:

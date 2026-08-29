@@ -185,11 +185,13 @@ function readStartupSnapshot() {
 
 function installAtomicStartupInstrumentation() {
   const state = {
+    activeRenderRepresentative: null,
     gpu: [],
     idleCallbacks: [],
     longAnimationFrames: [],
     longTasks: [],
     rafCallbacks: [],
+    renderReadiness: [],
     startedAt: performance.now(),
     timers: [],
   }
@@ -293,6 +295,42 @@ function installAtomicStartupInstrumentation() {
   observe('longtask', state.longTasks)
   observe('long-animation-frame', state.longAnimationFrames)
 
+  const shaderModuleFingerprints = new WeakMap()
+  const opaqueObjectIds = new WeakMap()
+  let nextOpaqueObjectId = 1
+  const hashText = (text) => {
+    let hash = 14695981039346656037n
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= BigInt(text.charCodeAt(index))
+      hash = BigInt.asUintN(64, hash * 1099511628211n)
+    }
+    return `${String(text.length)}:${hash.toString(16).padStart(16, '0')}`
+  }
+  const normalizeGpuDescriptorValue = (value) => {
+    if (value === null || typeof value !== 'object') return value
+    const shaderFingerprint = shaderModuleFingerprints.get(value)
+    if (shaderFingerprint) return { shaderModule: shaderFingerprint }
+    if (Array.isArray(value)) return value.map(normalizeGpuDescriptorValue)
+    if (ArrayBuffer.isView(value)) return Array.from(value)
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype === Object.prototype || prototype === null) {
+      return Object.fromEntries(
+        Object.keys(value)
+          .sort()
+          .map((key) => [key, normalizeGpuDescriptorValue(value[key])]),
+      )
+    }
+    let opaqueId = opaqueObjectIds.get(value)
+    if (!opaqueId) {
+      opaqueId = nextOpaqueObjectId
+      nextOpaqueObjectId += 1
+      opaqueObjectIds.set(value, opaqueId)
+    }
+    return { opaqueId, type: value.constructor?.name ?? 'Object' }
+  }
+  const fingerprintGpuDescriptor = (descriptor) =>
+    hashText(JSON.stringify(normalizeGpuDescriptorValue(descriptor)))
+
   const patchGpuMethod = (constructorName, methodName, asyncResult) => {
     const constructor = window[constructorName]
     const prototype = constructor?.prototype
@@ -303,14 +341,24 @@ function installAtomicStartupInstrumentation() {
       const record = {
         durationMs: null,
         method: `${constructorName}.${methodName}`,
+        representativeKey: state.activeRenderRepresentative,
         settledMs: null,
         stack: compactStack(),
         startMs: startedAt - state.startedAt,
+      }
+      if (methodName === 'createRenderPipeline' || methodName === 'createRenderPipelineAsync') {
+        record.pipelineFingerprint = fingerprintGpuDescriptor(args[0])
       }
       state.gpu.push(record)
       try {
         const result = original.apply(this, args)
         record.durationMs = performance.now() - startedAt
+        if (methodName === 'createShaderModule' && result) {
+          const code = String(args[0]?.code ?? '')
+          const shaderFingerprint = hashText(code)
+          shaderModuleFingerprints.set(result, shaderFingerprint)
+          record.shaderFingerprint = shaderFingerprint
+        }
         if (asyncResult && result && typeof result.then === 'function') {
           void result.finally(() => {
             record.settledMs = performance.now() - state.startedAt

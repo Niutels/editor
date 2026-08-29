@@ -69,6 +69,35 @@ type RenderReadinessCoordinatorEntry = {
 
 const RENDER_READINESS_COMPILE_TAILS = new WeakMap<object, Promise<void>>()
 
+type LandrushRenderReadinessTraceState = {
+  activeRenderRepresentative?: string | null
+  renderReadiness?: Array<{
+    durationMs?: number
+    edge: 'settled' | 'start'
+    key: string
+    outcome?: 'failed' | 'ready'
+    stats?: LandrushRenderReadinessRepresentativeStats
+    t: number
+  }>
+  startedAt?: number
+}
+
+type LandrushRenderReadinessTraceScope = Readonly<{
+  key: string
+  startedAt: number
+  state: LandrushRenderReadinessTraceState
+}>
+
+type LandrushRenderReadinessRepresentativeStats = Readonly<{
+  geometryCount: number
+  materialSlotCount: number
+  meshCount: number
+  objectCount: number
+  renderableCount: number
+  skinnedMeshCount: number
+  uniqueMaterialCount: number
+}>
+
 export async function compileLandrushRenderRepresentatives(
   {
     camera,
@@ -81,19 +110,119 @@ export async function compileLandrushRenderRepresentatives(
   const total = representatives.length
   let completed = 0
   onProgress?.({ completed, total })
-  await renderer.init?.()
+  if (renderer.init) {
+    const trace = beginLandrushRenderReadinessTrace('@renderer-init')
+    let outcome: 'failed' | 'ready' = 'ready'
+    try {
+      await renderer.init()
+    } catch (error) {
+      outcome = 'failed'
+      throw error
+    } finally {
+      settleLandrushRenderReadinessTrace(trace, outcome)
+    }
+  }
 
   for (const representative of representatives) {
-    let pendingCompilation: Promise<unknown>
-    const restore = forceLandrushRepresentativeRenderable(representative.root)
+    const trace = beginLandrushRenderReadinessTrace(representative.key, representative.root)
+    let outcome: 'failed' | 'ready' = 'ready'
     try {
-      pendingCompilation = renderer.compileAsync(representative.root, camera, targetScene)
+      let pendingCompilation: Promise<unknown>
+      const restore = forceLandrushRepresentativeRenderable(representative.root)
+      try {
+        pendingCompilation = renderer.compileAsync(representative.root, camera, targetScene)
+      } finally {
+        restore()
+      }
+      await pendingCompilation
+    } catch (error) {
+      outcome = 'failed'
+      throw error
     } finally {
-      restore()
+      settleLandrushRenderReadinessTrace(trace, outcome)
     }
-    await pendingCompilation
     completed += 1
     onProgress?.({ completed, total })
+  }
+}
+
+function beginLandrushRenderReadinessTrace(
+  key: string,
+  root?: Object3D,
+): LandrushRenderReadinessTraceScope | null {
+  const state = (
+    globalThis as typeof globalThis & {
+      __LANDRUSH_ATOMIC_STARTUP__?: LandrushRenderReadinessTraceState
+    }
+  ).__LANDRUSH_ATOMIC_STARTUP__
+  if (!state?.renderReadiness) return null
+  const startedAt = performance.now()
+  state.activeRenderRepresentative = key
+  state.renderReadiness.push({
+    edge: 'start',
+    key,
+    stats: root ? readLandrushRenderReadinessRepresentativeStats(root) : undefined,
+    t: startedAt - (state.startedAt ?? 0),
+  })
+  return { key, startedAt, state }
+}
+
+function readLandrushRenderReadinessRepresentativeStats(
+  root: Object3D,
+): LandrushRenderReadinessRepresentativeStats {
+  const geometries = new Set<unknown>()
+  const materials = new Set<unknown>()
+  let materialSlotCount = 0
+  let meshCount = 0
+  let objectCount = 0
+  let renderableCount = 0
+  let skinnedMeshCount = 0
+  root.traverse((object) => {
+    objectCount += 1
+    if (isLandrushRenderableObject(object)) renderableCount += 1
+    const mesh = object as Object3D & {
+      geometry?: unknown
+      isMesh?: boolean
+      isSkinnedMesh?: boolean
+      material?: unknown | unknown[]
+    }
+    if (!mesh.isMesh) return
+    meshCount += 1
+    if (mesh.isSkinnedMesh) skinnedMeshCount += 1
+    if (mesh.geometry) geometries.add(mesh.geometry)
+    const assignedMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of assignedMaterials) {
+      if (!material) continue
+      materialSlotCount += 1
+      materials.add(material)
+    }
+  })
+  return {
+    geometryCount: geometries.size,
+    materialSlotCount,
+    meshCount,
+    objectCount,
+    renderableCount,
+    skinnedMeshCount,
+    uniqueMaterialCount: materials.size,
+  }
+}
+
+function settleLandrushRenderReadinessTrace(
+  trace: LandrushRenderReadinessTraceScope | null,
+  outcome: 'failed' | 'ready',
+) {
+  if (!trace) return
+  const settledAt = performance.now()
+  trace.state.renderReadiness?.push({
+    durationMs: settledAt - trace.startedAt,
+    edge: 'settled',
+    key: trace.key,
+    outcome,
+    t: settledAt - (trace.state.startedAt ?? 0),
+  })
+  if (trace.state.activeRenderRepresentative === trace.key) {
+    trace.state.activeRenderRepresentative = null
   }
 }
 
