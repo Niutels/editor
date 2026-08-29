@@ -56,6 +56,9 @@ describe('Landrush Zombie Escape touch joysticks', () => {
     expect(markup).toContain('aria-label="Jump"')
     expect(markup).toContain('type="button"')
     expect(markup.match(/pointer-events-auto/g)).toHaveLength(3)
+    expect(markup.match(/size-\[clamp\(4\.2rem,15\.4vw,5\.6rem\)\]/g)).toHaveLength(2)
+    expect(markup.match(/size-\[clamp\(1\.82rem,6\.3vw,2\.38rem\)\]/g)).toHaveLength(2)
+    expect(markup.match(/inset-\[32%\]/g)).toHaveLength(1)
   })
 
   test('anchors both control clusters above the safe area and groups jump over aim', () => {

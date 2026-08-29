@@ -4,6 +4,9 @@ import http from 'node:http'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS,
+  MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS,
+  sanitizeMultiplayerPlayerCombatSnapshot,
   isMultiplayerPlayerPose,
   isSpatialVoiceSignalPayload,
   sanitizeMultiplayerRoomId,
@@ -24,6 +27,7 @@ const MAX_BUILD_NODES_PER_PARCEL = 1000
 const MAX_BUILD_NODE_VALUE_DEPTH = 100
 const MAX_BUILD_SNAPSHOT_BYTES = 1_250_000
 const MAX_ROOM_PEERS = 32
+const MAX_TIMER_DELAY_MS = 2_147_483_647
 const MAX_INACTIVE_WRITER_SESSIONS = Math.max(
   1,
   Number(process.env.LANDRUSH_MAX_INACTIVE_WRITER_SESSIONS) || 1024,
@@ -212,6 +216,7 @@ wss.on('connection', (socket) => {
 
       peer = {
         connectionId,
+        gameMode: message.gameMode === 'zombie-escape' ? message.gameMode : null,
         id: player.id,
         joinedAt: now,
         lastSeenAt: now,
@@ -427,6 +432,24 @@ wss.on('connection', (socket) => {
       return
     }
 
+    if (
+      message.type === 'initialize-zombie-escape-clock' ||
+      message.type === 'start-zombie-escape-night'
+    ) {
+      if (!peer) {
+        sendError(socket, 'not-joined', 'Join a room before updating Zombie Escape state')
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
+        return
+      }
+
+      peer.lastSeenAt = now
+      updateZombieEscapeRoomFromCommand(peer, message, now)
+      return
+    }
+
     if (message.type === 'voice-signal') {
       if (!peer) {
         sendError(socket, 'not-joined', 'Join a room before sending voice signals')
@@ -498,20 +521,249 @@ server.on('error', (error) => {
 
 function joinRoom(peer) {
   const room = getRoom(peer.roomId)
-  room.peers.set(peer.id, peer)
   const now = Date.now()
-  send(peer.socket, {
+  room.peers.set(peer.id, peer)
+  reconcileSupersededZombieEscapeRooms(peer, now)
+  reconcileZombieEscapeRoomParticipants(peer.roomId, room, now)
+  const snapshot = {
     players: roomSnapshots(room, peer.id),
     roomId: peer.roomId,
     serverTime: now,
     type: 'snapshot',
-  })
+  }
+  if (room.zombieEscapeState) {
+    snapshot.zombieEscapeState = cloneZombieEscapeState(room.zombieEscapeState)
+  }
+  send(peer.socket, snapshot)
   broadcast(
     peer.roomId,
     { player: peer.player, roomId: peer.roomId, serverTime: now, type: 'player-joined' },
     peer.id,
   )
   broadcastRoomState(peer.roomId)
+}
+
+function createZombieEscapeRoomState() {
+  return {
+    night: 0,
+    phase: 'build',
+    phaseEndsAt: null,
+    revision: 0,
+    sessionId: randomUUID(),
+  }
+}
+
+function cloneZombieEscapeState(state) {
+  return {
+    night: state.night,
+    phase: state.phase,
+    phaseEndsAt: state.phaseEndsAt,
+    revision: state.revision,
+    sessionId: state.sessionId,
+  }
+}
+
+function roomHasZombieEscapeParticipants(room) {
+  return [...room.peers.values()].some(
+    (roomPeer) => roomPeer.gameMode === 'zombie-escape' && isCurrentPeer(roomPeer),
+  )
+}
+
+function reconcileSupersededZombieEscapeRooms(peer, now) {
+  for (const [roomId, room] of rooms) {
+    if (roomId === peer.roomId || !room.peers.has(peer.id)) continue
+    reconcileZombieEscapeRoomParticipants(roomId, room, now)
+  }
+}
+
+function reconcileZombieEscapeRoomParticipants(roomId, room, now) {
+  if (!roomHasZombieEscapeParticipants(room)) {
+    clearZombieEscapeRoomState(room)
+    return
+  }
+
+  if (!room.zombieEscapeState) {
+    room.zombieEscapeState = createZombieEscapeRoomState()
+    return
+  }
+
+  synchronizeZombieEscapeRoomClock(roomId, room, now)
+}
+
+function clearZombieEscapeRoomState(room) {
+  if (room.zombieEscapeTimer) clearTimeout(room.zombieEscapeTimer)
+  room.zombieEscapeState = null
+  room.zombieEscapeTimer = null
+}
+
+function synchronizeZombieEscapeRoomClock(roomId, room, now) {
+  if (!roomHasZombieEscapeParticipants(room)) {
+    clearZombieEscapeRoomState(room)
+    return
+  }
+
+  const state = room.zombieEscapeState
+  if (state && advanceZombieEscapeStateTo(state, now) > 0) {
+    broadcastZombieEscapeState(roomId, state, now)
+  }
+  scheduleZombieEscapeRoomTimer(roomId, room, now)
+}
+
+function advanceZombieEscapeStateTo(state, now) {
+  if (state.phaseEndsAt === null || state.phaseEndsAt > now) return 0
+
+  let transitionCount = 0
+  transitionZombieEscapeState(state)
+  transitionCount += 1
+
+  const cycleDuration =
+    MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS +
+    MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
+  const fullCycles = Math.floor(Math.max(0, now - state.phaseEndsAt) / cycleDuration)
+  if (fullCycles > 0) {
+    state.night += fullCycles
+    state.phaseEndsAt += fullCycles * cycleDuration
+    transitionCount += fullCycles * 2
+  }
+
+  while (state.phaseEndsAt <= now) {
+    transitionZombieEscapeState(state)
+    transitionCount += 1
+  }
+  state.revision += transitionCount
+  return transitionCount
+}
+
+function transitionZombieEscapeState(state) {
+  if (state.phase === 'build') {
+    state.phase = 'night'
+    state.night += 1
+    state.phaseEndsAt += MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
+    return
+  }
+
+  state.phase = 'build'
+  state.phaseEndsAt += MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
+}
+
+function scheduleZombieEscapeRoomTimer(roomId, room, now) {
+  if (room.zombieEscapeTimer) clearTimeout(room.zombieEscapeTimer)
+  room.zombieEscapeTimer = null
+
+  const state = room.zombieEscapeState
+  if (!state || state.phaseEndsAt === null || !roomHasZombieEscapeParticipants(room)) return
+
+  const delay = Math.min(MAX_TIMER_DELAY_MS, Math.max(0, state.phaseEndsAt - now))
+  const timer = setTimeout(() => {
+    if (
+      rooms.get(roomId) !== room ||
+      room.zombieEscapeTimer !== timer ||
+      room.zombieEscapeState !== state
+    ) {
+      return
+    }
+    room.zombieEscapeTimer = null
+    synchronizeZombieEscapeRoomClock(roomId, room, Date.now())
+  }, delay)
+  timer.unref()
+  room.zombieEscapeTimer = timer
+}
+
+function updateZombieEscapeRoomFromCommand(peer, message, now) {
+  const room = rooms.get(peer.roomId)
+  if (!room) {
+    sendError(peer.socket, 'zombie-escape-state-unavailable', 'Zombie Escape state is unavailable')
+    return
+  }
+
+  synchronizeZombieEscapeRoomClock(peer.roomId, room, now)
+  const state = room.zombieEscapeState
+  if (!state) {
+    sendError(peer.socket, 'zombie-escape-state-unavailable', 'Zombie Escape state is unavailable')
+    return
+  }
+  if (peer.gameMode !== 'zombie-escape') {
+    rejectZombieEscapeStateCommand(
+      peer,
+      state,
+      'not-zombie-escape-participant',
+      'Join Zombie Escape before updating its clock',
+      now,
+    )
+    return
+  }
+  if (message.sessionId !== state.sessionId || message.baseRevision !== state.revision) {
+    rejectZombieEscapeStateCommand(
+      peer,
+      state,
+      'zombie-escape-state-conflict',
+      'Zombie Escape state changed; apply the current server state',
+      now,
+    )
+    return
+  }
+
+  if (message.type === 'initialize-zombie-escape-clock') {
+    if (state.phase !== 'build' || state.phaseEndsAt !== null) {
+      rejectZombieEscapeStateCommand(
+        peer,
+        state,
+        'zombie-escape-clock-already-initialized',
+        'The Zombie Escape clock is already running',
+        now,
+      )
+      return
+    }
+    state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
+  } else {
+    if (state.phaseEndsAt === null) {
+      rejectZombieEscapeStateCommand(
+        peer,
+        state,
+        'zombie-escape-clock-held',
+        'Initialize the Zombie Escape clock before starting the night',
+        now,
+      )
+      return
+    }
+    if (state.phase !== 'build') {
+      rejectZombieEscapeStateCommand(
+        peer,
+        state,
+        'zombie-escape-night-active',
+        'The Zombie Escape night is already active',
+        now,
+      )
+      return
+    }
+    state.phase = 'night'
+    state.night += 1
+    state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
+  }
+
+  state.revision += 1
+  scheduleZombieEscapeRoomTimer(peer.roomId, room, now)
+  broadcastZombieEscapeState(peer.roomId, state, now)
+}
+
+function rejectZombieEscapeStateCommand(peer, state, code, message, now) {
+  send(peer.socket, {
+    code,
+    message,
+    roomId: peer.roomId,
+    serverTime: now,
+    state: cloneZombieEscapeState(state),
+    type: 'zombie-escape-state-rejected',
+  })
+}
+
+function broadcastZombieEscapeState(roomId, state, now) {
+  broadcast(roomId, {
+    roomId,
+    serverTime: now,
+    state: cloneZombieEscapeState(state),
+    type: 'zombie-escape-state-updated',
+  })
 }
 
 function grantWriterSession({
@@ -646,14 +898,19 @@ function rejectWriterSession(socket, peer, now) {
 
 function watchRoom(watcher) {
   const room = getRoom(watcher.roomId)
-  room.watchers.add(watcher)
   const now = Date.now()
-  send(watcher.socket, {
+  synchronizeZombieEscapeRoomClock(watcher.roomId, room, now)
+  room.watchers.add(watcher)
+  const snapshot = {
     players: roomSnapshots(room),
     roomId: watcher.roomId,
     serverTime: now,
     type: 'snapshot',
-  })
+  }
+  if (room.zombieEscapeState) {
+    snapshot.zombieEscapeState = cloneZombieEscapeState(room.zombieEscapeState)
+  }
+  send(watcher.socket, snapshot)
   send(watcher.socket, {
     playerCount: room.peers.size,
     roomId: watcher.roomId,
@@ -671,7 +928,9 @@ function leaveRoom(peer, announce, reason) {
 
   room.peers.delete(peer.id)
   const now = Date.now()
+  reconcileZombieEscapeRoomParticipants(peer.roomId, room, now)
   if (roomIsEmpty(room)) {
+    clearZombieEscapeRoomState(room)
     rooms.delete(peer.roomId)
     return
   }
@@ -1521,7 +1780,12 @@ function sendError(socket, code, message) {
 function getRoom(roomId) {
   let room = rooms.get(roomId)
   if (!room) {
-    room = { peers: new Map(), watchers: new Set() }
+    room = {
+      peers: new Map(),
+      watchers: new Set(),
+      zombieEscapeState: null,
+      zombieEscapeTimer: null,
+    }
     rooms.set(roomId, room)
   }
   return room
@@ -1558,6 +1822,7 @@ function parseClientMessage(data) {
     if (
       raw?.type === 'join' &&
       isPlayerSnapshot(raw.player) &&
+      (raw.gameMode === undefined || raw.gameMode === 'zombie-escape') &&
       (raw.writerEpoch === undefined || isParcelWriterEpoch(raw.writerEpoch)) &&
       typeof raw.writerSessionId === 'string' &&
       raw.writerSessionId.length > 0
@@ -1565,6 +1830,17 @@ function parseClientMessage(data) {
       return raw
     }
     if (raw?.type === 'state' && isPlayerSnapshot(raw.player)) return raw
+    if (
+      (raw?.type === 'initialize-zombie-escape-clock' ||
+        raw?.type === 'start-zombie-escape-night') &&
+      typeof raw.sessionId === 'string' &&
+      raw.sessionId.length > 0 &&
+      raw.sessionId.length <= 80 &&
+      Number.isSafeInteger(raw.baseRevision) &&
+      raw.baseRevision >= 0
+    ) {
+      return raw
+    }
     if (raw?.type === 'heartbeat') return raw
     if (raw?.type === 'leave') return raw
     if (raw?.type === 'watch') return raw
@@ -1640,6 +1916,8 @@ function sanitizePlayerSnapshot(player, now) {
     updatedAt: now,
   }
   if (isMultiplayerPlayerPose(player.pose)) snapshot.pose = player.pose
+  const combat = sanitizeMultiplayerPlayerCombatSnapshot(player.combat)
+  if (combat) snapshot.combat = combat
   return snapshot
 }
 

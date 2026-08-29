@@ -65,7 +65,6 @@ import {
 import {
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
-  createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY,
   type ZombieEscapePipelineRenderer,
@@ -172,7 +171,6 @@ const EMPTY_RENDER_READINESS_SNAPSHOT: ZombieEscapeRenderReadinessSnapshot = {
 const subscribeToNoRenderReadinessRegistry = () => () => undefined
 const getEmptyRenderReadinessSnapshot = () => EMPTY_RENDER_READINESS_SNAPSHOT
 const EMPTY_READY_ZOMBIE_VARIANTS = new Set<number>()
-const ZOMBIE_ESCAPE_BACKGROUND_RENDER_PREWARM_DELAY_MS = 2_000
 
 function yieldZombieEscapeAuthoredBuildSlice() {
   return new Promise<void>((resolve) => {
@@ -214,12 +212,22 @@ export function resolveZombieEscapeRenderPipelineSettlement(
     }
   }
   return {
-    contentReady: true as const,
+    contentReady: false as const,
     diagnostic: {
       level: 'error' as const,
       message: status.message,
     },
   }
+}
+
+export function updateZombieEscapeRenderPipelineProgress(
+  current: { completed: number; total: number },
+  progress: Readonly<{ completed: number; total: number }>,
+) {
+  if (current.completed === progress.completed && current.total === progress.total) return false
+  current.completed = progress.completed
+  current.total = progress.total
+  return true
 }
 
 export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly string[]) {
@@ -332,26 +340,6 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   if (!coordinatorRef.current) {
     coordinatorRef.current = createZombieEscapeRenderReadinessCoordinator()
   }
-  const representativePrewarmQueueRef = useRef<ReturnType<
-    typeof createZombieEscapeRenderRepresentativePrewarmQueue
-  > | null>(null)
-  if (!representativePrewarmQueueRef.current) {
-    representativePrewarmQueueRef.current = createZombieEscapeRenderRepresentativePrewarmQueue({
-      onStatus(key, status) {
-        if (status.state === 'degraded') {
-          console.warn(
-            `[zombie-escape] Render representative ${key} is still prewarming.`,
-            status.message,
-          )
-        } else if (status.state === 'failed') {
-          console.error(
-            `[zombie-escape] Render representative ${key} failed to prewarm.`,
-            status.message,
-          )
-        }
-      },
-    })
-  }
   const renderReadinessSnapshot = useSyncExternalStore(
     renderReadinessRegistry?.subscribe ?? subscribeToNoRenderReadinessRegistry,
     renderReadinessRegistry?.getSnapshot ?? getEmptyRenderReadinessSnapshot,
@@ -364,9 +352,11 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     statuses: Map<string, ZombieEscapeGeneratedAssetTerminalStatus>
   }>({ generation: retryGeneration, statuses: new Map() })
   const pipelineReadinessRef = useRef({
+    completed: 0,
     generation: retryGeneration,
     ready: !renderReadinessRegistry,
     required: Boolean(renderReadinessRegistry),
+    total: 1,
   })
   if (readinessRef.current.generation !== retryGeneration) {
     readinessRef.current = { generation: retryGeneration, statuses: new Map() }
@@ -376,9 +366,11 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     pipelineReadinessRef.current.required !== Boolean(renderReadinessRegistry)
   ) {
     pipelineReadinessRef.current = {
+      completed: 0,
       generation: retryGeneration,
       ready: !renderReadinessRegistry,
       required: Boolean(renderReadinessRegistry),
+      total: 1,
     }
   }
   const publishReadiness = useCallback(() => {
@@ -394,7 +386,9 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       resolveZombieEscapeGeneratedAssetReadinessSnapshot({
         expectedKeys,
         generation: retryGeneration,
+        pipelineCompleted: pipelineReadiness.completed,
         pipelineReady: pipelineReadiness.ready,
+        pipelineTotal: pipelineReadiness.total,
         statuses: readiness.statuses,
       }),
     )
@@ -416,7 +410,9 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
           : { generation: retryGeneration, ready: settlement.ready },
       )
       if (renderReadinessRegistry && !settlement.ready) {
+        pipelineReadinessRef.current.completed = 0
         pipelineReadinessRef.current.ready = false
+        pipelineReadinessRef.current.total = 1
       }
       publishReadiness()
     },
@@ -433,44 +429,56 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
 
   useEffect(() => {
     const coordinator = coordinatorRef.current
-    const representativePrewarmQueue = representativePrewarmQueueRef.current
     const pipelineReadiness = pipelineReadinessRef.current
     if (pipelineReadiness.generation !== retryGeneration) return
-    if (!(coordinator && representativePrewarmQueue && renderReadinessRegistry)) {
+    if (!(coordinator && renderReadinessRegistry)) {
       pipelineReadiness.ready = true
       publishReadiness()
       return
     }
+    pipelineReadiness.completed = 0
     pipelineReadiness.ready = false
+    pipelineReadiness.total = 1
     publishReadiness()
     if (!(allocationReady && renderReadinessSnapshot.complete)) {
       coordinator.invalidate()
-      representativePrewarmQueue.invalidate()
       return
     }
 
     let active = true
-    let backgroundPrewarmTimer: number | null = null
+    const isCurrentRequest = () =>
+      active &&
+      readinessRef.current.generation === retryGeneration &&
+      pipelineReadinessRef.current === pipelineReadiness &&
+      renderReadinessRegistry.getSnapshot() === renderReadinessSnapshot &&
+      resolveZombieEscapeGeneratedAssetSettlement(expectedKeys, readinessRef.current.statuses).ready
     void coordinator.request(
       {
         camera: pipelineCamera,
         generation: retryGeneration,
         identity: renderReadinessSnapshot,
-        representatives: [],
+        representatives: renderReadinessSnapshot.representatives,
         renderer: gl as unknown as ZombieEscapePipelineRenderer,
         targetScene: scene,
       },
       (status) => {
-        if (!active || readinessRef.current.generation !== retryGeneration) return
+        if (!isCurrentRequest()) return
         const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
         if (settlement.diagnostic?.level === 'error') {
           console.error(
-            '[zombie-escape] Visible-scene render pipeline prewarm failed; continuing with loaded content.',
+            '[zombie-escape] Required render pipeline preparation failed; keeping loading active for retry.',
             settlement.diagnostic.message,
           )
+          onGeneratedAssetsFailureChange?.([
+            ...resolveZombieEscapeGeneratedAssetSettlement(
+              expectedKeys,
+              readinessRef.current.statuses,
+            ).failed,
+            { key: 'render:pipeline', message: settlement.diagnostic.message },
+          ])
         } else if (settlement.diagnostic) {
           console.warn(
-            '[zombie-escape] Visible-scene render pipeline prewarm exceeded its warning threshold; keeping loading active until it settles.',
+            '[zombie-escape] Required render pipeline preparation exceeded its warning threshold; keeping loading active until it settles.',
             settlement.diagnostic.message,
           )
         }
@@ -478,27 +486,21 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
         if (currentPipelineReadiness.generation !== retryGeneration) return
         currentPipelineReadiness.ready = settlement.contentReady
         publishReadiness()
-        if (status.state !== 'ready' || backgroundPrewarmTimer !== null) return
-        backgroundPrewarmTimer = window.setTimeout(() => {
-          backgroundPrewarmTimer = null
-          if (!active || readinessRef.current.generation !== retryGeneration) return
-          representativePrewarmQueue.synchronize({
-            camera: pipelineCamera,
-            generation: retryGeneration,
-            renderer: gl as unknown as ZombieEscapePipelineRenderer,
-            representatives: renderReadinessSnapshot.representatives,
-            targetScene: scene,
-          })
-        }, ZOMBIE_ESCAPE_BACKGROUND_RENDER_PREWARM_DELAY_MS)
+      },
+      (progress) => {
+        if (!isCurrentRequest()) return
+        if (!updateZombieEscapeRenderPipelineProgress(pipelineReadiness, progress)) return
+        publishReadiness()
       },
     )
     return () => {
       active = false
-      if (backgroundPrewarmTimer !== null) window.clearTimeout(backgroundPrewarmTimer)
     }
   }, [
     allocationReady,
+    expectedKeys,
     gl,
+    onGeneratedAssetsFailureChange,
     pipelineCamera,
     publishReadiness,
     renderReadinessRegistry,
@@ -510,7 +512,6 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   useEffect(
     () => () => {
       coordinatorRef.current?.invalidate()
-      representativePrewarmQueueRef.current?.dispose()
     },
     [],
   )
@@ -1201,16 +1202,7 @@ function PreparedGeneratedZombieVariant({
           visual = pooledVisualsRef.current.pop()
           if (visual) {
             visuals.set(slot, visual)
-            activateZombieVisual(
-              visual,
-              impactVisualRegistry,
-              slot,
-              generation,
-              attackClip,
-              deathClip,
-              runClip,
-              walkClip,
-            )
+            activateZombieVisual(visual, impactVisualRegistry, slot, generation)
           } else {
             throw new Error(
               `Detailed zombie root pool exhausted for variant ${zombie.id}; cap=${targetPoolSize}.`,
@@ -1408,21 +1400,24 @@ export function createZombieVisual({
     root = new Group()
     root.add(visualRoot)
     root.visible = active
-    mixer = active ? new AnimationMixer(visualRoot) : null
-    const walkAction = mixer && walkClip ? mixer.clipAction(walkClip, visualRoot) : null
-    const runAction = mixer && runClip ? mixer.clipAction(runClip, visualRoot) : null
-    const attackAction = mixer && attackClip ? mixer.clipAction(attackClip, visualRoot) : null
-    const deathAction = mixer && deathClip ? mixer.clipAction(deathClip, visualRoot) : null
+    mixer = new AnimationMixer(visualRoot)
+    const walkAction = walkClip ? mixer.clipAction(walkClip, visualRoot) : null
+    const runAction = runClip ? mixer.clipAction(runClip, visualRoot) : null
+    const attackAction = attackClip ? mixer.clipAction(attackClip, visualRoot) : null
+    const deathAction = deathClip ? mixer.clipAction(deathClip, visualRoot) : null
     for (const action of [attackAction, walkAction, runAction]) {
       action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
     }
     deathAction?.setLoop(LoopOnce, 1)
     if (deathAction) deathAction.clampWhenFinished = true
-    if (active) {
-      attackAction?.play()
-      deathAction?.play()
-      walkAction?.play()
-      runAction?.play()
+    attackAction?.play()
+    deathAction?.play()
+    walkAction?.play()
+    runAction?.play()
+    if (!active) {
+      // Resolve lazy property bindings inside the bounded loading slice, then restore the pose.
+      mixer.update(0)
+      mixer.stopAllAction()
     }
     unregisterImpactVisual =
       active && slot !== null
@@ -1564,30 +1559,13 @@ function cleanupFailedZombieVisualConstruction({
   }
 }
 
-function activateZombieVisual(
+export function activateZombieVisual(
   visual: GeneratedZombieVisual,
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry,
   slot: number,
   generation: number,
-  attackClip: AnimationClip | null,
-  deathClip: AnimationClip | null,
-  runClip: AnimationClip | null,
-  walkClip: AnimationClip | null,
 ) {
-  if (!visual.mixer) {
-    visual.mixer = new AnimationMixer(visual.animationRoot)
-    visual.attackAction = attackClip
-      ? visual.mixer.clipAction(attackClip, visual.animationRoot)
-      : null
-    visual.deathAction = deathClip ? visual.mixer.clipAction(deathClip, visual.animationRoot) : null
-    visual.walkAction = walkClip ? visual.mixer.clipAction(walkClip, visual.animationRoot) : null
-    visual.runAction = runClip ? visual.mixer.clipAction(runClip, visual.animationRoot) : null
-    for (const action of [visual.attackAction, visual.walkAction, visual.runAction]) {
-      action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
-    }
-    visual.deathAction?.setLoop(LoopOnce, 1)
-    if (visual.deathAction) visual.deathAction.clampWhenFinished = true
-  }
+  if (!visual.mixer) throw new Error('Detailed zombie animation bindings were not prepared.')
   visual.generation = generation
   visual.unregisterImpactVisual = registerZombieEscapeImpactVisual(
     impactVisualRegistry,
@@ -1602,19 +1580,13 @@ function activateZombieVisual(
   visual.root.visible = true
 }
 
-function parkZombieVisual(visual: GeneratedZombieVisual) {
+export function parkZombieVisual(visual: GeneratedZombieVisual) {
   visual.unregisterImpactVisual()
   visual.unregisterImpactVisual = () => undefined
   visual.attackAction?.stop()
   visual.deathAction?.stop()
   visual.walkAction?.stop()
   visual.runAction?.stop()
-  visual.mixer?.uncacheRoot(visual.animationRoot)
-  visual.mixer = null
-  visual.attackAction = null
-  visual.deathAction = null
-  visual.walkAction = null
-  visual.runAction = null
   visual.root.visible = false
 }
 

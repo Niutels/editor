@@ -3,7 +3,7 @@ import {
   type LandrushIslandLoadingProgressMotionSnapshot,
 } from './landrush-island-loading-progress-controller'
 
-export const LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION = 2
+export const LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION = 3
 export const LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL = '__LANDRUSH_ISLAND_LOADING_BOOT_RUN__'
 export const LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL =
   '__LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE__'

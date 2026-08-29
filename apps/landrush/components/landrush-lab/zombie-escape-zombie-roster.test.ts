@@ -73,6 +73,27 @@ describe('Zombie Escape zombie roster', () => {
     }
   })
 
+  test('widens only each gait distribution maximum by the requested multiplier', () => {
+    const baseline = Array.from({ length: 1_000 }, (_, ordinal) =>
+      resolveZombieEscapeSpawnSpeedScale(91_337, ordinal),
+    )
+    const maximumSpeedMultiplier = 1.25
+    const widened = baseline.map((_, ordinal) =>
+      resolveZombieEscapeSpawnSpeedScale(91_337, ordinal, maximumSpeedMultiplier),
+    )
+
+    for (let ordinal = 0; ordinal < baseline.length; ordinal += 1) {
+      const baselineSpeed = baseline[ordinal]!
+      const minimum = baselineSpeed >= 1.3 ? 1.3 : 0.9
+      const baselineMaximum = baselineSpeed >= 1.3 ? 1.55 : 1.12
+      const amount = (baselineSpeed - minimum) / (baselineMaximum - minimum)
+      expect(widened[ordinal]).toBeCloseTo(
+        minimum + (baselineMaximum * maximumSpeedMultiplier - minimum) * amount,
+        12,
+      )
+    }
+  })
+
   test('derives one bounded multiplicative slowdown per projectile hit identity', () => {
     const first = Array.from({ length: 32 }, (_, hitOrdinal) =>
       resolveZombieEscapeProjectileSlowdownMultiplier(91_337, 12, hitOrdinal),

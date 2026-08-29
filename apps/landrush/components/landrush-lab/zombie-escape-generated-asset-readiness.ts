@@ -14,7 +14,9 @@ export type ZombieEscapeGeneratedAssetReadinessSnapshot = Readonly<{
   completed: number
   expectedKeys: readonly string[]
   generation: number
+  pipelineCompleted: number
   pipelineReady: boolean
+  pipelineTotal: number
   ready: boolean
   readyKeys: readonly string[]
   settledKeys: readonly string[]
@@ -63,12 +65,16 @@ export function resolveZombieEscapeGeneratedAssetSettlement(
 export function resolveZombieEscapeGeneratedAssetReadinessSnapshot({
   expectedKeys,
   generation,
+  pipelineCompleted = 0,
   pipelineReady,
+  pipelineTotal = 1,
   statuses,
 }: {
   expectedKeys: readonly string[]
   generation: number
+  pipelineCompleted?: number
   pipelineReady: boolean
+  pipelineTotal?: number
   statuses: ReadonlyMap<string, ZombieEscapeGeneratedAssetTerminalStatus>
 }): ZombieEscapeGeneratedAssetReadinessSnapshot {
   const stableExpectedKeys = Array.from(new Set(expectedKeys))
@@ -81,13 +87,23 @@ export function resolveZombieEscapeGeneratedAssetReadinessSnapshot({
     if (status.state === 'ready') readyKeys.push(key)
   }
   const allocationReady = readyKeys.length === stableExpectedKeys.length
+  const boundedPipelineTotal = Number.isFinite(pipelineTotal)
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(1, Math.floor(pipelineTotal)))
+    : 1
+  const boundedPipelineCompleted = pipelineReady
+    ? boundedPipelineTotal
+    : Number.isFinite(pipelineCompleted)
+      ? Math.min(boundedPipelineTotal, Math.max(0, Math.floor(pipelineCompleted)))
+      : 0
 
   return {
     allocationReady,
     completed: settledKeys.length,
     expectedKeys: stableExpectedKeys,
     generation,
+    pipelineCompleted: boundedPipelineCompleted,
     pipelineReady,
+    pipelineTotal: boundedPipelineTotal,
     ready: allocationReady && pipelineReady,
     readyKeys,
     settledKeys,

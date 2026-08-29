@@ -91,7 +91,9 @@ describe('Zombie Escape generated asset readiness', () => {
       completed: 2,
       expectedKeys: ['weapon:pistol', 'weapon:carbine', 'zombie:dockworker'],
       generation: 4,
+      pipelineCompleted: 1,
       pipelineReady: true,
+      pipelineTotal: 1,
       ready: false,
       readyKeys: ['weapon:pistol'],
       settledKeys: ['weapon:pistol', 'zombie:dockworker'],
@@ -122,6 +124,43 @@ describe('Zombie Escape generated asset readiness', () => {
       allocationReady: true,
       completed: 2,
       pipelineReady: true,
+      ready: true,
+    })
+  })
+
+  test('normalizes pipeline progress to finite bounded integers without weakening readiness', () => {
+    const statuses = new Map<string, ZombieEscapeGeneratedAssetTerminalStatus>([
+      ['weapon:pistol', { state: 'ready' }],
+    ])
+    const resolve = (pipelineCompleted: number, pipelineTotal: number, pipelineReady = false) =>
+      resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+        expectedKeys: ['weapon:pistol'],
+        generation: 2,
+        pipelineCompleted,
+        pipelineReady,
+        pipelineTotal,
+        statuses,
+      })
+
+    expect(resolve(2.9, 4.8)).toMatchObject({
+      pipelineCompleted: 2,
+      pipelineReady: false,
+      pipelineTotal: 4,
+      ready: false,
+    })
+    expect(resolve(-4, 0)).toMatchObject({ pipelineCompleted: 0, pipelineTotal: 1 })
+    expect(resolve(Number.NaN, Number.POSITIVE_INFINITY)).toMatchObject({
+      pipelineCompleted: 0,
+      pipelineTotal: 1,
+    })
+    expect(resolve(Number.MAX_VALUE, Number.MAX_VALUE)).toMatchObject({
+      pipelineCompleted: Number.MAX_SAFE_INTEGER,
+      pipelineTotal: Number.MAX_SAFE_INTEGER,
+    })
+    expect(resolve(0, 7, true)).toMatchObject({
+      pipelineCompleted: 7,
+      pipelineReady: true,
+      pipelineTotal: 7,
       ready: true,
     })
   })

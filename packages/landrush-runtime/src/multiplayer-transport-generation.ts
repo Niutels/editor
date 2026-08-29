@@ -2,6 +2,7 @@ import type { ParcelBuildContentAuthority } from './parcel-build-content-authori
 
 export type MultiplayerTransportScope = {
   contentAuthority: ParcelBuildContentAuthority
+  gameMode: 'zombie-escape' | null
   localProfileId: string
   parcelWorldId: string | null
   roomId: string
@@ -25,6 +26,7 @@ export function advanceMultiplayerTransportScopeGeneration(
 ): MultiplayerTransportScopeGeneration {
   if (
     current.scope.contentAuthority === scope.contentAuthority &&
+    current.scope.gameMode === scope.gameMode &&
     current.scope.localProfileId === scope.localProfileId &&
     current.scope.parcelWorldId === scope.parcelWorldId &&
     current.scope.roomId === scope.roomId &&

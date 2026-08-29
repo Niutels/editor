@@ -6,9 +6,9 @@ import {
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
   createZombieEscapeRenderReadinessRegistry,
-  createZombieEscapeRenderRepresentativePrewarmQueue,
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
+  waitForZombieEscapeGpuPreparation,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
   type ZombieEscapePipelineRenderer,
   type ZombieEscapeRenderReadinessTimer,
@@ -30,15 +30,17 @@ function createFakeRenderReadinessTimer() {
   let nextHandle = 1
   let clearCount = 0
   const callbacks = new Map<number, () => void>()
+  const scheduledDelays: number[] = []
   const timer: ZombieEscapeRenderReadinessTimer = {
     clear(handle) {
       clearCount += 1
       callbacks.delete(handle as number)
     },
-    schedule(callback) {
+    schedule(callback, delayMs) {
       const handle = nextHandle
       nextHandle += 1
       callbacks.set(handle, callback)
+      scheduledDelays.push(delayMs)
       return handle
     },
   }
@@ -49,6 +51,7 @@ function createFakeRenderReadinessTimer() {
     get pendingCount() {
       return callbacks.size
     },
+    scheduledDelays,
     fireAll() {
       const pendingCallbacks = Array.from(callbacks.values())
       callbacks.clear()
@@ -106,6 +109,11 @@ describe('Zombie Escape render representative coverage', () => {
     expect(keys).toContain('effect:impact')
     expect(keys).toContain('effect:sparks')
     expect(keys).toContain('effect:blood')
+    expect(keys).toContain('effect:carrier-accent')
+    expect(keys).toContain('effect:travel-detail')
+    expect(keys).toContain('effect:travel-ribbon')
+    expect(keys).toContain('effect:muzzle-petals')
+    expect(keys).toContain('effect:death-dust')
     expect(getZombieEscapeRenderRepresentativeKeys('performance')).not.toContain(
       createZombieEscapeZombieRenderRepresentativeKey(ZOMBIE_ESCAPE_ZOMBIE_CATALOG[0]!.id),
     )
@@ -190,6 +198,7 @@ describe('Zombie Escape render compilation', () => {
     const compiledRoots: Object3D[] = []
     let initialized = false
     const renderer: ZombieEscapePipelineRenderer = {
+      backend: { device: { queue: { onSubmittedWorkDone: async () => undefined } } },
       async compileAsync(root, camera, targetScene) {
         expect(camera).toBe(fixture.camera)
         expect(targetScene).toBe(fixture.targetScene)
@@ -279,69 +288,347 @@ describe('Zombie Escape render compilation', () => {
     expect(calls).toBe(3)
     expect(maximumActive).toBe(1)
   })
+})
 
-  test('prewarms newly registered representatives immediately and exactly once in queue order', async () => {
-    const firstCompilation = deferred<void>()
-    const secondCompilation = deferred<void>()
-    const calls: string[] = []
-    let active = 0
-    let maximumActive = 0
-    const queue = createZombieEscapeRenderRepresentativePrewarmQueue({
-      compile: async ({ representatives }) => {
-        const key = representatives[0]!.key
-        calls.push(key)
-        active += 1
-        maximumActive = Math.max(maximumActive, active)
-        await (key === 'first' ? firstCompilation.promise : secondCompilation.promise)
-        active -= 1
-      },
-    })
-    const camera = new PerspectiveCamera()
-    const renderer = { compileAsync: async () => undefined }
+describe('Zombie Escape GPU preparation completion', () => {
+  test('counts the existing legacy scene compile separately and reserves the last unit for the fence', async () => {
+    const gpu = deferred<void>()
+    const root = new Group()
     const targetScene = new Scene()
-    const first = { key: 'first', root: new Group() }
-    const second = { key: 'second', root: new Group() }
-    const synchronize = (representatives: Array<typeof first>) =>
-      queue.synchronize({ camera, generation: 1, renderer, representatives, targetScene })
-
-    synchronize([first])
-    await flushMicrotasksUntil(() => calls.length === 1)
-    synchronize([first, second])
-    synchronize([first, second])
-    expect(calls).toEqual(['first'])
-
-    firstCompilation.resolve()
-    await flushMicrotasksUntil(() => calls.length === 2)
-    expect(calls).toEqual(['first', 'second'])
-    secondCompilation.resolve()
-    expect(await queue.waitForSettled()).toBe('ready')
-    expect(maximumActive).toBe(1)
-    queue.dispose()
+    const compiled: Object3D[] = []
+    const progress: unknown[] = []
+    let waitingForGpu = false
+    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const pending = coordinator.request(
+      {
+        camera: new PerspectiveCamera(),
+        generation: 1,
+        identity: {},
+        renderer: {
+          backend: {
+            device: {
+              queue: {
+                onSubmittedWorkDone: () => {
+                  waitingForGpu = true
+                  return gpu.promise
+                },
+              },
+            },
+          },
+          compileAsync: async (object) => {
+            compiled.push(object)
+          },
+        },
+        representatives: [{ key: 'root', root }],
+        targetScene,
+      },
+      () => undefined,
+      (snapshot) => progress.push(snapshot),
+    )
+    await flushMicrotasksUntil(() => waitingForGpu)
+    expect(compiled).toEqual([root, targetScene])
+    expect(progress).toEqual([
+      { completed: 0, total: 3 },
+      { completed: 1, total: 3 },
+      { completed: 2, total: 3 },
+    ])
+    gpu.resolve()
+    expect(await pending).toBe('ready')
+    expect(progress.at(-1)).toEqual({ completed: 3, total: 3 })
+    coordinator.dispose()
   })
 
-  test('continues the representative prewarm queue after one compilation fails', async () => {
-    const calls: string[] = []
-    const queue = createZombieEscapeRenderRepresentativePrewarmQueue({
-      compile: async ({ representatives }) => {
-        const key = representatives[0]!.key
-        calls.push(key)
-        if (key === 'first') throw new Error('first failed')
+  test('never credits the final unit or readiness when GPU completion fails', async () => {
+    const gpu = deferred<void>()
+    const progress: unknown[] = []
+    const statuses: unknown[] = []
+    let waitingForGpu = false
+    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const pending = coordinator.request(
+      {
+        camera: new PerspectiveCamera(),
+        generation: 1,
+        identity: {},
+        renderer: {
+          backend: {
+            device: {
+              queue: {
+                onSubmittedWorkDone: () => {
+                  waitingForGpu = true
+                  return gpu.promise
+                },
+              },
+            },
+          },
+          compileAsync: async () => undefined,
+          isWebGPURenderer: true,
+        },
+        representatives: [{ key: 'root', root: new Group() }],
+        targetScene: new Scene(),
       },
-    })
-    queue.synchronize({
-      camera: new PerspectiveCamera(),
-      generation: 1,
-      renderer: { compileAsync: async () => undefined },
-      representatives: [
-        { key: 'first', root: new Group() },
-        { key: 'second', root: new Group() },
-      ],
-      targetScene: new Scene(),
-    })
+      (status) => statuses.push(status),
+      (snapshot) => progress.push(snapshot),
+    )
+    await flushMicrotasksUntil(() => waitingForGpu)
+    gpu.reject(new Error('device lost'))
+    expect(await pending).toBe('failed')
+    expect(progress).toEqual([
+      { completed: 0, total: 2 },
+      { completed: 1, total: 2 },
+    ])
+    expect(statuses).toEqual([{ message: 'device lost', state: 'failed' }])
+    coordinator.dispose()
+  })
 
-    expect(await queue.waitForSettled()).toBe('failed')
-    expect(calls).toEqual(['first', 'second'])
-    queue.dispose()
+  test('bounds an unresponsive WebGPU queue without treating the deadline as readiness', async () => {
+    const timer = createFakeRenderReadinessTimer()
+    const pending = waitForZombieEscapeGpuPreparation(
+      {
+        backend: { device: { queue: { onSubmittedWorkDone: () => new Promise<void>(() => {}) } } },
+        compileAsync: async () => undefined,
+        isWebGPURenderer: true,
+      },
+      undefined,
+      timer.timer,
+    )
+    expect(timer.pendingCount).toBe(1)
+    timer.fireAll()
+    await expect(pending).rejects.toThrow('did not finish before its deadline')
+    expect(timer.pendingCount).toBe(0)
+    expect(timer.clearCount).toBe(1)
+  })
+
+  test('keeps the complete registered set behind readiness until GPU submissions finish', async () => {
+    const gpu = deferred<void>()
+    const roots = [new Group(), new Group(), new Group()]
+    const compiled: Object3D[] = []
+    const statuses: string[] = []
+    const progress: Array<Readonly<{ completed: number; total: number }>> = []
+    let waitingForGpu = false
+    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const result = coordinator.request(
+      {
+        camera: new PerspectiveCamera(),
+        generation: 1,
+        identity: {},
+        renderer: {
+          backend: {
+            device: {
+              queue: {
+                onSubmittedWorkDone: () => {
+                  waitingForGpu = true
+                  return gpu.promise
+                },
+              },
+            },
+          },
+          compileAsync: async (root) => {
+            compiled.push(root)
+          },
+          isWebGPURenderer: true,
+        },
+        representatives: roots.map((root, index) => ({ key: String(index), root })),
+        targetScene: new Scene(),
+      },
+      ({ state }) => statuses.push(state),
+      (snapshot) => progress.push(snapshot),
+    )
+    await flushMicrotasksUntil(() => waitingForGpu)
+    expect(compiled).toEqual(roots)
+    expect(waitingForGpu).toBe(true)
+    expect(statuses).toEqual([])
+    expect(progress).toEqual([
+      { completed: 0, total: 4 },
+      { completed: 1, total: 4 },
+      { completed: 2, total: 4 },
+      { completed: 3, total: 4 },
+    ])
+    gpu.resolve()
+    expect(await result).toBe('ready')
+    expect(statuses).toEqual(['ready'])
+    expect(progress.at(-1)).toEqual({ completed: 4, total: 4 })
+    coordinator.dispose()
+  })
+
+  test('does not report GPU readiness when queue submission rejects or no fence exists', async () => {
+    await expect(
+      waitForZombieEscapeGpuPreparation({
+        backend: {
+          device: {
+            queue: { onSubmittedWorkDone: async () => Promise.reject(new Error('device lost')) },
+          },
+        },
+        compileAsync: async () => undefined,
+        isWebGPURenderer: true,
+      }),
+    ).rejects.toThrow('device lost')
+    await expect(
+      waitForZombieEscapeGpuPreparation({
+        compileAsync: async () => undefined,
+        isWebGPURenderer: true,
+      }),
+    ).rejects.toThrow('requires a live GPU queue or WebGL2 fence')
+  })
+
+  test('flushes WebGL work and yields without blocking until the exact fence signals', async () => {
+    const timer = createFakeRenderReadinessTimer()
+    const events: string[] = []
+    const fence = {}
+    let polls = 0
+    const context = {
+      ALREADY_SIGNALED: 1,
+      CONDITION_SATISFIED: 2,
+      SYNC_GPU_COMMANDS_COMPLETE: 3,
+      TIMEOUT_EXPIRED: 4,
+      clientWaitSync(value: unknown, flags: number, timeout: number) {
+        expect(value).toBe(fence)
+        expect(flags).toBe(0)
+        expect(timeout).toBe(0)
+        events.push('poll')
+        return ++polls === 1 ? 4 : 2
+      },
+      deleteSync(value: unknown) {
+        expect(value).toBe(fence)
+        events.push('delete')
+      },
+      fenceSync(condition: number, flags: number) {
+        expect(condition).toBe(3)
+        expect(flags).toBe(0)
+        events.push('fence')
+        return fence
+      },
+      flush: () => events.push('flush'),
+      isContextLost: () => false,
+    }
+    await waitForZombieEscapeGpuPreparation(
+      { backend: { gl: context }, compileAsync: async () => undefined, isWebGPURenderer: true },
+      async () => {
+        events.push('frame')
+      },
+      timer.timer,
+    )
+    expect(events).toEqual(['fence', 'flush', 'frame', 'poll', 'frame', 'poll', 'delete'])
+    expect(timer.pendingCount).toBe(0)
+    expect(timer.clearCount).toBe(1)
+    expect(timer.scheduledDelays).toEqual([ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS])
+    timer.fireAll()
+    expect(events).toEqual(['fence', 'flush', 'frame', 'poll', 'frame', 'poll', 'delete'])
+  })
+
+  test('bounds a stalled WebGL admission and never polls or deletes again after late resumption', async () => {
+    for (const resume of ['resolve', 'reject'] as const) {
+      const timer = createFakeRenderReadinessTimer()
+      const admission = deferred<void>()
+      const events: string[] = []
+      const fence = {}
+      const context = {
+        ALREADY_SIGNALED: 1,
+        CONDITION_SATISFIED: 2,
+        SYNC_GPU_COMMANDS_COMPLETE: 3,
+        TIMEOUT_EXPIRED: 4,
+        clientWaitSync() {
+          events.push('poll')
+          return 2
+        },
+        deleteSync(value: unknown) {
+          expect(value).toBe(fence)
+          events.push('delete')
+        },
+        fenceSync: () => fence,
+        flush: () => events.push('flush'),
+        isContextLost() {
+          events.push('context')
+          return false
+        },
+      }
+      const pending = waitForZombieEscapeGpuPreparation(
+        { backend: { gl: context }, compileAsync: async () => undefined, isWebGPURenderer: true },
+        () => {
+          events.push('frame')
+          return admission.promise
+        },
+        timer.timer,
+      )
+      expect(events).toEqual(['context', 'flush', 'frame'])
+      expect(timer.pendingCount).toBe(1)
+      expect(timer.scheduledDelays).toEqual([ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS])
+      timer.fireAll()
+      await expect(pending).rejects.toThrow('did not finish before its deadline')
+      expect(events).toEqual(['context', 'flush', 'frame', 'delete'])
+      expect(timer.pendingCount).toBe(0)
+      expect(timer.clearCount).toBe(1)
+
+      if (resume === 'resolve') admission.resolve()
+      else admission.reject(new Error('late admission rejection'))
+      await admission.promise.catch(() => undefined)
+      await Promise.resolve()
+      expect(events).toEqual(['context', 'flush', 'frame', 'delete'])
+      expect(timer.clearCount).toBe(1)
+    }
+  })
+
+  test('clears the WebGL deadline and deletes the fence once on flush failure or context loss', async () => {
+    for (const failure of ['flush', 'context'] as const) {
+      const timer = createFakeRenderReadinessTimer()
+      let lost = false
+      let deleteCount = 0
+      let pollCount = 0
+      const context = {
+        clientWaitSync() {
+          pollCount += 1
+          return 0
+        },
+        deleteSync() {
+          deleteCount += 1
+        },
+        fenceSync: () => ({}),
+        flush() {
+          if (failure === 'flush') throw new Error('flush failed')
+        },
+        isContextLost: () => lost,
+      }
+      await expect(
+        waitForZombieEscapeGpuPreparation(
+          { backend: { gl: context }, compileAsync: async () => undefined, isWebGPURenderer: true },
+          async () => {
+            lost = true
+          },
+          timer.timer,
+        ),
+      ).rejects.toThrow(failure === 'flush' ? 'flush failed' : 'context was lost while waiting')
+      expect(deleteCount).toBe(1)
+      expect(pollCount).toBe(0)
+      expect(timer.pendingCount).toBe(0)
+      expect(timer.clearCount).toBe(1)
+      timer.fireAll()
+      expect(deleteCount).toBe(1)
+    }
+  })
+
+  test('deletes the WebGL fence when an admission wait fails', async () => {
+    const timer = createFakeRenderReadinessTimer()
+    let deleteCount = 0
+    const context = {
+      clientWaitSync: () => 0,
+      deleteSync: () => {
+        deleteCount += 1
+      },
+      fenceSync: () => ({}),
+      flush: () => undefined,
+      isContextLost: () => false,
+    }
+    await expect(
+      waitForZombieEscapeGpuPreparation(
+        { getContext: () => context, compileAsync: async () => undefined },
+        async () => {
+          throw new Error('admission aborted')
+        },
+        timer.timer,
+      ),
+    ).rejects.toThrow('admission aborted')
+    expect(deleteCount).toBe(1)
+    expect(timer.pendingCount).toBe(0)
+    expect(timer.clearCount).toBe(1)
   })
 })
 
@@ -506,7 +793,7 @@ describe('Zombie Escape render readiness coordinator', () => {
     }
   })
 
-  test('releases loading as degraded on timeout and upgrades after late success', async () => {
+  test('warns without settling on timeout and reports late success', async () => {
     const fakeTimer = createFakeRenderReadinessTimer()
     const compilation = deferred<void>()
     const coordinator = createZombieEscapeRenderReadinessCoordinator({
@@ -593,7 +880,7 @@ describe('Zombie Escape render readiness coordinator', () => {
     expect(duplicateStatuses).toEqual(['degraded', 'ready'])
   })
 
-  test('reports a real late compilation failure after degraded release', async () => {
+  test('reports a real late compilation failure after the warning threshold', async () => {
     const fakeTimer = createFakeRenderReadinessTimer()
     const compilation = deferred<void>()
     const coordinator = createZombieEscapeRenderReadinessCoordinator({

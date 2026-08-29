@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { Bone, BoxGeometry, Group, Mesh, MeshStandardMaterial, type Object3D, Vector3 } from 'three'
+import {
+  AnimationClip,
+  Bone,
+  BoxGeometry,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  NumberKeyframeTrack,
+  type Object3D,
+  Vector3,
+} from 'three'
 import {
   createZombieEscapeAttackClip,
   ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS,
@@ -8,9 +18,12 @@ import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-
 import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
+  activateZombieVisual,
   createZombieVisual,
+  parkZombieVisual,
   resolveZombieEscapeGeneratedVariantAdmissionCount,
   resolveZombieEscapeRenderPipelineSettlement,
+  updateZombieEscapeRenderPipelineProgress,
   updateZombieVisualLocomotion,
 } from './zombie-escape-generated-assets'
 import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
@@ -20,7 +33,7 @@ import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
 
 describe('generated asset render-pipeline readiness', () => {
-  test('keeps timed-out prewarm behind loading but releases failed compilation as a fallback', () => {
+  test('keeps timed-out and failed required preparation behind loading until ready or retried', () => {
     expect(
       resolveZombieEscapeRenderPipelineSettlement({
         message: 'prewarm timed out',
@@ -36,7 +49,7 @@ describe('generated asset render-pipeline readiness', () => {
         state: 'failed',
       }),
     ).toEqual({
-      contentReady: true,
+      contentReady: false,
       diagnostic: { level: 'error', message: 'shader compile rejected' },
     })
     expect(resolveZombieEscapeRenderPipelineSettlement({ state: 'ready' })).toEqual({
@@ -56,10 +69,22 @@ describe('generated asset render-pipeline readiness', () => {
     expect(resolveZombieEscapeGeneratedVariantAdmissionCount(2, settled, 3)).toBe(3)
     expect(resolveZombieEscapeGeneratedVariantAdmissionCount(3, settled, 3)).toBe(3)
   })
+
+  test('publishes pipeline progress only when a genuine completed count changes', () => {
+    const current = { completed: 0, total: 4 }
+    expect(updateZombieEscapeRenderPipelineProgress(current, { completed: 0, total: 4 })).toBe(
+      false,
+    )
+    expect(updateZombieEscapeRenderPipelineProgress(current, { completed: 1, total: 4 })).toBe(true)
+    expect(current).toEqual({ completed: 1, total: 4 })
+    expect(updateZombieEscapeRenderPipelineProgress(current, { completed: 1, total: 4 })).toBe(
+      false,
+    )
+  })
 })
 
 describe('generated zombie visual construction', () => {
-  test('prewarms a skinned root without allocating an animation mixer', () => {
+  test('prepares a stopped animation mixer before a hidden pooled root is ready', () => {
     const group = new Group()
     const source = new Group()
     const geometry = new BoxGeometry()
@@ -81,11 +106,72 @@ describe('generated zombie visual construction', () => {
       zombieShaderSeed: 0,
     })
 
-    expect(visual.mixer).toBeNull()
+    expect(visual.mixer).not.toBeNull()
+    expect(visual.mixer?.time).toBe(0)
+    expect(visual.mixer?.stats.actions.inUse).toBe(0)
     expect(visual.root.visible).toBe(false)
     for (const ownedMaterial of visual.ownedMaterials) ownedMaterial.dispose()
     geometry.dispose()
     material.dispose()
+  })
+
+  test('binds during preparation and reuses stopped actions across activation without changing the rest pose', () => {
+    const source = new Group()
+    const bone = new Bone()
+    bone.name = 'Hips'
+    bone.position.x = 2
+    source.add(bone)
+    const walkClip = new AnimationClip('walk', 1, [
+      new NumberKeyframeTrack('Hips.position[x]', [0, 1], [10, 20]),
+    ])
+    const registry = createZombieEscapeImpactVisualRegistry()
+    const visual = createZombieVisual({
+      active: false,
+      attackClip: null,
+      generation: 0,
+      group: new Group(),
+      impactVisualRegistry: registry,
+      modelTransform: MODEL_TRANSFORM,
+      runClip: null,
+      slot: null,
+      source,
+      walkClip,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+      zombieShaderSeed: 0,
+    })
+    const mixer = visual.mixer!
+    const action = visual.walkAction!
+    const animatedBone = visual.animationRoot.getObjectByName('Hips')!
+    const bindingCount = mixer.stats.bindings.total
+    expect(bindingCount).toBeGreaterThan(0)
+    expect(animatedBone.position.x).toBe(2)
+    expect(action.isRunning()).toBe(false)
+    expect(registry.bindings.size).toBe(0)
+    mixer.clipAction = () => {
+      throw new Error('Activation must reuse the prepared action')
+    }
+
+    for (let generation = 1; generation <= 8; generation += 1) {
+      activateZombieVisual(visual, registry, 3, generation)
+      expect(visual.mixer).toBe(mixer)
+      expect(visual.walkAction).toBe(action)
+      expect(visual.generation).toBe(generation)
+      expect(visual.root.visible).toBe(true)
+      expect(registry.bindings.size).toBe(1)
+      expect(action.time).toBe(0)
+      mixer.update(0.25)
+      expect(animatedBone.position.x).toBeCloseTo(12.5)
+
+      parkZombieVisual(visual)
+      expect(visual.root.visible).toBe(false)
+      expect(action.isRunning()).toBe(false)
+      expect(animatedBone.position.x).toBe(2)
+      expect(registry.bindings.size).toBe(0)
+      expect(mixer.stats.bindings.total).toBe(bindingCount)
+      expect(mixer.stats.actions.inUse).toBe(0)
+    }
+    mixer.uncacheRoot(visual.animationRoot)
+    expect(mixer.stats.bindings.total).toBe(0)
   })
 
   test('disposes materials cloned before a later material clone fails', () => {

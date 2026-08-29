@@ -608,7 +608,7 @@ describe('Landrush island measured loading timeline', () => {
     expect(controller.getSnapshot().displayedProgress).toBe(0.2)
   })
 
-  test('builds exact cubic compositor knots with a settled tail from retained presentation motion', () => {
+  test('builds exact cubic compositor knots with a bounded moving reserve from retained presentation motion', () => {
     const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0 })
     const stage = resolveLandrushIslandLoadingProgressStage({
       displayedProgress: 0,
@@ -617,47 +617,71 @@ describe('Landrush island measured loading timeline', () => {
     })
     controller.setConfirmedProgress(stage.confirmedProgress, stage)
 
-    const pulse = controller.getSnapshot().pulses[0]!
+    const snapshot = controller.getSnapshot()
+    const confirmedPulses = snapshot.pulses.filter((pulse) => pulse.kind === 'confirmed')
+    const speculativePulses = snapshot.pulses.filter((pulse) => pulse.kind === 'speculative')
+    const pulse = confirmedPulses[0]!
     const preview = createLandrushIslandLoadingVisualPreview(controller, 1_000)
 
-    expect(controller.getSnapshot().pulses).toHaveLength(1)
+    expect(confirmedPulses).toHaveLength(1)
+    expect(speculativePulses.length).toBeGreaterThan(1)
+    expect(speculativePulses.length).toBeLessThan(500)
     expect(pulse.startedAtMs).toBe(0)
     expect(pulse.durationMs).toBeGreaterThanOrEqual(LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS)
     expect(pulse.durationMs).toBeLessThan(LANDRUSH_ISLAND_LOADING_RESPONSE_MS)
     expect(preview.durationMs).toBe(LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS)
-    expect(preview.keyframes.map(({ offset }) => offset)).toEqual([
-      0,
-      pulse.durationMs / 3 / preview.durationMs,
-      (pulse.durationMs * 2) / 3 / preview.durationMs,
-      pulse.durationMs / preview.durationMs,
-      1,
-    ])
+    const expectedKnots = new Set([0, preview.durationMs])
+    for (const plannedPulse of snapshot.pulses) {
+      for (let knot = 0; knot <= 3; knot += 1) {
+        const timeMs = plannedPulse.startedAtMs + (knot * plannedPulse.durationMs) / 3
+        if (timeMs > 0 && timeMs < preview.durationMs) expectedKnots.add(timeMs)
+      }
+    }
+    const orderedKnots = [...expectedKnots].sort((left, right) => left - right)
+    expect(preview.keyframes.map(({ offset }) => offset)).toEqual(
+      orderedKnots.map((timeMs) => timeMs / preview.durationMs),
+    )
     expect(preview.keyframes[0]).toEqual({
       accelerationPerSecondSquared: 0,
       offset: 0,
       progress: 0,
       velocityPerSecond: 0,
     })
-    expect(preview.keyframes.at(-1)).toEqual({
-      accelerationPerSecondSquared: 0,
-      offset: 1,
-      progress: stage.confirmedProgress,
-      velocityPerSecond: 0,
-    })
-    expect(preview.to).toBe(stage.confirmedProgress)
+    expect(preview.keyframes.at(-1)?.velocityPerSecond).toBeGreaterThan(0)
+    expect(preview.keyframes.at(-1)?.offset).toBe(1)
+    expect(preview.to).toBeGreaterThan(stage.confirmedProgress)
+    expect(preview.to).toBeLessThan(stage.ceiling)
     expect(preview.to).toBeLessThanOrEqual(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS)
-    expect(
-      resolveLandrushIslandLoadingVisualSegmentProgress(
-        preview,
-        preview.startedAtMs + pulse.durationMs / 2,
-      ),
-    ).toBeCloseTo(stage.confirmedProgress / 2)
-    expect(
-      resolveLandrushIslandLoadingVisualSegmentProgress(
-        preview,
-        preview.startedAtMs + preview.durationMs / 2,
-      ),
-    ).toBe(stage.confirmedProgress)
+    const restored = createLandrushIslandLoadingProgressController()
+    restored.restoreMotionSnapshot(snapshot)
+    let elapsedMs = 0
+    for (let index = 0; index < preview.keyframes.length; index += 1) {
+      const keyframe = preview.keyframes[index]!
+      const timeMs = orderedKnots[index]!
+      restored.step(timeMs - elapsedMs)
+      elapsedMs = timeMs
+      const expected = restored.getSnapshot()
+      expect(keyframe.progress).toBeCloseTo(expected.displayedProgress, 12)
+      expect(keyframe.velocityPerSecond).toBeCloseTo(expected.velocityPerSecond, 12)
+      expect(keyframe.accelerationPerSecondSquared).toBeCloseTo(
+        expected.accelerationPerSecondSquared,
+        10,
+      )
+      expect(expected.displayedProgress).toBeLessThan(stage.ceiling)
+      if (timeMs > 0) expect(expected.velocityPerSecond).toBeGreaterThan(0)
+      if (index === preview.keyframes.length - 1) continue
+      const midpointMs = (timeMs + orderedKnots[index + 1]!) / 2
+      restored.step(midpointMs - elapsedMs)
+      elapsedMs = midpointMs
+      expect(
+        resolveLandrushIslandLoadingVisualSegmentProgress(
+          preview,
+          preview.startedAtMs + midpointMs,
+        ),
+      ).toBeCloseTo(restored.getSnapshot().displayedProgress, 12)
+    }
+    expect(controller.getSnapshot()).toEqual(snapshot)
+    expect(restored.readyToDismiss()).toBe(false)
   })
 
   test.each([
@@ -725,12 +749,26 @@ describe('Landrush island measured loading timeline', () => {
     expect(
       resolveLandrushIslandLoadingVisualSegmentProgress(reconciled, frameTimeMs + 1),
     ).toBeGreaterThanOrEqual(visualProgress)
+    const responseTimeMs = observationTimeMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS
+    const renderedAfterResponse = resolveLandrushIslandLoadingVisualSegmentProgress(
+      reconciled,
+      responseTimeMs,
+    )
+    controller.step(startDelayMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS)
+    expect(renderedAfterResponse).toBeCloseTo(controller.getSnapshot().displayedProgress, 12)
+    expect(renderedAfterResponse).toBeGreaterThan(milestoneStage.confirmedProgress)
+    expect(renderedAfterResponse).toBeLessThan(milestoneStage.ceiling)
+    expect(renderedAfterResponse).toBeLessThanOrEqual(
+      LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+    )
+    expect(controller.getSnapshot().velocityPerSecond).toBeGreaterThan(0)
+    controller.step(1_000)
     expect(
-      resolveLandrushIslandLoadingVisualSegmentProgress(
-        reconciled,
-        observationTimeMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
-      ),
-    ).toBeCloseTo(milestoneStage.confirmedProgress, 12)
+      resolveLandrushIslandLoadingVisualSegmentProgress(reconciled, responseTimeMs + 1_000),
+    ).toBeCloseTo(controller.getSnapshot().displayedProgress, 12)
+    expect(controller.getSnapshot().displayedProgress).toBeGreaterThan(renderedAfterResponse)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(milestoneStage.ceiling)
+    expect(controller.readyToDismiss()).toBe(false)
   })
 
   test('adds a stable document-readiness gate to every browser snapshot', () => {

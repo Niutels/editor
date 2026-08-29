@@ -1,7 +1,15 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, memo, useLayoutEffect, useMemo, useRef } from 'react'
+import {
+  type MutableRefObject,
+  memo,
+  type ReactNode,
+  Suspense,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react'
 import {
   AdditiveBlending,
   Color,
@@ -59,7 +67,10 @@ import {
   resolveZombieEscapePresentationPose,
   transformZombieEscapePresentationPoint,
 } from './zombie-escape-presentation-pose'
-import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
+import type {
+  ZombieEscapeRenderReadinessRegistry,
+  ZombieEscapeRenderRepresentativeKey,
+} from './zombie-escape-render-readiness'
 import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
 import {
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
@@ -146,6 +157,31 @@ export function shouldScanZombieEscapeDeathDustCandidates(kills: number, spawned
   return Number.isFinite(kills) && Number.isFinite(spawnedCount) && kills > spawnedCount
 }
 
+type ZombieEscapeEffectRenderBoundaryProps = {
+  children: ReactNode
+  registry: ZombieEscapeRenderReadinessRegistry | undefined
+  representativeKey: ZombieEscapeRenderRepresentativeKey
+}
+
+export function ZombieEscapeEffectRenderBoundary(props: ZombieEscapeEffectRenderBoundaryProps) {
+  return (
+    <Suspense fallback={null}>
+      <MountedZombieEscapeEffectRenderRepresentative {...props} />
+    </Suspense>
+  )
+}
+
+function MountedZombieEscapeEffectRenderRepresentative({
+  children,
+  registry,
+  representativeKey,
+}: ZombieEscapeEffectRenderBoundaryProps) {
+  const rootRef = useRef<Group>(null)
+  // The registration must suspend with its resources, not publish an empty outer group.
+  useZombieEscapeRenderRepresentative(registry, representativeKey, rootRef)
+  return <group ref={rootRef}>{children}</group>
+}
+
 export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
   deathDustVariant = DEFAULT_ZOMBIE_ESCAPE_DEATH_DUST_VARIANT,
   framePriority = -16,
@@ -206,11 +242,6 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
     [bloodEvents.pool.capacity],
   )
   const sparkRef = useRef<InstancedMesh>(null)
-  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:tracer', travelRef)
-  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:muzzle', muzzleRef)
-  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:impact', impactRootRef)
-  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:blood', bloodRootRef)
-  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:sparks', sparkRef)
   const dummy = useMemo(() => new Object3D(), [])
   const colorScratch = useMemo(() => new Color(), [])
   const direction = useMemo(() => new Vector3(), [])
@@ -326,6 +357,32 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
     sparkCapacity,
     travelDetailCapacity,
   ])
+
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:tracer', travelRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:muzzle', muzzleRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:impact', impactRootRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:blood', bloodRootRef)
+  useZombieEscapeRenderRepresentative(renderReadinessRegistry, 'effect:sparks', sparkRef)
+  useZombieEscapeRenderRepresentative(
+    renderReadinessRegistry,
+    'effect:carrier-accent',
+    carrierAccentRef,
+  )
+  useZombieEscapeRenderRepresentative(
+    renderReadinessRegistry,
+    'effect:travel-detail',
+    travelDetailRef,
+  )
+  useZombieEscapeRenderRepresentative(
+    renderReadinessRegistry,
+    'effect:travel-ribbon',
+    travelRibbonRef,
+  )
+  useZombieEscapeRenderRepresentative(
+    renderReadinessRegistry,
+    'effect:muzzle-petals',
+    muzzlePetalRef,
+  )
 
   useFrame(() => {
     const simulation = simulationRef.current
@@ -1625,12 +1682,18 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
           variant="viscous-strings"
         />
       </group>
-      <ZombieEscapeDeathDustPresentation
-        events={deathDustEvents}
-        framePriority={framePriority + 0.001}
-        getElapsedSeconds={getDeathDustElapsedSeconds}
-        variant={deathDustVariant}
-      />
+      <ZombieEscapeEffectRenderBoundary
+        key={deathDustVariant}
+        registry={renderReadinessRegistry}
+        representativeKey="effect:death-dust"
+      >
+        <ZombieEscapeDeathDustPresentation
+          events={deathDustEvents}
+          framePriority={framePriority + 0.001}
+          getElapsedSeconds={getDeathDustElapsedSeconds}
+          variant={deathDustVariant}
+        />
+      </ZombieEscapeEffectRenderBoundary>
       <instancedMesh
         args={[
           undefined,

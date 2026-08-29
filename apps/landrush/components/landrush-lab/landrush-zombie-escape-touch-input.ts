@@ -1,6 +1,6 @@
 export const LANDRUSH_ZOMBIE_ESCAPE_TOUCH_STICK_DEADZONE = 0.12
-export const LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD = 0.72
-export const LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_RELEASE_THRESHOLD = 0.64
+export const LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD = 0.36
+export const LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_RELEASE_THRESHOLD = 0.32
 
 export type LandrushZombieEscapeTouchStick = 'aim' | 'move'
 export type LandrushZombieEscapeTouchInputKind = LandrushZombieEscapeTouchStick | 'jump'

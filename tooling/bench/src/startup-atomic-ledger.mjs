@@ -159,6 +159,8 @@ function readStartupSnapshot() {
   const status = document.querySelector('[data-landrush-island-loading-shell-status]')
   return {
     ambient: main?.getAttribute('data-landrush-loading-ambient-ready') ?? null,
+    builtColliders:
+      main?.getAttribute('data-landrush-loading-built-colliders-ready') ?? null,
     cliffs: main?.getAttribute('data-landrush-loading-procedural-cliffs-ready') ?? null,
     ground: main?.getAttribute('data-landrush-loading-stylized-ground-ready') ?? null,
     handedOff: main?.getAttribute('data-landrush-loading-handed-off') ?? null,
@@ -172,6 +174,12 @@ function readStartupSnapshot() {
     visibility: document.visibilityState,
     worldFrame: main?.getAttribute('data-landrush-loading-world-frame-ready') ?? null,
     zombieAssets: main?.getAttribute('data-landrush-loading-zombie-assets-ready') ?? null,
+    zombieNavigation:
+      main?.getAttribute('data-landrush-loading-zombie-navigation-ready') ?? null,
+    zombieNavigationError:
+      main?.getAttribute('data-landrush-loading-zombie-navigation-error') ?? null,
+    zombieNavigationStatus:
+      main?.getAttribute('data-landrush-loading-zombie-navigation-status') ?? null,
   }
 }
 

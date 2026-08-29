@@ -216,7 +216,7 @@ function LandrushZombieEscapeTouchJoystick({
       const directionX = distance > 0 ? offsetX / distance : 0
       const directionY = distance > 0 ? offsetY / distance : 0
       const knobRadius = (knobRef.current?.getBoundingClientRect().width ?? 0) * 0.5
-      const travel = Math.max(0, radius - knobRadius - 5)
+      const travel = Math.max(0, radius - knobRadius - 3.5)
       if (knobRef.current) {
         knobRef.current.style.transform = `translate3d(${String(
           directionX * displacement * travel,
@@ -271,7 +271,7 @@ function LandrushZombieEscapeTouchJoystick({
   return (
     <div
       aria-label={label}
-      className="pointer-events-auto relative grid size-[clamp(6rem,22vw,8rem)] touch-none place-items-center rounded-full border border-white/20 bg-slate-950/48 opacity-100 shadow-[0_10px_30px_rgba(2,6,23,0.28)] backdrop-blur-sm transition-[border-color,background-color,box-shadow,opacity] data-[firing=true]:border-rose-200/75 data-[firing=true]:bg-rose-950/48 data-[firing=true]:shadow-[0_0_28px_rgba(251,113,133,0.32)]"
+      className="pointer-events-auto relative grid size-[clamp(4.2rem,15.4vw,5.6rem)] touch-none place-items-center rounded-full border border-white/20 bg-slate-950/48 opacity-100 shadow-[0_10px_30px_rgba(2,6,23,0.28)] backdrop-blur-sm transition-[border-color,background-color,box-shadow,opacity] data-[firing=true]:border-rose-200/75 data-[firing=true]:bg-rose-950/48 data-[firing=true]:shadow-[0_0_28px_rgba(251,113,133,0.32)]"
       data-firing="false"
       data-enabled="true"
       data-landrush-ui-interactive="true"
@@ -288,7 +288,7 @@ function LandrushZombieEscapeTouchJoystick({
       {stick === 'aim' ? (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-[14%] rounded-full border border-rose-100/20"
+          className="pointer-events-none absolute inset-[32%] rounded-full border border-rose-100/20"
         />
       ) : null}
       <span className="pointer-events-none absolute -top-5 left-1/2 -translate-x-1/2 font-black text-[9px] text-white/60 uppercase tracking-[0.16em]">
@@ -296,7 +296,7 @@ function LandrushZombieEscapeTouchJoystick({
       </span>
       <div
         aria-hidden="true"
-        className="pointer-events-none relative size-[clamp(2.6rem,9vw,3.4rem)] rounded-full border border-white/30 bg-white/18 shadow-[0_5px_18px_rgba(2,6,23,0.25)] will-change-transform"
+        className="pointer-events-none relative size-[clamp(1.82rem,6.3vw,2.38rem)] rounded-full border border-white/30 bg-white/18 shadow-[0_5px_18px_rgba(2,6,23,0.25)] will-change-transform"
         data-touch-stick-knob={stick}
         ref={knobRef}
         style={{ transform: 'translate3d(0, 0, 0)' }}

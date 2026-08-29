@@ -4,6 +4,9 @@ export const PARCEL_WRITER_SESSION_CLOSE_CODE: 4009
 export const MAX_PARCEL_WRITER_SESSION_ID_LENGTH: 120
 export const DEFAULT_MULTIPLAYER_ROOM_ID: 'landrush-lab-world-multiplayer'
 export const MAX_MULTIPLAYER_ROOM_ID_LENGTH: 80
+export const MAX_MULTIPLAYER_COMBAT_SHOTS: 64
+export const MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS: 60000
+export const MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS: 180000
 
 export type ParcelBuildReadableSchemaVersion =
   | typeof LEGACY_PARCEL_BUILD_SCHEMA_VERSION
@@ -16,6 +19,7 @@ export type LocalPlayerProfile = {
 }
 
 export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
+  combat?: MultiplayerPlayerCombatSnapshot
   heading: number
   moving: boolean
   pose?: MultiplayerPlayerPose
@@ -25,6 +29,32 @@ export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
 }
 
 export type MultiplayerPlayerPose = 'crouching' | 'falling'
+
+export type MultiplayerZombieEscapeStateSnapshot = {
+  night: number
+  phase: 'build' | 'night'
+  phaseEndsAt: number | null
+  revision: number
+  sessionId: string
+}
+
+export type MultiplayerPlayerShotSnapshot = {
+  id: number
+  impactAge: number | null
+  position: [number, number, number]
+  previousPosition: [number, number, number]
+  weaponIndex: number
+}
+
+export type MultiplayerPlayerCombatSnapshot = {
+  aimAngle: number
+  ammo: number
+  meleePhase: 'active' | 'idle' | 'recovery' | 'windup'
+  meleeProgress: number
+  shotSequence: number
+  shots: MultiplayerPlayerShotSnapshot[]
+  weaponIndex: number
+}
 
 export type ParcelOwnership = {
   claimedAt: number
@@ -147,3 +177,15 @@ export function normalizeParcelBuildRevision(value: unknown, fallback?: number):
 export function sanitizeMultiplayerRoomId(value: unknown): string
 export function isSpatialVoiceSignalPayload(value: unknown): value is SpatialVoiceSignalPayload
 export function isMultiplayerPlayerPose(value: unknown): value is MultiplayerPlayerPose
+export function isMultiplayerPlayerCombatSnapshot(
+  value: unknown,
+): value is MultiplayerPlayerCombatSnapshot
+export function sanitizeMultiplayerPlayerCombatSnapshot(
+  value: unknown,
+): MultiplayerPlayerCombatSnapshot | undefined
+export function isMultiplayerZombieEscapeStateSnapshot(
+  value: unknown,
+): value is MultiplayerZombieEscapeStateSnapshot
+export function sanitizeMultiplayerZombieEscapeStateSnapshot(
+  value: unknown,
+): MultiplayerZombieEscapeStateSnapshot | undefined

@@ -3,7 +3,7 @@ import type { Camera, Object3D, Scene } from 'three'
 export const LANDRUSH_RENDER_READINESS_TIMEOUT_MS = 15_000
 
 export type LandrushPipelineRenderer = Readonly<{
-  backend?: Readonly<{ device?: unknown }>
+  backend?: Readonly<{ device?: unknown; gl?: unknown }>
   compileAsync: (root: Object3D, camera: Camera, targetScene: Scene) => Promise<unknown>
   getContext?: () => unknown
   init?: () => Promise<unknown> | unknown
@@ -20,6 +20,11 @@ export type LandrushRenderReadinessStatus =
   | Readonly<{ message: string; state: 'degraded' }>
   | Readonly<{ message: string; state: 'failed' }>
 
+export type LandrushRenderReadinessProgress = Readonly<{
+  completed: number
+  total: number
+}>
+
 export type LandrushRenderReadinessRequest = Readonly<{
   camera: Camera
   generation: number
@@ -35,6 +40,7 @@ export type LandrushRenderReadinessCoordinator = Readonly<{
   request: (
     request: LandrushRenderReadinessRequest,
     onStatus: (status: LandrushRenderReadinessStatus) => void,
+    onProgress?: (progress: LandrushRenderReadinessProgress) => void,
   ) => Promise<'failed' | 'ready' | 'stale'>
 }>
 
@@ -53,6 +59,8 @@ type RenderReadinessCoordinatorEntry = {
   callbacks: Set<(status: LandrushRenderReadinessStatus) => void>
   clearWatchdog: () => void
   context: unknown
+  progress?: LandrushRenderReadinessProgress
+  progressCallbacks: Set<(progress: LandrushRenderReadinessProgress) => void>
   promise: Promise<'failed' | 'ready' | 'stale'>
   request: LandrushRenderReadinessRequest
   sequence: number
@@ -61,12 +69,18 @@ type RenderReadinessCoordinatorEntry = {
 
 const RENDER_READINESS_COMPILE_TAILS = new WeakMap<object, Promise<void>>()
 
-export async function compileLandrushRenderRepresentatives({
-  camera,
-  representatives,
-  renderer,
-  targetScene,
-}: Omit<LandrushRenderReadinessRequest, 'generation' | 'identity'>) {
+export async function compileLandrushRenderRepresentatives(
+  {
+    camera,
+    representatives,
+    renderer,
+    targetScene,
+  }: Omit<LandrushRenderReadinessRequest, 'generation' | 'identity'>,
+  onProgress?: (progress: LandrushRenderReadinessProgress) => void,
+) {
+  const total = representatives.length
+  let completed = 0
+  onProgress?.({ completed, total })
   await renderer.init?.()
 
   for (const representative of representatives) {
@@ -78,6 +92,8 @@ export async function compileLandrushRenderRepresentatives({
       restore()
     }
     await pendingCompilation
+    completed += 1
+    onProgress?.({ completed, total })
   }
 }
 
@@ -101,6 +117,7 @@ export function createLandrushRenderReadinessCoordinator({
     sequence += 1
     current?.clearWatchdog()
     current?.callbacks.clear()
+    current?.progressCallbacks.clear()
     current = undefined
   }
 
@@ -110,7 +127,7 @@ export function createLandrushRenderReadinessCoordinator({
       invalidate()
     },
     invalidate,
-    request(request, onStatus) {
+    request(request, onStatus, onProgress) {
       if (disposed) return Promise.resolve('stale')
       const context = getLandrushRendererContext(request.renderer)
       if (
@@ -120,23 +137,35 @@ export function createLandrushRenderReadinessCoordinator({
         current.request.renderer === request.renderer &&
         current.request.camera === request.camera &&
         current.request.targetScene === request.targetScene &&
-        current.context === context &&
-        current.promise
+        current.context === context
       ) {
-        if (current.status) onStatus(current.status)
-        if (!current.status || current.status.state === 'degraded') {
-          current.callbacks.add(onStatus)
+        const entry = current
+        if (entry.progress && onProgress && !entry.progressCallbacks.has(onProgress)) {
+          onProgress(entry.progress)
         }
-        return current.promise
+        if (!isLandrushRenderReadinessRequestCurrent(entry, current, disposed)) {
+          return entry.promise
+        }
+        if (entry.status) onStatus(entry.status)
+        if (
+          isLandrushRenderReadinessRequestCurrent(entry, current, disposed) &&
+          (!entry.status || entry.status.state === 'degraded')
+        ) {
+          entry.callbacks.add(onStatus)
+          if (onProgress) entry.progressCallbacks.add(onProgress)
+        }
+        return entry.promise
       }
 
       sequence += 1
       current?.clearWatchdog()
       current?.callbacks.clear()
+      current?.progressCallbacks.clear()
       const entry: RenderReadinessCoordinatorEntry = {
         callbacks: new Set([onStatus]),
         clearWatchdog: () => undefined,
         context,
+        progressCallbacks: new Set(onProgress ? [onProgress] : []),
         promise: Promise.resolve<'stale'>('stale'),
         request,
         sequence,
@@ -167,13 +196,25 @@ export function createLandrushRenderReadinessCoordinator({
         if (!isLandrushRenderReadinessRequestCurrent(entry, current, disposed)) {
           entry.clearWatchdog()
           entry.callbacks.clear()
+          entry.progressCallbacks.clear()
           return 'stale'
         }
         try {
-          await Promise.resolve().then(() => compile(request))
+          await Promise.resolve().then(() =>
+            compile(request, (progress) => {
+              if (
+                !isLandrushRenderReadinessRequestCurrent(entry, current, disposed) ||
+                (entry.status && entry.status.state !== 'degraded')
+              ) {
+                return
+              }
+              publishLandrushRenderReadinessProgress(entry, progress)
+            }),
+          )
         } catch (error) {
           if (!isLandrushRenderReadinessRequestCurrent(entry, current, disposed)) {
             entry.callbacks.clear()
+            entry.progressCallbacks.clear()
             return 'stale'
           }
           const message = error instanceof Error ? error.message : String(error)
@@ -191,6 +232,7 @@ export function createLandrushRenderReadinessCoordinator({
         }
         if (!isLandrushRenderReadinessRequestCurrent(entry, current, disposed)) {
           entry.callbacks.clear()
+          entry.progressCallbacks.clear()
           return 'stale'
         }
         publishLandrushRenderReadinessStatus(entry, { state: 'ready' }, true)
@@ -246,16 +288,35 @@ function scheduleLandrushRenderReadinessTimeout(
 }
 
 function publishLandrushRenderReadinessStatus(
-  entry: {
-    callbacks: Set<(status: LandrushRenderReadinessStatus) => void>
-    status?: LandrushRenderReadinessStatus
-  },
+  entry: RenderReadinessCoordinatorEntry,
   status: LandrushRenderReadinessStatus,
   settled: boolean,
 ) {
   entry.status = status
   for (const callback of entry.callbacks) callback(status)
-  if (settled) entry.callbacks.clear()
+  if (settled) {
+    entry.callbacks.clear()
+    entry.progressCallbacks.clear()
+  }
+}
+
+function publishLandrushRenderReadinessProgress(
+  entry: RenderReadinessCoordinatorEntry,
+  progress: LandrushRenderReadinessProgress,
+) {
+  if (
+    !Number.isSafeInteger(progress.completed) ||
+    !Number.isSafeInteger(progress.total) ||
+    progress.completed < 0 ||
+    progress.total < progress.completed ||
+    (entry.progress &&
+      (entry.progress.total !== progress.total || progress.completed <= entry.progress.completed))
+  ) {
+    return
+  }
+  const snapshot = { completed: progress.completed, total: progress.total }
+  entry.progress = snapshot
+  for (const callback of entry.progressCallbacks) callback(snapshot)
 }
 
 function forceLandrushRepresentativeRenderable(root: Object3D) {
@@ -300,7 +361,7 @@ function isLandrushRenderableObject(object: Object3D) {
 }
 
 function getLandrushRendererContext(renderer: LandrushPipelineRenderer) {
-  return renderer.backend?.device ?? renderer.getContext?.() ?? renderer
+  return renderer.backend?.device ?? renderer.backend?.gl ?? renderer.getContext?.() ?? renderer
 }
 
 function getLandrushRendererCompileTailKey(renderer: LandrushPipelineRenderer) {

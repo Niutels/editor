@@ -43,6 +43,8 @@ import {
   inspectZombieEscapeCommittedNavigationAction,
   isZombieEscapeWeaponPickupAvailable,
   resetZombieEscapeSimulation,
+  resolveZombieEscapeNightSpawnSpeedMaximumMultiplier,
+  resolveZombieEscapeNightZombieTarget,
   resolveZombieEscapeWeaponPurchaseCost,
   setZombieEscapeCollisionWorld,
   setZombieEscapeExternalPlayerPose,
@@ -51,6 +53,7 @@ import {
   setZombieEscapeWeaponPickupPlacements,
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
+  stepZombieEscapeSimulationPhysics,
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
   ZOMBIE_ESCAPE_SHOT_PHASE,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
@@ -58,6 +61,7 @@ import {
 import { createZombieEscapeArena } from './zombie-escape-world'
 import {
   resolveZombieEscapeProjectileSlowdownMultiplier,
+  resolveZombieEscapeSpawnSpeedScale,
   ZOMBIE_ESCAPE_ZOMBIE_GAIT,
 } from './zombie-escape-zombie-roster'
 
@@ -244,6 +248,67 @@ describe('Zombie Escape simulation', () => {
     expect(state.zombies.pool.capacity).toBe(ZOMBIE_ESCAPE_CAPACITY.zombies)
   })
 
+  test('repeats the same fifty-to-one-hundred population schedule every night', () => {
+    const expectedTargets = [50, 60, 70, 80, 90, 100, 100]
+    const remainingSeconds = [180, 150, 120, 90, 60, 30, 0]
+    expect(
+      remainingSeconds.map((remaining) => resolveZombieEscapeNightZombieTarget(remaining)),
+    ).toEqual(expectedTargets)
+    expect(resolveZombieEscapeNightZombieTarget(0, 257)).toBe(100)
+
+    const arena = createZombieEscapeArena(12_345_2)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 98_760_2)
+    const input = createZombieEscapeControlState()
+    setZombieEscapeGamePhase(state, 'night')
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(50)
+
+    for (let index = 1; index < remainingSeconds.length - 1; index += 1) {
+      state.phaseSecondsRemaining = remainingSeconds[index]!
+      stepZombieEscapeSimulationPhysics(
+        state,
+        input,
+        ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+        arena,
+      )
+      expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(expectedTargets[index]!)
+    }
+
+    setZombieEscapeGamePhase(state, 'build')
+    setZombieEscapeGamePhase(state, 'night')
+    expect(state.night).toBe(2)
+    expect(state.phaseSecondsRemaining).toBe(ZOMBIE_ESCAPE_SIMULATION.nightDurationSeconds)
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(50)
+  })
+
+  test('raises the spawn speed maximum five percent every thirty seconds and resets it nightly', () => {
+    const remainingSeconds = [180, 150, 120, 90, 60, 30, 0]
+    expect(
+      remainingSeconds.map((remaining) =>
+        resolveZombieEscapeNightSpawnSpeedMaximumMultiplier(remaining),
+      ),
+    ).toEqual([1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3])
+
+    const arena = createZombieEscapeArena(12_345_3)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 98_760_3)
+    setZombieEscapeGamePhase(state, 'night')
+    state.phaseSecondsRemaining = 30
+    const lateNightZombie = spawnZombieEscapeZombie(state, 1, 1)
+    expect(state.zombies.speedScale[lateNightZombie]).toBeCloseTo(
+      resolveZombieEscapeSpawnSpeedScale(state.seed, 0, 1.25),
+      6,
+    )
+
+    setZombieEscapeGamePhase(state, 'build')
+    setZombieEscapeGamePhase(state, 'night')
+    const nextNightZombie = spawnZombieEscapeZombie(state, 1, 1)
+    expect(state.zombies.speedScale[nextNightZombie]).toBeCloseTo(
+      resolveZombieEscapeSpawnSpeedScale(state.seed, 1, 1),
+      6,
+    )
+  })
+
   test('admits all fifty production zombies through the fixed spawn budget before its deadline', () => {
     const arena = createZombieEscapeArena(12_345_1)
     arena.obstacleCount = 0
@@ -390,8 +455,8 @@ describe('Zombie Escape simulation', () => {
   test('releases each corpse once and deterministically replaces it outside the player exclusion radius', () => {
     const arena = createZombieEscapeArena(12_346)
     arena.obstacleCount = 0
-    const first = createZombieEscapeSimulation(arena, 98_761)
-    const second = createZombieEscapeSimulation(arena, 98_761)
+    const first = createZombieEscapeSimulation(arena, 98_761, undefined, { zombieCapacity: 1 })
+    const second = createZombieEscapeSimulation(arena, 98_761, undefined, { zombieCapacity: 1 })
     const input = createZombieEscapeControlState()
 
     for (const state of [first, second]) {
@@ -2036,8 +2101,8 @@ describe('Zombie Escape simulation', () => {
   test('spawns each wave zombie on the deterministic player-reachable component', () => {
     const arena = createZombieEscapeArena(423)
     arena.obstacleCount = 0
-    const first = createZombieEscapeSimulation(arena, 824)
-    const second = createZombieEscapeSimulation(arena, 824)
+    const first = createZombieEscapeSimulation(arena, 824, undefined, { zombieCapacity: 1 })
+    const second = createZombieEscapeSimulation(arena, 824, undefined, { zombieCapacity: 1 })
     const world = createZombieEscapeCollisionWorld({
       agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
       boundaryPolicy: 'none',

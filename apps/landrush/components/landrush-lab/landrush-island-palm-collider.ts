@@ -2,10 +2,6 @@ import { buildFirstPersonColliderWorld, type FirstPersonColliderWorld } from '@l
 import { CylinderGeometry } from 'three'
 import type { LandrushPoint2 } from '@/components/landrush/types'
 import {
-  LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
-  LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
-} from './landrush-island-ambient-catalog'
-import {
   createLandrushIslandPalmCollisionCircles,
   type LandrushIslandPalmPlacement,
 } from './landrush-island-palm-layout'
@@ -21,14 +17,11 @@ export type LandrushIslandPalmNavigationFootprint = Readonly<{
 
 export function resolveLandrushIslandVisiblePalmLayout({
   layout,
-  zombieIslandActive,
+  visibleCount,
 }: {
   layout: readonly LandrushIslandPalmPlacement[]
-  zombieIslandActive: boolean
+  visibleCount: number
 }) {
-  const visibleCount = zombieIslandActive
-    ? LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT
-    : LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT
   return layout.slice(0, visibleCount)
 }
 

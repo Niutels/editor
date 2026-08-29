@@ -39,10 +39,10 @@ describe('Pascal multiplayer-island composition', () => {
       'const [viewerSceneReady, setViewerSceneReady] = useState(false)',
     )
     expect(clientSource).toMatch(
-      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+worldFrameReady &&\s+\(zombieEscapeEnabled \|\| ambientLoadReadiness\?\.ready === true\) &&/,
+      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+worldFrameReady &&\s+ambientLoadReadiness\?\.ready === true &&\s+builtCollidersReady &&/,
     )
     expect(clientSource).toMatch(
-      /if \(!zombieEscapeEnabled\) \{\s+tasks\.push\(\{\s+completed: ambientLoadReadiness\?\.completed \?\? 0,\s+id: 'ambient-assets'/,
+      /tasks\.push\(\s+\{\s+completed: ambientLoadReadiness\?\.completed \?\? 0,\s+id: 'ambient-assets'/,
     )
     expect(clientSource).toContain('onSceneReadyChange={setViewerSceneReady}')
     expect(clientSource).toContain(

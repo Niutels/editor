@@ -90,6 +90,69 @@ test('broadcasts world authority updates to subscribers in different presence ro
   }
 })
 
+test('relays combat on join, live updates, late observation, and return to normal play', async () => {
+  const port = await getOpenPort()
+  const server = spawn(process.execPath, ['server.mjs'], {
+    cwd: new URL('.', import.meta.url),
+    env: {
+      ...process.env,
+      LANDRUSH_WORLD_MULTIPLAYER_STATE_FILE: 'off',
+      LANDRUSH_WORLD_MULTIPLAYER_WS_PORT: String(port),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  children.add(server)
+  server.on('exit', () => children.delete(server))
+  await waitForServer(port)
+  const roomId = 'combat-presentation-room'
+  const clients = []
+  const combat = {
+    aimAngle: 0.8,
+    ammo: 60,
+    meleePhase: 'idle',
+    meleeProgress: 0,
+    shotSequence: 0,
+    shots: [],
+    weaponIndex: 0,
+  }
+  try {
+    const observer = await connectWatcher(port, roomId)
+    clients.push(observer)
+    const player = await connectPlayer(port, 'armed-player', roomId, combat)
+    clients.push(player)
+    const joined = await nextMessage(observer, (message) => message.type === 'player-joined')
+    assert.deepEqual(joined.player.combat, combat)
+
+    const fired = {
+      ...combat,
+      ammo: 71,
+      shotSequence: 1,
+      shots: [{ id: 8, impactAge: null, position: [4, 1, 2], previousPosition: [3, 1, 2], weaponIndex: 2 }],
+      weaponIndex: 2,
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    player.socket.send(JSON.stringify({ player: { ...createPlayer('armed-player'), combat: fired }, type: 'state' }))
+    const update = await nextMessage(observer, (message) => message.type === 'player-state' && message.player.combat?.shotSequence === 1)
+    assert.deepEqual(update.player.combat, fired)
+    const lateObserver = await connectWatcher(port, roomId)
+    clients.push(lateObserver)
+    assert.deepEqual(lateObserver.snapshot.players.find((entry) => entry.id === 'armed-player').combat, fired)
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    player.socket.send(JSON.stringify({ player: createPlayer('armed-player'), type: 'state' }))
+    const normal = await nextMessage(observer, (message) => message.type === 'player-state' && message.player.combat === undefined)
+    assert.equal(Object.hasOwn(normal.player, 'combat'), false)
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    player.socket.send(JSON.stringify({ player: { ...createPlayer('armed-player'), combat: { ...combat, weaponIndex: 999 } }, type: 'state' }))
+    const invalid = await nextMessage(lateObserver, (message) => message.type === 'player-state' && message.player.updatedAt > normal.player.updatedAt)
+    assert.equal(Object.hasOwn(invalid.player, 'combat'), false)
+  } finally {
+    for (const client of clients) client.socket.close()
+    server.kill()
+  }
+})
+
 function createWall() {
   return {
     children: [],
@@ -105,12 +168,12 @@ function createWall() {
   }
 }
 
-async function connectPlayer(port, id, roomId) {
+async function connectPlayer(port, id, roomId, combat) {
   const client = await openClient(port)
   const writerSessionId = `writer-${id}`
   client.socket.send(
     JSON.stringify({
-      player: createPlayer(id),
+      player: { ...createPlayer(id), ...(combat ? { combat } : {}) },
       roomId,
       type: 'join',
       writerSessionId,
@@ -127,8 +190,8 @@ async function connectPlayer(port, id, roomId) {
 async function connectWatcher(port, roomId) {
   const client = await openClient(port)
   client.socket.send(JSON.stringify({ roomId, type: 'watch' }))
-  await nextMessage(client, (message) => message.type === 'snapshot')
-  return { ...client, roomId }
+  const snapshot = await nextMessage(client, (message) => message.type === 'snapshot')
+  return { ...client, roomId, snapshot }
 }
 
 async function openClient(port) {

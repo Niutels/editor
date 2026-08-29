@@ -239,7 +239,8 @@ export function LandrushRobot({
       }))
     })
   }, [clonedScene, measure])
-  const { actions, mixer } = useAnimations(locomotionClips, groupRef)
+  // Lazy actions need a root during render; a pending JSX ref leaves remote actors unanimated.
+  const { actions, mixer } = useAnimations(locomotionClips, clonedScene)
   const allAnimationActions = useMemo(
     () =>
       measure('setup.robot-glb.collect-actions', () =>

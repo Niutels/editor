@@ -71,6 +71,12 @@ describe('Landrush Zombie Escape touch input', () => {
   })
 
   test('uses engage and release hysteresis without interrupting aim', () => {
+    expect(LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD).toBe(0.36)
+    expect(LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_RELEASE_THRESHOLD).toBe(0.32)
+    expect(LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_RELEASE_THRESHOLD).toBeLessThan(
+      LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD,
+    )
+
     const state = createLandrushZombieEscapeTouchInputState()
     beginLandrushZombieEscapeTouchStick(state, 'aim', 7)
 
@@ -95,7 +101,17 @@ describe('Landrush Zombie Escape touch input', () => {
     )
     expect(state.firing).toBe(true)
 
-    updateLandrushZombieEscapeTouchStick(state, 'aim', 7, 65, 0, 100)
+    updateLandrushZombieEscapeTouchStick(
+      state,
+      'aim',
+      7,
+      ((LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD +
+        LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_RELEASE_THRESHOLD) /
+        2) *
+        100,
+      0,
+      100,
+    )
     expect(state.firing).toBe(true)
     updateLandrushZombieEscapeTouchStick(
       state,
@@ -108,9 +124,23 @@ describe('Landrush Zombie Escape touch input', () => {
     expect(state.firing).toBe(false)
     expect(state.aim.strength).toBeGreaterThan(0)
 
-    updateLandrushZombieEscapeTouchStick(state, 'aim', 7, 70, 0, 100)
+    updateLandrushZombieEscapeTouchStick(
+      state,
+      'aim',
+      7,
+      LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD * 100 - 0.01,
+      0,
+      100,
+    )
     expect(state.firing).toBe(false)
-    updateLandrushZombieEscapeTouchStick(state, 'aim', 7, 73, 0, 100)
+    updateLandrushZombieEscapeTouchStick(
+      state,
+      'aim',
+      7,
+      LANDRUSH_ZOMBIE_ESCAPE_TOUCH_FIRE_ENGAGE_THRESHOLD * 100,
+      0,
+      100,
+    )
     expect(state.firing).toBe(true)
   })
 

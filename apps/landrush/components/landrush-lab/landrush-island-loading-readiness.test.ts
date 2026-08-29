@@ -27,6 +27,11 @@ import {
   LANDRUSH_ISLAND_LOADING_COMPLETION_DEADLINE_MS,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS,
 } from './landrush-island-loading-timeline-react'
+import {
+  type LandrushZombieEscapeNavigationReadiness,
+  reconcileLandrushZombieEscapeNavigationReadiness,
+  resolveLandrushZombieEscapeNavigationReady,
+} from './landrush-zombie-escape-navigation-readiness'
 
 function createFrameScheduler() {
   let nextId = 1
@@ -201,6 +206,42 @@ describe('Landrush island paint readiness', () => {
     })
   })
 
+  test('gives in-place Zombie selection a fresh loader and generated-asset readiness generation', () => {
+    const day = { enabled: false, generation: 4 }
+    const zombie = advanceLandrushGeneratedAssetMountGeneration(day, true)
+    expect(zombie).toEqual({ enabled: true, generation: 5 })
+    expect(advanceLandrushGeneratedAssetMountGeneration(zombie, true)).toBe(zombie)
+    const exited = advanceLandrushGeneratedAssetMountGeneration(zombie, false)
+    const reentered = advanceLandrushGeneratedAssetMountGeneration(exited, true)
+    expect(reentered.generation).toBeGreaterThan(zombie.generation)
+    expect(
+      resolveLandrushGeneratedAssetsReady({
+        enabled: true,
+        generation: `zombie-assets:${reentered.generation}`,
+        status: { generation: `zombie-assets:${zombie.generation}`, ready: true },
+      }),
+    ).toBe(false)
+
+    const clientSource = readFileSync(
+      new URL('./landrush-island-client.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(clientSource).toMatch(
+      /useLayoutEffect\(\(\) => \{\s+const previousEnabled = previousLoadingZombieEnabledRef\.current\s+previousLoadingZombieEnabledRef\.current = zombieEscapeEnabled\s+if \(!previousEnabled && zombieEscapeEnabled\) setLoadingActive\(true\)\s+\}, \[zombieEscapeEnabled\]\)/,
+    )
+    expect(clientSource).toMatch(
+      /const loadingRunGeneration = .*LANDRUSH_ISLAND_LOADING_RUN_GENERATION.*zombieEscapeGeneratedAssetMountGenerationRef\.current\.generation/,
+    )
+    const phaseReadySource = clientSource.slice(
+      clientSource.indexOf(
+        'const zombieEscapePhaseReady = resolveLandrushZombieEscapePhaseReady({',
+      ),
+      clientSource.indexOf('const selectedLevelId = useViewer'),
+    )
+    expect(phaseReadySource).toContain('loadingActive,')
+    expect(phaseReadySource).toContain('generatedAssetsReady: zombieEscapeGeneratedAssetsReady,')
+  })
+
   test('shows a compact resync veil only while a replacement authority is not ready', () => {
     expect(
       resolveLandrushAuthorityResyncActive({
@@ -242,6 +283,157 @@ describe('Landrush island paint readiness', () => {
         ready: true,
       }),
     ).toBe(false)
+  })
+
+  test('holds paint through missing, mismatched, and failed navigation until a current installation settles', () => {
+    const frames = createFrameScheduler()
+    const changes: boolean[] = []
+    const gate = createLandrushIslandPaintReadinessGate({
+      onReadyChange: (ready) => changes.push(ready),
+      scheduler: frames.scheduler,
+    })
+    const scope = { authorityKey: '2:world-a', mountGeneration: 'zombie-assets:5' }
+    const pending: LandrushZombieEscapeNavigationReadiness = {
+      ...scope,
+      error: null,
+      generation: 7,
+      installedSignature: null,
+      requestedSignature: 'world:current',
+      status: 'pending',
+    }
+    let current: LandrushZombieEscapeNavigationReadiness | null = null
+    const update = (reported: LandrushZombieEscapeNavigationReadiness) => {
+      current = reconcileLandrushZombieEscapeNavigationReadiness({ ...scope, current, reported })
+      const ready = resolveLandrushZombieEscapeNavigationReady({
+        ...scope,
+        admitted: true,
+        enabled: true,
+        status: current,
+      })
+      gate.setPrerequisitesReady(ready)
+      return ready
+    }
+    expect(update(pending)).toBe(false)
+    expect(
+      update({ ...pending, generation: 8, installedSignature: 'world:old', status: 'ready' }),
+    ).toBe(false)
+    const failure = { ...pending, error: 'Worker failed', generation: 9, status: 'failed' as const }
+    expect(update(failure)).toBe(false)
+    frames.flushFrame()
+    frames.flushFrame()
+    expect(changes).toEqual([])
+    const retry = { ...pending, generation: 10 }
+    expect(update(retry)).toBe(false)
+    expect(update({ ...failure, installedSignature: 'world:current', status: 'ready' })).toBe(false)
+    expect(current).toEqual(retry)
+    expect(
+      update({
+        ...retry,
+        generation: 11,
+        installedSignature: 'world:current',
+        mountGeneration: 'zombie-assets:4',
+        status: 'ready',
+      }),
+    ).toBe(false)
+    expect(
+      update({
+        ...retry,
+        authorityKey: '1:world-a',
+        generation: 11,
+        installedSignature: 'world:current',
+        status: 'ready',
+      }),
+    ).toBe(false)
+    expect(
+      update({ ...retry, generation: 11, installedSignature: 'world:current', status: 'ready' }),
+    ).toBe(true)
+    frames.flushFrame()
+    expect(changes).toEqual([])
+    frames.flushFrame()
+    expect(changes).toEqual([true])
+    expect(
+      resolveLandrushZombieEscapeNavigationReady({
+        ...scope,
+        admitted: false,
+        enabled: true,
+        status: current,
+      }),
+    ).toBe(false)
+    expect(
+      resolveLandrushZombieEscapeNavigationReady({
+        ...scope,
+        admitted: false,
+        enabled: false,
+        status: null,
+      }),
+    ).toBe(true)
+  })
+
+  test('wires navigation into loading independently of gameplay phase readiness', () => {
+    const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
+    const gateStart = source.indexOf('const zombieEscapeNavigationReady =')
+    const gateEnd = source.indexOf('const authorityResyncActive =', gateStart)
+    expect(gateStart).toBeGreaterThanOrEqual(0)
+    expect(gateEnd).toBeGreaterThan(gateStart)
+    const navigationGate = source.slice(gateStart, gateEnd)
+    expect(navigationGate).toContain('resolveLandrushZombieEscapeNavigationReady({')
+    expect(navigationGate).toContain('admitted: authorityPresentationReady,')
+    expect(navigationGate).toContain('authorityKey: initialParcelAuthorityKey,')
+    expect(navigationGate).toContain('enabled: zombieEscapeEnabled,')
+    expect(navigationGate).toContain('mountGeneration: zombieEscapeGeneratedAssetGeneration,')
+    expect(navigationGate).not.toContain('loadingActive')
+    expect(navigationGate).not.toContain('phaseReady')
+    expect(navigationGate).not.toContain('nightStartReady')
+    const prerequisiteSource = source.slice(
+      source.indexOf('const loadingAssetsReady ='),
+      source.indexOf('const loadingPaintReady ='),
+    )
+    expect(prerequisiteSource).toContain('zombieEscapeNavigationReady &&')
+    expect(source).toContain('reconcileLandrushZombieEscapeNavigationReadiness({')
+    expect(source).toContain('authorityKey: currentInitialParcelAuthorityKeyRef.current,')
+    expect(source).toContain(
+      'mountGeneration: currentZombieEscapeGeneratedAssetGenerationRef.current,',
+    )
+    expect(source).toContain(
+      'zombieEscapeNavigationMountGeneration={zombieEscapeGeneratedAssetGeneration}',
+    )
+    expect(source).toContain('navigationAuthorityKey={colliderAuthorityKey}')
+    expect(source).toContain('navigationMountGeneration={zombieEscapeNavigationMountGeneration}')
+    expect(source).toContain(
+      'onCollisionWorldReadinessChange={onZombieEscapeCollisionWorldReadinessChange}',
+    )
+    expect(source).toMatch(
+      /completed: zombieEscapeNavigationReady \? 1 : 0,\s+id: 'zombie-navigation',\s+ready: zombieEscapeNavigationReady,\s+total: 1/,
+    )
+    expect(source).toContain('data-landrush-loading-zombie-navigation-ready=')
+    expect(source).toContain('data-landrush-loading-zombie-navigation-status=')
+    expect(source).toContain('data-landrush-loading-zombie-navigation-error=')
+  })
+
+  test('maps partial Zombie pipeline work into a fixed 100-unit task without admitting it early', () => {
+    const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
+    const taskIdOffset = source.indexOf("id: 'zombie-pipeline'")
+    expect(taskIdOffset).toBeGreaterThanOrEqual(0)
+    const pipelineTask = source.slice(
+      source.lastIndexOf('{', taskIdOffset),
+      source.indexOf('}', taskIdOffset) + 1,
+    )
+
+    expect(pipelineTask).toMatch(
+      /completed:\s*zombieEscapeGeneratedAssetReadiness\?\.pipelineReady === true\s*\? 100/,
+    )
+    expect(pipelineTask).toContain('zombieEscapeGeneratedAssetReadiness?.pipelineCompleted ?? 0')
+    expect(pipelineTask).toContain('Math.floor(')
+    expect(pipelineTask).toMatch(/Math\.min\(\s*100,/)
+    expect(pipelineTask).toMatch(/Math\.max\(\s*0,/)
+    expect(pipelineTask).toMatch(
+      /Math\.max\(\s*1,\s*zombieEscapeGeneratedAssetReadiness\?\.pipelineTotal \?\? 1\s*\)/,
+    )
+    expect(pipelineTask).toMatch(
+      /ready: zombieEscapeGeneratedAssetReadiness\?\.pipelineReady === true/,
+    )
+    expect(pipelineTask).toMatch(/total: 100\s*,/)
+    expect(pipelineTask).not.toMatch(/total:\s*zombieEscapeGeneratedAssetReadiness/)
   })
 
   test('withdraws readiness when a reconnect removes the same-epoch snapshot', () => {
@@ -448,8 +640,12 @@ describe('Landrush island paint readiness', () => {
 
     expect(clientSource).toContain('<LandrushIslandWorldFrameReporter')
     expect(clientSource).toContain('useLandrushIslandPaintReadiness(loadingAssetsReady)')
-    expect(clientSource).toContain('(zombieEscapeEnabled || ambientLoadReadiness?.ready === true)')
-    expect(clientSource).toContain('runGeneration={loadingRunGenerationRef.current}')
+    expect(clientSource).toContain('ambientLoadReadiness?.ready === true &&')
+    expect(clientSource).toContain('builtCollidersReady &&')
+    expect(clientSource).not.toContain(
+      '(zombieEscapeEnabled || ambientLoadReadiness?.ready === true)',
+    )
+    expect(clientSource).toContain('runGeneration={loadingRunGeneration}')
     expect(clientSource).toContain('sampleInvalidationKey={initialParcelAuthorityKey}')
     expect(clientSource).toContain('topologySignature={loadingTopologySignature}')
     expect(clientSource).toContain('profileKey={loadingProfileKey}')
@@ -458,9 +654,10 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('ref={fillRef}')
     expect(clientSource).toContain('ref={overlayRef}')
     expect(clientSource).toContain("id: 'ambient-assets'")
-    expect(clientSource).toMatch(
+    expect(clientSource).not.toMatch(
       /if \(!zombieEscapeEnabled\) \{\s+tasks\.push\(\{\s+completed: ambientLoadReadiness\?\.completed \?\? 0,\s+id: 'ambient-assets'/,
     )
+    expect(clientSource).toContain("id: 'built-colliders'")
     expect(clientSource).toContain("id: 'natural-road-plan'")
     expect(clientSource).toContain("id: 'procedural-cliffs'")
     expect(clientSource).toContain("id: 'zombie-assets'")
@@ -478,7 +675,7 @@ describe('Landrush island paint readiness', () => {
       .split('\n')
       .find((line) => line.startsWith('const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE'))
     expect(dayTopologyDefinition).toContain('LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE')
-    expect(zombieTopologyDefinition).not.toContain('LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE')
+    expect(zombieTopologyDefinition).toContain('LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE')
     expect(clientSource).toContain('|natural-road-plan:${')
     expect(clientSource).toContain("naturalRoadPlanRequired ? 'required' : 'omitted'")
     expect(clientSource).toContain('|procedural-cliffs:')
@@ -490,7 +687,14 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toContain('Syncing world…')
     expect(clientSource).toContain('currentInitialParcelReadiness.ready')
     expect(clientSource).toContain('admitted={initialParcelMaterializationReady}')
-    expect(clientSource).toContain('{!zombieEscapeEnabled || !loadingActive ? (')
+    expect(clientSource).not.toContain('{!zombieEscapeEnabled || !loadingActive ? (')
+    expect(clientSource).toMatch(
+      /\{initialParcelReadyAuthorityKey === initialParcelAuthorityKey \? \(\s+<LandrushIslandAmbientLife\s+key=\{initialParcelAuthorityKey\}/,
+    )
+    expect(clientSource).toContain('ambientLoadStatus?.authorityKey === initialParcelAuthorityKey')
+    expect(clientSource).toContain(
+      'if (authorityKey !== currentInitialParcelAuthorityKeyRef.current) return current',
+    )
     expect(clientSource).toContain('onLoadReadinessChange={handleAmbientLoadReadinessChange}')
     expect(clientSource).toContain(
       'onLoadReadinessChange={handleProceduralCliffsLoadReadinessChange}',
@@ -509,13 +713,52 @@ describe('Landrush island paint readiness', () => {
       'currentGeneration: currentProceduralCliffsLoadGenerationRef.current',
     )
     expect(clientSource).not.toContain('admitted={!loadingActive}')
-    expect(clientSource).toContain(
-      'deferBuiltColliderRebuild={zombieEscapeEnabled && loadingActive}',
-    )
+    expect(clientSource).toContain('deferBuiltColliderRebuild={!authorityPresentationReady}')
     expect(clientSource).toContain(
       "deferRebuild ? 'deferred' : createLandrushIslandPhysicsNodeSignature(state.nodes)",
     )
     expect(clientSource).toContain('if (deferRebuild) return')
+    expect(clientSource).toContain(
+      'const authorityPresentationReady = initialParcelMaterializationReady && viewerSceneReady',
+    )
+    expect(clientSource).toContain('colliderAuthorityKey={initialParcelAuthorityKey}')
+    expect(clientSource).toContain(
+      'onBuiltCollidersReadinessChange={handleBuiltCollidersReadinessChange}',
+    )
+    expect(clientSource).toContain('colliderAuthorityKey={colliderAuthorityKey}')
+    expect(clientSource).toContain(
+      'onBuiltCollidersReadinessChange={onBuiltCollidersReadinessChange}',
+    )
+    expect(clientSource).toContain(
+      'sceneReadyPrerequisitesReady={initialParcelMaterializationReady}',
+    )
+    const colliderHookSource = clientSource.slice(
+      clientSource.indexOf('function useLandrushIslandBuiltColliderWorlds('),
+      clientSource.indexOf('function createLandrushIslandDoorAnimationSignature('),
+    )
+    expect(colliderHookSource).toContain('installedVersion: string | null')
+    expect(colliderHookSource).toContain('authorityKey,\n    physicsSignature,')
+    expect(colliderHookSource).toContain('useLayoutEffect(() => {\n    if (deferRebuild) return')
+    expect(colliderHookSource).toContain('if (cancelled) return')
+    expect(colliderHookSource).toContain(
+      'replaceWorlds({ ...nextWorlds, installedVersion: colliderWorldVersion })',
+    )
+    expect(colliderHookSource).toContain(
+      'installedVersion: deferRebuild ? null : worlds.installedVersion',
+    )
+    const localRobotSource = clientSource.slice(
+      clientSource.indexOf('function LocalLandrushIslandRobot('),
+    )
+    expect(localRobotSource).toMatch(
+      /useLayoutEffect\(\(\) => \{\s+onBuiltCollidersReadinessChange\(builtColliderReadiness\)\s+return \(\) =>\s+onBuiltCollidersReadinessChange\(\{ \.\.\.builtColliderReadiness, installedVersion: null \}\)/,
+    )
+    expect(localRobotSource).toContain('builtColliderWorlds.collision?.mesh')
+    expect(localRobotSource).toContain(
+      'fallPresentationActive ? LANDRUSH_ISLAND_ROBOT_FALL_COLLIDER_MESHES : colliderMeshes',
+    )
+    expect(clientSource).toContain(
+      "data-landrush-loading-built-colliders-ready={builtCollidersReady ? 'true' : 'false'}",
+    )
     expect(clientSource).toMatch(
       /data-landrush-loading-ambient-ready=\{\s*ambientLoadReadiness\?\.ready === true \? 'true' : 'false'\s*\}/,
     )
@@ -830,7 +1073,9 @@ describe('Landrush island paint readiness', () => {
     expect(generatedAssetsSource).toContain('onGeneratedAssetsReadinessChange?.(')
     expect(generatedAssetsSource).toContain("onAssetStatusChange(assetKey, { state: 'ready' })")
     expect(generatedAssetsSource).not.toContain('representativePrewarmQueue.waitForSettled()')
-    expect(generatedAssetsSource).toContain('representatives: []')
+    expect(generatedAssetsSource).toContain(
+      'representatives: renderReadinessSnapshot.representatives',
+    )
     expect(generatedAssetsSource).toContain('window.requestAnimationFrame(() => resolve())')
     expect(generatedAssetsSource).not.toContain('scheduler.yield()')
     expect(generatedAssetsSource).toContain(

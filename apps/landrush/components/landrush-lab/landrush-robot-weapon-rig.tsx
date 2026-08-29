@@ -171,7 +171,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   visualRootRef,
 }: {
   active?: boolean
-  combatStateRef: RefObject<LandrushRobotWeaponCombatState>
+  combatStateRef: RefObject<LandrushRobotWeaponCombatState | null>
   debug?: boolean
   dominantHand?: 'left' | 'right'
   fitAdjustment?: LandrushRobotWeaponFitAdjustment
@@ -251,6 +251,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
     if (!active) {
       if (weaponRoot) weaponRoot.visible = false
       armBindingRef.current.initialized = false
+      muzzlePoseRef.current.ready = false
       const combatState = combatStateRef.current
       resetZombieEscapeWeaponRecoil(
         recoilStateRef.current,
@@ -343,6 +344,9 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
     const secondaryForeArm = dominantHand === 'right' ? bones.leftForeArm : bones.rightForeArm
     const secondaryHand = dominantHand === 'right' ? bones.leftHand : bones.rightHand
     const armBinding = armBindingRef.current
+    if (!armBinding.initialized) {
+      resetZombieEscapeWeaponRecoil(recoilStateRef.current, weaponIndex, combatState.shotSequence)
+    }
     if (
       !armBinding.initialized ||
       armBinding.weaponIndex !== weaponIndex ||

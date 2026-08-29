@@ -1,0 +1,148 @@
+import { describe, expect, test } from 'bun:test'
+import type { MultiplayerZombieEscapeStateSnapshot } from '@landrush/protocol'
+import {
+  applyLandrushZombieEscapeRoomState,
+  type LandrushZombieEscapeRoomStateObservation,
+  projectLandrushZombieEscapePhaseSecondsRemaining,
+} from './landrush-zombie-escape-room-state'
+import { createZombieEscapeSimulation, setZombieEscapeGamePhase } from './zombie-escape-simulation'
+import { createZombieEscapeArena } from './zombie-escape-world'
+
+describe('Zombie Escape canonical room state', () => {
+  test('projects an absolute deadline from the server receipt pair and clamps it', () => {
+    const observation = createObservation({ phaseEndsAt: 1_050_000 })
+
+    expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 12_500, observation })).toBe(
+      47.5,
+    )
+    expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 90_000, observation })).toBe(0)
+  })
+
+  test('holds a null build deadline at the full server duration', () => {
+    const observation = createObservation({ phaseEndsAt: null })
+
+    expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 90_000, observation })).toBe(
+      60,
+    )
+  })
+
+  test('preseeds the night so a late join enters the canonical wave', () => {
+    const simulation = createSimulation()
+    const observation = createObservation({ night: 4, phase: 'night', phaseEndsAt: 1_150_000 })
+
+    const result = applyLandrushZombieEscapeRoomState({
+      appliedState: null,
+      nowMs: 10_000,
+      observation,
+      simulation,
+    })
+
+    expect(result.phaseChanged).toBe(true)
+    expect(simulation.phase).toBe('night')
+    expect(simulation.night).toBe(4)
+    expect(simulation.wave).toBe(4)
+    expect(simulation.phaseSecondsRemaining).toBe(150)
+  })
+
+  test('updates same-phase time without resetting active pools or personal state', () => {
+    const simulation = createSimulation()
+    setZombieEscapeGamePhase(simulation, 'night')
+    simulation.player.health = 37
+    simulation.shotsFired = 8
+    simulation.waveSpawnRemaining = 19
+    const shots = simulation.shots
+    const zombies = simulation.zombies
+    const observation = createObservation({
+      night: 1,
+      phase: 'night',
+      phaseEndsAt: 1_120_000,
+      revision: 5,
+    })
+    const appliedState = {
+      revision: 4,
+      sessionId: observation.state.sessionId,
+      transportGeneration: observation.transportGeneration,
+    }
+
+    const result = applyLandrushZombieEscapeRoomState({
+      appliedState,
+      nowMs: 20_000,
+      observation,
+      simulation,
+    })
+
+    expect(result.canonicalStateChanged).toBe(true)
+    expect(result.destructiveTransition).toBe(false)
+    expect(simulation.shots).toBe(shots)
+    expect(simulation.zombies).toBe(zombies)
+    expect(simulation.player.health).toBe(37)
+    expect(simulation.shotsFired).toBe(8)
+    expect(simulation.waveSpawnRemaining).toBe(19)
+    expect(simulation.phaseSecondsRemaining).toBe(110)
+  })
+
+  test('re-enters an already-active night when the canonical night changes', () => {
+    const simulation = createSimulation()
+    setZombieEscapeGamePhase(simulation, 'night')
+    const observation = createObservation({ night: 3, phase: 'night', revision: 9 })
+
+    const result = applyLandrushZombieEscapeRoomState({
+      appliedState: null,
+      nowMs: 10_000,
+      observation,
+      simulation,
+    })
+
+    expect(result.destructiveTransition).toBe(true)
+    expect(simulation.night).toBe(3)
+    expect(simulation.wave).toBe(3)
+  })
+
+  test('force-applying an unchanged canonical build only restores its time', () => {
+    const simulation = createSimulation()
+    simulation.player.health = 41
+    const observation = createObservation({ phaseEndsAt: 1_040_000, revision: 2 })
+    const appliedState = {
+      revision: 2,
+      sessionId: observation.state.sessionId,
+      transportGeneration: observation.transportGeneration,
+    }
+
+    const result = applyLandrushZombieEscapeRoomState({
+      appliedState,
+      force: true,
+      nowMs: 15_000,
+      observation,
+      simulation,
+    })
+
+    expect(result.reconciled).toBe(true)
+    expect(result.destructiveTransition).toBe(false)
+    expect(simulation.player.health).toBe(41)
+    expect(simulation.phaseSecondsRemaining).toBe(35)
+  })
+})
+
+function createSimulation() {
+  const arena = createZombieEscapeArena(41_005)
+  arena.obstacleCount = 0
+  return createZombieEscapeSimulation(arena, 41_006)
+}
+
+function createObservation(
+  state: Partial<MultiplayerZombieEscapeStateSnapshot>,
+): LandrushZombieEscapeRoomStateObservation {
+  return {
+    receivedAtMs: 10_000,
+    serverTime: 1_000_000,
+    state: {
+      night: 0,
+      phase: 'build',
+      phaseEndsAt: 1_060_000,
+      revision: 0,
+      sessionId: 'zombie-session-a',
+      ...state,
+    },
+    transportGeneration: 3,
+  }
+}

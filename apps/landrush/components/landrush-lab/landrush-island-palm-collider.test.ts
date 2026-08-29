@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { Line3, Raycaster, Vector3 } from 'three'
+import { readFileSync } from 'node:fs'
+import { createRoot, unmountComponentAtNode } from '@react-three/fiber'
+import { act, createElement, useMemo } from 'react'
+import { Line3, Raycaster, Scene, Vector3 } from 'three'
 import {
   LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
@@ -50,12 +53,152 @@ describe('Landrush island palm player colliders', () => {
       createPlacement(index),
     )
 
-    expect(resolveLandrushIslandVisiblePalmLayout({ layout, zombieIslandActive: false })).toEqual(
-      layout.slice(0, LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT),
+    expect(
+      resolveLandrushIslandVisiblePalmLayout({
+        layout,
+        visibleCount: LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+      }),
+    ).toEqual(layout.slice(0, LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT))
+    expect(
+      resolveLandrushIslandVisiblePalmLayout({
+        layout,
+        visibleCount: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
+      }),
+    ).toEqual(layout)
+  })
+
+  test('retains the visible layout and collider across equal-count mode changes and rebuilds on real input changes', async () => {
+    const clientSource = readFileSync(
+      new URL('./landrush-island-client.tsx', import.meta.url),
+      'utf8',
     )
-    expect(resolveLandrushIslandVisiblePalmLayout({ layout, zombieIslandActive: true })).toEqual(
+    expect(clientSource).toContain(`  const visiblePalmInstanceCount =
+    zombieEscapeEnabled && zombieEscapePhase === 'night'
+      ? LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT
+      : LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT
+  const visiblePalmLayout = useMemo(
+    () =>
+      resolveLandrushIslandVisiblePalmLayout({
+        layout: palmLayout,
+        visibleCount: visiblePalmInstanceCount,
+      }),
+    [palmLayout, visiblePalmInstanceCount],
+  )`)
+    const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT
+    actEnvironment.IS_REACT_ACT_ENVIRONMENT = true
+    const canvas = new EventTarget()
+    const root = createRoot(canvas)
+    let drawCount = 0
+    let buildCount = 0
+    const worlds = new Set<
+      NonNullable<ReturnType<typeof createLandrushIslandPalmTrunkColliderWorld>>
+    >()
+    const snapshots: Array<{
+      layout: readonly LandrushIslandPalmPlacement[]
+      world: ReturnType<typeof createLandrushIslandPalmTrunkColliderWorld>
+    }> = []
+    function PalmColliderProbe({
       layout,
+      visibleCount,
+    }: {
+      layout: readonly LandrushIslandPalmPlacement[]
+      visibleCount: number
+    }) {
+      const visibleLayout = useMemo(
+        () => resolveLandrushIslandVisiblePalmLayout({ layout, visibleCount }),
+        [layout, visibleCount],
+      )
+      const world = useMemo(() => {
+        buildCount += 1
+        const next = createLandrushIslandPalmTrunkColliderWorld({
+          groundY: GROUND_Y,
+          layout: visibleLayout,
+        })
+        if (next) worlds.add(next)
+        return next
+      }, [visibleLayout])
+      snapshots.push({ layout: visibleLayout, world })
+      return null
+    }
+    const layout = Array.from(
+      { length: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT + 2 },
+      (_, index) => createPlacement(index),
     )
+    const render = async (
+      nextLayout: readonly LandrushIslandPalmPlacement[],
+      visibleCount: number,
+    ) => {
+      await act(async () => {
+        root.render(createElement(PalmColliderProbe, { layout: nextLayout, visibleCount }))
+      })
+      return snapshots[snapshots.length - 1]!
+    }
+    try {
+      await root.configure({
+        dpr: 1,
+        frameloop: 'never',
+        gl: {
+          render() {
+            drawCount += 1
+          },
+          setPixelRatio() {},
+          setSize() {},
+        },
+        scene: new Scene(),
+        size: { height: 64, left: 0, top: 0, width: 64 },
+      })
+      const modes = [
+        { enabled: false, phase: 'build' },
+        { enabled: true, phase: 'build' },
+        { enabled: true, phase: 'night' },
+        { enabled: true, phase: 'build' },
+        { enabled: false, phase: 'build' },
+      ] as const
+      let first: (typeof snapshots)[number] | undefined
+      for (const mode of modes) {
+        const count =
+          mode.enabled && mode.phase === 'night'
+            ? LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT
+            : LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT
+        expect(count).toBe(LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT)
+        const current = await render(layout, count)
+        first ??= current
+        expect(current.layout).toBe(first.layout)
+        expect(current.world).toBe(first.world)
+        expect(buildCount).toBe(1)
+      }
+      expect(first?.world).not.toBeNull()
+      const smaller = await render(layout, 3)
+      expect(smaller.layout).toEqual(layout.slice(0, 3))
+      expect(smaller.layout).not.toBe(first?.layout)
+      expect(smaller.world).not.toBe(first?.world)
+      expect(smaller.world?.mesh.userData.landrushPalmTrunkColliderCount).toBe(3)
+      expect(buildCount).toBe(2)
+      const larger = await render(layout, 7)
+      expect(larger.layout).toEqual(layout.slice(0, 7))
+      expect(larger.world?.mesh.userData.landrushPalmTrunkColliderCount).toBe(7)
+      expect(buildCount).toBe(3)
+      const replacement = [createPlacement(31), createPlacement(32)]
+      const changed = await render(replacement, 7)
+      expect(changed.layout).toEqual(replacement)
+      expect(changed.world).not.toBe(larger.world)
+      expect(changed.world?.mesh.userData.landrushPalmTrunkColliderCount).toBe(2)
+      expect(buildCount).toBe(4)
+      expect(drawCount).toBe(0)
+    } finally {
+      let finish!: () => void
+      const disposed = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      await act(async () => {
+        unmountComponentAtNode(canvas, finish)
+      })
+      await disposed
+      for (const world of worlds) world.dispose()
+      if (previousActEnvironment === undefined) delete actEnvironment.IS_REACT_ACT_ENVIRONMENT
+      else actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+    }
   })
 
   test('builds one merged, open-ended BVH mesh that blocks a horizontal trunk ray', () => {

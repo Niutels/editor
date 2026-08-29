@@ -2,13 +2,17 @@
 
 import {
   type ConnectionStatus,
+  isMultiplayerPlayerCombatSnapshot,
   isMultiplayerPlayerPose,
+  isMultiplayerZombieEscapeStateSnapshot,
   isParcelWriterEpoch,
   isSpatialVoiceSignalPayload,
   isSupportedParcelBuildSchemaVersion,
   LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
   type LocalPlayerProfile,
+  type MultiplayerPlayerCombatSnapshot,
   type MultiplayerPlayerSnapshot,
+  type MultiplayerZombieEscapeStateSnapshot,
   normalizeParcelBuildRevision,
   PARCEL_BUILD_SCHEMA_VERSION,
   PARCEL_WRITER_SESSION_CLOSE_CODE,
@@ -57,6 +61,15 @@ export type ParcelBuildNodesSnapshot = ParcelBuildSnapshot<ParcelBuildNode>
 
 export type LandrushWorldContentAuthority = ParcelBuildContentAuthority
 
+export type LandrushWorldMultiplayerGameMode = 'zombie-escape' | null
+
+export type MultiplayerZombieEscapeStateObservation = Readonly<{
+  receivedAtMs: number
+  serverTime: number
+  state: MultiplayerZombieEscapeStateSnapshot
+  transportGeneration: number
+}>
+
 export type ParcelBuildContentUpdate = {
   build: ParcelBuildNodesSnapshot | null
   localDesiredNodes?: ParcelBuildNode[]
@@ -86,7 +99,13 @@ type ServerMessage =
       stalePeerMs: number
       type: 'welcome'
     }
-  | { players: MultiplayerPlayerSnapshot[]; roomId: string; serverTime: number; type: 'snapshot' }
+  | {
+      players: MultiplayerPlayerSnapshot[]
+      roomId: string
+      serverTime: number
+      type: 'snapshot'
+      zombieEscapeState?: MultiplayerZombieEscapeStateSnapshot
+    }
   | {
       player: MultiplayerPlayerSnapshot
       roomId: string
@@ -178,6 +197,20 @@ type ServerMessage =
     }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
   | {
+      roomId: string
+      serverTime: number
+      state: MultiplayerZombieEscapeStateSnapshot
+      type: 'zombie-escape-state-updated'
+    }
+  | {
+      code: string
+      message: string
+      roomId: string
+      serverTime: number
+      state: MultiplayerZombieEscapeStateSnapshot
+      type: 'zombie-escape-state-rejected'
+    }
+  | {
       playerCount?: number
       roomId?: string
       sentAt?: number
@@ -246,15 +279,21 @@ function sortedRemotePlayerSnapshots(map: ReadonlyMap<string, MultiplayerPlayerS
   return [...map.values()].sort((first, second) => first.name.localeCompare(second.name))
 }
 
-function remotePlayerRosterChanged(
+export function remotePlayerRosterChanged(
   previous: MultiplayerPlayerSnapshot,
   next: MultiplayerPlayerSnapshot,
 ) {
-  return previous.name !== next.name || previous.color !== next.color || previous.pose !== next.pose
+  return (
+    previous.name !== next.name ||
+    previous.color !== next.color ||
+    previous.pose !== next.pose ||
+    Boolean(previous.combat) !== Boolean(next.combat)
+  )
 }
 
 export function useLandrushWorldMultiplayer({
   contentAuthority,
+  gameMode,
   localProfile,
   onVoiceSignal,
   persistOfflineState = true,
@@ -262,6 +301,7 @@ export function useLandrushWorldMultiplayer({
   spectator,
 }: {
   contentAuthority: LandrushWorldContentAuthority
+  gameMode: LandrushWorldMultiplayerGameMode
   localProfile: LocalPlayerProfile
   onVoiceSignal?: (message: SpatialVoiceSignalMessage) => void
   persistOfflineState?: boolean
@@ -274,6 +314,7 @@ export function useLandrushWorldMultiplayer({
   const transportScopeGenerationRef = useRef(
     createMultiplayerTransportScopeGeneration({
       contentAuthority,
+      gameMode,
       localProfileId: localProfile.id,
       parcelWorldId: watchedParcelWorldId,
       roomId,
@@ -316,6 +357,11 @@ export function useLandrushWorldMultiplayer({
   const [status, setStatus] = useState<ConnectionStatus>(
     offlineAuthority ? 'offline' : 'connecting',
   )
+  const zombieEscapeStateObservationRef = useRef<MultiplayerZombieEscapeStateObservation | null>(
+    null,
+  )
+  const [zombieEscapeStateObservation, setZombieEscapeStateObservation] =
+    useState<MultiplayerZombieEscapeStateObservation | null>(null)
   const [remotePlayerRosterMap, setRemotePlayerRosterMap] = useState<
     Map<string, MultiplayerPlayerSnapshot>
   >(() => new Map())
@@ -435,18 +481,57 @@ export function useLandrushWorldMultiplayer({
     [],
   )
 
+  const clearZombieEscapeStateObservation = useCallback(() => {
+    if (zombieEscapeStateObservationRef.current === null) return
+    zombieEscapeStateObservationRef.current = null
+    setZombieEscapeStateObservation(null)
+    renderScheduler.requestFrame('animation')
+  }, [])
+
+  const observeZombieEscapeState = useCallback(
+    ({
+      receivedAtMs,
+      serverTime,
+      state,
+      transportGeneration,
+    }: MultiplayerZombieEscapeStateObservation) => {
+      const current = zombieEscapeStateObservationRef.current
+      if (
+        current?.transportGeneration === transportGeneration &&
+        current.state.sessionId === state.sessionId &&
+        current.state.revision > state.revision
+      ) {
+        return
+      }
+      const observation = { receivedAtMs, serverTime, state, transportGeneration }
+      zombieEscapeStateObservationRef.current = observation
+      setZombieEscapeStateObservation(observation)
+      renderScheduler.requestFrame('animation')
+    },
+    [],
+  )
+
   useLayoutEffect(() => {
-    transportScopeGenerationRef.current = advanceMultiplayerTransportScopeGeneration(
-      transportScopeGenerationRef.current,
-      {
-        contentAuthority,
-        localProfileId: localProfile.id,
-        parcelWorldId: watchedParcelWorldId,
-        roomId,
-        spectator,
-      },
-    )
-  }, [contentAuthority, localProfile.id, roomId, spectator, watchedParcelWorldId])
+    const current = transportScopeGenerationRef.current
+    const next = advanceMultiplayerTransportScopeGeneration(transportScopeGenerationRef.current, {
+      contentAuthority,
+      gameMode,
+      localProfileId: localProfile.id,
+      parcelWorldId: watchedParcelWorldId,
+      roomId,
+      spectator,
+    })
+    transportScopeGenerationRef.current = next
+    if (next !== current) clearZombieEscapeStateObservation()
+  }, [
+    clearZombieEscapeStateObservation,
+    contentAuthority,
+    gameMode,
+    localProfile.id,
+    roomId,
+    spectator,
+    watchedParcelWorldId,
+  ])
 
   useLayoutEffect(() => {
     const transition = parcelBuildContentAuthorityRef.current!.updateScope({
@@ -567,15 +652,62 @@ export function useLandrushWorldMultiplayer({
     [sendMessage],
   )
 
+  const initializeZombieEscapeClock = useCallback(() => {
+    const observation = zombieEscapeStateObservationRef.current
+    if (
+      !onlineEnabled ||
+      spectator ||
+      gameMode !== 'zombie-escape' ||
+      !observation ||
+      observation.transportGeneration !== transportScopeGenerationRef.current.generation ||
+      observation.state.phase !== 'build' ||
+      observation.state.phaseEndsAt !== null
+    ) {
+      return false
+    }
+    return Boolean(
+      sendMessage({
+        baseRevision: observation.state.revision,
+        sessionId: observation.state.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
+  }, [gameMode, onlineEnabled, sendMessage, spectator])
+
+  const startZombieEscapeNight = useCallback(() => {
+    const observation = zombieEscapeStateObservationRef.current
+    if (
+      !onlineEnabled ||
+      spectator ||
+      gameMode !== 'zombie-escape' ||
+      !observation ||
+      observation.transportGeneration !== transportScopeGenerationRef.current.generation ||
+      observation.state.phase !== 'build' ||
+      observation.state.phaseEndsAt === null
+    ) {
+      return false
+    }
+    return Boolean(
+      sendMessage({
+        baseRevision: observation.state.revision,
+        sessionId: observation.state.sessionId,
+        type: 'start-zombie-escape-night',
+      }),
+    )
+  }, [gameMode, onlineEnabled, sendMessage, spectator])
+
   const watchParcelWorld = useCallback(
     (worldId: string) => {
       if (watchedParcelWorldIdRef.current === worldId) return
 
       const authorityTransition = parcelBuildContentAuthorityRef.current!.watchWorld(worldId)
-      transportScopeGenerationRef.current = advanceMultiplayerTransportScopeGeneration(
-        transportScopeGenerationRef.current,
-        { ...transportScopeGenerationRef.current.scope, parcelWorldId: worldId },
-      )
+      const currentTransportScope = transportScopeGenerationRef.current
+      const nextTransportScope = advanceMultiplayerTransportScopeGeneration(currentTransportScope, {
+        ...transportScopeGenerationRef.current.scope,
+        parcelWorldId: worldId,
+      })
+      transportScopeGenerationRef.current = nextTransportScope
+      if (nextTransportScope !== currentTransportScope) clearZombieEscapeStateObservation()
       watchedParcelWorldIdRef.current = worldId
       setWatchedParcelWorldId(worldId)
       parcelBuildSyncQueueRef.current!.clear()
@@ -612,7 +744,13 @@ export function useLandrushWorldMultiplayer({
         publishParcelBuildUpdates(localAuthority.updates)
       }
     },
-    [contentAuthority, offlineAuthority, persistOfflineState, publishParcelBuildUpdates],
+    [
+      clearZombieEscapeStateObservation,
+      contentAuthority,
+      offlineAuthority,
+      persistOfflineState,
+      publishParcelBuildUpdates,
+    ],
   )
 
   const syncParcelBuildNodes = useCallback(
@@ -876,6 +1014,7 @@ export function useLandrushWorldMultiplayer({
   useEffect(() => {
     const transportParcelWorldId = watchedParcelWorldId
     if (!onlineEnabled || (!spectator && localProfile.id === FALLBACK_LOCAL_PROFILE.id)) {
+      clearZombieEscapeStateObservation()
       parcelBuildSyncQueueRef.current!.clear()
       parcelBuildUpdateSequenceRef.current = 0
       writerSessionRef.current = null
@@ -940,6 +1079,7 @@ export function useLandrushWorldMultiplayer({
       if (cancelled || transportScopeGenerationRef.current.generation !== transportGeneration) {
         return
       }
+      clearZombieEscapeStateObservation()
       setParcelBuildSnapshotWorldId(null)
       if (transportParcelWorldId) {
         parcelBuildSyncQueueRef.current!.suspendWorld(transportParcelWorldId)
@@ -976,6 +1116,7 @@ export function useLandrushWorldMultiplayer({
           ? sendMessage({ roomId, type: 'watch' }, socket)
           : sendMessage(
               {
+                ...(gameMode ? { gameMode } : {}),
                 player,
                 roomId,
                 type: 'join',
@@ -1090,6 +1231,23 @@ export function useLandrushWorldMultiplayer({
             sequence: voiceSignalSequenceRef.current++,
             signal: message.signal,
           })
+          return
+        }
+
+        if (
+          message.type === 'zombie-escape-state-updated' ||
+          message.type === 'zombie-escape-state-rejected'
+        ) {
+          if (message.roomId !== roomId || gameMode !== 'zombie-escape') return
+          observeZombieEscapeState({
+            receivedAtMs: performance.now(),
+            serverTime: message.serverTime,
+            state: message.state,
+            transportGeneration,
+          })
+          if (message.type === 'zombie-escape-state-rejected') {
+            setConnection((current) => ({ ...current, lastError: message.message }))
+          }
           return
         }
 
@@ -1334,6 +1492,18 @@ export function useLandrushWorldMultiplayer({
         if (message.type === 'snapshot') {
           setStatus('connected')
           const receivedAt = performance.now()
+          if (gameMode === 'zombie-escape') {
+            if (message.zombieEscapeState) {
+              observeZombieEscapeState({
+                receivedAtMs: receivedAt,
+                serverTime: message.serverTime,
+                state: message.zombieEscapeState,
+                transportGeneration,
+              })
+            } else {
+              clearZombieEscapeStateObservation()
+            }
+          }
           const nextRemotePlayerMap = new Map<string, MultiplayerPlayerSnapshot>()
           const nextRemotePlayerTimelineMap = new Map<string, MultiplayerRemotePlayerTimeline>()
           for (const player of message.players) {
@@ -1400,6 +1570,7 @@ export function useLandrushWorldMultiplayer({
         transportConnectionIdRef.current = null
         writerSessionRef.current = null
         if (cancelled || !callbackIsCurrent) return
+        clearZombieEscapeStateObservation()
 
         if (terminalWriterSessionRef.current || event.code === PARCEL_WRITER_SESSION_CLOSE_CODE) {
           terminalWriterSessionRef.current = true
@@ -1426,6 +1597,7 @@ export function useLandrushWorldMultiplayer({
 
       socket.addEventListener('error', () => {
         if (cancelled || !isCurrentSocket()) return
+        clearZombieEscapeStateObservation()
         setStatus('reconnecting')
         setConnection((current) => ({
           ...current,
@@ -1446,12 +1618,16 @@ export function useLandrushWorldMultiplayer({
         socket.send(JSON.stringify({ type: 'leave' }))
       }
       socket?.close()
+      clearZombieEscapeStateObservation()
     }
   }, [
+    clearZombieEscapeStateObservation,
     contentAuthority,
     flushAllQueuedParcelBuildSyncs,
     flushQueuedParcelBuildSync,
+    gameMode,
     localProfile,
+    observeZombieEscapeState,
     offlineAuthority,
     onlineEnabled,
     persistOfflineState,
@@ -1484,6 +1660,7 @@ export function useLandrushWorldMultiplayer({
   return {
     claimParcel,
     connection,
+    initializeZombieEscapeClock,
     parcelBuildNodes,
     parcelBuildContentAuthorityEpoch,
     parcelBuildUpdates,
@@ -1498,12 +1675,14 @@ export function useLandrushWorldMultiplayer({
     syncParcelBuildNodes,
     syncTvMediaState,
     status,
+    startZombieEscapeNight,
     tvMediaStates,
     watchParcelWorld,
+    zombieEscapeStateObservation,
   }
 }
 
-function shouldSendPlayerSnapshot(
+export function shouldSendPlayerSnapshot(
   player: MultiplayerPlayerSnapshot,
   previous: MultiplayerPlayerSnapshot | null,
   elapsedSinceLastSendMs: number,
@@ -1513,6 +1692,7 @@ function shouldSendPlayerSnapshot(
   if (player.name !== previous.name || player.color !== previous.color) return true
   if (player.moving !== previous.moving) return true
   if (player.pose !== previous.pose) return true
+  if (combatSnapshotChanged(player.combat, previous.combat)) return true
   if (Math.abs(player.speed - previous.speed) >= LOCAL_STATE_SPEED_EPSILON) return true
   if (angleDistance(player.heading, previous.heading) >= LOCAL_STATE_HEADING_EPSILON) return true
 
@@ -1520,6 +1700,35 @@ function shouldSendPlayerSnapshot(
     distanceSquared3(player.position, previous.position) >=
     LOCAL_STATE_POSITION_EPSILON * LOCAL_STATE_POSITION_EPSILON
   )
+}
+
+function combatSnapshotChanged(
+  current: MultiplayerPlayerCombatSnapshot | undefined,
+  previous: MultiplayerPlayerCombatSnapshot | undefined,
+) {
+  if (!current || !previous) return current !== previous
+  if (
+    current.weaponIndex !== previous.weaponIndex ||
+    current.ammo !== previous.ammo ||
+    current.shotSequence !== previous.shotSequence ||
+    current.meleePhase !== previous.meleePhase ||
+    Math.abs(current.meleeProgress - previous.meleeProgress) >= 0.02 ||
+    angleDistance(current.aimAngle, previous.aimAngle) >= LOCAL_STATE_HEADING_EPSILON ||
+    current.shots.length !== previous.shots.length
+  ) {
+    return true
+  }
+  return current.shots.some((shot, index) => {
+    const oldShot = previous.shots[index]
+    return (
+      !oldShot ||
+      shot.id !== oldShot.id ||
+      shot.weaponIndex !== oldShot.weaponIndex ||
+      shot.impactAge !== oldShot.impactAge ||
+      distanceSquared3(shot.position, oldShot.position) > 0.000_001 ||
+      distanceSquared3(shot.previousPosition, oldShot.previousPosition) > 0.000_001
+    )
+  })
 }
 
 function distanceSquared3(
@@ -1661,7 +1870,20 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       Array.isArray(message.players) &&
       message.players.every(isPlayerSnapshot) &&
       typeof message.roomId === 'string' &&
-      typeof message.serverTime === 'number'
+      typeof message.serverTime === 'number' &&
+      (message.zombieEscapeState === undefined ||
+        isMultiplayerZombieEscapeStateSnapshot(message.zombieEscapeState))
+    ) {
+      return message
+    }
+    if (
+      (message?.type === 'zombie-escape-state-updated' ||
+        message?.type === 'zombie-escape-state-rejected') &&
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
+      isMultiplayerZombieEscapeStateSnapshot(message.state) &&
+      (message.type === 'zombie-escape-state-updated' ||
+        (typeof message.code === 'string' && typeof message.message === 'string'))
     ) {
       return message
     }
@@ -1943,6 +2165,7 @@ function isPlayerSnapshot(value: unknown): value is MultiplayerPlayerSnapshot {
     typeof player.heading === 'number' &&
     typeof player.speed === 'number' &&
     typeof player.moving === 'boolean' &&
+    (player.combat === undefined || isMultiplayerPlayerCombatSnapshot(player.combat)) &&
     (player.pose === undefined || isMultiplayerPlayerPose(player.pose)) &&
     typeof player.updatedAt === 'number'
   )

@@ -113,7 +113,11 @@ export function useLandrushIslandLoadingTimeline({
   const nowRef = useRef(now)
   const fallbackRef = useRef(fallback)
   const sampleInvalidationKeyRef = useRef(sampleInvalidationKey)
-  if (bootRunRef.current === null && typeof window !== 'undefined') {
+  if (
+    (bootRunRef.current === null ||
+      bootRunRef.current.version !== LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION) &&
+    typeof window !== 'undefined'
+  ) {
     bootRunRef.current = resolveLandrushIslandLoadingBootRun()
   }
   tasksRef.current = tasks
@@ -194,7 +198,7 @@ export function useLandrushIslandLoadingTimeline({
     let fadeFallbackTimer: number | null = null
     let frameId: number | null = null
     let lastDriveMs = Number.NEGATIVE_INFINITY
-    let lastAnimatedTarget = Number.NaN
+    let lastAnimatedRevision = Number.NaN
     let lastPercent = -1
     let lastStatus = status?.textContent?.trim() || LANDRUSH_ISLAND_LOADING_INITIAL_STATUS
     let lastStatusRank = -1
@@ -294,7 +298,7 @@ export function useLandrushIslandLoadingTimeline({
         LANDRUSH_ISLAND_LOADING_MOTION_CONTRACT_ATTRIBUTE,
         installed ? 'compositor' : 'frame',
       )
-      lastAnimatedTarget = installed ? controller.getSnapshot().targetProgress : Number.NaN
+      lastAnimatedRevision = controller.getSnapshot().motionRevision
       publishProgress()
     }
     const cancelFade = () => {
@@ -417,7 +421,7 @@ export function useLandrushIslandLoadingTimeline({
         })
         controller.setConfirmedProgress(stage.confirmedProgress, { ...stage, startDelayMs })
       }
-      if (!fadeStarted && controller.getSnapshot().targetProgress !== lastAnimatedTarget)
+      if (!fadeStarted && controller.getSnapshot().motionRevision !== lastAnimatedRevision)
         installAnimation()
     }
     driveRef.current = drive
@@ -430,7 +434,6 @@ export function useLandrushIslandLoadingTimeline({
       advanceMotion()
       if (readNow() - lastDriveMs >= LANDRUSH_ISLAND_LOADING_MAXIMUM_APP_PRESENTATION_GAP_MS)
         drive()
-      if (!animation && !fadeStarted) installAnimation()
       publishProgress()
       const completed = allReady && controller.readyToDismiss()
       const completionPresented = completionGate.observeFrame({
@@ -724,24 +727,28 @@ export function resolveLandrushIslandLoadingVisualSegmentProgress(
 ) {
   if (segment.durationMs <= 0) return segment.to
   const elapsedFraction = clamp01((nowMs - segment.startedAtMs) / segment.durationMs)
-  let previous = segment.keyframes[0] ?? { offset: 0, progress: segment.from }
-  for (const next of segment.keyframes.slice(1)) {
-    if (elapsedFraction <= next.offset) {
-      const duration = next.offset - previous.offset
-      if (duration <= 0) return next.progress
-      const amount = clamp01((elapsedFraction - previous.offset) / duration)
-      const seconds = (duration * segment.durationMs) / 1_000
-      const v0 = previous.velocityPerSecond
-      const v1 = next.velocityPerSecond
-      if (v0 === undefined || v1 === undefined)
-        return previous.progress + (next.progress - previous.progress) * amount
-      const c3 = 2 * previous.progress - 2 * next.progress + seconds * (v0 + v1)
-      const c2 = -3 * previous.progress + 3 * next.progress - seconds * (2 * v0 + v1)
-      return ((c3 * amount + c2) * amount + seconds * v0) * amount + previous.progress
-    }
-    previous = next
+  if (segment.keyframes.length < 2 || elapsedFraction > segment.keyframes.at(-1)!.offset)
+    return segment.to
+  let low = 1
+  let high = segment.keyframes.length - 1
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (segment.keyframes[middle]!.offset < elapsedFraction) low = middle + 1
+    else high = middle
   }
-  return segment.to
+  const previous = segment.keyframes[low - 1]!
+  const next = segment.keyframes[low]!
+  const duration = next.offset - previous.offset
+  if (duration <= 0) return next.progress
+  const amount = clamp01((elapsedFraction - previous.offset) / duration)
+  const seconds = (duration * segment.durationMs) / 1_000
+  const distance = next.progress - previous.progress
+  const v0 = previous.velocityPerSecond
+  const v1 = next.velocityPerSecond
+  if (v0 === undefined || v1 === undefined) return previous.progress + distance * amount
+  const c3 = -2 * distance + seconds * (v0 + v1)
+  const c2 = 3 * distance - seconds * (2 * v0 + v1)
+  return ((c3 * amount + c2) * amount + seconds * v0) * amount + previous.progress
 }
 
 export function resolveLandrushIslandLoadingReducedMotion(

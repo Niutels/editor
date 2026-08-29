@@ -9,6 +9,7 @@ import {
 
 const PENDING_SCOPE = {
   contentAuthority: 'online-pending',
+  gameMode: null,
   localProfileId: 'pending-player',
   parcelWorldId: null,
   roomId: 'room-a',
@@ -27,6 +28,17 @@ describe('multiplayer transport scope generation', () => {
 
     expect(unchanged).toBe(pending)
     expect(online.generation).toBe(1)
+  })
+
+  test('advances when the declared game mode changes', () => {
+    const normal = createMultiplayerTransportScopeGeneration(PENDING_SCOPE)
+    const zombieEscape = advanceMultiplayerTransportScopeGeneration(normal, {
+      ...PENDING_SCOPE,
+      gameMode: 'zombie-escape',
+    })
+
+    expect(zombieEscape.generation).toBe(1)
+    expect(zombieEscape.scope.gameMode).toBe('zombie-escape')
   })
 
   test('rejects an old socket even while it is still the socket ref current value', () => {
@@ -127,5 +139,8 @@ describe('multiplayer transport scope generation', () => {
     )
     expect(source).toContain('isMultiplayerTransportSessionCallbackCurrent({')
     expect(source).toContain('parcelWorldId: worldId')
+    expect(source).toContain("LandrushWorldMultiplayerGameMode = 'zombie-escape' | null")
+    expect(source).toContain("type: 'initialize-zombie-escape-clock'")
+    expect(source).toContain("type: 'start-zombie-escape-night'")
   })
 })

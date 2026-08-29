@@ -9035,7 +9035,7 @@ export function moveZombieEscapeNavigationAgent(
   const projection = navigationConnectorProjection(connector, output.x, output.z)
   const amount = Math.max(0, Math.min(1, projection / connector.length))
   output.y = connector.startY + (connector.endY - connector.startY) * amount
-  const exitDistance = Math.max(0, connectorRadius) + COLLISION_EPSILON_METERS
+  const exitDistance = Math.max(0, radius) + COLLISION_EPSILON_METERS
   if (
     (targetEnd && projection >= connector.length + exitDistance) ||
     (!targetEnd && projection <= -exitDistance)

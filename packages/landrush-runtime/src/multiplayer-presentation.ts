@@ -1,3 +1,5 @@
+import type { MultiplayerPlayerCombatSnapshot } from '@landrush/protocol'
+
 export const REMOTE_PRESENTATION_POSITION_EPSILON_SQ = 0.0004
 export const REMOTE_PRESENTATION_HEADING_EPSILON_RADIANS = 0.001
 export const REMOTE_PRESENTATION_ANIMATION_SETTLE_SECONDS = 0.5
@@ -12,6 +14,7 @@ const REMOTE_PRESENTATION_FALLBACK_TRAVEL_SPEED = 7
 const REMOTE_PRESENTATION_MAX_RETIMING_MS = 500
 
 export type RemotePresentationSnapshot = {
+  combat?: MultiplayerPlayerCombatSnapshot
   heading: number
   moving: boolean
   position: readonly [number, number, number]
@@ -242,6 +245,9 @@ function interpolateSnapshots<T extends RemotePresentationSnapshot>(
   const discreteSnapshot = amount <= 0 ? first : second
   return {
     ...discreteSnapshot,
+    ...(discreteSnapshot.combat
+      ? { combat: interpolateCombatSnapshots(first.combat, second.combat, amount) }
+      : {}),
     heading: first.heading + signedAngleDistance(first.heading, second.heading) * amount,
     moving: first.moving || second.moving,
     position: [
@@ -252,6 +258,50 @@ function interpolateSnapshots<T extends RemotePresentationSnapshot>(
     speed: first.speed + (second.speed - first.speed) * amount,
     updatedAt: first.updatedAt + (second.updatedAt - first.updatedAt) * amount,
   } as T
+}
+
+function interpolateCombatSnapshots(
+  first: MultiplayerPlayerCombatSnapshot | undefined,
+  second: MultiplayerPlayerCombatSnapshot | undefined,
+  amount: number,
+) {
+  if (!first || !second || amount <= 0 || second.shotSequence < first.shotSequence) {
+    return amount <= 0 ? first : second
+  }
+  const previousShots = new Map(first.shots.map((shot) => [shot.id, shot]))
+  return {
+    ...second,
+    aimAngle: first.aimAngle + signedAngleDistance(first.aimAngle, second.aimAngle) * amount,
+    meleeProgress:
+      first.meleePhase === second.meleePhase
+        ? first.meleeProgress + (second.meleeProgress - first.meleeProgress) * amount
+        : second.meleeProgress,
+    shots: second.shots.map((shot) => {
+      const previous = previousShots.get(shot.id)
+      if (!previous || previous.weaponIndex !== shot.weaponIndex) return shot
+      return {
+        ...shot,
+        position: interpolatePoint(previous.position, shot.position, amount),
+        previousPosition: interpolatePoint(
+          previous.previousPosition,
+          shot.previousPosition,
+          amount,
+        ),
+      }
+    }),
+  }
+}
+
+function interpolatePoint(
+  first: readonly [number, number, number],
+  second: readonly [number, number, number],
+  amount: number,
+): [number, number, number] {
+  return [
+    first[0] + (second[0] - first[0]) * amount,
+    first[1] + (second[1] - first[1]) * amount,
+    first[2] + (second[2] - first[2]) * amount,
+  ]
 }
 
 function cloneSnapshot<T extends RemotePresentationSnapshot>(snapshot: T) {

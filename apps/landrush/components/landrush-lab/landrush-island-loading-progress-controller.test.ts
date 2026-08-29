@@ -7,6 +7,8 @@ import {
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
   LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS,
   LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+  LANDRUSH_ISLAND_LOADING_SPECULATIVE_INTERVAL_MS,
+  LANDRUSH_ISLAND_LOADING_SPECULATIVE_RESPONSE_MS,
   type LandrushIslandLoadingProgressController,
   type LandrushIslandLoadingProgressMotionSnapshot,
   resolveLandrushIslandLoadingProgressStage,
@@ -397,18 +399,18 @@ describe('Landrush island loading progress motion', () => {
 })
 
 describe('Landrush readiness and forecast tracking', () => {
-  test('actually targets readiness plus at most 9.9 points without a stale-duration forecast', () => {
+  test('separates real evidence from the bounded 9.9-point speculative reservoir', () => {
     for (const evidence of [0, 0.01, 0.2, 0.5, 0.9, 0.98, 1]) {
       const stage = resolveLandrushIslandLoadingProgressStage({
         displayedProgress: Math.max(0, evidence - 0.1),
         estimatedDurationMs: 18_000,
         evidenceProgress: evidence,
       })
-      expect(stage.confirmedProgress).toBe(
+      expect(stage.confirmedProgress).toBe(Math.min(0.984, evidence))
+      expect(stage.ceiling).toBe(
         Math.min(0.984, evidence + LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD),
       )
-      expect(stage.confirmedProgress).toBeLessThanOrEqual(evidence + 0.1)
-      expect(stage.ceiling).toBe(stage.confirmedProgress)
+      expect(stage.ceiling).toBeLessThanOrEqual(evidence + 0.1)
     }
     expect(
       resolveLandrushIslandLoadingProgressStage({
@@ -416,10 +418,22 @@ describe('Landrush readiness and forecast tracking', () => {
         estimatedDurationMs: -1,
         evidenceProgress: Number.NaN,
       }),
-    ).toEqual({ ceiling: 0.099, confirmedProgress: 0.099, estimatedDurationMs: 0 })
+    ).toEqual({ ceiling: 0.099, confirmedProgress: 0, estimatedDurationMs: 0 })
+    expect(
+      resolveLandrushIslandLoadingProgressStage({
+        displayedProgress: 0.9,
+        estimatedDurationMs: 1,
+        evidenceProgress: 0.1,
+      }).confirmedProgress,
+    ).toBe(0.1)
+    const inherited = createLandrushIslandLoadingProgressController({ initialProgress: 0.9 })
+    expect(inherited.getSnapshot().confirmedProgress).toBe(0)
+    inherited.setConfirmedProgress(0.1, { ceiling: 0.199 })
+    expect(inherited.getSnapshot().confirmedProgress).toBe(0.1)
+    expect(inherited.getSnapshot().displayedProgress).toBe(0.9)
   })
 
-  test('does not invent additional work completion after an optimistic forecast settles', () => {
+  test('keeps pending motion inside its reservoir without inventing additional confirmed work', () => {
     const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.15 })
     const stage = resolveLandrushIslandLoadingProgressStage({
       displayedProgress: 0.15,
@@ -428,8 +442,10 @@ describe('Landrush readiness and forecast tracking', () => {
     })
     controller.setConfirmedProgress(stage.confirmedProgress, stage)
     controller.step(120_000)
-    expect(controller.getSnapshot().displayedProgress).toBeCloseTo(0.249, 14)
-    expect(controller.getSnapshot().velocityPerSecond).toBe(0)
+    expect(controller.getSnapshot().confirmedProgress).toBe(0.15)
+    expect(controller.getSnapshot().displayedProgress).toBeGreaterThan(0.24)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(0.249)
+    expect(controller.getSnapshot().velocityPerSecond).toBeGreaterThan(0)
     expect(controller.readyToDismiss()).toBe(false)
   })
 
@@ -458,7 +474,9 @@ describe('Landrush readiness and forecast tracking', () => {
     expect(controller.getSnapshot().displayedProgress).toBe(0)
     expect(0.8 - controller.getSnapshot().displayedProgress).toBeGreaterThan(0.1)
     controller.step(RESPONSE_MS)
-    expect(controller.getSnapshot().displayedProgress).toBeCloseTo(0.899, 14)
+    expect(controller.getSnapshot().displayedProgress).toBeGreaterThan(0.8)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(0.899)
+    expect(controller.getSnapshot().velocityPerSecond).toBeGreaterThan(0)
     expect(controller.readyToDismiss()).toBe(false)
   })
 })
@@ -579,7 +597,10 @@ function measureRampError(durationMs: number, sampleIntervalMs: number, lookahea
         estimatedDurationMs: durationMs - elapsedMs,
         evidenceProgress: actualProgress,
       })
-      controller.setConfirmedProgress(lookahead ? stage.confirmedProgress : actualProgress, stage)
+      controller.setConfirmedProgress(stage.confirmedProgress, {
+        ...stage,
+        ceiling: lookahead ? stage.ceiling : stage.confirmedProgress,
+      })
     }
     maximumError = Math.max(
       maximumError,
@@ -751,7 +772,7 @@ describe('Landrush causal-clock motion and completion reserve', () => {
     }
   })
 
-  test('uses a shorter bounded response for small increments and a safe response for large ones', () => {
+  test('uses bounded mass-preserving response durations for every real increment', () => {
     const small = createLandrushIslandLoadingProgressController()
     small.setConfirmedProgress(0.01)
     expect(small.getSnapshot().pulses[0]?.durationMs).toBe(
@@ -759,7 +780,9 @@ describe('Landrush causal-clock motion and completion reserve', () => {
     )
     const large = createLandrushIslandLoadingProgressController()
     large.setConfirmedProgress(0.984)
-    expect(large.getSnapshot().pulses[0]!.durationMs).toBeGreaterThan(250)
+    expect(large.getSnapshot().pulses[0]!.durationMs).toBe(
+      LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS,
+    )
     expect(large.getSnapshot().pulses[0]!.durationMs).toBeLessThanOrEqual(RESPONSE_MS)
     assertAnalyticEnvelope(small)
     assertAnalyticEnvelope(large)
@@ -768,7 +791,7 @@ describe('Landrush causal-clock motion and completion reserve', () => {
     }
     expect(small.getSnapshot().pulses.length).toBeLessThan(64)
     for (const pulse of small.getSnapshot().pulses) {
-      expect(pulse.durationMs).toBeGreaterThanOrEqual(250)
+      expect(pulse.durationMs).toBeGreaterThanOrEqual(LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS)
       expect(pulse.durationMs).toBeLessThanOrEqual(RESPONSE_MS)
     }
     assertAnalyticEnvelope(small)
@@ -810,5 +833,154 @@ describe('Landrush causal-clock motion and completion reserve', () => {
       controller.step(RESPONSE_MS)
       expect(controller.readyToDismiss()).toBe(true)
     }
+  })
+})
+
+describe('Landrush autonomous pending motion', () => {
+  const stage = resolveLandrushIslandLoadingProgressStage({
+    displayedProgress: 0.08,
+    estimatedDurationMs: 0,
+    evidenceProgress: (11 / 13) * 0.985,
+  })
+
+  test('uses aligned overlapping cubic pulses throughout a complete no-JavaScript lease', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.08,
+      initialVelocityPerSecond: 0.006,
+    })
+    controller.setConfirmedProgress(stage.confirmedProgress, stage)
+    const source = controller.getSnapshot()
+    const speculative = source.pulses.filter((pulse) => pulse.kind === 'speculative')
+    expect(speculative.length).toBeGreaterThan(400)
+    expect(source.speculativeThroughMs).toBeGreaterThan(120_000)
+    expect(source.targetProgress).toBeLessThan(stage.ceiling)
+    for (let index = 0; index < speculative.length; index += 1) {
+      const pulse = speculative[index]!
+      expect(pulse.amount).toBeGreaterThan(0)
+      expect(pulse.durationMs).toBe(LANDRUSH_ISLAND_LOADING_SPECULATIVE_RESPONSE_MS)
+      if (index > 0) {
+        expect(pulse.startedAtMs - speculative[index - 1]!.startedAtMs).toBe(
+          LANDRUSH_ISLAND_LOADING_SPECULATIVE_INTERVAL_MS,
+        )
+      }
+    }
+    const preview = controller.createMotionPreview()
+    expect(preview.samples.length).toBeLessThan(460)
+    for (const sample of preview.samples) {
+      if (sample.offset > 0) expect(sample.velocityPerSecond).toBeGreaterThan(0)
+      expect(sample.progress).toBeLessThan(stage.ceiling)
+      const live = sampleFrom(source, sample.offset * preview.durationMs)
+      expect(sample.progress).toBeCloseTo(live.displayedProgress, 12)
+      expect(sample.velocityPerSecond).toBeCloseTo(live.velocityPerSecond, 12)
+      expect(sample.accelerationPerSecondSquared).toBeCloseTo(live.accelerationPerSecondSquared, 11)
+    }
+    assertAnalyticEnvelope(controller)
+    expect(controller.getSnapshot()).toEqual(source)
+  })
+
+  test('renews ten minutes of pending motion without exhausting its reservoir or rewriting history', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.08 })
+    controller.setConfirmedProgress(stage.confirmedProgress, stage)
+    let previousProgress = controller.getSnapshot().displayedProgress
+    let previousRevision = controller.getSnapshot().motionRevision
+    let renewals = 0
+    for (let elapsedMs = 50; elapsedMs <= 600_000; elapsedMs += 50) {
+      controller.step(50)
+      const before = controller.getSnapshot()
+      const after = controller.setConfirmedProgress(stage.confirmedProgress, stage)
+      expectMotionEqual(after, before)
+      expect(after.confirmedProgress).toBe(stage.confirmedProgress)
+      expect(after.displayedProgress).toBeGreaterThanOrEqual(previousProgress)
+      expect(after.displayedProgress).toBeLessThan(stage.ceiling)
+      expect(after.velocityPerSecond).toBeGreaterThan(0)
+      expect(after.velocityPerSecond).toBeLessThan(3)
+      expect(Math.abs(after.accelerationPerSecondSquared)).toBeLessThan(16)
+      expect(after.speculativeThroughMs! - after.elapsedMs).toBeGreaterThanOrEqual(60_000)
+      if (after.motionRevision !== previousRevision) renewals += 1
+      previousProgress = after.displayedProgress
+      previousRevision = after.motionRevision
+    }
+    expect(renewals).toBeGreaterThanOrEqual(8)
+    expect(controller.getSnapshot().pulses.length).toBeLessThan(450)
+    expect(controller.getSnapshot().targetProgress).toBeLessThan(stage.ceiling)
+    expect(controller.readyToDismiss()).toBe(false)
+  })
+
+  test('preserves the existing trajectory until a causal retarget and cancels only future speculation', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.08 })
+    controller.setConfirmedProgress(stage.confirmedProgress, stage)
+    controller.step(18_017)
+    const before = controller.getSnapshot()
+    controller.setConfirmedProgress(0.88, { ceiling: 0.979, startDelayMs: 367 })
+    const after = controller.getSnapshot()
+    expectMotionEqual(after, before)
+    expect(after.motionRevision).toBeGreaterThan(before.motionRevision)
+    for (const pulse of before.pulses.filter((pulse) => pulse.startedAtMs < 18_384)) {
+      expect(after.pulses).toContainEqual(pulse)
+    }
+    for (const offset of [0, 17, 149, 300, 366.999, 367]) {
+      expectMotionEqual(sampleFrom(after, offset), sampleFrom(before, offset))
+    }
+    assertAnalyticEnvelope(controller)
+  })
+
+  test('finishes an arbitrarily long pending stage within 850ms while preserving delayed p/v/a', () => {
+    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.08 })
+    controller.setConfirmedProgress(stage.confirmedProgress, stage)
+    controller.step(37_019)
+    const before = controller.getSnapshot()
+    const requestAtMs = before.elapsedMs + 367
+    controller.complete(367)
+    const completed = controller.getSnapshot()
+    expectMotionEqual(completed, before)
+    expect(completed.pulses.some((pulse) => pulse.kind === 'completion')).toBe(true)
+    expect(
+      completed.pulses.some(
+        (pulse) => pulse.kind === 'speculative' && pulse.startedAtMs >= requestAtMs,
+      ),
+    ).toBe(false)
+    for (const offset of [0, 73, 274, 366.99, 367]) {
+      expectMotionEqual(sampleFrom(completed, offset), sampleFrom(before, offset))
+    }
+    for (const pulse of completed.pulses) {
+      expect(pulse.startedAtMs + pulse.durationMs).toBeLessThanOrEqual(requestAtMs + RESPONSE_MS)
+    }
+    assertAnalyticEnvelope(controller)
+    controller.step(367 + RESPONSE_MS - 1)
+    expect(controller.readyToDismiss()).toBe(false)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(1)
+    controller.step(1)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(controller.readyToDismiss()).toBe(true)
+  })
+
+  test('restores the speculative lease and revision through remount and further renewal', () => {
+    const source = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.08,
+      initialVelocityPerSecond: 0.006,
+      inheritedVelocityHoldMs: 367,
+    })
+    source.setConfirmedProgress(stage.confirmedProgress, { ...stage, startDelayMs: 367 })
+    source.step(119)
+    const snapshot = source.getSnapshot()
+    const copy = createLandrushIslandLoadingProgressController()
+    copy.restoreMotionSnapshot(snapshot)
+    expect(copy.getSnapshot()).toEqual(snapshot)
+    expect(copy.createMotionPreview()).toEqual(source.createMotionPreview())
+    for (const elapsedMs of [53, 195, 29_633, 31_077, 40_000, 20_000, 50_000]) {
+      source.step(elapsedMs)
+      copy.step(elapsedMs)
+      source.setConfirmedProgress(stage.confirmedProgress, stage)
+      copy.setConfirmedProgress(stage.confirmedProgress, stage)
+      expect(copy.getSnapshot()).toEqual(source.getSnapshot())
+      expect(copy.createMotionPreview()).toEqual(source.createMotionPreview())
+    }
+    expect(source.getSnapshot().motionRevision).toBeGreaterThan(snapshot.motionRevision)
+    copy.complete()
+    copy.cancelCompletion()
+    copy.step(RESPONSE_MS)
+    expect(copy.readyToDismiss()).toBe(false)
+    copy.complete()
+    expect(copy.readyToDismiss()).toBe(true)
   })
 })

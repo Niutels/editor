@@ -33,7 +33,7 @@ describe('Landrush island loading status', () => {
     ['viewer-scene', 1, 'Raising roads and cliffs'],
     ['world-frame', 2, 'Hiding the goblins'],
     ['zombie-assets', 3, 'Staging weapons and infected'],
-    ['zombie-pipeline', 4, 'Rallying the horde'],
+    ['zombie-pipeline', 4, 'Hiding the goblins'],
     ['paint', 5, 'Watching the perimeter'],
   ] as const)('maps the first unfinished Zombie Escape group at %s', (id, rank, text) => {
     expect(resolveLandrushIslandLoadingStatus(zombieTasks(id))).toEqual({ rank, text })
@@ -42,11 +42,11 @@ describe('Landrush island loading status', () => {
   test('announces the playable handoff only after every readiness task finishes', () => {
     expect(resolveLandrushIslandLoadingStatus(zombieTasks())).toEqual({
       rank: 6,
-      text: 'Hiding the goblins — almost ready',
+      text: 'Rallying the horde — almost ready',
     })
   })
 
-  test('retains the goblin caption for the completion sweep when parallel work skips its stage', () => {
+  test('keeps the goblin caption on the longer pipeline stage when parallel work skips ahead', () => {
     const worldFrameFinishedFirst = zombieTasks('viewer-scene').map((snapshot) =>
       snapshot.id === 'world-frame' ? task(snapshot.id, true) : snapshot,
     )
@@ -58,9 +58,13 @@ describe('Landrush island loading status', () => {
       rank: 3,
       text: 'Staging weapons and infected',
     })
+    expect(resolveLandrushIslandLoadingStatus(zombieTasks('zombie-pipeline'))).toEqual({
+      rank: 4,
+      text: 'Hiding the goblins',
+    })
     expect(resolveLandrushIslandLoadingStatus(zombieTasks())).toEqual({
       rank: 6,
-      text: 'Hiding the goblins — almost ready',
+      text: 'Rallying the horde — almost ready',
     })
   })
 

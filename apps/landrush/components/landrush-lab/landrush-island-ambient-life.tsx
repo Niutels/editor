@@ -106,6 +106,7 @@ import {
   type LandrushIslandPalmPlacement,
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-palm-layout'
+import { createLandrushIslandPalmPresentation } from './landrush-island-palm-presentation'
 import type { ZombieEscapeCollisionCircleSource } from './zombie-escape-collision-world'
 
 type AmbientNpcActions = {
@@ -589,12 +590,11 @@ export function LandrushIslandMeshyPalm({
   targetSizeMeters: number
 }) {
   const gltf = useGLTFKTX2(modelPath)
-  const model = useMemo(() => gltf.scene.clone(true), [gltf.scene])
+  const model = useMemo(() => createLandrushIslandPalmPresentation(gltf.scene), [gltf.scene])
   const transform = useMemo(
     () => computeGroundedTransform(gltf.scene, targetSizeMeters),
     [gltf.scene, targetSizeMeters],
   )
-  useEffect(() => prepareMeshes(model), [model])
   return (
     <group position={position} rotation={[0, hashAngle(modelPath), 0]}>
       <primitive object={model} position={transform.offset} scale={transform.scale} />

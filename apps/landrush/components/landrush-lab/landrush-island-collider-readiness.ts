@@ -1,6 +1,49 @@
 import type { AnyNode, AnyNodeId } from '@pascal-app/core'
 import type { Mesh, Object3D } from 'three'
 
+export type LandrushIslandBuiltColliderReadiness = {
+  authorityKey: string
+  installedVersion: string | null
+  requestedVersion: string
+}
+
+export function reconcileLandrushIslandBuiltColliderReadiness({
+  authorityKey,
+  current,
+  reported,
+}: {
+  authorityKey: string
+  current: LandrushIslandBuiltColliderReadiness | null
+  reported: LandrushIslandBuiltColliderReadiness
+}) {
+  if (reported.authorityKey !== authorityKey) return current
+  if (
+    current?.authorityKey === reported.authorityKey &&
+    current.requestedVersion === reported.requestedVersion &&
+    current.installedVersion === reported.installedVersion
+  ) {
+    return current
+  }
+  return reported
+}
+
+export function resolveLandrushIslandBuiltCollidersReady({
+  admitted,
+  authorityKey,
+  status,
+}: {
+  admitted: boolean
+  authorityKey: string
+  status: LandrushIslandBuiltColliderReadiness | null
+}) {
+  return (
+    admitted &&
+    status?.authorityKey === authorityKey &&
+    status.installedVersion !== null &&
+    status.installedVersion === status.requestedVersion
+  )
+}
+
 export function areLandrushWallColliderGeometriesReady({
   dirtyNodeIds,
   nodes,

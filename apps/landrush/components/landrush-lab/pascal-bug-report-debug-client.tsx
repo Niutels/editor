@@ -1,5 +1,6 @@
 'use client'
 
+import { writeOfflineParcelWorldState } from '@landrush/runtime'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
@@ -37,6 +38,12 @@ export function PascalBugReportDebugClient() {
       }
       const parsed = parseLandrushBugReportJson(await response.text())
       if (!parsed.ok) throw new Error(parsed.error)
+      writeOfflineParcelWorldState(
+        parsed.report.save.worldId,
+        parsed.report.save.ownerships,
+        parsed.report.save.builds,
+        parsed.report.save.tvMediaStates,
+      )
       return parsed.report
     }
 

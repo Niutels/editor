@@ -136,7 +136,6 @@ const emptyScene = new Scene()
 
 const MAX_PIPELINE_RETRIES = 3
 const RETRY_DELAY_MS = 500
-const PRESENTATION_PREWARM_CHECK_INTERVAL_MS = 500
 const PRESENTATION_PREWARM_FRAME_BUDGET = 12
 const PRESENTATION_PREWARM_AMOUNT = 0.002
 const PRESENTATION_RADIAL_BLUR_PATH_FRACTION = 0.08
@@ -165,22 +164,6 @@ type RadialEdgeBlurEffect = {
 
 type DisposableRttNode = RTTNode & {
   _quadMesh?: { material?: { dispose?: () => void } }
-}
-
-function countRenderableObjects(root: Object3D) {
-  let count = 0
-  root.traverseVisible((object) => {
-    const candidate = object as {
-      isLine?: boolean
-      isMesh?: boolean
-      isPoints?: boolean
-      isSprite?: boolean
-    }
-    if (candidate.isMesh || candidate.isLine || candidate.isPoints || candidate.isSprite) {
-      count += 1
-    }
-  })
-  return count
 }
 
 function textureUvNode(textureNode: TextureNode): Node<'vec2'> {
@@ -354,12 +337,11 @@ const PostProcessingPasses = ({
   disablePostFx?: boolean
   presentationEffectRef?: ViewerPresentationEffectRef
 }) => {
-  const { gl: renderer, invalidate, scene, camera, size, viewport } = useThree()
+  const { gl: renderer, get, invalidate, scene, camera, size, viewport } = useThree()
   const renderPipelineRef = useRef<RenderPipeline | null>(null)
+  const presentationScenePassRef = useRef<ReturnType<typeof pass> | null>(null)
   const presentationOnlyPipelineRef = useRef(false)
   const presentationPrewarmFramesRef = useRef(0)
-  const presentationPrewarmSignatureRef = useRef(-1)
-  const presentationPrewarmCheckAtRef = useRef(0)
   const hasPipelineErrorRef = useRef(false)
   const retryCountRef = useRef(0)
   const rebuildTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -444,6 +426,9 @@ const PostProcessingPasses = ({
 
   // Bump this to force a pipeline rebuild (used by retry logic)
   const [pipelineVersion, setPipelineVersion] = useState(0)
+  // The color-only pass reads its camera per draw; depth-based effects capture it in their graph.
+  const pipelineCamera =
+    disablePostFx && presentationEffectRef && !PERF_POST_FX_DISABLED ? null : camera
 
   const requestPipelineRebuild = useCallback(() => {
     if (rebuildTimeoutRef.current !== null) {
@@ -493,12 +478,11 @@ const PostProcessingPasses = ({
 
   // Build / rebuild the post-processing pipeline
   useEffect(() => {
+    const camera = pipelineCamera ?? get().camera
     const width = Math.floor(size.width)
     const height = Math.floor(size.height)
     presentationOnlyPipelineRef.current = false
     presentationPrewarmFramesRef.current = 0
-    presentationPrewarmSignatureRef.current = -1
-    presentationPrewarmCheckAtRef.current = 0
 
     if (!(renderer && scene && camera)) {
       console.warn('[viewer/post-processing] Skipping pipeline build — missing dependency.', {
@@ -609,6 +593,7 @@ const PostProcessingPasses = ({
         renderPipeline.outputColorTransform = true
         renderPipeline.outputNode = presentationEffect.outputNode
         renderPipelineRef.current = renderPipeline
+        presentationScenePassRef.current = presentationScenePass
         presentationOnlyPipelineRef.current = true
         presentationPrewarmFramesRef.current = PRESENTATION_PREWARM_FRAME_BUDGET
         hasPipelineErrorRef.current = false
@@ -622,6 +607,9 @@ const PostProcessingPasses = ({
         renderPipelineRef.current?.dispose()
         presentationEffect?.dispose()
         presentationScenePass?.dispose()
+        if (presentationScenePassRef.current === presentationScenePass) {
+          presentationScenePassRef.current = null
+        }
         renderPipelineRef.current = null
       }
 
@@ -629,6 +617,9 @@ const PostProcessingPasses = ({
         renderPipelineRef.current?.dispose()
         presentationEffect?.dispose()
         presentationScenePass?.dispose()
+        if (presentationScenePassRef.current === presentationScenePass) {
+          presentationScenePassRef.current = null
+        }
         renderPipelineRef.current = null
         presentationOnlyPipelineRef.current = false
         presentationPrewarmFramesRef.current = 0
@@ -914,14 +905,15 @@ const PostProcessingPasses = ({
     // pushed to uniforms in a separate effect, so a hover must NOT rebuild the
     // whole pipeline. The uniform refs below are stable (useMemo), so they
     // never trigger a rebuild either.
-    camera,
     disablePostFx,
+    get,
     hoverHiddenColor,
     hoverPulseMix,
     hoverStrength,
     hoverVisibleColor,
     edges,
     inkOpacityOverride,
+    pipelineCamera,
     pipelineVersion,
     presentationEffectRef,
     projectId,
@@ -937,7 +929,8 @@ const PostProcessingPasses = ({
     overlayLayers,
   ])
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
+    const camera = state.camera
     if (size.width < 1 || size.height < 1) {
       return
     }
@@ -1019,18 +1012,7 @@ const PostProcessingPasses = ({
       )
     }
 
-    if (presentationOnlyPipelineRef.current && presentationAmount <= 0.001) {
-      const now = performance.now()
-      if (now >= presentationPrewarmCheckAtRef.current) {
-        presentationPrewarmCheckAtRef.current = now + PRESENTATION_PREWARM_CHECK_INTERVAL_MS
-        const renderables = countRenderableObjects(scene)
-        if (renderables > presentationPrewarmSignatureRef.current) {
-          presentationPrewarmSignatureRef.current = renderables
-          presentationPrewarmFramesRef.current = PRESENTATION_PREWARM_FRAME_BUDGET
-        }
-      }
-    }
-
+    // Scene growth does not invalidate the fullscreen graph or warrant drawing the whole world again.
     const prewarming =
       presentationOnlyPipelineRef.current &&
       presentationAmount <= 0.001 &&
@@ -1086,6 +1068,9 @@ const PostProcessingPasses = ({
         })
       }
       try {
+        if (presentationScenePassRef.current) {
+          presentationScenePassRef.current.camera = camera
+        }
         renderPipeline.render()
       } finally {
         for (const object of unculled) object.frustumCulled = true

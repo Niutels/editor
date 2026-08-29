@@ -38,6 +38,7 @@ import {
 } from './zombie-escape-simulation'
 import { resolveSparseNavigationStrictRegionWitnessNode } from './zombie-escape-sparse-navigation'
 import { createZombieEscapeArena } from './zombie-escape-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 const AGENT_RADIUS = 0.22
 const STEP_METERS = 0.06
@@ -615,6 +616,92 @@ describe('Zombie Escape layered navigation', () => {
     expect(descended).toBe(true)
     expect(exitedLower).toBe(true)
     expect(y).toBeCloseTo(connector.startY, 10)
+  })
+
+  test('carries every zombie radius beyond the shared upper-floor support clearance', () => {
+    const upperY = 3
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boundaryPolicy: 'none',
+      navigationConnectors: [
+        {
+          ascendingEnd: true,
+          chainId: 'upper-clearance-stair',
+          chainLowerY: 0,
+          chainOrder: 0,
+          chainUpperY: upperY,
+          endX: -1,
+          endY: upperY,
+          endZ: 0,
+          halfWidth: 0.6,
+          id: 'upper-clearance-stair:flight',
+          startX: -3,
+          startY: 0,
+          startZ: 0,
+        },
+      ],
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'upper-clearance-ground',
+          polygon: [
+            { x: -6, z: -3 },
+            { x: 6, z: -3 },
+            { x: 6, z: 3 },
+            { x: -6, z: 3 },
+          ],
+        },
+        {
+          elevation: upperY,
+          id: 'upper-clearance-floor',
+          polygon: [
+            { x: -1, z: -2 },
+            { x: 4, z: -2 },
+            { x: 4, z: 2 },
+            { x: -1, z: 2 },
+          ],
+        },
+      ],
+      playRadius: 8,
+    })
+    const hit = createZombieEscapeCollisionHit()
+    const move = createZombieEscapeNavigationMoveResult()
+
+    for (const zombie of ZOMBIE_ESCAPE_ZOMBIE_CATALOG) {
+      let connectorIndex = 0
+      let connectorTargetEnd = true
+      let x = -3
+      let y = 0
+      let z = 0
+      for (let step = 0; step < 128 && x < 0; step += 1) {
+        moveZombieEscapeNavigationAgent(
+          world,
+          x,
+          y,
+          z,
+          0.05,
+          0,
+          world.agentRadius,
+          connectorIndex,
+          connectorTargetEnd,
+          hit,
+          move,
+          -1,
+          false,
+          zombie.capsule.radiusMeters,
+        )
+        x = move.x
+        y = move.y
+        z = move.z
+        connectorIndex = move.connectorIndex
+        connectorTargetEnd = move.connectorTargetEnd
+      }
+
+      expect(x, zombie.id).toBeGreaterThanOrEqual(0)
+      expect(y, zombie.id).toBe(upperY)
+      expect(connectorIndex, zombie.id).toBe(-1)
+    }
   })
 
   test('preserves authored-ground admission through the legacy spawn API', () => {

@@ -2317,7 +2317,13 @@ function initializeZombieEscapeZombie(
   zombies.attackTargetObjectOrdinal[slot] = -1
   zombies.deathPresentationSeconds[slot] = 0
   zombies.spawnOrdinal[slot] = spawnOrdinal
-  zombies.speedScale[slot] = resolveZombieEscapeSpawnSpeedScale(state.seed, spawnOrdinal)
+  zombies.speedScale[slot] = resolveZombieEscapeSpawnSpeedScale(
+    state.seed,
+    spawnOrdinal,
+    state.phase === 'night'
+      ? resolveZombieEscapeNightSpawnSpeedMaximumMultiplier(state.phaseSecondsRemaining)
+      : 1,
+  )
   zombies.variant[slot] = state.variantByPoolSlot[slot]!
   if (anchor) {
     cacheZombieEscapeSparseNavigationAnchor(state, slot, anchor)
@@ -8736,14 +8742,15 @@ function trySpawnZombieEscapeSparseZombie(state: ZombieEscapeSimulation, isRepla
 
 function updateWaves(state: ZombieEscapeSimulation, delta: number) {
   if (state.waveState === 'escape') return
+  scheduleZombieEscapeNightPopulationGrowth(state)
   if (state.waveState === 'intermission') {
     state.waveIntermissionSeconds -= delta
     if (state.waveIntermissionSeconds <= 0) {
       state.wave += 1
       state.waveState = 'active'
-      state.waveSpawnRemaining = Math.min(
+      state.waveSpawnRemaining = resolveZombieEscapeNightZombieTarget(
+        state.phaseSecondsRemaining,
         state.zombies.pool.capacity,
-        zombieEscapeWaveSize(state.wave),
       )
       state.waveSpawnTimerSeconds = 0
     }
@@ -8925,12 +8932,49 @@ function segmentSphereFirstIntersectionAmount(
   return amount >= 0 && amount <= 1 ? amount : Number.POSITIVE_INFINITY
 }
 
-function zombieEscapeWaveSize(wave: number) {
-  const normalizedWave = Math.max(1, Math.trunc(wave))
-  return (
-    ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount +
-    (normalizedWave - 1) * ZOMBIE_ESCAPE_SIMULATION.zombiePopulationGrowthPerNight
+export function resolveZombieEscapeNightDifficultyInterval(phaseSecondsRemaining: number) {
+  const duration = ZOMBIE_ESCAPE_SIMULATION.nightDurationSeconds
+  const remaining = Number.isFinite(phaseSecondsRemaining)
+    ? Math.min(duration, Math.max(0, phaseSecondsRemaining))
+    : duration
+  return Math.floor(
+    (duration - remaining + 1e-9) / ZOMBIE_ESCAPE_SIMULATION.nightDifficultyIntervalSeconds,
   )
+}
+
+export function resolveZombieEscapeNightZombieTarget(
+  phaseSecondsRemaining: number,
+  zombieCapacity: number = ZOMBIE_ESCAPE_CAPACITY.zombies,
+) {
+  const capacity = Math.max(0, Math.trunc(zombieCapacity))
+  return Math.min(
+    capacity,
+    ZOMBIE_ESCAPE_SIMULATION.maximumNightZombieCount,
+    ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount +
+      resolveZombieEscapeNightDifficultyInterval(phaseSecondsRemaining) *
+        ZOMBIE_ESCAPE_SIMULATION.zombiePopulationGrowthPerDifficultyInterval,
+  )
+}
+
+export function resolveZombieEscapeNightSpawnSpeedMaximumMultiplier(phaseSecondsRemaining: number) {
+  return (
+    1 +
+    resolveZombieEscapeNightDifficultyInterval(phaseSecondsRemaining) *
+      ZOMBIE_ESCAPE_SIMULATION.zombieSpawnSpeedMaximumGrowthPerDifficultyInterval
+  )
+}
+
+function scheduleZombieEscapeNightPopulationGrowth(state: ZombieEscapeSimulation) {
+  const target = resolveZombieEscapeNightZombieTarget(
+    state.phaseSecondsRemaining,
+    state.zombies.pool.capacity,
+  )
+  const scheduledPopulation =
+    state.zombies.pool.activeCount + state.replacementSpawnRemaining + state.waveSpawnRemaining
+  if (scheduledPopulation >= target) return
+  state.waveSpawnRemaining += target - scheduledPopulation
+  state.waveIntermissionSeconds = 0
+  state.waveState = 'active'
 }
 
 export function advanceZombieEscapePhaseClock(
@@ -8968,7 +9012,10 @@ function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
   state.replacementSpawnRemaining = 0
   state.wave = state.night
   state.waveIntermissionSeconds = 0
-  state.waveSpawnRemaining = Math.min(state.zombies.pool.capacity, zombieEscapeWaveSize(state.wave))
+  state.waveSpawnRemaining = resolveZombieEscapeNightZombieTarget(
+    state.phaseSecondsRemaining,
+    state.zombies.pool.capacity,
+  )
   state.waveSpawnTimerSeconds = 0
   state.waveState = 'active'
   if (state.player.ammo === 0) {

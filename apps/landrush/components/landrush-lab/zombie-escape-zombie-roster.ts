@@ -24,19 +24,27 @@ function mixZombieEscapeSpawnIdentity(seed: number, ...values: readonly number[]
   return value >>> 0
 }
 
-export function resolveZombieEscapeSpawnSpeedScale(seed: number, spawnOrdinal: number) {
+export function resolveZombieEscapeSpawnSpeedScale(
+  seed: number,
+  spawnOrdinal: number,
+  maximumSpeedMultiplier = 1,
+) {
   const lane = Math.max(0, Math.trunc(spawnOrdinal)) % 5
   const blockOrdinal = Math.floor(Math.max(0, Math.trunc(spawnOrdinal)) / 5)
   const sprinterLane = mixZombieEscapeSpawnIdentity(seed, blockOrdinal, 0x52ab_91d3) % 5
   const amount = mixZombieEscapeSpawnIdentity(seed, spawnOrdinal, 0x8f6c_a231) / 0x1_0000_0000
+  const resolvedMaximumSpeedMultiplier = Number.isFinite(maximumSpeedMultiplier)
+    ? Math.max(1, maximumSpeedMultiplier)
+    : 1
   const minimum =
     lane === sprinterLane
       ? ZOMBIE_ESCAPE_SPRINTER_SPEED_MINIMUM
       : ZOMBIE_ESCAPE_REGULAR_SPEED_MINIMUM
-  const maximum =
+  const baseMaximum =
     lane === sprinterLane
       ? ZOMBIE_ESCAPE_SPRINTER_SPEED_MAXIMUM
       : ZOMBIE_ESCAPE_REGULAR_SPEED_MAXIMUM
+  const maximum = baseMaximum * resolvedMaximumSpeedMultiplier
   return minimum + (maximum - minimum) * amount
 }
 

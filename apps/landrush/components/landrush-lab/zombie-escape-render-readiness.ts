@@ -5,6 +5,7 @@ import {
   LANDRUSH_RENDER_READINESS_TIMEOUT_MS,
   type LandrushPipelineRenderer,
   type LandrushRenderReadinessCoordinator,
+  type LandrushRenderReadinessProgress,
   type LandrushRenderReadinessRequest,
   type LandrushRenderReadinessStatus,
   type LandrushRenderReadinessTimer,
@@ -20,6 +21,11 @@ const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
   'effect:impact',
   'effect:sparks',
   'effect:blood',
+  'effect:carrier-accent',
+  'effect:travel-detail',
+  'effect:travel-ribbon',
+  'effect:muzzle-petals',
+  'effect:death-dust',
 ] as const
 
 export const ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY = 'weapon-pickup'
@@ -50,19 +56,19 @@ export type ZombieEscapeRenderReadinessRequest = LandrushRenderReadinessRequest
 
 export type ZombieEscapeRenderReadinessCoordinator = LandrushRenderReadinessCoordinator
 
-export type ZombieEscapeRenderReadinessTimer = LandrushRenderReadinessTimer
+export type ZombieEscapeRenderReadinessProgress = LandrushRenderReadinessProgress
 
-export type ZombieEscapeRenderRepresentativePrewarmQueue = Readonly<{
-  dispose: () => void
-  invalidate: () => void
-  synchronize: (request: Omit<ZombieEscapeRenderReadinessRequest, 'identity'>) => void
-  waitForSettled: () => Promise<'failed' | 'ready' | 'stale'>
-}>
+export type ZombieEscapeRenderReadinessTimer = LandrushRenderReadinessTimer
 
 type RegisteredRepresentative = Readonly<{
   registration: symbol
   root: Object3D
 }>
+
+const GPU_PREPARATION_TIMER: ZombieEscapeRenderReadinessTimer = {
+  clear: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
+  schedule: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+}
 
 export function createZombieEscapeHeldWeaponRenderRepresentativeKey(weaponId: string) {
   return `weapon-held:${weaponId}`
@@ -127,21 +133,115 @@ export function createZombieEscapeRenderReadinessRegistry(
   }
 }
 
-export async function compileZombieEscapeRenderRepresentatives({
-  camera,
-  representatives,
-  renderer,
-  targetScene,
-}: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>) {
-  await compileLandrushRenderRepresentatives({
+export async function compileZombieEscapeRenderRepresentatives(
+  {
     camera,
-    renderer,
     representatives,
+    renderer,
     targetScene,
-  })
+  }: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>,
+  onProgress?: (progress: ZombieEscapeRenderReadinessProgress) => void,
+) {
+  const total = representatives.length + (renderer.isWebGPURenderer === true ? 1 : 2)
+  let completed = 0
+  onProgress?.({ completed, total })
+  await compileLandrushRenderRepresentatives(
+    { camera, renderer, representatives, targetScene },
+    (progress) => {
+      completed = progress.completed
+      onProgress?.({ completed, total })
+    },
+  )
   // A WebGPU whole-scene compile can bind viewport-depth placeholders before their first real render establishes matching MSAA textures.
-  if (renderer.isWebGPURenderer === true) return
-  await renderer.compileAsync(targetScene, camera, targetScene)
+  if (renderer.isWebGPURenderer !== true) {
+    await renderer.compileAsync(targetScene, camera, targetScene)
+    completed += 1
+    onProgress?.({ completed, total })
+  }
+  await waitForZombieEscapeGpuPreparation(renderer)
+  onProgress?.({ completed: total, total })
+}
+
+export async function waitForZombieEscapeGpuPreparation(
+  renderer: ZombieEscapePipelineRenderer,
+  waitForFrame: () => Promise<void> = () =>
+    new Promise((resolve) => requestAnimationFrame(() => resolve())),
+  timer: ZombieEscapeRenderReadinessTimer = GPU_PREPARATION_TIMER,
+) {
+  const device = renderer.backend?.device as
+    | { queue?: { onSubmittedWorkDone?: () => Promise<void> } }
+    | undefined
+  if (typeof device?.queue?.onSubmittedWorkDone === 'function') {
+    let timeoutHandle: unknown
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = timer.schedule(
+        () => reject(new Error('Zombie Escape GPU submission did not finish before its deadline.')),
+        ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
+      )
+    })
+    try {
+      await Promise.race([device.queue.onSubmittedWorkDone(), timeout])
+    } finally {
+      timer.clear(timeoutHandle)
+    }
+    return
+  }
+  const context = (renderer.backend?.gl ?? renderer.getContext?.()) as
+    | WebGL2RenderingContext
+    | undefined
+  if (!context) {
+    if (renderer.isWebGPURenderer) {
+      throw new Error('Zombie Escape GPU preparation requires a live GPU queue or WebGL2 fence.')
+    }
+    return
+  }
+  if (
+    typeof context.fenceSync !== 'function' ||
+    typeof context.clientWaitSync !== 'function' ||
+    typeof context.deleteSync !== 'function' ||
+    typeof context.flush !== 'function' ||
+    typeof context.isContextLost !== 'function'
+  ) {
+    throw new Error('Zombie Escape GPU preparation requires usable WebGL2 fences.')
+  }
+  if (context.isContextLost()) throw new Error('Zombie Escape GPU preparation context is lost.')
+  const fence = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0)
+  if (!fence) throw new Error('Zombie Escape GPU preparation could not create a fence.')
+  let finished = false
+  let timeoutHandle: unknown
+  const timeoutError = new Error(
+    'Zombie Escape GPU preparation did not finish before its deadline.',
+  )
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = timer.schedule(() => {
+        if (finished) return
+        finished = true
+        reject(timeoutError)
+      }, ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS)
+    })
+    const waitForFence = async () => {
+      context.flush()
+      for (;;) {
+        await waitForFrame()
+        // A frame may resume after the timeout has already deleted this fence.
+        if (finished) throw timeoutError
+        if (context.isContextLost()) {
+          throw new Error('Zombie Escape GPU preparation context was lost while waiting.')
+        }
+        const status = context.clientWaitSync(fence, 0, 0)
+        if (status === context.ALREADY_SIGNALED || status === context.CONDITION_SATISFIED) return
+        if (status !== context.TIMEOUT_EXPIRED) {
+          throw new Error('Zombie Escape GPU preparation fence failed.')
+        }
+      }
+    }
+    await Promise.race([waitForFence(), timeout])
+  } finally {
+    finished = true
+    timer.clear(timeoutHandle)
+    context.deleteSync(fence)
+  }
 }
 
 export function createZombieEscapeRenderReadinessCoordinator({
@@ -160,109 +260,6 @@ export function createZombieEscapeRenderReadinessCoordinator({
     timeoutMs,
     timer,
   })
-}
-
-export function createZombieEscapeRenderRepresentativePrewarmQueue({
-  compile = compileLandrushRenderRepresentatives,
-  onStatus,
-  timeoutMs = ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
-  timer,
-}: {
-  compile?: typeof compileLandrushRenderRepresentatives
-  onStatus?: (key: string, status: ZombieEscapeRenderReadinessStatus) => void
-  timeoutMs?: number
-  timer?: ZombieEscapeRenderReadinessTimer
-} = {}): ZombieEscapeRenderRepresentativePrewarmQueue {
-  const coordinator = createLandrushRenderReadinessCoordinator({
-    compile,
-    formatTimeoutMessage: (boundedTimeoutMs) =>
-      `Zombie Escape render representative prewarm timed out after ${String(boundedTimeoutMs)}ms.`,
-    timeoutMs,
-    timer,
-  })
-  let context:
-    | Pick<ZombieEscapeRenderReadinessRequest, 'camera' | 'generation' | 'renderer' | 'targetScene'>
-    | undefined
-  let disposed = false
-  let failed = false
-  let revision = 0
-  let roots = new Map<string, Object3D>()
-  let tail = Promise.resolve()
-
-  const invalidate = () => {
-    revision += 1
-    context = undefined
-    failed = false
-    roots = new Map()
-    tail = Promise.resolve()
-    coordinator.invalidate()
-  }
-
-  return {
-    dispose() {
-      if (disposed) return
-      disposed = true
-      invalidate()
-      coordinator.dispose()
-    },
-    invalidate,
-    synchronize(request) {
-      if (disposed) return
-      if (
-        !context ||
-        context.camera !== request.camera ||
-        context.generation !== request.generation ||
-        context.renderer !== request.renderer ||
-        context.targetScene !== request.targetScene
-      ) {
-        invalidate()
-        context = request
-      }
-
-      const currentKeys = new Set(request.representatives.map(({ key }) => key))
-      for (const key of roots.keys()) {
-        if (!currentKeys.has(key)) roots.delete(key)
-      }
-      for (const representative of request.representatives) {
-        if (roots.get(representative.key) === representative.root) continue
-        roots.set(representative.key, representative.root)
-        const queuedRevision = revision
-        const queuedRequest: ZombieEscapeRenderReadinessRequest = {
-          ...request,
-          identity: representative.root,
-          representatives: [representative],
-        }
-        tail = tail.then(async () => {
-          if (
-            disposed ||
-            revision !== queuedRevision ||
-            roots.get(representative.key) !== representative.root
-          ) {
-            return
-          }
-          const result = await coordinator.request(queuedRequest, (status) => {
-            if (
-              disposed ||
-              revision !== queuedRevision ||
-              roots.get(representative.key) !== representative.root
-            ) {
-              return
-            }
-            onStatus?.(representative.key, status)
-          })
-          if (revision === queuedRevision && result === 'failed') failed = true
-        })
-      }
-    },
-    waitForSettled() {
-      const queuedRevision = revision
-      const queuedTail = tail
-      return queuedTail.then(() => {
-        if (disposed || revision !== queuedRevision) return 'stale'
-        return failed ? 'failed' : 'ready'
-      })
-    },
-  }
 }
 
 function createRegistrySnapshot(

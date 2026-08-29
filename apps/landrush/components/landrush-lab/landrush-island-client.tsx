@@ -273,6 +273,10 @@ import {
   resolveLandrushGrassMapVisibility,
 } from './landrush-grass-map-transition'
 import {
+  LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+  LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
+} from './landrush-island-ambient-catalog'
+import {
   LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE,
   LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS,
   LandrushIslandAmbientLife,
@@ -295,7 +299,12 @@ import {
   serializeLandrushBugReportCameraPose,
   writeLandrushIslandCameraPose,
 } from './landrush-island-camera-pose'
-import { areLandrushWallColliderGeometriesReady } from './landrush-island-collider-readiness'
+import {
+  areLandrushWallColliderGeometriesReady,
+  type LandrushIslandBuiltColliderReadiness,
+  reconcileLandrushIslandBuiltColliderReadiness,
+  resolveLandrushIslandBuiltCollidersReady,
+} from './landrush-island-collider-readiness'
 import { landrushIslandInputTargetBlocksGameplay } from './landrush-island-input-capture'
 import {
   advanceLandrushIslandDayGamepadButtonState,
@@ -429,6 +438,17 @@ import {
   LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER,
   LandrushZombieEscapeMode,
 } from './landrush-zombie-escape-mode'
+import type { LandrushZombieEscapeCombatSnapshotReader } from './landrush-zombie-escape-multiplayer'
+import {
+  type LandrushZombieEscapeNavigationReadiness,
+  reconcileLandrushZombieEscapeNavigationReadiness,
+  resolveLandrushZombieEscapeNavigationReady,
+} from './landrush-zombie-escape-navigation-readiness'
+import { LandrushZombieEscapeRemoteCombat } from './landrush-zombie-escape-remote-combat'
+import type {
+  LandrushZombieEscapeClockMode,
+  LandrushZombieEscapeRoomStateObservation,
+} from './landrush-zombie-escape-room-state'
 import { resolveLandrushZombieEscapeIntegratedLocomotionEnabled } from './landrush-zombie-escape-runtime'
 import {
   clearLandrushZombieEscapeTouchJumpRequest,
@@ -786,9 +806,9 @@ const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
 const LANDRUSH_ISLAND_LOADING_DAY_PROFILE_KEY = 'landrush-island:day:v1'
 const LANDRUSH_ISLAND_LOADING_ZOMBIE_PROFILE_KEY = 'landrush-island:zombie-balanced:v1'
 const LANDRUSH_ISLAND_LOADING_RUN_GENERATION = 'landrush-island:startup:v1'
-const LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE = 'landrush-island:startup-readiness:v2'
+const LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE = 'landrush-island:startup-readiness:v3'
 const LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:day|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}`
-const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
+const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
 const LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS = 520
 const LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS = 45_000
 const LANDRUSH_ISLAND_PARCEL_MAP_OVERLAY_ELEVATION_OFFSET = 0.08
@@ -3391,18 +3411,22 @@ export function LandrushIslandClient({
     (searchParams.get('landrushEditorReactProfile') === '1' ||
       searchParams.get('editorReactProfile') === '1')
   const [loadingActive, setLoadingActive] = useState(true)
+  const previousLoadingZombieEnabledRef = useRef(zombieEscapeEnabled)
+  useLayoutEffect(() => {
+    const previousEnabled = previousLoadingZombieEnabledRef.current
+    previousLoadingZombieEnabledRef.current = zombieEscapeEnabled
+    if (!previousEnabled && zombieEscapeEnabled) setLoadingActive(true)
+  }, [zombieEscapeEnabled])
   const [viewerSceneReady, setViewerSceneReady] = useState(false)
   const [worldFrameReady, setWorldFrameReady] = useState(false)
-  const [ambientLoadReadiness, setAmbientLoadReadiness] =
-    useState<LandrushIslandAmbientLoadReadiness | null>(null)
-  const handleAmbientLoadReadinessChange = useCallback(
-    (readiness: LandrushIslandAmbientLoadReadiness) => {
-      setAmbientLoadReadiness((current) =>
-        reconcileLandrushIslandAmbientLoadReadiness(current, readiness),
-      )
-    },
-    [],
-  )
+  const [ambientLoadStatus, setAmbientLoadStatus] = useState<{
+    authorityKey: string
+    readiness: LandrushIslandAmbientLoadReadiness
+  } | null>(null)
+  const [builtColliderReadiness, setBuiltColliderReadiness] =
+    useState<LandrushIslandBuiltColliderReadiness | null>(null)
+  const [zombieEscapeNavigationStatus, setZombieEscapeNavigationStatus] =
+    useState<LandrushZombieEscapeNavigationReadiness | null>(null)
   const fallPresentationRef = useRef<LandrushIslandFallPresentationState>(
     createLandrushIslandFallPresentationState(),
   )
@@ -3530,12 +3554,18 @@ export function LandrushIslandClient({
   )
   const multiplayer = useLandrushWorldMultiplayer({
     contentAuthority: multiplayerContentAuthority,
+    gameMode: zombieEscapeEnabled ? 'zombie-escape' : null,
     localProfile: localProfile ?? LANDRUSH_ISLAND_FALLBACK_PROFILE,
     onVoiceSignal: handleVoiceSignal,
     persistOfflineState: shouldPersistLandrushIslandOfflineState({ clean, offline }),
     roomId,
     spectator: false,
   })
+  const zombieEscapeClockMode: LandrushZombieEscapeClockMode = offline
+    ? 'offline-local'
+    : multiplayer.zombieEscapeStateObservation
+      ? 'online-canonical'
+      : 'online-waiting'
   const resolvedLocalProfile = localProfile ?? LANDRUSH_ISLAND_FALLBACK_PROFILE
   const multiplayerStatus: ConnectionStatus = offline ? 'offline' : multiplayer.status
   const spatialVoice = useLandrushSpatialVoice({
@@ -4170,6 +4200,66 @@ export function LandrushIslandClient({
     initialParcelReadyAuthorityKey === initialParcelAuthorityKey &&
     currentInitialParcelReadiness.ready
   const authorityPresentationReady = initialParcelMaterializationReady && viewerSceneReady
+  const currentInitialParcelAuthorityKeyRef = useRef(initialParcelAuthorityKey)
+  currentInitialParcelAuthorityKeyRef.current = initialParcelAuthorityKey
+  const ambientLoadReadiness =
+    ambientLoadStatus?.authorityKey === initialParcelAuthorityKey
+      ? ambientLoadStatus.readiness
+      : null
+  const handleAmbientLoadReadinessChange = useCallback(
+    (reported: LandrushIslandAmbientLoadReadiness) => {
+      const authorityKey = initialParcelAuthorityKey
+      setAmbientLoadStatus((current) => {
+        if (authorityKey !== currentInitialParcelAuthorityKeyRef.current) return current
+        const previous = current?.authorityKey === authorityKey ? current.readiness : null
+        const readiness = reconcileLandrushIslandAmbientLoadReadiness(previous, reported)
+        return readiness === previous ? current : { authorityKey, readiness }
+      })
+    },
+    [initialParcelAuthorityKey],
+  )
+  const handleBuiltCollidersReadinessChange = useCallback(
+    (reported: LandrushIslandBuiltColliderReadiness) => {
+      setBuiltColliderReadiness((current) =>
+        reconcileLandrushIslandBuiltColliderReadiness({
+          authorityKey: currentInitialParcelAuthorityKeyRef.current,
+          current,
+          reported,
+        }),
+      )
+    },
+    [],
+  )
+  const builtCollidersReady = resolveLandrushIslandBuiltCollidersReady({
+    admitted: authorityPresentationReady,
+    authorityKey: initialParcelAuthorityKey,
+    status: builtColliderReadiness,
+  })
+  const handleZombieEscapeCollisionWorldReadinessChange = useCallback(
+    (reported: LandrushZombieEscapeNavigationReadiness) => {
+      setZombieEscapeNavigationStatus((current) =>
+        reconcileLandrushZombieEscapeNavigationReadiness({
+          authorityKey: currentInitialParcelAuthorityKeyRef.current,
+          current,
+          mountGeneration: currentZombieEscapeGeneratedAssetGenerationRef.current,
+          reported,
+        }),
+      )
+    },
+    [],
+  )
+  const zombieEscapeNavigationReadiness =
+    zombieEscapeNavigationStatus?.authorityKey === initialParcelAuthorityKey &&
+    zombieEscapeNavigationStatus.mountGeneration === zombieEscapeGeneratedAssetGeneration
+      ? zombieEscapeNavigationStatus
+      : null
+  const zombieEscapeNavigationReady = resolveLandrushZombieEscapeNavigationReady({
+    admitted: authorityPresentationReady,
+    authorityKey: initialParcelAuthorityKey,
+    enabled: zombieEscapeEnabled,
+    mountGeneration: zombieEscapeGeneratedAssetGeneration,
+    status: zombieEscapeNavigationReadiness,
+  })
   const authorityResyncActive = resolveLandrushAuthorityResyncActive({
     authorityKey: initialParcelAuthorityKey,
     handedOff: !loadingActive,
@@ -4588,8 +4678,10 @@ export function LandrushIslandClient({
     initialParcelMaterializationReady &&
     viewerSceneReady &&
     worldFrameReady &&
-    (zombieEscapeEnabled || ambientLoadReadiness?.ready === true) &&
+    ambientLoadReadiness?.ready === true &&
+    builtCollidersReady &&
     zombieEscapeGeneratedAssetsReady &&
+    zombieEscapeNavigationReady &&
     naturalRoadPlanReady &&
     proceduralCliffsReady &&
     (!stylizedGroundTextureRequired || stylizedGroundTextureReady)
@@ -4604,7 +4696,7 @@ export function LandrushIslandClient({
   }|ground-texture:${stylizedGroundTextureRequired ? 'required' : 'omitted'}|natural-road-plan:${
     naturalRoadPlanRequired ? 'required' : 'omitted'
   }|procedural-cliffs:${proceduralCliffsRequired ? 'required' : 'omitted'}`
-  const loadingRunGenerationRef = useRef(LANDRUSH_ISLAND_LOADING_RUN_GENERATION)
+  const loadingRunGeneration = `${LANDRUSH_ISLAND_LOADING_RUN_GENERATION}:${zombieEscapeGeneratedAssetMountGenerationRef.current.generation}`
   const loadingTasks = useMemo<readonly LandrushIslandLoadingTaskSnapshot[]>(() => {
     const tasks: LandrushIslandLoadingTaskSnapshot[] = [
       {
@@ -4647,14 +4739,20 @@ export function LandrushIslandClient({
       total: 1,
     })
 
-    if (!zombieEscapeEnabled) {
-      tasks.push({
+    tasks.push(
+      {
         completed: ambientLoadReadiness?.completed ?? 0,
         id: 'ambient-assets',
         ready: ambientLoadReadiness?.ready === true,
         total: LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS.length,
-      })
-    }
+      },
+      {
+        completed: builtCollidersReady ? 1 : 0,
+        id: 'built-colliders',
+        ready: builtCollidersReady,
+        total: 1,
+      },
+    )
 
     tasks.push({
       completed: !stylizedGroundTextureRequired || stylizedGroundTextureReady ? 1 : 0,
@@ -4672,9 +4770,27 @@ export function LandrushIslandClient({
           total: ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_KEYS.length,
         },
         {
-          completed: zombieEscapeGeneratedAssetReadiness?.pipelineReady === true ? 1 : 0,
+          completed:
+            zombieEscapeGeneratedAssetReadiness?.pipelineReady === true
+              ? 100
+              : Math.min(
+                  100,
+                  Math.max(
+                    0,
+                    Math.floor(
+                      (100 * (zombieEscapeGeneratedAssetReadiness?.pipelineCompleted ?? 0)) /
+                        Math.max(1, zombieEscapeGeneratedAssetReadiness?.pipelineTotal ?? 1),
+                    ),
+                  ),
+                ),
           id: 'zombie-pipeline',
           ready: zombieEscapeGeneratedAssetReadiness?.pipelineReady === true,
+          total: 100,
+        },
+        {
+          completed: zombieEscapeNavigationReady ? 1 : 0,
+          id: 'zombie-navigation',
+          ready: zombieEscapeNavigationReady,
           total: 1,
         },
       )
@@ -4689,6 +4805,7 @@ export function LandrushIslandClient({
     return tasks
   }, [
     ambientLoadReadiness,
+    builtCollidersReady,
     initialParcelMaterializationReady,
     loadingPaintReady,
     naturalRoadPlanReady,
@@ -4700,6 +4817,7 @@ export function LandrushIslandClient({
     worldFrameReady,
     zombieEscapeEnabled,
     zombieEscapeGeneratedAssetReadiness,
+    zombieEscapeNavigationReady,
   ])
   const hasLiveWaterNode = useScene((state) =>
     Boolean(state.nodes[LANDRUSH_ISLAND_NODE_ID as never]),
@@ -6189,6 +6307,7 @@ export function LandrushIslandClient({
       className="relative h-screen w-screen overflow-hidden bg-[#0f1720] outline-none [&_canvas]:h-full [&_canvas]:w-full [&_canvas]:touch-none"
       data-landrush-interface-focus-sink
       data-landrush-loading-ambient-ready={ambientLoadReadiness?.ready === true ? 'true' : 'false'}
+      data-landrush-loading-built-colliders-ready={builtCollidersReady ? 'true' : 'false'}
       data-landrush-loading-handed-off={!loadingActive ? 'true' : 'false'}
       data-landrush-loading-initial-parcel-ready={
         initialParcelMaterializationReady ? 'true' : 'false'
@@ -6212,6 +6331,15 @@ export function LandrushIslandClient({
       data-landrush-loading-world-frame-ready={worldFrameReady ? 'true' : 'false'}
       data-landrush-loading-zombie-assets-ready={
         zombieEscapeGeneratedAssetsReady ? 'true' : 'false'
+      }
+      data-landrush-loading-zombie-navigation-error={
+        zombieEscapeEnabled && zombieEscapeNavigationReadiness?.status === 'failed'
+          ? (zombieEscapeNavigationReadiness.error ?? undefined)
+          : undefined
+      }
+      data-landrush-loading-zombie-navigation-ready={zombieEscapeNavigationReady ? 'true' : 'false'}
+      data-landrush-loading-zombie-navigation-status={
+        zombieEscapeEnabled ? (zombieEscapeNavigationReadiness?.status ?? 'pending') : 'omitted'
       }
       tabIndex={-1}
     >
@@ -6324,8 +6452,9 @@ export function LandrushIslandClient({
                       ) : null}
                     </>
                   ) : null}
-                  {!zombieEscapeEnabled || !loadingActive ? (
+                  {initialParcelReadyAuthorityKey === initialParcelAuthorityKey ? (
                     <LandrushIslandAmbientLife
+                      key={initialParcelAuthorityKey}
                       admitted={initialParcelMaterializationReady}
                       npcsVisible={!zombieEscapeNightActive}
                       onLoadReadinessChange={handleAmbientLoadReadinessChange}
@@ -6352,11 +6481,13 @@ export function LandrushIslandClient({
                       bugReportReplayPlayer={bugReportReplay?.player ?? null}
                       buildCameraPoseRef={buildCameraPoseRef}
                       cameraOwner={cameraOwner}
+                      colliderAuthorityKey={initialParcelAuthorityKey}
                       dayInterfaceCommandsEnabled={dayInterfaceCommandsEnabled}
-                      deferBuiltColliderRebuild={zombieEscapeEnabled && loadingActive}
+                      deferBuiltColliderRebuild={!authorityPresentationReady}
                       fallPresentationRef={fallPresentationRef}
                       fpvActive={fpvActive}
                       grassInteractionRef={grassInteractionRef}
+                      initializeZombieEscapeClock={multiplayer.initializeZombieEscapeClock}
                       jumpEdgeBlurPresentationRef={jumpEdgeBlurPresentationRef}
                       localMotionRef={localMotionRef}
                       localProfile={resolvedLocalProfile}
@@ -6374,6 +6505,10 @@ export function LandrushIslandClient({
                       navigationLiveScenarioAutoRun={navigationLiveScenarioAutoRun}
                       navigationLiveScenarioReady={
                         !loadingActive || navigationLiveScenarioImmediate
+                      }
+                      onBuiltCollidersReadinessChange={handleBuiltCollidersReadinessChange}
+                      onZombieEscapeCollisionWorldReadinessChange={
+                        handleZombieEscapeCollisionWorldReadinessChange
                       }
                       onZombieEscapeGeneratedAssetsReadinessChange={
                         handleZombieEscapeGeneratedAssetsReadinessChange
@@ -6397,8 +6532,12 @@ export function LandrushIslandClient({
                       voiceRangeVisible={spatialVoice.desired && spatialVoice.status === 'live'}
                       waterY={LANDRUSH_ISLAND_LOW_ELEVATION - liveLandSurface.grassSurfaceElevation}
                       zombieEscapeEnabled={zombieEscapeEnabled}
+                      zombieEscapeClockMode={zombieEscapeClockMode}
+                      zombieEscapeNavigationMountGeneration={zombieEscapeGeneratedAssetGeneration}
                       zombieEscapePhase={zombieEscapePhase}
                       zombieEscapePhaseReady={zombieEscapePhaseReady}
+                      zombieEscapeRoomStateObservation={multiplayer.zombieEscapeStateObservation}
+                      startZombieEscapeNight={multiplayer.startZombieEscapeNight}
                     />
                   </LandrushIslandStartupReactProfiler>
                   {revealProof ? (
@@ -6833,7 +6972,7 @@ export function LandrushIslandClient({
         <LandrushIslandLoadingOverlay
           onLoaded={handleLoadingLoaded}
           profileKey={loadingProfileKey}
-          runGeneration={loadingRunGenerationRef.current}
+          runGeneration={loadingRunGeneration}
           sampleInvalidationKey={initialParcelAuthorityKey}
           tasks={loadingTasks}
           topologySignature={loadingTopologySignature}
@@ -9719,6 +9858,7 @@ function buildLandrushIslandColliderWorld(excludedRegisteredNodeIds: ReadonlySet
 function useLandrushIslandBuiltColliderWorlds(
   excludedRegisteredNodeIds: ReadonlySet<string>,
   deferRebuild: boolean,
+  authorityKey: string,
 ) {
   const physicsSignature = useScene((state) =>
     deferRebuild ? 'deferred' : createLandrushIslandPhysicsNodeSignature(state.nodes),
@@ -9732,17 +9872,25 @@ function useLandrushIslandBuiltColliderWorlds(
   const [worlds, setWorlds] = useState<{
     collision: FirstPersonColliderWorld | null
     floatOnly: FirstPersonColliderWorld | null
-  }>({ collision: null, floatOnly: null })
+    installedVersion: string | null
+  }>({ collision: null, floatOnly: null, installedVersion: null })
   const worldsRef = useRef<{
     collision: FirstPersonColliderWorld | null
     floatOnly: FirstPersonColliderWorld | null
   }>({ collision: null, floatOnly: null })
-  const colliderWorldVersion = `${physicsSignature}:${doorAnimationSignature}:${exclusionSignature}:${runtimeColliderVersion}`
+  const colliderWorldVersion = JSON.stringify([
+    authorityKey,
+    physicsSignature,
+    doorAnimationSignature,
+    exclusionSignature,
+    runtimeColliderVersion,
+  ])
 
   const replaceWorlds = useCallback(
     (nextWorlds: {
       collision: FirstPersonColliderWorld | null
       floatOnly: FirstPersonColliderWorld | null
+      installedVersion: string
     }) => {
       worldsRef.current.collision?.dispose()
       worldsRef.current.floatOnly?.dispose()
@@ -9768,13 +9916,13 @@ function useLandrushIslandBuiltColliderWorlds(
     return { collision, floatOnly: null }
   }, [excludedRegisteredNodeIds])
 
-  useEffect(() => {
-    void colliderWorldVersion
+  useLayoutEffect(() => {
     if (deferRebuild) return
 
     let cancelled = false
     let frame = 0
     const rebuildWhenReady = () => {
+      if (cancelled) return
       if (
         !landrushIslandWallColliderGeometryReady() ||
         !landrushIslandStairColliderGeometryReady() ||
@@ -9789,7 +9937,7 @@ function useLandrushIslandBuiltColliderWorlds(
         disposeWorlds(nextWorlds)
         return
       }
-      replaceWorlds(nextWorlds)
+      replaceWorlds({ ...nextWorlds, installedVersion: colliderWorldVersion })
     }
     frame = window.requestAnimationFrame(rebuildWhenReady)
 
@@ -9818,7 +9966,17 @@ function useLandrushIslandBuiltColliderWorlds(
     [],
   )
 
-  return worlds
+  return useMemo(
+    () => ({
+      readiness: {
+        authorityKey,
+        installedVersion: deferRebuild ? null : worlds.installedVersion,
+        requestedVersion: colliderWorldVersion,
+      } satisfies LandrushIslandBuiltColliderReadiness,
+      worlds,
+    }),
+    [authorityKey, colliderWorldVersion, deferRebuild, worlds],
+  )
 }
 
 function createLandrushIslandDoorAnimationSignature(
@@ -9902,11 +10060,13 @@ function LandrushIslandPlayerLayer({
   bugReportReplayPlayer,
   buildCameraPoseRef,
   cameraOwner,
+  colliderAuthorityKey,
   dayInterfaceCommandsEnabled,
   deferBuiltColliderRebuild,
   fallPresentationRef,
   fpvActive,
   grassInteractionRef,
+  initializeZombieEscapeClock,
   jumpEdgeBlurPresentationRef,
   localMotionRef,
   localProfile,
@@ -9920,9 +10080,11 @@ function LandrushIslandPlayerLayer({
   navigationLiveScenario,
   navigationLiveScenarioAutoRun,
   navigationLiveScenarioReady,
+  onBuiltCollidersReadinessChange,
   onExitBuildMode,
   onLocalPlayerChange,
   onZombieEscapeCameraSettled,
+  onZombieEscapeCollisionWorldReadinessChange,
   onZombieEscapeGeneratedAssetsReadinessChange,
   onZombieEscapePhaseChange,
   palmLayout,
@@ -9941,18 +10103,24 @@ function LandrushIslandPlayerLayer({
   voiceRangeVisible,
   waterY,
   zombieEscapeEnabled,
+  zombieEscapeClockMode,
+  zombieEscapeNavigationMountGeneration,
   zombieEscapePhase,
   zombieEscapePhaseReady,
+  zombieEscapeRoomStateObservation,
+  startZombieEscapeNight,
 }: {
   baseNode: LandrushIslandLayoutNode
   bugReportReplayPlayer: LandrushBugReportPlayer | null
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraOwner: LandrushIslandCameraOwner
+  colliderAuthorityKey: string
   dayInterfaceCommandsEnabled: boolean
   deferBuiltColliderRebuild: boolean
   fallPresentationRef: { current: LandrushIslandFallPresentationState }
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
+  initializeZombieEscapeClock: () => boolean
   jumpEdgeBlurPresentationRef: { current: LandrushIslandJumpEdgeBlurPresentationState }
   localMotionRef: { current: RobotMotion | null }
   localProfile: LocalPlayerProfile
@@ -9966,9 +10134,13 @@ function LandrushIslandPlayerLayer({
   navigationLiveScenario: LandrushIslandNavigationLiveScenarioKind | null
   navigationLiveScenarioAutoRun: boolean
   navigationLiveScenarioReady: boolean
+  onBuiltCollidersReadinessChange: (readiness: LandrushIslandBuiltColliderReadiness) => void
   onExitBuildMode: () => void
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
   onZombieEscapeCameraSettled: () => void
+  onZombieEscapeCollisionWorldReadinessChange: (
+    readiness: LandrushZombieEscapeNavigationReadiness,
+  ) => void
   onZombieEscapeGeneratedAssetsReadinessChange: (
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
   ) => void
@@ -9989,8 +10161,12 @@ function LandrushIslandPlayerLayer({
   voiceRangeVisible: boolean
   waterY: number
   zombieEscapeEnabled: boolean
+  zombieEscapeClockMode: LandrushZombieEscapeClockMode
+  zombieEscapeNavigationMountGeneration: string
   zombieEscapePhase: ZombieEscapeGamePhase
   zombieEscapePhaseReady: boolean
+  zombieEscapeRoomStateObservation: LandrushZombieEscapeRoomStateObservation | null
+  startZombieEscapeNight: () => boolean
 }) {
   const spawn = playerSpawn
   const groundY = surface.grassSurfaceElevation + LANDRUSH_ISLAND_ROBOT_GROUND_CLEARANCE
@@ -10012,6 +10188,15 @@ function LandrushIslandPlayerLayer({
   const localRobotVisualRootRef = useRef<Group | null>(null)
   const zombieEscapeResetPlayerMotionRef = useRef<(() => void) | null>(null)
   const zombieEscapeCombatHeadingRef = useRef<number | null>(null)
+  const zombieEscapeCombatSnapshotReaderRef =
+    useRef<LandrushZombieEscapeCombatSnapshotReader | null>(null)
+  const publishLocalPlayerWithCombat = useCallback(
+    (player: MultiplayerPlayerSnapshot) => {
+      const combat = zombieEscapeCombatSnapshotReaderRef.current?.()
+      onLocalPlayerChange(combat ? { ...player, combat } : player)
+    },
+    [onLocalPlayerChange],
+  )
   const zombieEscapeTouchInputRef = useRef(createLandrushZombieEscapeTouchInputState())
   const resetZombieEscapeExternalPlayerMotion = useCallback(() => {
     zombieEscapeResetPlayerMotionRef.current?.()
@@ -10028,13 +10213,17 @@ function LandrushIslandPlayerLayer({
     zombieEscapePhase === 'night' &&
     zombieEscapePhaseReady &&
     zombieEscapeCameraActive
+  const visiblePalmInstanceCount =
+    zombieEscapeEnabled && zombieEscapePhase === 'night'
+      ? LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT
+      : LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT
   const visiblePalmLayout = useMemo(
     () =>
       resolveLandrushIslandVisiblePalmLayout({
         layout: palmLayout,
-        zombieIslandActive: zombieEscapeEnabled && zombieEscapePhase === 'night',
+        visibleCount: visiblePalmInstanceCount,
       }),
-    [palmLayout, zombieEscapeEnabled, zombieEscapePhase],
+    [palmLayout, visiblePalmInstanceCount],
   )
   const localRobotLevelIdRef = useRef<LevelNode['id']>(
     resolveLandrushIslandPlayerSpawnLevelId(spawn, useScene.getState().nodes),
@@ -10090,6 +10279,7 @@ function LandrushIslandPlayerLayer({
       <LocalLandrushIslandRobot
         baseNode={baseNode}
         bugReportReplayPlayer={bugReportReplayPlayer}
+        colliderAuthorityKey={colliderAuthorityKey}
         combatAimActive={zombieEscapeInteractionActionable}
         deferBuiltColliderRebuild={deferBuiltColliderRebuild}
         fallSurfacePoints={cliffFallBoundaryPoints}
@@ -10111,8 +10301,9 @@ function LandrushIslandPlayerLayer({
         navigationLiveScenario={navigationLiveScenario}
         navigationLiveScenarioAutoRun={navigationLiveScenarioAutoRun}
         navigationLiveScenarioReady={navigationLiveScenarioReady}
+        onBuiltCollidersReadinessChange={onBuiltCollidersReadinessChange}
         onExitBuildMode={onExitBuildMode}
-        onLocalPlayerChange={onLocalPlayerChange}
+        onLocalPlayerChange={publishLocalPlayerWithCombat}
         perfRun={perfRun}
         presentationMode={robotPresentationMode}
         buildCameraPoseRef={buildCameraPoseRef}
@@ -10131,11 +10322,16 @@ function LandrushIslandPlayerLayer({
         <LandrushZombieEscapeMode
           active={zombieEscapeActive}
           combatHeadingRef={zombieEscapeCombatHeadingRef}
+          combatSnapshotReaderRef={zombieEscapeCombatSnapshotReaderRef}
           expectedPhase={zombieEscapePhase}
           groundY={groundY}
+          initializeZombieEscapeClock={initializeZombieEscapeClock}
           materialPresentation={materialPresentation}
           materialPresentationReadinessMeshes={materialPresentationReadinessMeshes}
           motionRef={localMotionRef}
+          navigationAuthorityKey={colliderAuthorityKey}
+          navigationMountGeneration={zombieEscapeNavigationMountGeneration}
+          onCollisionWorldReadinessChange={onZombieEscapeCollisionWorldReadinessChange}
           onDestroyedFurnitureIdsChange={handleDestroyedFurnitureIdsChange}
           onGeneratedAssetsReadinessChange={onZombieEscapeGeneratedAssetsReadinessChange}
           onInteractionActionabilityChange={setZombieEscapeInteractionActionable}
@@ -10147,6 +10343,9 @@ function LandrushIslandPlayerLayer({
           playerColor={localProfile.color}
           spawn={spawn}
           surfacePoints={surface.grassSurfacePoints}
+          zombieEscapeClockMode={zombieEscapeClockMode}
+          zombieEscapeRoomStateObservation={zombieEscapeRoomStateObservation}
+          startZombieEscapeNight={startZombieEscapeNight}
           viewerSceneReady={viewerSceneReady}
           visualRootRef={localRobotVisualRootRef}
           zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
@@ -12662,6 +12861,7 @@ function LocalLandrushIslandRobot({
   bugReportReplayPlayer,
   buildCameraPoseRef,
   cameraEnabled,
+  colliderAuthorityKey,
   combatAimActive,
   dayInterfaceCommandsEnabled,
   deferBuiltColliderRebuild,
@@ -12682,6 +12882,7 @@ function LocalLandrushIslandRobot({
   navigationLiveScenario,
   navigationLiveScenarioAutoRun,
   navigationLiveScenarioReady,
+  onBuiltCollidersReadinessChange,
   onExitBuildMode,
   onLocalPlayerChange,
   perfRun,
@@ -12701,6 +12902,7 @@ function LocalLandrushIslandRobot({
   bugReportReplayPlayer: LandrushBugReportPlayer | null
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   cameraEnabled: boolean
+  colliderAuthorityKey: string
   combatAimActive: boolean
   dayInterfaceCommandsEnabled: boolean
   deferBuiltColliderRebuild: boolean
@@ -12721,6 +12923,7 @@ function LocalLandrushIslandRobot({
   navigationLiveScenario: LandrushIslandNavigationLiveScenarioKind | null
   navigationLiveScenarioAutoRun: boolean
   navigationLiveScenarioReady: boolean
+  onBuiltCollidersReadinessChange: (readiness: LandrushIslandBuiltColliderReadiness) => void
   onExitBuildMode: () => void
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
   perfRun: LandrushIslandPerfRunOptions
@@ -12737,10 +12940,12 @@ function LocalLandrushIslandRobot({
   zombieEscapeTouchInputRef: { current: LandrushZombieEscapeTouchInputState }
 }) {
   const { camera, gl } = useThree()
-  const builtColliderWorlds = useLandrushIslandBuiltColliderWorlds(
-    destroyedFurnitureIds,
-    deferBuiltColliderRebuild,
-  )
+  const { readiness: builtColliderReadiness, worlds: builtColliderWorlds } =
+    useLandrushIslandBuiltColliderWorlds(
+      destroyedFurnitureIds,
+      deferBuiltColliderRebuild,
+      colliderAuthorityKey,
+    )
   const sceneNodesForNavigation = useScene((state) => (movementEnabled ? state.nodes : null))
   const pressedKeysRef = useRef(new Set<string>())
   const clickMoveTargetRef = useRef<LandrushIslandMoveTarget | null>(null)
@@ -12809,6 +13014,11 @@ function LocalLandrushIslandRobot({
       ].filter((mesh): mesh is Mesh => Boolean(mesh)),
     [builtColliderWorlds, groundColliderMesh, palmTrunkColliderWorld],
   )
+  useLayoutEffect(() => {
+    onBuiltCollidersReadinessChange(builtColliderReadiness)
+    return () =>
+      onBuiltCollidersReadinessChange({ ...builtColliderReadiness, installedVersion: null })
+  }, [builtColliderReadiness, onBuiltCollidersReadinessChange])
   const palmNavigationObstacles = useMemo<readonly LandrushIslandNavigationObstacle[]>(
     () =>
       createLandrushIslandPalmNavigationFootprints({
@@ -15751,12 +15961,25 @@ function RemoteLandrushIslandRobot({
       >
         <LandrushRobot
           crouchingRef={crouchingRef}
-          framePriority={LANDRUSH_ISLAND_REMOTE_ROBOT_FRAME_PRIORITY}
+          framePriority={
+            player.combat
+              ? LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.robot
+              : LANDRUSH_ISLAND_REMOTE_ROBOT_FRAME_PRIORITY
+          }
           node={nodeRef.current}
           presentationMode={presentationMode}
           visualRootRef={visualRootRef}
         />
       </Suspense>
+      {player.combat ? (
+        <LandrushZombieEscapeRemoteCombat
+          effectsFramePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.effects}
+          playerId={player.id}
+          remotePlayerStore={remotePlayerStore}
+          visualRootRef={visualRootRef}
+          weaponFramePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.weapon}
+        />
+      ) : null}
       <LandrushIslandRobotPlayerBeacon
         color={player.color}
         framePriority={LANDRUSH_ISLAND_REMOTE_BEACON_FRAME_PRIORITY}
