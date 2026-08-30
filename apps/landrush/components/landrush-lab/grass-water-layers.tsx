@@ -39,6 +39,8 @@ import { StylizedPathNetworkLayer } from './stylized-path-network-layer'
 import {
   DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   type StylizedGrassInteractionRef,
+  type StylizedGrassPreparedResidencyReadinessHandler,
+  type StylizedGrassPreparedResidencyRequest,
   type StylizedGrassVisibilityRef,
   StylizedSceneLandLayer,
 } from './stylized-scene-land-layers'
@@ -56,9 +58,11 @@ type GrassWaterLandLayersProps = {
   grassBlockers?: readonly GrassFieldBlocker[]
   grassDebugState?: GrassLifecycleDebugState
   grassInteractionRef?: StylizedGrassInteractionRef
+  grassPreparedResidencyRequest?: StylizedGrassPreparedResidencyRequest | null
   grassStreamingPaused?: boolean
   groundRenderOrder?: number
   onStylizedGroundTextureReady?: (ready: boolean) => void
+  onGrassPreparedResidencyReadinessChange?: StylizedGrassPreparedResidencyReadinessHandler
   profileMeasure?: ProfileMeasure
   renderStylizedPathNetwork?: boolean
   roads?: readonly LandrushRoadSegment[]
@@ -136,9 +140,11 @@ export function GrassWaterLandLayers({
   grassBlockers = EMPTY_GRASS_BLOCKERS,
   grassDebugState,
   grassInteractionRef,
+  grassPreparedResidencyRequest = null,
   grassStreamingPaused = false,
   groundRenderOrder = GRASS_GROUND_RENDER_ORDER,
   onStylizedGroundTextureReady,
+  onGrassPreparedResidencyReadinessChange,
   profileMeasure,
   renderStylizedPathNetwork = true,
   roads = EMPTY_GRASS_ROADS,
@@ -330,11 +336,13 @@ export function GrassWaterLandLayers({
               structuralBlockerSignature: grassBlockersSignature(resolvedBladeGrassBlockers),
             }}
             grassInteractionRef={grassInteractionRef}
+            grassPreparedResidencyRequest={grassPreparedResidencyRequest}
             grassBlockers={resolvedBladeGrassBlockers}
             profileMeasure={profileMeasure}
             roads={roads}
             grassRenderOrder={resolvedBladeRenderOrder}
             grassVisibilityRef={bladeVisibilityRef}
+            onGrassPreparedResidencyReadinessChange={onGrassPreparedResidencyReadinessChange}
             showBlades={showBlades}
             showTrees={showTrees}
             streamingPaused={grassStreamingPaused}

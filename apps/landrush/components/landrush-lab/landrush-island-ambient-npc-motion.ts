@@ -12,6 +12,7 @@ import {
 } from './landrush-island-ambient-navigation'
 
 const NPC_COLLISION_DISTANCE_METERS = 0.72
+const NPC_COLLISION_DISTANCE_SQUARED = NPC_COLLISION_DISTANCE_METERS * NPC_COLLISION_DISTANCE_METERS
 const NPC_MAX_FRAME_DELTA_SECONDS = 0.1
 const NPC_SPAWN_CLEARANCE_METERS = 0.9
 const NPC_WAYPOINT_RADIUS_METERS = 0.000_01
@@ -40,6 +41,39 @@ export type LandrushIslandAmbientNpcNeighbor = {
   id: string
   position: LandrushPoint2
 }
+
+export type LandrushIslandAmbientNpcNeighborQuery = {
+  positionHasClearance: (point: LandrushPoint2) => boolean
+}
+
+export type LandrushIslandAmbientNpcNeighborIndex = {
+  createQuery: (ownId: string) => LandrushIslandAmbientNpcNeighborQuery
+  delete: (id: string) => void
+  set: (id: string, position: LandrushPoint2) => void
+}
+
+type LandrushIslandAmbientNpcNeighborSource =
+  | readonly LandrushIslandAmbientNpcNeighbor[]
+  | LandrushIslandAmbientNpcNeighborQuery
+
+type MutableLandrushPoint2 = {
+  x: number
+  z: number
+}
+
+type LandrushIslandAmbientNpcMotionScratch = {
+  desired: MutableLandrushPoint2
+  direction: MutableLandrushPoint2
+  side: -1 | 1
+  sideSequence: number
+  sidestep: MutableLandrushPoint2
+}
+
+const EMPTY_AMBIENT_NPC_NEIGHBORS: readonly LandrushIslandAmbientNpcNeighbor[] = Object.freeze([])
+const AMBIENT_NPC_MOTION_SCRATCH = new WeakMap<
+  LandrushIslandAmbientNpcMotionState,
+  LandrushIslandAmbientNpcMotionScratch
+>()
 
 export type LandrushIslandAmbientNpcJourneyPlannerAdvanceResult = {
   operations: number
@@ -71,6 +105,10 @@ type LandrushIslandAmbientNpcJourneySearch = {
 }
 
 type LandrushIslandAmbientNpcJourneyJob = {
+  advanceResult: {
+    done: boolean
+    operations: number
+  }
   attempt: number
   baseSequence: number
   operations: number
@@ -85,7 +123,7 @@ export function createLandrushIslandAmbientNpcMotionState(
 ): LandrushIslandAmbientNpcMotionState {
   const seed = `ambient-npc-${index}`
   const position = resolveInitialNpcPosition(index, world)
-  return {
+  const state: LandrushIslandAmbientNpcMotionState = {
     destinationPreference: 'grass',
     destinationSequence: 0,
     idleSeconds: 1.8 + hashUnit(`${seed}:initial-idle`) * 2.6,
@@ -97,6 +135,125 @@ export function createLandrushIslandAmbientNpcMotionState(
     speedMetersPerSecond: 0,
     target: null,
     yaw: hashUnit(`${seed}:initial-yaw`) * Math.PI * 2,
+  }
+  AMBIENT_NPC_MOTION_SCRATCH.set(state, createLandrushIslandAmbientNpcMotionScratch())
+  return state
+}
+
+export function createLandrushIslandAmbientNpcNeighborIndex(
+  world: LandrushIslandAmbientNavigationWorld,
+  maximumNpcCount: number,
+): LandrushIslandAmbientNpcNeighborIndex {
+  const capacity = Math.max(1, Math.trunc(maximumNpcCount))
+  const bounds = resolveLandrushIslandAmbientNpcGridBounds(world)
+  const bucketHeads = new Int32Array(bounds.columnCount * bounds.rowCount)
+  const entryBuckets = new Int32Array(capacity)
+  const entryNext = new Int32Array(capacity)
+  const entryPrevious = new Int32Array(capacity)
+  const entryX = new Float64Array(capacity)
+  const entryZ = new Float64Array(capacity)
+  bucketHeads.fill(-1)
+  entryBuckets.fill(-1)
+  entryNext.fill(-1)
+  entryPrevious.fill(-1)
+  const slotById = new Map<string, number>()
+  let registeredCount = 0
+
+  const resolveBucket = (x: number, z: number) => {
+    const column = Math.min(
+      bounds.columnCount - 1,
+      Math.max(0, Math.floor(x / NPC_COLLISION_DISTANCE_METERS) - bounds.minimumCellX),
+    )
+    const row = Math.min(
+      bounds.rowCount - 1,
+      Math.max(0, Math.floor(z / NPC_COLLISION_DISTANCE_METERS) - bounds.minimumCellZ),
+    )
+    return row * bounds.columnCount + column
+  }
+
+  const removeFromBucket = (slot: number) => {
+    const bucket = entryBuckets[slot]!
+    if (bucket < 0) return
+    const previous = entryPrevious[slot]!
+    const next = entryNext[slot]!
+    if (previous >= 0) entryNext[previous] = next
+    else bucketHeads[bucket] = next
+    if (next >= 0) entryPrevious[next] = previous
+    entryBuckets[slot] = -1
+    entryNext[slot] = -1
+    entryPrevious[slot] = -1
+  }
+
+  const positionHasClearance = (point: LandrushPoint2, ownId: string) => {
+    const ownSlot = slotById.get(ownId) ?? -1
+    const minimumColumn = Math.max(
+      0,
+      Math.floor((point.x - NPC_COLLISION_DISTANCE_METERS) / NPC_COLLISION_DISTANCE_METERS) -
+        bounds.minimumCellX,
+    )
+    const maximumColumn = Math.min(
+      bounds.columnCount - 1,
+      Math.floor((point.x + NPC_COLLISION_DISTANCE_METERS) / NPC_COLLISION_DISTANCE_METERS) -
+        bounds.minimumCellX,
+    )
+    const minimumRow = Math.max(
+      0,
+      Math.floor((point.z - NPC_COLLISION_DISTANCE_METERS) / NPC_COLLISION_DISTANCE_METERS) -
+        bounds.minimumCellZ,
+    )
+    const maximumRow = Math.min(
+      bounds.rowCount - 1,
+      Math.floor((point.z + NPC_COLLISION_DISTANCE_METERS) / NPC_COLLISION_DISTANCE_METERS) -
+        bounds.minimumCellZ,
+    )
+    for (let row = minimumRow; row <= maximumRow; row += 1) {
+      for (let column = minimumColumn; column <= maximumColumn; column += 1) {
+        let slot = bucketHeads[row * bounds.columnCount + column]!
+        while (slot >= 0) {
+          if (slot !== ownSlot) {
+            const dx = point.x - entryX[slot]!
+            const dz = point.z - entryZ[slot]!
+            if (dx * dx + dz * dz < NPC_COLLISION_DISTANCE_SQUARED) return false
+          }
+          slot = entryNext[slot]!
+        }
+      }
+    }
+    return true
+  }
+
+  return {
+    createQuery(ownId) {
+      return {
+        positionHasClearance: (point) => positionHasClearance(point, ownId),
+      }
+    },
+    delete(id) {
+      const slot = slotById.get(id)
+      if (slot !== undefined) removeFromBucket(slot)
+    },
+    set(id, position) {
+      let slot = slotById.get(id)
+      if (slot === undefined) {
+        if (registeredCount >= capacity) {
+          throw new Error(`Ambient NPC neighbor index capacity ${capacity} exceeded.`)
+        }
+        slot = registeredCount
+        registeredCount += 1
+        slotById.set(id, slot)
+      }
+      const bucket = resolveBucket(position.x, position.z)
+      entryX[slot] = position.x
+      entryZ[slot] = position.z
+      if (entryBuckets[slot] === bucket) return
+      removeFromBucket(slot)
+      const previousHead = bucketHeads[bucket]!
+      entryBuckets[slot] = bucket
+      entryNext[slot] = previousHead
+      entryPrevious[slot] = -1
+      if (previousHead >= 0) entryPrevious[previousHead] = slot
+      bucketHeads[bucket] = slot
+    },
   }
 }
 
@@ -110,6 +267,10 @@ export function createLandrushIslandAmbientNpcJourneyPlanner(
   >()
   let cursor = 0
   let disposed = false
+  const advanceResult: LandrushIslandAmbientNpcJourneyPlannerAdvanceResult = {
+    operations: 0,
+    pendingCount: 0,
+  }
 
   const removeJob = (job: LandrushIslandAmbientNpcJourneyJob) => {
     const index = jobs.indexOf(job)
@@ -145,7 +306,9 @@ export function createLandrushIslandAmbientNpcJourneyPlanner(
         consecutiveZeroWorkJobs = result.operations === 0 ? consecutiveZeroWorkJobs + 1 : 0
         if (consecutiveZeroWorkJobs >= jobs.length) break
       }
-      return { operations, pendingCount: jobs.length }
+      advanceResult.operations = operations
+      advanceResult.pendingCount = jobs.length
+      return advanceResult
     },
     dispose() {
       disposed = true
@@ -165,6 +328,7 @@ export function createLandrushIslandAmbientNpcJourneyPlanner(
       }
       if (jobByState.has(state)) return true
       const job: LandrushIslandAmbientNpcJourneyJob = {
+        advanceResult: { done: false, operations: 0 },
         attempt: 0,
         baseSequence: state.destinationSequence,
         operations: 0,
@@ -230,7 +394,7 @@ export function advanceLandrushIslandAmbientNpcMotion(
   state: LandrushIslandAmbientNpcMotionState,
   deltaSeconds: number,
   world: LandrushIslandAmbientNavigationWorld,
-  neighbors: readonly LandrushIslandAmbientNpcNeighbor[] = [],
+  neighbors: LandrushIslandAmbientNpcNeighborSource = EMPTY_AMBIENT_NPC_NEIGHBORS,
   journeyPlanner?: LandrushIslandAmbientNpcJourneyPlanner,
 ) {
   let remainingSeconds = Math.min(NPC_MAX_FRAME_DELTA_SECONDS, Math.max(0, deltaSeconds))
@@ -261,18 +425,18 @@ export function advanceLandrushIslandAmbientNpcMotion(
     const dz = waypoint.z - state.position.z
     const distance = Math.hypot(dx, dz)
     if (distance <= NPC_WAYPOINT_RADIUS_METERS) {
-      state.position = { ...waypoint }
+      setLandrushIslandAmbientNpcPoint(state.position, waypoint.x, waypoint.z)
       state.pathIndex += 1
       continue
     }
 
-    const direction = { x: dx / distance, z: dz / distance }
+    const scratch = resolveLandrushIslandAmbientNpcMotionScratch(state)
+    scratch.direction.x = dx / distance
+    scratch.direction.z = dz / distance
     const travelDistance = Math.min(distance, state.speedMetersPerSecond * remainingSeconds)
-    const desired = {
-      x: state.position.x + direction.x * travelDistance,
-      z: state.position.z + direction.z * travelDistance,
-    }
-    const resolved = resolveNpcCollisionStep(state, desired, direction, world, neighbors)
+    scratch.desired.x = state.position.x + scratch.direction.x * travelDistance
+    scratch.desired.z = state.position.z + scratch.direction.z * travelDistance
+    const resolved = resolveNpcCollisionStep(state, scratch, world, neighbors)
     if (!resolved) {
       state.phase = 'idle'
       state.idleSeconds =
@@ -286,7 +450,7 @@ export function advanceLandrushIslandAmbientNpcMotion(
     const movedX = resolved.x - state.position.x
     const movedZ = resolved.z - state.position.z
     const movedDistance = Math.hypot(movedX, movedZ)
-    state.position = resolved
+    setLandrushIslandAmbientNpcPoint(state.position, resolved.x, resolved.z)
     if (movedDistance > 0.000_001) state.yaw = Math.atan2(movedX, movedZ)
     remainingSeconds -= movedDistance / state.speedMetersPerSecond
     if (travelDistance >= distance - 0.000_001) state.pathIndex += 1
@@ -329,11 +493,13 @@ function advanceLandrushIslandAmbientNpcJourneyJob(
 ): { done: boolean; operations: number } {
   let operations = 0
   while (operations < operationBudget) {
-    if (!isLandrushIslandAmbientNpcJourneyJobCurrent(job)) return { done: true, operations }
+    if (!isLandrushIslandAmbientNpcJourneyJobCurrent(job)) {
+      return updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(job, true, operations)
+    }
     if (!job.search) {
       if (job.attempt >= NPC_JOURNEY_ATTEMPT_COUNT) {
         job.state.idleSeconds = 0.8
-        return { done: true, operations }
+        return updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(job, true, operations)
       }
       const sequence = job.baseSequence + 1 + job.attempt
       job.attempt += 1
@@ -362,7 +528,9 @@ function advanceLandrushIslandAmbientNpcJourneyJob(
         ),
         target,
       }
-      if (operations >= operationBudget) return { done: false, operations }
+      if (operations >= operationBudget) {
+        return updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(job, false, operations)
+      }
     }
 
     const search = job.search
@@ -371,7 +539,9 @@ function advanceLandrushIslandAmbientNpcJourneyJob(
       Math.max(1, operationBudget - operations),
     )
     operations += result.operations
-    if (!result.done) return { done: false, operations }
+    if (!result.done) {
+      return updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(job, false, operations)
+    }
     if (result.path.length >= 2) {
       if (isLandrushIslandAmbientNpcJourneyJobCurrent(job)) {
         applyLandrushIslandAmbientNpcJourney(job.state, {
@@ -383,11 +553,21 @@ function advanceLandrushIslandAmbientNpcJourneyJob(
           target: search.target,
         })
       }
-      return { done: true, operations }
+      return updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(job, true, operations)
     }
     job.search = null
   }
-  return { done: false, operations }
+  return updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(job, false, operations)
+}
+
+function updateLandrushIslandAmbientNpcJourneyJobAdvanceResult(
+  job: LandrushIslandAmbientNpcJourneyJob,
+  done: boolean,
+  operations: number,
+) {
+  job.advanceResult.done = done
+  job.advanceResult.operations = operations
+  return job.advanceResult
 }
 
 function isLandrushIslandAmbientNpcJourneyJobCurrent(job: LandrushIslandAmbientNpcJourneyJob) {
@@ -441,11 +621,11 @@ function enterDestinationIdle(state: LandrushIslandAmbientNpcMotionState) {
 
 function resolveNpcCollisionStep(
   state: LandrushIslandAmbientNpcMotionState,
-  desired: LandrushPoint2,
-  direction: LandrushPoint2,
+  scratch: LandrushIslandAmbientNpcMotionScratch,
   world: LandrushIslandAmbientNavigationWorld,
-  neighbors: readonly LandrushIslandAmbientNpcNeighbor[],
+  neighbors: LandrushIslandAmbientNpcNeighborSource,
 ) {
+  const { desired, direction, sidestep } = scratch
   if (
     isLandrushIslandAmbientSegmentPassable(world, state.position, desired) &&
     npcPositionHasClearance(desired, state.seed, neighbors)
@@ -453,12 +633,19 @@ function resolveNpcCollisionStep(
     return desired
   }
 
-  const side = hashUnit(`${state.seed}:${state.destinationSequence}:side`) < 0.5 ? -1 : 1
-  const travelDistance = Math.hypot(desired.x - state.position.x, desired.z - state.position.z)
-  const sidestep = {
-    x: state.position.x + direction.x * travelDistance * 0.55 - direction.z * travelDistance * side,
-    z: state.position.z + direction.z * travelDistance * 0.55 + direction.x * travelDistance * side,
+  if (scratch.sideSequence !== state.destinationSequence) {
+    scratch.side = hashUnit(`${state.seed}:${state.destinationSequence}:side`) < 0.5 ? -1 : 1
+    scratch.sideSequence = state.destinationSequence
   }
+  const travelDistance = Math.hypot(desired.x - state.position.x, desired.z - state.position.z)
+  sidestep.x =
+    state.position.x +
+    direction.x * travelDistance * 0.55 -
+    direction.z * travelDistance * scratch.side
+  sidestep.z =
+    state.position.z +
+    direction.z * travelDistance * 0.55 +
+    direction.x * travelDistance * scratch.side
   if (
     isLandrushIslandAmbientSegmentPassable(world, state.position, sidestep) &&
     npcPositionHasClearance(sidestep, state.seed, neighbors)
@@ -471,14 +658,78 @@ function resolveNpcCollisionStep(
 function npcPositionHasClearance(
   point: LandrushPoint2,
   ownId: string,
-  neighbors: readonly LandrushIslandAmbientNpcNeighbor[],
+  neighbors: LandrushIslandAmbientNpcNeighborSource,
 ) {
-  return neighbors.every(
-    (neighbor) =>
-      neighbor.id === ownId ||
-      Math.hypot(point.x - neighbor.position.x, point.z - neighbor.position.z) >=
-        NPC_COLLISION_DISTANCE_METERS,
-  )
+  if (isLandrushIslandAmbientNpcNeighborQuery(neighbors)) {
+    return neighbors.positionHasClearance(point)
+  }
+  for (const neighbor of neighbors) {
+    if (neighbor.id === ownId) continue
+    const dx = point.x - neighbor.position.x
+    const dz = point.z - neighbor.position.z
+    if (dx * dx + dz * dz < NPC_COLLISION_DISTANCE_SQUARED) return false
+  }
+  return true
+}
+
+function isLandrushIslandAmbientNpcNeighborQuery(
+  source: LandrushIslandAmbientNpcNeighborSource,
+): source is LandrushIslandAmbientNpcNeighborQuery {
+  return !Array.isArray(source)
+}
+
+function setLandrushIslandAmbientNpcPoint(point: LandrushPoint2, x: number, z: number) {
+  const mutablePoint = point as MutableLandrushPoint2
+  mutablePoint.x = x
+  mutablePoint.z = z
+}
+
+function createLandrushIslandAmbientNpcMotionScratch(): LandrushIslandAmbientNpcMotionScratch {
+  return {
+    desired: { x: 0, z: 0 },
+    direction: { x: 0, z: 0 },
+    side: 1,
+    sideSequence: -1,
+    sidestep: { x: 0, z: 0 },
+  }
+}
+
+function resolveLandrushIslandAmbientNpcMotionScratch(state: LandrushIslandAmbientNpcMotionState) {
+  let scratch = AMBIENT_NPC_MOTION_SCRATCH.get(state)
+  if (!scratch) {
+    scratch = createLandrushIslandAmbientNpcMotionScratch()
+    AMBIENT_NPC_MOTION_SCRATCH.set(state, scratch)
+  }
+  return scratch
+}
+
+function resolveLandrushIslandAmbientNpcGridBounds(world: LandrushIslandAmbientNavigationWorld) {
+  let minimumX = Number.POSITIVE_INFINITY
+  let minimumZ = Number.POSITIVE_INFINITY
+  let maximumX = Number.NEGATIVE_INFINITY
+  let maximumZ = Number.NEGATIVE_INFINITY
+  for (const point of world.surfacePoints) {
+    minimumX = Math.min(minimumX, point.x)
+    minimumZ = Math.min(minimumZ, point.z)
+    maximumX = Math.max(maximumX, point.x)
+    maximumZ = Math.max(maximumZ, point.z)
+  }
+  if (!Number.isFinite(minimumX)) {
+    minimumX = -NPC_COLLISION_DISTANCE_METERS
+    minimumZ = -NPC_COLLISION_DISTANCE_METERS
+    maximumX = NPC_COLLISION_DISTANCE_METERS
+    maximumZ = NPC_COLLISION_DISTANCE_METERS
+  }
+  const minimumCellX = Math.floor(minimumX / NPC_COLLISION_DISTANCE_METERS) - 1
+  const minimumCellZ = Math.floor(minimumZ / NPC_COLLISION_DISTANCE_METERS) - 1
+  const maximumCellX = Math.floor(maximumX / NPC_COLLISION_DISTANCE_METERS) + 1
+  const maximumCellZ = Math.floor(maximumZ / NPC_COLLISION_DISTANCE_METERS) + 1
+  return {
+    columnCount: maximumCellX - minimumCellX + 1,
+    minimumCellX,
+    minimumCellZ,
+    rowCount: maximumCellZ - minimumCellZ + 1,
+  }
 }
 
 function hashUnit(value: string) {

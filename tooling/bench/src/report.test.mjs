@@ -700,6 +700,34 @@ test('scenario and viewport validity are hard gates', async () => {
   )
 })
 
+test('reports renderer DPR separately without changing device-DPR viewport validity', async () => {
+  const frames = makeFrames({ count: 90 })
+  await withSyntheticRun(
+    {
+      frames,
+      options: { meta: { displayHz: 60, rendererDpr: 0.7 } },
+    },
+    async ({ report, writtenJson, markdown }) => {
+      assert.equal(findGate(report, 'Requested viewport').status, 'pass')
+      assert.equal(report.viewport.actual.dpr, 1)
+      assert.equal(report.viewport.rendererDpr, 0.7)
+      assert.equal(writtenJson.meta.rendererDpr, 0.7)
+      assert.equal(writtenJson.viewport.rendererDpr, 0.7)
+      assert.match(markdown, /1280x720 @ device DPR 1 · renderer DPR 0\.7/u)
+    },
+  )
+
+  await withSyntheticRun(
+    { frames, options: { meta: { displayHz: 60 } } },
+    async ({ report, markdown }) => {
+      assert.equal(findGate(report, 'Requested viewport').status, 'pass')
+      assert.equal(report.viewport.actual.dpr, 1)
+      assert.equal(report.viewport.rendererDpr, null)
+      assert.match(markdown, /1280x720 @ device DPR 1 · renderer DPR \?/u)
+    },
+  )
+})
+
 test('trace-boundary disagreement and event continuity loss are hard failures', async () => {
   const frames = makeFrames({ count: 90 })
   const measureFromFrame = frames[0].frameIdx
@@ -792,7 +820,7 @@ test('disabled profilers, watchdog state, viewport dimensions, and missing end b
       assert.equal(findGate(report, 'Bench overhead').status, 'unmeasured')
       assert.equal(findGate(report, 'No main-thread task starvation').status, 'unmeasured')
       assert.equal(findGate(report, 'Requested viewport').status, 'fail')
-      assert.match(markdown, /1279x720 @ DPR 1/u)
+      assert.match(markdown, /1279x720 @ device DPR 1 · renderer DPR \?/u)
     },
   )
 

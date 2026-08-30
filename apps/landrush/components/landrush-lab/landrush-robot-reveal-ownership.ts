@@ -1,4 +1,4 @@
-import { type Box3, type Camera, type Object3D, Plane, Vector3 } from 'three'
+import { type Box3, type Camera, type Matrix4, type Object3D, Plane, Vector3 } from 'three'
 
 export type LandrushRobotRevealOwnerObservation = {
   enterIntersects: boolean
@@ -41,6 +41,37 @@ export function createLandrushRobotRevealAperture(segmentCount: number) {
     supportPoint: new Vector3(),
     worldCenter: new Vector3(),
   } satisfies LandrushRobotRevealAperture
+}
+
+export function shouldUpdateLandrushRobotRevealClippingPlanes({
+  camera,
+  lastCamera,
+  lastProjectionMatrix,
+  lastWorldMatrix,
+  maskChanged,
+}: {
+  camera: Camera
+  lastCamera: Camera | null
+  lastProjectionMatrix: Matrix4
+  lastWorldMatrix: Matrix4
+  maskChanged: boolean
+}) {
+  if (maskChanged || lastCamera !== camera) return true
+
+  const projectionElements = camera.projectionMatrix.elements
+  const lastProjectionElements = lastProjectionMatrix.elements
+  const worldElements = camera.matrixWorld.elements
+  const lastWorldElements = lastWorldMatrix.elements
+  for (let index = 0; index < 16; index += 1) {
+    if (
+      Math.abs((projectionElements[index] ?? 0) - (lastProjectionElements[index] ?? 0)) >
+        0.000_001 ||
+      Math.abs((worldElements[index] ?? 0) - (lastWorldElements[index] ?? 0)) > 0.000_001
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 export function updateLandrushRobotRevealAperture({

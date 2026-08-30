@@ -21,6 +21,8 @@ export function ItemsPanel({
   leadingTile,
   emptyState,
   functionTree,
+  isItemDisabled,
+  renderItemBadge,
   showSourceFilter = true,
   showTagFilters = true,
 }: {
@@ -44,6 +46,8 @@ export function ItemsPanel({
    * hierarchical tree browse instead of the legacy hardcoded category tabs.
    */
   functionTree?: FunctionTreeNode[]
+  isItemDisabled?: (item: AssetInput & { tool?: string }) => boolean
+  renderItemBadge?: (item: AssetInput & { tool?: string }) => React.ReactNode
   /**
    * Library/Community/Mine source chips. The open-source editor has no
    * uploaded items (only the built-in catalog), so it hides these.
@@ -62,9 +66,11 @@ export function ItemsPanel({
       <FunctionTreePanel
         emptyState={emptyState}
         functionTree={functionTree}
+        isItemDisabled={isItemDisabled}
         items={items}
         leadingTile={leadingTile}
         onSearchChange={onSearchChange}
+        renderItemBadge={renderItemBadge}
         searchResults={searchResults}
       />
     )
@@ -72,9 +78,11 @@ export function ItemsPanel({
 
   return <LegacyItemsPanel
     emptyState={emptyState}
+    isItemDisabled={isItemDisabled}
     items={items}
     leadingTile={leadingTile}
     onSearchChange={onSearchChange}
+    renderItemBadge={renderItemBadge}
     searchResults={searchResults}
     showSourceFilter={showSourceFilter}
     showTagFilters={showTagFilters}
@@ -87,6 +95,8 @@ function LegacyItemsPanel({
   searchResults,
   leadingTile,
   emptyState,
+  isItemDisabled,
+  renderItemBadge,
   showSourceFilter = true,
   showTagFilters = true,
 }: {
@@ -95,6 +105,8 @@ function LegacyItemsPanel({
   searchResults?: AssetInput[] | null
   leadingTile?: React.ReactNode
   emptyState?: React.ReactNode
+  isItemDisabled?: (item: AssetInput & { tool?: string }) => boolean
+  renderItemBadge?: (item: AssetInput & { tool?: string }) => React.ReactNode
   showSourceFilter?: boolean
   showTagFilters?: boolean
 }) {
@@ -206,6 +218,8 @@ function LegacyItemsPanel({
                   ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                   : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
               )}
+              data-editor-build-controller-action="palette"
+              data-editor-build-controller-item
               key={cat.catalogCategory}
               onClick={() => {
                 triggerSFX('sfx:menu-click')
@@ -385,6 +399,7 @@ function LegacyItemsPanel({
             activePlacementTag={isServerSearch ? null : activePlacementTag}
             category={activeCategory.catalogCategory}
             emptyState={emptyState}
+            isItemDisabled={isItemDisabled}
             items={activeSource && items ? items.filter(matchesSource) : items}
             key={activeCategory.catalogCategory}
             leadingTile={leadingTile}
@@ -395,6 +410,7 @@ function LegacyItemsPanel({
                   : (searchResults ?? undefined)
                 : undefined
             }
+            renderItemBadge={renderItemBadge}
             search={isServerSearch ? '' : search}
           />
         )}

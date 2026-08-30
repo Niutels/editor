@@ -3,9 +3,14 @@ import { advance, createRoot, reconciler, unmountComponentAtNode } from '@react-
 import { act, type ReactNode, StrictMode } from 'react'
 import * as THREE from 'three'
 import { PassNode, RenderPipeline } from 'three/webgpu'
+import { edgeColorFor, edgeOpacityScaleFor } from '../../lib/edge-style'
 import useViewer from '../../store/use-viewer'
 import PostProcessingPasses, {
+  advancePostProcessingBackgroundColor,
+  resolvePostProcessingInkColor,
+  resolvePostProcessingInkOpacityScale,
   SSGI_PARAMS,
+  updatePostProcessingBackdropTargetsFromColor,
   type ViewerPresentationEffectRef,
 } from './post-processing'
 
@@ -166,6 +171,7 @@ async function createPresentationRoot({ strict = false } = {}) {
   observedScene = scene
   const directDraws: Array<{ camera: THREE.Camera; culled: boolean[]; scene: THREE.Scene }> = []
   const boundTargets: unknown[] = []
+  const clearColors: number[] = []
   const renderer = {
     render(drawnScene: THREE.Scene, drawnCamera: THREE.Camera) {
       const culled: boolean[] = []
@@ -175,7 +181,9 @@ async function createPresentationRoot({ strict = false } = {}) {
       directDraws.push({ camera: drawnCamera, culled, scene: drawnScene })
     },
     setClearAlpha() {},
-    setClearColor() {},
+    setClearColor(color: THREE.Color) {
+      clearColors.push(color.getHex())
+    },
     setPixelRatio() {},
     setRenderTarget(target: unknown) {
       boundTargets.push(target)
@@ -215,6 +223,7 @@ async function createPresentationRoot({ strict = false } = {}) {
     alwaysUnculledMesh,
     boundTargets,
     camera,
+    clearColors,
     directDraws,
     mesh,
     scene,
@@ -259,7 +268,254 @@ async function elapseRetryDelay() {
   })
 }
 
+describe('post-processing background frame work', () => {
+  test('updates preallocated backdrop colors from a live mutable scene color', () => {
+    const live = new THREE.Color('#164a77')
+    const background = new THREE.Color()
+    const sky = new THREE.Color()
+    const haze = new THREE.Color()
+    const skyDeep = new THREE.Color()
+
+    updatePostProcessingBackdropTargetsFromColor(live, background, sky, haze, skyDeep)
+    const targets = [background, sky, haze, skyDeep]
+    expect(background.equals(live)).toBe(true)
+    expect(sky.equals(live)).toBe(true)
+    const firstHaze = haze.getHex()
+    const firstDeep = skyDeep.getHex()
+
+    live.set('#020611')
+    updatePostProcessingBackdropTargetsFromColor(live, background, sky, haze, skyDeep)
+    expect([background, sky, haze, skyDeep]).toEqual(targets)
+    expect(background.equals(live)).toBe(true)
+    expect(haze.getHex()).not.toBe(firstHaze)
+    expect(skyDeep.getHex()).not.toBe(firstDeep)
+  })
+
+  test('uses each in-place scene-background transition color for direct presentation frames', async () => {
+    const host = await createPresentationRoot()
+    const live = new THREE.Color('#164a77')
+    host.scene.background = live
+    try {
+      await host.render(<PostProcessingPasses disablePostFx />)
+      host.frame()
+      expect(host.clearColors.at(-1)).toBe(live.getHex())
+
+      live.set('#020611')
+      host.frame()
+      expect(host.clearColors.at(-1)).toBe(live.getHex())
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('preserves the authored ink style without allocating intermediate color strings', () => {
+    for (const background of ['#f2eee5', '#53708c', '#07111f', '#000000', '#ffffff']) {
+      const color = new THREE.Color(background)
+      expect(resolvePostProcessingInkColor(color)).toBe(
+        Number.parseInt(edgeColorFor(`#${color.getHexString()}`).slice(1), 16),
+      )
+      expect(resolvePostProcessingInkOpacityScale(color)).toBe(
+        edgeOpacityScaleFor(`#${color.getHexString()}`),
+      )
+    }
+  })
+
+  test('does no color work after a background target converges', () => {
+    const target = new THREE.Color('#07111f')
+    const current = new THREE.Color('#f2eee5')
+    let advancedFrames = 0
+    for (let frame = 0; frame < 1_000; frame += 1) {
+      if (advancePostProcessingBackgroundColor(current, target, 1 / 60)) advancedFrames += 1
+    }
+    expect(current.equals(target)).toBe(true)
+    expect(advancedFrames).toBeLessThan(300)
+    expect(advancePostProcessingBackgroundColor(current, target, 1 / 60)).toBe(false)
+  })
+})
+
 describe('presentation-only post-processing camera lifecycle', () => {
+  test('keeps the warmed presentation context active on a zero-amount transition boundary', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.zoomBlurActive = true
+      effect.current.zoomBlurAmount = 0
+      host.frame()
+      expect(frames).toHaveLength(13)
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.zoomBlurActive = false
+      host.frame()
+      expect(frames).toHaveLength(13)
+      expect(host.directDraws).toHaveLength(2)
+      expect(errors).toEqual([])
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('keeps the warmed presentation context active for an externally armed camera handoff', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.presentationPipelineActive = true
+      host.frame()
+      expect(frames).toHaveLength(13)
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.presentationPipelineActive = false
+      host.frame()
+      expect(frames).toHaveLength(13)
+      expect(host.directDraws).toHaveLength(2)
+      expect(errors).toEqual([])
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('acknowledges a pending pipeline prewarm only after the real presentation pipeline renders', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    const settlements: Array<readonly [number, 'failed' | 'rendered']> = []
+    effect.current.pipelinePrewarmOnRenderSettled = (revision, outcome) => {
+      settlements.push([revision, outcome])
+    }
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.pipelinePrewarmRequestRevision = 7
+      host.frame()
+      expect(frames).toHaveLength(13)
+      expect(effect.current.pipelinePrewarmRenderedRevision).toBe(7)
+      expect(effect.current.pipelinePrewarmRenderedCamera).toBe(host.camera)
+      expect(effect.current.pipelinePrewarmCameraMatched).toBe(true)
+      expect(effect.current.pipelinePrewarmFailedRevision).toBeUndefined()
+      expect(settlements).toEqual([[7, 'rendered']])
+      expect(host.directDraws).toHaveLength(1)
+
+      host.frame()
+      expect(frames).toHaveLength(13)
+      expect(host.directDraws).toHaveLength(2)
+      expect(errors).toEqual([])
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('acknowledges an exact direct prewarm frame with the requested camera and unculled scene', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    const zombieCamera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.5, 400)
+    const settlements: Array<readonly [number, 'failed' | 'rendered']> = []
+    effect.current.pipelinePrewarmOnRenderSettled = (revision, outcome) => {
+      settlements.push([revision, outcome])
+      effect.current.pipelinePrewarmCamera = undefined
+      effect.current.pipelinePrewarmRenderPath = undefined
+    }
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.pipelinePrewarmCamera = zombieCamera
+      effect.current.pipelinePrewarmRenderPath = 'direct'
+      effect.current.pipelinePrewarmRequestRevision = 11
+      host.frame()
+
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(2)
+      expect(host.directDraws.at(-1)?.camera).toBe(zombieCamera)
+      expect(host.directDraws.at(-1)?.culled).toEqual([false, false])
+      expect(effect.current.pipelinePrewarmRenderedRevision).toBe(11)
+      expect(effect.current.pipelinePrewarmRenderedCamera).toBe(zombieCamera)
+      expect(effect.current.pipelinePrewarmCameraMatched).toBe(true)
+      expect(settlements).toEqual([[11, 'rendered']])
+
+      host.frame()
+      expect(host.directDraws.at(-1)?.camera).toBe(host.camera)
+      expect(host.directDraws.at(-1)?.culled).toEqual([true, false])
+      expect(errors).toEqual([])
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('uses a pending prewarm camera only for the hidden render pass', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    const zombieCamera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.5, 400)
+    effect.current.pipelinePrewarmOnRenderSettled = () => {
+      effect.current.pipelinePrewarmCamera = undefined
+    }
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      expect(host.directDraws.at(-1)?.camera).toBe(host.camera)
+
+      effect.current.pipelinePrewarmCamera = zombieCamera
+      effect.current.pipelinePrewarmRequestRevision = 9
+      host.frame()
+      expect(frames.at(-1)?.cameras).toEqual([zombieCamera])
+      expect(frames.at(-1)?.culled).toEqual([false, false])
+      expect(effect.current.pipelinePrewarmRenderedCamera).toBe(zombieCamera)
+      expect(effect.current.pipelinePrewarmCameraMatched).toBe(true)
+      expect(host.state().camera).toBe(host.camera)
+      expect(effect.current.pipelinePrewarmCamera).toBeUndefined()
+
+      host.frame()
+      expect(host.directDraws.at(-1)?.camera).toBe(host.camera)
+      expect(host.directDraws.at(-1)?.culled).toEqual([true, false])
+      expect(errors).toEqual([])
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('does not falsely acknowledge a failed pending pipeline prewarm render', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    const settlements: Array<readonly [number, 'failed' | 'rendered']> = []
+    effect.current.pipelinePrewarmOnRenderSettled = (revision, outcome) => {
+      settlements.push([revision, outcome])
+    }
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      effect.current.pipelinePrewarmRequestRevision = 8
+      failNextPipelineFrame = true
+      host.frame()
+
+      expect(frames).toHaveLength(13)
+      expect(effect.current.pipelinePrewarmRenderedRevision).toBeUndefined()
+      expect(effect.current.pipelinePrewarmRenderedCamera).toBeUndefined()
+      expect(effect.current.pipelinePrewarmCameraMatched).toBe(false)
+      expect(effect.current.pipelinePrewarmFailedRevision).toBe(8)
+      expect(settlements).toEqual([[8, 'failed']])
+      expect(errors).toHaveLength(1)
+      expect(disposedPipelines).toHaveLength(1)
+    } finally {
+      await host.dispose()
+    }
+  })
+
   test('retains the color graph across perspective/orthographic handoffs without rearming its twelve warmup frames', async () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()

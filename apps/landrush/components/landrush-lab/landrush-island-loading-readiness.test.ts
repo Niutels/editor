@@ -822,7 +822,10 @@ describe('Landrush island paint readiness', () => {
     expect(runtimeHookSource).toMatch(
       /controller\.setConfirmedProgress\(stage\.confirmedProgress,\s*\{\s*\.\.\.stage,\s*startDelayMs,?\s*\}\)/,
     )
-    expect(runtimeHookSource).toContain('evidenceProgress: update.evidenceProgress')
+    expect(runtimeHookSource).toContain('evidenceProgress: update.presentationProgress')
+    expect(runtimeHookSource).toContain(
+      'maximumProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING',
+    )
     expect(runtimeHookSource).not.toContain('forecastProgress:')
     expect(runtimeHookSource).not.toMatch(/completionRequested = true\s+beginHandoffFade\(\)/)
     expect(runtimeHookSource).toContain(

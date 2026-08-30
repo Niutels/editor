@@ -1,5 +1,20 @@
-import type { AnyNode, AnyNodeId } from '@pascal-app/core'
+import type { AnyNode, AnyNodeId, LevelNode } from '@pascal-app/core'
 import type { Mesh, Object3D } from 'three'
+
+const LANDRUSH_ISLAND_COLLIDER_LEVEL_BASE_Y_EPSILON = 0.015
+
+export type LandrushIslandColliderLevelPlacement = Readonly<{
+  baseY: number
+  levelId: LevelNode['id']
+  object: Object3D
+}>
+
+type LandrushIslandColliderFloorStack = Readonly<{
+  floors: readonly Readonly<{
+    baseY: number
+    levelIds: readonly LevelNode['id'][]
+  }>[]
+}>
 
 export type LandrushIslandBuiltColliderReadiness = {
   authorityKey: string
@@ -71,4 +86,79 @@ export function areLandrushWallColliderGeometriesReady({
   }
 
   return true
+}
+
+export function resolveLandrushIslandColliderLevelPlacements({
+  nodes,
+  resolveObject,
+  stacks,
+}: {
+  nodes: Record<string, AnyNode>
+  resolveObject: (nodeId: AnyNodeId) => Object3D | undefined
+  stacks: readonly LandrushIslandColliderFloorStack[]
+}): readonly LandrushIslandColliderLevelPlacement[] | null {
+  const baseYByLevelId = new Map<LevelNode['id'], number>()
+  for (const stack of stacks) {
+    for (const floor of stack.floors) {
+      if (!Number.isFinite(floor.baseY)) return null
+      for (const levelId of floor.levelIds) {
+        const node = nodes[levelId]
+        if (node?.type !== 'level') return null
+        if (node.visible === false) continue
+        const existingBaseY = baseYByLevelId.get(levelId)
+        if (
+          existingBaseY !== undefined &&
+          Math.abs(existingBaseY - floor.baseY) > LANDRUSH_ISLAND_COLLIDER_LEVEL_BASE_Y_EPSILON
+        ) {
+          return null
+        }
+        baseYByLevelId.set(levelId, floor.baseY)
+      }
+    }
+  }
+
+  const placements: LandrushIslandColliderLevelPlacement[] = []
+  const baseYByObject = new Map<Object3D, number>()
+  for (const [levelId, baseY] of [...baseYByLevelId].sort(([first], [second]) =>
+    first.localeCompare(second),
+  )) {
+    const object = resolveObject(levelId)
+    if (!object) return null
+    const existingBaseY = baseYByObject.get(object)
+    if (existingBaseY !== undefined) {
+      if (Math.abs(existingBaseY - baseY) > LANDRUSH_ISLAND_COLLIDER_LEVEL_BASE_Y_EPSILON) {
+        return null
+      }
+      continue
+    }
+    baseYByObject.set(object, baseY)
+    placements.push({ baseY, levelId, object })
+  }
+  return placements
+}
+
+export function withLandrushIslandColliderLevelPlacements<T>(
+  placements: readonly LandrushIslandColliderLevelPlacement[],
+  build: () => T,
+) {
+  const snapshots = placements.map(({ object }) => ({
+    object,
+    visible: object.visible,
+    y: object.position.y,
+  }))
+
+  try {
+    for (const { baseY, object } of placements) {
+      object.position.y = baseY
+      object.visible = true
+      object.updateWorldMatrix(true, true)
+    }
+    return build()
+  } finally {
+    for (const { object, visible, y } of snapshots) {
+      object.position.y = y
+      object.visible = visible
+      object.updateWorldMatrix(true, true)
+    }
+  }
 }

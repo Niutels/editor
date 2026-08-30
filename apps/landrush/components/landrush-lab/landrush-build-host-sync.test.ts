@@ -27,6 +27,7 @@ import {
   isLandrushBuildConflictRetryReady,
   isLandrushBuildMaterializationReady,
   resetLandrushBuildAuthorityCachesOnChange,
+  rollbackLandrushBuildRejectedCandidate,
   shouldApplyLandrushBuildContentUpdate,
   shouldPublishLandrushBuildSceneCommit,
   shouldSubscribeLandrushBuildCommitPublisher,
@@ -531,6 +532,117 @@ describe('Landrush build host sync', () => {
     expect(published).toEqual(['stair-rise-and-opening-synced'])
   })
 
+  test('rolls a rejected build back only to the nearest safe history state and clears redo', () => {
+    const pastStates = [
+      { label: 'older build state', transport: 'older-build' },
+      { label: 'safe build state', transport: 'safe-build' },
+      { label: 'unrelated local change', transport: 'safe-build' },
+    ]
+    let desired = 'rejected-build'
+    let clearRedoCount = 0
+    let rematerializeCount = 0
+    const result = rollbackLandrushBuildRejectedCandidate({
+      areEqual: (first, second) => first === second,
+      baseline: 'safe-build',
+      clearRedo: () => {
+        clearRedoCount += 1
+      },
+      desiredFromPastState: (state) => state.transport,
+      pastStates,
+      readDesired: () => desired,
+      rematerialize: () => {
+        rematerializeCount += 1
+        desired = 'safe-build'
+        return desired
+      },
+      undo: () => {
+        desired = pastStates.pop()?.transport ?? desired
+      },
+    })
+
+    expect(result).toEqual({ kind: 'history', undoCount: 1 })
+    expect(pastStates).toEqual([
+      { label: 'older build state', transport: 'older-build' },
+      { label: 'safe build state', transport: 'safe-build' },
+    ])
+    expect(clearRedoCount).toBe(1)
+    expect(rematerializeCount).toBe(0)
+  })
+
+  test('uses safe rematerialization without undoing when history has no matching baseline', () => {
+    let desired = 'rejected-build'
+    let undoCount = 0
+    let redoCleared = false
+    const result = rollbackLandrushBuildRejectedCandidate({
+      areEqual: (first, second) => first === second,
+      baseline: 'safe-build',
+      clearRedo: () => {
+        redoCleared = true
+      },
+      desiredFromPastState: (state) => state,
+      pastStates: ['unrelated-old-state'],
+      readDesired: () => desired,
+      rematerialize: () => {
+        desired = 'safe-build'
+        return desired
+      },
+      undo: () => {
+        undoCount += 1
+      },
+    })
+
+    expect(result).toEqual({ kind: 'rematerialized', undoCount: 0 })
+    expect(undoCount).toBe(0)
+    expect(redoCleared).toBe(true)
+  })
+
+  test('coalesces rollback commits to the safe baseline without retrying the rejected candidate', () => {
+    const microtasks: Array<() => void> = []
+    const considered: string[] = []
+    const synced: string[] = []
+    const pastStates = ['safe-build']
+    let desired = 'rejected-build'
+    let redoCleared = false
+    let safeBaseline = 'safe-build'
+    let scheduler!: ReturnType<typeof createLandrushBuildCommitPublishScheduler<string>>
+    scheduler = createLandrushBuildCommitPublishScheduler({
+      publish: (candidate) => {
+        considered.push(candidate)
+        if (candidate === 'rejected-build') {
+          rollbackLandrushBuildRejectedCandidate({
+            areEqual: (first, second) => first === second,
+            baseline: safeBaseline,
+            clearRedo: () => {
+              redoCleared = true
+            },
+            desiredFromPastState: (state) => state,
+            pastStates,
+            readDesired: () => desired,
+            rematerialize: () => null,
+            undo: () => {
+              desired = pastStates.pop() ?? desired
+              scheduler.handleCommit(sceneCommit({}, {}, new Set()))
+            },
+          })
+          return
+        }
+        if (candidate === safeBaseline) return
+        synced.push(candidate)
+        safeBaseline = candidate
+      },
+      readDesired: () => desired,
+      scheduleMicrotask: (callback) => microtasks.push(callback),
+    })
+
+    scheduler.handleCommit(sceneCommit({}, {}, new Set()))
+    while (microtasks.length > 0) microtasks.shift()?.()
+
+    expect(considered).toEqual(['rejected-build', 'safe-build'])
+    expect(synced).toEqual([])
+    expect(safeBaseline).toBe('safe-build')
+    expect(redoCleared).toBe(true)
+  })
+
   test('settles a load commit against the latest safe baseline without publishing stale content', () => {
     const microtasks: Array<() => void> = []
     const published: number[] = []
@@ -645,7 +757,7 @@ describe('Landrush build host sync', () => {
     expect(deleted).toEqual([['edge-wall']])
   })
 
-  test('does not treat an old self acknowledgement or conflict as inbound scene content', () => {
+  test('applies authoritative content updates but not acknowledgements or conflicts', () => {
     let visibleDesiredState = 'S2'
     let applyCount = 0
     const events = [
@@ -663,6 +775,8 @@ describe('Landrush build host sync', () => {
     expect(visibleDesiredState).toBe('S2')
     expect(shouldApplyLandrushBuildContentUpdate({ source: 'snapshot' })).toBe(true)
     expect(shouldApplyLandrushBuildContentUpdate({ source: 'remote' })).toBe(true)
+    expect(shouldApplyLandrushBuildContentUpdate({ source: 'insufficient-funds' })).toBe(true)
+    expect(shouldApplyLandrushBuildContentUpdate({ source: 'conflict' })).toBe(false)
   })
 
   test('creates a host patch without replacing unrelated scene nodes', () => {

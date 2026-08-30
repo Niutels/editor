@@ -105,9 +105,18 @@ type LandrushIslandAmbientWalkablePathSearchState = {
   allCandidates: readonly LandrushIslandAmbientNavigationCandidate[]
   completedPath: readonly LandrushPoint2[] | null
   currentIndex: number
+  completedAdvanceResult: {
+    done: true
+    operations: number
+    path: readonly LandrushPoint2[]
+  }
   distances: Array<number | undefined>
   navigationGraph: LandrushIslandAmbientNavigationGraph | undefined
   phase: LandrushIslandAmbientWalkablePathSearchPhase
+  pendingAdvanceResult: {
+    done: false
+    operations: number
+  }
   pointCount: number
   previous: Array<number | undefined>
   queryStats: LandrushIslandAmbientNavigationGraphQueryStats
@@ -241,10 +250,12 @@ export function createLandrushIslandAmbientWalkablePathSearch(
   const state: LandrushIslandAmbientWalkablePathSearchState = {
     allCandidates,
     completedPath,
+    completedAdvanceResult: { done: true, operations: 0, path: completedPath ?? [] },
     currentIndex: -1,
     distances: [],
     navigationGraph,
     phase: completedPath ? 'complete' : 'rank-candidates',
+    pendingAdvanceResult: { done: false, operations: 0 },
     pointCount: 0,
     previous: [],
     queryStats: {
@@ -356,9 +367,13 @@ export function advanceLandrushIslandAmbientWalkablePathSearch(
     }
   }
 
-  return state.phase === 'complete'
-    ? { done: true, operations, path: state.completedPath ?? [] }
-    : { done: false, operations }
+  if (state.phase === 'complete') {
+    state.completedAdvanceResult.operations = operations
+    state.completedAdvanceResult.path = state.completedPath ?? []
+    return state.completedAdvanceResult
+  }
+  state.pendingAdvanceResult.operations = operations
+  return state.pendingAdvanceResult
 }
 
 function beginLandrushIslandAmbientCandidateSort(

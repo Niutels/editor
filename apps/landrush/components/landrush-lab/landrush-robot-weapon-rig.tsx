@@ -3,6 +3,8 @@
 import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, memo, type RefObject, Suspense, useMemo, useRef } from 'react'
 import { Euler, type Group, MathUtils, type Object3D, Quaternion, Vector3 } from 'three'
+import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
+import { LandrushRobotShoulderTorchRig } from './landrush-robot-shoulder-torch-rig'
 import {
   captureLandrushRobotWeaponRelativeHandQuaternion,
   createLandrushRobotTwoBoneIkScratch,
@@ -167,6 +169,8 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   muzzlePoseRef,
   onFitSnapshot,
   renderReadinessRegistry,
+  shoulderTorchLightingStateRef,
+  shoulderTorches = true,
   supportHandEnabled = true,
   visualRootRef,
 }: {
@@ -179,6 +183,8 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   muzzlePoseRef: MutableRefObject<LandrushRobotWeaponMuzzlePose>
   onFitSnapshot?: (snapshot: LandrushRobotWeaponFitSnapshot) => void
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
+  shoulderTorchLightingStateRef?: RefObject<LandrushRobotShoulderTorchLightingState>
+  shoulderTorches?: boolean
   supportHandEnabled?: boolean
   visualRootRef: RefObject<Group | null>
 }) {
@@ -549,6 +555,16 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
 
   return (
     <>
+      {shoulderTorches ? (
+        <LandrushRobotShoulderTorchRig
+          active={active}
+          combatStateRef={combatStateRef}
+          framePriority={framePriority + 0.005}
+          lightingStateRef={shoulderTorchLightingStateRef}
+          renderReadinessRegistry={renderReadinessRegistry}
+          visualRootRef={visualRootRef}
+        />
+      ) : null}
       <group
         ref={weaponRootRef}
         userData={{ role: 'landrush-robot-mounted-weapon' }}

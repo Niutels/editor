@@ -32,6 +32,7 @@ import { ADDITION, Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg'
 import { computeBoundsTree } from 'three-mesh-bvh'
 import { applyWorldScaleBoxUVs } from '../../lib/box-uv'
 import { ensureRenderableGeometryAttributes, subtractCsgBrush } from '../../lib/csg-utils'
+import { hasPendingRoofBuildWork, roofBuildWorkQueue } from './roof-build-work'
 
 function csgGeometry(brush: Brush): THREE.BufferGeometry {
   return brush.geometry as unknown as THREE.BufferGeometry
@@ -155,14 +156,13 @@ function createDegenerateRoofPlaceholder(): THREE.BufferGeometry {
 }
 
 // Pending merged-roof updates carried across frames (for throttling)
-const pendingRoofUpdates = new Set<AnyNodeId>()
 const previousRoofPlanBounds = new Map<AnyNodeId, RoofPlanBounds>()
 const warnedMergedRoofNaNIds = new Set<AnyNodeId>()
 const MAX_ROOFS_PER_FRAME = 1
 const MAX_SEGMENTS_PER_FRAME = 3
 
 function queueSiblingRoofUpdates(roofId: AnyNodeId, nodes: Record<string, AnyNode>) {
-  pendingRoofUpdates.add(roofId)
+  roofBuildWorkQueue.add(roofId)
   const roof = nodes[roofId]?.type === 'roof' ? getEffectiveNode(nodes[roofId]) : undefined
   if (roof?.type !== 'roof' || !roof.parentId) return
   const currentBounds = getRoofPlanBounds({
@@ -213,7 +213,7 @@ function queueSiblingRoofUpdates(roofId: AnyNodeId, nodes: Record<string, AnyNod
       (currentBounds && roofPlanBoundsOverlap(currentBounds, siblingBounds)) ||
       (oldBounds && roofPlanBoundsOverlap(oldBounds, siblingBounds))
     ) {
-      pendingRoofUpdates.add(sibling.id)
+      roofBuildWorkQueue.add(sibling.id)
     }
   }
 }
@@ -235,7 +235,7 @@ export const RoofSystem = () => {
   useFrame(() => {
     // Clear stale pending updates when the scene is unloaded
     if (rootNodeIds.length === 0) {
-      pendingRoofUpdates.clear()
+      roofBuildWorkQueue.clear()
       previousRoofPlanBounds.clear()
       warnedMergedRoofNaNIds.clear()
       for (const cached of mergedRoofSegmentGeometryCache.values()) {
@@ -245,7 +245,7 @@ export const RoofSystem = () => {
       return
     }
 
-    if (dirtyNodes.size === 0 && pendingRoofUpdates.size === 0) return
+    if (dirtyNodes.size === 0 && !hasPendingRoofBuildWork()) return
 
     const nodes = useScene.getState().nodes
 
@@ -268,7 +268,7 @@ export const RoofSystem = () => {
         const segId = (node as { roofSegmentId?: string }).roofSegmentId
         const seg = segId ? (nodes[segId as AnyNodeId] as RoofSegmentNode | undefined) : undefined
         if (roofAccessory.buildCut && seg?.parentId) {
-          pendingRoofUpdates.add(seg.parentId as AnyNodeId)
+          roofBuildWorkQueue.add(seg.parentId as AnyNodeId)
         }
         clearDirty(id as AnyNodeId)
         return
@@ -332,12 +332,12 @@ export const RoofSystem = () => {
 
     // --- Pass 2: Process pending merged-roof updates (max 1 per frame) ---
     let roofsProcessed = 0
-    for (const id of pendingRoofUpdates) {
+    for (const id of roofBuildWorkQueue) {
       if (roofsProcessed >= MAX_ROOFS_PER_FRAME) break
 
       const node = nodes[id]
       if (node?.type !== 'roof') {
-        pendingRoofUpdates.delete(id)
+        roofBuildWorkQueue.delete(id)
         continue
       }
 
@@ -353,7 +353,7 @@ export const RoofSystem = () => {
         roofsProcessed++
       }
 
-      pendingRoofUpdates.delete(id)
+      roofBuildWorkQueue.delete(id)
     }
   }, 5) // Priority 5: run after all other systems have settled
 

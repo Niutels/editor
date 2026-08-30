@@ -1,9 +1,9 @@
 import {
-  LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+  LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
   type LandrushIslandLoadingProgressMotionSnapshot,
 } from './landrush-island-loading-progress-controller'
 
-export const LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION = 3
+export const LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION = 4
 export const LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL = '__LANDRUSH_ISLAND_LOADING_BOOT_RUN__'
 export const LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL =
   '__LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE__'
@@ -216,13 +216,13 @@ export function resolveLandrushIslandLoadingShellVelocity(
 }
 
 export function createStreamedShellMotionSegment(fromProgress: number, maximumDurationMs: number) {
-  const from = Math.min(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS, clamp01(fromProgress))
+  const from = Math.min(LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING, clamp01(fromProgress))
   const requestedDurationMs = Math.max(
     0,
     Number.isFinite(maximumDurationMs) ? maximumDurationMs : 0,
   )
   const remainingDurationMs =
-    ((LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS - from) /
+    ((LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING - from) /
       STREAMED_SHELL_VELOCITY_PER_SECOND) *
     1_000
   const durationMs = Math.min(requestedDurationMs, remainingDurationMs)
@@ -231,7 +231,7 @@ export function createStreamedShellMotionSegment(fromProgress: number, maximumDu
     durationMs,
     fromProgress: from,
     toProgress: Math.min(
-      LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
       from + STREAMED_SHELL_VELOCITY_PER_SECOND * (durationMs / 1_000),
     ),
   }

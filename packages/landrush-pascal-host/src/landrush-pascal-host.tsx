@@ -25,6 +25,7 @@ import {
   useViewer,
   Viewer,
   type ViewerPresentationEffectRef,
+  type ViewerRenderDpr,
 } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -56,6 +57,7 @@ export type LandrushPascalHostProps = {
   ownedHorizontalGridPlaneY: number | null
   presentationEffectRef?: ViewerPresentationEffectRef
   projectId?: string | null
+  renderDpr?: ViewerRenderDpr
   sceneReadyKey?: string | number | null
   sceneReadyMaxWaitMs?: number
   sceneReadyPrerequisitesReady?: boolean
@@ -74,6 +76,7 @@ export function LandrushPascalHost({
   ownedHorizontalGridPlaneY,
   presentationEffectRef,
   projectId = null,
+  renderDpr,
   sceneReadyKey = null,
   sceneReadyMaxWaitMs,
   sceneReadyPrerequisitesReady = true,
@@ -157,11 +160,13 @@ export function LandrushPascalHost({
           maxFps={maxFps}
           onSceneReadyChange={onSceneReadyChange}
           presentationEffectRef={presentationEffectRef}
+          renderDpr={renderDpr}
           renderContext="editor"
           sceneReadyKey={viewerSceneReadyKey}
           sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}
           sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}
           selectionManager={selectionManager}
+          shadows={false}
           useBvh={false}
         >
           <LandrushPascalHostRuntime

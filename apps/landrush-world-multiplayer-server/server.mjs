@@ -4,8 +4,14 @@ import http from 'node:http'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  calculateParcelBuildPriceDelta,
+  DEFAULT_PROFILE_MONEY,
+  isApplyProfileMoneyOperationMessage,
+  isZombieEscapeFirstHouseReady,
   MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS,
   MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS,
+  isReportZombieEscapeDeathMessage,
+  MAX_PROFILE_MONEY,
   sanitizeMultiplayerPlayerCombatSnapshot,
   isMultiplayerPlayerPose,
   isSpatialVoiceSignalPayload,
@@ -18,6 +24,7 @@ import {
   PARCEL_BUILD_SCHEMA_VERSION,
   PARCEL_WRITER_SESSION_CLOSE_CODE,
   sanitizeParcelWriterSessionId,
+  ZOMBIE_ESCAPE_KILL_REWARD,
 } from '@landrush/protocol'
 import { WebSocket, WebSocketServer } from 'ws'
 
@@ -44,7 +51,8 @@ const WRITER_SESSION_CLOSE_GRACE_MS = Math.max(
 )
 const PORT = Number(process.env.PORT ?? process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PORT ?? 3003)
 const WS_PATH = process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PATH ?? '/api/landrush-lab/world-multiplayer/ws'
-const PERSISTENT_STATE_SCHEMA_VERSION = 2
+const PERSISTENT_STATE_SCHEMA_VERSION = 3
+const MAX_RECENT_PROFILE_MONEY_OPERATIONS = 128
 const ALLOW_EMPTY_PERSISTENT_STATE =
   process.env.LANDRUSH_WORLD_MULTIPLAYER_ALLOW_EMPTY_STATE === '1'
 const PERSISTENT_STATE_FILE = resolvePersistentStateFile()
@@ -60,6 +68,7 @@ const rooms = new Map()
 const parcelBuildNodesByWorld = new Map()
 const parcelOwnershipByWorld = new Map()
 const tvMediaStateByWorld = new Map()
+const profileWalletByPlayer = new Map()
 const writerSessionsByPlayer = new Map()
 const parcelWorldSubscriptionBySocket = new Map()
 const parcelWorldSubscribers = new Map()
@@ -280,6 +289,21 @@ wss.on('connection', (socket) => {
       peer.lastSeenAt = now
       const synced = syncParcelBuildNodes(peer, message, now)
       if (!synced.ok) {
+        if (synced.code === 'insufficient-build-funds') {
+          send(socket, {
+            build: synced.build,
+            cost: synced.cost,
+            operationId: synced.operationId,
+            parcelId: synced.parcelId,
+            reason: synced.message,
+            roomId: peer.roomId,
+            serverTime: now,
+            type: 'parcel-build-nodes-insufficient-funds',
+            wallet: synced.wallet,
+            worldId: synced.worldId,
+          })
+          return
+        }
         if (synced.code === 'parcel-build-conflict') {
           send(socket, {
             build: synced.build,
@@ -319,6 +343,7 @@ wss.on('connection', (socket) => {
         type: 'parcel-build-nodes-ack',
         updatedAt: synced.build.updatedAt,
         updatedBy: synced.build.updatedBy,
+        wallet: synced.wallet,
         worldId: synced.build.worldId,
         writerEpoch: peer.writerEpoch,
         writerSessionId: peer.writerSessionId,
@@ -406,6 +431,53 @@ wss.on('connection', (socket) => {
         { ownership: claim.ownership, serverTime: now, type: 'parcel-owned' },
         socket,
       )
+      return
+    }
+
+    if (message.type === 'apply-profile-money-operation') {
+      if (!peer) {
+        sendError(socket, 'not-joined', 'Join a room before updating profile money')
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
+        return
+      }
+
+      peer.lastSeenAt = now
+      const result = applyProfileMoneyOperation(peer, message, now)
+      if (result.ok) {
+        send(socket, {
+          duplicate: result.duplicate,
+          operationId: result.operationId,
+          serverTime: now,
+          type: 'profile-money-operation-ack',
+          wallet: result.wallet,
+        })
+      } else {
+        send(socket, {
+          code: result.code,
+          message: result.message,
+          operationId: result.operationId,
+          serverTime: now,
+          type: 'profile-money-operation-rejected',
+          wallet: result.wallet,
+        })
+      }
+      return
+    }
+
+    if (message.type === 'report-zombie-escape-death') {
+      if (!peer) {
+        sendError(socket, 'not-joined', 'Join a room before reporting Zombie Escape death')
+        return
+      }
+      if (!isCurrentPeer(peer)) {
+        rejectWriterSession(socket, peer, now)
+        return
+      }
+      peer.lastSeenAt = now
+      reportZombieEscapeDeath(peer, message, now)
       return
     }
 
@@ -523,6 +595,13 @@ function joinRoom(peer) {
   const room = getRoom(peer.roomId)
   const now = Date.now()
   room.peers.set(peer.id, peer)
+  if (
+    peer.gameMode === 'zombie-escape' &&
+    room.zombieEscapeState?.phase === 'night' &&
+    !room.zombieEscapeDeadPlayerIds.has(peer.id)
+  ) {
+    room.zombieEscapeAlivePlayerIds.add(peer.id)
+  }
   reconcileSupersededZombieEscapeRooms(peer, now)
   reconcileZombieEscapeRoomParticipants(peer.roomId, room, now)
   const snapshot = {
@@ -535,6 +614,7 @@ function joinRoom(peer) {
     snapshot.zombieEscapeState = cloneZombieEscapeState(room.zombieEscapeState)
   }
   send(peer.socket, snapshot)
+  sendProfileMoneySnapshot(peer.socket, peer.id, now)
   broadcast(
     peer.roomId,
     { player: peer.player, roomId: peer.roomId, serverTime: now, type: 'player-joined' },
@@ -594,6 +674,8 @@ function clearZombieEscapeRoomState(room) {
   if (room.zombieEscapeTimer) clearTimeout(room.zombieEscapeTimer)
   room.zombieEscapeState = null
   room.zombieEscapeTimer = null
+  room.zombieEscapeAlivePlayerIds.clear()
+  room.zombieEscapeDeadPlayerIds.clear()
 }
 
 function synchronizeZombieEscapeRoomClock(roomId, room, now) {
@@ -603,17 +685,19 @@ function synchronizeZombieEscapeRoomClock(roomId, room, now) {
   }
 
   const state = room.zombieEscapeState
-  if (state && advanceZombieEscapeStateTo(state, now) > 0) {
+  if (state && advanceZombieEscapeStateTo(room, now) > 0) {
     broadcastZombieEscapeState(roomId, state, now)
   }
   scheduleZombieEscapeRoomTimer(roomId, room, now)
 }
 
-function advanceZombieEscapeStateTo(state, now) {
+function advanceZombieEscapeStateTo(room, now) {
+  const state = room.zombieEscapeState
+  if (!state) return 0
   if (state.phaseEndsAt === null || state.phaseEndsAt > now) return 0
 
   let transitionCount = 0
-  transitionZombieEscapeState(state)
+  transitionZombieEscapeState(room)
   transitionCount += 1
 
   const cycleDuration =
@@ -624,26 +708,43 @@ function advanceZombieEscapeStateTo(state, now) {
     state.night += fullCycles
     state.phaseEndsAt += fullCycles * cycleDuration
     transitionCount += fullCycles * 2
+    synchronizeZombieEscapeNightParticipants(room)
   }
 
   while (state.phaseEndsAt <= now) {
-    transitionZombieEscapeState(state)
+    transitionZombieEscapeState(room)
     transitionCount += 1
   }
   state.revision += transitionCount
   return transitionCount
 }
 
-function transitionZombieEscapeState(state) {
+function transitionZombieEscapeState(room) {
+  const state = room.zombieEscapeState
+  if (!state) return
   if (state.phase === 'build') {
     state.phase = 'night'
     state.night += 1
     state.phaseEndsAt += MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
+    synchronizeZombieEscapeNightParticipants(room)
     return
   }
 
   state.phase = 'build'
   state.phaseEndsAt += MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
+  room.zombieEscapeAlivePlayerIds.clear()
+  room.zombieEscapeDeadPlayerIds.clear()
+}
+
+function synchronizeZombieEscapeNightParticipants(room) {
+  room.zombieEscapeAlivePlayerIds.clear()
+  room.zombieEscapeDeadPlayerIds.clear()
+  if (room.zombieEscapeState?.phase !== 'night') return
+  for (const roomPeer of room.peers.values()) {
+    if (roomPeer.gameMode === 'zombie-escape' && isCurrentPeer(roomPeer)) {
+      room.zombieEscapeAlivePlayerIds.add(roomPeer.id)
+    }
+  }
 }
 
 function scheduleZombieEscapeRoomTimer(roomId, room, now) {
@@ -667,6 +768,18 @@ function scheduleZombieEscapeRoomTimer(roomId, room, now) {
   }, delay)
   timer.unref()
   room.zombieEscapeTimer = timer
+}
+
+function watchedWorldHasZombieEscapeFirstHouse(peer) {
+  const subscription = parcelWorldSubscriptionBySocket.get(peer.socket)
+  if (!subscription || subscription.roomId !== peer.roomId) return null
+
+  const builds = parcelBuildNodesByWorld.get(subscription.worldId)
+  if (!builds) return false
+  for (const build of builds.values()) {
+    if (isZombieEscapeFirstHouseReady(build.nodes)) return true
+  }
+  return false
 }
 
 function updateZombieEscapeRoomFromCommand(peer, message, now) {
@@ -714,6 +827,27 @@ function updateZombieEscapeRoomFromCommand(peer, message, now) {
       )
       return
     }
+    const hasFirstHouse = watchedWorldHasZombieEscapeFirstHouse(peer)
+    if (hasFirstHouse === null) {
+      rejectZombieEscapeStateCommand(
+        peer,
+        state,
+        'zombie-escape-parcel-world-unavailable',
+        'Watch the current parcel world before initializing Zombie Escape',
+        now,
+      )
+      return
+    }
+    if (!hasFirstHouse) {
+      rejectZombieEscapeStateCommand(
+        peer,
+        state,
+        'zombie-escape-house-required',
+        'Build a closed house with walls and an attached door before starting the Zombie Escape countdown',
+        now,
+      )
+      return
+    }
     state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
   } else {
     if (state.phaseEndsAt === null) {
@@ -739,6 +873,7 @@ function updateZombieEscapeRoomFromCommand(peer, message, now) {
     state.phase = 'night'
     state.night += 1
     state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
+    synchronizeZombieEscapeNightParticipants(room)
   }
 
   state.revision += 1
@@ -764,6 +899,39 @@ function broadcastZombieEscapeState(roomId, state, now) {
     state: cloneZombieEscapeState(state),
     type: 'zombie-escape-state-updated',
   })
+}
+
+function reportZombieEscapeDeath(peer, message, now) {
+  const room = rooms.get(peer.roomId)
+  const state = room?.zombieEscapeState
+  if (
+    !room ||
+    !state ||
+    peer.gameMode !== 'zombie-escape' ||
+    state.phase !== 'night' ||
+    message.sessionId !== state.sessionId ||
+    message.night !== state.night ||
+    !room.zombieEscapeAlivePlayerIds.has(peer.id)
+  ) {
+    return false
+  }
+  room.zombieEscapeAlivePlayerIds.delete(peer.id)
+  room.zombieEscapeDeadPlayerIds.add(peer.id)
+  if (room.zombieEscapeAlivePlayerIds.size === 0) finishZombieEscapeNight(peer.roomId, room, now)
+  return true
+}
+
+function finishZombieEscapeNight(roomId, room, now) {
+  const state = room.zombieEscapeState
+  if (!state || state.phase !== 'night') return false
+  state.phase = 'build'
+  state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
+  state.revision += 1
+  room.zombieEscapeAlivePlayerIds.clear()
+  room.zombieEscapeDeadPlayerIds.clear()
+  scheduleZombieEscapeRoomTimer(roomId, room, now)
+  broadcastZombieEscapeState(roomId, state, now)
+  return true
 }
 
 function grantWriterSession({
@@ -928,6 +1096,16 @@ function leaveRoom(peer, announce, reason) {
 
   room.peers.delete(peer.id)
   const now = Date.now()
+  const removedAliveZombieParticipant =
+    room.zombieEscapeState?.phase === 'night' &&
+    peer.gameMode === 'zombie-escape' &&
+    room.zombieEscapeAlivePlayerIds.delete(peer.id)
+  if (removedAliveZombieParticipant) {
+    room.zombieEscapeDeadPlayerIds.add(peer.id)
+    if (room.zombieEscapeAlivePlayerIds.size === 0) {
+      finishZombieEscapeNight(peer.roomId, room, now)
+    }
+  }
   reconcileZombieEscapeRoomParticipants(peer.roomId, room, now)
   if (roomIsEmpty(room)) {
     clearZombieEscapeRoomState(room)
@@ -1050,6 +1228,158 @@ function claimParcel(peer, worldIdValue, parcelIdValue, now) {
   return { ok: true, ownership }
 }
 
+function getProfileWallet(profileId, now = Date.now()) {
+  let wallet = profileWalletByPlayer.get(profileId)
+  if (!wallet) {
+    wallet = {
+      balance: DEFAULT_PROFILE_MONEY,
+      profileId,
+      recentOperations: [],
+      revision: 0,
+      updatedAt: now,
+    }
+    profileWalletByPlayer.set(profileId, wallet)
+  }
+  return wallet
+}
+
+function profileWalletSnapshot(profileId, now = Date.now()) {
+  const wallet = getProfileWallet(profileId, now)
+  return {
+    balance: wallet.balance,
+    profileId: wallet.profileId,
+    revision: wallet.revision,
+    updatedAt: wallet.updatedAt,
+  }
+}
+
+function sendProfileMoneySnapshot(socket, profileId, now = Date.now()) {
+  send(socket, {
+    serverTime: now,
+    type: 'profile-money-snapshot',
+    wallet: profileWalletSnapshot(profileId, now),
+  })
+}
+
+function applyProfileMoneyOperation(peer, message, now) {
+  const operation = message.operation
+  const wallet = getProfileWallet(peer.id, now)
+  if (!isActiveWriterSession(peer, message.writerSessionId, message.writerEpoch)) {
+    return {
+      code: 'writer-session-superseded',
+      message: 'This profile-money writer session was superseded',
+      ok: false,
+      operationId: operation.operationId,
+      wallet: profileWalletSnapshot(peer.id, now),
+    }
+  }
+
+  const previous = wallet.recentOperations.find(
+    (candidate) => candidate.operationId === operation.operationId,
+  )
+  if (previous) {
+    if (!profileMoneyOperationMatches(previous, operation)) {
+      return {
+        code: 'profile-money-operation-reused',
+        message: 'Profile money operation ID was reused with different content',
+        ok: false,
+        operationId: operation.operationId,
+        wallet: profileWalletSnapshot(peer.id, now),
+      }
+    }
+    if (previous.result === 'applied') {
+      return {
+        duplicate: true,
+        ok: true,
+        operationId: operation.operationId,
+        wallet: profileWalletSnapshot(peer.id, now),
+      }
+    }
+    return {
+      code: previous.result,
+      message: profileMoneyRejectionMessage(previous.result),
+      ok: false,
+      operationId: operation.operationId,
+      wallet: profileWalletSnapshot(peer.id, now),
+    }
+  }
+
+  if (operation.baseRevision !== wallet.revision) {
+    return {
+      code: 'profile-money-conflict',
+      message: `Profile money revision changed from ${operation.baseRevision} to ${wallet.revision}`,
+      ok: false,
+      operationId: operation.operationId,
+      wallet: profileWalletSnapshot(peer.id, now),
+    }
+  }
+
+  const delta =
+    operation.kind === 'zombie-kill-reward' ? ZOMBIE_ESCAPE_KILL_REWARD : -operation.cost
+  if (delta < 0 && wallet.balance < -delta) {
+    recordProfileMoneyOperation(wallet, operation, 'insufficient-funds')
+    queuePersistentWorldStateWrite()
+    return {
+      code: 'insufficient-funds',
+      message: profileMoneyRejectionMessage('insufficient-funds'),
+      ok: false,
+      operationId: operation.operationId,
+      wallet: profileWalletSnapshot(peer.id, now),
+    }
+  }
+  if (delta > 0 && wallet.balance > MAX_PROFILE_MONEY - delta) {
+    recordProfileMoneyOperation(wallet, operation, 'profile-money-limit')
+    queuePersistentWorldStateWrite()
+    return {
+      code: 'profile-money-limit',
+      message: profileMoneyRejectionMessage('profile-money-limit'),
+      ok: false,
+      operationId: operation.operationId,
+      wallet: profileWalletSnapshot(peer.id, now),
+    }
+  }
+
+  wallet.balance += delta
+  wallet.revision += 1
+  wallet.updatedAt = now
+  recordProfileMoneyOperation(wallet, operation, 'applied')
+  queuePersistentWorldStateWrite()
+  return {
+    duplicate: false,
+    ok: true,
+    operationId: operation.operationId,
+    wallet: profileWalletSnapshot(peer.id, now),
+  }
+}
+
+function recordProfileMoneyOperation(wallet, operation, result) {
+  wallet.recentOperations.push({
+    ...(operation.kind === 'weapon-purchase' ? { cost: operation.cost } : {}),
+    kind: operation.kind,
+    operationId: operation.operationId,
+    result,
+  })
+  if (wallet.recentOperations.length > MAX_RECENT_PROFILE_MONEY_OPERATIONS) {
+    wallet.recentOperations.splice(
+      0,
+      wallet.recentOperations.length - MAX_RECENT_PROFILE_MONEY_OPERATIONS,
+    )
+  }
+}
+
+function profileMoneyOperationMatches(persisted, operation) {
+  return (
+    persisted.kind === operation.kind &&
+    (operation.kind !== 'weapon-purchase' || persisted.cost === operation.cost)
+  )
+}
+
+function profileMoneyRejectionMessage(code) {
+  if (code === 'insufficient-funds') return 'Not enough profile money'
+  if (code === 'profile-money-limit') return 'Profile money is already at its limit'
+  return 'Profile money operation was rejected'
+}
+
 function sendParcelOwnershipSnapshot(socket, roomId, worldId) {
   send(socket, {
     ownerships: parcelOwnershipSnapshot(worldId),
@@ -1128,7 +1458,12 @@ function syncParcelBuildNodes(peer, message, now) {
         ok: false,
       }
     }
-    return { build: currentBuild, duplicate: true, ok: true }
+    return {
+      build: currentBuild,
+      duplicate: true,
+      ok: true,
+      wallet: profileWalletSnapshot(peer.id, now),
+    }
   }
 
   const currentRevision = currentBuild?.revision ?? 0
@@ -1144,6 +1479,23 @@ function syncParcelBuildNodes(peer, message, now) {
     }
   }
 
+  const priced = calculateParcelBuildPriceDelta(currentBuild?.nodes ?? [], nodes.nodes)
+  if (!priced.ok) return priced
+  const wallet = getProfileWallet(peer.id, now)
+  if (wallet.balance < priced.cost) {
+    return {
+      build: currentBuild,
+      code: 'insufficient-build-funds',
+      cost: priced.cost,
+      message: `This build costs $${priced.cost}; profile balance is $${wallet.balance}`,
+      ok: false,
+      operationId,
+      parcelId,
+      wallet: profileWalletSnapshot(peer.id, now),
+      worldId,
+    }
+  }
+
   const build = {
     nodes: nodes.nodes,
     operationId,
@@ -1154,9 +1506,14 @@ function syncParcelBuildNodes(peer, message, now) {
     updatedBy: peer.id,
     worldId,
   }
+  if (priced.cost > 0) {
+    wallet.balance -= priced.cost
+    wallet.revision += 1
+    wallet.updatedAt = now
+  }
   builds.set(parcelId, build)
   queuePersistentWorldStateWrite()
-  return { build, ok: true }
+  return { build, cost: priced.cost, ok: true, wallet: profileWalletSnapshot(peer.id, now) }
 }
 
 function syncTvMediaState(peer, message, now) {
@@ -1293,12 +1650,13 @@ async function restorePersistentWorldState() {
   try {
     const snapshot = JSON.parse(encoded)
     if (
-      ![1, PERSISTENT_STATE_SCHEMA_VERSION].includes(snapshot?.schemaVersion) ||
+      ![1, 2, PERSISTENT_STATE_SCHEMA_VERSION].includes(snapshot?.schemaVersion) ||
       !Array.isArray(snapshot.worlds)
     ) {
       throw new Error('Unsupported local-save schema')
     }
-    const strictEnvelope = snapshot.schemaVersion === PERSISTENT_STATE_SCHEMA_VERSION
+    const strictEnvelope = snapshot.schemaVersion >= 2
+    const strictProfileEnvelope = snapshot.schemaVersion === PERSISTENT_STATE_SCHEMA_VERSION
     if (
       strictEnvelope &&
       (!Number.isSafeInteger(snapshot.savedAt) || snapshot.savedAt < 0)
@@ -1307,11 +1665,17 @@ async function restorePersistentWorldState() {
     }
     const needsCanonicalRewrite = persistentStateNeedsCanonicalRewrite(snapshot)
 
+    if (strictProfileEnvelope && !Array.isArray(snapshot.profileWallets)) {
+      throw new Error('Schema-3 local save has an invalid profile-wallet envelope')
+    }
+
     let buildCount = 0
     let ownershipCount = 0
+    let profileWalletCount = 0
     let tvCount = 0
     const restoredBuildsByWorld = new Map()
     const restoredOwnershipsByWorld = new Map()
+    const restoredProfileWallets = new Map()
     const restoredTvsByWorld = new Map()
     const worldIds = new Set()
     for (const candidate of snapshot.worlds) {
@@ -1372,9 +1736,22 @@ async function restorePersistentWorldState() {
       buildCount += builds.size
       tvCount += tvs.size
     }
+    for (const value of Array.isArray(snapshot.profileWallets) ? snapshot.profileWallets : []) {
+      const wallet = sanitizePersistentProfileWallet(value, strictProfileEnvelope)
+      if (!wallet) continue
+      if (restoredProfileWallets.has(wallet.profileId)) {
+        if (strictProfileEnvelope) {
+          throw new Error(`Schema-3 local save contains duplicate profile ${wallet.profileId}`)
+        }
+        continue
+      }
+      restoredProfileWallets.set(wallet.profileId, wallet)
+      profileWalletCount += 1
+    }
     parcelOwnershipByWorld.clear()
     parcelBuildNodesByWorld.clear()
     tvMediaStateByWorld.clear()
+    profileWalletByPlayer.clear()
     for (const [worldId, ownerships] of restoredOwnershipsByWorld) {
       parcelOwnershipByWorld.set(worldId, ownerships)
     }
@@ -1384,6 +1761,9 @@ async function restorePersistentWorldState() {
     for (const [worldId, tvs] of restoredTvsByWorld) {
       tvMediaStateByWorld.set(worldId, tvs)
     }
+    for (const [profileId, wallet] of restoredProfileWallets) {
+      profileWalletByPlayer.set(profileId, wallet)
+    }
     persistentStateStatus.backupAvailable = await ensurePersistentWorldStateBackup(encoded)
     persistentStateStatus.restored = true
     if (needsCanonicalRewrite) {
@@ -1391,7 +1771,7 @@ async function restorePersistentWorldState() {
       persistentStateStatus.migrated = true
     }
     console.log(
-      `Restored Landrush local save (${ownershipCount} parcels, ${buildCount} builds, ${tvCount} TVs)`,
+      `Restored Landrush local save (${ownershipCount} parcels, ${buildCount} builds, ${tvCount} TVs, ${profileWalletCount} profile wallets)`,
     )
   } catch (error) {
     persistentStateStatus.lastError = errorMessage(error)
@@ -1455,6 +1835,7 @@ function persistentStateHealth() {
     lastError: persistentStateStatus.lastError,
     migrated: persistentStateStatus.migrated,
     ownershipCount,
+    profileWalletCount: profileWalletByPlayer.size,
     restored: persistentStateStatus.restored,
     schemaVersion: PERSISTENT_STATE_SCHEMA_VERSION,
     tvCount,
@@ -1518,6 +1899,15 @@ function createPersistentWorldStateSnapshot() {
     ...tvMediaStateByWorld.keys(),
   ])
   return {
+    profileWallets: [...profileWalletByPlayer.values()]
+      .sort((first, second) => first.profileId.localeCompare(second.profileId))
+      .map((wallet) => ({
+        balance: wallet.balance,
+        profileId: wallet.profileId,
+        recentOperations: wallet.recentOperations.map((operation) => ({ ...operation })),
+        revision: wallet.revision,
+        updatedAt: wallet.updatedAt,
+      })),
     savedAt: Date.now(),
     schemaVersion: PERSISTENT_STATE_SCHEMA_VERSION,
     worlds: [...worldIds]
@@ -1541,6 +1931,81 @@ async function writePersistentWorldState(snapshot) {
   } catch (error) {
     await rm(temporaryFile, { force: true }).catch(() => undefined)
     throw error
+  }
+}
+
+function sanitizePersistentProfileWallet(value, strictEnvelope = false) {
+  const validResults = new Set(['applied', 'insufficient-funds', 'profile-money-limit'])
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    typeof value.profileId !== 'string' ||
+    !value.profileId.trim()
+  ) {
+    if (strictEnvelope) throw new Error('Schema-3 local save has an invalid profile wallet')
+    return null
+  }
+  const profileId = sanitizeText(value.profileId, '', 80)
+  const recentOperations = []
+  const seenOperationIds = new Set()
+  if (!Array.isArray(value.recentOperations)) {
+    if (strictEnvelope) throw new Error(`Schema-3 profile ${profileId} has invalid operations`)
+  } else {
+    if (strictEnvelope && value.recentOperations.length > MAX_RECENT_PROFILE_MONEY_OPERATIONS) {
+      throw new Error(`Schema-3 profile ${profileId} has too many recent operations`)
+    }
+    for (const candidate of value.recentOperations) {
+      const operationId = sanitizeParcelKey(candidate?.operationId, '', 120)
+      const validOperation =
+        candidate?.kind === 'zombie-kill-reward'
+          ? candidate.cost === undefined
+          : candidate?.kind === 'weapon-purchase' &&
+            Number.isSafeInteger(candidate.cost) &&
+            candidate.cost > 0 &&
+            candidate.cost <= MAX_PROFILE_MONEY
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        !operationId ||
+        candidate.operationId !== operationId ||
+        !validOperation ||
+        !validResults.has(candidate.result) ||
+        seenOperationIds.has(operationId)
+      ) {
+        if (strictEnvelope) {
+          throw new Error(`Schema-3 profile ${profileId} has an invalid recent operation`)
+        }
+        continue
+      }
+      seenOperationIds.add(operationId)
+      recentOperations.push({
+        ...(candidate.kind === 'weapon-purchase' ? { cost: candidate.cost } : {}),
+        kind: candidate.kind,
+        operationId,
+        result: candidate.result,
+      })
+    }
+  }
+  if (
+    profileId !== value.profileId ||
+    !Number.isSafeInteger(value.balance) ||
+    value.balance < 0 ||
+    value.balance > MAX_PROFILE_MONEY ||
+    !Number.isSafeInteger(value.revision) ||
+    value.revision < 0 ||
+    !Number.isSafeInteger(value.updatedAt) ||
+    value.updatedAt < 0
+  ) {
+    if (strictEnvelope) throw new Error(`Schema-3 profile ${profileId} has invalid money data`)
+    return null
+  }
+  return {
+    balance: value.balance,
+    profileId,
+    recentOperations: recentOperations.slice(-MAX_RECENT_PROFILE_MONEY_OPERATIONS),
+    revision: value.revision,
+    updatedAt: value.updatedAt,
   }
 }
 
@@ -1783,6 +2248,8 @@ function getRoom(roomId) {
     room = {
       peers: new Map(),
       watchers: new Set(),
+      zombieEscapeAlivePlayerIds: new Set(),
+      zombieEscapeDeadPlayerIds: new Set(),
       zombieEscapeState: null,
       zombieEscapeTimer: null,
     }
@@ -1844,6 +2311,8 @@ function parseClientMessage(data) {
     if (raw?.type === 'heartbeat') return raw
     if (raw?.type === 'leave') return raw
     if (raw?.type === 'watch') return raw
+    if (isApplyProfileMoneyOperationMessage(raw)) return raw
+    if (isReportZombieEscapeDeathMessage(raw)) return raw
     if (raw?.type === 'watch-parcels' && typeof raw.worldId === 'string') return raw
     if (
       raw?.type === 'voice-signal' &&

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { type AnyNode, type AnyNodeId, WallNode } from '@pascal-app/core'
+import { type AnyNode, type AnyNodeId, LevelNode, WallNode } from '@pascal-app/core'
 import {
   BoxGeometry,
   BufferGeometry,
   Float32BufferAttribute,
+  Group,
   Mesh,
   MeshBasicMaterial,
   type Object3D,
@@ -13,6 +14,8 @@ import {
   type LandrushIslandBuiltColliderReadiness,
   reconcileLandrushIslandBuiltColliderReadiness,
   resolveLandrushIslandBuiltCollidersReady,
+  resolveLandrushIslandColliderLevelPlacements,
+  withLandrushIslandColliderLevelPlacements,
 } from './landrush-island-collider-readiness'
 
 function checkWallReadiness({
@@ -60,6 +63,142 @@ describe('areLandrushWallColliderGeometriesReady', () => {
   test('does not block forever on a zero-length wall record', () => {
     const wall = WallNode.parse({ id: 'wall_zero', start: [1, 1], end: [1, 1] })
     expect(checkWallReadiness({ wall })).toBe(true)
+  })
+})
+
+describe('scoped level collider placements', () => {
+  const resolvePlacements = ({
+    levels,
+    roots,
+    stacks,
+  }: {
+    levels: readonly ReturnType<typeof LevelNode.parse>[]
+    roots: ReadonlyMap<AnyNodeId, Object3D>
+    stacks: readonly {
+      floors: readonly {
+        baseY: number
+        levelIds: readonly ReturnType<typeof LevelNode.parse>['id'][]
+      }[]
+    }[]
+  }) =>
+    resolveLandrushIslandColliderLevelPlacements({
+      nodes: Object.fromEntries(levels.map((level) => [level.id, level])) as Record<
+        string,
+        AnyNode
+      >,
+      resolveObject: (levelId) => roots.get(levelId),
+      stacks,
+    })
+
+  test('builds at the scoped 3.0 base Y and restores the live 2.5 presentation', () => {
+    const level = LevelNode.parse({ id: 'level_scoped_upper', level: 1 })
+    const root = new Group()
+    root.position.y = 2.5
+    root.visible = false
+    root.updateWorldMatrix(true, true)
+    const placements = resolvePlacements({
+      levels: [level],
+      roots: new Map([[level.id, root]]),
+      stacks: [{ floors: [{ baseY: 3, levelIds: [level.id] }] }],
+    })
+
+    expect(placements).not.toBeNull()
+    const result = withLandrushIslandColliderLevelPlacements(placements ?? [], () => {
+      expect(root.position.y).toBe(3)
+      expect(root.matrixWorld.elements[13]).toBe(3)
+      expect(root.visible).toBe(true)
+      return 'built'
+    })
+
+    expect(result).toBe('built')
+    expect(root.position.y).toBe(2.5)
+    expect(root.matrixWorld.elements[13]).toBe(2.5)
+    expect(root.visible).toBe(false)
+  })
+
+  test('resolves every ordinal level independently across multiple parcels', () => {
+    const parcelAGround = LevelNode.parse({ id: 'level_parcel_a_ground', level: 0 })
+    const parcelAUpper = LevelNode.parse({ id: 'level_parcel_a_upper', level: 1 })
+    const parcelBGround = LevelNode.parse({ id: 'level_parcel_b_ground', level: 0 })
+    const parcelBUpper = LevelNode.parse({ id: 'level_parcel_b_upper', level: 1 })
+    const levels = [parcelAGround, parcelAUpper, parcelBGround, parcelBUpper]
+    const roots = new Map(levels.map((level) => [level.id, new Group()] as const))
+    const placements = resolvePlacements({
+      levels,
+      roots,
+      stacks: [
+        {
+          floors: [
+            { baseY: 0, levelIds: [parcelAGround.id] },
+            { baseY: 3, levelIds: [parcelAUpper.id] },
+          ],
+        },
+        {
+          floors: [
+            { baseY: 0, levelIds: [parcelBGround.id] },
+            { baseY: 2.5, levelIds: [parcelBUpper.id] },
+          ],
+        },
+      ],
+    })
+
+    expect(placements?.map(({ baseY, levelId }) => [levelId, baseY])).toEqual(
+      [
+        [parcelAGround.id, 0],
+        [parcelAUpper.id, 3],
+        [parcelBGround.id, 0],
+        [parcelBUpper.id, 2.5],
+      ].sort(([first], [second]) => String(first).localeCompare(String(second))),
+    )
+  })
+
+  test('waits for a scoped level root that is not registered yet', () => {
+    const level = LevelNode.parse({ id: 'level_missing_root', level: 1 })
+    expect(
+      resolvePlacements({
+        levels: [level],
+        roots: new Map(),
+        stacks: [{ floors: [{ baseY: 3, levelIds: [level.id] }] }],
+      }),
+    ).toBeNull()
+  })
+
+  test('rejects conflicting base Y claims for one scoped level', () => {
+    const level = LevelNode.parse({ id: 'level_conflicting_scope', level: 1 })
+    expect(
+      resolvePlacements({
+        levels: [level],
+        roots: new Map([[level.id, new Group()]]),
+        stacks: [
+          { floors: [{ baseY: 2.5, levelIds: [level.id] }] },
+          { floors: [{ baseY: 3, levelIds: [level.id] }] },
+        ],
+      }),
+    ).toBeNull()
+  })
+
+  test('restores exact level transforms and visibility when the builder throws', () => {
+    const level = LevelNode.parse({ id: 'level_throw_restore', level: 1 })
+    const root = new Group()
+    root.position.y = 2.5
+    root.visible = false
+    root.updateWorldMatrix(true, true)
+    const placements = resolvePlacements({
+      levels: [level],
+      roots: new Map([[level.id, root]]),
+      stacks: [{ floors: [{ baseY: 3, levelIds: [level.id] }] }],
+    })
+
+    expect(() =>
+      withLandrushIslandColliderLevelPlacements(placements ?? [], () => {
+        root.position.y = 9
+        root.visible = true
+        throw new Error('builder failed')
+      }),
+    ).toThrow('builder failed')
+    expect(root.position.y).toBe(2.5)
+    expect(root.matrixWorld.elements[13]).toBe(2.5)
+    expect(root.visible).toBe(false)
   })
 })
 

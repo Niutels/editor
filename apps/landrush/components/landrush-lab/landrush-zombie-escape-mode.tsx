@@ -1,6 +1,6 @@
 'use client'
 
-import { renderScheduler } from '@landrush/runtime'
+import { type ProfileMoneyOperationRequest, renderScheduler } from '@landrush/runtime'
 import { useInteractive, useScene } from '@pascal-app/core'
 import { useFrame, useThree } from '@react-three/fiber'
 import {
@@ -42,12 +42,14 @@ import type {
 } from './landrush-island-material-presentation'
 import {
   LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+  LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
   LandrushIslandMaterialPresentationRenderReadiness,
 } from './landrush-island-material-presentation-readiness'
 import {
   createLandrushIslandPalmCollisionCircles,
   type LandrushIslandPalmPlacement,
 } from './landrush-island-palm-layout'
+import { createLandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
 import {
   createLandrushRobotWeaponCombatState,
   createLandrushRobotWeaponMuzzlePose,
@@ -77,7 +79,17 @@ import {
 } from './landrush-zombie-escape-collision-world-lifecycle'
 import { createBrowserLandrushZombieEscapeCollisionWorldWorkerCompiler } from './landrush-zombie-escape-collision-world-worker-client'
 import {
+  isLandrushZombieEscapeFirstHouseReady,
+  resolveLandrushZombieEscapeFirstHouseBuildSatisfied,
+  shouldRequestLandrushZombieEscapeClockInitialization,
+} from './landrush-zombie-escape-first-house'
+import {
+  publishLandrushZombieEscapeFirstHouseBuildGate,
+  releaseLandrushZombieEscapeFirstHouseBuildGate,
+} from './landrush-zombie-escape-first-house-build-gate'
+import {
   shouldShowLandrushZombieEscapeMoney,
+  shouldShowLandrushZombieEscapeNightInteractionHud,
   shouldShowLandrushZombieEscapeTouchControls,
 } from './landrush-zombie-escape-hud-visibility'
 import {
@@ -106,6 +118,13 @@ import {
   restartLandrushZombieEscapeIntegratedSimulation,
   stepLandrushZombieEscapeIntegratedSimulation,
 } from './landrush-zombie-escape-runtime'
+import {
+  applyLandrushZombieEscapeProfileMoneyOperations,
+  captureLandrushZombieEscapeEconomyCheckpoint,
+  hydrateLandrushZombieEscapeProfileMoney,
+  resolveLandrushZombieEscapeDeathAction,
+  shouldAttemptLandrushZombieEscapeDeathReport,
+} from './landrush-zombie-escape-session'
 import { LandrushZombieEscapeStructurePresentation } from './landrush-zombie-escape-structure-presentation'
 import {
   type LandrushZombieEscapeTouchInputKind,
@@ -151,6 +170,7 @@ import {
   restoreZombieEscapeDefaultMuzzlePose,
   setZombieEscapeCollisionWorld,
   setZombieEscapeExternalPlayerPose,
+  setZombieEscapeGamePhase,
   setZombieEscapeObstacleDamageEnabled,
   setZombieEscapePlayerMuzzlePose,
   setZombieEscapeWeaponPickupPlacements,
@@ -177,6 +197,7 @@ import type { ZombieEscapeArenaData } from './zombie-escape-world'
 const GENERATED_ASSET_AUTO_RETRY_DELAYS_MS = [650, 1_300] as const
 const LANDRUSH_ZOMBIE_ESCAPE_SURFACE_SUPPORT_ID = 'landrush-island:surface-boundary'
 const LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK_PROTECTED_HEALTH = 1_000_000_000
+export const LANDRUSH_ZOMBIE_ESCAPE_MAXIMUM_RECOVERY_SUBSTEPS = 2
 
 const LazyLandrushZombieNavigationOverlay = lazy(
   () => import('./landrush-zombie-navigation-overlay'),
@@ -305,6 +326,39 @@ export function shouldPublishLandrushZombieEscapeIntegratedDebugState(search: st
   return new URLSearchParams(search).get('bench') === '1'
 }
 
+export function accumulateLandrushZombieEscapeFrameTime(
+  accumulatorSeconds: number,
+  frameDeltaSeconds: number,
+) {
+  const fixedDeltaSeconds = ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
+  const maximumAccumulatorSeconds =
+    fixedDeltaSeconds * (LANDRUSH_ZOMBIE_ESCAPE_MAXIMUM_RECOVERY_SUBSTEPS + 1) - Number.EPSILON
+  return Math.min(
+    Math.max(0, accumulatorSeconds) + Math.max(0, frameDeltaSeconds),
+    maximumAccumulatorSeconds,
+  )
+}
+
+export function areLandrushZombieEscapeHudSnapshotsSemanticallyEqual(
+  first: ZombieEscapeHudSnapshot,
+  second: ZombieEscapeHudSnapshot,
+) {
+  const terminal = second.status !== 'playing'
+  return (
+    first.phase === second.phase &&
+    first.status === second.status &&
+    clampLandrushZombieEscapeHudHealth(first.health) ===
+      clampLandrushZombieEscapeHudHealth(second.health) &&
+    first.money === second.money &&
+    resolveLandrushZombieEscapeHudCountdown(first.phaseSecondsRemaining) ===
+      resolveLandrushZombieEscapeHudCountdown(second.phaseSecondsRemaining) &&
+    landrushZombieEscapePickupPromptsMatch(first.pickupPrompt, second.pickupPrompt) &&
+    (!terminal ||
+      (first.kills === second.kills &&
+        first.elapsedSeconds.toFixed(1) === second.elapsedSeconds.toFixed(1)))
+  )
+}
+
 export function isLandrushZombieEscapeNavigationScaleProofFixtureCaptureReady({
   buildReady,
   captureEnabled,
@@ -370,12 +424,16 @@ export type LandrushZombieEscapeModeProps = {
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
   ) => void
   onInteractionActionabilityChange: (actionable: boolean) => void
+  onNightTransitionStart: () => void
   onPhaseChange: (phase: ZombieEscapeGamePhase) => void
+  onProfileMoneyOperation?: (operation: ProfileMoneyOperationRequest) => number | null
   onResetExternalPlayerMotion: () => void
   onStatusChange: (status: ZombieEscapeGameStatus) => void
+  onZombieEscapeDeath?: () => boolean
   palmLayout: readonly LandrushIslandPalmPlacement[]
   phaseReady: boolean
   playerColor: string
+  profileMoneyBalance?: number
   spawn: Readonly<{ x: number; z: number }>
   surfacePoints: readonly Readonly<{ x: number; z: number }>[]
   zombieEscapeClockMode: LandrushZombieEscapeClockMode
@@ -1077,12 +1135,16 @@ export function LandrushZombieEscapeMode({
   onDestroyedFurnitureIdsChange,
   onGeneratedAssetsReadinessChange,
   onInteractionActionabilityChange,
+  onNightTransitionStart,
   onPhaseChange,
+  onProfileMoneyOperation,
   onResetExternalPlayerMotion,
   onStatusChange,
+  onZombieEscapeDeath,
   palmLayout,
   phaseReady,
   playerColor,
+  profileMoneyBalance,
   spawn,
   surfacePoints,
   zombieEscapeClockMode,
@@ -1092,7 +1154,7 @@ export function LandrushZombieEscapeMode({
   visualRootRef,
   zombieEscapeTouchInputRef,
 }: LandrushZombieEscapeModeProps) {
-  const { camera, clock, get, gl, setEvents, size } = useThree()
+  const { camera, get, gl, setEvents, size } = useThree()
   const renderReadinessCamera = useMemo(
     () => resolveLandrushZombieEscapeCamera(motionRef),
     [motionRef],
@@ -1168,6 +1230,10 @@ export function LandrushZombieEscapeMode({
       ),
     [sceneNodes, spawn],
   )
+  const firstHouseReady = useMemo(
+    () => isLandrushZombieEscapeFirstHouseReady(sceneNodes),
+    [sceneNodes],
+  )
   const collisionWorldInput = useMemo<LandrushZombieEscapeCollisionWorldInput>(
     () => ({
       agentRadius: ZOMBIE_ESCAPE_SIMULATION.zombieNavigationRadius,
@@ -1222,6 +1288,7 @@ export function LandrushZombieEscapeMode({
     const state = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED, undefined, {
       requireSparseNavigation: true,
     })
+    hydrateLandrushZombieEscapeProfileMoney(state, profileMoneyBalance)
     setZombieEscapeExternalPlayerPose(state, true)
     return state
   })
@@ -1232,6 +1299,7 @@ export function LandrushZombieEscapeMode({
       createZombieEscapeRenderReadinessRegistry([
         ...getZombieEscapeRenderRepresentativeKeys('balanced'),
         LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+        LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
       ]),
     [],
   )
@@ -1255,7 +1323,11 @@ export function LandrushZombieEscapeMode({
   const controlsRef = useRef(createZombieEscapeControlState())
   const accumulatorRef = useRef(0)
   const appliedRoomStateRef = useRef<LandrushZombieEscapeAppliedRoomState | null>(null)
+  const deathReportedRef = useRef(false)
+  const deathReportRetryAtRef = useRef(Number.NEGATIVE_INFINITY)
   const clockModeRef = useRef<LandrushZombieEscapeClockMode>(zombieEscapeClockMode)
+  const firstHouseBuildGateOwnerRef = useRef(Symbol('landrush-zombie-escape-first-house'))
+  const offlineFirstHouseBuiltRef = useRef(false)
   const initializedRoomStateKeyRef = useRef<string | null>(null)
   const phaseClockRef = useRef(createLandrushZombieEscapePhaseClock())
   const roomSoakStateRef = useRef<LandrushZombieEscapeRoomSoakState>(
@@ -1283,6 +1355,7 @@ export function LandrushZombieEscapeMode({
   const [snapshot, setSnapshot] = useState<ZombieEscapeHudSnapshot>(() =>
     createZombieEscapeHudSnapshot(simulation),
   )
+  const snapshotRef = useRef(snapshot)
   const [generatedAssetFailures, setGeneratedAssetFailures] = useState<
     readonly ZombieEscapeGeneratedAssetFailure[]
   >([])
@@ -1291,8 +1364,6 @@ export function LandrushZombieEscapeMode({
   const [generatedAssetsRetrying, setGeneratedAssetsRetrying] = useState(false)
   const [navigationOverlayEnabled, setNavigationOverlayEnabled] = useState(false)
   const snapshotAtRef = useRef(Number.NEGATIVE_INFINITY)
-  const debugAtRef = useRef(Number.NEGATIVE_INFINITY)
-  const frameMsRef = useRef(16.7)
   const publishedObstacleRevisionRef = useRef(simulation.obstacleRevision)
   const isCurrentCollisionWorldInstalled = useCallback(() => {
     const owner = collisionWorldBuildOwnerRef.current
@@ -1336,8 +1407,18 @@ export function LandrushZombieEscapeMode({
       phaseReady,
       state: collisionWorldBuildState,
     })
+  if (zombieEscapeClockMode === 'offline-local' && firstHouseReady) {
+    offlineFirstHouseBuiltRef.current = true
+  }
+  const firstHouseBuildSatisfied = resolveLandrushZombieEscapeFirstHouseBuildSatisfied({
+    clockMode: zombieEscapeClockMode,
+    offlineFirstHouseBuilt: offlineFirstHouseBuiltRef.current,
+    phaseEndsAt: zombieEscapeRoomStateObservation?.state.phaseEndsAt ?? null,
+  })
+  const waitingOnFirstHouse = expectedPhase === 'build' && !firstHouseBuildSatisfied
   const nightStartReady = phaseReady && desiredCollisionWorldReady && collisionWorldInstalled
   const sharedNightStartReady =
+    firstHouseBuildSatisfied &&
     nightStartReady &&
     (zombieEscapeClockMode === 'offline-local' ||
       (zombieEscapeClockMode === 'online-canonical' &&
@@ -1363,6 +1444,23 @@ export function LandrushZombieEscapeMode({
       shouldPublishLandrushZombieEscapeIntegratedDebugState(window.location.search),
     [],
   )
+  const integratedDebugSemanticStateRef = useRef({ expectedPhase, phaseReady: runtimePhaseReady })
+  integratedDebugSemanticStateRef.current.expectedPhase = expectedPhase
+  integratedDebugSemanticStateRef.current.phaseReady = runtimePhaseReady
+
+  useLayoutEffect(() => {
+    publishLandrushZombieEscapeFirstHouseBuildGate(
+      firstHouseBuildGateOwnerRef.current,
+      waitingOnFirstHouse,
+    )
+  }, [waitingOnFirstHouse])
+
+  useLayoutEffect(
+    () => () => {
+      releaseLandrushZombieEscapeFirstHouseBuildGate(firstHouseBuildGateOwnerRef.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (shouldEnableLandrushZombieNavigationOverlay(window.location.search)) {
@@ -1383,11 +1481,13 @@ export function LandrushZombieEscapeMode({
 
   useEffect(() => {
     if (
-      zombieEscapeClockMode !== 'online-canonical' ||
-      !nightStartReady ||
-      !zombieEscapeRoomStateObservation ||
-      zombieEscapeRoomStateObservation.state.phase !== 'build' ||
-      zombieEscapeRoomStateObservation.state.phaseEndsAt !== null
+      !shouldRequestLandrushZombieEscapeClockInitialization({
+        clockMode: zombieEscapeClockMode,
+        nightStartReady,
+        phase: zombieEscapeRoomStateObservation?.state.phase ?? null,
+        phaseEndsAt: zombieEscapeRoomStateObservation?.state.phaseEndsAt ?? null,
+      }) ||
+      !zombieEscapeRoomStateObservation
     ) {
       return
     }
@@ -1529,6 +1629,40 @@ export function LandrushZombieEscapeMode({
       simulation,
       spawn,
     ])
+
+  useEffect(() => {
+    if (!integratedDebugPublicationEnabled) return
+    const bridge = createLandrushZombieEscapeIntegratedDebugBridge({
+      arena,
+      groundY,
+      navigationScaleProofFixtureCapture: navigationScaleProofFixtureCaptureEnabled
+        ? captureNavigationScaleProofFixture
+        : null,
+      navigationScaleProofRunner: navigationScaleProofEnabled ? runNavigationScaleProof : null,
+      readExpectedPhase: () => integratedDebugSemanticStateRef.current.expectedPhase,
+      readMuzzlePose: () => muzzlePoseRef.current,
+      readPhaseReady: () => integratedDebugSemanticStateRef.current.phaseReady,
+      roomSoakState: roomSoakStateRef.current,
+      simulation,
+      spawn,
+    })
+    window.__LANDRUSH_ZOMBIE_ESCAPE__ = bridge
+    return () => {
+      if (window.__LANDRUSH_ZOMBIE_ESCAPE__ === bridge) {
+        delete window.__LANDRUSH_ZOMBIE_ESCAPE__
+      }
+    }
+  }, [
+    arena,
+    captureNavigationScaleProofFixture,
+    groundY,
+    integratedDebugPublicationEnabled,
+    navigationScaleProofEnabled,
+    navigationScaleProofFixtureCaptureEnabled,
+    runNavigationScaleProof,
+    simulation,
+    spawn,
+  ])
 
   useEffect(
     () => () => {
@@ -1782,15 +1916,19 @@ export function LandrushZombieEscapeMode({
   }, [onDestroyedFurnitureIdsChange, simulation])
 
   const publishSnapshot = useCallback(() => {
-    setSnapshot(
-      createZombieEscapeHudSnapshot(
-        simulation,
-        gl.info.render.calls,
-        gl.info.render.triangles,
-        frameMsRef.current,
-      ),
-    )
-  }, [gl, simulation])
+    const next = createZombieEscapeHudSnapshot(simulation)
+    const previous = snapshotRef.current
+    if (areLandrushZombieEscapeHudSnapshotsSemanticallyEqual(previous, next)) return
+    if (previous.phase !== next.phase) onPhaseChange(next.phase)
+    if (previous.status !== next.status) onStatusChange(next.status)
+    snapshotRef.current = next
+    setSnapshot(next)
+  }, [onPhaseChange, onStatusChange, simulation])
+
+  useEffect(() => {
+    if (!hydrateLandrushZombieEscapeProfileMoney(simulation, profileMoneyBalance)) return
+    publishSnapshot()
+  }, [profileMoneyBalance, publishSnapshot, simulation])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -1819,23 +1957,12 @@ export function LandrushZombieEscapeMode({
   }, [simulation])
 
   const runAgain = useCallback(() => {
-    if (zombieEscapeClockMode === 'online-waiting') return
+    if (zombieEscapeClockMode !== 'offline-local') return
     restartLandrushZombieEscapeIntegratedSimulation({
       arena,
       resetExternalPlayerMotion: onResetExternalPlayerMotion,
       simulation,
     })
-    if (zombieEscapeClockMode === 'online-canonical' && zombieEscapeRoomStateObservation) {
-      const reconciliation = applyLandrushZombieEscapeRoomState({
-        appliedState: appliedRoomStateRef.current,
-        force: true,
-        nowMs: performance.now(),
-        observation: zombieEscapeRoomStateObservation,
-        simulation,
-      })
-      appliedRoomStateRef.current = reconciliation.appliedState
-      phaseClockRef.current.authorityNowSeconds = clock.elapsedTime
-    }
     onStatusChange(simulation.status)
     accumulatorRef.current = 0
     const controls = controlsRef.current
@@ -1856,14 +1983,12 @@ export function LandrushZombieEscapeMode({
     renderScheduler.requestFrame('animation')
   }, [
     arena,
-    clock,
     onResetExternalPlayerMotion,
     onStatusChange,
     publishDestroyedFurnitureIds,
     publishSnapshot,
     simulation,
     zombieEscapeClockMode,
-    zombieEscapeRoomStateObservation,
     zombieEscapeTouchInputRef,
   ])
 
@@ -1878,26 +2003,31 @@ export function LandrushZombieEscapeMode({
       ) {
         return
       }
+      onNightTransitionStart()
       renderScheduler.requestFrame('animation')
       return
     }
     if (
       !requestLandrushZombieEscapeNightStart({
         expectedPhase,
-        phaseReady: nightStartReady && isCurrentCollisionWorldInstalled(),
+        phaseReady:
+          firstHouseBuildSatisfied && nightStartReady && isCurrentCollisionWorldInstalled(),
         simulation,
       })
     ) {
       return
     }
+    onNightTransitionStart()
     accumulatorRef.current = 0
     publishDestroyedFurnitureIds()
     publishSnapshot()
     renderScheduler.requestFrame('animation')
   }, [
     expectedPhase,
+    firstHouseBuildSatisfied,
     isCurrentCollisionWorldInstalled,
     nightStartReady,
+    onNightTransitionStart,
     publishDestroyedFurnitureIds,
     publishSnapshot,
     simulation,
@@ -2121,7 +2251,6 @@ export function LandrushZombieEscapeMode({
     controls.qualityPressed = false
     controls.resetPressed = false
 
-    syncIntegratedPlayerPose(simulation, motion, groundY, spawn)
     if (aimStrength > 0.001) simulation.player.aimAngle = Math.atan2(aimX, aimZ)
     combatHeadingRef.current = simulation.player.aimAngle
     combatStateRef.current.aimAngle = simulation.player.aimAngle
@@ -2136,7 +2265,6 @@ export function LandrushZombieEscapeMode({
     const frameRuntimePhaseReady = runtimePhaseReady && installed
     const frameInteractionActionable = interactionActionable && installed
     const motion = motionRef.current
-    if (motion) syncIntegratedPlayerPose(simulation, motion, groundY, spawn)
     if (clockModeRef.current !== zombieEscapeClockMode) {
       clockModeRef.current = zombieEscapeClockMode
       phaseClockRef.current.authorityNowSeconds = state.clock.elapsedTime
@@ -2151,6 +2279,10 @@ export function LandrushZombieEscapeMode({
       })
       appliedRoomStateRef.current = reconciliation.appliedState
       phaseClockRef.current.authorityNowSeconds = state.clock.elapsedTime
+      if (zombieEscapeRoomStateObservation.state.phase === 'build') {
+        deathReportedRef.current = false
+        deathReportRetryAtRef.current = Number.NEGATIVE_INFINITY
+      }
       if (reconciliation.destructiveTransition) accumulatorRef.current = 0
       if (reconciliation.semanticStateChanged) {
         publishDestroyedFurnitureIds()
@@ -2163,7 +2295,9 @@ export function LandrushZombieEscapeMode({
         clock: phaseClockRef.current,
         expectedPhase,
         phaseReady:
-          (simulation.phase === 'build' ? nightStartReady && installed : frameRuntimePhaseReady) &&
+          (simulation.phase === 'build'
+            ? firstHouseBuildSatisfied && nightStartReady && installed
+            : frameRuntimePhaseReady) &&
           motion !== null &&
           !roomSoakStateRef.current.active,
         simulation,
@@ -2171,13 +2305,28 @@ export function LandrushZombieEscapeMode({
     } else {
       phaseClockRef.current.authorityNowSeconds = state.clock.elapsedTime
     }
+    const attemptDeathReport = () => {
+      if (
+        !shouldAttemptLandrushZombieEscapeDeathReport({
+          clockMode: zombieEscapeClockMode,
+          nextAttemptAtSeconds: deathReportRetryAtRef.current,
+          nowSeconds: state.clock.elapsedTime,
+          reported: deathReportedRef.current,
+          status: simulation.status,
+        })
+      ) {
+        return
+      }
+      deathReportRetryAtRef.current = state.clock.elapsedTime + 1
+      if (onZombieEscapeDeath?.() === true) deathReportedRef.current = true
+    }
+    attemptDeathReport()
     if (!motion) return
 
     const frameDelta = Math.min(
       ZOMBIE_ESCAPE_SIMULATION.maximumFrameDeltaSeconds,
       Math.max(0, delta),
     )
-    frameMsRef.current += (frameDelta * 1000 - frameMsRef.current) * 0.08
     const controls = controlsRef.current
     const phaseCanAdvance =
       (zombieEscapeClockMode === 'offline-local' ||
@@ -2233,16 +2382,18 @@ export function LandrushZombieEscapeMode({
       fireMouseRef.current = false
       interactPulseRef.current = false
     } else if (!simulation.paused && simulation.status === 'playing') {
-      accumulatorRef.current = Math.min(
-        accumulatorRef.current + frameDelta,
-        ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds * ZOMBIE_ESCAPE_SIMULATION.maximumSubsteps,
+      accumulatorRef.current = accumulateLandrushZombieEscapeFrameTime(
+        accumulatorRef.current,
+        frameDelta,
       )
       let substeps = 0
       while (
         accumulatorRef.current >= ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds &&
-        substeps < ZOMBIE_ESCAPE_SIMULATION.maximumSubsteps
+        substeps < LANDRUSH_ZOMBIE_ESCAPE_MAXIMUM_RECOVERY_SUBSTEPS
       ) {
-        syncIntegratedPlayerPose(simulation, motion, groundY, spawn)
+        const economyCheckpoint = onProfileMoneyOperation
+          ? captureLandrushZombieEscapeEconomyCheckpoint(simulation)
+          : null
         const outcome = stepLandrushZombieEscapeIntegratedSimulation({
           arena,
           deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
@@ -2251,11 +2402,29 @@ export function LandrushZombieEscapeMode({
           phaseReady: frameRuntimePhaseReady,
           simulation,
         })
+        if (economyCheckpoint) {
+          applyLandrushZombieEscapeProfileMoneyOperations({
+            checkpoint: economyCheckpoint,
+            onOperation: onProfileMoneyOperation,
+            simulation,
+          })
+        }
         controls.interactPressed = false
         interactPulseRef.current = false
         publishDestroyedFurnitureIds()
         if (outcome.terminal || outcome.phaseChanged) {
-          if (outcome.terminal) onStatusChange(simulation.status)
+          if (outcome.terminal) {
+            const deathAction = resolveLandrushZombieEscapeDeathAction({
+              clockMode: zombieEscapeClockMode,
+              status: simulation.status,
+            })
+            if (deathAction === 'enter-build') {
+              setZombieEscapeGamePhase(simulation, 'build')
+            } else if (deathAction === 'report-death') {
+              attemptDeathReport()
+            }
+            onStatusChange(simulation.status)
+          }
           accumulatorRef.current = 0
           controls.fire = false
           controls.interactPressed = false
@@ -2266,7 +2435,6 @@ export function LandrushZombieEscapeMode({
           publishSnapshot()
           break
         }
-        syncIntegratedPlayerPose(simulation, motion, groundY, spawn)
         accumulatorRef.current -= ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
         substeps += 1
       }
@@ -2283,23 +2451,6 @@ export function LandrushZombieEscapeMode({
     if (state.clock.elapsedTime - snapshotAtRef.current >= 0.1) {
       snapshotAtRef.current = state.clock.elapsedTime
       publishSnapshot()
-    }
-    if (integratedDebugPublicationEnabled && state.clock.elapsedTime - debugAtRef.current >= 0.25) {
-      debugAtRef.current = state.clock.elapsedTime
-      publishIntegratedDebugState({
-        arena,
-        expectedPhase,
-        groundY,
-        muzzlePose: muzzlePoseRef.current,
-        navigationScaleProofFixtureCapture: navigationScaleProofFixtureCaptureEnabled
-          ? captureNavigationScaleProofFixture
-          : null,
-        navigationScaleProofRunner: navigationScaleProofEnabled ? runNavigationScaleProof : null,
-        phaseReady: frameRuntimePhaseReady,
-        roomSoakState: roomSoakStateRef.current,
-        simulation,
-        spawn,
-      })
     }
     renderScheduler.requestFrame('animation')
   }, LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.simulation)
@@ -2339,11 +2490,13 @@ export function LandrushZombieEscapeMode({
         onInput={handleTouchInput}
         onRetryGeneratedAssets={retryGeneratedAssets}
         onRunAgain={runAgain}
+        runAgainAvailable={zombieEscapeClockMode === 'offline-local'}
         onStartZombie={startZombie}
         ownerDocument={gl.domElement.ownerDocument}
         nightStartReady={sharedNightStartReady}
         phaseReady={interactionActionable}
         snapshot={snapshot}
+        waitingOnHouse={waitingOnFirstHouse}
         zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
       />
     </>
@@ -2397,6 +2550,7 @@ const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePrese
   visualRootRef,
   zombieMaterialPhaseActive,
 }: LandrushZombieEscapePresentationProps) {
+  const shoulderTorchLightingStateRef = useRef(createLandrushRobotShoulderTorchLightingState())
   return (
     <>
       <LandrushIslandMaterialPresentationRenderReadiness
@@ -2407,6 +2561,7 @@ const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePrese
       />
       <group position={[spawn.x, groundY, spawn.z]} visible={active}>
         <ZombieEscapeActors
+          detailedZombies={false}
           impactVisualRegistry={impactVisualRegistry}
           onGeneratedAssetsFailureChange={onGeneratedAssetsFailureChange}
           onGeneratedAssetsReadinessChange={onGeneratedAssetsReadinessChange}
@@ -2417,6 +2572,7 @@ const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePrese
           renderReadinessRegistry={renderReadinessRegistry}
           renderPlayer={false}
           retryGeneratedAssetsGeneration={generatedAssetRetryGeneration}
+          shoulderTorchLightingStateRef={shoulderTorchLightingStateRef}
           simulationRef={simulationRef}
           zombieMaterialPhaseActive={zombieMaterialPhaseActive}
         />
@@ -2453,6 +2609,7 @@ const LandrushZombieEscapePresentation = memo(function LandrushZombieEscapePrese
           framePriority={LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER.weapon}
           muzzlePoseRef={muzzlePoseRef}
           renderReadinessRegistry={renderReadinessRegistry}
+          shoulderTorchLightingStateRef={shoulderTorchLightingStateRef}
           visualRootRef={visualRootRef}
         />
       </Suspense>
@@ -2474,15 +2631,19 @@ type LandrushZombieEscapeHudProps = {
   ownerDocument: Document
   nightStartReady: boolean
   phaseReady: boolean
+  runAgainAvailable: boolean
   snapshot: ZombieEscapeHudSnapshot
+  waitingOnHouse: boolean
   zombieEscapeTouchInputRef: MutableRefObject<LandrushZombieEscapeTouchInputState>
 }
 
 export function resolveLandrushZombieEscapeControllerCommands({
   pickupAvailable,
+  runAgainAvailable = true,
   terminal,
 }: {
   pickupAvailable: boolean
+  runAgainAvailable?: boolean
   terminal: boolean
 }): LandrushControllerCommands {
   return {
@@ -2490,7 +2651,7 @@ export function resolveLandrushZombieEscapeControllerCommands({
     l2: { label: 'Crouch' },
     r2: { label: 'Attack' },
     square: { label: pickupAvailable ? 'Buy' : 'Interact' },
-    ...(terminal ? { triangle: { label: 'Run again' } } : {}),
+    ...(terminal && runAgainAvailable ? { triangle: { label: 'Run again' } } : {}),
   }
 }
 
@@ -2508,7 +2669,9 @@ function LandrushZombieEscapeHudPortal({
   ownerDocument,
   nightStartReady,
   phaseReady,
+  runAgainAvailable,
   snapshot,
+  waitingOnHouse,
   zombieEscapeTouchInputRef,
 }: LandrushZombieEscapeHudProps) {
   const ownerRef = useRef(Symbol('landrush-zombie-escape-hud'))
@@ -2576,7 +2739,9 @@ function LandrushZombieEscapeHudPortal({
         ownerDocument={ownerDocument}
         nightStartReady={nightStartReady}
         phaseReady={phaseReady}
+        runAgainAvailable={runAgainAvailable}
         snapshot={snapshot}
+        waitingOnHouse={waitingOnHouse}
         zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
       />,
     )
@@ -2594,7 +2759,9 @@ function LandrushZombieEscapeHudPortal({
     ownerDocument,
     nightStartReady,
     phaseReady,
+    runAgainAvailable,
     snapshot,
+    waitingOnHouse,
     zombieEscapeTouchInputRef,
   ])
 
@@ -2615,14 +2782,21 @@ function LandrushZombieEscapeHud({
   ownerDocument,
   nightStartReady,
   phaseReady,
+  runAgainAvailable,
   snapshot,
+  waitingOnHouse,
   zombieEscapeTouchInputRef,
 }: LandrushZombieEscapeHudProps) {
   const phase = snapshot.phase === 'night' ? 'night' : 'build'
   const phaseSecondsRemaining = Number.isFinite(snapshot.phaseSecondsRemaining)
     ? Math.max(0, snapshot.phaseSecondsRemaining)
     : 0
-  const pickupPrompt = snapshot.pickupPrompt
+  const nightInteractionHudVisible = shouldShowLandrushZombieEscapeNightInteractionHud({
+    actualPhase: snapshot.phase,
+    expectedPhase,
+    phaseReady,
+  })
+  const pickupPrompt = nightInteractionHudVisible ? snapshot.pickupPrompt : null
   const health = Math.max(0, Math.min(100, snapshot.health))
   const terminal = snapshot.status !== 'playing'
   const recovery = resolveLandrushZombieEscapeRecoveryPresentation({
@@ -2633,6 +2807,7 @@ function LandrushZombieEscapeHud({
   })
   const controllerCommands = resolveLandrushZombieEscapeControllerCommands({
     pickupAvailable: pickupPrompt !== null,
+    runAgainAvailable,
     terminal,
   })
   const moneyVisible = shouldShowLandrushZombieEscapeMoney({
@@ -2656,6 +2831,7 @@ function LandrushZombieEscapeHud({
       data-expected-phase={expectedPhase}
       data-integrated-landrush-world="true"
       data-night-start-ready={nightStartReady ? 'true' : 'false'}
+      data-waiting-on-house={waitingOnHouse ? 'true' : 'false'}
       data-phase={phase}
       data-phase-ready={phaseReady ? 'true' : 'false'}
       data-phase-seconds-remaining={Math.ceil(phaseSecondsRemaining)}
@@ -2671,7 +2847,7 @@ function LandrushZombieEscapeHud({
       {moneyVisible ? (
         <ZombieEscapeMoneyBadge className="absolute top-4 left-4" money={snapshot.money} />
       ) : null}
-      {phase === 'night' && inputMode === 'gamepad' ? (
+      {nightInteractionHudVisible && inputMode === 'gamepad' ? (
         <LandrushControllerCommandHud
           className="absolute top-14 right-3 z-30 md:top-[18vh] md:right-5"
           commands={controllerCommands}
@@ -2683,6 +2859,7 @@ function LandrushZombieEscapeHud({
           disabled={!nightStartReady || expectedPhase !== 'build' || terminal}
           onStartZombie={onStartZombie}
           phaseSecondsRemaining={phaseSecondsRemaining}
+          waitingOnHouse={waitingOnHouse}
         />
       ) : (
         <div
@@ -2757,14 +2934,23 @@ function LandrushZombieEscapeHud({
             <p className="mt-3 text-sm text-white/65">
               Seeded run · {snapshot.kills} zombies cleared · {snapshot.elapsedSeconds.toFixed(1)}s
             </p>
-            <button
-              className="mt-6 rounded-xl border border-white/18 bg-white/10 px-4 py-2 font-semibold text-sm text-white transition hover:border-white/35 hover:bg-white/16"
-              data-testid="landrush-zombie-escape-run-again"
-              onClick={onRunAgain}
-              type="button"
-            >
-              {inputMode === 'gamepad' ? '△ / Y Run again' : 'Run again'}
-            </button>
+            {runAgainAvailable ? (
+              <button
+                className="mt-6 rounded-xl border border-white/18 bg-white/10 px-4 py-2 font-semibold text-sm text-white transition hover:border-white/35 hover:bg-white/16"
+                data-testid="landrush-zombie-escape-run-again"
+                onClick={onRunAgain}
+                type="button"
+              >
+                {inputMode === 'gamepad' ? '△ / Y Run again' : 'Run again'}
+              </button>
+            ) : (
+              <p
+                className="mt-6 font-semibold text-sm text-amber-100/90"
+                data-testid="landrush-zombie-escape-waiting-for-survivors"
+              >
+                Waiting for survivors…
+              </p>
+            )}
           </section>
         </div>
       ) : null}
@@ -2797,30 +2983,38 @@ export function LandrushZombieEscapeDayCountdown({
   disabled,
   onStartZombie,
   phaseSecondsRemaining,
+  waitingOnHouse = false,
 }: {
   disabled: boolean
   onStartZombie: () => void
   phaseSecondsRemaining: number
+  waitingOnHouse?: boolean
 }) {
   return (
     <button
-      aria-label="Start zombie"
+      aria-label={waitingOnHouse ? 'Waiting on house' : 'Start zombie'}
       className="group pointer-events-auto absolute top-4 left-1/2 grid min-w-[7rem] -translate-x-1/2 place-items-center overflow-hidden rounded-full border border-white/15 bg-slate-950/58 px-3 py-1.5 font-medium text-[11px] text-white/90 shadow-lg backdrop-blur-md transition-[border-color,background-color,box-shadow] duration-200 enabled:cursor-pointer enabled:hover:border-amber-200/45 enabled:hover:bg-slate-950/72 enabled:hover:shadow-xl focus-visible:border-amber-200/55 focus-visible:bg-slate-950/72 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200/45 disabled:cursor-wait disabled:opacity-60"
       data-testid="landrush-zombie-escape-build-countdown"
-      disabled={disabled}
+      disabled={disabled || waitingOnHouse}
       onClick={onStartZombie}
-      title="Start zombie"
+      title={waitingOnHouse ? 'Waiting on house' : 'Start zombie'}
       type="button"
     >
-      <span className="col-start-1 row-start-1 whitespace-nowrap transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0">
-        Day · {formatZombieEscapePhaseTime(phaseSecondsRemaining)}
-      </span>
-      <span
-        aria-hidden="true"
-        className="col-start-1 row-start-1 whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-      >
-        Start zombie
-      </span>
+      {waitingOnHouse ? (
+        <span className="col-start-1 row-start-1 whitespace-nowrap">Waiting on house</span>
+      ) : (
+        <>
+          <span className="col-start-1 row-start-1 whitespace-nowrap transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0">
+            Day · {formatZombieEscapePhaseTime(phaseSecondsRemaining)}
+          </span>
+          <span
+            aria-hidden="true"
+            className="col-start-1 row-start-1 whitespace-nowrap opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            Start zombie
+          </span>
+        </>
+      )}
     </button>
   )
 }
@@ -2833,6 +3027,29 @@ function generatedAssetFailuresMatch(
   return first.every(
     (failure, index) =>
       failure.key === second[index]?.key && failure.message === second[index]?.message,
+  )
+}
+
+function clampLandrushZombieEscapeHudHealth(health: number) {
+  return Math.max(0, Math.min(100, health))
+}
+
+function resolveLandrushZombieEscapeHudCountdown(seconds: number) {
+  return Math.ceil(Number.isFinite(seconds) ? Math.max(0, seconds) : 0)
+}
+
+function landrushZombieEscapePickupPromptsMatch(
+  first: ZombieEscapePickupPrompt | null,
+  second: ZombieEscapePickupPrompt | null,
+) {
+  return (
+    first === second ||
+    (first !== null &&
+      second !== null &&
+      first.affordable === second.affordable &&
+      first.cost === second.cost &&
+      first.displayName === second.displayName &&
+      first.weaponIndex === second.weaponIndex)
   )
 }
 
@@ -2858,129 +3075,159 @@ function syncIntegratedPlayerPose(
   simulation.player.runBlend = motion.runRequested ? 1 : 0
 }
 
-function publishIntegratedDebugState({
+export function createLandrushZombieEscapeIntegratedDebugBridge({
   arena,
-  expectedPhase,
   groundY,
-  muzzlePose,
   navigationScaleProofFixtureCapture,
   navigationScaleProofRunner,
-  phaseReady,
+  readExpectedPhase,
+  readMuzzlePose,
+  readPhaseReady,
   roomSoakState,
   simulation,
   spawn,
 }: {
   arena: ZombieEscapeArenaData
-  expectedPhase: ZombieEscapeGamePhase
   groundY: number
-  muzzlePose: ReturnType<typeof createLandrushRobotWeaponMuzzlePose>
   navigationScaleProofFixtureCapture: LandrushZombieEscapeNavigationScaleProofFixtureCaptureRunner | null
   navigationScaleProofRunner: LandrushZombieEscapeNavigationScaleProofRunner | null
-  phaseReady: boolean
+  readExpectedPhase: () => ZombieEscapeGamePhase
+  readMuzzlePose: () => ReturnType<typeof createLandrushRobotWeaponMuzzlePose>
+  readPhaseReady: () => boolean
   roomSoakState: LandrushZombieEscapeRoomSoakState
   simulation: ZombieEscapeSimulation
   spawn: Readonly<{ x: number; z: number }>
 }) {
-  let reactingEnemies = 0
-  for (let slot = 0; slot < simulation.zombies.pool.capacity; slot += 1) {
-    if (
-      simulation.zombies.pool.active[slot] !== 0 &&
-      (simulation.zombies.hitFlash[slot]! > 0 || simulation.zombies.hitReaction[slot]! > 0)
-    ) {
-      reactingEnemies += 1
-    }
-  }
-  const lastShotSlot = simulation.lastShotSlot
-  const lastShot =
-    lastShotSlot >= 0 &&
-    simulation.shots.pool.generation[lastShotSlot] === simulation.lastShotGeneration
-      ? {
-          currentWorld: [
-            simulation.shots.x[lastShotSlot]! + spawn.x,
-            simulation.shots.y[lastShotSlot]! + groundY,
-            simulation.shots.z[lastShotSlot]! + spawn.z,
-          ],
-          generation: simulation.lastShotGeneration,
-          hitWorld: [
-            simulation.shots.hitX[lastShotSlot]! + spawn.x,
-            simulation.shots.hitY[lastShotSlot]! + groundY,
-            simulation.shots.hitZ[lastShotSlot]! + spawn.z,
-          ],
-          impactKind: simulation.shots.impactKind[lastShotSlot],
-          originWorld: [
-            simulation.shots.originX[lastShotSlot]! + spawn.x,
-            simulation.shots.originY[lastShotSlot]! + groundY,
-            simulation.shots.originZ[lastShotSlot]! + spawn.z,
-          ],
-          phase: simulation.shots.phase[lastShotSlot],
-          slot: lastShotSlot,
-        }
-      : null
-  window.__LANDRUSH_ZOMBIE_ESCAPE__ = {
+  const bridge: Record<string, unknown> = {
     actualAvatar: '/navigation/proto_pascal_robot.glb',
     arena: { playRadius: arena.playRadius, worldOrigin: [spawn.x, groundY, spawn.z] },
-    benchmarkRoomSoak: readLandrushZombieEscapeRoomSoakSnapshot(roomSoakState, simulation),
     frameOrder: LANDRUSH_ZOMBIE_ESCAPE_FRAME_ORDER,
     integratedIntoExistingCanvas: true,
-    economy: {
-      ammo: simulation.player.ammo,
-      money: simulation.money,
-      weaponPickupRespawnAtSeconds: Array.from(simulation.weaponPickupRespawnAtSeconds),
-      weaponPurchaseCount: simulation.weaponPurchaseCount,
+    get benchmarkRoomSoak() {
+      return readLandrushZombieEscapeRoomSoakSnapshot(roomSoakState, simulation)
     },
-    expectedPhase,
-    lastShot,
-    muzzle: muzzlePose.ready
-      ? {
-          direction: muzzlePose.direction.toArray(),
-          position: muzzlePose.position.toArray(),
-          ready: true,
+    get economy() {
+      return {
+        ammo: simulation.player.ammo,
+        money: simulation.money,
+        weaponPickupRespawnAtSeconds: Array.from(simulation.weaponPickupRespawnAtSeconds),
+        weaponPurchaseCount: simulation.weaponPurchaseCount,
+      }
+    },
+    get elapsedSeconds() {
+      return simulation.elapsedSeconds
+    },
+    get expectedPhase() {
+      return readExpectedPhase()
+    },
+    get lastShot() {
+      const slot = simulation.lastShotSlot
+      if (slot < 0 || simulation.shots.pool.generation[slot] !== simulation.lastShotGeneration) {
+        return null
+      }
+      return {
+        currentWorld: [
+          simulation.shots.x[slot]! + spawn.x,
+          simulation.shots.y[slot]! + groundY,
+          simulation.shots.z[slot]! + spawn.z,
+        ],
+        generation: simulation.lastShotGeneration,
+        hitWorld: [
+          simulation.shots.hitX[slot]! + spawn.x,
+          simulation.shots.hitY[slot]! + groundY,
+          simulation.shots.hitZ[slot]! + spawn.z,
+        ],
+        impactKind: simulation.shots.impactKind[slot],
+        originWorld: [
+          simulation.shots.originX[slot]! + spawn.x,
+          simulation.shots.originY[slot]! + groundY,
+          simulation.shots.originZ[slot]! + spawn.z,
+        ],
+        phase: simulation.shots.phase[slot],
+        slot,
+      }
+    },
+    get muzzle() {
+      const muzzlePose = readMuzzlePose()
+      return muzzlePose.ready
+        ? {
+            direction: muzzlePose.direction.toArray(),
+            position: muzzlePose.position.toArray(),
+            ready: true,
+          }
+        : { ready: false }
+    },
+    get night() {
+      return simulation.night
+    },
+    get performance() {
+      return {
+        collisionWorldGeneration: simulation.collisionWorldGeneration,
+        routing: createLandrushZombieEscapeRoutingDebugSnapshot(simulation),
+        spatial: {
+          buildCount: simulation.agentSpatialIndex.buildCount,
+          candidateInspectionCount: simulation.agentSpatialIndex.candidateInspectionCount,
+          indexedAgentCount: simulation.agentSpatialIndex.indexedAgentCount,
+          maximumCandidateInspectionsObserved:
+            simulation.agentSpatialIndex.maximumCandidateInspectionsObserved,
+          maximumCandidateInspectionsPerQuery:
+            simulation.agentSpatialIndex.maximumCandidateInspectionsPerQuery,
+          overflowQueryCount: simulation.agentSpatialIndex.overflowQueryCount,
+          pairInspectionCount: simulation.agentSpatialIndex.pairInspectionCount,
+          queryCount: simulation.agentSpatialIndex.queryCount,
+          separationNeighborCount: simulation.agentSpatialIndex.separationNeighborCount,
+          unindexedAgentCount: simulation.agentSpatialIndex.unindexedAgentCount,
+        },
+      }
+    },
+    get phase() {
+      return simulation.phase
+    },
+    get phaseReady() {
+      return readPhaseReady()
+    },
+    get phaseSecondsRemaining() {
+      return simulation.phaseSecondsRemaining
+    },
+    get pickups() {
+      return simulation.weaponPickups.map((pickup) => ({
+        available: isZombieEscapeWeaponPickupAvailable(simulation, pickup.weaponIndex),
+        scopeId: pickup.scopeId,
+        weapon: ZOMBIE_ESCAPE_WEAPON_CATALOG[pickup.weaponIndex]?.id ?? null,
+        world: [pickup.x + spawn.x, pickup.y + groundY, pickup.z + spawn.z],
+      }))
+    },
+    get shots() {
+      return {
+        active: simulation.shots.pool.activeCount,
+        impact: countZombieEscapeShotsByPhase(simulation.shots, ZOMBIE_ESCAPE_SHOT_PHASE.impact),
+        oneAuthoritativeCarrierPerShot: true,
+        shotsFired: simulation.shotsFired,
+        travel: countZombieEscapeShotsByPhase(simulation.shots, ZOMBIE_ESCAPE_SHOT_PHASE.travel),
+      }
+    },
+    get status() {
+      return simulation.status
+    },
+    get targets() {
+      let reacting = 0
+      for (let slot = 0; slot < simulation.zombies.pool.capacity; slot += 1) {
+        if (
+          simulation.zombies.pool.active[slot] !== 0 &&
+          (simulation.zombies.hitFlash[slot]! > 0 || simulation.zombies.hitReaction[slot]! > 0)
+        ) {
+          reacting += 1
         }
-      : { ready: false },
-    shots: {
-      active: simulation.shots.pool.activeCount,
-      impact: countZombieEscapeShotsByPhase(simulation.shots, ZOMBIE_ESCAPE_SHOT_PHASE.impact),
-      oneAuthoritativeCarrierPerShot: true,
-      shotsFired: simulation.shotsFired,
-      travel: countZombieEscapeShotsByPhase(simulation.shots, ZOMBIE_ESCAPE_SHOT_PHASE.travel),
+      }
+      return { active: simulation.zombies.pool.activeCount, reacting }
     },
-    phase: simulation.phase,
-    phaseReady,
-    phaseSecondsRemaining: simulation.phaseSecondsRemaining,
-    performance: {
-      collisionWorldGeneration: simulation.collisionWorldGeneration,
-      routing: createLandrushZombieEscapeRoutingDebugSnapshot(simulation),
-      spatial: {
-        buildCount: simulation.agentSpatialIndex.buildCount,
-        candidateInspectionCount: simulation.agentSpatialIndex.candidateInspectionCount,
-        indexedAgentCount: simulation.agentSpatialIndex.indexedAgentCount,
-        maximumCandidateInspectionsObserved:
-          simulation.agentSpatialIndex.maximumCandidateInspectionsObserved,
-        maximumCandidateInspectionsPerQuery:
-          simulation.agentSpatialIndex.maximumCandidateInspectionsPerQuery,
-        overflowQueryCount: simulation.agentSpatialIndex.overflowQueryCount,
-        pairInspectionCount: simulation.agentSpatialIndex.pairInspectionCount,
-        queryCount: simulation.agentSpatialIndex.queryCount,
-        separationNeighborCount: simulation.agentSpatialIndex.separationNeighborCount,
-        unindexedAgentCount: simulation.agentSpatialIndex.unindexedAgentCount,
-      },
+    get weapon() {
+      return ZOMBIE_ESCAPE_WEAPON_CATALOG[simulation.player.weaponIndex]?.id ?? null
     },
-    night: simulation.night,
-    ...(navigationScaleProofRunner ? { runNavigationScaleProof: navigationScaleProofRunner } : {}),
-    ...(navigationScaleProofFixtureCapture
-      ? { captureNavigationScaleProofFixture: navigationScaleProofFixtureCapture }
-      : {}),
-    pickups: simulation.weaponPickups.map((pickup) => ({
-      available: isZombieEscapeWeaponPickupAvailable(simulation, pickup.weaponIndex),
-      scopeId: pickup.scopeId,
-      weapon: ZOMBIE_ESCAPE_WEAPON_CATALOG[pickup.weaponIndex]?.id ?? null,
-      world: [pickup.x + spawn.x, pickup.y + groundY, pickup.z + spawn.z],
-    })),
-    status: simulation.status,
-    targets: {
-      active: simulation.zombies.pool.activeCount,
-      reacting: reactingEnemies,
-    },
-    weapon: ZOMBIE_ESCAPE_WEAPON_CATALOG[simulation.player.weaponIndex]?.id ?? null,
   }
+  if (navigationScaleProofRunner) bridge.runNavigationScaleProof = navigationScaleProofRunner
+  if (navigationScaleProofFixtureCapture) {
+    bridge.captureNavigationScaleProofFixture = navigationScaleProofFixtureCapture
+  }
+  return bridge
 }

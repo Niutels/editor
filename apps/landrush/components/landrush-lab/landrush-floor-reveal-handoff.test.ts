@@ -406,6 +406,61 @@ describe('Landrush floor/reveal handoff', () => {
     }
   })
 
+  test('treats a later owned combined reveal assignment as settled without another floor ensure', () => {
+    const scene = new Scene()
+    const root = new Group()
+    const geometry = new PlaneGeometry(2, 2)
+    const source = new MeshBasicMaterial({ color: '#302b29' })
+    const intruder = new MeshBasicMaterial({ color: '#ff00ff' })
+    const mesh = new Mesh(geometry, source)
+    root.add(mesh)
+    scene.add(root)
+    const materialPresentation = new LandrushIslandMaterialPresentationOwner()
+    const floorPresentation = new LandrushIslandFloorFadePresentationOwner<LevelNode['id']>(
+      materialPresentation,
+    )
+    const level = {
+      levelId: 'level_owned_combined_reveal_assignment' as LevelNode['id'],
+      root,
+      structuralToken: 0,
+    }
+
+    try {
+      floorPresentation.ensureLevel(level)
+      for (let index = 0; index < 240 && floorPresentation.hasPendingWork; index += 1) {
+        floorPresentation.prepareFrame(1 / 60)
+      }
+      expect(floorPresentation.hasPendingWork).toBe(false)
+      const floorOnlyAssignment = mesh.material
+      expect(floorPresentation.readLevel(level.levelId)).toMatchObject({
+        assignmentMismatchCount: 0,
+        pending: false,
+        ready: true,
+      })
+
+      materialPresentation.syncRevealMeshes([mesh], { kind: 'soft' })
+      expect(mesh.material).not.toBe(floorOnlyAssignment)
+      expect(floorPresentation.readLevel(level.levelId)).toMatchObject({
+        assignmentMismatchCount: 0,
+        pending: false,
+        ready: true,
+      })
+
+      mesh.material = intruder
+      expect(floorPresentation.readLevel(level.levelId)).toMatchObject({
+        assignmentMismatchCount: 1,
+        pending: false,
+        ready: true,
+      })
+    } finally {
+      floorPresentation.disposeExactAll()
+      materialPresentation.dispose()
+      geometry.dispose()
+      source.dispose()
+      intruder.dispose()
+    }
+  })
+
   test('rejects a mutated cached reveal array and preserves a later authored replacement', () => {
     const scene = new Scene()
     const root = new Group()
@@ -484,6 +539,7 @@ describe('Landrush floor/reveal handoff', () => {
       expect(materialPresentation.readOwnedFloorFadeAssignment(mesh, ownerToken) === null).toBe(
         true,
       )
+      expect(floorPresentation.readLevel(level.levelId)?.assignmentMismatchCount).toBe(1)
       expect(materialPresentation.applyPreparedFloorFade(mesh, false)).toBe('stale')
       expect(mesh.material).toBe(corruptedAssignment)
 

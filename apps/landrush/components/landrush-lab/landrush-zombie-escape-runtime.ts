@@ -182,7 +182,21 @@ export function stepLandrushZombieEscapeIntegratedSimulation({
     } as const
   }
 
-  stepZombieEscapeSimulationPhysics(simulation, input, deltaSeconds, arena)
+  const suspendedPickupInputMode = simulation.phase === 'build' ? input.inputMode : null
+  if (suspendedPickupInputMode !== null) {
+    input.inputMode = 'keyboard'
+    input.interactPressed = false
+  }
+  try {
+    stepZombieEscapeSimulationPhysics(simulation, input, deltaSeconds, arena)
+  } finally {
+    if (suspendedPickupInputMode !== null) {
+      input.inputMode = suspendedPickupInputMode
+      input.interactPressed = false
+      simulation.nearbyPickupIndex = -1
+      simulation.purchaseFeedback = null
+    }
+  }
   return {
     phaseChanged: simulation.phase !== phaseBeforeStep,
     stepped: true,

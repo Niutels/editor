@@ -7,9 +7,13 @@ export const MAX_MULTIPLAYER_ROOM_ID_LENGTH: 80
 export const MAX_MULTIPLAYER_COMBAT_SHOTS: 64
 export const MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS: 60000
 export const MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS: 180000
-export const DEFAULT_PROFILE_MONEY: 0
+export const DEFAULT_PROFILE_MONEY: 100
 export const MAX_PROFILE_MONEY: 1000000000
 export const MAX_PROFILE_MONEY_OPERATION_ID_LENGTH: 120
+export const PARCEL_BUILD_FIXED_NODE_PRICE: 10
+export const PARCEL_BUILD_ITEM_PRICE: 50
+export const PARCEL_BUILD_PRICE_EPSILON: 0.000001
+export const PARCEL_BUILD_WALL_PRICE_PER_METER: 10
 export const ZOMBIE_ESCAPE_KILL_REWARD: 10
 
 export type ParcelBuildReadableSchemaVersion =
@@ -144,6 +148,26 @@ export type ParcelBuildNode = {
   type: string
 }
 
+export type ParcelBuildPricingNode = ParcelBuildNode & {
+  autoFromWalls?: boolean
+  curveOffset?: number | null
+  end?: readonly [number, number]
+  metadata?: unknown
+  openingKind?: string
+  parentId?: string | null
+  start?: readonly [number, number]
+  visible?: boolean
+  wallId?: string
+}
+
+export type ParcelBuildPriceDeltaResult =
+  | { cost: number; ok: true }
+  | {
+      code: 'build-price-limit' | 'unpriced-build-node'
+      message: string
+      ok: false
+    }
+
 export type ParcelBuildSnapshot<Node = ParcelBuildNode> = {
   nodes: Node[]
   operationId: string
@@ -209,12 +233,16 @@ export function isSupportedParcelBuildSchemaVersion(
 export function isParcelWriterEpoch(value: unknown): value is number
 export function sanitizeParcelWriterSessionId(value: unknown): string
 export function normalizeParcelBuildRevision(value: unknown, fallback?: number): number
+export function isParcelBuildFixedPriceNodeType(value: unknown): boolean
+export function isZombieEscapeFirstHouseReady(nodes: readonly ParcelBuildPricingNode[]): boolean
+export function calculateParcelBuildPriceDelta(
+  previousNodes: readonly ParcelBuildPricingNode[],
+  nextNodes: readonly ParcelBuildPricingNode[],
+): ParcelBuildPriceDeltaResult
 export function sanitizeMultiplayerRoomId(value: unknown): string
 export function sanitizeProfileMoneyOperationId(value: unknown): string
 export function isProfileWalletSnapshot(value: unknown): value is ProfileWalletSnapshot
-export function sanitizeProfileWalletSnapshot(
-  value: unknown,
-): ProfileWalletSnapshot | undefined
+export function sanitizeProfileWalletSnapshot(value: unknown): ProfileWalletSnapshot | undefined
 export function isProfileMoneyOperation(value: unknown): value is ProfileMoneyOperation
 export function sanitizeProfileMoneyOperation(value: unknown): ProfileMoneyOperation | undefined
 export function isApplyProfileMoneyOperationMessage(

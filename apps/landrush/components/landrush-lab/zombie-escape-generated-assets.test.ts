@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   AnimationClip,
   Bone,
@@ -33,6 +34,21 @@ import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
 
 describe('generated asset render-pipeline readiness', () => {
+  test('runs only the final aggregate pipeline preparation after complete asset coverage', () => {
+    const source = readFileSync(
+      new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(source).toContain('resolveZombieEscapeRenderReadinessProgressTotal(pipelineRenderer)')
+    expect(source).toContain('representatives: renderReadinessSnapshot.representatives')
+    expect(source).not.toContain('createZombieEscapeRenderPrewarmCoordinator')
+    expect(source).not.toContain('prewarmCoordinator.request(')
+    expect(source).toContain(
+      'detailedZombies\n      ? loadedZombieVariantsRef.current\n      : EMPTY_READY_ZOMBIE_VARIANTS',
+    )
+    expect(source).toContain('detailedZombies\n        ? resolveZombieEscapeDetailedRootPoolSize(')
+  })
+
   test('keeps timed-out and failed required preparation behind loading until ready or retried', () => {
     expect(
       resolveZombieEscapeRenderPipelineSettlement({

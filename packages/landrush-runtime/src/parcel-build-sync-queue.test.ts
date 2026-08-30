@@ -83,6 +83,22 @@ describe('ParcelBuildSyncQueue', () => {
     expect(queue.inspect('world-1', 'parcel-1')?.pendingNodes).toBeNull()
   })
 
+  it('exposes the reservation legs without changing queue state', () => {
+    const queue = createQueue()
+    queue.enqueue('world-1', 'parcel-1', [wallA], 0)
+    expect(queue.inspectReservation('world-1', 'parcel-1')).toEqual({
+      authoritativeRevision: 0,
+      inFlightNodes: null,
+      pendingNodes: [wallA],
+    })
+    prepare(queue)
+    expect(queue.inspectReservation('world-1', 'parcel-1')).toEqual({
+      authoritativeRevision: 0,
+      inFlightNodes: [wallA],
+      pendingNodes: null,
+    })
+  })
+
   it('does not settle a matching operation on an invalid revision acknowledgement', () => {
     const queue = createQueue()
     queue.enqueue('world-1', 'parcel-1', [wallA], 4)

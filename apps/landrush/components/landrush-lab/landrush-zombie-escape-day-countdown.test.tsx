@@ -33,4 +33,22 @@ describe('Landrush Zombie Escape Day countdown', () => {
 
     expect(markup).toContain('disabled=""')
   })
+
+  test('shows a non-actionable waiting capsule until the first house is complete', () => {
+    const markup = renderToStaticMarkup(
+      <LandrushZombieEscapeDayCountdown
+        disabled={false}
+        onStartZombie={() => {}}
+        phaseSecondsRemaining={60}
+        waitingOnHouse
+      />,
+    )
+
+    expect(markup).toContain('aria-label="Waiting on house"')
+    expect(markup).toContain('title="Waiting on house"')
+    expect(markup).toContain('disabled=""')
+    expect(markup).toContain('Waiting on house')
+    expect(markup).not.toContain('Day ·')
+    expect(markup).not.toContain('Start zombie')
+  })
 })

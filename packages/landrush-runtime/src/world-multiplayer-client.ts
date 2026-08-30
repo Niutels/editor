@@ -2,14 +2,18 @@
 
 import {
   type ConnectionStatus,
+  calculateParcelBuildPriceDelta,
   isMultiplayerPlayerCombatSnapshot,
   isMultiplayerPlayerPose,
   isMultiplayerZombieEscapeStateSnapshot,
   isParcelWriterEpoch,
+  isProfileWalletSnapshot,
   isSpatialVoiceSignalPayload,
   isSupportedParcelBuildSchemaVersion,
+  isZombieEscapeFirstHouseReady,
   LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
   type LocalPlayerProfile,
+  MAX_PROFILE_MONEY,
   type MultiplayerPlayerCombatSnapshot,
   type MultiplayerPlayerSnapshot,
   type MultiplayerZombieEscapeStateSnapshot,
@@ -19,14 +23,18 @@ import {
   type ParcelBuildNode,
   type ParcelBuildNodesAckMessage,
   type ParcelBuildNodesRejectedMessage,
+  type ParcelBuildPriceDeltaResult,
   type ParcelBuildSnapshot,
   type ParcelClaimError,
   type ParcelOwnership,
+  type ProfileWalletSnapshot,
   type SpatialVoiceSignalMessage,
   type SpatialVoiceSignalPayload,
   sanitizeMultiplayerRoomId,
   sanitizeParcelWriterSessionId,
+  sanitizeProfileMoneyOperationId,
   type TvMediaStateSnapshot,
+  ZOMBIE_ESCAPE_KILL_REWARD,
 } from '@landrush/protocol'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -70,13 +78,208 @@ export type MultiplayerZombieEscapeStateObservation = Readonly<{
   transportGeneration: number
 }>
 
+export type ProfileMoneyOperationRequest =
+  | { kind: 'zombie-kill-reward'; operationId?: string }
+  | { cost: number; kind: 'weapon-purchase'; operationId?: string }
+
+export type ProfileMoneyState = ProfileWalletSnapshot & {
+  canonicalBalance: number
+  pendingBuildCost: number
+  pendingOperationCount: number
+  status: 'pending' | 'stale' | 'synced'
+}
+
+export type ParcelBuildAdmissionReason =
+  | 'build-authority-unavailable'
+  | 'build-price-limit'
+  | 'insufficient-funds'
+  | 'profile-money-stale'
+  | 'profile-money-unavailable'
+  | 'unpriced-build-node'
+
+export type ParcelBuildNodesQuote = Readonly<{
+  allowed: boolean
+  availableBalance: number | null
+  cost: number | null
+  existingPendingBuildCost: number | null
+  newPendingBuildCost: number | null
+  reason: ParcelBuildAdmissionReason | null
+  remainingBalance: number | null
+}>
+
+type PendingParcelBuildCostProjection =
+  | { cost: number; ok: true }
+  | {
+      code: Extract<
+        ParcelBuildAdmissionReason,
+        'build-authority-unavailable' | 'build-price-limit' | 'unpriced-build-node'
+      >
+      message: string
+      ok: false
+    }
+
+export function calculateParcelBuildReservationCost({
+  authoritativeNodes,
+  inFlightNodes,
+  pendingNodes,
+}: {
+  authoritativeNodes: readonly ParcelBuildNode[]
+  inFlightNodes: readonly ParcelBuildNode[] | null
+  pendingNodes: readonly ParcelBuildNode[] | null
+}): ParcelBuildPriceDeltaResult {
+  let baselineNodes = authoritativeNodes
+  let cost = 0
+  if (inFlightNodes !== null) {
+    const inFlightPrice = calculateParcelBuildPriceDelta(authoritativeNodes, inFlightNodes)
+    if (!inFlightPrice.ok) return inFlightPrice
+    cost = inFlightPrice.cost
+    baselineNodes = inFlightNodes
+  }
+  if (pendingNodes !== null) {
+    const pendingPrice = calculateParcelBuildPriceDelta(baselineNodes, pendingNodes)
+    if (!pendingPrice.ok) return pendingPrice
+    cost += pendingPrice.cost
+  }
+  if (!Number.isSafeInteger(cost) || cost > MAX_PROFILE_MONEY) {
+    return {
+      code: 'build-price-limit',
+      message: 'Build price exceeds the supported profile-money limit',
+      ok: false,
+    }
+  }
+  return { cost, ok: true }
+}
+
+export function resolveParcelBuildNodesQuote({
+  authorityKnown,
+  existingPendingBuildCost,
+  newPendingBuildCost,
+  pricingFailure,
+  profileBalanceBeforeBuildReservations,
+  profileMoneyFresh,
+}: {
+  authorityKnown: boolean
+  existingPendingBuildCost: number | null
+  newPendingBuildCost: number | null
+  pricingFailure: Extract<
+    ParcelBuildAdmissionReason,
+    'build-authority-unavailable' | 'build-price-limit' | 'unpriced-build-node'
+  > | null
+  profileBalanceBeforeBuildReservations: number | null
+  profileMoneyFresh: boolean
+}): ParcelBuildNodesQuote {
+  if (!authorityKnown) {
+    return {
+      allowed: false,
+      availableBalance: null,
+      cost: null,
+      existingPendingBuildCost,
+      newPendingBuildCost,
+      reason: 'build-authority-unavailable',
+      remainingBalance: null,
+    }
+  }
+  if (
+    pricingFailure ||
+    !isPendingBuildCost(existingPendingBuildCost) ||
+    !isPendingBuildCost(newPendingBuildCost)
+  ) {
+    return {
+      allowed: false,
+      availableBalance: null,
+      cost: null,
+      existingPendingBuildCost,
+      newPendingBuildCost,
+      reason: pricingFailure ?? 'build-price-limit',
+      remainingBalance: null,
+    }
+  }
+
+  const cost = Math.max(0, newPendingBuildCost - existingPendingBuildCost)
+  const availableBalance =
+    profileBalanceBeforeBuildReservations === null
+      ? null
+      : Math.max(0, profileBalanceBeforeBuildReservations - existingPendingBuildCost)
+  const remainingBalance =
+    profileBalanceBeforeBuildReservations !== null &&
+    profileBalanceBeforeBuildReservations >= newPendingBuildCost
+      ? profileBalanceBeforeBuildReservations - newPendingBuildCost
+      : null
+  if (cost === 0) {
+    return {
+      allowed: true,
+      availableBalance,
+      cost,
+      existingPendingBuildCost,
+      newPendingBuildCost,
+      reason: null,
+      remainingBalance,
+    }
+  }
+  if (profileBalanceBeforeBuildReservations === null) {
+    return {
+      allowed: false,
+      availableBalance: null,
+      cost,
+      existingPendingBuildCost,
+      newPendingBuildCost,
+      reason: 'profile-money-unavailable',
+      remainingBalance: null,
+    }
+  }
+  if (!profileMoneyFresh) {
+    return {
+      allowed: false,
+      availableBalance,
+      cost,
+      existingPendingBuildCost,
+      newPendingBuildCost,
+      reason: 'profile-money-stale',
+      remainingBalance: null,
+    }
+  }
+  if (availableBalance === null || availableBalance < cost) {
+    return {
+      allowed: false,
+      availableBalance,
+      cost,
+      existingPendingBuildCost,
+      newPendingBuildCost,
+      reason: 'insufficient-funds',
+      remainingBalance: null,
+    }
+  }
+  return {
+    allowed: true,
+    availableBalance,
+    cost,
+    existingPendingBuildCost,
+    newPendingBuildCost,
+    reason: null,
+    remainingBalance,
+  }
+}
+
+function isPendingBuildCost(value: number | null): value is number {
+  return value !== null && Number.isSafeInteger(value) && value >= 0 && value <= MAX_PROFILE_MONEY
+}
+
+type QueuedProfileMoneyOperation = (
+  | { kind: 'zombie-kill-reward' }
+  | { cost: number; kind: 'weapon-purchase' }
+) & {
+  lastSentAt: number | null
+  lastSentConnectionId: string | null
+  operationId: string
+}
+
 export type ParcelBuildContentUpdate = {
   build: ParcelBuildNodesSnapshot | null
   localDesiredNodes?: ParcelBuildNode[]
   parcelId: string
   rejectedOperationId?: string | null
   sequence: number
-  source: 'conflict' | 'remote' | 'snapshot'
+  source: 'conflict' | 'insufficient-funds' | 'remote' | 'snapshot'
   worldId: string
 }
 
@@ -155,7 +358,7 @@ type ServerMessage =
       serverTime: number
       type: 'parcel-build-nodes-updated'
     }
-  | ParcelBuildNodesAckMessage
+  | (ParcelBuildNodesAckMessage & { wallet?: ProfileWalletSnapshot })
   | ParcelBuildNodesRejectedMessage
   | {
       build: ParcelBuildNodesSnapshot | null
@@ -165,6 +368,18 @@ type ServerMessage =
       roomId: string
       serverTime: number
       type: 'parcel-build-nodes-conflict'
+      worldId: string
+    }
+  | {
+      build: ParcelBuildNodesSnapshot | null
+      cost: number
+      operationId: string
+      parcelId: string
+      reason: string
+      roomId: string
+      serverTime: number
+      type: 'parcel-build-nodes-insufficient-funds'
+      wallet: ProfileWalletSnapshot
       worldId: string
     }
   | {
@@ -196,6 +411,26 @@ type ServerMessage =
       type: 'tv-media-state-synced' | 'tv-media-state-updated'
     }
   | { playerCount: number; roomId: string; serverTime: number; type: 'room-state' }
+  | {
+      serverTime: number
+      type: 'profile-money-snapshot'
+      wallet: ProfileWalletSnapshot
+    }
+  | {
+      duplicate: boolean
+      operationId: string
+      serverTime: number
+      type: 'profile-money-operation-ack'
+      wallet: ProfileWalletSnapshot
+    }
+  | {
+      code: string
+      message: string
+      operationId: string
+      serverTime: number
+      type: 'profile-money-operation-rejected'
+      wallet: ProfileWalletSnapshot
+    }
   | {
       roomId: string
       serverTime: number
@@ -291,6 +526,23 @@ export function remotePlayerRosterChanged(
   )
 }
 
+export function isCanonicalZombieEscapeFirstHouseReady({
+  parcelBuildNodes,
+  parcelBuildSnapshotWorldId,
+  watchedParcelWorldId,
+}: {
+  parcelBuildNodes: readonly ParcelBuildNodesSnapshot[]
+  parcelBuildSnapshotWorldId: string | null
+  watchedParcelWorldId: string | null
+}) {
+  if (watchedParcelWorldId === null || parcelBuildSnapshotWorldId !== watchedParcelWorldId) {
+    return false
+  }
+  return parcelBuildNodes.some(
+    (build) => build.worldId === watchedParcelWorldId && isZombieEscapeFirstHouseReady(build.nodes),
+  )
+}
+
 export function useLandrushWorldMultiplayer({
   contentAuthority,
   gameMode,
@@ -350,6 +602,10 @@ export function useLandrushWorldMultiplayer({
   const writerSessionIdRef = useRef<string | null>(null)
   if (!writerSessionIdRef.current) writerSessionIdRef.current = createParcelWriterSessionId()
   const terminalWriterSessionRef = useRef(false)
+  const canonicalProfileWalletRef = useRef<ProfileWalletSnapshot | null>(null)
+  const pendingProfileMoneyOperationsRef = useRef<QueuedProfileMoneyOperation[]>([])
+  const profileMoneyFreshRef = useRef(false)
+  const profileMoneyOwnerRef = useRef(localProfile.id)
   const remotePlayerMapRef = useRef<Map<string, MultiplayerPlayerSnapshot>>(new Map())
   const remotePlayerTimelineMapRef = useRef<Map<string, MultiplayerRemotePlayerTimeline>>(new Map())
   const [connection, setConnection] =
@@ -366,6 +622,7 @@ export function useLandrushWorldMultiplayer({
     Map<string, MultiplayerPlayerSnapshot>
   >(() => new Map())
   const [parcelClaimError, setParcelClaimError] = useState<ParcelClaimError | null>(null)
+  const [profileMoney, setProfileMoney] = useState<ProfileMoneyState | null>(null)
   const [parcelOwnershipMap, setParcelOwnershipMap] = useState<Map<string, ParcelOwnership>>(
     () => new Map(),
   )
@@ -451,6 +708,246 @@ export function useLandrushWorldMultiplayer({
       return false
     }
   }, [])
+
+  const projectPendingParcelBuildCost = useCallback(
+    (
+      proposal: Readonly<{
+        nodes: readonly ParcelBuildNode[]
+        parcelId: string
+        worldId: string
+      }> | null = null,
+    ): PendingParcelBuildCostProjection => {
+      const worldId = watchedParcelWorldIdRef.current
+      if (!worldId) return { cost: 0, ok: true }
+      if (proposal && proposal.worldId !== worldId) {
+        return {
+          code: 'build-authority-unavailable',
+          message: 'Parcel build authority is not available for the proposed world',
+          ok: false,
+        }
+      }
+
+      const queue = parcelBuildSyncQueueRef.current!
+      const parcelIds = new Set(queue.parcelIds(worldId))
+      if (proposal) parcelIds.add(proposal.parcelId)
+      let cost = 0
+      for (const parcelId of parcelIds) {
+        const build = parcelBuildNodeMapRef.current.get(parcelId)
+        const authoritativeBuild = build?.worldId === worldId ? build : null
+        const authoritativeRevision = authoritativeBuild?.revision ?? 0
+        const queued = queue.inspectReservation(worldId, parcelId)
+        if (queued && queued.authoritativeRevision !== authoritativeRevision) {
+          return {
+            code: 'build-authority-unavailable',
+            message: `Parcel ${parcelId} build authority changed while local work was pending`,
+            ok: false,
+          }
+        }
+        const reservation = calculateParcelBuildReservationCost({
+          authoritativeNodes: authoritativeBuild?.nodes ?? [],
+          inFlightNodes: queued?.inFlightNodes ?? null,
+          pendingNodes:
+            proposal?.parcelId === parcelId ? proposal.nodes : (queued?.pendingNodes ?? null),
+        })
+        if (!reservation.ok) return reservation
+        cost += reservation.cost
+        if (!Number.isSafeInteger(cost) || cost > MAX_PROFILE_MONEY) {
+          return {
+            code: 'build-price-limit',
+            message: 'Pending build reservations exceed the supported profile-money limit',
+            ok: false,
+          }
+        }
+      }
+      return { cost, ok: true }
+    },
+    [],
+  )
+
+  const projectCurrentProfileMoney = useCallback(() => {
+    const wallet = canonicalProfileWalletRef.current
+    if (!wallet) return null
+    const pendingBuild = projectPendingParcelBuildCost()
+    if (!pendingBuild.ok) return null
+    const balance = projectProfileMoneyBalanceAfterBuildReservations(
+      wallet.balance,
+      pendingProfileMoneyOperationsRef.current,
+      pendingBuild.cost,
+    )
+    return balance === null ? null : { balance, pendingBuildCost: pendingBuild.cost }
+  }, [projectPendingParcelBuildCost])
+
+  const publishProfileMoney = useCallback(() => {
+    const wallet = canonicalProfileWalletRef.current
+    if (!wallet) {
+      setProfileMoney(null)
+      return null
+    }
+    const projection = projectCurrentProfileMoney()
+    if (!projection) {
+      setProfileMoney(null)
+      return null
+    }
+    const pendingOperationCount = pendingProfileMoneyOperationsRef.current.length
+    const next = {
+      ...wallet,
+      balance: projection.balance,
+      canonicalBalance: wallet.balance,
+      pendingBuildCost: projection.pendingBuildCost,
+      pendingOperationCount,
+      status: profileMoneyFreshRef.current
+        ? pendingOperationCount > 0 || projection.pendingBuildCost > 0
+          ? ('pending' as const)
+          : ('synced' as const)
+        : ('stale' as const),
+    }
+    setProfileMoney(next)
+    return next
+  }, [projectCurrentProfileMoney])
+
+  const flushProfileMoneyOperation = useCallback(() => {
+    const operation = pendingProfileMoneyOperationsRef.current[0]
+    const wallet = canonicalProfileWalletRef.current
+    const writerSession = writerSessionRef.current
+    const connectionId = transportConnectionIdRef.current
+    const socket = socketRef.current
+    if (
+      !onlineEnabled ||
+      spectator ||
+      terminalWriterSessionRef.current ||
+      !operation ||
+      !wallet ||
+      !writerSession ||
+      !connectionId ||
+      !socket
+    ) {
+      return false
+    }
+    const now = Date.now()
+    if (
+      operation.lastSentConnectionId === connectionId &&
+      operation.lastSentAt !== null &&
+      now - operation.lastSentAt < PARCEL_BUILD_ACK_RETRY_MS
+    ) {
+      return false
+    }
+    const sent = sendMessage(
+      {
+        operation: {
+          baseRevision: wallet.revision,
+          ...(operation.kind === 'weapon-purchase' ? { cost: operation.cost } : {}),
+          kind: operation.kind,
+          operationId: operation.operationId,
+        },
+        type: 'apply-profile-money-operation',
+        ...writerSession,
+      },
+      socket,
+    )
+    if (!sent) return false
+    operation.lastSentAt = now
+    operation.lastSentConnectionId = connectionId
+    const transportGeneration = transportScopeGenerationRef.current.generation
+    window.setTimeout(() => {
+      if (
+        !isMultiplayerTransportSessionCallbackCurrent({
+          capturedConnectionId: connectionId,
+          capturedGeneration: transportGeneration,
+          currentConnectionId: transportConnectionIdRef.current,
+          currentGeneration: transportScopeGenerationRef.current.generation,
+          currentTransport: socketRef.current,
+          transport: socket,
+        })
+      ) {
+        return
+      }
+      flushProfileMoneyOperation()
+    }, PARCEL_BUILD_ACK_RETRY_MS)
+    return true
+  }, [onlineEnabled, sendMessage, spectator])
+
+  const applyProfileMoneyOperation = useCallback(
+    (request: ProfileMoneyOperationRequest) => {
+      if (!onlineEnabled || spectator || terminalWriterSessionRef.current) return null
+      if (
+        request.kind === 'weapon-purchase' &&
+        (!Number.isSafeInteger(request.cost) ||
+          request.cost <= 0 ||
+          request.cost > MAX_PROFILE_MONEY)
+      ) {
+        return null
+      }
+      const operationId = sanitizeProfileMoneyOperationId(
+        request.operationId ?? createProfileMoneyOperationId(),
+      )
+      if (!operationId) return null
+      const existing = pendingProfileMoneyOperationsRef.current.find(
+        (operation) => operation.operationId === operationId,
+      )
+      if (existing) {
+        if (
+          existing.kind !== request.kind ||
+          (request.kind === 'weapon-purchase' &&
+            (existing.kind !== 'weapon-purchase' || existing.cost !== request.cost))
+        ) {
+          return null
+        }
+        return projectCurrentProfileMoney()?.balance ?? null
+      }
+      const wallet = canonicalProfileWalletRef.current
+      if (!wallet && request.kind === 'weapon-purchase') return null
+      if (wallet) {
+        const currentBalanceBeforeBuildReservations = projectProfileMoneyBalance(
+          wallet.balance,
+          pendingProfileMoneyOperationsRef.current,
+        )
+        const currentProjection = projectCurrentProfileMoney()
+        if (currentBalanceBeforeBuildReservations === null || !currentProjection) return null
+        if (request.kind === 'weapon-purchase' && currentProjection.balance < request.cost)
+          return null
+        if (
+          request.kind === 'zombie-kill-reward' &&
+          currentBalanceBeforeBuildReservations > MAX_PROFILE_MONEY - ZOMBIE_ESCAPE_KILL_REWARD
+        ) {
+          return null
+        }
+      }
+      const queueMetadata = {
+        lastSentAt: null,
+        lastSentConnectionId: null,
+        operationId,
+      }
+      pendingProfileMoneyOperationsRef.current.push(
+        request.kind === 'weapon-purchase'
+          ? { ...queueMetadata, cost: request.cost, kind: request.kind }
+          : { ...queueMetadata, kind: request.kind },
+      )
+      const projected = wallet ? (projectCurrentProfileMoney()?.balance ?? null) : null
+      publishProfileMoney()
+      flushProfileMoneyOperation()
+      return projected
+    },
+    [
+      flushProfileMoneyOperation,
+      onlineEnabled,
+      projectCurrentProfileMoney,
+      publishProfileMoney,
+      spectator,
+    ],
+  )
+
+  const acceptProfileWallet = useCallback(
+    (wallet: ProfileWalletSnapshot, fresh: boolean) => {
+      if (wallet.profileId !== localProfile.id) return false
+      const current = canonicalProfileWalletRef.current
+      if (current && current.revision > wallet.revision) return false
+      canonicalProfileWalletRef.current = wallet
+      profileMoneyFreshRef.current = fresh
+      publishProfileMoney()
+      return true
+    },
+    [localProfile.id, publishProfileMoney],
+  )
 
   const publishParcelBuildUpdates = useCallback(
     (updates: readonly Omit<ParcelBuildContentUpdate, 'sequence'>[]) => {
@@ -542,6 +1039,7 @@ export function useLandrushWorldMultiplayer({
     if (!transition.changed) return
 
     parcelBuildSyncQueueRef.current!.clear()
+    publishProfileMoney()
     parcelBuildUpdateSequenceRef.current = 0
     parcelOwnershipMapRef.current = new Map()
     parcelBuildNodeMapRef.current = new Map()
@@ -552,7 +1050,16 @@ export function useLandrushWorldMultiplayer({
     setParcelBuildUpdateMap(new Map())
     setTvMediaStateMap(new Map())
     setParcelBuildContentAuthorityEpoch(transition.epoch)
-  }, [contentAuthority, localProfile.id, roomId])
+  }, [contentAuthority, localProfile.id, publishProfileMoney, roomId])
+
+  useLayoutEffect(() => {
+    if (profileMoneyOwnerRef.current === localProfile.id) return
+    profileMoneyOwnerRef.current = localProfile.id
+    canonicalProfileWalletRef.current = null
+    pendingProfileMoneyOperationsRef.current = []
+    profileMoneyFreshRef.current = false
+    setProfileMoney(null)
+  }, [localProfile.id])
 
   const flushQueuedParcelBuildSync = useCallback(
     (worldId: string, parcelId: string) => {
@@ -661,7 +1168,12 @@ export function useLandrushWorldMultiplayer({
       !observation ||
       observation.transportGeneration !== transportScopeGenerationRef.current.generation ||
       observation.state.phase !== 'build' ||
-      observation.state.phaseEndsAt !== null
+      observation.state.phaseEndsAt !== null ||
+      !isCanonicalZombieEscapeFirstHouseReady({
+        parcelBuildNodes,
+        parcelBuildSnapshotWorldId,
+        watchedParcelWorldId,
+      })
     ) {
       return false
     }
@@ -672,7 +1184,15 @@ export function useLandrushWorldMultiplayer({
         type: 'initialize-zombie-escape-clock',
       }),
     )
-  }, [gameMode, onlineEnabled, sendMessage, spectator])
+  }, [
+    gameMode,
+    onlineEnabled,
+    parcelBuildNodes,
+    parcelBuildSnapshotWorldId,
+    sendMessage,
+    spectator,
+    watchedParcelWorldId,
+  ])
 
   const startZombieEscapeNight = useCallback(() => {
     const observation = zombieEscapeStateObservationRef.current
@@ -696,6 +1216,28 @@ export function useLandrushWorldMultiplayer({
     )
   }, [gameMode, onlineEnabled, sendMessage, spectator])
 
+  const reportZombieEscapeDeath = useCallback(() => {
+    const observation = zombieEscapeStateObservationRef.current
+    if (
+      !onlineEnabled ||
+      spectator ||
+      gameMode !== 'zombie-escape' ||
+      !observation ||
+      observation.transportGeneration !== transportScopeGenerationRef.current.generation ||
+      observation.state.phase !== 'night' ||
+      observation.state.night <= 0
+    ) {
+      return false
+    }
+    return Boolean(
+      sendMessage({
+        night: observation.state.night,
+        sessionId: observation.state.sessionId,
+        type: 'report-zombie-escape-death',
+      }),
+    )
+  }, [gameMode, onlineEnabled, sendMessage, spectator])
+
   const watchParcelWorld = useCallback(
     (worldId: string) => {
       if (watchedParcelWorldIdRef.current === worldId) return
@@ -711,6 +1253,7 @@ export function useLandrushWorldMultiplayer({
       watchedParcelWorldIdRef.current = worldId
       setWatchedParcelWorldId(worldId)
       parcelBuildSyncQueueRef.current!.clear()
+      publishProfileMoney()
       parcelBuildUpdateSequenceRef.current = 0
       const offlineState =
         offlineAuthority && persistOfflineState ? readOfflineParcelWorldState(worldId) : null
@@ -750,7 +1293,49 @@ export function useLandrushWorldMultiplayer({
       offlineAuthority,
       persistOfflineState,
       publishParcelBuildUpdates,
+      publishProfileMoney,
     ],
+  )
+
+  const quoteParcelBuildNodes = useCallback(
+    (worldId: string, parcelId: string, nodes: readonly ParcelBuildNode[]) => {
+      if (offlineAuthority) {
+        return resolveParcelBuildNodesQuote({
+          authorityKnown: true,
+          existingPendingBuildCost: 0,
+          newPendingBuildCost: 0,
+          pricingFailure: null,
+          profileBalanceBeforeBuildReservations: null,
+          profileMoneyFresh: false,
+        })
+      }
+      const authorityKnown =
+        onlineEnabled &&
+        watchedParcelWorldIdRef.current === worldId &&
+        parcelBuildSnapshotWorldId === worldId
+      const existingPending = projectPendingParcelBuildCost()
+      const newPending = authorityKnown
+        ? projectPendingParcelBuildCost({ nodes, parcelId, worldId })
+        : null
+      const pricingFailure = !existingPending.ok
+        ? existingPending.code
+        : newPending && !newPending.ok
+          ? newPending.code
+          : null
+      const wallet = canonicalProfileWalletRef.current
+      const profileBalanceBeforeBuildReservations = wallet
+        ? projectProfileMoneyBalance(wallet.balance, pendingProfileMoneyOperationsRef.current)
+        : null
+      return resolveParcelBuildNodesQuote({
+        authorityKnown,
+        existingPendingBuildCost: existingPending.ok ? existingPending.cost : null,
+        newPendingBuildCost: newPending?.ok ? newPending.cost : null,
+        pricingFailure,
+        profileBalanceBeforeBuildReservations,
+        profileMoneyFresh: profileMoneyFreshRef.current,
+      })
+    },
+    [offlineAuthority, onlineEnabled, parcelBuildSnapshotWorldId, projectPendingParcelBuildCost],
   )
 
   const syncParcelBuildNodes = useCallback(
@@ -787,6 +1372,8 @@ export function useLandrushWorldMultiplayer({
         return true
       }
       if (!onlineEnabled) return false
+      const quote = quoteParcelBuildNodes(worldId, parcelId, clonedNodes)
+      if (!quote.allowed) return false
 
       const currentBuild = parcelBuildNodeMapRef.current.get(parcelId)
       const pausedConflict = parcelBuildSyncQueueRef.current!.enqueue(
@@ -795,6 +1382,7 @@ export function useLandrushWorldMultiplayer({
         clonedNodes,
         currentBuild?.worldId === worldId ? currentBuild.revision : 0,
       )
+      publishProfileMoney()
       if (pausedConflict) {
         publishParcelBuildUpdates([
           conflictContentUpdate(
@@ -816,12 +1404,16 @@ export function useLandrushWorldMultiplayer({
       onlineEnabled,
       persistOfflineState,
       publishParcelBuildUpdates,
+      publishProfileMoney,
+      quoteParcelBuildNodes,
       watchParcelWorld,
     ],
   )
 
   const resolveParcelBuildConflict = useCallback(
     (worldId: string, parcelId: string, nodes: readonly ParcelBuildNode[]) => {
+      const quote = quoteParcelBuildNodes(worldId, parcelId, nodes)
+      if (!quote.allowed) return false
       const currentBuild = parcelBuildNodeMapRef.current.get(parcelId)
       const resolved = parcelBuildSyncQueueRef.current!.resolveConflict(
         worldId,
@@ -837,10 +1429,11 @@ export function useLandrushWorldMultiplayer({
         next.delete(key)
         return next
       })
+      publishProfileMoney()
       flushQueuedParcelBuildSync(worldId, parcelId)
       return true
     },
-    [flushQueuedParcelBuildSync],
+    [flushQueuedParcelBuildSync, publishProfileMoney, quoteParcelBuildNodes],
   )
 
   const syncTvMediaState = useCallback(
@@ -1021,6 +1614,12 @@ export function useLandrushWorldMultiplayer({
       writerLeaseEpochRef.current = null
       transportConnectionIdRef.current = null
       terminalWriterSessionRef.current = false
+      profileMoneyFreshRef.current = false
+      if (offlineAuthority) {
+        canonicalProfileWalletRef.current = null
+        pendingProfileMoneyOperationsRef.current = []
+      }
+      publishProfileMoney()
       setStatus(offlineAuthority ? 'offline' : 'connecting')
       remotePlayerMapRef.current = new Map()
       remotePlayerTimelineMapRef.current = new Map()
@@ -1080,6 +1679,8 @@ export function useLandrushWorldMultiplayer({
         return
       }
       clearZombieEscapeStateObservation()
+      profileMoneyFreshRef.current = false
+      publishProfileMoney()
       setParcelBuildSnapshotWorldId(null)
       if (transportParcelWorldId) {
         parcelBuildSyncQueueRef.current!.suspendWorld(transportParcelWorldId)
@@ -1181,6 +1782,7 @@ export function useLandrushWorldMultiplayer({
           ) {
             flushAllQueuedParcelBuildSyncs()
           }
+          flushProfileMoneyOperation()
           return
         }
 
@@ -1188,6 +1790,8 @@ export function useLandrushWorldMultiplayer({
           if (message.writerSessionId !== writerSessionIdRef.current) return
           terminalWriterSessionRef.current = true
           writerSessionRef.current = null
+          profileMoneyFreshRef.current = false
+          publishProfileMoney()
           setConnection((current) => ({ ...current, lastError: message.message }))
           socket.close(PARCEL_WRITER_SESSION_CLOSE_CODE, 'Writer session superseded')
           return
@@ -1221,6 +1825,41 @@ export function useLandrushWorldMultiplayer({
               serverPlayerCount,
             }
           })
+          return
+        }
+
+        if (message.type === 'profile-money-snapshot') {
+          if (!acceptProfileWallet(message.wallet, true)) return
+          const pending = pendingProfileMoneyOperationsRef.current[0]
+          if (pending) {
+            pending.lastSentAt = null
+            pending.lastSentConnectionId = null
+          }
+          flushProfileMoneyOperation()
+          return
+        }
+
+        if (message.type === 'profile-money-operation-ack') {
+          const pending = pendingProfileMoneyOperationsRef.current[0]
+          if (!pending || pending.operationId !== message.operationId) return
+          pendingProfileMoneyOperationsRef.current.shift()
+          if (!acceptProfileWallet(message.wallet, true)) publishProfileMoney()
+          flushProfileMoneyOperation()
+          return
+        }
+
+        if (message.type === 'profile-money-operation-rejected') {
+          const pending = pendingProfileMoneyOperationsRef.current[0]
+          if (!pending || pending.operationId !== message.operationId) return
+          if (message.code === 'profile-money-conflict') {
+            pending.lastSentAt = null
+            pending.lastSentConnectionId = null
+          } else {
+            pendingProfileMoneyOperationsRef.current.shift()
+            setConnection((current) => ({ ...current, lastError: message.message }))
+          }
+          if (!acceptProfileWallet(message.wallet, true)) publishProfileMoney()
+          flushProfileMoneyOperation()
           return
         }
 
@@ -1326,6 +1965,7 @@ export function useLandrushWorldMultiplayer({
           }
           parcelBuildNodeMapRef.current = nextBuildNodeMap
           setParcelBuildNodeMap(nextBuildNodeMap)
+          publishProfileMoney()
           publishParcelBuildUpdates(updates)
           setParcelBuildSnapshotWorldId(message.worldId)
           parcelBuildSyncQueueRef.current!.resumeWorld(message.worldId)
@@ -1379,10 +2019,41 @@ export function useLandrushWorldMultiplayer({
           nextBuildNodeMap.set(message.parcelId, acknowledgedBuild)
           parcelBuildNodeMapRef.current = nextBuildNodeMap
           setParcelBuildNodeMap(nextBuildNodeMap)
+          if (!message.wallet || !acceptProfileWallet(message.wallet, true)) publishProfileMoney()
           setConnection((current) =>
             current.lastError === null ? current : { ...current, lastError: null },
           )
           flushQueuedParcelBuildSync(message.worldId, message.parcelId)
+          return
+        }
+
+        if (message.type === 'parcel-build-nodes-insufficient-funds') {
+          if (message.worldId !== watchedParcelWorldIdRef.current) return
+          const rejected = parcelBuildSyncQueueRef.current!.reject(
+            message.worldId,
+            message.parcelId,
+            message.operationId,
+            message.build,
+          )
+          if (!rejected) return
+          parcelBuildSyncQueueRef.current!.clearWorld(message.worldId)
+          parcelBuildSyncQueueRef.current!.resumeWorld(message.worldId)
+          const nextBuildNodeMap = new Map(parcelBuildNodeMapRef.current)
+          if (message.build) nextBuildNodeMap.set(message.parcelId, message.build)
+          else nextBuildNodeMap.delete(message.parcelId)
+          parcelBuildNodeMapRef.current = nextBuildNodeMap
+          setParcelBuildNodeMap(nextBuildNodeMap)
+          if (!acceptProfileWallet(message.wallet, true)) publishProfileMoney()
+          publishParcelBuildUpdates([
+            {
+              build: message.build,
+              parcelId: message.parcelId,
+              rejectedOperationId: message.operationId,
+              source: 'insufficient-funds',
+              worldId: message.worldId,
+            },
+          ])
+          setConnection((current) => ({ ...current, lastError: message.reason }))
           return
         }
 
@@ -1402,6 +2073,7 @@ export function useLandrushWorldMultiplayer({
           const reconciliation = parcelBuildSyncQueueRef.current!.reconcileRemoteBuild(
             message.build,
           )
+          publishProfileMoney()
           if (reconciliation.kind === 'content') {
             publishParcelBuildUpdates([
               {
@@ -1444,6 +2116,7 @@ export function useLandrushWorldMultiplayer({
           else nextBuildNodeMap.delete(message.parcelId)
           parcelBuildNodeMapRef.current = nextBuildNodeMap
           setParcelBuildNodeMap(nextBuildNodeMap)
+          publishProfileMoney()
           publishParcelBuildUpdates([
             conflictContentUpdate(message.worldId, message.parcelId, message.build, conflict),
           ])
@@ -1462,6 +2135,7 @@ export function useLandrushWorldMultiplayer({
             authoritativeBuild,
           )
           if (!conflict) return
+          publishProfileMoney()
           publishParcelBuildUpdates([
             conflictContentUpdate(message.worldId, message.parcelId, authoritativeBuild, conflict),
           ])
@@ -1569,6 +2243,8 @@ export function useLandrushWorldMultiplayer({
         socketRef.current = null
         transportConnectionIdRef.current = null
         writerSessionRef.current = null
+        profileMoneyFreshRef.current = false
+        publishProfileMoney()
         if (cancelled || !callbackIsCurrent) return
         clearZombieEscapeStateObservation()
 
@@ -1621,9 +2297,11 @@ export function useLandrushWorldMultiplayer({
       clearZombieEscapeStateObservation()
     }
   }, [
+    acceptProfileWallet,
     clearZombieEscapeStateObservation,
     contentAuthority,
     flushAllQueuedParcelBuildSyncs,
+    flushProfileMoneyOperation,
     flushQueuedParcelBuildSync,
     gameMode,
     localProfile,
@@ -1632,6 +2310,7 @@ export function useLandrushWorldMultiplayer({
     onlineEnabled,
     persistOfflineState,
     publishParcelBuildUpdates,
+    publishProfileMoney,
     roomId,
     sendMessage,
     spectator,
@@ -1658,6 +2337,7 @@ export function useLandrushWorldMultiplayer({
   }, [status])
 
   return {
+    applyProfileMoneyOperation,
     claimParcel,
     connection,
     initializeZombieEscapeClock,
@@ -1668,6 +2348,9 @@ export function useLandrushWorldMultiplayer({
     parcelClaimError,
     parcelOwnerships,
     publishLocalPlayer,
+    profileMoney,
+    quoteParcelBuildNodes,
+    reportZombieEscapeDeath,
     remotePlayerStore,
     remotePlayers,
     resolveParcelBuildConflict,
@@ -1888,6 +2571,32 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       return message
     }
     if (
+      message?.type === 'profile-money-snapshot' &&
+      typeof message.serverTime === 'number' &&
+      isProfileWalletSnapshot(message.wallet)
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'profile-money-operation-ack' &&
+      typeof message.operationId === 'string' &&
+      typeof message.duplicate === 'boolean' &&
+      typeof message.serverTime === 'number' &&
+      isProfileWalletSnapshot(message.wallet)
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'profile-money-operation-rejected' &&
+      typeof message.code === 'string' &&
+      typeof message.message === 'string' &&
+      typeof message.operationId === 'string' &&
+      typeof message.serverTime === 'number' &&
+      isProfileWalletSnapshot(message.wallet)
+    ) {
+      return message
+    }
+    if (
       (message?.type === 'player-joined' || message?.type === 'player-state') &&
       isPlayerSnapshot(message.player) &&
       typeof message.roomId === 'string' &&
@@ -1956,8 +2665,24 @@ function parseServerMessage(data: unknown): ServerMessage | null {
       typeof message.updatedAt === 'number' &&
       typeof message.updatedBy === 'string' &&
       typeof message.worldId === 'string' &&
+      (message.wallet === undefined || isProfileWalletSnapshot(message.wallet)) &&
       isParcelWriterEpoch(message.writerEpoch) &&
       typeof message.writerSessionId === 'string'
+    ) {
+      return message
+    }
+    if (
+      message?.type === 'parcel-build-nodes-insufficient-funds' &&
+      typeof message.operationId === 'string' &&
+      typeof message.parcelId === 'string' &&
+      typeof message.reason === 'string' &&
+      typeof message.roomId === 'string' &&
+      typeof message.serverTime === 'number' &&
+      typeof message.worldId === 'string' &&
+      Number.isSafeInteger(message.cost) &&
+      message.cost >= 0 &&
+      isProfileWalletSnapshot(message.wallet) &&
+      (message.build === null || isParcelBuildNodesSnapshot(message.build))
     ) {
       return message
     }
@@ -2179,6 +2904,58 @@ function createParcelBuildOperationId() {
   return typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `parcel-build-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function createProfileMoneyOperationId() {
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? `money-${globalThis.crypto.randomUUID()}`
+    : `money-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export function projectProfileMoneyBalance(
+  canonicalBalance: number,
+  operations: readonly ProfileMoneyOperationRequest[],
+) {
+  if (
+    !Number.isSafeInteger(canonicalBalance) ||
+    canonicalBalance < 0 ||
+    canonicalBalance > MAX_PROFILE_MONEY
+  ) {
+    return null
+  }
+  let projectedBalance = canonicalBalance
+  for (const operation of operations) {
+    if (operation.kind === 'zombie-kill-reward') {
+      if (projectedBalance > MAX_PROFILE_MONEY - ZOMBIE_ESCAPE_KILL_REWARD) return null
+      projectedBalance += ZOMBIE_ESCAPE_KILL_REWARD
+      continue
+    }
+    if (
+      !Number.isSafeInteger(operation.cost) ||
+      operation.cost <= 0 ||
+      projectedBalance < operation.cost
+    ) {
+      return null
+    }
+    projectedBalance -= operation.cost
+  }
+  return projectedBalance
+}
+
+export function projectProfileMoneyBalanceAfterBuildReservations(
+  canonicalBalance: number,
+  operations: readonly ProfileMoneyOperationRequest[],
+  pendingBuildCost: number,
+) {
+  if (!isPendingBuildCost(pendingBuildCost)) return null
+  const balanceBeforeBuildReservations = projectProfileMoneyBalance(canonicalBalance, operations)
+  if (
+    balanceBeforeBuildReservations === null ||
+    balanceBeforeBuildReservations < pendingBuildCost
+  ) {
+    return null
+  }
+  return balanceBeforeBuildReservations - pendingBuildCost
 }
 
 function createParcelWriterSessionId() {

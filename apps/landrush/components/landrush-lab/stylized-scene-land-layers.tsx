@@ -15,6 +15,7 @@ import {
 } from 'react'
 import {
   BufferGeometry,
+  type Camera,
   Color,
   DoubleSide,
   DynamicDrawUsage,
@@ -29,7 +30,9 @@ import {
   MeshStandardMaterial,
   Object3D,
   Quaternion,
+  Raycaster,
   type Texture,
+  Vector2,
   Vector3,
   Vector4,
 } from 'three'
@@ -69,12 +72,14 @@ type StylizedSceneLandLayerProps = {
   grassDebugState?: StylizedGrassDebugState
   grassFadeBlockers?: readonly StylizedGrassBlocker[]
   grassInteractionRef?: StylizedGrassInteractionRef
+  grassPreparedResidencyRequest?: StylizedGrassPreparedResidencyRequest | null
   grassRenderOrder?: number
   grassVisibilityRef?: StylizedGrassVisibilityRef
   bladesVisible?: boolean
   groundColorTexture?: Texture | null
   groundTintCap?: number
   profileMeasure?: StylizedSceneProfileMeasure
+  onGrassPreparedResidencyReadinessChange?: StylizedGrassPreparedResidencyReadinessHandler
   roads?: readonly LandrushRoadSegment[]
   showBlades?: boolean
   showTrees?: boolean
@@ -225,6 +230,7 @@ type StylizedGrassStreamGrid = {
 
 type StylizedGrassResidentCellScan = {
   cells: readonly StylizedGrassStreamCell[]
+  preparedCells: readonly StylizedGrassStreamCell[]
 }
 
 export type StylizedGrassDrawEnvelope = {
@@ -340,6 +346,58 @@ export type StylizedGrassInteractionRef = {
   current: StylizedGrassInteraction | null
 }
 
+export type StylizedGrassPreparedResidencyRequest = {
+  footprintRadiusMeters: number
+  generation: string
+  transitionActive: boolean
+}
+
+export type StylizedGrassPreparedResidencyReadiness = {
+  contentGeneration: number
+  contentRevision: number
+  coverageRevision: number
+  generation: string
+  ready: boolean
+}
+
+export type StylizedGrassPreparedResidencyReadinessHandler = (
+  readiness: StylizedGrassPreparedResidencyReadiness,
+) => void
+
+type StylizedGrassPreparedResidencyState = {
+  centerX: number
+  centerZ: number
+  committedContentGeneration: number
+  committedContentRevision: number
+  coverageRevision: number
+  footprintRadiusMeters: number
+  generation: string | null
+  prepared: boolean
+  ready: boolean
+}
+
+export type StylizedGrassPreparedResidencyContainmentScratch = {
+  ndc: Vector2
+  raycaster: Raycaster
+}
+
+export type StylizedGrassPreparedResidencyCameraPolicy = 'fallback' | 'normal' | 'suppress'
+
+export type StylizedGrassPreparedResidencyFallbackGate = {
+  cameraContained: boolean
+  committedContentGeneration: number
+  committedContentRevision: number
+  currentContentGeneration: number
+  currentContentRevision: number
+  currentCoverageRevision: number
+  initialized: boolean
+  preparedCoverageRevision: number
+  preparedGeneration: string | null
+  ready: boolean
+  requestGeneration: string | null
+  transitionActive: boolean
+}
+
 export type StylizedGrassVisibilityRef = {
   current: number
 }
@@ -405,6 +463,8 @@ const STYLIZED_SCENE_STREAM_MIN_UPDATE_SECONDS = 0.15
 const STYLIZED_SCENE_STREAM_ARRIVAL_FADE_SECONDS = 0.28
 const STYLIZED_SCENE_STREAM_UPDATE_RANGE_GAP = 4
 const STYLIZED_SCENE_STREAM_SCAN_CHUNK_CELLS = 8
+const STYLIZED_SCENE_PREPARED_RESIDENCY_NDC_CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1] as const
+const EMPTY_STYLIZED_GRASS_STREAM_CELLS: readonly StylizedGrassStreamCell[] = []
 const STYLIZED_TREE_BLOCKER_CLEARANCE_METERS = 2.35
 const STYLIZED_TREE_TRUNK_SCALE = 12
 const STYLIZED_GRASS_RENDER_ORDER = 14
@@ -412,6 +472,7 @@ export const DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP = 0.55
 
 type StylizedGrassLod = 'culled' | 'far' | 'mid' | 'near'
 
+const STYLIZED_SCENE_GRASS_RENDER_SECTION_TARGETS = [0.4] as const
 const STYLIZED_GRASS_LOD_DENSITY: Record<StylizedGrassLod, number> = {
   culled: 0,
   far: 0.45,
@@ -458,6 +519,16 @@ const EMPTY_STYLIZED_GRASS_FADE_SUMMARY: StylizedGrassFadeSummary = {
   fadeMin: 1,
 }
 
+const stylizedGrassReusableSpanUpdateRangeByAttribute = new WeakMap<
+  InstancedBufferAttribute,
+  { count: number; start: number }
+>()
+const stylizedGrassFadeStateScratch = {
+  heightVisibility: 1,
+  insideHiddenZone: false,
+  opacity: 1,
+}
+
 type StylizedGrassRenderCenter = {
   x: number
   z: number
@@ -482,12 +553,14 @@ export function StylizedSceneLandLayer({
   grassDebugState,
   grassFadeBlockers = [],
   grassInteractionRef,
+  grassPreparedResidencyRequest = null,
   grassRenderOrder = STYLIZED_GRASS_RENDER_ORDER,
   grassVisibilityRef,
   bladesVisible = true,
   groundColorTexture = null,
   groundTintCap = DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   profileMeasure,
+  onGrassPreparedResidencyReadinessChange,
   roads = [],
   showBlades = true,
   showTrees = true,
@@ -518,6 +591,8 @@ export function StylizedSceneLandLayer({
           groundColorTexture={groundColorTexture}
           groundTintCap={groundTintCap}
           interactionRef={grassInteractionRef}
+          onPreparedResidencyReadinessChange={onGrassPreparedResidencyReadinessChange}
+          preparedResidencyRequest={grassPreparedResidencyRequest}
           profileMeasure={profileMeasure}
           renderOrder={grassRenderOrder}
           roads={roads}
@@ -555,6 +630,8 @@ function StylizedSceneGrassLayer({
   groundColorTexture,
   groundTintCap,
   interactionRef,
+  onPreparedResidencyReadinessChange,
+  preparedResidencyRequest,
   profileMeasure,
   renderOrder,
   roads,
@@ -571,6 +648,8 @@ function StylizedSceneGrassLayer({
   groundColorTexture: Texture | null
   groundTintCap: number
   interactionRef?: StylizedGrassInteractionRef
+  onPreparedResidencyReadinessChange?: StylizedGrassPreparedResidencyReadinessHandler
+  preparedResidencyRequest: StylizedGrassPreparedResidencyRequest | null
   profileMeasure?: StylizedSceneProfileMeasure
   renderOrder: number
   roads: readonly LandrushRoadSegment[]
@@ -591,19 +670,11 @@ function StylizedSceneGrassLayer({
   )
   const sourceGeometry = useMemo(() => {
     return measureStylizedScene(profileMeasure, 'setup.stylized-grass.instance-geometry', () => {
-      const geometry = extractFirstMeshGeometry(scene)
-      return geometry ? withStylizedGrassBladeRootUv(geometry) : null
+      return extractFirstMeshGeometry(scene)
     })
   }, [profileMeasure, scene])
-  const lodGeometries = useMemo(
-    () =>
-      sourceGeometry
-        ? {
-            far: createReducedStylizedGrassGeometry(sourceGeometry, [0.4]),
-            mid: createReducedStylizedGrassGeometry(sourceGeometry, [0.2, 0.72]),
-            near: sourceGeometry,
-          }
-        : null,
+  const renderGeometry = useMemo(
+    () => (sourceGeometry ? createStylizedGrassRenderGeometry(sourceGeometry) : null),
     [sourceGeometry],
   )
   const lodAnchor = useMemo(() => centroidForStylizedGrassPoints(surfacePoints), [surfacePoints])
@@ -658,15 +729,33 @@ function StylizedSceneGrassLayer({
     [profileMeasure, surfacePoints],
   )
   const arrivalStateRef = useRef(createStylizedGrassArrivalState())
+  const preparedResidencyStateRef = useRef<StylizedGrassPreparedResidencyState>({
+    centerX: 0,
+    centerZ: 0,
+    committedContentGeneration: -1,
+    committedContentRevision: -1,
+    coverageRevision: -1,
+    footprintRadiusMeters: 0,
+    generation: null,
+    prepared: false,
+    ready: false,
+  })
+  const currentResidentContentGenerationRef = useRef(0)
+  const currentResidentContentRevisionRef = useRef(0)
   const {
     changesRef: residentCellChangesRef,
     coverage,
     exactDrawMembershipRef,
+    preparedCoverageVersion,
   } = useStylizedGrassCellCoverage({
     arrivalState: arrivalStateRef.current,
+    currentResidentContentGenerationRef,
+    currentResidentContentRevisionRef,
     drawEnvelope: grassDrawEnvelope,
     elevation,
     interactionRef,
+    preparedResidencyRequest,
+    preparedResidencyStateRef,
     streamingPaused: grassWorkPaused,
     surfaceBounds,
   })
@@ -675,7 +764,7 @@ function StylizedSceneGrassLayer({
   const grassEdgeFillClearance =
     grassClusterRadius * STYLIZED_SCENE_GRASS_EDGE_FILL_SCALE +
     STYLIZED_SCENE_GRASS_EDGE_SAFETY_METERS
-  const baseGeometry = lod === 'culled' ? null : (lodGeometries?.[lod] ?? null)
+  const baseGeometry = lod === 'culled' ? null : renderGeometry
   const roadGrid = useMemo(
     () =>
       measureStylizedScene(profileMeasure, 'setup.stylized-grass.road-grid', () =>
@@ -777,6 +866,7 @@ function StylizedSceneGrassLayer({
     }
   }
   const residentContentGeneration = cellCacheRevisionRef.current
+  currentResidentContentGenerationRef.current = residentContentGeneration
   const grassFadeBlockerSignature = useMemo(
     () => stylizedGrassBlockersSignature(grassFadeBlockers),
     [grassFadeBlockers],
@@ -822,6 +912,7 @@ function StylizedSceneGrassLayer({
   )
   const residentInstancesByCell = residentInstanceSnapshot.instancesByCell
   const residentInstanceRevision = residentInstanceSnapshot.revision
+  currentResidentContentRevisionRef.current = residentInstanceRevision
   const committedResidentDrawSourcesRef = useRef<StylizedGrassCommittedResidentDrawSources | null>(
     null,
   )
@@ -837,9 +928,9 @@ function StylizedSceneGrassLayer({
   const materialBundle = useMemo(
     () =>
       measureStylizedScene(profileMeasure, 'setup.stylized-grass.node-material', () =>
-        createStylizedGrassNodeMaterial(sourceGeometry, resolvedTuning, groundColorTexture),
+        createStylizedGrassNodeMaterial(renderGeometry, resolvedTuning, groundColorTexture),
       ),
-    [groundColorTexture, profileMeasure, resolvedTuning, sourceGeometry],
+    [groundColorTexture, profileMeasure, renderGeometry, resolvedTuning],
   )
   const material = materialBundle?.material ?? null
   const meshRef = useRef<InstancedMesh>(null!)
@@ -862,11 +953,16 @@ function StylizedSceneGrassLayer({
   const appliedResidentInstanceRevisionRef = useRef(-1)
   const fadeZonesRef = useRef<StylizedGrassFadeZone[]>([])
   const lastFadeFrameAtRef = useRef<number | null>(null)
-  const lastFadeSummaryRef = useRef<StylizedGrassFadeSummary>(EMPTY_STYLIZED_GRASS_FADE_SUMMARY)
+  const lastFadeSummaryRef = useRef<StylizedGrassFadeSummary>({
+    ...EMPTY_STYLIZED_GRASS_FADE_SUMMARY,
+  })
   const smoothedInteractionRef = useRef(new Vector4())
   const profiledStartupFramesRef = useRef(0)
   const profileMeasureRef = useRef(profileMeasure)
   profileMeasureRef.current = profileMeasure
+  const lastPreparedResidencyReadinessRef = useRef<StylizedGrassPreparedResidencyReadiness | null>(
+    null,
+  )
 
   const applyExactDrawMembership = useCallback(
     (nowMs: number) => {
@@ -1004,15 +1100,19 @@ function StylizedSceneGrassLayer({
           fadeZonesChanged: false,
           instanceCount: drawUpdate.instances.length,
         })
+        const fadeStateById = stylizedGrassRuntimeProbeIsEnabled() ? state.fadeStateById : undefined
         applyStylizedGrassFadeAttributeSlots(
           geometry,
           drawUpdate.instances,
           fadeZonesRef.current,
           fadeSlots,
-          state.fadeStateById,
+          fadeStateById,
         )
-        if (stylizedGrassRuntimeProbeIsEnabled()) {
-          lastFadeSummaryRef.current = summarizeStylizedGrassFadeSlotStates(state.fadeStateById)
+        if (fadeStateById) {
+          lastFadeSummaryRef.current = summarizeStylizedGrassFadeSlotStates(
+            state.fadeStateById,
+            lastFadeSummaryRef.current,
+          )
         }
         mesh.count = drawUpdate.instances.length
       })
@@ -1041,13 +1141,62 @@ function StylizedSceneGrassLayer({
   }, [groundTintCap, materialBundle])
 
   useLayoutEffect(() => {
-    committedResidentDrawSourcesRef.current = {
+    void preparedCoverageVersion
+    const residentSources = {
       contentGeneration: residentContentGeneration,
       instancesByCell: residentInstancesByCell,
       residentCells,
       revision: residentInstanceRevision,
     }
-  }, [residentCells, residentContentGeneration, residentInstanceRevision, residentInstancesByCell])
+    committedResidentDrawSourcesRef.current = residentSources
+
+    const preparedState = preparedResidencyStateRef.current
+    preparedState.committedContentGeneration = residentContentGeneration
+    preparedState.committedContentRevision = residentInstanceRevision
+    preparedState.ready = resolveStylizedGrassPreparedResidencyReadiness({
+      committedContentGeneration: residentContentGeneration,
+      committedContentRevision: residentInstanceRevision,
+      coverageRevision: coverage.residentRevision,
+      currentContentGeneration: currentResidentContentGenerationRef.current,
+      currentContentRevision: currentResidentContentRevisionRef.current,
+      preparedCoverageRevision: preparedState.coverageRevision,
+      preparedGeneration: preparedState.generation,
+      prepared: preparedState.prepared,
+      requestGeneration: preparedResidencyRequest?.generation ?? null,
+      residentCells: residentSources.residentCells,
+      residentInstancesByCell: residentSources.instancesByCell,
+    })
+    if (!preparedResidencyRequest) return
+
+    const nextReadiness = {
+      contentGeneration: residentContentGeneration,
+      contentRevision: residentInstanceRevision,
+      coverageRevision: preparedState.coverageRevision,
+      generation: preparedResidencyRequest.generation,
+      ready: preparedState.ready,
+    }
+    const previousReadiness = lastPreparedResidencyReadinessRef.current
+    if (
+      previousReadiness?.contentGeneration === nextReadiness.contentGeneration &&
+      previousReadiness.contentRevision === nextReadiness.contentRevision &&
+      previousReadiness.coverageRevision === nextReadiness.coverageRevision &&
+      previousReadiness.generation === nextReadiness.generation &&
+      previousReadiness.ready === nextReadiness.ready
+    ) {
+      return
+    }
+    lastPreparedResidencyReadinessRef.current = nextReadiness
+    onPreparedResidencyReadinessChange?.(nextReadiness)
+  }, [
+    coverage.residentRevision,
+    onPreparedResidencyReadinessChange,
+    preparedCoverageVersion,
+    preparedResidencyRequest,
+    residentCells,
+    residentContentGeneration,
+    residentInstanceRevision,
+    residentInstancesByCell,
+  ])
 
   useLayoutEffect(() => {
     applyExactDrawMembership(performance.now())
@@ -1081,30 +1230,23 @@ function StylizedSceneGrassLayer({
     const hadFadeZones = fadeZonesRef.current.length > 0
     updateStylizedGrassFadeZones(fadeZonesRef.current, grassFadeBlockers)
     if (geometry && (hadFadeZones || fadeZonesRef.current.length > 0)) {
+      const fadeStateById = stylizedGrassRuntimeProbeIsEnabled()
+        ? drawStateRef.current.fadeStateById
+        : undefined
       lastFadeSummaryRef.current = applyStylizedGrassFadeAttributes(
         geometry,
         drawInstancesRef.current,
         fadeZonesRef.current,
         hadFadeZones,
-        drawStateRef.current.fadeStateById,
+        fadeStateById,
+        lastFadeSummaryRef.current,
       )
     }
     renderScheduler.requestFrame('animation')
   }, [bladesVisible, geometry, grassFadeBlockers])
 
-  useFrame(({ clock }, delta) => {
-    const mesh = meshRef.current
-    const visibility = clamp01(visibilityRef?.current ?? 1)
-    if (materialBundle) materialBundle.uniforms.visibility.value = visibility
-    if (material instanceof MeshStandardMaterial) material.opacity = visibility
-    const renderBlades = bladesVisible && visibility > 0.002
-    if (mesh) mesh.visible = renderBlades
-    if (!renderBlades) {
-      lastFadeFrameAtRef.current = performance.now()
-      return
-    }
-
-    const runFrame = () => {
+  const advanceGrassFrame = useCallback(
+    (clockElapsedTime: number, delta: number) => {
       const fadeFrameAt = performance.now()
       const previousFadeFrameAt = lastFadeFrameAtRef.current
       lastFadeFrameAtRef.current = fadeFrameAt
@@ -1121,20 +1263,23 @@ function StylizedSceneGrassLayer({
       // structural blocker rebuilds the instanced grass buffers at fade-end, which
       // can flash the old buffer contents for a frame across the whole field.
       const fadeChanged = advanceStylizedGrassFadeZones(fadeZonesRef.current, fadeDelta)
+      const runtimeProbeEnabled = stylizedGrassRuntimeProbeIsEnabled()
       if (!mesh || !geometry || !materialBundle || drawInstanceCount === 0) {
         if (fadeChanged) renderScheduler.requestFrame('animation')
-        recordStylizedGrassFadeRuntimeProbe({
-          cacheStats: takeStylizedGrassCacheStats(cacheStatsRef.current),
-          debugState: grassDebugState,
-          fadeBlockerSignature: grassFadeBlockerSignature,
-          fadeSummary: lastFadeSummaryRef.current,
-          fadeZoneCount: fadeZonesRef.current.length,
-          instanceCount: drawInstanceCount,
-          structuralBlockerSignature: grassBlockerSignature,
-        })
+        if (runtimeProbeEnabled) {
+          recordStylizedGrassFadeRuntimeProbe({
+            cacheStats: takeStylizedGrassCacheStats(cacheStatsRef.current),
+            debugState: grassDebugState,
+            fadeBlockerSignature: grassFadeBlockerSignature,
+            fadeSummary: lastFadeSummaryRef.current,
+            fadeZoneCount: fadeZonesRef.current.length,
+            instanceCount: drawInstanceCount,
+            structuralBlockerSignature: grassBlockerSignature,
+          })
+        }
         return
       }
-      materialBundle.uniforms.time.value = clock.elapsedTime
+      materialBundle.uniforms.time.value = clockElapsedTime
       const interaction = interactionRef?.current
       const smoothedInteraction = smoothedInteractionRef.current
       const targetStrength =
@@ -1175,33 +1320,59 @@ function StylizedSceneGrassLayer({
           activeDrawInstances,
           fadeZonesRef.current,
           hadFadeZones,
-          drawStateRef.current.fadeStateById,
+          runtimeProbeEnabled ? drawStateRef.current.fadeStateById : undefined,
+          lastFadeSummaryRef.current,
         )
       }
       if (fadeChanged) renderScheduler.requestFrame('animation')
-      recordStylizedGrassFadeRuntimeProbe({
-        cacheStats: takeStylizedGrassCacheStats(cacheStatsRef.current),
-        debugState: grassDebugState,
-        fadeBlockerSignature: grassFadeBlockerSignature,
-        fadeSummary: lastFadeSummaryRef.current,
-        fadeZoneCount: fadeZonesRef.current.length,
-        instanceCount: drawInstanceCount,
-        structuralBlockerSignature: grassBlockerSignature,
-      })
+      if (runtimeProbeEnabled) {
+        recordStylizedGrassFadeRuntimeProbe({
+          cacheStats: takeStylizedGrassCacheStats(cacheStatsRef.current),
+          debugState: grassDebugState,
+          fadeBlockerSignature: grassFadeBlockerSignature,
+          fadeSummary: lastFadeSummaryRef.current,
+          fadeZoneCount: fadeZonesRef.current.length,
+          instanceCount: drawInstanceCount,
+          structuralBlockerSignature: grassBlockerSignature,
+        })
+      }
+    },
+    [
+      geometry,
+      grassBlockerSignature,
+      grassDebugState,
+      grassFadeBlockerSignature,
+      interactionRef,
+      materialBundle,
+    ],
+  )
+
+  useFrame(({ clock }, delta) => {
+    const mesh = meshRef.current
+    const visibility = clamp01(visibilityRef?.current ?? 1)
+    if (materialBundle) materialBundle.uniforms.visibility.value = visibility
+    if (material instanceof MeshStandardMaterial) material.opacity = visibility
+    const renderBlades = bladesVisible && visibility > 0.002
+    if (mesh) mesh.visible = renderBlades
+    if (!renderBlades) {
+      lastFadeFrameAtRef.current = performance.now()
+      return
     }
+
     if (profileMeasure && profiledStartupFramesRef.current < 6) {
       const frameIndex = profiledStartupFramesRef.current
       profiledStartupFramesRef.current += 1
-      measureStylizedScene(profileMeasure, `setup.stylized-grass.frame-${frameIndex}`, runFrame)
+      measureStylizedScene(profileMeasure, `setup.stylized-grass.frame-${frameIndex}`, () =>
+        advanceGrassFrame(clock.elapsedTime, delta),
+      )
       return
     }
-    runFrame()
+    advanceGrassFrame(clock.elapsedTime, delta)
   }, 2)
 
   useGpuResourceLifetime(geometry)
   useGpuResourceLifetime(material)
-  useGpuResourceLifetime(lodGeometries?.far)
-  useGpuResourceLifetime(lodGeometries?.mid)
+  useGpuResourceLifetime(renderGeometry)
   useGpuResourceLifetime(sourceGeometry)
 
   if (!geometry || !material) return null
@@ -1436,6 +1607,10 @@ function withStylizedGrassBladeRootUv(geometry: BufferGeometry) {
   return geometry
 }
 
+export function createStylizedGrassRenderGeometry(source: BufferGeometry) {
+  return createReducedStylizedGrassGeometry(source, STYLIZED_SCENE_GRASS_RENDER_SECTION_TARGETS)
+}
+
 function createReducedStylizedGrassGeometry(
   source: BufferGeometry,
   sectionTargets: readonly number[],
@@ -1667,18 +1842,246 @@ function resolveStylizedGrassLod(projectedPixels: number, current: StylizedGrass
   return 'culled'
 }
 
+export function createStylizedGrassPreparedResidencyContainmentScratch(): StylizedGrassPreparedResidencyContainmentScratch {
+  return {
+    ndc: new Vector2(),
+    raycaster: new Raycaster(),
+  }
+}
+
+export function createStylizedGrassPreparedResidencyFallbackGate(): StylizedGrassPreparedResidencyFallbackGate {
+  return {
+    cameraContained: false,
+    committedContentGeneration: -1,
+    committedContentRevision: -1,
+    currentContentGeneration: -1,
+    currentContentRevision: -1,
+    currentCoverageRevision: -1,
+    initialized: false,
+    preparedCoverageRevision: -1,
+    preparedGeneration: null,
+    ready: false,
+    requestGeneration: null,
+    transitionActive: false,
+  }
+}
+
+export function isStylizedGrassPreparedResidencyExtentContained(
+  extentRadiusMeters: number,
+  footprintRadiusMeters: number,
+  horizontalMarginMeters: number,
+) {
+  const preparedRadius =
+    Math.max(0, footprintRadiusMeters) + STYLIZED_SCENE_STREAM_PREFETCH_MARGIN_METERS
+  const requiredRadius =
+    Math.max(0, extentRadiusMeters) +
+    Math.max(0, horizontalMarginMeters) +
+    STYLIZED_SCENE_STREAM_DRAW_EXIT_GUARD_METERS +
+    STYLIZED_SCENE_STREAM_CELL_SIZE * Math.SQRT2
+  return requiredRadius <= preparedRadius
+}
+
+export function stylizedGrassPreparedResidencyContainsCamera(
+  camera: Camera,
+  centerX: number,
+  centerZ: number,
+  drawEnvelope: StylizedGrassDrawEnvelope,
+  elevation: number,
+  footprintRadiusMeters: number,
+  scratch: StylizedGrassPreparedResidencyContainmentScratch,
+) {
+  let maximumDistanceSquared = 0
+  const minY = elevation + drawEnvelope.minHeight - STYLIZED_SCENE_STREAM_DRAW_EXIT_GUARD_METERS
+  const maxY = elevation + drawEnvelope.maxHeight + STYLIZED_SCENE_STREAM_DRAW_EXIT_GUARD_METERS
+
+  for (
+    let cornerOffset = 0;
+    cornerOffset < STYLIZED_SCENE_PREPARED_RESIDENCY_NDC_CORNERS.length;
+    cornerOffset += 2
+  ) {
+    scratch.ndc.set(
+      STYLIZED_SCENE_PREPARED_RESIDENCY_NDC_CORNERS[cornerOffset]!,
+      STYLIZED_SCENE_PREPARED_RESIDENCY_NDC_CORNERS[cornerOffset + 1]!,
+    )
+    scratch.raycaster.setFromCamera(scratch.ndc, camera)
+    const ray = scratch.raycaster.ray
+    if (!Number.isFinite(ray.direction.y) || Math.abs(ray.direction.y) <= 0.000001) return false
+
+    for (let slabIndex = 0; slabIndex < 2; slabIndex += 1) {
+      const slabY = slabIndex === 0 ? minY : maxY
+      const distance = (slabY - ray.origin.y) / ray.direction.y
+      if (!Number.isFinite(distance) || distance < 0) return false
+      const intersectionX = ray.origin.x + ray.direction.x * distance
+      const intersectionZ = ray.origin.z + ray.direction.z * distance
+      const deltaX = intersectionX - centerX
+      const deltaZ = intersectionZ - centerZ
+      maximumDistanceSquared = Math.max(maximumDistanceSquared, deltaX * deltaX + deltaZ * deltaZ)
+    }
+  }
+
+  return isStylizedGrassPreparedResidencyExtentContained(
+    Math.sqrt(maximumDistanceSquared),
+    footprintRadiusMeters,
+    drawEnvelope.horizontalMargin,
+  )
+}
+
+export function resolveStylizedGrassPreparedResidencyCameraPolicy(
+  transitionActive: boolean,
+  ready: boolean,
+  cameraContained: boolean,
+  preparedGeneration: string | null,
+  requestGeneration: string,
+  preparedCoverageRevision: number,
+  currentCoverageRevision: number,
+  committedContentGeneration: number,
+  currentContentGeneration: number,
+  committedContentRevision: number,
+  currentContentRevision: number,
+): StylizedGrassPreparedResidencyCameraPolicy {
+  if (!transitionActive) return 'normal'
+  return ready &&
+    cameraContained &&
+    preparedGeneration === requestGeneration &&
+    preparedCoverageRevision === currentCoverageRevision &&
+    committedContentGeneration === currentContentGeneration &&
+    committedContentRevision === currentContentRevision
+    ? 'suppress'
+    : 'fallback'
+}
+
+export function resolveStylizedGrassResidentUpdateDue(
+  initialized: boolean,
+  coverageChanged: boolean,
+  interactionChanged: boolean,
+  preparedRequestChanged: boolean,
+  preparedCameraPolicy: StylizedGrassPreparedResidencyCameraPolicy,
+  preparedFallbackUpdateDue: boolean,
+  timedCameraUpdateDue: boolean,
+) {
+  return (
+    !initialized ||
+    coverageChanged ||
+    interactionChanged ||
+    preparedRequestChanged ||
+    preparedFallbackUpdateDue ||
+    (timedCameraUpdateDue && preparedCameraPolicy !== 'suppress')
+  )
+}
+
+export function shouldForceStylizedGrassPreparedResidencyFallback(
+  gate: StylizedGrassPreparedResidencyFallbackGate,
+  transitionActive: boolean,
+  policy: StylizedGrassPreparedResidencyCameraPolicy,
+  ready: boolean,
+  cameraContained: boolean,
+  preparedGeneration: string | null,
+  requestGeneration: string | null,
+  preparedCoverageRevision: number,
+  currentCoverageRevision: number,
+  committedContentGeneration: number,
+  currentContentGeneration: number,
+  committedContentRevision: number,
+  currentContentRevision: number,
+) {
+  const invalidityChanged =
+    !gate.initialized ||
+    gate.transitionActive !== transitionActive ||
+    gate.ready !== ready ||
+    gate.cameraContained !== cameraContained ||
+    gate.preparedGeneration !== preparedGeneration ||
+    gate.requestGeneration !== requestGeneration ||
+    gate.preparedCoverageRevision !== preparedCoverageRevision ||
+    gate.currentCoverageRevision !== currentCoverageRevision ||
+    gate.committedContentGeneration !== committedContentGeneration ||
+    gate.currentContentGeneration !== currentContentGeneration ||
+    gate.committedContentRevision !== committedContentRevision ||
+    gate.currentContentRevision !== currentContentRevision
+
+  gate.initialized = true
+  gate.transitionActive = transitionActive
+  gate.ready = ready
+  gate.cameraContained = cameraContained
+  gate.preparedGeneration = preparedGeneration
+  gate.requestGeneration = requestGeneration
+  gate.preparedCoverageRevision = preparedCoverageRevision
+  gate.currentCoverageRevision = currentCoverageRevision
+  gate.committedContentGeneration = committedContentGeneration
+  gate.currentContentGeneration = currentContentGeneration
+  gate.committedContentRevision = committedContentRevision
+  gate.currentContentRevision = currentContentRevision
+
+  return policy === 'fallback' && invalidityChanged
+}
+
+export function shouldSettleStylizedGrassPreparedResidencyBaselines(
+  transitionActive: boolean,
+  previousCameraPolicy: StylizedGrassPreparedResidencyCameraPolicy,
+) {
+  return !transitionActive && previousCameraPolicy === 'suppress'
+}
+
+export function resolveStylizedGrassPreparedResidencyReadiness({
+  committedContentGeneration,
+  committedContentRevision,
+  coverageRevision,
+  currentContentGeneration,
+  currentContentRevision,
+  prepared,
+  preparedCoverageRevision,
+  preparedGeneration,
+  requestGeneration,
+  residentCells,
+  residentInstancesByCell,
+}: {
+  committedContentGeneration: number
+  committedContentRevision: number
+  coverageRevision: number
+  currentContentGeneration: number
+  currentContentRevision: number
+  prepared: boolean
+  preparedCoverageRevision: number
+  preparedGeneration: string | null
+  requestGeneration: string | null
+  residentCells: readonly StylizedGrassStreamCell[]
+  residentInstancesByCell: ReadonlyMap<string, readonly StylizedGrassInstance[]>
+}) {
+  if (
+    !prepared ||
+    requestGeneration === null ||
+    preparedGeneration !== requestGeneration ||
+    preparedCoverageRevision !== coverageRevision ||
+    committedContentGeneration !== currentContentGeneration ||
+    committedContentRevision !== currentContentRevision
+  ) {
+    return false
+  }
+  for (const cell of residentCells) {
+    if (!residentInstancesByCell.has(cell.key)) return false
+  }
+  return true
+}
+
 function useStylizedGrassCellCoverage({
   arrivalState,
+  currentResidentContentGenerationRef,
+  currentResidentContentRevisionRef,
   drawEnvelope,
   elevation,
   interactionRef,
+  preparedResidencyRequest,
+  preparedResidencyStateRef,
   streamingPaused,
   surfaceBounds,
 }: {
   arrivalState: StylizedGrassArrivalState
+  currentResidentContentGenerationRef: { current: number }
+  currentResidentContentRevisionRef: { current: number }
   drawEnvelope: StylizedGrassDrawEnvelope
   elevation: number
   interactionRef?: StylizedGrassInteractionRef
+  preparedResidencyRequest: StylizedGrassPreparedResidencyRequest | null
+  preparedResidencyStateRef: { current: StylizedGrassPreparedResidencyState }
   streamingPaused: boolean
   surfaceBounds: StylizedGrassBounds
 }) {
@@ -1697,29 +2100,47 @@ function useStylizedGrassCellCoverage({
   const currentCameraQuaternionRef = useRef(new Quaternion())
   const projectionViewMatrixRef = useRef(new Matrix4())
   const frustumRef = useRef(new Frustum())
+  const previousResidentCellIndicesRef = useRef(new Set<number>())
   const streamGrid = useMemo(() => createStylizedGrassStreamGrid(surfaceBounds), [surfaceBounds])
   const changesRef = useRef<StylizedGrassResidentCellChanges>({
     added: [],
     removed: [],
     revision: 0,
   })
-  const lastInteractionCellRef = useRef('')
+  const lastInteractionCellRef = useRef({ active: false, x: 0, z: 0 })
   const lastResidentUpdateTimeRef = useRef(-Infinity)
+  const lastPreparedResidencyCameraPolicyRef =
+    useRef<StylizedGrassPreparedResidencyCameraPolicy>('normal')
+  const preparedResidencyFallbackGateRef =
+    useRef<StylizedGrassPreparedResidencyFallbackGate | null>(null)
+  if (!preparedResidencyFallbackGateRef.current) {
+    preparedResidencyFallbackGateRef.current = createStylizedGrassPreparedResidencyFallbackGate()
+  }
+  const preparedResidencyFallbackGate = preparedResidencyFallbackGateRef.current
+  const preparedResidencyContainmentScratchRef =
+    useRef<StylizedGrassPreparedResidencyContainmentScratch | null>(null)
+  if (!preparedResidencyContainmentScratchRef.current) {
+    preparedResidencyContainmentScratchRef.current =
+      createStylizedGrassPreparedResidencyContainmentScratch()
+  }
+  const preparedResidencyContainmentScratch = preparedResidencyContainmentScratchRef.current
+  const [preparedCoverageVersion, setPreparedCoverageVersion] = useState(0)
   const coverageSignature = `${surfaceBounds.minX}:${surfaceBounds.minZ}:${surfaceBounds.maxX}:${surfaceBounds.maxZ}:${elevation}:${drawEnvelope.horizontalMargin}:${drawEnvelope.minHeight}:${drawEnvelope.maxHeight}`
   const lastCoverageSignatureRef = useRef('')
 
   useFrame(({ clock }) => {
     if (streamingPaused) return
 
-    camera.updateMatrixWorld()
-    camera.getWorldPosition(currentCameraPositionRef.current)
-    camera.getWorldQuaternion(currentCameraQuaternionRef.current)
+    camera.updateWorldMatrix(true, false)
+    currentCameraPositionRef.current.setFromMatrixPosition(camera.matrixWorld)
+    currentCameraQuaternionRef.current.setFromRotationMatrix(camera.matrixWorld)
     const interaction = interactionRef?.current
-    const interactionCell = interaction
-      ? `${Math.floor(interaction.x / STYLIZED_SCENE_STREAM_INTERACTION_CELL_METERS)}:${Math.floor(
-          interaction.z / STYLIZED_SCENE_STREAM_INTERACTION_CELL_METERS,
-        )}`
-      : ''
+    const interactionCellX = interaction
+      ? Math.floor(interaction.x / STYLIZED_SCENE_STREAM_INTERACTION_CELL_METERS)
+      : 0
+    const interactionCellZ = interaction
+      ? Math.floor(interaction.z / STYLIZED_SCENE_STREAM_INTERACTION_CELL_METERS)
+      : 0
     projectionViewMatrixRef.current.multiplyMatrices(
       camera.projectionMatrix,
       camera.matrixWorldInverse,
@@ -1741,16 +2162,88 @@ function useStylizedGrassCellCoverage({
     const residentProjectionChanged =
       !initializedRef.current ||
       stylizedGrassMatrixChanged(lastResidentProjectionMatrixRef.current, camera.projectionMatrix)
-    const interactionChanged = lastInteractionCellRef.current !== interactionCell
+    const previousInteractionCell = lastInteractionCellRef.current
+    const interactionChanged =
+      previousInteractionCell.active !== Boolean(interaction) ||
+      previousInteractionCell.x !== interactionCellX ||
+      previousInteractionCell.z !== interactionCellZ
     const coverageChanged = lastCoverageSignatureRef.current !== coverageSignature
-    const residentUpdateDue =
-      !initializedRef.current ||
-      coverageChanged ||
-      interactionChanged ||
-      (clock.elapsedTime - lastResidentUpdateTimeRef.current >=
+    const preparedState = preparedResidencyStateRef.current
+    const preparedRequestChanged =
+      preparedState.generation !== (preparedResidencyRequest?.generation ?? null) ||
+      preparedState.footprintRadiusMeters !== (preparedResidencyRequest?.footprintRadiusMeters ?? 0)
+    const transitionActive = preparedResidencyRequest?.transitionActive === true
+    const cameraContained =
+      transitionActive && preparedState.prepared
+        ? stylizedGrassPreparedResidencyContainsCamera(
+            camera,
+            preparedState.centerX,
+            preparedState.centerZ,
+            drawEnvelope,
+            elevation,
+            preparedState.footprintRadiusMeters,
+            preparedResidencyContainmentScratch,
+          )
+        : false
+    let preparedCameraPolicy = preparedResidencyRequest
+      ? resolveStylizedGrassPreparedResidencyCameraPolicy(
+          transitionActive,
+          preparedState.ready,
+          cameraContained,
+          preparedState.generation,
+          preparedResidencyRequest.generation,
+          preparedState.coverageRevision,
+          coverageRef.current.residentRevision,
+          preparedState.committedContentGeneration,
+          currentResidentContentGenerationRef.current,
+          preparedState.committedContentRevision,
+          currentResidentContentRevisionRef.current,
+        )
+      : ('normal' as const)
+    const preparedFallbackUpdateDue = shouldForceStylizedGrassPreparedResidencyFallback(
+      preparedResidencyFallbackGate,
+      transitionActive,
+      preparedCameraPolicy,
+      preparedState.ready,
+      cameraContained,
+      preparedState.generation,
+      preparedResidencyRequest?.generation ?? null,
+      preparedState.coverageRevision,
+      coverageRef.current.residentRevision,
+      preparedState.committedContentGeneration,
+      currentResidentContentGenerationRef.current,
+      preparedState.committedContentRevision,
+      currentResidentContentRevisionRef.current,
+    )
+    const preparedTransitionSettled = shouldSettleStylizedGrassPreparedResidencyBaselines(
+      transitionActive,
+      lastPreparedResidencyCameraPolicyRef.current,
+    )
+    if (preparedTransitionSettled) {
+      initializedRef.current = true
+      lastResidentCameraPositionRef.current.copy(currentCameraPositionRef.current)
+      lastResidentCameraQuaternionRef.current.copy(currentCameraQuaternionRef.current)
+      lastResidentProjectionMatrixRef.current.copy(camera.projectionMatrix)
+      lastResidentUpdateTimeRef.current = clock.elapsedTime
+    }
+    const timedCameraUpdateDue =
+      !preparedTransitionSettled &&
+      clock.elapsedTime - lastResidentUpdateTimeRef.current >=
         STYLIZED_SCENE_STREAM_MIN_UPDATE_SECONDS &&
-        (residentCameraMoved || residentCameraRotated || residentProjectionChanged))
-    if (!residentUpdateDue && !drawViewChanged) return
+      (residentCameraMoved || residentCameraRotated || residentProjectionChanged)
+    const residentUpdateDue = resolveStylizedGrassResidentUpdateDue(
+      initializedRef.current,
+      coverageChanged,
+      interactionChanged,
+      preparedRequestChanged,
+      preparedCameraPolicy,
+      preparedFallbackUpdateDue,
+      timedCameraUpdateDue,
+    )
+    if (!residentUpdateDue && !drawViewChanged) {
+      lastPreparedResidencyCameraPolicyRef.current = preparedCameraPolicy
+      return
+    }
 
     frustumRef.current.setFromProjectionMatrix(
       projectionViewMatrixRef.current,
@@ -1759,16 +2252,26 @@ function useStylizedGrassCellCoverage({
     const profile = getStylizedGrassPerfProbe()
     const streamStartedAt = profile ? performance.now() : 0
     const previousCoverage = coverageRef.current
-    const nextResidentCells = residentUpdateDue
+    const residentScan = residentUpdateDue
       ? createStylizedGrassResidentCells({
           drawEnvelope,
           elevation,
           frustum: frustumRef.current,
           grid: streamGrid,
           interaction,
+          preparedResidency:
+            preparedResidencyRequest && interaction
+              ? {
+                  centerX: interaction.x,
+                  centerZ: interaction.z,
+                  footprintRadiusMeters: preparedResidencyRequest.footprintRadiusMeters,
+                }
+              : null,
           previousCells: previousCoverage.residentCells,
-        }).cells
-      : previousCoverage.residentCells
+          previousCellIndices: previousResidentCellIndicesRef.current,
+        })
+      : null
+    const nextResidentCells = residentScan?.cells ?? previousCoverage.residentCells
     const changedAtMs = performance.now()
     const hadArrivalBaseline = arrivalState.initialized
     const drawMembershipChanged = reconcileStylizedGrassExactDrawMembership({
@@ -1800,14 +2303,38 @@ function useStylizedGrassCellCoverage({
       })
     }
     if (residentUpdateDue) {
+      const nextPrepared = Boolean(preparedResidencyRequest && interaction)
+      const nextPreparedGeneration = preparedResidencyRequest?.generation ?? null
+      const nextPreparedFootprintRadius = preparedResidencyRequest?.footprintRadiusMeters ?? 0
+      const preparedSnapshotChanged =
+        preparedState.prepared !== nextPrepared ||
+        preparedState.generation !== nextPreparedGeneration ||
+        preparedState.footprintRadiusMeters !== nextPreparedFootprintRadius ||
+        preparedState.coverageRevision !== nextCoverage.residentRevision ||
+        (nextPrepared &&
+          (preparedState.centerX !== interaction!.x || preparedState.centerZ !== interaction!.z))
+      if (preparedSnapshotChanged) {
+        preparedState.centerX = interaction?.x ?? 0
+        preparedState.centerZ = interaction?.z ?? 0
+        preparedState.coverageRevision = nextCoverage.residentRevision
+        preparedState.footprintRadiusMeters = nextPreparedFootprintRadius
+        preparedState.generation = nextPreparedGeneration
+        preparedState.prepared = nextPrepared
+        preparedState.ready = false
+        if (transitionActive) preparedCameraPolicy = 'fallback'
+        setPreparedCoverageVersion((version) => version + 1)
+      }
       initializedRef.current = true
       lastResidentCameraPositionRef.current.copy(currentCameraPositionRef.current)
       lastResidentCameraQuaternionRef.current.copy(currentCameraQuaternionRef.current)
       lastResidentProjectionMatrixRef.current.copy(camera.projectionMatrix)
-      lastInteractionCellRef.current = interactionCell
+      previousInteractionCell.active = Boolean(interaction)
+      previousInteractionCell.x = interactionCellX
+      previousInteractionCell.z = interactionCellZ
       lastCoverageSignatureRef.current = coverageSignature
       lastResidentUpdateTimeRef.current = clock.elapsedTime
     }
+    lastPreparedResidencyCameraPolicyRef.current = preparedCameraPolicy
     lastDrawProjectionViewMatrixRef.current.copy(projectionViewMatrixRef.current)
     if (nextCoverage === previousCoverage) return
 
@@ -1859,7 +2386,7 @@ function useStylizedGrassCellCoverage({
     setCoverage(nextCoverage)
   })
 
-  return { changesRef, coverage, exactDrawMembershipRef }
+  return { changesRef, coverage, exactDrawMembershipRef, preparedCoverageVersion }
 }
 
 export function createInitialStylizedGrassCellCoverage(): StylizedGrassCellCoverage {
@@ -1932,6 +2459,8 @@ export function createStylizedGrassResidentCells({
   frustum,
   grid,
   interaction,
+  preparedResidency = null,
+  previousCellIndices,
   previousCells,
 }: {
   drawEnvelope: StylizedGrassDrawEnvelope
@@ -1939,6 +2468,12 @@ export function createStylizedGrassResidentCells({
   frustum: Frustum
   grid: StylizedGrassStreamGrid
   interaction: StylizedGrassInteraction | null | undefined
+  preparedResidency?: {
+    centerX: number
+    centerZ: number
+    footprintRadiusMeters: number
+  } | null
+  previousCellIndices?: Set<number>
   previousCells: readonly StylizedGrassStreamCell[]
 }): StylizedGrassResidentCellScan {
   const cellSize = STYLIZED_SCENE_STREAM_CELL_SIZE
@@ -1949,8 +2484,16 @@ export function createStylizedGrassResidentCells({
       )
     : 0
   const interactionRadiusSquared = interactionRadius * interactionRadius
-  const previousCellIndices = new Set(previousCells.map((cell) => cell.index))
+  const preparedResidencyRadius = preparedResidency
+    ? Math.max(0, preparedResidency.footprintRadiusMeters) +
+      STYLIZED_SCENE_STREAM_PREFETCH_MARGIN_METERS
+    : 0
+  const preparedResidencyRadiusSquared = preparedResidencyRadius * preparedResidencyRadius
+  const retainedCellIndices = previousCellIndices ?? new Set<number>()
+  retainedCellIndices.clear()
+  for (const cell of previousCells) retainedCellIndices.add(cell.index)
   const cells: StylizedGrassStreamCell[] = []
+  const preparedCells: StylizedGrassStreamCell[] | null = preparedResidency ? [] : null
   const minBladeY = elevation + drawEnvelope.minHeight
   const maxBladeY = elevation + drawEnvelope.maxHeight
 
@@ -1959,8 +2502,16 @@ export function createStylizedGrassResidentCells({
       ? squaredDistanceToStylizedGrassBounds(interaction.x, interaction.z, chunk) <=
         interactionRadiusSquared
       : false
+    const chunkNearPreparedResidency = preparedResidency
+      ? squaredDistanceToStylizedGrassBounds(
+          preparedResidency.centerX,
+          preparedResidency.centerZ,
+          chunk,
+        ) <= preparedResidencyRadiusSquared
+      : false
     if (
       !chunkNearInteraction &&
+      !chunkNearPreparedResidency &&
       !stylizedGrassFrustumIntersectsBounds(
         frustum,
         chunk.minX - STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS - drawEnvelope.horizontalMargin,
@@ -1987,12 +2538,26 @@ export function createStylizedGrassResidentCells({
         interaction !== undefined &&
         interactionDeltaX * interactionDeltaX + interactionDeltaZ * interactionDeltaZ <=
           interactionRadiusSquared
-      const wasVisible = previousCellIndices.has(cell.index)
+      const preparedClosestX = preparedResidency
+        ? clamp(preparedResidency.centerX, minX, minX + cellSize)
+        : 0
+      const preparedClosestZ = preparedResidency
+        ? clamp(preparedResidency.centerZ, minZ, minZ + cellSize)
+        : 0
+      const preparedDeltaX = preparedResidency ? preparedResidency.centerX - preparedClosestX : 0
+      const preparedDeltaZ = preparedResidency ? preparedResidency.centerZ - preparedClosestZ : 0
+      const inPreparedResidency =
+        preparedResidency !== null &&
+        preparedDeltaX * preparedDeltaX + preparedDeltaZ * preparedDeltaZ <=
+          preparedResidencyRadiusSquared
+      if (inPreparedResidency) preparedCells?.push(cell)
+      const wasVisible = retainedCellIndices.has(cell.index)
       const margin = wasVisible
         ? STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS
         : STYLIZED_SCENE_STREAM_PREFETCH_MARGIN_METERS
       if (
         !nearInteraction &&
+        !inPreparedResidency &&
         !stylizedGrassFrustumIntersectsBounds(
           frustum,
           minX - margin - drawEnvelope.horizontalMargin,
@@ -2009,7 +2574,7 @@ export function createStylizedGrassResidentCells({
     }
   }
 
-  return { cells }
+  return { cells, preparedCells: preparedCells ?? EMPTY_STYLIZED_GRASS_STREAM_CELLS }
 }
 
 export function createStylizedGrassExactDrawCellKeys({
@@ -2878,18 +3443,19 @@ function initializeStylizedGrassIdentityMatrices(mesh: InstancedMesh) {
 function applyStylizedGrassFadeAttributes(
   geometry: BufferGeometry,
   instances: readonly StylizedGrassInstance[],
-  fadeZones: readonly StylizedGrassFadeZone[] = [],
-  forceNoZoneUpdate = false,
-  fadeStateById?: Map<string, StylizedGrassFadeSlotState>,
+  fadeZones: readonly StylizedGrassFadeZone[],
+  forceNoZoneUpdate: boolean,
+  fadeStateById: Map<string, StylizedGrassFadeSlotState> | undefined,
+  summary: StylizedGrassFadeSummary,
 ) {
   const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
-  if (!fade) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
+  if (!fade) return resetStylizedGrassFadeSummary(summary)
 
   const hasFadeZones = fadeZones.length > 0
-  fadeStateById?.clear()
-  if (!hasFadeZones && !forceNoZoneUpdate) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
+  if (!hasFadeZones) fadeStateById?.clear()
+  if (!hasFadeZones && !forceNoZoneUpdate) return resetStylizedGrassFadeSummary(summary)
 
-  const fadeState = { heightVisibility: 1, insideHiddenZone: false, opacity: 1 }
+  const fadeState = stylizedGrassFadeStateScratch
   let blockedFullCount = 0
   let blockedInstanceCount = 0
   let blockedVisibleCount = 0
@@ -2900,11 +3466,17 @@ function applyStylizedGrassFadeAttributes(
     resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
     const fadeValue = hasFadeZones ? Math.min(fadeState.heightVisibility, fadeState.opacity) : 1
     fade.setX(index, fadeValue)
-    if (hasFadeZones) {
-      fadeStateById?.set(instance.id, {
-        insideHiddenZone: fadeState.insideHiddenZone,
-        value: fadeValue,
-      })
+    if (hasFadeZones && fadeStateById) {
+      const slotState = fadeStateById.get(instance.id)
+      if (slotState) {
+        slotState.insideHiddenZone = fadeState.insideHiddenZone
+        slotState.value = fadeValue
+      } else {
+        fadeStateById.set(instance.id, {
+          insideHiddenZone: fadeState.insideHiddenZone,
+          value: fadeValue,
+        })
+      }
     }
     fadeMin = Math.min(fadeMin, fadeValue)
     fadeMax = Math.max(fadeMax, fadeValue)
@@ -2914,17 +3486,22 @@ function applyStylizedGrassFadeAttributes(
       if (fadeValue > 0.05) blockedVisibleCount += 1
     }
   }
-  markStylizedGrassInstanceSlotsUpdated(
-    fade,
-    Array.from({ length: instances.length }, (_, index) => index),
-  )
-  return {
-    blockedFullCount,
-    blockedInstanceCount,
-    blockedVisibleCount,
-    fadeMax: instances.length > 0 ? fadeMax : 1,
-    fadeMin: instances.length > 0 ? fadeMin : 1,
-  }
+  markStylizedGrassInstanceSlotSpanUpdated(fade, 0, instances.length - 1)
+  summary.blockedFullCount = blockedFullCount
+  summary.blockedInstanceCount = blockedInstanceCount
+  summary.blockedVisibleCount = blockedVisibleCount
+  summary.fadeMax = instances.length > 0 ? fadeMax : 1
+  summary.fadeMin = instances.length > 0 ? fadeMin : 1
+  return summary
+}
+
+function resetStylizedGrassFadeSummary(summary: StylizedGrassFadeSummary) {
+  summary.blockedFullCount = 0
+  summary.blockedInstanceCount = 0
+  summary.blockedVisibleCount = 0
+  summary.fadeMax = 1
+  summary.fadeMin = 1
+  return summary
 }
 
 export function resolveStylizedGrassFadeUploadSlots({
@@ -2964,30 +3541,37 @@ function applyStylizedGrassFadeAttributeSlots(
   instances: readonly StylizedGrassInstance[],
   fadeZones: readonly StylizedGrassFadeZone[],
   slots: readonly number[],
-  fadeStateById: Map<string, StylizedGrassFadeSlotState>,
+  fadeStateById?: Map<string, StylizedGrassFadeSlotState>,
 ) {
   if (fadeZones.length === 0 || slots.length === 0) return
   const fade = geometry.getAttribute('aFade') as InstancedBufferAttribute | undefined
   if (!fade) return
-  const fadeState = { heightVisibility: 1, insideHiddenZone: false, opacity: 1 }
+  const fadeState = stylizedGrassFadeStateScratch
   for (const slot of slots) {
     const instance = instances[slot]
     if (!instance) continue
     resolveStylizedGrassFadeState(instance, fadeZones, fadeState)
     const value = Math.min(fadeState.heightVisibility, fadeState.opacity)
     fade.setX(slot, value)
-    fadeStateById.set(instance.id, {
-      insideHiddenZone: fadeState.insideHiddenZone,
-      value,
-    })
+    const slotState = fadeStateById?.get(instance.id)
+    if (slotState) {
+      slotState.insideHiddenZone = fadeState.insideHiddenZone
+      slotState.value = value
+    } else {
+      fadeStateById?.set(instance.id, {
+        insideHiddenZone: fadeState.insideHiddenZone,
+        value,
+      })
+    }
   }
   markStylizedGrassInstanceSlotsUpdated(fade, slots)
 }
 
 function summarizeStylizedGrassFadeSlotStates(
   fadeStateById: ReadonlyMap<string, StylizedGrassFadeSlotState>,
+  summary: StylizedGrassFadeSummary,
 ) {
-  if (fadeStateById.size === 0) return EMPTY_STYLIZED_GRASS_FADE_SUMMARY
+  if (fadeStateById.size === 0) return resetStylizedGrassFadeSummary(summary)
   let blockedFullCount = 0
   let blockedInstanceCount = 0
   let blockedVisibleCount = 0
@@ -3001,7 +3585,12 @@ function summarizeStylizedGrassFadeSlotStates(
     if (state.value > 0.95) blockedFullCount += 1
     if (state.value > 0.05) blockedVisibleCount += 1
   }
-  return { blockedFullCount, blockedInstanceCount, blockedVisibleCount, fadeMax, fadeMin }
+  summary.blockedFullCount = blockedFullCount
+  summary.blockedInstanceCount = blockedInstanceCount
+  summary.blockedVisibleCount = blockedVisibleCount
+  summary.fadeMax = fadeMax
+  summary.fadeMin = fadeMin
+  return summary
 }
 
 function updateStylizedGrassFadeZones(
@@ -3528,7 +4117,9 @@ function advanceStylizedGrassStreamFades(
   if (!streamFade) return
 
   const activeBefore = state.streamFadeById.size
-  const changedSlots: number[] = []
+  let firstChangedSlot = Number.POSITIVE_INFINITY
+  let lastChangedSlot = -1
+  let updatedSlotCount = 0
   let fadeMax = 0
   let fadeMin = 1
   for (const id of state.streamFadeById.keys()) {
@@ -3543,14 +4134,18 @@ function advanceStylizedGrassStreamFades(
     fadeMax = Math.max(fadeMax, nextFade)
     fadeMin = Math.min(fadeMin, nextFade)
     streamFade.setX(slot, nextFade)
-    changedSlots.push(slot)
+    firstChangedSlot = Math.min(firstChangedSlot, slot)
+    lastChangedSlot = Math.max(lastChangedSlot, slot)
+    updatedSlotCount += 1
     if (nextFade >= 1) state.streamFadeById.delete(id)
     else state.streamFadeById.set(id, nextFade)
   }
 
-  changedSlots.sort((first, second) => first - second)
-  markStylizedGrassInstanceSlotsUpdated(streamFade, changedSlots)
-  if (nowMs - state.lastStreamFadeTraceAt >= 100 || state.streamFadeById.size === 0) {
+  markStylizedGrassInstanceSlotSpanUpdated(streamFade, firstChangedSlot, lastChangedSlot)
+  if (
+    stylizedGrassRuntimeProbeIsEnabled() &&
+    (nowMs - state.lastStreamFadeTraceAt >= 100 || state.streamFadeById.size === 0)
+  ) {
     state.lastStreamFadeTraceAt = nowMs
     recordStylizedGrassStreamRuntimeEvent({
       activeAfter: state.streamFadeById.size,
@@ -3558,7 +4153,7 @@ function advanceStylizedGrassStreamFades(
       event: 'arrival-fade',
       fadeMax: Math.round(fadeMax * 1000) / 1000,
       fadeMin: Math.round(fadeMin * 1000) / 1000,
-      updatedSlots: changedSlots.length,
+      updatedSlots: updatedSlotCount,
     })
   }
 }
@@ -3655,6 +4250,36 @@ function reconcileStylizedGrassDrawInstances({
 function stylizedGrassInstanceCellKey(id: string) {
   const separator = id.lastIndexOf(':')
   return separator < 0 ? id : id.slice(0, separator)
+}
+
+export function markStylizedGrassInstanceSlotSpanUpdated(
+  attribute: InstancedBufferAttribute,
+  firstSlot: number,
+  lastSlot: number,
+) {
+  if (!Number.isInteger(firstSlot) || !Number.isInteger(lastSlot)) return
+  const firstValidSlot = Math.max(0, firstSlot)
+  const lastValidSlot = Math.min(attribute.count - 1, lastSlot)
+  if (firstValidSlot > lastValidSlot) return
+
+  const itemSize = attribute.itemSize
+  let start = firstValidSlot * itemSize
+  let end = (lastValidSlot + 1) * itemSize
+  for (const range of attribute.updateRanges) {
+    start = Math.min(start, range.start)
+    end = Math.max(end, range.start + range.count)
+  }
+
+  let reusableRange = stylizedGrassReusableSpanUpdateRangeByAttribute.get(attribute)
+  if (!reusableRange) {
+    reusableRange = { count: 0, start: 0 }
+    stylizedGrassReusableSpanUpdateRangeByAttribute.set(attribute, reusableRange)
+  }
+  reusableRange.start = start
+  reusableRange.count = end - start
+  attribute.clearUpdateRanges()
+  attribute.updateRanges.push(reusableRange)
+  attribute.needsUpdate = true
 }
 
 export function markStylizedGrassInstanceSlotsUpdated(

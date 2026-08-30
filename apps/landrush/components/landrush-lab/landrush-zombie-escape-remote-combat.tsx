@@ -208,6 +208,7 @@ export function LandrushZombieEscapeRemoteCombat({
         combatStateRef={combatStateRef}
         framePriority={weaponFramePriority}
         muzzlePoseRef={muzzlePoseRef}
+        shoulderTorches={false}
         visualRootRef={visualRootRef}
       />
       <instancedMesh

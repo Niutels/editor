@@ -361,6 +361,8 @@ export async function runScenario(args) {
       adapter: info?.adapter ?? null,
       viewport: info?.viewport ?? null,
       dpr: info?.dpr ?? null,
+      rendererDpr:
+        Number.isFinite(info?.rendererDpr) && info.rendererDpr > 0 ? info.rendererDpr : null,
       actualViewport,
       requestedViewport,
       viewportMatchesRequest,
@@ -787,6 +789,8 @@ export async function runScenario(args) {
       adapter: info?.adapter ?? null,
       viewport: info?.viewport ?? null,
       dpr: info?.dpr ?? null,
+      rendererDpr:
+        Number.isFinite(info?.rendererDpr) && info.rendererDpr > 0 ? info.rendererDpr : null,
       actualViewport,
       requestedViewport,
       viewportMatchesRequest,

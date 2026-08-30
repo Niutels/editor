@@ -123,7 +123,6 @@ describe('authored instanced zombie presentation', () => {
         vertexCount: 3,
         walkFrameIndex: 0,
       })
-
       presentation.update({
         detailedSlots: new Uint8Array(1),
         elapsedSeconds: 1,
@@ -156,6 +155,50 @@ describe('authored instanced zombie presentation', () => {
         runtimeMixerCount: 0,
         spatialBoundsValid: true,
       })
+    } finally {
+      presentation.dispose()
+      source.geometry.dispose()
+      source.material.dispose()
+    }
+  })
+
+  test('keeps every exact authored pipeline resident behind one parked render-only instance', () => {
+    const source = createSkinnedSource()
+    const presentation = createZombieEscapeAuthoredInstancePresentation({
+      attackClip: null,
+      instanceCapacity: 2,
+      modelTransform: { offset: new Vector3(), scale: 1 },
+      runClip: null,
+      source: source.root,
+      variantIndex: 0,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+    const empty = createAuthoredState(2)
+    empty.pool.active.fill(0)
+    const full = createAuthoredState(2)
+    const parkedMatrix = new Matrix4()
+
+    try {
+      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies: empty })
+      const mesh = presentation.root.children[0] as InstancedMesh
+      expect(presentation.root.visible).toBe(true)
+      expect(mesh.visible).toBe(true)
+      expect(mesh.frustumCulled).toBe(false)
+      expect(mesh.count).toBe(1)
+      mesh.getMatrixAt(0, parkedMatrix)
+      expect(parkedMatrix.elements[13]).toBe(-1_000_000)
+      expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 0, batchCount: 0 })
+
+      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies: full })
+      expect(mesh.count).toBe(3)
+      mesh.getMatrixAt(2, parkedMatrix)
+      expect(parkedMatrix.elements[13]).toBe(-1_000_000)
+      expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 2, batchCount: 1 })
+
+      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies: empty })
+      expect(mesh.count).toBe(1)
+      expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 0, batchCount: 0 })
     } finally {
       presentation.dispose()
       source.geometry.dispose()
@@ -579,6 +622,93 @@ describe('authored instanced zombie presentation', () => {
       source.material.dispose()
     }
   })
+
+  test('uploads only changed instance matrix and animation-frame ranges', () => {
+    const source = createSkinnedSource()
+    const presentation = createZombieEscapeAuthoredInstancePresentation({
+      attackClip: null,
+      instanceCapacity: 2,
+      modelTransform: { offset: new Vector3(), scale: 1 },
+      runClip: null,
+      source: source.root,
+      variantIndex: 0,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+    const zombies = createAuthoredState(2)
+    zombies.x.set([2, 4])
+
+    try {
+      const detailedSlots = new Uint8Array(2)
+      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      const mesh = presentation.root.children[0] as InstancedMesh
+      const frames = mesh.geometry.getAttribute('zombieBakedFrame')
+      mesh.instanceMatrix.clearUpdateRanges()
+      frames.clearUpdateRanges()
+      const matrixVersion = mesh.instanceMatrix.version
+      const frameVersion = frames.version
+
+      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      expect(mesh.instanceMatrix.version).toBe(matrixVersion)
+      expect(frames.version).toBe(frameVersion)
+      expect(mesh.instanceMatrix.updateRanges).toEqual([])
+      expect(frames.updateRanges).toEqual([])
+
+      zombies.x[1] = 5
+      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      expect(mesh.instanceMatrix.version).toBe(matrixVersion + 1)
+      expect(mesh.instanceMatrix.updateRanges).toEqual([{ count: 16, start: 16 }])
+      expect(frames.version).toBe(frameVersion)
+
+      mesh.instanceMatrix.clearUpdateRanges()
+      zombies.locomotionPhase[1] = Math.PI / 6
+      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      expect(mesh.instanceMatrix.updateRanges).toEqual([])
+      expect(frames.version).toBe(frameVersion + 1)
+      expect(frames.updateRanges).toEqual([{ count: 1, start: 1 }])
+    } finally {
+      presentation.dispose()
+      source.geometry.dispose()
+      source.material.dispose()
+    }
+  })
+
+  test('shares one animation-frame attribute across every baked submesh', () => {
+    const source = createMultiMeshSkinnedSource()
+    const presentation = createZombieEscapeAuthoredInstancePresentation({
+      attackClip: null,
+      instanceCapacity: 2,
+      modelTransform: { offset: new Vector3(), scale: 1 },
+      runClip: null,
+      source: source.root,
+      variantIndex: 0,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+    const zombies = createAuthoredState(2)
+
+    try {
+      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies })
+      const firstMesh = presentation.root.children[0] as InstancedMesh
+      const secondMesh = presentation.root.children[1] as InstancedMesh
+      const firstFrames = firstMesh.geometry.getAttribute('zombieBakedFrame')
+      const secondFrames = secondMesh.geometry.getAttribute('zombieBakedFrame')
+
+      expect(firstFrames).toBe(secondFrames)
+      firstFrames.clearUpdateRanges()
+      const frameVersion = firstFrames.version
+      zombies.locomotionPhase[1] = Math.PI / 6
+      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies })
+
+      expect(firstFrames.version).toBe(frameVersion + 1)
+      expect(firstFrames.updateRanges).toEqual([{ count: 1, start: 1 }])
+      expect(secondFrames.updateRanges).toEqual([{ count: 1, start: 1 }])
+    } finally {
+      presentation.dispose()
+      for (const geometry of source.geometries) geometry.dispose()
+      for (const material of source.materials) material.dispose()
+    }
+  })
 })
 
 function createAuthoredState(capacity: number) {
@@ -626,4 +756,22 @@ function createSkinnedSource() {
   const root = new Group()
   root.add(mesh)
   return { geometry, material, mesh, root }
+}
+
+function createMultiMeshSkinnedSource() {
+  const first = createSkinnedSource()
+  const secondGeometry = first.geometry.clone()
+  const secondMaterial = first.material.clone()
+  const secondBone = new Bone()
+  const secondSkeleton = new Skeleton([secondBone])
+  const secondMesh = new SkinnedMesh(secondGeometry, secondMaterial)
+  secondMesh.add(secondBone)
+  secondMesh.bind(secondSkeleton)
+  secondMesh.position.x = 0.2
+  first.root.add(secondMesh)
+  return {
+    geometries: [first.geometry, secondGeometry],
+    materials: [first.material, secondMaterial],
+    root: first.root,
+  }
 }

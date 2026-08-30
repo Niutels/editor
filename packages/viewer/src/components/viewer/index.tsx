@@ -36,6 +36,7 @@ import { installTextureNodeNullGuard } from '../../lib/texture-node-guard'
 import useViewer, { type RenderContext } from '../../store/use-viewer'
 import { FloorElevationSystem } from '../../systems/floor-elevation/floor-elevation-system'
 import { GeometrySystem } from '../../systems/geometry/geometry-system'
+import { hasPendingRoofBuildWork } from '../../systems/roof/roof-build-work'
 import { ErrorBoundary } from '../error-boundary'
 import { SceneRenderer } from '../renderers/scene-renderer'
 import FrameLimiter from './frame-limiter'
@@ -59,6 +60,7 @@ import { SelectionManager } from './selection-manager'
 import { UnsupportedGpuViewerFallback } from './unsupported-gpu-fallback'
 import { ViewerCamera } from './viewer-camera'
 import { createViewerPointerEvents } from './viewer-pointer-events'
+import { resolveViewerRenderDpr, type ViewerRenderDpr } from './viewer-render-dpr'
 
 // Must be in place before any node material builds — a null texture pulled by
 // a shared override-material pass otherwise kills the render pass outright.
@@ -364,6 +366,7 @@ function SceneReadyTracker({
     const geometryRevision = useViewer.getState().geometryRevision
     const sceneRevision = sceneRegistry.revision
     const dirtyNodeCount = useScene.getState().dirtyNodes.size
+    const roofBuildWork = hasPendingRoofBuildWork()
     const observed = observedRevisionsRef.current
     const geometryOrSceneChanged =
       observed.geometry !== geometryRevision || observed.scene !== sceneRevision
@@ -371,9 +374,15 @@ function SceneReadyTracker({
       geometryOrSceneChanged ||
       observed.material !== materialRevision ||
       observed.dirtyNodes !== dirtyNodeCount
-    if (readinessStateRef.current.ready && !forceEvaluationRef.current && !revisionsChanged) {
+    if (
+      readinessStateRef.current.ready &&
+      !forceEvaluationRef.current &&
+      !revisionsChanged &&
+      !roofBuildWork
+    ) {
       return
     }
+    const buildWork = roofBuildWork || hasPendingSceneBuildWork()
     observedRevisionsRef.current = {
       dirtyNodes: dirtyNodeCount,
       geometry: geometryRevision,
@@ -427,7 +436,7 @@ function SceneReadyTracker({
       }
     }
     const blockers = getSceneReadinessBlockerNames({
-      buildWork: hasPendingSceneBuildWork(),
+      buildWork,
       committedRoot: hasCommittedSceneRoot(),
       failedMaterialTextures: materialSettlement.failedAssignments,
       pendingMaterialTextures: materialSettlement.pendingAssignments,
@@ -530,6 +539,10 @@ interface ViewerProps {
    * GPU on a passive or background canvas.
    */
   maxFps?: number
+  /** Override the canvas backing-buffer DPR without changing its CSS dimensions. */
+  renderDpr?: ViewerRenderDpr
+  /** Override the persisted shadow preference for this Viewer host. */
+  shadows?: boolean
   /**
    * Skip the TSL post-processing pipeline (SSGI/denoise/ink/outline) and render
    * the scene directly. For headless/capture surfaces (the bake page) where
@@ -629,6 +642,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
     sceneReadyPrerequisitesReady = true,
     sceneReadyMaxWaitMs,
     maxFps = 50,
+    renderDpr,
+    shadows,
     disablePostFx = false,
     presentationEffectRef,
     renderPaused = false,
@@ -676,7 +691,8 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // back on reuses destroyed resources and every frame submit fails with a
   // GPUValidationError. Disabling at the renderer level rebuilds materials
   // without disposing anything, so the round-trip is safe.
-  const shadowsEnabled = useViewer((state) => state.shadows)
+  const preferredShadowsEnabled = useViewer((state) => state.shadows)
+  const shadowsEnabled = shadows ?? preferredShadowsEnabled
   useLayoutEffect(() => {
     if (transparent === undefined) return
 
@@ -725,8 +741,9 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   // Coarse-pointer devices (phones/tablets) get a tighter DPR ceiling to keep
   // fragment-shader cost down — saves another ~30% over 1.5x on high-DPI mobile.
   // Desktops (fine pointer) keep the original 1.5 cap.
-  const maxDpr =
-    typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches ? 1.25 : 1.5
+  const coarsePointer =
+    typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+  const canvasDpr = resolveViewerRenderDpr(renderDpr, coarsePointer)
   const showGpuFallback = rendererInitFailed
   // When we can't mount the GPU canvas, the SceneReadyTracker never mounts and
   // the host editor would otherwise wait on its scene-readiness timeout. Signal
@@ -744,7 +761,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       className={`transition-colors duration-700 ${
         transparentBackground ? 'bg-transparent' : isDark ? 'bg-[#1f2433]' : 'bg-[#fafafa]'
       }`}
-      dpr={[1, maxDpr]}
+      dpr={canvasDpr}
       events={createViewerPointerEvents}
       frameloop="never"
       gl={

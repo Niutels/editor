@@ -1,12 +1,14 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  type Camera,
   Color,
   HalfFloatType,
   Layers,
   Matrix4,
   type Object3D,
   Scene,
+  SRGBColorSpace,
   UnsignedByteType,
   Vector2,
 } from 'three'
@@ -48,7 +50,6 @@ import {
   type WebGPURenderer,
 } from 'three/webgpu'
 import { backdropGradient, deepSkyColor, horizonHazeColor } from '../../lib/backdrop'
-import { edgeColorFor, edgeOpacityScaleFor } from '../../lib/edge-style'
 import { PERF_OVERLAY_ENABLED, pushGpuSample } from '../../lib/gpu-perf'
 import { inkedEdges } from '../../lib/ink-edges'
 import { GRID_LAYER, OVERLAY_LAYER, SCENE_LAYER, ZONE_LAYER } from '../../lib/layers'
@@ -143,9 +144,144 @@ const PRESENTATION_RADIAL_BLUR_MAX_STRENGTH = 2
 const PRESENTATION_RADIAL_BLUR_RESOLUTION_SCALE = 0.5
 const PRESENTATION_RADIAL_BLUR_SAMPLE_PAIRS = 6
 
+export function resolvePostProcessingInkColor(background: Color) {
+  const hex = background.getHex()
+  const red = (hex >> 16) & 0xff
+  const green = (hex >> 8) & 0xff
+  const blue = hex & 0xff
+  const luma = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+  if (luma > 0.5) return 0x1a_1d_24
+
+  const lift = (channel: number) => Math.round(channel + (255 - channel) * 0.42)
+  return (lift(red) << 16) | (lift(green) << 8) | lift(blue)
+}
+
+export function resolvePostProcessingInkOpacityScale(background: Color) {
+  const hex = background.getHex()
+  const red = (hex >> 16) & 0xff
+  const green = (hex >> 8) & 0xff
+  const blue = hex & 0xff
+  return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255 > 0.5 ? 1 : 0.7
+}
+
+export function advancePostProcessingBackgroundColor(
+  current: Color,
+  target: Color,
+  deltaSeconds: number,
+) {
+  if (current.equals(target)) return false
+  const alpha = Math.min(Math.max(deltaSeconds, 0), 0.1) * 4
+  if (
+    alpha >= 1 ||
+    Math.max(
+      Math.abs(current.r - target.r),
+      Math.abs(current.g - target.g),
+      Math.abs(current.b - target.b),
+    ) <= 0.000_01
+  ) {
+    current.copy(target)
+  } else {
+    current.lerp(target, alpha)
+  }
+  return true
+}
+
+export function updatePostProcessingBackdropTargetsFromColor(
+  source: Color,
+  background: Color,
+  sky: Color,
+  haze: Color,
+  skyDeep: Color,
+) {
+  background.copy(source)
+  sky.copy(source)
+  const hex = source.getHex(SRGBColorSpace)
+  const red = (hex >> 16) & 0xff
+  const green = (hex >> 8) & 0xff
+  const blue = hex & 0xff
+  const luma = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+  const hazeAmount = luma > 0.5 ? 0.5 : 0.25
+  haze.setRGB(
+    Math.round(red + (255 - red) * hazeAmount) / 255,
+    Math.round(green + (244 - green) * hazeAmount) / 255,
+    Math.round(blue + (222 - blue) * hazeAmount) / 255,
+    SRGBColorSpace,
+  )
+
+  const redUnit = red / 255
+  const greenUnit = green / 255
+  const blueUnit = blue / 255
+  const max = Math.max(redUnit, greenUnit, blueUnit)
+  const min = Math.min(redUnit, greenUnit, blueUnit)
+  const lightness = (max + min) / 2
+  const delta = max - min
+  let hue = 0
+  let saturation = 0
+  if (delta > 0) {
+    saturation = delta / (1 - Math.abs(2 * lightness - 1))
+    if (max === redUnit) {
+      hue = ((greenUnit - blueUnit) / delta + (greenUnit < blueUnit ? 6 : 0)) / 6
+    } else if (max === greenUnit) {
+      hue = ((blueUnit - redUnit) / delta + 2) / 6
+    } else {
+      hue = ((redUnit - greenUnit) / delta + 4) / 6
+    }
+  }
+  const deepSaturation = Math.min(1, saturation * 1.5 + 0.05)
+  const deepLightness = lightness * 0.72
+  const chroma = (1 - Math.abs(2 * deepLightness - 1)) * deepSaturation
+  const secondary = chroma * (1 - Math.abs(((hue * 6) % 2) - 1))
+  const match = deepLightness - chroma / 2
+  const sector = Math.floor(hue * 6) % 6
+  let deepRed = 0
+  let deepGreen = 0
+  let deepBlue = 0
+  if (sector === 0) {
+    deepRed = chroma
+    deepGreen = secondary
+  } else if (sector === 1) {
+    deepRed = secondary
+    deepGreen = chroma
+  } else if (sector === 2) {
+    deepGreen = chroma
+    deepBlue = secondary
+  } else if (sector === 3) {
+    deepGreen = secondary
+    deepBlue = chroma
+  } else if (sector === 4) {
+    deepRed = secondary
+    deepBlue = chroma
+  } else {
+    deepRed = chroma
+    deepBlue = secondary
+  }
+  skyDeep.setRGB(
+    Math.round((deepRed + match) * 255) / 255,
+    Math.round((deepGreen + match) * 255) / 255,
+    Math.round((deepBlue + match) * 255) / 255,
+    SRGBColorSpace,
+  )
+}
+
 export type ViewerPresentationEffectDebugMode = 'contribution' | 'final' | 'mask'
 
 export type ViewerPresentationEffectState = {
+  pipelinePrewarmBeginCount?: number
+  pipelinePrewarmCamera?: Camera
+  pipelinePrewarmCameraMatched?: boolean
+  pipelinePrewarmCallbackInstalled?: boolean
+  pipelinePrewarmFailedRevision?: number
+  pipelinePrewarmOnRenderSettled?: (revision: number, outcome: 'failed' | 'rendered') => void
+  pipelinePrewarmPipelineAvailable?: boolean
+  pipelinePrewarmPipelineError?: boolean
+  pipelinePrewarmPostprocessCallbackCount?: number
+  pipelinePrewarmPostprocessFrameCount?: number
+  pipelinePrewarmRenderedCamera?: Camera
+  pipelinePrewarmRenderPath?: 'direct' | 'presentation'
+  pipelinePrewarmRenderedRevision?: number
+  pipelinePrewarmRequestRevision?: number
+  presentationPipelineActive?: boolean
+  zoomBlurActive?: boolean
   zoomBlurAmount: number
   zoomBlurCenter?: readonly [number, number]
   zoomBlurDebugMode?: ViewerPresentationEffectDebugMode
@@ -155,6 +291,10 @@ export type ViewerPresentationEffectState = {
 
 export type ViewerPresentationEffectRef = {
   current: ViewerPresentationEffectState
+}
+
+function normalizePresentationRevision(revision: number | undefined) {
+  return Number.isSafeInteger(revision) && (revision ?? -1) >= 0 ? (revision as number) : 0
 }
 
 type RadialEdgeBlurEffect = {
@@ -338,6 +478,18 @@ const PostProcessingPasses = ({
   presentationEffectRef?: ViewerPresentationEffectRef
 }) => {
   const { gl: renderer, get, invalidate, scene, camera, size, viewport } = useThree()
+  const sceneTheme = useViewer((state) => state.sceneTheme)
+  const backgroundTargets = useMemo(() => {
+    const theme = getSceneTheme(sceneTheme)
+    const background = new Color(theme.background)
+    const skySource = theme.backgroundSky ?? theme.background
+    return {
+      background,
+      haze: new Color(horizonHazeColor(skySource, theme.appearance)),
+      sky: new Color(skySource),
+      skyDeep: new Color(deepSkyColor(skySource)),
+    }
+  }, [sceneTheme])
   const renderPipelineRef = useRef<RenderPipeline | null>(null)
   const presentationScenePassRef = useRef<ReturnType<typeof pass> | null>(null)
   const presentationOnlyPipelineRef = useRef(false)
@@ -349,25 +501,22 @@ const PostProcessingPasses = ({
 
   // Background color uniform — updated every frame via lerp, read by the TSL pipeline.
   // Initialised from the current scene theme so there's no flash on first render.
-  const initTheme = getSceneTheme(useViewer.getState().sceneTheme)
-  const initBg = initTheme.background
-  const bgUniform = useRef(uniform(new Color(initBg)))
-  const bgCurrent = useRef(new Color(initBg))
-  const bgTarget = useRef(new Color())
+  const bgUniform = useRef(uniform(backgroundTargets.background.clone()))
+  const bgCurrent = useRef(backgroundTargets.background.clone())
+  const bgTarget = useRef(backgroundTargets.background.clone())
   // Zenith colour of the backdrop gradient (falls back to the flat background).
-  const initSky = initTheme.backgroundSky ?? initBg
-  const bgSkyUniform = useRef(uniform(new Color(initSky)))
-  const bgSkyCurrent = useRef(new Color(initSky))
-  const bgSkyTarget = useRef(new Color())
+  const bgSkyUniform = useRef(uniform(backgroundTargets.sky.clone()))
+  const bgSkyCurrent = useRef(backgroundTargets.sky.clone())
+  const bgSkyTarget = useRef(backgroundTargets.sky.clone())
   // Horizon haze band + deep zenith (derived — see lib/backdrop.ts).
-  const initHaze = horizonHazeColor(initSky, initTheme.appearance)
-  const bgHazeUniform = useRef(uniform(new Color(initHaze)))
-  const bgHazeCurrent = useRef(new Color(initHaze))
-  const bgHazeTarget = useRef(new Color())
-  const initSkyDeep = deepSkyColor(initSky)
-  const bgSkyDeepUniform = useRef(uniform(new Color(initSkyDeep)))
-  const bgSkyDeepCurrent = useRef(new Color(initSkyDeep))
-  const bgSkyDeepTarget = useRef(new Color())
+  const bgHazeUniform = useRef(uniform(backgroundTargets.haze.clone()))
+  const bgHazeCurrent = useRef(backgroundTargets.haze.clone())
+  const bgHazeTarget = useRef(backgroundTargets.haze.clone())
+  const bgSkyDeepUniform = useRef(uniform(backgroundTargets.skyDeep.clone()))
+  const bgSkyDeepCurrent = useRef(backgroundTargets.skyDeep.clone())
+  const bgSkyDeepTarget = useRef(backgroundTargets.skyDeep.clone())
+  const liveBackgroundActiveRef = useRef(false)
+  const lastLiveBackgroundRef = useRef(backgroundTargets.background.clone())
   // Scene-camera matrices for the backdrop: the pipeline's fullscreen quad has
   // its own camera, so the sky gradient reconstructs each pixel's world-space
   // view ray from these to find the true horizon (dir.y = 0).
@@ -378,12 +527,26 @@ const PostProcessingPasses = ({
   const presentationBlurDebugMode = useRef(uniform(0))
   const presentationBlurDirection = useRef(uniform(1))
   const presentationBlurStrength = useRef(uniform(1))
+  const presentationPrewarmUnculledRef = useRef<Object3D[]>([])
 
   // Ink-line colour follows the scene-theme background luminance (dark lines on
   // light scenes, light on dark), refreshed each frame like the background.
   // Dark scenes also scale the ink opacity down (see edge-style.ts).
-  const inkColorUniform = useRef(uniform(new Color(edgeColorFor(initBg))))
-  const inkOpacityScaleUniform = useRef(uniform(edgeOpacityScaleFor(initBg)))
+  const inkColorUniform = useRef(
+    uniform(new Color(resolvePostProcessingInkColor(backgroundTargets.background))),
+  )
+  const inkOpacityScaleUniform = useRef(
+    uniform(resolvePostProcessingInkOpacityScale(backgroundTargets.background)),
+  )
+
+  useEffect(() => {
+    liveBackgroundActiveRef.current = false
+    bgTarget.current.copy(backgroundTargets.background)
+    bgSkyTarget.current.copy(backgroundTargets.sky)
+    bgHazeTarget.current.copy(backgroundTargets.haze)
+    bgSkyDeepTarget.current.copy(backgroundTargets.skyDeep)
+    invalidate()
+  }, [backgroundTargets, invalidate])
 
   const zoneLayers = useMemo(() => {
     const l = new Layers()
@@ -930,7 +1093,8 @@ const PostProcessingPasses = ({
   ])
 
   useFrame((state, delta) => {
-    const camera = state.camera
+    const presentationState = presentationEffectRef?.current
+    const camera = presentationState?.pipelinePrewarmCamera ?? state.camera
     if (size.width < 1 || size.height < 1) {
       return
     }
@@ -952,38 +1116,92 @@ const PostProcessingPasses = ({
       return
     }
 
-    // Animate background colour toward the current scene theme target (same lerp as AnimatedBackground)
-    const bgTheme = getSceneTheme(useViewer.getState().sceneTheme)
-    bgTarget.current.set(bgTheme.background)
-    bgCurrent.current.lerp(bgTarget.current, Math.min(delta, 0.1) * 4)
-    bgUniform.current.value.copy(bgCurrent.current)
-    bgSkyTarget.current.set(bgTheme.backgroundSky ?? bgTheme.background)
-    bgSkyCurrent.current.lerp(bgSkyTarget.current, Math.min(delta, 0.1) * 4)
-    bgSkyUniform.current.value.copy(bgSkyCurrent.current)
-    bgHazeTarget.current.set(
-      horizonHazeColor(bgTheme.backgroundSky ?? bgTheme.background, bgTheme.appearance),
+    const sceneBackground = scene.background
+    const liveBackground =
+      sceneBackground && (sceneBackground as Color).isColor ? (sceneBackground as Color) : null
+    const liveBackgroundActive =
+      liveBackground !== null && !liveBackground.equals(backgroundTargets.background)
+    if (liveBackgroundActive) {
+      if (
+        !liveBackgroundActiveRef.current ||
+        !lastLiveBackgroundRef.current.equals(liveBackground)
+      ) {
+        updatePostProcessingBackdropTargetsFromColor(
+          liveBackground,
+          bgTarget.current,
+          bgSkyTarget.current,
+          bgHazeTarget.current,
+          bgSkyDeepTarget.current,
+        )
+        bgCurrent.current.copy(bgTarget.current)
+        bgSkyCurrent.current.copy(bgSkyTarget.current)
+        bgHazeCurrent.current.copy(bgHazeTarget.current)
+        bgSkyDeepCurrent.current.copy(bgSkyDeepTarget.current)
+        bgUniform.current.value.copy(bgCurrent.current)
+        bgSkyUniform.current.value.copy(bgSkyCurrent.current)
+        bgHazeUniform.current.value.copy(bgHazeCurrent.current)
+        bgSkyDeepUniform.current.value.copy(bgSkyDeepCurrent.current)
+        inkColorUniform.current.value.setHex(resolvePostProcessingInkColor(bgCurrent.current))
+        inkOpacityScaleUniform.current.value = resolvePostProcessingInkOpacityScale(
+          bgCurrent.current,
+        )
+        lastLiveBackgroundRef.current.copy(liveBackground)
+      }
+      liveBackgroundActiveRef.current = true
+    } else if (liveBackgroundActiveRef.current) {
+      liveBackgroundActiveRef.current = false
+      bgTarget.current.copy(backgroundTargets.background)
+      bgSkyTarget.current.copy(backgroundTargets.sky)
+      bgHazeTarget.current.copy(backgroundTargets.haze)
+      bgSkyDeepTarget.current.copy(backgroundTargets.skyDeep)
+    }
+
+    // Theme parsing is change-driven; steady frames only touch uniforms while a lerp is active.
+    const backgroundChanged = advancePostProcessingBackgroundColor(
+      bgCurrent.current,
+      bgTarget.current,
+      delta,
     )
-    bgHazeCurrent.current.lerp(bgHazeTarget.current, Math.min(delta, 0.1) * 4)
-    bgHazeUniform.current.value.copy(bgHazeCurrent.current)
-    bgSkyDeepTarget.current.set(deepSkyColor(bgTheme.backgroundSky ?? bgTheme.background))
-    bgSkyDeepCurrent.current.lerp(bgSkyDeepTarget.current, Math.min(delta, 0.1) * 4)
-    bgSkyDeepUniform.current.value.copy(bgSkyDeepCurrent.current)
+    if (backgroundChanged) {
+      bgUniform.current.value.copy(bgCurrent.current)
+      inkColorUniform.current.value.setHex(resolvePostProcessingInkColor(bgCurrent.current))
+      inkOpacityScaleUniform.current.value = resolvePostProcessingInkOpacityScale(bgCurrent.current)
+    }
+    if (advancePostProcessingBackgroundColor(bgSkyCurrent.current, bgSkyTarget.current, delta)) {
+      bgSkyUniform.current.value.copy(bgSkyCurrent.current)
+    }
+    if (advancePostProcessingBackgroundColor(bgHazeCurrent.current, bgHazeTarget.current, delta)) {
+      bgHazeUniform.current.value.copy(bgHazeCurrent.current)
+    }
+    if (
+      advancePostProcessingBackgroundColor(bgSkyDeepCurrent.current, bgSkyDeepTarget.current, delta)
+    ) {
+      bgSkyDeepUniform.current.value.copy(bgSkyDeepCurrent.current)
+    }
     camProjInvUniform.current.value.copy(camera.projectionMatrixInverse)
     camWorldUniform.current.value.copy(camera.matrixWorld)
-    // Ink colour follows the (lerping) background luminance — snaps dark↔light.
-    const bgHex = `#${bgCurrent.current.getHexString()}`
-    inkColorUniform.current.value.set(edgeColorFor(bgHex))
-    inkOpacityScaleUniform.current.value = edgeOpacityScaleFor(bgHex)
 
     const outliner = useViewer.getState().outliner
     sanitizeOutlineObjects(outliner.selectedObjects)
     sanitizeOutlineObjects(outliner.hoveredObjects)
 
-    const presentationState = presentationEffectRef?.current
+    const pipelinePrewarmRequestRevision = normalizePresentationRevision(
+      presentationState?.pipelinePrewarmRequestRevision,
+    )
+    const pipelinePrewarmRenderedRevision = normalizePresentationRevision(
+      presentationState?.pipelinePrewarmRenderedRevision,
+    )
+    const pipelinePrewarmPending =
+      presentationState !== undefined &&
+      pipelinePrewarmRequestRevision > pipelinePrewarmRenderedRevision
+    const pipelinePrewarmRenderPath = presentationState?.pipelinePrewarmRenderPath ?? 'presentation'
     const rawPresentationAmount = presentationState?.zoomBlurAmount ?? 0
     const presentationAmount = Number.isFinite(rawPresentationAmount)
       ? Math.max(0, Math.min(1, rawPresentationAmount))
       : 0
+    const presentationActive =
+      presentationState?.presentationPipelineActive === true ||
+      presentationState?.zoomBlurActive === true
     const rawPresentationStrength = presentationState?.zoomBlurStrength ?? 1
     presentationBlurAmount.current.value = presentationAmount
     presentationBlurDirection.current.value =
@@ -1017,20 +1235,48 @@ const PostProcessingPasses = ({
       presentationOnlyPipelineRef.current &&
       presentationAmount <= 0.001 &&
       presentationPrewarmFramesRef.current > 0
-    if (prewarming) {
+    if (prewarming || pipelinePrewarmPending) {
       presentationBlurAmount.current.value = PRESENTATION_PREWARM_AMOUNT
       invalidate()
     }
 
     const presentationPipelineFrame =
-      presentationOnlyPipelineRef.current && (presentationAmount > 0.001 || prewarming)
+      presentationOnlyPipelineRef.current &&
+      (presentationActive ||
+        presentationAmount > 0.001 ||
+        prewarming ||
+        (pipelinePrewarmPending && pipelinePrewarmRenderPath === 'presentation'))
     const renderPipeline = renderPipelineRef.current
     const shouldDirectRender =
       PERF_POST_FX_DISABLED ||
       hasPipelineErrorRef.current ||
+      (pipelinePrewarmPending && pipelinePrewarmRenderPath === 'direct') ||
       (disablePostFx && !presentationPipelineFrame)
 
+    if (pipelinePrewarmPending && presentationState) {
+      presentationState.pipelinePrewarmCameraMatched = false
+      presentationState.pipelinePrewarmRenderedCamera = undefined
+      presentationState.pipelinePrewarmPostprocessFrameCount =
+        normalizePresentationRevision(presentationState.pipelinePrewarmPostprocessFrameCount) + 1
+      presentationState.pipelinePrewarmPipelineAvailable = renderPipeline !== null
+      presentationState.pipelinePrewarmPipelineError = hasPipelineErrorRef.current
+      presentationState.pipelinePrewarmCallbackInstalled =
+        typeof presentationState.pipelinePrewarmOnRenderSettled === 'function'
+    }
+
     if (!renderPipeline || shouldDirectRender) {
+      const directPrewarm =
+        pipelinePrewarmPending && pipelinePrewarmRenderPath === 'direct' && renderPipeline !== null
+      const unculled = presentationPrewarmUnculledRef.current
+      if (directPrewarm) {
+        unculled.length = 0
+        scene.traverse((object) => {
+          if (!object.frustumCulled) return
+          object.frustumCulled = false
+          unculled.push(object)
+        })
+      }
+      let renderSucceeded = false
       try {
         const clearAlpha = transparentBackground ? 0 : 1
         if ((renderer as any).setClearColor) {
@@ -1040,6 +1286,7 @@ const PostProcessingPasses = ({
         }
         const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
         ;(renderer as any).render(scene, camera)
+        renderSucceeded = true
         if (PERF_OVERLAY_ENABLED) {
           const queue = (renderer as any).backend?.device?.queue as
             | { onSubmittedWorkDone?: () => Promise<void> }
@@ -1050,6 +1297,31 @@ const PostProcessingPasses = ({
         }
       } catch (fallbackError) {
         console.error('[viewer/post-processing] Fallback render failed.', fallbackError)
+      } finally {
+        for (const object of unculled) object.frustumCulled = true
+        unculled.length = 0
+      }
+      if (prewarming || pipelinePrewarmPending) {
+        presentationBlurAmount.current.value = presentationAmount
+      }
+      if (pipelinePrewarmPending && presentationState) {
+        const requestedCamera = presentationState.pipelinePrewarmCamera
+        const cameraMatched = requestedCamera === undefined || camera === requestedCamera
+        const rendered = directPrewarm && renderSucceeded && cameraMatched
+        presentationState.pipelinePrewarmCameraMatched = rendered
+        presentationState.pipelinePrewarmRenderedCamera = rendered ? camera : undefined
+        if (rendered) {
+          presentationState.pipelinePrewarmRenderedRevision = pipelinePrewarmRequestRevision
+        } else {
+          presentationState.pipelinePrewarmFailedRevision = pipelinePrewarmRequestRevision
+        }
+        presentationState.pipelinePrewarmPostprocessCallbackCount =
+          normalizePresentationRevision(presentationState.pipelinePrewarmPostprocessCallbackCount) +
+          1
+        presentationState.pipelinePrewarmOnRenderSettled?.(
+          pipelinePrewarmRequestRevision,
+          rendered ? 'rendered' : 'failed',
+        )
       }
       return
     }
@@ -1059,8 +1331,9 @@ const PostProcessingPasses = ({
       // making scenePassColor.a a reliable geometry mask (geometry pixels write a=1 via output node).
       ;(renderer as any).setClearAlpha(0)
       const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
-      const unculled: Object3D[] = []
-      if (prewarming) {
+      const unculled = presentationPrewarmUnculledRef.current
+      if (prewarming || pipelinePrewarmPending) {
+        unculled.length = 0
         scene.traverse((object) => {
           if (!object.frustumCulled) return
           object.frustumCulled = false
@@ -1072,8 +1345,32 @@ const PostProcessingPasses = ({
           presentationScenePassRef.current.camera = camera
         }
         renderPipeline.render()
+        if (pipelinePrewarmPending && presentationState) {
+          const renderedCamera = presentationScenePassRef.current?.camera ?? camera
+          const requestedCamera = presentationState.pipelinePrewarmCamera
+          const cameraMatched = requestedCamera === undefined || renderedCamera === requestedCamera
+          presentationState.pipelinePrewarmCameraMatched = cameraMatched
+          presentationState.pipelinePrewarmRenderedCamera = renderedCamera
+          presentationState.pipelinePrewarmPostprocessCallbackCount =
+            normalizePresentationRevision(
+              presentationState.pipelinePrewarmPostprocessCallbackCount,
+            ) + 1
+          if (cameraMatched) {
+            presentationState.pipelinePrewarmRenderedRevision = pipelinePrewarmRequestRevision
+          } else {
+            presentationState.pipelinePrewarmFailedRevision = pipelinePrewarmRequestRevision
+          }
+          presentationState.pipelinePrewarmOnRenderSettled?.(
+            pipelinePrewarmRequestRevision,
+            cameraMatched ? 'rendered' : 'failed',
+          )
+        }
       } finally {
         for (const object of unculled) object.frustumCulled = true
+        unculled.length = 0
+        if (prewarming || pipelinePrewarmPending) {
+          presentationBlurAmount.current.value = presentationAmount
+        }
       }
       if (prewarming) {
         presentationPrewarmFramesRef.current -= 1
@@ -1093,6 +1390,13 @@ const PostProcessingPasses = ({
       }
     } catch (error) {
       hasPipelineErrorRef.current = true
+      if (pipelinePrewarmPending && presentationState) {
+        presentationState.pipelinePrewarmFailedRevision = pipelinePrewarmRequestRevision
+        presentationState.pipelinePrewarmPostprocessCallbackCount =
+          normalizePresentationRevision(presentationState.pipelinePrewarmPostprocessCallbackCount) +
+          1
+        presentationState.pipelinePrewarmOnRenderSettled?.(pipelinePrewarmRequestRevision, 'failed')
+      }
       // A failed MRT pass may leave its target bound; clear it before the fallback render.
       ;(renderer as any).setRenderTarget?.(null)
       console.error('[viewer/post-processing] Render pass failed.', {

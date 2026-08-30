@@ -33,6 +33,7 @@ test('broadcasts world authority updates to subscribers in different presence ro
   const worldId = 'shared-authority-world'
   const parcelId = 'parcel-1'
   try {
+    await setProfileMoneyBalance(builder, 20)
     await watchWorld(builder, worldId)
     await watchWorld(observer, worldId)
 
@@ -185,6 +186,54 @@ async function connectPlayer(port, id, roomId, combat) {
   )
   await nextMessage(client, (message) => message.type === 'snapshot')
   return { ...client, roomId, writerEpoch: grant.writerEpoch, writerSessionId }
+}
+
+async function setProfileMoneyBalance(client, amount) {
+  assert.equal(amount % 10, 0)
+  let wallet = await nextMessage(client, (message) => message.type === 'profile-money-snapshot')
+  if (wallet.wallet.balance > amount) {
+    const operationId = `fund-${client.writerSessionId}-debit`
+    client.socket.send(
+      JSON.stringify({
+        operation: {
+          baseRevision: wallet.wallet.revision,
+          cost: wallet.wallet.balance - amount,
+          kind: 'weapon-purchase',
+          operationId,
+        },
+        type: 'apply-profile-money-operation',
+        writerEpoch: client.writerEpoch,
+        writerSessionId: client.writerSessionId,
+      }),
+    )
+    wallet = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'profile-money-operation-ack' && message.operationId === operationId,
+    )
+  }
+  assert.equal((amount - wallet.wallet.balance) % 10, 0)
+  for (let index = wallet.wallet.balance / 10; index < amount / 10; index += 1) {
+    const operationId = `fund-${client.writerSessionId}-reward-${index}`
+    client.socket.send(
+      JSON.stringify({
+        operation: {
+          baseRevision: wallet.wallet.revision,
+          kind: 'zombie-kill-reward',
+          operationId,
+        },
+        type: 'apply-profile-money-operation',
+        writerEpoch: client.writerEpoch,
+        writerSessionId: client.writerSessionId,
+      }),
+    )
+    wallet = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'profile-money-operation-ack' && message.operationId === operationId,
+    )
+  }
+  assert.equal(wallet.wallet.balance, amount)
 }
 
 async function connectWatcher(port, roomId) {

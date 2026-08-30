@@ -57,6 +57,7 @@ test('fences a displaced editor session and rejects its later reconnect', async 
       assert.equal(displaced.closeCode, PARCEL_WRITER_SESSION_CLOSE_CODE)
       assert.equal((await readMetrics(port)).rooms, roomCountBeforeRejection)
 
+      await setProfileMoneyBalance(second, 20)
       sendBuild(second, 0, 'writer-tab-b-operation', parcelId, worldId)
       const ack = await nextMessage(
         second,
@@ -450,9 +451,11 @@ function sendBuild(client, baseRevision, operationId, parcelId, worldId) {
       nodes: [
         {
           children: [],
+          end: [2, 0],
           id: 'wall-writer-session',
           object: 'node',
           parentId: null,
+          start: [0, 0],
           type: 'wall',
           visible: true,
         },
@@ -466,6 +469,54 @@ function sendBuild(client, baseRevision, operationId, parcelId, worldId) {
       writerSessionId: client.writerSessionId,
     }),
   )
+}
+
+async function setProfileMoneyBalance(client, amount) {
+  assert.equal(amount % 10, 0)
+  let wallet = await nextMessage(client, (message) => message.type === 'profile-money-snapshot')
+  if (wallet.wallet.balance > amount) {
+    const operationId = `fund-${client.writerSessionId}-debit`
+    client.socket.send(
+      JSON.stringify({
+        operation: {
+          baseRevision: wallet.wallet.revision,
+          cost: wallet.wallet.balance - amount,
+          kind: 'weapon-purchase',
+          operationId,
+        },
+        type: 'apply-profile-money-operation',
+        writerEpoch: client.writerEpoch,
+        writerSessionId: client.writerSessionId,
+      }),
+    )
+    wallet = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'profile-money-operation-ack' && message.operationId === operationId,
+    )
+  }
+  assert.equal((amount - wallet.wallet.balance) % 10, 0)
+  for (let index = wallet.wallet.balance / 10; index < amount / 10; index += 1) {
+    const operationId = `fund-${client.writerSessionId}-reward-${index}`
+    client.socket.send(
+      JSON.stringify({
+        operation: {
+          baseRevision: wallet.wallet.revision,
+          kind: 'zombie-kill-reward',
+          operationId,
+        },
+        type: 'apply-profile-money-operation',
+        writerEpoch: client.writerEpoch,
+        writerSessionId: client.writerSessionId,
+      }),
+    )
+    wallet = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'profile-money-operation-ack' && message.operationId === operationId,
+    )
+  }
+  assert.equal(wallet.wallet.balance, amount)
 }
 
 async function nextMessage(client, predicate) {

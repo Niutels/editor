@@ -252,7 +252,8 @@ export function buildBaselineWallLedger(frames, switchPageTMs, options = {}) {
   return {
     frames: atomicFrames,
     invariants: {
-      exactWindowCoverage: frameWindow.coveredUs === 12_000_000,
+      exactWindowCoverage:
+        frameWindow.coveredUs === frameWindow.windowEndUs - frameWindow.windowStartUs,
       frameContinuityIssues: frameWindow.continuityIssues,
       maxLeafUs,
       noLeafAbove2ms: maxLeafUs <= DEFAULT_MAX_LEAF_US,
@@ -408,8 +409,8 @@ function buildTraceThreadPartition({
   return segments
 }
 
-export function buildTraceLedger({ frames, markerName, switchPageTMs, traceEvents }) {
-  const frameWindow = createFrameWindows(frames, switchPageTMs)
+export function buildTraceLedger({ frames, markerName, options = {}, switchPageTMs, traceEvents }) {
+  const frameWindow = createFrameWindows(frames, switchPageTMs, options)
   const traceZeroUs = findTraceMarkerUs(traceEvents, markerName)
   const traceStartUs = traceZeroUs + frameWindow.windowStartUs
   const traceEndUs = traceZeroUs + frameWindow.windowEndUs
@@ -531,7 +532,8 @@ export function buildTraceLedger({ frames, markerName, switchPageTMs, traceEvent
   return {
     frames: atomicFrames,
     invariants: {
-      exactWindowCoverage: frameWindow.coveredUs === 12_000_000,
+      exactWindowCoverage:
+        frameWindow.coveredUs === frameWindow.windowEndUs - frameWindow.windowStartUs,
       frameContinuityIssues: frameWindow.continuityIssues,
       maxLeafUs,
       noLeafAbove2ms: maxLeafUs <= DEFAULT_MAX_LEAF_US,
@@ -562,8 +564,11 @@ function cpuNodeMetadata(profile) {
     const line = Number.isInteger(callFrame.lineNumber) ? callFrame.lineNumber + 1 : null
     const label = `${functionName}${url ? ` @ ${url}${line ? `:${line}` : ''}` : ''}`
     const stack = []
+    const seen = new Set()
     let cursor = node.id
-    while (cursor !== undefined && stack.length < 16) {
+    while (cursor !== undefined) {
+      assert(!seen.has(cursor), `V8 profile contains cyclic parentage at node ${cursor}`)
+      seen.add(cursor)
       const stackNode = nodes.get(cursor)
       if (!stackNode) break
       const stackFrame = stackNode.callFrame ?? {}
@@ -626,6 +631,7 @@ export function buildV8SampleLedger({
   clockOffsetUs,
   clockUncertaintyUs = 0,
   frames,
+  options = {},
   profile,
   switchPageTMs,
 }) {
@@ -634,7 +640,7 @@ export function buildV8SampleLedger({
     finiteNumber(clockUncertaintyUs) && clockUncertaintyUs <= DEFAULT_MAX_LEAF_US,
     `V8 clock uncertainty is ${clockUncertaintyUs}us`,
   )
-  const frameWindow = createFrameWindows(frames, switchPageTMs)
+  const frameWindow = createFrameWindows(frames, switchPageTMs, options)
   const t0MonotonicUs = Math.round(clockOffsetUs + switchPageTMs * 1_000)
   const metadata = cpuNodeMetadata(profile)
   const samples = profile.samples ?? []
@@ -698,10 +704,12 @@ export function buildV8SampleLedger({
     atomicFrames.flatMap((frame) => frame.leaves.map((leaf) => leaf.nodeId)).filter(Number.isInteger),
   )
   return {
+    basis: 'normalized-wall-responsibility',
     frames: atomicFrames,
     invariants: {
       clockUncertaintyUs,
-      exactWindowCoverage: frameWindow.coveredUs === 12_000_000,
+      exactWindowCoverage:
+        frameWindow.coveredUs === frameWindow.windowEndUs - frameWindow.windowStartUs,
       frameContinuityIssues: frameWindow.continuityIssues,
       maxLeafUs,
       noLeafAbove2ms: maxLeafUs <= DEFAULT_MAX_LEAF_US,
@@ -714,8 +722,8 @@ export function buildV8SampleLedger({
   }
 }
 
-export function buildScopedCpuLedger(frames, switchPageTMs) {
-  const frameWindow = createFrameWindows(frames, switchPageTMs)
+export function buildScopedCpuLedger(frames, switchPageTMs, options = {}) {
+  const frameWindow = createFrameWindows(frames, switchPageTMs, options)
   const atomicFrames = frameWindow.windows.map((frame) => {
     const cpu = frame.endFrame.cpu
     let buckets
@@ -798,14 +806,17 @@ export function buildScopedCpuLedger(frames, switchPageTMs) {
   return {
     frames: atomicFrames,
     invariants: {
-      exactWindowCoverage: frameWindow.coveredUs === 12_000_000,
+      exactWindowCoverage:
+        frameWindow.coveredUs === frameWindow.windowEndUs - frameWindow.windowStartUs,
       frameContinuityIssues: frameWindow.continuityIssues,
       maxLeafUs,
       noLeafAbove2ms: maxLeafUs <= DEFAULT_MAX_LEAF_US,
       windowCoverageUs: frameWindow.coveredUs,
     },
-    ordering: 'duration-only; exported scoped spans do not carry per-frame start timestamps',
+    ordering:
+      'duration-only source buckets proportionally normalized to each bench wall interval; synthetic order; not raw CPU duration or exact per-frame timing',
     schema: 'landrush-atomic-scoped-cpu/v1',
+    sourceTiming: 'duration-only',
     unit: 'microseconds',
     window: { endOffsetUs: frameWindow.windowEndUs, startOffsetUs: frameWindow.windowStartUs },
   }
@@ -904,8 +915,8 @@ function buildMeasuredGpuFrames(frames) {
   return { mappingIssues, rowsByBenchFrame }
 }
 
-export function buildGpuAtomicLedger(frames, switchPageTMs) {
-  const frameWindow = createFrameWindows(frames, switchPageTMs)
+export function buildGpuAtomicLedger(frames, switchPageTMs, options = {}) {
+  const frameWindow = createFrameWindows(frames, switchPageTMs, options)
   const gpuFrames = buildMeasuredGpuFrames(frames)
   const atomicFrames = frameWindow.windows.map((frame) => {
     const benchRenderFrameIdx = frame.startFrame.frameIdx
@@ -947,7 +958,8 @@ export function buildGpuAtomicLedger(frames, switchPageTMs) {
     frames: atomicFrames,
     invariants: {
       completeFrameCount,
-      exactWindowCoverage: frameWindow.coveredUs === 12_000_000,
+      exactWindowCoverage:
+        frameWindow.coveredUs === frameWindow.windowEndUs - frameWindow.windowStartUs,
       frameContinuityIssues: frameWindow.continuityIssues,
       gpuFrameCoverageRate: completeFrameCount / atomicFrames.length,
       maxLeafUs,

@@ -39,7 +39,7 @@ describe('Pascal multiplayer-island composition', () => {
       'const [viewerSceneReady, setViewerSceneReady] = useState(false)',
     )
     expect(clientSource).toMatch(
-      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+worldFrameReady &&\s+ambientLoadReadiness\?\.ready === true &&\s+builtCollidersReady &&/,
+      /const loadingAssetsReady =\s+initialParcelMaterializationReady &&\s+viewerSceneReady &&\s+floorPresentationReady &&\s+dayMaterialPresentationReady &&\s+worldFrameReady &&\s+ambientLoadReadiness\?\.ready === true &&\s+builtCollidersReady &&/,
     )
     expect(clientSource).toMatch(
       /tasks\.push\(\s+\{\s+completed: ambientLoadReadiness\?\.completed \?\? 0,\s+id: 'ambient-assets'/,
@@ -49,6 +49,8 @@ describe('Pascal multiplayer-island composition', () => {
       'sceneReadyPrerequisitesReady={initialParcelMaterializationReady}',
     )
     expect(clientSource).toContain('sceneReadyKey={initialParcelAuthorityKey}')
+    expect(clientSource).toContain('const LANDRUSH_ISLAND_RENDER_DPR = 0.7')
+    expect(clientSource).toContain('renderDpr={LANDRUSH_ISLAND_RENDER_DPR}')
     expect(clientSource).toContain(
       'sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}',
     )
@@ -103,5 +105,7 @@ describe('Pascal multiplayer-island composition', () => {
     expect(hostSource).toContain('JSON.stringify([sceneReadyKey, sceneLoadRevision])')
     expect(hostSource).toContain('sceneReadyPrerequisitesReady={sceneReadyPrerequisitesReady}')
     expect(hostSource).toContain('sceneReadyMaxWaitMs={sceneReadyMaxWaitMs}')
+    expect(hostSource).toContain('renderDpr?: ViewerRenderDpr')
+    expect(hostSource).toContain('renderDpr={renderDpr}')
   })
 })

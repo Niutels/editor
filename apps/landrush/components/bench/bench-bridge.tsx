@@ -38,6 +38,7 @@ import {
   restoreCheckpointState,
   setCameraPose,
 } from './bench-io'
+import { readBenchRenderScale } from './bench-render-scale'
 import { createGpuFrameTimer, type GpuFrameTimer } from './gpu-frame-timer'
 
 export type BenchFrameCpu = {
@@ -384,6 +385,7 @@ function BenchBridgeCollector() {
         const renderer = gl as unknown as {
           isWebGPURenderer?: boolean
           backend?: { device?: { adapterInfo?: Record<string, unknown> } }
+          getPixelRatio(): number
         }
         const adapterInfo = renderer.backend?.device?.adapterInfo
         return {
@@ -397,7 +399,7 @@ function BenchBridgeCollector() {
                 description: adapterInfo.description,
               }
             : null,
-          dpr: window.devicePixelRatio,
+          ...readBenchRenderScale(renderer, window.devicePixelRatio),
           viewport: { w: window.innerWidth, h: window.innerHeight },
           url: window.location.href,
           gpuSupported: gpuTimerRef.current?.supported ?? false,

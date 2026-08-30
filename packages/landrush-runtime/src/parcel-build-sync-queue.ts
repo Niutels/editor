@@ -268,6 +268,23 @@ export class ParcelBuildSyncQueue {
     }
   }
 
+  inspectReservation(
+    worldId: string,
+    parcelId: string,
+  ): Readonly<{
+    authoritativeRevision: number
+    inFlightNodes: readonly Readonly<ParcelBuildNode>[] | null
+    pendingNodes: readonly Readonly<ParcelBuildNode>[] | null
+  }> | null {
+    const entry = this.#entries.get(syncKey(worldId, parcelId))
+    if (!entry) return null
+    return {
+      authoritativeRevision: entry.authoritativeRevision,
+      inFlightNodes: entry.inFlight?.nodes ?? null,
+      pendingNodes: entry.pendingNodes,
+    }
+  }
+
   #entry(worldId: string, parcelId: string, authoritativeRevision: number) {
     const key = syncKey(worldId, parcelId)
     let entry = this.#entries.get(key)

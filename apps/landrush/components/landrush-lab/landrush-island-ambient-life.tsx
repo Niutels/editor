@@ -80,10 +80,12 @@ import {
   advanceLandrushIslandAmbientNpcMotion,
   createLandrushIslandAmbientNpcJourneyPlanner,
   createLandrushIslandAmbientNpcMotionState,
+  createLandrushIslandAmbientNpcNeighborIndex,
   LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME,
   type LandrushIslandAmbientNpcJourneyPlanner,
   type LandrushIslandAmbientNpcMotionState,
-  type LandrushIslandAmbientNpcNeighbor,
+  type LandrushIslandAmbientNpcNeighborIndex,
+  type LandrushIslandAmbientNpcNeighborQuery,
   reconcileLandrushIslandAmbientNpcMotionStateForWorld,
 } from './landrush-island-ambient-npc-motion'
 import {
@@ -108,6 +110,7 @@ import {
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-palm-layout'
 import { createLandrushIslandPalmPresentation } from './landrush-island-palm-presentation'
+import { LandrushZombieNightPresentation } from './landrush-zombie-night-presentation'
 import type { ZombieEscapeCollisionCircleSource } from './zombie-escape-collision-world'
 
 type AmbientNpcActions = {
@@ -127,7 +130,6 @@ type AmbientMotionDebugRuntime = {
   timeSeconds: number | null
 }
 
-const AMBIENT_NPC_POSITIONS = new Map<string, LandrushPoint2>()
 const EMPTY_AMBIENT_SCENE_NODES: Record<string, AnyNode> = {}
 const AMBIENT_NPC_COLLISION_RADIUS_METERS = 0.3
 const AMBIENT_FISH_Y_AXIS = new Vector3(0, 1, 0)
@@ -264,6 +266,14 @@ export function LandrushIslandAmbientLife({
     () => createLandrushIslandAmbientNpcJourneyPlanner(navigationWorld),
     [navigationWorld],
   )
+  const npcNeighborIndex = useMemo(
+    () =>
+      createLandrushIslandAmbientNpcNeighborIndex(
+        navigationWorld,
+        LANDRUSH_ISLAND_AMBIENT_NPCS.length,
+      ),
+    [navigationWorld],
+  )
   const oceanBounds = useMemo(() => boundsForPoints(surface.grassSurfacePoints), [surface])
   const mountedLoadUnits = resolveMountedLandrushIslandAmbientLoadUnits(
     loadQueue,
@@ -296,7 +306,7 @@ export function LandrushIslandAmbientLife({
   }, -5.5)
 
   useFrame(function updateLandrushIslandFishBatches({ clock }) {
-    if (!admitted) return
+    if (!shouldAdvanceLandrushIslandFishBatches(admitted, zombieIslandActive)) return
     fishRuntime.advance(motionDebug.timeSeconds ?? clock.elapsedTime, waterY)
   }, -6)
 
@@ -362,6 +372,11 @@ export function LandrushIslandAmbientLife({
         visiblePalmInstanceCount: visiblePalmLayout.length,
       }}
     >
+      <LandrushZombieNightPresentation
+        active={zombieIslandActive}
+        groundY={surface.grassSurfaceElevation}
+        roads={roads}
+      />
       {mountedLoadUnits.map((unit) => (
         <AmbientProgressiveLoadUnit
           generation={loadQueue.generation}
@@ -377,6 +392,7 @@ export function LandrushIslandAmbientLife({
             motionDebug={motionDebug}
             navigationWorld={navigationWorld}
             npcJourneyPlanner={npcJourneyPlanner}
+            npcNeighborIndex={npcNeighborIndex}
             npcsVisible={npcsVisible}
             orbitRadiusX={Math.max(oceanBounds.width * 0.54 + 4, 1)}
             orbitRadiusZ={Math.max(oceanBounds.depth * 0.54 + 4, 1)}
@@ -400,6 +416,7 @@ function AmbientLoadUnitModel({
   motionDebug,
   navigationWorld,
   npcJourneyPlanner,
+  npcNeighborIndex,
   npcsVisible,
   orbitRadiusX,
   orbitRadiusZ,
@@ -416,6 +433,7 @@ function AmbientLoadUnitModel({
   motionDebug: AmbientMotionDebugRuntime
   navigationWorld: LandrushIslandAmbientNavigationWorld
   npcJourneyPlanner: LandrushIslandAmbientNpcJourneyPlanner
+  npcNeighborIndex: LandrushIslandAmbientNpcNeighborIndex
   npcsVisible: boolean
   orbitRadiusX: number
   orbitRadiusZ: number
@@ -502,6 +520,7 @@ function AmbientLoadUnitModel({
         index={unit.catalogIndex}
         navigationWorld={navigationWorld}
         npc={npc}
+        npcNeighborIndex={npcNeighborIndex}
         planner={npcJourneyPlanner}
       />
     </group>
@@ -706,7 +725,14 @@ export function LandrushIslandMeshyFishSchool({
     (elapsedSeconds: number, currentWaterY: number, phase = 0, phaseCount = 1) => {
       const mesh = meshRef.current
       if (!mesh) return
-      for (let schoolIndex = phase; schoolIndex < fish.schoolSize; schoolIndex += phaseCount) {
+      const updateRange = resolveLandrushIslandFishUpdateRange(fish.schoolSize, phase, phaseCount)
+      let firstChangedInstance = updateRange.start + updateRange.count
+      let lastChangedInstance = -1
+      for (
+        let schoolIndex = updateRange.start;
+        schoolIndex < updateRange.start + updateRange.count;
+        schoolIndex += 1
+      ) {
         const trajectory = trajectories[schoolIndex]
         const sample = samples[schoolIndex]
         if (!(trajectory && sample)) continue
@@ -729,7 +755,10 @@ export function LandrushIslandMeshyFishSchool({
           matrixScratch.quaternion,
           matrixScratch.scale,
         )
-        mesh.setMatrixAt(schoolIndex, matrixScratch.matrix)
+        if (setLandrushIslandFishInstanceMatrixIfChanged(mesh, schoolIndex, matrixScratch.matrix)) {
+          firstChangedInstance = Math.min(firstChangedInstance, schoolIndex)
+          lastChangedInstance = schoolIndex
+        }
         if (debugStore) {
           recordLandrushIslandFishMotionDebug(
             debugStore,
@@ -742,7 +771,13 @@ export function LandrushIslandMeshyFishSchool({
           )
         }
       }
-      mesh.instanceMatrix.needsUpdate = true
+      if (lastChangedInstance >= firstChangedInstance) {
+        mesh.instanceMatrix.addUpdateRange(
+          firstChangedInstance * 16,
+          (lastChangedInstance - firstChangedInstance + 1) * 16,
+        )
+        mesh.instanceMatrix.needsUpdate = true
+      }
     },
     [debugStore, fish, matrixScratch, motionScratch, samples, shoreline, trajectories],
   )
@@ -781,6 +816,43 @@ export function LandrushIslandMeshyFishSchool({
       }}
     />
   )
+}
+
+export function resolveLandrushIslandFishUpdateRange(
+  instanceCount: number,
+  phase: number,
+  phaseCount: number,
+) {
+  const count = Math.max(0, Math.trunc(instanceCount))
+  const phases = Math.max(1, Math.trunc(phaseCount))
+  const normalizedPhase = Math.min(phases - 1, Math.max(0, Math.trunc(phase)))
+  const start = Math.floor((count * normalizedPhase) / phases)
+  const end = Math.floor((count * (normalizedPhase + 1)) / phases)
+  return { count: end - start, start }
+}
+
+export function shouldAdvanceLandrushIslandFishBatches(
+  admitted: boolean,
+  zombieIslandActive: boolean,
+) {
+  return admitted && !zombieIslandActive
+}
+
+export function setLandrushIslandFishInstanceMatrixIfChanged(
+  mesh: InstancedMesh,
+  instance: number,
+  matrix: Matrix4,
+) {
+  const offset = instance * 16
+  const target = mesh.instanceMatrix.array
+  const elements = matrix.elements
+  for (let component = 0; component < 16; component += 1) {
+    if (target[offset + component] !== Math.fround(elements[component]!)) {
+      mesh.setMatrixAt(instance, matrix)
+      return true
+    }
+  }
+  return false
 }
 
 export function LandrushIslandMeshyBoat({
@@ -851,6 +923,7 @@ function AmbientNpc({
   index,
   navigationWorld,
   npc,
+  npcNeighborIndex,
   planner,
 }: {
   active: boolean
@@ -859,6 +932,7 @@ function AmbientNpc({
   index: number
   navigationWorld: LandrushIslandAmbientNavigationWorld
   npc: LandrushIslandAmbientNpc
+  npcNeighborIndex: LandrushIslandAmbientNpcNeighborIndex
   planner: LandrushIslandAmbientNpcJourneyPlanner
 }) {
   const riggedGltf = useGLTFKTX2(npc.glb.rigged)
@@ -876,6 +950,7 @@ function AmbientNpc({
   useGpuResourceLifetime(modelOwner.skeletonResource)
   const rootRef = useRef<Group>(null)
   const actionsRef = useRef<AmbientNpcActions | null>(null)
+  const actionPhaseRef = useRef<LandrushIslandAmbientNpcMotionState['phase'] | null>(null)
   const motionRef = useRef<LandrushIslandAmbientNpcMotionState | null>(null)
   const motionWorldRef = useRef(navigationWorld)
   if (!motionRef.current) {
@@ -884,6 +959,10 @@ function AmbientNpc({
   const transform = useMemo(
     () => computeGroundedTransform(riggedGltf.scene, npc.heightMeters),
     [npc.heightMeters, riggedGltf.scene],
+  )
+  const neighborQuery = useMemo<LandrushIslandAmbientNpcNeighborQuery>(
+    () => npcNeighborIndex.createQuery(npc.id),
+    [npc.id, npcNeighborIndex],
   )
 
   useEffect(() => {
@@ -897,10 +976,12 @@ function AmbientNpc({
       action?.play()
     }
     actionsRef.current = { idle, mixer, run, walk }
+    actionPhaseRef.current = null
     return () => {
       mixer.stopAllAction()
       mixer.uncacheRoot(model)
       actionsRef.current = null
+      actionPhaseRef.current = null
     }
   }, [idleGltf.animations, model, runGltf.animations, walkGltf.animations])
 
@@ -916,12 +997,12 @@ function AmbientNpc({
     }
     root.position.set(motion.position.x, groundY, motion.position.z)
     root.rotation.y = motion.yaw
-    AMBIENT_NPC_POSITIONS.set(npc.id, { ...motion.position })
+    npcNeighborIndex.set(npc.id, motion.position)
     return () => {
-      AMBIENT_NPC_POSITIONS.delete(npc.id)
+      npcNeighborIndex.delete(npc.id)
       clearLandrushIslandNpcMotionDebug(debugStore, npc.id)
     }
-  }, [debugStore, groundY, index, navigationWorld, npc.id])
+  }, [debugStore, groundY, index, navigationWorld, npc.id, npcNeighborIndex])
 
   useFrame((_, delta) => {
     if (!active) return
@@ -929,30 +1010,35 @@ function AmbientNpc({
     const actions = actionsRef.current
     if (!(root && actions)) return
     const frameDelta = Math.min(0.1, Math.max(0, delta))
-    const neighbors: LandrushIslandAmbientNpcNeighbor[] = []
-    for (const [id, position] of AMBIENT_NPC_POSITIONS) {
-      if (id !== npc.id) neighbors.push({ id, position })
-    }
     const currentMotion = motionRef.current
     if (!currentMotion) return
+    const previousX = currentMotion.position.x
+    const previousZ = currentMotion.position.z
+    const previousYaw = currentMotion.yaw
     const motion = advanceLandrushIslandAmbientNpcMotion(
       currentMotion,
       frameDelta,
       navigationWorld,
-      neighbors,
+      neighborQuery,
       planner,
     )
-    root.position.set(motion.position.x, groundY, motion.position.z)
-    root.rotation.y = motion.yaw
-    AMBIENT_NPC_POSITIONS.set(npc.id, { ...motion.position })
-    setAmbientNpcActionWeights(
-      actions,
-      motion.phase === 'idle' ? 1 : 0,
-      motion.phase === 'walk' ? 1 : 0,
-      motion.phase === 'run' ? 1 : 0,
-    )
-    root.userData.phase = motion.phase
-    root.userData.destinationPreference = motion.destinationPreference
+    if (motion.position.x !== previousX || motion.position.z !== previousZ) {
+      root.position.x = motion.position.x
+      root.position.z = motion.position.z
+      npcNeighborIndex.set(npc.id, motion.position)
+    }
+    if (motion.yaw !== previousYaw) root.rotation.y = motion.yaw
+    if (actionPhaseRef.current !== motion.phase) {
+      setAmbientNpcActionWeights(
+        actions,
+        motion.phase === 'idle' ? 1 : 0,
+        motion.phase === 'walk' ? 1 : 0,
+        motion.phase === 'run' ? 1 : 0,
+      )
+      root.userData.phase = motion.phase
+      root.userData.destinationPreference = motion.destinationPreference
+      actionPhaseRef.current = motion.phase
+    }
     if (debugStore) {
       recordLandrushIslandNpcMotionDebug(debugStore, npc.id, motion, navigationWorld)
     }

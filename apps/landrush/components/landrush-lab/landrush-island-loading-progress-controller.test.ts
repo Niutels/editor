@@ -6,6 +6,7 @@ import {
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED,
   LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
   LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS,
+  LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
   LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
   LANDRUSH_ISLAND_LOADING_SPECULATIVE_INTERVAL_MS,
   LANDRUSH_ISLAND_LOADING_SPECULATIVE_RESPONSE_MS,
@@ -248,6 +249,55 @@ describe('Landrush island loading progress motion', () => {
     }
   })
 
+  test('spends the terminal smoothing before 80 percent and keeps the final fifth brief', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.6,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+    controller.complete()
+    controller.step(600)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(0.8)
+    expect(controller.readyToDismiss()).toBe(false)
+    controller.step(50)
+    expect(controller.getSnapshot().displayedProgress).toBeGreaterThan(0.8)
+    controller.step(RESPONSE_MS - 650 - 1)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(1)
+    expect(controller.readyToDismiss()).toBe(false)
+    controller.step(1)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(controller.readyToDismiss()).toBe(true)
+  })
+
+  test('holds exact 80 percent until the final 350ms of the fixed completion response', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+    const completed = controller.complete()
+    const terminal = completed.pulses.find((pulse) => pulse.kind === 'completion')!
+
+    expect(terminal.startedAtMs).toBeGreaterThanOrEqual(RESPONSE_MS - 350)
+    expect(terminal.durationMs).toBeLessThanOrEqual(350)
+    controller.step(RESPONSE_MS - 350)
+    expect(controller.getSnapshot().displayedProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
+    controller.step(terminal.startedAtMs - controller.getSnapshot().elapsedMs)
+    expect(controller.getSnapshot().displayedProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
+    controller.step(1)
+    expect(controller.getSnapshot().displayedProgress).toBeGreaterThan(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
+    controller.step(RESPONSE_MS - controller.getSnapshot().elapsedMs - 1)
+    expect(controller.getSnapshot().displayedProgress).toBeLessThan(1)
+    expect(controller.readyToDismiss()).toBe(false)
+    controller.step(1)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(controller.readyToDismiss()).toBe(true)
+  })
+
   test('repeated completion requests do not restart or extend the completion deadline', () => {
     const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.05 })
     controller.setConfirmedProgress(0.4)
@@ -267,21 +317,106 @@ describe('Landrush island loading progress motion', () => {
     expect(controller.complete().pulses).toHaveLength(0)
   })
 
-  test('cancelling completion revokes dismissal without changing the motion trajectory', () => {
-    const controller = createLandrushIslandLoadingProgressController({ initialProgress: 0.2 })
+  test('cancelling completion revokes terminal motion while preserving the pending trajectory', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      initialProgress: 0.2,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
     controller.complete()
     controller.step(250)
     const before = controller.getSnapshot()
     controller.cancelCompletion()
     expectMotionEqual(controller.getSnapshot(), before)
-    expect(controller.getSnapshot().pulses).toEqual(before.pulses)
+    expect(controller.getSnapshot().pulses.some((pulse) => pulse.kind === 'completion')).toBe(false)
+    expect(
+      controller.getSnapshot().pulses.some((pulse) => pulse.kind === 'completion-pending'),
+    ).toBe(true)
+    expect(controller.getSnapshot().targetProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
     expect(controller.readyToDismiss()).toBe(false)
     controller.step(RESPONSE_MS)
-    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(controller.getSnapshot().displayedProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
     expect(controller.readyToDismiss()).toBe(false)
     controller.complete()
+    expect(controller.readyToDismiss()).toBe(false)
+    controller.step(RESPONSE_MS)
     expect(controller.readyToDismiss()).toBe(true)
-    expect(controller.getSnapshot().pulses).toHaveLength(0)
+  })
+
+  test('withdrawal after the terminal leg begins freezes below 100 without a visual reset', () => {
+    for (const initialProgress of [0.2, LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING]) {
+      const controller = createLandrushIslandLoadingProgressController({
+        initialProgress,
+        maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      })
+      controller.complete()
+      controller.step(RESPONSE_MS - 100)
+      const before = controller.getSnapshot()
+      expect(before.displayedProgress).toBeGreaterThan(
+        LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      )
+      expect(before.displayedProgress).toBeLessThan(1)
+
+      controller.cancelCompletion()
+      const withdrawn = controller.getSnapshot()
+      expect(withdrawn.displayedProgress).toBeCloseTo(before.displayedProgress, 14)
+      expect(withdrawn.targetProgress).toBeCloseTo(before.displayedProgress, 14)
+      expect(withdrawn.pulses).toHaveLength(0)
+      expect(withdrawn.inheritedMotion).toBeNull()
+      expect(controller.readyToDismiss()).toBe(false)
+      controller.step(RESPONSE_MS)
+      expect(controller.getSnapshot().displayedProgress).toBeCloseTo(before.displayedProgress, 14)
+      expect(controller.getSnapshot().displayedProgress).toBeLessThan(1)
+    }
+  })
+
+  test('caps a 120-second shell takeover and its inherited tail at 80 percent', () => {
+    const controller = createLandrushIslandLoadingProgressController({
+      inheritedVelocityHoldMs: 120_000,
+      initialProgress: 0.08,
+      initialVelocityPerSecond: 0.006,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+
+    expect(controller.getSnapshot().targetProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
+    for (const sample of controller.createMotionPreview(120_000).samples) {
+      expect(sample.progress).toBeLessThanOrEqual(
+        LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      )
+    }
+    controller.step(120_000 + RESPONSE_MS)
+    expect(controller.getSnapshot().displayedProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
+    expect(controller.readyToDismiss()).toBe(false)
+  })
+
+  test('restores completion ownership on remount and revokes it when readiness withdraws', () => {
+    const source = createLandrushIslandLoadingProgressController({
+      initialProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+    source.complete()
+    source.step(250)
+    const snapshot = source.getSnapshot()
+    const restored = createLandrushIslandLoadingProgressController({
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+    restored.restoreMotionSnapshot(snapshot)
+
+    expect(restored.getSnapshot().completionRequested).toBe(true)
+    restored.cancelCompletion()
+    restored.step(RESPONSE_MS)
+    expect(restored.getSnapshot().completionRequested).toBe(false)
+    expect(restored.getSnapshot().displayedProgress).toBe(
+      LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    )
+    expect(restored.readyToDismiss()).toBe(false)
   })
 
   test('restores the entire active pulse plan and independently continues through remount', () => {
@@ -840,7 +975,8 @@ describe('Landrush autonomous pending motion', () => {
   const stage = resolveLandrushIslandLoadingProgressStage({
     displayedProgress: 0.08,
     estimatedDurationMs: 0,
-    evidenceProgress: (11 / 13) * 0.985,
+    evidenceProgress: (11 / 13) * LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    maximumProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
   })
 
   test('uses aligned overlapping cubic pulses throughout a complete no-JavaScript lease', () => {
@@ -981,6 +1117,7 @@ describe('Landrush autonomous pending motion', () => {
     copy.step(RESPONSE_MS)
     expect(copy.readyToDismiss()).toBe(false)
     copy.complete()
+    copy.step(RESPONSE_MS)
     expect(copy.readyToDismiss()).toBe(true)
   })
 })

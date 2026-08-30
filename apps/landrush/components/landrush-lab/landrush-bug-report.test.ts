@@ -5,6 +5,7 @@ import {
   type LandrushBugReport,
   parseLandrushBugReport,
   parseLandrushBugReportJson,
+  resolveLandrushCanvasPixelRatio,
 } from './landrush-bug-report'
 
 function createReport(): LandrushBugReport {
@@ -124,5 +125,27 @@ describe('Landrush bug reports', () => {
     expect(createLandrushBugReportFileName(createReport().capturedAt)).toBe(
       'landrush-bug-report_2026-08-12_14-30-15-120.json',
     )
+  })
+
+  test('reports the captured canvas backing-to-CSS pixel ratio', () => {
+    expect(
+      resolveLandrushCanvasPixelRatio({
+        clientHeight: 1_000,
+        clientWidth: 1_600,
+        height: 700,
+        width: 1_120,
+      }),
+    ).toBe(0.7)
+  })
+
+  test('uses the captured height when CSS width is unavailable', () => {
+    expect(
+      resolveLandrushCanvasPixelRatio({
+        clientHeight: 1_000,
+        clientWidth: 0,
+        height: 700,
+        width: 0,
+      }),
+    ).toBe(0.7)
   })
 })

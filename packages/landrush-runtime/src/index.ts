@@ -75,8 +75,13 @@ export {
   MULTIPLAYER_LATENCY_EVENT,
   type MultiplayerConnectionDetails,
   type MultiplayerRemotePlayerStore,
+  type ParcelBuildAdmissionReason,
   type ParcelBuildContentUpdate,
+  type ParcelBuildNodesQuote,
   type ParcelBuildNodesSnapshot,
+  type ProfileMoneyOperationRequest,
+  type ProfileMoneyState,
+  projectProfileMoneyBalance,
   readLocalPlayerProfile,
   sanitizeRoomId,
   useLandrushWorldMultiplayer,
@@ -96,9 +101,25 @@ export type EditorCameraInitialPose = {
 }
 export type ViewerPresentationEffectDebugMode = 'contribution' | 'final' | 'mask'
 export type ViewerPresentationEffectState = {
+  pipelinePrewarmBeginCount?: number
+  pipelinePrewarmCamera?: Camera
+  pipelinePrewarmCameraMatched?: boolean
+  pipelinePrewarmCallbackInstalled?: boolean
+  pipelinePrewarmFailedRevision?: number
+  pipelinePrewarmOnRenderSettled?: (revision: number, outcome: 'failed' | 'rendered') => void
+  pipelinePrewarmPipelineAvailable?: boolean
+  pipelinePrewarmPipelineError?: boolean
+  pipelinePrewarmPostprocessCallbackCount?: number
+  pipelinePrewarmPostprocessFrameCount?: number
+  pipelinePrewarmRenderedCamera?: Camera
+  pipelinePrewarmRenderedRevision?: number
+  pipelinePrewarmRequestRevision?: number
+  presentationPipelineActive?: boolean
+  zoomBlurActive?: boolean
   zoomBlurAmount: number
   zoomBlurCenter?: readonly [number, number]
   zoomBlurDebugMode?: ViewerPresentationEffectDebugMode
   zoomBlurDirection: number
   zoomBlurStrength: number
 }
+import type { Camera } from 'three'

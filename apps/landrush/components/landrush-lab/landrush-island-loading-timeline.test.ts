@@ -3,6 +3,7 @@ import {
   createLandrushIslandLoadingProgressController,
   LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
   LANDRUSH_ISLAND_LOADING_MINIMUM_RESPONSE_MS,
+  LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
   LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
   resolveLandrushIslandLoadingProgressStage,
 } from './landrush-island-loading-progress-controller'
@@ -11,6 +12,7 @@ import {
   createLandrushIslandLoadingForecast,
   createLandrushIslandLoadingTaskTopologyKey,
   createLandrushIslandLoadingTimelineRun,
+  LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
   LANDRUSH_ISLAND_LOADING_TIMING_MAX_SAMPLES,
   LANDRUSH_ISLAND_LOADING_TIMING_PROFILE_VERSION,
   type LandrushIslandLoadingTaskSnapshot,
@@ -18,6 +20,7 @@ import {
   type LandrushIslandLoadingTimingSample,
   type LandrushIslandLoadingTimingStorage,
   readLandrushIslandLoadingTimingProfile,
+  resolveLandrushIslandLoadingPendingPresentationProgress,
 } from './landrush-island-loading-timeline'
 import {
   animateLandrushIslandLoadingPreview,
@@ -205,7 +208,7 @@ describe('Landrush island measured loading timeline', () => {
     ).progress
 
     expect(manyAssetGateReady).toBeCloseTo(singleAssetGateReady)
-    expect(manyAssetGateReady).toBeCloseTo(0.5 * 0.985)
+    expect(manyAssetGateReady).toBeCloseTo(0.5 * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE)
   })
 
   test('keeps one or two unresolved aggregate gates below fixed endgame caps', () => {
@@ -253,8 +256,9 @@ describe('Landrush island measured loading timeline', () => {
 
     const oneUnresolvedProgress = oneUnresolvedRun.advance(600_000)
     const twoUnresolvedProgress = twoUnresolvedRun.advance(600_000)
-    const oneUnresolvedHardCap = ((7 + 0.75) / 8) * 0.985
-    const twoUnresolvedHardCap = ((7 + 2 * 0.75) / 9) * 0.985
+    const oneUnresolvedHardCap = ((7 + 0.75) / 8) * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE
+    const twoUnresolvedHardCap =
+      ((7 + 2 * 0.75) / 9) * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE
 
     expect(oneUnresolvedHardCap).toBeLessThan(0.96)
     expect(oneUnresolvedProgress).toBeLessThan(oneUnresolvedHardCap)
@@ -293,8 +297,120 @@ describe('Landrush island measured loading timeline', () => {
 
     const update = run.update('world:evidence', tasks, 30_000)
 
-    expect(update.evidenceProgress).toBeCloseTo(0.5 * 0.985)
+    expect(update.evidenceProgress).toBeCloseTo(
+      0.5 * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+    )
     expect(update.progress).toBeGreaterThan(update.evidenceProgress)
+  })
+
+  test('keeps pending work below 80 percent until every top-level gate settles', () => {
+    const tasks = Array.from({ length: 10 }, (_, index) =>
+      task(`gate-${String(index)}`, index < 8 ? 1 : 0, 1, index < 8),
+    )
+    const run = createLandrushIslandLoadingTimelineRun({
+      generation: 'world:left-weighted-progress',
+      initialObservationTimeMs: 0,
+      profileKey: 'zombie-left-weighted-progress',
+      startTimeMs: 0,
+      tasks,
+      topologySignature: TEST_TOPOLOGY_SIGNATURE,
+    })
+
+    const eightReady = run.update('world:left-weighted-progress', tasks, 0)
+    expect(eightReady.evidenceProgress).toBeLessThan(0.8)
+    expect(eightReady.presentationProgress).toBeLessThan(0.8)
+    const nineReady = tasks.map((candidate, index) =>
+      index === 8 ? { ...candidate, completed: 1, ready: true } : candidate,
+    )
+    const ninthReady = run.update('world:left-weighted-progress', nineReady, 1)
+    expect(ninthReady.evidenceProgress).toBeGreaterThan(0.8)
+    expect(ninthReady.presentationProgress).toBeLessThan(0.8)
+    const allReady = nineReady.map((candidate) => ({ ...candidate, completed: 1, ready: true }))
+    expect(run.update('world:left-weighted-progress', allReady, 2)).toMatchObject({
+      allReady: true,
+      evidenceProgress: LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+      presentationProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+  })
+
+  test('maps raw readiness evidence monotonically through 98.4 percent without over-reporting', () => {
+    const evidence = Array.from({ length: 985 }, (_, index) => index / 1_000)
+    const presentation = evidence.map(resolveLandrushIslandLoadingPendingPresentationProgress)
+    expect(presentation).toEqual([...presentation].sort((left, right) => left - right))
+    for (let index = 0; index < evidence.length; index += 1) {
+      expect(presentation[index]!).toBeLessThanOrEqual(evidence[index]!)
+      expect(presentation[index]!).toBeLessThanOrEqual(
+        LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      )
+    }
+    expect(presentation.at(-1)).toBeCloseTo(
+      (0.984 * LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING) /
+        LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+    )
+  })
+
+  test.each([
+    [4_000, 561],
+    [5_000, 561],
+  ])('keeps a realistic 12-gate run below 80 until readiness, then spends at most 350ms above it (%ims)', (durationMs, expectedCrossingMs) => {
+    const gate = (index: number, state: 0 | 1 | 2) =>
+      task(`gate-${String(index)}`, state === 0 ? 0 : 1, 1, state === 2)
+    let states = Array.from({ length: 12 }, () => 0 as 0 | 1 | 2)
+    let tasks = states.map((state, index) => gate(index, state))
+    const run = createLandrushIslandLoadingTimelineRun({
+      generation: 'world:representative-progress',
+      initialObservationTimeMs: 0,
+      profileKey: 'zombie-representative-progress',
+      startTimeMs: 0,
+      tasks,
+      topologySignature: TEST_TOPOLOGY_SIGNATURE,
+    })
+    const controller = createLandrushIslandLoadingProgressController({
+      initialVelocityPerSecond: 0.006,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+    for (let elapsedMs = 0; elapsedMs < durationMs; elapsedMs += 50) {
+      controller.step(50)
+      const settledGateCount = Math.min(11, Math.floor((elapsedMs / (durationMs * 0.7)) * 11))
+      states = states.map((_, index) =>
+        index < settledGateCount ? 2 : index === 11 && elapsedMs > durationMs * 0.7 ? 1 : 0,
+      )
+      tasks = states.map((state, index) => gate(index, state))
+      const update = run.update('world:representative-progress', tasks, elapsedMs)
+      const stage = resolveLandrushIslandLoadingProgressStage({
+        displayedProgress: controller.getSnapshot().displayedProgress,
+        estimatedDurationMs: durationMs - elapsedMs,
+        evidenceProgress: update.presentationProgress,
+        maximumProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+      })
+      controller.setConfirmedProgress(stage.confirmedProgress, stage)
+      expect(controller.getSnapshot().displayedProgress).toBeLessThanOrEqual(0.8)
+    }
+    const beforeReady = controller.getSnapshot()
+    expect(beforeReady.confirmedProgress).toBe(0.78)
+    expect(beforeReady.stageCeiling).toBe(0.8)
+    expect(beforeReady.displayedProgress).toBeLessThan(0.8)
+    expect(beforeReady.pulses.some((pulse) => pulse.kind === 'speculative')).toBe(true)
+
+    const readyTasks = states.map((_, index) => gate(index, 2))
+    expect(run.update('world:representative-progress', readyTasks, durationMs)).toMatchObject({
+      allReady: true,
+      evidenceProgress: LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+      presentationProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    })
+    controller.complete()
+    let crossed80AtMs: number | null = null
+    for (let elapsedMs = 1; elapsedMs <= LANDRUSH_ISLAND_LOADING_RESPONSE_MS; elapsedMs += 1) {
+      controller.step(1)
+      if (crossed80AtMs === null && controller.getSnapshot().displayedProgress > 0.8) {
+        crossed80AtMs = elapsedMs
+      }
+    }
+    expect(crossed80AtMs).not.toBeNull()
+    expect(crossed80AtMs).toBe(expectedCrossingMs)
+    expect(LANDRUSH_ISLAND_LOADING_RESPONSE_MS - expectedCrossingMs).toBe(289)
+    expect(controller.getSnapshot().displayedProgress).toBe(1)
+    expect(controller.readyToDismiss()).toBe(true)
   })
 
   test('unlocks only the next forecast interval when an ordinal settles', () => {
@@ -325,10 +441,14 @@ describe('Landrush island measured loading timeline', () => {
       120_000,
     ).progress
 
-    expect(beforeSettlement).toBeLessThan(0.7 * 0.25 * 0.985)
+    expect(beforeSettlement).toBeLessThan(
+      0.7 * 0.25 * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+    )
     expect(firstSettlement).toBeGreaterThan(beforeSettlement)
     expect(approachingSecond).toBeGreaterThan(firstSettlement)
-    expect(approachingSecond).toBeLessThan(0.7 * 0.5 * 0.985)
+    expect(approachingSecond).toBeLessThan(
+      0.7 * 0.5 * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+    )
     expect(secondSettlement).toBeGreaterThan(approachingSecond)
   })
 
@@ -351,7 +471,7 @@ describe('Landrush island measured loading timeline', () => {
     const afterTwentyIntervals = run.project(20_000)
 
     expect(afterTwentyIntervals).toBeGreaterThan(afterTenIntervals)
-    expect(afterTwentyIntervals).toBeLessThan(0.7 * 0.985)
+    expect(afterTwentyIntervals).toBeLessThan(0.7 * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE)
   })
 
   test('keeps live time moving beyond ten minutes but rejects the oversized timing sample', () => {
@@ -700,7 +820,8 @@ describe('Landrush island measured loading timeline', () => {
     const initialStage = resolveLandrushIslandLoadingProgressStage({
       displayedProgress: 0,
       estimatedDurationMs: run.getForecast().durationMs,
-      evidenceProgress: initialUpdate.evidenceProgress,
+      evidenceProgress: initialUpdate.presentationProgress,
+      maximumProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
     })
     controller.setConfirmedProgress(initialStage.confirmedProgress, initialStage)
     const preview = createLandrushIslandLoadingVisualPreview(controller, 0)
@@ -721,7 +842,8 @@ describe('Landrush island measured loading timeline', () => {
     const milestoneStage = resolveLandrushIslandLoadingProgressStage({
       displayedProgress: visualProgress,
       estimatedDurationMs: run.getForecast().durationMs - observationTimeMs,
-      evidenceProgress: milestone.evidenceProgress,
+      evidenceProgress: milestone.presentationProgress,
+      maximumProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
     })
     const startDelayMs = resolveLandrushIslandLoadingObservationDelay(
       observationTimeMs,

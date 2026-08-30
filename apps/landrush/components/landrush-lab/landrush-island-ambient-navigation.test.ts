@@ -354,6 +354,26 @@ describe('Landrush island ambient navigation', () => {
     })
     expect(() => advanceLandrushIslandAmbientWalkablePathSearch(search, 0)).toThrow(RangeError)
   })
+
+  test('reuses state-owned resumable search results without changing path behavior', () => {
+    const search = createLandrushIslandAmbientWalkablePathSearch(
+      world,
+      { x: -7, z: 0 },
+      { x: 7, z: 0 },
+    )
+    const pendingResult = advanceLandrushIslandAmbientWalkablePathSearch(search, 1)
+    expect(pendingResult.done).toBe(false)
+    expect(advanceLandrushIslandAmbientWalkablePathSearch(search, 1)).toBe(pendingResult)
+
+    let completedResult = advanceLandrushIslandAmbientWalkablePathSearch(search, 64)
+    while (!completedResult.done) {
+      completedResult = advanceLandrushIslandAmbientWalkablePathSearch(search, 64)
+    }
+    expect(completedResult.path).toEqual(
+      findLandrushIslandAmbientWalkablePath(world, { x: -7, z: 0 }, { x: 7, z: 0 }),
+    )
+    expect(advanceLandrushIslandAmbientWalkablePathSearch(search, 64)).toBe(completedResult)
+  })
 })
 
 function runResumablePathSearch(

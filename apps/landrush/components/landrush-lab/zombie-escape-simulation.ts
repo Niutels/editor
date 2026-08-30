@@ -1626,7 +1626,6 @@ export function resetZombieEscapeSimulation(
   state.kills = 0
   state.lastShotGeneration = 0
   state.lastShotSlot = -1
-  state.money = 0
   state.nearbyPickupIndex = -1
   state.navigationGoalInitialized = false
   state.navigationGoalLayerIndex = -1
@@ -9029,6 +9028,11 @@ function enterZombieEscapeNight(state: ZombieEscapeSimulation) {
 function enterZombieEscapeBuild(state: ZombieEscapeSimulation) {
   state.phase = 'build'
   state.phaseSecondsRemaining = ZOMBIE_ESCAPE_SIMULATION.buildDurationSeconds
+  if (state.status === 'lost') {
+    state.player.health = 100
+    state.player.hurtFlash = 0
+  }
+  if (state.status !== 'playing') state.status = 'playing'
   resetShotEventPool(state.shots)
   resetWeaponImpactEventPool(state.impactEvents)
   resetZombiePool(state.zombies)

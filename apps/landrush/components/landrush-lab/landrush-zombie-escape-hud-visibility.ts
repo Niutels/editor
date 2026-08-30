@@ -3,6 +3,18 @@ import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
 export function shouldShowLandrushZombieEscapeMoney({
   actualPhase,
   expectedPhase,
+  phaseReady: _phaseReady,
+}: {
+  actualPhase: ZombieEscapeGamePhase
+  expectedPhase: ZombieEscapeGamePhase
+  phaseReady: boolean
+}) {
+  return actualPhase === expectedPhase
+}
+
+export function shouldShowLandrushZombieEscapeNightInteractionHud({
+  actualPhase,
+  expectedPhase,
   phaseReady,
 }: {
   actualPhase: ZombieEscapeGamePhase

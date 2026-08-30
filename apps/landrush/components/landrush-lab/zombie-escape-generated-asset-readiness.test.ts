@@ -92,6 +92,7 @@ describe('Zombie Escape generated asset readiness', () => {
       expectedKeys: ['weapon:pistol', 'weapon:carbine', 'zombie:dockworker'],
       generation: 4,
       pipelineCompleted: 1,
+      pipelineMissingRepresentativeKeys: [],
       pipelineReady: true,
       pipelineTotal: 1,
       ready: false,
@@ -125,6 +126,34 @@ describe('Zombie Escape generated asset readiness', () => {
       completed: 2,
       pipelineReady: true,
       ready: true,
+    })
+  })
+
+  test('reports unique missing render representatives while exact pipeline admission is blocked', () => {
+    const statuses = new Map<string, ZombieEscapeGeneratedAssetTerminalStatus>([
+      ['weapon:pistol', { state: 'ready' }],
+    ])
+
+    expect(
+      resolveZombieEscapeGeneratedAssetReadinessSnapshot({
+        expectedKeys: ['weapon:pistol'],
+        generation: 3,
+        pipelineMissingRepresentativeKeys: [
+          'effect:death-dust',
+          'island:material-presentation:night',
+          'effect:death-dust',
+        ],
+        pipelineReady: false,
+        statuses,
+      }),
+    ).toMatchObject({
+      allocationReady: true,
+      pipelineMissingRepresentativeKeys: [
+        'effect:death-dust',
+        'island:material-presentation:night',
+      ],
+      pipelineReady: false,
+      ready: false,
     })
   })
 

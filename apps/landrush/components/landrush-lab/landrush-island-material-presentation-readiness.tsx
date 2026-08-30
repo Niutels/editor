@@ -1,16 +1,38 @@
 'use client'
 
-import { useLayoutEffect, useRef } from 'react'
-import type { Mesh, Object3D } from 'three'
+import { useThree } from '@react-three/fiber'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { Group, type Mesh, type Object3D } from 'three'
 import type {
   LandrushIslandMaterialPresentationOwner,
   LandrushIslandMaterialReadinessMesh,
 } from './landrush-island-material-presentation'
+import {
+  createLandrushRenderReadinessCoordinator,
+  type LandrushPipelineRenderer,
+} from './landrush-render-readiness'
+import {
+  createLandrushZombieNightBeaconRenderReadinessRepresentative,
+  createLandrushZombieNightSurfaceRenderReadinessRepresentative,
+  LANDRUSH_ZOMBIE_NIGHT_RENDER_REPRESENTATIVE_KEY,
+  observeLandrushZombieNightWorld,
+} from './landrush-zombie-night-presentation-material'
 import { isLandrushRevealObjectOwnedByRoot } from './robot-reveal-mesh-ownership'
 import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 
 export const LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY =
   'island:material-presentation'
+export const LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY =
+  LANDRUSH_ZOMBIE_NIGHT_RENDER_REPRESENTATIVE_KEY
+export const LANDRUSH_ISLAND_DAY_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY =
+  'island:material-presentation:day'
+
+export type LandrushIslandDayMaterialPresentationReadiness = Readonly<{
+  completed: number
+  generation: string
+  ready: boolean
+  total: number
+}>
 
 export function collectLandrushIslandMaterialPresentationReadinessMeshes({
   floorRoots,
@@ -53,27 +75,48 @@ export function collectLandrushIslandMaterialPresentationReadinessMeshes({
 }
 
 export function registerLandrushIslandMaterialPresentationRenderReadiness({
+  generation = 0,
   meshes,
   owner,
   ready,
   registry,
+  worldRoot,
 }: {
+  generation?: number
   meshes: readonly LandrushIslandMaterialReadinessMesh[]
   owner: LandrushIslandMaterialPresentationOwner
   ready: boolean
   registry: ZombieEscapeRenderReadinessRegistry
+  worldRoot?: Object3D
 }) {
   if (!ready) return undefined
 
-  const root = owner.createRenderReadinessRepresentative(meshes, { kind: 'soft' })
-  let unregister: (() => void) | undefined
+  const dayRoot = owner.createRenderReadinessRepresentative(meshes, { kind: 'soft' })
+  const nightRoot = new Group()
+  dayRoot.userData.landrushMaterialReadinessGeneration = generation
+  nightRoot.userData.landrushMaterialReadinessGeneration = generation
+  const surfaceRepresentative = worldRoot
+    ? createLandrushZombieNightSurfaceRenderReadinessRepresentative(worldRoot)
+    : null
+  const beaconRepresentative = createLandrushZombieNightBeaconRenderReadinessRepresentative()
+  if (surfaceRepresentative) nightRoot.add(surfaceRepresentative)
+  nightRoot.add(beaconRepresentative.root)
+  let unregisterDay: (() => void) | undefined
+  let unregisterNight: (() => void) | undefined
   try {
-    unregister = registry.register(
+    unregisterDay = registry.register(
       LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
-      root,
+      dayRoot,
+    )
+    unregisterNight = registry.register(
+      LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+      nightRoot,
     )
   } catch (error) {
-    root.clear()
+    unregisterDay?.()
+    dayRoot.clear()
+    nightRoot.clear()
+    beaconRepresentative.dispose()
     throw error
   }
 
@@ -81,8 +124,11 @@ export function registerLandrushIslandMaterialPresentationRenderReadiness({
   return () => {
     if (!registered) return
     registered = false
-    unregister?.()
-    root.clear()
+    unregisterNight?.()
+    unregisterDay?.()
+    dayRoot.clear()
+    nightRoot.clear()
+    beaconRepresentative.dispose()
   }
 }
 
@@ -97,19 +143,109 @@ export function LandrushIslandMaterialPresentationRenderReadiness({
   ready: boolean
   registry: ZombieEscapeRenderReadinessRegistry
 }) {
-  const readyMeshesRef = useRef(meshes)
-  readyMeshesRef.current = meshes
+  const scene = useThree((state) => state.scene)
+  const [meshGeneration, setMeshGeneration] = useState(0)
+  const registrationCleanupRef = useRef<(() => void) | undefined>(undefined)
+  const invalidateRegistration = useCallback(() => {
+    registrationCleanupRef.current?.()
+    registrationCleanupRef.current = undefined
+    setMeshGeneration((current) => current + 1)
+  }, [])
 
   useLayoutEffect(
-    () =>
-      registerLandrushIslandMaterialPresentationRenderReadiness({
-        meshes: readyMeshesRef.current,
-        owner,
-        ready,
-        registry,
-      }),
-    [owner, ready, registry],
+    () => observeLandrushZombieNightWorld(scene, invalidateRegistration),
+    [invalidateRegistration, scene],
   )
+
+  useLayoutEffect(() => {
+    const cleanup = registerLandrushIslandMaterialPresentationRenderReadiness({
+      generation: meshGeneration,
+      meshes,
+      owner,
+      ready,
+      registry,
+      worldRoot: scene,
+    })
+    registrationCleanupRef.current = cleanup
+    return () => {
+      if (registrationCleanupRef.current === cleanup) {
+        registrationCleanupRef.current = undefined
+      }
+      cleanup?.()
+    }
+  }, [meshGeneration, meshes, owner, ready, registry, scene])
+
+  return null
+}
+
+export function LandrushIslandDayMaterialPresentationRenderReadiness({
+  generation,
+  meshes,
+  onReadinessChange,
+  owner,
+  ready,
+}: {
+  generation: string
+  meshes: readonly LandrushIslandMaterialReadinessMesh[]
+  onReadinessChange: (readiness: LandrushIslandDayMaterialPresentationReadiness) => void
+  owner: LandrushIslandMaterialPresentationOwner
+  ready: boolean
+}) {
+  const { camera, gl, scene } = useThree()
+  const coordinatorRef = useRef<ReturnType<typeof createLandrushRenderReadinessCoordinator> | null>(
+    null,
+  )
+  const requestGenerationRef = useRef(0)
+  coordinatorRef.current ??= createLandrushRenderReadinessCoordinator()
+
+  useLayoutEffect(() => {
+    const coordinator = coordinatorRef.current
+    if (!coordinator) return
+    coordinator.invalidate()
+    if (!ready) {
+      onReadinessChange({ completed: 0, generation, ready: false, total: 1 })
+      return
+    }
+
+    const root = owner.createRenderReadinessRepresentative(meshes, { kind: 'soft' })
+    const requestGeneration = ++requestGenerationRef.current
+    let active = true
+    let completed = 0
+    onReadinessChange({ completed, generation, ready: false, total: 1 })
+    void coordinator.request(
+      {
+        camera,
+        generation: requestGeneration,
+        identity: root,
+        representatives: [
+          {
+            key: LANDRUSH_ISLAND_DAY_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+            root,
+          },
+        ],
+        renderer: gl as unknown as LandrushPipelineRenderer,
+        targetScene: scene,
+      },
+      (status) => {
+        if (!active) return
+        const contentReady = status.state === 'ready'
+        if (contentReady) completed = 1
+        onReadinessChange({ completed, generation, ready: contentReady, total: 1 })
+      },
+      (progress) => {
+        if (!active) return
+        completed = Math.min(1, progress.completed)
+        onReadinessChange({ completed, generation, ready: false, total: 1 })
+      },
+    )
+
+    return () => {
+      active = false
+      coordinator.invalidate()
+      root.clear()
+      onReadinessChange({ completed: 0, generation, ready: false, total: 1 })
+    }
+  }, [camera, generation, gl, meshes, onReadinessChange, owner, ready, scene])
 
   return null
 }

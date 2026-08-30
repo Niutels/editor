@@ -3,7 +3,10 @@ import type { MaterialSchema } from '@pascal-app/core'
 import { clearMaterialCache, createMaterial } from '@pascal-app/viewer'
 import {
   AdditiveBlending,
+  Bone,
+  Float32BufferAttribute,
   Group,
+  InstancedMesh,
   type Material,
   Mesh,
   MeshBasicMaterial,
@@ -12,8 +15,11 @@ import {
   NormalBlending,
   Plane,
   PlaneGeometry,
+  Skeleton,
+  SkinnedMesh,
   Texture,
   TextureLoader,
+  Uint16BufferAttribute,
 } from 'three'
 import { color, float } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
@@ -272,16 +278,14 @@ describe('Landrush island material presentation ownership', () => {
       (representative) => representative.geometry === overlapMesh.geometry,
     )
 
-    expect(representatives).toHaveLength(8)
+    expect(representatives).toHaveLength(5)
     expect(floorRepresentatives).toHaveLength(2)
     expect(revealRepresentatives).toHaveLength(1)
-    expect(overlapRepresentatives).toHaveLength(5)
+    expect(overlapRepresentatives).toHaveLength(2)
     expect(
       representatives.filter((representative) => representative.geometry === inactiveMesh.geometry),
     ).toHaveLength(0)
-    expect(overlapRepresentatives[0]!.material).toBe(floorRepresentatives[0]!.material)
-    expect(overlapRepresentatives[1]!.material).toBe(floorRepresentatives[1]!.material)
-    expect(overlapRepresentatives[2]!.material).toBe(revealRepresentatives[0]!.material)
+    expect(new Set(representatives.map((representative) => representative.material)).size).toBe(5)
     expect(owner.ownedMaterialCount).toBe(5)
     expect(owner.activeBindingCount).toBe(0)
     expect(floorMesh.material).toBe(source)
@@ -387,14 +391,12 @@ describe('Landrush island material presentation ownership', () => {
     )
     const representatives = group.children as Mesh[]
     const firstRepresentatives = representatives.slice(0, 5)
-    const secondRepresentatives = representatives.slice(5)
     const preparedMaterials = new Set(
       firstRepresentatives.map((representative) => representative.material as Material),
     )
 
-    expect(representatives).toHaveLength(10)
+    expect(representatives).toHaveLength(5)
     expect(firstRepresentatives).toHaveLength(5)
-    expect(secondRepresentatives).toHaveLength(5)
     expect(preparedMaterials.size).toBe(5)
     expect((firstRepresentatives[2]!.material as Material).transparent).toBe(false)
     expect((firstRepresentatives[2]!.material as Material).alphaHash).toBe(false)
@@ -417,12 +419,9 @@ describe('Landrush island material presentation ownership', () => {
       expect(representative.geometry).toBe(firstMesh.geometry)
       expect(representative.parent).toBe(group)
     }
-    for (const representative of secondRepresentatives) {
-      expect(representative).not.toBe(secondMesh)
-      expect(representative).toBeInstanceOf(Mesh)
-      expect(representative.geometry).toBe(secondMesh.geometry)
-      expect(representative.parent).toBe(group)
-    }
+    expect(
+      representatives.some((representative) => representative.geometry === secondMesh.geometry),
+    ).toBe(false)
 
     owner.acquireFloorFade(firstMesh)
     expect(firstMesh.material).toBe(firstRepresentatives[0]!.material)
@@ -469,6 +468,131 @@ describe('Landrush island material presentation ownership', () => {
     firstMesh.geometry.dispose()
     secondMesh.geometry.dispose()
     source.dispose()
+  })
+
+  test('collapses many equivalent meshes while preserving distinct material and geometry pipelines', () => {
+    const owner = new LandrushIslandMaterialPresentationOwner()
+    const source = new MeshBasicMaterial()
+    const distinctSource = new MeshBasicMaterial()
+    const equivalentMeshes = Array.from({ length: 96 }, () => createMesh(source))
+    const distinctMaterialMesh = createMesh(distinctSource)
+    const nonIndexedMesh = new Mesh(new PlaneGeometry(1, 1).toNonIndexed(), source)
+    const coloredGeometry = new PlaneGeometry(1, 1)
+    coloredGeometry.setAttribute(
+      'color',
+      new Float32BufferAttribute(
+        new Float32Array(coloredGeometry.getAttribute('position').count * 3),
+        3,
+      ),
+    )
+    const coloredMesh = new Mesh(coloredGeometry, source)
+    const instancedMesh = new InstancedMesh(new PlaneGeometry(1, 1), source, 2)
+    const morphGeometry = new PlaneGeometry(1, 1)
+    morphGeometry.morphAttributes.position = [
+      new Float32BufferAttribute(
+        new Float32Array(morphGeometry.getAttribute('position').count * 3),
+        3,
+      ),
+    ]
+    const morphMesh = new Mesh(morphGeometry, source)
+    morphMesh.updateMorphTargets()
+    const skinnedGeometry = new PlaneGeometry(1, 1)
+    const skinnedVertexCount = skinnedGeometry.getAttribute('position').count
+    skinnedGeometry.setAttribute(
+      'skinIndex',
+      new Uint16BufferAttribute(new Uint16Array(skinnedVertexCount * 4), 4),
+    )
+    const skinWeights = new Float32Array(skinnedVertexCount * 4)
+    for (let index = 0; index < skinnedVertexCount; index += 1) skinWeights[index * 4] = 1
+    skinnedGeometry.setAttribute('skinWeight', new Float32BufferAttribute(skinWeights, 4))
+    const skinnedMesh = new SkinnedMesh(skinnedGeometry, source)
+    const bone = new Bone()
+    skinnedMesh.add(bone)
+    skinnedMesh.bind(new Skeleton([bone]))
+
+    const group = owner.createRenderReadinessRepresentative(
+      [
+        ...equivalentMeshes.map((mesh) => ({ floor: true, mesh, reveal: true })),
+        { floor: true, mesh: distinctMaterialMesh, reveal: true },
+        { floor: true, mesh: nonIndexedMesh, reveal: true },
+        { floor: true, mesh: coloredMesh, reveal: true },
+        { floor: true, mesh: instancedMesh, reveal: true },
+        { floor: true, mesh: morphMesh, reveal: true },
+        { floor: true, mesh: skinnedMesh, reveal: true },
+      ],
+      { kind: 'soft' },
+    )
+    const representatives = group.children as Mesh[]
+
+    expect(representatives).toHaveLength(35)
+    expect(
+      representatives.filter(
+        (representative) => representative.geometry === equivalentMeshes[0]!.geometry,
+      ),
+    ).toHaveLength(5)
+    for (const duplicate of equivalentMeshes.slice(1)) {
+      expect(
+        representatives.some((representative) => representative.geometry === duplicate.geometry),
+      ).toBe(false)
+    }
+    for (const distinct of [
+      distinctMaterialMesh,
+      nonIndexedMesh,
+      coloredMesh,
+      instancedMesh,
+      morphMesh,
+      skinnedMesh,
+    ]) {
+      expect(
+        representatives.filter((representative) => representative.geometry === distinct.geometry),
+      ).toHaveLength(5)
+    }
+
+    group.clear()
+    owner.dispose()
+    for (const mesh of equivalentMeshes) mesh.geometry.dispose()
+    distinctMaterialMesh.geometry.dispose()
+    nonIndexedMesh.geometry.dispose()
+    coloredGeometry.dispose()
+    instancedMesh.geometry.dispose()
+    morphGeometry.dispose()
+    skinnedGeometry.dispose()
+    source.dispose()
+    distinctSource.dispose()
+  })
+
+  test('retains representatives for each material-array group selection', () => {
+    const owner = new LandrushIslandMaterialPresentationOwner()
+    const firstSource = new MeshBasicMaterial()
+    const secondSource = new MeshBasicMaterial()
+    const materials = [firstSource, secondSource]
+    const firstGeometry = new PlaneGeometry(1, 1)
+    firstGeometry.clearGroups()
+    firstGeometry.addGroup(0, firstGeometry.index!.count, 0)
+    const secondGeometry = new PlaneGeometry(1, 1)
+    secondGeometry.clearGroups()
+    secondGeometry.addGroup(0, secondGeometry.index!.count, 1)
+    const firstMesh = new Mesh(firstGeometry, materials)
+    const secondMesh = new Mesh(secondGeometry, materials)
+
+    const group = owner.createRenderReadinessRepresentative(
+      [
+        { floor: false, mesh: firstMesh, reveal: true },
+        { floor: false, mesh: secondMesh, reveal: true },
+      ],
+      { kind: 'soft' },
+    )
+
+    expect(group.children).toHaveLength(2)
+    expect((group.children[0] as Mesh).geometry).toBe(firstGeometry)
+    expect((group.children[1] as Mesh).geometry).toBe(secondGeometry)
+
+    group.clear()
+    owner.dispose()
+    firstGeometry.dispose()
+    secondGeometry.dispose()
+    firstSource.dispose()
+    secondSource.dispose()
   })
 
   test('keeps the owned variant count exact across many source buckets and repeated eviction', () => {

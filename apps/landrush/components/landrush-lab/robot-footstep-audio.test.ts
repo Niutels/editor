@@ -1,14 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { PerspectiveCamera, Vector3 } from 'three'
 import {
-  advanceRobotGamepadAudioPromptState,
   advanceRobotJumpAudioPlaybackState,
   createRobotJumpAudioPlaybackState,
-  hasRobotGamepadAudioUnlockInput,
   isRobotJumpAudioCueConfigurationValid,
   ROBOT_FOOTSTEP_BASE_VOLUME,
   ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS,
-  type RobotAudioUnlockGamepad,
   type RobotJumpAudioBufferStatus,
   type RobotJumpAudioCue,
   resolveRobotAudioListenerLocalPosition,
@@ -323,39 +320,3 @@ describe('robot jump audio playback lifecycle', () => {
     ).toBe(false)
   })
 })
-
-describe('robot controller audio activation prompt', () => {
-  test('recognizes connected button and stick input without treating empty slots as input', () => {
-    expect(hasRobotGamepadAudioUnlockInput([null, undefined])).toBe(false)
-    expect(hasRobotGamepadAudioUnlockInput([gamepad()])).toBe(false)
-    expect(
-      hasRobotGamepadAudioUnlockInput([gamepad({ buttons: [{ pressed: true, value: 1 }] })]),
-    ).toBe(true)
-    expect(hasRobotGamepadAudioUnlockInput([gamepad({ axes: [0.5] })])).toBe(true)
-    expect(
-      hasRobotGamepadAudioUnlockInput([
-        gamepad({ buttons: [{ pressed: true, value: 1 }], connected: false }),
-      ]),
-    ).toBe(false)
-  })
-
-  test('requests one prompt per controller input edge rather than every frame', () => {
-    const state = { gamepadPromptInputActive: false }
-
-    expect(advanceRobotGamepadAudioPromptState(state, true, false)).toBe(false)
-    expect(advanceRobotGamepadAudioPromptState(state, true, true)).toBe(true)
-    expect(advanceRobotGamepadAudioPromptState(state, true, true)).toBe(false)
-    expect(advanceRobotGamepadAudioPromptState(state, false, true)).toBe(false)
-    expect(advanceRobotGamepadAudioPromptState(state, true, true)).toBe(true)
-    expect(advanceRobotGamepadAudioPromptState(state, true, false)).toBe(false)
-    expect(state.gamepadPromptInputActive).toBe(false)
-  })
-})
-
-function gamepad({
-  axes = [0],
-  buttons = [{ pressed: false, value: 0 }],
-  connected = true,
-}: Partial<RobotAudioUnlockGamepad> = {}): RobotAudioUnlockGamepad {
-  return { axes, buttons, connected }
-}

@@ -1,6 +1,7 @@
 'use client'
 
 import { lazy, Suspense } from 'react'
+import { LandrushIslandBackgroundMusic } from './landrush-island-background-music-client'
 import { LandrushIslandStartupPresentationGate } from './landrush-island-startup-presentation-gate'
 import { LandrushKeyboardFocusAnchor } from './landrush-keyboard-focus-anchor'
 
@@ -13,6 +14,7 @@ const DeferredLandrushIslandClient = lazy(() =>
 export function LandrushIslandDeferredClient() {
   return (
     <LandrushIslandStartupPresentationGate>
+      <LandrushIslandBackgroundMusic />
       <LandrushKeyboardFocusAnchor />
       <Suspense fallback={null}>
         <DeferredLandrushIslandClient experience="pascal-multiplayer-island" />

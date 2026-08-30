@@ -46,6 +46,7 @@ Invoke the `review-architecture` skill (`.agents/skills/review-architecture/SKIL
 
 ## Operating rules
 
+- Treat 60 FPS as a hard constraint: complete expensive setup before gameplay and keep frame-time work change-driven, bounded, and allocation-free so transitions never introduce compilation stalls or recurring unnecessary work.
 - Read the full file before editing. Plan all changes, then make one complete edit.
 - When the user corrects you, stop and re-read their message.
 - After two consecutive tool failures, stop and change approach.

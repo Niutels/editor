@@ -9,8 +9,13 @@ import {
   createFrameWindows,
 } from './atomic-frame-accounting.mjs'
 
+const SEVENTEEN_SECOND_WINDOW = Object.freeze({
+  windowEndUs: 15_000_000,
+  windowStartUs: -2_000_000,
+})
+
 function frames(stepMs = 10) {
-  return Array.from({ length: 1_203 }, (_, frameIdx) => ({
+  return Array.from({ length: 1_703 }, (_, frameIdx) => ({
     cpu: {
       intervalMs: stepMs,
       measuredTopLevelMs: 3,
@@ -25,7 +30,7 @@ function frames(stepMs = 10) {
   }))
 }
 
-test('creates one exact continuous twelve-second wall window', () => {
+test('preserves the default exact continuous twelve-second wall window', () => {
   const source = frames()
   const window = createFrameWindows(source, 2_010)
   assert.equal(window.coveredUs, 12_000_000)
@@ -34,6 +39,16 @@ test('creates one exact continuous twelve-second wall window', () => {
   const ledger = buildBaselineWallLedger(source, 2_010)
   assert.equal(ledger.invariants.maxLeafUs, 2_000)
   assert.equal(ledger.invariants.noLeafAbove2ms, true)
+})
+
+test('supports an exact continuous minus-two through plus-fifteen-second window', () => {
+  const source = frames()
+  const window = createFrameWindows(source, 2_010, SEVENTEEN_SECOND_WINDOW)
+  assert.equal(window.coveredUs, 17_000_000)
+  assert.equal(window.windows[0].startOffsetUs, -2_000_000)
+  assert.equal(window.windows.at(-1).endOffsetUs, 15_000_000)
+  const ledger = buildBaselineWallLedger(source, 2_010, SEVENTEEN_SECOND_WINDOW)
+  assert.equal(ledger.invariants.exactWindowCoverage, true)
 })
 
 test('partitions nested trace work and explicit idle without losing a microsecond', () => {
@@ -67,6 +82,7 @@ test('partitions nested trace work and explicit idle without losing a microsecon
   const ledger = buildTraceLedger({
     frames: source,
     markerName: 'switch-marker',
+    options: SEVENTEEN_SECOND_WINDOW,
     switchPageTMs: 2_010,
     traceEvents,
   })
@@ -81,8 +97,8 @@ test('partitions nested trace work and explicit idle without losing a microsecon
 })
 
 test('reconciles scoped duration buckets after clipping and splitting', () => {
-  const ledger = buildScopedCpuLedger(frames(), 2_010)
-  assert.equal(ledger.invariants.windowCoverageUs, 12_000_000)
+  const ledger = buildScopedCpuLedger(frames(), 2_010, SEVENTEEN_SECOND_WINDOW)
+  assert.equal(ledger.invariants.windowCoverageUs, 17_000_000)
   assert.equal(ledger.invariants.maxLeafUs <= 2_000, true)
   for (const frame of ledger.frames) {
     assert.equal(
@@ -108,10 +124,11 @@ test('makes the V8 statistical timeline total and atomic', () => {
     clockOffsetUs: 5_000_000,
     clockUncertaintyUs: 1_000,
     frames: source,
+    options: SEVENTEEN_SECOND_WINDOW,
     profile,
     switchPageTMs: 2_010,
   })
-  assert.equal(ledger.invariants.windowCoverageUs, 12_000_000)
+  assert.equal(ledger.invariants.windowCoverageUs, 17_000_000)
   assert.equal(ledger.invariants.clockUncertaintyUs, 1_000)
   assert.equal(ledger.invariants.maxLeafUs <= 2_000, true)
   assert.throws(
@@ -120,11 +137,43 @@ test('makes the V8 statistical timeline total and atomic', () => {
         clockOffsetUs: 5_000_000,
         clockUncertaintyUs: 2_001,
         frames: source,
+        options: SEVENTEEN_SECOND_WINDOW,
         profile,
         switchPageTMs: 2_010,
       }),
     /V8 clock uncertainty/,
   )
+})
+
+test('preserves complete V8 ancestry beyond sixteen parent frames', () => {
+  const depth = 24
+  const nodes = Array.from({ length: depth }, (_, index) => ({
+    callFrame: {
+      functionName: index === 0 ? '(root)' : `frame-${index + 1}`,
+      url: index === 0 ? '' : `http://localhost/frame-${index + 1}.ts`,
+    },
+    children: index + 1 < depth ? [index + 2] : undefined,
+    id: index + 1,
+  }))
+  const profile = {
+    endTime: 5_030_000,
+    nodes,
+    samples: Array.from({ length: 30 }, () => depth),
+    startTime: 5_000_000,
+    timeDeltas: Array.from({ length: 30 }, () => 1_000),
+  }
+  const ledger = buildV8SampleLedger({
+    clockOffsetUs: 5_000_000,
+    clockUncertaintyUs: 1_000,
+    frames: frames(),
+    options: SEVENTEEN_SECOND_WINDOW,
+    profile,
+    switchPageTMs: 2_010,
+  })
+  const leaf = ledger.nodes.find((node) => node.nodeId === depth)
+  assert(leaf)
+  assert.equal(leaf.stack.length, depth)
+  assert.equal(leaf.stack.at(-1), '(root)')
 })
 
 test('maps timestamped GPU passes to the render following the start frame', () => {
@@ -139,7 +188,7 @@ test('maps timestamped GPU passes to the render following the start frame', () =
     threeFrames: [2],
   }
   source[10].gpu = sample
-  const ledger = buildGpuAtomicLedger(source, 2_010)
+  const ledger = buildGpuAtomicLedger(source, 2_010, SEVENTEEN_SECOND_WINDOW)
   const mapped = ledger.frames.find((frame) => frame.benchRenderFrameIdx === 9)
   assert(mapped)
   assert.equal(mapped.gpuBusyUs, 4_500)

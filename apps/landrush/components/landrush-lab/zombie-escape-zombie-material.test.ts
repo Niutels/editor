@@ -7,6 +7,10 @@ import {
   Texture,
 } from 'three'
 import { MeshPhysicalNodeMaterial, MeshStandardNodeMaterial } from 'three/webgpu'
+import {
+  createLandrushRobotShoulderTorchLightingState,
+  updateLandrushRobotShoulderTorchLightingState,
+} from './landrush-robot-shoulder-torch'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 describe('zombie phase material shader', () => {
@@ -39,14 +43,55 @@ describe('zombie phase material shader', () => {
     )
     expect(first.userData.zombieTextureShader).toEqual({
       debugMode: 'final',
+      outsideTorchVisibility: 1,
       phaseScoped: true,
       seed: 4,
+      torchScoped: false,
     })
 
     first.dispose()
     second.dispose()
     source.dispose()
     map.dispose()
+    geometry.dispose()
+  })
+
+  test('adds a stable real-torch visibility field only for the zombie-only comparison', () => {
+    const geometry = new BoxGeometry()
+    const source = new MeshStandardMaterial()
+    const shader = createZombieEscapeZombieShader({
+      outsideTorchVisibility: 0.5,
+      phaseAmount: 1,
+    })
+    const material = shader.createMaterial(source, geometry, 3) as MeshStandardNodeMaterial
+    const colorNode = material.colorNode
+    const emissiveNode = material.emissiveNode
+    const torchState = createLandrushRobotShoulderTorchLightingState()
+
+    updateLandrushRobotShoulderTorchLightingState(
+      torchState,
+      true,
+      { x: 1, y: 2, z: 3 },
+      { x: 4, y: 2, z: 7 },
+    )
+    shader.setTorchLighting(torchState)
+
+    expect(shader.getOutsideTorchVisibility()).toBe(0.5)
+    expect(material.colorNode).toBe(colorNode)
+    expect(material.emissiveNode).toBe(emissiveNode)
+    expect(material.userData.zombieTextureShader).toEqual({
+      debugMode: 'final',
+      outsideTorchVisibility: 0.5,
+      phaseScoped: true,
+      seed: 3,
+      torchScoped: true,
+    })
+
+    shader.setTorchLighting(null)
+    expect(material.colorNode).toBe(colorNode)
+
+    material.dispose()
+    source.dispose()
     geometry.dispose()
   })
 

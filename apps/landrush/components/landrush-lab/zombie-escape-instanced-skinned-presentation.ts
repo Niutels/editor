@@ -76,6 +76,7 @@ const ZOMBIE_ESCAPE_AUTHORED_BATCH_BOUNDS_PADDING_METERS = 2.5
 const ZOMBIE_ESCAPE_AUTHORED_FRAME_ATTRIBUTE = 'zombieBakedFrame'
 const ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX = 2
 const ZOMBIE_ESCAPE_AUTHORED_HALF_FLOAT_MAX = 65_504
+const ZOMBIE_ESCAPE_AUTHORED_PARKED_INSTANCE_Y = -1_000_000
 const TWO_PI = Math.PI * 2
 const ONE = new Vector3(1, 1, 1)
 
@@ -153,7 +154,6 @@ type BakedTextureSet = {
 }
 
 type BakedMeshState = {
-  frameAttribute: InstancedBufferAttribute
   materials: Material[]
   mesh: InstancedMesh
   meshToRoot: Matrix4
@@ -375,7 +375,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
   samplerRoot.updateMatrixWorld(true)
 
   const root = new Group()
-  root.visible = false
+  root.visible = true
   root.userData.authoredZombieInstances = {
     activeCount: 0,
     animationMode: 'baked-vertex',
@@ -403,14 +403,24 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
     samplerRoot.quaternion,
     new Vector3(modelTransform.scale, modelTransform.scale, modelTransform.scale),
   )
+  const renderCapacity = instanceCapacity + 1
+  const parkedInstanceMatrix = new Matrix4().makeTranslation(
+    0,
+    ZOMBIE_ESCAPE_AUTHORED_PARKED_INSTANCE_Y,
+    0,
+  )
+  const frameAttribute = new InstancedBufferAttribute(new Float32Array(renderCapacity), 1)
+  frameAttribute.setUsage(DynamicDrawUsage)
   const bakedMeshes: BakedMeshState[] = []
   let ownershipTransferred = false
   try {
     for (let meshIndex = 0; meshIndex < samplerMeshes.length; meshIndex += 1) {
       yield
       const state = createBakedMeshState({
-        instanceCapacity,
+        frameAttribute,
+        instanceCapacity: renderCapacity,
         modelMatrix,
+        parkedInstanceMatrix,
         rootWorldInverse,
         sourceMesh: samplerMeshes[meshIndex]!,
         textureSet: bakedTextureSets[meshIndex]!,
@@ -580,24 +590,56 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
           bounds.radius = 0
         }
         activeBatchCount = selectedCount > 0 ? bakedMeshes.length : 0
+        const renderCount = selectedCount + 1
+        let firstChangedFrame = renderCount
+        let lastChangedFrame = -1
+        for (let instance = 0; instance < selectedCount; instance += 1) {
+          if (writeInstanceFrameIfChanged(frameAttribute, instance, selectedFrames[instance]!)) {
+            firstChangedFrame = Math.min(firstChangedFrame, instance)
+            lastChangedFrame = instance
+          }
+        }
+        if (writeInstanceFrameIfChanged(frameAttribute, selectedCount, 0)) {
+          firstChangedFrame = Math.min(firstChangedFrame, selectedCount)
+          lastChangedFrame = selectedCount
+        }
+        if (lastChangedFrame >= firstChangedFrame) {
+          frameAttribute.addUpdateRange(
+            firstChangedFrame,
+            lastChangedFrame - firstChangedFrame + 1,
+          )
+          frameAttribute.needsUpdate = true
+        }
         for (const state of bakedMeshes) {
           const mesh = state.mesh
-          mesh.count = selectedCount
-          mesh.visible = selectedCount > 0
-          if (selectedCount === 0) continue
+          if (mesh.count !== renderCount) mesh.count = renderCount
+          let firstChangedMatrix = renderCount
+          let lastChangedMatrix = -1
           for (let instance = 0; instance < selectedCount; instance += 1) {
             meshInstanceMatrix.multiplyMatrices(selectedRootMatrices[instance]!, state.meshToRoot)
-            mesh.setMatrixAt(instance, meshInstanceMatrix)
-            state.frameAttribute.setX(instance, selectedFrames[instance]!)
+            if (writeInstanceMatrixIfChanged(mesh, instance, meshInstanceMatrix)) {
+              firstChangedMatrix = Math.min(firstChangedMatrix, instance)
+              lastChangedMatrix = instance
+            }
           }
-          mesh.instanceMatrix.needsUpdate = true
-          state.frameAttribute.needsUpdate = true
-          if (mesh.boundingSphere) mesh.boundingSphere.copy(bounds)
-          else mesh.boundingSphere = bounds.clone()
+          if (writeInstanceMatrixIfChanged(mesh, selectedCount, parkedInstanceMatrix)) {
+            firstChangedMatrix = Math.min(firstChangedMatrix, selectedCount)
+            lastChangedMatrix = selectedCount
+          }
+          if (lastChangedMatrix >= firstChangedMatrix) {
+            mesh.instanceMatrix.addUpdateRange(
+              firstChangedMatrix * 16,
+              (lastChangedMatrix - firstChangedMatrix + 1) * 16,
+            )
+            mesh.instanceMatrix.needsUpdate = true
+          }
+          if (!mesh.boundingSphere) mesh.boundingSphere = bounds.clone()
+          else if (!mesh.boundingSphere.equals(bounds)) mesh.boundingSphere.copy(bounds)
         }
         spatialBoundsValid = selectedCount > 0 && Number.isFinite(bounds.radius)
-        root.visible = selectedCount > 0
-        root.userData.authoredZombieInstances.activeCount = selectedCount
+        if (root.userData.authoredZombieInstances.activeCount !== selectedCount) {
+          root.userData.authoredZombieInstances.activeCount = selectedCount
+        }
       },
     }
     ownershipTransferred = true
@@ -799,24 +841,26 @@ function updateBaseGeometryFromTexture(textureSet: BakedTextureSet) {
 }
 
 function createBakedMeshState({
+  frameAttribute,
   instanceCapacity,
   modelMatrix,
+  parkedInstanceMatrix,
   rootWorldInverse,
   sourceMesh,
   textureSet,
   variantIndex,
   zombieShader,
 }: {
+  frameAttribute: InstancedBufferAttribute
   instanceCapacity: number
   modelMatrix: Matrix4
+  parkedInstanceMatrix: Matrix4
   rootWorldInverse: Matrix4
   sourceMesh: SkinnedMesh
   textureSet: BakedTextureSet
   variantIndex: number
   zombieShader: ZombieEscapeZombieShader
 }): BakedMeshState {
-  const frameAttribute = new InstancedBufferAttribute(new Float32Array(instanceCapacity), 1)
-  frameAttribute.setUsage(DynamicDrawUsage)
   textureSet.baseGeometry.setAttribute(ZOMBIE_ESCAPE_AUTHORED_FRAME_ATTRIBUTE, frameAttribute)
   const nodes = createBakedVertexNodes(textureSet)
   const sourceMaterials = Array.isArray(sourceMesh.material)
@@ -839,12 +883,14 @@ function createBakedMeshState({
     const material = Array.isArray(sourceMesh.material) ? materials : materials[0]!
     mesh = new InstancedMesh(textureSet.baseGeometry, material, instanceCapacity)
     mesh.castShadow = false
-    mesh.count = 0
-    mesh.frustumCulled = true
+    mesh.count = 1
+    mesh.frustumCulled = false
     mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+    mesh.setMatrixAt(0, parkedInstanceMatrix)
+    mesh.instanceMatrix.needsUpdate = true
     mesh.receiveShadow = false
     mesh.boundingSphere = new Sphere()
-    mesh.visible = false
+    mesh.visible = true
     mesh.userData.authoredZombieCrowdLod = {
       bakedFrameCount: ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT,
       bakedTextureFormat: 'rgba16float',
@@ -854,7 +900,6 @@ function createBakedMeshState({
       variantIndex,
     }
     return {
-      frameAttribute,
       materials,
       mesh,
       meshToRoot: modelMatrix.clone().multiply(rootWorldInverse).multiply(sourceMesh.matrixWorld),
@@ -989,6 +1034,29 @@ function updateBatchBounds(
   const halfZ = (maximumZ - minimumZ) * 0.5
   target.radius =
     Math.hypot(halfX, halfY, halfZ) + ZOMBIE_ESCAPE_AUTHORED_BATCH_BOUNDS_PADDING_METERS
+}
+
+function writeInstanceMatrixIfChanged(mesh: InstancedMesh, instance: number, matrix: Matrix4) {
+  const offset = instance * 16
+  const target = mesh.instanceMatrix.array
+  const elements = matrix.elements
+  for (let component = 0; component < 16; component += 1) {
+    if (target[offset + component] !== Math.fround(elements[component]!)) {
+      mesh.setMatrixAt(instance, matrix)
+      return true
+    }
+  }
+  return false
+}
+
+function writeInstanceFrameIfChanged(
+  attribute: InstancedBufferAttribute,
+  instance: number,
+  frame: number,
+) {
+  if (attribute.getX(instance) === frame) return false
+  attribute.setX(instance, frame)
+  return true
 }
 
 function assertSkinnedGeometry(geometry: BufferGeometry) {

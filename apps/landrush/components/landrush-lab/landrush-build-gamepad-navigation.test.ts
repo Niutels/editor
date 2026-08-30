@@ -6,6 +6,10 @@ import {
   type LandrushBuildGamepadNavigationRect,
   resolveLandrushBuildGamepadDirectionalIndex,
   resolveLandrushBuildGamepadFocusAfterActivation,
+  resolveLandrushBuildGamepadNavigationAction,
+  resolveLandrushBuildGamepadPalettePanel,
+  resolveLandrushBuildGamepadSidebarActivation,
+  resolveLandrushBuildGamepadSidebarIndex,
   shouldAutofocusLandrushBuildGamepadPalette,
 } from './landrush-build-gamepad-navigation'
 
@@ -15,6 +19,20 @@ const buildTabSource = readFileSync(join(import.meta.dir, '../build-tab.tsx'), '
 )
 const islandClientSource = readFileSync(
   join(import.meta.dir, 'landrush-island-client.tsx'),
+  'utf8',
+).replaceAll('\r\n', '\n')
+const itemCatalogSource = readFileSync(
+  join(
+    import.meta.dir,
+    '../../../../packages/editor/src/components/ui/item-catalog/item-catalog.tsx',
+  ),
+  'utf8',
+).replaceAll('\r\n', '\n')
+const itemsPanelSource = readFileSync(
+  join(
+    import.meta.dir,
+    '../../../../packages/editor/src/components/ui/sidebar/panels/items-panel/index.tsx',
+  ),
   'utf8',
 ).replaceAll('\r\n', '\n')
 
@@ -56,6 +74,103 @@ describe('Landrush build gamepad navigation', () => {
     expect(resolveLandrushBuildGamepadFocusAfterActivation(undefined)).toBe('palette')
   })
 
+  test('enters the tab rail without opening a tab, then browses and activates separately', () => {
+    expect(
+      resolveLandrushBuildGamepadNavigationAction({ direction: 'left', focusMode: 'palette' }),
+    ).toBe('enter-sidebar')
+    expect(
+      resolveLandrushBuildGamepadNavigationAction({ direction: 'down', focusMode: 'sidebar' }),
+    ).toBe('move-sidebar')
+    expect(
+      resolveLandrushBuildGamepadNavigationAction({ direction: 'left', focusMode: 'sidebar' }),
+    ).toBeNull()
+    expect(
+      resolveLandrushBuildGamepadNavigationAction({ direction: 'right', focusMode: 'sidebar' }),
+    ).toBe('leave-sidebar')
+    expect(
+      resolveLandrushBuildGamepadSidebarIndex({
+        currentIndex: 0,
+        direction: 'down',
+        itemCount: 3,
+      }),
+    ).toBe(1)
+    expect(
+      resolveLandrushBuildGamepadSidebarIndex({
+        currentIndex: 2,
+        direction: 'down',
+        itemCount: 3,
+      }),
+    ).toBe(0)
+    expect(
+      resolveLandrushBuildGamepadSidebarIndex({
+        currentIndex: 0,
+        direction: 'up',
+        itemCount: 3,
+      }),
+    ).toBe(2)
+    expect(
+      resolveLandrushBuildGamepadSidebarIndex({
+        currentIndex: 0,
+        direction: 'up',
+        itemCount: 0,
+      }),
+    ).toBe(-1)
+    expect(
+      resolveLandrushBuildGamepadSidebarActivation({
+        activePanel: 'build',
+        focusedPanel: 'build',
+        sidebarCollapsed: false,
+      }),
+    ).toEqual({ palettePanel: 'build', selectPanel: false })
+    expect(
+      resolveLandrushBuildGamepadSidebarActivation({
+        activePanel: 'build',
+        focusedPanel: 'items',
+        sidebarCollapsed: false,
+      }),
+    ).toEqual({ palettePanel: 'items', selectPanel: true })
+    expect(
+      resolveLandrushBuildGamepadSidebarActivation({
+        activePanel: 'items',
+        focusedPanel: 'items',
+        sidebarCollapsed: true,
+      }),
+    ).toEqual({ palettePanel: 'items', selectPanel: true })
+    expect(
+      resolveLandrushBuildGamepadSidebarActivation({
+        activePanel: 'build',
+        focusedPanel: 'settings',
+        sidebarCollapsed: false,
+      }),
+    ).toEqual({ palettePanel: null, selectPanel: true })
+    expect(resolveLandrushBuildGamepadPalettePanel('build')).toBe('build')
+    expect(resolveLandrushBuildGamepadPalettePanel('items')).toBe('items')
+    expect(resolveLandrushBuildGamepadPalettePanel('settings')).toBeNull()
+    expect(islandClientSource).toContain("gamepadBuildFocusModeRef.current = 'sidebar'")
+    expect(islandClientSource).toContain('activateLandrushIslandGamepadSidebarButton(')
+    expect(islandClientSource).toContain(
+      "'[data-landrush-editor-sidebar-nav] [data-editor-sidebar-tab]'",
+    )
+    expect(islandClientSource).not.toContain(
+      'resolveLandrushBuildGamepadPalettePanel(button.dataset.editorSidebarTab)',
+    )
+    expect(islandClientSource).toContain('return activation.palettePanel')
+    expect(islandClientSource).toContain("gamepadBuildFocusModeRef.current = 'palette'")
+    expect(islandClientSource).toContain('scheduleLandrushIslandCurrentGamepadBuildPaletteFocus(')
+    expect(islandClientSource).not.toContain('activateLandrushIslandGamepadSidebarPanel(')
+  })
+
+  test('drills Build and Items into their palettes without treating categories as placement', () => {
+    expect(islandClientSource).toContain(
+      'const activePanel = resolveLandrushBuildGamepadPalettePanel(',
+    )
+    expect(islandClientSource).toContain('data-landrush-editor-panel=')
+    expect(itemsPanelSource).toContain('data-editor-build-controller-action="palette"')
+    expect(itemsPanelSource).toContain('data-editor-build-controller-item')
+    expect(itemCatalogSource).toContain('data-editor-build-controller-action="placement"')
+    expect(itemCatalogSource).toContain('data-editor-build-controller-item')
+  })
+
   test('routes canvas modes through placement while keeping MEP as a palette drill-down', () => {
     expect(buildTabSource).toContain(
       `data-editor-build-controller-action={
@@ -94,6 +209,13 @@ describe('Landrush build gamepad navigation', () => {
       isLandrushBuildGamepadPaletteInputReady({
         buildMode: true,
         focusMode: 'placement',
+        interactionReady: true,
+      }),
+    ).toBe(false)
+    expect(
+      isLandrushBuildGamepadPaletteInputReady({
+        buildMode: true,
+        focusMode: 'sidebar',
         interactionReady: true,
       }),
     ).toBe(false)

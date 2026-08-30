@@ -1,9 +1,10 @@
-import type {
-  BufferGeometry,
-  Material,
-  MeshPhysicalMaterial,
-  MeshStandardMaterial,
-  Texture,
+import {
+  type BufferGeometry,
+  type Material,
+  type MeshPhysicalMaterial,
+  type MeshStandardMaterial,
+  type Texture,
+  Vector3,
 } from 'three'
 import {
   color,
@@ -15,6 +16,7 @@ import {
   mix,
   mx_noise_float,
   positionGeometry,
+  positionWorld,
   smoothstep,
   uniform,
   vec3,
@@ -26,6 +28,12 @@ import {
   MeshStandardNodeMaterial,
   type Node as TSLNode,
 } from 'three/webgpu'
+import {
+  LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_PENUMBRA,
+  type LandrushRobotShoulderTorchLightingState,
+} from './landrush-robot-shoulder-torch'
 
 export type ZombieEscapeZombieMaterialDebugMode =
   | 'final'
@@ -38,6 +46,8 @@ export type ZombieEscapeZombieShader = Readonly<{
   createMaterial: (source: Material, geometry: BufferGeometry, seed: number) => Material
   debugMode: ZombieEscapeZombieMaterialDebugMode
   getPhaseAmount: () => number
+  getOutsideTorchVisibility: () => number
+  setTorchLighting: (state: Readonly<LandrushRobotShoulderTorchLightingState> | null) => void
   setPhaseAmount: (amount: number) => void
 }>
 
@@ -51,17 +61,45 @@ type ZombieFloatNode = TSLNode<'float'>
 type ZombieVec3Node = TSLNode<'vec3'>
 type ZombieVec4Node = TSLNode<'vec4'>
 type ZombiePhaseUniformNode = ZombieFloatNode & { value: number }
+type ZombieVec3UniformNode = ZombieVec3Node & { value: Vector3 }
+
+type ZombieTorchFieldNodes = Readonly<{
+  active: ZombieFloatNode
+  direction: ZombieVec3Node
+  origin: ZombieVec3Node
+  outsideVisibility: ZombieFloatNode
+}>
 
 export function createZombieEscapeZombieShader({
   debugMode = 'final',
+  outsideTorchVisibility = 1,
   phaseAmount = 0,
 }: {
   debugMode?: ZombieEscapeZombieMaterialDebugMode
+  outsideTorchVisibility?: number
   phaseAmount?: number
 } = {}): ZombieEscapeZombieShader {
   const clampedInitialPhase = clampPhaseAmount(phaseAmount)
+  const clampedOutsideTorchVisibility = clampPhaseAmount(outsideTorchVisibility)
   const phaseNode = uniform(clampedInitialPhase) as ZombiePhaseUniformNode
   const phaseUniform = { value: clampedInitialPhase }
+  const torchActiveNode = uniform(0) as ZombiePhaseUniformNode
+  const torchDirection = new Vector3(0, 0, 1)
+  const torchDirectionNode = uniform(torchDirection) as ZombieVec3UniformNode
+  const torchOrigin = new Vector3()
+  const torchOriginNode = uniform(torchOrigin) as ZombieVec3UniformNode
+  const outsideTorchVisibilityNode = uniform(
+    clampedOutsideTorchVisibility,
+  ) as ZombiePhaseUniformNode
+  const torchFieldNodes: ZombieTorchFieldNodes | null =
+    clampedOutsideTorchVisibility < 1
+      ? {
+          active: torchActiveNode,
+          direction: torchDirectionNode,
+          origin: torchOriginNode,
+          outsideVisibility: outsideTorchVisibilityNode,
+        }
+      : null
   const untexturedFieldGraphs = new Map<string, ReturnType<typeof createZombieMaterialFieldGraph>>()
   const texturedFieldGraphs = new WeakMap<
     Texture,
@@ -86,6 +124,7 @@ export function createZombieEscapeZombieShader({
           bounds,
           seed,
           phaseNode,
+          torchFieldNodes,
           debugMode,
           clonedMaterial.vertexColors,
         )
@@ -103,8 +142,10 @@ export function createZombieEscapeZombieShader({
         material.roughnessNode = graph.roughnessNode
         material.userData.zombieTextureShader = {
           debugMode,
+          outsideTorchVisibility: clampedOutsideTorchVisibility,
           phaseScoped: true,
           seed,
+          torchScoped: torchFieldNodes !== null,
         }
         clonedMaterial.dispose()
         return material
@@ -116,6 +157,22 @@ export function createZombieEscapeZombieShader({
     },
     debugMode,
     getPhaseAmount: () => phaseUniform.value,
+    getOutsideTorchVisibility: () => outsideTorchVisibilityNode.value,
+    setTorchLighting(state) {
+      if (!state?.active) {
+        torchActiveNode.value = 0
+        return
+      }
+      torchOrigin.set(state.originX, state.originY, state.originZ)
+      torchDirection
+        .set(
+          state.targetX - state.originX,
+          state.targetY - state.originY,
+          state.targetZ - state.originZ,
+        )
+        .normalize()
+      torchActiveNode.value = 1
+    },
     setPhaseAmount(amount) {
       const clampedAmount = clampPhaseAmount(amount)
       phaseUniform.value = clampedAmount
@@ -128,6 +185,7 @@ function createZombieMaterialFieldGraph(
   bounds: ZombieMaterialBounds,
   seed: number,
   phaseNode: ZombieFloatNode,
+  torchFieldNodes: ZombieTorchFieldNodes | null,
   debugMode: ZombieEscapeZombieMaterialDebugMode,
   usesVertexColors: boolean,
 ) {
@@ -220,11 +278,49 @@ function createZombieMaterialFieldGraph(
       ? sourceEmissive.mul(float(0.68).sub(tissue.mul(0.52))).add(zombieRgb.mul(tissue).mul(0.06))
       : vec3(0)
 
+  const phaseVisibility = torchFieldNodes
+    ? createZombieTorchVisibilityNode(torchFieldNodes, phaseNode)
+    : float(1)
+
   return {
-    colorNode: vec4(mix(baseRgb, diagnosticRgb, phaseNode), sourceColor.a),
-    emissiveNode: mix(sourceEmissive, zombieEmissive, phaseNode),
+    colorNode: vec4(mix(baseRgb, diagnosticRgb, phaseNode).mul(phaseVisibility), sourceColor.a),
+    emissiveNode: mix(sourceEmissive, zombieEmissive, phaseNode).mul(phaseVisibility),
     roughnessNode: mix(sourceRoughness, zombieRoughness, phaseNode),
   }
+}
+
+function createZombieTorchVisibilityNode(
+  torchFieldNodes: ZombieTorchFieldNodes,
+  phaseNode: ZombieFloatNode,
+) {
+  const torchOffset = positionWorld.sub(torchFieldNodes.origin)
+  const distanceAlongBeam = torchOffset.dot(torchFieldNodes.direction)
+  const radialDistance = torchOffset.sub(torchFieldNodes.direction.mul(distanceAlongBeam)).length()
+  const outerConeRadius = distanceAlongBeam
+    .max(0)
+    .mul(Math.tan(LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE))
+    .add(0.02)
+  const innerConeRadius = distanceAlongBeam
+    .max(0)
+    .mul(
+      Math.tan(
+        LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE * (1 - LANDRUSH_ROBOT_SHOULDER_TORCH_PENUMBRA),
+      ),
+    )
+    .add(0.02)
+  const insideCone = smoothstep(innerConeRadius, outerConeRadius, radialDistance).oneMinus()
+  const insideNearPlane = smoothstep(0, 0.18, distanceAlongBeam)
+  const insideFarPlane = smoothstep(
+    LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE - 0.8,
+    LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE,
+    distanceAlongBeam,
+  ).oneMinus()
+  const torchVisibility = insideCone
+    .mul(insideNearPlane)
+    .mul(insideFarPlane)
+    .mul(torchFieldNodes.active)
+  const zombieNightVisibility = mix(torchFieldNodes.outsideVisibility, float(1), torchVisibility)
+  return mix(float(1), zombieNightVisibility, phaseNode)
 }
 
 function resolveMaterialBounds(geometry: BufferGeometry): ZombieMaterialBounds {

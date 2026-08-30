@@ -83,8 +83,11 @@ export type BuildTabCapabilities = {
 }
 
 export type BuildTabProps = {
+  allowedStructureKinds?: ReadonlySet<string>
   capabilities?: Partial<BuildTabCapabilities>
   interactionReady?: boolean
+  isStructureToolDisabled?: (kind: string) => boolean
+  renderStructurePriceBadge?: (kind: string | undefined) => React.ReactNode
   runStructureToolActivation?: (activate: () => void) => void
 }
 
@@ -93,12 +96,51 @@ const FULL_BUILD_TAB_CAPABILITIES: BuildTabCapabilities = {
 }
 
 const runToolActivationDirectly = (activate: () => void) => activate()
+const isStructureToolNeverDisabled = () => false
+const VARIABLE_STRUCTURE_PRICE_KINDS = new Set(['duct-segment', 'liquid-line', 'pipe-segment'])
+
+export function isBuildTabVariableStructurePriceKind(kind: string | undefined): boolean {
+  return kind !== undefined && VARIABLE_STRUCTURE_PRICE_KINDS.has(kind)
+}
+
+function BuildTabStructurePriceBadge({
+  kind,
+  renderPriceBadge,
+}: {
+  kind: string | undefined
+  renderPriceBadge?: (kind: string | undefined) => React.ReactNode
+}) {
+  const badge = renderPriceBadge?.(kind)
+  if (!badge) return null
+  return (
+    <>
+      {badge}
+      {isBuildTabVariableStructurePriceKind(kind) ? (
+        <span
+          className="pointer-events-none absolute right-0.5 bottom-0.5 z-20 rounded-sm bg-black/80 px-0.5 font-mono font-semibold text-[8px] text-white leading-none"
+          data-landrush-build-price-minimum
+          title="Minimum price"
+        >
+          +
+        </span>
+      ) : null}
+    </>
+  )
+}
 
 export function applyBuildTabCapabilities<T extends { mode?: string }>(
   types: T[],
   capabilities: BuildTabCapabilities,
 ): T[] {
   return capabilities.materialPaint ? types : types.filter((type) => type.mode !== 'material-paint')
+}
+
+export function applyBuildTabStructureKindAllowList<T extends { kind?: string }>(
+  types: T[],
+  allowedStructureKinds?: ReadonlySet<string>,
+): T[] {
+  if (allowedStructureKinds === undefined) return types
+  return types.filter((type) => type.kind !== undefined && allowedStructureKinds.has(type.kind))
 }
 
 const subscribeToClientMount = () => () => {}
@@ -229,8 +271,11 @@ const MEP_TOOL_KINDS = new Set<string>([
 ])
 
 export function BuildTab({
+  allowedStructureKinds,
   capabilities,
   interactionReady = true,
+  isStructureToolDisabled = isStructureToolNeverDisabled,
+  renderStructurePriceBadge,
   runStructureToolActivation = runToolActivationDirectly,
 }: BuildTabProps = {}) {
   const materialPaintEnabled =
@@ -245,10 +290,18 @@ export function BuildTab({
     () => true,
     () => false,
   )
+  const structureKindsRestricted = allowedStructureKinds !== undefined
+  const isStructureKindAllowed = useCallback(
+    (kind: string) => allowedStructureKinds === undefined || allowedStructureKinds.has(kind),
+    [allowedStructureKinds],
+  )
   const buildTypes = useMemo(() => {
     const availableTypes = registryReady ? collectBuildTypes(floorplanMode) : BASE_BUILD_TYPES
-    return applyBuildTabCapabilities(availableTypes, { materialPaint: materialPaintEnabled })
-  }, [floorplanMode, materialPaintEnabled, registryReady])
+    return applyBuildTabStructureKindAllowList(
+      applyBuildTabCapabilities(availableTypes, { materialPaint: materialPaintEnabled }),
+      allowedStructureKinds,
+    )
+  }, [allowedStructureKinds, floorplanMode, materialPaintEnabled, registryReady])
 
   // The fitting / follow tools are armed from a segment's panel, not a grid
   // tile — keep the segment tile lit so the panel (and the way back) stays
@@ -259,6 +312,9 @@ export function BuildTab({
     mode === 'build' &&
     (activeTool === 'pipe-segment' || activeTool === 'pipe-fitting' || activeTool === 'pipe-trap')
   const liquidLineContext = mode === 'build' && activeTool === 'liquid-line'
+  const ductFittingTargetKind = activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting'
+  const pipeFittingTargetKind = activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting'
+  const pipeTrapTargetKind = activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap'
 
   const isMepItemActive = (item: MepItem) =>
     item.kind === 'duct-segment'
@@ -276,8 +332,9 @@ export function BuildTab({
     const features: RoofFeature[] = []
     for (const [kind, def] of nodeRegistry.entries()) {
       if (
-        def.capabilities.roofAccessory === undefined &&
-        def.presentation?.paletteGroup !== 'roof-features'
+        !isStructureKindAllowed(kind) ||
+        (def.capabilities.roofAccessory === undefined &&
+          def.presentation?.paletteGroup !== 'roof-features')
       ) {
         continue
       }
@@ -293,7 +350,7 @@ export function BuildTab({
       })
     }
     return features
-  }, [registryReady])
+  }, [isStructureKindAllowed, registryReady])
 
   // Tile highlight derives from the single source of truth (the active tool /
   // mode), never a separate local selection — so keyboard shortcuts and panel
@@ -303,7 +360,8 @@ export function BuildTab({
   // active tool, the same way MEP stays lit for its sub-grid tools.
   const isRoofFeatureActive =
     mode === 'build' && !!activeTool && roofFeatures.some((f) => f.kind === activeTool)
-  const isMepActive = mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)
+  const isMepActive =
+    !structureKindsRestricted && mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)
 
   const isTypeActive = (type: BuildType) => {
     if (type.mode) return mode === type.mode
@@ -314,15 +372,27 @@ export function BuildTab({
   }
 
   const runBuildToolActivation = useCallback(
-    (kind: string) => runStructureToolActivation(() => activateBuildTool(kind)),
-    [runStructureToolActivation],
+    (kind: string) => {
+      if (!isStructureKindAllowed(kind) || isStructureToolDisabled(kind)) return
+      runStructureToolActivation(() => activateBuildTool(kind))
+    },
+    [isStructureKindAllowed, isStructureToolDisabled, runStructureToolActivation],
   )
   const runRoofFeatureActivation = useCallback(
-    (kind: string) => runStructureToolActivation(() => activateRoofFeatureTool(kind)),
-    [runStructureToolActivation],
+    (kind: string) => {
+      if (!isStructureKindAllowed(kind) || isStructureToolDisabled(kind)) return
+      runStructureToolActivation(() => activateRoofFeatureTool(kind))
+    },
+    [isStructureKindAllowed, isStructureToolDisabled, runStructureToolActivation],
   )
   const handleTypeClick = useCallback(
     (type: BuildType) => {
+      if (
+        structureKindsRestricted &&
+        (type.kind === undefined || !isStructureKindAllowed(type.kind))
+      ) {
+        return
+      }
       if (type.mode === 'material-paint') {
         activatePaintMode()
       } else if (type.mode === 'terrain-sculpt') {
@@ -335,10 +405,10 @@ export function BuildTab({
         runBuildToolActivation(type.kind)
       }
     },
-    [runBuildToolActivation],
+    [isStructureKindAllowed, runBuildToolActivation, structureKindsRestricted],
   )
 
-  // On open, land on the first build tool — parity with the community Build
+  // On open, land on the first enabled build tool — parity with the community Build
   // sidebar, so switching to Build immediately arms a usable tool. Skip when a
   // build tool is already active (e.g. the B shortcut armed one before this
   // panel mounted): the active tool is the source of truth, not this default.
@@ -355,10 +425,42 @@ export function BuildTab({
     const ed = useEditor.getState()
     const enteredFromVisualHandoff = awaitingInteractionRef.current
     awaitingInteractionRef.current = false
-    if (!enteredFromVisualHandoff && ed.mode === 'build' && ed.tool) return
-    const firstType = buildTypes.find((t) => t.kind)
+    if (
+      !enteredFromVisualHandoff &&
+      ed.mode === 'build' &&
+      ed.tool &&
+      isStructureKindAllowed(ed.tool)
+    ) {
+      return
+    }
+    const firstType = buildTypes.find((type) => type.kind && !isStructureToolDisabled(type.kind))
     if (firstType) handleTypeClick(firstType)
-  }, [buildTypes, handleTypeClick, interactionReady])
+  }, [
+    buildTypes,
+    handleTypeClick,
+    interactionReady,
+    isStructureKindAllowed,
+    isStructureToolDisabled,
+  ])
+
+  useEffect(() => {
+    if (!interactionReady || !structureKindsRestricted) return
+    const disallowedStructureTool =
+      mode === 'build' && activeTool !== null && !isStructureKindAllowed(activeTool)
+    const disallowedSpecialMode = mode === 'material-paint' || mode === 'terrain-sculpt'
+    if (!disallowedStructureTool && !disallowedSpecialMode) return
+    const firstType = buildTypes.find((type) => type.kind && !isStructureToolDisabled(type.kind))
+    if (firstType) handleTypeClick(firstType)
+  }, [
+    activeTool,
+    buildTypes,
+    handleTypeClick,
+    interactionReady,
+    isStructureKindAllowed,
+    isStructureToolDisabled,
+    mode,
+    structureKindsRestricted,
+  ])
 
   return (
     <div className="flex h-full flex-col gap-3 p-3">
@@ -368,7 +470,9 @@ export function BuildTab({
           style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }}
         >
           {buildTypes.map((type) => {
-            const active = isTypeActive(type)
+            const priceKind = type.kind ?? (type.id === 'mep' ? MEP_ITEMS[0]!.kind : undefined)
+            const disabled = priceKind ? isStructureToolDisabled(priceKind) : false
+            const active = !disabled && isTypeActive(type)
             return (
               <Tooltip key={type.id}>
                 <TooltipTrigger asChild>
@@ -378,24 +482,34 @@ export function BuildTab({
                       active
                         ? 'bg-primary/10 ring-1 ring-primary/50'
                         : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
+                      disabled &&
+                        'cursor-not-allowed opacity-35 hover:bg-muted/40 hover:opacity-35 hover:grayscale',
                     )}
                     data-editor-build-controller-action={
                       type.id === 'mep' ? 'palette' : 'placement'
                     }
                     data-editor-build-controller-item
+                    disabled={disabled}
                     onClick={() => {
+                      if (disabled) return
                       triggerSFX('sfx:menu-click')
                       handleTypeClick(type)
                     }}
-                    onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                    onMouseEnter={() => {
+                      if (!disabled) triggerSFX('sfx:menu-hover')
+                    }}
                     type="button"
                   >
                     <Image
                       alt={type.label}
-                      className="size-full object-contain transition-transform duration-200 group-hover:scale-110"
+                      className="size-full object-contain transition-transform duration-200 group-hover:scale-110 group-disabled:scale-100"
                       height={48}
                       src={type.iconSrc}
                       width={48}
+                    />
+                    <BuildTabStructurePriceBadge
+                      kind={priceKind}
+                      renderPriceBadge={renderStructurePriceBadge}
                     />
                   </button>
                 </TooltipTrigger>
@@ -408,11 +522,11 @@ export function BuildTab({
         </div>
       </TooltipProvider>
 
-      {materialPaintEnabled && mode === 'material-paint' ? (
+      {!structureKindsRestricted && materialPaintEnabled && mode === 'material-paint' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <MaterialPaintPanel />
         </div>
-      ) : mode === 'terrain-sculpt' ? (
+      ) : !structureKindsRestricted && mode === 'terrain-sculpt' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <TerrainSculptPanel />
         </div>
@@ -429,7 +543,8 @@ export function BuildTab({
               style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }}
             >
               {roofFeatures.map((feature) => {
-                const active = mode === 'build' && activeTool === feature.kind
+                const disabled = isStructureToolDisabled(feature.kind)
+                const active = !disabled && mode === 'build' && activeTool === feature.kind
                 return (
                   <Tooltip key={feature.kind}>
                     <TooltipTrigger asChild>
@@ -439,22 +554,32 @@ export function BuildTab({
                           active
                             ? 'bg-primary/10 ring-1 ring-primary/50'
                             : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
+                          disabled &&
+                            'cursor-not-allowed opacity-35 hover:bg-muted/40 hover:opacity-35 hover:grayscale',
                         )}
                         data-editor-build-controller-action="placement"
                         data-editor-build-controller-item
+                        disabled={disabled}
                         onClick={() => {
+                          if (disabled) return
                           triggerSFX('sfx:menu-click')
                           runRoofFeatureActivation(feature.kind)
                         }}
-                        onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                        onMouseEnter={() => {
+                          if (!disabled) triggerSFX('sfx:menu-hover')
+                        }}
                         type="button"
                       >
                         <Image
                           alt={feature.label}
-                          className="size-full object-contain transition-transform duration-200 group-hover:scale-110"
+                          className="size-full object-contain transition-transform duration-200 group-hover:scale-110 group-disabled:scale-100"
                           height={48}
                           src={feature.iconSrc}
                           width={48}
+                        />
+                        <BuildTabStructurePriceBadge
+                          kind={feature.kind}
+                          renderPriceBadge={renderStructurePriceBadge}
                         />
                       </button>
                     </TooltipTrigger>
@@ -476,7 +601,8 @@ export function BuildTab({
               style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(56px, 1fr))' }}
             >
               {MEP_ITEMS.map((item) => {
-                const active = isMepItemActive(item)
+                const disabled = isStructureToolDisabled(item.kind)
+                const active = !disabled && isMepItemActive(item)
                 return (
                   <Tooltip key={item.id}>
                     <TooltipTrigger asChild>
@@ -486,22 +612,32 @@ export function BuildTab({
                           active
                             ? 'bg-primary/10 ring-1 ring-primary/50'
                             : 'bg-muted/40 opacity-70 grayscale hover:bg-muted hover:opacity-100 hover:grayscale-0',
+                          disabled &&
+                            'cursor-not-allowed opacity-35 hover:bg-muted/40 hover:opacity-35 hover:grayscale',
                         )}
                         data-editor-build-controller-action="placement"
                         data-editor-build-controller-item
+                        disabled={disabled}
                         onClick={() => {
+                          if (disabled) return
                           triggerSFX('sfx:menu-click')
                           runBuildToolActivation(item.kind)
                         }}
-                        onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                        onMouseEnter={() => {
+                          if (!disabled) triggerSFX('sfx:menu-hover')
+                        }}
                         type="button"
                       >
                         <Image
                           alt={item.label}
-                          className="size-full object-contain transition-transform duration-200 group-hover:scale-110"
+                          className="size-full object-contain transition-transform duration-200 group-hover:scale-110 group-disabled:scale-100"
                           height={48}
                           src={item.iconSrc}
                           width={48}
+                        />
+                        <BuildTabStructurePriceBadge
+                          kind={item.kind}
+                          renderPriceBadge={renderStructurePriceBadge}
                         />
                       </button>
                     </TooltipTrigger>
@@ -519,20 +655,25 @@ export function BuildTab({
               <span className="text-muted-foreground text-xs">Duct</span>
               <button
                 className={cn(
-                  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200',
-                  activeTool === 'duct-fitting'
+                  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:bg-muted/40 disabled:opacity-35 disabled:ring-0 disabled:hover:bg-muted/40',
+                  renderStructurePriceBadge && 'relative pr-14 pl-3',
+                  activeTool === 'duct-fitting' && !isStructureToolDisabled(ductFittingTargetKind)
                     ? 'bg-primary/10 ring-1 ring-primary/50'
                     : 'bg-muted/40 hover:bg-muted',
                 )}
                 data-editor-build-controller-action="placement"
                 data-editor-build-controller-item
+                disabled={isStructureToolDisabled(ductFittingTargetKind)}
                 onClick={() => {
+                  if (isStructureToolDisabled(ductFittingTargetKind)) return
                   triggerSFX('sfx:menu-click')
-                  runBuildToolActivation(
-                    activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting',
-                  )
+                  runBuildToolActivation(ductFittingTargetKind)
                 }}
-                onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                onMouseEnter={() => {
+                  if (!isStructureToolDisabled(ductFittingTargetKind)) {
+                    triggerSFX('sfx:menu-hover')
+                  }
+                }}
                 type="button"
               >
                 <Image
@@ -544,6 +685,10 @@ export function BuildTab({
                   width={16}
                 />
                 Add Fitting
+                <BuildTabStructurePriceBadge
+                  kind={ductFittingTargetKind}
+                  renderPriceBadge={renderStructurePriceBadge}
+                />
               </button>
             </div>
           ) : null}
@@ -553,20 +698,25 @@ export function BuildTab({
               <span className="text-muted-foreground text-xs">DWV Pipe</span>
               <button
                 className={cn(
-                  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200',
-                  activeTool === 'pipe-fitting'
+                  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:bg-muted/40 disabled:opacity-35 disabled:ring-0 disabled:hover:bg-muted/40',
+                  renderStructurePriceBadge && 'relative pr-14 pl-3',
+                  activeTool === 'pipe-fitting' && !isStructureToolDisabled(pipeFittingTargetKind)
                     ? 'bg-primary/10 ring-1 ring-primary/50'
                     : 'bg-muted/40 hover:bg-muted',
                 )}
                 data-editor-build-controller-action="placement"
                 data-editor-build-controller-item
+                disabled={isStructureToolDisabled(pipeFittingTargetKind)}
                 onClick={() => {
+                  if (isStructureToolDisabled(pipeFittingTargetKind)) return
                   triggerSFX('sfx:menu-click')
-                  runBuildToolActivation(
-                    activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting',
-                  )
+                  runBuildToolActivation(pipeFittingTargetKind)
                 }}
-                onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                onMouseEnter={() => {
+                  if (!isStructureToolDisabled(pipeFittingTargetKind)) {
+                    triggerSFX('sfx:menu-hover')
+                  }
+                }}
                 type="button"
               >
                 <Image
@@ -578,21 +728,30 @@ export function BuildTab({
                   width={16}
                 />
                 Add Fitting
+                <BuildTabStructurePriceBadge
+                  kind={pipeFittingTargetKind}
+                  renderPriceBadge={renderStructurePriceBadge}
+                />
               </button>
               <button
                 className={cn(
-                  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200',
-                  activeTool === 'pipe-trap'
+                  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:bg-muted/40 disabled:opacity-35 disabled:ring-0 disabled:hover:bg-muted/40',
+                  renderStructurePriceBadge && 'relative pr-14 pl-3',
+                  activeTool === 'pipe-trap' && !isStructureToolDisabled(pipeTrapTargetKind)
                     ? 'bg-primary/10 ring-1 ring-primary/50'
                     : 'bg-muted/40 hover:bg-muted',
                 )}
                 data-editor-build-controller-action="placement"
                 data-editor-build-controller-item
+                disabled={isStructureToolDisabled(pipeTrapTargetKind)}
                 onClick={() => {
+                  if (isStructureToolDisabled(pipeTrapTargetKind)) return
                   triggerSFX('sfx:menu-click')
-                  runBuildToolActivation(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
+                  runBuildToolActivation(pipeTrapTargetKind)
                 }}
-                onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+                onMouseEnter={() => {
+                  if (!isStructureToolDisabled(pipeTrapTargetKind)) triggerSFX('sfx:menu-hover')
+                }}
                 type="button"
               >
                 <Image
@@ -604,6 +763,10 @@ export function BuildTab({
                   width={16}
                 />
                 Add Trap
+                <BuildTabStructurePriceBadge
+                  kind={pipeTrapTargetKind}
+                  renderPriceBadge={renderStructurePriceBadge}
+                />
               </button>
             </div>
           ) : null}

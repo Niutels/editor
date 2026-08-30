@@ -1,7 +1,6 @@
 'use client'
 
 import { useAudio } from '@pascal-app/editor'
-import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -44,7 +43,6 @@ const FOOTSTEP_MAX_DISTANCE = 22
 const FOOTSTEP_ROLLOFF = 0.8
 const FOOTSTEP_WALK_PLAYBACK_SPEED = 2.2
 const FOOTSTEP_RUN_PLAYBACK_SPEED = 1
-const GAMEPAD_AUDIO_UNLOCK_AXIS_THRESHOLD = 0.35
 const JUMP_AUDIO_MAX_RETRYABLE_PLAY_FAILURES = 2
 export const ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS = 0.45
 const EMPTY_JUMP_AUDIO_BUFFERS: readonly AudioBuffer[] = []
@@ -91,16 +89,6 @@ export type RobotJumpAudioPlaybackAdvanceResult = 'none' | 'pending' | 'played' 
 
 export type RobotJumpAudioPlayResult = 'played' | 'retry' | 'terminal'
 
-export type RobotAudioUnlockGamepad = {
-  axes: readonly number[]
-  buttons: readonly { pressed: boolean; value: number }[]
-  connected?: boolean
-}
-
-export type RobotGamepadAudioPromptState = {
-  gamepadPromptInputActive: boolean
-}
-
 type JumpAudioBufferLoadState = {
   buffers: readonly AudioBuffer[]
   filesKey: string
@@ -109,7 +97,6 @@ type JumpAudioBufferLoadState = {
 
 type FootstepRuntime = {
   distance: number
-  gamepadPromptInputActive: boolean
   jumpPoolIndex: number
   jumpPlayback: RobotJumpAudioPlaybackState
   lastJumpPlayedAtSeconds: number
@@ -141,10 +128,8 @@ export function LandrushRobotFootstepAudio({
   const audioPoolRef = useRef<PositionalAudio[]>([])
   const jumpAudioPoolRef = useRef<(PositionalAudio | ThreeAudio)[]>([])
   const jumpAudioPoolCueRef = useRef<RobotJumpAudioCue | null>(null)
-  const unlockAudioRef = useRef<(() => void) | null>(null)
   const runtimeRef = useRef<FootstepRuntime>({
     distance: 0,
-    gamepadPromptInputActive: false,
     jumpPoolIndex: 0,
     jumpPlayback: createRobotJumpAudioPlaybackState(jumpSequenceRef?.current ?? 0),
     lastJumpPlayedAtSeconds: Number.NEGATIVE_INFINITY,
@@ -163,7 +148,6 @@ export function LandrushRobotFootstepAudio({
     status: shouldLoadRobotJumpAudioCue(jumpAudioCue) ? 'loading' : 'unavailable',
   }))
   const [audioUnlocked, setAudioUnlocked] = useState(false)
-  const [controllerAudioActivationNeeded, setControllerAudioActivationNeeded] = useState(false)
   const masterVolume = useAudio((state) => state.masterVolume)
   const muted = useAudio((state) => state.muted)
   const sfxVolume = useAudio((state) => state.sfxVolume)
@@ -232,7 +216,6 @@ export function LandrushRobotFootstepAudio({
       if (!active) return
       const running = context.state === 'running'
       setAudioUnlocked(running)
-      if (context.state !== 'suspended') setControllerAudioActivationNeeded(false)
     }
     const unlockAudio = () => {
       if (context.state === 'running') {
@@ -250,7 +233,6 @@ export function LandrushRobotFootstepAudio({
         })
     }
 
-    unlockAudioRef.current = unlockAudio
     syncAudioState()
     context.addEventListener('statechange', syncAudioState)
     window.addEventListener('pointerdown', unlockAudio, { passive: true })
@@ -258,19 +240,12 @@ export function LandrushRobotFootstepAudio({
     window.addEventListener('keydown', unlockAudio)
     return () => {
       active = false
-      if (unlockAudioRef.current === unlockAudio) unlockAudioRef.current = null
       context.removeEventListener('statechange', syncAudioState)
       window.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('touchstart', unlockAudio)
       window.removeEventListener('keydown', unlockAudio)
     }
   }, [listener])
-
-  useEffect(() => {
-    if (!enabled || muted || masterVolume <= 0 || sfxVolume <= 0) {
-      setControllerAudioActivationNeeded(false)
-    }
-  }, [enabled, masterVolume, muted, sfxVolume])
 
   useEffect(() => {
     let active = true
@@ -367,16 +342,6 @@ export function LandrushRobotFootstepAudio({
     }
     const volumeScale = muted ? 0 : (masterVolume / 100) * (sfxVolume / 100)
     const audioContextRunning = listener?.context.state === 'running'
-    const audioContextSuspended = listener?.context.state === 'suspended'
-    if (audioContextSuspended && enabled && volumeScale > 0 && !controllerAudioActivationNeeded) {
-      // Polled Gamepad state is not a browser user-activation event, so it can only surface this prompt.
-      const gamepadInputActive = readRobotGamepadAudioUnlockInput()
-      if (advanceRobotGamepadAudioPromptState(runtime, gamepadInputActive, true)) {
-        setControllerAudioActivationNeeded(true)
-      }
-    } else {
-      advanceRobotGamepadAudioPromptState(runtime, false, false)
-    }
 
     const currentJumpBufferLoad =
       jumpBufferLoad.filesKey === jumpAudioFilesKey
@@ -465,32 +430,7 @@ export function LandrushRobotFootstepAudio({
     })
   })
 
-  return (
-    <>
-      <group ref={audioGroupRef} />
-      {controllerAudioActivationNeeded ? (
-        <Html fullscreen style={{ pointerEvents: 'none' }}>
-          <div
-            aria-live="polite"
-            className="pointer-events-none fixed inset-x-0 bottom-6 z-[70] flex justify-center px-4"
-          >
-            <div className="flex max-w-sm items-center gap-3 rounded-xl border border-white/20 bg-black/80 px-4 py-3 text-white shadow-2xl backdrop-blur-md">
-              <span className="text-sm leading-snug">
-                Browser audio needs a click, tap, or keyboard press.
-              </span>
-              <button
-                className="pointer-events-auto shrink-0 rounded-lg bg-white px-3 py-2 font-semibold text-black text-sm outline-none transition hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-cyan-300"
-                onClick={() => unlockAudioRef.current?.()}
-                type="button"
-              >
-                Enable sound
-              </button>
-            </div>
-          </div>
-        </Html>
-      ) : null}
-    </>
-  )
+  return <group ref={audioGroupRef} />
 }
 
 function playJump({
@@ -629,19 +569,6 @@ export function resolveRobotJumpAudioPlaybackDisposition({
   return intervalElapsed ? 'play' : 'terminal'
 }
 
-export function hasRobotGamepadAudioUnlockInput(
-  gamepads: readonly (RobotAudioUnlockGamepad | null | undefined)[],
-) {
-  return gamepads.some(
-    (gamepad) =>
-      gamepad !== null &&
-      gamepad !== undefined &&
-      gamepad.connected !== false &&
-      (gamepad.buttons.some((button) => button.pressed || button.value >= 0.5) ||
-        gamepad.axes.some((axis) => Math.abs(axis) >= GAMEPAD_AUDIO_UNLOCK_AXIS_THRESHOLD)),
-  )
-}
-
 export function isRobotJumpAudioCueConfigurationValid(cue: RobotJumpAudioCue | undefined) {
   if (!cue || cue.files.length === 0) return false
   const { maxDistance, maxVoices, minIntervalMs, rateRange, referenceDistance, volume } =
@@ -671,29 +598,6 @@ export function shouldLoadRobotJumpAudioCue(
   cue: RobotJumpAudioCue | undefined,
 ): cue is RobotJumpAudioCue {
   return isRobotJumpAudioCueConfigurationValid(cue)
-}
-
-export function advanceRobotGamepadAudioPromptState(
-  state: RobotGamepadAudioPromptState,
-  inputActive: boolean,
-  contextSuspended: boolean,
-) {
-  if (!contextSuspended) {
-    state.gamepadPromptInputActive = false
-    return false
-  }
-  const promptRequested = inputActive && !state.gamepadPromptInputActive
-  state.gamepadPromptInputActive = inputActive
-  return promptRequested
-}
-
-function readRobotGamepadAudioUnlockInput() {
-  if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') return false
-  try {
-    return hasRobotGamepadAudioUnlockInput(navigator.getGamepads())
-  } catch {
-    return false
-  }
 }
 
 function acknowledgeRobotJumpAudioSequence(state: RobotJumpAudioPlaybackState, sequence: number) {

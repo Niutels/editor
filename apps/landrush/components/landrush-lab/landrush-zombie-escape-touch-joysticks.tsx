@@ -59,7 +59,7 @@ export const LandrushZombieEscapeTouchJoysticks = memo(function LandrushZombieEs
   return (
     <div
       aria-label="Zombie Escape touch controls"
-      className="pointer-events-none absolute inset-0 z-30"
+      className="pointer-events-none absolute inset-0 z-30 touch-none select-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none]"
       data-enabled="true"
       data-testid="landrush-zombie-escape-touch-controls"
       data-touch-capable="true"
@@ -88,6 +88,7 @@ export const LandrushZombieEscapeTouchJoysticks = memo(function LandrushZombieEs
           className="pointer-events-auto grid size-[clamp(3rem,11vw,3.5rem)] touch-none place-items-center rounded-full border border-sky-100/35 bg-slate-950/62 font-black text-[9px] text-white/80 uppercase tracking-[0.14em] shadow-[0_8px_24px_rgba(2,6,23,0.28)] backdrop-blur-sm active:border-sky-100/70 active:bg-sky-950/70"
           data-landrush-ui-interactive="true"
           data-touch-action="jump"
+          draggable={false}
           onClick={(event) => {
             event.stopPropagation()
             if (!shouldRequestLandrushZombieEscapeTouchJumpFromClick(event.detail)) return
@@ -276,6 +277,7 @@ function LandrushZombieEscapeTouchJoystick({
       data-enabled="true"
       data-landrush-ui-interactive="true"
       data-stick={stick}
+      draggable={false}
       onContextMenu={(event) => event.preventDefault()}
       onLostPointerCapture={handlePointerEnd}
       onPointerCancel={handlePointerEnd}

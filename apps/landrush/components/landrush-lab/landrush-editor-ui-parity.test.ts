@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { shouldBlockLandrushFirstHouseBuildShortcut } from './landrush-pascal-editor-chrome'
 
 const readSource = (path: string) =>
   readFileSync(join(import.meta.dir, path), 'utf8').replaceAll('\r\n', '\n')
@@ -8,6 +9,16 @@ const readSource = (path: string) =>
 function replaceRequired(source: string, embedded: string, canonical: string): string {
   expect(source).toContain(embedded)
   return source.replace(embedded, canonical)
+}
+
+function replaceAllRequired(
+  source: string,
+  embedded: string,
+  canonical: string,
+  expectedCount: number,
+): string {
+  expect(source.split(embedded)).toHaveLength(expectedCount + 1)
+  return source.replaceAll(embedded, canonical)
 }
 
 function removeLandrushBuildTabAdapters(source: string): string {
@@ -20,13 +31,52 @@ function removeLandrushBuildTabAdapters(source: string): string {
   normalized = normalized.replace(controllerActionPattern, '')
   normalized = replaceRequired(
     normalized,
+    `const VARIABLE_STRUCTURE_PRICE_KINDS = new Set(['duct-segment', 'liquid-line', 'pipe-segment'])
+
+export function isBuildTabVariableStructurePriceKind(kind: string | undefined): boolean {
+  return kind !== undefined && VARIABLE_STRUCTURE_PRICE_KINDS.has(kind)
+}
+
+function BuildTabStructurePriceBadge({
+  kind,
+  renderPriceBadge,
+}: {
+  kind: string | undefined
+  renderPriceBadge?: (kind: string | undefined) => React.ReactNode
+}) {
+  const badge = renderPriceBadge?.(kind)
+  if (!badge) return null
+  return (
+    <>
+      {badge}
+      {isBuildTabVariableStructurePriceKind(kind) ? (
+        <span
+          className="pointer-events-none absolute right-0.5 bottom-0.5 z-20 rounded-sm bg-black/80 px-0.5 font-mono font-semibold text-[8px] text-white leading-none"
+          data-landrush-build-price-minimum
+          title="Minimum price"
+        >
+          +
+        </span>
+      ) : null}
+    </>
+  )
+}
+
+`,
+    '\n',
+  )
+  normalized = replaceRequired(
+    normalized,
     `export type BuildTabCapabilities = {
   materialPaint: boolean
 }
 
 export type BuildTabProps = {
+  allowedStructureKinds?: ReadonlySet<string>
   capabilities?: Partial<BuildTabCapabilities>
   interactionReady?: boolean
+  isStructureToolDisabled?: (kind: string) => boolean
+  renderStructurePriceBadge?: (kind: string | undefined) => React.ReactNode
   runStructureToolActivation?: (activate: () => void) => void
 }
 
@@ -35,6 +85,7 @@ const FULL_BUILD_TAB_CAPABILITIES: BuildTabCapabilities = {
 }
 
 const runToolActivationDirectly = (activate: () => void) => activate()
+const isStructureToolNeverDisabled = () => false
 
 export function applyBuildTabCapabilities<T extends { mode?: string }>(
   types: T[],
@@ -43,14 +94,25 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
   return capabilities.materialPaint ? types : types.filter((type) => type.mode !== 'material-paint')
 }
 
+export function applyBuildTabStructureKindAllowList<T extends { kind?: string }>(
+  types: T[],
+  allowedStructureKinds?: ReadonlySet<string>,
+): T[] {
+  if (allowedStructureKinds === undefined) return types
+  return types.filter((type) => type.kind !== undefined && allowedStructureKinds.has(type.kind))
+}
+
 `,
     '',
   )
   normalized = replaceRequired(
     normalized,
     `export function BuildTab({
+  allowedStructureKinds,
   capabilities,
   interactionReady = true,
+  isStructureToolDisabled = isStructureToolNeverDisabled,
+  renderStructurePriceBadge,
   runStructureToolActivation = runToolActivationDirectly,
 }: BuildTabProps = {}) {
   const materialPaintEnabled =
@@ -59,10 +121,18 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
   )
   normalized = replaceRequired(
     normalized,
-    `  const buildTypes = useMemo(() => {
+    `  const structureKindsRestricted = allowedStructureKinds !== undefined
+  const isStructureKindAllowed = useCallback(
+    (kind: string) => allowedStructureKinds === undefined || allowedStructureKinds.has(kind),
+    [allowedStructureKinds],
+  )
+  const buildTypes = useMemo(() => {
     const availableTypes = registryReady ? collectBuildTypes(floorplanMode) : BASE_BUILD_TYPES
-    return applyBuildTabCapabilities(availableTypes, { materialPaint: materialPaintEnabled })
-  }, [floorplanMode, materialPaintEnabled, registryReady])`,
+    return applyBuildTabStructureKindAllowList(
+      applyBuildTabCapabilities(availableTypes, { materialPaint: materialPaintEnabled }),
+      allowedStructureKinds,
+    )
+  }, [allowedStructureKinds, floorplanMode, materialPaintEnabled, registryReady])`,
     `  const buildTypes = useMemo(
     () => (registryReady ? collectBuildTypes(floorplanMode) : BASE_BUILD_TYPES),
     [floorplanMode, registryReady],
@@ -70,16 +140,60 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
   )
   normalized = replaceRequired(
     normalized,
+    `      if (
+        !isStructureKindAllowed(kind) ||
+        (def.capabilities.roofAccessory === undefined &&
+          def.presentation?.paletteGroup !== 'roof-features')
+      ) {`,
+    `      if (
+        def.capabilities.roofAccessory === undefined &&
+        def.presentation?.paletteGroup !== 'roof-features'
+      ) {`,
+  )
+  normalized = replaceRequired(
+    normalized,
+    '  }, [isStructureKindAllowed, registryReady])',
+    '  }, [registryReady])',
+  )
+  normalized = replaceRequired(
+    normalized,
+    `  const isMepActive =
+    !structureKindsRestricted && mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)`,
+    `  const isMepActive = mode === 'build' && !!activeTool && MEP_TOOL_KINDS.has(activeTool)`,
+  )
+  normalized = replaceRequired(
+    normalized,
+    `  const ductFittingTargetKind = activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting'
+  const pipeFittingTargetKind = activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting'
+  const pipeTrapTargetKind = activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap'
+
+`,
+    '\n',
+  )
+  normalized = replaceRequired(
+    normalized,
     `  const runBuildToolActivation = useCallback(
-    (kind: string) => runStructureToolActivation(() => activateBuildTool(kind)),
-    [runStructureToolActivation],
+    (kind: string) => {
+      if (!isStructureKindAllowed(kind) || isStructureToolDisabled(kind)) return
+      runStructureToolActivation(() => activateBuildTool(kind))
+    },
+    [isStructureKindAllowed, isStructureToolDisabled, runStructureToolActivation],
   )
   const runRoofFeatureActivation = useCallback(
-    (kind: string) => runStructureToolActivation(() => activateRoofFeatureTool(kind)),
-    [runStructureToolActivation],
+    (kind: string) => {
+      if (!isStructureKindAllowed(kind) || isStructureToolDisabled(kind)) return
+      runStructureToolActivation(() => activateRoofFeatureTool(kind))
+    },
+    [isStructureKindAllowed, isStructureToolDisabled, runStructureToolActivation],
   )
   const handleTypeClick = useCallback(
     (type: BuildType) => {
+      if (
+        structureKindsRestricted &&
+        (type.kind === undefined || !isStructureKindAllowed(type.kind))
+      ) {
+        return
+      }
       if (type.mode === 'material-paint') {
         activatePaintMode()
       } else if (type.mode === 'terrain-sculpt') {
@@ -92,7 +206,7 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
         runBuildToolActivation(type.kind)
       }
     },
-    [runBuildToolActivation],
+    [isStructureKindAllowed, runBuildToolActivation, structureKindsRestricted],
   )`,
     `  const handleTypeClick = useCallback((type: BuildType) => {
     if (type.mode === 'material-paint') {
@@ -110,6 +224,11 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
   )
   normalized = replaceRequired(
     normalized,
+    '  // On open, land on the first enabled build tool — parity with the community Build\n',
+    '  // On open, land on the first build tool — parity with the community Build\n',
+  )
+  normalized = replaceRequired(
+    normalized,
     `  const didInitRef = useRef(false)
   const awaitingInteractionRef = useRef(!interactionReady)
   useEffect(() => {
@@ -123,10 +242,42 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
     const ed = useEditor.getState()
     const enteredFromVisualHandoff = awaitingInteractionRef.current
     awaitingInteractionRef.current = false
-    if (!enteredFromVisualHandoff && ed.mode === 'build' && ed.tool) return
-    const firstType = buildTypes.find((t) => t.kind)
+    if (
+      !enteredFromVisualHandoff &&
+      ed.mode === 'build' &&
+      ed.tool &&
+      isStructureKindAllowed(ed.tool)
+    ) {
+      return
+    }
+    const firstType = buildTypes.find((type) => type.kind && !isStructureToolDisabled(type.kind))
     if (firstType) handleTypeClick(firstType)
-  }, [buildTypes, handleTypeClick, interactionReady])`,
+  }, [
+    buildTypes,
+    handleTypeClick,
+    interactionReady,
+    isStructureKindAllowed,
+    isStructureToolDisabled,
+  ])
+
+  useEffect(() => {
+    if (!interactionReady || !structureKindsRestricted) return
+    const disallowedStructureTool =
+      mode === 'build' && activeTool !== null && !isStructureKindAllowed(activeTool)
+    const disallowedSpecialMode = mode === 'material-paint' || mode === 'terrain-sculpt'
+    if (!disallowedStructureTool && !disallowedSpecialMode) return
+    const firstType = buildTypes.find((type) => type.kind && !isStructureToolDisabled(type.kind))
+    if (firstType) handleTypeClick(firstType)
+  }, [
+    activeTool,
+    buildTypes,
+    handleTypeClick,
+    interactionReady,
+    isStructureKindAllowed,
+    isStructureToolDisabled,
+    mode,
+    structureKindsRestricted,
+  ])`,
     `  const didInitRef = useRef(false)
   useEffect(() => {
     if (didInitRef.current) return
@@ -136,6 +287,155 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
     const firstType = buildTypes.find((t) => t.kind)
     if (firstType) handleTypeClick(firstType)
   }, [buildTypes, handleTypeClick])`,
+  )
+  normalized = replaceRequired(
+    normalized,
+    `            const priceKind = type.kind ?? (type.id === 'mep' ? MEP_ITEMS[0]!.kind : undefined)
+            const disabled = priceKind ? isStructureToolDisabled(priceKind) : false
+            const active = !disabled && isTypeActive(type)`,
+    '            const active = isTypeActive(type)',
+  )
+  normalized = replaceRequired(
+    normalized,
+    `                const disabled = isStructureToolDisabled(feature.kind)
+                const active = !disabled && mode === 'build' && activeTool === feature.kind`,
+    "                const active = mode === 'build' && activeTool === feature.kind",
+  )
+  normalized = replaceRequired(
+    normalized,
+    `                const disabled = isStructureToolDisabled(item.kind)
+                const active = !disabled && isMepItemActive(item)`,
+    '                const active = isMepItemActive(item)',
+  )
+  normalized = replaceAllRequired(
+    normalized,
+    `                      disabled &&
+                        'cursor-not-allowed opacity-35 hover:bg-muted/40 hover:opacity-35 hover:grayscale',
+`,
+    '',
+    1,
+  )
+  normalized = replaceAllRequired(
+    normalized,
+    `                          disabled &&
+                            'cursor-not-allowed opacity-35 hover:bg-muted/40 hover:opacity-35 hover:grayscale',
+`,
+    '',
+    2,
+  )
+  const nativeDisabledPattern = /^[ \t]+disabled=\{disabled\}\n/gm
+  const guardedClickPattern = /^[ \t]+if \(disabled\) return\n/gm
+  expect(normalized.match(nativeDisabledPattern) ?? []).toHaveLength(3)
+  expect(normalized.match(guardedClickPattern) ?? []).toHaveLength(3)
+  normalized = normalized.replace(nativeDisabledPattern, '')
+  normalized = normalized.replace(guardedClickPattern, '')
+  normalized = replaceAllRequired(
+    normalized,
+    `                    onMouseEnter={() => {
+                      if (!disabled) triggerSFX('sfx:menu-hover')
+                    }}`,
+    "                    onMouseEnter={() => triggerSFX('sfx:menu-hover')}",
+    1,
+  )
+  normalized = replaceAllRequired(
+    normalized,
+    `                        onMouseEnter={() => {
+                          if (!disabled) triggerSFX('sfx:menu-hover')
+                        }}`,
+    "                        onMouseEnter={() => triggerSFX('sfx:menu-hover')}",
+    2,
+  )
+  normalized = replaceAllRequired(
+    normalized,
+    'size-full object-contain transition-transform duration-200 group-hover:scale-110 group-disabled:scale-100',
+    'size-full object-contain transition-transform duration-200 group-hover:scale-110',
+    3,
+  )
+  const priceBadgePattern =
+    /^[ \t]+<BuildTabStructurePriceBadge\n[ \t]+kind=\{[^}]+\}\n[ \t]+renderPriceBadge=\{renderStructurePriceBadge\}\n[ \t]+\/>\n/gm
+  expect(normalized.match(priceBadgePattern) ?? []).toHaveLength(6)
+  normalized = normalized.replace(priceBadgePattern, '')
+  normalized = replaceAllRequired(
+    normalized,
+    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200 disabled:cursor-not-allowed disabled:bg-muted/40 disabled:opacity-35 disabled:ring-0 disabled:hover:bg-muted/40',
+    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all duration-200',
+    3,
+  )
+  normalized = replaceAllRequired(
+    normalized,
+    "                  renderStructurePriceBadge && 'relative pr-14 pl-3',\n",
+    '',
+    3,
+  )
+  normalized = replaceRequired(
+    normalized,
+    "                  activeTool === 'duct-fitting' && !isStructureToolDisabled(ductFittingTargetKind)",
+    "                  activeTool === 'duct-fitting'",
+  )
+  normalized = replaceRequired(
+    normalized,
+    "                  activeTool === 'pipe-fitting' && !isStructureToolDisabled(pipeFittingTargetKind)",
+    "                  activeTool === 'pipe-fitting'",
+  )
+  normalized = replaceRequired(
+    normalized,
+    "                  activeTool === 'pipe-trap' && !isStructureToolDisabled(pipeTrapTargetKind)",
+    "                  activeTool === 'pipe-trap'",
+  )
+  normalized = replaceRequired(
+    normalized,
+    `                disabled={isStructureToolDisabled(ductFittingTargetKind)}
+                onClick={() => {
+                  if (isStructureToolDisabled(ductFittingTargetKind)) return
+                  triggerSFX('sfx:menu-click')
+                  runBuildToolActivation(ductFittingTargetKind)
+                }}
+                onMouseEnter={() => {
+                  if (!isStructureToolDisabled(ductFittingTargetKind)) {
+                    triggerSFX('sfx:menu-hover')
+                  }
+                }}`,
+    `                onClick={() => {
+                  triggerSFX('sfx:menu-click')
+                  activateBuildTool(activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting')
+                }}
+                onMouseEnter={() => triggerSFX('sfx:menu-hover')}`,
+  )
+  normalized = replaceRequired(
+    normalized,
+    `                disabled={isStructureToolDisabled(pipeFittingTargetKind)}
+                onClick={() => {
+                  if (isStructureToolDisabled(pipeFittingTargetKind)) return
+                  triggerSFX('sfx:menu-click')
+                  runBuildToolActivation(pipeFittingTargetKind)
+                }}
+                onMouseEnter={() => {
+                  if (!isStructureToolDisabled(pipeFittingTargetKind)) {
+                    triggerSFX('sfx:menu-hover')
+                  }
+                }}`,
+    `                onClick={() => {
+                  triggerSFX('sfx:menu-click')
+                  activateBuildTool(activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting')
+                }}
+                onMouseEnter={() => triggerSFX('sfx:menu-hover')}`,
+  )
+  normalized = replaceRequired(
+    normalized,
+    `                disabled={isStructureToolDisabled(pipeTrapTargetKind)}
+                onClick={() => {
+                  if (isStructureToolDisabled(pipeTrapTargetKind)) return
+                  triggerSFX('sfx:menu-click')
+                  runBuildToolActivation(pipeTrapTargetKind)
+                }}
+                onMouseEnter={() => {
+                  if (!isStructureToolDisabled(pipeTrapTargetKind)) triggerSFX('sfx:menu-hover')
+                }}`,
+    `                onClick={() => {
+                  triggerSFX('sfx:menu-click')
+                  activateBuildTool(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')
+                }}
+                onMouseEnter={() => triggerSFX('sfx:menu-hover')}`,
   )
   normalized = replaceRequired(
     normalized,
@@ -149,27 +449,13 @@ export function applyBuildTabCapabilities<T extends { mode?: string }>(
   )
   normalized = replaceRequired(
     normalized,
-    `runBuildToolActivation(
-                    activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting',
-                  )`,
-    "activateBuildTool(activeTool === 'duct-fitting' ? 'duct-segment' : 'duct-fitting')",
-  )
-  normalized = replaceRequired(
-    normalized,
-    `runBuildToolActivation(
-                    activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting',
-                  )`,
-    "activateBuildTool(activeTool === 'pipe-fitting' ? 'pipe-segment' : 'pipe-fitting')",
-  )
-  normalized = replaceRequired(
-    normalized,
-    "runBuildToolActivation(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')",
-    "activateBuildTool(activeTool === 'pipe-trap' ? 'pipe-segment' : 'pipe-trap')",
+    "{!structureKindsRestricted && materialPaintEnabled && mode === 'material-paint' ? (",
+    "{mode === 'material-paint' ? (",
   )
   return replaceRequired(
     normalized,
-    "{materialPaintEnabled && mode === 'material-paint' ? (",
-    "{mode === 'material-paint' ? (",
+    ") : !structureKindsRestricted && mode === 'terrain-sculpt' ? (",
+    ") : mode === 'terrain-sculpt' ? (",
   )
 }
 
@@ -315,7 +601,28 @@ const FULL_EDITOR_TOOLBAR_CAPABILITIES: CommunityViewerToolbarCapabilities = {
 }
 
 describe('Landrush Pascal editor UI parity', () => {
-  test('keeps the Build palette aligned with only the declared material-paint gate', () => {
+  test('blocks first-house creation shortcuts without swallowing editable or allowed input', () => {
+    for (const key of ['f', 'g', 'm', 'p', 'z']) {
+      expect(shouldBlockLandrushFirstHouseBuildShortcut({ key })).toBe(true)
+    }
+    expect(shouldBlockLandrushFirstHouseBuildShortcut({ ctrlKey: true, key: 'v' })).toBe(true)
+    expect(shouldBlockLandrushFirstHouseBuildShortcut({ key: 'v', metaKey: true })).toBe(true)
+    expect(shouldBlockLandrushFirstHouseBuildShortcut({ key: 'b' })).toBe(false)
+    expect(shouldBlockLandrushFirstHouseBuildShortcut({ key: 'v' })).toBe(false)
+    expect(shouldBlockLandrushFirstHouseBuildShortcut({ ctrlKey: true, key: 'z' })).toBe(false)
+    expect(
+      shouldBlockLandrushFirstHouseBuildShortcut({
+        ctrlKey: true,
+        editableTarget: true,
+        key: 'v',
+      }),
+    ).toBe(false)
+    expect(shouldBlockLandrushFirstHouseBuildShortcut({ editableTarget: true, key: 'g' })).toBe(
+      false,
+    )
+  })
+
+  test('keeps the Build palette aligned with the declared Landrush host gates', () => {
     const canonical = readSource('../../../editor/components/build-tab.tsx')
     const landrush = readSource('../build-tab.tsx')
 
@@ -348,9 +655,15 @@ describe('Landrush Pascal editor UI parity', () => {
     expect(landrush).toContain("paletteGroup === 'roof-features'")
     expect(landrush).toContain('materialPaint: boolean')
     expect(landrush).toContain("type.mode !== 'material-paint'")
+    expect(landrush).toContain('allowedStructureKinds?: ReadonlySet<string>')
+    expect(landrush).toContain('applyBuildTabStructureKindAllowList')
     expect(landrush).toContain('data-editor-build-controller-item')
     expect(landrush).toContain('data-editor-build-controller-action="placement"')
     expect(landrush).toContain('data-editor-build-controller-action="palette"')
+    expect(landrush.match(/<BuildTabStructurePriceBadge/g) ?? []).toHaveLength(6)
+    expect(landrush.match(/disabled=\{disabled\}/g) ?? []).toHaveLength(3)
+    expect(landrush.match(/disabled=\{isStructureToolDisabled\(/g) ?? []).toHaveLength(3)
+    expect(landrush).toContain('data-landrush-build-price-minimum')
   })
 
   test('keeps the standalone viewer toolbar with only declared embed capability gates', () => {
@@ -366,13 +679,40 @@ describe('Landrush Pascal editor UI parity', () => {
 
   test('composes v2-style Landrush chrome without importing standalone app internals', () => {
     const chrome = readSource('landrush-pascal-editor-chrome.tsx')
+    const itemCatalog = readSource(
+      '../../../../packages/editor/src/components/ui/item-catalog/item-catalog.tsx',
+    )
 
     expect(chrome).toContain(`<BuildTab
+      allowedStructureKinds={allowedStructureKinds}
       capabilities={{ materialPaint: false }}
       interactionReady={interactionReady}
+      isStructureToolDisabled={isStructureToolDisabled}
+      renderStructurePriceBadge={renderLandrushStructurePriceBadge}
       runStructureToolActivation={runLandrushPascalToolActivationInCurrentLevel}
     />`)
-    expect(chrome).toContain('<ItemsPanel showSourceFilter={false} showTagFilters={false} />')
+    expect(chrome).toContain('isItemDisabled={isItemDisabled}')
+    expect(chrome).toContain('renderItemBadge={renderLandrushItemPriceBadge}')
+    expect(chrome).toContain("item.tool === 'cabinet' ? { ...item, tool: undefined } : item")
+    expect(chrome).toContain('items={LANDRUSH_ITEM_CATALOG}')
+    expect(itemCatalog).toContain('const disabled = isItemDisabled?.(item) ?? false')
+    expect(itemCatalog).toContain('disabled={disabled}')
+    expect(itemCatalog).toContain('if (disabled) return')
+    expect(itemCatalog).toContain("setTool(item.tool ?? 'item')")
+    expect(chrome).toContain(
+      "buildCostsEnabled && !canAffordLandrushBuildSelection('item', profileMoney)",
+    )
+    expect(chrome).toContain('LANDRUSH_ZOMBIE_ESCAPE_FIRST_HOUSE_BUILD_KINDS')
+    expect(chrome).toContain('waitingOnFirstHouse ? FIRST_HOUSE_STRUCTURE_KINDS : undefined')
+    expect(chrome).toContain('data-landrush-zombie-escape-waiting-on-house=')
+    expect(chrome).toContain('shouldBlockLandrushFirstHouseBuildShortcut')
+    expect(chrome).toContain('editableTarget: isEditableKeyboardTarget(event.target)')
+    expect(chrome).toContain("window.addEventListener('keydown', handleFirstHouseKeyDown, true)")
+    expect(chrome).toContain("window.removeEventListener('keydown', handleFirstHouseKeyDown, true)")
+    expect(chrome).toContain('event.preventDefault()')
+    expect(chrome).toContain('event.stopImmediatePropagation()')
+    expect(chrome).toContain("editorMode === 'material-paint' || editorMode === 'terrain-sculpt'")
+    expect(chrome).toContain("import { CATALOG_ITEMS } from '@pascal-app/editor/catalog'")
     expect(chrome).toContain('<SettingsPanel />')
     expect(chrome).toContain(
       '<CommunityViewerToolbarLeft capabilities={LANDRUSH_VIEWER_CAPABILITIES} />',
@@ -495,7 +835,7 @@ describe('Landrush Pascal editor UI parity', () => {
       "import { LandrushPascalEditorChrome } from './landrush-pascal-editor-chrome'",
     )
     expect(island).toMatch(
-      /editingChrome=\{\s*<LandrushPascalEditorChrome\s+active=\{buildEditorChromeActive && !zombieEscapeNightActive\}\s+chromeRootRef=\{buildEditorChromeRootRef\}\s+exitBuildButtonRef=\{buildEditorExitButtonRef\}\s+interactionReady=\{buildEditorInteractionReady\}\s+modeTransitionActive=\{buildEditorModeTransitionActive\}\s+onExitBuild=\{enterPlayerView\}\s+open=\{buildEditorLayoutOpen\}\s*\/>/,
+      /editingChrome=\{\s*<LandrushPascalEditorChrome\s+active=\{buildEditorChromeActive && !zombieEscapeNightActive\}\s+buildCostsEnabled=\{!offline\}\s+chromeRootRef=\{buildEditorChromeRootRef\}\s+exitBuildButtonRef=\{buildEditorExitButtonRef\}\s+interactionReady=\{buildEditorInteractionReady\}\s+modeTransitionActive=\{buildEditorModeTransitionActive\}\s+onExitBuild=\{enterPlayerView\}\s+open=\{buildEditorLayoutOpen\}\s+profileMoney=\{multiplayer\.profileMoney\}\s*\/>/,
     )
     expect(island).toContain(
       'const buildEditorRuntimeActive = buildEditorSystemsActive && !zombieEscapeNightActive',
@@ -547,5 +887,16 @@ describe('Landrush Pascal editor UI parity', () => {
     expect(island).not.toMatch(
       /\{!zombieEscapeNightActive && !buildEditorChromeActive \? \(\s*<MultiplayerStatusPanel/,
     )
+  })
+
+  test('keeps the compact multiplayer status visible across day and zombie chrome', () => {
+    const statusPanel = readSource('multiplayer-status-panel.tsx')
+
+    expect(statusPanel).toContain("import { createPortal } from 'react-dom'")
+    expect(statusPanel).toContain('setPortalTarget(document.body)')
+    expect(statusPanel).toContain('fixed right-3 bottom-3')
+    expect(statusPanel).toContain('data-landrush-multiplayer-status')
+    expect(statusPanel).toContain('createPortal(panel, portalTarget)')
+    expect(statusPanel).toContain('[latencyLabel, portalTarget]')
   })
 })

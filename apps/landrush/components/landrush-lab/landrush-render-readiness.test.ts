@@ -1,9 +1,22 @@
 import { describe, expect, test } from 'bun:test'
-import { Group, PerspectiveCamera, Scene } from 'three'
 import {
+  BoxGeometry,
+  Group,
+  InstancedMesh,
+  MeshBasicMaterial,
+  PerspectiveCamera,
+  PointLight,
+  Scene,
+} from 'three'
+import {
+  beginLandrushPresentationPipelinePrewarmFrame,
   compileLandrushRenderRepresentatives,
+  completeLandrushPresentationPipelinePrewarmFrame,
   createLandrushRenderReadinessCoordinator,
   type LandrushPipelineRenderer,
+  type LandrushPresentationPipelinePrewarmState,
+  registerLandrushPresentationPipelinePrewarm,
+  requestLandrushPresentationPipelinePrewarm,
 } from './landrush-render-readiness'
 
 function deferred<T>() {
@@ -32,6 +45,592 @@ function createRequest(renderer: LandrushPipelineRenderer) {
 }
 
 describe('Landrush render readiness compile coordination', () => {
+  test('renders overlapping live representatives with exact state restoration and no graph moves', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const zombieCamera = new PerspectiveCamera()
+    const scene = new Scene()
+    const parent = new Group()
+    const before = new Group()
+    const root = new Group()
+    const child = new Group()
+    const after = new Group()
+    const geometry = new BoxGeometry()
+    const material = new MeshBasicMaterial()
+    const instances = new InstancedMesh(geometry, material, 4)
+    const state: LandrushPresentationPipelinePrewarmState = {}
+    let invalidations = 0
+    parent.add(before, root, after)
+    root.add(child)
+    child.add(instances)
+    scene.add(parent)
+    const originalParentChildren = [...parent.children]
+    const originalRootChildren = [...root.children]
+    root.visible = false
+    child.visible = false
+    instances.visible = false
+    instances.frustumCulled = true
+    instances.count = 0
+    root.layers.set(3)
+    child.layers.set(5)
+    const rootLayerMask = root.layers.mask
+    const childLayerMask = child.layers.mask
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => {
+        invalidations += 1
+      },
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const pending = requestLandrushPresentationPipelinePrewarm({
+        camera: zombieCamera,
+        renderer,
+        representatives: [
+          { key: 'root', root },
+          { key: 'overlap', root: child },
+          { key: 'duplicate', root },
+        ],
+        targetScene: scene,
+      })
+      expect(invalidations).toBe(1)
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(state.pipelinePrewarmCamera).toBe(zombieCamera)
+      expect(root.visible).toBe(true)
+      expect(child.visible).toBe(true)
+      expect(instances.visible).toBe(true)
+      expect(instances.frustumCulled).toBe(false)
+      expect(instances.count).toBe(1)
+      expect(parent.children).toEqual(originalParentChildren)
+      expect(root.children).toEqual(originalRootChildren)
+      expect(root.layers.mask).toBe(rootLayerMask)
+      expect(child.layers.mask).toBe(childLayerMask)
+
+      state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(state.pipelinePrewarmCamera).toBeUndefined()
+      expect(root.visible).toBe(false)
+      expect(child.visible).toBe(false)
+      expect(instances.visible).toBe(false)
+      expect(instances.frustumCulled).toBe(true)
+      expect(instances.count).toBe(0)
+      expect(parent.children).toEqual(originalParentChildren)
+      expect(root.children).toEqual(originalRootChildren)
+      await pending
+    } finally {
+      unregister()
+      geometry.dispose()
+      material.dispose()
+    }
+  })
+
+  test('temporarily exposes detached representative trees without publishing scene graph events', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const camera = new PerspectiveCamera()
+    const scene = new Scene()
+    const existing = new Group()
+    const detachedAncestor = new Group()
+    const root = new Group()
+    const state: {
+      pipelinePrewarmRenderedRevision?: number
+      pipelinePrewarmRequestRevision?: number
+    } = {}
+    let childAddedEvents = 0
+    scene.add(existing)
+    detachedAncestor.add(root)
+    detachedAncestor.visible = false
+    root.visible = false
+    scene.addEventListener('childadded', () => {
+      childAddedEvents += 1
+    })
+    const originalSceneChildren = [...scene.children]
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const pending = requestLandrushPresentationPipelinePrewarm({
+        camera,
+        renderer,
+        representatives: [{ key: 'detached', root }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(detachedAncestor.parent).toBe(scene)
+      expect(root.parent).toBe(detachedAncestor)
+      expect(detachedAncestor.visible).toBe(true)
+      expect(root.visible).toBe(true)
+      expect(scene.children).toEqual([...originalSceneChildren, detachedAncestor])
+      expect(childAddedEvents).toBe(0)
+
+      state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      await pending
+      expect(detachedAncestor.parent).toBeNull()
+      expect(root.parent).toBe(detachedAncestor)
+      expect(detachedAncestor.visible).toBe(false)
+      expect(root.visible).toBe(false)
+      expect(scene.children).toEqual(originalSceneChildren)
+      expect(childAddedEvents).toBe(0)
+    } finally {
+      unregister()
+    }
+  })
+
+  test('warms only registered renderables while preserving effective light visibility', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const camera = new PerspectiveCamera()
+    const scene = new Scene()
+    const hiddenAncestor = new Group()
+    const representative = new Group()
+    const geometry = new BoxGeometry()
+    const material = new MeshBasicMaterial()
+    const instances = new InstancedMesh(geometry, material, 2)
+    const registeredLight = new PointLight()
+    const hiddenLight = new PointLight()
+    const unrelated = new Group()
+    const state: LandrushPresentationPipelinePrewarmState = {}
+    hiddenAncestor.visible = false
+    instances.count = 0
+    instances.visible = false
+    registeredLight.visible = false
+    unrelated.visible = false
+    representative.add(instances, registeredLight)
+    hiddenAncestor.add(representative, hiddenLight)
+    scene.add(hiddenAncestor, unrelated)
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const pending = requestLandrushPresentationPipelinePrewarm({
+        camera,
+        renderer,
+        representatives: [{ key: 'instances', root: representative }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(hiddenAncestor.visible).toBe(true)
+      expect(representative.visible).toBe(true)
+      expect(instances.visible).toBe(true)
+      expect(instances.count).toBe(1)
+      expect(registeredLight.visible).toBe(true)
+      expect(hiddenLight.visible).toBe(false)
+      expect(unrelated.visible).toBe(false)
+
+      state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      await pending
+      expect(hiddenAncestor.visible).toBe(false)
+      expect(instances.visible).toBe(false)
+      expect(instances.count).toBe(0)
+      expect(registeredLight.visible).toBe(false)
+      expect(hiddenLight.visible).toBe(true)
+      expect(unrelated.visible).toBe(false)
+    } finally {
+      unregister()
+      geometry.dispose()
+      material.dispose()
+    }
+  })
+
+  test('rejects a failed pipeline revision and allows a later request to recover', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const zombieCamera = new PerspectiveCamera()
+    const scene = new Scene()
+    const root = new Group()
+    const state: LandrushPresentationPipelinePrewarmState = {}
+    root.visible = false
+    scene.add(root)
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const failed = requestLandrushPresentationPipelinePrewarm({
+        camera: zombieCamera,
+        renderer,
+        representatives: [{ key: 'failed', root }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(state.pipelinePrewarmCamera).toBe(zombieCamera)
+      state.pipelinePrewarmFailedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      await expect(failed).rejects.toThrow('render failed')
+      expect(state.pipelinePrewarmCamera).toBeUndefined()
+      expect(root.visible).toBe(false)
+      expect(state.pipelinePrewarmRequestRevision).toBe(0)
+      expect(state.pipelinePrewarmFailedRevision).toBe(1)
+
+      const recovered = requestLandrushPresentationPipelinePrewarm({
+        camera: zombieCamera,
+        renderer,
+        representatives: [{ key: 'recovered', root }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(state.pipelinePrewarmCamera).toBe(zombieCamera)
+      expect(state.pipelinePrewarmRequestRevision).toBe(2)
+      state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      await recovered
+      expect(state.pipelinePrewarmCamera).toBeUndefined()
+      expect(root.visible).toBe(false)
+    } finally {
+      unregister()
+    }
+  })
+
+  test('serializes live-scene pipeline prewarms and restores an unacknowledged frame before retry', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const camera = new PerspectiveCamera()
+    const scene = new Scene()
+    const firstRoot = new Group()
+    const secondRoot = new Group()
+    const state: {
+      pipelinePrewarmRenderedRevision?: number
+      pipelinePrewarmRequestRevision?: number
+    } = {}
+    firstRoot.visible = false
+    secondRoot.visible = false
+    scene.add(firstRoot, secondRoot)
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const first = requestLandrushPresentationPipelinePrewarm({
+        camera,
+        renderer,
+        representatives: [{ key: 'first', root: firstRoot }],
+        targetScene: scene,
+      })
+      const second = requestLandrushPresentationPipelinePrewarm({
+        camera,
+        renderer,
+        representatives: [{ key: 'second', root: secondRoot }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(firstRoot.visible).toBe(true)
+      expect(secondRoot.visible).toBe(false)
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(firstRoot.visible).toBe(false)
+      expect(secondRoot.visible).toBe(false)
+
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(firstRoot.visible).toBe(true)
+      expect(secondRoot.visible).toBe(false)
+      state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      await first
+
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(firstRoot.visible).toBe(false)
+      expect(secondRoot.visible).toBe(true)
+      state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
+      completeLandrushPresentationPipelinePrewarmFrame(renderer)
+      await second
+      expect(secondRoot.visible).toBe(false)
+    } finally {
+      unregister()
+    }
+  })
+
+  test('settles immediately from the exact render callback without waiting for a later frame hook', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const camera = new PerspectiveCamera()
+    const scene = new Scene()
+    const root = new Group()
+    const state: LandrushPresentationPipelinePrewarmState = {}
+    root.visible = false
+    scene.add(root)
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const pending = requestLandrushPresentationPipelinePrewarm({
+        camera,
+        renderer,
+        representatives: [{ key: 'root', root }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      expect(root.visible).toBe(true)
+      const revision = state.pipelinePrewarmRequestRevision!
+      state.pipelinePrewarmCameraMatched = true
+      state.pipelinePrewarmRenderedCamera = camera
+      state.pipelinePrewarmOnRenderSettled?.(revision, 'rendered')
+      await pending
+      expect(root.visible).toBe(false)
+      expect(state.pipelinePrewarmRenderedRevision).toBe(revision)
+    } finally {
+      unregister()
+    }
+  })
+
+  test('rejects a rendered callback that did not use the exact requested camera', async () => {
+    const camera = new PerspectiveCamera()
+    const otherCamera = new PerspectiveCamera()
+    const renderer = { compileAsync: async () => undefined }
+    const scene = new Scene()
+    const root = new Group()
+    const state: LandrushPresentationPipelinePrewarmState = {}
+    root.visible = false
+    scene.add(root)
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+
+    try {
+      const pending = requestLandrushPresentationPipelinePrewarm({
+        camera,
+        renderer,
+        representatives: [{ key: 'root', root }],
+        targetScene: scene,
+      })
+      beginLandrushPresentationPipelinePrewarmFrame(renderer)
+      const revision = state.pipelinePrewarmRequestRevision!
+      state.pipelinePrewarmCameraMatched = true
+      state.pipelinePrewarmRenderedCamera = otherCamera
+      state.pipelinePrewarmOnRenderSettled?.(revision, 'rendered')
+
+      await expect(pending).rejects.toThrow('render failed')
+      expect(state.pipelinePrewarmRenderedRevision).toBeUndefined()
+      expect(state.pipelinePrewarmFailedRevision).toBe(revision)
+      expect(root.visible).toBe(false)
+    } finally {
+      unregister()
+    }
+  })
+
+  test('restores active representatives and rejects pending work on driver cleanup', async () => {
+    const renderer = { compileAsync: async () => undefined }
+    const zombieCamera = new PerspectiveCamera()
+    const scene = new Scene()
+    const root = new Group()
+    const state: LandrushPresentationPipelinePrewarmState = {}
+    root.visible = false
+    scene.add(root)
+    const unregister = registerLandrushPresentationPipelinePrewarm({
+      invalidate: () => undefined,
+      renderer,
+      scene,
+      state,
+    })
+    const pending = requestLandrushPresentationPipelinePrewarm({
+      camera: zombieCamera,
+      renderer,
+      representatives: [{ key: 'root', root }],
+      targetScene: scene,
+    })
+    beginLandrushPresentationPipelinePrewarmFrame(renderer)
+    expect(state.pipelinePrewarmCamera).toBe(zombieCamera)
+    expect(root.visible).toBe(true)
+    unregister()
+    expect(state.pipelinePrewarmCamera).toBeUndefined()
+    expect(root.visible).toBe(false)
+    await expect(pending).rejects.toThrow('was unmounted')
+  })
+
+  test('compiles zero-count instances as one and restores exact state before awaiting', async () => {
+    const compilation = deferred<void>()
+    const ancestor = new Group()
+    const root = new Group()
+    const geometry = new BoxGeometry()
+    const material = new MeshBasicMaterial()
+    const zeroCount = new InstancedMesh(geometry, material, 4)
+    const populated = new InstancedMesh(geometry, material, 4)
+    ancestor.visible = false
+    root.visible = false
+    zeroCount.count = 0
+    zeroCount.visible = false
+    zeroCount.frustumCulled = true
+    populated.count = 2
+    populated.visible = false
+    populated.frustumCulled = true
+    root.add(zeroCount, populated)
+    ancestor.add(root)
+    let compileObserved = false
+
+    const pending = compileLandrushRenderRepresentatives({
+      camera: new PerspectiveCamera(),
+      renderer: {
+        compileAsync(compiledRoot) {
+          compileObserved = true
+          expect(compiledRoot).toBe(root)
+          expect(ancestor.visible).toBe(true)
+          expect(root.visible).toBe(true)
+          expect(zeroCount.visible).toBe(true)
+          expect(zeroCount.frustumCulled).toBe(false)
+          expect(zeroCount.count).toBe(1)
+          expect(populated.visible).toBe(true)
+          expect(populated.frustumCulled).toBe(false)
+          expect(populated.count).toBe(2)
+          return compilation.promise
+        },
+      },
+      representatives: [{ key: 'instances', root }],
+      targetScene: new Scene(),
+    })
+
+    expect(compileObserved).toBe(true)
+    expect(ancestor.visible).toBe(false)
+    expect(root.visible).toBe(false)
+    expect(zeroCount.visible).toBe(false)
+    expect(zeroCount.frustumCulled).toBe(true)
+    expect(zeroCount.count).toBe(0)
+    expect(populated.visible).toBe(false)
+    expect(populated.frustumCulled).toBe(true)
+    expect(populated.count).toBe(2)
+    compilation.resolve()
+    await pending
+    geometry.dispose()
+    material.dispose()
+  })
+
+  test('restores zero-count instances after synchronous throw and asynchronous rejection', async () => {
+    for (const failure of ['throw', 'reject'] as const) {
+      const geometry = new BoxGeometry()
+      const material = new MeshBasicMaterial()
+      const root = new Group()
+      const mesh = new InstancedMesh(geometry, material, 2)
+      root.visible = false
+      mesh.count = 0
+      mesh.visible = false
+      mesh.frustumCulled = true
+      root.add(mesh)
+
+      await expect(
+        compileLandrushRenderRepresentatives({
+          camera: new PerspectiveCamera(),
+          renderer: {
+            compileAsync() {
+              expect(root.visible).toBe(true)
+              expect(mesh.visible).toBe(true)
+              expect(mesh.frustumCulled).toBe(false)
+              expect(mesh.count).toBe(1)
+              if (failure === 'throw') throw new Error('compile failed')
+              return Promise.reject(new Error('compile failed'))
+            },
+          },
+          representatives: [{ key: failure, root }],
+          targetScene: new Scene(),
+        }),
+      ).rejects.toThrow('compile failed')
+      expect(root.visible).toBe(false)
+      expect(mesh.visible).toBe(false)
+      expect(mesh.frustumCulled).toBe(true)
+      expect(mesh.count).toBe(0)
+      geometry.dispose()
+      material.dispose()
+    }
+  })
+
+  test('rejects delayed WebGPU validation errors instead of publishing false readiness', async () => {
+    let uncapturedErrorListener: ((event: unknown) => void) | undefined
+    let errorScopePending = false
+    const root = new Group()
+    root.visible = false
+    const renderer: LandrushPipelineRenderer = {
+      backend: {
+        device: {
+          addEventListener(type: string, listener: (event: unknown) => void) {
+            expect(type).toBe('uncapturederror')
+            uncapturedErrorListener = listener
+          },
+          popErrorScope() {
+            expect(errorScopePending).toBe(true)
+            errorScopePending = false
+            return Promise.resolve(null)
+          },
+          pushErrorScope(filter: string) {
+            expect(filter).toBe('validation')
+            errorScopePending = true
+          },
+          removeEventListener(type: string, listener: (event: unknown) => void) {
+            expect(type).toBe('uncapturederror')
+            expect(listener).toBe(uncapturedErrorListener)
+            uncapturedErrorListener = undefined
+          },
+        },
+      },
+      async compileAsync() {
+        expect(root.visible).toBe(true)
+        uncapturedErrorListener?.({ error: { message: 'invalid sampler binding' } })
+      },
+    }
+
+    await expect(
+      compileLandrushRenderRepresentatives({
+        camera: new PerspectiveCamera(),
+        renderer,
+        representatives: [{ key: 'invalid-material', root }],
+        targetScene: new Scene(),
+      }),
+    ).rejects.toThrow('invalid sampler binding')
+    expect(root.visible).toBe(false)
+    expect(errorScopePending).toBe(false)
+    expect(uncapturedErrorListener).toBeUndefined()
+  })
+
+  test('rejects a scoped WebGPU validation error when the compile scope settles', async () => {
+    const events: string[] = []
+    const renderer: LandrushPipelineRenderer = {
+      backend: {
+        device: {
+          addEventListener() {
+            events.push('listen')
+          },
+          async popErrorScope() {
+            events.push('pop')
+            return { message: 'invalid render pipeline' }
+          },
+          pushErrorScope() {
+            events.push('push')
+          },
+          removeEventListener() {
+            events.push('unlisten')
+          },
+        },
+      },
+      async compileAsync() {
+        events.push('compile')
+      },
+    }
+
+    await expect(
+      compileLandrushRenderRepresentatives({
+        camera: new PerspectiveCamera(),
+        renderer,
+        representatives: [{ key: 'scoped-error', root: new Group() }],
+        targetScene: new Scene(),
+      }),
+    ).rejects.toThrow('invalid render pipeline')
+    expect(events).toEqual(['listen', 'push', 'compile', 'pop', 'unlisten'])
+  })
+
   test('reports only completed awaited representatives as incremental progress', async () => {
     const first = deferred<void>()
     const second = deferred<void>()

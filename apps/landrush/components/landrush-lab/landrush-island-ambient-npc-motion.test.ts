@@ -10,6 +10,7 @@ import {
   advanceLandrushIslandAmbientNpcMotion,
   createLandrushIslandAmbientNpcJourneyPlanner,
   createLandrushIslandAmbientNpcMotionState,
+  createLandrushIslandAmbientNpcNeighborIndex,
   reconcileLandrushIslandAmbientNpcMotionStateForWorld,
 } from './landrush-island-ambient-npc-motion'
 
@@ -98,17 +99,15 @@ describe('Landrush island ambient NPC motion', () => {
     const states = Array.from({ length: 10 }, (_, index) =>
       createLandrushIslandAmbientNpcMotionState(index, world),
     )
+    const neighborIndex = createLandrushIslandAmbientNpcNeighborIndex(world, states.length)
+    const neighborQueries = states.map((state) => neighborIndex.createQuery(state.seed))
+    for (const state of states) neighborIndex.set(state.seed, state.position)
 
     for (let frame = 0; frame < 60 * 120; frame += 1) {
-      for (const state of states) {
-        advanceLandrushIslandAmbientNpcMotion(
-          state,
-          1 / 60,
-          world,
-          states
-            .filter((neighbor) => neighbor !== state)
-            .map((neighbor) => ({ id: neighbor.seed, position: neighbor.position })),
-        )
+      for (let index = 0; index < states.length; index += 1) {
+        const state = states[index]!
+        advanceLandrushIslandAmbientNpcMotion(state, 1 / 60, world, neighborQueries[index])
+        neighborIndex.set(state.seed, state.position)
       }
       for (let firstIndex = 0; firstIndex < states.length; firstIndex += 1) {
         for (let secondIndex = firstIndex + 1; secondIndex < states.length; secondIndex += 1) {
@@ -120,6 +119,40 @@ describe('Landrush island ambient NPC motion', () => {
         }
       }
     }
+  })
+
+  test('updates a fixed spatial neighbor index across cells and removal', () => {
+    const neighborIndex = createLandrushIslandAmbientNpcNeighborIndex(world, 32)
+    const groundskeeperQuery = neighborIndex.createQuery('groundskeeper')
+    neighborIndex.set('groundskeeper', { x: -12, z: -12 })
+    neighborIndex.set('visitor', { x: -11.29, z: -12 })
+    for (let index = 0; index < 30; index += 1) {
+      neighborIndex.set(`far-${index}`, { x: 6 + (index % 5), z: 6 + Math.floor(index / 5) })
+    }
+
+    expect(groundskeeperQuery.positionHasClearance({ x: -12, z: -12 })).toBe(false)
+    neighborIndex.set('visitor', { x: 12, z: 12 })
+    expect(groundskeeperQuery.positionHasClearance({ x: -12, z: -12 })).toBe(true)
+    neighborIndex.set('visitor', { x: -12.1, z: -12.1 })
+    expect(groundskeeperQuery.positionHasClearance({ x: -12, z: -12 })).toBe(false)
+    neighborIndex.delete('visitor')
+    expect(groundskeeperQuery.positionHasClearance({ x: -12, z: -12 })).toBe(true)
+  })
+
+  test('reuses the motion position object during steady locomotion', () => {
+    const state = createLandrushIslandAmbientNpcMotionState(0, world)
+    state.position = { x: -12, z: -12 }
+    state.path = [{ x: -10, z: -12 }]
+    state.pathIndex = 0
+    state.phase = 'walk'
+    state.speedMetersPerSecond = 1.25
+    const position = state.position
+
+    for (let frame = 0; frame < 60; frame += 1) {
+      advanceLandrushIslandAmbientNpcMotion(state, 1 / 60, world)
+      expect(state.position).toBe(position)
+    }
+    expect(state.position.x).toBeGreaterThan(-12)
   })
 
   test('shares one strict per-frame planning budget fairly across ten NPCs', () => {
@@ -164,6 +197,22 @@ describe('Landrush island ambient NPC motion', () => {
     expect(result.pendingCount).toBe(0)
     expect(state.phase).toBe('idle')
     expect(state.path).toEqual([])
+  })
+
+  test('reuses one planner-owned per-frame result through completion', () => {
+    const state = createLandrushIslandAmbientNpcMotionState(4, world)
+    const planner = createLandrushIslandAmbientNpcJourneyPlanner(world)
+    state.idleSeconds = 0
+    advanceLandrushIslandAmbientNpcMotion(state, 1 / 60, world, [], planner)
+
+    const result = planner.advance(1)
+    expect(result.pendingCount).toBe(1)
+    for (let frame = 0; frame < 10_000 && result.pendingCount > 0; frame += 1) {
+      expect(planner.advance(16)).toBe(result)
+      expect(result.operations).toBeLessThanOrEqual(16)
+    }
+    expect(result.pendingCount).toBe(0)
+    expect(state.phase).not.toBe('idle')
   })
 
   test('preserves a valid position across topology changes and respawns only invalid positions', () => {

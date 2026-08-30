@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { type AnyNode, BuildingNode, CeilingNode, LevelNode, WallNode } from '@pascal-app/core'
+import {
+  type AnyNode,
+  BuildingNode,
+  CeilingNode,
+  DoorNode,
+  LevelNode,
+  WallNode,
+} from '@pascal-app/core'
 import { findLandrushBuildingFloorInteriorRegion } from './landrush-building-floor-visibility'
 import { resolveZombieEscapeWeaponPickupPlacements } from './zombie-escape-weapon-placement'
 
@@ -33,6 +40,51 @@ describe('Zombie Escape weapon placement', () => {
     ])
   })
 
+  test('does not place a weapon in closed walls until a boundary door exists', () => {
+    const nodes = {} as Record<string, AnyNode>
+    const building = BuildingNode.parse({ name: 'Doorless building' })
+    nodes[building.id] = building
+    addClosedLevel(nodes, building.id, 0, 0, 0, 'Doorless ground', undefined, false)
+
+    expect(resolveZombieEscapeWeaponPickupPlacements(nodes)).toEqual([])
+  })
+
+  test('places the weapon in the door-equipped room instead of a larger sealed room', () => {
+    const nodes = {} as Record<string, AnyNode>
+    const building = BuildingNode.parse({ name: 'Mixed access building' })
+    const level = LevelNode.parse({ level: 0, name: 'Ground', parentId: building.id })
+    nodes[building.id] = building
+    nodes[level.id] = level
+    addClosedRoom(nodes, level.id, 0, 0, 10, 8, 'Large sealed room', false)
+    addClosedRoom(nodes, level.id, 14, 1, 4, 4, 'Small door room', true)
+
+    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes)
+
+    expect(placement).toBeDefined()
+    expect(placement!.x).toBeGreaterThan(14)
+    expect(placement!.x).toBeLessThan(18)
+    expect(placement!.z).toBeGreaterThan(1)
+    expect(placement!.z).toBeLessThan(5)
+  })
+
+  test('does not use an opening-only room when another room has a real door', () => {
+    const nodes = {} as Record<string, AnyNode>
+    const building = BuildingNode.parse({ name: 'Mixed opening building' })
+    const level = LevelNode.parse({ level: 0, name: 'Ground', parentId: building.id })
+    nodes[building.id] = building
+    nodes[level.id] = level
+    addClosedRoom(nodes, level.id, 0, 1, 4, 4, 'Small door room', true)
+    addClosedRoom(nodes, level.id, 8, 0, 10, 8, 'Large opening room', true, 'opening')
+
+    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes)
+
+    expect(placement).toBeDefined()
+    expect(placement!.x).toBeGreaterThan(0)
+    expect(placement!.x).toBeLessThan(4)
+    expect(placement!.z).toBeGreaterThan(1)
+    expect(placement!.z).toBeLessThan(5)
+  })
+
   test('uses level zero instead of a basement when both exist', () => {
     const nodes = {} as Record<string, AnyNode>
     const building = BuildingNode.parse({ name: 'Basement house' })
@@ -50,7 +102,7 @@ describe('Zombie Escape weapon placement', () => {
     expect(placement!.y).toBe(4)
   })
 
-  test('chooses a valid interior point outside ceiling holes', () => {
+  test('does not treat a ceiling-only interior as the first house', () => {
     const building = BuildingNode.parse({ name: 'Courtyard house' })
     const level = LevelNode.parse({ level: 0, name: 'Ground', parentId: building.id })
     const region = {
@@ -80,10 +132,8 @@ describe('Zombie Escape weapon placement', () => {
       [building, level, ceiling].map((node) => [node.id, node]),
     ) as Record<string, AnyNode>
 
-    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes)
-
-    expect(placement).toBeDefined()
-    expect(findLandrushBuildingFloorInteriorRegion(placement!, [region])).not.toBeNull()
+    expect(findLandrushBuildingFloorInteriorRegion({ x: 1, z: 1 }, [region])).not.toBeNull()
+    expect(resolveZombieEscapeWeaponPickupPlacements(nodes)).toEqual([])
   })
 })
 
@@ -106,22 +156,48 @@ function addClosedLevel(
   offsetZ: number,
   name: string,
   height?: number,
+  includeDoor = true,
 ) {
   const level = LevelNode.parse({ height, level: levelNumber, name, parentId: buildingId })
+  nodes[level.id] = level
+  addClosedRoom(nodes, level.id, offsetX, offsetZ, 8, 6, name, includeDoor)
+}
+
+function addClosedRoom(
+  nodes: Record<string, AnyNode>,
+  levelId: string,
+  offsetX: number,
+  offsetZ: number,
+  width: number,
+  depth: number,
+  name: string,
+  includeDoor: boolean,
+  openingKind: 'door' | 'opening' = 'door',
+) {
   const corners = [
     [offsetX, offsetZ],
-    [offsetX + 8, offsetZ],
-    [offsetX + 8, offsetZ + 6],
-    [offsetX, offsetZ + 6],
+    [offsetX + width, offsetZ],
+    [offsetX + width, offsetZ + depth],
+    [offsetX, offsetZ + depth],
   ] as const
   const walls = corners.map((start, index) =>
     WallNode.parse({
       end: corners[(index + 1) % corners.length],
       name: `${name} wall ${String(index + 1)}`,
-      parentId: level.id,
+      parentId: levelId,
       start,
     }),
   )
-  nodes[level.id] = { ...level, children: walls.map(({ id }) => id) }
+  const level = nodes[levelId]
+  if (level?.type !== 'level') throw new Error(`Missing level ${levelId}`)
+  nodes[levelId] = {
+    ...level,
+    children: [...(level.children ?? []), ...walls.map(({ id }) => id)],
+  }
   for (const wall of walls) nodes[wall.id] = wall
+  if (!includeDoor) return
+  const hostWall = walls[0]!
+  const door = DoorNode.parse({ openingKind, parentId: hostWall.id, wallId: hostWall.id })
+  nodes[hostWall.id] = { ...hostWall, children: [door.id] }
+  nodes[door.id] = door
 }

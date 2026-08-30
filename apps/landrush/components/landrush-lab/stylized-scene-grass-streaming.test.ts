@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   BufferGeometry,
   Float32BufferAttribute,
   Frustum,
   InstancedBufferAttribute,
   Matrix4,
+  OrthographicCamera,
   PerspectiveCamera,
   Plane,
   Vector3,
@@ -15,9 +17,13 @@ import {
   createStylizedGrassArrivalState,
   createStylizedGrassDenseDrawState,
   createStylizedGrassExactDrawCellKeys,
+  createStylizedGrassPreparedResidencyContainmentScratch,
+  createStylizedGrassPreparedResidencyFallbackGate,
   createStylizedGrassResidentCells,
   createStylizedGrassStreamGrid,
+  isStylizedGrassPreparedResidencyExtentContained,
   markStylizedGrassDrawArrivals,
+  markStylizedGrassInstanceSlotSpanUpdated,
   markStylizedGrassInstanceSlotsUpdated,
   packStylizedGrassScaleHeight,
   reconcileStylizedGrassArrivalState,
@@ -29,14 +35,26 @@ import {
   resolveStylizedGrassDrawEnvelope,
   resolveStylizedGrassDrawMembershipApplyDecision,
   resolveStylizedGrassFadeUploadSlots,
+  resolveStylizedGrassPreparedResidencyCameraPolicy,
+  resolveStylizedGrassPreparedResidencyReadiness,
+  resolveStylizedGrassResidentUpdateDue,
   resolveStylizedGrassStructuralUploadSlots,
   type StylizedGrassDrawEnvelope,
   type StylizedGrassInstance,
   type StylizedGrassStreamCell,
   selectStylizedGrassDrawInstances,
+  shouldForceStylizedGrassPreparedResidencyFallback,
+  shouldSettleStylizedGrassPreparedResidencyBaselines,
+  stylizedGrassPreparedResidencyContainsCamera,
   stylizedGrassStreamCellIntersectsFrustum,
   withStylizedGrassInstanceAttributes,
 } from './stylized-scene-land-layers'
+import {
+  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters,
+  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE,
+  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+} from './zombie-escape-config'
 
 const DRAW_ENVELOPE: StylizedGrassDrawEnvelope = {
   horizontalMargin: 0.25,
@@ -76,6 +94,33 @@ function createCameraFrustum(
     new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
     camera.coordinateSystem,
   )
+}
+
+function createZombieGameplayCamera(aspectRatio: number, halfHeightScale = 1) {
+  const config = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+  const aspect = Math.max(0.1, aspectRatio)
+  const horizontalHalfWidth =
+    config.halfHeightMeters * Math.min(aspect, config.maximumAspectRatio) * halfHeightScale
+  const verticalHalfHeight = horizontalHalfWidth / aspect
+  const camera = new OrthographicCamera(
+    -horizontalHalfWidth,
+    horizontalHalfWidth,
+    verticalHalfHeight,
+    -verticalHalfHeight,
+    config.nearMeters,
+    config.farMeters,
+  )
+  const horizontalDistance = Math.cos(config.elevationRadians) * config.distanceMeters
+  const target = new Vector3(0, config.targetHeightMeters, 0)
+  camera.position.set(
+    Math.sin(config.azimuthRadians) * horizontalDistance,
+    target.y + Math.sin(config.elevationRadians) * config.distanceMeters,
+    Math.cos(config.azimuthRadians) * horizontalDistance,
+  )
+  camera.lookAt(target)
+  camera.updateProjectionMatrix()
+  camera.updateMatrixWorld(true)
+  return camera
 }
 
 function createBoxFrustum({
@@ -124,6 +169,311 @@ function instancesByCell(instances: readonly StylizedGrassInstance[]) {
     instances.map((instance) => [instance.id.slice(0, instance.id.lastIndexOf(':')), [instance]]),
   )
 }
+
+function preparedCameraPolicy(
+  overrides: Partial<{
+    cameraContained: boolean
+    committedContentGeneration: number
+    committedContentRevision: number
+    currentContentGeneration: number
+    currentContentRevision: number
+    currentCoverageRevision: number
+    preparedCoverageRevision: number
+    preparedGeneration: string | null
+    ready: boolean
+    requestGeneration: string
+    transitionActive: boolean
+  }> = {},
+) {
+  const state = {
+    cameraContained: true,
+    committedContentGeneration: 3,
+    committedContentRevision: 7,
+    currentContentGeneration: 3,
+    currentContentRevision: 7,
+    currentCoverageRevision: 5,
+    preparedCoverageRevision: 5,
+    preparedGeneration: 'prepared:1' as string | null,
+    ready: true,
+    requestGeneration: 'prepared:1',
+    transitionActive: true,
+    ...overrides,
+  }
+  return resolveStylizedGrassPreparedResidencyCameraPolicy(
+    state.transitionActive,
+    state.ready,
+    state.cameraContained,
+    state.preparedGeneration,
+    state.requestGeneration,
+    state.preparedCoverageRevision,
+    state.currentCoverageRevision,
+    state.committedContentGeneration,
+    state.currentContentGeneration,
+    state.committedContentRevision,
+    state.currentContentRevision,
+  )
+}
+
+describe('stylized grass prepared transition residency', () => {
+  test('uses the conservative gameplay footprint plus collision and authored safety', () => {
+    const camera = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+    expect(ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS).toBeCloseTo(
+      resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters(camera.maximumAspectRatio) +
+        ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS +
+        camera.replacementSpawnMarginMeters,
+      10,
+    )
+  })
+
+  test('contains final portrait, maximum-aspect, and capped-ultrawide camera slabs', () => {
+    const scratch = createStylizedGrassPreparedResidencyContainmentScratch()
+    for (const aspect of [
+      9 / 16,
+      ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE.maximumAspectRatio,
+      32 / 9,
+    ]) {
+      expect(
+        stylizedGrassPreparedResidencyContainsCamera(
+          createZombieGameplayCamera(aspect),
+          0,
+          0,
+          DRAW_ENVELOPE,
+          0,
+          ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+          scratch,
+        ),
+      ).toBe(true)
+    }
+    expect(
+      stylizedGrassPreparedResidencyContainsCamera(
+        createZombieGameplayCamera(16 / 9, 2),
+        0,
+        0,
+        DRAW_ENVELOPE,
+        0,
+        ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+        scratch,
+      ),
+    ).toBe(false)
+  })
+
+  test('includes the exact-draw vertical exit guard for a 14-degree source camera', () => {
+    const config = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
+    const pitch = (14 * Math.PI) / 180
+    const target = new Vector3(0, config.targetHeightMeters, 0)
+    const horizontalDistance = Math.cos(pitch) * config.distanceMeters
+    const halfHeight = 1
+    const aspect = 16 / 9
+    const camera = new OrthographicCamera(
+      -halfHeight * aspect,
+      halfHeight * aspect,
+      halfHeight,
+      -halfHeight,
+      config.nearMeters,
+      config.farMeters,
+    )
+    camera.position.set(0, target.y + Math.sin(pitch) * config.distanceMeters, horizontalDistance)
+    camera.lookAt(target)
+    camera.updateProjectionMatrix()
+    camera.updateMatrixWorld(true)
+
+    expect(
+      stylizedGrassPreparedResidencyContainsCamera(
+        camera,
+        0,
+        0,
+        DRAW_ENVELOPE,
+        0,
+        15,
+        createStylizedGrassPreparedResidencyContainmentScratch(),
+      ),
+    ).toBe(false)
+  })
+
+  test('accepts the exact prepared boundary and rejects an epsilon outside', () => {
+    const footprint = ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS
+    const boundaryExtent = footprint + 9 - DRAW_ENVELOPE.horizontalMargin - 3 - Math.SQRT2
+    expect(
+      isStylizedGrassPreparedResidencyExtentContained(
+        boundaryExtent,
+        footprint,
+        DRAW_ENVELOPE.horizontalMargin,
+      ),
+    ).toBe(true)
+    expect(
+      isStylizedGrassPreparedResidencyExtentContained(
+        boundaryExtent + 0.000001,
+        footprint,
+        DRAW_ENVELOPE.horizontalMargin,
+      ),
+    ).toBe(false)
+  })
+
+  test('stages only the prepared circle and keeps exact draw membership independent', () => {
+    const grid = createStylizedGrassStreamGrid({ maxX: 40, maxZ: 40, minX: -40, minZ: -40 })
+    const awayFrustum = createCameraFrustum([0, 3, 60], [0, 3, 80])
+    const scan = createStylizedGrassResidentCells({
+      drawEnvelope: DRAW_ENVELOPE,
+      elevation: 0,
+      frustum: awayFrustum,
+      grid,
+      interaction: null,
+      preparedResidency: {
+        centerX: 0,
+        centerZ: 0,
+        footprintRadiusMeters: ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+      },
+      previousCells: [],
+    })
+    const residentKeys = new Set(scan.cells.map((cell) => cell.key))
+    expect(scan.preparedCells.length).toBeGreaterThan(0)
+    expect(scan.preparedCells.length).toBeLessThan(grid.cells.length)
+    expect(scan.preparedCells.every((cell) => residentKeys.has(cell.key))).toBe(true)
+    expect(
+      createStylizedGrassExactDrawCellKeys({
+        cells: scan.cells,
+        drawEnvelope: DRAW_ENVELOPE,
+        elevation: 0,
+        frustum: awayFrustum,
+      }).size,
+    ).toBe(0)
+  })
+
+  test('suppresses only a fully current contained transition and falls back immediately', () => {
+    expect(preparedCameraPolicy()).toBe('suppress')
+    expect(preparedCameraPolicy({ transitionActive: false })).toBe('normal')
+    expect(preparedCameraPolicy({ cameraContained: false })).toBe('fallback')
+    expect(preparedCameraPolicy({ ready: false })).toBe('fallback')
+    expect(preparedCameraPolicy({ preparedGeneration: 'prepared:stale' })).toBe('fallback')
+    expect(preparedCameraPolicy({ preparedCoverageRevision: 4 })).toBe('fallback')
+    expect(preparedCameraPolicy({ committedContentGeneration: 2 })).toBe('fallback')
+    expect(preparedCameraPolicy({ committedContentRevision: 6 })).toBe('fallback')
+  })
+
+  test('suppresses only timed camera work and settles only a valid prepared handoff', () => {
+    expect(
+      resolveStylizedGrassResidentUpdateDue(true, false, false, false, 'suppress', false, true),
+    ).toBe(false)
+    expect(
+      resolveStylizedGrassResidentUpdateDue(true, true, false, false, 'suppress', false, false),
+    ).toBe(true)
+    expect(
+      resolveStylizedGrassResidentUpdateDue(true, false, true, false, 'suppress', false, false),
+    ).toBe(true)
+    expect(
+      resolveStylizedGrassResidentUpdateDue(true, false, false, true, 'suppress', false, false),
+    ).toBe(true)
+    expect(
+      resolveStylizedGrassResidentUpdateDue(true, false, false, false, 'fallback', true, false),
+    ).toBe(true)
+    expect(shouldSettleStylizedGrassPreparedResidencyBaselines(false, 'suppress')).toBe(true)
+    expect(shouldSettleStylizedGrassPreparedResidencyBaselines(false, 'fallback')).toBe(false)
+    expect(shouldSettleStylizedGrassPreparedResidencyBaselines(true, 'suppress')).toBe(false)
+  })
+
+  test('forces one outside fallback and rearms for a new invalidity signature', () => {
+    const gate = createStylizedGrassPreparedResidencyFallbackGate()
+    const force = (
+      overrides: Partial<{
+        cameraContained: boolean
+        currentContentRevision: number
+        currentCoverageRevision: number
+        transitionActive: boolean
+      }> = {},
+    ) => {
+      const state = {
+        cameraContained: false,
+        currentContentRevision: 7,
+        currentCoverageRevision: 5,
+        transitionActive: true,
+        ...overrides,
+      }
+      return shouldForceStylizedGrassPreparedResidencyFallback(
+        gate,
+        state.transitionActive,
+        state.transitionActive ? 'fallback' : 'normal',
+        true,
+        state.cameraContained,
+        'prepared:1',
+        'prepared:1',
+        5,
+        state.currentCoverageRevision,
+        3,
+        3,
+        7,
+        state.currentContentRevision,
+      )
+    }
+
+    expect(force()).toBe(true)
+    expect(force()).toBe(false)
+    expect(force({ currentCoverageRevision: 6 })).toBe(true)
+    expect(force({ currentCoverageRevision: 6 })).toBe(false)
+    expect(force({ currentContentRevision: 8, currentCoverageRevision: 6 })).toBe(true)
+    expect(force({ currentContentRevision: 8, currentCoverageRevision: 6 })).toBe(false)
+    expect(force({ transitionActive: false })).toBe(false)
+    expect(force({ currentContentRevision: 8, currentCoverageRevision: 6 })).toBe(true)
+  })
+
+  test('requires committed content for every resident cell and accepts empty cells', () => {
+    const cells = [createCell(0, 0), createCell(1, 0, 1)]
+    const readiness = (
+      residentInstancesByCell: ReadonlyMap<string, readonly StylizedGrassInstance[]>,
+    ) =>
+      resolveStylizedGrassPreparedResidencyReadiness({
+        committedContentGeneration: 2,
+        committedContentRevision: 4,
+        coverageRevision: 3,
+        currentContentGeneration: 2,
+        currentContentRevision: 4,
+        prepared: true,
+        preparedCoverageRevision: 3,
+        preparedGeneration: 'prepared:1',
+        requestGeneration: 'prepared:1',
+        residentCells: cells,
+        residentInstancesByCell,
+      })
+
+    expect(readiness(new Map())).toBe(false)
+    expect(readiness(new Map([['0:0', []]]))).toBe(false)
+    expect(
+      readiness(
+        new Map([
+          ['0:0', []],
+          ['1:0', [createInstance('1:0:0')]],
+        ]),
+      ),
+    ).toBe(true)
+    expect(
+      resolveStylizedGrassPreparedResidencyReadiness({
+        committedContentGeneration: 1,
+        committedContentRevision: 4,
+        coverageRevision: 3,
+        currentContentGeneration: 2,
+        currentContentRevision: 4,
+        prepared: true,
+        preparedCoverageRevision: 3,
+        preparedGeneration: 'prepared:1',
+        requestGeneration: 'prepared:1',
+        residentCells: cells,
+        residentInstancesByCell: new Map([
+          ['0:0', []],
+          ['1:0', []],
+        ]),
+      }),
+    ).toBe(false)
+  })
+
+  test('gates only the build-to-night start on matching prepared readiness', () => {
+    const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
+    expect(source).toMatch(
+      /zombieEscapePhase !== 'build' \|\|\s+\(zombieEscapeGrassResidencyReadiness\?\.generation === zombieEscapeGrassResidencyGeneration &&\s+zombieEscapeGrassResidencyReadiness\.ready\)/,
+    )
+    expect(source).toMatch(
+      /const zombieEscapePhaseReady =\s+zombieEscapeGrassResidencyReadyForNightStart &&\s+resolveLandrushZombieEscapePhaseReady/,
+    )
+  })
+})
 
 describe('stylized grass residency and exact draw membership', () => {
   test('publishes stable exact membership atomically and keeps no-op deltas intact', () => {
@@ -297,6 +647,23 @@ describe('stylized grass residency and exact draw membership', () => {
     expect(residentCells.length).toBeGreaterThan(0)
     expect(drawKeys.size).toBe(0)
     expect([...drawKeys].every((key) => residentCells.some((cell) => cell.key === key))).toBe(true)
+  })
+
+  test('reuses the caller-owned resident membership scratch set', () => {
+    const grid = createStylizedGrassStreamGrid({ maxX: 2, maxZ: 1, minX: 0, minZ: 0 })
+    const previousCells = [createCell(0, 0, 0), createCell(1, 0, 1)]
+    const previousCellIndices = new Set([99])
+    createStylizedGrassResidentCells({
+      drawEnvelope: DRAW_ENVELOPE,
+      elevation: 0,
+      frustum: createBoxFrustum({ maxX: 4, minX: -2 }),
+      grid,
+      interaction: null,
+      previousCellIndices,
+      previousCells,
+    })
+
+    expect(previousCellIndices).toEqual(new Set([0, 1]))
   })
 
   test('prioritizes exact cells before applying the GPU capacity', () => {
@@ -944,6 +1311,20 @@ describe('stylized grass fade upload policy and lifecycle', () => {
       { start: 2, count: 6 },
       { start: 20, count: 2 },
     ])
+  })
+
+  test('reuses one contiguous update range throughout arrival fades', () => {
+    const attribute = new InstancedBufferAttribute(new Float32Array(24), 2)
+    markStylizedGrassInstanceSlotsUpdated(attribute, [1, 10])
+
+    markStylizedGrassInstanceSlotSpanUpdated(attribute, 3, 7)
+    expect(attribute.updateRanges).toEqual([{ start: 2, count: 20 }])
+    const range = attribute.updateRanges[0]
+
+    attribute.clearUpdateRanges()
+    markStylizedGrassInstanceSlotSpanUpdated(attribute, 4, 6)
+    expect(attribute.updateRanges).toEqual([{ start: 8, count: 6 }])
+    expect(attribute.updateRanges[0]).toBe(range)
   })
 
   test('retains dense and arrival identities through canonical resource-style rebuilds', () => {

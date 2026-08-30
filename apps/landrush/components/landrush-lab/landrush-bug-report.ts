@@ -228,6 +228,18 @@ export function cloneLandrushBugReportBuilds(
   }))
 }
 
+export function resolveLandrushCanvasPixelRatio(
+  canvas: Pick<HTMLCanvasElement, 'clientHeight' | 'clientWidth' | 'height' | 'width'>,
+) {
+  const widthRatio = canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : null
+  if (widthRatio !== null && isPositiveFiniteNumber(widthRatio)) return widthRatio
+
+  const heightRatio = canvas.clientHeight > 0 ? canvas.height / canvas.clientHeight : null
+  if (heightRatio !== null && isPositiveFiniteNumber(heightRatio)) return heightRatio
+
+  throw new Error('The Landrush canvas CSS dimensions are unavailable.')
+}
+
 function isCamera(value: unknown): value is LandrushBugReportCamera {
   return (
     isRecord(value) &&

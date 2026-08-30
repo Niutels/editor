@@ -15,7 +15,7 @@ export function LandrushIslandLoadingShell() {
       aria-valuemin={0}
       aria-valuenow={initialPercent}
       aria-valuetext={`${LANDRUSH_ISLAND_LOADING_INITIAL_STATUS}, ${initialPercent}%`}
-      className="fixed inset-0 z-[230] grid place-items-center bg-[#0f1720] text-white [contain:strict]"
+      className="fixed inset-0 z-[230] grid place-items-center bg-slate-950/58 text-white [contain:strict]"
       data-landrush-island-loading-shell
       role="progressbar"
       suppressHydrationWarning

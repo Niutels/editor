@@ -49,7 +49,8 @@ test('keeps and migrates a legacy world across server replacement', async () => 
     firstServer = null
 
     const migratedState = JSON.parse(await readFile(stateFile, 'utf8'))
-    assert.equal(migratedState.schemaVersion, 2)
+    assert.equal(migratedState.schemaVersion, 3)
+    assert.deepEqual(migratedState.profileWallets, [])
     assert.equal(migratedState.worlds[0].builds[0].operationId, 'restored-parcel-02-0')
     assert.equal(migratedState.worlds[0].builds[0].revision, 0)
     assert.equal(
@@ -209,6 +210,47 @@ test('refuses to lossy-repair a malformed schema-2 build during restore', async 
     assert.match(stderr.join(''), /invalid schema-2 build graph/)
   } finally {
     await rm(dataDirectory, { force: true, recursive: true })
+  }
+})
+
+test('refuses malformed schema-3 profile-wallet authority during restore', async () => {
+  const cases = [
+    {
+      mutate(wallet) {
+        wallet.balance = -1
+      },
+      name: 'negative balance',
+    },
+    {
+      mutate(wallet) {
+        wallet.recentOperations.push({ ...wallet.recentOperations[0] })
+      },
+      name: 'duplicate recent operation',
+    },
+    {
+      mutate(wallet) {
+        wallet.revision = Number.MAX_SAFE_INTEGER + 1
+      },
+      name: 'unsafe revision',
+    },
+  ]
+
+  for (const entry of cases) {
+    const snapshot = createCanonicalSchema2State('strict-wallet-world')
+    snapshot.schemaVersion = 3
+    snapshot.profileWallets = [
+      {
+        balance: 40,
+        profileId: 'strict-wallet-player',
+        recentOperations: [
+          { kind: 'zombie-kill-reward', operationId: 'strict-wallet-op', result: 'applied' },
+        ],
+        revision: 4,
+        updatedAt: snapshot.savedAt,
+      },
+    ]
+    entry.mutate(snapshot.profileWallets[0])
+    await assertProductionRestoreFails(snapshot, entry.name)
   }
 })
 

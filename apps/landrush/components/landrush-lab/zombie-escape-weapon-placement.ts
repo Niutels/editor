@@ -2,8 +2,8 @@ import type { AnyNode } from '@pascal-app/core'
 import {
   findLandrushBuildingFloorInteriorRegion,
   type LandrushBuildingFloorInteriorRegion,
-  resolveLandrushBuildingFloorStacks,
 } from './landrush-building-floor-visibility'
+import { resolveLandrushZombieEscapeFirstHouseReadyRegions } from './landrush-zombie-escape-first-house'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import type { ZombieEscapeWeaponPickupPlacement } from './zombie-escape-weapon-pickup-data'
 
@@ -29,14 +29,21 @@ export function resolveZombieEscapeWeaponPickupPlacements(
   )
   if (limit === 0) return []
 
-  return resolveLandrushBuildingFloorStacks(nodes)
-    .flatMap((stack) => {
-      const groundFloor = stack.floors.find((floor) => floor.level === 0) ?? stack.floors[0]
-      if (!groundFloor) return []
-      const region = [...groundFloor.interiorRegions].sort(compareInteriorRegions)[0]
-      if (!region) return []
+  const largestReadyRegionByScope = new Map<
+    string,
+    ReturnType<typeof resolveLandrushZombieEscapeFirstHouseReadyRegions>[number]
+  >()
+  for (const candidate of resolveLandrushZombieEscapeFirstHouseReadyRegions(nodes)) {
+    const current = largestReadyRegionByScope.get(candidate.scopeId)
+    if (!current || compareInteriorRegions(candidate.region, current.region) < 0) {
+      largestReadyRegionByScope.set(candidate.scopeId, candidate)
+    }
+  }
+
+  return [...largestReadyRegionByScope.values()]
+    .flatMap(({ region, scopeId, y }) => {
       const point = findInteriorPlacementPoint(region)
-      return point ? [{ point, scopeId: stack.scopeId, y: groundFloor.baseY }] : []
+      return point ? [{ point, scopeId, y }] : []
     })
     .sort((first, second) => first.scopeId.localeCompare(second.scopeId))
     .slice(0, limit)

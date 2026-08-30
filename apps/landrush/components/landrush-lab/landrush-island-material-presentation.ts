@@ -12,6 +12,10 @@ import { materialAlphaTest, materialOpacity, mul, uniform } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
 import { readLandrushIslandFloorFadeOpacity } from './landrush-floor-fade-opacity'
 import { readLandrushRobotRevealObjectAmount } from './landrush-robot-reveal-support'
+import {
+  inheritLandrushZombieNightSurfaceMaterial,
+  prepareLandrushZombieNightSurfaceMaterials,
+} from './landrush-zombie-night-presentation-material'
 import { createLandrushRobotScreenRevealAlphaHashThresholdNode } from './robot-screen-reveal-alpha-hash'
 import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
 
@@ -171,6 +175,17 @@ export class LandrushIslandMaterialPresentationOwner {
   ): Group {
     const group = new Group()
     const readinessByMesh = new Map<Mesh, { floor: boolean; reveal: boolean }>()
+    const materialIds = new WeakMap<Material, number>()
+    const representedPipelines = new Set<string>()
+    let nextMaterialId = 1
+    const readMaterialId = (material: Material) => {
+      const existing = materialIds.get(material)
+      if (existing !== undefined) return existing
+      const id = nextMaterialId
+      nextMaterialId += 1
+      materialIds.set(material, id)
+      return id
+    }
     for (const { floor, mesh, reveal } of meshes) {
       const readiness = readinessByMesh.get(mesh)
       if (readiness) {
@@ -207,6 +222,7 @@ export class LandrushIslandMaterialPresentationOwner {
         : Array.isArray(sourceMaterial)
           ? sourceMaterial
           : [sourceMaterial]
+      prepareLandrushZombieNightSurfaceMaterials(mesh, sources)
       const emittedAssignments: Material[][] = []
 
       for (const state of states) {
@@ -221,6 +237,14 @@ export class LandrushIslandMaterialPresentationOwner {
           continue
         }
         emittedAssignments.push(materials)
+
+        const pipelineKey = [
+          Array.isArray(sourceMaterial) ? 'array' : 'single',
+          materials.map(readMaterialId).join(','),
+          readLandrushMaterialReadinessMeshPipelineSignature(mesh, readMaterialId),
+        ].join('|')
+        if (representedPipelines.has(pipelineKey)) continue
+        representedPipelines.add(pipelineKey)
 
         const representative = mesh.clone(false)
         representative.material = Array.isArray(sourceMaterial) ? materials : materials[0]!
@@ -846,9 +870,13 @@ export class LandrushIslandMaterialPresentationOwner {
       source.addEventListener('dispose', disposeListener)
     }
     const existing = variants.get(variant.key)
-    if (existing) return existing
+    if (existing) {
+      inheritLandrushZombieNightSurfaceMaterial(source, existing)
+      return existing
+    }
 
     const material = cloneMaterial(source)
+    inheritLandrushZombieNightSurfaceMaterial(source, material)
     const nodeMaterial = material as LandrushIslandPresentationNodeMaterial
     const sourceNodeMaterial = source as LandrushIslandPresentationNodeMaterial
     if (sourceNodeMaterial.alphaTestNode !== undefined) {
@@ -1047,6 +1075,99 @@ function sameMaterialAssignment(first: Material[], second: Material[]) {
   return (
     first.length === second.length && first.every((material, index) => material === second[index])
   )
+}
+
+function readLandrushMaterialReadinessMeshPipelineSignature(
+  mesh: Mesh,
+  readMaterialId: (material: Material) => number,
+) {
+  const candidate = mesh as Mesh & {
+    customDepthMaterial?: Material
+    customDistanceMaterial?: Material
+    drawMode?: number
+    instanceColor?: unknown
+    instanceMatrix?: unknown
+    instanceMorphTexture?: unknown
+    isBatchedMesh?: boolean
+    isInstancedMesh?: boolean
+    isSkinnedMesh?: boolean
+    morphTargetInfluences?: readonly number[]
+  }
+  const geometry = mesh.geometry
+  const attributeSignature = Object.entries(geometry.attributes)
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([name, attribute]) => `${name}:${readLandrushPipelineAttributeSignature(attribute)}`)
+    .join(',')
+  const morphSignature = Object.entries(geometry.morphAttributes)
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(
+      ([name, attributes]) =>
+        `${name}:${attributes.map(readLandrushPipelineAttributeSignature).join(';')}`,
+    )
+    .join(',')
+  const representedGroupMaterials = [
+    ...new Set(
+      geometry.groups.filter((group) => group.count > 0).map((group) => group.materialIndex ?? 0),
+    ),
+  ].sort((first, second) => first - second)
+  const customDepthMaterialId = candidate.customDepthMaterial
+    ? readMaterialId(candidate.customDepthMaterial)
+    : 0
+  const customDistanceMaterialId = candidate.customDistanceMaterial
+    ? readMaterialId(candidate.customDistanceMaterial)
+    : 0
+  return [
+    candidate.isBatchedMesh === true ? 'batched' : 'not-batched',
+    candidate.isInstancedMesh === true ? 'instanced' : 'not-instanced',
+    candidate.isSkinnedMesh === true ? 'skinned' : 'static',
+    candidate.instanceColor ? 'instance-color' : 'no-instance-color',
+    candidate.instanceMatrix ? 'instance-matrix' : 'no-instance-matrix',
+    candidate.instanceMorphTexture ? 'instance-morph' : 'no-instance-morph',
+    geometry.index
+      ? `indexed:${readLandrushPipelineAttributeSignature(geometry.index)}`
+      : 'non-indexed',
+    `attributes:${attributeSignature}`,
+    `morph:${morphSignature}`,
+    geometry.morphTargetsRelative ? 'relative-morph' : 'absolute-morph',
+    `morph-influences:${String(candidate.morphTargetInfluences?.length ?? 0)}`,
+    `draw-mode:${String(candidate.drawMode ?? 'default')}`,
+    geometry.groups.length === 0 ? 'groups:none' : `groups:${representedGroupMaterials.join(',')}`,
+    mesh.castShadow ? 'casts-shadow' : 'no-cast-shadow',
+    mesh.receiveShadow ? 'receives-shadow' : 'no-receive-shadow',
+    `custom-depth:${String(customDepthMaterialId)}`,
+    `custom-distance:${String(customDistanceMaterialId)}`,
+  ].join('|')
+}
+
+function readLandrushPipelineAttributeSignature(attribute: unknown) {
+  const candidate = attribute as {
+    array?: { constructor?: { name?: string } }
+    data?: {
+      array?: { constructor?: { name?: string } }
+      meshPerAttribute?: number
+      stride?: number
+    }
+    gpuType?: number
+    isInstancedBufferAttribute?: boolean
+    isInterleavedBufferAttribute?: boolean
+    itemSize?: number
+    meshPerAttribute?: number
+    normalized?: boolean
+    offset?: number
+  }
+  const storage = candidate.isInterleavedBufferAttribute ? candidate.data : candidate
+  const arrayType = storage?.array?.constructor?.name ?? 'unknown'
+  return [
+    candidate.isInterleavedBufferAttribute ? 'interleaved' : 'buffer',
+    candidate.isInstancedBufferAttribute ? 'instanced' : 'vertex',
+    arrayType,
+    String(candidate.itemSize ?? 0),
+    candidate.normalized ? 'normalized' : 'raw',
+    `gpu:${String(candidate.gpuType ?? 'default')}`,
+    `stride:${String(candidate.data?.stride ?? candidate.itemSize ?? 0)}`,
+    `offset:${String(candidate.offset ?? 0)}`,
+    `divisor:${String(candidate.meshPerAttribute ?? candidate.data?.meshPerAttribute ?? 0)}`,
+  ].join(':')
 }
 
 function sameRevealPresentation(

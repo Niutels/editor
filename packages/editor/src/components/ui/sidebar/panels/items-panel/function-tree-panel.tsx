@@ -56,6 +56,8 @@ export function FunctionTreePanel({
   searchResults,
   leadingTile,
   emptyState,
+  isItemDisabled,
+  renderItemBadge,
 }: {
   functionTree: FunctionTreeNode[]
   items?: AssetInput[]
@@ -63,6 +65,8 @@ export function FunctionTreePanel({
   searchResults?: AssetInput[] | null
   leadingTile?: React.ReactNode
   emptyState?: React.ReactNode
+  isItemDisabled?: (item: AssetInput & { tool?: string }) => boolean
+  renderItemBadge?: (item: AssetInput & { tool?: string }) => React.ReactNode
 }) {
   const [activeRootSlug, setActiveRootSlug] = useState<string | null>(
     functionTree[0]?.slug ?? null,
@@ -257,9 +261,11 @@ export function FunctionTreePanel({
           <ItemCatalog
             category={'furnish' as never}
             emptyState={emptyState}
+            isItemDisabled={isItemDisabled}
             key={activeNode?.slug ?? 'all'}
             leadingTile={leadingTile}
             overrideItems={isServerSearch && search ? (searchItems ?? undefined) : treeItems}
+            renderItemBadge={renderItemBadge}
           />
         )}
       </div>

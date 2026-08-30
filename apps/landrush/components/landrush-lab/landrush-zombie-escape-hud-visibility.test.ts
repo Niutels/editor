@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test'
 import {
   shouldShowLandrushZombieEscapeMoney,
+  shouldShowLandrushZombieEscapeNightInteractionHud,
   shouldShowLandrushZombieEscapeTouchControls,
 } from './landrush-zombie-escape-hud-visibility'
 
 describe('Landrush zombie HUD visibility', () => {
-  test('shows money only for an authoritative, ready night phase', () => {
-    expect(
-      shouldShowLandrushZombieEscapeMoney({
-        actualPhase: 'night',
-        expectedPhase: 'night',
-        phaseReady: true,
-      }),
-    ).toBe(true)
-
+  test('keeps money visible throughout synchronized Day and Night phases', () => {
     for (const state of [
       { actualPhase: 'build', expectedPhase: 'build', phaseReady: true },
-      { actualPhase: 'night', expectedPhase: 'build', phaseReady: true },
+      { actualPhase: 'build', expectedPhase: 'build', phaseReady: false },
+      { actualPhase: 'night', expectedPhase: 'night', phaseReady: true },
       { actualPhase: 'night', expectedPhase: 'night', phaseReady: false },
+    ] as const) {
+      expect(shouldShowLandrushZombieEscapeMoney(state)).toBe(true)
+    }
+
+    for (const state of [
+      { actualPhase: 'night', expectedPhase: 'build', phaseReady: true },
       { actualPhase: 'build', expectedPhase: 'night', phaseReady: true },
     ] as const) {
       expect(shouldShowLandrushZombieEscapeMoney(state)).toBe(false)
@@ -42,6 +42,25 @@ describe('Landrush zombie HUD visibility', () => {
       { actualPhase: 'night', expectedPhase: 'night', phaseReady: true, terminal: true },
     ] as const) {
       expect(shouldShowLandrushZombieEscapeTouchControls(state)).toBe(false)
+    }
+  })
+
+  test('shows pickup and controller interaction hints only during ready Night gameplay', () => {
+    expect(
+      shouldShowLandrushZombieEscapeNightInteractionHud({
+        actualPhase: 'night',
+        expectedPhase: 'night',
+        phaseReady: true,
+      }),
+    ).toBe(true)
+
+    for (const state of [
+      { actualPhase: 'build', expectedPhase: 'build', phaseReady: true },
+      { actualPhase: 'night', expectedPhase: 'build', phaseReady: true },
+      { actualPhase: 'build', expectedPhase: 'night', phaseReady: true },
+      { actualPhase: 'night', expectedPhase: 'night', phaseReady: false },
+    ] as const) {
+      expect(shouldShowLandrushZombieEscapeNightInteractionHud(state)).toBe(false)
     }
   })
 })

@@ -8,6 +8,7 @@ import {
   createZombieEscapeRenderReadinessRegistry,
   createZombieEscapeZombieRenderRepresentativeKey,
   getZombieEscapeRenderRepresentativeKeys,
+  isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled,
   waitForZombieEscapeGpuPreparation,
   ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
   type ZombieEscapePipelineRenderer,
@@ -62,7 +63,7 @@ function createFakeRenderReadinessTimer() {
 }
 
 async function flushMicrotasksUntil(condition: () => boolean) {
-  for (let attempt = 0; attempt < 20 && !condition(); attempt += 1) {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) {
     await Promise.resolve()
   }
 }
@@ -137,10 +138,23 @@ describe('Zombie Escape render representative coverage', () => {
 })
 
 describe('Zombie Escape render compilation', () => {
-  test('initializes first, compiles against the actual scene, and restores hidden flags before await', async () => {
+  test('bypasses exact presentation rendering only for explicit draw or post-FX diagnostics', () => {
+    expect(isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled('')).toBe(false)
+    expect(isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled('?disable=ao')).toBe(false)
+    expect(isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled('?disable=draw')).toBe(true)
+    expect(isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled('?disable=postFx')).toBe(
+      true,
+    )
+    expect(
+      isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled('?disable=outline,postFx'),
+    ).toBe(true)
+  })
+
+  test('initializes first, submits one aggregate against the actual scene, and restores it before await', async () => {
     const fixture = createCompileFixture()
     const compilation = deferred<unknown>()
     const events: string[] = []
+    let aggregateRoot: Object3D | undefined
     let compileCount = 0
     const renderer: ZombieEscapePipelineRenderer = {
       async compileAsync(root, camera, targetScene) {
@@ -153,8 +167,11 @@ describe('Zombie Escape render compilation', () => {
           expect(fixture.ancestor.visible).toBe(false)
           return undefined
         }
-        expect(root).toBe(fixture.root)
-        expect(fixture.ancestor.visible).toBe(true)
+        aggregateRoot = root
+        expect(root).not.toBe(fixture.root)
+        expect(fixture.root.parent).toBe(root)
+        expect(fixture.ancestor.children).not.toContain(fixture.root)
+        expect(fixture.ancestor.visible).toBe(false)
         expect(fixture.root.visible).toBe(true)
         expect(fixture.child.visible).toBe(true)
         expect(fixture.child.frustumCulled).toBe(true)
@@ -175,6 +192,9 @@ describe('Zombie Escape render compilation', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(events).toEqual(['init', 'compile:representative'])
+    expect(aggregateRoot).toBeDefined()
+    expect(fixture.root.parent).toBe(fixture.ancestor)
+    expect(fixture.ancestor.children).toEqual([fixture.root])
     expect(fixture.ancestor.visible).toBe(false)
     expect(fixture.root.visible).toBe(false)
     expect(fixture.child.visible).toBe(false)
@@ -193,9 +213,12 @@ describe('Zombie Escape render compilation', () => {
     fixture.mesh.material.dispose()
   })
 
-  test('keeps targeted WebGPU prewarm but skips the unsafe whole-scene compile', async () => {
+  test('warms exact WebGPU presentation and direct frames after the aggregate compile', async () => {
     const fixture = createCompileFixture()
     const compiledRoots: Object3D[] = []
+    const compiledPointLightCounts: number[] = []
+    const containsRepresentative: boolean[] = []
+    const prewarmRenderPaths: Array<'direct' | 'presentation' | undefined> = []
     let initialized = false
     const renderer: ZombieEscapePipelineRenderer = {
       backend: { device: { queue: { onSubmittedWorkDone: async () => undefined } } },
@@ -203,6 +226,14 @@ describe('Zombie Escape render compilation', () => {
         expect(camera).toBe(fixture.camera)
         expect(targetScene).toBe(fixture.targetScene)
         compiledRoots.push(root)
+        let pointLightCount = 0
+        let representativeFound = false
+        root.traverse((object) => {
+          if ((object as { isPointLight?: boolean }).isPointLight) pointLightCount += 1
+          if (object === fixture.root) representativeFound = true
+        })
+        compiledPointLightCounts.push(pointLightCount)
+        containsRepresentative.push(representativeFound)
       },
       init() {
         initialized = true
@@ -210,15 +241,27 @@ describe('Zombie Escape render compilation', () => {
       isWebGPURenderer: true,
     }
 
-    await compileZombieEscapeRenderRepresentatives({
-      camera: fixture.camera,
-      renderer,
-      representatives: [{ key: 'hidden', root: fixture.root }],
-      targetScene: fixture.targetScene,
-    })
+    await compileZombieEscapeRenderRepresentatives(
+      {
+        camera: fixture.camera,
+        renderer,
+        representatives: [{ key: 'hidden', root: fixture.root }],
+        targetScene: fixture.targetScene,
+      },
+      undefined,
+      async ({ renderPath, representatives }) => {
+        prewarmRenderPaths.push(renderPath)
+        expect(representatives).toEqual([{ key: 'hidden', root: fixture.root }])
+      },
+    )
 
     expect(initialized).toBe(true)
-    expect(compiledRoots).toEqual([fixture.root])
+    expect(compiledRoots).toHaveLength(1)
+    expect(compiledRoots[0]).not.toBe(fixture.root)
+    expect(compiledPointLightCounts).toEqual([0])
+    expect(containsRepresentative).toEqual([true])
+    expect(prewarmRenderPaths).toEqual(['presentation', 'direct'])
+    expect(fixture.root.parent).toBe(fixture.ancestor)
     expect(fixture.ancestor.visible).toBe(false)
     expect(fixture.root.visible).toBe(false)
     expect(fixture.child.visible).toBe(false)
@@ -245,6 +288,8 @@ describe('Zombie Escape render compilation', () => {
           targetScene: fixture.targetScene,
         }),
       ).rejects.toThrow('compile failed')
+      expect(fixture.root.parent).toBe(fixture.ancestor)
+      expect(fixture.ancestor.children).toEqual([fixture.root])
       expect(fixture.ancestor.visible).toBe(false)
       expect(fixture.root.visible).toBe(false)
       expect(fixture.child.visible).toBe(false)
@@ -255,7 +300,105 @@ describe('Zombie Escape render compilation', () => {
     }
   })
 
-  test('serializes roots instead of compiling a pool concurrently', async () => {
+  test('restores exact sibling and nested hierarchy before an aggregate submission settles', async () => {
+    const representativeOrders = ['forward', 'reverse'] as const
+    for (const order of representativeOrders) {
+      const parent = new Group()
+      const before = new Group()
+      const first = new Group()
+      const between = new Group()
+      const second = new Group()
+      const after = new Group()
+      parent.add(before, first, between, second, after)
+      const originalChildren = [...parent.children]
+      const compilation = deferred<unknown>()
+      let calls = 0
+      const pending = compileZombieEscapeRenderRepresentatives({
+        camera: new PerspectiveCamera(),
+        renderer: {
+          compileAsync: (root) => {
+            calls += 1
+            if (calls > 1) return Promise.resolve()
+            expect(root.children).toEqual(order === 'forward' ? [first, second] : [second, first])
+            return compilation.promise
+          },
+        },
+        representatives: (order === 'forward' ? [first, second] : [second, first]).map(
+          (root, index) => ({ key: String(index), root }),
+        ),
+        targetScene: new Scene(),
+      })
+      await flushMicrotasksUntil(() => calls === 1)
+      expect(parent.children).toEqual(originalChildren)
+      expect(first.parent).toBe(parent)
+      expect(second.parent).toBe(parent)
+      compilation.resolve(undefined)
+      await pending
+    }
+
+    for (const order of representativeOrders) {
+      const parent = new Group()
+      const ancestor = new Group()
+      const before = new Group()
+      const descendant = new Group()
+      const after = new Group()
+      parent.add(ancestor)
+      ancestor.add(before, descendant, after)
+      const originalChildren = [...ancestor.children]
+      const compilation = deferred<unknown>()
+      let calls = 0
+      const representatives = order === 'forward' ? [ancestor, descendant] : [descendant, ancestor]
+      const pending = compileZombieEscapeRenderRepresentatives({
+        camera: new PerspectiveCamera(),
+        renderer: {
+          compileAsync: () => {
+            calls += 1
+            return calls === 1 ? compilation.promise : Promise.resolve()
+          },
+        },
+        representatives: representatives.map((root, index) => ({ key: String(index), root })),
+        targetScene: new Scene(),
+      })
+      await flushMicrotasksUntil(() => calls === 1)
+      expect(ancestor.parent).toBe(parent)
+      expect(ancestor.children).toEqual(originalChildren)
+      expect(descendant.parent).toBe(ancestor)
+      compilation.resolve(undefined)
+      await pending
+    }
+  })
+
+  test('deduplicates identical roots and restores a parentless root before submission settles', async () => {
+    const root = new Group()
+    const compilation = deferred<unknown>()
+    let aggregateOccurrences = 0
+    let calls = 0
+    const pending = compileZombieEscapeRenderRepresentatives({
+      camera: new PerspectiveCamera(),
+      renderer: {
+        compileAsync: (aggregate) => {
+          calls += 1
+          if (calls > 1) return Promise.resolve()
+          aggregate.traverse((object) => {
+            if (object === root) aggregateOccurrences += 1
+          })
+          return compilation.promise
+        },
+      },
+      representatives: [
+        { key: 'first', root },
+        { key: 'duplicate', root },
+      ],
+      targetScene: new Scene(),
+    })
+    await flushMicrotasksUntil(() => calls === 1)
+    expect(root.parent).toBeNull()
+    expect(aggregateOccurrences).toBe(1)
+    compilation.resolve(undefined)
+    await pending
+  })
+
+  test('serializes the aggregate and legacy scene submissions without per-root compiles', async () => {
     const first = deferred<unknown>()
     const second = deferred<unknown>()
     const roots = [new Group(), new Group()]
@@ -263,9 +406,16 @@ describe('Zombie Escape render compilation', () => {
     let maximumActive = 0
     let calls = 0
     const renderer: ZombieEscapePipelineRenderer = {
-      async compileAsync() {
+      async compileAsync(root) {
         active += 1
         maximumActive = Math.max(maximumActive, active)
+        if (calls === 0) {
+          let representativeCount = 0
+          root.traverse((object) => {
+            if (roots.includes(object as Group)) representativeCount += 1
+          })
+          expect(representativeCount).toBe(2)
+        }
         const pending = calls++ === 0 ? first : second
         await pending.promise
         active -= 1
@@ -280,12 +430,11 @@ describe('Zombie Escape render compilation', () => {
     await Promise.resolve()
     expect(calls).toBe(1)
     first.resolve(undefined)
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushMicrotasksUntil(() => calls === 2)
     expect(calls).toBe(2)
     second.resolve(undefined)
     await pending
-    expect(calls).toBe(3)
+    expect(calls).toBe(2)
     expect(maximumActive).toBe(1)
   })
 })
@@ -296,9 +445,12 @@ describe('Zombie Escape GPU preparation completion', () => {
     const root = new Group()
     const targetScene = new Scene()
     const compiled: Object3D[] = []
+    const compiledRepresentativeCounts: number[] = []
     const progress: unknown[] = []
     let waitingForGpu = false
-    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const coordinator = createZombieEscapeRenderReadinessCoordinator({
+      prewarmPresentationPipeline: async () => undefined,
+    })
     const pending = coordinator.request(
       {
         camera: new PerspectiveCamera(),
@@ -317,6 +469,11 @@ describe('Zombie Escape GPU preparation completion', () => {
           },
           compileAsync: async (object) => {
             compiled.push(object)
+            let representativeCount = 0
+            object.traverse((candidate) => {
+              if (candidate === root) representativeCount += 1
+            })
+            compiledRepresentativeCounts.push(representativeCount)
           },
         },
         representatives: [{ key: 'root', root }],
@@ -326,7 +483,11 @@ describe('Zombie Escape GPU preparation completion', () => {
       (snapshot) => progress.push(snapshot),
     )
     await flushMicrotasksUntil(() => waitingForGpu)
-    expect(compiled).toEqual([root, targetScene])
+    expect(compiled).toHaveLength(2)
+    expect(compiled[0]).not.toBe(root)
+    expect(compiled[1]).toBe(targetScene)
+    expect(compiledRepresentativeCounts).toEqual([1, 0])
+    expect(root.parent).toBeNull()
     expect(progress).toEqual([
       { completed: 0, total: 3 },
       { completed: 1, total: 3 },
@@ -343,7 +504,9 @@ describe('Zombie Escape GPU preparation completion', () => {
     const progress: unknown[] = []
     const statuses: unknown[] = []
     let waitingForGpu = false
-    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const coordinator = createZombieEscapeRenderReadinessCoordinator({
+      prewarmPresentationPipeline: async () => undefined,
+    })
     const pending = coordinator.request(
       {
         camera: new PerspectiveCamera(),
@@ -373,8 +536,10 @@ describe('Zombie Escape GPU preparation completion', () => {
     gpu.reject(new Error('device lost'))
     expect(await pending).toBe('failed')
     expect(progress).toEqual([
-      { completed: 0, total: 2 },
-      { completed: 1, total: 2 },
+      { completed: 0, total: 4 },
+      { completed: 1, total: 4 },
+      { completed: 2, total: 4 },
+      { completed: 3, total: 4 },
     ])
     expect(statuses).toEqual([{ message: 'device lost', state: 'failed' }])
     coordinator.dispose()
@@ -400,12 +565,32 @@ describe('Zombie Escape GPU preparation completion', () => {
 
   test('keeps the complete registered set behind readiness until GPU submissions finish', async () => {
     const gpu = deferred<void>()
+    const exactPipelineRender = deferred<void>()
     const roots = [new Group(), new Group(), new Group()]
+    const parent = new Group()
+    const before = new Group()
+    const between = new Group()
+    const after = new Group()
+    parent.add(before, roots[0]!, between, roots[1]!, roots[2]!, after)
+    const originalChildren = [...parent.children]
     const compiled: Object3D[] = []
+    const compiledRepresentativeCounts: number[] = []
     const statuses: string[] = []
     const progress: Array<Readonly<{ completed: number; total: number }>> = []
+    const targetScene = new Scene()
+    const prewarmRenderPaths: Array<'direct' | 'presentation' | undefined> = []
+    let waitingForExactPipelineRender = false
     let waitingForGpu = false
-    const coordinator = createZombieEscapeRenderReadinessCoordinator()
+    const coordinator = createZombieEscapeRenderReadinessCoordinator({
+      prewarmPresentationPipeline: async ({ renderPath, representatives }) => {
+        prewarmRenderPaths.push(renderPath)
+        waitingForExactPipelineRender = true
+        expect(representatives.map(({ root }) => root)).toEqual(roots)
+        expect(parent.children).toEqual(originalChildren)
+        for (const root of roots) expect(root.parent).toBe(parent)
+        await exactPipelineRender.promise
+      },
+    })
     const result = coordinator.request(
       {
         camera: new PerspectiveCamera(),
@@ -424,18 +609,38 @@ describe('Zombie Escape GPU preparation completion', () => {
           },
           compileAsync: async (root) => {
             compiled.push(root)
+            let representativeCount = 0
+            root.traverse((object) => {
+              if (roots.includes(object as Group)) representativeCount += 1
+            })
+            compiledRepresentativeCounts.push(representativeCount)
           },
           isWebGPURenderer: true,
         },
         representatives: roots.map((root, index) => ({ key: String(index), root })),
-        targetScene: new Scene(),
+        targetScene,
       },
       ({ state }) => statuses.push(state),
       (snapshot) => progress.push(snapshot),
     )
+    await flushMicrotasksUntil(() => waitingForExactPipelineRender)
+    expect(compiled).toHaveLength(1)
+    expect(new Set(compiled).size).toBe(1)
+    expect(roots).not.toContain(compiled[0])
+    expect(compiledRepresentativeCounts).toEqual([3])
+    expect(parent.children).toEqual(originalChildren)
+    for (const root of roots) expect(root.parent).toBe(parent)
+    expect(waitingForGpu).toBe(false)
+    expect(progress).toEqual([
+      { completed: 0, total: 4 },
+      { completed: 1, total: 4 },
+    ])
+    exactPipelineRender.resolve()
     await flushMicrotasksUntil(() => waitingForGpu)
-    expect(compiled).toEqual(roots)
     expect(waitingForGpu).toBe(true)
+    expect(compiled).toHaveLength(1)
+    expect(compiledRepresentativeCounts).toEqual([3])
+    expect(prewarmRenderPaths).toEqual(['presentation', 'direct'])
     expect(statuses).toEqual([])
     expect(progress).toEqual([
       { completed: 0, total: 4 },

@@ -3,8 +3,17 @@
 import { LandrushWorldNode } from '@landrush/pascal-plugin'
 import { LandrushRobot } from '@landrush/pascal-plugin/landrush-world/robot'
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, memo, Suspense, useEffect, useMemo, useRef } from 'react'
+import {
+  type MutableRefObject,
+  memo,
+  type RefObject,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react'
 import type { Camera, Group } from 'three'
+import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
 import {
   createLandrushRobotWeaponCombatState,
   createLandrushRobotWeaponMuzzlePose,
@@ -42,11 +51,13 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
   playerColor = '#fff0a2',
   presentationFramePriority,
   quality,
+  detailedZombies,
   renderReadinessCamera,
   renderReadinessRegistry,
   renderPlayer = true,
   retryGeneratedAssetsGeneration = 0,
   simulationRef,
+  shoulderTorchLightingStateRef,
   zombieMaterialPhaseActive = true,
 }: {
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
@@ -57,11 +68,13 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
   playerColor?: string
   presentationFramePriority?: number
   quality: ZombieEscapeQuality
+  detailedZombies?: boolean
   renderReadinessCamera?: Camera
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   renderPlayer?: boolean
   retryGeneratedAssetsGeneration?: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  shoulderTorchLightingStateRef?: RefObject<LandrushRobotShoulderTorchLightingState>
   zombieMaterialPhaseActive?: boolean
 }) {
   const loadedZombieVariantsRef = useRef(new Set<number>())
@@ -80,6 +93,7 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
     <group name="zombie-escape-presentation" userData={presentationUserData}>
       {renderPlayer ? <ZombieEscapeOrbot simulationRef={simulationRef} /> : null}
       <ZombieEscapeGeneratedAssets
+        detailedZombies={detailedZombies ?? quality === 'balanced'}
         detailedZombieSlotsRef={detailedZombieSlotsRef}
         impactVisualRegistry={impactVisualRegistry}
         loadedZombieVariantsRef={loadedZombieVariantsRef}
@@ -92,6 +106,7 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
         renderReadinessRegistry={renderReadinessRegistry}
         retryGeneration={retryGeneratedAssetsGeneration}
         simulationRef={simulationRef}
+        shoulderTorchLightingStateRef={shoulderTorchLightingStateRef}
         zombieMaterialPhaseActive={zombieMaterialPhaseActive}
         zombiePresentationFramePriority={presentationFramePriority}
         zombieSelectionFramePriority={(presentationFramePriority ?? -19) - 0.01}

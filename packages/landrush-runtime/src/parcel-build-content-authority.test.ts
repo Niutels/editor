@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import type { ParcelBuildNode, ParcelBuildSnapshot } from '@landrush/protocol'
+import {
+  isZombieEscapeFirstHouseReady,
+  type ParcelBuildNode,
+  type ParcelBuildSnapshot,
+} from '@landrush/protocol'
 import {
   createClaimedParcelBuildAuthorityUpdate,
   createOfflineParcelBuildAuthorityUpdates,
@@ -8,6 +12,7 @@ import {
   resolveLocalParcelBuildContentAuthority,
   shouldRefreshParcelBuildAuthorityAfterClaim,
 } from './parcel-build-content-authority'
+import { isCanonicalZombieEscapeFirstHouseReady } from './world-multiplayer-client'
 
 const ONLINE_SCOPE = {
   contentAuthority: 'online',
@@ -32,6 +37,94 @@ const OFFLINE_BUILD = {
   updatedBy: 'player-a',
   worldId: 'world-a',
 } satisfies ParcelBuildSnapshot<ParcelBuildNode>
+
+const ZOMBIE_HOUSE_METADATA = { landrushParcelId: 'shared-zombie-house' }
+
+function buildNode(
+  id: string,
+  type: string,
+  parentId: string | null,
+  properties: Record<string, unknown> = {},
+) {
+  return {
+    id,
+    object: 'node',
+    parentId,
+    type,
+    visible: true,
+    ...properties,
+  } as ParcelBuildNode
+}
+
+function closedZombieHouseNodes({ door = false } = {}) {
+  const wallIds = ['wall-north', 'wall-east', 'wall-south', 'wall-west']
+  return [
+    buildNode('building-house', 'building', null, { children: ['level-house'] }),
+    buildNode('level-house', 'level', 'building-house', { children: wallIds }),
+    buildNode(wallIds[0]!, 'wall', 'level-house', {
+      children: door ? ['door-house'] : [],
+      end: [4, 0],
+      metadata: ZOMBIE_HOUSE_METADATA,
+      start: [0, 0],
+    }),
+    buildNode(wallIds[1]!, 'wall', 'level-house', {
+      children: [],
+      end: [4, 3],
+      metadata: ZOMBIE_HOUSE_METADATA,
+      start: [4, 0],
+    }),
+    buildNode(wallIds[2]!, 'wall', 'level-house', {
+      children: [],
+      end: [0, 3],
+      metadata: ZOMBIE_HOUSE_METADATA,
+      start: [4, 3],
+    }),
+    buildNode(wallIds[3]!, 'wall', 'level-house', {
+      children: [],
+      end: [0, 0],
+      metadata: ZOMBIE_HOUSE_METADATA,
+      start: [0, 3],
+    }),
+    ...(door
+      ? [
+          buildNode('door-house', 'door', wallIds[0]!, {
+            metadata: ZOMBIE_HOUSE_METADATA,
+          }),
+        ]
+      : []),
+  ]
+}
+
+function standaloneDoorWallNodes() {
+  return [
+    buildNode('building-door', 'building', null, { children: ['level-house'] }),
+    buildNode('level-house', 'level', 'building-door', {
+      children: ['wall-door-host'],
+    }),
+    buildNode('wall-door-host', 'wall', 'level-house', {
+      children: ['door-cross-parcel'],
+      end: [4, 0],
+      metadata: ZOMBIE_HOUSE_METADATA,
+      start: [0, 0],
+    }),
+    buildNode('door-cross-parcel', 'door', 'wall-door-host', {
+      metadata: ZOMBIE_HOUSE_METADATA,
+    }),
+  ]
+}
+
+function canonicalBuild(parcelId: string, worldId: string, nodes: readonly ParcelBuildNode[]) {
+  return {
+    nodes: [...nodes],
+    operationId: `operation-${parcelId}`,
+    parcelId,
+    revision: 1,
+    schemaVersion: 2,
+    updatedAt: 1,
+    updatedBy: 'player-a',
+    worldId,
+  } satisfies ParcelBuildSnapshot<ParcelBuildNode>
+}
 
 describe('ParcelBuildContentAuthorityEpoch', () => {
   test('assigns a fresh epoch every time world authority changes from A to B to A', () => {
@@ -169,5 +262,56 @@ describe('ParcelBuildContentAuthorityEpoch', () => {
     expect(resolve('online-pending')).toEqual({ snapshotWorldId: null, updates: [] })
     expect(resolve('online')).toEqual({ snapshotWorldId: null, updates: [] })
     expect(resolve('offline')).toEqual({ snapshotWorldId: 'world-a', updates: [] })
+  })
+})
+
+describe('canonical Zombie Escape first-house authority', () => {
+  const ready = (
+    parcelBuildNodes: readonly ParcelBuildSnapshot<ParcelBuildNode>[],
+    watchedParcelWorldId = 'world-a',
+    parcelBuildSnapshotWorldId: string | null = 'world-a',
+  ) =>
+    isCanonicalZombieEscapeFirstHouseReady({
+      parcelBuildNodes,
+      parcelBuildSnapshotWorldId,
+      watchedParcelWorldId,
+    })
+
+  test('rejects empty and spawn-only canonical authority', () => {
+    expect(ready([])).toBe(false)
+    expect(
+      ready([canonicalBuild('parcel-spawn', 'world-a', [buildNode('spawn-only', 'spawn', null)])]),
+    ).toBe(false)
+  })
+
+  test('accepts one qualifying canonical build in the watched world', () => {
+    expect(
+      ready([canonicalBuild('parcel-house', 'world-a', closedZombieHouseNodes({ door: true }))]),
+    ).toBe(true)
+  })
+
+  test('rejects a qualifying build from a different world', () => {
+    expect(
+      ready([canonicalBuild('parcel-house', 'world-b', closedZombieHouseNodes({ door: true }))]),
+    ).toBe(false)
+    expect(
+      ready(
+        [canonicalBuild('parcel-house', 'world-a', closedZombieHouseNodes({ door: true }))],
+        'world-a',
+        'world-b',
+      ),
+    ).toBe(false)
+  })
+
+  test('does not compose closed walls and a hosted door across canonical builds', () => {
+    const walls = closedZombieHouseNodes()
+    const hostedDoorWall = standaloneDoorWallNodes()
+    expect(isZombieEscapeFirstHouseReady([...walls, ...hostedDoorWall])).toBe(true)
+    expect(
+      ready([
+        canonicalBuild('parcel-walls', 'world-a', walls),
+        canonicalBuild('parcel-door', 'world-a', hostedDoorWall),
+      ]),
+    ).toBe(false)
   })
 })

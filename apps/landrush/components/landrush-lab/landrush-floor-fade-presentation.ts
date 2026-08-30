@@ -83,6 +83,7 @@ type LandrushIslandFloorFadeRootState = {
   committedSourceAssignments: Map<Mesh, Material | Material[]>
   disposed: boolean
   excludedRoots: Set<Object3D>
+  excludedRootsInput: Iterable<Object3D>
   forceVisible: boolean
   generation: LandrushIslandFloorFadeGeneration | null
   hasCommittedPresentation: boolean
@@ -109,6 +110,7 @@ type LandrushIslandFloorFadeLevelState = {
   desiredEffectiveOpacity: number
   desiredOpacity: number
   fallback: LandrushIslandFloorFadeRootState | null
+  lastSettledParent: Object3D | null
   lastSafe: LandrushIslandFloorFadeRootState | null
 }
 
@@ -157,6 +159,19 @@ export type LandrushIslandFloorFadePreparationMetrics = Readonly<{
   preparationSteps: number
   stackItemsAdded: number
 }>
+
+const EMPTY_LANDRUSH_ISLAND_FLOOR_FADE_PREPARATION_METRICS: LandrushIslandFloorFadePreparationMetrics =
+  {
+    arrivalsAdvanced: 0,
+    edgesTraversed: 0,
+    elapsedMs: 0,
+    materialsPrepared: 0,
+    maxPendingStackDepth: 0,
+    meshesPrepared: 0,
+    objectsVisited: 0,
+    preparationSteps: 0,
+    stackItemsAdded: 0,
+  }
 
 export type LandrushIslandFloorFadeLevelReadState = Readonly<{
   appliedOpacity: number
@@ -247,6 +262,7 @@ export class LandrushIslandFloorFadePresentationOwner<
         desiredEffectiveOpacity: 1,
         desiredOpacity: 1,
         fallback: null,
+        lastSettledParent: root.parent,
         lastSafe: null,
       }
       this.levels.set(levelId, nextLevel)
@@ -309,8 +325,23 @@ export class LandrushIslandFloorFadePresentationOwner<
       }
     }
 
-    level.desiredEffectiveOpacity = clamp01(effectiveOpacity)
-    level.desiredOpacity = clamp01(opacity)
+    const desiredEffectiveOpacity = clamp01(effectiveOpacity)
+    const desiredOpacity = clamp01(opacity)
+    if (
+      level.desiredEffectiveOpacity === desiredEffectiveOpacity &&
+      level.desiredOpacity === desiredOpacity &&
+      level.fallback === null &&
+      level.lastSettledParent === root.parent &&
+      level.canonical.generation === null &&
+      level.canonical.quarantines.size === 0
+    ) {
+      return {
+        appliedOpacity: level.appliedOpacity,
+        ready: this.isCanonicalReady(level),
+      }
+    }
+    level.desiredEffectiveOpacity = desiredEffectiveOpacity
+    level.desiredOpacity = desiredOpacity
     this.settleReadyHandoffs()
     return {
       appliedOpacity: level.appliedOpacity,
@@ -319,9 +350,16 @@ export class LandrushIslandFloorFadePresentationOwner<
   }
 
   prepareFrame(deltaSeconds = 0): LandrushIslandFloorFadePreparationMetrics {
-    const startedAt = performance.now()
     this.reclaimOneDetachedSuppressedLease()
     this.frameRequestScheduled = false
+    if (
+      !this.hasPendingWork &&
+      this.preparationHead >= this.preparationQueue.length &&
+      this.arrivalHead >= this.arrivalQueue.length
+    ) {
+      return EMPTY_LANDRUSH_ISLAND_FLOOR_FADE_PREPARATION_METRICS
+    }
+    const startedAt = performance.now()
     let arrivalsAdvanced = 0
     let edgesTraversed = 0
     let materialsPrepared = 0
@@ -405,8 +443,12 @@ export class LandrushIslandFloorFadePresentationOwner<
     const level = this.levels.get(levelId)
     if (!level) return null
     let assignmentMismatchCount = 0
-    for (const [mesh, assignment] of level.canonical.committedAssignments) {
-      if (mesh.material !== assignment) assignmentMismatchCount += 1
+    for (const mesh of level.canonical.committedAssignments.keys()) {
+      const ownedAssignment = this.materialPresentation.readOwnedFloorFadeAssignment(
+        mesh,
+        level.canonical.materialOwnerToken,
+      )
+      if (mesh.material !== ownedAssignment) assignmentMismatchCount += 1
     }
     return {
       appliedOpacity: level.appliedOpacity,
@@ -506,9 +548,8 @@ export class LandrushIslandFloorFadePresentationOwner<
     rootState.committedRevision = 0
     rootState.committedSourceAssignments = new Map()
     rootState.disposed = false
-    rootState.excludedRoots = new Set(
-      [...excludedRoots].filter((excludedRoot) => excludedRoot !== root),
-    )
+    rootState.excludedRoots = createExcludedRootSet(excludedRoots, root)
+    rootState.excludedRootsInput = excludedRoots
     rootState.forceVisible = forceVisible
     rootState.generation = null
     rootState.hasCommittedPresentation = false
@@ -538,9 +579,9 @@ export class LandrushIslandFloorFadePresentationOwner<
     rootState: LandrushIslandFloorFadeRootState,
     excludedRoots: Iterable<Object3D>,
   ) {
-    const nextExcludedRoots = new Set(
-      [...excludedRoots].filter((excludedRoot) => excludedRoot !== rootState.root),
-    )
+    if (rootState.excludedRootsInput === excludedRoots) return
+    const nextExcludedRoots = createExcludedRootSet(excludedRoots, rootState.root)
+    rootState.excludedRootsInput = excludedRoots
     if (sameObjectSet(rootState.excludedRoots, nextExcludedRoots)) return
     rootState.excludedRoots = nextExcludedRoots
     this.requestGeneration(rootState)
@@ -850,7 +891,10 @@ export class LandrushIslandFloorFadePresentationOwner<
       )
       // Reveal may have installed another valid combined variant since the floor's last commit.
       if (ownedAssignment) rootState.committedAssignments.set(mesh, ownedAssignment)
-      if (mesh.material === (ownedAssignment ?? assignment)) continue
+      if (mesh.material === (ownedAssignment ?? assignment)) {
+        if (!ownedAssignment) changed = true
+        continue
+      }
       const sourceAssignment = mesh.material
       if (
         !sameFloorFadeMaterialAssignment(
@@ -1028,6 +1072,7 @@ export class LandrushIslandFloorFadePresentationOwner<
   }
 
   private settleLevel(level: LandrushIslandFloorFadeLevelState) {
+    level.lastSettledParent = level.canonical.root.parent
     const previousAppliedOpacity = level.appliedOpacity
     const previousFallback = level.fallback
     const previousCanonicalVisible = level.canonical.root.visible
@@ -1437,6 +1482,14 @@ function sameFloorFadeMaterialAssignment(
     first.length === second.length &&
     first.every((material, index) => material === second[index])
   )
+}
+
+function createExcludedRootSet(excludedRoots: Iterable<Object3D>, root: Object3D) {
+  const result = new Set<Object3D>()
+  for (const excludedRoot of excludedRoots) {
+    if (excludedRoot !== root) result.add(excludedRoot)
+  }
+  return result
 }
 
 function sameObjectSet(first: ReadonlySet<Object3D>, second: ReadonlySet<Object3D>) {

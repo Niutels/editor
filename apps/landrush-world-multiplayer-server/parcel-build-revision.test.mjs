@@ -13,7 +13,7 @@ after(() => {
   for (const child of children) child.kill()
 })
 
-test('serializes parcel builds idempotently and accepts bounded registry node kinds', async () => {
+test('serializes priced parcel builds idempotently and rejects unpriced node kinds', async () => {
   const port = await getOpenPort()
   const server = spawn(process.execPath, ['server.mjs'], {
     cwd: new URL('.', import.meta.url),
@@ -33,6 +33,7 @@ test('serializes parcel builds idempotently and accepts bounded registry node ki
   const parcelId = 'parcel-1'
 
   try {
+    await setProfileMoneyBalance(client, 100)
     client.socket.send(JSON.stringify({ parcelId, type: 'claim-parcel', worldId }))
     await nextMessage(client, (message) => message.type === 'parcel-claim-result')
 
@@ -162,10 +163,24 @@ test('serializes parcel builds idempotently and accepts bounded registry node ki
       parcelId,
       worldId,
     })
+    const unpricedNodeRejected = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'parcel-build-nodes-rejected' && message.operationId === 'operation-4',
+    )
+    assert.equal(unpricedNodeRejected.code, 'unpriced-build-node')
+
+    sendBuild(client, {
+      baseRevision: 2,
+      nodes: createPricedParcelGraph(),
+      operationId: 'operation-5',
+      parcelId,
+      worldId,
+    })
     const afterRejections = await nextMessage(
       client,
       (message) =>
-        message.type === 'parcel-build-nodes-ack' && message.operationId === 'operation-4',
+        message.type === 'parcel-build-nodes-ack' && message.operationId === 'operation-5',
     )
     assert.equal(afterRejections.revision, 3)
 
@@ -205,6 +220,7 @@ test('reconnects the same writer session and idempotently acknowledges a lost ac
   const writerSessionId = 'writer-lost-ack'
   let client = await connectPlayer(port, 'lost-ack-builder', writerSessionId)
   try {
+    await setProfileMoneyBalance(client, 20)
     client.socket.send(JSON.stringify({ parcelId, type: 'claim-parcel', worldId }))
     await nextMessage(client, (message) => message.type === 'parcel-claim-result')
     sendBuild(client, { baseRevision: 0, operationId: 'stable-operation', parcelId, worldId })
@@ -300,6 +316,24 @@ function createCanonicalParcelGraph() {
   ]
 }
 
+function createPricedParcelGraph() {
+  return [
+    createGraphNode('building-parcel', 'building', null, ['level-ground']),
+    createGraphNode('level-ground', 'level', 'building-parcel', [
+      'slab-ground',
+      'spawn-main',
+      'stair-main',
+      'wall-main',
+    ]),
+    createGraphNode('spawn-main', 'spawn', 'level-ground'),
+    { ...createWall('wall-main'), children: ['door-main'], parentId: 'level-ground' },
+    createGraphNode('door-main', 'door', 'wall-main'),
+    createGraphNode('slab-ground', 'slab', 'level-ground'),
+    createGraphNode('stair-main', 'stair', 'level-ground', ['stair-segment-main']),
+    createGraphNode('stair-segment-main', 'stair-segment', 'stair-main'),
+  ]
+}
+
 function createGraphNode(id, type, parentId, children) {
   return {
     ...(children ? { children } : {}),
@@ -346,6 +380,54 @@ async function connectPlayer(
   )
   await nextMessage({ messages, socket }, (message) => message.type === 'snapshot')
   return { messages, socket, writerEpoch: writerGrant.writerEpoch, writerSessionId }
+}
+
+async function setProfileMoneyBalance(client, amount) {
+  assert.equal(amount % 10, 0)
+  let wallet = await nextMessage(client, (message) => message.type === 'profile-money-snapshot')
+  if (wallet.wallet.balance > amount) {
+    const operationId = `fund-${client.writerSessionId}-debit`
+    client.socket.send(
+      JSON.stringify({
+        operation: {
+          baseRevision: wallet.wallet.revision,
+          cost: wallet.wallet.balance - amount,
+          kind: 'weapon-purchase',
+          operationId,
+        },
+        type: 'apply-profile-money-operation',
+        writerEpoch: client.writerEpoch,
+        writerSessionId: client.writerSessionId,
+      }),
+    )
+    wallet = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'profile-money-operation-ack' && message.operationId === operationId,
+    )
+  }
+  assert.equal((amount - wallet.wallet.balance) % 10, 0)
+  for (let index = wallet.wallet.balance / 10; index < amount / 10; index += 1) {
+    const operationId = `fund-${client.writerSessionId}-reward-${index}`
+    client.socket.send(
+      JSON.stringify({
+        operation: {
+          baseRevision: wallet.wallet.revision,
+          kind: 'zombie-kill-reward',
+          operationId,
+        },
+        type: 'apply-profile-money-operation',
+        writerEpoch: client.writerEpoch,
+        writerSessionId: client.writerSessionId,
+      }),
+    )
+    wallet = await nextMessage(
+      client,
+      (message) =>
+        message.type === 'profile-money-operation-ack' && message.operationId === operationId,
+    )
+  }
+  assert.equal(wallet.wallet.balance, amount)
 }
 
 async function nextMessage(client, predicate) {

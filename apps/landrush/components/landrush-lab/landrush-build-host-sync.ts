@@ -19,7 +19,11 @@ export type LandrushBuildHostPatchResult =
   | { kind: 'patches'; patches: readonly SceneOperationPatch[] }
 
 export function shouldApplyLandrushBuildContentUpdate(update: { source?: unknown }) {
-  return update.source === 'snapshot' || update.source === 'remote'
+  return (
+    update.source === 'snapshot' ||
+    update.source === 'remote' ||
+    update.source === 'insufficient-funds'
+  )
 }
 
 export function shouldPublishLandrushBuildSceneCommit(origin: SceneCommitOrigin) {
@@ -194,6 +198,66 @@ export function createLandrushBuildCommitPublishScheduler<TDesired>({
       })
     },
   }
+}
+
+export type LandrushBuildRejectedCandidateRollbackResult = Readonly<{
+  kind: 'already-safe' | 'failed' | 'history' | 'rematerialized'
+  undoCount: number
+}>
+
+export function rollbackLandrushBuildRejectedCandidate<TCandidate, TPastState>({
+  areEqual,
+  baseline,
+  clearRedo,
+  desiredFromPastState,
+  pastStates,
+  readDesired,
+  rematerialize,
+  undo,
+}: {
+  areEqual: (first: TCandidate, second: TCandidate) => boolean
+  baseline: TCandidate
+  clearRedo: () => void
+  desiredFromPastState: (state: TPastState) => TCandidate | null
+  pastStates: readonly TPastState[]
+  readDesired: () => TCandidate
+  rematerialize: () => TCandidate | null
+  undo: () => void
+}): LandrushBuildRejectedCandidateRollbackResult {
+  if (areEqual(readDesired(), baseline)) {
+    clearRedo()
+    return { kind: 'already-safe', undoCount: 0 }
+  }
+
+  let targetUndoCount: number | null = null
+  for (let offset = 1; offset <= pastStates.length; offset += 1) {
+    const pastState = pastStates[pastStates.length - offset]
+    if (!pastState) continue
+    const desired = desiredFromPastState(pastState)
+    if (desired !== null && areEqual(desired, baseline)) {
+      targetUndoCount = offset
+      break
+    }
+  }
+
+  let undoCount = 0
+  if (targetUndoCount !== null) {
+    while (undoCount < targetUndoCount && !areEqual(readDesired(), baseline)) {
+      undo()
+      undoCount += 1
+    }
+  }
+
+  if (areEqual(readDesired(), baseline)) {
+    clearRedo()
+    return { kind: undoCount === 0 ? 'already-safe' : 'history', undoCount }
+  }
+
+  const recovered = rematerialize()
+  clearRedo()
+  return recovered !== null && areEqual(recovered, baseline) && areEqual(readDesired(), baseline)
+    ? { kind: 'rematerialized', undoCount }
+    : { kind: 'failed', undoCount }
 }
 
 export function createLandrushBuildInvalidNodeDeletionScheduler({

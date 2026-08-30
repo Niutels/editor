@@ -1203,6 +1203,8 @@ export function buildReport({
   )
   const scenarioValidity = analyzeScenarioValidity(meta.scenarioValidity)
   const viewport = analyzeViewport(meta)
+  const rendererDpr =
+    Number.isFinite(meta.rendererDpr) && meta.rendererDpr > 0 ? meta.rendererDpr : null
   const eventWindow = filterMeasurementEvents(
     allEvents,
     meta.measurementWindow,
@@ -1602,7 +1604,7 @@ export function buildReport({
       measureToFrame: Number.isInteger(measureToFrame) ? measureToFrame : null,
     },
     scenarioValidity,
-    viewport,
+    viewport: { ...viewport, rendererDpr },
     frameContinuity,
     eventWindow: {
       valid: eventWindow.valid,
@@ -1744,7 +1746,7 @@ function renderMarkdown(report) {
   lines.push(
     `- adapter: ${JSON.stringify(meta.adapter ?? null)}  viewport: ${
       report.viewport.actual
-        ? `${report.viewport.actual.width}x${report.viewport.actual.height} @ DPR ${report.viewport.actual.dpr ?? '?'}`
+        ? `${report.viewport.actual.width}x${report.viewport.actual.height} @ device DPR ${report.viewport.actual.dpr ?? '?'} · renderer DPR ${report.viewport.rendererDpr ?? '?'}`
         : '?'
     }`,
   )

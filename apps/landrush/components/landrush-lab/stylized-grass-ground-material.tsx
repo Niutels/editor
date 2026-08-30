@@ -2,11 +2,12 @@
 
 import { getMaterialRendererBackend } from '@landrush/runtime'
 import { useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   FrontSide,
   LinearFilter,
   LinearMipmapLinearFilter,
+  type Mesh,
   PlaneGeometry,
   RenderTarget,
   type Texture,
@@ -30,6 +31,7 @@ import {
   type WebGPURenderer,
 } from 'three/webgpu'
 import { GRASS_FIELD_PLANE_SIZE } from './grass-field-texture'
+import { notifyLandrushZombieNightSurfaceMaterialChange } from './landrush-zombie-night-presentation-material'
 import { ORGANIC_GRASS_PALETTE } from './organic-grass-pattern'
 
 export type StylizedGrassGroundDebugMode = 'final' | 'footprint' | 'hierarchy' | 'macro'
@@ -61,6 +63,7 @@ export function ProceduralStylizedGrassGround({
 }) {
   const renderer = useThree((state) => state.gl) as unknown as WebGPURenderer
   const invalidate = useThree((state) => state.invalidate)
+  const meshRef = useRef<Mesh>(null)
   const geometry = useMemo(
     () => new PlaneGeometry(GRASS_FIELD_PLANE_SIZE, GRASS_FIELD_PLANE_SIZE),
     [],
@@ -99,11 +102,17 @@ export function ProceduralStylizedGrassGround({
     }
   }, [bake, invalidate, onReady, renderer])
   useEffect(() => () => geometry.dispose(), [geometry])
+  useLayoutEffect(() => {
+    const mesh = meshRef.current
+    if (!(mesh && bakedTexture)) return
+    notifyLandrushZombieNightSurfaceMaterialChange(mesh)
+  }, [bakedTexture])
 
   return (
     <mesh
       geometry={geometry}
       position={[0, elevation + 0.018, 0]}
+      ref={meshRef}
       renderOrder={renderOrder}
       rotation={[-Math.PI / 2, 0, 0]}
     >

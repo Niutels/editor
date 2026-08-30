@@ -5,6 +5,7 @@ import {
   createLandrushIslandLoadingShellPercentKeyframes,
   createStreamedShellMotionSegment,
   LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION,
+  LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL,
   LANDRUSH_ISLAND_LOADING_BOOT_SEQUENCE_GLOBAL,
   LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY,
   LANDRUSH_ISLAND_LOADING_SHELL_INITIAL_PROGRESS,
@@ -67,6 +68,17 @@ describe('Landrush island loading shell bootstrap', () => {
       firstBridge.bootRun.runId,
     )
     expect(duplicateBridge.styles.get(LANDRUSH_ISLAND_LOADING_SHELL_DELAY_PROPERTY)).toBe('-572ms')
+  })
+
+  test('invalidates retained runs from the superseded speculative-progress contract', () => {
+    const target: BootstrapWindow = { navigation: { currentEntry: { key: 'entry-a' } } }
+    const obsolete = { ...createBootRun(), version: 3 }
+    target[LANDRUSH_ISLAND_LOADING_BOOT_RUN_GLOBAL] = obsolete
+
+    const current = executeBootstrap({ navigationKey: 'entry-a', nowMs: 8, target }).bootRun
+
+    expect(current).not.toBe(obsolete)
+    expect(current.version).toBe(LANDRUSH_ISLAND_LOADING_BOOT_CONTRACT_VERSION)
   })
 
   test('keeps the first client clock when the navigation entry key becomes available', () => {
@@ -214,12 +226,13 @@ describe('Landrush island loading shell bootstrap', () => {
 
     const first = startLandrushIslandLoadingShellMotion(fill, run, environment)
     const replay = startLandrushIslandLoadingShellMotion(fill, run, environment)
+    const expectedDurationMs = ((0.8 - 0.24) / STREAMED_SHELL_VELOCITY_PER_SECOND) * 1_000
 
     expect(replay).toBe(first)
     expect(animateCalls).toBe(1)
-    expect(frames).toEqual([{ transform: 'scaleX(0.24)' }, { transform: 'scaleX(0.96)' }])
+    expect(frames).toEqual([{ transform: 'scaleX(0.24)' }, { transform: 'scaleX(0.8)' }])
     expect(options).toEqual({
-      duration: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+      duration: expectedDurationMs,
       easing: 'linear',
       fill: 'forwards',
     })
@@ -228,17 +241,17 @@ describe('Landrush island loading shell bootstrap', () => {
     expect(style.transform).toBe('scaleX(0.24)')
     expect(run.motion).toEqual({
       animation,
-      durationMs: LANDRUSH_ISLAND_LOADING_SHELL_MOTION_DURATION_MS,
+      durationMs: expectedDurationMs,
       fill,
       fromProgress: 0.24,
-      toProgress: 0.96,
+      toProgress: 0.8,
       velocityPerSecond: STREAMED_SHELL_VELOCITY_PER_SECOND,
     })
   })
 
   test.each([
     [0.08, 120_000, 0.8],
-    [0.72, 44_000, 0.984],
+    [0.72, (0.8 - 0.72) * (1_000 / STREAMED_SHELL_VELOCITY_PER_SECOND), 0.8],
   ])('starts fill and percentage together from %f, including a shortened runway', (from, durationMs, to) => {
     const run = createBootRun()
     const fillStyle = { animation: 'shell-progress 120s linear', transform: '' }
@@ -477,13 +490,16 @@ describe('Landrush island loading shell bootstrap', () => {
     )
 
     expect(full).toEqual({ durationMs: 120_000, fromProgress: 0, toProgress: 0.72 })
-    expect(renewed?.durationMs).toBeCloseTo(44_000, 9)
-    expect(renewed?.toProgress).toBeCloseTo(0.984, 12)
+    expect(renewed?.durationMs).toBeCloseTo(
+      (0.8 - 0.72) * (1_000 / STREAMED_SHELL_VELOCITY_PER_SECOND),
+      9,
+    )
+    expect(renewed?.toProgress).toBeCloseTo(0.8, 12)
     expect(
       ((renewed?.toProgress ?? 0) - (renewed?.fromProgress ?? 0)) /
         ((renewed?.durationMs ?? 1) / 1_000),
     ).toBeCloseTo(STREAMED_SHELL_VELOCITY_PER_SECOND, 12)
-    expect(createStreamedShellMotionSegment(0.984, 120_000)).toBeNull()
+    expect(createStreamedShellMotionSegment(0.8, 120_000)).toBeNull()
   })
 
   test('gives a replacement shell in the same run its own compositor trajectory', () => {

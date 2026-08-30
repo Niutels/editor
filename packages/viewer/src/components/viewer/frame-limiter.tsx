@@ -8,9 +8,12 @@ type FrameLimiterProps = {
 }
 
 export type FrameClock = {
+  rebase: (wallTimeMs: number) => void
   sample: (wallTimeMs: number, intervalMs: number) => number | null
   step: (seconds: number) => number
 }
+
+const MAX_EARLY_FRAME_TOLERANCE_MS = 1
 
 /**
  * Keeps R3F's manual clock monotonic while each limiter effect owns a fresh
@@ -19,21 +22,28 @@ export type FrameClock = {
  */
 export function createFrameClock(initialTime = 0): FrameClock {
   let frameTime = initialTime
-  let previousWallTime: number | null = null
+  let scheduledWallTime: number | null = null
 
   return {
+    rebase(wallTimeMs) {
+      scheduledWallTime = wallTimeMs
+    },
     sample(wallTimeMs, intervalMs) {
-      if (previousWallTime === null) {
-        previousWallTime = wallTimeMs
+      if (scheduledWallTime === null || wallTimeMs < scheduledWallTime) {
+        scheduledWallTime = wallTimeMs
         return null
       }
 
-      const elapsedMs = wallTimeMs - previousWallTime
-      if (elapsedMs < intervalMs) return null
+      const elapsedMs = wallTimeMs - scheduledWallTime
+      // Browser rAF timestamps can land fractionally before the theoretical
+      // refresh deadline. A small tolerance keeps that same vblank usable.
+      const earlyToleranceMs = Math.min(MAX_EARLY_FRAME_TOLERANCE_MS, intervalMs * 0.1)
+      if (elapsedMs + earlyToleranceMs < intervalMs) return null
 
-      const remainderMs = elapsedMs % intervalMs
-      frameTime += (elapsedMs - remainderMs) / 1000
-      previousWallTime = wallTimeMs - remainderMs
+      const elapsedIntervals = Math.max(1, Math.floor((elapsedMs + earlyToleranceMs) / intervalMs))
+      const advancedMs = elapsedIntervals * intervalMs
+      frameTime += advancedMs / 1000
+      scheduledWallTime += advancedMs
       return frameTime
     },
     step(seconds) {
@@ -90,6 +100,7 @@ const FrameLimiter: React.FC<FrameLimiterProps> = ({ fps = 50, paused = false })
     }
     function kick() {
       syncSize()
+      clock.rebase(performance.now())
       const frameTime = clock.step(1 / 1000)
       nextFrameTimeRef.current = frameTime
       advance(frameTime)

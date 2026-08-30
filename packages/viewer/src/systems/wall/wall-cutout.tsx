@@ -164,6 +164,16 @@ export const WallCutout = () => {
   const lastWallAppearanceKey = useRef('')
   const materialOwnershipEpoch = useRef(0)
   const materialOwnership = useRef(new Map<string, WallCutoutMaterialOwnership>())
+  const highlightSnapshotRef = useRef({
+    deleteHoveredWallId: null as string | null,
+    highlightedWallIds: new Set<string>(),
+    hoverHighlightMode: null as unknown,
+    hoveredId: null as unknown,
+    key: '',
+    nodes: null as object | null,
+    previewSelectedIds: null as unknown,
+    selectedIds: null as unknown,
+  })
   const wallAppearanceKeyRef = useRef('')
   const wallAppearanceInputs = useRef({
     nodes: null as object | null,
@@ -190,18 +200,38 @@ export const WallCutout = () => {
     const currentCameraPosition = camera.position
     camera.getWorldDirection(tmpVec)
     tmpVec.add(currentCameraPosition)
-    const highlightedWallIds = new Set(
-      [...selectedIds, ...previewSelectedIds].filter(
-        (id) => sceneState.nodes[id as AnyNodeId]?.type === 'wall',
-      ),
-    )
-    const deleteHoveredWallId =
-      hoverHighlightMode === 'delete' &&
-      hoveredId &&
-      sceneState.nodes[hoveredId as AnyNodeId]?.type === 'wall'
-        ? hoveredId
-        : null
-    const highlightKey = `${Array.from(highlightedWallIds).sort().join('|')}::${deleteHoveredWallId ?? ''}`
+    let highlightSnapshot = highlightSnapshotRef.current
+    if (
+      highlightSnapshot.selectedIds !== selectedIds ||
+      highlightSnapshot.previewSelectedIds !== previewSelectedIds ||
+      highlightSnapshot.hoveredId !== hoveredId ||
+      highlightSnapshot.hoverHighlightMode !== hoverHighlightMode ||
+      highlightSnapshot.nodes !== sceneState.nodes
+    ) {
+      const highlightedWallIds = new Set(
+        [...selectedIds, ...previewSelectedIds].filter(
+          (id) => sceneState.nodes[id as AnyNodeId]?.type === 'wall',
+        ),
+      )
+      const deleteHoveredWallId =
+        hoverHighlightMode === 'delete' &&
+        hoveredId &&
+        sceneState.nodes[hoveredId as AnyNodeId]?.type === 'wall'
+          ? hoveredId
+          : null
+      highlightSnapshot = {
+        deleteHoveredWallId,
+        highlightedWallIds,
+        hoverHighlightMode,
+        hoveredId,
+        key: `${Array.from(highlightedWallIds).sort().join('|')}::${deleteHoveredWallId ?? ''}`,
+        nodes: sceneState.nodes,
+        previewSelectedIds,
+        selectedIds,
+      }
+      highlightSnapshotRef.current = highlightSnapshot
+    }
+    const { deleteHoveredWallId, highlightedWallIds, key: highlightKey } = highlightSnapshot
     // Sorting every wall id, hashing each wall's material and JSON-dumping its
     // face bands is a full-scene scan; its inputs are immutable store slices,
     // so identity is enough to know the key cannot have changed.
@@ -280,30 +310,24 @@ export const WallCutout = () => {
         ;(wallMesh as Mesh).userData.wallHidden = wallMode !== 'translucent' && hideWall
         const isDeleteHighlighted = deleteHoveredWallId === wallId
         const isSelectionHighlighted = !isDeleteHighlighted && highlightedWallIds.has(wallId)
-        const levelId = resolveLevelId(wallNode, sceneState.nodes)
-        const support = spatialGridManager.getSlabSupportForWall(
-          levelId,
-          wallNode.start,
-          wallNode.end,
-          wallNode.curveOffset ?? 0,
-          wallNode.thickness,
-          wallNode.supportSlabId,
-        )
-        const effectiveWallHeight = resolveWallEffectiveHeight(
-          wallNode,
-          getWallPlaneTop(wallNode, levelId, sceneState.nodes),
-          support.elevation,
-        )
-        const shouldSelectionHighlight =
-          isSelectionHighlighted && !getWallFaceBandConfig(wallNode, effectiveWallHeight).enabled
-        const materials = getMaterialsForWall(
-          wallNode,
-          shading,
-          textures,
-          colorPreset,
-          sceneTheme,
-          sceneState.materials,
-        )
+        let shouldSelectionHighlight = false
+        if (isSelectionHighlighted) {
+          const levelId = resolveLevelId(wallNode, sceneState.nodes)
+          const support = spatialGridManager.getSlabSupportForWall(
+            levelId,
+            wallNode.start,
+            wallNode.end,
+            wallNode.curveOffset ?? 0,
+            wallNode.thickness,
+            wallNode.supportSlabId,
+          )
+          const effectiveWallHeight = resolveWallEffectiveHeight(
+            wallNode,
+            getWallPlaneTop(wallNode, levelId, sceneState.nodes),
+            support.elevation,
+          )
+          shouldSelectionHighlight = !getWallFaceBandConfig(wallNode, effectiveWallHeight).enabled
+        }
 
         const materialKind =
           wallMode === 'translucent' ? 'translucent' : hideWall ? 'invisible' : 'visible'
@@ -312,6 +336,18 @@ export const WallCutout = () => {
           : shouldSelectionHighlight
             ? 'selection'
             : 'normal'
+        const ownershipKey = `${materialOwnershipEpoch.current}:${materialKind}:${highlightKind}`
+        const currentOwnership = materialOwnership.current.get(wallId)
+        if (currentOwnership?.mesh === wallMesh && currentOwnership.key === ownershipKey) return
+
+        const materials = getMaterialsForWall(
+          wallNode,
+          shading,
+          textures,
+          colorPreset,
+          sceneTheme,
+          sceneState.materials,
+        )
         const nextMaterial =
           materialKind === 'translucent'
             ? isDeleteHighlighted
@@ -333,10 +369,10 @@ export const WallCutout = () => {
         materialOwnership.current.set(
           wallId,
           applyWallCutoutMaterial(
-            materialOwnership.current.get(wallId),
+            currentOwnership,
             wallMesh as Mesh,
             nextMaterial,
-            `${materialOwnershipEpoch.current}:${materialKind}:${highlightKind}`,
+            ownershipKey,
             isWallCutoutMaterialAssignment((wallMesh as Mesh).material, materials),
           ),
         )

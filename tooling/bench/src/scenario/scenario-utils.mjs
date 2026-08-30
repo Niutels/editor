@@ -397,6 +397,63 @@ export function sortLandrushExteriorEntryRoutes(routes) {
   )
 }
 
+export function createLandrushExteriorEntryCandidates({ portals, start }) {
+  if (
+    !start ||
+    !Number.isFinite(start.x) ||
+    !Number.isFinite(start.y) ||
+    !Number.isFinite(start.z)
+  ) {
+    return []
+  }
+  const candidates = []
+  for (const portal of portals ?? []) {
+    if (
+      !Number.isFinite(portal?.baseY) ||
+      Math.abs(portal.baseY) >= 0.75 ||
+      typeof portal.doorId !== 'string' ||
+      portal.doorId.length === 0 ||
+      typeof portal.levelId !== 'string' ||
+      portal.levelId.length === 0 ||
+      !Number.isFinite(portal.sideA?.x) ||
+      !Number.isFinite(portal.sideA?.z) ||
+      !Number.isFinite(portal.sideB?.x) ||
+      !Number.isFinite(portal.sideB?.z)
+    ) {
+      continue
+    }
+    const distanceToSideA = Math.hypot(portal.sideA.x - start.x, portal.sideA.z - start.z)
+    const distanceToSideB = Math.hypot(portal.sideB.x - start.x, portal.sideB.z - start.z)
+    const outside = distanceToSideA <= distanceToSideB ? portal.sideA : portal.sideB
+    const inside = outside === portal.sideA ? portal.sideB : portal.sideA
+    candidates.push({
+      approachDistance: Math.min(distanceToSideA, distanceToSideB),
+      buildingScopeId: null,
+      doorId: portal.doorId,
+      inside: { ...inside, y: portal.baseY },
+      levelId: portal.levelId,
+      outside: { ...outside, y: portal.baseY },
+      start: { x: start.x, y: start.y, z: start.z },
+    })
+  }
+  return candidates.sort(
+    (first, second) =>
+      first.approachDistance - second.approachDistance ||
+      compareStableStrings(first.levelId, second.levelId) ||
+      compareStableStrings(first.doorId, second.doorId),
+  )
+}
+
+export async function discoverLandrushExteriorEntryCandidates(page) {
+  const state = await page.evaluate(
+    () => window.__LANDRUSH_ISLAND_NAV_TEST__?.getState() ?? null,
+  )
+  return createLandrushExteriorEntryCandidates({
+    portals: state?.doorPortals,
+    start: state?.robot,
+  })
+}
+
 export async function discoverLandrushExteriorEntryRoutes(page, sleep) {
   const portals = await page.evaluate(
     () => window.__LANDRUSH_ISLAND_NAV_TEST__?.getState().doorPortals ?? [],

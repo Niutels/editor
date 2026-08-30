@@ -113,6 +113,62 @@ function disposeOwners({
 }
 
 describe('Landrush floor fade presentation owner', () => {
+  test('reuses settled frame results and skips unchanged presentation writes', () => {
+    const levelId = asLevelId('level-steady-frame')
+    const scene = new Scene()
+    const { root } = createRoot()
+    scene.add(root)
+    const owners = createOwners()
+
+    ensureLevel({ floorPresentation: owners.floorPresentation, levelId, root })
+    prepareUntilReady(owners.floorPresentation, levelId)
+    const firstIdleFrame = owners.floorPresentation.prepareFrame(1 / 60)
+    const secondIdleFrame = owners.floorPresentation.prepareFrame(1 / 60)
+    expect(secondIdleFrame).toBe(firstIdleFrame)
+    expect(secondIdleFrame.elapsedMs).toBe(0)
+
+    let opacityWrites = 0
+    Object.defineProperty(root.userData, LANDRUSH_ISLAND_FLOOR_FADE_OPACITY_USER_DATA_KEY, {
+      configurable: true,
+      get: () => 1,
+      set: () => {
+        opacityWrites += 1
+      },
+    })
+    expect(owners.floorPresentation.applyLevelOpacity({ levelId, opacity: 1, root })).toEqual({
+      appliedOpacity: 1,
+      ready: true,
+    })
+    expect(opacityWrites).toBe(0)
+
+    disposeOwners(owners)
+  })
+
+  test('does not rescan the same excluded-root collection on steady ensures', () => {
+    const levelId = asLevelId('level-stable-exclusions')
+    const scene = new Scene()
+    const { root } = createRoot()
+    const excludedRoot = new Group()
+    root.add(excludedRoot)
+    scene.add(root)
+    const owners = createOwners()
+    let iterationCount = 0
+    const excludedRoots = {
+      *[Symbol.iterator]() {
+        iterationCount += 1
+        yield excludedRoot
+      },
+    }
+
+    ensureLevel({ excludedRoots, floorPresentation: owners.floorPresentation, levelId, root })
+    prepareUntilReady(owners.floorPresentation, levelId)
+    expect(iterationCount).toBe(1)
+    ensureLevel({ excludedRoots, floorPresentation: owners.floorPresentation, levelId, root })
+    expect(iterationCount).toBe(1)
+
+    disposeOwners(owners)
+  })
+
   test('prepares both modes incrementally and switches opacity without allocation', () => {
     const levelId = asLevelId('level-multi-material')
     const scene = new Scene()

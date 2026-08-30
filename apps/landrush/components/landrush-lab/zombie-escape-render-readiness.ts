@@ -1,7 +1,8 @@
-import type { Object3D } from 'three'
+import { Group, type Object3D } from 'three'
 import {
-  compileLandrushRenderRepresentatives,
+  compileLandrushRenderRepresentative,
   createLandrushRenderReadinessCoordinator,
+  initializeLandrushRenderReadinessRenderer,
   LANDRUSH_RENDER_READINESS_TIMEOUT_MS,
   type LandrushPipelineRenderer,
   type LandrushRenderReadinessCoordinator,
@@ -10,6 +11,7 @@ import {
   type LandrushRenderReadinessStatus,
   type LandrushRenderReadinessTimer,
   type LandrushRenderRepresentative,
+  requestLandrushPresentationPipelinePrewarm,
 } from './landrush-render-readiness'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
@@ -29,7 +31,10 @@ const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
 ] as const
 
 export const ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY = 'weapon-pickup'
+export const ZOMBIE_ESCAPE_SHOULDER_TORCH_RENDER_REPRESENTATIVE_KEY = 'robot:shoulder-torch'
 export const ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS = LANDRUSH_RENDER_READINESS_TIMEOUT_MS
+export const ZOMBIE_ESCAPE_WEBGPU_RENDER_READINESS_PROGRESS_TOTAL = 4
+export const ZOMBIE_ESCAPE_WEBGL_RENDER_READINESS_PROGRESS_TOTAL = 3
 
 export type ZombieEscapeRenderRepresentativeKey = string
 
@@ -78,6 +83,14 @@ export function createZombieEscapeZombieRenderRepresentativeKey(zombieId: string
   return `zombie:${zombieId}`
 }
 
+export function resolveZombieEscapeRenderReadinessProgressTotal(
+  renderer: Pick<ZombieEscapePipelineRenderer, 'isWebGPURenderer'>,
+) {
+  return renderer.isWebGPURenderer === true
+    ? ZOMBIE_ESCAPE_WEBGPU_RENDER_READINESS_PROGRESS_TOTAL
+    : ZOMBIE_ESCAPE_WEBGL_RENDER_READINESS_PROGRESS_TOTAL
+}
+
 export function getZombieEscapeRenderRepresentativeKeys(
   quality: ZombieEscapeQuality,
 ): readonly ZombieEscapeRenderRepresentativeKey[] {
@@ -85,6 +98,7 @@ export function getZombieEscapeRenderRepresentativeKeys(
     ...ZOMBIE_ESCAPE_WEAPON_CATALOG.map((weapon) =>
       createZombieEscapeHeldWeaponRenderRepresentativeKey(weapon.id),
     ),
+    ZOMBIE_ESCAPE_SHOULDER_TORCH_RENDER_REPRESENTATIVE_KEY,
     ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY,
     ...(quality === 'balanced'
       ? ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((zombie) =>
@@ -141,25 +155,154 @@ export async function compileZombieEscapeRenderRepresentatives(
     targetScene,
   }: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>,
   onProgress?: (progress: ZombieEscapeRenderReadinessProgress) => void,
+  prewarmPresentationPipeline = requestLandrushPresentationPipelinePrewarm,
 ) {
-  const total = representatives.length + (renderer.isWebGPURenderer === true ? 1 : 2)
+  const webGpu = renderer.isWebGPURenderer === true
+  const total = resolveZombieEscapeRenderReadinessProgressTotal(renderer)
   let completed = 0
   onProgress?.({ completed, total })
-  await compileLandrushRenderRepresentatives(
+  await initializeLandrushRenderReadinessRenderer(renderer)
+  await compileZombieEscapeRenderAggregate(
     { camera, renderer, representatives, targetScene },
-    (progress) => {
-      completed = progress.completed
+    () => {
+      completed += 1
       onProgress?.({ completed, total })
     },
   )
-  // A WebGPU whole-scene compile can bind viewport-depth placeholders before their first real render establishes matching MSAA textures.
-  if (renderer.isWebGPURenderer !== true) {
-    await renderer.compileAsync(targetScene, camera, targetScene)
+  const exactFramePrewarmDisabled = isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled()
+  if (webGpu) {
+    if (!exactFramePrewarmDisabled) {
+      await prewarmPresentationPipeline({
+        camera,
+        renderPath: 'presentation',
+        renderer,
+        representatives,
+        targetScene,
+      })
+    }
     completed += 1
     onProgress?.({ completed, total })
   }
+  if (webGpu && !exactFramePrewarmDisabled) {
+    await prewarmPresentationPipeline({
+      camera,
+      renderPath: 'direct',
+      renderer,
+      representatives,
+      targetScene,
+    })
+  } else {
+    await renderer.compileAsync(targetScene, camera, targetScene)
+  }
+  completed += 1
+  onProgress?.({ completed, total })
   await waitForZombieEscapeGpuPreparation(renderer)
   onProgress?.({ completed: total, total })
+}
+
+export function isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled(
+  search = typeof window === 'undefined' ? '' : window.location.search,
+) {
+  const disabled = new Set(
+    (new URLSearchParams(search).get('disable') ?? '')
+      .split(',')
+      .map((token) => token.trim().toLowerCase())
+      .filter(Boolean),
+  )
+  return disabled.has('draw') || disabled.has('postfx')
+}
+
+async function compileZombieEscapeRenderAggregate(
+  {
+    camera,
+    representatives,
+    renderer,
+    targetScene,
+  }: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>,
+  onCompiled: () => void,
+) {
+  const root = new Group()
+  const attachedRoots = new Set<Object3D>()
+  const representativeRoots: Object3D[] = []
+  for (const representative of representatives) {
+    if (attachedRoots.has(representative.root)) continue
+    attachedRoots.add(representative.root)
+    representativeRoots.push(representative.root)
+  }
+
+  await compileZombieEscapeRenderAggregateVariant({
+    camera,
+    key: 'zombie-day',
+    representativeRoots,
+    renderer,
+    root,
+    targetScene,
+  })
+  onCompiled()
+}
+
+async function compileZombieEscapeRenderAggregateVariant({
+  camera,
+  key,
+  representativeRoots,
+  renderer,
+  root,
+  targetScene,
+}: Readonly<{
+  camera: ZombieEscapeRenderReadinessRequest['camera']
+  key: string
+  representativeRoots: readonly Object3D[]
+  renderer: ZombieEscapePipelineRenderer
+  root: Group
+  targetScene: ZombieEscapeRenderReadinessRequest['targetScene']
+}>) {
+  const placements: Array<{
+    index: number
+    parent: Object3D | null
+    root: Object3D
+  }> = []
+  const pendingCompilation = (() => {
+    try {
+      for (const representativeRoot of representativeRoots) {
+        placements.push({
+          index: representativeRoot.parent?.children.indexOf(representativeRoot) ?? -1,
+          parent: representativeRoot.parent,
+          root: representativeRoot,
+        })
+        root.add(representativeRoot)
+      }
+      return compileLandrushRenderRepresentative({
+        camera,
+        renderer,
+        representative: { key, root },
+        targetScene,
+      })
+    } finally {
+      restoreZombieEscapeRenderAggregatePlacements(root, placements)
+    }
+  })()
+  await pendingCompilation
+}
+
+function restoreZombieEscapeRenderAggregatePlacements(
+  aggregateRoot: Group,
+  placements: readonly Readonly<{
+    index: number
+    parent: Object3D | null
+    root: Object3D
+  }>[],
+) {
+  for (let index = placements.length - 1; index >= 0; index -= 1) {
+    const placement = placements[index]!
+    aggregateRoot.remove(placement.root)
+    if (!placement.parent) continue
+    placement.parent.add(placement.root)
+    const restoredIndex = placement.parent.children.indexOf(placement.root)
+    const targetIndex = Math.min(placement.index, placement.parent.children.length - 1)
+    if (restoredIndex === targetIndex) continue
+    placement.parent.children.splice(restoredIndex, 1)
+    placement.parent.children.splice(targetIndex, 0, placement.root)
+  }
 }
 
 export async function waitForZombieEscapeGpuPreparation(
@@ -245,20 +388,28 @@ export async function waitForZombieEscapeGpuPreparation(
 }
 
 export function createZombieEscapeRenderReadinessCoordinator({
-  compile = compileZombieEscapeRenderRepresentatives,
+  compile,
+  prewarmPresentationPipeline = requestLandrushPresentationPipelinePrewarm,
   timeoutMs = ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS,
   timer,
+  watchdogStartsOnAdmission = false,
 }: {
   compile?: typeof compileZombieEscapeRenderRepresentatives
+  prewarmPresentationPipeline?: typeof requestLandrushPresentationPipelinePrewarm
   timeoutMs?: number
   timer?: ZombieEscapeRenderReadinessTimer
+  watchdogStartsOnAdmission?: boolean
 } = {}): ZombieEscapeRenderReadinessCoordinator {
   return createLandrushRenderReadinessCoordinator({
-    compile,
+    compile:
+      compile ??
+      ((request, onProgress) =>
+        compileZombieEscapeRenderRepresentatives(request, onProgress, prewarmPresentationPipeline)),
     formatTimeoutMessage: (boundedTimeoutMs) =>
       `Zombie Escape render readiness timed out after ${String(boundedTimeoutMs)}ms.`,
     timeoutMs,
     timer,
+    watchdogStartsOnAdmission,
   })
 }
 

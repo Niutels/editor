@@ -53,6 +53,7 @@ import {
   openPointRing,
   type ParcelBuildContentUpdate,
   type ParcelBuildNodesSnapshot,
+  type ProfileMoneyOperationRequest,
   pointInPolygon,
   pointInPolygonOrNearEdge,
   pointsAlmostEqual2,
@@ -179,6 +180,7 @@ import {
   downloadLandrushBugReport,
   type LandrushBugReport,
   type LandrushBugReportPlayer,
+  resolveLandrushCanvasPixelRatio,
 } from './landrush-bug-report'
 import { advanceLandrushBuildCameraHandoff } from './landrush-build-camera-handoff'
 import {
@@ -202,6 +204,10 @@ import {
   type LandrushBuildGamepadFocusMode,
   resolveLandrushBuildGamepadDirectionalIndex,
   resolveLandrushBuildGamepadFocusAfterActivation,
+  resolveLandrushBuildGamepadNavigationAction,
+  resolveLandrushBuildGamepadPalettePanel,
+  resolveLandrushBuildGamepadSidebarActivation,
+  resolveLandrushBuildGamepadSidebarIndex,
   shouldAutofocusLandrushBuildGamepadPalette,
 } from './landrush-build-gamepad-navigation'
 import { LandrushIslandBuildGridOverlay } from './landrush-build-grid-overlay'
@@ -217,6 +223,7 @@ import {
   isLandrushBuildMaterializationReady,
   landrushBuildHostOperationPatchesHaveLiveConflict,
   resetLandrushBuildAuthorityCachesOnChange,
+  rollbackLandrushBuildRejectedCandidate,
   shouldApplyLandrushBuildContentUpdate,
   shouldSubscribeLandrushBuildCommitPublisher,
 } from './landrush-build-host-sync'
@@ -249,7 +256,6 @@ import {
   type LandrushBuildingFloorContext,
   type LandrushBuildingFloorStack,
   type LandrushBuildingFloorTransition,
-  resolveLandrushBuildingActiveFloorCoverNodeIds,
   resolveLandrushBuildingFloorCovers,
   resolveLandrushBuildingFloorOpacities,
   resolveLandrushBuildingFloorStacks,
@@ -302,9 +308,22 @@ import {
 import {
   areLandrushWallColliderGeometriesReady,
   type LandrushIslandBuiltColliderReadiness,
+  type LandrushIslandColliderLevelPlacement,
   reconcileLandrushIslandBuiltColliderReadiness,
   resolveLandrushIslandBuiltCollidersReady,
+  resolveLandrushIslandColliderLevelPlacements,
+  withLandrushIslandColliderLevelPlacements,
 } from './landrush-island-collider-readiness'
+import {
+  advanceLandrushIslandFloorPresentationReadiness,
+  collectLandrushIslandExpectedFloorPresentationRoots,
+  collectLandrushIslandRegisteredFloorPresentationRoots,
+  type LandrushIslandFloorPresentationPoseSnapshot,
+  type LandrushIslandFloorPresentationReadiness,
+  landrushIslandFloorPresentationPoseChanged,
+  reconcileLandrushIslandFloorPresentationReadiness,
+  resolveLandrushIslandFloorPresentationReady,
+} from './landrush-island-floor-presentation-readiness'
 import { landrushIslandInputTargetBlocksGameplay } from './landrush-island-input-capture'
 import {
   advanceLandrushIslandDayGamepadButtonState,
@@ -354,7 +373,11 @@ import {
   LandrushIslandMaterialPresentationOwner,
   type LandrushIslandMaterialReadinessMesh,
 } from './landrush-island-material-presentation'
-import { collectLandrushIslandMaterialPresentationReadinessMeshes } from './landrush-island-material-presentation-readiness'
+import {
+  collectLandrushIslandMaterialPresentationReadinessMeshes,
+  type LandrushIslandDayMaterialPresentationReadiness,
+  LandrushIslandDayMaterialPresentationRenderReadiness,
+} from './landrush-island-material-presentation-readiness'
 import {
   type LandrushIslandMovementSpeedEnvelope,
   resolveLandrushIslandMovementSpeedPolicy,
@@ -410,12 +433,19 @@ import {
 import { canonicalizeLandrushParcelBuildGraph } from './landrush-parcel-build-graph'
 import { LandrushPascalEditorChrome } from './landrush-pascal-editor-chrome'
 import {
+  beginLandrushPresentationPipelinePrewarmFrame,
+  completeLandrushPresentationPipelinePrewarmFrame,
+  type LandrushPipelineRenderer,
+  registerLandrushPresentationPipelinePrewarm,
+} from './landrush-render-readiness'
+import {
   classifyLandrushRobotRevealOwnerBounds,
   createLandrushRobotRevealAperture,
   isLandrushRobotRevealOwnerRootLive,
   type LandrushRobotRevealOwnerObservation,
   type LandrushRobotRevealOwnerState,
   reconcileLandrushRobotRevealOwnerStates,
+  shouldUpdateLandrushRobotRevealClippingPlanes,
   updateLandrushRobotRevealAperture,
 } from './landrush-robot-reveal-ownership'
 import {
@@ -516,7 +546,11 @@ import {
 } from './standalone-ocean-material'
 import { StandaloneOceanParameterControls } from './standalone-ocean-parameter-controls'
 import { STYLIZED_PATH_WIDTH_SCALE } from './stylized-path-network-layer'
-import type { StylizedGrassInteraction } from './stylized-scene-land-layers'
+import type {
+  StylizedGrassInteraction,
+  StylizedGrassPreparedResidencyReadiness,
+  StylizedGrassPreparedResidencyRequest,
+} from './stylized-scene-land-layers'
 import {
   WATER_FIELD_PREVIEW_RESOLUTION,
   WATER_FIELD_RESOLUTION,
@@ -540,6 +574,7 @@ import {
 } from './world-multiplayer-spatial-audio'
 import { SpatialVoiceRangeRing } from './world-multiplayer-spatial-voice-range'
 import { ZOMBIE_ESCAPE_PLAYER_JUMP_AUDIO_CUE } from './zombie-escape-audio-catalog'
+import { ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS } from './zombie-escape-config'
 import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
   ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE,
@@ -586,6 +621,7 @@ const LANDRUSH_ISLAND_GRASS_TUNING = {
   windStrength: 0.75,
 } satisfies GrassBladeTuning
 const LANDRUSH_ISLAND_MULTIPLAYER_ROOM_ID = 'landrush-lab-world-multiplayer'
+const LANDRUSH_ISLAND_RENDER_DPR = 0.7
 const LANDRUSH_ISLAND_LOCAL_STATE_SEND_INTERVAL_MS = 80
 const LANDRUSH_ISLAND_ROBOT_PREVIOUS_WALK_SPEED = 2.75
 const LANDRUSH_ISLAND_ROBOT_WALK_SPEED = LANDRUSH_ISLAND_ROBOT_PREVIOUS_WALK_SPEED / 1.5
@@ -617,6 +653,8 @@ const LANDRUSH_ISLAND_ROBOT_TURN_RESPONSE = 12
 const LANDRUSH_ISLAND_ROBOT_GROUND_CLEARANCE = 0.04
 const LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS = 0.35
 const LANDRUSH_ISLAND_FLOOR_FADE_PREPARE_DISTANCE_METERS = 8
+const LANDRUSH_ISLAND_FLOOR_PRESENTATION_MAX_MISMATCH_REPAIRS_PER_FRAME = 1
+const LANDRUSH_ISLAND_FLOOR_PRESENTATION_MAX_ROOT_ADMISSIONS_PER_FRAME = 6
 const LANDRUSH_ISLAND_ROBOT_JUMP_DURATION_MS = 1_280
 const LANDRUSH_ISLAND_ROBOT_JUMP_HEIGHT = 1.1875
 const LANDRUSH_ISLAND_ROBOT_JUMP_TAKEOFF_PROGRESS = 0.18
@@ -807,7 +845,7 @@ const LANDRUSH_ISLAND_RUNTIME_FRAME_GAP_MS = 34
 const LANDRUSH_ISLAND_LOADING_DAY_PROFILE_KEY = 'landrush-island:day:v1'
 const LANDRUSH_ISLAND_LOADING_ZOMBIE_PROFILE_KEY = 'landrush-island:zombie-balanced:v1'
 const LANDRUSH_ISLAND_LOADING_RUN_GENERATION = 'landrush-island:startup:v1'
-const LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE = 'landrush-island:startup-readiness:v3'
+const LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE = 'landrush-island:startup-readiness:v4'
 const LANDRUSH_ISLAND_LOADING_DAY_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:day|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}`
 const LANDRUSH_ISLAND_LOADING_ZOMBIE_TOPOLOGY_SIGNATURE = `${LANDRUSH_ISLAND_LOADING_READINESS_SCHEMA_SIGNATURE}|mode:zombie-balanced|${LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE}|${ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE}`
 const LANDRUSH_ISLAND_LOADING_HANDOFF_FADE_MS = 520
@@ -976,6 +1014,11 @@ type LandrushIslandFallPresentationState = {
   amount: number
   slowMotionFactor: number
   wiggleAmount: number
+}
+type LandrushIslandFallPresentationStore = {
+  current: LandrushIslandFallPresentationState
+  listeners: Set<() => void>
+  notified: LandrushIslandFallPresentationState
 }
 type LandrushIslandFallControlInput = {
   forward: number
@@ -1472,6 +1515,32 @@ function createLandrushIslandFallPresentationState(): LandrushIslandFallPresenta
     slowMotionFactor: 1,
     wiggleAmount: 0,
   }
+}
+
+function createLandrushIslandFallPresentationStore(): LandrushIslandFallPresentationStore {
+  const current = createLandrushIslandFallPresentationState()
+  return {
+    current,
+    listeners: new Set(),
+    notified: { ...current },
+  }
+}
+
+function publishLandrushIslandFallPresentation(
+  store: LandrushIslandFallPresentationStore,
+  next: LandrushIslandFallPresentationState,
+) {
+  const previous = store.notified
+  store.current = next
+  if (
+    previous.active === next.active &&
+    Math.abs(previous.amount - next.amount) < 0.012 &&
+    Math.abs(previous.slowMotionFactor - next.slowMotionFactor) < 0.025
+  ) {
+    return
+  }
+  store.notified = next
+  for (const listener of store.listeners) listener()
 }
 
 declare global {
@@ -3064,11 +3133,15 @@ function wasLandrushIslandGamepadButtonPressed(
 
 function getLandrushIslandGamepadBuildPaletteButtons() {
   if (typeof document === 'undefined') return []
-  const buildPanel = document.querySelector('[data-landrush-editor-panel="build"]')
-  if (!buildPanel) return []
+  const activePanel = resolveLandrushBuildGamepadPalettePanel(
+    useEditor.getState().activeSidebarPanel,
+  )
+  if (!activePanel) return []
+  const panel = document.querySelector(`[data-landrush-editor-panel="${activePanel}"]`)
+  if (!panel) return []
 
   return [
-    ...buildPanel.querySelectorAll<HTMLButtonElement>('[data-editor-build-controller-item]'),
+    ...panel.querySelectorAll<HTMLButtonElement>('[data-editor-build-controller-item]'),
   ].filter(
     (button) =>
       !button.disabled &&
@@ -3131,6 +3204,92 @@ function moveLandrushIslandGamepadBuildPaletteFocus(
   if (nextButton) focusLandrushIslandGamepadBuildPaletteButton(nextButton, buttonRef)
 }
 
+function getLandrushIslandGamepadSidebarButtons(root: HTMLElement | null) {
+  if (!root) return []
+  return [
+    ...root.querySelectorAll<HTMLButtonElement>(
+      '[data-landrush-editor-sidebar-nav] [data-editor-sidebar-tab]',
+    ),
+  ].filter(
+    (button) =>
+      !button.disabled &&
+      button.getAttribute('aria-hidden') !== 'true' &&
+      button.getClientRects().length > 0,
+  )
+}
+
+function focusLandrushIslandGamepadSidebarButton(
+  button: HTMLButtonElement,
+  buttonRef: { current: HTMLButtonElement | null },
+) {
+  buttonRef.current = button
+  button.focus({ preventScroll: true })
+  button.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
+
+function resolveLandrushIslandGamepadSidebarButton(
+  root: HTMLElement | null,
+  buttonRef: { current: HTMLButtonElement | null },
+) {
+  const buttons = getLandrushIslandGamepadSidebarButtons(root)
+  if (buttons.length === 0) return null
+  const activeElement = document.activeElement
+  if (activeElement instanceof HTMLButtonElement && buttons.includes(activeElement)) {
+    return activeElement
+  }
+  if (buttonRef.current?.isConnected && buttons.includes(buttonRef.current)) {
+    return buttonRef.current
+  }
+  const activePanel = useEditor.getState().activeSidebarPanel
+  return (
+    buttons.find((button) => button.dataset.editorSidebarTab === activePanel) ?? buttons[0] ?? null
+  )
+}
+
+function focusLandrushIslandCurrentGamepadSidebarButton(
+  root: HTMLElement | null,
+  buttonRef: { current: HTMLButtonElement | null },
+) {
+  const button = resolveLandrushIslandGamepadSidebarButton(root, buttonRef)
+  if (button) focusLandrushIslandGamepadSidebarButton(button, buttonRef)
+}
+
+function moveLandrushIslandGamepadSidebarFocus(
+  root: HTMLElement | null,
+  direction: 'down' | 'up',
+  buttonRef: { current: HTMLButtonElement | null },
+) {
+  const buttons = getLandrushIslandGamepadSidebarButtons(root)
+  if (buttons.length === 0) return
+  const currentButton = resolveLandrushIslandGamepadSidebarButton(root, buttonRef)
+  const currentIndex = currentButton ? buttons.indexOf(currentButton) : 0
+  const nextIndex = resolveLandrushBuildGamepadSidebarIndex({
+    currentIndex,
+    direction,
+    itemCount: buttons.length,
+  })
+  const nextButton = nextIndex >= 0 ? buttons[nextIndex] : currentButton
+  if (nextButton) focusLandrushIslandGamepadSidebarButton(nextButton, buttonRef)
+}
+
+function activateLandrushIslandGamepadSidebarButton(
+  root: HTMLElement | null,
+  buttonRef: { current: HTMLButtonElement | null },
+) {
+  const button = resolveLandrushIslandGamepadSidebarButton(root, buttonRef)
+  if (!button) return null
+  const sidebar = useSidebarStore.getState()
+  const activation = resolveLandrushBuildGamepadSidebarActivation({
+    activePanel: useEditor.getState().activeSidebarPanel,
+    focusedPanel: button.dataset.editorSidebarTab,
+    sidebarCollapsed: sidebar.isCollapsed,
+  })
+  if (!activation) return null
+  focusLandrushIslandGamepadSidebarButton(button, buttonRef)
+  if (activation.selectPanel) button.click()
+  return activation.palettePanel
+}
+
 function activateLandrushIslandGamepadBuildPaletteButton(buttonRef: {
   current: HTMLButtonElement | null
 }) {
@@ -3184,6 +3343,8 @@ export function LandrushIslandClient({
   )
   currentZombieEscapeGeneratedAssetGenerationRef.current = zombieEscapeGeneratedAssetGeneration
   const [zombieEscapePhase, setZombieEscapePhase] = useState<ZombieEscapeGamePhase>('build')
+  const [zombieEscapeCameraTransitionActive, setZombieEscapeCameraTransitionActive] =
+    useState(false)
   const [zombieEscapeGeneratedAssetStatus, setZombieEscapeGeneratedAssetStatus] = useState<{
     mountGeneration: string
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot
@@ -3222,11 +3383,8 @@ export function LandrushIslandClient({
   const handleZombieEscapePhaseChange = useCallback((phase: ZombieEscapeGamePhase) => {
     if (zombieEscapePhaseRef.current === phase) return
     zombieEscapePhaseRef.current = phase
+    setZombieEscapeCameraTransitionActive(phase === 'night')
     setZombieEscapePhase(phase)
-  }, [])
-  const handleZombieEscapeCameraSettled = useCallback(() => {
-    if (zombieEscapePhaseRef.current !== 'night') return
-    recordLandrushIslandPhaseProbe('camera-owner:zombie-settled')
   }, [])
   const bugReportReplayCameraPose = useMemo(
     () => deserializeLandrushBugReportCameraPose(bugReportReplay?.camera ?? null),
@@ -3325,12 +3483,23 @@ export function LandrushIslandClient({
     createLandrushIslandModeTransitionPresentationState(transitionBlurDebugMode),
   )
   const viewerPresentationEffectRef = useRef<ViewerPresentationEffectState>({
+    presentationPipelineActive: false,
+    zoomBlurActive: false,
     zoomBlurAmount: 0,
     zoomBlurCenter: [0.5, 0.5],
     zoomBlurDebugMode: 'final',
     zoomBlurDirection: 1,
     zoomBlurStrength: LANDRUSH_ISLAND_JUMP_EDGE_BLUR.radialStrength,
   })
+  const handleZombieEscapeNightTransitionStart = useCallback(() => {
+    viewerPresentationEffectRef.current.presentationPipelineActive = true
+  }, [])
+  const handleZombieEscapeCameraSettled = useCallback(() => {
+    if (zombieEscapePhaseRef.current !== 'night') return
+    viewerPresentationEffectRef.current.presentationPipelineActive = false
+    setZombieEscapeCameraTransitionActive(false)
+    recordLandrushIslandPhaseProbe('camera-owner:zombie-settled')
+  }, [])
   const grassVisibilityRef = useRef(1)
   const renderedFpsRef = useRef<number | null>(null)
   const appliedBuildUpdateSequenceRef = useRef(new Map<string, number>())
@@ -3343,6 +3512,7 @@ export function LandrushIslandClient({
   const previousGamepadButtonsRef = useRef(createLandrushIslandGamepadButtonState())
   const gamepadBuildFocusModeRef = useRef<LandrushBuildGamepadFocusMode>('palette')
   const gamepadBuildPaletteButtonRef = useRef<HTMLButtonElement | null>(null)
+  const gamepadBuildSidebarButtonRef = useRef<HTMLButtonElement | null>(null)
   if (startupProfileEnabled && !startupProfileRef.current && typeof performance !== 'undefined') {
     startupProfileRef.current = {
       animationFrames: [],
@@ -3426,11 +3596,15 @@ export function LandrushIslandClient({
   } | null>(null)
   const [builtColliderReadiness, setBuiltColliderReadiness] =
     useState<LandrushIslandBuiltColliderReadiness | null>(null)
+  const [floorPresentationReadiness, setFloorPresentationReadiness] =
+    useState<LandrushIslandFloorPresentationReadiness | null>(null)
+  const [dayMaterialPresentationReadiness, setDayMaterialPresentationReadiness] =
+    useState<LandrushIslandDayMaterialPresentationReadiness | null>(null)
   const [zombieEscapeNavigationStatus, setZombieEscapeNavigationStatus] =
     useState<LandrushZombieEscapeNavigationReadiness | null>(null)
-  const fallPresentationRef = useRef<LandrushIslandFallPresentationState>(
-    createLandrushIslandFallPresentationState(),
-  )
+  const [zombieEscapeGrassResidencyReadiness, setZombieEscapeGrassResidencyReadiness] =
+    useState<StylizedGrassPreparedResidencyReadiness | null>(null)
+  const fallPresentationRef = useMemo(createLandrushIslandFallPresentationStore, [])
   const stylizedGroundTextureRequired =
     !startupProfileNoLandLayers && !startupProfileNoStylizedGround
   const [stylizedGroundTextureReady, setStylizedGroundTextureReady] = useState(
@@ -3460,7 +3634,9 @@ export function LandrushIslandClient({
     message: string
   } | null>(null)
   const [buildSyncConflict, setBuildSyncConflict] = useState<ParcelBuildContentUpdate | null>(null)
-  const [buildPlacementRejected, setBuildPlacementRejected] = useState(false)
+  const [buildPlacementRejectionMessage, setBuildPlacementRejectionMessage] = useState<
+    string | null
+  >(null)
   const [buildMaterializationVersion, setBuildMaterializationVersion] = useState(0)
   const [initialParcelReadyAuthorityKey, setInitialParcelReadyAuthorityKey] = useState<
     string | null
@@ -3477,16 +3653,21 @@ export function LandrushIslandClient({
   const bugReportReplayModeAppliedRef = useRef(false)
   const [localProfile, setLocalProfile] = useState<LocalPlayerProfile | null>(null)
   const [incomingVoiceSignals, setIncomingVoiceSignals] = useState<SpatialVoiceSignalMessage[]>([])
-  const showBuildPlacementRejection = useCallback(() => {
-    setBuildPlacementRejected(true)
+  const showBuildPlacementRejection = useCallback((message: string) => {
+    setBuildPlacementRejectionMessage(message)
     if (buildPlacementRejectedTimeoutRef.current !== null) {
       window.clearTimeout(buildPlacementRejectedTimeoutRef.current)
     }
     buildPlacementRejectedTimeoutRef.current = window.setTimeout(() => {
       buildPlacementRejectedTimeoutRef.current = null
-      setBuildPlacementRejected(false)
+      setBuildPlacementRejectionMessage(null)
     }, 3200)
   }, [])
+  const showBuildBoundsPlacementRejection = useCallback(
+    () =>
+      showBuildPlacementRejection('Placement rejected: keep the whole object inside your parcel.'),
+    [showBuildPlacementRejection],
+  )
   const handleVoiceSignal = useCallback((message: SpatialVoiceSignalMessage) => {
     setIncomingVoiceSignals((current) => [...current.slice(-63), message])
   }, [])
@@ -4203,6 +4384,92 @@ export function LandrushIslandClient({
   const authorityPresentationReady = initialParcelMaterializationReady && viewerSceneReady
   const currentInitialParcelAuthorityKeyRef = useRef(initialParcelAuthorityKey)
   currentInitialParcelAuthorityKeyRef.current = initialParcelAuthorityKey
+  const floorPresentationRequestKey = `${initialParcelAuthorityKey}|mode:${
+    zombieEscapeEnabled ? 'zombie' : 'day'
+  }|${zombieEscapeGeneratedAssetGeneration}`
+  const currentFloorPresentationRequestKeyRef = useRef(floorPresentationRequestKey)
+  currentFloorPresentationRequestKeyRef.current = floorPresentationRequestKey
+  const zombieEscapeGrassResidencyRequired =
+    zombieEscapeEnabled && !startupProfileNoLandLayers && !startupProfileNoStylizedBlades
+  const zombieEscapeGrassResidencyGeneration = `${floorPresentationRequestKey}|zombie-grass-residency:v1`
+  const currentZombieEscapeGrassResidencyGenerationRef = useRef(
+    zombieEscapeGrassResidencyGeneration,
+  )
+  currentZombieEscapeGrassResidencyGenerationRef.current = zombieEscapeGrassResidencyGeneration
+  const zombieEscapeGrassResidencyRequest = useMemo<StylizedGrassPreparedResidencyRequest | null>(
+    () =>
+      zombieEscapeGrassResidencyRequired
+        ? {
+            footprintRadiusMeters: ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+            generation: zombieEscapeGrassResidencyGeneration,
+            transitionActive: zombieEscapeNightActive && zombieEscapeCameraTransitionActive,
+          }
+        : null,
+    [
+      zombieEscapeCameraTransitionActive,
+      zombieEscapeGrassResidencyGeneration,
+      zombieEscapeGrassResidencyRequired,
+      zombieEscapeNightActive,
+    ],
+  )
+  const handleZombieEscapeGrassResidencyReadinessChange = useCallback(
+    (reported: StylizedGrassPreparedResidencyReadiness) => {
+      if (reported.generation !== currentZombieEscapeGrassResidencyGenerationRef.current) return
+      setZombieEscapeGrassResidencyReadiness((current) =>
+        current?.contentGeneration === reported.contentGeneration &&
+        current.contentRevision === reported.contentRevision &&
+        current.coverageRevision === reported.coverageRevision &&
+        current.generation === reported.generation &&
+        current.ready === reported.ready
+          ? current
+          : reported,
+      )
+    },
+    [],
+  )
+  const zombieEscapeGrassResidencyReadyForNightStart =
+    !zombieEscapeGrassResidencyRequired ||
+    zombieEscapePhase !== 'build' ||
+    (zombieEscapeGrassResidencyReadiness?.generation === zombieEscapeGrassResidencyGeneration &&
+      zombieEscapeGrassResidencyReadiness.ready)
+  const handleFloorPresentationReadinessChange = useCallback(
+    (reported: LandrushIslandFloorPresentationReadiness) => {
+      setFloorPresentationReadiness((current) =>
+        reconcileLandrushIslandFloorPresentationReadiness({
+          current,
+          currentRequestKey: currentFloorPresentationRequestKeyRef.current,
+          reported,
+        }),
+      )
+    },
+    [],
+  )
+  const handleDayMaterialPresentationReadinessChange = useCallback(
+    (reported: LandrushIslandDayMaterialPresentationReadiness) => {
+      setDayMaterialPresentationReadiness((current) =>
+        current?.generation === reported.generation &&
+        current.completed === reported.completed &&
+        current.total === reported.total &&
+        current.ready === reported.ready
+          ? current
+          : reported,
+      )
+    },
+    [],
+  )
+  const floorPresentationReady = resolveLandrushIslandFloorPresentationReady({
+    admitted: authorityPresentationReady,
+    requestKey: floorPresentationRequestKey,
+    status: floorPresentationReadiness,
+  })
+  const floorPresentationGeneration = floorPresentationReady
+    ? (floorPresentationReadiness?.generation ?? null)
+    : null
+  const dayMaterialPresentationReady =
+    zombieEscapeEnabled ||
+    (floorPresentationGeneration !== null &&
+      dayMaterialPresentationReadiness?.generation === floorPresentationGeneration &&
+      dayMaterialPresentationReadiness?.ready === true)
   const ambientLoadReadiness =
     ambientLoadStatus?.authorityKey === initialParcelAuthorityKey
       ? ambientLoadStatus.readiness
@@ -4361,6 +4628,8 @@ export function LandrushIslandClient({
     if (!zombieEscapeEnabled) {
       appliedZombieEscapePhaseRef.current = null
       zombieEscapePhaseRef.current = 'build'
+      viewerPresentationEffectRef.current.presentationPipelineActive = false
+      setZombieEscapeCameraTransitionActive(false)
       setZombieEscapePhase('build')
       return
     }
@@ -4390,20 +4659,22 @@ export function LandrushIslandClient({
     zombieEscapeEnabled,
     zombieEscapePhase,
   ])
-  const zombieEscapePhaseReady = resolveLandrushZombieEscapePhaseReady({
-    authorityResyncActive,
-    buildMode,
-    cameraOwner,
-    fpvView,
-    generatedAssetsReady: zombieEscapeGeneratedAssetsReady,
-    loadingActive,
-    mapView,
-    modeTransitionActive: modeTransitionFade !== null,
-    phase: zombieEscapePhase,
-    sceneViewMode,
-    viewMode,
-    zombieEscapeEnabled,
-  })
+  const zombieEscapePhaseReady =
+    zombieEscapeGrassResidencyReadyForNightStart &&
+    resolveLandrushZombieEscapePhaseReady({
+      authorityResyncActive,
+      buildMode,
+      cameraOwner,
+      fpvView,
+      generatedAssetsReady: zombieEscapeGeneratedAssetsReady,
+      loadingActive,
+      mapView,
+      modeTransitionActive: modeTransitionFade !== null,
+      phase: zombieEscapePhase,
+      sceneViewMode,
+      viewMode,
+      zombieEscapeEnabled,
+    })
   const selectedLevelId = useViewer((state) => state.selection.levelId)
   const activeBuildLevelBaseY = useScene((state) =>
     resolveLandrushIslandActiveLevelBaseY(
@@ -4678,6 +4949,8 @@ export function LandrushIslandClient({
   const loadingAssetsReady =
     initialParcelMaterializationReady &&
     viewerSceneReady &&
+    floorPresentationReady &&
+    dayMaterialPresentationReady &&
     worldFrameReady &&
     ambientLoadReadiness?.ready === true &&
     builtCollidersReady &&
@@ -4723,6 +4996,37 @@ export function LandrushIslandClient({
       ready: viewerSceneReady,
       total: 1,
     })
+
+    const currentFloorPresentationReadiness =
+      floorPresentationReadiness?.requestKey === floorPresentationRequestKey
+        ? floorPresentationReadiness
+        : null
+    tasks.push({
+      completed: floorPresentationReady
+        ? 100
+        : Math.min(
+            99,
+            Math.max(
+              0,
+              Math.floor(
+                (100 * (currentFloorPresentationReadiness?.completed ?? 0)) /
+                  Math.max(1, currentFloorPresentationReadiness?.total ?? 1),
+              ),
+            ),
+          ),
+      id: 'floor-presentation',
+      ready: floorPresentationReady,
+      total: 100,
+    })
+
+    if (!zombieEscapeEnabled) {
+      tasks.push({
+        completed: dayMaterialPresentationReady ? 1 : 0,
+        id: 'day-material-presentation',
+        ready: dayMaterialPresentationReady,
+        total: 1,
+      })
+    }
 
     if (proceduralCliffsRequired) {
       tasks.push({
@@ -4807,6 +5111,10 @@ export function LandrushIslandClient({
   }, [
     ambientLoadReadiness,
     builtCollidersReady,
+    dayMaterialPresentationReady,
+    floorPresentationReadiness,
+    floorPresentationReady,
+    floorPresentationRequestKey,
     initialParcelMaterializationReady,
     loadingPaintReady,
     naturalRoadPlanReady,
@@ -5126,7 +5434,7 @@ export function LandrushIslandClient({
         dataUrl: screenshotDataUrl,
         height: canvas.height,
         mimeType: 'image/png',
-        pixelRatio: window.devicePixelRatio,
+        pixelRatio: resolveLandrushCanvasPixelRatio(canvas),
         width: canvas.width,
       },
       version: 1,
@@ -5404,7 +5712,7 @@ export function LandrushIslandClient({
           releaseHistoryPause()
         }
         if (!deleted) return
-        showBuildPlacementRejection()
+        showBuildBoundsPlacementRejection()
         renderScheduler.requestFrame('geometry:changed')
       },
       readInvalidNodeIds,
@@ -5416,7 +5724,7 @@ export function LandrushIslandClient({
       unsubscribe()
       scheduler.dispose()
     }
-  }, [activeBuildParcel, buildMode, parcelWorldId, showBuildPlacementRejection])
+  }, [activeBuildParcel, buildMode, parcelWorldId, showBuildBoundsPlacementRejection])
 
   const handleTvMediaStateChange = useCallback(
     (parcelId: string, tvId: string, media: LandrushIslandTvMediaSettings) => {
@@ -5650,6 +5958,58 @@ export function LandrushIslandClient({
           authorizedBuildDeletionNodeIdsRef.current.delete(updateKey)
           return
         }
+        const quote = multiplayer.quoteParcelBuildNodes(parcelWorldId, localOwnedParcel.id, nodes)
+        if (!quote.allowed) {
+          cancelLandrushPascalEditingRuntime()
+          const temporal = useScene.temporal.getState()
+          const rollback = rollbackLandrushBuildRejectedCandidate({
+            areEqual: areLandrushBuildSyncNodeSetsEqual,
+            baseline,
+            clearRedo: () => useScene.temporal.setState({ futureStates: [] }),
+            desiredFromPastState: (state) =>
+              state.nodes
+                ? createLandrushIslandSyncedBuildNodes({
+                    nodes: state.nodes,
+                    parcel: localOwnedParcel,
+                    parcelWorldId,
+                  })
+                : null,
+            pastStates: temporal.pastStates,
+            readDesired: () =>
+              createLandrushIslandSyncedBuildNodes({
+                nodes: useScene.getState().nodes,
+                parcel: localOwnedParcel,
+                parcelWorldId,
+              }),
+            rematerialize: () =>
+              rematerializeLandrushIslandSafeBuildTransportBaseline({
+                baselineNodes: baseline,
+                parcel: localOwnedParcel,
+                parcelWorldId,
+              }),
+            undo: () => useScene.temporal.getState().undo(),
+          })
+          authorizedBuildDeletionNodeIdsRef.current.delete(updateKey)
+          if (rollback.kind === 'rematerialized') {
+            setBuildEditorParcelReady(false)
+            setBuildMaterializationVersion((version) => version + 1)
+          } else if (rollback.kind === 'failed') {
+            setBuildEditorParcelReady(false)
+            console.error('[Landrush build sync] Could not roll back a rejected placement', {
+              parcelId: localOwnedParcel.id,
+              reason: quote.reason,
+              worldId: parcelWorldId,
+            })
+          }
+          showBuildPlacementRejection(
+            quote.reason === 'insufficient-funds' &&
+              quote.cost !== null &&
+              quote.availableBalance !== null
+              ? `Not enough money: this placement costs $${quote.cost}; $${quote.availableBalance} available`
+              : 'Placement rejected: build pricing or balance is unavailable.',
+          )
+          return
+        }
         if (multiplayer.syncParcelBuildNodes(parcelWorldId, localOwnedParcel.id, nodes)) {
           safeBuildTransportBaselineRef.current.set(updateKey, nodes)
           authorizedBuildDeletionNodeIdsRef.current.delete(updateKey)
@@ -5731,8 +6091,10 @@ export function LandrushIslandClient({
     hasLiveLayoutNode,
     localOwnedParcel,
     multiplayer.parcelBuildContentAuthorityEpoch,
+    multiplayer.quoteParcelBuildNodes,
     multiplayer.syncParcelBuildNodes,
     parcelWorldId,
+    showBuildPlacementRejection,
   ])
 
   const retryBuildSyncConflict = useCallback(() => {
@@ -5907,6 +6269,7 @@ export function LandrushIslandClient({
     releaseLandrushIslandPointerLock()
   }, [fpvActive])
 
+  const modeKeyDownHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
   useLayoutEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       measureLandrushFrameSlice('landrush-island.input.mode-keydown', () => {
@@ -5995,9 +6358,7 @@ export function LandrushIslandClient({
         }
       })
     }
-
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
+    modeKeyDownHandlerRef.current = handleKeyDown
   }, [
     buildEditorKeyboardReserved,
     buildMode,
@@ -6014,6 +6375,12 @@ export function LandrushIslandClient({
     spatialVoice,
   ])
 
+  useLayoutEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => modeKeyDownHandlerRef.current(event)
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [])
+
   const activateGamepadVoiceCommand = useCallback(() => {
     if (!spatialVoice.available && !spatialVoice.desired) return
     measureLandrushFrameSlice('landrush-island.input.gamepad.toggle-voice', spatialVoice.toggle)
@@ -6022,6 +6389,7 @@ export function LandrushIslandClient({
   const activateGamepadSquareCommand = useCallback(() => {
     gamepadBuildFocusModeRef.current = 'palette'
     gamepadBuildPaletteButtonRef.current = null
+    gamepadBuildSidebarButtonRef.current = null
     if (buildMode) {
       measureLandrushFrameSlice('landrush-island.input.gamepad.leave-build', enterPlayerView)
     } else if (localOwnedParcel) {
@@ -6055,9 +6423,18 @@ export function LandrushIslandClient({
       })
       return
     }
+    if (buildMode && gamepadBuildFocusModeRef.current === 'sidebar') {
+      if (!resolveLandrushBuildGamepadPalettePanel(useEditor.getState().activeSidebarPanel)) {
+        return
+      }
+      gamepadBuildFocusModeRef.current = 'palette'
+      scheduleLandrushIslandCurrentGamepadBuildPaletteFocus(gamepadBuildPaletteButtonRef)
+      return
+    }
     if (!buildMode) return
     gamepadBuildFocusModeRef.current = 'palette'
     gamepadBuildPaletteButtonRef.current = null
+    gamepadBuildSidebarButtonRef.current = null
     measureLandrushFrameSlice('landrush-island.input.gamepad.leave-build', enterPlayerView)
   }, [buildMode, enterPlayerView, mapView])
 
@@ -6143,22 +6520,72 @@ export function LandrushIslandClient({
       }
 
       if (
-        isLandrushBuildGamepadPaletteInputReady({
-          buildMode,
-          focusMode: gamepadBuildFocusModeRef.current,
-          interactionReady: buildEditorInteractionReady,
-        })
+        buildMode &&
+        buildEditorInteractionReady &&
+        gamepadBuildFocusModeRef.current !== 'placement'
       ) {
         if (paletteDirection) {
-          measureLandrushFrameSlice('landrush-island.input.gamepad.navigate-build-palette', () =>
-            moveLandrushIslandGamepadBuildPaletteFocus(
-              paletteDirection,
-              gamepadBuildPaletteButtonRef,
-            ),
-          )
+          const navigationAction = resolveLandrushBuildGamepadNavigationAction({
+            direction: paletteDirection,
+            focusMode: gamepadBuildFocusModeRef.current,
+          })
+          if (navigationAction === 'enter-sidebar') {
+            measureLandrushFrameSlice(
+              'landrush-island.input.gamepad.navigate-build-sidebar',
+              () => {
+                gamepadBuildFocusModeRef.current = 'sidebar'
+                gamepadBuildSidebarButtonRef.current = null
+                focusLandrushIslandCurrentGamepadSidebarButton(
+                  buildEditorChromeRootRef.current,
+                  gamepadBuildSidebarButtonRef,
+                )
+              },
+            )
+          } else if (
+            navigationAction === 'move-sidebar' &&
+            (paletteDirection === 'up' || paletteDirection === 'down')
+          ) {
+            measureLandrushFrameSlice('landrush-island.input.gamepad.navigate-build-sidebar', () =>
+              moveLandrushIslandGamepadSidebarFocus(
+                buildEditorChromeRootRef.current,
+                paletteDirection,
+                gamepadBuildSidebarButtonRef,
+              ),
+            )
+          } else if (
+            navigationAction === 'leave-sidebar' &&
+            resolveLandrushBuildGamepadPalettePanel(useEditor.getState().activeSidebarPanel) !==
+              null
+          ) {
+            gamepadBuildFocusModeRef.current = 'palette'
+            scheduleLandrushIslandCurrentGamepadBuildPaletteFocus(gamepadBuildPaletteButtonRef)
+          } else if (navigationAction === 'move-palette') {
+            measureLandrushFrameSlice('landrush-island.input.gamepad.navigate-build-palette', () =>
+              moveLandrushIslandGamepadBuildPaletteFocus(
+                paletteDirection,
+                gamepadBuildPaletteButtonRef,
+              ),
+            )
+          }
         }
-        if (crossPressed) {
-          activateGamepadBuildPaletteCommand()
+        if (crossPressed && !paletteDirection) {
+          if (gamepadBuildFocusModeRef.current === 'sidebar') {
+            measureLandrushFrameSlice(
+              'landrush-island.input.gamepad.activate-build-sidebar',
+              () => {
+                const palettePanel = activateLandrushIslandGamepadSidebarButton(
+                  buildEditorChromeRootRef.current,
+                  gamepadBuildSidebarButtonRef,
+                )
+                if (!palettePanel) return
+                gamepadBuildFocusModeRef.current = 'palette'
+                gamepadBuildPaletteButtonRef.current = null
+                scheduleLandrushIslandCurrentGamepadBuildPaletteFocus(gamepadBuildPaletteButtonRef)
+              },
+            )
+          } else {
+            activateGamepadBuildPaletteCommand()
+          }
         }
       }
 
@@ -6192,9 +6619,11 @@ export function LandrushIslandClient({
     ) {
       gamepadBuildFocusModeRef.current = 'palette'
       gamepadBuildPaletteButtonRef.current = null
+      gamepadBuildSidebarButtonRef.current = null
       return
     }
     gamepadBuildFocusModeRef.current = 'palette'
+    gamepadBuildSidebarButtonRef.current = null
     scheduleLandrushIslandCurrentGamepadBuildPaletteFocus(gamepadBuildPaletteButtonRef)
   }, [buildEditorInteractionReady, buildMode, gamepadHintsActive])
 
@@ -6317,6 +6746,22 @@ export function LandrushIslandClient({
       data-landrush-interface-focus-sink
       data-landrush-loading-ambient-ready={ambientLoadReadiness?.ready === true ? 'true' : 'false'}
       data-landrush-loading-built-colliders-ready={builtCollidersReady ? 'true' : 'false'}
+      data-landrush-loading-floor-presentation-completed={
+        floorPresentationReadiness?.requestKey === floorPresentationRequestKey
+          ? floorPresentationReadiness.completed
+          : 0
+      }
+      data-landrush-loading-floor-presentation-generation={
+        floorPresentationReadiness?.requestKey === floorPresentationRequestKey
+          ? floorPresentationReadiness.generation
+          : undefined
+      }
+      data-landrush-loading-floor-presentation-ready={floorPresentationReady ? 'true' : 'false'}
+      data-landrush-loading-floor-presentation-total={
+        floorPresentationReadiness?.requestKey === floorPresentationRequestKey
+          ? floorPresentationReadiness.total
+          : 0
+      }
       data-landrush-loading-handed-off={!loadingActive ? 'true' : 'false'}
       data-landrush-loading-initial-parcel-ready={
         initialParcelMaterializationReady ? 'true' : 'false'
@@ -6338,6 +6783,9 @@ export function LandrushIslandClient({
       }
       data-landrush-loading-viewer-scene-ready={viewerSceneReady ? 'true' : 'false'}
       data-landrush-loading-world-frame-ready={worldFrameReady ? 'true' : 'false'}
+      data-landrush-loading-zombie-allocation-ready={
+        zombieEscapeGeneratedAssetReadiness?.allocationReady === true ? 'true' : 'false'
+      }
       data-landrush-loading-zombie-assets-ready={
         zombieEscapeGeneratedAssetsReady ? 'true' : 'false'
       }
@@ -6349,6 +6797,48 @@ export function LandrushIslandClient({
       data-landrush-loading-zombie-navigation-ready={zombieEscapeNavigationReady ? 'true' : 'false'}
       data-landrush-loading-zombie-navigation-status={
         zombieEscapeEnabled ? (zombieEscapeNavigationReadiness?.status ?? 'pending') : 'omitted'
+      }
+      data-landrush-loading-zombie-pipeline-completed={
+        zombieEscapeGeneratedAssetReadiness?.pipelineCompleted ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-missing-representatives={
+        zombieEscapeGeneratedAssetReadiness?.pipelineMissingRepresentativeKeys.join(',') ?? ''
+      }
+      data-landrush-loading-zombie-pipeline-begin-count={
+        viewerPresentationEffectRef.current.pipelinePrewarmBeginCount ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-callback-installed={
+        viewerPresentationEffectRef.current.pipelinePrewarmCallbackInstalled ? 'true' : 'false'
+      }
+      data-landrush-loading-zombie-pipeline-camera-match={
+        viewerPresentationEffectRef.current.pipelinePrewarmCameraMatched ? 'true' : 'false'
+      }
+      data-landrush-loading-zombie-pipeline-failed-revision={
+        viewerPresentationEffectRef.current.pipelinePrewarmFailedRevision ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-pipeline-available={
+        viewerPresentationEffectRef.current.pipelinePrewarmPipelineAvailable ? 'true' : 'false'
+      }
+      data-landrush-loading-zombie-pipeline-pipeline-error={
+        viewerPresentationEffectRef.current.pipelinePrewarmPipelineError ? 'true' : 'false'
+      }
+      data-landrush-loading-zombie-pipeline-postprocess-callback-count={
+        viewerPresentationEffectRef.current.pipelinePrewarmPostprocessCallbackCount ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-postprocess-frame-count={
+        viewerPresentationEffectRef.current.pipelinePrewarmPostprocessFrameCount ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-rendered-revision={
+        viewerPresentationEffectRef.current.pipelinePrewarmRenderedRevision ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-request-revision={
+        viewerPresentationEffectRef.current.pipelinePrewarmRequestRevision ?? 0
+      }
+      data-landrush-loading-zombie-pipeline-ready={
+        zombieEscapeGeneratedAssetReadiness?.pipelineReady === true ? 'true' : 'false'
+      }
+      data-landrush-loading-zombie-pipeline-total={
+        zombieEscapeGeneratedAssetReadiness?.pipelineTotal ?? 0
       }
       tabIndex={-1}
     >
@@ -6376,12 +6866,14 @@ export function LandrushIslandClient({
               editingChrome={
                 <LandrushPascalEditorChrome
                   active={buildEditorChromeActive && !zombieEscapeNightActive}
+                  buildCostsEnabled={!offline}
                   chromeRootRef={buildEditorChromeRootRef}
                   exitBuildButtonRef={buildEditorExitButtonRef}
                   interactionReady={buildEditorInteractionReady}
                   modeTransitionActive={buildEditorModeTransitionActive}
                   onExitBuild={enterPlayerView}
                   open={buildEditorLayoutOpen}
+                  profileMoney={multiplayer.profileMoney}
                 />
               }
               editingActive={buildEditorRuntimeActive}
@@ -6396,6 +6888,7 @@ export function LandrushIslandClient({
               }
               presentationEffectRef={viewerPresentationEffectRef}
               projectId={experienceConfig.projectId}
+              renderDpr={LANDRUSH_ISLAND_RENDER_DPR}
               sceneReadyKey={initialParcelAuthorityKey}
               sceneReadyMaxWaitMs={LANDRUSH_ISLAND_INITIAL_SCENE_READY_MAX_WAIT_MS}
               sceneReadyPrerequisitesReady={initialParcelMaterializationReady}
@@ -6418,6 +6911,9 @@ export function LandrushIslandClient({
                     localMotionRef={localMotionRef}
                     outputPresentationRef={viewerPresentationEffectRef}
                     presentationRef={modeTransitionPresentationRef}
+                  />
+                  <LandrushPresentationPipelinePrewarmDriver
+                    presentationEffectRef={viewerPresentationEffectRef}
                   />
                   <color args={['#164a77']} attach="background" />
                   {multiplayerNaturalEnvironment ? (
@@ -6496,6 +6992,7 @@ export function LandrushIslandClient({
                       dayInterfaceCommandsEnabled={dayInterfaceCommandsEnabled}
                       deferBuiltColliderRebuild={!authorityPresentationReady}
                       fallPresentationRef={fallPresentationRef}
+                      floorPresentationReadinessGeneration={floorPresentationGeneration}
                       fpvActive={fpvActive}
                       grassInteractionRef={grassInteractionRef}
                       initializeZombieEscapeClock={multiplayer.initializeZombieEscapeClock}
@@ -6503,7 +7000,7 @@ export function LandrushIslandClient({
                       localMotionRef={localMotionRef}
                       localProfile={resolvedLocalProfile}
                       materialPresentation={materialPresentation}
-                      viewerSceneReady={viewerSceneReady}
+                      viewerSceneReady={viewerSceneReady && ambientLoadReadiness?.ready === true}
                       mapPresentationProgressRef={mapPresentationProgressRef}
                       mapPresentationVisible={mapPresentationVisible}
                       mapCameraPoseRef={mapCameraPoseRef}
@@ -6518,6 +7015,9 @@ export function LandrushIslandClient({
                         !loadingActive || navigationLiveScenarioImmediate
                       }
                       onBuiltCollidersReadinessChange={handleBuiltCollidersReadinessChange}
+                      onDayMaterialPresentationReadinessChange={
+                        handleDayMaterialPresentationReadinessChange
+                      }
                       onZombieEscapeCollisionWorldReadinessChange={
                         handleZombieEscapeCollisionWorldReadinessChange
                       }
@@ -6526,14 +7026,20 @@ export function LandrushIslandClient({
                       }
                       onZombieEscapePhaseChange={handleZombieEscapePhaseChange}
                       onZombieEscapeCameraSettled={handleZombieEscapeCameraSettled}
+                      onZombieEscapeNightTransitionStart={
+                        handleZombieEscapeNightTransitionStart
+                      }
+                      onZombieEscapeDeath={multiplayer.reportZombieEscapeDeath}
                       onExitBuildMode={enterPlayerView}
                       onLocalPlayerChange={multiplayer.publishLocalPlayer}
+                      onProfileMoneyOperation={multiplayer.applyProfileMoneyOperation}
                       palmLayout={livePalmLayout}
                       perfRun={activePerfRun}
                       playerCameraPoseRef={playerCameraPoseRef}
                       playerReturnCameraPoseRef={playerReturnCameraPoseRef}
                       playerSpawn={playerSpawn}
                       playerSpawnAuthorityReady={initialParcelMaterializationReady}
+                      profileMoneyBalance={multiplayer.profileMoney?.balance}
                       remotePlayerStore={multiplayer.remotePlayerStore}
                       remotePlayers={multiplayer.remotePlayers}
                       remoteVoicePeerIds={spatialVoice.remoteVoicePeerIds}
@@ -6588,7 +7094,7 @@ export function LandrushIslandClient({
                   <LandrushIslandBuildParcelGuardLayer
                     buildMode={dayInterfaceState.buildControlsActive}
                     groundY={activeBuildGroundY}
-                    onPlacementRejected={showBuildPlacementRejection}
+                    onPlacementRejected={showBuildBoundsPlacementRejection}
                     parcel={buildSceneModeActive ? activeBuildParcel : null}
                   />
                   <LandrushIslandStartupReactProfiler
@@ -6620,10 +7126,13 @@ export function LandrushIslandClient({
                     visible={dayInterfaceState.buildControlsActive}
                   />
                   <LandrushIslandRobotLevelSelectionTracker
-                    enabled={!buildSceneModeActive}
+                    enabled={loadingActive || !buildSceneModeActive}
                     groundY={liveViewerLandSurface.grassSurfaceElevation}
+                    loadingActive={loadingActive}
                     localMotionRef={localMotionRef}
                     materialPresentation={materialPresentation}
+                    onReadinessChange={handleFloorPresentationReadinessChange}
+                    readinessRequestKey={floorPresentationRequestKey}
                   />
                   {!startupProfileNoLandLayers ? (
                     <LandrushIslandStartupReactProfiler
@@ -6660,6 +7169,7 @@ export function LandrushIslandClient({
                             bladeVisibilityRef={grassVisibilityRef}
                             grassDebugState={stylizedGrassDebugState}
                             grassInteractionRef={grassInteractionRef}
+                            grassPreparedResidencyRequest={zombieEscapeGrassResidencyRequest}
                             grassStreamingPaused={grassStreamingPaused}
                             grassBlockers={grassBlockers}
                             groundRenderOrder={
@@ -6668,6 +7178,9 @@ export function LandrushIslandClient({
                                 : undefined
                             }
                             onStylizedGroundTextureReady={setStylizedGroundTextureReady}
+                            onGrassPreparedResidencyReadinessChange={
+                              handleZombieEscapeGrassResidencyReadinessChange
+                            }
                             profileMeasure={activeProfileMeasure}
                             renderStylizedPathNetwork={!multiplayerNaturalEnvironment}
                             roads={liveRenderedGrassRoads}
@@ -6968,13 +7481,13 @@ export function LandrushIslandClient({
             </button>
           </div>
         ) : null}
-        {dayInterfaceCommandsEnabled && buildPlacementRejected && buildMode ? (
+        {dayInterfaceCommandsEnabled && buildPlacementRejectionMessage && buildMode ? (
           <div
             className="pointer-events-none absolute top-4 left-1/2 z-[170] max-w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-full border border-amber-100/25 bg-slate-950/88 px-4 py-2 text-center font-semibold text-amber-50 text-sm shadow-xl backdrop-blur-md"
             data-landrush-build-placement-rejected
             role="alert"
           >
-            Placement rejected: keep the whole object inside your parcel.
+            {buildPlacementRejectionMessage}
           </div>
         ) : null}
       </div>
@@ -6997,30 +7510,18 @@ export function LandrushIslandClient({
 function LandrushIslandFallScreenEffect({
   presentationRef,
 }: {
-  presentationRef: { current: LandrushIslandFallPresentationState }
+  presentationRef: LandrushIslandFallPresentationStore
 }) {
-  const [snapshot, setSnapshot] = useState(() => createLandrushIslandFallPresentationState())
+  const [snapshot, setSnapshot] = useState(() => ({ ...presentationRef.current }))
 
   useEffect(() => {
-    let frameId: number | null = null
-    const tick = () => {
-      const next = presentationRef.current
-      setSnapshot((current) => {
-        if (
-          current.active === next.active &&
-          Math.abs(current.amount - next.amount) < 0.012 &&
-          Math.abs(current.slowMotionFactor - next.slowMotionFactor) < 0.025
-        ) {
-          return current
-        }
-        return { ...next }
-      })
-      frameId = window.requestAnimationFrame(tick)
+    const updateSnapshot = () => {
+      setSnapshot({ ...presentationRef.current })
     }
-
-    frameId = window.requestAnimationFrame(tick)
+    presentationRef.listeners.add(updateSnapshot)
+    updateSnapshot()
     return () => {
-      if (frameId !== null) window.cancelAnimationFrame(frameId)
+      presentationRef.listeners.delete(updateSnapshot)
     }
   }, [presentationRef])
 
@@ -7045,6 +7546,29 @@ function LandrushIslandFallScreenEffect({
   )
 }
 
+function LandrushPresentationPipelinePrewarmDriver({
+  presentationEffectRef,
+}: {
+  presentationEffectRef: { current: ViewerPresentationEffectState }
+}) {
+  const { gl, invalidate, scene } = useThree()
+  const renderer = gl as unknown as LandrushPipelineRenderer
+
+  useLayoutEffect(
+    () =>
+      registerLandrushPresentationPipelinePrewarm({
+        invalidate,
+        renderer,
+        scene,
+        state: presentationEffectRef.current,
+      }),
+    [invalidate, presentationEffectRef, renderer, scene],
+  )
+  useFrame(() => beginLandrushPresentationPipelinePrewarmFrame(renderer), 0.999)
+  useFrame(() => completeLandrushPresentationPipelinePrewarmFrame(renderer), 1.001)
+  return null
+}
+
 function LandrushIslandPresentationEffectDriver({
   fallPresentationRef,
   fpvActive,
@@ -7053,7 +7577,7 @@ function LandrushIslandPresentationEffectDriver({
   outputPresentationRef,
   presentationRef,
 }: {
-  fallPresentationRef: { current: LandrushIslandFallPresentationState }
+  fallPresentationRef: LandrushIslandFallPresentationStore
   fpvActive: boolean
   jumpPresentationRef: { current: LandrushIslandJumpEdgeBlurPresentationState }
   localMotionRef: { current: RobotMotion | null }
@@ -7073,6 +7597,7 @@ function LandrushIslandPresentationEffectDriver({
       clearLandrushIslandJumpEdgeBlur(jumpPresentationRef.current)
       reducedMotionQueryRef.current = null
       const output = outputPresentationRef.current
+      output.zoomBlurActive = false
       output.zoomBlurAmount = 0
       output.zoomBlurCenter = [0.5, 0.5]
       output.zoomBlurDebugMode = 'final'
@@ -7085,7 +7610,7 @@ function LandrushIslandPresentationEffectDriver({
   useFrame(() => {
     const presentation = presentationRef.current
     const transitionAmount = clamp01(presentation.zoomBlurAmount)
-    const transitionActive = transitionAmount > 0.001
+    const transitionActive = presentation.zoomBlurActive === true
     const fallActive = fallPresentationRef.current.active
     if (transitionActive || fallActive) {
       clearLandrushIslandJumpEdgeBlur(jumpPresentationRef.current)
@@ -7104,6 +7629,7 @@ function LandrushIslandPresentationEffectDriver({
       const center = jumpCenterRef.current
       center[0] = 0.5
       center[1] = 0.5
+      output.zoomBlurActive = false
       output.zoomBlurAmount = 0
       output.zoomBlurCenter = center
       output.zoomBlurDebugMode = 'final'
@@ -7131,6 +7657,7 @@ function LandrushIslandPresentationEffectDriver({
       }
 
       const jumpDebugMode = jumpPresentationRef.current.debugMode
+      output.zoomBlurActive = true
       output.zoomBlurAmount = clamp01(jumpSample.amount)
       output.zoomBlurCenter = center
       output.zoomBlurDebugMode =
@@ -7138,6 +7665,7 @@ function LandrushIslandPresentationEffectDriver({
       output.zoomBlurDirection = 1
       output.zoomBlurStrength = LANDRUSH_ISLAND_JUMP_EDGE_BLUR.radialStrength
     } else {
+      output.zoomBlurActive = transitionActive
       output.zoomBlurAmount = transitionAmount
       output.zoomBlurCenter = presentation.zoomBlurCenter
       output.zoomBlurDebugMode = presentation.zoomBlurDebugMode
@@ -7145,7 +7673,7 @@ function LandrushIslandPresentationEffectDriver({
       output.zoomBlurStrength = presentation.zoomBlurStrength
     }
 
-    if (!fallActive && (transitionAmount > 0 || jumpSample.active)) {
+    if (!fallActive && (transitionActive || jumpSample.active)) {
       invalidate()
       renderScheduler.requestFrame('animation')
     }
@@ -7158,6 +7686,7 @@ function createLandrushIslandModeTransitionPresentationState(
   zoomBlurDebugMode: ViewerPresentationEffectDebugMode,
 ): LandrushIslandModeTransitionPresentationState {
   return {
+    zoomBlurActive: false,
     zoomBlurAmount: 0,
     zoomBlurCenter: [0.5, 0.48],
     zoomBlurDebugMode,
@@ -7172,6 +7701,7 @@ function updateLandrushIslandModeTransitionPresentation(
   progress: number,
 ) {
   if (!transition) {
+    output.zoomBlurActive = false
     output.zoomBlurAmount = 0
     output.zoomBlurDirection = 1
     return
@@ -7182,6 +7712,7 @@ function updateLandrushIslandModeTransitionPresentation(
   const blurIn = MathUtils.smoothstep(amount, 0.0075, LANDRUSH_ISLAND_TRANSITION_BLUR_FULL_PROGRESS)
   const blurOut = 1 - MathUtils.smoothstep(amount, 0.72, 0.98)
 
+  output.zoomBlurActive = true
   output.zoomBlurAmount = clamp01(normalizedCameraVelocity ** 0.72 * blurIn * blurOut)
   output.zoomBlurDirection =
     transition.to === 'map' || (transition.from === 'player' && transition.to === 'build') ? 1 : -1
@@ -9427,6 +9958,7 @@ function LandrushIslandRuntimeCameraProbeRecorder({
       renderedFpsWindow.frameCount = 0
       renderedFpsWindow.startedAt = now
     }
+    if (!landrushIslandRuntimeProbeIsEnabled()) return
     recordLandrushIslandFrameProbe({
       dtMs: previousFrameAt === null ? null : now - previousFrameAt,
       mode,
@@ -9707,13 +10239,15 @@ function LandrushIslandBuildCameraTransition({
     )
     state.camera.updateMatrixWorld()
     writeLandrushIslandCameraPose(buildCameraPoseRef, state.camera, controlsTarget)
-    recordLandrushIslandCameraProbe({
-      camera: state.camera,
-      mode: 'build',
-      progress,
-      source: 'build-transition',
-      target: controlsTarget,
-    })
+    if (landrushIslandRuntimeProbeIsEnabled()) {
+      recordLandrushIslandCameraProbe({
+        camera: state.camera,
+        mode: 'build',
+        progress,
+        source: 'build-transition',
+        target: controlsTarget,
+      })
+    }
 
     if (progress >= 1) {
       state.camera.position.copy(desired)
@@ -9801,32 +10335,20 @@ function landrushIslandWallColliderGeometryReady() {
   })
 }
 
-function landrushIslandLevelColliderTransformsReady() {
+function collectLandrushIslandColliderLevelPlacements() {
   const nodes = useScene.getState().nodes
-  const expectedBaseYByLevelId = new Map<LevelNode['id'], number>()
-  for (const stack of resolveLandrushIslandFloorStacks(nodes)) {
-    for (const floor of stack.floors) {
-      for (const levelId of floor.levelIds) {
-        const existingBaseY = expectedBaseYByLevelId.get(levelId)
-        if (existingBaseY !== undefined && Math.abs(existingBaseY - floor.baseY) > 0.015) {
-          return false
-        }
-        expectedBaseYByLevelId.set(levelId, floor.baseY)
-      }
-    }
-  }
-
-  for (const [levelId, expectedBaseY] of expectedBaseYByLevelId) {
-    const object = sceneRegistry.nodes.get(levelId)
-    if (!object || Math.abs(object.position.y - expectedBaseY) > 0.015) return false
-  }
-
-  return true
+  return resolveLandrushIslandColliderLevelPlacements({
+    nodes,
+    resolveObject: (levelId) => sceneRegistry.nodes.get(levelId),
+    stacks: resolveLandrushIslandFloorStacks(nodes),
+  })
 }
 
-function buildLandrushIslandColliderWorld(excludedRegisteredNodeIds: ReadonlySet<string>) {
+function buildLandrushIslandColliderWorld(
+  excludedRegisteredNodeIds: ReadonlySet<string>,
+  levelPlacements: readonly LandrushIslandColliderLevelPlacement[],
+) {
   const nodes = useScene.getState().nodes
-  const hiddenLevelObjects: Object3D[] = []
   const redundantSlabObjects: Object3D[] = []
   const levelsWithFinishedFloorSlabs = new Set<AnyNodeId>()
   for (const node of Object.values(nodes)) {
@@ -9850,19 +10372,14 @@ function buildLandrushIslandColliderWorld(excludedRegisteredNodeIds: ReadonlySet
       }
       continue
     }
-    if (node.type !== 'level' || node.visible === false) continue
-    const object = sceneRegistry.nodes.get(node.id)
-    if (!object || object.visible) continue
-    hiddenLevelObjects.push(object)
-    object.visible = true
-    object.updateWorldMatrix(true, true)
   }
 
   try {
-    return buildFirstPersonColliderWorldFromRegistry(excludedRegisteredNodeIds)
+    return withLandrushIslandColliderLevelPlacements(levelPlacements, () =>
+      buildFirstPersonColliderWorldFromRegistry(excludedRegisteredNodeIds),
+    )
   } finally {
     for (const object of redundantSlabObjects) object.visible = true
-    for (const object of hiddenLevelObjects) object.visible = false
   }
 }
 
@@ -9922,10 +10439,13 @@ function useLandrushIslandBuiltColliderWorlds(
     [],
   )
 
-  const buildWorlds = useCallback(() => {
-    const collision = buildLandrushIslandColliderWorld(excludedRegisteredNodeIds)
-    return { collision, floatOnly: null }
-  }, [excludedRegisteredNodeIds])
+  const buildWorlds = useCallback(
+    (levelPlacements: readonly LandrushIslandColliderLevelPlacement[]) => {
+      const collision = buildLandrushIslandColliderWorld(excludedRegisteredNodeIds, levelPlacements)
+      return { collision, floatOnly: null }
+    },
+    [excludedRegisteredNodeIds],
+  )
 
   useLayoutEffect(() => {
     if (deferRebuild) return
@@ -9936,14 +10456,18 @@ function useLandrushIslandBuiltColliderWorlds(
       if (cancelled) return
       if (
         !landrushIslandWallColliderGeometryReady() ||
-        !landrushIslandStairColliderGeometryReady() ||
-        !landrushIslandLevelColliderTransformsReady()
+        !landrushIslandStairColliderGeometryReady()
       ) {
         frame = window.requestAnimationFrame(rebuildWhenReady)
         return
       }
+      const levelPlacements = collectLandrushIslandColliderLevelPlacements()
+      if (!levelPlacements) {
+        frame = window.requestAnimationFrame(rebuildWhenReady)
+        return
+      }
 
-      const nextWorlds = buildWorlds()
+      const nextWorlds = buildWorlds(levelPlacements)
       if (cancelled) {
         disposeWorlds(nextWorlds)
         return
@@ -10076,6 +10600,7 @@ function LandrushIslandPlayerLayer({
   dayInterfaceCommandsEnabled,
   deferBuiltColliderRebuild,
   fallPresentationRef,
+  floorPresentationReadinessGeneration,
   fpvActive,
   grassInteractionRef,
   initializeZombieEscapeClock,
@@ -10093,10 +10618,14 @@ function LandrushIslandPlayerLayer({
   navigationLiveScenarioAutoRun,
   navigationLiveScenarioReady,
   onBuiltCollidersReadinessChange,
+  onDayMaterialPresentationReadinessChange,
   onExitBuildMode,
   onLocalPlayerChange,
+  onProfileMoneyOperation,
   onZombieEscapeCameraSettled,
+  onZombieEscapeNightTransitionStart,
   onZombieEscapeCollisionWorldReadinessChange,
+  onZombieEscapeDeath,
   onZombieEscapeGeneratedAssetsReadinessChange,
   onZombieEscapePhaseChange,
   palmLayout,
@@ -10105,6 +10634,7 @@ function LandrushIslandPlayerLayer({
   playerReturnCameraPoseRef,
   playerSpawn,
   playerSpawnAuthorityReady,
+  profileMoneyBalance,
   remotePlayerStore,
   remotePlayers,
   remoteVoicePeerIds,
@@ -10130,7 +10660,8 @@ function LandrushIslandPlayerLayer({
   colliderAuthorityKey: string
   dayInterfaceCommandsEnabled: boolean
   deferBuiltColliderRebuild: boolean
-  fallPresentationRef: { current: LandrushIslandFallPresentationState }
+  fallPresentationRef: LandrushIslandFallPresentationStore
+  floorPresentationReadinessGeneration: string | null
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   initializeZombieEscapeClock: () => boolean
@@ -10148,12 +10679,18 @@ function LandrushIslandPlayerLayer({
   navigationLiveScenarioAutoRun: boolean
   navigationLiveScenarioReady: boolean
   onBuiltCollidersReadinessChange: (readiness: LandrushIslandBuiltColliderReadiness) => void
+  onDayMaterialPresentationReadinessChange: (
+    readiness: LandrushIslandDayMaterialPresentationReadiness,
+  ) => void
   onExitBuildMode: () => void
   onLocalPlayerChange: (player: MultiplayerPlayerSnapshot) => void
+  onProfileMoneyOperation: (operation: ProfileMoneyOperationRequest) => number | null
   onZombieEscapeCameraSettled: () => void
+  onZombieEscapeNightTransitionStart: () => void
   onZombieEscapeCollisionWorldReadinessChange: (
     readiness: LandrushZombieEscapeNavigationReadiness,
   ) => void
+  onZombieEscapeDeath: () => boolean
   onZombieEscapeGeneratedAssetsReadinessChange: (
     readiness: ZombieEscapeGeneratedAssetReadinessSnapshot,
   ) => void
@@ -10164,6 +10701,7 @@ function LandrushIslandPlayerLayer({
   playerReturnCameraPoseRef: { current: LandrushIslandCameraPose | null }
   playerSpawn: LandrushIslandPlayerSpawnPose
   playerSpawnAuthorityReady: boolean
+  profileMoneyBalance: number | undefined
   remotePlayerStore: MultiplayerRemotePlayerStore
   remotePlayers: readonly MultiplayerPlayerSnapshot[]
   remoteVoicePeerIds: readonly string[]
@@ -10184,6 +10722,7 @@ function LandrushIslandPlayerLayer({
   const spawn = playerSpawn
   const groundY = surface.grassSurfaceElevation + LANDRUSH_ISLAND_ROBOT_GROUND_CLEARANCE
   const mapVisible = cameraOwner === 'map'
+  const zombieEscapeNightActive = zombieEscapeEnabled && zombieEscapePhase === 'night'
   const [zombieEscapeStatus, setZombieEscapeStatus] = useState<ZombieEscapeGameStatus>('playing')
   const [zombieEscapeInteractionActionable, setZombieEscapeInteractionActionable] = useState(false)
   const movementEnabled = resolveLandrushZombieEscapeIntegratedLocomotionEnabled({
@@ -10264,11 +10803,13 @@ function LandrushIslandPlayerLayer({
   )
   const materialPresentationReadinessMeshes = useMemo(
     () =>
-      zombieEscapeEnabled && viewerSceneReady
+      viewerSceneReady && floorPresentationReadinessGeneration !== null
         ? collectLandrushIslandMaterialPresentationReadinessSceneMeshes()
         : [],
-    [viewerSceneReady, zombieEscapeEnabled],
+    [floorPresentationReadinessGeneration, viewerSceneReady],
   )
+  const materialPresentationReadinessReady =
+    viewerSceneReady && floorPresentationReadinessGeneration !== null
 
   return (
     <group userData={{ pascalExcludeFromToolConeTarget: true }}>
@@ -10332,6 +10873,15 @@ function LandrushIslandPlayerLayer({
         waterY={waterY}
         zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
       />
+      {!zombieEscapeEnabled && floorPresentationReadinessGeneration !== null ? (
+        <LandrushIslandDayMaterialPresentationRenderReadiness
+          generation={floorPresentationReadinessGeneration}
+          meshes={materialPresentationReadinessMeshes}
+          onReadinessChange={onDayMaterialPresentationReadinessChange}
+          owner={materialPresentation}
+          ready={materialPresentationReadinessReady}
+        />
+      ) : null}
       {zombieEscapeEnabled ? (
         <LandrushZombieEscapeMode
           active={zombieEscapeActive}
@@ -10349,18 +10899,22 @@ function LandrushIslandPlayerLayer({
           onDestroyedFurnitureIdsChange={handleDestroyedFurnitureIdsChange}
           onGeneratedAssetsReadinessChange={onZombieEscapeGeneratedAssetsReadinessChange}
           onInteractionActionabilityChange={setZombieEscapeInteractionActionable}
+          onNightTransitionStart={onZombieEscapeNightTransitionStart}
           onPhaseChange={onZombieEscapePhaseChange}
+          onProfileMoneyOperation={onProfileMoneyOperation}
           onResetExternalPlayerMotion={resetZombieEscapeExternalPlayerMotion}
           onStatusChange={setZombieEscapeStatus}
+          onZombieEscapeDeath={onZombieEscapeDeath}
           palmLayout={visiblePalmLayout}
           phaseReady={zombieEscapePhaseReady}
           playerColor={localProfile.color}
+          profileMoneyBalance={profileMoneyBalance}
           spawn={spawn}
           surfacePoints={surface.grassSurfacePoints}
           zombieEscapeClockMode={zombieEscapeClockMode}
           zombieEscapeRoomStateObservation={zombieEscapeRoomStateObservation}
           startZombieEscapeNight={startZombieEscapeNight}
-          viewerSceneReady={viewerSceneReady}
+          viewerSceneReady={materialPresentationReadinessReady}
           visualRootRef={localRobotVisualRootRef}
           zombieEscapeTouchInputRef={zombieEscapeTouchInputRef}
         />
@@ -10398,7 +10952,9 @@ function LandrushIslandPlayerLayer({
         presentationMode={robotPresentationMode}
         structureGroundY={surface.grassSurfaceElevation}
         visualRootRef={localRobotVisualRootRef}
-        visible={robotScreenRevealEnabled && viewMode !== 'map' && !fpvActive}
+        visible={
+          robotScreenRevealEnabled && !zombieEscapeEnabled && viewMode !== 'map' && !fpvActive
+        }
       />
       <LandrushIslandMapPlayerMarker
         color={localProfile.color}
@@ -10513,15 +11069,25 @@ function LandrushIslandRevealProofOccluder({
 function LandrushIslandRobotLevelSelectionTracker({
   enabled,
   groundY,
+  loadingActive,
   localMotionRef,
   materialPresentation,
+  onReadinessChange,
+  readinessRequestKey,
 }: {
   enabled: boolean
   groundY: number
+  loadingActive: boolean
   localMotionRef: { current: RobotMotion | null }
   materialPresentation: LandrushIslandMaterialPresentationOwner
+  onReadinessChange: (readiness: LandrushIslandFloorPresentationReadiness) => void
+  readinessRequestKey: string
 }) {
-  const activeContextSignatureRef = useRef<string | null>(null)
+  const activeContextRef = useRef<{
+    levelNumber: number | null
+    scopeId: string | null
+    signature: string | null
+  }>({ levelNumber: null, scopeId: null, signature: null })
   const retainedFloorContextRef = useRef<LandrushBuildingFloorContext | null>(null)
   const floorStacksCacheRef = useRef<{
     covers: ReturnType<typeof resolveLandrushBuildingFloorCovers>
@@ -10530,35 +11096,98 @@ function LandrushIslandRobotLevelSelectionTracker({
     stacks: ReturnType<typeof resolveLandrushBuildingFloorStacks>
   } | null>(null)
   const activeCoverNodeIdsCacheRef = useRef<{
-    contextSignature: string | null
+    context: LandrushBuildingFloorContext | null
     covers: ReturnType<typeof resolveLandrushBuildingFloorCovers>
-    nodeIds: ReadonlySet<AnyNode['id']>
+    nodeIds: Set<AnyNode['id']>
+  } | null>(null)
+  const floorPoseCacheRef = useRef<{
+    context: LandrushBuildingFloorContext | null
+    snapshot: LandrushIslandFloorPresentationPoseSnapshot
+    stairTransition: LandrushIslandResolvedStairFloorTransition | null
   } | null>(null)
   const levelOpacitiesRef = useRef(new Map<LevelNode['id'], number>())
   const coverOpacitiesRef = useRef(new Map<AnyNode['id'], number>())
   const floorMaterialAssignmentIdsRef = useRef(new WeakMap<object, number>())
   const nextFloorMaterialAssignmentIdRef = useRef(1)
-  const floorFadePresentation = useMemo(
-    () =>
-      new LandrushIslandFloorFadePresentationOwner<AnyNode['id']>(materialPresentation, () =>
+  const floorRootIdentityIdsRef = useRef(new WeakMap<Object3D, number>())
+  const nextFloorRootIdentityIdRef = useRef(1)
+  const floorFadePresentationLease = useMemo(
+    () => ({
+      cleanupGeneration: 0,
+      owner: new LandrushIslandFloorFadePresentationOwner<AnyNode['id']>(materialPresentation, () =>
         renderScheduler.requestFrame('animation'),
       ),
+    }),
     [materialPresentation],
   )
+  const floorFadePresentation = floorFadePresentationLease.owner
+  const loadingPreparationPlanRef = useRef<{
+    admittedRootIds: Set<AnyNode['id']>
+    cursor: number
+    generation: string | null
+  }>({ admittedRootIds: new Set(), cursor: 0, generation: null })
+  const readinessStateRef = useRef({ settledGeneration: null as string | null })
+  const lastPublishedReadinessRef = useRef<LandrushIslandFloorPresentationReadiness | null>(null)
+  const loadingWasActiveRef = useRef(false)
   const floorFadePreparationMetricsRef = useRef({
     maxFrameMs: 0,
     totalMaterialsPrepared: 0,
     totalMeshesPrepared: 0,
   })
+  const floorPreparationRootsCacheRef = useRef<{
+    expectedRoots: Array<{
+      excludedRoots?: readonly Object3D[]
+      levelId: AnyNode['id']
+      root: Object3D | null
+      scopeId: string
+    }>
+    liveRoots: Map<AnyNode['id'], Object3D>
+    nodes: Record<string, AnyNode>
+    registeredRoots: Array<{
+      excludedRoots?: readonly Object3D[]
+      levelId: AnyNode['id']
+      root: Object3D
+      scopeId: string
+    }>
+    rootSignature: string
+    rootNodeIds: readonly AnyNode['id'][]
+    structuralToken: string
+  } | null>(null)
+  const lastEnsuredStructuralTokenByRootIdRef = useRef(new Map<AnyNode['id'], string>())
+  const lastPrunedPreparationGenerationRef = useRef<string | null>(null)
+  const preparationScopeIdsRef = useRef(new Set<string>())
+  const preparationScopesInitializedRef = useRef(false)
+  const preparationGenerationCacheRef = useRef({
+    readinessRequestKey: '',
+    rootSignature: '',
+    structuralToken: '',
+    value: '',
+  })
+  const opacityTargetsRef = useRef<ReturnType<typeof resolveLandrushBuildingFloorOpacities>>([])
+  const opacityTargetByLevelIdRef = useRef(new Map<LevelNode['id'], number>())
+  const floorOpacityPresentationActiveRef = useRef(true)
+  const liveLevelIdsRef = useRef(new Set<LevelNode['id']>())
+  const liveCoverNodeIdsRef = useRef(new Set<AnyNode['id']>())
+  const robotFloorPointRef = useRef({ x: 0, z: 0 })
+  const floorStructuralTokenRef = useRef({ geometryRevision: -1, registryRevision: -1, value: '' })
 
-  useEffect(
-    () => () => {
-      floorFadePresentation.disposeExactAll()
-    },
-    [floorFadePresentation],
-  )
+  useEffect(() => {
+    floorFadePresentationLease.cleanupGeneration += 1
+    return () => {
+      const cleanupGeneration = ++floorFadePresentationLease.cleanupGeneration
+      const lastReadiness = lastPublishedReadinessRef.current
+      if (lastReadiness) {
+        onReadinessChange({ ...lastReadiness, ready: false })
+      }
+      queueMicrotask(() => {
+        if (floorFadePresentationLease.cleanupGeneration !== cleanupGeneration) return
+        floorFadePresentation.disposeExactAll()
+      })
+    }
+  }, [floorFadePresentation, floorFadePresentationLease, onReadinessChange])
 
   useFrame((_, delta) => {
+    const probe = getLandrushIslandRuntimeProbe()
     if (!enabled) {
       floorFadePresentation.restoreCanonicalLevels()
       floorFadePreparationMetricsRef.current = {
@@ -10568,17 +11197,29 @@ function LandrushIslandRobotLevelSelectionTracker({
       }
       levelOpacitiesRef.current.clear()
       coverOpacitiesRef.current.clear()
+      lastEnsuredStructuralTokenByRootIdRef.current.clear()
+      lastPrunedPreparationGenerationRef.current = null
       activeCoverNodeIdsCacheRef.current = null
+      floorPoseCacheRef.current = null
+      opacityTargetsRef.current = []
+      opacityTargetByLevelIdRef.current.clear()
+      floorOpacityPresentationActiveRef.current = true
+      preparationScopeIdsRef.current.clear()
+      preparationScopesInitializedRef.current = false
       retainedFloorContextRef.current = null
-      if (activeContextSignatureRef.current !== null) {
-        recordLandrushIslandNavigationProbe({
-          fromContext: activeContextSignatureRef.current,
-          kind: 'floor-visibility-exit',
-          reason: 'disabled',
-        })
-        activeContextSignatureRef.current = null
+      const activeContext = activeContextRef.current
+      if (activeContext.signature !== null) {
+        if (probe) {
+          recordLandrushIslandNavigationProbe({
+            fromContext: activeContext.signature,
+            kind: 'floor-visibility-exit',
+            reason: 'disabled',
+          })
+        }
+        activeContext.levelNumber = null
+        activeContext.scopeId = null
+        activeContext.signature = null
       }
-      const probe = getLandrushIslandRuntimeProbe()
       if (probe) {
         probe.floorFadePreparation = {
           activeScopeIds: [],
@@ -10610,11 +11251,23 @@ function LandrushIslandRobotLevelSelectionTracker({
     }
 
     const motion = localMotionRef.current
-    if (!motion) return
-
-    const nodes = useScene.getState().nodes
-    const structuralToken = `${useViewer.getState().geometryRevision}:${sceneRegistry.revision}`
+    const sceneState = useScene.getState()
+    const nodes = sceneState.nodes
+    const rootNodeIds = sceneState.rootNodeIds
+    const geometryRevision = useViewer.getState().geometryRevision
+    const registryRevision = sceneRegistry.revision
+    const structuralTokenState = floorStructuralTokenRef.current
+    if (
+      structuralTokenState.geometryRevision !== geometryRevision ||
+      structuralTokenState.registryRevision !== registryRevision
+    ) {
+      structuralTokenState.geometryRevision = geometryRevision
+      structuralTokenState.registryRevision = registryRevision
+      structuralTokenState.value = `${geometryRevision}:${registryRevision}`
+    }
+    const structuralToken = structuralTokenState.value
     let floorStacksCache = floorStacksCacheRef.current
+    const floorStacksChanged = floorStacksCache?.nodes !== nodes
     if (floorStacksCache?.nodes !== nodes) {
       activeCoverNodeIdsCacheRef.current = null
       const stacks = resolveLandrushIslandFloorStacks(nodes)
@@ -10626,85 +11279,276 @@ function LandrushIslandRobotLevelSelectionTracker({
       }
       floorStacksCacheRef.current = floorStacksCache
     }
-    const context = findLandrushBuildingFloorContext({
+    const robotPoint = robotFloorPointRef.current
+    const motionX = motion?.position.x ?? 0
+    const motionY = motion?.position.y ?? 0
+    const motionZ = motion?.position.z ?? 0
+    let floorPoseCache = floorPoseCacheRef.current
+    const floorPoseChanged = landrushIslandFloorPresentationPoseChanged(
+      floorPoseCache?.snapshot ?? null,
+      floorStacksCache.stacks,
       groundY,
-      horizontalExitMargin: LANDRUSH_ISLAND_BUILDING_CONTEXT_EXIT_MARGIN_METERS,
-      point: { x: motion.position.x, z: motion.position.z },
-      previousContext: retainedFloorContextRef.current,
-      robotWorldY: motion.position.y,
-      stacks: floorStacksCache.stacks,
-      verticalTolerance: LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS,
-    })
-    retainedFloorContextRef.current = context
-    const coverContextSignature = context
-      ? `${context.scopeId}:${context.floor.level}:${context.floor.levelIds.join(',')}`
-      : null
+      motion !== null,
+      motionX,
+      motionY,
+      motionZ,
+    )
+    let context = floorPoseCache?.context ?? null
+    let stairTransition = floorPoseCache?.stairTransition ?? null
+    if (floorPoseChanged) {
+      robotPoint.x = motionX
+      robotPoint.z = motionZ
+      context = motion
+        ? findLandrushBuildingFloorContext({
+            groundY,
+            horizontalExitMargin: LANDRUSH_ISLAND_BUILDING_CONTEXT_EXIT_MARGIN_METERS,
+            point: robotPoint,
+            previousContext: retainedFloorContextRef.current,
+            robotWorldY: motionY,
+            stacks: floorStacksCache.stacks,
+            verticalTolerance: LANDRUSH_ISLAND_ROBOT_LEVEL_SELECTION_TOLERANCE_METERS,
+          })
+        : null
+      stairTransition = motion
+        ? resolveLandrushIslandStairFloorTransition({
+            groundY,
+            point: robotPoint,
+            robotWorldY: motionY,
+            stairConnectors: floorStacksCache.stairConnectors,
+          })
+        : null
+      const snapshot = floorPoseCache?.snapshot ?? {
+        groundY,
+        hasMotion: motion !== null,
+        stacks: floorStacksCache.stacks,
+        x: motionX,
+        y: motionY,
+        z: motionZ,
+      }
+      snapshot.groundY = groundY
+      snapshot.hasMotion = motion !== null
+      snapshot.stacks = floorStacksCache.stacks
+      snapshot.x = motionX
+      snapshot.y = motionY
+      snapshot.z = motionZ
+      floorPoseCache = { context, snapshot, stairTransition }
+      floorPoseCacheRef.current = floorPoseCache
+      retainedFloorContextRef.current = context
+    }
     let activeCoverNodeIdsCache = activeCoverNodeIdsCacheRef.current
-    if (
-      activeCoverNodeIdsCache?.covers !== floorStacksCache.covers ||
-      activeCoverNodeIdsCache.contextSignature !== coverContextSignature
-    ) {
+    let activeCoverNodeIdsCacheCreated = false
+    if (!activeCoverNodeIdsCache) {
+      activeCoverNodeIdsCacheCreated = true
       activeCoverNodeIdsCache = {
-        contextSignature: coverContextSignature,
+        context,
         covers: floorStacksCache.covers,
-        nodeIds: new Set(
-          resolveLandrushBuildingActiveFloorCoverNodeIds(floorStacksCache.covers, context),
-        ),
+        nodeIds: new Set(),
       }
       activeCoverNodeIdsCacheRef.current = activeCoverNodeIdsCache
     }
-    const activeCoverNodeIds = activeCoverNodeIdsCache.nodeIds
-    const stairTransition = resolveLandrushIslandStairFloorTransition({
-      groundY,
-      point: { x: motion.position.x, z: motion.position.z },
-      robotWorldY: motion.position.y,
-      stairConnectors: floorStacksCache.stairConnectors,
-    })
-    const preparationScopeIds = new Set<string>()
-    if (context) preparationScopeIds.add(context.scopeId)
-    if (stairTransition) preparationScopeIds.add(stairTransition.scopeId)
-    const robotPoint = { x: motion.position.x, z: motion.position.z }
-    const coverObjectsByLevelId = new Map<LevelNode['id'], Object3D[]>()
-    for (const cover of floorStacksCache.covers) {
-      const coverObject = sceneRegistry.nodes.get(cover.nodeId as AnyNodeId)
-      if (!coverObject) continue
-      const coverObjects = coverObjectsByLevelId.get(cover.levelId)
-      if (coverObjects) coverObjects.push(coverObject)
-      else coverObjectsByLevelId.set(cover.levelId, [coverObject])
-    }
-    for (const stack of floorStacksCache.stacks) {
-      if (isLandrushIslandFloorStackNearPoint(stack, robotPoint)) {
-        preparationScopeIds.add(stack.scopeId)
-      }
-      if (!preparationScopeIds.has(stack.scopeId)) continue
-
-      for (let floorIndex = 1; floorIndex < stack.floors.length; floorIndex += 1) {
-        const floor = stack.floors[floorIndex]
-        if (!floor) continue
-        for (const floorLevelId of floor.levelIds) {
-          if (nodes[floorLevelId]?.visible === false) continue
-          const levelObject = sceneRegistry.nodes.get(floorLevelId as AnyNodeId)
-          if (!levelObject) continue
-          floorFadePresentation.ensureLevel({
-            excludedRoots: coverObjectsByLevelId.get(floorLevelId),
-            forceVisible: true,
-            levelId: floorLevelId,
-            root: levelObject,
-            structuralToken,
-          })
+    if (
+      activeCoverNodeIdsCacheCreated ||
+      activeCoverNodeIdsCache.covers !== floorStacksCache.covers ||
+      activeCoverNodeIdsCache.context !== context
+    ) {
+      activeCoverNodeIdsCache.context = context
+      activeCoverNodeIdsCache.covers = floorStacksCache.covers
+      activeCoverNodeIdsCache.nodeIds.clear()
+      if (context) {
+        for (const cover of floorStacksCache.covers) {
+          if (cover.scopeId === context.scopeId && context.floor.levelIds.includes(cover.levelId)) {
+            activeCoverNodeIdsCache.nodeIds.add(cover.nodeId)
+          }
         }
       }
     }
-    for (const cover of floorStacksCache.covers) {
-      if (!preparationScopeIds.has(cover.scopeId)) continue
-      const coverObject = sceneRegistry.nodes.get(cover.nodeId as AnyNodeId)
-      if (!coverObject) continue
-      floorFadePresentation.ensureLevel({
-        forceVisible: true,
-        levelId: cover.nodeId,
-        root: coverObject,
-        structuralToken,
+    const activeCoverNodeIds = activeCoverNodeIdsCache.nodeIds
+    let preparationRootsCache = floorPreparationRootsCacheRef.current
+    let preparationRootsRebuilt = false
+    if (
+      !preparationRootsCache ||
+      preparationRootsCache.nodes !== nodes ||
+      preparationRootsCache.rootNodeIds !== rootNodeIds ||
+      preparationRootsCache.structuralToken !== structuralToken
+    ) {
+      preparationRootsRebuilt = true
+      const coverObjectsByLevelId = new Map<LevelNode['id'], Object3D[]>()
+      for (const cover of floorStacksCache.covers) {
+        const coverObject = sceneRegistry.nodes.get(cover.nodeId as AnyNodeId)
+        if (!coverObject) continue
+        const coverObjects = coverObjectsByLevelId.get(cover.levelId)
+        if (coverObjects) coverObjects.push(coverObject)
+        else coverObjectsByLevelId.set(cover.levelId, [coverObject])
+      }
+      const requiredPreparationRoots = new Map<
+        AnyNode['id'],
+        {
+          excludedRoots?: readonly Object3D[]
+          levelId: AnyNode['id']
+          root: Object3D | null
+          scopeId: string
+        }
+      >()
+      for (const stack of floorStacksCache.stacks) {
+        for (let floorIndex = 1; floorIndex < stack.floors.length; floorIndex += 1) {
+          const floor = stack.floors[floorIndex]
+          if (!floor) continue
+          for (const floorLevelId of floor.levelIds) {
+            if (nodes[floorLevelId]?.visible === false) continue
+            requiredPreparationRoots.set(floorLevelId, {
+              excludedRoots: coverObjectsByLevelId.get(floorLevelId),
+              levelId: floorLevelId,
+              root: sceneRegistry.nodes.get(floorLevelId as AnyNodeId) ?? null,
+              scopeId: stack.scopeId,
+            })
+          }
+        }
+      }
+      for (const cover of floorStacksCache.covers) {
+        if (nodes[cover.nodeId]?.visible === false) continue
+        requiredPreparationRoots.set(cover.nodeId, {
+          levelId: cover.nodeId,
+          root: sceneRegistry.nodes.get(cover.nodeId as AnyNodeId) ?? null,
+          scopeId: cover.scopeId,
+        })
+      }
+      const orderedRoots = [...requiredPreparationRoots.values()].sort((first, second) =>
+        String(first.levelId).localeCompare(String(second.levelId)),
+      )
+      const expectedRoots = collectLandrushIslandExpectedFloorPresentationRoots({
+        nodes,
+        rootNodeIds,
+        roots: orderedRoots,
       })
+      const registeredRoots = collectLandrushIslandRegisteredFloorPresentationRoots(expectedRoots)
+      const liveRoots = new Map<AnyNode['id'], Object3D>()
+      const generationRootParts: string[] = []
+      for (const { levelId, root } of expectedRoots) {
+        if (!root) {
+          generationRootParts.push(`${String(levelId)}@missing`)
+          continue
+        }
+        liveRoots.set(levelId, root)
+        let identity = floorRootIdentityIdsRef.current.get(root)
+        if (identity === undefined) {
+          identity = nextFloorRootIdentityIdRef.current
+          nextFloorRootIdentityIdRef.current += 1
+          floorRootIdentityIdsRef.current.set(root, identity)
+        }
+        generationRootParts.push(`${String(levelId)}@${String(identity)}`)
+      }
+      preparationRootsCache = {
+        expectedRoots,
+        liveRoots,
+        nodes,
+        registeredRoots,
+        rootSignature: generationRootParts.join(','),
+        rootNodeIds,
+        structuralToken,
+      }
+      floorPreparationRootsCacheRef.current = preparationRootsCache
+    }
+    const loadingStarted = loadingActive && !loadingWasActiveRef.current
+    const loadingChanged = loadingActive !== loadingWasActiveRef.current
+    loadingWasActiveRef.current = loadingActive
+    const preparationScopeIds = preparationScopeIdsRef.current
+    const preparationScopesChanged =
+      !preparationScopesInitializedRef.current ||
+      floorPoseChanged ||
+      floorStacksChanged ||
+      preparationRootsRebuilt ||
+      loadingChanged
+    if (preparationScopesChanged) {
+      preparationScopesInitializedRef.current = true
+      preparationScopeIds.clear()
+      if (loadingActive) {
+        for (const stack of floorStacksCache.stacks) preparationScopeIds.add(stack.scopeId)
+      } else {
+        if (context) preparationScopeIds.add(context.scopeId)
+        if (stairTransition) preparationScopeIds.add(stairTransition.scopeId)
+        if (motion) {
+          for (const stack of floorStacksCache.stacks) {
+            if (isLandrushIslandFloorStackNearPoint(stack, robotPoint)) {
+              preparationScopeIds.add(stack.scopeId)
+            }
+          }
+        }
+      }
+    }
+    const expectedPreparationRoots = preparationRootsCache.expectedRoots
+    const registeredPreparationRoots = preparationRootsCache.registeredRoots
+    const preparationGenerationCache = preparationGenerationCacheRef.current
+    if (
+      preparationGenerationCache.readinessRequestKey !== readinessRequestKey ||
+      preparationGenerationCache.structuralToken !== structuralToken ||
+      preparationGenerationCache.rootSignature !== preparationRootsCache.rootSignature
+    ) {
+      preparationGenerationCache.readinessRequestKey = readinessRequestKey
+      preparationGenerationCache.structuralToken = structuralToken
+      preparationGenerationCache.rootSignature = preparationRootsCache.rootSignature
+      preparationGenerationCache.value = `${readinessRequestKey}|${structuralToken}|${preparationRootsCache.rootSignature}`
+    }
+    const preparationGeneration = preparationGenerationCache.value
+    const preparationPlan = loadingPreparationPlanRef.current
+    if (loadingActive && (loadingStarted || preparationPlan.generation !== preparationGeneration)) {
+      preparationPlan.admittedRootIds.clear()
+      preparationPlan.cursor = 0
+      preparationPlan.generation = preparationGeneration
+      readinessStateRef.current = { settledGeneration: null }
+    }
+
+    if (loadingActive) {
+      let admissions = 0
+      while (
+        preparationPlan.cursor < registeredPreparationRoots.length &&
+        admissions < LANDRUSH_ISLAND_FLOOR_PRESENTATION_MAX_ROOT_ADMISSIONS_PER_FRAME
+      ) {
+        const preparationRoot = registeredPreparationRoots[preparationPlan.cursor]
+        preparationPlan.cursor += 1
+        admissions += 1
+        if (!preparationRoot) continue
+        floorFadePresentation.ensureLevel({
+          excludedRoots: preparationRoot.excludedRoots,
+          forceVisible: true,
+          levelId: preparationRoot.levelId,
+          root: preparationRoot.root,
+          structuralToken,
+        })
+        floorOpacityPresentationActiveRef.current = true
+        preparationPlan.admittedRootIds.add(preparationRoot.levelId)
+        lastEnsuredStructuralTokenByRootIdRef.current.set(preparationRoot.levelId, structuralToken)
+      }
+      if (preparationPlan.cursor < registeredPreparationRoots.length) {
+        renderScheduler.requestFrame('animation')
+      }
+    } else if (preparationScopesChanged) {
+      for (const preparationRoot of registeredPreparationRoots) {
+        if (!preparationScopeIds.has(preparationRoot.scopeId)) continue
+        if (
+          lastEnsuredStructuralTokenByRootIdRef.current.get(preparationRoot.levelId) ===
+          structuralToken
+        ) {
+          continue
+        }
+        floorFadePresentation.ensureLevel({
+          excludedRoots: preparationRoot.excludedRoots,
+          forceVisible: true,
+          levelId: preparationRoot.levelId,
+          root: preparationRoot.root,
+          structuralToken,
+        })
+        floorOpacityPresentationActiveRef.current = true
+        lastEnsuredStructuralTokenByRootIdRef.current.set(preparationRoot.levelId, structuralToken)
+      }
+    }
+    if (lastPrunedPreparationGenerationRef.current !== preparationGeneration) {
+      floorFadePresentation.pruneLevels(preparationRootsCache.liveRoots)
+      lastPrunedPreparationGenerationRef.current = preparationGeneration
+      for (const rootId of lastEnsuredStructuralTokenByRootIdRef.current.keys()) {
+        if (!preparationRootsCache.liveRoots.has(rootId)) {
+          lastEnsuredStructuralTokenByRootIdRef.current.delete(rootId)
+        }
+      }
     }
     const preparationFrame = floorFadePresentation.prepareFrame(delta)
     const preparationMetrics = floorFadePreparationMetricsRef.current
@@ -10717,101 +11561,167 @@ function LandrushIslandRobotLevelSelectionTracker({
     if (floorFadePresentation.hasPendingWork) {
       renderScheduler.requestFrame('animation')
     }
-    const opacityTargets = resolveLandrushBuildingFloorOpacities(
-      floorStacksCache.stacks,
-      context,
-      stairTransition,
-    )
-    const opacityTargetByLevelId = new Map(
-      opacityTargets.map(({ levelId, opacity }) => [levelId, opacity]),
-    )
-    const liveLevelIds = new Set<LevelNode['id']>()
-    const liveFloorFadeCanonicalRoots = new Map<AnyNode['id'], Object3D>()
-    const levelOpacities: Record<string, number> = {}
-    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
-
-    for (const stack of floorStacksCache.stacks) {
-      for (const floor of stack.floors) {
-        for (const floorLevelId of floor.levelIds) {
-          if (nodes[floorLevelId]?.visible === false) continue
-          liveLevelIds.add(floorLevelId)
-          const levelObject = sceneRegistry.nodes.get(floorLevelId as AnyNodeId)
-          if (!levelObject) continue
-          liveFloorFadeCanonicalRoots.set(floorLevelId, levelObject)
-          levelObject.position.y = floor.baseY
-
-          const requestedTargetOpacity = opacityTargetByLevelId.get(floorLevelId) ?? 1
-          const previousOpacity = levelOpacitiesRef.current.get(floorLevelId) ?? 1
-          const dampedOpacity = MathUtils.damp(
-            previousOpacity,
-            requestedTargetOpacity,
-            LANDRUSH_ISLAND_FLOOR_FADE_RESPONSE,
-            frameDelta,
-          )
-          const desiredOpacity =
-            Math.abs(dampedOpacity - requestedTargetOpacity) <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
-              ? requestedTargetOpacity
-              : dampedOpacity
-          const { appliedOpacity } = floorFadePresentation.applyLevelOpacity({
-            levelId: floorLevelId,
-            opacity: desiredOpacity,
-            root: levelObject,
+    if (loadingActive) {
+      let canonicalReadyRoots = 0
+      let hasQuarantineWork = false
+      let mismatchRepairs = 0
+      for (const preparationRoot of registeredPreparationRoots) {
+        if (!preparationPlan.admittedRootIds.has(preparationRoot.levelId)) {
+          continue
+        }
+        const readState = floorFadePresentation.readLevel(preparationRoot.levelId)
+        if (!readState || readState.canonicalRoot !== preparationRoot.root) continue
+        hasQuarantineWork ||= readState.quarantineCount > 0
+        if (
+          readState.assignmentMismatchCount > 0 &&
+          mismatchRepairs < LANDRUSH_ISLAND_FLOOR_PRESENTATION_MAX_MISMATCH_REPAIRS_PER_FRAME
+        ) {
+          floorFadePresentation.ensureLevel({
+            excludedRoots: preparationRoot.excludedRoots,
+            forceVisible: true,
+            levelId: preparationRoot.levelId,
+            root: preparationRoot.root,
+            structuralToken,
           })
-          levelOpacitiesRef.current.set(floorLevelId, appliedOpacity)
-          levelOpacities[floorLevelId] = roundPerf(appliedOpacity)
-          if (appliedOpacity !== requestedTargetOpacity) {
-            renderScheduler.requestFrame('animation')
-          }
+          floorOpacityPresentationActiveRef.current = true
+          mismatchRepairs += 1
+          renderScheduler.requestFrame('animation')
+          continue
+        }
+        if (
+          readState.ready &&
+          !readState.pending &&
+          readState.quarantineCount === 0 &&
+          readState.assignmentMismatchCount === 0
+        ) {
+          canonicalReadyRoots += 1
         }
       }
-    }
-    for (const levelId of levelOpacitiesRef.current.keys()) {
-      if (!liveLevelIds.has(levelId)) levelOpacitiesRef.current.delete(levelId)
-    }
-
-    const coverOpacities: Record<string, number> = {}
-    const liveCoverNodeIds = new Set<AnyNode['id']>()
-    for (const cover of floorStacksCache.covers) {
-      liveCoverNodeIds.add(cover.nodeId)
-      const coverObject = sceneRegistry.nodes.get(cover.nodeId as AnyNodeId)
-      if (!coverObject) continue
-      liveFloorFadeCanonicalRoots.set(cover.nodeId, coverObject)
-      const requestedTargetOpacity = activeCoverNodeIds.has(cover.nodeId) ? 0 : 1
-      const previousOpacity = coverOpacitiesRef.current.get(cover.nodeId) ?? 1
-      const dampedOpacity = MathUtils.damp(
-        previousOpacity,
-        requestedTargetOpacity,
-        LANDRUSH_ISLAND_FLOOR_FADE_RESPONSE,
-        frameDelta,
-      )
-      const desiredOpacity =
-        Math.abs(dampedOpacity - requestedTargetOpacity) <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
-          ? requestedTargetOpacity
-          : dampedOpacity
-      const { appliedOpacity } = floorFadePresentation.applyLevelOpacity({
-        effectiveOpacity: desiredOpacity * (levelOpacitiesRef.current.get(cover.levelId) ?? 1),
-        levelId: cover.nodeId,
-        opacity: desiredOpacity,
-        root: coverObject,
+      const result = advanceLandrushIslandFloorPresentationReadiness({
+        admissionComplete: preparationPlan.cursor >= registeredPreparationRoots.length,
+        canonicalReadyRoots,
+        generation: preparationGeneration,
+        hasPendingWork: floorFadePresentation.hasPendingWork || hasQuarantineWork,
+        previous: readinessStateRef.current,
+        registrationComplete: registeredPreparationRoots.length === expectedPreparationRoots.length,
+        requestKey: readinessRequestKey,
+        total: expectedPreparationRoots.length,
       })
-      coverOpacitiesRef.current.set(cover.nodeId, appliedOpacity)
-      coverOpacities[cover.nodeId] = roundPerf(appliedOpacity)
-      if (appliedOpacity !== requestedTargetOpacity) {
+      readinessStateRef.current = result.state
+      const previousReadiness = lastPublishedReadinessRef.current
+      if (
+        !previousReadiness ||
+        previousReadiness.generation !== result.readiness.generation ||
+        previousReadiness.completed !== result.readiness.completed ||
+        previousReadiness.total !== result.readiness.total ||
+        previousReadiness.ready !== result.readiness.ready ||
+        previousReadiness.requestKey !== result.readiness.requestKey
+      ) {
+        lastPublishedReadinessRef.current = result.readiness
+        onReadinessChange(result.readiness)
+      }
+      if (!result.readiness.ready && result.state.settledGeneration === preparationGeneration) {
         renderScheduler.requestFrame('animation')
       }
     }
-    for (const coverNodeId of coverOpacitiesRef.current.keys()) {
-      if (!liveCoverNodeIds.has(coverNodeId)) coverOpacitiesRef.current.delete(coverNodeId)
+    if (!motion) return
+    const opacityTargetByLevelId = opacityTargetByLevelIdRef.current
+    if (floorPoseChanged || preparationRootsRebuilt) {
+      opacityTargetsRef.current = resolveLandrushBuildingFloorOpacities(
+        floorStacksCache.stacks,
+        context,
+        stairTransition,
+      )
+      opacityTargetByLevelId.clear()
+      for (const { levelId, opacity } of opacityTargetsRef.current) {
+        opacityTargetByLevelId.set(levelId, opacity)
+      }
+      floorOpacityPresentationActiveRef.current = true
     }
-    floorFadePresentation.pruneLevels(liveFloorFadeCanonicalRoots)
+    const opacityTargets = opacityTargetsRef.current
+    const liveLevelIds = liveLevelIdsRef.current
+    const levelOpacities: Record<string, number> | null = probe ? {} : null
+    const frameDelta = Math.max(0.001, Math.min(delta, 0.05))
+    if (floorOpacityPresentationActiveRef.current) {
+      let opacityAnimationActive = false
+      liveLevelIds.clear()
+      for (const stack of floorStacksCache.stacks) {
+        for (const floor of stack.floors) {
+          for (const floorLevelId of floor.levelIds) {
+            if (nodes[floorLevelId]?.visible === false) continue
+            liveLevelIds.add(floorLevelId)
+            const levelObject = sceneRegistry.nodes.get(floorLevelId as AnyNodeId)
+            if (!levelObject) continue
+            levelObject.position.y = floor.baseY
 
-    const hiddenLevelIds = opacityTargets
-      .filter(({ opacity }) => opacity <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON)
-      .map(({ levelId }) => levelId)
-    const visibleLevelIds = opacityTargets
-      .filter(({ opacity }) => opacity > LANDRUSH_ISLAND_FLOOR_FADE_EPSILON)
-      .map(({ levelId }) => levelId)
+            const requestedTargetOpacity = opacityTargetByLevelId.get(floorLevelId) ?? 1
+            const previousOpacity = levelOpacitiesRef.current.get(floorLevelId) ?? 1
+            const dampedOpacity = MathUtils.damp(
+              previousOpacity,
+              requestedTargetOpacity,
+              LANDRUSH_ISLAND_FLOOR_FADE_RESPONSE,
+              frameDelta,
+            )
+            const desiredOpacity =
+              Math.abs(dampedOpacity - requestedTargetOpacity) <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
+                ? requestedTargetOpacity
+                : dampedOpacity
+            const { appliedOpacity } = floorFadePresentation.applyLevelOpacity({
+              levelId: floorLevelId,
+              opacity: desiredOpacity,
+              root: levelObject,
+            })
+            levelOpacitiesRef.current.set(floorLevelId, appliedOpacity)
+            if (appliedOpacity !== requestedTargetOpacity) opacityAnimationActive = true
+          }
+        }
+      }
+      for (const levelId of levelOpacitiesRef.current.keys()) {
+        if (!liveLevelIds.has(levelId)) levelOpacitiesRef.current.delete(levelId)
+      }
 
+      const liveCoverNodeIds = liveCoverNodeIdsRef.current
+      liveCoverNodeIds.clear()
+      for (const cover of floorStacksCache.covers) {
+        liveCoverNodeIds.add(cover.nodeId)
+        const coverObject = sceneRegistry.nodes.get(cover.nodeId as AnyNodeId)
+        if (!coverObject) continue
+        const requestedTargetOpacity = activeCoverNodeIds.has(cover.nodeId) ? 0 : 1
+        const previousOpacity = coverOpacitiesRef.current.get(cover.nodeId) ?? 1
+        const dampedOpacity = MathUtils.damp(
+          previousOpacity,
+          requestedTargetOpacity,
+          LANDRUSH_ISLAND_FLOOR_FADE_RESPONSE,
+          frameDelta,
+        )
+        const desiredOpacity =
+          Math.abs(dampedOpacity - requestedTargetOpacity) <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON
+            ? requestedTargetOpacity
+            : dampedOpacity
+        const { appliedOpacity } = floorFadePresentation.applyLevelOpacity({
+          effectiveOpacity: desiredOpacity * (levelOpacitiesRef.current.get(cover.levelId) ?? 1),
+          levelId: cover.nodeId,
+          opacity: desiredOpacity,
+          root: coverObject,
+        })
+        coverOpacitiesRef.current.set(cover.nodeId, appliedOpacity)
+        if (appliedOpacity !== requestedTargetOpacity) opacityAnimationActive = true
+      }
+      for (const coverNodeId of coverOpacitiesRef.current.keys()) {
+        if (!liveCoverNodeIds.has(coverNodeId)) coverOpacitiesRef.current.delete(coverNodeId)
+      }
+      floorOpacityPresentationActiveRef.current = opacityAnimationActive
+      if (opacityAnimationActive) renderScheduler.requestFrame('animation')
+    }
+    const coverOpacities: Record<string, number> | null = probe ? {} : null
+    if (probe) {
+      for (const [levelId, opacity] of levelOpacitiesRef.current) {
+        if (levelOpacities) levelOpacities[levelId] = roundPerf(opacity)
+      }
+      for (const [coverNodeId, opacity] of coverOpacitiesRef.current) {
+        if (coverOpacities) coverOpacities[coverNodeId] = roundPerf(opacity)
+      }
+    }
     const viewer = useViewer.getState()
     if (viewer.levelMode !== 'stacked') viewer.setLevelMode('stacked')
     const stairOnUpperFloor = Boolean(
@@ -10833,28 +11743,48 @@ function LandrushIslandRobotLevelSelectionTracker({
           ? stairTransition.upperLevelNumber
           : stairTransition.lowerLevelNumber
         : null)
-    const contextSignature =
-      buildingScopeId && levelNumber !== null ? `${buildingScopeId}:${levelNumber}` : null
-    if (contextSignature !== activeContextSignatureRef.current) {
-      const previousContext = activeContextSignatureRef.current
-      recordLandrushIslandNavigationProbe({
-        buildingScopeId,
-        fromContext: previousContext,
-        hiddenLevelIds,
-        kind: contextSignature
-          ? previousContext
-            ? 'floor-visibility-level-change'
-            : 'floor-visibility-enter'
-          : 'floor-visibility-exit',
-        levelId,
-        levelNumber,
-        regionSource: context?.region.source ?? null,
-        stairTransition,
-      })
-      activeContextSignatureRef.current = contextSignature
+    const activeContext = activeContextRef.current
+    const contextChanged =
+      buildingScopeId !== activeContext.scopeId || levelNumber !== activeContext.levelNumber
+    const contextSignature = contextChanged
+      ? buildingScopeId && levelNumber !== null
+        ? `${buildingScopeId}:${levelNumber}`
+        : null
+      : activeContext.signature
+    const hiddenLevelIds: LevelNode['id'][] | null = probe || contextChanged ? [] : null
+    const visibleLevelIds: LevelNode['id'][] | null = probe || contextChanged ? [] : null
+    if (probe || contextChanged) {
+      for (const target of opacityTargets) {
+        if (target.opacity <= LANDRUSH_ISLAND_FLOOR_FADE_EPSILON) {
+          hiddenLevelIds?.push(target.levelId)
+        } else {
+          visibleLevelIds?.push(target.levelId)
+        }
+      }
+    }
+    if (contextChanged) {
+      const previousContext = activeContext.signature
+      if (probe) {
+        recordLandrushIslandNavigationProbe({
+          buildingScopeId,
+          fromContext: previousContext,
+          hiddenLevelIds: hiddenLevelIds ?? [],
+          kind: contextSignature
+            ? previousContext
+              ? 'floor-visibility-level-change'
+              : 'floor-visibility-enter'
+            : 'floor-visibility-exit',
+          levelId,
+          levelNumber,
+          regionSource: context?.region.source ?? null,
+          stairTransition,
+        })
+      }
+      activeContext.levelNumber = levelNumber
+      activeContext.scopeId = buildingScopeId
+      activeContext.signature = contextSignature
     }
 
-    const probe = getLandrushIslandRuntimeProbe()
     if (probe) {
       const preparationSnapshot = floorFadePresentation.readPreparationSnapshot()
       probe.floorFadePreparation = {
@@ -10871,19 +11801,19 @@ function LandrushIslandRobotLevelSelectionTracker({
       }
       probe.floorVisibility = {
         buildingScopeId,
-        coverOpacities,
+        coverOpacities: coverOpacities ?? {},
         hiddenCoverNodeIds: [...activeCoverNodeIds].sort(),
-        hiddenLevelIds,
+        hiddenLevelIds: hiddenLevelIds ?? [],
         insideBuilding: context !== null || stairTransition !== null,
         levelId,
-        levelOpacities,
+        levelOpacities: levelOpacities ?? {},
         levelMode: viewer.levelMode === 'stacked' ? viewer.levelMode : 'stacked',
         regionSource: context?.region.source ?? null,
         stairTransition,
-        visibleLevelIds,
+        visibleLevelIds: visibleLevelIds ?? [],
       }
       const presentationRoots: Record<string, unknown>[] = []
-      for (const [rootId, root] of liveFloorFadeCanonicalRoots) {
+      for (const [rootId, root] of preparationRootsCache.liveRoots) {
         const readState = floorFadePresentation.readLevel(rootId)
         if (!readState) continue
         let assignmentHash = 2_166_136_261
@@ -11783,6 +12713,20 @@ function LandrushIslandRobotScreenRevealClipper({
   const lastProbeAtRef = useRef(-Infinity)
   const revealActiveRef = useRef(false)
   const revealGrowthAmountRef = useRef(0)
+  const revealObjectTransitionRef = useRef({
+    activeObjectCount: 0,
+    fadingInObjectCount: 0,
+    fadingOutObjectCount: 0,
+    growthAmount: 0,
+    maxAmount: 0,
+    minAmount: 0,
+    objectCount: 0,
+    waitingObjectCount: 0,
+  })
+  const revealMeshRevisionRef = useRef(0)
+  const lastSyncedRevealMeshRevisionRef = useRef(-1)
+  const lastSyncedRevealPathRef = useRef<'material' | 'soft-material' | null>(null)
+  const lastMaterialTransitionRef = useRef({ activeMaterialCount: 0, materialCount: 0 })
   const clippingPlanesRef = useRef(
     Array.from({ length: LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS }, () => new Plane()),
   )
@@ -11798,9 +12742,23 @@ function LandrushIslandRobotScreenRevealClipper({
   const robotBaseRef = useRef(new Vector3())
   const robotHeadRef = useRef(new Vector3())
   const robotCenterRef = useRef(new Vector3())
+  const robotPointRef = useRef({ x: 0, z: 0 })
   const robotNdcRef = useRef(new Vector3())
   const robotViewPointRef = useRef(new Vector3())
   const revealScreenRef = useRef({ x: 0, y: 0 })
+  const lastRevealMaskInputsRef = useRef({
+    centerX: Number.NaN,
+    centerY: Number.NaN,
+    height: -1,
+    innerRadius: Number.NaN,
+    outerRadius: Number.NaN,
+    robotNearDepth: Number.NaN,
+    width: -1,
+  })
+  const lastRevealClippingCameraRef = useRef<Camera | null>(null)
+  const lastRevealClippingProjectionMatrixRef = useRef(new Matrix4())
+  const lastRevealClippingWorldMatrixRef = useRef(new Matrix4())
+  const lastRevealClippingPathRef = useRef<'material' | null>(null)
   const enterApertureRef = useRef(
     createLandrushRobotRevealAperture(LANDRUSH_ISLAND_ROBOT_SCREEN_REVEAL_CLIP_SEGMENTS),
   )
@@ -11839,6 +12797,20 @@ function LandrushIslandRobotScreenRevealClipper({
     }
     revealActiveRef.current = false
     revealGrowthAmountRef.current = 0
+    revealMeshRevisionRef.current = 0
+    lastSyncedRevealMeshRevisionRef.current = -1
+    lastSyncedRevealPathRef.current = null
+    lastMaterialTransitionRef.current = { activeMaterialCount: 0, materialCount: 0 }
+    const lastMaskInputs = lastRevealMaskInputsRef.current
+    lastMaskInputs.centerX = Number.NaN
+    lastMaskInputs.centerY = Number.NaN
+    lastMaskInputs.height = -1
+    lastMaskInputs.innerRadius = Number.NaN
+    lastMaskInputs.outerRadius = Number.NaN
+    lastMaskInputs.robotNearDepth = Number.NaN
+    lastMaskInputs.width = -1
+    lastRevealClippingCameraRef.current = null
+    lastRevealClippingPathRef.current = null
     lastRevealCameraRef.current = null
     lastRevealPresentationModeRef.current = null
     lastRevealNodesRef.current = null
@@ -11879,6 +12851,7 @@ function LandrushIslandRobotScreenRevealClipper({
     }
     if (revealPath !== 'material') {
       disableLandrushRobotScreenRevealWebGLDepthPlane(webGLDepthPlaneRef.current)
+      lastRevealClippingPathRef.current = null
     }
 
     hoverAmountRef.current = MathUtils.damp(
@@ -11888,7 +12861,7 @@ function LandrushIslandRobotScreenRevealClipper({
       Math.min(delta, 0.05),
     )
     const visualRoot = visualRootRef.current
-    visualRoot?.updateWorldMatrix(true, true)
+    visualRoot?.updateWorldMatrix(true, false)
     const robotVisualRoot = visualRoot
       ? robotVisualRootRef.current.setFromMatrixPosition(visualRoot.matrixWorld)
       : null
@@ -11897,7 +12870,9 @@ function LandrushIslandRobotScreenRevealClipper({
       motion.position.y + resolveLandrushRobotHoverOffset(hoverAmountRef.current, clock.elapsedTime)
     const robotX = robotVisualRoot?.x ?? motion.position.x
     const robotZ = robotVisualRoot?.z ?? motion.position.z
-    const robotPoint = { x: robotX, z: robotZ }
+    const robotPoint = robotPointRef.current
+    robotPoint.x = robotX
+    robotPoint.z = robotZ
     camera.updateWorldMatrix(true, false)
     cameraPositionRef.current.setFromMatrixPosition(camera.matrixWorld)
     const robotBase = robotBaseRef.current.set(
@@ -11974,30 +12949,7 @@ function LandrushIslandRobotScreenRevealClipper({
       )
       revealScreen.y = MathUtils.clamp(revealScreen.y, revealClampMarginPx, maxRevealY)
     }
-    updateLandrushRobotRevealAperture({
-      aperture: enterApertureRef.current,
-      camera,
-      centerX: revealScreen.x,
-      centerY: revealScreen.y,
-      farDepth: robotNearDepth,
-      height,
-      ndcZ: robotNdc.z,
-      radiusPx: revealOuterRadiusPx,
-      width,
-    })
-    updateLandrushRobotRevealAperture({
-      aperture: exitApertureRef.current,
-      camera,
-      centerX: revealScreen.x,
-      centerY: revealScreen.y,
-      farDepth: robotNearDepth,
-      height,
-      ndcZ: robotNdc.z,
-      radiusPx: revealOuterRadiusPx * LANDRUSH_ISLAND_ROBOT_REVEAL_EXIT_RADIUS_SCALE,
-      width,
-    })
-
-    camera.getWorldQuaternion(cameraQuaternionRef.current)
+    cameraQuaternionRef.current.setFromRotationMatrix(camera.matrixWorld)
     const cameraHandoff =
       lastRevealCameraRef.current !== null && lastRevealCameraRef.current !== camera
     const presentationHandoff =
@@ -12043,14 +12995,18 @@ function LandrushIslandRobotScreenRevealClipper({
       projectionChanged ||
       viewportChanged ||
       Math.abs(lastRevealRadiusRef.current - revealOuterRadiusPx) > 0.25
+    const dynamicRevealOwnersPresent = occludersRef.current.some((owner) => owner.dynamicBounds)
     let stairTransitionTopY = lastStairTransitionTopYRef.current
+    let refreshedOwners = false
     if (
       nodesChanged ||
       sceneRegistryChanged ||
       revealDiscontinuity ||
-      refreshAge >= LANDRUSH_ISLAND_ROBOT_REVEAL_REFRESH_MAX_SECONDS ||
+      (dynamicRevealOwnersPresent &&
+        refreshAge >= LANDRUSH_ISLAND_ROBOT_REVEAL_REFRESH_MAX_SECONDS) ||
       (revealViewChanged && refreshAge >= LANDRUSH_ISLAND_ROBOT_REVEAL_REFRESH_MIN_SECONDS)
     ) {
+      refreshedOwners = true
       const robotLevelId = levelIdRef.current
       const robotLevelBaseY =
         structureGroundY +
@@ -12070,7 +13026,8 @@ function LandrushIslandRobotScreenRevealClipper({
       lastRevealCameraQuaternionRef.current.copy(cameraQuaternionRef.current)
       lastRevealProjectionMatrixRef.current.copy(camera.projectionMatrix)
       lastRevealRobotCenterRef.current.copy(robotCenter)
-      lastRevealViewportRef.current = { height, width }
+      lastRevealViewportRef.current.height = height
+      lastRevealViewportRef.current.width = width
       lastRevealRadiusRef.current = revealOuterRadiusPx
       lastRevealCameraRef.current = camera
       lastRevealPresentationModeRef.current = presentationMode
@@ -12090,7 +13047,9 @@ function LandrushIslandRobotScreenRevealClipper({
       for (const owner of occludersRef.current) {
         revealOwnerRootsRef.current.set(owner.ownerId, owner.object)
       }
-      const liveRevealOwnerIds = new Set(occludersRef.current.map((owner) => owner.ownerId))
+      const liveRevealOwnerIds = liveRevealOwnerIdsRef.current
+      liveRevealOwnerIds.clear()
+      for (const owner of occludersRef.current) liveRevealOwnerIds.add(owner.ownerId)
       for (const [ownerId, ownerRoot] of revealOwnerRootsRef.current) {
         if (
           isLandrushRobotRevealOwnerRootLive({
@@ -12103,80 +13062,139 @@ function LandrushIslandRobotScreenRevealClipper({
           liveRevealOwnerIds.add(ownerId)
         }
       }
-      liveRevealOwnerIdsRef.current = liveRevealOwnerIds
       refreshLandrushIslandRobotRevealOwnerBounds({
         boundsCache: revealBoundsCacheRef.current,
         owners: occludersRef.current,
         registeredNodeRoots,
       })
     }
-    classifyLandrushRobotRevealOwnerBounds({
-      boundsByOwnerId: revealBoundsCacheRef.current,
-      enterAperture: enterApertureRef.current,
-      exitAperture: exitApertureRef.current,
-      target: revealOwnerObservationsRef.current,
-    })
-    revealOwnerObservationGenerationRef.current += 1
-    reconcileLandrushRobotRevealOwnerStates({
-      exitGraceMs: LANDRUSH_ISLAND_ROBOT_REVEAL_EXIT_GRACE_MS,
-      liveOwnerIds: liveRevealOwnerIdsRef.current,
-      nowMs: performance.now(),
-      observationByOwnerId: revealOwnerObservationByIdRef.current,
-      observationGeneration: revealOwnerObservationGenerationRef.current,
-      observations: revealOwnerObservationsRef.current,
-      states: revealOwnerStatesRef.current,
-      target: activeRevealOwnerIdsRef.current,
-    })
-    const revealObjectTransition = advanceLandrushRobotRevealObjectTransitions({
-      activeObjects: activeRevealOwnerIdsRef.current,
-      deltaSeconds: delta,
-      epsilon: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON,
-      fadeInDelaySeconds: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_IN_DELAY_SECONDS,
-      response: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_RESPONSE,
-      states: revealOwnerTransitionStatesRef.current,
-    })
-    const revealMeshes = revealMeshCollectionBufferRef.current
-    revealMeshes.clear()
-    for (const [ownerId, state] of revealOwnerTransitionStatesRef.current) {
-      if (
-        !isLandrushRobotRevealObjectPresented(
+    let ownerStateNeedsUpdate = refreshedOwners || revealViewChanged
+    if (!ownerStateNeedsUpdate) {
+      for (const state of revealOwnerStatesRef.current.values()) {
+        if (state.exitMissStartedAtMs !== null) {
+          ownerStateNeedsUpdate = true
+          break
+        }
+      }
+    }
+    if (ownerStateNeedsUpdate) {
+      updateLandrushRobotRevealAperture({
+        aperture: enterApertureRef.current,
+        camera,
+        centerX: revealScreen.x,
+        centerY: revealScreen.y,
+        farDepth: robotNearDepth,
+        height,
+        ndcZ: robotNdc.z,
+        radiusPx: revealOuterRadiusPx,
+        width,
+      })
+      updateLandrushRobotRevealAperture({
+        aperture: exitApertureRef.current,
+        camera,
+        centerX: revealScreen.x,
+        centerY: revealScreen.y,
+        farDepth: robotNearDepth,
+        height,
+        ndcZ: robotNdc.z,
+        radiusPx: revealOuterRadiusPx * LANDRUSH_ISLAND_ROBOT_REVEAL_EXIT_RADIUS_SCALE,
+        width,
+      })
+      classifyLandrushRobotRevealOwnerBounds({
+        boundsByOwnerId: revealBoundsCacheRef.current,
+        enterAperture: enterApertureRef.current,
+        exitAperture: exitApertureRef.current,
+        target: revealOwnerObservationsRef.current,
+      })
+      revealOwnerObservationGenerationRef.current += 1
+      reconcileLandrushRobotRevealOwnerStates({
+        exitGraceMs: LANDRUSH_ISLAND_ROBOT_REVEAL_EXIT_GRACE_MS,
+        liveOwnerIds: liveRevealOwnerIdsRef.current,
+        nowMs: performance.now(),
+        observationByOwnerId: revealOwnerObservationByIdRef.current,
+        observationGeneration: revealOwnerObservationGenerationRef.current,
+        observations: revealOwnerObservationsRef.current,
+        states: revealOwnerStatesRef.current,
+        target: activeRevealOwnerIdsRef.current,
+      })
+    }
+    let transitionNeedsUpdate = ownerStateNeedsUpdate
+    if (!transitionNeedsUpdate) {
+      for (const [ownerId, state] of revealOwnerTransitionStatesRef.current) {
+        const target = activeRevealOwnerIdsRef.current.has(ownerId) ? 1 : 0
+        if (
+          state.fadeInDelaySeconds > 0 ||
+          Math.abs(target - state.amount) > LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON
+        ) {
+          transitionNeedsUpdate = true
+          break
+        }
+      }
+    }
+    if (transitionNeedsUpdate) {
+      revealObjectTransitionRef.current = advanceLandrushRobotRevealObjectTransitions({
+        activeObjects: activeRevealOwnerIdsRef.current,
+        deltaSeconds: delta,
+        epsilon: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON,
+        fadeInDelaySeconds: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_IN_DELAY_SECONDS,
+        response: LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_RESPONSE,
+        states: revealOwnerTransitionStatesRef.current,
+      })
+      const revealMeshes = revealMeshCollectionBufferRef.current
+      revealMeshes.clear()
+      for (const [ownerId, state] of revealOwnerTransitionStatesRef.current) {
+        if (
+          !isLandrushRobotRevealObjectPresented(
+            state.amount,
+            LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON,
+          )
+        ) {
+          continue
+        }
+        const ownerRoot = revealOwnerRootsRef.current.get(ownerId)
+        if (!ownerRoot) continue
+        const ownerNode = ownerId.startsWith('node:')
+          ? nodes[ownerId.slice('node:'.length) as AnyNodeId]
+          : null
+        appendLandrushRevealOwnedMeshes(
+          ownerRoot,
+          registeredNodeRoots,
+          revealMeshes,
           state.amount,
-          LANDRUSH_ISLAND_ROBOT_REVEAL_FADE_EPSILON,
+          applyLandrushIslandRobotRevealMeshAmount,
+          ownerNode?.type === 'roof',
         )
-      ) {
-        continue
       }
-      const ownerRoot = revealOwnerRootsRef.current.get(ownerId)
-      if (!ownerRoot) continue
-      const ownerNode = ownerId.startsWith('node:')
-        ? nodes[ownerId.slice('node:'.length) as AnyNodeId]
-        : null
-      appendLandrushRevealOwnedMeshes(
-        ownerRoot,
-        registeredNodeRoots,
-        revealMeshes,
-        state.amount,
-        applyLandrushIslandRobotRevealMeshAmount,
-        ownerNode?.type === 'roof',
-      )
-    }
-    const previousRevealMeshes = presentedRevealMeshesRef.current
-    for (const mesh of previousRevealMeshes) {
-      if (!revealMeshes.has(mesh)) delete mesh.userData[LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY]
-    }
-    presentedRevealMeshesRef.current = revealMeshes
-    revealMeshCollectionBufferRef.current = previousRevealMeshes
-    for (const ownerId of revealOwnerRootsRef.current.keys()) {
-      if (!revealOwnerTransitionStatesRef.current.has(ownerId)) {
-        revealOwnerRootsRef.current.delete(ownerId)
+      const previousRevealMeshes = presentedRevealMeshesRef.current
+      let revealMembershipChanged = previousRevealMeshes.size !== revealMeshes.size
+      for (const mesh of previousRevealMeshes) {
+        if (revealMeshes.has(mesh)) continue
+        revealMembershipChanged = true
+        delete mesh.userData[LANDRUSH_ROBOT_REVEAL_AMOUNT_USER_DATA_KEY]
+      }
+      presentedRevealMeshesRef.current = revealMeshes
+      revealMeshCollectionBufferRef.current = previousRevealMeshes
+      if (revealMembershipChanged) revealMeshRevisionRef.current += 1
+      for (const ownerId of revealOwnerRootsRef.current.keys()) {
+        if (!revealOwnerTransitionStatesRef.current.has(ownerId)) {
+          revealOwnerRootsRef.current.delete(ownerId)
+        }
       }
     }
+    const revealObjectTransition = revealObjectTransitionRef.current
+    const revealMeshes = presentedRevealMeshesRef.current
     revealActiveRef.current = true
-    let softTransition = null
-    let materialTransition = { activeMaterialCount: 0, materialCount: 0 }
+    let materialTransition = lastMaterialTransitionRef.current
     if (revealPath === 'soft-material') {
-      materialTransition = materialPresentation.syncRevealMeshes(revealMeshes, { kind: 'soft' })
-      softTransition = { ...revealObjectTransition, ...materialTransition }
+      if (
+        lastSyncedRevealMeshRevisionRef.current !== revealMeshRevisionRef.current ||
+        lastSyncedRevealPathRef.current !== revealPath
+      ) {
+        materialTransition = materialPresentation.syncRevealMeshes(revealMeshes, { kind: 'soft' })
+        lastMaterialTransitionRef.current = materialTransition
+        lastSyncedRevealMeshRevisionRef.current = revealMeshRevisionRef.current
+        lastSyncedRevealPathRef.current = revealPath
+      }
       revealGrowthAmountRef.current = revealObjectTransition.growthAmount
     } else {
       const growthTarget = revealMeshes.size > 0 ? 1 : 0
@@ -12197,35 +13215,66 @@ function LandrushIslandRobotScreenRevealClipper({
       amount: revealGrowthAmountRef.current,
       startScale: LANDRUSH_ISLAND_ROBOT_REVEAL_GROWTH_START_SCALE,
     })
-    updateLandrushRobotScreenRevealMask({
-      centerX: revealScreen.x,
-      centerY: revealScreen.y,
-      height,
-      innerRadius: revealRadiusPx,
-      outerRadius: revealOuterRadiusPx,
-      robotNearDepth,
-      width,
-    })
-    if (revealPath === 'material') {
-      camera.getWorldDirection(cameraForwardRef.current)
-      updateLandrushRobotScreenRevealWebGLDepthPlane({
-        cameraForward: cameraForwardRef.current,
-        cameraPosition: cameraPositionRef.current,
-        plane: webGLDepthPlaneRef.current,
-        robotNearDepth,
-      })
-      updateLandrushIslandRobotRevealClippingPlanes({
-        camera,
-        cameraPosition: cameraPositionRef.current,
+    const lastMaskInputs = lastRevealMaskInputsRef.current
+    const revealMaskChanged =
+      lastMaskInputs.centerX !== revealScreen.x ||
+      lastMaskInputs.centerY !== revealScreen.y ||
+      lastMaskInputs.height !== height ||
+      lastMaskInputs.innerRadius !== revealRadiusPx ||
+      lastMaskInputs.outerRadius !== revealOuterRadiusPx ||
+      lastMaskInputs.robotNearDepth !== robotNearDepth ||
+      lastMaskInputs.width !== width
+    if (revealMaskChanged) {
+      updateLandrushRobotScreenRevealMask({
+        centerX: revealScreen.x,
+        centerY: revealScreen.y,
         height,
-        ndcZ: robotNdc.z,
-        planes: clippingPlanesRef.current,
-        points: boundaryPointsRef.current,
-        radiusPx: revealRadiusPx,
-        robotCenter,
-        robotScreen: revealScreen,
+        innerRadius: revealRadiusPx,
+        outerRadius: revealOuterRadiusPx,
+        robotNearDepth,
         width,
       })
+      lastMaskInputs.centerX = revealScreen.x
+      lastMaskInputs.centerY = revealScreen.y
+      lastMaskInputs.height = height
+      lastMaskInputs.innerRadius = revealRadiusPx
+      lastMaskInputs.outerRadius = revealOuterRadiusPx
+      lastMaskInputs.robotNearDepth = robotNearDepth
+      lastMaskInputs.width = width
+    }
+    if (revealPath === 'material') {
+      const revealClippingChanged = shouldUpdateLandrushRobotRevealClippingPlanes({
+        camera,
+        lastCamera: lastRevealClippingCameraRef.current,
+        lastProjectionMatrix: lastRevealClippingProjectionMatrixRef.current,
+        lastWorldMatrix: lastRevealClippingWorldMatrixRef.current,
+        maskChanged: revealMaskChanged || lastRevealClippingPathRef.current !== revealPath,
+      })
+      if (revealClippingChanged) {
+        cameraForwardRef.current.set(0, 0, -1).transformDirection(camera.matrixWorld)
+        updateLandrushRobotScreenRevealWebGLDepthPlane({
+          cameraForward: cameraForwardRef.current,
+          cameraPosition: cameraPositionRef.current,
+          plane: webGLDepthPlaneRef.current,
+          robotNearDepth,
+        })
+        updateLandrushIslandRobotRevealClippingPlanes({
+          camera,
+          cameraPosition: cameraPositionRef.current,
+          height,
+          ndcZ: robotNdc.z,
+          planes: clippingPlanesRef.current,
+          points: boundaryPointsRef.current,
+          radiusPx: revealRadiusPx,
+          robotCenter,
+          robotScreen: revealScreen,
+          width,
+        })
+        lastRevealClippingCameraRef.current = camera
+        lastRevealClippingProjectionMatrixRef.current.copy(camera.projectionMatrix)
+        lastRevealClippingWorldMatrixRef.current.copy(camera.matrixWorld)
+        lastRevealClippingPathRef.current = revealPath
+      }
       if (rendererClippingRef.current?.renderer !== renderer) {
         rendererClippingRef.current = {
           localClippingEnabled: renderer.localClippingEnabled,
@@ -12233,13 +13282,22 @@ function LandrushIslandRobotScreenRevealClipper({
         }
       }
       renderer.localClippingEnabled = true
-      materialTransition = materialPresentation.syncRevealMeshes(revealMeshes, {
-        clippingPlanes: webGLClippingPlanesRef.current,
-        kind: 'clip',
-      })
+      if (
+        lastSyncedRevealMeshRevisionRef.current !== revealMeshRevisionRef.current ||
+        lastSyncedRevealPathRef.current !== revealPath
+      ) {
+        materialTransition = materialPresentation.syncRevealMeshes(revealMeshes, {
+          clippingPlanes: webGLClippingPlanesRef.current,
+          kind: 'clip',
+        })
+        lastMaterialTransitionRef.current = materialTransition
+        lastSyncedRevealMeshRevisionRef.current = revealMeshRevisionRef.current
+        lastSyncedRevealPathRef.current = revealPath
+      }
     }
-    const now = performance.now()
-    if (now - lastProbeAtRef.current > 160) {
+    if (landrushIslandRuntimeProbeIsEnabled()) {
+      const now = performance.now()
+      if (now - lastProbeAtRef.current <= 160) return
       lastProbeAtRef.current = now
       recordLandrushIslandRevealProbe({
         activeRevealOwnerIds: [...activeRevealOwnerIdsRef.current].sort(),
@@ -12250,25 +13308,23 @@ function LandrushIslandRobotScreenRevealClipper({
         revealGrowthAmount: roundPerf(revealGrowthAmountRef.current),
         revealGrowthScale: roundPerf(revealGrowthScale),
         radiusRatio: roundPerf(revealOuterRadiusPx / revealRadiusPx),
-        roofOccluders: landrushIslandRuntimeProbeIsEnabled()
-          ? occludersRef.current.flatMap(({ ownerId }) => {
-              if (!ownerId.startsWith('node:')) return []
-              const nodeId = ownerId.slice('node:'.length) as AnyNodeId
-              const node = nodes[nodeId]
-              if (node?.type !== 'roof' && node?.type !== 'roof-segment') return []
-              const bounds = revealBoundsCacheRef.current.get(ownerId)?.bounds
-              const observation = revealOwnerObservationByIdRef.current.get(ownerId)
-              return [
-                {
-                  bounds: bounds ? [bounds.min.toArray(), bounds.max.toArray()] : null,
-                  enterIntersects: observation?.enterIntersects ?? null,
-                  exitIntersects: observation?.exitIntersects ?? null,
-                  ownerId,
-                  type: node.type,
-                },
-              ]
-            })
-          : [],
+        roofOccluders: occludersRef.current.flatMap(({ ownerId }) => {
+          if (!ownerId.startsWith('node:')) return []
+          const nodeId = ownerId.slice('node:'.length) as AnyNodeId
+          const node = nodes[nodeId]
+          if (node?.type !== 'roof' && node?.type !== 'roof-segment') return []
+          const bounds = revealBoundsCacheRef.current.get(ownerId)?.bounds
+          const observation = revealOwnerObservationByIdRef.current.get(ownerId)
+          return [
+            {
+              bounds: bounds ? [bounds.min.toArray(), bounds.max.toArray()] : null,
+              enterIntersects: observation?.enterIntersects ?? null,
+              exitIntersects: observation?.exitIntersects ?? null,
+              ownerId,
+              type: node.type,
+            },
+          ]
+        }),
         robotNdc: [roundPerf(robotNdc.x), roundPerf(robotNdc.y), roundPerf(robotNdc.z)],
         projectedCenterScreen: [
           roundPerf(projectedCenterScreen.x),
@@ -12276,7 +13332,10 @@ function LandrushIslandRobotScreenRevealClipper({
         ],
         revealScreen: [roundPerf(revealScreen.x), roundPerf(revealScreen.y)],
         revealScreenClamped,
-        revealTransition: softTransition,
+        revealTransition:
+          revealPath === 'soft-material'
+            ? { ...revealObjectTransition, ...materialTransition }
+            : null,
         presentedRevealOwners: [...revealOwnerTransitionStatesRef.current]
           .filter(([, state]) =>
             isLandrushRobotRevealObjectPresented(
@@ -12922,7 +13981,7 @@ function LocalLandrushIslandRobot({
   deferBuiltColliderRebuild: boolean
   destroyedFurnitureIds: ReadonlySet<string>
   fallSurfacePoints: readonly LandrushPoint2[]
-  fallPresentationRef: { current: LandrushIslandFallPresentationState }
+  fallPresentationRef: LandrushIslandFallPresentationStore
   fpvActive: boolean
   grassInteractionRef: { current: StylizedGrassInteraction | null }
   groundY: number
@@ -13214,7 +14273,7 @@ function LocalLandrushIslandRobot({
 
   const updateFallPresentation = useCallback(
     (next: LandrushIslandFallPresentationState) => {
-      fallPresentationRef.current = next
+      publishLandrushIslandFallPresentation(fallPresentationRef, next)
       setFallPresentation((current) => {
         if (
           current.active === next.active &&
@@ -14866,7 +15925,7 @@ function LocalLandrushIslandRobot({
         z: motion.position.z,
       }
       grassInteractionRef.current = grassInteraction
-      if (now - lastGrassProbeAtRef.current >= 250) {
+      if (landrushIslandRuntimeProbeIsEnabled() && now - lastGrassProbeAtRef.current >= 250) {
         lastGrassProbeAtRef.current = now
         recordLandrushIslandGrassProbe({
           centerLagMeters: Math.hypot(
@@ -16041,12 +17100,14 @@ function LandrushIslandMapCameraRig({
       state.camera,
       controls?.target ?? controlsTarget,
     )
-    recordLandrushIslandCameraProbe({
-      camera: state.camera,
-      mode: 'map',
-      source: 'map-camera',
-      target: controls?.target ?? controlsTarget,
-    })
+    if (landrushIslandRuntimeProbeIsEnabled()) {
+      recordLandrushIslandCameraProbe({
+        camera: state.camera,
+        mode: 'map',
+        source: 'map-camera',
+        target: controls?.target ?? controlsTarget,
+      })
+    }
   })
 
   return (
@@ -16188,13 +17249,15 @@ function stepLandrushIslandCameraPoseTransition({
   camera.updateMatrixWorld()
 
   writeLandrushIslandCameraPose(poseRef, camera, target)
-  recordLandrushIslandCameraProbe({
-    camera,
-    mode,
-    progress,
-    source,
-    target,
-  })
+  if (landrushIslandRuntimeProbeIsEnabled()) {
+    recordLandrushIslandCameraProbe({
+      camera,
+      mode,
+      progress,
+      source,
+      target,
+    })
+  }
 
   return progress
 }
@@ -16569,13 +17632,15 @@ function LandrushIslandFirstPersonCameraController({
     ) {
       renderScheduler.requestFrame('camera:move')
     }
-    recordLandrushIslandCameraProbe({
-      camera: state.camera,
-      mode: 'player',
-      progress: entryCompleteRef.current ? undefined : entryProgress,
-      source: entryCompleteRef.current ? 'fpv-camera' : 'fpv-entry-transition',
-      target: targetRef.current,
-    })
+    if (landrushIslandRuntimeProbeIsEnabled()) {
+      recordLandrushIslandCameraProbe({
+        camera: state.camera,
+        mode: 'player',
+        progress: entryCompleteRef.current ? undefined : entryProgress,
+        source: entryCompleteRef.current ? 'fpv-camera' : 'fpv-entry-transition',
+        target: targetRef.current,
+      })
+    }
   }, 2)
 
   return null
@@ -17056,13 +18121,15 @@ function LandrushIslandThirdPersonCameraController({
       writeLandrushIslandCameraPose(playerCameraPoseRef, state.camera, target)
       setCameraMotionActive(true)
       renderScheduler.requestFrame('camera:move')
-      recordLandrushIslandCameraProbe({
-        camera: state.camera,
-        mode: 'player',
-        progress: entryProgress,
-        source: 'player-entry-transition',
-        target,
-      })
+      if (landrushIslandRuntimeProbeIsEnabled()) {
+        recordLandrushIslandCameraProbe({
+          camera: state.camera,
+          mode: 'player',
+          progress: entryProgress,
+          source: 'player-entry-transition',
+          target,
+        })
+      }
 
       if (entryProgress >= 1) {
         previousTargetRef.current = target.clone()
@@ -17185,12 +18252,14 @@ function LandrushIslandThirdPersonCameraController({
       stanceSettling
     setCameraMotionActive(activeCameraMotion)
     if (activeCameraMotion) renderScheduler.requestFrame('camera:move')
-    recordLandrushIslandCameraProbe({
-      camera: state.camera,
-      mode: 'player',
-      source: 'player-camera',
-      target: previousTarget,
-    })
+    if (landrushIslandRuntimeProbeIsEnabled()) {
+      recordLandrushIslandCameraProbe({
+        camera: state.camera,
+        mode: 'player',
+        source: 'player-camera',
+        target: previousTarget,
+      })
+    }
   }, 2)
 
   return null

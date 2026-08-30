@@ -3,6 +3,7 @@
 import type { ConnectionStatus } from '@landrush/protocol'
 import { MULTIPLAYER_LATENCY_EVENT, type MultiplayerConnectionDetails } from '@landrush/runtime'
 import { type RefObject, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { SpatialVoiceControl, type SpatialVoiceController } from './world-multiplayer-spatial-audio'
 
 export function MultiplayerStatusPanel({
@@ -21,6 +22,7 @@ export function MultiplayerStatusPanel({
   voice?: SpatialVoiceController
 }) {
   const latencyLabelRef = useRef<HTMLSpanElement>(null)
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null)
   const displayedPlayerCount =
     connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
   const statusLabel = compactStatusLabel(status)
@@ -29,6 +31,11 @@ export function MultiplayerStatusPanel({
   const fpsLabel = measuredFps === null ? '--fps' : `${measuredFps}fps`
 
   useEffect(() => {
+    setPortalTarget(document.body)
+  }, [])
+
+  useEffect(() => {
+    if (!portalTarget) return
     const element = latencyLabelRef.current
     if (!element) return
     element.textContent = latencyLabel
@@ -39,10 +46,13 @@ export function MultiplayerStatusPanel({
     }
     window.addEventListener(MULTIPLAYER_LATENCY_EVENT, handleLatency)
     return () => window.removeEventListener(MULTIPLAYER_LATENCY_EVENT, handleLatency)
-  }, [latencyLabel])
+  }, [latencyLabel, portalTarget])
 
-  return (
-    <section className="pointer-events-auto absolute top-3 left-3 z-40 flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur">
+  const panel = (
+    <section
+      className="pointer-events-auto fixed right-3 bottom-3 z-[120] flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur"
+      data-landrush-multiplayer-status
+    >
       <span
         aria-hidden
         className={`size-2 shrink-0 rounded-full ${compactStatusDotClass(status)}`}
@@ -62,6 +72,8 @@ export function MultiplayerStatusPanel({
       ) : null}
     </section>
   )
+
+  return portalTarget ? createPortal(panel, portalTarget) : null
 }
 
 function useMeasuredFps(renderedFpsRef?: RefObject<number | null>) {

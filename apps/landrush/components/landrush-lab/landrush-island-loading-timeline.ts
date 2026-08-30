@@ -1,9 +1,11 @@
+import { LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING } from './landrush-island-loading-progress-controller'
+
 export const LANDRUSH_ISLAND_LOADING_TIMING_PROFILE_VERSION = 2
 export const LANDRUSH_ISLAND_LOADING_TIMING_MAX_SAMPLES = 8
+export const LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE = 0.985
 
 const LANDRUSH_ISLAND_LOADING_TIMING_STORAGE_PREFIX = 'landrush-island-loading-timing'
 const LANDRUSH_ISLAND_LOADING_MAX_SAMPLE_DURATION_MS = 10 * 60_000
-const LANDRUSH_ISLAND_LOADING_PENDING_FORECAST_SHARE = 0.985
 const LANDRUSH_ISLAND_LOADING_PENDING_MAX_PROGRESS = 0.999
 const LANDRUSH_ISLAND_LOADING_SETTLED_MILESTONE_SHARE = 0.7
 const LANDRUSH_ISLAND_LOADING_UNREADY_GATE_CEILING = 0.75
@@ -63,6 +65,7 @@ export type LandrushIslandLoadingForecast = Readonly<{
 export type LandrushIslandLoadingTimelineUpdate = Readonly<{
   allReady: boolean
   evidenceProgress: number
+  presentationProgress: number
   progress: number
   stale: boolean
 }>
@@ -274,7 +277,7 @@ export function createLandrushIslandLoadingTimelineRun({
     const forecastFraction = resolveForecastFraction(forecast, latestTasks, timings, elapsedMs)
     const evidenceProgress = resolveEvidenceProgress(latestTasks)
     const modeledProgress = Math.max(
-      forecastFraction * LANDRUSH_ISLAND_LOADING_PENDING_FORECAST_SHARE,
+      forecastFraction * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
       evidenceProgress,
     )
     return Math.max(
@@ -330,9 +333,12 @@ export function createLandrushIslandLoadingTimelineRun({
       if (aborted || nextGeneration !== generation) {
         aborted = true
         persistenceEligible = false
+        const evidenceProgress = resolveEvidenceProgress(latestTasks)
         return {
           allReady: false,
-          evidenceProgress: resolveEvidenceProgress(latestTasks),
+          evidenceProgress,
+          presentationProgress:
+            resolveLandrushIslandLoadingPendingPresentationProgress(evidenceProgress),
           progress: progressFloor,
           stale: true,
         }
@@ -343,18 +349,24 @@ export function createLandrushIslandLoadingTimelineRun({
       ) {
         aborted = true
         persistenceEligible = false
+        const evidenceProgress = resolveEvidenceProgress(latestTasks)
         return {
           allReady: false,
-          evidenceProgress: resolveEvidenceProgress(latestTasks),
+          evidenceProgress,
+          presentationProgress:
+            resolveLandrushIslandLoadingPendingPresentationProgress(evidenceProgress),
           progress: progressFloor,
           stale: true,
         }
       }
       const allReady = recordTasks(nextTasks, nowMs)
       progressFloor = Math.max(progressFloor, project(nowMs))
+      const evidenceProgress = resolveEvidenceProgress(nextTasks)
       return {
         allReady,
-        evidenceProgress: resolveEvidenceProgress(nextTasks),
+        evidenceProgress,
+        presentationProgress:
+          resolveLandrushIslandLoadingPendingPresentationProgress(evidenceProgress),
         progress: progressFloor,
         stale: false,
       }
@@ -428,7 +440,16 @@ function resolveObservedFraction(tasks: readonly LandrushIslandLoadingTaskSnapsh
 function resolveEvidenceProgress(tasks: readonly LandrushIslandLoadingTaskSnapshot[]) {
   return Math.min(
     LANDRUSH_ISLAND_LOADING_PENDING_MAX_PROGRESS,
-    resolveObservedFraction(tasks) * LANDRUSH_ISLAND_LOADING_PENDING_FORECAST_SHARE,
+    resolveObservedFraction(tasks) * LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE,
+  )
+}
+
+export function resolveLandrushIslandLoadingPendingPresentationProgress(evidenceProgress: number) {
+  return Math.min(
+    LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
+    clamp01(evidenceProgress) *
+      (LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING /
+        LANDRUSH_ISLAND_LOADING_PENDING_EVIDENCE_SHARE),
   )
 }
 

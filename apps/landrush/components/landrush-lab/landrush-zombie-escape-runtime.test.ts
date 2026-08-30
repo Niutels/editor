@@ -157,6 +157,49 @@ describe('integrated Zombie Escape terminal lifecycle', () => {
     expect(simulation.status).toBe('playing')
   })
 
+  test('keeps hidden weapon pickups inactive throughout integrated Day', () => {
+    const arena = createIntegratedArena()
+    const simulation = createZombieEscapeSimulation(arena, ZOMBIE_ESCAPE_SEED)
+    const pickup = simulation.weaponPickups.find(({ weaponIndex }) => weaponIndex === 1)
+    expect(pickup).toBeDefined()
+    if (!pickup) return
+    simulation.player.x = pickup.x
+    simulation.player.y = pickup.y
+    simulation.player.z = pickup.z
+    simulation.money = 1_000
+    const input = createZombieEscapeControlState()
+    input.inputMode = 'touch'
+    input.interactPressed = true
+
+    stepLandrushZombieEscapeIntegratedSimulation({
+      arena,
+      deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      expectedPhase: 'build',
+      input,
+      phaseReady: true,
+      simulation,
+    })
+
+    expect(simulation.player.weaponIndex).toBe(0)
+    expect(simulation.weaponPurchaseCount).toBe(0)
+    expect(createZombieEscapeHudSnapshot(simulation).pickupPrompt).toBeNull()
+    expect(input.inputMode).toBe('touch')
+    expect(input.interactPressed).toBe(false)
+
+    setZombieEscapeGamePhase(simulation, 'night')
+    stepLandrushZombieEscapeIntegratedSimulation({
+      arena,
+      deltaSeconds: ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      expectedPhase: 'night',
+      input,
+      phaseReady: true,
+      simulation,
+    })
+
+    expect(simulation.player.weaponIndex).toBe(1)
+    expect(simulation.weaponPurchaseCount).toBe(1)
+  })
+
   test('holds both won and lost terminal snapshots without advancing simulation', () => {
     for (const terminalStatus of ['lost', 'won'] as const) {
       const { arena, input, simulation } = createTerminalIntegratedSimulation(terminalStatus)

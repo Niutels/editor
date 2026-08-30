@@ -7,6 +7,7 @@ export const LANDRUSH_ISLAND_LOADING_SPECULATIVE_INTERVAL_MS = 275
 export const LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND = 3
 export const LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED = 16
 export const LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD = 0.099
+export const LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING = 0.8
 
 const MAXIMUM_INITIAL_VELOCITY_PER_SECOND = 0.075
 const MAXIMUM_PREVIEW_DURATION_MS = 120_000
@@ -15,12 +16,15 @@ const SPECULATIVE_RESERVOIR_HALF_LIFE_MS = 20_000
 const INITIAL_SPECULATIVE_RESERVOIR_SHARE = 0.12
 const SPECULATIVE_RESERVOIR_SHARE_PER_PULSE =
   1 - 2 ** (-LANDRUSH_ISLAND_LOADING_SPECULATIVE_INTERVAL_MS / SPECULATIVE_RESERVOIR_HALF_LIFE_MS)
+const COMPLETION_DURATION_SEARCH_STEP_MS = 5
+const COMPLETION_FINAL_LEG_MAXIMUM_MS = 350
+const MOTION_BOUND_TOLERANCE = 1e-10
 const MAXIMUM_CLOCK_MS = Number.MAX_SAFE_INTEGER - LANDRUSH_ISLAND_LOADING_RESPONSE_MS
 
 type ProgressPulse = Readonly<{
   amount: number
   durationMs: number
-  kind: 'completion' | 'confirmed' | 'speculative'
+  kind: 'completion' | 'completion-pending' | 'confirmed' | 'speculative'
   startedAtMs: number
 }>
 
@@ -88,21 +92,25 @@ export type LandrushIslandLoadingProgressController = Readonly<{
 export function resolveLandrushIslandLoadingProgressStage({
   estimatedDurationMs,
   evidenceProgress,
+  maximumProgress = LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
 }: Readonly<{
   displayedProgress: number
   estimatedDurationMs: number
   evidenceProgress: number
+  maximumProgress?: number
 }>) {
-  const ceiling = Math.min(
+  const boundedMaximumProgress = Math.min(
     LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
-    clamp01(evidenceProgress) + LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD,
+    clamp01(maximumProgress),
+  )
+  const confirmedProgress = Math.min(boundedMaximumProgress, clamp01(evidenceProgress))
+  const ceiling = Math.min(
+    boundedMaximumProgress,
+    confirmedProgress + LANDRUSH_ISLAND_LOADING_MAXIMUM_FORECAST_LEAD,
   )
   return {
     ceiling,
-    confirmedProgress: Math.min(
-      LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
-      clamp01(evidenceProgress),
-    ),
+    confirmedProgress,
     estimatedDurationMs: nonNegativeTime(estimatedDurationMs),
   }
 }
@@ -112,23 +120,31 @@ export function createLandrushIslandLoadingProgressController(
     inheritedVelocityHoldMs?: number
     initialProgress?: number
     initialVelocityPerSecond?: number
+    maximumPendingProgress?: number
   }> = {},
 ): LandrushIslandLoadingProgressController {
   const initialProgress = clamp01(options.initialProgress ?? 0)
+  const maximumPendingProgress = Math.min(
+    LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS,
+    clamp01(options.maximumPendingProgress ?? LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS),
+  )
   const holdUntilMs = nonNegativeTime(options.inheritedVelocityHoldMs)
   const initialVelocity = Math.max(
     0,
     Math.min(
       MAXIMUM_INITIAL_VELOCITY_PER_SECOND,
       finiteOr(options.initialVelocityPerSecond, 0),
-      Math.max(0, LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS - initialProgress) /
+      Math.max(0, maximumPendingProgress - initialProgress) /
         (holdUntilMs / 1_000 + LANDRUSH_ISLAND_LOADING_RESPONSE_MS / 4_500),
     ),
   )
   let inheritedMotion: InheritedMotion | null =
     initialVelocity > 0 ? { holdUntilMs, velocityPerSecond: initialVelocity } : null
   let baseProgress = initialProgress
-  let targetProgress = Math.min(1, initialProgress + inheritedAdvance(inheritedMotion))
+  let targetProgress = Math.max(
+    initialProgress,
+    Math.min(maximumPendingProgress, initialProgress + inheritedAdvance(inheritedMotion)),
+  )
   let elapsedMs = 0
   let lastRequestAtMs = holdUntilMs
   let pulses: ProgressPulse[] = []
@@ -272,8 +288,40 @@ export function createLandrushIslandLoadingProgressController(
 
   return {
     cancelCompletion() {
+      if (!completionRequested && !pulses.some((pulse) => pulse.kind === 'completion')) return
+      const displayedProgress = sample(elapsedMs).progress
+      const terminalMotionStarted = pulses.some(
+        (pulse) => pulse.kind === 'completion' && pulse.startedAtMs < elapsedMs,
+      )
+      if (terminalMotionStarted) {
+        baseProgress = displayedProgress
+        inheritedMotion = null
+        pulses = []
+        speculativeThroughMs = null
+        targetProgress = displayedProgress
+      } else {
+        const current = samplePlan(pulses, inheritedMotion, elapsedMs)
+        const retainedPulses = pulses.filter((pulse) => pulse.kind !== 'completion')
+        const retained = samplePlan(retainedPulses, inheritedMotion, elapsedMs)
+        baseProgress = clamp01(baseProgress + current.progress - retained.progress)
+        pulses = retainedPulses
+        targetProgress = Math.max(
+          baseProgress,
+          Math.min(
+            maximumPendingProgress,
+            clamp01(
+              baseProgress +
+                inheritedAdvance(inheritedMotion) +
+                pulses.reduce((total, pulse) => total + pulse.amount, 0),
+            ),
+          ),
+        )
+      }
       completionRequested = false
       completionStartedAtMs = null
+      confirmedProgress = Math.min(maximumPendingProgress, targetProgress)
+      stageCeiling = confirmedProgress
+      motionRevision += 1
     },
     complete(startDelayMs = 0) {
       if (completionRequested) return getSnapshot()
@@ -282,13 +330,17 @@ export function createLandrushIslandLoadingProgressController(
       confirmedProgress = 1
       stageCeiling = 1
       let changed = discardFutureSpeculation(completionStartedAtMs)
-      changed =
-        appendPulse(
-          Math.max(0, 1 - targetProgress),
-          LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
-          'completion',
-          completionStartedAtMs,
-        ) || changed
+      const completionPulses = createCompletionPulsePlan(
+        pulses,
+        inheritedMotion,
+        targetProgress,
+        maximumPendingProgress,
+        completionStartedAtMs,
+      )
+      for (const pulse of completionPulses) {
+        changed =
+          appendPulse(pulse.amount, pulse.durationMs, pulse.kind, pulse.startedAtMs) || changed
+      }
       if (changed) motionRevision += 1
       return getSnapshot()
     },
@@ -345,11 +397,11 @@ export function createLandrushIslandLoadingProgressController(
     setConfirmedProgress(value, stage = {}) {
       const nextConfirmedProgress = Math.max(
         confirmedProgress,
-        Math.min(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS, clamp01(value)),
+        Math.min(maximumPendingProgress, clamp01(value)),
       )
       const nextStageCeiling = Math.max(
         nextConfirmedProgress,
-        Math.min(LANDRUSH_ISLAND_LOADING_MAX_SPECULATIVE_PROGRESS, clamp01(stage.ceiling ?? value)),
+        Math.min(maximumPendingProgress, clamp01(stage.ceiling ?? value)),
       )
       stageDurationMs = nonNegativeTime(stage.estimatedDurationMs)
       const requestedAtMs = recordRequest(stage.startDelayMs)
@@ -385,6 +437,127 @@ export function createLandrushIslandLoadingProgressController(
       return sample(elapsedMs).progress
     },
   }
+}
+
+function createCompletionPulsePlan(
+  pulses: readonly ProgressPulse[],
+  inherited: InheritedMotion | null,
+  targetProgress: number,
+  maximumPendingProgress: number,
+  startedAtMs: number,
+): readonly ProgressPulse[] {
+  const amount = Math.max(0, 1 - targetProgress)
+  if (!(amount > 0)) return []
+  const earlyAmount = Math.min(amount, Math.max(0, maximumPendingProgress - targetProgress))
+  const lateAmount = amount - earlyAmount
+  const earlyPulse: ProgressPulse | null =
+    earlyAmount > 0
+      ? {
+          amount: earlyAmount,
+          durationMs: LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+          kind: 'completion-pending',
+          startedAtMs,
+        }
+      : null
+  if (!(lateAmount > 0)) return earlyPulse ? [earlyPulse] : []
+  const minimumDurationMs = Math.max(
+    1,
+    (2_250 * lateAmount) / LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND,
+    3_000 *
+      Math.sqrt(
+        lateAmount / LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED,
+      ),
+  )
+  let durationMs =
+    Math.ceil(minimumDurationMs / COMPLETION_DURATION_SEARCH_STEP_MS) *
+    COMPLETION_DURATION_SEARCH_STEP_MS
+  for (
+    ;
+    durationMs <= COMPLETION_FINAL_LEG_MAXIMUM_MS;
+    durationMs += COMPLETION_DURATION_SEARCH_STEP_MS
+  ) {
+    const latePulse: ProgressPulse = {
+      amount: lateAmount,
+      durationMs,
+      kind: 'completion',
+      startedAtMs: startedAtMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS - durationMs,
+    }
+    if (
+      respectsLoadingMotionBounds(
+        [...pulses, ...(earlyPulse ? [earlyPulse] : []), latePulse],
+        inherited,
+        startedAtMs,
+        startedAtMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS,
+      )
+    ) {
+      return earlyPulse ? [earlyPulse, latePulse] : [latePulse]
+    }
+  }
+  const latePulse: ProgressPulse = {
+    amount: lateAmount,
+    durationMs: COMPLETION_FINAL_LEG_MAXIMUM_MS,
+    kind: 'completion',
+    startedAtMs:
+      startedAtMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS - COMPLETION_FINAL_LEG_MAXIMUM_MS,
+  }
+  return earlyPulse ? [earlyPulse, latePulse] : [latePulse]
+}
+
+function respectsLoadingMotionBounds(
+  pulses: readonly ProgressPulse[],
+  inherited: InheritedMotion | null,
+  fromMs: number,
+  throughMs: number,
+) {
+  const knots = new Set([fromMs, throughMs])
+  for (const pulse of pulses) {
+    for (let knot = 0; knot <= 3; knot += 1) {
+      const timeMs = pulse.startedAtMs + (knot * pulse.durationMs) / 3
+      if (timeMs > fromMs && timeMs < throughMs) knots.add(timeMs)
+    }
+  }
+  if (inherited) {
+    for (const timeMs of [
+      inherited.holdUntilMs,
+      inherited.holdUntilMs + LANDRUSH_ISLAND_LOADING_RESPONSE_MS / 6,
+      inheritedEnd(inherited),
+    ]) {
+      if (timeMs > fromMs && timeMs < throughMs) knots.add(timeMs)
+    }
+  }
+  const times = [...knots].sort((left, right) => left - right)
+  for (let index = 0; index < times.length; index += 1) {
+    const at = samplePlan(pulses, inherited, times[index]!)
+    if (!respectsLoadingMotionSampleBounds(at)) return false
+    const nextTimeMs = times[index + 1]
+    if (nextTimeMs === undefined) continue
+    const next = samplePlan(pulses, inherited, nextTimeMs)
+    const durationSeconds = (nextTimeMs - times[index]!) / 1_000
+    const jerk =
+      (next.accelerationPerSecondSquared - at.accelerationPerSecondSquared) / durationSeconds
+    if (Math.abs(jerk) <= MOTION_BOUND_TOLERANCE) continue
+    const zeroAccelerationSeconds = -at.accelerationPerSecondSquared / jerk
+    if (zeroAccelerationSeconds > 0 && zeroAccelerationSeconds < durationSeconds) {
+      const zeroAcceleration = samplePlan(
+        pulses,
+        inherited,
+        times[index]! + zeroAccelerationSeconds * 1_000,
+      )
+      if (!respectsLoadingMotionSampleBounds(zeroAcceleration)) return false
+    }
+  }
+  return true
+}
+
+function respectsLoadingMotionSampleBounds(sample: ProgressMotion) {
+  return (
+    sample.velocityPerSecond >= -MOTION_BOUND_TOLERANCE &&
+    sample.velocityPerSecond <=
+      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_RATE_PER_SECOND + MOTION_BOUND_TOLERANCE &&
+    Math.abs(sample.accelerationPerSecondSquared) <=
+      LANDRUSH_ISLAND_LOADING_MAXIMUM_RENDERED_ACCELERATION_PER_SECOND_SQUARED +
+        MOTION_BOUND_TOLERANCE
+  )
 }
 
 function collectMotionKnots(

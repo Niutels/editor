@@ -18,6 +18,8 @@ export function ItemCatalog({
   overrideItems,
   leadingTile,
   emptyState,
+  isItemDisabled,
+  renderItemBadge,
 }: {
   category: CatalogCategory
   items?: AssetInput[]
@@ -30,6 +32,8 @@ export function ItemCatalog({
   leadingTile?: React.ReactNode
   /** Rendered when there are no items to show. Replaces the empty grid. */
   emptyState?: React.ReactNode
+  isItemDisabled?: (item: CatalogItem) => boolean
+  renderItemBadge?: (item: CatalogItem) => React.ReactNode
 }) {
   const selectedItem = useEditor((state) => state.selectedItem)
   const setSelectedItem = useEditor((state) => state.setSelectedItem)
@@ -65,15 +69,22 @@ export function ItemCatalog({
       {leadingTile}
       {filteredItems.map((item, index) => {
         const isSelected = selectedItem?.src === item?.src
+        const disabled = isItemDisabled?.(item) ?? false
         const snapTarget = resolveAssetSnapTarget(item?.attachTo)
         return (
           <button
             className={cn(
               'group relative flex flex-col gap-1.5 rounded-xl p-1.5 transition-colors hover:cursor-pointer hover:bg-sidebar-accent',
               isSelected && 'bg-sidebar-accent ring-2 ring-primary-foreground',
+              disabled &&
+                'cursor-not-allowed opacity-35 grayscale hover:cursor-not-allowed hover:bg-transparent',
             )}
+            data-editor-build-controller-action="placement"
+            data-editor-build-controller-item
+            disabled={disabled}
             key={index}
             onClick={() => {
+              if (disabled) return
               triggerSFX('sfx:menu-click')
               // Drop the current selection before arming placement — keeping
               // it would route shortcuts (rotate & co) to both the ghost and
@@ -83,7 +94,9 @@ export function ItemCatalog({
               setTool(item.tool ?? 'item')
               setMode('build')
             }}
-            onMouseEnter={() => triggerSFX('sfx:menu-hover')}
+            onMouseEnter={() => {
+              if (!disabled) triggerSFX('sfx:menu-hover')
+            }}
             type="button"
           >
             <div className="relative aspect-square w-full overflow-hidden rounded-lg">
@@ -97,9 +110,12 @@ export function ItemCatalog({
                 <SnapTargetBadge className="absolute right-1 bottom-1" target={snapTarget} />
               )}
             </div>
-            <span className="truncate px-0.5 text-left font-medium text-[11px] text-muted-foreground group-hover:text-foreground">
-              {item.name}
-            </span>
+            <div className="flex min-w-0 items-center gap-1 px-0.5">
+              <span className="min-w-0 flex-1 truncate text-left font-medium text-[11px] text-muted-foreground group-hover:text-foreground">
+                {item.name}
+              </span>
+              {renderItemBadge?.(item)}
+            </div>
           </button>
         )
       })}

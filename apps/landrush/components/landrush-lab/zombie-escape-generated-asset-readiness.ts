@@ -15,6 +15,7 @@ export type ZombieEscapeGeneratedAssetReadinessSnapshot = Readonly<{
   expectedKeys: readonly string[]
   generation: number
   pipelineCompleted: number
+  pipelineMissingRepresentativeKeys: readonly string[]
   pipelineReady: boolean
   pipelineTotal: number
   ready: boolean
@@ -66,6 +67,7 @@ export function resolveZombieEscapeGeneratedAssetReadinessSnapshot({
   expectedKeys,
   generation,
   pipelineCompleted = 0,
+  pipelineMissingRepresentativeKeys = [],
   pipelineReady,
   pipelineTotal = 1,
   statuses,
@@ -73,6 +75,7 @@ export function resolveZombieEscapeGeneratedAssetReadinessSnapshot({
   expectedKeys: readonly string[]
   generation: number
   pipelineCompleted?: number
+  pipelineMissingRepresentativeKeys?: readonly string[]
   pipelineReady: boolean
   pipelineTotal?: number
   statuses: ReadonlyMap<string, ZombieEscapeGeneratedAssetTerminalStatus>
@@ -102,6 +105,7 @@ export function resolveZombieEscapeGeneratedAssetReadinessSnapshot({
     expectedKeys: stableExpectedKeys,
     generation,
     pipelineCompleted: boundedPipelineCompleted,
+    pipelineMissingRepresentativeKeys: Array.from(new Set(pipelineMissingRepresentativeKeys)),
     pipelineReady,
     pipelineTotal: boundedPipelineTotal,
     ready: allocationReady && pipelineReady,

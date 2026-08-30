@@ -9,6 +9,7 @@ import {
   type MutableRefObject,
   memo,
   type ReactNode,
+  type RefObject,
   Suspense,
   useCallback,
   useEffect,
@@ -33,6 +34,11 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import {
+  LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY,
+  type LandrushRobotShoulderTorchLightingState,
+} from './landrush-robot-shoulder-torch'
+import { parseLandrushZombieNightDebugQuery } from './landrush-zombie-night-presentation-state'
 import {
   createZombieEscapeAttackClip,
   isZombieEscapeAttackPresentationActive,
@@ -66,6 +72,7 @@ import {
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   createZombieEscapeRenderReadinessCoordinator,
   createZombieEscapeZombieRenderRepresentativeKey,
+  resolveZombieEscapeRenderReadinessProgressTotal,
   ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY,
   type ZombieEscapePipelineRenderer,
   type ZombieEscapeRenderReadinessCoordinator,
@@ -238,6 +245,7 @@ export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly stri
 }
 
 export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAssets({
+  detailedZombies,
   detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -250,10 +258,12 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   renderReadinessRegistry,
   retryGeneration = 0,
   simulationRef,
+  shoulderTorchLightingStateRef,
   zombieMaterialPhaseActive,
   zombiePresentationFramePriority,
   zombieSelectionFramePriority,
 }: {
+  detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
@@ -268,14 +278,26 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   retryGeneration?: number
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
+  shoulderTorchLightingStateRef?: RefObject<LandrushRobotShoulderTorchLightingState>
   zombieMaterialPhaseActive: boolean
   zombiePresentationFramePriority?: number
   zombieSelectionFramePriority: number
 }) {
   const { camera: activeCamera, gl, scene } = useThree()
   const pipelineCamera = renderReadinessCamera ?? activeCamera
+  const [zombieNightVisibility] = useState(() =>
+    typeof window === 'undefined'
+      ? 'normal'
+      : parseLandrushZombieNightDebugQuery(new URLSearchParams(window.location.search)).visibility,
+  )
   const [zombieShader] = useState(() =>
-    createZombieEscapeZombieShader({ phaseAmount: zombieMaterialPhaseActive ? 1 : 0 }),
+    createZombieEscapeZombieShader({
+      outsideTorchVisibility:
+        zombieNightVisibility === 'zombies50'
+          ? LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY
+          : 1,
+      phaseAmount: zombieMaterialPhaseActive ? 1 : 0,
+    }),
   )
   useLayoutEffect(() => {
     zombieShader.setPhaseAmount(zombieMaterialPhaseActive ? 1 : 0)
@@ -283,6 +305,9 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   const visualLodStateRef = useRef<ZombieEscapeVisualLodState | null>(null)
   const visualLodInputRef = useRef<ZombieEscapeVisualLodInput | null>(null)
   useFrame(() => {
+    if (zombieNightVisibility === 'zombies50') {
+      zombieShader.setTorchLighting(shoulderTorchLightingStateRef?.current ?? null)
+    }
     const simulation = simulationRef.current
     const capacity = simulation.zombies.pool.capacity
     let visualLodState = visualLodStateRef.current
@@ -318,8 +343,9 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     visualLodInput.hitReaction = simulation.zombies.hitReaction
     visualLodInput.observerX = simulation.player.x
     visualLodInput.observerZ = simulation.player.z
-    visualLodInput.readyVariants =
-      quality === 'balanced' ? loadedZombieVariantsRef.current : EMPTY_READY_ZOMBIE_VARIANTS
+    visualLodInput.readyVariants = detailedZombies
+      ? loadedZombieVariantsRef.current
+      : EMPTY_READY_ZOMBIE_VARIANTS
     visualLodInput.variant = simulation.zombies.variant
     visualLodInput.x = simulation.zombies.x
     visualLodInput.z = simulation.zombies.z
@@ -336,14 +362,21 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     generation: retryGeneration,
     ready: false,
   })
+  const [pipelineAttempt, setPipelineAttempt] = useState(0)
   const coordinatorRef = useRef<ZombieEscapeRenderReadinessCoordinator | null>(null)
   if (!coordinatorRef.current) {
-    coordinatorRef.current = createZombieEscapeRenderReadinessCoordinator()
+    coordinatorRef.current = createZombieEscapeRenderReadinessCoordinator({
+      watchdogStartsOnAdmission: true,
+    })
   }
   const renderReadinessSnapshot = useSyncExternalStore(
     renderReadinessRegistry?.subscribe ?? subscribeToNoRenderReadinessRegistry,
     renderReadinessRegistry?.getSnapshot ?? getEmptyRenderReadinessSnapshot,
     renderReadinessRegistry?.getSnapshot ?? getEmptyRenderReadinessSnapshot,
+  )
+  const pipelineRequestIdentity = useMemo(
+    () => ({ attempt: pipelineAttempt, snapshot: renderReadinessSnapshot }),
+    [pipelineAttempt, renderReadinessSnapshot],
   )
   const allocationReady =
     allocationReadiness.generation === retryGeneration && allocationReadiness.ready
@@ -354,6 +387,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   const pipelineReadinessRef = useRef({
     completed: 0,
     generation: retryGeneration,
+    missingRepresentativeKeys: [] as readonly string[],
     ready: !renderReadinessRegistry,
     required: Boolean(renderReadinessRegistry),
     total: 1,
@@ -368,6 +402,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     pipelineReadinessRef.current = {
       completed: 0,
       generation: retryGeneration,
+      missingRepresentativeKeys: [] as readonly string[],
       ready: !renderReadinessRegistry,
       required: Boolean(renderReadinessRegistry),
       total: 1,
@@ -387,6 +422,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
         expectedKeys,
         generation: retryGeneration,
         pipelineCompleted: pipelineReadiness.completed,
+        pipelineMissingRepresentativeKeys: pipelineReadiness.missingRepresentativeKeys,
         pipelineReady: pipelineReadiness.ready,
         pipelineTotal: pipelineReadiness.total,
         statuses: readiness.statuses,
@@ -409,20 +445,9 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
           ? current
           : { generation: retryGeneration, ready: settlement.ready },
       )
-      if (renderReadinessRegistry && !settlement.ready) {
-        pipelineReadinessRef.current.completed = 0
-        pipelineReadinessRef.current.ready = false
-        pipelineReadinessRef.current.total = 1
-      }
       publishReadiness()
     },
-    [
-      expectedKeys,
-      onGeneratedAssetsFailureChange,
-      publishReadiness,
-      renderReadinessRegistry,
-      retryGeneration,
-    ],
+    [expectedKeys, onGeneratedAssetsFailureChange, publishReadiness, retryGeneration],
   )
 
   useEffect(() => publishReadiness(), [publishReadiness])
@@ -436,63 +461,85 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       publishReadiness()
       return
     }
+    const pipelineRenderer = gl as unknown as ZombieEscapePipelineRenderer
+    const pipelineTotal = resolveZombieEscapeRenderReadinessProgressTotal(pipelineRenderer)
     pipelineReadiness.completed = 0
+    pipelineReadiness.missingRepresentativeKeys = renderReadinessSnapshot.missingKeys
     pipelineReadiness.ready = false
-    pipelineReadiness.total = 1
+    pipelineReadiness.total = pipelineTotal
     publishReadiness()
-    if (!(allocationReady && renderReadinessSnapshot.complete)) {
-      coordinator.invalidate()
-      return
-    }
 
     let active = true
-    const isCurrentRequest = () =>
+    const isCurrentSnapshot = () =>
       active &&
       readinessRef.current.generation === retryGeneration &&
       pipelineReadinessRef.current === pipelineReadiness &&
-      renderReadinessRegistry.getSnapshot() === renderReadinessSnapshot &&
+      renderReadinessRegistry.getSnapshot() === renderReadinessSnapshot
+    const isCurrentFinalRequest = () =>
+      isCurrentSnapshot() &&
       resolveZombieEscapeGeneratedAssetSettlement(expectedKeys, readinessRef.current.statuses).ready
-    void coordinator.request(
-      {
-        camera: pipelineCamera,
-        generation: retryGeneration,
-        identity: renderReadinessSnapshot,
-        representatives: renderReadinessSnapshot.representatives,
-        renderer: gl as unknown as ZombieEscapePipelineRenderer,
-        targetScene: scene,
-      },
-      (status) => {
-        if (!isCurrentRequest()) return
-        const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
-        if (settlement.diagnostic?.level === 'error') {
-          console.error(
-            '[zombie-escape] Required render pipeline preparation failed; keeping loading active for retry.',
-            settlement.diagnostic.message,
-          )
-          onGeneratedAssetsFailureChange?.([
-            ...resolveZombieEscapeGeneratedAssetSettlement(
-              expectedKeys,
-              readinessRef.current.statuses,
-            ).failed,
-            { key: 'render:pipeline', message: settlement.diagnostic.message },
-          ])
-        } else if (settlement.diagnostic) {
-          console.warn(
-            '[zombie-escape] Required render pipeline preparation exceeded its warning threshold; keeping loading active until it settles.',
-            settlement.diagnostic.message,
-          )
-        }
-        const currentPipelineReadiness = pipelineReadinessRef.current
-        if (currentPipelineReadiness.generation !== retryGeneration) return
-        currentPipelineReadiness.ready = settlement.contentReady
-        publishReadiness()
-      },
-      (progress) => {
-        if (!isCurrentRequest()) return
-        if (!updateZombieEscapeRenderPipelineProgress(pipelineReadiness, progress)) return
-        publishReadiness()
-      },
-    )
+    const retryStalePipeline = (status: 'failed' | 'ready' | 'stale') => {
+      if (status === 'stale' && isCurrentSnapshot()) {
+        setPipelineAttempt((current) => current + 1)
+      }
+    }
+    if (!(allocationReady && renderReadinessSnapshot.complete)) {
+      coordinator.invalidate()
+      return () => {
+        active = false
+      }
+    }
+
+    void coordinator
+      .request(
+        {
+          camera: pipelineCamera,
+          generation: retryGeneration,
+          identity: pipelineRequestIdentity,
+          representatives: renderReadinessSnapshot.representatives,
+          renderer: pipelineRenderer,
+          targetScene: scene,
+        },
+        (status) => {
+          if (!isCurrentFinalRequest()) return
+          const settlement = resolveZombieEscapeRenderPipelineSettlement(status)
+          if (settlement.diagnostic?.level === 'error') {
+            console.error(
+              '[zombie-escape] Required render pipeline preparation failed; keeping loading active for retry.',
+              settlement.diagnostic.message,
+            )
+            onGeneratedAssetsFailureChange?.([
+              ...resolveZombieEscapeGeneratedAssetSettlement(
+                expectedKeys,
+                readinessRef.current.statuses,
+              ).failed,
+              { key: 'render:pipeline', message: settlement.diagnostic.message },
+            ])
+          } else if (settlement.diagnostic) {
+            console.warn(
+              '[zombie-escape] Required render pipeline preparation exceeded its warning threshold; keeping loading active until it settles.',
+              settlement.diagnostic.message,
+            )
+          }
+          const currentPipelineReadiness = pipelineReadinessRef.current
+          if (currentPipelineReadiness.generation !== retryGeneration) return
+          currentPipelineReadiness.ready = settlement.contentReady
+          publishReadiness()
+        },
+        (progress) => {
+          if (!isCurrentFinalRequest()) return
+          if (
+            !updateZombieEscapeRenderPipelineProgress(pipelineReadiness, {
+              completed: Math.max(pipelineReadiness.completed, progress.completed),
+              total: progress.total,
+            })
+          ) {
+            return
+          }
+          publishReadiness()
+        },
+      )
+      .then(retryStalePipeline)
     return () => {
       active = false
     }
@@ -502,6 +549,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     gl,
     onGeneratedAssetsFailureChange,
     pipelineCamera,
+    pipelineRequestIdentity,
     publishReadiness,
     renderReadinessRegistry,
     renderReadinessSnapshot,
@@ -527,6 +575,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       />
       {quality === 'balanced' ? (
         <ZombieEscapeGeneratedZombies
+          detailedZombies={detailedZombies}
           detailedZombieSlotsRef={detailedZombieSlotsRef}
           impactVisualRegistry={impactVisualRegistry}
           loadedZombieVariantsRef={loadedZombieVariantsRef}
@@ -760,6 +809,7 @@ function LoadedGeneratedWeaponModel({
 }
 
 const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies({
+  detailedZombies,
   detailedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -771,6 +821,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
   zombieShader,
   zombiePresentationFramePriority,
 }: {
+  detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
@@ -863,6 +914,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
           >
             <Suspense fallback={null}>
               <GeneratedZombieVariant
+                detailedZombies={detailedZombies}
                 detailedZombieSlotsRef={detailedZombieSlotsRef}
                 framePriority={zombiePresentationFramePriority ?? -17}
                 impactVisualRegistry={impactVisualRegistry}
@@ -886,6 +938,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
 })
 
 const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
+  detailedZombies,
   detailedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
@@ -900,6 +953,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
+  detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
@@ -919,6 +973,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   const walkGltf = useGLTF(zombie.glb.walk.path)
   return (
     <PreparedGeneratedZombieVariant
+      detailedZombies={detailedZombies}
       detailedZombieSlotsRef={detailedZombieSlotsRef}
       framePriority={framePriority}
       impactVisualRegistry={impactVisualRegistry}
@@ -940,6 +995,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
 })
 
 function PreparedGeneratedZombieVariant({
+  detailedZombies,
   detailedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
@@ -957,6 +1013,7 @@ function PreparedGeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
+  detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
@@ -983,11 +1040,13 @@ function PreparedGeneratedZombieVariant({
   const assetKey = `zombie:${zombie.id}`
   const targetPoolSize = useMemo(
     () =>
-      resolveZombieEscapeDetailedRootPoolSize(
-        simulationRef.current.variantByPoolSlot,
-        variantIndex,
-      ),
-    [simulationRef, variantIndex],
+      detailedZombies
+        ? resolveZombieEscapeDetailedRootPoolSize(
+            simulationRef.current.variantByPoolSlot,
+            variantIndex,
+          )
+        : 0,
+    [detailedZombies, simulationRef, variantIndex],
   )
   const presentationPose = useMemo(() => createZombieEscapePresentationPose(), [])
   const modelTransform = useMemo(
@@ -1125,10 +1184,11 @@ function PreparedGeneratedZombieVariant({
         elapsedSeconds: simulation.elapsedSeconds,
         zombies,
       })
-      const authoredDebug = presentation.getDebugSnapshot()
-      if (presentationLodDebugRef.current) {
+      const presentationLodDebug = presentationLodDebugRef.current
+      if (presentationLodDebug) {
+        const authoredDebug = presentation.getDebugSnapshot()
         updateZombieEscapePresentationLodDebugAuthoredVariant(
-          presentationLodDebugRef.current,
+          presentationLodDebug,
           variantIndex,
           authoredDebug.activeCount,
           authoredDebug.batchCount,

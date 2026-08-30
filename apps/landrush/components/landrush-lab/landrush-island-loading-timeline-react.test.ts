@@ -439,6 +439,22 @@ describe('Landrush island loading presentation handoff', () => {
     expect(source).not.toContain('controller.getSnapshot().targetProgress !== lastAnimatedTarget')
   })
 
+  test('restores hook-local completion ownership and applies the pending ceiling on remount', () => {
+    const source = readFileSync(
+      new URL('./landrush-island-loading-timeline-react.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(source).toContain(
+      'maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING',
+    )
+    expect(source).toContain('const restoredControllerSnapshot = controller.getSnapshot()')
+    expect(source).toContain(
+      'let completionRequested = restoredControllerSnapshot.completionRequested',
+    )
+    expect(source).toContain('restoredControllerSnapshot.completionStartedAtMs')
+  })
+
   test.each([
     0, 367,
   ])('finishes renewed pending motion smoothly within one second of readiness after a %i-ms observation delay', (startDelayMs) => {

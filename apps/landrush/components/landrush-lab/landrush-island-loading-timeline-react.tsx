@@ -3,6 +3,7 @@
 import { type MutableRefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   createLandrushIslandLoadingProgressController,
+  LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
   type LandrushIslandLoadingProgressController,
   resolveLandrushIslandLoadingProgressStage,
 } from './landrush-island-loading-progress-controller'
@@ -183,6 +184,7 @@ export function useLandrushIslandLoadingTimeline({
       initialVelocityPerSecond: shellPresentation
         ? resolveLandrushIslandLoadingShellVelocity(retained)
         : 0,
+      maximumPendingProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
     })
     if (retained?.progressSnapshot) {
       controller.restoreMotionSnapshot(retained.progressSnapshot)
@@ -191,6 +193,7 @@ export function useLandrushIslandLoadingTimeline({
         controller.step(Math.max(0, Number(retainedTime) - (retained.animationElapsedMs ?? 0)))
       }
     }
+    const restoredControllerSnapshot = controller.getSnapshot()
     let animation: Animation | null = retained?.animation ?? null
     let percentAnimation: Animation | null = retained?.percentAnimation ?? null
     let segment: LandrushIslandLoadingVisualSegment | null = null
@@ -203,8 +206,15 @@ export function useLandrushIslandLoadingTimeline({
     let lastStatus = status?.textContent?.trim() || LANDRUSH_ISLAND_LOADING_INITIAL_STATUS
     let lastStatusRank = -1
     let allReady = false
-    let readyAtMs: number | null = null
-    let completionRequested = false
+    let completionRequested = restoredControllerSnapshot.completionRequested
+    let readyAtMs =
+      completionRequested && restoredControllerSnapshot.completionStartedAtMs !== null
+        ? readNow() -
+          Math.max(
+            0,
+            restoredControllerSnapshot.elapsedMs - restoredControllerSnapshot.completionStartedAtMs,
+          )
+        : null
     const completionGate = createLandrushIslandLoadingCompletionGate()
     let fadeStarted = false
     let fadeAttempt = 0
@@ -411,13 +421,14 @@ export function useLandrushIslandLoadingTimeline({
         if (!completionRequested) {
           completionRequested = true
           controller.complete(startDelayMs)
-          overlay?.setAttribute('data-landrush-island-loading-ready-at-ms', String(readyAtMs))
         }
+        overlay?.setAttribute('data-landrush-island-loading-ready-at-ms', String(readyAtMs))
       } else {
         const stage = resolveLandrushIslandLoadingProgressStage({
           displayedProgress: controller.getSnapshot().displayedProgress,
           estimatedDurationMs: run.getForecast().durationMs - (nowMs - startTimeMs),
-          evidenceProgress: update.evidenceProgress,
+          evidenceProgress: update.presentationProgress,
+          maximumProgress: LANDRUSH_ISLAND_LOADING_PENDING_PRESENTATION_CEILING,
         })
         controller.setConfirmedProgress(stage.confirmedProgress, { ...stage, startDelayMs })
       }

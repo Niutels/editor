@@ -3,6 +3,10 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import net from 'node:net'
 import { after, test } from 'node:test'
+import {
+  isZombieEscapeFirstHouseReady,
+  PARCEL_BUILD_SCHEMA_VERSION,
+} from '@landrush/protocol'
 import { WebSocket } from 'ws'
 
 const WS_PATH = '/api/landrush-lab/world-multiplayer/ws'
@@ -18,6 +22,8 @@ after(() => {
 test('holds the first Zombie clock, enforces CAS and participant authority, and hydrates late joins', async () => {
   const { port, server } = await startServer()
   const roomId = 'zombie-escape-clock-room'
+  const worldId = 'zombie-escape-clock-world'
+  const parcelId = 'parcel-zombie-escape-clock'
   const clients = []
   try {
     const normal = await connectPlayer(port, 'normal-player', roomId)
@@ -85,6 +91,88 @@ test('holds the first Zombie clock, enforces CAS and participant authority, and 
         type: 'initialize-zombie-escape-clock',
       }),
     )
+    const missingWorldRejection = await nextMessage(
+      zombie,
+      (message) => message.type === 'zombie-escape-state-rejected',
+    )
+    assert.equal(missingWorldRejection.code, 'zombie-escape-parcel-world-unavailable')
+    assert.equal(
+      missingWorldRejection.message,
+      'Watch the current parcel world before initializing Zombie Escape',
+    )
+    assert.deepEqual(missingWorldRejection.state, held)
+
+    await watchParcelWorld(zombie, `${roomId}-mismatch`, worldId)
+    zombie.socket.send(
+      JSON.stringify({
+        baseRevision: held.revision,
+        sessionId: held.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
+    const mismatchedWorldRejection = await nextMessage(
+      zombie,
+      (message) => message.type === 'zombie-escape-state-rejected',
+    )
+    assert.equal(mismatchedWorldRejection.code, 'zombie-escape-parcel-world-unavailable')
+    assert.deepEqual(mismatchedWorldRejection.state, held)
+
+    const emptyWorld = await watchParcelWorld(zombie, roomId, worldId)
+    assert.deepEqual(emptyWorld.builds, [])
+    zombie.socket.send(
+      JSON.stringify({
+        baseRevision: held.revision,
+        sessionId: held.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
+    const emptyWorldRejection = await nextMessage(
+      zombie,
+      (message) => message.type === 'zombie-escape-state-rejected',
+    )
+    assert.equal(emptyWorldRejection.code, 'zombie-escape-house-required')
+    assert.equal(
+      emptyWorldRejection.message,
+      'Build a closed house with walls and an attached door before starting the Zombie Escape countdown',
+    )
+    assert.deepEqual(emptyWorldRejection.state, held)
+
+    await claimParcel(zombie, worldId, parcelId)
+    await syncParcelBuild(zombie, {
+      baseRevision: 0,
+      nodes: createZombieEscapeBuildNodes(parcelId, { spawn: true }),
+      operationId: 'zombie-clock-spawn-only',
+      parcelId,
+      worldId,
+    })
+    zombie.socket.send(
+      JSON.stringify({
+        baseRevision: held.revision,
+        sessionId: held.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
+    const spawnOnlyRejection = await nextMessage(
+      zombie,
+      (message) => message.type === 'zombie-escape-state-rejected',
+    )
+    assert.equal(spawnOnlyRejection.code, 'zombie-escape-house-required')
+    assert.deepEqual(spawnOnlyRejection.state, held)
+
+    await syncParcelBuild(zombie, {
+      baseRevision: 1,
+      nodes: createZombieEscapeBuildNodes(parcelId, { house: true, spawn: true }),
+      operationId: 'zombie-clock-first-house',
+      parcelId,
+      worldId,
+    })
+    zombie.socket.send(
+      JSON.stringify({
+        baseRevision: held.revision,
+        sessionId: held.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
     const initializedMessage = await nextMessage(
       zombie,
       (message) => message.type === 'zombie-escape-state-updated',
@@ -97,6 +185,30 @@ test('holds the first Zombie clock, enforces CAS and participant authority, and 
       sessionId: held.sessionId,
     })
     assertDeadline(initializedMessage, initialized, BUILD_DURATION_MS)
+
+    await syncParcelBuild(zombie, {
+      baseRevision: 2,
+      nodes: createZombieEscapeBuildNodes(parcelId, { spawn: true }),
+      operationId: 'zombie-clock-house-deleted-after-initialize',
+      parcelId,
+      worldId,
+    })
+    zombie.socket.send(
+      JSON.stringify({
+        baseRevision: initialized.revision,
+        sessionId: initialized.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
+    const initializedWithoutHouseRejection = await nextMessage(
+      zombie,
+      (message) => message.type === 'zombie-escape-state-rejected',
+    )
+    assert.equal(
+      initializedWithoutHouseRejection.code,
+      'zombie-escape-clock-already-initialized',
+    )
+    assert.deepEqual(initializedWithoutHouseRejection.state, initialized)
 
     normal.socket.send(
       JSON.stringify({
@@ -160,6 +272,66 @@ test('holds the first Zombie clock, enforces CAS and participant authority, and 
   }
 })
 
+test('does not compose closed walls and a hosted door across committed parcels', async () => {
+  const { port, server } = await startServer()
+  const roomId = 'zombie-escape-cross-parcel-room'
+  const worldId = 'zombie-escape-cross-parcel-world'
+  const clients = []
+  try {
+    const zombie = await connectPlayer(port, 'cross-parcel-zombie', roomId, {
+      gameMode: ZOMBIE_ESCAPE_GAME_MODE,
+    })
+    clients.push(zombie)
+    const builder = await connectPlayer(port, 'cross-parcel-builder', roomId)
+    clients.push(builder)
+    const held = zombie.snapshot.zombieEscapeState
+    const sharedHouseMetadataParcelId = 'cross-parcel-house-group'
+    const wallNodes = createZombieEscapeBuildNodes(sharedHouseMetadataParcelId, {
+      house: true,
+      houseDoor: false,
+    })
+    const doorNodes = createZombieEscapeDoorWallBuildNodes(sharedHouseMetadataParcelId)
+    assert.equal(isZombieEscapeFirstHouseReady(wallNodes), false)
+    assert.equal(isZombieEscapeFirstHouseReady(doorNodes), false)
+    assert.equal(isZombieEscapeFirstHouseReady([...wallNodes, ...doorNodes]), true)
+
+    await watchParcelWorld(zombie, roomId, worldId)
+    await claimParcel(zombie, worldId, 'parcel-cross-walls')
+    await syncParcelBuild(zombie, {
+      baseRevision: 0,
+      nodes: wallNodes,
+      operationId: 'build-cross-parcel-walls',
+      parcelId: 'parcel-cross-walls',
+      worldId,
+    })
+    await claimParcel(builder, worldId, 'parcel-cross-door')
+    await syncParcelBuild(builder, {
+      baseRevision: 0,
+      nodes: doorNodes,
+      operationId: 'build-cross-parcel-door',
+      parcelId: 'parcel-cross-door',
+      worldId,
+    })
+
+    zombie.socket.send(
+      JSON.stringify({
+        baseRevision: held.revision,
+        sessionId: held.sessionId,
+        type: 'initialize-zombie-escape-clock',
+      }),
+    )
+    const rejection = await nextMessage(
+      zombie,
+      (message) => message.type === 'zombie-escape-state-rejected',
+    )
+    assert.equal(rejection.code, 'zombie-escape-house-required')
+    assert.deepEqual(rejection.state, held)
+  } finally {
+    for (const client of clients) client.socket.close()
+    server.kill()
+  }
+})
+
 test('clears the Zombie clock when the last Zombie leaves even if a normal peer remains', async () => {
   const { port, server } = await startServer()
   const roomId = 'zombie-escape-cleanup-room'
@@ -172,6 +344,12 @@ test('clears the Zombie clock when the last Zombie leaves even if a normal peer 
     })
     clients.push(zombie)
     const held = zombie.snapshot.zombieEscapeState
+    await prepareZombieEscapeHouse(
+      zombie,
+      roomId,
+      'zombie-escape-cleanup-world',
+      'parcel-zombie-escape-cleanup',
+    )
     zombie.socket.send(
       JSON.stringify({
         baseRevision: held.revision,
@@ -224,6 +402,12 @@ test('same-ID replacement preserves or clears Zombie participation according to 
     })
     clients.push(first)
     const held = first.snapshot.zombieEscapeState
+    await prepareZombieEscapeHouse(
+      first,
+      roomId,
+      'zombie-escape-replacement-world',
+      'parcel-zombie-escape-replacement',
+    )
     first.socket.send(
       JSON.stringify({
         baseRevision: held.revision,
@@ -277,6 +461,12 @@ test('cross-room same-ID takeover clears a superseded Zombie clock during close 
     })
     clients.push(first)
     const held = first.snapshot.zombieEscapeState
+    await prepareZombieEscapeHouse(
+      first,
+      oldRoomId,
+      'zombie-escape-cross-room-world',
+      'parcel-zombie-escape-cross-room',
+    )
     first.socket.send(
       JSON.stringify({
         baseRevision: held.revision,
@@ -391,6 +581,184 @@ async function connectWatcher(port, roomId) {
     (message) => message.type === 'snapshot' && message.roomId === roomId,
   )
   return { ...client, snapshot }
+}
+
+async function prepareZombieEscapeHouse(client, roomId, worldId, parcelId) {
+  await watchParcelWorld(client, roomId, worldId)
+  await claimParcel(client, worldId, parcelId)
+  await syncParcelBuild(client, {
+    baseRevision: 0,
+    nodes: createZombieEscapeBuildNodes(parcelId, { house: true }),
+    operationId: `build-${parcelId}`,
+    parcelId,
+    worldId,
+  })
+}
+
+async function watchParcelWorld(client, roomId, worldId) {
+  client.socket.send(JSON.stringify({ roomId, type: 'watch-parcels', worldId }))
+  return nextMessage(
+    client,
+    (message) =>
+      message.type === 'parcel-build-nodes-snapshot' &&
+      message.roomId === roomId &&
+      message.worldId === worldId,
+  )
+}
+
+async function claimParcel(client, worldId, parcelId) {
+  client.socket.send(JSON.stringify({ parcelId, type: 'claim-parcel', worldId }))
+  const result = await nextMessage(
+    client,
+    (message) => message.type === 'parcel-claim-result' && message.ownership?.parcelId === parcelId,
+  )
+  assert.equal(result.ownership.worldId, worldId)
+}
+
+async function syncParcelBuild(
+  client,
+  { baseRevision, nodes, operationId, parcelId, worldId },
+) {
+  client.socket.send(
+    JSON.stringify({
+      baseRevision,
+      nodes,
+      operationId,
+      parcelId,
+      schemaVersion: PARCEL_BUILD_SCHEMA_VERSION,
+      type: 'sync-parcel-build-nodes',
+      worldId,
+      writerEpoch: client.writerEpoch,
+      writerSessionId: client.writerSessionId,
+    }),
+  )
+  return nextMessage(
+    client,
+    (message) => message.type === 'parcel-build-nodes-ack' && message.operationId === operationId,
+  )
+}
+
+function createZombieEscapeBuildNodes(
+  parcelId,
+  { house = false, houseDoor = true, spawn = false } = {},
+) {
+  const buildingId = 'building_zombie-first-house'
+  const levelId = 'level_zombie-first-house'
+  const levelChildren = []
+  const nodes = []
+  const metadata = { landrushParcelId: parcelId }
+
+  if (house) {
+    const wallIds = [
+      'wall_zombie-first-house-north',
+      'wall_zombie-first-house-east',
+      'wall_zombie-first-house-south',
+      'wall_zombie-first-house-west',
+    ]
+    levelChildren.push(...wallIds)
+    nodes.push(
+      createBuildNode(wallIds[0], 'wall', levelId, {
+        children: houseDoor ? ['door_zombie-first-house'] : [],
+        end: [1, 0],
+        height: 2.5,
+        metadata,
+        start: [0, 0],
+        thickness: 0.2,
+      }),
+      createBuildNode(wallIds[1], 'wall', levelId, {
+        children: [],
+        end: [1, 1],
+        height: 2.5,
+        metadata,
+        start: [1, 0],
+        thickness: 0.2,
+      }),
+      createBuildNode(wallIds[2], 'wall', levelId, {
+        children: [],
+        end: [0, 1],
+        height: 2.5,
+        metadata,
+        start: [1, 1],
+        thickness: 0.2,
+      }),
+      createBuildNode(wallIds[3], 'wall', levelId, {
+        children: [],
+        end: [0, 0],
+        height: 2.5,
+        metadata,
+        start: [0, 1],
+        thickness: 0.2,
+      }),
+    )
+    if (houseDoor) {
+      nodes.push(
+        createBuildNode('door_zombie-first-house', 'door', wallIds[0], {
+          height: 2.1,
+          metadata,
+          position: [0.5, 1.05, 0],
+          rotation: [0, 0, 0],
+          width: 0.9,
+        }),
+      )
+    }
+  }
+  if (spawn) {
+    levelChildren.push('spawn_zombie-first-house')
+    nodes.push(
+      createBuildNode('spawn_zombie-first-house', 'spawn', levelId, {
+        metadata,
+        position: [0.5, 0, 0.5],
+        rotation: 0,
+      }),
+    )
+  }
+
+  return [
+    createBuildNode(buildingId, 'building', null, { children: [levelId], metadata }),
+    createBuildNode(levelId, 'level', buildingId, {
+      children: levelChildren,
+      level: 0,
+      metadata,
+    }),
+    ...nodes,
+  ]
+}
+
+function createZombieEscapeDoorWallBuildNodes(parcelId) {
+  const buildingId = 'building_zombie-cross-parcel-door'
+  const levelId = 'level_zombie-first-house'
+  const wallId = 'wall_zombie-cross-parcel-door-host'
+  const metadata = { landrushParcelId: parcelId }
+  return [
+    createBuildNode(buildingId, 'building', null, { children: [levelId], metadata }),
+    createBuildNode(levelId, 'level', buildingId, { children: [wallId], level: 0, metadata }),
+    createBuildNode(wallId, 'wall', levelId, {
+      children: ['door_zombie-cross-parcel'],
+      end: [1, 0],
+      height: 2.5,
+      metadata,
+      start: [0, 0],
+      thickness: 0.2,
+    }),
+    createBuildNode('door_zombie-cross-parcel', 'door', wallId, {
+      height: 2.1,
+      metadata,
+      position: [0.5, 1.05, 0],
+      rotation: [0, 0, 0],
+      width: 0.9,
+    }),
+  ]
+}
+
+function createBuildNode(id, type, parentId, properties = {}) {
+  return {
+    id,
+    object: 'node',
+    parentId,
+    type,
+    visible: true,
+    ...properties,
+  }
 }
 
 async function openClient(port) {

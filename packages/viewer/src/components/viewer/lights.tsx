@@ -1,6 +1,6 @@
-import { sceneRegistry } from '@pascal-app/core'
+import { sceneRegistry, useScene } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type {
   AmbientLight,
   DirectionalLight,
@@ -61,10 +61,6 @@ const SHADOW_NORMAL_BIAS = 0.08
 // `site` nodes (the ground/site plane, which can be arbitrarily large) are
 // excluded so they don't blow the frustum up to cover the whole lot.
 const SHADOW_EXCLUDED_TYPES = ['site'] as const
-// How often (seconds) to recompute building bounds. Bounds only change while
-// editing, so we throttle the (subtree-walking) union instead of doing it every
-// frame.
-const BOUNDS_REFRESH_INTERVAL = 0.4
 // Extra coverage around the building bounds — the "and a bit nearby" margin so
 // shadows don't get clipped right at the walls. Scales with building size.
 const SHADOW_MARGIN_SCALE = 1.15
@@ -73,6 +69,47 @@ const SHADOW_MARGIN = 3
 const SHADOW_BACKOFF = 10
 // Fallback radius when the scene has no building geometry yet (empty scene).
 const SHADOW_FALLBACK_RADIUS = 30
+
+export const VIEWER_LIGHTING_OWNER = 'viewer'
+export const VIEWER_LIGHTING_OWNER_USER_DATA_KEY = 'pascalLightingOwner'
+
+export function viewerOwnsLighting(owner: unknown) {
+  return owner === undefined || owner === null || owner === VIEWER_LIGHTING_OWNER
+}
+
+export function shouldRefreshShadowBounds(
+  shadows: boolean,
+  dirty: boolean,
+  geometryRevision: number,
+  lastGeometryRevision: number,
+  registryRevision: number,
+  lastRegistryRevision: number,
+) {
+  return (
+    shadows &&
+    (dirty ||
+      geometryRevision !== lastGeometryRevision ||
+      registryRevision !== lastRegistryRevision)
+  )
+}
+
+const LIGHT_VALUE_EPSILON = 0.001
+const LIGHT_COLOR_EPSILON = 1 / 1024
+
+function advanceScalar(current: number, target: number, amount: number) {
+  const next = THREE.MathUtils.lerp(current, target, amount)
+  return Math.abs(next - target) <= LIGHT_VALUE_EPSILON ? target : next
+}
+
+function advanceColor(current: THREE.Color, target: THREE.Color, amount: number) {
+  current.lerp(target, amount)
+  const settled =
+    Math.abs(current.r - target.r) <= LIGHT_COLOR_EPSILON &&
+    Math.abs(current.g - target.g) <= LIGHT_COLOR_EPSILON &&
+    Math.abs(current.b - target.b) <= LIGHT_COLOR_EPSILON
+  if (settled) current.copy(target)
+  return settled
+}
 
 export function Lights() {
   const sceneTheme = useViewer((state) => state.sceneTheme)
@@ -84,70 +121,101 @@ export function Lights() {
   // Initial ortho half-size; overridden each refresh to fit the building.
   const shadowCameraSize = 50
 
-  // Building bounds the shadow frustum is fit to, recomputed on an interval.
+  // Building bounds the shadow frustum is fit to when scene inputs change.
   const shadowFocus = useRef(new THREE.Vector3()) // sphere centre
   const shadowRadius = useRef(SHADOW_FALLBACK_RADIUS) // sphere radius
   const shadowDir = useRef(new THREE.Vector3()) // scratch: per-light direction
   const boundsBox = useRef(new THREE.Box3()) // scratch: union AABB
   const boundsSphere = useRef(new THREE.Sphere()) // scratch: fitted sphere
-  const lastBoundsTime = useRef(-1) // last refresh timestamp (-1 = never)
+  const shadowBoundsDirty = useRef(true)
+  const lastGeometryRevision = useRef(-1)
+  const lastRegistryRevision = useRef(-1)
   const shadowHelpers = useRef<Array<THREE.CameraHelper | null>>([])
 
   const hemiRef = useRef<HemisphereLight>(null)
   const ambientRef = useRef<AmbientLight>(null)
 
   const initialized = useRef(false)
-  const lightTargets = useRef<THREE.Color[]>([])
+  const appliedTheme = useRef<typeof theme | null>(null)
+  const transitioning = useRef(false)
+  const hadViewerOwnership = useRef(true)
 
   const targets = useMemo(
     () => ({
-      hemiSky: new THREE.Color(),
-      hemiGround: new THREE.Color(),
-      ambColor: new THREE.Color(),
+      ambient: new THREE.Color(theme.ambient.color),
+      hemiGround: theme.hemi ? new THREE.Color(theme.hemi.ground) : null,
+      hemiSky: theme.hemi ? new THREE.Color(theme.hemi.sky) : null,
+      lights: theme.lights.map((light) => new THREE.Color(light.color)),
     }),
+    [theme],
+  )
+
+  useEffect(
+    () =>
+      useScene.subscribe(() => {
+        shadowBoundsDirty.current = true
+      }),
     [],
   )
 
   useFrame((state, delta) => {
-    // clamp delta to avoid huge jumps on tab switch
-    const dt = Math.min(delta, 0.1) * 4
+    const owner = state.scene.userData[VIEWER_LIGHTING_OWNER_USER_DATA_KEY]
+    if (!viewerOwnsLighting(owner)) {
+      hadViewerOwnership.current = false
+      return
+    }
+    if (!hadViewerOwnership.current) {
+      hadViewerOwnership.current = true
+      initialized.current = false
+      shadowBoundsDirty.current = true
+    }
+
+    const themeChanged = appliedTheme.current !== theme
+    if (themeChanged) shadowBoundsDirty.current = true
 
     // Fit each shadow-casting light's frustum to the BUILDING geometry rather
-    // than the camera. We refresh the union bounds on an interval (cheap enough,
-    // and bounds only change while editing), fit a sphere, and size + place the
+    // than the camera. We refresh the union bounds when scene inputs change,
+    // fit a sphere, and size + place the
     // ortho shadow camera so the building (plus a margin) is fully covered from
     // the light's direction. The light DIRECTION stays exactly as the theme
     // specifies; only its position/distance and the frustum extents change.
-    if (shadows) {
-      const now = state.clock.elapsedTime
-      if (now - lastBoundsTime.current >= BOUNDS_REFRESH_INTERVAL) {
-        lastBoundsTime.current = now
-        const box = boundsBox.current.makeEmpty()
-        for (const [id, obj] of sceneRegistry.nodes) {
-          if (SHADOW_EXCLUDED_TYPES.some((t) => sceneRegistry.byType[t]!.has(id))) continue
-          box.expandByObject(obj)
-        }
-        box.getBoundingSphere(boundsSphere.current)
-        const center = boundsSphere.current.center
-        const radius = boundsSphere.current.radius
-        // Empty scene OR a node with a NaN position/geometry poisoning the union
-        // box: fall back to the origin with a default radius. The directional
-        // light's position is derived from `focus`, so a single non-finite mesh
-        // must NOT be allowed to make `focus`/`radius` NaN — that breaks every
-        // shadow-casting light's position and renders the whole scene black.
-        const finiteBounds =
-          !box.isEmpty() &&
-          Number.isFinite(center.x) &&
-          Number.isFinite(center.y) &&
-          Number.isFinite(center.z) &&
-          Number.isFinite(radius)
-        if (finiteBounds) {
-          shadowFocus.current.copy(center)
-          shadowRadius.current = radius
-        } else {
-          shadowFocus.current.set(0, 0, 0)
-          shadowRadius.current = SHADOW_FALLBACK_RADIUS
-        }
+    const geometryRevision = useViewer.getState().geometryRevision
+    const registryRevision = sceneRegistry.revision
+    if (
+      shouldRefreshShadowBounds(
+        shadows,
+        shadowBoundsDirty.current,
+        geometryRevision,
+        lastGeometryRevision.current,
+        registryRevision,
+        lastRegistryRevision.current,
+      )
+    ) {
+      const box = boundsBox.current.makeEmpty()
+      for (const [id, obj] of sceneRegistry.nodes) {
+        if (SHADOW_EXCLUDED_TYPES.some((t) => sceneRegistry.byType[t]!.has(id))) continue
+        box.expandByObject(obj)
+      }
+      box.getBoundingSphere(boundsSphere.current)
+      const center = boundsSphere.current.center
+      const radius = boundsSphere.current.radius
+      // Empty scene OR a node with a NaN position/geometry poisoning the union
+      // box: fall back to the origin with a default radius. The directional
+      // light's position is derived from `focus`, so a single non-finite mesh
+      // must NOT be allowed to make `focus`/`radius` NaN — that breaks every
+      // shadow-casting light's position and renders the whole scene black.
+      const finiteBounds =
+        !box.isEmpty() &&
+        Number.isFinite(center.x) &&
+        Number.isFinite(center.y) &&
+        Number.isFinite(center.z) &&
+        Number.isFinite(radius)
+      if (finiteBounds) {
+        shadowFocus.current.copy(center)
+        shadowRadius.current = radius
+      } else {
+        shadowFocus.current.set(0, 0, 0)
+        shadowRadius.current = SHADOW_FALLBACK_RADIUS
       }
 
       const focus = shadowFocus.current
@@ -196,6 +264,9 @@ export function Lights() {
           }
         }
       }
+      shadowBoundsDirty.current = false
+      lastGeometryRevision.current = geometryRevision
+      lastRegistryRevision.current = registryRevision
     }
 
     if (!initialized.current) {
@@ -212,63 +283,83 @@ export function Lights() {
       }
       if (hemiRef.current && theme.hemi) {
         hemiRef.current.intensity = theme.hemi.intensity
-        hemiRef.current.color.set(theme.hemi.sky)
-        hemiRef.current.groundColor.set(theme.hemi.ground)
+        if (targets.hemiSky) hemiRef.current.color.copy(targets.hemiSky)
+        if (targets.hemiGround) hemiRef.current.groundColor.copy(targets.hemiGround)
       }
       if (ambientRef.current) {
         ambientRef.current.intensity = theme.ambient.intensity
-        ambientRef.current.color.set(theme.ambient.color)
+        ambientRef.current.color.copy(targets.ambient)
       }
       initialized.current = true
+      appliedTheme.current = theme
+      transitioning.current = false
       return
     }
+
+    if (themeChanged) {
+      appliedTheme.current = theme
+      transitioning.current = true
+    }
+    if (!transitioning.current) return
+
+    // Clamp delta to avoid huge jumps on tab switch, then stop touching light
+    // state entirely once the theme transition reaches its targets.
+    const dt = Math.min(delta, 0.1) * 4
+    let stillTransitioning = false
 
     for (let index = 0; index < theme.lights.length; index++) {
       const config = theme.lights[index]
       const light = lightRefs.current[index]
       if (!(config && light)) continue
 
-      light.intensity = THREE.MathUtils.lerp(light.intensity, config.intensity, dt)
-      let target = lightTargets.current[index]
-      if (!target) {
-        target = new THREE.Color()
-        lightTargets.current[index] = target
+      light.intensity = advanceScalar(light.intensity, config.intensity, dt)
+      stillTransitioning ||= Math.abs(light.intensity - config.intensity) > LIGHT_VALUE_EPSILON
+      const target = targets.lights[index]
+      if (target) {
+        const colorTransitioning = !advanceColor(light.color, target, dt)
+        stillTransitioning = colorTransitioning || stillTransitioning
       }
-      target.set(config.color)
-      light.color.lerp(target, dt)
 
       if (config.castShadow && light.shadow) {
         if (light.shadow.intensity !== undefined) {
-          light.shadow.intensity = THREE.MathUtils.lerp(
-            light.shadow.intensity,
-            config.intensity <= 1 ? config.intensity : MAX_SHADOW_INTENSITY,
-            dt,
-          )
+          const targetIntensity = config.intensity <= 1 ? config.intensity : MAX_SHADOW_INTENSITY
+          light.shadow.intensity = advanceScalar(light.shadow.intensity, targetIntensity, dt)
+          stillTransitioning ||=
+            Math.abs(light.shadow.intensity - targetIntensity) > LIGHT_VALUE_EPSILON
         }
       }
     }
 
     if (hemiRef.current && theme.hemi) {
-      hemiRef.current.intensity = THREE.MathUtils.lerp(
-        hemiRef.current.intensity,
-        theme.hemi.intensity,
-        dt,
-      )
-      targets.hemiSky.set(theme.hemi.sky)
-      hemiRef.current.color.lerp(targets.hemiSky, dt)
-      targets.hemiGround.set(theme.hemi.ground)
-      hemiRef.current.groundColor.lerp(targets.hemiGround, dt)
+      hemiRef.current.intensity = advanceScalar(hemiRef.current.intensity, theme.hemi.intensity, dt)
+      stillTransitioning ||=
+        Math.abs(hemiRef.current.intensity - theme.hemi.intensity) > LIGHT_VALUE_EPSILON
+      if (targets.hemiSky) {
+        const skyTransitioning = !advanceColor(hemiRef.current.color, targets.hemiSky, dt)
+        stillTransitioning = skyTransitioning || stillTransitioning
+      }
+      if (targets.hemiGround) {
+        const groundTransitioning = !advanceColor(
+          hemiRef.current.groundColor,
+          targets.hemiGround,
+          dt,
+        )
+        stillTransitioning = groundTransitioning || stillTransitioning
+      }
     }
 
     if (ambientRef.current) {
-      ambientRef.current.intensity = THREE.MathUtils.lerp(
+      ambientRef.current.intensity = advanceScalar(
         ambientRef.current.intensity,
         theme.ambient.intensity,
         dt,
       )
-      targets.ambColor.set(theme.ambient.color)
-      ambientRef.current.color.lerp(targets.ambColor, dt)
+      stillTransitioning ||=
+        Math.abs(ambientRef.current.intensity - theme.ambient.intensity) > LIGHT_VALUE_EPSILON
+      const ambientColorTransitioning = !advanceColor(ambientRef.current.color, targets.ambient, dt)
+      stillTransitioning = ambientColorTransitioning || stillTransitioning
     }
+    transitioning.current = stillTransitioning
   })
 
   return (

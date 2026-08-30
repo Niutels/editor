@@ -1,9 +1,28 @@
 // @ts-expect-error - bun:test is provided by the Bun runtime; viewer does not
 // include Bun globals in its package tsconfig.
 import { describe, expect, test } from 'bun:test'
-import { RoofSegmentNode } from '@pascal-app/core'
+import { type AnyNodeId, RoofSegmentNode } from '@pascal-app/core'
 import * as THREE from 'three'
+import { hasPendingRoofBuildWork, roofBuildWorkQueue } from './roof-build-work'
 import { generateRoofSegmentGeometry } from './roof-system'
+
+describe('roof build readiness', () => {
+  test('stays pending until the final queued roof drains', () => {
+    roofBuildWorkQueue.clear()
+    try {
+      expect(hasPendingRoofBuildWork()).toBe(false)
+      roofBuildWorkQueue.add('roof-a' as AnyNodeId)
+      roofBuildWorkQueue.add('roof-b' as AnyNodeId)
+      expect(hasPendingRoofBuildWork()).toBe(true)
+      roofBuildWorkQueue.delete('roof-a' as AnyNodeId)
+      expect(hasPendingRoofBuildWork()).toBe(true)
+      roofBuildWorkQueue.delete('roof-b' as AnyNodeId)
+      expect(hasPendingRoofBuildWork()).toBe(false)
+    } finally {
+      roofBuildWorkQueue.clear()
+    }
+  })
+})
 
 describe('roof system shed geometry', () => {
   function inspectShedGeometry(segment: RoofSegmentNode) {

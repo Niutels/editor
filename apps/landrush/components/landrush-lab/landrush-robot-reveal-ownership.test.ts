@@ -1,4 +1,5 @@
-import { Box3, Object3D, PerspectiveCamera, Vector3 } from 'three'
+import { readFileSync } from 'node:fs'
+import { Box3, Matrix4, Object3D, PerspectiveCamera, Vector3 } from 'three'
 import { describe, expect, test } from 'vitest'
 import {
   classifyLandrushRobotRevealOwnerBounds,
@@ -6,6 +7,7 @@ import {
   isLandrushRobotRevealOwnerRootLive,
   landrushRobotRevealApertureIntersectsBox,
   reconcileLandrushRobotRevealOwnerStates,
+  shouldUpdateLandrushRobotRevealClippingPlanes,
   updateLandrushRobotRevealAperture,
 } from './landrush-robot-reveal-ownership'
 
@@ -21,6 +23,14 @@ function createReconcileWorkspace() {
 }
 
 describe('Landrush robot reveal semantic ownership', () => {
+  test('keeps reveal material topology disabled for the entire Zombie session', () => {
+    const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
+
+    expect(source).toMatch(
+      /visible=\{\s*robotScreenRevealEnabled\s*&&\s*!zombieEscapeEnabled\s*&&\s*viewMode !== 'map'\s*&&\s*!fpvActive\s*\}/,
+    )
+  })
+
   test('requires the current semantic root identity while retaining attached visual roots', () => {
     const scene = new Object3D()
     const staleSemanticRoot = new Object3D()
@@ -253,6 +263,47 @@ describe('Landrush robot reveal semantic ownership', () => {
 })
 
 describe('Landrush robot reveal aperture', () => {
+  test('invalidates clipping when the camera changes behind stable screen-mask scalars', () => {
+    const camera = new PerspectiveCamera(50, 1, 0.1, 100)
+    camera.position.set(0, 0, 10)
+    camera.lookAt(0, 0, 0)
+    camera.updateProjectionMatrix()
+    camera.updateMatrixWorld(true)
+    const lastProjectionMatrix = camera.projectionMatrix.clone()
+    const lastWorldMatrix = camera.matrixWorld.clone()
+    const unchanged = () =>
+      shouldUpdateLandrushRobotRevealClippingPlanes({
+        camera,
+        lastCamera: camera,
+        lastProjectionMatrix,
+        lastWorldMatrix,
+        maskChanged: false,
+      })
+
+    expect(unchanged()).toBe(false)
+    camera.position.x = 2
+    camera.lookAt(0, 0, 0)
+    camera.updateMatrixWorld(true)
+    expect(unchanged()).toBe(true)
+    lastWorldMatrix.copy(camera.matrixWorld)
+    expect(unchanged()).toBe(false)
+
+    camera.fov = 62
+    camera.updateProjectionMatrix()
+    expect(unchanged()).toBe(true)
+    lastProjectionMatrix.copy(camera.projectionMatrix)
+    expect(unchanged()).toBe(false)
+    expect(
+      shouldUpdateLandrushRobotRevealClippingPlanes({
+        camera,
+        lastCamera: new PerspectiveCamera(),
+        lastProjectionMatrix: new Matrix4(),
+        lastWorldMatrix: new Matrix4(),
+        maskChanged: false,
+      }),
+    ).toBe(true)
+  })
+
   test('reclassifies cached bounds from the latest aperture without reallocating observations', () => {
     const camera = new PerspectiveCamera(50, 1, 0.1, 100)
     camera.position.set(0, 0, 10)
