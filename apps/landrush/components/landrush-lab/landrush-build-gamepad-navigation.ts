@@ -6,6 +6,7 @@ export type LandrushBuildGamepadNavigationAction =
   | 'leave-sidebar'
   | 'move-palette'
   | 'move-sidebar'
+export type LandrushBuildGamepadSquarePressAction = 'confirm-placement' | 'toggle-build'
 export type LandrushBuildGamepadNavigationRect = {
   bottom: number
   left: number
@@ -63,6 +64,24 @@ export function resolveLandrushBuildGamepadFocusAfterActivation(
   return action === 'placement' ? 'placement' : 'palette'
 }
 
+export function resolveLandrushBuildGamepadSquarePressAction(
+  buildMode: boolean,
+  focusMode: LandrushBuildGamepadFocusMode,
+  editorPlacementActive: boolean,
+): LandrushBuildGamepadSquarePressAction {
+  return buildMode && (focusMode === 'placement' || editorPlacementActive)
+    ? 'confirm-placement'
+    : 'toggle-build'
+}
+
+export function wasLandrushBuildGamepadPlacementConfirmPressed(
+  crossHeld: boolean,
+  squareHeld: boolean,
+  previousConfirmHeld: boolean,
+) {
+  return (crossHeld || squareHeld) && !previousConfirmHeld
+}
+
 export function resolveLandrushBuildGamepadNavigationAction({
   direction,
   focusMode,
@@ -111,6 +130,15 @@ export function resolveLandrushBuildGamepadSidebarActivation({
     palettePanel: resolveLandrushBuildGamepadPalettePanel(focusedPanel),
     selectPanel: sidebarCollapsed || activePanel !== focusedPanel,
   }
+}
+
+export function isLandrushBuildGamepadNavigationInputReady(
+  buildMode: boolean,
+  focusMode: LandrushBuildGamepadFocusMode,
+  interactionReady: boolean,
+  editorPlacementActive: boolean,
+) {
+  return buildMode && interactionReady && !editorPlacementActive && focusMode !== 'placement'
 }
 
 export function isLandrushBuildGamepadPaletteInputReady({

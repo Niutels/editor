@@ -199,6 +199,7 @@ import {
   resolveLandrushDayChromePresentation,
 } from './landrush-build-editor-presentation'
 import {
+  isLandrushBuildGamepadNavigationInputReady,
   isLandrushBuildGamepadPaletteInputReady,
   type LandrushBuildGamepadDirection,
   type LandrushBuildGamepadFocusMode,
@@ -208,7 +209,9 @@ import {
   resolveLandrushBuildGamepadPalettePanel,
   resolveLandrushBuildGamepadSidebarActivation,
   resolveLandrushBuildGamepadSidebarIndex,
+  resolveLandrushBuildGamepadSquarePressAction,
   shouldAutofocusLandrushBuildGamepadPalette,
+  wasLandrushBuildGamepadPlacementConfirmPressed,
 } from './landrush-build-gamepad-navigation'
 import { LandrushIslandBuildGridOverlay } from './landrush-build-grid-overlay'
 import {
@@ -6487,6 +6490,7 @@ export function LandrushIslandClient({
       const trianglePressed = dayButtons.pressed.triangle
       const crossPressed = dayButtons.pressed.cross
       const voicePressed = dayButtons.pressed.leftShoulder
+      const editorPlacementActive = useEditor.getState().tool !== null
       const paletteDirection: LandrushBuildGamepadDirection | null = dayButtons.pressed.dpadUp
         ? 'up'
         : dayButtons.pressed.dpadDown
@@ -6502,7 +6506,12 @@ export function LandrushIslandClient({
       }
 
       if (squarePressed) {
-        activateGamepadSquareCommand()
+        const squareAction = resolveLandrushBuildGamepadSquarePressAction(
+          buildMode,
+          gamepadBuildFocusModeRef.current,
+          editorPlacementActive,
+        )
+        if (squareAction === 'toggle-build') activateGamepadSquareCommand()
         frameId = window.requestAnimationFrame(tick)
         return
       }
@@ -6520,9 +6529,12 @@ export function LandrushIslandClient({
       }
 
       if (
-        buildMode &&
-        buildEditorInteractionReady &&
-        gamepadBuildFocusModeRef.current !== 'placement'
+        isLandrushBuildGamepadNavigationInputReady(
+          buildMode,
+          gamepadBuildFocusModeRef.current,
+          buildEditorInteractionReady,
+          editorPlacementActive,
+        )
       ) {
         if (paletteDirection) {
           const navigationAction = resolveLandrushBuildGamepadNavigationAction({
@@ -8562,10 +8574,13 @@ function LandrushIslandDayControllerCommandHud({
         : undefined,
       square: {
         active: buildMode,
-        buttonRef: buildButtonRef,
-        disabled: !commandsEnabled || (!buildMode && !localParcelAvailable),
-        label: buildMode ? 'Exit build' : 'Build',
-        onActivate: onActivateSquare,
+        buttonRef: placementActive ? undefined : buildButtonRef,
+        disabled:
+          !commandsEnabled ||
+          (!buildMode && !localParcelAvailable) ||
+          (placementActive && !buildInteractionReady),
+        label: placementActive ? 'Place' : buildMode ? 'Exit build' : 'Build',
+        onActivate: placementActive ? undefined : onActivateSquare,
       },
       triangle: {
         active: mapView && !buildMode,
@@ -9166,7 +9181,7 @@ function LandrushIslandBuildGamepadPlacementController({
   const gridSnapStep = useEditor((state) => state.gridSnapStep)
   const cursorRef = useRef<LandrushPoint2 | null>(null)
   const emittedCursorRef = useRef<LandrushPoint2 | null>(null)
-  const crossHeldRef = useRef(false)
+  const placementConfirmHeldRef = useRef(false)
   const previousFocusModeRef = useRef<LandrushBuildGamepadFocusMode>(focusModeRef.current)
   const hoveredWallIdRef = useRef<string | null>(null)
   const wallTargetToolRef = useRef<string | null>(null)
@@ -9178,7 +9193,7 @@ function LandrushIslandBuildGamepadPlacementController({
   useEffect(() => {
     cursorRef.current = parcel?.centroid ? { ...parcel.centroid } : null
     emittedCursorRef.current = null
-    crossHeldRef.current = false
+    placementConfirmHeldRef.current = false
     wallTargetToolRef.current = null
     hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
     clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
@@ -9188,7 +9203,7 @@ function LandrushIslandBuildGamepadPlacementController({
   useFrame((state, delta) => {
     const input = readLandrushGamepadInput()
     if (!visible || !parcel) {
-      crossHeldRef.current = Boolean(input?.cross)
+      placementConfirmHeldRef.current = Boolean(input?.cross || input?.square)
       wallTargetToolRef.current = null
       hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
       clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
@@ -9196,16 +9211,17 @@ function LandrushIslandBuildGamepadPlacementController({
     }
 
     if (!input) {
-      crossHeldRef.current = false
+      placementConfirmHeldRef.current = false
       wallTargetToolRef.current = null
       hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
       clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
       return
     }
 
+    const placementConfirmHeld = input.cross || input.square
     if (previousFocusModeRef.current !== focusModeRef.current) {
       previousFocusModeRef.current = focusModeRef.current
-      crossHeldRef.current = input.cross
+      placementConfirmHeldRef.current = placementConfirmHeld
       emittedCursorRef.current = null
     }
 
@@ -9257,8 +9273,9 @@ function LandrushIslandBuildGamepadPlacementController({
       })
     }
 
-    if (focusModeRef.current !== 'placement') {
-      crossHeldRef.current = input.cross
+    const activeTool = useEditor.getState().tool
+    if (focusModeRef.current !== 'placement' && activeTool === null) {
+      placementConfirmHeldRef.current = placementConfirmHeld
       wallTargetToolRef.current = null
       hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
       clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
@@ -9266,7 +9283,7 @@ function LandrushIslandBuildGamepadPlacementController({
     }
 
     if (cameraPanning) {
-      crossHeldRef.current = input.cross
+      placementConfirmHeldRef.current = placementConfirmHeld
       updateLandrushIslandGamepadBuildCursorVisual({
         camera,
         point: {
@@ -9290,8 +9307,6 @@ function LandrushIslandBuildGamepadPlacementController({
     cursorRef.current = nextCursor
 
     const snappedCursor = snapLandrushIslandGamepadBuildCursor(nextCursor, gridSnapStep)
-    const activeTool = useEditor.getState().tool
-
     if (isLandrushIslandGamepadWallTargetTool(activeTool)) {
       if (wallTargetToolRef.current !== activeTool) {
         clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
@@ -9322,9 +9337,13 @@ function LandrushIslandBuildGamepadPlacementController({
       })
       emitLandrushIslandGamepadBuildWallHover(hoveredWallIdRef, wallTarget)
 
-      const crossPressed = input.cross && !crossHeldRef.current
-      crossHeldRef.current = input.cross
-      if (crossPressed && wallTarget) {
+      const confirmPressed = wasLandrushBuildGamepadPlacementConfirmPressed(
+        input.cross,
+        input.square,
+        placementConfirmHeldRef.current,
+      )
+      placementConfirmHeldRef.current = placementConfirmHeld
+      if (confirmPressed && wallTarget) {
         emitLandrushIslandGamepadBuildWallEvent('click', wallTarget)
         renderScheduler.requestFrame('selection:changed')
       }
@@ -9354,9 +9373,13 @@ function LandrushIslandBuildGamepadPlacementController({
       emitLandrushIslandGamepadBuildGridEvent('move', snappedCursor, groundY)
     }
 
-    const crossPressed = input.cross && !crossHeldRef.current
-    crossHeldRef.current = input.cross
-    if (!crossPressed) return
+    const confirmPressed = wasLandrushBuildGamepadPlacementConfirmPressed(
+      input.cross,
+      input.square,
+      placementConfirmHeldRef.current,
+    )
+    placementConfirmHeldRef.current = placementConfirmHeld
+    if (!confirmPressed) return
 
     emitLandrushIslandGamepadBuildGridEvent('click', snappedCursor, groundY)
     renderScheduler.requestFrame('selection:changed')

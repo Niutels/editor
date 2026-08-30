@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  isLandrushBuildGamepadNavigationInputReady,
   isLandrushBuildGamepadPaletteInputReady,
   type LandrushBuildGamepadNavigationRect,
   resolveLandrushBuildGamepadDirectionalIndex,
@@ -10,7 +11,9 @@ import {
   resolveLandrushBuildGamepadPalettePanel,
   resolveLandrushBuildGamepadSidebarActivation,
   resolveLandrushBuildGamepadSidebarIndex,
+  resolveLandrushBuildGamepadSquarePressAction,
   shouldAutofocusLandrushBuildGamepadPalette,
+  wasLandrushBuildGamepadPlacementConfirmPressed,
 } from './landrush-build-gamepad-navigation'
 
 const buildTabSource = readFileSync(join(import.meta.dir, '../build-tab.tsx'), 'utf8').replaceAll(
@@ -72,6 +75,71 @@ describe('Landrush build gamepad navigation', () => {
     expect(resolveLandrushBuildGamepadFocusAfterActivation('placement')).toBe('placement')
     expect(resolveLandrushBuildGamepadFocusAfterActivation('palette')).toBe('palette')
     expect(resolveLandrushBuildGamepadFocusAfterActivation(undefined)).toBe('palette')
+  })
+
+  test('routes Square/X to placement confirmation only while placement owns build focus', () => {
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'placement', false)).toBe(
+      'confirm-placement',
+    )
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', true)).toBe(
+      'confirm-placement',
+    )
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', false)).toBe(
+      'toggle-build',
+    )
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'sidebar', false)).toBe(
+      'toggle-build',
+    )
+    expect(resolveLandrushBuildGamepadSquarePressAction(false, 'palette', true)).toBe(
+      'toggle-build',
+    )
+    expect(islandClientSource).toContain("squareAction === 'toggle-build'")
+    expect(islandClientSource).toContain(
+      'const editorPlacementActive = useEditor.getState().tool !== null',
+    )
+    expect(islandClientSource).toContain(
+      "focusModeRef.current !== 'placement' && activeTool === null",
+    )
+    expect(islandClientSource).toContain(
+      "label: placementActive ? 'Place' : buildMode ? 'Exit build' : 'Build'",
+    )
+    expect(islandClientSource).toContain(
+      'onActivate: placementActive ? undefined : onActivateSquare',
+    )
+  })
+
+  test('treats Cross/A and Square/X as one rearmable placement-confirm edge', () => {
+    let confirmHeld = false
+    const advance = (crossHeld: boolean, squareHeld: boolean) => {
+      const pressed = wasLandrushBuildGamepadPlacementConfirmPressed(
+        crossHeld,
+        squareHeld,
+        confirmHeld,
+      )
+      confirmHeld = crossHeld || squareHeld
+      return pressed
+    }
+
+    expect(advance(false, true)).toBe(true)
+    expect(advance(true, true)).toBe(false)
+    expect(advance(true, false)).toBe(false)
+    expect(advance(false, false)).toBe(false)
+    expect(advance(true, false)).toBe(true)
+    expect(advance(true, true)).toBe(false)
+    expect(advance(false, false)).toBe(false)
+    expect(advance(true, true)).toBe(true)
+    expect(islandClientSource).toContain('wasLandrushBuildGamepadPlacementConfirmPressed(')
+  })
+
+  test('keeps palette and sidebar navigation inert while a live editor tool owns placement', () => {
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', true, false)).toBe(true)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'sidebar', true, false)).toBe(true)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', true, true)).toBe(false)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'sidebar', true, true)).toBe(false)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'placement', true, false)).toBe(false)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', false, false)).toBe(false)
+    expect(isLandrushBuildGamepadNavigationInputReady(false, 'palette', true, false)).toBe(false)
+    expect(islandClientSource).toContain('isLandrushBuildGamepadNavigationInputReady(')
   })
 
   test('enters the tab rail without opening a tab, then browses and activates separately', () => {
