@@ -77,20 +77,23 @@ describe('Landrush build gamepad navigation', () => {
     expect(resolveLandrushBuildGamepadFocusAfterActivation(undefined)).toBe('palette')
   })
 
-  test('routes Square/X to placement confirmation only while placement owns build focus', () => {
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'placement', false)).toBe(
+  test('routes Square/X to the placement that claimed the press before its tool can finish', () => {
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'placement', false, false)).toBe(
       'confirm-placement',
     )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', true)).toBe(
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', true, false)).toBe(
       'confirm-placement',
     )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', false)).toBe(
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', false, true)).toBe(
+      'confirm-placement',
+    )
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', false, false)).toBe(
       'toggle-build',
     )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'sidebar', false)).toBe(
+    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'sidebar', false, false)).toBe(
       'toggle-build',
     )
-    expect(resolveLandrushBuildGamepadSquarePressAction(false, 'palette', true)).toBe(
+    expect(resolveLandrushBuildGamepadSquarePressAction(false, 'palette', true, true)).toBe(
       'toggle-build',
     )
     expect(islandClientSource).toContain("squareAction === 'toggle-build'")
@@ -98,7 +101,19 @@ describe('Landrush build gamepad navigation', () => {
       'const editorPlacementActive = useEditor.getState().tool !== null',
     )
     expect(islandClientSource).toContain(
+      'const placementSquareOwned = gamepadBuildPlacementSquareOwnedRef.current',
+    )
+    expect(islandClientSource).toContain(
+      'if (!buttons.square) gamepadBuildPlacementSquareOwnedRef.current = false',
+    )
+    expect(islandClientSource).toContain("if (squareAction === 'confirm-placement') {")
+    expect(islandClientSource).toContain('gamepadBuildPlacementSquareOwnedRef.current = true')
+    expect(islandClientSource).toContain('if (input.square) placementSquareOwnedRef.current = true')
+    expect(islandClientSource).toContain(
       "focusModeRef.current !== 'placement' && activeTool === null",
+    )
+    expect(islandClientSource).toMatch(
+      /useLayoutEffect\(\(\) => \{\n {4}if \(visible\) return\n {4}hideLandrushIslandGamepadBuildCursorVisual\(cursorVisualRef\)/,
     )
     expect(islandClientSource).toContain(
       "label: placementActive ? 'Place' : buildMode ? 'Exit build' : 'Build'",

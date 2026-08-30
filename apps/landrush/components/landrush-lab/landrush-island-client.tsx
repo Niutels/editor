@@ -3513,6 +3513,7 @@ export function LandrushIslandClient({
   const pendingBuildAuthorityEvictionWorldIdsRef = useRef(new Set<string>())
   const initialViewModeAppliedRef = useRef(false)
   const previousGamepadButtonsRef = useRef(createLandrushIslandGamepadButtonState())
+  const gamepadBuildPlacementSquareOwnedRef = useRef(false)
   const gamepadBuildFocusModeRef = useRef<LandrushBuildGamepadFocusMode>('palette')
   const gamepadBuildPaletteButtonRef = useRef<HTMLButtonElement | null>(null)
   const gamepadBuildSidebarButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -6473,6 +6474,7 @@ export function LandrushIslandClient({
       }
 
       const buttons = readLandrushIslandGamepadButtonState(input)
+      if (!buttons.square) gamepadBuildPlacementSquareOwnedRef.current = false
       const previous = previousGamepadButtonsRef.current
       const dayButtons = advanceLandrushIslandDayGamepadButtonState({
         current: buttons,
@@ -6491,6 +6493,7 @@ export function LandrushIslandClient({
       const crossPressed = dayButtons.pressed.cross
       const voicePressed = dayButtons.pressed.leftShoulder
       const editorPlacementActive = useEditor.getState().tool !== null
+      const placementSquareOwned = gamepadBuildPlacementSquareOwnedRef.current
       const paletteDirection: LandrushBuildGamepadDirection | null = dayButtons.pressed.dpadUp
         ? 'up'
         : dayButtons.pressed.dpadDown
@@ -6510,7 +6513,11 @@ export function LandrushIslandClient({
           buildMode,
           gamepadBuildFocusModeRef.current,
           editorPlacementActive,
+          placementSquareOwned,
         )
+        if (squareAction === 'confirm-placement') {
+          gamepadBuildPlacementSquareOwnedRef.current = true
+        }
         if (squareAction === 'toggle-build') activateGamepadSquareCommand()
         frameId = window.requestAnimationFrame(tick)
         return
@@ -7135,6 +7142,7 @@ export function LandrushIslandClient({
                     focusModeRef={gamepadBuildFocusModeRef}
                     groundY={activeBuildGroundY}
                     parcel={buildSceneModeActive ? activeBuildParcel : null}
+                    placementSquareOwnedRef={gamepadBuildPlacementSquareOwnedRef}
                     visible={dayInterfaceState.buildControlsActive}
                   />
                   <LandrushIslandRobotLevelSelectionTracker
@@ -9169,12 +9177,14 @@ function LandrushIslandBuildGamepadPlacementController({
   focusModeRef,
   groundY,
   parcel,
+  placementSquareOwnedRef,
   visible,
 }: {
   buildCameraPoseRef: { current: LandrushIslandCameraPose | null }
   focusModeRef: { current: LandrushBuildGamepadFocusMode }
   groundY: number
   parcel: ParcelAllocationParcel | null
+  placementSquareOwnedRef: { current: boolean }
   visible: boolean
 }) {
   const { camera } = useThree()
@@ -9199,6 +9209,12 @@ function LandrushIslandBuildGamepadPlacementController({
     clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
     return () => clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
   }, [parcel])
+
+  useLayoutEffect(() => {
+    if (visible) return
+    hideLandrushIslandGamepadBuildCursorVisual(cursorVisualRef)
+    clearLandrushIslandGamepadBuildWallHover(hoveredWallIdRef)
+  }, [visible])
 
   useFrame((state, delta) => {
     const input = readLandrushGamepadInput()
@@ -9343,6 +9359,7 @@ function LandrushIslandBuildGamepadPlacementController({
         placementConfirmHeldRef.current,
       )
       placementConfirmHeldRef.current = placementConfirmHeld
+      if (confirmPressed && input.square) placementSquareOwnedRef.current = true
       if (confirmPressed && wallTarget) {
         emitLandrushIslandGamepadBuildWallEvent('click', wallTarget)
         renderScheduler.requestFrame('selection:changed')
@@ -9380,6 +9397,7 @@ function LandrushIslandBuildGamepadPlacementController({
     )
     placementConfirmHeldRef.current = placementConfirmHeld
     if (!confirmPressed) return
+    if (input.square) placementSquareOwnedRef.current = true
 
     emitLandrushIslandGamepadBuildGridEvent('click', snappedCursor, groundY)
     renderScheduler.requestFrame('selection:changed')

@@ -68,8 +68,9 @@ export function resolveLandrushBuildGamepadSquarePressAction(
   buildMode: boolean,
   focusMode: LandrushBuildGamepadFocusMode,
   editorPlacementActive: boolean,
+  placementSquareOwned: boolean,
 ): LandrushBuildGamepadSquarePressAction {
-  return buildMode && (focusMode === 'placement' || editorPlacementActive)
+  return buildMode && (focusMode === 'placement' || editorPlacementActive || placementSquareOwned)
     ? 'confirm-placement'
     : 'toggle-build'
 }
