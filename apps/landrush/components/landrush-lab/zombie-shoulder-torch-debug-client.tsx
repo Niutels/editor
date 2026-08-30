@@ -124,7 +124,7 @@ export function ZombieShoulderTorchDebugClient({
           {budget.pairFixtureTriangles} fixture tris / pair · {budget.textureBytes} B armor texture
         </p>
         <p className="text-slate-400 text-xs">
-          {budget.beamTriangles} beam tris · two beam lobes / one unified spotlight · no post
+          {budget.beamTriangles} beam tris · two source feeds / one beam / one spotlight · no post
         </p>
       </section>
       {view === 'designs' ? <ZombieShoulderTorchDesignLabels /> : null}

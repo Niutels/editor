@@ -10,8 +10,8 @@ import {
   ClampToEdgeWrapping,
   CylinderGeometry,
   DataTexture,
-  DoubleSide,
   DynamicDrawUsage,
+  FrontSide,
   type Group,
   LinearFilter,
   Matrix4,
@@ -30,8 +30,9 @@ import {
 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import {
-  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT,
-  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_LOBE_COUNT,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_PENUMBRA,
@@ -44,7 +45,7 @@ import {
   resolveLandrushRobotShoulderTorchGeometryBudget,
   updateLandrushRobotShoulderTorchGroundTarget,
   updateLandrushRobotShoulderTorchLightingState,
-  updateLandrushRobotShoulderTorchLobeTargets,
+  updateLandrushRobotShoulderTorchMergeTarget,
 } from './landrush-robot-shoulder-torch'
 import type { LandrushRobotWeaponCombatState } from './landrush-robot-weapon-rig'
 import {
@@ -58,13 +59,10 @@ const WORLD_UP = new Vector3(0, 1, 0)
 const TORCH_REACH_METERS = 5.4
 const TORCH_FIXTURE_SCALE = 0.18
 const TORCH_LENS_OFFSET_METERS = 0.0337
-const TORCH_LOBE_BEAM_RADIUS = 0.72
+const TORCH_BEAM_TARGET_RADIUS = 1.45
+const TORCH_BEAM_MERGE_RADIUS = 0.11
 const TORCH_BEAM_SOURCE_RADIUS_METERS = 0.018
-const TORCH_BEAM_FIN_ORIENTATIONS = [
-  [1, 0],
-  [-0.5, Math.sqrt(3) * 0.5],
-  [-0.5, -Math.sqrt(3) * 0.5],
-] as const
+const TORCH_BEAM_FEED_ENERGY = 0.5
 
 type LandrushRobotShoulderBones = {
   leftShoulder: Object3D
@@ -76,26 +74,27 @@ type LandrushRobotShoulderTorchScratch = {
   beamGeometryChanged: boolean
   beamOrigin: Vector3
   beamRadial: Vector3
-  beamRight: Vector3
-  beamUp: Vector3
+  beamUvsChanged: boolean
+  cameraPosition: Vector3
   center: Vector3
   desiredQuaternion: Quaternion
   leftLensOrigin: Vector3
   leftMount: Vector3
   leftOutward: Vector3
   leftShoulder: Vector3
-  leftTarget: Vector3
   localScale: Vector3
+  mergeTarget: Vector3
   parentQuaternion: Quaternion
   parentScale: Vector3
   rightMount: Vector3
   rightLensOrigin: Vector3
   rightOutward: Vector3
   rightShoulder: Vector3
-  rightTarget: Vector3
   robotOrigin: Vector3
+  segmentCenter: Vector3
   target: Vector3
   vertex: Vector3
+  viewDirection: Vector3
   worldScale: Vector3
   worldToBeam: Matrix4
 }
@@ -159,26 +158,27 @@ export const LandrushRobotShoulderTorchRig = memo(function LandrushRobotShoulder
       beamGeometryChanged: false,
       beamOrigin: new Vector3(),
       beamRadial: new Vector3(),
-      beamRight: new Vector3(),
-      beamUp: new Vector3(),
+      beamUvsChanged: false,
+      cameraPosition: new Vector3(),
       center: new Vector3(),
       desiredQuaternion: new Quaternion(),
       leftLensOrigin: new Vector3(),
       leftMount: new Vector3(),
       leftOutward: new Vector3(),
       leftShoulder: new Vector3(),
-      leftTarget: new Vector3(),
       localScale: new Vector3(),
+      mergeTarget: new Vector3(),
       parentQuaternion: new Quaternion(),
       parentScale: new Vector3(),
       rightMount: new Vector3(),
       rightLensOrigin: new Vector3(),
       rightOutward: new Vector3(),
       rightShoulder: new Vector3(),
-      rightTarget: new Vector3(),
       robotOrigin: new Vector3(),
+      segmentCenter: new Vector3(),
       target: new Vector3(),
       vertex: new Vector3(),
+      viewDirection: new Vector3(),
       worldScale: new Vector3(),
       worldToBeam: new Matrix4(),
     }),
@@ -199,7 +199,7 @@ export const LandrushRobotShoulderTorchRig = memo(function LandrushRobotShoulder
     }
   }, [])
 
-  useFrame(() => {
+  useFrame(({ camera }) => {
     const root = rootRef.current
     const visualRoot = visualRootRef.current
     const combatState = combatStateRef.current
@@ -297,14 +297,11 @@ export const LandrushRobotShoulderTorchRig = memo(function LandrushRobotShoulder
       return
     }
     scratch.beamDirection.multiplyScalar(1 / mountToTarget)
-    updateLandrushRobotShoulderTorchLobeTargets(
-      scratch.leftTarget,
-      scratch.rightTarget,
+    updateLandrushRobotShoulderTorchMergeTarget(
+      scratch.mergeTarget,
+      scratch.beamOrigin,
       scratch.target,
-      scratch.leftMount,
-      scratch.rightMount,
-      combatState.aimAngle,
-      TORCH_REACH_METERS,
+      LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE,
     )
 
     applyLandrushRobotShoulderTorchContribution(
@@ -322,26 +319,28 @@ export const LandrushRobotShoulderTorchRig = memo(function LandrushRobotShoulder
     )
 
     updateLandrushRobotShoulderTorchFixture(
-      scratch.leftTarget,
+      scratch.mergeTarget,
       leftFixtureRef.current,
       scratch.leftLensOrigin,
       scratch.leftMount,
       scratch,
     )
     updateLandrushRobotShoulderTorchFixture(
-      scratch.rightTarget,
+      scratch.mergeTarget,
       rightFixtureRef.current,
       scratch.rightLensOrigin,
       scratch.rightMount,
       scratch,
     )
+    camera.getWorldPosition(scratch.cameraPosition)
     updateLandrushRobotShoulderTorchBeam(
       scratch.leftLensOrigin,
-      scratch.leftTarget,
+      scratch.rightLensOrigin,
+      scratch.mergeTarget,
+      scratch.target,
+      scratch.cameraPosition,
       lightRef.current,
       outerBeamRef.current,
-      scratch.rightLensOrigin,
-      scratch.rightTarget,
       scratch,
       targetRef.current,
     )
@@ -389,9 +388,10 @@ export const LandrushRobotShoulderTorchRig = memo(function LandrushRobotShoulder
           color="#ffd58a"
           depthWrite={false}
           opacity={0}
-          side={DoubleSide}
+          side={FrontSide}
           toneMapped={false}
           transparent
+          vertexColors
         />
       </mesh>
       <spotLight
@@ -550,16 +550,17 @@ function updateLandrushRobotShoulderTorchFixture(
 
 function updateLandrushRobotShoulderTorchBeam(
   leftOrigin: Vector3,
-  leftTarget: Vector3,
+  rightOrigin: Vector3,
+  mergeTarget: Vector3,
+  beamTarget: Vector3,
+  cameraPosition: Vector3,
   light: SpotLight | null,
   outerBeam: Mesh<BufferGeometry> | null,
-  rightOrigin: Vector3,
-  rightTarget: Vector3,
   scratch: LandrushRobotShoulderTorchScratch,
   target: Object3D | null,
 ) {
   scratch.beamOrigin.copy(leftOrigin).add(rightOrigin).multiplyScalar(0.5)
-  scratch.beamDirection.copy(scratch.target).sub(scratch.beamOrigin)
+  scratch.beamDirection.copy(beamTarget).sub(scratch.beamOrigin)
   const originToTarget = scratch.beamDirection.length()
   if (originToTarget <= 0.001) return
   scratch.beamDirection.multiplyScalar(1 / originToTarget)
@@ -567,22 +568,24 @@ function updateLandrushRobotShoulderTorchBeam(
     updateLandrushRobotShoulderTorchBeamGeometry(
       outerBeam,
       leftOrigin,
-      leftTarget,
       rightOrigin,
-      rightTarget,
+      mergeTarget,
+      beamTarget,
+      cameraPosition,
       scratch,
     )
   }
   if (light) setLandrushRobotShoulderTorchWorldPosition(light, scratch.beamOrigin)
-  if (target) setLandrushRobotShoulderTorchWorldPosition(target, scratch.target)
+  if (target) setLandrushRobotShoulderTorchWorldPosition(target, beamTarget)
 }
 
 function updateLandrushRobotShoulderTorchBeamGeometry(
   beam: Mesh<BufferGeometry>,
   leftOrigin: Vector3,
-  leftTarget: Vector3,
   rightOrigin: Vector3,
-  rightTarget: Vector3,
+  mergeTarget: Vector3,
+  beamTarget: Vector3,
+  cameraPosition: Vector3,
   scratch: LandrushRobotShoulderTorchScratch,
 ) {
   beam.position.set(0, 0, 0)
@@ -592,81 +595,153 @@ function updateLandrushRobotShoulderTorchBeamGeometry(
   scratch.worldToBeam.copy(beam.matrixWorld).invert()
 
   const position = beam.geometry.getAttribute('position') as BufferAttribute
-  const array = position.array as Float32Array
+  const positionArray = position.array as Float32Array
+  const uv = beam.geometry.getAttribute('uv') as BufferAttribute
+  const uvArray = uv.array as Float32Array
   scratch.beamGeometryChanged = false
-  let offset = 0
-  offset = writeLandrushRobotShoulderTorchBeamLobe(array, offset, leftOrigin, leftTarget, scratch)
-  writeLandrushRobotShoulderTorchBeamLobe(array, offset, rightOrigin, rightTarget, scratch)
+  scratch.beamUvsChanged = false
+  const fullBeamLength = scratch.beamOrigin.distanceTo(beamTarget)
+  const mergeProgress =
+    fullBeamLength <= 0.001
+      ? 0
+      : Math.min(1, scratch.beamOrigin.distanceTo(mergeTarget) / fullBeamLength)
+  updateLandrushRobotShoulderTorchBeamRadial(cameraPosition, beamTarget, scratch)
+  let positionOffset = 0
+  positionOffset = writeLandrushRobotShoulderTorchBeamSection(
+    positionArray,
+    positionOffset,
+    leftOrigin,
+    mergeTarget,
+    TORCH_BEAM_SOURCE_RADIUS_METERS,
+    TORCH_BEAM_MERGE_RADIUS,
+    scratch,
+  )
+  positionOffset = writeLandrushRobotShoulderTorchBeamSection(
+    positionArray,
+    positionOffset,
+    rightOrigin,
+    mergeTarget,
+    TORCH_BEAM_SOURCE_RADIUS_METERS,
+    TORCH_BEAM_MERGE_RADIUS,
+    scratch,
+  )
+  writeLandrushRobotShoulderTorchBeamSection(
+    positionArray,
+    positionOffset,
+    mergeTarget,
+    beamTarget,
+    TORCH_BEAM_MERGE_RADIUS,
+    TORCH_BEAM_TARGET_RADIUS,
+    scratch,
+  )
+  let uvOffset = 0
+  uvOffset = writeLandrushRobotShoulderTorchBeamUvRange(
+    uvArray,
+    uvOffset,
+    0,
+    mergeProgress,
+    scratch,
+  )
+  uvOffset = writeLandrushRobotShoulderTorchBeamUvRange(
+    uvArray,
+    uvOffset,
+    0,
+    mergeProgress,
+    scratch,
+  )
+  writeLandrushRobotShoulderTorchBeamUvRange(uvArray, uvOffset, mergeProgress, 1, scratch)
   if (scratch.beamGeometryChanged) position.needsUpdate = true
+  if (scratch.beamUvsChanged) uv.needsUpdate = true
 }
 
-function writeLandrushRobotShoulderTorchBeamLobe(
+function updateLandrushRobotShoulderTorchBeamRadial(
+  cameraPosition: Vector3,
+  beamTarget: Vector3,
+  scratch: LandrushRobotShoulderTorchScratch,
+) {
+  scratch.beamDirection.copy(beamTarget).sub(scratch.beamOrigin)
+  if (scratch.beamDirection.lengthSq() <= 0.000_001) scratch.beamDirection.copy(LOCAL_FORWARD)
+  else scratch.beamDirection.normalize()
+  scratch.segmentCenter.copy(scratch.beamOrigin).add(beamTarget).multiplyScalar(0.5)
+  scratch.viewDirection.copy(cameraPosition).sub(scratch.segmentCenter)
+  scratch.beamRadial.crossVectors(scratch.viewDirection, scratch.beamDirection)
+  if (scratch.beamRadial.lengthSq() <= 0.000_001) {
+    scratch.beamRadial.crossVectors(WORLD_UP, scratch.beamDirection)
+  }
+  if (scratch.beamRadial.lengthSq() <= 0.000_001) scratch.beamRadial.set(1, 0, 0)
+  else scratch.beamRadial.normalize()
+}
+
+function writeLandrushRobotShoulderTorchBeamSection(
   array: Float32Array,
   offset: number,
   origin: Vector3,
   target: Vector3,
+  sourceRadius: number,
+  targetRadius: number,
   scratch: LandrushRobotShoulderTorchScratch,
 ) {
   scratch.beamDirection.copy(target).sub(origin)
   const beamLength = scratch.beamDirection.length()
   if (beamLength <= 0.001) return offset
   scratch.beamDirection.multiplyScalar(1 / beamLength)
-  scratch.beamRight.crossVectors(WORLD_UP, scratch.beamDirection)
-  if (scratch.beamRight.lengthSq() <= 0.000_001) scratch.beamRight.set(1, 0, 0)
-  else scratch.beamRight.normalize()
-  scratch.beamUp.crossVectors(scratch.beamDirection, scratch.beamRight).normalize()
-
-  for (let fin = 0; fin < LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT; fin += 1) {
-    const orientation = TORCH_BEAM_FIN_ORIENTATIONS[fin]!
-    scratch.beamRadial
-      .copy(scratch.beamRight)
-      .multiplyScalar(orientation[0])
-      .addScaledVector(scratch.beamUp, orientation[1])
-      .normalize()
-    offset = writeLandrushRobotShoulderTorchBeamPosition(
-      array,
-      offset,
-      origin,
-      -TORCH_BEAM_SOURCE_RADIUS_METERS,
-      scratch,
-    )
-    offset = writeLandrushRobotShoulderTorchBeamPosition(
-      array,
-      offset,
-      target,
-      -TORCH_LOBE_BEAM_RADIUS,
-      scratch,
-    )
-    offset = writeLandrushRobotShoulderTorchBeamPosition(
-      array,
-      offset,
-      target,
-      TORCH_LOBE_BEAM_RADIUS,
-      scratch,
-    )
-    offset = writeLandrushRobotShoulderTorchBeamPosition(
-      array,
-      offset,
-      origin,
-      -TORCH_BEAM_SOURCE_RADIUS_METERS,
-      scratch,
-    )
-    offset = writeLandrushRobotShoulderTorchBeamPosition(
-      array,
-      offset,
-      target,
-      TORCH_LOBE_BEAM_RADIUS,
-      scratch,
-    )
-    offset = writeLandrushRobotShoulderTorchBeamPosition(
-      array,
-      offset,
-      origin,
-      TORCH_BEAM_SOURCE_RADIUS_METERS,
-      scratch,
-    )
-  }
+  offset = writeLandrushRobotShoulderTorchBeamPosition(
+    array,
+    offset,
+    origin,
+    -sourceRadius,
+    scratch,
+  )
+  offset = writeLandrushRobotShoulderTorchBeamPosition(
+    array,
+    offset,
+    target,
+    -targetRadius,
+    scratch,
+  )
+  offset = writeLandrushRobotShoulderTorchBeamPosition(array, offset, target, targetRadius, scratch)
+  offset = writeLandrushRobotShoulderTorchBeamPosition(
+    array,
+    offset,
+    origin,
+    -sourceRadius,
+    scratch,
+  )
+  offset = writeLandrushRobotShoulderTorchBeamPosition(array, offset, target, targetRadius, scratch)
+  offset = writeLandrushRobotShoulderTorchBeamPosition(array, offset, origin, sourceRadius, scratch)
   return offset
+}
+
+function writeLandrushRobotShoulderTorchBeamUvRange(
+  array: Float32Array,
+  offset: number,
+  startV: number,
+  endV: number,
+  scratch: LandrushRobotShoulderTorchScratch,
+) {
+  offset = writeLandrushRobotShoulderTorchBeamUv(array, offset, 0, startV, scratch)
+  offset = writeLandrushRobotShoulderTorchBeamUv(array, offset, 0, endV, scratch)
+  offset = writeLandrushRobotShoulderTorchBeamUv(array, offset, 1, endV, scratch)
+  offset = writeLandrushRobotShoulderTorchBeamUv(array, offset, 0, startV, scratch)
+  offset = writeLandrushRobotShoulderTorchBeamUv(array, offset, 1, endV, scratch)
+  return writeLandrushRobotShoulderTorchBeamUv(array, offset, 1, startV, scratch)
+}
+
+function writeLandrushRobotShoulderTorchBeamUv(
+  array: Float32Array,
+  offset: number,
+  u: number,
+  v: number,
+  scratch: LandrushRobotShoulderTorchScratch,
+) {
+  const nextU = Math.fround(u)
+  const nextV = Math.fround(v)
+  if (array[offset] !== nextU || array[offset + 1] !== nextV) {
+    array[offset] = nextU
+    array[offset + 1] = nextV
+    scratch.beamUvsChanged = true
+  }
+  return offset + 2
 }
 
 function writeLandrushRobotShoulderTorchBeamPosition(
@@ -827,18 +902,24 @@ function mergeLandrushRobotShoulderTorchGeometry(parts: BufferGeometry[], name: 
 }
 
 function createLandrushRobotShoulderTorchBeamGeometry() {
-  const uvs: number[] = []
-  const finCount =
-    LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT * LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_LOBE_COUNT
-  for (let fin = 0; fin < finCount; fin += 1) {
-    uvs.push(0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0)
-  }
   const geometry = new BufferGeometry()
-  const triangleCount = finCount * 2
+  const triangleCount =
+    (LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT +
+      LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT) *
+    2
   const position = new BufferAttribute(new Float32Array(triangleCount * 3 * 3), 3)
+  const uv = new BufferAttribute(new Float32Array(triangleCount * 3 * 2), 2)
+  const color = new BufferAttribute(new Float32Array(triangleCount * 3 * 3), 3)
+  const feedVertexCount = LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT * 2 * 3
+  for (let vertex = 0; vertex < triangleCount * 3; vertex += 1) {
+    const energy = vertex < feedVertexCount ? TORCH_BEAM_FEED_ENERGY : 1
+    color.setXYZ(vertex, energy, energy, energy)
+  }
   position.setUsage(DynamicDrawUsage)
+  uv.setUsage(DynamicDrawUsage)
+  geometry.setAttribute('color', color)
   geometry.setAttribute('position', position)
-  geometry.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2))
+  geometry.setAttribute('uv', uv)
   return geometry
 }
 
@@ -869,8 +950,8 @@ export function createLandrushRobotShoulderTorchPixelTexture() {
 }
 
 function createLandrushRobotShoulderTorchBeamAlphaTexture() {
-  const width = 16
-  const height = 32
+  const width = 32
+  const height = 64
   const data = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -890,7 +971,7 @@ function createLandrushRobotShoulderTorchBeamAlphaTexture() {
   texture.minFilter = LinearFilter
   texture.wrapS = ClampToEdgeWrapping
   texture.wrapT = ClampToEdgeWrapping
-  texture.name = 'landrush-shoulder-torch-soft-twin-lobe-envelope'
+  texture.name = 'landrush-shoulder-torch-soft-two-feed-unified-envelope'
   texture.needsUpdate = true
   return texture
 }
@@ -900,8 +981,9 @@ export function resolveLandrushRobotShoulderTorchBeamEnvelope(u: number, v: numb
   const normalizedV = Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0))
   const edgeDistance = Math.abs(normalizedU * 2 - 1)
   const radial = edgeDistance >= 1 ? 0 : Math.cos(edgeDistance * Math.PI * 0.5) ** 1.35
-  const headProgress = Math.min(1, normalizedV / 0.08)
-  const head = headProgress * headProgress * (3 - 2 * headProgress)
+  const headProgress = Math.min(1, normalizedV / 0.018)
+  const headEase = headProgress * headProgress * (3 - 2 * headProgress)
+  const head = 0.58 + 0.42 * headEase
   const tailProgress = Math.min(1, Math.max(0, (normalizedV - 0.78) / 0.22))
   const tail = 1 - tailProgress * tailProgress * (3 - 2 * tailProgress)
   return (radial * head * tail) ** 0.86

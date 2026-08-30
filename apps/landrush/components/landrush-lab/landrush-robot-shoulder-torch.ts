@@ -6,14 +6,14 @@ export type LandrushRobotShoulderTorchDesign =
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_SELECTED_DESIGN =
   'sentinel' satisfies LandrushRobotShoulderTorchDesign
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_TEXTURE_RESOLUTION = 8
-export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT = 3
-export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_LOBE_COUNT = 2
+export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT = 2
+export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT = 1
+export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE = 0.8
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_SPOT_INTENSITY = 148
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_OPACITY = 0.04
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_LENS_EMISSIVE_INTENSITY = 5.4
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE = 0.34
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_PENUMBRA = 0.9
-export const LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE = 0.045
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE = 8.4
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY = 0.5
 
@@ -109,7 +109,9 @@ export function resolveLandrushRobotShoulderTorchGeometryBudget(
   const fixtureTriangles = FIXTURE_TRIANGLES[design]
   const pairFixtureTriangles = fixtureTriangles * 2
   const beamTriangles =
-    LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT * LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_LOBE_COUNT * 2
+    (LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT +
+      LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT) *
+    2
   return {
     beamTriangles,
     fixtureTriangles,
@@ -135,29 +137,29 @@ export function updateLandrushRobotShoulderTorchGroundTarget(
   return target
 }
 
-export function updateLandrushRobotShoulderTorchLobeTargets(
-  leftTarget: { x: number; y: number; z: number },
-  rightTarget: { x: number; y: number; z: number },
-  centerTarget: Readonly<{ x: number; y: number; z: number }>,
-  leftOrigin: Readonly<{ x: number; z: number }>,
-  rightOrigin: Readonly<{ x: number; z: number }>,
-  aimAngle: number,
-  reachMeters: number,
+export function updateLandrushRobotShoulderTorchMergeTarget(
+  mergeTarget: { x: number; y: number; z: number },
+  beamOrigin: Readonly<{ x: number; y: number; z: number }>,
+  beamTarget: Readonly<{ x: number; y: number; z: number }>,
+  mergeDistanceMeters: number,
 ) {
-  const angle = Number.isFinite(aimAngle) ? aimAngle : 0
-  const reach = Math.max(0, Number.isFinite(reachMeters) ? reachMeters : 0)
-  const rightX = Math.cos(angle)
-  const rightZ = -Math.sin(angle)
-  const sourceSeparation =
-    (rightOrigin.x - leftOrigin.x) * rightX + (rightOrigin.z - leftOrigin.z) * rightZ
-  const lateralOffset =
-    Math.abs(sourceSeparation) * 0.5 +
-    Math.tan(LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE) * reach
-  leftTarget.x = centerTarget.x - rightX * lateralOffset
-  leftTarget.y = centerTarget.y
-  leftTarget.z = centerTarget.z - rightZ * lateralOffset
-  rightTarget.x = centerTarget.x + rightX * lateralOffset
-  rightTarget.y = centerTarget.y
-  rightTarget.z = centerTarget.z + rightZ * lateralOffset
-  return lateralOffset
+  const deltaX = beamTarget.x - beamOrigin.x
+  const deltaY = beamTarget.y - beamOrigin.y
+  const deltaZ = beamTarget.z - beamOrigin.z
+  const beamLength = Math.hypot(deltaX, deltaY, deltaZ)
+  if (beamLength <= 0.000_001) {
+    mergeTarget.x = beamOrigin.x
+    mergeTarget.y = beamOrigin.y
+    mergeTarget.z = beamOrigin.z
+    return mergeTarget
+  }
+  const requestedDistance = Math.max(
+    0,
+    Number.isFinite(mergeDistanceMeters) ? mergeDistanceMeters : 0,
+  )
+  const progress = Math.min(1, requestedDistance / beamLength)
+  mergeTarget.x = beamOrigin.x + deltaX * progress
+  mergeTarget.y = beamOrigin.y + deltaY * progress
+  mergeTarget.z = beamOrigin.z + deltaZ * progress
+  return mergeTarget
 }

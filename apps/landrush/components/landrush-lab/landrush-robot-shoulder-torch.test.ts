@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs'
 import { LinearFilter } from 'three'
 import {
   createLandrushRobotShoulderTorchLightingState,
-  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT,
-  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_LOBE_COUNT,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_OPACITY,
   LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_DESIGNS,
   LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_LENS_EMISSIVE_INTENSITY,
-  LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY,
   LANDRUSH_ROBOT_SHOULDER_TORCH_PENUMBRA,
   LANDRUSH_ROBOT_SHOULDER_TORCH_SELECTED_DESIGN,
@@ -19,7 +19,7 @@ import {
   resolveLandrushRobotShoulderTorchGeometryBudget,
   updateLandrushRobotShoulderTorchGroundTarget,
   updateLandrushRobotShoulderTorchLightingState,
-  updateLandrushRobotShoulderTorchLobeTargets,
+  updateLandrushRobotShoulderTorchMergeTarget,
 } from './landrush-robot-shoulder-torch'
 import {
   createLandrushRobotShoulderTorchPixelTexture,
@@ -53,12 +53,20 @@ describe('Landrush robot shoulder torches', () => {
     })
   })
 
-  test('keeps one physical spotlight behind the two visual beam lobes', () => {
+  test('keeps one physical spotlight behind the two source feeds and unified beam', () => {
     const source = readFileSync(
       new URL('./landrush-robot-shoulder-torch-rig.tsx', import.meta.url),
       'utf8',
     )
     expect(source.match(/<spotLight\b/g)).toHaveLength(1)
+    expect(source).toContain('side={FrontSide}')
+    expect(source).toContain('vertexColors')
+    expect(source).toContain('const TORCH_BEAM_FEED_ENERGY = 0.5')
+    expect(source).toContain(
+      'updateLandrushRobotShoulderTorchBeamRadial(cameraPosition, beamTarget, scratch)',
+    )
+    expect(source).not.toContain('DoubleSide')
+    expect(source).not.toContain('TORCH_BEAM_FIN_ORIENTATIONS')
   })
 
   test('changes only fixture, beam, and spot-light contribution while active', () => {
@@ -101,9 +109,9 @@ describe('Landrush robot shoulder torches', () => {
       resolveLandrushRobotShoulderTorchGeometryBudget(LANDRUSH_ROBOT_SHOULDER_TORCH_SELECTED_DESIGN)
         .pairFixtureTriangles,
     )
-    expect(resolveLandrushRobotShoulderTorchGeometryBudget().beamTriangles).toBe(12)
-    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FIN_COUNT).toBe(3)
-    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_LOBE_COUNT).toBe(2)
+    expect(resolveLandrushRobotShoulderTorchGeometryBudget().beamTriangles).toBe(6)
+    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT).toBe(2)
+    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT).toBe(1)
   })
 
   test('lands the unified beam on the ground in the exact combat aim direction', () => {
@@ -120,48 +128,46 @@ describe('Landrush robot shoulder torches', () => {
     expect(right.z).toBeCloseTo(5)
   })
 
-  test('separates two visual lobes around the unified real-light target', () => {
-    const leftTarget = { x: 0, y: 0, z: 0 }
-    const rightTarget = { x: 0, y: 0, z: 0 }
-    const centerTarget = { x: 8, y: 0.035, z: 2.4 }
-    const leftOrigin = { x: 7.7, z: -3 }
-    const rightOrigin = { x: 8.3, z: -3 }
-    const lateralOffset = updateLandrushRobotShoulderTorchLobeTargets(
-      leftTarget,
-      rightTarget,
-      centerTarget,
-      leftOrigin,
-      rightOrigin,
-      0,
-      5.4,
+  test('joins two source feeds into one body at the authored merge distance', () => {
+    const origin = { x: 8, y: 1.2, z: -3 }
+    const target = { x: 8, y: 0.035, z: 2.4 }
+    const mergeTarget = { x: 0, y: 0, z: 0 }
+    const updated = updateLandrushRobotShoulderTorchMergeTarget(
+      mergeTarget,
+      origin,
+      target,
+      LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE,
     )
 
-    expect(lateralOffset).toBeCloseTo(
-      0.3 + Math.tan(LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE) * 5.4,
-    )
-    expect(leftTarget.x).toBeCloseTo(centerTarget.x - lateralOffset)
-    expect(rightTarget.x).toBeCloseTo(centerTarget.x + lateralOffset)
-    expect(leftOrigin.x - leftTarget.x).toBeCloseTo(
-      Math.tan(LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE) * 5.4,
-    )
-    expect(rightTarget.x - rightOrigin.x).toBeCloseTo(
-      Math.tan(LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE) * 5.4,
-    )
-    expect(leftTarget.y).toBe(centerTarget.y)
-    expect(rightTarget.y).toBe(centerTarget.y)
-    expect(leftTarget.z).toBeCloseTo(centerTarget.z)
-    expect(rightTarget.z).toBeCloseTo(centerTarget.z)
+    expect(updated).toBe(mergeTarget)
+    expect(
+      Math.hypot(updated.x - origin.x, updated.y - origin.y, updated.z - origin.z),
+    ).toBeCloseTo(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE)
+    expect(updated.x).toBeCloseTo(origin.x)
+    expect(updated.y).toBeLessThan(origin.y)
+    expect(updated.z).toBeGreaterThan(origin.z)
   })
 
-  test('feathers both the sides and ends of each visual beam fin', () => {
+  test('keeps the source filled and every radial station center-high without a bright rim', () => {
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0.5)).toBe(1)
-    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0, 0.5)).toBe(0)
-    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(1, 0.5)).toBe(0)
-    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0)).toBe(0)
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0)).toBeGreaterThan(0.5)
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0.05 / 5.4)).toBeGreaterThan(0.75)
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 1)).toBe(0)
-    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.1, 0.5)).toBeLessThan(
-      resolveLandrushRobotShoulderTorchBeamEnvelope(0.25, 0.5),
-    )
+    for (const v of [0, 0.01, 0.15, 0.5, 0.9]) {
+      let previous = resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, v)
+      expect(Number.isFinite(previous)).toBe(true)
+      for (let step = 1; step <= 20; step += 1) {
+        const u = 0.5 + step / 40
+        const value = resolveLandrushRobotShoulderTorchBeamEnvelope(u, v)
+        expect(value).toBeLessThanOrEqual(previous)
+        expect(value).toBeCloseTo(resolveLandrushRobotShoulderTorchBeamEnvelope(1 - u, v))
+        expect(value).toBeGreaterThanOrEqual(0)
+        expect(value).toBeLessThanOrEqual(1)
+        previous = value
+      }
+      expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0, v)).toBe(0)
+      expect(resolveLandrushRobotShoulderTorchBeamEnvelope(1, v)).toBe(0)
+    }
   })
 
   test('publishes the exact real-light cone for zombie visibility without allocating a new state', () => {
@@ -185,7 +191,6 @@ describe('Landrush robot shoulder torches', () => {
     })
     expect(LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE).toBe(0.34)
     expect(LANDRUSH_ROBOT_SHOULDER_TORCH_PENUMBRA).toBe(0.9)
-    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_LOBE_DIVERGENCE_ANGLE).toBe(0.045)
     expect(LANDRUSH_ROBOT_SHOULDER_TORCH_DISTANCE).toBe(8.4)
     expect(LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY).toBe(0.5)
   })
