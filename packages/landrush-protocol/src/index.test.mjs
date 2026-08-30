@@ -735,7 +735,7 @@ test('normalizes multiplayer room ids consistently for clients and servers', () 
 })
 
 test('shares a bounded persistent profile wallet contract', () => {
-  assert.equal(DEFAULT_PROFILE_MONEY, 100)
+  assert.equal(DEFAULT_PROFILE_MONEY, 200)
   assert.equal(MAX_PROFILE_MONEY, 1_000_000_000)
   assert.equal(ZOMBIE_ESCAPE_KILL_REWARD, 10)
 
