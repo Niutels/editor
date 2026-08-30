@@ -22,7 +22,14 @@ import {
   type LandrushRobotWeaponCombatState,
 } from './landrush-robot-weapon-rig'
 
-export type ZombieShoulderTorchDebugView = 'beam' | 'designs' | 'mounted'
+export type ZombieShoulderTorchDebugView =
+  | 'beam'
+  | 'designs'
+  | 'mounted'
+  | 'origin-front'
+  | 'origin-rear'
+  | 'origin-right'
+  | 'origin-top'
 export type ZombieShoulderTorchDebugMode = 'final' | 'fixture-only' | 'light-only'
 
 const ZOMBIE_SHOULDER_TORCH_DEBUG_RENDERER_CACHE = new WeakMap<
@@ -56,6 +63,7 @@ export function ZombieShoulderTorchDebugClient({
   const [canvasReady, setCanvasReady] = useState(false)
   const [subjectReady, setSubjectReady] = useState(view === 'designs')
   const budget = resolveLandrushRobotShoulderTorchGeometryBudget()
+  const beamView = isZombieShoulderTorchBeamView(view)
   const ready = canvasReady && subjectReady
   const handleSubjectReady = useCallback(() => setSubjectReady(true), [])
 
@@ -93,7 +101,7 @@ export function ZombieShoulderTorchDebugClient({
         onCreated={({ camera: sceneCamera, gl }) => {
           gl.outputColorSpace = SRGBColorSpace
           gl.toneMapping = ACESFilmicToneMapping
-          gl.toneMappingExposure = view === 'beam' ? 0.82 : 1.05
+          gl.toneMappingExposure = beamView ? 0.38 : 1.05
           sceneCamera.lookAt(...camera.target)
           sceneCamera.updateMatrixWorld(true)
           setCanvasReady(true)
@@ -105,6 +113,7 @@ export function ZombieShoulderTorchDebugClient({
           onSubjectReady={handleSubjectReady}
           view={view}
         />
+        <ZombieShoulderTorchDebugManualRenderDriver />
       </Canvas>
       <section className="pointer-events-none absolute top-5 left-5 rounded-2xl border border-amber-100/20 bg-slate-950/78 px-4 py-3 shadow-2xl backdrop-blur-md">
         <p className="font-black text-[10px] text-amber-200 uppercase tracking-[0.24em]">
@@ -115,7 +124,7 @@ export function ZombieShoulderTorchDebugClient({
           {budget.pairFixtureTriangles} fixture tris / pair · {budget.textureBytes} B armor texture
         </p>
         <p className="text-slate-400 text-xs">
-          {budget.beamTriangles} beam tris · one unified spot light · no post
+          {budget.beamTriangles} beam tris · two beam lobes / one unified spotlight · no post
         </p>
       </section>
       {view === 'designs' ? <ZombieShoulderTorchDesignLabels /> : null}
@@ -153,18 +162,18 @@ function ZombieShoulderTorchDebugWorld({
   onSubjectReady: () => void
   view: ZombieShoulderTorchDebugView
 }) {
-  const beamView = view === 'beam'
+  const beamView = isZombieShoulderTorchBeamView(view)
   return (
     <>
       <color args={[beamView ? '#02050b' : '#08111d']} attach="background" />
       <hemisphereLight
         color={beamView ? '#56718a' : '#d7e8ff'}
         groundColor={beamView ? '#080b0b' : '#151c25'}
-        intensity={beamView ? 0.28 : 1.25}
+        intensity={beamView ? 0.08 : 1.25}
       />
       <directionalLight
         color={beamView ? '#6f8ca9' : '#fff0d6'}
-        intensity={beamView ? 0.32 : 2.8}
+        intensity={beamView ? 0.1 : 2.8}
         position={[3, 7, 2]}
       />
       <mesh position={[0, -0.01, 2.1]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -225,6 +234,7 @@ function ZombieShoulderTorchRobotSubject({
   onReady: () => void
   view: ZombieShoulderTorchDebugView
 }) {
+  const beamView = isZombieShoulderTorchBeamView(view)
   const visualRootRef = useRef<Group | null>(null)
   const combatStateRef = useRef<LandrushRobotWeaponCombatState | null>(
     createLandrushRobotWeaponCombatState(),
@@ -267,12 +277,19 @@ function ZombieShoulderTorchRobotSubject({
         combatStateRef={combatStateRef}
         emitSpotLights={mode !== 'fixture-only'}
         framePriority={2.6}
-        showBeams={view === 'beam' && mode !== 'fixture-only'}
+        showBeams={beamView && mode !== 'fixture-only'}
         showFixtures={mode !== 'light-only'}
         visualRootRef={visualRootRef}
       />
     </group>
   )
+}
+
+function ZombieShoulderTorchDebugManualRenderDriver() {
+  useFrame(({ camera, gl, scene }) => {
+    gl.render(scene, camera)
+  }, 100)
+  return null
 }
 
 function ZombieShoulderTorchBeamTargets() {
@@ -333,9 +350,41 @@ function resolveZombieShoulderTorchDebugCamera(view: ZombieShoulderTorchDebugVie
       target: [0, 1.4, 0.02] as [number, number, number],
     }
   }
+  if (view === 'origin-front') {
+    return {
+      fov: 30,
+      position: [0, 1.62, 1.55] as [number, number, number],
+      target: [0, 1.4, 0.15] as [number, number, number],
+    }
+  }
+  if (view === 'origin-right') {
+    return {
+      fov: 32,
+      position: [1.1, 1.72, 1.25] as [number, number, number],
+      target: [0, 1.4, 0.25] as [number, number, number],
+    }
+  }
+  if (view === 'origin-rear') {
+    return {
+      fov: 34,
+      position: [-1.05, 1.78, -1.25] as [number, number, number],
+      target: [0, 1.3, 0.65] as [number, number, number],
+    }
+  }
+  if (view === 'origin-top') {
+    return {
+      fov: 45,
+      position: [0, 3.2, 0.6] as [number, number, number],
+      target: [0, 0.2, 0.6] as [number, number, number],
+    }
+  }
   return {
     fov: 42,
     position: [3.8, 3.25, -4.5] as [number, number, number],
     target: [0, 0.5, 2.7] as [number, number, number],
   }
+}
+
+function isZombieShoulderTorchBeamView(view: ZombieShoulderTorchDebugView) {
+  return view === 'beam' || view.startsWith('origin-')
 }

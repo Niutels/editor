@@ -30,6 +30,7 @@ import {
 import {
   advanceLandrushZombieNightAmount,
   createLandrushZombieNightBeaconPlacements,
+  LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
   LANDRUSH_ZOMBIE_NIGHT_SEED,
   type LandrushZombieNightDebugMode,
   parseLandrushZombieNightDebugQuery,
@@ -42,7 +43,6 @@ import {
 const NIGHT_BACKGROUND = '#020611'
 const NIGHT_FOG = '#081426'
 const NIGHT_FOG_DENSITY = 0.0085
-const NIGHT_EXPOSURE = 0.78
 
 const NIGHT_LIGHTS = [
   { color: '#b9caff', direction: [-0.58, 1, -0.42] as const, intensity: 1.08 },
@@ -215,7 +215,7 @@ export function LandrushZombieNightPresentation({
     const treatmentAmount = settings.mode === 'light-contribution' ? 1 : amount
     const nightExposure = resolveLandrushZombieNightTargetExposure({
       mode: settings.mode,
-      nightExposure: NIGHT_EXPOSURE,
+      nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
       visibility: settings.visibility,
     })
     const targetExposure =

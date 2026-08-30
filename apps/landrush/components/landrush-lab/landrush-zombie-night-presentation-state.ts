@@ -1,4 +1,5 @@
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
+import { LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY } from './landrush-robot-shoulder-torch'
 
 export type LandrushZombieNightDebugMode = 'final' | 'light-contribution' | 'no-post'
 export type LandrushZombieNightQuality = 'balanced' | 'high' | 'low'
@@ -19,8 +20,29 @@ export type LandrushZombieNightBeaconPlacement = Readonly<{
   position: readonly [number, number, number]
 }>
 
+export const LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE = 0.78
+export const LANDRUSH_ZOMBIE_NIGHT_SHIPPING_OUTSIDE_TORCH_VISIBILITY = 0.8
+export const LANDRUSH_ZOMBIE_NIGHT_WORLD_EXPOSURE_SCALE = 0.5
 export const LANDRUSH_ZOMBIE_NIGHT_SEED = 0x4c61_6e64
 export const LANDRUSH_ZOMBIE_NIGHT_RESPONSE_PER_SECOND = 1.55
+
+const LANDRUSH_ZOMBIE_NIGHT_VISIBILITY_TREATMENTS = Object.freeze({
+  normal: Object.freeze({
+    outsideTorchVisibility: LANDRUSH_ZOMBIE_NIGHT_SHIPPING_OUTSIDE_TORCH_VISIBILITY,
+    worldExposureScale: LANDRUSH_ZOMBIE_NIGHT_WORLD_EXPOSURE_SCALE,
+  }),
+  world50: Object.freeze({
+    outsideTorchVisibility: 1,
+    worldExposureScale: LANDRUSH_ZOMBIE_NIGHT_WORLD_EXPOSURE_SCALE,
+  }),
+  zombies50: Object.freeze({
+    outsideTorchVisibility: LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY,
+    worldExposureScale: 1,
+  }),
+} satisfies Record<
+  LandrushZombieNightVisibility,
+  Readonly<{ outsideTorchVisibility: number; worldExposureScale: number }>
+>)
 
 export const LANDRUSH_ZOMBIE_NIGHT_VISUAL_CONTRACT = Object.freeze({
   allowedDivergences: [
@@ -131,8 +153,18 @@ export function resolveLandrushZombieNightTargetExposure({
   nightExposure: number
   visibility: LandrushZombieNightVisibility
 }) {
-  const settledExposure = mode === 'no-post' ? 1 : nightExposure
-  return visibility === 'world50' ? settledExposure * 0.5 : settledExposure
+  if (mode === 'no-post') {
+    return visibility === 'world50' ? LANDRUSH_ZOMBIE_NIGHT_WORLD_EXPOSURE_SCALE : 1
+  }
+  return (
+    nightExposure * resolveLandrushZombieNightVisibilityTreatment(visibility).worldExposureScale
+  )
+}
+
+export function resolveLandrushZombieNightVisibilityTreatment(
+  visibility: LandrushZombieNightVisibility,
+) {
+  return LANDRUSH_ZOMBIE_NIGHT_VISIBILITY_TREATMENTS[visibility]
 }
 
 export function advanceLandrushZombieNightAmount(

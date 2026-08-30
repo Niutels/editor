@@ -11,6 +11,7 @@ import {
   createLandrushRobotShoulderTorchLightingState,
   updateLandrushRobotShoulderTorchLightingState,
 } from './landrush-robot-shoulder-torch'
+import { LANDRUSH_ZOMBIE_NIGHT_SHIPPING_OUTSIDE_TORCH_VISIBILITY } from './landrush-zombie-night-presentation-state'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 describe('zombie phase material shader', () => {
@@ -56,11 +57,11 @@ describe('zombie phase material shader', () => {
     geometry.dispose()
   })
 
-  test('adds a stable real-torch visibility field only for the zombie-only comparison', () => {
+  test('adds a stable real-torch visibility field for shipping zombie attenuation', () => {
     const geometry = new BoxGeometry()
     const source = new MeshStandardMaterial()
     const shader = createZombieEscapeZombieShader({
-      outsideTorchVisibility: 0.5,
+      outsideTorchVisibility: LANDRUSH_ZOMBIE_NIGHT_SHIPPING_OUTSIDE_TORCH_VISIBILITY,
       phaseAmount: 1,
     })
     const material = shader.createMaterial(source, geometry, 3) as MeshStandardNodeMaterial
@@ -76,12 +77,12 @@ describe('zombie phase material shader', () => {
     )
     shader.setTorchLighting(torchState)
 
-    expect(shader.getOutsideTorchVisibility()).toBe(0.5)
+    expect(shader.getOutsideTorchVisibility()).toBe(0.8)
     expect(material.colorNode).toBe(colorNode)
     expect(material.emissiveNode).toBe(emissiveNode)
     expect(material.userData.zombieTextureShader).toEqual({
       debugMode: 'final',
-      outsideTorchVisibility: 0.5,
+      outsideTorchVisibility: 0.8,
       phaseScoped: true,
       seed: 3,
       torchScoped: true,

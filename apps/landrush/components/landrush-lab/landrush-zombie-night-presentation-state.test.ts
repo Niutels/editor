@@ -3,6 +3,7 @@ import type { LandrushRoadSegment } from '@/components/landrush/types'
 import {
   advanceLandrushZombieNightAmount,
   createLandrushZombieNightBeaconPlacements,
+  LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
   LANDRUSH_ZOMBIE_NIGHT_VISUAL_CONTRACT,
   parseLandrushZombieNightDebugQuery,
@@ -10,6 +11,7 @@ import {
   resolveLandrushZombieNightBeaconPulse,
   resolveLandrushZombieNightSurfaceRole,
   resolveLandrushZombieNightTargetExposure,
+  resolveLandrushZombieNightVisibilityTreatment,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
 
@@ -95,28 +97,65 @@ describe('Landrush zombie night presentation state', () => {
     ).toBe(true)
   })
 
-  test('halves only the settled whole-world night exposure', () => {
+  test('resolves stable shipping and isolated diagnostic visibility treatments', () => {
+    const shipping = resolveLandrushZombieNightVisibilityTreatment('normal')
+    expect(shipping).toEqual({ outsideTorchVisibility: 0.8, worldExposureScale: 0.5 })
+    expect(shipping.worldExposureScale * shipping.outsideTorchVisibility).toBe(0.4)
+    expect(shipping.worldExposureScale).toBe(0.5)
+    expect(resolveLandrushZombieNightVisibilityTreatment('normal')).toBe(shipping)
+    expect(resolveLandrushZombieNightVisibilityTreatment('world50')).toEqual({
+      outsideTorchVisibility: 1,
+      worldExposureScale: 0.5,
+    })
+    expect(resolveLandrushZombieNightVisibilityTreatment('zombies50')).toEqual({
+      outsideTorchVisibility: 0.5,
+      worldExposureScale: 1,
+    })
+  })
+
+  test('applies shipping and diagnostic exposure scales to the settled night', () => {
     expect(
       resolveLandrushZombieNightTargetExposure({
         mode: 'final',
-        nightExposure: 0.78,
+        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
         visibility: 'normal',
       }),
-    ).toBe(0.78)
+    ).toBe(0.39)
     expect(
       resolveLandrushZombieNightTargetExposure({
         mode: 'final',
-        nightExposure: 0.78,
+        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
         visibility: 'zombies50',
       }),
     ).toBe(0.78)
     expect(
       resolveLandrushZombieNightTargetExposure({
         mode: 'final',
-        nightExposure: 0.78,
+        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
         visibility: 'world50',
       }),
     ).toBe(0.39)
+    expect(
+      resolveLandrushZombieNightTargetExposure({
+        mode: 'no-post',
+        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        visibility: 'normal',
+      }),
+    ).toBe(1)
+    expect(
+      resolveLandrushZombieNightTargetExposure({
+        mode: 'no-post',
+        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        visibility: 'world50',
+      }),
+    ).toBe(0.5)
+    expect(
+      resolveLandrushZombieNightTargetExposure({
+        mode: 'no-post',
+        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        visibility: 'zombies50',
+      }),
+    ).toBe(1)
   })
 
   test('keeps the transition response frame-rate independent', () => {

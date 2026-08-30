@@ -34,11 +34,11 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
 import {
-  LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY,
-  type LandrushRobotShoulderTorchLightingState,
-} from './landrush-robot-shoulder-torch'
-import { parseLandrushZombieNightDebugQuery } from './landrush-zombie-night-presentation-state'
+  parseLandrushZombieNightDebugQuery,
+  resolveLandrushZombieNightVisibilityTreatment,
+} from './landrush-zombie-night-presentation-state'
 import {
   createZombieEscapeAttackClip,
   isZombieEscapeAttackPresentationActive,
@@ -290,12 +290,11 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       ? 'normal'
       : parseLandrushZombieNightDebugQuery(new URLSearchParams(window.location.search)).visibility,
   )
+  const outsideTorchVisibility =
+    resolveLandrushZombieNightVisibilityTreatment(zombieNightVisibility).outsideTorchVisibility
   const [zombieShader] = useState(() =>
     createZombieEscapeZombieShader({
-      outsideTorchVisibility:
-        zombieNightVisibility === 'zombies50'
-          ? LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY
-          : 1,
+      outsideTorchVisibility,
       phaseAmount: zombieMaterialPhaseActive ? 1 : 0,
     }),
   )
@@ -305,7 +304,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   const visualLodStateRef = useRef<ZombieEscapeVisualLodState | null>(null)
   const visualLodInputRef = useRef<ZombieEscapeVisualLodInput | null>(null)
   useFrame(() => {
-    if (zombieNightVisibility === 'zombies50') {
+    if (zombieMaterialPhaseActive && outsideTorchVisibility < 1) {
       zombieShader.setTorchLighting(shoulderTorchLightingStateRef?.current ?? null)
     }
     const simulation = simulationRef.current

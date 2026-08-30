@@ -24,7 +24,16 @@ export default async function ZombieShoulderTorchDebugPage({
 
 function resolveDebugView(value: string | string[] | undefined): ZombieShoulderTorchDebugView {
   const requested = Array.isArray(value) ? value[0] : value
-  if (requested === 'mounted' || requested === 'beam') return requested
+  if (
+    requested === 'mounted' ||
+    requested === 'beam' ||
+    requested === 'origin-front' ||
+    requested === 'origin-right' ||
+    requested === 'origin-rear' ||
+    requested === 'origin-top'
+  ) {
+    return requested
+  }
   return 'designs'
 }
 

@@ -47,6 +47,7 @@ describe('generated asset render-pipeline readiness', () => {
       'detailedZombies\n      ? loadedZombieVariantsRef.current\n      : EMPTY_READY_ZOMBIE_VARIANTS',
     )
     expect(source).toContain('detailedZombies\n        ? resolveZombieEscapeDetailedRootPoolSize(')
+    expect(source).toContain('zombieMaterialPhaseActive && outsideTorchVisibility < 1')
   })
 
   test('keeps timed-out and failed required preparation behind loading until ready or retried', () => {
