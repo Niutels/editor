@@ -1,3 +1,4 @@
+*.js text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
 apps/landrush/components/landrush-lab/zombie-escape-audio-catalog.json text eol=lf
