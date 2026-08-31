@@ -32,6 +32,7 @@ function createHudSnapshot(): ZombieEscapeHudSnapshot {
     waveRemaining: 0,
     waveState: 'active',
     weaponIndex: 0,
+    weaponInventoryMask: 1,
     zombies: 0,
   }
 }
@@ -56,7 +57,7 @@ describe('ZombieEscapeMoneyBadge', () => {
 })
 
 describe('ZombieEscapeHud controls', () => {
-  test('advertises the canonical L3 sprint and R2 fire mapping', () => {
+  test('advertises the canonical L3 sprint, R2 fire, and L1/R1 weapon swap mapping', () => {
     const markup = renderToStaticMarkup(
       <ZombieEscapeHud
         api={null}
@@ -68,6 +69,27 @@ describe('ZombieEscapeHud controls', () => {
     )
 
     expect(markup).toContain('RT fire · L3 run')
+    expect(markup).toContain('L1/R1 swap')
     expect(markup).not.toContain('LB run')
+  })
+
+  test('advertises mouse-wheel swapping and renders the owned weapon row', () => {
+    const snapshot = createHudSnapshot()
+    snapshot.weaponIndex = 1
+    snapshot.weaponInventoryMask = 0b00011
+    const markup = renderToStaticMarkup(
+      <ZombieEscapeHud
+        api={null}
+        inputMode="keyboard"
+        onQualityToggle={() => undefined}
+        quality="balanced"
+        snapshot={snapshot}
+      />,
+    )
+
+    expect(markup).toContain('Mouse wheel swap')
+    expect(markup.match(/data-weapon-inventory-slot="true"/g)).toHaveLength(2)
+    expect(markup).toContain('data-weapon-id="reef-carbine"')
+    expect(markup).toContain('aria-current="true"')
   })
 })

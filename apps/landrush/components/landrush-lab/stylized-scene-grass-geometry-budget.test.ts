@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { BufferGeometry, Float32BufferAttribute, Mesh } from 'three'
 import { color as tslColor } from 'three/tsl'
-import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { MeshStandardNodeMaterial } from 'three/webgpu'
 import {
   prepareLandrushZombieNightSurfaceMaterials,
   readPreparedLandrushZombieNightSurfaceRole,
 } from './landrush-zombie-night-presentation-material'
 import {
   createStylizedGrassRenderGeometry,
+  createStylizedGrassWebGpuMaterial,
   withStylizedGrassInstanceAttributes,
 } from './stylized-scene-land-layers'
 
@@ -82,13 +83,17 @@ describe('stylized grass render geometry budget', () => {
     const source = createGrassClusterGeometry()
     const render = createStylizedGrassRenderGeometry(source)
     const instanced = withStylizedGrassInstanceAttributes(render, 16)
-    const material = new MeshBasicNodeMaterial()
+    const material = createStylizedGrassWebGpuMaterial()
     material.colorNode = tslColor('#7fb13f')
     const mesh = new Mesh(instanced, material)
 
     expect(instanced.getAttribute('uv').count).toBe(instanced.getAttribute('position').count)
     expect(prepareLandrushZombieNightSurfaceMaterials(mesh, [material])).toBe(1)
     expect(readPreparedLandrushZombieNightSurfaceRole(material)).toBe('grass-blades')
+    expect(material).toBeInstanceOf(MeshStandardNodeMaterial)
+    expect(material.isMeshStandardNodeMaterial).toBe(true)
+    expect(material.flatShading).toBe(true)
+    expect(material.roughness).toBeCloseTo(0.85)
 
     source.dispose()
     render.dispose()

@@ -3,24 +3,27 @@ import type {
   Color,
   DirectionalLight,
   FogExp2,
-  Group,
   HemisphereLight,
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
-  PointLight,
   Scene,
+  SpotLight,
 } from 'three'
+import {
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_CONTRIBUTION_INTENSITY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
+} from './landrush-zombie-night-street-lightpost'
 
 export type LandrushZombieNightBeaconRuntime = {
   coreMaterial: MeshBasicMaterial | null
-  group: Group | null
+  fixtureMaterials: readonly MeshStandardMaterial[]
   innerGlowMaterial: MeshBasicMaterial | null
   lastContributionOnly: boolean | null
   lastEnvelope: number
   lastGlowTreatment: boolean | null
-  light: PointLight | null
-  mastMaterial: MeshStandardMaterial | null
+  light: SpotLight | null
   outerGlowMaterial: MeshBasicMaterial | null
 }
 
@@ -63,8 +66,10 @@ export function updateLandrushZombieNightBeaconRuntime({
     runtime.lastContributionOnly !== contributionOnly ||
     runtime.lastGlowTreatment !== glowTreatment
   ) {
-    if (runtime.group) runtime.group.visible = true
-    if (runtime.mastMaterial) runtime.mastMaterial.opacity = envelope
+    for (const material of runtime.fixtureMaterials) {
+      material.emissiveIntensity =
+        envelope * LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY
+    }
     if (runtime.coreMaterial) runtime.coreMaterial.opacity = envelope * 0.98
     if (runtime.innerGlowMaterial) {
       runtime.innerGlowMaterial.opacity = glowTreatment ? envelope * 0.24 : 0
@@ -78,7 +83,13 @@ export function updateLandrushZombieNightBeaconRuntime({
   }
   if (runtime.light) {
     runtime.light.intensity =
-      envelope > 0 ? envelope * lightPulse * (contributionOnly ? 82 : 58) : 0
+      envelope > 0
+        ? envelope *
+          lightPulse *
+          (contributionOnly
+            ? LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_CONTRIBUTION_INTENSITY
+            : LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY)
+        : 0
   }
   return envelope
 }

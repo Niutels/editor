@@ -77,13 +77,13 @@ export default {
     }
     return params.toString()
   },
-  async prepare({ args = {}, bridge, page, sleep }) {
+  async prepare({ bridge, page, sleep }) {
     if (preparePass === 0) {
       await waitForSceneNodes(bridge, 1)
       preparePass = 1
       return
     }
-    if (args['start-night'] === true) await startNight(page)
+    await startNight(page)
     await waitForNight(page, bridge, sleep)
     const soak = await page.evaluate(() => window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__?.begin())
     if (!soak?.active || !soak.phaseHeld || !soak.playerProtected) {

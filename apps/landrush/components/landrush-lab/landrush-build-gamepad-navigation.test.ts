@@ -5,16 +5,21 @@ import {
   isLandrushBuildGamepadNavigationInputReady,
   isLandrushBuildGamepadPaletteInputReady,
   type LandrushBuildGamepadNavigationRect,
+  resolveLandrushBuildGamepadCirclePressAction,
   resolveLandrushBuildGamepadDirectionalIndex,
   resolveLandrushBuildGamepadFocusAfterActivation,
   resolveLandrushBuildGamepadNavigationAction,
   resolveLandrushBuildGamepadPalettePanel,
+  resolveLandrushBuildGamepadPlacementSquareOwnership,
   resolveLandrushBuildGamepadSidebarActivation,
   resolveLandrushBuildGamepadSidebarIndex,
   resolveLandrushBuildGamepadSquarePressAction,
+  shouldApplyLandrushBuildGamepadPaletteAutofocus,
   shouldAutofocusLandrushBuildGamepadPalette,
+  shouldShowLandrushBuildGamepadPlacementCursor,
   wasLandrushBuildGamepadPlacementConfirmPressed,
 } from './landrush-build-gamepad-navigation'
+import { resolveLandrushIslandCameraOwner } from './landrush-island-camera-owner'
 
 const buildTabSource = readFileSync(join(import.meta.dir, '../build-tab.tsx'), 'utf8').replaceAll(
   '\r\n',
@@ -77,50 +82,149 @@ describe('Landrush build gamepad navigation', () => {
     expect(resolveLandrushBuildGamepadFocusAfterActivation(undefined)).toBe('palette')
   })
 
-  test('routes Square/X to the placement that claimed the press before its tool can finish', () => {
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'placement', false, false)).toBe(
-      'confirm-placement',
-    )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', true, false)).toBe(
-      'confirm-placement',
-    )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', false, true)).toBe(
-      'confirm-placement',
-    )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'palette', false, false)).toBe(
-      'toggle-build',
-    )
-    expect(resolveLandrushBuildGamepadSquarePressAction(true, 'sidebar', false, false)).toBe(
-      'toggle-build',
-    )
-    expect(resolveLandrushBuildGamepadSquarePressAction(false, 'palette', true, true)).toBe(
-      'toggle-build',
-    )
+  test('lets Square/X enter Build but never race a placement into exiting Build', () => {
+    expect(resolveLandrushBuildGamepadSquarePressAction(false)).toBe('toggle-build')
+    expect(resolveLandrushBuildGamepadSquarePressAction(true)).toBe('confirm-placement')
     expect(islandClientSource).toContain("squareAction === 'toggle-build'")
     expect(islandClientSource).toContain(
-      'const editorPlacementActive = useEditor.getState().tool !== null',
+      'const gamepadBuildPlacementSquareOwnedRef = useRef(false)',
     )
-    expect(islandClientSource).toContain(
-      'const placementSquareOwned = gamepadBuildPlacementSquareOwnedRef.current',
+    expect(islandClientSource).toContain('resolveLandrushBuildGamepadPlacementSquareOwnership({')
+    const squareCommandSource = islandClientSource.slice(
+      islandClientSource.indexOf('const activateGamepadSquareCommand'),
+      islandClientSource.indexOf('const activateGamepadTriangleCommand'),
     )
-    expect(islandClientSource).toContain(
-      'if (!buttons.square) gamepadBuildPlacementSquareOwnedRef.current = false',
+    expect(squareCommandSource).toMatch(
+      /resolveLandrushBuildGamepadSquarePressAction\(\s+buildModeRef\.current,\s+gamepadBuildPlacementSquareOwnedRef\.current,\s+\) !== 'toggle-build'/,
     )
-    expect(islandClientSource).toContain("if (squareAction === 'confirm-placement') {")
-    expect(islandClientSource).toContain('gamepadBuildPlacementSquareOwnedRef.current = true')
-    expect(islandClientSource).toContain('if (input.square) placementSquareOwnedRef.current = true')
-    expect(islandClientSource).toContain(
-      "focusModeRef.current !== 'placement' && activeTool === null",
+    expect(squareCommandSource).not.toContain('enterPlayerView')
+    expect(squareCommandSource.indexOf("!== 'toggle-build'")).toBeLessThan(
+      squareCommandSource.indexOf("gamepadBuildFocusModeRef.current = 'palette'"),
     )
     expect(islandClientSource).toMatch(
-      /useLayoutEffect\(\(\) => \{\n {4}if \(visible\) return\n {4}hideLandrushIslandGamepadBuildCursorVisual\(cursorVisualRef\)/,
+      /const squareAction = resolveLandrushBuildGamepadSquarePressAction\(\s+buildMode,\s+gamepadBuildPlacementSquareOwnedRef\.current,\s+\)/,
     )
     expect(islandClientSource).toContain(
-      "label: placementActive ? 'Place' : buildMode ? 'Exit build' : 'Build'",
+      "focusModeRef.current !== 'placement' || activeTool === null",
     )
+    expect(islandClientSource).toContain('square: buildMode')
+    expect(islandClientSource).toContain("label: 'Place'")
+    expect(islandClientSource).toContain("label: 'Build'")
+    expect(islandClientSource).not.toContain("buildMode ? 'Exit build' : 'Build'")
+  })
+
+  test('enters Build inside Build content without preactivating a main tab', () => {
+    const prepareChromeSource = islandClientSource.slice(
+      islandClientSource.indexOf('function prepareLandrushIslandBuildEditorChrome'),
+      islandClientSource.indexOf('function readLandrushIslandGamepadButtonState'),
+    )
+    expect(prepareChromeSource).toContain(
+      "if (editor.activeSidebarPanel !== 'build') editor.setActiveSidebarPanel('build')",
+    )
+
+    const squareCommandSource = islandClientSource.slice(
+      islandClientSource.indexOf('const activateGamepadSquareCommand'),
+      islandClientSource.indexOf('const activateGamepadTriangleCommand'),
+    )
+    expect(squareCommandSource).toContain("gamepadBuildFocusModeRef.current = 'palette'")
+    expect(
+      squareCommandSource.indexOf("gamepadBuildFocusModeRef.current = 'palette'"),
+    ).toBeLessThan(squareCommandSource.indexOf('enterBuildView(localOwnedParcel.id)'))
+
+    const directionalNavigationSource = islandClientSource.slice(
+      islandClientSource.indexOf('if (paletteDirection) {'),
+      islandClientSource.indexOf('if (crossPressed && !paletteDirection) {'),
+    )
+    expect(directionalNavigationSource).not.toContain('activateLandrushIslandGamepadSidebarButton(')
+    expect(directionalNavigationSource).not.toContain('setActiveSidebarPanel(')
+  })
+
+  test('keeps final wall Square/X placement-owned until release without changing camera owner', () => {
+    let placementSquareOwned = false
+    let exitCount = 0
+    let viewMode: 'build' | 'player' = 'build'
+    const advanceHeldSquare = (editorPlacementActive: boolean) => {
+      placementSquareOwned = resolveLandrushBuildGamepadPlacementSquareOwnership({
+        editorPlacementActive,
+        placementSquareOwned,
+        squareHeld: true,
+      })
+      const action = resolveLandrushBuildGamepadSquarePressAction(
+        viewMode === 'build',
+        placementSquareOwned,
+      )
+      if (action === 'toggle-build') {
+        exitCount += 1
+        viewMode = 'player'
+      }
+      return action
+    }
+
+    expect(advanceHeldSquare(true)).toBe('confirm-placement')
+    expect(advanceHeldSquare(false)).toBe('confirm-placement')
+    expect(exitCount).toBe(0)
+    expect(
+      resolveLandrushIslandCameraOwner({
+        viewMode,
+        zombieEscapeNightActive: false,
+      }),
+    ).toBe('build')
+
+    placementSquareOwned = resolveLandrushBuildGamepadPlacementSquareOwnership({
+      editorPlacementActive: false,
+      placementSquareOwned,
+      squareHeld: false,
+    })
+    expect(placementSquareOwned).toBe(false)
+    expect(resolveLandrushBuildGamepadSquarePressAction(false, placementSquareOwned)).toBe(
+      'toggle-build',
+    )
+  })
+
+  test('keeps an auto-armed Wall cursor hidden until deliberate gamepad engagement', () => {
+    expect(
+      shouldShowLandrushBuildGamepadPlacementCursor({
+        editorPlacementActive: true,
+        focusMode: 'palette',
+        gamepadPlacementEngaged: false,
+        parcelAvailable: true,
+        visible: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldShowLandrushBuildGamepadPlacementCursor({
+        editorPlacementActive: true,
+        focusMode: 'placement',
+        gamepadPlacementEngaged: false,
+        parcelAvailable: true,
+        visible: true,
+      }),
+    ).toBe(false)
+    expect(
+      shouldShowLandrushBuildGamepadPlacementCursor({
+        editorPlacementActive: true,
+        focusMode: 'placement',
+        gamepadPlacementEngaged: true,
+        parcelAvailable: true,
+        visible: false,
+      }),
+    ).toBe(false)
+    expect(
+      shouldShowLandrushBuildGamepadPlacementCursor({
+        editorPlacementActive: true,
+        focusMode: 'placement',
+        gamepadPlacementEngaged: true,
+        parcelAvailable: true,
+        visible: true,
+      }),
+    ).toBe(true)
+    expect(islandClientSource).toContain('shouldShowLandrushBuildGamepadPlacementCursor({')
+    expect(islandClientSource).toContain('gamepadPlacementEngagedRef.current = false')
     expect(islandClientSource).toContain(
-      'onActivate: placementActive ? undefined : onActivateSquare',
+      'if (input.strength > 0 || confirmPressed) gamepadPlacementEngagedRef.current = true',
     )
+    expect(islandClientSource).toContain('<ringGeometry args={[0.72, 1, 32]} />')
+    expect(islandClientSource).not.toContain('<circleGeometry args={[1, 32]} />')
   })
 
   test('treats Cross/A and Square/X as one rearmable placement-confirm edge', () => {
@@ -146,30 +250,59 @@ describe('Landrush build gamepad navigation', () => {
     expect(islandClientSource).toContain('wasLandrushBuildGamepadPlacementConfirmPressed(')
   })
 
-  test('keeps palette and sidebar navigation inert while a live editor tool owns placement', () => {
-    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', true, false)).toBe(true)
-    expect(isLandrushBuildGamepadNavigationInputReady(true, 'sidebar', true, false)).toBe(true)
-    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', true, true)).toBe(false)
-    expect(isLandrushBuildGamepadNavigationInputReady(true, 'sidebar', true, true)).toBe(false)
-    expect(isLandrushBuildGamepadNavigationInputReady(true, 'placement', true, false)).toBe(false)
-    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', false, false)).toBe(false)
-    expect(isLandrushBuildGamepadNavigationInputReady(false, 'palette', true, false)).toBe(false)
+  test('lets palette navigation replace an auto-armed Wall with Door', () => {
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', true)).toBe(true)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'sidebar', true)).toBe(true)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'placement', true)).toBe(false)
+    expect(isLandrushBuildGamepadNavigationInputReady(true, 'palette', false)).toBe(false)
+    expect(isLandrushBuildGamepadNavigationInputReady(false, 'palette', true)).toBe(false)
     expect(islandClientSource).toContain('isLandrushBuildGamepadNavigationInputReady(')
+    expect(islandClientSource).not.toContain(
+      'isLandrushBuildGamepadNavigationInputReady(\n          buildMode,\n          gamepadBuildFocusModeRef.current,\n          buildEditorInteractionReady,\n          editorPlacementActive,',
+    )
   })
 
-  test('enters the tab rail without opening a tab, then browses and activates separately', () => {
-    expect(
-      resolveLandrushBuildGamepadNavigationAction({ direction: 'left', focusMode: 'palette' }),
-    ).toBe('enter-sidebar')
+  test('uses Circle alone to move out through placement, palette, tabs, and Build', () => {
+    expect(resolveLandrushBuildGamepadCirclePressAction('placement')).toBe('cancel-placement')
+    expect(resolveLandrushBuildGamepadCirclePressAction('palette')).toBe('enter-sidebar')
+    expect(resolveLandrushBuildGamepadCirclePressAction('sidebar')).toBe('exit-build')
+
+    const circleCommandSource = islandClientSource.slice(
+      islandClientSource.indexOf('const activateGamepadCircleCommand'),
+      islandClientSource.indexOf('const activateGamepadBuildPaletteCommand'),
+    )
+    expect(circleCommandSource).toContain('resolveLandrushBuildGamepadCirclePressAction(')
+    expect(circleCommandSource).toContain("circleAction === 'cancel-placement'")
+    expect(circleCommandSource).toContain("circleAction === 'enter-sidebar'")
+    expect(circleCommandSource).toContain("gamepadBuildFocusModeRef.current = 'sidebar'")
+    expect(circleCommandSource).toContain('focusLandrushIslandCurrentGamepadSidebarButton(')
+    expect(circleCommandSource).toContain('enterPlayerView')
+  })
+
+  test('locks D-pad navigation inside either the current palette or the main tab rail', () => {
+    for (const direction of ['down', 'left', 'right', 'up'] as const) {
+      expect(resolveLandrushBuildGamepadNavigationAction({ direction, focusMode: 'palette' })).toBe(
+        'move-palette',
+      )
+      expect(
+        resolveLandrushBuildGamepadNavigationAction({ direction, focusMode: 'placement' }),
+      ).toBeNull()
+    }
     expect(
       resolveLandrushBuildGamepadNavigationAction({ direction: 'down', focusMode: 'sidebar' }),
+    ).toBe('move-sidebar')
+    expect(
+      resolveLandrushBuildGamepadNavigationAction({ direction: 'up', focusMode: 'sidebar' }),
     ).toBe('move-sidebar')
     expect(
       resolveLandrushBuildGamepadNavigationAction({ direction: 'left', focusMode: 'sidebar' }),
     ).toBeNull()
     expect(
       resolveLandrushBuildGamepadNavigationAction({ direction: 'right', focusMode: 'sidebar' }),
-    ).toBe('leave-sidebar')
+    ).toBeNull()
+  })
+
+  test('browses the main tab rail without opening tabs, then enters all three with Cross', () => {
     expect(
       resolveLandrushBuildGamepadSidebarIndex({
         currentIndex: 0,
@@ -225,10 +358,11 @@ describe('Landrush build gamepad navigation', () => {
         focusedPanel: 'settings',
         sidebarCollapsed: false,
       }),
-    ).toEqual({ palettePanel: null, selectPanel: true })
+    ).toEqual({ palettePanel: 'settings', selectPanel: true })
     expect(resolveLandrushBuildGamepadPalettePanel('build')).toBe('build')
     expect(resolveLandrushBuildGamepadPalettePanel('items')).toBe('items')
-    expect(resolveLandrushBuildGamepadPalettePanel('settings')).toBeNull()
+    expect(resolveLandrushBuildGamepadPalettePanel('settings')).toBe('settings')
+    expect(resolveLandrushBuildGamepadPalettePanel('site')).toBeNull()
     expect(islandClientSource).toContain("gamepadBuildFocusModeRef.current = 'sidebar'")
     expect(islandClientSource).toContain('activateLandrushIslandGamepadSidebarButton(')
     expect(islandClientSource).toContain(
@@ -240,6 +374,8 @@ describe('Landrush build gamepad navigation', () => {
     expect(islandClientSource).toContain('return activation.palettePanel')
     expect(islandClientSource).toContain("gamepadBuildFocusModeRef.current = 'palette'")
     expect(islandClientSource).toContain('scheduleLandrushIslandCurrentGamepadBuildPaletteFocus(')
+    expect(islandClientSource).not.toContain("navigationAction === 'enter-sidebar'")
+    expect(islandClientSource).not.toContain("navigationAction === 'leave-sidebar'")
     expect(islandClientSource).not.toContain('activateLandrushIslandGamepadSidebarPanel(')
   })
 
@@ -264,9 +400,7 @@ describe('Landrush build gamepad navigation', () => {
       `{ id: 'terrain', label: 'Terrain', iconSrc: '/icons/mesh.webp', mode: 'terrain-sculpt' }`,
     )
     expect(resolveLandrushBuildGamepadFocusAfterActivation('placement')).toBe('placement')
-    expect(islandClientSource).toContain(
-      "buildMode && gamepadBuildFocusModeRef.current === 'placement'",
-    )
+    expect(islandClientSource).toContain("circleAction === 'cancel-placement'")
     expect(islandClientSource).toContain('cancelLandrushPascalEditingRuntime()')
     expect(islandClientSource).toContain("editor.setContinuation('point', 'repeat')")
     expect(islandClientSource).toContain("useEditor.getState().setContinuation('point', 'once')")
@@ -320,5 +454,60 @@ describe('Landrush build gamepad navigation', () => {
       }),
     ).toBe(true)
     expect(islandClientSource).toContain('shouldAutofocusLandrushBuildGamepadPalette({')
+  })
+
+  test('does not let a delayed palette autofocus clobber controller placement intent', () => {
+    expect(
+      shouldApplyLandrushBuildGamepadPaletteAutofocus({
+        autofocusReady: true,
+        focusMode: 'palette',
+      }),
+    ).toBe(true)
+    expect(
+      shouldApplyLandrushBuildGamepadPaletteAutofocus({
+        autofocusReady: true,
+        focusMode: 'placement',
+      }),
+    ).toBe(false)
+    expect(
+      shouldApplyLandrushBuildGamepadPaletteAutofocus({
+        autofocusReady: true,
+        focusMode: 'sidebar',
+      }),
+    ).toBe(false)
+    expect(
+      shouldApplyLandrushBuildGamepadPaletteAutofocus({
+        autofocusReady: false,
+        focusMode: 'palette',
+      }),
+    ).toBe(false)
+    expect(islandClientSource).toContain('shouldApplyLandrushBuildGamepadPaletteAutofocus({')
+    const scheduledPaletteFocusSource = islandClientSource.slice(
+      islandClientSource.indexOf('function scheduleLandrushIslandCurrentGamepadBuildPaletteFocus'),
+      islandClientSource.indexOf('function moveLandrushIslandGamepadBuildPaletteFocus'),
+    )
+    expect(scheduledPaletteFocusSource).toContain(
+      'focusModeRef: { current: LandrushBuildGamepadFocusMode }',
+    )
+    expect(scheduledPaletteFocusSource).toMatch(
+      /window\.requestAnimationFrame\(\(\) => \{\s+if \(focusModeRef\.current !== 'palette'\) return\s+focusLandrushIslandCurrentGamepadBuildPaletteButton\(buttonRef\)/,
+    )
+    expect(
+      islandClientSource.match(
+        /scheduleLandrushIslandCurrentGamepadBuildPaletteFocus\(\s+gamepadBuildPaletteButtonRef,\s+gamepadBuildFocusModeRef,?\s+\)/g,
+      ),
+    ).toHaveLength(4)
+    expect(islandClientSource).not.toContain(
+      "gamepadBuildFocusModeRef.current = 'palette'\n    gamepadBuildSidebarButtonRef.current = null\n    scheduleLandrushIslandCurrentGamepadBuildPaletteFocus",
+    )
+  })
+
+  test('preserves a held placement confirm across parcel changes', () => {
+    expect(islandClientSource).toContain(
+      'placementConfirmHeldRef.current = Boolean(input?.cross || input?.square)',
+    )
+    expect(islandClientSource).not.toContain(
+      'cursorRef.current = parcel?.centroid ? { ...parcel.centroid } : null\n    emittedCursorRef.current = null\n    gamepadPlacementEngagedRef.current = false\n    placementConfirmHeldRef.current = false',
+    )
   })
 })

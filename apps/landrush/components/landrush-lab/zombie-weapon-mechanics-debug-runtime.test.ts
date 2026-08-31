@@ -7,11 +7,17 @@ import { ZOMBIE_WEAPON_MECHANICS_SCENARIOS } from './zombie-weapon-mechanics-deb
 
 describe('zombie weapon mechanics production proof runtime', () => {
   test('drives the real simulation to the expected five distinct outcomes', () => {
-    const reports = ZOMBIE_WEAPON_MECHANICS_SCENARIOS.map((scenario) =>
-      advanceZombieWeaponMechanicsScenarioRuntime(
-        createZombieWeaponMechanicsScenarioRuntime(scenario),
-        2.6,
-      ),
+    const runtimes = ZOMBIE_WEAPON_MECHANICS_SCENARIOS.map((scenario) =>
+      createZombieWeaponMechanicsScenarioRuntime(scenario),
+    )
+    for (const runtime of runtimes) {
+      expect(runtime.simulation.player.weaponInventoryMask & (1 << runtime.weaponIndex)).not.toBe(0)
+      expect(runtime.simulation.player.weaponAmmoByIndex[runtime.weaponIndex]).toBe(
+        runtime.initialPlayerAmmo,
+      )
+    }
+    const reports = runtimes.map((runtime) =>
+      advanceZombieWeaponMechanicsScenarioRuntime(runtime, 2.6),
     )
 
     expect(reports.map(({ id, shotsFired }) => [id, shotsFired])).toEqual(

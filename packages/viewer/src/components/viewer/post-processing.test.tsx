@@ -51,11 +51,31 @@ type PipelineFrame = {
   pipeline: RenderPipeline
 }
 
+type CameraRenderSnapshot = {
+  camera: THREE.Camera
+  position: [number, number, number]
+  quaternion: [number, number, number, number]
+}
+
+type RenderSubmission = {
+  cameras: CameraRenderSnapshot[]
+  path: 'direct' | 'pipeline'
+}
+
+function snapshotCamera(camera: THREE.Camera): CameraRenderSnapshot {
+  return {
+    camera,
+    position: camera.position.toArray(),
+    quaternion: camera.quaternion.toArray(),
+  }
+}
+
 let passes: PassNode[]
 let textureRequests: Array<{ name: string; pass: PassNode }>
 let disposedPasses: PassNode[]
 let disposedPipelines: RenderPipeline[]
 let frames: PipelineFrame[]
+let submissions: RenderSubmission[]
 let errors: unknown[][]
 let failNextPipelineFrame: boolean
 let observedScene: THREE.Scene | null
@@ -69,6 +89,7 @@ beforeEach(() => {
   disposedPasses = []
   disposedPipelines = []
   frames = []
+  submissions = []
   errors = []
   failNextPipelineFrame = false
   observedScene = null
@@ -118,12 +139,14 @@ beforeEach(() => {
     observedScene?.traverse((object) => {
       if (object instanceof THREE.Mesh) culled.push(object.frustumCulled)
     })
+    const cameras = livePasses.map((pass) => pass.camera)
     frames.push({
-      cameras: livePasses.map((pass) => pass.camera),
+      cameras,
       culled,
       passes: [...livePasses],
       pipeline: this,
     })
+    submissions.push({ cameras: cameras.map(snapshotCamera), path: 'pipeline' })
     if (failNextPipelineFrame) {
       failNextPipelineFrame = false
       throw new Error('injected presentation render failure')
@@ -179,6 +202,7 @@ async function createPresentationRoot({ strict = false } = {}) {
         if (object instanceof THREE.Mesh) culled.push(object.frustumCulled)
       })
       directDraws.push({ camera: drawnCamera, culled, scene: drawnScene })
+      submissions.push({ cameras: [snapshotCamera(drawnCamera)], path: 'direct' })
     },
     setClearAlpha() {},
     setClearColor(color: THREE.Color) {
@@ -334,7 +358,7 @@ describe('post-processing background frame work', () => {
 })
 
 describe('presentation-only post-processing camera lifecycle', () => {
-  test('keeps the warmed presentation context active on a zero-amount transition boundary', async () => {
+  test('uses direct rendering when a transition flag is active at zero amount', async () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()
     try {
@@ -347,20 +371,20 @@ describe('presentation-only post-processing camera lifecycle', () => {
       effect.current.zoomBlurActive = true
       effect.current.zoomBlurAmount = 0
       host.frame()
-      expect(frames).toHaveLength(13)
-      expect(host.directDraws).toHaveLength(1)
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(2)
 
       effect.current.zoomBlurActive = false
       host.frame()
-      expect(frames).toHaveLength(13)
-      expect(host.directDraws).toHaveLength(2)
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(3)
       expect(errors).toEqual([])
     } finally {
       await host.dispose()
     }
   })
 
-  test('keeps the warmed presentation context active for an externally armed camera handoff', async () => {
+  test('uses direct rendering when a presentation flag is armed without an effect contribution', async () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()
     try {
@@ -372,10 +396,38 @@ describe('presentation-only post-processing camera lifecycle', () => {
 
       effect.current.presentationPipelineActive = true
       host.frame()
-      expect(frames).toHaveLength(13)
-      expect(host.directDraws).toHaveLength(1)
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(2)
 
       effect.current.presentationPipelineActive = false
+      host.frame()
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(3)
+      expect(errors).toEqual([])
+    } finally {
+      await host.dispose()
+    }
+  })
+
+  test('uses direct rendering when blur strength removes an otherwise active contribution', async () => {
+    const host = await createPresentationRoot()
+    const effect = presentationRef()
+    try {
+      await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
+      for (let index = 0; index < 12; index += 1) host.frame()
+      host.frame()
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(1)
+
+      effect.current.presentationPipelineActive = true
+      effect.current.zoomBlurActive = true
+      effect.current.zoomBlurAmount = 0.8
+      effect.current.zoomBlurStrength = 0
+      host.frame()
+      expect(frames).toHaveLength(12)
+      expect(host.directDraws).toHaveLength(2)
+
+      effect.current.zoomBlurStrength = 1
       host.frame()
       expect(frames).toHaveLength(13)
       expect(host.directDraws).toHaveLength(2)
@@ -421,6 +473,10 @@ describe('presentation-only post-processing camera lifecycle', () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()
     const zombieCamera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.5, 400)
+    host.camera.position.set(11, 13, -17)
+    host.camera.quaternion.set(0.1, 0.2, 0.3, 0.9).normalize()
+    zombieCamera.position.set(-23, 29, 31)
+    zombieCamera.quaternion.set(-0.2, 0.4, -0.1, 0.8).normalize()
     const settlements: Array<readonly [number, 'failed' | 'rendered']> = []
     effect.current.pipelinePrewarmOnRenderSettled = (revision, outcome) => {
       settlements.push([revision, outcome])
@@ -436,16 +492,22 @@ describe('presentation-only post-processing camera lifecycle', () => {
       effect.current.pipelinePrewarmCamera = zombieCamera
       effect.current.pipelinePrewarmRenderPath = 'direct'
       effect.current.pipelinePrewarmRequestRevision = 11
+      const submissionStart = submissions.length
       host.frame()
 
       expect(frames).toHaveLength(12)
-      expect(host.directDraws).toHaveLength(2)
-      expect(host.directDraws.at(-1)?.camera).toBe(zombieCamera)
-      expect(host.directDraws.at(-1)?.culled).toEqual([false, false])
+      expect(host.directDraws).toHaveLength(3)
+      expect(submissions.slice(submissionStart)).toEqual([
+        { cameras: [snapshotCamera(zombieCamera)], path: 'direct' },
+        { cameras: [snapshotCamera(host.camera)], path: 'direct' },
+      ])
+      expect(host.directDraws.at(-2)?.culled).toEqual([false, false])
+      expect(host.directDraws.at(-1)?.culled).toEqual([true, false])
       expect(effect.current.pipelinePrewarmRenderedRevision).toBe(11)
       expect(effect.current.pipelinePrewarmRenderedCamera).toBe(zombieCamera)
       expect(effect.current.pipelinePrewarmCameraMatched).toBe(true)
       expect(settlements).toEqual([[11, 'rendered']])
+      expect(host.state().camera).toBe(host.camera)
 
       host.frame()
       expect(host.directDraws.at(-1)?.camera).toBe(host.camera)
@@ -456,10 +518,14 @@ describe('presentation-only post-processing camera lifecycle', () => {
     }
   })
 
-  test('uses a pending prewarm camera only for the hidden render pass', async () => {
+  test('restores the live camera before the final presentation submission', async () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()
     const zombieCamera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.5, 400)
+    host.camera.position.set(11, 13, -17)
+    host.camera.quaternion.set(0.1, 0.2, 0.3, 0.9).normalize()
+    zombieCamera.position.set(-23, 29, 31)
+    zombieCamera.quaternion.set(-0.2, 0.4, -0.1, 0.8).normalize()
     effect.current.pipelinePrewarmOnRenderSettled = () => {
       effect.current.pipelinePrewarmCamera = undefined
     }
@@ -471,14 +537,23 @@ describe('presentation-only post-processing camera lifecycle', () => {
 
       effect.current.pipelinePrewarmCamera = zombieCamera
       effect.current.pipelinePrewarmRequestRevision = 9
+      effect.current.zoomBlurAmount = 0.6
+      const submissionStart = submissions.length
       host.frame()
-      expect(frames.at(-1)?.cameras).toEqual([zombieCamera])
-      expect(frames.at(-1)?.culled).toEqual([false, false])
+      expect(submissions.slice(submissionStart)).toEqual([
+        { cameras: [snapshotCamera(zombieCamera)], path: 'pipeline' },
+        { cameras: [snapshotCamera(host.camera)], path: 'pipeline' },
+      ])
+      expect(frames.at(-2)?.cameras).toEqual([zombieCamera])
+      expect(frames.at(-2)?.culled).toEqual([false, false])
+      expect(frames.at(-1)?.cameras).toEqual([host.camera])
+      expect(frames.at(-1)?.culled).toEqual([true, false])
       expect(effect.current.pipelinePrewarmRenderedCamera).toBe(zombieCamera)
       expect(effect.current.pipelinePrewarmCameraMatched).toBe(true)
       expect(host.state().camera).toBe(host.camera)
       expect(effect.current.pipelinePrewarmCamera).toBeUndefined()
 
+      effect.current.zoomBlurAmount = 0
       host.frame()
       expect(host.directDraws.at(-1)?.camera).toBe(host.camera)
       expect(host.directDraws.at(-1)?.culled).toEqual([true, false])
@@ -488,29 +563,55 @@ describe('presentation-only post-processing camera lifecycle', () => {
     }
   })
 
-  test('does not falsely acknowledge a failed pending pipeline prewarm render', async () => {
+  test('restores the live camera once when an alternate-camera prewarm pipeline render fails', async () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()
+    const zombieCamera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.5, 400)
+    host.camera.position.set(11, 13, -17)
+    host.camera.quaternion.set(0.1, 0.2, 0.3, 0.9).normalize()
+    zombieCamera.position.set(-23, 29, 31)
+    zombieCamera.quaternion.set(-0.2, 0.4, -0.1, 0.8).normalize()
     const settlements: Array<readonly [number, 'failed' | 'rendered']> = []
     effect.current.pipelinePrewarmOnRenderSettled = (revision, outcome) => {
       settlements.push([revision, outcome])
+      effect.current.pipelinePrewarmCamera = undefined
+      effect.current.pipelinePrewarmRequestRevision =
+        effect.current.pipelinePrewarmRenderedRevision ?? 0
     }
     try {
       await host.render(<PostProcessingPasses disablePostFx presentationEffectRef={effect} />)
       for (let index = 0; index < 12; index += 1) host.frame()
       host.frame()
+      effect.current.pipelinePrewarmCamera = zombieCamera
       effect.current.pipelinePrewarmRequestRevision = 8
+      const submissionStart = submissions.length
       failNextPipelineFrame = true
       host.frame()
 
       expect(frames).toHaveLength(13)
+      expect(submissions.slice(submissionStart)).toEqual([
+        { cameras: [snapshotCamera(zombieCamera)], path: 'pipeline' },
+        { cameras: [snapshotCamera(host.camera)], path: 'direct' },
+      ])
+      expect(submissions.at(-1)).toEqual({
+        cameras: [snapshotCamera(host.camera)],
+        path: 'direct',
+      })
       expect(effect.current.pipelinePrewarmRenderedRevision).toBeUndefined()
       expect(effect.current.pipelinePrewarmRenderedCamera).toBeUndefined()
       expect(effect.current.pipelinePrewarmCameraMatched).toBe(false)
       expect(effect.current.pipelinePrewarmFailedRevision).toBe(8)
       expect(settlements).toEqual([[8, 'failed']])
+      expect(host.state().camera).toBe(host.camera)
       expect(errors).toHaveLength(1)
       expect(disposedPipelines).toHaveLength(1)
+
+      host.frame()
+      expect(submissions.at(-1)).toEqual({
+        cameras: [snapshotCamera(host.camera)],
+        path: 'direct',
+      })
+      expect(settlements).toEqual([[8, 'failed']])
     } finally {
       await host.dispose()
     }

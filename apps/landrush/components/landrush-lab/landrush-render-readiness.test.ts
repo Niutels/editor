@@ -1,12 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  Box3,
   BoxGeometry,
   Group,
   InstancedMesh,
+  Matrix4,
   MeshBasicMaterial,
   PerspectiveCamera,
   PointLight,
   Scene,
+  Sphere,
+  Vector3,
 } from 'three'
 import {
   beginLandrushPresentationPipelinePrewarmFrame,
@@ -25,6 +29,24 @@ function deferred<T>() {
     resolve = resolvePromise
   })
   return { promise, resolve }
+}
+
+function readInstanceMatrix(mesh: InstancedMesh, index = 0) {
+  const matrix = new Matrix4()
+  mesh.getMatrixAt(index, matrix)
+  return matrix
+}
+
+function expectBoundingBoxRestored(mesh: InstancedMesh, object: Box3, value: Box3) {
+  expect(mesh.boundingBox).toBe(object)
+  expect(mesh.boundingBox?.min.toArray()).toEqual(value.min.toArray())
+  expect(mesh.boundingBox?.max.toArray()).toEqual(value.max.toArray())
+}
+
+function expectBoundingSphereRestored(mesh: InstancedMesh, object: Sphere, value: Sphere) {
+  expect(mesh.boundingSphere).toBe(object)
+  expect(mesh.boundingSphere?.center.toArray()).toEqual(value.center.toArray())
+  expect(mesh.boundingSphere?.radius).toBe(value.radius)
 }
 
 async function flushMicrotasksUntil(condition: () => boolean) {
@@ -70,6 +92,16 @@ describe('Landrush render readiness compile coordination', () => {
     instances.visible = false
     instances.frustumCulled = true
     instances.count = 0
+    const originalInstanceMatrix = new Matrix4().makeTranslation(3, 4, 5)
+    instances.setMatrixAt(0, originalInstanceMatrix)
+    instances.instanceMatrix.needsUpdate = true
+    const originalInstanceMatrixVersion = instances.instanceMatrix.version
+    const originalBoundingBox = new Box3(new Vector3(-3, -2, -1), new Vector3(4, 5, 6))
+    const originalBoundingBoxValue = originalBoundingBox.clone()
+    const originalBoundingSphere = new Sphere(new Vector3(7, 8, 9), 10)
+    const originalBoundingSphereValue = originalBoundingSphere.clone()
+    instances.boundingBox = originalBoundingBox
+    instances.boundingSphere = originalBoundingSphere
     root.layers.set(3)
     child.layers.set(5)
     const rootLayerMask = root.layers.mask
@@ -102,6 +134,20 @@ describe('Landrush render readiness compile coordination', () => {
       expect(instances.visible).toBe(true)
       expect(instances.frustumCulled).toBe(false)
       expect(instances.count).toBe(1)
+      const concealedMatrix = readInstanceMatrix(instances)
+      expect(concealedMatrix.elements.every(Number.isFinite)).toBe(true)
+      expect(concealedMatrix.determinant()).toBe(1)
+      expect(concealedMatrix.elements[0]).toBe(1)
+      expect(concealedMatrix.elements[5]).toBe(1)
+      expect(concealedMatrix.elements[10]).toBe(1)
+      expect(concealedMatrix.elements[13]).toBe(-1_000_000)
+      const concealedInstanceMatrixVersion = instances.instanceMatrix.version
+      expect(concealedInstanceMatrixVersion).toBeGreaterThan(originalInstanceMatrixVersion)
+      originalBoundingBox.min.set(100, 101, 102)
+      originalBoundingSphere.center.set(103, 104, 105)
+      originalBoundingSphere.radius = 106
+      instances.boundingBox = new Box3(new Vector3(107, 108, 109), new Vector3(110, 111, 112))
+      instances.boundingSphere = new Sphere(new Vector3(113, 114, 115), 116)
       expect(parent.children).toEqual(originalParentChildren)
       expect(root.children).toEqual(originalRootChildren)
       expect(root.layers.mask).toBe(rootLayerMask)
@@ -115,6 +161,10 @@ describe('Landrush render readiness compile coordination', () => {
       expect(instances.visible).toBe(false)
       expect(instances.frustumCulled).toBe(true)
       expect(instances.count).toBe(0)
+      expect(readInstanceMatrix(instances).elements).toEqual(originalInstanceMatrix.elements)
+      expect(instances.instanceMatrix.version).toBeGreaterThan(concealedInstanceMatrixVersion)
+      expectBoundingBoxRestored(instances, originalBoundingBox, originalBoundingBoxValue)
+      expectBoundingSphereRestored(instances, originalBoundingSphere, originalBoundingSphereValue)
       expect(parent.children).toEqual(originalParentChildren)
       expect(root.children).toEqual(originalRootChildren)
       await pending
@@ -430,8 +480,19 @@ describe('Landrush render readiness compile coordination', () => {
     const zombieCamera = new PerspectiveCamera()
     const scene = new Scene()
     const root = new Group()
+    const geometry = new BoxGeometry()
+    const material = new MeshBasicMaterial()
+    const instances = new InstancedMesh(geometry, material, 2)
+    const originalInstanceMatrix = new Matrix4().makeTranslation(7, 8, 9)
+    const originalBoundingBox = new Box3(new Vector3(-7, -8, -9), new Vector3(10, 11, 12))
+    const originalBoundingBoxValue = originalBoundingBox.clone()
     const state: LandrushPresentationPipelinePrewarmState = {}
     root.visible = false
+    instances.count = 0
+    instances.setMatrixAt(0, originalInstanceMatrix)
+    instances.boundingBox = originalBoundingBox
+    instances.boundingSphere = null
+    root.add(instances)
     scene.add(root)
     const unregister = registerLandrushPresentationPipelinePrewarm({
       invalidate: () => undefined,
@@ -448,10 +509,21 @@ describe('Landrush render readiness compile coordination', () => {
     beginLandrushPresentationPipelinePrewarmFrame(renderer)
     expect(state.pipelinePrewarmCamera).toBe(zombieCamera)
     expect(root.visible).toBe(true)
+    expect(instances.count).toBe(1)
+    expect(readInstanceMatrix(instances).elements).not.toEqual(originalInstanceMatrix.elements)
+    originalBoundingBox.max.set(201, 202, 203)
+    instances.boundingBox = new Box3(new Vector3(204, 205, 206), new Vector3(207, 208, 209))
+    instances.boundingSphere = new Sphere(new Vector3(210, 211, 212), 213)
     unregister()
     expect(state.pipelinePrewarmCamera).toBeUndefined()
     expect(root.visible).toBe(false)
+    expect(instances.count).toBe(0)
+    expect(readInstanceMatrix(instances).elements).toEqual(originalInstanceMatrix.elements)
+    expectBoundingBoxRestored(instances, originalBoundingBox, originalBoundingBoxValue)
+    expect(instances.boundingSphere).toBeNull()
     await expect(pending).rejects.toThrow('was unmounted')
+    geometry.dispose()
+    material.dispose()
   })
 
   test('compiles zero-count instances as one and restores exact state before awaiting', async () => {
@@ -461,16 +533,30 @@ describe('Landrush render readiness compile coordination', () => {
     const geometry = new BoxGeometry()
     const material = new MeshBasicMaterial()
     const zeroCount = new InstancedMesh(geometry, material, 4)
+    const zeroCapacity = new InstancedMesh(geometry, material, 0)
     const populated = new InstancedMesh(geometry, material, 4)
     ancestor.visible = false
     root.visible = false
     zeroCount.count = 0
     zeroCount.visible = false
     zeroCount.frustumCulled = true
+    const originalZeroCountMatrix = new Matrix4().makeTranslation(11, 12, 13)
+    zeroCount.setMatrixAt(0, originalZeroCountMatrix)
+    const originalZeroCountBoundingBox = new Box3(
+      new Vector3(-11, -12, -13),
+      new Vector3(14, 15, 16),
+    )
+    const originalZeroCountBoundingBoxValue = originalZeroCountBoundingBox.clone()
+    const originalZeroCountBoundingSphere = new Sphere(new Vector3(17, 18, 19), 20)
+    const originalZeroCountBoundingSphereValue = originalZeroCountBoundingSphere.clone()
+    zeroCount.boundingBox = originalZeroCountBoundingBox
+    zeroCount.boundingSphere = originalZeroCountBoundingSphere
     populated.count = 2
+    const originalPopulatedMatrix = new Matrix4().makeTranslation(21, 22, 23)
+    populated.setMatrixAt(0, originalPopulatedMatrix)
     populated.visible = false
     populated.frustumCulled = true
-    root.add(zeroCount, populated)
+    root.add(zeroCount, zeroCapacity, populated)
     ancestor.add(root)
     let compileObserved = false
 
@@ -485,9 +571,28 @@ describe('Landrush render readiness compile coordination', () => {
           expect(zeroCount.visible).toBe(true)
           expect(zeroCount.frustumCulled).toBe(false)
           expect(zeroCount.count).toBe(1)
+          const concealedMatrix = readInstanceMatrix(zeroCount)
+          expect(concealedMatrix.elements.every(Number.isFinite)).toBe(true)
+          expect(concealedMatrix.determinant()).toBe(1)
+          expect(concealedMatrix.elements[0]).toBe(1)
+          expect(concealedMatrix.elements[5]).toBe(1)
+          expect(concealedMatrix.elements[10]).toBe(1)
+          expect(concealedMatrix.elements[13]).toBe(-1_000_000)
+          expect(zeroCapacity.count).toBe(0)
+          originalZeroCountBoundingBox.min.set(301, 302, 303)
+          originalZeroCountBoundingSphere.center.set(304, 305, 306)
+          originalZeroCountBoundingSphere.radius = 307
+          zeroCount.boundingBox = new Box3(new Vector3(308, 309, 310), new Vector3(311, 312, 313))
+          zeroCount.boundingSphere = new Sphere(new Vector3(314, 315, 316), 317)
+          zeroCapacity.boundingBox = new Box3(
+            new Vector3(318, 319, 320),
+            new Vector3(321, 322, 323),
+          )
+          zeroCapacity.boundingSphere = new Sphere(new Vector3(324, 325, 326), 327)
           expect(populated.visible).toBe(true)
           expect(populated.frustumCulled).toBe(false)
           expect(populated.count).toBe(2)
+          expect(readInstanceMatrix(populated).elements).toEqual(originalPopulatedMatrix.elements)
           return compilation.promise
         },
       },
@@ -501,9 +606,24 @@ describe('Landrush render readiness compile coordination', () => {
     expect(zeroCount.visible).toBe(false)
     expect(zeroCount.frustumCulled).toBe(true)
     expect(zeroCount.count).toBe(0)
+    expect(readInstanceMatrix(zeroCount).elements).toEqual(originalZeroCountMatrix.elements)
+    expectBoundingBoxRestored(
+      zeroCount,
+      originalZeroCountBoundingBox,
+      originalZeroCountBoundingBoxValue,
+    )
+    expectBoundingSphereRestored(
+      zeroCount,
+      originalZeroCountBoundingSphere,
+      originalZeroCountBoundingSphereValue,
+    )
+    expect(zeroCapacity.count).toBe(0)
+    expect(zeroCapacity.boundingBox).toBeNull()
+    expect(zeroCapacity.boundingSphere).toBeNull()
     expect(populated.visible).toBe(false)
     expect(populated.frustumCulled).toBe(true)
     expect(populated.count).toBe(2)
+    expect(readInstanceMatrix(populated).elements).toEqual(originalPopulatedMatrix.elements)
     compilation.resolve()
     await pending
     geometry.dispose()
@@ -520,6 +640,16 @@ describe('Landrush render readiness compile coordination', () => {
       mesh.count = 0
       mesh.visible = false
       mesh.frustumCulled = true
+      const originalMatrix = new Matrix4().makeTranslation(17, 18, 19)
+      mesh.setMatrixAt(0, originalMatrix)
+      const originalBoundingBox =
+        failure === 'throw' ? new Box3(new Vector3(-17, -18, -19), new Vector3(20, 21, 22)) : null
+      const originalBoundingBoxValue = originalBoundingBox?.clone()
+      const originalBoundingSphere =
+        failure === 'reject' ? new Sphere(new Vector3(23, 24, 25), 26) : null
+      const originalBoundingSphereValue = originalBoundingSphere?.clone()
+      mesh.boundingBox = originalBoundingBox
+      mesh.boundingSphere = originalBoundingSphere
       root.add(mesh)
 
       await expect(
@@ -531,6 +661,14 @@ describe('Landrush render readiness compile coordination', () => {
               expect(mesh.visible).toBe(true)
               expect(mesh.frustumCulled).toBe(false)
               expect(mesh.count).toBe(1)
+              expect(readInstanceMatrix(mesh).elements).not.toEqual(originalMatrix.elements)
+              originalBoundingBox?.min.set(401, 402, 403)
+              if (originalBoundingSphere) {
+                originalBoundingSphere.center.set(404, 405, 406)
+                originalBoundingSphere.radius = 407
+              }
+              mesh.boundingBox = new Box3(new Vector3(408, 409, 410), new Vector3(411, 412, 413))
+              mesh.boundingSphere = new Sphere(new Vector3(414, 415, 416), 417)
               if (failure === 'throw') throw new Error('compile failed')
               return Promise.reject(new Error('compile failed'))
             },
@@ -543,6 +681,17 @@ describe('Landrush render readiness compile coordination', () => {
       expect(mesh.visible).toBe(false)
       expect(mesh.frustumCulled).toBe(true)
       expect(mesh.count).toBe(0)
+      expect(readInstanceMatrix(mesh).elements).toEqual(originalMatrix.elements)
+      if (originalBoundingBox && originalBoundingBoxValue) {
+        expectBoundingBoxRestored(mesh, originalBoundingBox, originalBoundingBoxValue)
+      } else {
+        expect(mesh.boundingBox).toBeNull()
+      }
+      if (originalBoundingSphere && originalBoundingSphereValue) {
+        expectBoundingSphereRestored(mesh, originalBoundingSphere, originalBoundingSphereValue)
+      } else {
+        expect(mesh.boundingSphere).toBeNull()
+      }
       geometry.dispose()
       material.dispose()
     }

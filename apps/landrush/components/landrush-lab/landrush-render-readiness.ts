@@ -1,4 +1,5 @@
-import type { Camera, InstancedMesh, Object3D, Scene } from 'three'
+import type { Box3, Camera, InstancedMesh, Object3D, Scene, Sphere } from 'three'
+import { Matrix4 } from 'three'
 
 export const LANDRUSH_RENDER_READINESS_TIMEOUT_MS = 15_000
 
@@ -76,10 +77,15 @@ export type LandrushPresentationPipelinePrewarmRequest = Readonly<{
 
 type FlagSnapshot = Readonly<{
   frustumCulled: boolean
+  instancedMeshBoundingBox: Readonly<{ object: Box3; value: Box3 }> | null
+  instancedMeshBoundingSphere: Readonly<{ object: Sphere; value: Sphere }> | null
   instancedMeshCount: number | null
+  instancedMeshMatrix0: Matrix4 | null
   object: Object3D
   visible: boolean
 }>
+
+const CONCEALED_INSTANCE_MATRIX = new Matrix4().makeTranslation(0, -1_000_000, 0)
 
 type RenderReadinessCoordinatorEntry = {
   callbacks: Set<(status: LandrushRenderReadinessStatus) => void>
@@ -916,9 +922,25 @@ function forceLandrushRepresentativesRenderable(
   const snapshot = (object: Object3D) => {
     const instancedMesh = object as InstancedMesh
     if (!snapshots.has(object)) {
+      const snapshotInstancedMeshBounds =
+        instancedMesh.isInstancedMesh === true && instancedMesh.count === 0
+      const instancedMeshBoundingBox =
+        snapshotInstancedMeshBounds && instancedMesh.boundingBox
+          ? { object: instancedMesh.boundingBox, value: instancedMesh.boundingBox.clone() }
+          : null
+      const instancedMeshBoundingSphere =
+        snapshotInstancedMeshBounds && instancedMesh.boundingSphere
+          ? { object: instancedMesh.boundingSphere, value: instancedMesh.boundingSphere.clone() }
+          : null
+      const instancedMeshMatrix0 =
+        snapshotInstancedMeshBounds && instancedMesh.instanceMatrix.count > 0 ? new Matrix4() : null
+      if (instancedMeshMatrix0) instancedMesh.getMatrixAt(0, instancedMeshMatrix0)
       snapshots.set(object, {
         frustumCulled: object.frustumCulled,
+        instancedMeshBoundingBox,
+        instancedMeshBoundingSphere,
         instancedMeshCount: instancedMesh.isInstancedMesh === true ? instancedMesh.count : null,
+        instancedMeshMatrix0,
         object,
         visible: object.visible,
       })
@@ -931,7 +953,13 @@ function forceLandrushRepresentativesRenderable(
     if (light.isLight !== true || representedLights.has(object)) object.visible = true
     if (renderable) {
       object.frustumCulled = false
-      if (instancedMesh.isInstancedMesh === true && instancedMesh.count === 0) {
+      if (
+        instancedMesh.isInstancedMesh === true &&
+        instancedMesh.count === 0 &&
+        instancedMesh.instanceMatrix.count > 0
+      ) {
+        instancedMesh.setMatrixAt(0, CONCEALED_INSTANCE_MATRIX)
+        instancedMesh.instanceMatrix.needsUpdate = true
         instancedMesh.count = 1
       }
     }
@@ -966,7 +994,27 @@ function forceLandrushRepresentativesRenderable(
       snapshot.object.frustumCulled = snapshot.frustumCulled
       if (snapshot.instancedMeshCount !== null) {
         const instancedMesh = snapshot.object as InstancedMesh
+        if (snapshot.instancedMeshMatrix0) {
+          instancedMesh.setMatrixAt(0, snapshot.instancedMeshMatrix0)
+          instancedMesh.instanceMatrix.needsUpdate = true
+        }
         instancedMesh.count = snapshot.instancedMeshCount
+        if (snapshot.instancedMeshCount === 0) {
+          if (snapshot.instancedMeshBoundingBox) {
+            snapshot.instancedMeshBoundingBox.object.copy(snapshot.instancedMeshBoundingBox.value)
+            instancedMesh.boundingBox = snapshot.instancedMeshBoundingBox.object
+          } else {
+            instancedMesh.boundingBox = null
+          }
+          if (snapshot.instancedMeshBoundingSphere) {
+            snapshot.instancedMeshBoundingSphere.object.copy(
+              snapshot.instancedMeshBoundingSphere.value,
+            )
+            instancedMesh.boundingSphere = snapshot.instancedMeshBoundingSphere.object
+          } else {
+            instancedMesh.boundingSphere = null
+          }
+        }
       }
     }
   }

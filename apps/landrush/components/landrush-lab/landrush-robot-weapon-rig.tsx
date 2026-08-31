@@ -2,9 +2,14 @@
 
 import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, memo, type RefObject, Suspense, useMemo, useRef } from 'react'
-import { Euler, type Group, MathUtils, type Object3D, Quaternion, Vector3 } from 'three'
+import { Euler, type Group, MathUtils, Matrix4, type Object3D, Quaternion, Vector3 } from 'three'
 import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
-import { LandrushRobotShoulderTorchRig } from './landrush-robot-shoulder-torch-rig'
+import {
+  createLandrushRobotShoulderTorchPoseState,
+  type LandrushRobotShoulderTorchPoseState,
+  LandrushRobotShoulderTorchRig,
+  updateLandrushRobotShoulderTorchPoseState,
+} from './landrush-robot-shoulder-torch-rig'
 import {
   captureLandrushRobotWeaponRelativeHandQuaternion,
   createLandrushRobotTwoBoneIkScratch,
@@ -124,6 +129,7 @@ type LandrushRobotWeaponRigScratch = {
   fitOffset: Vector3
   fitQuaternion: Quaternion
   fromDirection: Vector3
+  inverseParentWorldMatrix: Matrix4
   inverseWeaponQuaternion: Quaternion
   leftGripTarget: Vector3
   leftHandPosition: Vector3
@@ -138,13 +144,14 @@ type LandrushRobotWeaponRigScratch = {
   rightDirection: Vector3
   rightHandPosition: Vector3
   shoulderCenter: Vector3
-  shoulderLeft: Vector3
-  shoulderRight: Vector3
+  shoulderTorchPose: LandrushRobotShoulderTorchPoseState
   secondaryPalmOffset: Vector3
   toDirection: Vector3
   weaponForward: Vector3
   weaponOrigin: Vector3
   weaponQuaternion: Quaternion
+  worldDecomposePosition: Vector3
+  worldDecomposeScale: Vector3
   wristPosition: Vector3
 }
 
@@ -195,6 +202,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   const primaryHandMarkerRef = useRef<Group>(null)
   const secondaryHandMarkerRef = useRef<Group>(null)
   const bonesRef = useRef<LandrushRobotArmBones | null>(null)
+  const bonesRootRef = useRef<Object3D | null>(null)
   const torsoAimOffsetRef = useRef(0)
   const snapshotFrameRef = useRef(0)
   const scratch = useMemo<LandrushRobotWeaponRigScratch>(
@@ -214,6 +222,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       fitOffset: new Vector3(),
       fitQuaternion: new Quaternion(),
       fromDirection: new Vector3(),
+      inverseParentWorldMatrix: new Matrix4(),
       inverseWeaponQuaternion: new Quaternion(),
       leftGripTarget: new Vector3(),
       leftHandPosition: new Vector3(),
@@ -228,17 +237,19 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       rightDirection: new Vector3(),
       rightHandPosition: new Vector3(),
       shoulderCenter: new Vector3(),
-      shoulderLeft: new Vector3(),
-      shoulderRight: new Vector3(),
+      shoulderTorchPose: createLandrushRobotShoulderTorchPoseState(),
       secondaryPalmOffset: new Vector3(),
       toDirection: new Vector3(),
       weaponForward: new Vector3(),
       weaponOrigin: new Vector3(),
       weaponQuaternion: new Quaternion(),
+      worldDecomposePosition: new Vector3(),
+      worldDecomposeScale: new Vector3(),
       wristPosition: new Vector3(),
     }),
     [],
   )
+  const shoulderTorchPoseRef = useRef(scratch.shoulderTorchPose)
   const armBindingRef = useRef<LandrushRobotWeaponArmBinding>({
     dominantHand,
     initialized: false,
@@ -253,12 +264,20 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   const recoilPoseRef = useRef(createZombieEscapeWeaponRecoilPose())
 
   useFrame((_, delta) => {
+    scratch.shoulderTorchPose.ready = false
     const weaponRoot = weaponRootRef.current
+    const visualRoot = visualRootRef.current
+    const combatState = combatStateRef.current
+    if (bonesRootRef.current !== visualRoot) {
+      bonesRootRef.current = visualRoot
+      bonesRef.current = null
+    }
+    const bones = visualRoot ? (bonesRef.current ?? findLandrushRobotArmBones(visualRoot)) : null
+    bonesRef.current = bones
     if (!active) {
       if (weaponRoot) weaponRoot.visible = false
       armBindingRef.current.initialized = false
       muzzlePoseRef.current.ready = false
-      const combatState = combatStateRef.current
       resetZombieEscapeWeaponRecoil(
         recoilStateRef.current,
         combatState?.weaponIndex ?? 0,
@@ -266,9 +285,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       )
       return
     }
-    const visualRoot = visualRootRef.current
-    const combatState = combatStateRef.current
-    if (!weaponRoot || !visualRoot || !combatState) {
+    if (!weaponRoot || !visualRoot || !combatState || !bones) {
       if (weaponRoot) weaponRoot.visible = false
       armBindingRef.current.initialized = false
       muzzlePoseRef.current.ready = false
@@ -288,15 +305,6 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       return
     }
 
-    const bones = bonesRef.current ?? findLandrushRobotArmBones(visualRoot)
-    bonesRef.current = bones
-    if (!bones) {
-      weaponRoot.visible = false
-      armBindingRef.current.initialized = false
-      muzzlePoseRef.current.ready = false
-      return
-    }
-
     weaponRoot.visible = true
     const meleeActive = combatState.meleePhase !== 'idle'
     for (let index = 0; index < weaponVisualRefs.current.length; index += 1) {
@@ -304,7 +312,6 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       if (visual) visual.visible = index === weaponIndex
     }
 
-    visualRoot.updateWorldMatrix(true, true)
     const torsoAimTarget = resolveZombieEscapeTorsoAimOffset(
       combatState.aimAngle,
       combatState.movementHeading,
@@ -320,9 +327,17 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
     scratch.deltaQuaternion.setFromAxisAngle(WORLD_UP, torsoAimOffsetRef.current * 0.58)
     bones.spine02.quaternion.multiply(scratch.deltaQuaternion).normalize()
     visualRoot.updateWorldMatrix(true, true)
-    bones.leftShoulder.getWorldPosition(scratch.shoulderLeft)
-    bones.rightShoulder.getWorldPosition(scratch.shoulderRight)
-    scratch.shoulderCenter.copy(scratch.shoulderLeft).add(scratch.shoulderRight).multiplyScalar(0.5)
+    const shoulderTorchPose = updateLandrushRobotShoulderTorchPoseState(
+      scratch.shoulderTorchPose,
+      visualRoot,
+      bones.leftShoulder.matrixWorld,
+      bones.rightShoulder.matrixWorld,
+      visualRoot.matrixWorld,
+    )
+    scratch.shoulderCenter
+      .copy(shoulderTorchPose.leftShoulder)
+      .add(shoulderTorchPose.rightShoulder)
+      .multiplyScalar(0.5)
 
     const fitScale = MathUtils.clamp(fitAdjustment?.scale ?? 1, 0.35, 1.75)
     scratch.fitEuler.set(
@@ -360,26 +375,26 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       armBinding.supportHandEnabled !== supportHandEnabled
     ) {
       scratch.inverseWeaponQuaternion.copy(scratch.ballisticQuaternion).invert()
-      primaryHand.getWorldQuaternion(scratch.currentWorldQuaternion)
+      readLandrushRobotWorldQuaternion(primaryHand, scratch.currentWorldQuaternion, scratch)
       captureLandrushRobotWeaponRelativeHandQuaternion(
         scratch.ballisticQuaternion,
         scratch.currentWorldQuaternion,
         armBinding.primaryWeaponRelativeHandQuaternion,
       )
-      secondaryHand.getWorldQuaternion(scratch.currentWorldQuaternion)
+      readLandrushRobotWorldQuaternion(secondaryHand, scratch.currentWorldQuaternion, scratch)
       captureLandrushRobotWeaponRelativeHandQuaternion(
         scratch.ballisticQuaternion,
         scratch.currentWorldQuaternion,
         armBinding.secondaryWeaponRelativeHandQuaternion,
       )
-      primaryArm.getWorldPosition(scratch.currentJoint)
-      primaryForeArm.getWorldPosition(scratch.currentEnd)
+      scratch.currentJoint.setFromMatrixPosition(primaryArm.matrixWorld)
+      scratch.currentEnd.setFromMatrixPosition(primaryForeArm.matrixWorld)
       armBinding.primaryElbowPoleWeaponSpace
         .copy(scratch.currentEnd)
         .sub(scratch.currentJoint)
         .applyQuaternion(scratch.inverseWeaponQuaternion)
-      secondaryArm.getWorldPosition(scratch.currentJoint)
-      secondaryForeArm.getWorldPosition(scratch.currentEnd)
+      scratch.currentJoint.setFromMatrixPosition(secondaryArm.matrixWorld)
+      scratch.currentEnd.setFromMatrixPosition(secondaryForeArm.matrixWorld)
       armBinding.secondaryElbowPoleWeaponSpace
         .copy(scratch.currentEnd)
         .sub(scratch.currentJoint)
@@ -466,8 +481,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
       )
     }
 
-    visualRoot.updateWorldMatrix(true, true)
-    primaryHand.getWorldPosition(scratch.rightHandPosition)
+    scratch.rightHandPosition.setFromMatrixPosition(primaryHand.matrixWorld)
     scratch.weaponOrigin
       .copy(scratch.rightHandPosition)
       .sub(scratch.anchorOffset)
@@ -507,8 +521,6 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
         scratch,
       )
     }
-    visualRoot.updateWorldMatrix(true, true)
-
     applyWorldWeaponTransform(
       weaponRoot,
       scratch.weaponOrigin,
@@ -532,7 +544,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
     muzzlePose.weaponIndex = weaponIndex
 
     if (debug || onFitSnapshot) {
-      secondaryHand.getWorldPosition(scratch.leftHandPosition)
+      scratch.leftHandPosition.setFromMatrixPosition(secondaryHand.matrixWorld)
       updateMarker(primaryTargetMarkerRef.current, scratch.primaryGripTarget)
       updateMarker(secondaryTargetMarkerRef.current, scratch.leftGripTarget)
       updateMarker(primaryHandMarkerRef.current, scratch.rightHandPosition)
@@ -561,6 +573,7 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
           combatStateRef={combatStateRef}
           framePriority={framePriority + 0.005}
           lightingStateRef={shoulderTorchLightingStateRef}
+          poseStateRef={shoulderTorchPoseRef}
           renderReadinessRegistry={renderReadinessRegistry}
           visualRootRef={visualRootRef}
         />
@@ -663,10 +676,9 @@ function solveLandrushRobotArmToTarget(
   weaponQuaternion: Quaternion,
   scratch: LandrushRobotWeaponRigScratch,
 ) {
-  upperArm.updateWorldMatrix(true, true)
-  upperArm.getWorldPosition(scratch.currentJoint)
-  foreArm.getWorldPosition(scratch.currentEnd)
-  hand.getWorldPosition(scratch.wristPosition)
+  scratch.currentJoint.setFromMatrixPosition(upperArm.matrixWorld)
+  scratch.currentEnd.setFromMatrixPosition(foreArm.matrixWorld)
+  scratch.wristPosition.setFromMatrixPosition(hand.matrixWorld)
   const upperArmLength = scratch.currentJoint.distanceTo(scratch.currentEnd)
   const foreArmLength = scratch.currentEnd.distanceTo(scratch.wristPosition)
   scratch.elbowPoleDirection.copy(elbowPoleWeaponSpace).applyQuaternion(weaponQuaternion)
@@ -691,9 +703,8 @@ function rotateLandrushRobotJointTowardTarget(
 ) {
   const parent = joint.parent
   if (!parent) return
-  joint.updateWorldMatrix(true, true)
-  hand.getWorldPosition(scratch.currentEnd)
-  joint.getWorldPosition(scratch.currentJoint)
+  scratch.currentEnd.setFromMatrixPosition(hand.matrixWorld)
+  scratch.currentJoint.setFromMatrixPosition(joint.matrixWorld)
   scratch.fromDirection.copy(scratch.currentEnd).sub(scratch.currentJoint)
   scratch.toDirection.copy(target).sub(scratch.currentJoint)
   if (
@@ -705,18 +716,27 @@ function rotateLandrushRobotJointTowardTarget(
   scratch.fromDirection.normalize()
   scratch.toDirection.normalize()
   scratch.deltaQuaternion.setFromUnitVectors(scratch.fromDirection, scratch.toDirection)
-  joint.getWorldQuaternion(scratch.currentWorldQuaternion)
+  readLandrushRobotWorldQuaternion(joint, scratch.currentWorldQuaternion, scratch)
   scratch.desiredWorldQuaternion
     .copy(scratch.deltaQuaternion)
     .multiply(scratch.currentWorldQuaternion)
     .normalize()
-  parent.getWorldQuaternion(scratch.parentWorldQuaternion)
+  readLandrushRobotWorldQuaternion(parent, scratch.parentWorldQuaternion, scratch)
   scratch.parentWorldQuaternion.invert()
   joint.quaternion
     .copy(scratch.parentWorldQuaternion)
     .multiply(scratch.desiredWorldQuaternion)
     .normalize()
   joint.updateWorldMatrix(false, true)
+}
+
+function readLandrushRobotWorldQuaternion(
+  object: Object3D,
+  target: Quaternion,
+  scratch: LandrushRobotWeaponRigScratch,
+) {
+  object.matrixWorld.decompose(scratch.worldDecomposePosition, target, scratch.worldDecomposeScale)
+  return target
 }
 
 function updateMarker(marker: Group | null, position: Vector3) {
@@ -735,22 +755,24 @@ function applyWorldWeaponTransform(
     weaponRoot.position.copy(worldPosition)
     weaponRoot.quaternion.copy(worldQuaternion)
     weaponRoot.scale.setScalar(worldScale)
-    weaponRoot.updateWorldMatrix(true, true)
     return
   }
 
   parent.updateWorldMatrix(true, false)
-  weaponRoot.position.copy(worldPosition)
-  parent.worldToLocal(weaponRoot.position)
-  parent.getWorldQuaternion(scratch.parentWorldQuaternion).invert()
+  scratch.inverseParentWorldMatrix.copy(parent.matrixWorld).invert()
+  weaponRoot.position.copy(worldPosition).applyMatrix4(scratch.inverseParentWorldMatrix)
+  parent.matrixWorld.decompose(
+    scratch.worldDecomposePosition,
+    scratch.parentWorldQuaternion,
+    scratch.parentWorldScale,
+  )
+  scratch.parentWorldQuaternion.invert()
   weaponRoot.quaternion.copy(scratch.parentWorldQuaternion).multiply(worldQuaternion).normalize()
-  parent.getWorldScale(scratch.parentWorldScale)
   weaponRoot.scale.set(
     worldScale / Math.max(0.000_001, Math.abs(scratch.parentWorldScale.x)),
     worldScale / Math.max(0.000_001, Math.abs(scratch.parentWorldScale.y)),
     worldScale / Math.max(0.000_001, Math.abs(scratch.parentWorldScale.z)),
   )
-  weaponRoot.updateWorldMatrix(true, true)
 }
 
 function applyLandrushRobotPalmPose(
@@ -777,7 +799,7 @@ function applyLandrushRobotPalmPose(
     weaponRelativeHandQuaternion,
     scratch.desiredWorldQuaternion,
   )
-  parent.getWorldQuaternion(scratch.parentWorldQuaternion).invert()
+  readLandrushRobotWorldQuaternion(parent, scratch.parentWorldQuaternion, scratch).invert()
   scratch.deltaQuaternion
     .copy(scratch.parentWorldQuaternion)
     .multiply(scratch.desiredWorldQuaternion)

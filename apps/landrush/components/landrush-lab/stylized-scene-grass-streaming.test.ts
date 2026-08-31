@@ -12,8 +12,10 @@ import {
   Vector3,
 } from 'three'
 import {
+  advanceStylizedGrassPreparedDrawMembership,
   createInitialStylizedGrassCellCoverage,
   createInitialStylizedGrassExactDrawMembership,
+  createInitialStylizedGrassPreparedDrawMembershipProgress,
   createStylizedGrassArrivalState,
   createStylizedGrassDenseDrawState,
   createStylizedGrassExactDrawCellKeys,
@@ -31,19 +33,25 @@ import {
   reconcileStylizedGrassDenseDrawCellDelta,
   reconcileStylizedGrassDenseDrawInstances,
   reconcileStylizedGrassExactDrawMembership,
+  reconcileStylizedGrassPinnedDrawCellKeys,
+  reconcileStylizedGrassPreparedDrawMembershipTarget,
   resolveStylizedGrassArrivalFade,
   resolveStylizedGrassDrawEnvelope,
   resolveStylizedGrassDrawMembershipApplyDecision,
   resolveStylizedGrassFadeUploadSlots,
+  resolveStylizedGrassPreparedDrawMembershipActive,
+  resolveStylizedGrassPreparedDrawMembershipReadiness,
   resolveStylizedGrassPreparedResidencyCameraPolicy,
   resolveStylizedGrassPreparedResidencyReadiness,
   resolveStylizedGrassResidentUpdateDue,
   resolveStylizedGrassStructuralUploadSlots,
+  STYLIZED_SCENE_PREPARED_DRAW_CELL_BUDGET_PER_FRAME,
   type StylizedGrassDrawEnvelope,
   type StylizedGrassInstance,
   type StylizedGrassStreamCell,
   selectStylizedGrassDrawInstances,
   shouldForceStylizedGrassPreparedResidencyFallback,
+  shouldReconcileStylizedGrassExactDrawMembership,
   shouldSettleStylizedGrassPreparedResidencyBaselines,
   stylizedGrassPreparedResidencyContainsCamera,
   stylizedGrassStreamCellIntersectsFrustum,
@@ -339,6 +347,195 @@ describe('stylized grass prepared transition residency', () => {
     ).toBe(0)
   })
 
+  test('prewarms one prepared draw footprint, freezes it during handoff, and releases at settle', () => {
+    const grid = createStylizedGrassStreamGrid({ maxX: 40, maxZ: 40, minX: -40, minZ: -40 })
+    const awayFrustum = createCameraFrustum([0, 3, 60], [0, 3, 80])
+    const scan = createStylizedGrassResidentCells({
+      drawEnvelope: DRAW_ENVELOPE,
+      elevation: 0,
+      frustum: awayFrustum,
+      grid,
+      interaction: null,
+      preparedResidency: {
+        centerX: 0,
+        centerZ: 0,
+        footprintRadiusMeters: ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+      },
+      previousCells: [],
+    })
+    const pinnedCellKeys = new Set<string>()
+    const membership = createInitialStylizedGrassExactDrawMembership()
+    const progress = createInitialStylizedGrassPreparedDrawMembershipProgress()
+
+    expect(
+      reconcileStylizedGrassPreparedDrawMembershipTarget(
+        progress,
+        scan.preparedCells,
+        'prepared:1',
+      ),
+    ).toBe(true)
+    let appliedRevision = membership.revision
+    let frameCount = 0
+    while (
+      !resolveStylizedGrassPreparedDrawMembershipReadiness(
+        progress,
+        appliedRevision,
+        membership.revision,
+        'prepared:1',
+      )
+    ) {
+      const previousCellIndex = progress.nextCellIndex
+      const remainingCellCount = progress.targetCells.length - previousCellIndex
+      const stage = advanceStylizedGrassPreparedDrawMembership({
+        cellBudget: STYLIZED_SCENE_PREPARED_DRAW_CELL_BUDGET_PER_FRAME,
+        changedAtMs: 10 + frameCount,
+        membership,
+        pinnedCellKeys,
+        progress,
+      })
+      frameCount += 1
+      expect(stage.processedCells).toBe(
+        Math.min(STYLIZED_SCENE_PREPARED_DRAW_CELL_BUDGET_PER_FRAME, remainingCellCount),
+      )
+      expect(progress.nextCellIndex - previousCellIndex).toBe(stage.processedCells)
+      if (progress.nextCellIndex < progress.targetCells.length) {
+        expect(
+          resolveStylizedGrassPreparedDrawMembershipReadiness(
+            progress,
+            appliedRevision,
+            membership.revision,
+            'prepared:1',
+          ),
+        ).toBe(false)
+      }
+      if (stage.membershipChanged) appliedRevision = membership.revision
+    }
+    expect(frameCount).toBe(
+      Math.ceil(progress.targetCells.length / STYLIZED_SCENE_PREPARED_DRAW_CELL_BUDGET_PER_FRAME),
+    )
+    expect(frameCount).toBeLessThanOrEqual(20)
+    expect(membership.exact).toEqual(pinnedCellKeys)
+    const preparedRevision = membership.revision
+
+    expect(shouldReconcileStylizedGrassExactDrawMembership(false, true, 'suppress')).toBe(false)
+    expect(shouldReconcileStylizedGrassExactDrawMembership(true, true, 'suppress')).toBe(true)
+    expect(shouldReconcileStylizedGrassExactDrawMembership(false, true, 'fallback')).toBe(true)
+    expect(shouldReconcileStylizedGrassExactDrawMembership(false, true, 'normal')).toBe(true)
+    expect(membership.revision).toBe(preparedRevision)
+
+    expect(
+      reconcileStylizedGrassPinnedDrawCellKeys(
+        pinnedCellKeys,
+        scan.preparedCells.map((cell) => ({ ...cell })),
+      ),
+    ).toBe(false)
+    expect(shouldReconcileStylizedGrassExactDrawMembership(false, false, 'normal', true)).toBe(true)
+    expect(reconcileStylizedGrassPinnedDrawCellKeys(pinnedCellKeys, [])).toBe(true)
+    expect(
+      reconcileStylizedGrassExactDrawMembership({
+        cells: scan.cells,
+        changedAtMs: 20,
+        drawEnvelope: DRAW_ENVELOPE,
+        elevation: 0,
+        frustum: awayFrustum,
+        membership,
+        pinnedCellKeys,
+      }),
+    ).toBe(true)
+    expect(membership.exact.size).toBe(0)
+    expect(membership.revision).toBe(preparedRevision + 1)
+  })
+
+  test('keeps partial and unapplied prepared membership non-ready', () => {
+    const cells = [createCell(0, 0), createCell(1, 0, 1), createCell(2, 0, 2)]
+    const progress = createInitialStylizedGrassPreparedDrawMembershipProgress()
+    const membership = createInitialStylizedGrassExactDrawMembership()
+    const pinnedCellKeys = new Set<string>()
+    reconcileStylizedGrassPreparedDrawMembershipTarget(progress, cells, 'prepared:1')
+
+    const partial = advanceStylizedGrassPreparedDrawMembership({
+      cellBudget: 2,
+      changedAtMs: 10,
+      membership,
+      pinnedCellKeys,
+      progress,
+    })
+    expect(partial.processedCells).toBe(2)
+    expect(pinnedCellKeys.size).toBe(2)
+    expect(
+      resolveStylizedGrassPreparedDrawMembershipReadiness(
+        progress,
+        membership.revision,
+        membership.revision,
+        'prepared:1',
+      ),
+    ).toBe(false)
+
+    const appliedBeforeFinalStage = membership.revision
+    advanceStylizedGrassPreparedDrawMembership({
+      cellBudget: 2,
+      changedAtMs: 11,
+      membership,
+      pinnedCellKeys,
+      progress,
+    })
+    expect(
+      resolveStylizedGrassPreparedDrawMembershipReadiness(
+        progress,
+        appliedBeforeFinalStage,
+        membership.revision,
+        'prepared:1',
+      ),
+    ).toBe(false)
+    expect(
+      resolveStylizedGrassPreparedDrawMembershipReadiness(
+        progress,
+        membership.revision,
+        membership.revision,
+        'prepared:1',
+      ),
+    ).toBe(true)
+    expect(resolveStylizedGrassPreparedDrawMembershipActive(true, false, true, false, false)).toBe(
+      false,
+    )
+    expect(resolveStylizedGrassPreparedDrawMembershipActive(true, true, false, false, false)).toBe(
+      false,
+    )
+    expect(resolveStylizedGrassPreparedDrawMembershipActive(true, true, true, false, false)).toBe(
+      true,
+    )
+    expect(resolveStylizedGrassPreparedDrawMembershipActive(false, true, true, true, true)).toBe(
+      true,
+    )
+    expect(resolveStylizedGrassPreparedDrawMembershipActive(false, true, false, true, true)).toBe(
+      false,
+    )
+  })
+
+  test('publishes prepared readiness after applying exact draw membership in the same commit', () => {
+    const source = readFileSync(
+      new URL('./stylized-scene-land-layers.tsx', import.meta.url),
+      'utf8',
+    )
+    const readinessMarker = source.indexOf('void preparedCoverageVersion')
+    const effectStart = source.lastIndexOf('useLayoutEffect(() => {', readinessMarker)
+    const effectEnd = source.indexOf('\n  useLayoutEffect(() => {', readinessMarker)
+    const readinessEffect = source.slice(effectStart, effectEnd)
+    const committedSources = readinessEffect.indexOf(
+      'committedResidentDrawSourcesRef.current = residentSources',
+    )
+    const appliedMembership = readinessEffect.indexOf('applyExactDrawMembership(performance.now())')
+    const resolvedReadiness = readinessEffect.indexOf(
+      'preparedState.drawMembershipReady = resolveStylizedGrassPreparedDrawMembershipReadiness',
+    )
+
+    expect(effectStart).toBeGreaterThan(-1)
+    expect(effectEnd).toBeGreaterThan(effectStart)
+    expect(committedSources).toBeGreaterThan(-1)
+    expect(appliedMembership).toBeGreaterThan(committedSources)
+    expect(resolvedReadiness).toBeGreaterThan(appliedMembership)
+  })
+
   test('suppresses only a fully current contained transition and falls back immediately', () => {
     expect(preparedCameraPolicy()).toBe('suppress')
     expect(preparedCameraPolicy({ transitionActive: false })).toBe('normal')
@@ -466,11 +663,17 @@ describe('stylized grass prepared transition residency', () => {
 
   test('gates only the build-to-night start on matching prepared readiness', () => {
     const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
-    expect(source).toMatch(
-      /zombieEscapePhase !== 'build' \|\|\s+\(zombieEscapeGrassResidencyReadiness\?\.generation === zombieEscapeGrassResidencyGeneration &&\s+zombieEscapeGrassResidencyReadiness\.ready\)/,
+    expect(source).toContain(
+      "prepareDrawMembership: zombieEscapePhase === 'build' && zombieEscapeBasePhaseReady",
     )
     expect(source).toMatch(
-      /const zombieEscapePhaseReady =\s+zombieEscapeGrassResidencyReadyForNightStart &&\s+resolveLandrushZombieEscapePhaseReady/,
+      /zombieEscapePhase !== 'build' \|\|\s+\(zombieEscapeGrassResidencyReadiness\?\.generation === zombieEscapeGrassResidencyGeneration &&\s+zombieEscapeGrassResidencyReadiness\.ready &&\s+zombieEscapeGrassResidencyReadiness\.drawMembershipReady\)/,
+    )
+    expect(source).toMatch(
+      /const zombieEscapeBasePhaseReady = resolveLandrushZombieEscapePhaseReady/,
+    )
+    expect(source).toMatch(
+      /const zombieEscapePhaseReady =\s+zombieEscapeGrassResidencyReadyForNightStart && zombieEscapeBasePhaseReady/,
     )
   })
 })
@@ -893,6 +1096,27 @@ describe('stylized grass residency and exact draw membership', () => {
 })
 
 describe('stylized grass arrival and compact draw slots', () => {
+  test('completes every seeded arrival variation within 153ms', () => {
+    const state = createStylizedGrassArrivalState()
+    const initialCell = createCell(0, 0)
+    const arrivingCell = createCell(1, 0, 1)
+    const seededInstances = Array.from({ length: 1_000 }, (_, seed) =>
+      createInstance(`${arrivingCell.key}:${seed}`, seed),
+    )
+
+    reconcileStylizedGrassArrivalState(state, [initialCell], 0)
+    reconcileStylizedGrassArrivalState(state, [initialCell, arrivingCell], 100)
+
+    expect(
+      seededInstances.some((instance) => resolveStylizedGrassArrivalFade(instance, state, 252) < 1),
+    ).toBe(true)
+    expect(
+      seededInstances.every(
+        (instance) => resolveStylizedGrassArrivalFade(instance, state, 253) === 1,
+      ),
+    ).toBe(true)
+  })
+
   test('preserves arrival progress through draw exit and restarts only after residency eviction', () => {
     const state = createStylizedGrassArrivalState()
     const initialCell = createCell(0, 0)
@@ -1325,6 +1549,29 @@ describe('stylized grass fade upload policy and lifecycle', () => {
     markStylizedGrassInstanceSlotSpanUpdated(attribute, 4, 6)
     expect(attribute.updateRanges).toEqual([{ start: 8, count: 6 }])
     expect(attribute.updateRanges[0]).toBe(range)
+  })
+
+  test('keeps active arrival fades sparse and resolves the runtime probe only once per page', () => {
+    const source = readFileSync(
+      new URL('./stylized-scene-land-layers.tsx', import.meta.url),
+      'utf8',
+    )
+    const advanceStart = source.indexOf('function advanceStylizedGrassStreamFades(')
+    const advanceEnd = source.indexOf(
+      '\nfunction reconcileStylizedGrassDrawInstances(',
+      advanceStart,
+    )
+    const advanceSource = source.slice(advanceStart, advanceEnd)
+    const probeStart = source.indexOf('function stylizedGrassRuntimeProbeIsEnabled()')
+    const probeEnd = source.indexOf('\nfunction takeStylizedGrassCacheStats(', probeStart)
+    const probeSource = source.slice(probeStart, probeEnd)
+
+    expect(advanceSource).toContain('state.streamFadeChangedSlots.push(slot)')
+    expect(advanceSource).toContain(
+      'markStylizedGrassInstanceSlotsUpdated(streamFade, state.streamFadeChangedSlots)',
+    )
+    expect(advanceSource).not.toContain('markStylizedGrassInstanceSlotSpanUpdated')
+    expect(probeSource.match(/window\.location\.search/g)).toHaveLength(1)
   })
 
   test('retains dense and arrival identities through canonical resource-style rebuilds', () => {

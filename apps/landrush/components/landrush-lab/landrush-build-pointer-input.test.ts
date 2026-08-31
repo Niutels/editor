@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   constrainLandrushBuildCameraOffset,
   resolveLandrushBuildCameraDragAction,
+  shouldArmLandrushBuildRobotExit,
   shouldBeginLandrushBuildCameraOrbit,
+  shouldCommitLandrushBuildRobotExit,
   shouldHandleLandrushBuildCameraWheel,
   shouldSuppressLandrushBuildContextMenu,
 } from './landrush-build-pointer-input'
@@ -17,6 +19,58 @@ const baseIntent = {
 }
 
 describe('Landrush build pointer ownership', () => {
+  test('does not arm or commit the robot exit while a wall placement owns the pointer', () => {
+    expect(shouldArmLandrushBuildRobotExit({ editorPlacementActive: true, robotHit: true })).toBe(
+      false,
+    )
+    expect(
+      shouldCommitLandrushBuildRobotExit({
+        armed: true,
+        editorPlacementActive: true,
+        robotHit: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('does not commit when a wall finishes between pointerdown and pointerup', () => {
+    const armed = shouldArmLandrushBuildRobotExit({
+      editorPlacementActive: true,
+      robotHit: true,
+    })
+
+    expect(armed).toBe(false)
+    expect(
+      shouldCommitLandrushBuildRobotExit({
+        armed,
+        editorPlacementActive: false,
+        robotHit: true,
+      }),
+    ).toBe(false)
+  })
+
+  test('commits the robot exit only after an idle pointerdown and pointerup both hit it', () => {
+    const armed = shouldArmLandrushBuildRobotExit({
+      editorPlacementActive: false,
+      robotHit: true,
+    })
+
+    expect(armed).toBe(true)
+    expect(
+      shouldCommitLandrushBuildRobotExit({
+        armed,
+        editorPlacementActive: false,
+        robotHit: true,
+      }),
+    ).toBe(true)
+    expect(
+      shouldCommitLandrushBuildRobotExit({
+        armed,
+        editorPlacementActive: false,
+        robotHit: false,
+      }),
+    ).toBe(false)
+  })
+
   test('fully reserves left click for editor placement tools', () => {
     expect(shouldBeginLandrushBuildCameraOrbit({ ...baseIntent, button: 0 })).toBe(false)
     expect(resolveLandrushBuildCameraDragAction({ ...baseIntent, button: 0 })).toBeNull()

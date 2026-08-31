@@ -5,15 +5,23 @@ import {
   createLandrushZombieNightBeaconPlacements,
   LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
+  LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS,
+  LANDRUSH_ZOMBIE_NIGHT_SUNSET_END_SECONDS,
+  LANDRUSH_ZOMBIE_NIGHT_TRANSITION_DURATION_SECONDS,
   LANDRUSH_ZOMBIE_NIGHT_VISUAL_CONTRACT,
   parseLandrushZombieNightDebugQuery,
   resolveLandrushZombieNightBeaconFrameMode,
   resolveLandrushZombieNightBeaconPulse,
+  resolveLandrushZombieNightSunsetAmount,
   resolveLandrushZombieNightSurfaceRole,
   resolveLandrushZombieNightTargetExposure,
+  resolveLandrushZombieNightTimelineAmount,
   resolveLandrushZombieNightVisibilityTreatment,
+  resolveLandrushZombieNightVisualAmount,
+  shouldApplyLandrushZombieNightCpuPresentation,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
+import { resolveLandrushZombieNightStreetLightpostYaw } from './landrush-zombie-night-street-lightpost'
 
 const ROADS: readonly LandrushRoadSegment[] = [
   {
@@ -172,6 +180,71 @@ describe('Landrush zombie night presentation state', () => {
     expect(sixtyFps).toBeLessThan(1)
   })
 
+  test('passes through an early sunset and reaches the existing night exactly at 90 seconds', () => {
+    expect(resolveLandrushZombieNightTimelineAmount(-1)).toBe(0)
+    expect(resolveLandrushZombieNightTimelineAmount(0)).toBe(0)
+    expect(resolveLandrushZombieNightTimelineAmount(30)).toBeCloseTo(0.209_876_543_2, 10)
+    expect(resolveLandrushZombieNightTimelineAmount(60)).toBeCloseTo(0.790_123_456_8, 10)
+    expect(
+      resolveLandrushZombieNightTimelineAmount(LANDRUSH_ZOMBIE_NIGHT_TRANSITION_DURATION_SECONDS),
+    ).toBe(1)
+    expect(resolveLandrushZombieNightTimelineAmount(Number.POSITIVE_INFINITY)).toBe(1)
+
+    expect(resolveLandrushZombieNightSunsetAmount(0)).toBe(0)
+    expect(resolveLandrushZombieNightSunsetAmount(1)).toBeGreaterThan(0)
+    expect(resolveLandrushZombieNightSunsetAmount(18)).toBe(1)
+    expect(resolveLandrushZombieNightSunsetAmount(28)).toBe(1)
+    expect(resolveLandrushZombieNightSunsetAmount(44)).toBeCloseTo(0.5, 12)
+    expect(resolveLandrushZombieNightSunsetAmount(59)).toBeGreaterThan(0)
+    expect(resolveLandrushZombieNightSunsetAmount(LANDRUSH_ZOMBIE_NIGHT_SUNSET_END_SECONDS)).toBe(0)
+    expect(resolveLandrushZombieNightSunsetAmount(90)).toBe(0)
+    expect(resolveLandrushZombieNightSunsetAmount(Number.POSITIVE_INFINITY)).toBe(0)
+
+    const firstSecondNightAmount = resolveLandrushZombieNightTimelineAmount(1)
+    const firstSecondSunsetAmount = resolveLandrushZombieNightSunsetAmount(1)
+    expect(firstSecondNightAmount).toBeLessThan(0.001)
+    expect(firstSecondSunsetAmount).toBeGreaterThan(0.001)
+    expect(
+      resolveLandrushZombieNightVisualAmount(firstSecondNightAmount, firstSecondSunsetAmount),
+    ).toBe(firstSecondSunsetAmount)
+  })
+
+  test('bounds CPU presentation writes while still applying invalidations and exact endpoints', () => {
+    expect(shouldApplyLandrushZombieNightCpuPresentation(Number.NaN, 0.2, 1, 1, 2, false)).toBe(
+      true,
+    )
+    expect(shouldApplyLandrushZombieNightCpuPresentation(0.2, 0.3, 1, 1, 2, false)).toBe(false)
+    expect(shouldApplyLandrushZombieNightCpuPresentation(0.2, 0.3, 1, 1, 2, true)).toBe(true)
+    expect(shouldApplyLandrushZombieNightCpuPresentation(0.2, 0.3, 1, 2, 2, false)).toBe(true)
+    expect(shouldApplyLandrushZombieNightCpuPresentation(0.99, 1, 1, 1, 2, false)).toBe(true)
+    expect(shouldApplyLandrushZombieNightCpuPresentation(1, 1, 1, 3, 2, false)).toBe(false)
+
+    let appliedAmount = Number.NaN
+    let nextUpdateAt = 0
+    let updates = 0
+    for (let frame = 0; frame <= 120; frame += 1) {
+      const elapsedSeconds = frame / 120
+      const amount = frame === 120 ? 1 : elapsedSeconds
+      if (
+        !shouldApplyLandrushZombieNightCpuPresentation(
+          appliedAmount,
+          amount,
+          1,
+          elapsedSeconds,
+          nextUpdateAt,
+          false,
+        )
+      ) {
+        continue
+      }
+      updates += 1
+      appliedAmount = amount
+      nextUpdateAt = elapsedSeconds + LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS
+    }
+    expect(updates).toBeLessThanOrEqual(26)
+    expect(appliedAmount).toBe(1)
+  })
+
   test('selects stable, finite beacon placements and honors the quality budget', () => {
     const balanced = createLandrushZombieNightBeaconPlacements({
       groundY: 1.25,
@@ -193,10 +266,16 @@ describe('Landrush zombie night presentation state', () => {
     expect(low).toHaveLength(3)
     expect(new Set(balanced.map(({ id }) => id)).size).toBe(balanced.length)
     expect(
-      balanced.every(({ phase, position }) =>
-        [phase, ...position].every((value) => Number.isFinite(value)),
+      balanced.every(({ phase, position, rotationY }) =>
+        [phase, rotationY, ...position].every((value) => Number.isFinite(value)),
       ),
     ).toBe(true)
+  })
+
+  test('aims each overhanging lamp arm from its curb side back toward the road', () => {
+    expect(resolveLandrushZombieNightStreetLightpostYaw(1, 0, -1)).toBeCloseTo(0, 12)
+    expect(Math.abs(resolveLandrushZombieNightStreetLightpostYaw(1, 0, 1))).toBeCloseTo(Math.PI, 12)
+    expect(resolveLandrushZombieNightStreetLightpostYaw(0, 1, 1)).toBeCloseTo(Math.PI / 2, 12)
   })
 
   test('replaces the center beacon when spare candidates preserve the quality count', () => {

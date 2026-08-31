@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -27,6 +30,10 @@ import {
   serializeSlowFrameContributorsCsv,
   serializeSlowFramesCsv,
 } from './zombie-frame-responsibility.mjs'
+import {
+  validateZombieModeSwitchNormalFirstHit,
+  ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT,
+} from './zombie-mode-switch-normal-first-hit.mjs'
 
 const SOURCE_DIR = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(SOURCE_DIR, '..', '..', '..')
@@ -58,6 +65,7 @@ const WINDOW_BEFORE_SECONDS = Math.abs(WINDOW_START_US) / 1_000_000
 const WINDOW_AFTER_SECONDS = WINDOW_END_US / 1_000_000
 const WINDOW_DURATION_SECONDS = WINDOW_BEFORE_SECONDS + WINDOW_AFTER_SECONDS
 const FRAME_BUDGET_US = 1_000_000 / 60
+const SOURCE_PROVENANCE_PATHS = ['apps/landrush', 'packages/viewer', 'tooling/bench/src']
 
 function parseArgs(argv) {
   const result = {}
@@ -78,6 +86,44 @@ function parseArgs(argv) {
 
 function runName() {
   return `zombie-switch-atomic-${new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')}`
+}
+
+function readSourceProvenance() {
+  const git = (args, encoding = null) =>
+    execFileSync('git', args, {
+      cwd: REPO_ROOT,
+      encoding,
+      maxBuffer: 32 * 1024 * 1024,
+      windowsHide: true,
+    })
+  const commit = String(git(['rev-parse', 'HEAD'], 'utf8')).trim()
+  const trackedDiff = git(['diff', '--binary', 'HEAD', '--', ...SOURCE_PROVENANCE_PATHS])
+  const untrackedFiles = String(
+    git(
+      ['ls-files', '--others', '--exclude-standard', '-z', '--', ...SOURCE_PROVENANCE_PATHS],
+      'utf8',
+    ),
+  )
+    .split('\0')
+    .filter(Boolean)
+    .sort()
+  const hash = createHash('sha256')
+  hash.update(commit)
+  hash.update('\0tracked-diff\0')
+  hash.update(trackedDiff)
+  for (const relativePath of untrackedFiles) {
+    hash.update('\0untracked\0')
+    hash.update(relativePath)
+    hash.update('\0')
+    hash.update(readFileSync(path.join(REPO_ROOT, relativePath)))
+  }
+  return {
+    commit,
+    dirty: trackedDiff.length > 0 || untrackedFiles.length > 0,
+    fingerprintSha256: hash.digest('hex'),
+    trackedDiffBytes: trackedDiff.length,
+    untrackedFiles,
+  }
 }
 
 async function writeJson(filePath, value, pretty = false) {
@@ -363,7 +409,7 @@ function profileDirectoryIsSafe(profileDir) {
   )
 }
 
-async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
+async function captureVariant({ baseUrl, fixture, headless, normalFirstHit, runDir, variant }) {
   const profileDir = await mkdtemp(path.join(tmpdir(), 'landrush-zombie-atomic-'))
   if (!profileDirectoryIsSafe(profileDir)) throw new Error(`unsafe temporary profile ${profileDir}`)
   const browser = await launchBenchBrowser({ headless, profileDir })
@@ -453,7 +499,13 @@ async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
       })
     })
     const markerName = `landrush-atomic-zombie-night-start-${variant}`
-    const startZombieTarget = await browser.page.evaluate((marker) => {
+    const startZombieTarget = await browser.page.evaluate(({
+      expectedAfterHealth,
+      expectedBeforeHealth,
+      marker,
+      normalFirstHit,
+      windowEndMs,
+    }) => {
       const button = document.querySelector(
         '[data-testid="landrush-zombie-escape-build-countdown"]',
       )
@@ -461,6 +513,46 @@ async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
         throw new Error('Start zombie control is unavailable')
       }
       window.__LANDRUSH_ATOMIC_SWITCH_POINT__ = null
+      window.__LANDRUSH_ATOMIC_NORMAL_FIRST_HIT__ = normalFirstHit
+        ? {
+            damageAtMs: null,
+            damageCount: 0,
+            damageFromHealth: null,
+            damagePlayerState: null,
+            damageToHealth: null,
+            enabled: true,
+            error: null,
+            firstUnexpectedHudHealth: null,
+            hudAtMs: null,
+            hudHealth: null,
+            initialPlayerState: null,
+            protectedPlayerState: null,
+            protectedRoomState: null,
+            releasedAtMs: null,
+            releasedPlayerState: null,
+            releasedRoomState: null,
+            reprotectedAtMs: null,
+            reprotectedPlayerState: null,
+            reprotectedRoomState: null,
+            stoppedReason: null,
+            terminalObservation: null,
+          }
+        : null
+      const copyPlayerState = (state) => ({
+        audioWriteSequence: state.audioWriteSequence,
+        health: state.health,
+        hitSlowSeconds: state.hitSlowSeconds,
+        hurtFlash: state.hurtFlash,
+        phase: state.phase,
+        playerProtected: state.playerProtected,
+        status: state.status,
+      })
+      const markProbe = (name) => {
+        const mark = performance.mark(name)
+        console.timeStamp(name)
+        window.__PASCAL_BENCH__?.mark(name)
+        return mark.startTime
+      }
       button.addEventListener(
         'click',
         (event) => {
@@ -475,17 +567,123 @@ async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
             url: window.location.href,
           }
           setTimeout(() => {
+            const roomSoak = window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__
+            const probe = window.__LANDRUSH_ATOMIC_NORMAL_FIRST_HIT__
+            if (!roomSoak) {
+              if (probe) {
+                probe.error = 'room-soak bridge is unavailable'
+                probe.stoppedReason = 'setup-error'
+              }
+              return
+            }
+            if (
+              normalFirstHit &&
+              (typeof roomSoak.getPlayerState !== 'function' ||
+                typeof roomSoak.releasePlayerProtection !== 'function')
+            ) {
+              probe.error = 'normal first-hit room-soak methods are unavailable'
+              probe.stoppedReason = 'setup-error'
+              return
+            }
+            const playerState = normalFirstHit
+              ? {
+                  audioWriteSequence: 0,
+                  health: 0,
+                  hitSlowSeconds: 0,
+                  hurtFlash: 0,
+                  phase: 'build',
+                  playerProtected: false,
+                  status: 'playing',
+                }
+              : null
+            if (playerState) {
+              roomSoak.getPlayerState(playerState)
+              probe.initialPlayerState = copyPlayerState(playerState)
+            }
+            const protectedRoomState = roomSoak.begin()
             window.__LANDRUSH_ATOMIC_NIGHT_PROTECTION__ = {
               pageTMs: performance.now(),
-              state: window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__?.begin() ?? null,
+              state: protectedRoomState,
             }
+            if (!normalFirstHit) return
+            roomSoak.getPlayerState(playerState)
+            probe.protectedPlayerState = copyPlayerState(playerState)
+            probe.protectedRoomState = protectedRoomState
+            probe.releasedRoomState = roomSoak.releasePlayerProtection()
+            roomSoak.getPlayerState(playerState)
+            probe.releasedPlayerState = copyPlayerState(playerState)
+            probe.releasedAtMs = markProbe(`${marker}-normal-first-hit-released`)
+            let lastHealth = playerState.health
+            const deadlineMs = entry.startTime + windowEndMs
+            const observe = (nowMs) => {
+              roomSoak.getPlayerState(playerState)
+              if (
+                probe.terminalObservation === null &&
+                (playerState.phase !== 'night' || playerState.status !== 'playing')
+              ) {
+                probe.terminalObservation = {
+                  atMs: nowMs,
+                  phase: playerState.phase,
+                  status: playerState.status,
+                }
+              }
+              if (!playerState.playerProtected && playerState.health < lastHealth) {
+                probe.damageCount += 1
+                if (probe.damageCount === 1) {
+                  probe.damageFromHealth = lastHealth
+                  probe.damageToHealth = playerState.health
+                  probe.damagePlayerState = copyPlayerState(playerState)
+                  probe.damageAtMs = markProbe(`${marker}-normal-first-hit-damage`)
+                }
+              }
+              lastHealth = playerState.health
+              if (probe.damageAtMs !== null) {
+                const meter = document.querySelector(
+                  '[data-testid="landrush-zombie-escape-life-bar"]',
+                )
+                const hudHealth = Number(meter?.getAttribute('aria-valuenow'))
+                if (Number.isFinite(hudHealth)) {
+                  if (
+                    hudHealth !== expectedBeforeHealth &&
+                    hudHealth !== expectedAfterHealth &&
+                    probe.firstUnexpectedHudHealth === null
+                  ) {
+                    probe.firstUnexpectedHudHealth = hudHealth
+                  }
+                  if (hudHealth === expectedAfterHealth) {
+                    probe.hudHealth = hudHealth
+                    probe.hudAtMs = markProbe(`${marker}-normal-first-hit-hud`)
+                    probe.reprotectedRoomState = roomSoak.begin()
+                    roomSoak.getPlayerState(playerState)
+                    probe.reprotectedPlayerState = copyPlayerState(playerState)
+                    probe.reprotectedAtMs = markProbe(
+                      `${marker}-normal-first-hit-reprotected`,
+                    )
+                    probe.stoppedReason = 'reprotected'
+                    return
+                  }
+                }
+              }
+              if (nowMs >= deadlineMs) {
+                probe.stoppedReason = 'timeout'
+                return
+              }
+              requestAnimationFrame(observe)
+            }
+            requestAnimationFrame(observe)
           }, 0)
         },
         { capture: true, once: true },
       )
       const bounds = button.getBoundingClientRect()
       return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
-    }, markerName)
+    }, {
+      expectedAfterHealth: ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT.expectedAfterHealth,
+      expectedBeforeHealth: ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT.expectedBeforeHealth,
+      marker: markerName,
+      normalFirstHit,
+      windowEndMs: WINDOW_END_US / 1_000,
+    })
     await browser.cdp.send('Input.dispatchMouseEvent', {
       button: 'none',
       buttons: 0,
@@ -534,7 +732,38 @@ async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
     if (variant === 'trace') await stopTraceToFile(browser.cdp, tracePath)
     const drained = await bridge.pumpFrames()
     const afterSwitch = await readiness(browser.page)
-    const afterSwitchIssues = zombieNightReadinessIssues(afterSwitch)
+    const normalFirstHitProbe = await browser.page.evaluate((enabled) => {
+      if (!enabled) return null
+      const probe = window.__LANDRUSH_ATOMIC_NORMAL_FIRST_HIT__
+      const roomSoak = window.__LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK__
+      if (!probe || !roomSoak || typeof roomSoak.getPlayerState !== 'function') return probe ?? null
+      const finalPlayerState = {
+        audioWriteSequence: 0,
+        health: 0,
+        hitSlowSeconds: 0,
+        hurtFlash: 0,
+        phase: 'build',
+        playerProtected: false,
+        status: 'playing',
+      }
+      roomSoak.getPlayerState(finalPlayerState)
+      return {
+        ...probe,
+        finalPlayerState,
+        finalRoomState: roomSoak.getState(),
+      }
+    }, normalFirstHit)
+    const normalFirstHitIssues = normalFirstHit
+      ? validateZombieModeSwitchNormalFirstHit({
+          probe: normalFirstHitProbe,
+          switchPageTMs: switchPoint.pageTMs,
+          windowEndMs: WINDOW_END_US / 1_000,
+        })
+      : []
+    const afterSwitchIssues = [
+      ...zombieNightReadinessIssues(afterSwitch),
+      ...normalFirstHitIssues,
+    ]
     if (afterSwitchIssues.length > 0) {
       await writeJson(
         path.join(runDir, `capture-${variant}-rejected.json`),
@@ -544,6 +773,7 @@ async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
           consoleErrors,
           droppedByRing: drained.droppedByRing,
           endPoint,
+          normalFirstHit: normalFirstHitProbe,
           pageErrors,
           reason: afterSwitchIssues,
           switchPoint,
@@ -571,6 +801,7 @@ async function captureVariant({ baseUrl, fixture, headless, runDir, variant }) {
       finalState,
       frames: drained.frames.map(compactFrame),
       markerName,
+      normalFirstHit: normalFirstHitProbe,
       pageErrors,
       switchPoint,
       variant,
@@ -736,9 +967,26 @@ function buildReport({
   responsibility,
   runDir,
   scopedLedger,
+  sourceProvenance,
   traceLedger,
   v8Ledger,
 }) {
+  const normalFirstHitEnabled = VARIANTS.every(
+    (variant) => captures[variant].normalFirstHit?.enabled === true,
+  )
+  const normalFirstHitRows = normalFirstHitEnabled
+    ? VARIANTS.map((variant) => {
+        const capture = captures[variant]
+        const probe = capture.normalFirstHit
+        return [
+          variant,
+          `${String(probe.damageFromHealth)}→${String(probe.damageToHealth)}`,
+          formatNumber(probe.damageAtMs - capture.switchPoint.pageTMs),
+          formatNumber(probe.hudAtMs - probe.damageAtMs),
+          formatNumber(probe.reprotectedAtMs - probe.damageAtMs),
+        ]
+      })
+    : []
   const cadenceRows = VARIANTS.map((variant) => {
     const summary = cadence(captures[variant])
     return [
@@ -878,12 +1126,14 @@ function buildReport({
 
 This captures a trusted click on the visible **Start zombie** control inside an already loaded Zombie Escape day phase. The logical window is exactly ${WINDOW_DURATION_SECONDS} seconds: **−${WINDOW_BEFORE_SECONDS.toFixed(3)}s through +${WINDOW_AFTER_SECONDS.toFixed(3)}s**, where 0 is the trusted click event immediately before the React night-start handler runs.
 
-The server reported **${health.mode}** mode. These results diagnose this local ${health.mode} build; they are not claims about different hardware or deployment environments. The trace capture is the one exhaustive attributed primary execution. Baseline, V8, scoped, and GPU are four separate cold observer-effect validation runs; their unique frames are non-additive and never inherit attribution from the trace run.
+The server reported **${health.mode}** mode. These results diagnose this local ${health.mode} build; they are not claims about different hardware or deployment environments. The trace capture supplies the exhaustive primary wall-time partition. Overlap identifies concurrent traced activity, not a causal wait dependency. Baseline, V8, scoped, and GPU are four separate cold observer-effect validation runs; their unique frames are non-additive and never inherit attribution from the trace run.
 
 ## Capture validity
 
 - Route: \`/landrush-lab/pascal-multiplayer-island?offline=1&bench=1&game=zombie-escape&landrushZombieRoomSoak=1\`.
-- Scenario: fully loaded and settled Zombie Escape day phase, ${WINDOW_BEFORE_SECONDS} seconds untouched, trusted Start zombie click, then ${WINDOW_AFTER_SECONDS} seconds with the benchmark room-soak protection holding night and preventing idle-player death. No target-roster override or synthetic gameplay input is used.
+- Audio: Chromium is launched with process-level audio muting, so the capture remains inaudible while the app's normal audio workload stays enabled.
+- Source: commit \`${sourceProvenance.commit}\`${sourceProvenance.dirty ? ` with dirty fingerprint \`${sourceProvenance.fingerprintSha256}\`` : ' with a clean scoped tree'}; the scoped source fingerprint stayed unchanged throughout all five captures.
+- Scenario: fully loaded and settled Zombie Escape day phase, ${WINDOW_BEFORE_SECONDS} seconds untouched, trusted Start zombie click, then ${WINDOW_AFTER_SECONDS} seconds with the benchmark room soak holding night and suppressing obstacle damage${normalFirstHitEnabled ? '; player protection is released for one authentic 100→92 zombie hit and restored only after the HUD meter shows 92' : ' while player protection prevents idle-player death'}. No target-roster override or synthetic damage/input is used.
 - Fixture: \`${fixtureSummary.name}\`, ${fixtureSummary.buildCount} builds, ${fixtureSummary.nodeCount} nodes, world \`${fixtureSummary.worldId}\`.
 - Input seed: none; the harness sends no movement or combat input.
 - Viewport: 1600×1000 CSS pixels at ${formatAtomicRenderScale(renderScale)}; ${headless ? 'headless' : 'headful'} Chromium with WebGPU.
@@ -894,14 +1144,28 @@ The server reported **${health.mode}** mode. These results diagnose this local $
 - Page/console errors: ${errors.length}.
 - V8 clock alignment uncertainty: ${formatMs(v8Ledger.invariants.clockUncertaintyUs)}ms.
 - Before the switch, Zombie asset readiness was \`${captures.baseline.beforeSwitch.zombieAssetsReady}\`; at +${WINDOW_AFTER_SECONDS}s it was \`${captures.baseline.afterSwitch.zombieAssetsReady}\`.
+- Authentic normal-health first-hit probe: ${normalFirstHitEnabled ? `enabled and valid in all five variants; reprotection limit ${ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT.maximumReprotectionDelayMs}ms` : 'disabled'}.
 
 ## Direct findings
 
 - The observer-light run's largest complete frame was **${formatMs(baselineWorst.rawDurationMs * 1_000)}ms**, from ${formatMs(baselineWorst.rawStartOffsetUs)}ms to ${formatMs(baselineWorst.rawEndOffsetUs)}ms relative to the click. **${baselineSlowFrames.length}/${baselineWindows.length}** complete frames with positive overlap of the logical window, including **${baselinePostSwitchSlowFrames.length}/${baselinePostSwitchWindows.length}** post-click frames, exceeded the strict raw-time predicate \`durationMs × 60 > 1000\` (${(FRAME_BUDGET_US / 1_000).toFixed(6)}ms).
 - The largest traced interval was **${formatMs(worstTraceFrames[0].totalUs)}ms**, of which **${formatMs(worstTraceFrames[0].activeUs)}ms** was renderer-main work. Tracing is intentionally isolated in its own cold differential run, so its cadence is not substituted for the observer-light baseline.
-- The primary trace run contains **${responsibility.primary.slowFrameCount}/${responsibility.primary.frames.length}** strict misses. Every one is retained with an additive full-frame wall partition: renderer-main work, named overlapping GPU/compositor/presentation/other Chrome owners during renderer gaps, and an explicit irreducible bucket only where no synchronous trace owner exists.
+- The primary trace run contains **${responsibility.primary.slowFrameCount}/${responsibility.primary.frames.length}** strict misses. Every one is retained with an additive full-frame wall partition: renderer-main work, named overlapping GPU/compositor/presentation/other Chrome activity during renderer gaps, and an explicit irreducible bucket only where no traced activity overlaps. These shares reconcile wall time; they do not by themselves prove causal responsibility.
 - Timestamped render-pass execution did not explain the stalls: mean timestamped GPU busy time was **${formatNumber(gpuBefore.average)}ms** before and **${formatNumber(gpuAfter.average)}ms** after the switch; the post-switch maximum was **${formatNumber(gpuAfter.maximum)}ms**. These timestamps exclude pipeline creation, driver compilation, presentation, and compositor waits; those CPU-side Chrome owners are represented separately by the primary trace wall partition when the trace exposes them.
 - V8 sampled stacks contain **${formatMs(sampledStackTotal('PostProcessingPasses.useFrame'))}ms** in post-processing and **${formatMs(sampledStackTotal('ZombieEscapeEffects'))}ms** in Zombie effects during +0s..+${WINDOW_AFTER_SECONDS}s. These are sampled attribution totals from a separate run, not values to add to baseline wall time.
+
+${
+  normalFirstHitEnabled
+    ? `## Authentic normal-health first hit
+
+Each isolated variant observed exactly one natural Zombie attack from 100 to 92 health, the matching HUD meter value, and successful room-soak reprotection. The page-side observer reuses one mutable sample object and stops immediately after reprotection.
+
+${markdownTable(
+  ['variant', 'health', 'hit offset ms', 'HUD delay ms', 'reprotection delay ms'],
+  normalFirstHitRows,
+)}`
+    : ''
+}
 
 ## Observer cost check
 
@@ -1059,8 +1323,11 @@ Artifacts are in \`${runDir}\`.
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  const sourceProvenanceAtStart = readSourceProvenance()
   const baseUrl = String(args.url ?? process.env.PASCAL_BENCH_URL ?? 'http://localhost:3002')
+  const fixtureName = String(args.fixture ?? 'outside')
   const headless = args.headful !== true
+  const normalFirstHit = args['normal-first-hit'] === true
   const rebuildDir = typeof args.rebuild === 'string' ? path.resolve(args.rebuild) : null
   const outputName = typeof args.output === 'string' ? args.output : runName()
   const runDir = rebuildDir ?? path.resolve(RUNS_DIR, outputName)
@@ -1092,9 +1359,16 @@ async function main() {
         throw new Error(`Landrush health returned HTTP ${healthResponse.status}`)
       }
       health = await healthResponse.json()
-      const fixture = await loadLandrushBenchmarkFixture({ name: 'outside', repoRoot: REPO_ROOT })
+      const fixture = await loadLandrushBenchmarkFixture({ name: fixtureName, repoRoot: REPO_ROOT })
       for (const variant of recaptureVariants) {
-        raw[variant] = await captureVariant({ baseUrl, fixture, headless, runDir, variant })
+        raw[variant] = await captureVariant({
+          baseUrl,
+          fixture,
+          headless,
+          normalFirstHit,
+          runDir,
+          variant,
+        })
         captures[variant] = raw[variant].capture
       }
       metadata.health = health
@@ -1106,9 +1380,16 @@ async function main() {
     }
     health = await healthResponse.json()
     if (health.status !== 'ok') throw new Error(`Landrush health is ${JSON.stringify(health)}`)
-    const fixture = await loadLandrushBenchmarkFixture({ name: 'outside', repoRoot: REPO_ROOT })
+    const fixture = await loadLandrushBenchmarkFixture({ name: fixtureName, repoRoot: REPO_ROOT })
     for (const variant of VARIANTS) {
-      raw[variant] = await captureVariant({ baseUrl, fixture, headless, runDir, variant })
+      raw[variant] = await captureVariant({
+        baseUrl,
+        fixture,
+        headless,
+        normalFirstHit,
+        runDir,
+        variant,
+      })
       captures[variant] = raw[variant].capture
     }
     metadata = {
@@ -1118,13 +1399,43 @@ async function main() {
       health,
       route: '/landrush-lab/pascal-multiplayer-island',
       scenario:
-        'trusted Start zombie click from settled day phase into protected deterministic night',
+        normalFirstHit
+          ? 'trusted Start zombie click from settled day phase into held night with one authentic normal-health hit'
+          : 'trusted Start zombie click from settled day phase into protected deterministic night',
       variants: VARIANTS,
       window: { afterSeconds: WINDOW_AFTER_SECONDS, beforeSeconds: WINDOW_BEFORE_SECONDS },
     }
   }
+  const captureNormalFirstHitModes = VARIANTS.map(
+    (variant) => captures[variant].normalFirstHit?.enabled === true,
+  )
+  if (captureNormalFirstHitModes.some((enabled) => enabled !== normalFirstHit)) {
+    throw new Error(
+      `--normal-first-hit=${String(normalFirstHit)} does not match all persisted capture variants`,
+    )
+  }
+  metadata.normalFirstHit = {
+    enabled: normalFirstHit,
+    expectedHealthTransition: [
+      ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT.expectedBeforeHealth,
+      ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT.expectedAfterHealth,
+    ],
+    maximumReprotectionDelayMs:
+      ZOMBIE_MODE_SWITCH_NORMAL_FIRST_HIT.maximumReprotectionDelayMs,
+  }
+  metadata.scenario = normalFirstHit
+    ? 'trusted Start zombie click from settled day phase into held night with one authentic normal-health hit'
+    : 'trusted Start zombie click from settled day phase into protected deterministic night'
   const renderScale = summarizeAtomicRenderScale(captures, VARIANTS)
+  const sourceProvenanceAtEnd = readSourceProvenance()
+  const sourceStableDuringCapture =
+    sourceProvenanceAtStart.fingerprintSha256 === sourceProvenanceAtEnd.fingerprintSha256
+  if (!sourceStableDuringCapture) {
+    throw new Error('Source changed during the atomic capture; refusing to report mixed provenance')
+  }
   metadata.renderScale = renderScale
+  metadata.sourceProvenance = sourceProvenanceAtEnd
+  metadata.sourceStableDuringCapture = sourceStableDuringCapture
   await writeJson(path.join(runDir, 'metadata.json'), metadata, true)
   normalizeV8ClockCalibration(captures.v8, raw.v8.profile)
   await writeJson(path.join(runDir, 'capture-v8.json'), captures.v8)
@@ -1216,6 +1527,7 @@ async function main() {
     responsibility,
     runDir,
     scopedLedger,
+    sourceProvenance: metadata.sourceProvenance,
     traceLedger,
     v8Ledger,
   })

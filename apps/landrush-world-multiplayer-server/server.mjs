@@ -7,8 +7,6 @@ import {
   calculateParcelBuildPriceDelta,
   DEFAULT_PROFILE_MONEY,
   isApplyProfileMoneyOperationMessage,
-  isZombieEscapeFirstHouseReady,
-  MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS,
   MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS,
   isReportZombieEscapeDeathMessage,
   MAX_PROFILE_MONEY,
@@ -504,10 +502,7 @@ wss.on('connection', (socket) => {
       return
     }
 
-    if (
-      message.type === 'initialize-zombie-escape-clock' ||
-      message.type === 'start-zombie-escape-night'
-    ) {
+    if (message.type === 'start-zombie-escape-night') {
       if (!peer) {
         sendError(socket, 'not-joined', 'Join a room before updating Zombie Escape state')
         return
@@ -696,44 +691,20 @@ function advanceZombieEscapeStateTo(room, now) {
   if (!state) return 0
   if (state.phaseEndsAt === null || state.phaseEndsAt > now) return 0
 
-  let transitionCount = 0
-  transitionZombieEscapeState(room)
-  transitionCount += 1
-
-  const cycleDuration =
-    MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS +
-    MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
-  const fullCycles = Math.floor(Math.max(0, now - state.phaseEndsAt) / cycleDuration)
-  if (fullCycles > 0) {
-    state.night += fullCycles
-    state.phaseEndsAt += fullCycles * cycleDuration
-    transitionCount += fullCycles * 2
-    synchronizeZombieEscapeNightParticipants(room)
-  }
-
-  while (state.phaseEndsAt <= now) {
-    transitionZombieEscapeState(room)
-    transitionCount += 1
-  }
-  state.revision += transitionCount
-  return transitionCount
+  if (!transitionZombieEscapeNightToBuild(room)) return 0
+  state.revision += 1
+  return 1
 }
 
-function transitionZombieEscapeState(room) {
+function transitionZombieEscapeNightToBuild(room) {
   const state = room.zombieEscapeState
-  if (!state) return
-  if (state.phase === 'build') {
-    state.phase = 'night'
-    state.night += 1
-    state.phaseEndsAt += MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
-    synchronizeZombieEscapeNightParticipants(room)
-    return
-  }
+  if (!state || state.phase !== 'night') return false
 
   state.phase = 'build'
-  state.phaseEndsAt += MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
+  state.phaseEndsAt = null
   room.zombieEscapeAlivePlayerIds.clear()
   room.zombieEscapeDeadPlayerIds.clear()
+  return true
 }
 
 function synchronizeZombieEscapeNightParticipants(room) {
@@ -770,18 +741,6 @@ function scheduleZombieEscapeRoomTimer(roomId, room, now) {
   room.zombieEscapeTimer = timer
 }
 
-function watchedWorldHasZombieEscapeFirstHouse(peer) {
-  const subscription = parcelWorldSubscriptionBySocket.get(peer.socket)
-  if (!subscription || subscription.roomId !== peer.roomId) return null
-
-  const builds = parcelBuildNodesByWorld.get(subscription.worldId)
-  if (!builds) return false
-  for (const build of builds.values()) {
-    if (isZombieEscapeFirstHouseReady(build.nodes)) return true
-  }
-  return false
-}
-
 function updateZombieEscapeRoomFromCommand(peer, message, now) {
   const room = rooms.get(peer.roomId)
   if (!room) {
@@ -816,65 +775,20 @@ function updateZombieEscapeRoomFromCommand(peer, message, now) {
     return
   }
 
-  if (message.type === 'initialize-zombie-escape-clock') {
-    if (state.phase !== 'build' || state.phaseEndsAt !== null) {
-      rejectZombieEscapeStateCommand(
-        peer,
-        state,
-        'zombie-escape-clock-already-initialized',
-        'The Zombie Escape clock is already running',
-        now,
-      )
-      return
-    }
-    const hasFirstHouse = watchedWorldHasZombieEscapeFirstHouse(peer)
-    if (hasFirstHouse === null) {
-      rejectZombieEscapeStateCommand(
-        peer,
-        state,
-        'zombie-escape-parcel-world-unavailable',
-        'Watch the current parcel world before initializing Zombie Escape',
-        now,
-      )
-      return
-    }
-    if (!hasFirstHouse) {
-      rejectZombieEscapeStateCommand(
-        peer,
-        state,
-        'zombie-escape-house-required',
-        'Build a closed house with walls and an attached door before starting the Zombie Escape countdown',
-        now,
-      )
-      return
-    }
-    state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
-  } else {
-    if (state.phaseEndsAt === null) {
-      rejectZombieEscapeStateCommand(
-        peer,
-        state,
-        'zombie-escape-clock-held',
-        'Initialize the Zombie Escape clock before starting the night',
-        now,
-      )
-      return
-    }
-    if (state.phase !== 'build') {
-      rejectZombieEscapeStateCommand(
-        peer,
-        state,
-        'zombie-escape-night-active',
-        'The Zombie Escape night is already active',
-        now,
-      )
-      return
-    }
-    state.phase = 'night'
-    state.night += 1
-    state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
-    synchronizeZombieEscapeNightParticipants(room)
+  if (state.phase !== 'build') {
+    rejectZombieEscapeStateCommand(
+      peer,
+      state,
+      'zombie-escape-night-active',
+      'The Zombie Escape night is already active',
+      now,
+    )
+    return
   }
+  state.phase = 'night'
+  state.night += 1
+  state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
+  synchronizeZombieEscapeNightParticipants(room)
 
   state.revision += 1
   scheduleZombieEscapeRoomTimer(peer.roomId, room, now)
@@ -923,12 +837,8 @@ function reportZombieEscapeDeath(peer, message, now) {
 
 function finishZombieEscapeNight(roomId, room, now) {
   const state = room.zombieEscapeState
-  if (!state || state.phase !== 'night') return false
-  state.phase = 'build'
-  state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
+  if (!state || !transitionZombieEscapeNightToBuild(room)) return false
   state.revision += 1
-  room.zombieEscapeAlivePlayerIds.clear()
-  room.zombieEscapeDeadPlayerIds.clear()
   scheduleZombieEscapeRoomTimer(roomId, room, now)
   broadcastZombieEscapeState(roomId, state, now)
   return true
@@ -2298,8 +2208,7 @@ function parseClientMessage(data) {
     }
     if (raw?.type === 'state' && isPlayerSnapshot(raw.player)) return raw
     if (
-      (raw?.type === 'initialize-zombie-escape-clock' ||
-        raw?.type === 'start-zombie-escape-night') &&
+      raw?.type === 'start-zombie-escape-night' &&
       typeof raw.sessionId === 'string' &&
       raw.sessionId.length > 0 &&
       raw.sessionId.length <= 80 &&

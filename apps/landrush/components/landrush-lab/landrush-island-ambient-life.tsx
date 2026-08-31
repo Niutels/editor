@@ -24,6 +24,7 @@ import {
   DynamicDrawUsage,
   type Group,
   type InstancedMesh,
+  LoopOnce,
   LoopRepeat,
   Matrix4,
   type Mesh,
@@ -111,9 +112,44 @@ import {
 } from './landrush-island-palm-layout'
 import { createLandrushIslandPalmPresentation } from './landrush-island-palm-presentation'
 import { LandrushZombieNightPresentation } from './landrush-zombie-night-presentation'
+import {
+  parseLandrushZombieNightDebugQuery,
+  resolveLandrushZombieNightVisibilityTreatment,
+} from './landrush-zombie-night-presentation-state'
+import {
+  ZOMBIE_ESCAPE_AMBIENT_HANDOFF_LOCOMOTION,
+  type ZombieEscapeAmbientHandoffSource,
+} from './zombie-escape-ambient-handoff'
+import { createZombieEscapeAmbientNpcPresentationResource } from './zombie-escape-ambient-npc-presentation'
+import {
+  createZombieEscapeAmbientNpcPresentationClaim,
+  isZombieEscapeAmbientNpcHandoffCandidatePending,
+  resolveZombieEscapeAmbientNpcPresentationClaim,
+  type ZombieEscapeAmbientNpcPresentationRegistry,
+} from './zombie-escape-ambient-npc-presentation-registry'
+import {
+  createZombieEscapeAttackClip,
+  isZombieEscapeAttackPresentationActive,
+  resolveZombieEscapeAttackNormalizedPhase,
+} from './zombie-escape-attack-presentation'
+import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
 import type { ZombieEscapeCollisionCircleSource } from './zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from './zombie-escape-config'
+import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
+import {
+  resolveZombieEscapeLocomotionPlaybackRate,
+  resolveZombieEscapeLocomotionWeight,
+} from './zombie-escape-locomotion-playback'
+import {
+  createZombieEscapePresentationPose,
+  resolveZombieEscapePresentationPose,
+  ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y,
+} from './zombie-escape-presentation-pose'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 type AmbientNpcActions = {
+  attack: AnimationAction | null
+  death: AnimationAction | null
   idle: AnimationAction | null
   mixer: AnimationMixer
   run: AnimationAction | null
@@ -131,9 +167,11 @@ type AmbientMotionDebugRuntime = {
 }
 
 const EMPTY_AMBIENT_SCENE_NODES: Record<string, AnyNode> = {}
-const AMBIENT_NPC_COLLISION_RADIUS_METERS = 0.3
+const AMBIENT_NPC_COLLISION_RADIUS_METERS = ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS
 const AMBIENT_FISH_Y_AXIS = new Vector3(0, 1, 0)
 const AMBIENT_FISH_Z_AXIS = new Vector3(0, 0, 1)
+const AMBIENT_NPC_ZOMBIE_ACTION_BLEND_SECONDS = 0.18
+const AMBIENT_NPC_ZOMBIE_PRESENTATION_FRAME_PRIORITY = 0.86
 
 const LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS = createLandrushIslandAmbientLoadUnits({
   boatIds: LANDRUSH_ISLAND_AMBIENT_BOATS.map((boat) => boat.id),
@@ -150,23 +188,29 @@ export const LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE = `ambient-assets:${
 
 export function LandrushIslandAmbientLife({
   admitted,
+  ambientNpcPresentationRegistry,
   blockedPalmInstanceIndices,
   npcsVisible,
   onLoadReadinessChange,
   palmLayout,
+  readCanonicalElapsedSeconds,
   roads,
   surface,
   waterY,
+  zombieEscapeHandoffEnabled,
   zombieIslandActive,
 }: {
   admitted: boolean
+  ambientNpcPresentationRegistry: ZombieEscapeAmbientNpcPresentationRegistry
   blockedPalmInstanceIndices: ReadonlySet<number>
   npcsVisible: boolean
   onLoadReadinessChange: (readiness: LandrushIslandAmbientLoadReadiness) => void
   palmLayout: readonly LandrushIslandPalmPlacement[]
+  readCanonicalElapsedSeconds: () => number | null
   roads: readonly LandrushRoadSegment[]
   surface: PascalWaterLandSurface
   waterY: number
+  zombieEscapeHandoffEnabled: boolean
   zombieIslandActive: boolean
 }) {
   const sceneNodes = useScene((state) => (admitted ? state.nodes : EMPTY_AMBIENT_SCENE_NODES))
@@ -179,6 +223,7 @@ export function LandrushIslandAmbientLife({
   )
   const [loadQueue, setLoadQueue] = useState(createLandrushIslandAmbientLoadQueueStateForMount)
   const [fishRuntime] = useState(createLandrushIslandFishRuntime)
+  const [zombieOutsideTorchVisibility] = useState(readAmbientNpcZombieOutsideTorchVisibility)
   const [pageVisible, setPageVisible] = useState(readAmbientPageVisible)
   const pageVisibleRef = useRef(pageVisible)
   pageVisibleRef.current = pageVisible
@@ -280,6 +325,10 @@ export function LandrushIslandAmbientLife({
     LANDRUSH_ISLAND_AMBIENT_LOAD_UNITS,
   )
 
+  useLayoutEffect(() => {
+    ambientNpcPresentationRegistry.setGroundY(surface.grassSurfaceElevation)
+  }, [ambientNpcPresentationRegistry, surface.grassSurfaceElevation])
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       const visible = readAmbientPageVisible()
@@ -364,7 +413,7 @@ export function LandrushIslandAmbientLife({
         fishInstanceCount: LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
         fishModelCount: LANDRUSH_ISLAND_AMBIENT_FISH.length,
         fishUpdatePhaseCount: fishRuntime.snapshot().updatePhaseCount,
-        npcModelCount: npcsVisible ? LANDRUSH_ISLAND_AMBIENT_NPCS.length : 0,
+        npcModelCount: npcsVisible || zombieIslandActive ? LANDRUSH_ISLAND_AMBIENT_NPCS.length : 0,
         npcNavigationObstacleCount: navigationObstacles.length,
         palmInstanceCount: LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
         palmModelCount: LANDRUSH_ISLAND_AMBIENT_PALMS.length,
@@ -375,6 +424,7 @@ export function LandrushIslandAmbientLife({
       <LandrushZombieNightPresentation
         active={zombieIslandActive}
         groundY={surface.grassSurfaceElevation}
+        readCanonicalElapsedSeconds={readCanonicalElapsedSeconds}
         roads={roads}
       />
       {mountedLoadUnits.map((unit) => (
@@ -385,6 +435,7 @@ export function LandrushIslandAmbientLife({
           unitId={unit.id}
         >
           <AmbientLoadUnitModel
+            ambientNpcPresentationRegistry={ambientNpcPresentationRegistry}
             center={center}
             blockedPalmInstanceIndices={blockedPalmInstanceIndices}
             fishRuntime={fishRuntime}
@@ -400,7 +451,9 @@ export function LandrushIslandAmbientLife({
             shoreline={surface.grassSurfacePoints}
             unit={unit}
             waterY={waterY}
+            zombieEscapeHandoffEnabled={zombieEscapeHandoffEnabled}
             zombieIslandActive={zombieIslandActive}
+            zombieOutsideTorchVisibility={zombieOutsideTorchVisibility}
           />
         </AmbientProgressiveLoadUnit>
       ))}
@@ -409,6 +462,7 @@ export function LandrushIslandAmbientLife({
 }
 
 function AmbientLoadUnitModel({
+  ambientNpcPresentationRegistry,
   blockedPalmInstanceIndices,
   center,
   fishRuntime,
@@ -424,8 +478,11 @@ function AmbientLoadUnitModel({
   shoreline,
   unit,
   waterY,
+  zombieEscapeHandoffEnabled,
   zombieIslandActive,
+  zombieOutsideTorchVisibility,
 }: {
+  ambientNpcPresentationRegistry: ZombieEscapeAmbientNpcPresentationRegistry
   blockedPalmInstanceIndices: ReadonlySet<number>
   center: LandrushPoint2
   fishRuntime: LandrushIslandFishRuntime
@@ -441,7 +498,9 @@ function AmbientLoadUnitModel({
   shoreline: readonly LandrushPoint2[]
   unit: LandrushIslandAmbientLoadUnit
   waterY: number
+  zombieEscapeHandoffEnabled: boolean
   zombieIslandActive: boolean
+  zombieOutsideTorchVisibility: number
 }) {
   if (unit.kind === 'palm') {
     const palm = LANDRUSH_ISLAND_AMBIENT_PALMS[unit.catalogIndex]
@@ -512,9 +571,10 @@ function AmbientLoadUnitModel({
   const npc = LANDRUSH_ISLAND_AMBIENT_NPCS[unit.catalogIndex]
   if (!npc) throw new Error(`Unknown ambient NPC load unit ${unit.id}.`)
   return (
-    <group visible={npcsVisible}>
+    <group visible={npcsVisible || zombieIslandActive}>
       <AmbientNpc
-        active={npcsVisible}
+        ambientNpcPresentationRegistry={ambientNpcPresentationRegistry}
+        dayActive={npcsVisible}
         debugStore={motionDebug.store}
         groundY={groundY}
         index={unit.catalogIndex}
@@ -522,6 +582,9 @@ function AmbientLoadUnitModel({
         npc={npc}
         npcNeighborIndex={npcNeighborIndex}
         planner={npcJourneyPlanner}
+        zombieEscapeHandoffEnabled={zombieEscapeHandoffEnabled}
+        zombieIslandActive={zombieIslandActive}
+        zombieOutsideTorchVisibility={zombieOutsideTorchVisibility}
       />
     </group>
   )
@@ -917,7 +980,8 @@ export function LandrushIslandMeshyBoat({
 }
 
 function AmbientNpc({
-  active,
+  ambientNpcPresentationRegistry,
+  dayActive,
   debugStore,
   groundY,
   index,
@@ -925,8 +989,12 @@ function AmbientNpc({
   npc,
   npcNeighborIndex,
   planner,
+  zombieEscapeHandoffEnabled,
+  zombieIslandActive,
+  zombieOutsideTorchVisibility,
 }: {
-  active: boolean
+  ambientNpcPresentationRegistry: ZombieEscapeAmbientNpcPresentationRegistry
+  dayActive: boolean
   debugStore: AmbientMotionDebugStore | null
   groundY: number
   index: number
@@ -934,6 +1002,9 @@ function AmbientNpc({
   npc: LandrushIslandAmbientNpc
   npcNeighborIndex: LandrushIslandAmbientNpcNeighborIndex
   planner: LandrushIslandAmbientNpcJourneyPlanner
+  zombieEscapeHandoffEnabled: boolean
+  zombieIslandActive: boolean
+  zombieOutsideTorchVisibility: number
 }) {
   const riggedGltf = useGLTFKTX2(npc.glb.rigged)
   const idleGltf = useGLTF(npc.glb.idle)
@@ -948,11 +1019,41 @@ function AmbientNpc({
   }, [riggedGltf.scene])
   const model = modelOwner.model
   useGpuResourceLifetime(modelOwner.skeletonResource)
+  const zombieVariantIndex = useMemo(
+    () => ZOMBIE_ESCAPE_ZOMBIE_CATALOG.findIndex((zombie) => zombie.sourceNpcId === npc.id),
+    [npc.id],
+  )
+  const zombieVariant = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[zombieVariantIndex]
+  if (!zombieVariant) throw new Error(`Missing zombie variant for ambient NPC ${npc.id}.`)
+  const presentationResource = useMemo(
+    () =>
+      zombieEscapeHandoffEnabled
+        ? createZombieEscapeAmbientNpcPresentationResource(
+            model,
+            zombieVariant.seed,
+            zombieOutsideTorchVisibility,
+          )
+        : null,
+    [model, zombieEscapeHandoffEnabled, zombieOutsideTorchVisibility, zombieVariant.seed],
+  )
+  useGpuResourceLifetime(presentationResource)
+  const rootUserData = useMemo(
+    () => ({
+      ambientNpcId: npc.id,
+      collision: 'scene-obstacles+npc-separation',
+      navigation: 'player-surface-visibility-graph',
+      phase: 'idle',
+      zombieGeneration: 0,
+      zombieSlot: -1,
+    }),
+    [npc.id],
+  )
   const rootRef = useRef<Group>(null)
   const actionsRef = useRef<AmbientNpcActions | null>(null)
   const actionPhaseRef = useRef<LandrushIslandAmbientNpcMotionState['phase'] | null>(null)
   const motionRef = useRef<LandrushIslandAmbientNpcMotionState | null>(null)
   const motionWorldRef = useRef(navigationWorld)
+  const [zombiePresentation] = useState(createAmbientNpcZombiePresentationState)
   if (!motionRef.current) {
     motionRef.current = createLandrushIslandAmbientNpcMotionState(index, navigationWorld)
   }
@@ -964,6 +1065,50 @@ function AmbientNpc({
     () => npcNeighborIndex.createQuery(npc.id),
     [npc.id, npcNeighborIndex],
   )
+  const walkClip = walkGltf.animations[0] ?? null
+  const attackClip = useMemo(
+    () => (zombieEscapeHandoffEnabled ? createZombieEscapeAttackClip(model, walkClip) : null),
+    [model, walkClip, zombieEscapeHandoffEnabled],
+  )
+  const deathClip = useMemo(
+    () => (zombieEscapeHandoffEnabled ? createZombieEscapeDeathClip(model) : null),
+    [model, zombieEscapeHandoffEnabled],
+  )
+  const captureAdapter = useMemo(
+    () => ({
+      capture(source: ZombieEscapeAmbientHandoffSource, captureIndex: number) {
+        const root = rootRef.current
+        const actions = actionsRef.current
+        const motion = motionRef.current
+        const runtime = ambientNpcPresentationRegistry.readRuntime()
+        if (
+          !(presentationResource && root && actions && motion && runtime && captureIndex === index)
+        ) {
+          return false
+        }
+        const phase = actionPhaseRef.current ?? motion.phase
+        const action =
+          phase === 'idle' ? actions.idle : phase === 'walk' ? actions.walk : actions.run
+        source.x[index] = root.position.x - runtime.originX
+        source.y[index] = root.position.y - ambientNpcPresentationRegistry.readGroundY()
+        source.z[index] = root.position.z - runtime.originZ
+        source.yaw[index] = root.rotation.y
+        source.locomotionMode[index] = ZOMBIE_ESCAPE_AMBIENT_HANDOFF_LOCOMOTION[phase]
+        source.locomotionPhase[index] = resolveAmbientNpcZombieLocomotionPhase(
+          action?.time ?? 0,
+          action?.getClip().duration ?? 0,
+        )
+        source.variant[index] = zombieVariantIndex
+        return true
+      },
+    }),
+    [ambientNpcPresentationRegistry, index, presentationResource, zombieVariantIndex],
+  )
+
+  useLayoutEffect(() => {
+    if (!zombieEscapeHandoffEnabled) return
+    return ambientNpcPresentationRegistry.register(index, captureAdapter)
+  }, [ambientNpcPresentationRegistry, captureAdapter, index, zombieEscapeHandoffEnabled])
 
   useEffect(() => {
     prepareMeshes(model)
@@ -971,19 +1116,35 @@ function AmbientNpc({
     const idle = idleGltf.animations[0] ? mixer.clipAction(idleGltf.animations[0], model) : null
     const walk = walkGltf.animations[0] ? mixer.clipAction(walkGltf.animations[0], model) : null
     const run = runGltf.animations[0] ? mixer.clipAction(runGltf.animations[0], model) : null
+    const attack = attackClip ? mixer.clipAction(attackClip, model) : null
+    const death = deathClip ? mixer.clipAction(deathClip, model) : null
     for (const action of [idle, walk, run]) {
       action?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
       action?.play()
     }
-    actionsRef.current = { idle, mixer, run, walk }
-    actionPhaseRef.current = null
+    attack?.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
+    death?.setLoop(LoopOnce, 1)
+    if (death) death.clampWhenFinished = true
+    const actions = { attack, death, idle, mixer, run, walk }
+    actionsRef.current = actions
+    const phase = motionRef.current?.phase ?? 'idle'
+    setAmbientNpcActionWeights(
+      actions,
+      phase === 'idle' ? 1 : 0,
+      phase === 'walk' ? 1 : 0,
+      phase === 'run' ? 1 : 0,
+      0,
+      0,
+    )
+    mixer.update(0)
+    actionPhaseRef.current = phase
     return () => {
       mixer.stopAllAction()
       mixer.uncacheRoot(model)
       actionsRef.current = null
       actionPhaseRef.current = null
     }
-  }, [idleGltf.animations, model, runGltf.animations, walkGltf.animations])
+  }, [attackClip, deathClip, idleGltf.animations, model, runGltf.animations, walkGltf.animations])
 
   useEffect(() => {
     const root = rootRef.current
@@ -995,17 +1156,74 @@ function AmbientNpc({
       motionRef.current = motion
       motionWorldRef.current = navigationWorld
     }
-    root.position.set(motion.position.x, groundY, motion.position.z)
-    root.rotation.y = motion.yaw
-    npcNeighborIndex.set(npc.id, motion.position)
+    if (dayActive) {
+      root.position.set(motion.position.x, groundY, motion.position.z)
+      root.rotation.y = motion.yaw
+      npcNeighborIndex.set(npc.id, motion.position)
+    } else {
+      npcNeighborIndex.delete(npc.id)
+    }
     return () => {
       npcNeighborIndex.delete(npc.id)
       clearLandrushIslandNpcMotionDebug(debugStore, npc.id)
     }
-  }, [debugStore, groundY, index, navigationWorld, npc.id, npcNeighborIndex])
+  }, [dayActive, debugStore, groundY, index, navigationWorld, npc.id, npcNeighborIndex])
+
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    const actions = actionsRef.current
+    const motion = motionRef.current
+    if (!(root && motion && presentationResource)) return
+    presentationResource.setHitFlash(0)
+    zombiePresentation.activeGeneration = 0
+    zombiePresentation.activeSlot = -1
+    zombiePresentation.releasedForNight = false
+    zombiePresentation.transitionSeconds = 0
+    if (dayActive) {
+      presentationResource.setZombiePhase(0)
+      root.visible = true
+      root.position.set(motion.position.x, groundY, motion.position.z)
+      root.rotation.set(0, motion.yaw, 0)
+      root.userData.phase = motion.phase
+      root.userData.zombieGeneration = 0
+      root.userData.zombieSlot = -1
+      npcNeighborIndex.set(npc.id, motion.position)
+      if (actions) {
+        actions.attack?.stop()
+        actions.death?.stop()
+        setAmbientNpcActionWeights(
+          actions,
+          motion.phase === 'idle' ? 1 : 0,
+          motion.phase === 'walk' ? 1 : 0,
+          motion.phase === 'run' ? 1 : 0,
+          0,
+          0,
+        )
+        actions.mixer.update(0)
+        actionPhaseRef.current = motion.phase
+      }
+      return
+    }
+    if (zombieIslandActive) {
+      presentationResource.setZombiePhase(1)
+      root.visible = true
+      root.userData.phase = 'zombie'
+      root.userData.zombieGeneration = 0
+      root.userData.zombieSlot = -1
+      npcNeighborIndex.delete(npc.id)
+    }
+  }, [
+    dayActive,
+    groundY,
+    npc.id,
+    npcNeighborIndex,
+    presentationResource,
+    zombieIslandActive,
+    zombiePresentation,
+  ])
 
   useFrame((_, delta) => {
-    if (!active) return
+    if (!dayActive) return
     const root = rootRef.current
     const actions = actionsRef.current
     if (!(root && actions)) return
@@ -1034,6 +1252,8 @@ function AmbientNpc({
         motion.phase === 'idle' ? 1 : 0,
         motion.phase === 'walk' ? 1 : 0,
         motion.phase === 'run' ? 1 : 0,
+        0,
+        0,
       )
       root.userData.phase = motion.phase
       root.userData.destinationPreference = motion.destinationPreference
@@ -1045,15 +1265,111 @@ function AmbientNpc({
     actions.mixer.update(frameDelta)
   }, -5)
 
+  useFrame((_, delta) => {
+    if (dayActive || !zombieIslandActive || !presentationResource) return
+    const root = rootRef.current
+    const actions = actionsRef.current
+    const runtime = ambientNpcPresentationRegistry.readRuntime()
+    const presentation = zombiePresentation
+    if (!(root && actions && runtime) || presentation.releasedForNight) return
+    const simulation = runtime.readSimulation()
+    if (zombieOutsideTorchVisibility < 1) {
+      presentationResource.shader.setTorchLighting(runtime.readShoulderTorchLighting())
+    }
+    const claim = resolveZombieEscapeAmbientNpcPresentationClaim(
+      simulation,
+      index,
+      presentation.claim,
+    )
+    if (
+      presentation.activeSlot >= 0 &&
+      (!claim.valid ||
+        claim.slot !== presentation.activeSlot ||
+        claim.generation !== presentation.activeGeneration)
+    ) {
+      presentationResource.setHitFlash(0)
+      presentation.activeSlot = -1
+      presentation.activeGeneration = 0
+      presentation.releasedForNight = true
+      root.visible = false
+      root.userData.zombieGeneration = 0
+      root.userData.zombieSlot = -1
+      return
+    }
+    if (!claim.valid) {
+      if (!isZombieEscapeAmbientNpcHandoffCandidatePending(simulation.ambientHandoff, index)) {
+        presentationResource.setHitFlash(0)
+        presentation.releasedForNight = true
+        root.visible = false
+        root.userData.zombieGeneration = 0
+        root.userData.zombieSlot = -1
+      }
+      return
+    }
+    const slot = claim.slot
+    if (presentation.activeSlot < 0) {
+      actions.attack?.play()
+      actions.death?.play()
+      presentation.activeSlot = slot
+      presentation.activeGeneration = claim.generation
+      presentation.transitionSeconds = 0
+      presentation.sourceAttackWeight = actions.attack?.getEffectiveWeight() ?? 0
+      presentation.sourceDeathWeight = actions.death?.getEffectiveWeight() ?? 0
+      presentation.sourceIdleWeight = actions.idle?.getEffectiveWeight() ?? 0
+      presentation.sourceRunWeight = actions.run?.getEffectiveWeight() ?? 0
+      presentation.sourceWalkWeight = actions.walk?.getEffectiveWeight() ?? 0
+      root.visible = true
+    }
+    const zombies = simulation.zombies
+    const deathProgress =
+      (zombies.health[slot] ?? 0) <= 0
+        ? resolveZombieEscapeDeathNormalizedPhase(zombies.deathPresentationSeconds[slot] ?? 0)
+        : 0
+    resolveZombieEscapePresentationPose(
+      (zombies.x[slot] ?? 0) + runtime.originX,
+      (zombies.y[slot] ?? 0) +
+        ambientNpcPresentationRegistry.readGroundY() -
+        ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y,
+      (zombies.z[slot] ?? 0) + runtime.originZ,
+      zombies.heading[slot] ?? 0,
+      zombies.hitReaction[slot] ?? 0,
+      zombies.hitImpulseX[slot] ?? 0,
+      zombies.hitImpulseY[slot] ?? 0,
+      zombies.hitImpulseZ[slot] ?? 0,
+      presentation.pose,
+      transform.bodyCenterY,
+      deathProgress,
+      zombies.spawnOrdinal[slot] ?? 0,
+    )
+    root.position.set(presentation.pose.x, presentation.pose.y, presentation.pose.z)
+    root.quaternion.set(
+      presentation.pose.quaternionX,
+      presentation.pose.quaternionY,
+      presentation.pose.quaternionZ,
+      presentation.pose.quaternionW,
+    )
+    presentationResource.setHitFlash(zombies.hitFlash[slot] ?? 0)
+    updateAmbientNpcZombieActions(
+      actions,
+      presentation,
+      Math.min(0.05, Math.max(0, delta)),
+      simulation.paused,
+      Math.hypot(zombies.vx[slot] ?? 0, zombies.vz[slot] ?? 0),
+      zombies.runBlend[slot] ?? 0,
+      zombieVariant.movement.walkMetersPerSecond,
+      zombieVariant.movement.runMetersPerSecond,
+      zombies.intent[slot] ?? 0,
+      zombies.attackCooldown[slot] ?? 0,
+      zombies.health[slot] ?? 0,
+      zombies.deathPresentationSeconds[slot] ?? 0,
+    )
+    root.userData.phase = 'zombie'
+    root.userData.zombieGeneration = presentation.activeGeneration
+    root.userData.zombieSlot = presentation.activeSlot
+  }, AMBIENT_NPC_ZOMBIE_PRESENTATION_FRAME_PRIORITY)
+
   return (
-    <group
-      ref={rootRef}
-      userData={{
-        ambientNpcId: npc.id,
-        collision: 'scene-obstacles+npc-separation',
-        navigation: 'player-surface-visibility-graph',
-      }}
-    >
+    <group ref={rootRef} userData={rootUserData}>
       <primitive
         dispose={null}
         object={model}
@@ -1064,15 +1380,191 @@ function AmbientNpc({
   )
 }
 
+type AmbientNpcZombieActionTargets = {
+  attackPhase: number
+  attackWeight: number
+  deathPhase: number
+  deathWeight: number
+  idleWeight: number
+  locomotionPlaybackRate: number
+  runWeight: number
+  walkWeight: number
+}
+
+type AmbientNpcZombiePresentationState = {
+  activeGeneration: number
+  activeSlot: number
+  claim: ReturnType<typeof createZombieEscapeAmbientNpcPresentationClaim>
+  pose: ReturnType<typeof createZombieEscapePresentationPose>
+  releasedForNight: boolean
+  sourceAttackWeight: number
+  sourceDeathWeight: number
+  sourceIdleWeight: number
+  sourceRunWeight: number
+  sourceWalkWeight: number
+  targets: AmbientNpcZombieActionTargets
+  transitionSeconds: number
+}
+
+function createAmbientNpcZombiePresentationState(): AmbientNpcZombiePresentationState {
+  return {
+    activeGeneration: 0,
+    activeSlot: -1,
+    claim: createZombieEscapeAmbientNpcPresentationClaim(),
+    pose: createZombieEscapePresentationPose(),
+    releasedForNight: false,
+    sourceAttackWeight: 0,
+    sourceDeathWeight: 0,
+    sourceIdleWeight: 0,
+    sourceRunWeight: 0,
+    sourceWalkWeight: 0,
+    targets: createAmbientNpcZombieActionTargets(),
+    transitionSeconds: 0,
+  }
+}
+
+export function createAmbientNpcZombieActionTargets(): AmbientNpcZombieActionTargets {
+  return {
+    attackPhase: 0,
+    attackWeight: 0,
+    deathPhase: 0,
+    deathWeight: 0,
+    idleWeight: 1,
+    locomotionPlaybackRate: 0,
+    runWeight: 0,
+    walkWeight: 0,
+  }
+}
+
+export function resolveAmbientNpcZombieLocomotionPhase(
+  actionTimeSeconds: number,
+  clipDurationSeconds: number,
+) {
+  if (
+    !Number.isFinite(actionTimeSeconds) ||
+    !Number.isFinite(clipDurationSeconds) ||
+    clipDurationSeconds <= 0
+  ) {
+    return 0
+  }
+  const wrappedTime =
+    ((actionTimeSeconds % clipDurationSeconds) + clipDurationSeconds) % clipDurationSeconds
+  return (wrappedTime / clipDurationSeconds) * Math.PI * 2
+}
+
+export function resolveAmbientNpcZombieActionTargets(
+  horizontalSpeed: number,
+  runBlend: number,
+  walkMetersPerSecond: number,
+  runMetersPerSecond: number,
+  attackIntent: number,
+  attackCooldown: number,
+  health: number,
+  deathPresentationSeconds: number,
+  output: AmbientNpcZombieActionTargets,
+) {
+  const deathActive = health <= 0
+  const attackIntentActive = isZombieEscapeAttackPresentationActive(attackIntent)
+  const deathPhase = deathActive
+    ? resolveZombieEscapeDeathNormalizedPhase(deathPresentationSeconds)
+    : 0
+  const deathBlendProgress = Math.min(1, deathPhase / 0.24)
+  const deathWeight = deathBlendProgress * deathBlendProgress * (3 - 2 * deathBlendProgress)
+  const sourceWeight = 1 - deathWeight
+  const locomotionWeight = attackIntentActive
+    ? 0
+    : resolveZombieEscapeLocomotionWeight(horizontalSpeed) * sourceWeight
+  const clampedRunBlend = Math.max(0, Math.min(1, runBlend))
+  output.attackPhase = resolveZombieEscapeAttackNormalizedPhase(attackCooldown)
+  output.attackWeight =
+    (!deathActive && attackIntentActive) || (deathActive && attackIntentActive) ? sourceWeight : 0
+  output.deathPhase = deathPhase
+  output.deathWeight = deathActive ? deathWeight : 0
+  output.idleWeight = attackIntentActive ? 0 : (1 - locomotionWeight) * sourceWeight
+  output.locomotionPlaybackRate = resolveZombieEscapeLocomotionPlaybackRate(
+    horizontalSpeed,
+    walkMetersPerSecond,
+    runMetersPerSecond,
+    clampedRunBlend,
+  )
+  output.runWeight = clampedRunBlend * locomotionWeight
+  output.walkWeight = (1 - clampedRunBlend) * locomotionWeight
+  return output
+}
+
+function updateAmbientNpcZombieActions(
+  actions: AmbientNpcActions,
+  presentation: AmbientNpcZombiePresentationState,
+  frameDelta: number,
+  paused: boolean,
+  horizontalSpeed: number,
+  runBlend: number,
+  walkMetersPerSecond: number,
+  runMetersPerSecond: number,
+  attackIntent: number,
+  attackCooldown: number,
+  health: number,
+  deathPresentationSeconds: number,
+) {
+  const targets = resolveAmbientNpcZombieActionTargets(
+    horizontalSpeed,
+    runBlend,
+    walkMetersPerSecond,
+    runMetersPerSecond,
+    attackIntent,
+    attackCooldown,
+    health,
+    deathPresentationSeconds,
+    presentation.targets,
+  )
+  const blendProgress = Math.min(
+    1,
+    presentation.transitionSeconds / AMBIENT_NPC_ZOMBIE_ACTION_BLEND_SECONDS,
+  )
+  const blend = blendProgress * blendProgress * (3 - 2 * blendProgress)
+  actions.idle?.setEffectiveWeight(
+    presentation.sourceIdleWeight + (targets.idleWeight - presentation.sourceIdleWeight) * blend,
+  )
+  actions.walk?.setEffectiveWeight(
+    presentation.sourceWalkWeight + (targets.walkWeight - presentation.sourceWalkWeight) * blend,
+  )
+  actions.walk?.setEffectiveTimeScale(targets.locomotionPlaybackRate)
+  actions.run?.setEffectiveWeight(
+    presentation.sourceRunWeight + (targets.runWeight - presentation.sourceRunWeight) * blend,
+  )
+  actions.run?.setEffectiveTimeScale(targets.locomotionPlaybackRate)
+  actions.attack?.setEffectiveWeight(
+    presentation.sourceAttackWeight +
+      (targets.attackWeight - presentation.sourceAttackWeight) * blend,
+  )
+  actions.attack?.setEffectiveTimeScale(0)
+  if (actions.attack && targets.attackWeight > 0) {
+    actions.attack.time = targets.attackPhase * actions.attack.getClip().duration
+  }
+  actions.death?.setEffectiveWeight(
+    presentation.sourceDeathWeight + (targets.deathWeight - presentation.sourceDeathWeight) * blend,
+  )
+  actions.death?.setEffectiveTimeScale(0)
+  if (actions.death && targets.deathWeight > 0) {
+    actions.death.time = targets.deathPhase * actions.death.getClip().duration
+  }
+  actions.mixer.update(paused ? 0 : frameDelta)
+  if (!paused) presentation.transitionSeconds += frameDelta
+}
+
 function setAmbientNpcActionWeights(
   actions: AmbientNpcActions,
   idleWeight: number,
   walkWeight: number,
   runWeight: number,
+  attackWeight: number,
+  deathWeight: number,
 ) {
   actions.idle?.setEffectiveWeight(idleWeight)
   actions.walk?.setEffectiveWeight(walkWeight)
   actions.run?.setEffectiveWeight(runWeight)
+  actions.attack?.setEffectiveWeight(attackWeight)
+  actions.death?.setEffectiveWeight(deathWeight)
 }
 
 function computeGroundedTransform(source: Group, heightMeters: number) {
@@ -1081,6 +1573,7 @@ function computeGroundedTransform(source: Group, heightMeters: number) {
   const center = bounds.getCenter(new Vector3())
   const scale = heightMeters / Math.max(0.000_1, size.y)
   return {
+    bodyCenterY: (center.y - bounds.min.y) * scale,
     offset: new Vector3(-center.x * scale, -bounds.min.y * scale, -center.z * scale),
     scale,
   }
@@ -1217,6 +1710,14 @@ function readAmbientMotionDebugRuntime(): AmbientMotionDebugRuntime {
   if (!settings.enabled) return { store: null, timeSeconds: settings.timeSeconds }
   window.__LANDRUSH_AMBIENT_MOTION_DEBUG__ ??= { fish: {}, npcs: {} }
   return { store: window.__LANDRUSH_AMBIENT_MOTION_DEBUG__, timeSeconds: settings.timeSeconds }
+}
+
+function readAmbientNpcZombieOutsideTorchVisibility() {
+  const visibility =
+    typeof window === 'undefined'
+      ? 'normal'
+      : parseLandrushZombieNightDebugQuery(new URLSearchParams(window.location.search)).visibility
+  return resolveLandrushZombieNightVisibilityTreatment(visibility).outsideTorchVisibility
 }
 
 function readAmbientPageVisible() {

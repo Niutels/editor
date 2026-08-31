@@ -20,6 +20,7 @@ import {
 import {
   createZombieEscapeRenderReadinessRegistry,
   getZombieEscapeRenderRepresentativeKeys,
+  ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,
   ZOMBIE_ESCAPE_SHOULDER_TORCH_RENDER_REPRESENTATIVE_KEY,
 } from './zombie-escape-render-readiness'
 
@@ -132,6 +133,72 @@ describe('Zombie Escape live-scene presentation prewarm', () => {
     )
     expect(islandClientSource).toMatch(
       /viewerSceneReady=\{\s*viewerSceneReady\s*&&\s*ambientLoadReadiness\?\.ready\s*===\s*true\s*\}/,
+    )
+  })
+
+  test('requires the live aim reticle and wires its exact root into the registry', () => {
+    expect(getZombieEscapeRenderRepresentativeKeys('balanced')).toContain(
+      ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,
+    )
+    expect(getZombieEscapeRenderRepresentativeKeys('performance')).toContain(
+      ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,
+    )
+
+    const actorsSource = readFileSync(
+      new URL('./zombie-escape-actors.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(actorsSource).toMatch(
+      /<ZombieEscapeAimReticle[\s\S]*?renderReadinessRegistry=\{renderReadinessRegistry\}[\s\S]*?\/>/,
+    )
+    expect(actorsSource).toContain(
+      'useZombieEscapeRenderRepresentative(\n    renderReadinessRegistry,\n    ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,\n    reticleRef,\n  )',
+    )
+  })
+
+  test('keeps camera and robot bone-binding preparation resident before night activation', () => {
+    const islandClientSource = readFileSync(
+      new URL('./landrush-island-client.tsx', import.meta.url),
+      'utf8',
+    )
+    const weaponRigSource = readFileSync(
+      new URL('./landrush-robot-weapon-rig.tsx', import.meta.url),
+      'utf8',
+    )
+    const torchRigSource = readFileSync(
+      new URL('./landrush-robot-shoulder-torch-rig.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(islandClientSource).toMatch(
+      /\{zombieEscapeEnabled \? \(\s*<LandrushZombieEscapeCamera\s+active=\{zombieEscapeCameraActive\}/,
+    )
+    expect(weaponRigSource).toMatch(
+      /const bones = visualRoot[\s\S]*?findLandrushRobotArmBones\(visualRoot\)[\s\S]*?if \(!active\)/,
+    )
+    expect(torchRigSource).toMatch(
+      /const bones = visualRoot[\s\S]*?findLandrushRobotShoulderBones\(visualRoot\)[\s\S]*?const preparedPoseReady/,
+    )
+    expect(torchRigSource).not.toContain('writeLandrushRobotShoulderTorchBeamUvRange')
+  })
+
+  test('uses one authoritative robot matrix sync and shares its shoulder pose with the torch', () => {
+    const weaponRigSource = readFileSync(
+      new URL('./landrush-robot-weapon-rig.tsx', import.meta.url),
+      'utf8',
+    )
+    const torchRigSource = readFileSync(
+      new URL('./landrush-robot-shoulder-torch-rig.tsx', import.meta.url),
+      'utf8',
+    )
+
+    expect(weaponRigSource.match(/visualRoot\.updateWorldMatrix\(true, true\)/g)).toHaveLength(1)
+    expect(weaponRigSource).not.toContain('upperArm.updateWorldMatrix(true, true)')
+    expect(weaponRigSource).not.toContain('joint.updateWorldMatrix(true, true)')
+    expect(weaponRigSource).toContain('joint.updateWorldMatrix(false, true)')
+    expect(weaponRigSource).toContain('poseStateRef={shoulderTorchPoseRef}')
+    expect(torchRigSource).toMatch(
+      /if \(preparedPoseReady && poseState\)[\s\S]*?scratch\.robotOrigin\.copy\(poseState\.robotOrigin\)[\s\S]*?else if \(bones\) \{\s*visualRoot\.updateWorldMatrix\(true, true\)/,
     )
   })
 })

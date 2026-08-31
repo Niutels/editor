@@ -10,6 +10,9 @@
     "optimize:island-ambient-assets": "node scripts/optimize-island-ambient-assets.mjs",
     "audit:island-ambient-assets": "node scripts/audit-island-ambient-assets.mjs",
     "generate:zombie-escape-assets": "node scripts/generate-zombie-escape-assets.mjs",
+    "generate:zombie-night-lightpost": "node scripts/generate-zombie-night-street-lightpost.mjs",
+    "optimize:zombie-night-lightpost": "node scripts/optimize-zombie-night-street-lightpost.mjs",
+    "test:zombie-night-lightpost": "node --test scripts/zombie-night-street-lightpost-asset.test.mjs",
     "optimize:zombie-escape-weapon-assets": "node scripts/zombie-escape-weapon-glb-optimizer.mjs",
     "audit:zombie-escape-assets": "node scripts/audit-zombie-escape-assets.mjs",
     "audit:zombie-escape-assets:shipping": "node scripts/audit-zombie-escape-assets.mjs --no-write --quiet",
@@ -26,7 +29,7 @@
     "start": "bun run sync:pascal-assets && bun run build:runtime-workers && next start",
     "lint": "biome lint",
     "check-types": "next typegen && tsc --noEmit",
-    "test": "bun test components/landrush-lab lib && bun run test:zombie-escape-weapon-assets"
+    "test": "bun test components/landrush-lab lib && bun run test:zombie-escape-weapon-assets && bun run test:zombie-night-lightpost"
   },
   "dependencies": {
     "@iconify/react": "^6.0.2",

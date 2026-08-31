@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { shouldBlockLandrushFirstHouseBuildShortcut } from './landrush-pascal-editor-chrome'
 
 const readSource = (path: string) =>
   readFileSync(join(import.meta.dir, path), 'utf8').replaceAll('\r\n', '\n')
@@ -601,27 +600,6 @@ const FULL_EDITOR_TOOLBAR_CAPABILITIES: CommunityViewerToolbarCapabilities = {
 }
 
 describe('Landrush Pascal editor UI parity', () => {
-  test('blocks first-house creation shortcuts without swallowing editable or allowed input', () => {
-    for (const key of ['f', 'g', 'm', 'p', 'z']) {
-      expect(shouldBlockLandrushFirstHouseBuildShortcut({ key })).toBe(true)
-    }
-    expect(shouldBlockLandrushFirstHouseBuildShortcut({ ctrlKey: true, key: 'v' })).toBe(true)
-    expect(shouldBlockLandrushFirstHouseBuildShortcut({ key: 'v', metaKey: true })).toBe(true)
-    expect(shouldBlockLandrushFirstHouseBuildShortcut({ key: 'b' })).toBe(false)
-    expect(shouldBlockLandrushFirstHouseBuildShortcut({ key: 'v' })).toBe(false)
-    expect(shouldBlockLandrushFirstHouseBuildShortcut({ ctrlKey: true, key: 'z' })).toBe(false)
-    expect(
-      shouldBlockLandrushFirstHouseBuildShortcut({
-        ctrlKey: true,
-        editableTarget: true,
-        key: 'v',
-      }),
-    ).toBe(false)
-    expect(shouldBlockLandrushFirstHouseBuildShortcut({ editableTarget: true, key: 'g' })).toBe(
-      false,
-    )
-  })
-
   test('keeps the Build palette aligned with the declared Landrush host gates', () => {
     const canonical = readSource('../../../editor/components/build-tab.tsx')
     const landrush = readSource('../build-tab.tsx')
@@ -684,7 +662,6 @@ describe('Landrush Pascal editor UI parity', () => {
     )
 
     expect(chrome).toContain(`<BuildTab
-      allowedStructureKinds={allowedStructureKinds}
       capabilities={{ materialPaint: false }}
       interactionReady={interactionReady}
       isStructureToolDisabled={isStructureToolDisabled}
@@ -702,16 +679,10 @@ describe('Landrush Pascal editor UI parity', () => {
     expect(chrome).toContain(
       "buildCostsEnabled && !canAffordLandrushBuildSelection('item', profileMoney)",
     )
-    expect(chrome).toContain('LANDRUSH_ZOMBIE_ESCAPE_FIRST_HOUSE_BUILD_KINDS')
-    expect(chrome).toContain('waitingOnFirstHouse ? FIRST_HOUSE_STRUCTURE_KINDS : undefined')
-    expect(chrome).toContain('data-landrush-zombie-escape-waiting-on-house=')
-    expect(chrome).toContain('shouldBlockLandrushFirstHouseBuildShortcut')
-    expect(chrome).toContain('editableTarget: isEditableKeyboardTarget(event.target)')
-    expect(chrome).toContain("window.addEventListener('keydown', handleFirstHouseKeyDown, true)")
-    expect(chrome).toContain("window.removeEventListener('keydown', handleFirstHouseKeyDown, true)")
-    expect(chrome).toContain('event.preventDefault()')
-    expect(chrome).toContain('event.stopImmediatePropagation()')
-    expect(chrome).toContain("editorMode === 'material-paint' || editorMode === 'terrain-sculpt'")
+    expect(chrome).not.toContain('FIRST_HOUSE')
+    expect(chrome).not.toContain('waitingOnFirstHouse')
+    expect(chrome).not.toContain('first-house-build-gate')
+    expect(chrome).not.toContain('allowedStructureKinds=')
     expect(chrome).toContain("import { CATALOG_ITEMS } from '@pascal-app/editor/catalog'")
     expect(chrome).toContain('<SettingsPanel />')
     expect(chrome).toContain(
@@ -894,7 +865,9 @@ describe('Landrush Pascal editor UI parity', () => {
 
     expect(statusPanel).toContain("import { createPortal } from 'react-dom'")
     expect(statusPanel).toContain('setPortalTarget(document.body)')
-    expect(statusPanel).toContain('fixed right-3 bottom-3')
+    expect(statusPanel).toContain(
+      'fixed right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[120] flex min-h-7',
+    )
     expect(statusPanel).toContain('data-landrush-multiplayer-status')
     expect(statusPanel).toContain('createPortal(panel, portalTarget)')
     expect(statusPanel).toContain('[latencyLabel, portalTarget]')

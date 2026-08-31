@@ -121,7 +121,7 @@ export function ZombieShoulderTorchDebugClient({
         </p>
         <h1 className="mt-1 font-black text-xl">Sentinel Mk II · selected</h1>
         <p className="mt-1 text-slate-300 text-xs">
-          {budget.pairFixtureTriangles} fixture tris / pair · {budget.textureBytes} B armor texture
+          {budget.pairFixtureTriangles} fixture tris / pair · {budget.textureBytes} B textures
         </p>
         <p className="text-slate-400 text-xs">
           {budget.beamTriangles} beam tris · two source feeds / one beam / one spotlight · no post
@@ -129,7 +129,7 @@ export function ZombieShoulderTorchDebugClient({
       </section>
       {view === 'designs' ? <ZombieShoulderTorchDesignLabels /> : null}
       <div className="pointer-events-none absolute right-5 bottom-5 rounded-full border border-white/10 bg-black/50 px-3 py-1.5 font-semibold text-[10px] text-white/65 uppercase tracking-[0.18em]">
-        {ready ? 'Capture ready' : 'Preparing fixed view'} · DPR 1 · 8×8 nearest texture
+        {ready ? 'Capture ready' : 'Preparing fixed view'} · DPR 1 · mipmapped beam alpha
       </div>
     </main>
   )

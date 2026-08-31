@@ -2041,6 +2041,7 @@ async function waitForFrozenTargetTransition(
   signal: AbortSignal | undefined,
   deadline: number,
   recordTarget: boolean,
+  minimumLiveGoalClassificationTicks = 1,
 ) {
   const state = harness.simulation
   const zombies = state.zombies
@@ -2144,10 +2145,13 @@ async function waitForFrozenTargetTransition(
       }
     }
     const classification = inspectFrozenPopulationClassification(state)
+    const liveGoalClassificationSettled =
+      publicationTick >= 0 && tick - publicationTick + 1 >= minimumLiveGoalClassificationTicks
     if (
       reverse.activeGeneration > generationBefore &&
       reverse.activeRouteTargetLayerIndex === targetLayerIndex &&
       simulationHasNoPendingNavigation(state) &&
+      liveGoalClassificationSettled &&
       frozenClassificationIsComplete(classification, harness.population)
     ) {
       const counterDelta = subtractCounters(readCounterSnapshot(state), countersBefore)
@@ -3258,6 +3262,7 @@ async function runPopulationProof(
     signal,
     deadline,
     true,
+    ZOMBIE_ESCAPE_SIMULATION.zombieLiveGoalReacquisitionClearTicks,
   )
 
   const lowerTarget = targetForNode(state.collisionWorld, harness.plan.lowerTargetNode)

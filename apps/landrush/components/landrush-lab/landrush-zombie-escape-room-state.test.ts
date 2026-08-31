@@ -3,6 +3,7 @@ import type { MultiplayerZombieEscapeStateSnapshot } from '@landrush/protocol'
 import {
   applyLandrushZombieEscapeRoomState,
   type LandrushZombieEscapeRoomStateObservation,
+  projectLandrushZombieEscapePhaseElapsedSeconds,
   projectLandrushZombieEscapePhaseSecondsRemaining,
 } from './landrush-zombie-escape-room-state'
 import { createZombieEscapeSimulation, setZombieEscapeGamePhase } from './zombie-escape-simulation'
@@ -10,7 +11,7 @@ import { createZombieEscapeArena } from './zombie-escape-world'
 
 describe('Zombie Escape canonical room state', () => {
   test('projects an absolute deadline from the server receipt pair and clamps it', () => {
-    const observation = createObservation({ phaseEndsAt: 1_050_000 })
+    const observation = createObservation({ phase: 'night', phaseEndsAt: 1_050_000 })
 
     expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 12_500, observation })).toBe(
       47.5,
@@ -18,12 +19,24 @@ describe('Zombie Escape canonical room state', () => {
     expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 90_000, observation })).toBe(0)
   })
 
-  test('holds a null build deadline at the full server duration', () => {
+  test('represents a held build phase without a countdown', () => {
     const observation = createObservation({ phaseEndsAt: null })
 
-    expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 90_000, observation })).toBe(
-      60,
-    )
+    expect(projectLandrushZombieEscapePhaseSecondsRemaining({ nowMs: 90_000, observation })).toBe(0)
+  })
+
+  test('projects canonical night elapsed time and clamps it to the server duration', () => {
+    const observation = createObservation({ phase: 'night', phaseEndsAt: 1_180_000 })
+
+    expect(projectLandrushZombieEscapePhaseElapsedSeconds(10_000, observation)).toBe(0)
+    expect(projectLandrushZombieEscapePhaseElapsedSeconds(40_000, observation)).toBe(30)
+    expect(projectLandrushZombieEscapePhaseElapsedSeconds(250_000, observation)).toBe(180)
+  })
+
+  test('has no canonical elapsed clock outside an observed night', () => {
+    const observation = createObservation({ phaseEndsAt: null })
+
+    expect(projectLandrushZombieEscapePhaseElapsedSeconds(10_000, observation)).toBeNull()
   })
 
   test('preseeds the night so a late join enters the canonical wave', () => {
@@ -41,6 +54,7 @@ describe('Zombie Escape canonical room state', () => {
     expect(simulation.phase).toBe('night')
     expect(simulation.night).toBe(4)
     expect(simulation.wave).toBe(4)
+    expect(simulation.waveSpawnRemaining).toBe(25)
     expect(simulation.phaseSecondsRemaining).toBe(150)
   })
 
@@ -98,10 +112,10 @@ describe('Zombie Escape canonical room state', () => {
     expect(simulation.wave).toBe(3)
   })
 
-  test('force-applying an unchanged canonical build only restores its time', () => {
+  test('force-applying an unchanged canonical build keeps its clock held', () => {
     const simulation = createSimulation()
     simulation.player.health = 41
-    const observation = createObservation({ phaseEndsAt: 1_040_000, revision: 2 })
+    const observation = createObservation({ phaseEndsAt: null, revision: 2 })
     const appliedState = {
       revision: 2,
       sessionId: observation.state.sessionId,
@@ -119,7 +133,7 @@ describe('Zombie Escape canonical room state', () => {
     expect(result.reconciled).toBe(true)
     expect(result.destructiveTransition).toBe(false)
     expect(simulation.player.health).toBe(41)
-    expect(simulation.phaseSecondsRemaining).toBe(35)
+    expect(simulation.phaseSecondsRemaining).toBe(0)
   })
 })
 

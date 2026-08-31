@@ -45,7 +45,7 @@ export function resolveZombieEscapeWeaponPickupPlacements(
       const point = findInteriorPlacementPoint(region)
       return point ? [{ point, scopeId, y }] : []
     })
-    .sort((first, second) => first.scopeId.localeCompare(second.scopeId))
+    .sort((first, second) => compareWeaponPickupScopes(first.scopeId, second.scopeId))
     .slice(0, limit)
     .map(({ point, scopeId, y }, index) => ({
       scopeId,
@@ -54,6 +54,12 @@ export function resolveZombieEscapeWeaponPickupPlacements(
       y,
       z: point.z,
     }))
+}
+
+function compareWeaponPickupScopes(first: string, second: string) {
+  const firstPriority = first.startsWith('parcel:') ? 0 : 1
+  const secondPriority = second.startsWith('parcel:') ? 0 : 1
+  return firstPriority - secondPriority || first.localeCompare(second)
 }
 
 function compareInteriorRegions(

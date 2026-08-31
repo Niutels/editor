@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
   beginLandrushZombieEscapeRoomSoak,
+  createLandrushZombieEscapeRoomSoakBridge,
   createLandrushZombieEscapeRoomSoakState,
   createLandrushZombieEscapeRoutingDebugSnapshot,
   endLandrushZombieEscapeRoomSoak,
+  type LandrushZombieEscapeRoomSoakPlayerState,
   readLandrushZombieEscapeRoomSoakSnapshot,
   requestLandrushZombieEscapeRoomSoakObstacleDelta,
   requestLandrushZombieEscapeRoomSoakTargetRoster,
@@ -106,6 +108,72 @@ describe('Landrush Zombie Escape room-soak policy lifecycle', () => {
       obstacleDamageSuppressed: true,
       phaseHeld: false,
     })
+  })
+
+  test('releases only player protection and re-protects without replacing the original health', () => {
+    const arena = createZombieEscapeArena(91_213)
+    const simulation = createZombieEscapeSimulation(arena, 91_214)
+    const soakState = createLandrushZombieEscapeRoomSoakState()
+    soakState.enabled = true
+    setZombieEscapeGamePhase(simulation, 'night')
+    simulation.player.health = 100
+    const bridge = createLandrushZombieEscapeRoomSoakBridge(soakState, simulation)
+    const playerState: LandrushZombieEscapeRoomSoakPlayerState = {
+      audioWriteSequence: -1,
+      health: -1,
+      hitSlowSeconds: -1,
+      hurtFlash: -1,
+      phase: 'build',
+      playerProtected: false,
+      status: 'playing',
+    }
+
+    bridge.begin()
+    expect(soakState.originalPlayerHealth).toBe(100)
+    expect(bridge.getPlayerState(playerState)).toBe(playerState)
+    expect(playerState.audioWriteSequence).toBe(simulation.audioEvents.writeSequence)
+    expect(playerState).toMatchObject({
+      phase: 'night',
+      playerProtected: true,
+      status: 'playing',
+    })
+    expect(playerState.health).toBeGreaterThan(100)
+
+    expect(bridge.releasePlayerProtection()).toMatchObject({
+      active: true,
+      obstacleDamageSuppressed: true,
+      phaseHeld: true,
+      playerProtected: false,
+    })
+    expect(simulation.player.health).toBe(100)
+    expect(simulation.obstacleDamageEnabled).toBe(false)
+
+    simulation.player.health = 92
+    simulation.player.hitSlowSeconds = ZOMBIE_ESCAPE_SIMULATION.playerHitSlowSeconds
+    simulation.player.hurtFlash = 1
+    bridge.releasePlayerProtection()
+    expect(simulation.player.health).toBe(92)
+
+    expect(bridge.begin()).toMatchObject({
+      active: true,
+      obstacleDamageSuppressed: true,
+      phaseHeld: true,
+      playerProtected: true,
+    })
+    expect(soakState.originalPlayerHealth).toBe(100)
+    expect(simulation.player.health).toBeGreaterThan(100)
+    expect(bridge.getPlayerState(playerState)).toMatchObject({
+      health: simulation.player.health,
+      hitSlowSeconds: ZOMBIE_ESCAPE_SIMULATION.playerHitSlowSeconds,
+      hurtFlash: 1,
+      phase: 'night',
+      playerProtected: true,
+      status: 'playing',
+    })
+
+    bridge.end()
+    expect(simulation.player.health).toBe(100)
+    expect(simulation.obstacleDamageEnabled).toBe(true)
   })
 
   test('requests an idempotent full-capacity roster without bypassing sparse spawn validation', () => {

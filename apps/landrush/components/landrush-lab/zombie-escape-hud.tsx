@@ -8,6 +8,7 @@ import {
 import type { ZombieEscapeSceneApi } from './zombie-escape-scene'
 import type { ZombieEscapeHudSnapshot } from './zombie-escape-simulation'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
+import { ZombieEscapeWeaponInventoryRow } from './zombie-escape-weapon-inventory'
 
 const BUTTON_CLASS =
   'rounded-lg border border-white/15 bg-slate-950/55 px-3 py-2 font-semibold text-[11px] text-white/85 uppercase tracking-wide backdrop-blur-md transition hover:border-cyan-200/45 hover:bg-slate-900/75 hover:text-white'
@@ -151,24 +152,30 @@ export function ZombieEscapeHud({
         <div className="rounded-xl border border-white/12 bg-slate-950/62 px-4 py-2 text-center text-[11px] text-white/72 shadow-xl backdrop-blur-lg">
           {inputMode === 'gamepad' ? (
             <span>
-              LS move · RS aim · RT fire · L3 run · Menu pause · Y reset · View debug · D-pad
-              camera/quality
+              LS move · RS aim · RT fire · L3 run · L1/R1 swap · Menu pause · Y reset · View debug ·
+              D-pad camera/quality
             </span>
           ) : inputMode === 'touch' ? (
             <span>Left stick move · Right stick aim · Push the right stick outward to fire</span>
           ) : (
             <span>
-              WASD move · Mouse aim · LMB/Space fire · Shift run · P pause · R reset · F1 debug · C
-              camera · Q quality
+              WASD move · Mouse aim · LMB/Space fire · Shift run · Mouse wheel swap · P pause · R
+              reset · F1 debug · C camera · Q quality
             </span>
           )}
         </div>
       </div>
 
-      <div className="absolute bottom-16 left-4 rounded-lg border border-white/10 bg-slate-950/48 px-3 py-1.5 text-[10px] text-white/55 backdrop-blur">
+      <div className="absolute bottom-[max(7.75rem,calc(env(safe-area-inset-bottom)+7.75rem))] left-[max(1rem,env(safe-area-inset-left))] rounded-lg border border-white/10 bg-slate-950/48 px-3 py-1.5 text-[10px] text-white/55 backdrop-blur">
         {equippedWeapon?.displayName ?? 'Weapon'} · {snapshot.kills} cleared · {snapshot.shotsFired}{' '}
-        shots · walk over a cyan armory pad to swap
+        shots · cyan armory pads add weapons · wheel or L1/R1 to swap
       </div>
+
+      <ZombieEscapeWeaponInventoryRow
+        className="absolute bottom-[max(4rem,calc(env(safe-area-inset-bottom)+4rem))] left-[max(1rem,env(safe-area-inset-left))]"
+        weaponIndex={snapshot.weaponIndex}
+        weaponInventoryMask={snapshot.weaponInventoryMask}
+      />
 
       {overlayVisible ? (
         <div className="pointer-events-auto absolute inset-0 grid place-items-center bg-slate-950/45 backdrop-blur-[3px]">

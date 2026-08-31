@@ -43,7 +43,7 @@ export function parseColdEntryArgs(argv) {
   const durationSeconds = Number(raw.duration ?? (scenario === 'startup' ? 30 : 180))
   const postHideSeconds = Number(raw['post-hide'] ?? 30)
   if (!Number.isFinite(durationSeconds) || durationSeconds < 30 || durationSeconds > 300) throw new Error('--duration must be 30..300 seconds')
-  if (!Number.isFinite(postHideSeconds) || postHideSeconds < 30 || postHideSeconds > 40) throw new Error('--post-hide must be 30..40 seconds, before the normal 60s day ends')
+  if (!Number.isFinite(postHideSeconds) || postHideSeconds < 30 || postHideSeconds > 40) throw new Error('--post-hide must be 30..40 seconds')
   if (!/^[A-Za-z0-9_-]+$/.test(raw['expected-build-id'] ?? '')) throw new Error('--expected-build-id is required')
   if (!/^[0-9a-f]{40}$/.test(raw['expected-source'] ?? '')) throw new Error('--expected-source requires an exact 40-character SHA: published source or local worktree base HEAD, according to --source-kind')
   const serverMode = raw['server-mode'] ?? 'production'
@@ -147,7 +147,6 @@ export function installColdEntryObserver(config) {
       expectedPhase: hud?.getAttribute('data-expected-phase') ?? null,
       phaseReady: hud?.getAttribute('data-phase-ready') === 'true',
       nightStartReady: hud?.getAttribute('data-night-start-ready') === 'true',
-      secondsRemaining: hud?.getAttribute('data-phase-seconds-remaining') ?? null,
       startEnabled: !!button && !button.disabled, terminal,
       runtimeStatus: runtime?.status ?? null, runtimeNight: runtime?.night ?? null,
       renderError: !!document.querySelector('[data-landrush-zombie-render-error]'),

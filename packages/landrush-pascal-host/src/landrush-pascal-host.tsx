@@ -46,6 +46,7 @@ import {
 
 export type LandrushPascalHostProps = {
   children: ReactNode
+  defaultCamera?: ReactNode
   disablePostFx?: boolean
   editingActive: boolean
   editingChrome: ReactNode
@@ -65,6 +66,7 @@ export type LandrushPascalHostProps = {
 
 export function LandrushPascalHost({
   children,
+  defaultCamera,
   disablePostFx = true,
   editingActive,
   editingChrome,
@@ -155,6 +157,7 @@ export function LandrushPascalHost({
         open={editingViewportOpen}
       >
         <Viewer
+          defaultCamera={defaultCamera}
           defaultRender={{ shading: 'solid' }}
           disablePostFx={disablePostFx}
           maxFps={maxFps}

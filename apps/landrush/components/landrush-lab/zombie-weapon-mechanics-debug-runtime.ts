@@ -66,8 +66,11 @@ export function createZombieWeaponMechanicsScenarioRuntime(
   setZombieEscapeExternalPlayerPose(simulation, true)
   simulation.phaseSecondsRemaining = 999
   simulation.player.aimAngle = Math.PI
-  simulation.player.ammo = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!.ammoGranted
+  const weaponAmmo = ZOMBIE_ESCAPE_WEAPON_PROFILES[weaponIndex]!.ammoGranted
+  simulation.player.weaponAmmoByIndex[weaponIndex] = weaponAmmo
   simulation.player.weaponIndex = weaponIndex
+  simulation.player.weaponInventoryMask |= 1 << weaponIndex
+  simulation.player.ammo = weaponAmmo
   simulation.player.x = 0
   simulation.player.y = 0
   simulation.player.z = 5

@@ -31,7 +31,10 @@ import {
   type WebGPURenderer,
 } from 'three/webgpu'
 import { GRASS_FIELD_PLANE_SIZE } from './grass-field-texture'
-import { notifyLandrushZombieNightSurfaceMaterialChange } from './landrush-zombie-night-presentation-material'
+import {
+  notifyLandrushZombieNightSurfaceMaterialChange,
+  prepareLandrushZombieNightSurfaceMaterial,
+} from './landrush-zombie-night-presentation-material'
 import { ORGANIC_GRASS_PALETTE } from './organic-grass-pattern'
 
 export type StylizedGrassGroundDebugMode = 'final' | 'footprint' | 'hierarchy' | 'macro'
@@ -77,6 +80,10 @@ export function ProceduralStylizedGrassGround({
     texture: Texture
   } | null>(null)
   const bakedTexture = baked?.bake === bake ? baked.texture : null
+  const displayMaterial = useMemo(
+    () => (bakedTexture ? createProceduralStylizedGrassDisplayMaterial(bakedTexture, color) : null),
+    [bakedTexture, color],
+  )
 
   useEffect(() => {
     let active = true
@@ -102,35 +109,41 @@ export function ProceduralStylizedGrassGround({
     }
   }, [bake, invalidate, onReady, renderer])
   useEffect(() => () => geometry.dispose(), [geometry])
+  useEffect(() => () => displayMaterial?.dispose(), [displayMaterial])
   useLayoutEffect(() => {
     const mesh = meshRef.current
-    if (!(mesh && bakedTexture)) return
+    if (!(mesh && displayMaterial)) return
     notifyLandrushZombieNightSurfaceMaterialChange(mesh)
-  }, [bakedTexture])
+  }, [displayMaterial])
 
   return (
     <mesh
       geometry={geometry}
+      name="landrush-grass-ground"
       position={[0, elevation + 0.018, 0]}
       ref={meshRef}
       renderOrder={renderOrder}
       rotation={[-Math.PI / 2, 0, 0]}
     >
-      {bakedTexture ? (
-        <meshBasicMaterial
-          alphaTest={STYLIZED_GRASS_GROUND_EDGE_ALPHA_TEST}
-          color={color}
-          depthWrite
-          map={bakedTexture}
-          side={FrontSide}
-          toneMapped={false}
-          transparent={false}
-        />
-      ) : (
-        <primitive attach="material" object={bake.material} />
-      )}
+      <primitive attach="material" object={displayMaterial ?? bake.material} />
     </mesh>
   )
+}
+
+export function createProceduralStylizedGrassDisplayMaterial(texture: Texture, tint: string) {
+  const surface = tslTexture(texture)
+  const material = new MeshBasicNodeMaterial({
+    alphaTest: STYLIZED_GRASS_GROUND_EDGE_ALPHA_TEST,
+    depthWrite: true,
+    side: FrontSide,
+    transparent: false,
+  })
+  material.colorNode = surface.rgb.mul(tslColor(tint))
+  material.opacityNode = surface.a
+  material.toneMapped = false
+  material.name = 'procedural-stylized-grass-ground'
+  prepareLandrushZombieNightSurfaceMaterial(material, 'grass-ground')
+  return material
 }
 
 type ProceduralStylizedGrassBake = {

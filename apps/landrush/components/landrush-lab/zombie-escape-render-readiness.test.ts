@@ -271,6 +271,125 @@ describe('Zombie Escape render compilation', () => {
     fixture.mesh.material.dispose()
   })
 
+  test('recompiles only wall-style material root replacements after initial aggregate readiness', async () => {
+    const targetScene = new Scene()
+    const camera = new PerspectiveCamera()
+    const initialRepresentatives = [
+      { key: 'weapon-held:fixture', root: new Group() },
+      { key: 'effect:fixture', root: new Group() },
+      { key: 'island:material-presentation', root: new Group() },
+      { key: 'island:material-presentation:night', root: new Group() },
+    ]
+    const replacementRepresentatives = initialRepresentatives.map((representative) =>
+      representative.key.startsWith('island:material-presentation')
+        ? { key: representative.key, root: new Group() }
+        : representative,
+    )
+    const keysByRoot = new Map(
+      [...initialRepresentatives, ...replacementRepresentatives].map(({ key, root }) => [
+        root,
+        key,
+      ]),
+    )
+    const compiledKeySets: string[][] = []
+    const prewarmedKeySets: string[][] = []
+    const renderer: ZombieEscapePipelineRenderer = {
+      backend: { device: { queue: { onSubmittedWorkDone: async () => undefined } } },
+      async compileAsync(root) {
+        const keys: string[] = []
+        root.traverse((object) => {
+          const key = keysByRoot.get(object as Group)
+          if (key) keys.push(key)
+        })
+        compiledKeySets.push(keys)
+      },
+      isWebGPURenderer: true,
+    }
+    const prewarm = async ({
+      representatives,
+    }: {
+      representatives: readonly { key: string }[]
+    }) => {
+      prewarmedKeySets.push(representatives.map(({ key }) => key))
+    }
+
+    await compileZombieEscapeRenderRepresentatives(
+      { camera, renderer, representatives: initialRepresentatives, targetScene },
+      undefined,
+      prewarm,
+    )
+    await compileZombieEscapeRenderRepresentatives(
+      { camera, renderer, representatives: replacementRepresentatives, targetScene },
+      undefined,
+      prewarm,
+    )
+    const progress: unknown[] = []
+    await compileZombieEscapeRenderRepresentatives(
+      { camera, renderer, representatives: replacementRepresentatives, targetScene },
+      (snapshot) => progress.push(snapshot),
+      prewarm,
+    )
+
+    expect(compiledKeySets).toEqual([
+      initialRepresentatives.map(({ key }) => key),
+      ['island:material-presentation', 'island:material-presentation:night'],
+    ])
+    expect(prewarmedKeySets).toEqual([
+      initialRepresentatives.map(({ key }) => key),
+      initialRepresentatives.map(({ key }) => key),
+      ['island:material-presentation', 'island:material-presentation:night'],
+      ['island:material-presentation', 'island:material-presentation:night'],
+    ])
+    expect(progress).toEqual([
+      { completed: 0, total: 4 },
+      { completed: 4, total: 4 },
+    ])
+  })
+
+  test('caches roots only after GPU completion and invalidates them with the renderer device', async () => {
+    let rejectGpuCompletion = true
+    let aggregateCompiles = 0
+    let exactPrewarms = 0
+    const createDevice = () => ({
+      queue: {
+        onSubmittedWorkDone: async () => {
+          if (rejectGpuCompletion) throw new Error('fixture GPU completion failed')
+        },
+      },
+    })
+    const backend = { device: createDevice() }
+    const renderer: ZombieEscapePipelineRenderer = {
+      backend,
+      async compileAsync() {
+        aggregateCompiles += 1
+      },
+      isWebGPURenderer: true,
+    }
+    const request = {
+      camera: new PerspectiveCamera(),
+      renderer,
+      representatives: [{ key: 'island:material-presentation', root: new Group() }],
+      targetScene: new Scene(),
+    }
+    const prewarm = async () => {
+      exactPrewarms += 1
+    }
+
+    await expect(
+      compileZombieEscapeRenderRepresentatives(request, undefined, prewarm),
+    ).rejects.toThrow('fixture GPU completion failed')
+    rejectGpuCompletion = false
+    await compileZombieEscapeRenderRepresentatives(request, undefined, prewarm)
+    await compileZombieEscapeRenderRepresentatives(request, undefined, prewarm)
+    expect(aggregateCompiles).toBe(2)
+    expect(exactPrewarms).toBe(4)
+
+    backend.device = createDevice()
+    await compileZombieEscapeRenderRepresentatives(request, undefined, prewarm)
+    expect(aggregateCompiles).toBe(3)
+    expect(exactPrewarms).toBe(6)
+  })
+
   test('restores every flag after synchronous throw and asynchronous rejection', async () => {
     for (const failure of ['throw', 'reject'] as const) {
       const fixture = createCompileFixture()

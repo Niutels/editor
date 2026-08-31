@@ -31,6 +31,12 @@ describe('Landrush Zombie Escape frame order', () => {
     expect(modeEnd).toBeGreaterThan(modeStart)
     expect(source.slice(presentationStart, presentationEnd)).not.toContain('snapshot')
     expect(source.slice(modeStart, modeEnd)).toContain('<LandrushZombieEscapePresentation')
-    expect(source.slice(modeStart, modeEnd)).toContain('<LandrushZombieEscapeHudPortal')
+    expect(source.slice(modeStart, modeEnd)).toContain(
+      'updateLandrushZombieEscapeHudPortalSnapshot',
+    )
+    expect(source.slice(modeStart, modeEnd)).toContain('publishLandrushZombieEscapeHudPortal')
+    expect(source.slice(modeStart, modeEnd)).not.toContain('setSnapshot(')
+    expect(source).not.toContain("from 'react-dom/client'")
+    expect(source).not.toContain('createRoot(')
   })
 })

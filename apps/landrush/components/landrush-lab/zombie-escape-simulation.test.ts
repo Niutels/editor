@@ -40,6 +40,7 @@ import { shouldRenderZombieEscapeTracer } from './zombie-escape-effects'
 import {
   createZombieEscapeHudSnapshot,
   createZombieEscapeSimulation,
+  cycleZombieEscapeOwnedWeapon,
   inspectZombieEscapeCommittedNavigationAction,
   isZombieEscapeWeaponPickupAvailable,
   resetZombieEscapeSimulation,
@@ -153,8 +154,12 @@ describe('Zombie Escape simulation', () => {
     const eligible = state.navigationIntentResolveEligible
     const scheduled = state.navigationIntentResolveScheduled
     const variants = state.variantByPoolSlot
+    const weaponAmmoByIndex = state.player.weaponAmmoByIndex
     spawnZombieEscapeZombie(state, 1, 1)
     spawnZombieEscapeZombie(state, 2, 2)
+    state.player.hitSlowSeconds = 0.25
+    state.player.weaponAmmoByIndex.set([12, 23, 34])
+    state.player.weaponInventoryMask = 0b00111
     eligible.fill(1)
     scheduled.fill(1)
 
@@ -165,7 +170,11 @@ describe('Zombie Escape simulation', () => {
     expect(state.navigationIntentResolveEligible).toBe(eligible)
     expect(state.navigationIntentResolveScheduled).toBe(scheduled)
     expect(state.variantByPoolSlot).toBe(variants)
+    expect(state.player.weaponAmmoByIndex).toBe(weaponAmmoByIndex)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([60, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(1)
     expect(state.zombies.pool.activeCount).toBe(0)
+    expect(state.player.hitSlowSeconds).toBe(0)
     expect([...state.zombies.pool.active].every((value) => value === 0)).toBe(true)
     expect([...state.navigationIntentResolveEligible].every((value) => value === 0)).toBe(true)
     expect([...state.navigationIntentResolveScheduled].every((value) => value === 0)).toBe(true)
@@ -214,9 +223,11 @@ describe('Zombie Escape simulation', () => {
     state.zombies.attackCooldown[highSlot] = 0
     state.zombies.attackFocusX[highSlot] = 0
     state.zombies.attackFocusZ[highSlot] = 0
+    state.zombies.attackObstacleRenewalEvidence[highSlot] = 1
     state.zombies.attackTargetObjectId[highSlot] = 'high-slot-table'
     state.zombies.attackTargetObjectOrdinal[highSlot] =
       state.collisionWorld.objectCatalog.objectIds.indexOf('high-slot-table')
+    state.zombies.intent[highSlot] = ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle
 
     for (let frame = 0; frame < 180 && state.audioEvents.writeSequence === 0; frame += 1) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
@@ -239,6 +250,7 @@ describe('Zombie Escape simulation', () => {
 
     setZombieEscapeGamePhase(state, 'night')
 
+    expect(ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount).toBe(10)
     expect(state.wave).toBe(1)
     expect(state.waveSpawnRemaining).toBe(ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount)
     expect(state.replacementSpawnRemaining).toBe(0)
@@ -248,20 +260,20 @@ describe('Zombie Escape simulation', () => {
     expect(state.zombies.pool.capacity).toBe(ZOMBIE_ESCAPE_CAPACITY.zombies)
   })
 
-  test('repeats the same fifty-to-one-hundred population schedule every night', () => {
-    const expectedTargets = [50, 60, 70, 80, 90, 100, 100]
-    const remainingSeconds = [180, 150, 120, 90, 60, 30, 0]
+  test('ramps every night linearly from ten zombies to one hundred by night end', () => {
+    const remainingSeconds = [180, 150, 120, 90, 60, 30, 1, 0]
+    const expectedTargets = [10, 25, 40, 55, 70, 85, 100, 100]
     expect(
       remainingSeconds.map((remaining) => resolveZombieEscapeNightZombieTarget(remaining)),
     ).toEqual(expectedTargets)
-    expect(resolveZombieEscapeNightZombieTarget(0, 257)).toBe(100)
 
     const arena = createZombieEscapeArena(12_345_2)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 98_760_2)
     const input = createZombieEscapeControlState()
     setZombieEscapeGamePhase(state, 'night')
-    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(50)
+    expect(state.night).toBe(1)
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(10)
 
     for (let index = 1; index < remainingSeconds.length - 1; index += 1) {
       state.phaseSecondsRemaining = remainingSeconds[index]!
@@ -278,7 +290,24 @@ describe('Zombie Escape simulation', () => {
     setZombieEscapeGamePhase(state, 'night')
     expect(state.night).toBe(2)
     expect(state.phaseSecondsRemaining).toBe(ZOMBIE_ESCAPE_SIMULATION.nightDurationSeconds)
-    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(50)
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(10)
+  })
+
+  test('rounds the linear population ramp and clamps time and finite capacity', () => {
+    expect(resolveZombieEscapeNightZombieTarget(179.000_001)).toBe(10)
+    expect(resolveZombieEscapeNightZombieTarget(179)).toBe(11)
+    expect(resolveZombieEscapeNightZombieTarget(1.000_001)).toBe(99)
+    expect(resolveZombieEscapeNightZombieTarget(1)).toBe(100)
+    expect(resolveZombieEscapeNightZombieTarget(210)).toBe(10)
+    expect(resolveZombieEscapeNightZombieTarget(-3)).toBe(100)
+    expect(resolveZombieEscapeNightZombieTarget(Number.NaN)).toBe(10)
+    expect(resolveZombieEscapeNightZombieTarget(Number.POSITIVE_INFINITY)).toBe(10)
+    expect(resolveZombieEscapeNightZombieTarget(180, 35.9)).toBe(10)
+    expect(resolveZombieEscapeNightZombieTarget(90, 35.9)).toBe(35)
+    expect(resolveZombieEscapeNightZombieTarget(90, -1)).toBe(0)
+    expect(resolveZombieEscapeNightZombieTarget(90, Number.NaN)).toBe(0)
+    expect(resolveZombieEscapeNightZombieTarget(90, Number.POSITIVE_INFINITY)).toBe(0)
+    expect(resolveZombieEscapeNightZombieTarget(0, 257)).toBe(100)
   })
 
   test('raises the spawn speed maximum five percent every thirty seconds and resets it nightly', () => {
@@ -309,7 +338,7 @@ describe('Zombie Escape simulation', () => {
     )
   })
 
-  test('admits all fifty production zombies through the fixed spawn budget before its deadline', () => {
+  test('admits every first-night production zombie through the fixed spawn budget before its deadline', () => {
     const arena = createZombieEscapeArena(12_345_1)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 98_760_1)
@@ -760,8 +789,9 @@ describe('Zombie Escape simulation', () => {
     state.player.z = targetCenterZ
     const input = createZombieEscapeControlState()
     publishZombieEscapeSparseTarget(state, input, arena)
+    const stressCount = 50
     const slots: number[] = []
-    for (let index = 0; index < ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount; index += 1) {
+    for (let index = 0; index < stressCount; index += 1) {
       slots.push(
         spawnZombieEscapeZombie(
           state,
@@ -802,7 +832,7 @@ describe('Zombie Escape simulation', () => {
       )
       return finalDistance <= initialDistances[index]! - 5
     }).length
-    expect(state.zombies.pool.activeCount).toBe(ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount)
+    expect(state.zombies.pool.activeCount).toBe(stressCount)
     expect(progressedCount).toBeGreaterThanOrEqual(45)
     expect(wallCrossingViolationCount).toBe(0)
     expect(state.navigationTargetRequestedRevision).toBeLessThanOrEqual(2)
@@ -874,8 +904,9 @@ describe('Zombie Escape simulation', () => {
       { x: 11, z: -9 },
     ] as const
     let targetWaypointIndex = 0
+    const stressCount = 50
     const slots: number[] = []
-    for (let index = 0; index < ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount; index += 1) {
+    for (let index = 0; index < stressCount; index += 1) {
       slots.push(
         spawnZombieEscapeZombie(state, -22 - (index % 5) * 1.1, -12 + Math.floor(index / 5) * 2.65),
       )
@@ -1307,7 +1338,7 @@ describe('Zombie Escape simulation', () => {
     const targetUpdate = state.navigationField.graphSparseTargetUpdate
 
     expect(protectedPathStressInjected).toBe(true)
-    expect(state.zombies.pool.activeCount).toBe(ZOMBIE_ESCAPE_SIMULATION.initialNightZombieCount)
+    expect(state.zombies.pool.activeCount).toBe(stressCount)
     expect(targetCellTransitionCount).toBeGreaterThan(30)
     expect(targetDirectionChangeCount).toBeGreaterThan(8)
     expect(maximumConsecutivePendingReplacementTicks).toBeLessThanOrEqual(60)
@@ -2329,6 +2360,162 @@ describe('Zombie Escape simulation', () => {
     ])
   })
 
+  test('hits a zombie 0.25 meters ahead between the player anchor and pistol muzzle', () => {
+    const arena = createZombieEscapeArena(5_114)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_114)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 0
+    state.player.z = 0
+    const zombie = spawnZombieEscapeZombie(state, 0, -0.25, 120)
+    state.zombies.speedScale[zombie] = 0
+    const input = createZombieEscapeControlState()
+    input.aimX = 0
+    input.aimZ = -1
+    input.aimStrength = 1
+    input.fire = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    const shot = state.lastShotSlot
+    expect(state.zombies.health[zombie]).toBe(
+      120 - ZOMBIE_ESCAPE_WEAPON_PROFILES[0].projectileDamage,
+    )
+    expect(state.zombies.projectileHitOrdinal[zombie]).toBe(1)
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy)
+    expect(state.shots.hitTargetSlot[shot]).toBe(zombie)
+    expect(state.shots.hitTargetGeneration[shot]).toBe(state.zombies.pool.generation[zombie])
+    expect(readZombieEscapeAudioEventKinds(state)).toEqual([
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.shotFired,
+      ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyHit,
+    ])
+  })
+
+  test('resolves a close carbine hit before a wall later in the launch segment', () => {
+    const arena = createZombieEscapeArena(5_115)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_115)
+    state.player.x = 0
+    state.player.z = 0
+    setZombieEscapeCollisionWorld(
+      state,
+      createZombieEscapeCollisionWorld({
+        agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+        playRadius: arena.playRadius,
+        segments: [
+          {
+            endX: 2,
+            endZ: -1.1,
+            halfThickness: 0.05,
+            id: 'carbine-launch-wall',
+            startX: -2,
+            startZ: -1.1,
+          },
+        ],
+      }),
+    )
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[1]
+    state.player.weaponIndex = 1
+    state.player.ammo = profile.ammoGranted
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: 0,
+      y: ZOMBIE_ESCAPE_SIMULATION.defaultMuzzleHeight,
+      z: -1.4,
+    })
+    const zombie = spawnZombieEscapeZombie(state, 0, -0.5, 120)
+    state.zombies.speedScale[zombie] = 0
+    const input = createZombieEscapeControlState()
+    input.fire = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    const shot = state.lastShotSlot
+    const impactSlots = Array.from(state.impactEvents.pool.active.keys()).filter(
+      (slot) => state.impactEvents.pool.active[slot] !== 0,
+    )
+    expect(state.zombies.health[zombie]).toBe(120 - profile.projectileDamage)
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.impact)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment)
+    expect(state.shots.hitTargetSlot[shot]).toBe(-1)
+    expect(state.shots.z[shot]).toBeCloseTo(-1.025, 5)
+    expect(state.shots.hitZ[shot]).toBeCloseTo(-1.05, 5)
+    expect(state.shots.remainingEnemyPenetrations[shot]).toBe(2)
+    expect(state.shots.lastPiercedTargetSlot[shot]).toBe(zombie)
+    expect(impactSlots.map((slot) => state.impactEvents.targetSlot[slot])).toEqual([zombie, -1])
+    expect(impactSlots.map((slot) => state.impactEvents.impactKind[slot])).toEqual([
+      ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy,
+      ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.environment,
+    ])
+    expect(impactSlots.map((slot) => state.impactEvents.damage[slot])).toEqual([
+      profile.projectileDamage,
+      profile.projectileDamage,
+    ])
+  })
+
+  test('damages two distinct stacked zombies in order before clearing the carbine muzzle', () => {
+    const arena = createZombieEscapeArena(5_116)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_116)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 0
+    state.player.z = 0
+    const profile = ZOMBIE_ESCAPE_WEAPON_PROFILES[1]
+    state.player.weaponIndex = 1
+    state.player.ammo = profile.ammoGranted
+    setZombieEscapePlayerMuzzlePose(state, {
+      directionX: 0,
+      directionY: 0,
+      directionZ: -1,
+      x: 0,
+      y: ZOMBIE_ESCAPE_SIMULATION.defaultMuzzleHeight,
+      z: -1.4,
+    })
+    const first = spawnZombieEscapeZombie(state, 0, -0.5, 120)
+    const second = spawnZombieEscapeZombie(state, 0, -1, 120)
+    state.zombies.speedScale[first] = 0
+    state.zombies.speedScale[second] = 0
+    const input = createZombieEscapeControlState()
+    input.fire = true
+
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+
+    const shot = state.lastShotSlot
+    const impactSlots = Array.from(state.impactEvents.pool.active.keys()).filter(
+      (slot) => state.impactEvents.pool.active[slot] !== 0,
+    )
+    expect([state.zombies.health[first], state.zombies.health[second]]).toEqual([
+      120 - profile.projectileDamage,
+      120 - profile.projectileDamage,
+    ])
+    expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.travel)
+    expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.none)
+    expect(state.shots.remainingEnemyPenetrations[shot]).toBe(1)
+    expect(state.shots.lastPiercedTargetSlot[shot]).toBe(second)
+    expect(impactSlots.map((slot) => state.impactEvents.targetSlot[slot])).toEqual([first, second])
+    expect(impactSlots.map((slot) => state.impactEvents.impactKind[slot])).toEqual([
+      ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy,
+      ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.enemy,
+    ])
+    expect(impactSlots.map((slot) => state.impactEvents.damage[slot])).toEqual([
+      profile.projectileDamage,
+      profile.projectileDamage,
+    ])
+    expect(state.shots.originZ[shot]).toBeCloseTo(-1.4, 5)
+    expect(state.shots.previousZ[shot]).toBeCloseTo(-1.4, 5)
+    expect(state.shots.z[shot]).toBeCloseTo(-2.2, 5)
+  })
+
   test('uses upper-floor combat geometry without adding it to the ground navigation world', () => {
     const arena = createZombieEscapeArena(512)
     arena.obstacleCount = 0
@@ -2990,6 +3177,10 @@ describe('Zombie Escape simulation', () => {
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     expect(state.player.health).toBe(100)
     expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer)
+    expect(
+      Math.hypot(state.zombies.x[zombie]! - attackX, state.zombies.z[zombie]! - attackZ),
+    ).toBeGreaterThan(0)
+    expect(Math.hypot(state.zombies.vx[zombie]!, state.zombies.vz[zombie]!)).toBeGreaterThan(0)
     expect(state.zombies.attackContactResolved[zombie]).toBe(0)
     expect(state.zombies.attackCooldown[zombie]).toBeCloseTo(
       ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds,
@@ -3000,17 +3191,30 @@ describe('Zombie Escape simulation', () => {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
     expect(state.player.health).toBe(92)
+    expect(state.player.hitSlowSeconds).toBe(ZOMBIE_ESCAPE_SIMULATION.playerHitSlowSeconds)
     expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer)
-    expect(state.zombies.x[zombie]).toBe(attackX)
-    expect(state.zombies.z[zombie]).toBe(attackZ)
-    expect(state.zombies.vx[zombie]).toBe(0)
-    expect(state.zombies.vz[zombie]).toBe(0)
     expect(readZombieEscapeAudioEventKinds(state)).toEqual([
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerHurt,
     ])
 
+    state.player.x = 20
+    state.player.z = 20
+    const hitSlowTicks = Math.ceil(
+      ZOMBIE_ESCAPE_SIMULATION.playerHitSlowSeconds / ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+    )
+    for (let frame = 0; frame < hitSlowTicks - 1; frame += 1) {
+      stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    }
+    expect(state.player.hitSlowSeconds).toBeGreaterThan(0)
+    for (let frame = 0; frame < 2; frame += 1) {
+      stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
+    }
+    expect(state.player.hitSlowSeconds).toBe(0)
+
     const beforeLethalSequence = state.audioEvents.writeSequence
     state.player.health = 8
+    state.player.x = state.zombies.x[zombie]!
+    state.player.z = state.zombies.z[zombie]! + 0.7
     for (let frame = 0; frame < 120 && state.status !== 'lost'; frame += 1) {
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
@@ -3018,16 +3222,18 @@ describe('Zombie Escape simulation', () => {
     expect(readZombieEscapeAudioEventKinds(state, beforeLethalSequence)).toEqual([
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerKilled,
     ])
+    expect(state.player.hitSlowSeconds).toBe(ZOMBIE_ESCAPE_SIMULATION.playerHitSlowSeconds)
 
     const lethalSequence = state.audioEvents.writeSequence
     resetZombieEscapeSimulation(state, arena)
+    expect(state.player.hitSlowSeconds).toBe(0)
     expect(state.audioEvents.writeSequence).toBe(lethalSequence)
     expect(readZombieEscapeAudioEventKinds(state, lethalSequence - 1)).toEqual([
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.playerKilled,
     ])
   })
 
-  test('finishes a committed swing while pursuing an out-of-range player at walking speed', () => {
+  test('finishes a committed swing while pursuing an out-of-range player at runner speed', () => {
     const arena = createZombieEscapeArena(5_211)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 9_211)
@@ -3052,6 +3258,9 @@ describe('Zombie Escape simulation', () => {
     const catalogEntry = getZombieEscapeZombieCatalogEntry(state.zombies.variant[zombie]!)
     const maximumWalkSpeed =
       (catalogEntry.movement.walkMetersPerSecond + state.wave * 0.06) *
+      state.zombies.speedScale[zombie]!
+    const maximumRunSpeed =
+      (catalogEntry.movement.runMetersPerSecond + state.wave * 0.18) *
       state.zombies.speedScale[zombie]!
     let attackTicks = 0
     let previousCooldown = state.zombies.attackCooldown[zombie]!
@@ -3082,8 +3291,53 @@ describe('Zombie Escape simulation', () => {
     expect(state.player.health).toBe(100)
     expect(sawContact).toBe(true)
     expect(state.zombies.z[zombie]! - attackStartZ).toBeGreaterThan(0.1)
-    expect(maximumAttackSpeed).toBeLessThanOrEqual(maximumWalkSpeed + 0.000_1)
-    expect(minimumAttackRunBlend).toBeLessThan(0.1)
+    expect(maximumAttackSpeed).toBeGreaterThan(maximumWalkSpeed)
+    expect(maximumAttackSpeed).toBeLessThanOrEqual(maximumRunSpeed + 0.000_1)
+    expect(minimumAttackRunBlend).toBeGreaterThan(0.99)
+  })
+
+  test('resolves player damage from the pursuing zombie position at the contact keyframe', () => {
+    const arena = createZombieEscapeArena(5_213)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_213)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 0
+    state.player.z = 0
+    const zombie = spawnZombieEscapeZombie(state, 0, -0.7, 120)
+    const input = createZombieEscapeControlState()
+    const delta = ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
+
+    stepZombieEscapeSimulation(state, input, delta, arena)
+    expect(state.zombies.intent[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackPlayer)
+    const duration = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
+    const contactSeconds = duration * ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackContactPhase
+    state.zombies.attackCooldown[zombie] = duration - (contactSeconds - delta * 0.5)
+    state.zombies.attackContactResolved[zombie] = 0
+    state.player.z =
+      state.zombies.z[zombie]! + ZOMBIE_ESCAPE_SIMULATION.zombiePlayerAttackReachMeters + 0.001
+    const beforeZ = state.zombies.z[zombie]!
+    const beforeDistance = Math.hypot(
+      state.player.x - state.zombies.x[zombie]!,
+      state.player.z - beforeZ,
+    )
+
+    stepZombieEscapeSimulation(state, input, delta, arena)
+
+    const contactDistance = Math.hypot(
+      state.player.x - state.zombies.x[zombie]!,
+      state.player.z - state.zombies.z[zombie]!,
+    )
+    expect(beforeDistance).toBeGreaterThan(ZOMBIE_ESCAPE_SIMULATION.zombiePlayerAttackReachMeters)
+    expect(state.zombies.z[zombie]).toBeGreaterThan(beforeZ)
+    expect(contactDistance).toBeLessThanOrEqual(
+      ZOMBIE_ESCAPE_SIMULATION.zombiePlayerAttackReachMeters,
+    )
+    expect(state.zombies.attackContactResolved[zombie]).toBe(1)
+    expect(state.player.health).toBe(92)
+    expect(state.player.hitSlowSeconds).toBe(ZOMBIE_ESCAPE_SIMULATION.playerHitSlowSeconds)
   })
 
   test('does not restart a committed swing when the player re-enters attack range', () => {
@@ -3147,6 +3401,9 @@ describe('Zombie Escape simulation', () => {
 
     expect(state.player.weaponIndex).toBe(weaponIndex)
     expect(state.player.ammo).toBe(profile.ammoGranted)
+    expect(state.player.weaponAmmoByIndex[0]).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted)
+    expect(state.player.weaponAmmoByIndex[weaponIndex]).toBe(profile.ammoGranted)
+    expect(state.player.weaponInventoryMask).toBe((1 << 0) | (1 << weaponIndex))
     expect(state.money).toBe(0)
     expect(readZombieEscapeAudioEventKinds(state)).toEqual([
       ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.weaponPurchased,
@@ -3158,6 +3415,37 @@ describe('Zombie Escape simulation', () => {
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     expect(state.shots.damage[state.lastShotSlot]).toBe(profile.projectileDamage)
     expect(state.player.ammo).toBe(profile.ammoGranted - 1)
+    expect(state.player.weaponAmmoByIndex[weaponIndex]).toBe(profile.ammoGranted - 1)
+    expect(state.player.weaponAmmoByIndex[0]).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted)
+  })
+
+  test('cycles owned weapons in both directions while retaining each weapon ammo value', () => {
+    const arena = createZombieEscapeArena(5_300)
+    const state = createZombieEscapeSimulation(arena, 9_300)
+    const weaponAmmoByIndex = state.player.weaponAmmoByIndex
+    state.player.weaponInventoryMask = 0b10101
+    state.player.weaponAmmoByIndex.set([12, 0, 22, 0, 32])
+    state.player.weaponIndex = 0
+    state.player.ammo = 11
+
+    expect(cycleZombieEscapeOwnedWeapon(state, 1)).toBe(true)
+    expect(state.player.weaponIndex).toBe(2)
+    expect(state.player.ammo).toBe(22)
+    expect(state.player.weaponAmmoByIndex[0]).toBe(11)
+    expect(cycleZombieEscapeOwnedWeapon(state, 1)).toBe(true)
+    expect(state.player.weaponIndex).toBe(4)
+    expect(state.player.ammo).toBe(32)
+    expect(cycleZombieEscapeOwnedWeapon(state, 1)).toBe(true)
+    expect(state.player.weaponIndex).toBe(0)
+    expect(state.player.ammo).toBe(11)
+    expect(cycleZombieEscapeOwnedWeapon(state, -1)).toBe(true)
+    expect(state.player.weaponIndex).toBe(4)
+    expect(state.player.ammo).toBe(32)
+    expect(cycleZombieEscapeOwnedWeapon(state, 0)).toBe(false)
+    expect(state.player.weaponIndex).toBe(4)
+    expect(state.player.weaponAmmoByIndex).toBe(weaponAmmoByIndex)
+    expect(state.player.weaponInventoryMask).toBe(0b10101)
+    expect(createZombieEscapeHudSnapshot(state).weaponInventoryMask).toBe(0b10101)
   })
 
   test('automatically purchases an affordable overlapping pickup exactly once for touch input', () => {
@@ -3379,6 +3667,9 @@ describe('Zombie Escape simulation', () => {
     expect(state.shotsFired).toBe(0)
     expect(state.player.weaponIndex).toBe(0)
     expect(state.player.ammo).toBe(60)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([60, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(1)
+    expect(createZombieEscapeHudSnapshot(state).weaponInventoryMask).toBe(1)
     expect(isZombieEscapeWeaponPickupAvailable(state, 0)).toBe(false)
     expect(state.weaponPickupRespawnAtSeconds[0]).toBe(Number.POSITIVE_INFINITY)
     expect(state.weaponPurchaseCount).toBe(0)
@@ -3395,6 +3686,7 @@ describe('Zombie Escape simulation', () => {
 
     expect(state.shotsFired).toBe(60)
     expect(state.player.ammo).toBe(0)
+    expect(state.player.weaponAmmoByIndex[0]).toBe(0)
   })
 
   test('awards money exactly once for a lethal zombie hit', () => {
@@ -3459,12 +3751,60 @@ describe('Zombie Escape simulation', () => {
     expect(state.money).toBe(ZOMBIE_ESCAPE_SIMULATION.killReward - carbineProfile.purchaseCost)
   })
 
-  test('starts a later night with one finite pistol loadout when the equipped weapon is empty', () => {
+  test('preserves owned weapons and per-weapon ammo across death and phase changes', () => {
     const arena = createZombieEscapeArena(535)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 935)
+    const input = createZombieEscapeControlState()
     setZombieEscapeGamePhase(state, 'night')
     setZombieEscapeGamePhase(state, 'build')
+    state.player.weaponInventoryMask = 0b00011
+    state.player.weaponAmmoByIndex[0] = 17
+    state.player.weaponAmmoByIndex[1] = 0
+    state.player.weaponIndex = 1
+    state.player.ammo = 0
+    state.money = 37
+
+    setZombieEscapeGamePhase(state, 'night')
+
+    expect(state.night).toBe(2)
+    expect(state.player.weaponIndex).toBe(1)
+    expect(state.player.ammo).toBe(0)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([17, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
+    expect(state.money).toBe(37)
+
+    state.waveState = 'escape'
+    state.waveSpawnRemaining = 0
+    state.player.health = 0
+    stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    expect(state.status).toBe('lost')
+    expect(state.player.weaponIndex).toBe(1)
+    expect(state.player.ammo).toBe(0)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([17, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
+
+    setZombieEscapeGamePhase(state, 'build')
+    expect(state.status).toBe('playing')
+    expect(state.player.health).toBe(100)
+    expect(state.player.weaponIndex).toBe(1)
+    expect(state.player.ammo).toBe(0)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([17, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
+    expect(cycleZombieEscapeOwnedWeapon(state, -1)).toBe(true)
+    expect(state.player.weaponIndex).toBe(0)
+    expect(state.player.ammo).toBe(17)
+  })
+
+  test('refills the pistol on a later night only when every owned weapon is empty', () => {
+    const arena = createZombieEscapeArena(5_351)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_351)
+    setZombieEscapeGamePhase(state, 'night')
+    setZombieEscapeGamePhase(state, 'build')
+    state.player.weaponInventoryMask = 0b00011
+    state.player.weaponAmmoByIndex[0] = 0
+    state.player.weaponAmmoByIndex[1] = 0
     state.player.weaponIndex = 1
     state.player.ammo = 0
     state.money = 37
@@ -3474,22 +3814,9 @@ describe('Zombie Escape simulation', () => {
     expect(state.night).toBe(2)
     expect(state.player.weaponIndex).toBe(0)
     expect(state.player.ammo).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([60, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
     expect(state.money).toBe(37)
-
-    state.waveState = 'escape'
-    state.waveSpawnRemaining = 0
-    const shotsBefore = state.shotsFired
-    const input = createZombieEscapeControlState()
-    input.fire = true
-    const pistolProfile = ZOMBIE_ESCAPE_WEAPON_PROFILES[0]
-    const framesToEmpty =
-      Math.ceil(pistolProfile.ammoGranted * pistolProfile.shotIntervalSeconds * 60) + 1
-    for (let frame = 0; frame < framesToEmpty; frame += 1) {
-      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
-    }
-
-    expect(state.shotsFired - shotsBefore).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted)
-    expect(state.player.ammo).toBe(0)
   })
 
   test('charges a linear global premium for each weapon purchase', () => {
@@ -3510,6 +3837,9 @@ describe('Zombie Escape simulation', () => {
 
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     expect(state.weaponPurchaseCount).toBe(1)
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
+    expect(state.player.weaponAmmoByIndex[0]).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted)
+    expect(state.player.weaponAmmoByIndex[firstWeaponIndex]).toBe(firstProfile.ammoGranted)
     expect(state.money).toBe(100 - firstProfile.purchaseCost)
     expect(resolveZombieEscapeWeaponPurchaseCost(state, secondWeaponIndex)).toBe(
       secondProfile.purchaseCost * 2,
@@ -3517,12 +3847,17 @@ describe('Zombie Escape simulation', () => {
 
     state.player.x = secondPickup.x
     state.player.z = secondPickup.z
+    state.player.ammo = firstProfile.ammoGranted - 7
     input.interactPressed = true
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
 
     expect(state.weaponPurchaseCount).toBe(2)
     expect(state.player.weaponIndex).toBe(secondWeaponIndex)
     expect(state.player.ammo).toBe(secondProfile.ammoGranted)
+    expect(state.player.weaponAmmoByIndex[0]).toBe(ZOMBIE_ESCAPE_WEAPON_PROFILES[0].ammoGranted)
+    expect(state.player.weaponAmmoByIndex[firstWeaponIndex]).toBe(firstProfile.ammoGranted - 7)
+    expect(state.player.weaponAmmoByIndex[secondWeaponIndex]).toBe(secondProfile.ammoGranted)
+    expect(state.player.weaponInventoryMask).toBe(0b00111)
     expect(state.money).toBe(100 - firstProfile.purchaseCost - secondProfile.purchaseCost * 2)
     expect(resolveZombieEscapeWeaponPurchaseCost(state, firstWeaponIndex)).toBe(
       firstProfile.purchaseCost * 3,
@@ -3622,11 +3957,13 @@ describe('Zombie Escape simulation', () => {
     )
     expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
     expect(state.weaponPurchaseCount).toBe(1)
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
 
     setZombieEscapeGamePhase(state, 'night')
     setZombieEscapeGamePhase(state, 'build')
     expect(state.weaponPickupRespawnAtSeconds[weaponIndex]).toBe(respawnAtSeconds)
     expect(state.weaponPurchaseCount).toBe(1)
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
     expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(false)
 
     state.paused = true
@@ -3643,6 +3980,8 @@ describe('Zombie Escape simulation', () => {
     expect(state.weaponPurchaseCount).toBe(2)
     expect(state.player.weaponIndex).toBe(weaponIndex)
     expect(state.player.ammo).toBe(profile.ammoGranted)
+    expect(state.player.weaponAmmoByIndex[weaponIndex]).toBe(profile.ammoGranted)
+    expect(state.player.weaponInventoryMask).toBe(0b00011)
     expect(state.money).toBe(0)
     expect(state.weaponPickupRespawnAtSeconds[weaponIndex]).toBe(
       respawnAtSeconds + ZOMBIE_ESCAPE_SIMULATION.weaponPickupRespawnSeconds,
@@ -3650,6 +3989,8 @@ describe('Zombie Escape simulation', () => {
 
     resetZombieEscapeSimulation(state, arena)
     expect(state.weaponPurchaseCount).toBe(0)
+    expect([...state.player.weaponAmmoByIndex]).toEqual([60, 0, 0, 0, 0])
+    expect(state.player.weaponInventoryMask).toBe(1)
     expect(state.weaponPickupRespawnAtSeconds[weaponIndex]).toBe(0)
     expect(state.weaponPickupRespawnAtSeconds[0]).toBe(Number.POSITIVE_INFINITY)
     expect(isZombieEscapeWeaponPickupAvailable(state, weaponIndex)).toBe(true)

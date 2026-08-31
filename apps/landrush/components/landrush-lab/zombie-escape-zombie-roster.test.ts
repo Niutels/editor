@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test'
+import { LANDRUSH_ISLAND_AMBIENT_NPCS } from './landrush-island-ambient-catalog'
 import { ZOMBIE_ESCAPE_CAPACITY, ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT } from './zombie-escape-config'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 import {
   createZombieEscapeVariantByPoolSlot,
+  createZombieEscapeZombieRoster,
   resolveZombieEscapeProjectileSlowdownMultiplier,
   resolveZombieEscapeSpawnSpeedScale,
+  ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
 } from './zombie-escape-zombie-roster'
 
 describe('Zombie Escape zombie roster', () => {
@@ -22,6 +26,33 @@ describe('Zombie Escape zombie roster', () => {
     expect(first).not.toEqual(otherSeed)
     expect(first).toHaveLength(ZOMBIE_ESCAPE_CAPACITY.zombies)
     expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1)
+  })
+
+  test('maps the ambient catalog prefix to its exact zombie bodies and shuffles only the suffix', () => {
+    const first = createZombieEscapeZombieRoster(91_337)
+    const repeated = createZombieEscapeZombieRoster(91_337)
+    const otherSeed = createZombieEscapeZombieRoster(91_338)
+    const prefixCount = LANDRUSH_ISLAND_AMBIENT_NPCS.length
+
+    expect(ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS).toEqual(
+      LANDRUSH_ISLAND_AMBIENT_NPCS.map(({ id }) => id),
+    )
+    expect(first).toEqual(repeated)
+    expect(first.sourceNpcIdByPoolSlot.slice(0, prefixCount)).toEqual(
+      LANDRUSH_ISLAND_AMBIENT_NPCS.map(({ id }) => id),
+    )
+    for (let npcIndex = 0; npcIndex < prefixCount; npcIndex += 1) {
+      expect(ZOMBIE_ESCAPE_ZOMBIE_CATALOG[first.variantByPoolSlot[npcIndex]!]!.sourceNpcId).toBe(
+        LANDRUSH_ISLAND_AMBIENT_NPCS[npcIndex]!.id,
+      )
+    }
+    expect(first.variantByPoolSlot.slice(0, prefixCount)).toEqual(
+      otherSeed.variantByPoolSlot.slice(0, prefixCount),
+    )
+    expect(first.variantByPoolSlot.slice(prefixCount)).not.toEqual(
+      otherSeed.variantByPoolSlot.slice(prefixCount),
+    )
+    expect(first.sourceNpcIdByPoolSlot.slice(prefixCount).every((id) => id === null)).toBe(true)
   })
 
   test('derives a deterministic 80/20 regular and sprinter speed distribution from spawn identity', () => {

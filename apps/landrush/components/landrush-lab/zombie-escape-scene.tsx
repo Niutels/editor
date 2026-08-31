@@ -40,6 +40,7 @@ import {
   createZombieEscapeSimulation,
   cycleZombieEscapeCameraBookmark,
   cycleZombieEscapeDebugMode,
+  cycleZombieEscapeOwnedWeapon,
   resetZombieEscapeSimulation,
   stepZombieEscapeSimulation,
   type ZombieEscapeHudSnapshot,
@@ -47,6 +48,12 @@ import {
 } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
 import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
+import {
+  createZombieEscapeWeaponSwitchInputState,
+  readZombieEscapeShoulderWeaponSwitch,
+  readZombieEscapeWheelWeaponSwitch,
+  resetZombieEscapeWeaponSwitchInput,
+} from './zombie-escape-weapon-switch-input'
 import type { ZombieEscapeArenaData } from './zombie-escape-world'
 import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
@@ -104,6 +111,7 @@ export function ZombieEscapeScene({
     viewForwardZ: -1,
   })
   const gamepadMetaRef = useRef<ZombieEscapeGamepadMeta>({ menu: false, view: false })
+  const weaponSwitchInputStateRef = useRef(createZombieEscapeWeaponSwitchInputState())
   const controlLatchRef = useRef(createZombieEscapeControlLatch())
   const controlsRef = useRef(createZombieEscapeControlState())
   const accumulatorRef = useRef(0)
@@ -117,6 +125,16 @@ export function ZombieEscapeScene({
   const pointerWorld = useMemo(() => new Vector3(), [])
   const cameraForward = useMemo(() => new Vector3(), [])
 
+  const activateInputMode = useCallback(
+    (mode: ZombieEscapeInputMode) => {
+      controlLatchRef.current.inputMode = mode
+      if (inputModeRef.current === mode) return
+      inputModeRef.current = mode
+      onInputModeChange(mode)
+    },
+    [onInputModeChange],
+  )
+
   const publishSnapshot = useCallback(() => {
     onHudSnapshot(
       createZombieEscapeHudSnapshot(
@@ -127,6 +145,15 @@ export function ZombieEscapeScene({
       ),
     )
   }, [gl, onHudSnapshot, simulation])
+
+  const cycleOwnedWeapon = useCallback(
+    (direction: -1 | 1) => {
+      if (simulation.phase !== 'night' || simulation.status !== 'playing') return
+      if (!cycleZombieEscapeOwnedWeapon(simulation, direction)) return
+      publishSnapshot()
+    },
+    [publishSnapshot, simulation],
+  )
 
   useEffect(() => {
     const api: ZombieEscapeSceneApi = {
@@ -140,6 +167,7 @@ export function ZombieEscapeScene({
       },
       reset: () => {
         accumulatorRef.current = 0
+        resetZombieEscapeWeaponSwitchInput(weaponSwitchInputStateRef.current)
         resetZombieEscapeSimulation(simulation, arena)
         publishSnapshot()
       },
@@ -195,6 +223,20 @@ export function ZombieEscapeScene({
       keysRef.current.clear()
       fireMouseRef.current = false
       firePulseRef.current = false
+      resetZombieEscapeWeaponSwitchInput(weaponSwitchInputStateRef.current)
+    }
+    const handleWheel = (event: WheelEvent) => {
+      if (event.target !== canvas) return
+      event.preventDefault()
+      const direction = readZombieEscapeWheelWeaponSwitch(
+        weaponSwitchInputStateRef.current,
+        event.deltaY,
+        event.deltaMode,
+        performance.now(),
+      )
+      if (direction === 0) return
+      activateInputMode('keyboard')
+      cycleOwnedWeapon(direction)
     }
     const preventContextMenu = (event: MouseEvent) => event.preventDefault()
 
@@ -202,6 +244,7 @@ export function ZombieEscapeScene({
     canvas.addEventListener('pointermove', updatePointer)
     canvas.addEventListener('pointerdown', handlePointerDown)
     canvas.addEventListener('contextmenu', preventContextMenu)
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
     window.addEventListener('pointerup', handlePointerUp)
     window.addEventListener('keydown', handleKeyDown, { passive: false })
     window.addEventListener('keyup', handleKeyUp)
@@ -210,18 +253,29 @@ export function ZombieEscapeScene({
       canvas.removeEventListener('pointermove', updatePointer)
       canvas.removeEventListener('pointerdown', handlePointerDown)
       canvas.removeEventListener('contextmenu', preventContextMenu)
+      canvas.removeEventListener('wheel', handleWheel)
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', clearInput)
     }
-  }, [gl])
+  }, [activateInputMode, cycleOwnedWeapon, gl])
 
   useFrame((state, frameDelta) => {
     const raw = rawControlsRef.current
     const pointer = pointerRef.current
     raw.fireMouse = fireMouseRef.current || firePulseRef.current
-    raw.gamepad = readLandrushGamepadInput()
+    const gamepad = readLandrushGamepadInput()
+    raw.gamepad = gamepad
+    const weaponSwitchDirection = readZombieEscapeShoulderWeaponSwitch(
+      weaponSwitchInputStateRef.current,
+      Boolean(gamepad?.leftShoulder),
+      Boolean(gamepad?.rightShoulder),
+    )
+    if (weaponSwitchDirection !== 0) {
+      activateInputMode('gamepad')
+      cycleOwnedWeapon(weaponSwitchDirection)
+    }
     raw.gamepadMeta = readZombieEscapeGamepadMetaInto(gamepadMetaRef.current)
     raw.pointerActive = performance.now() - pointer.activeAtMs < 450
     camera.getWorldDirection(cameraForward)
@@ -242,15 +296,13 @@ export function ZombieEscapeScene({
 
     const controls = controlsRef.current
     resolveZombieEscapeControlsInto(raw, controlLatchRef.current, controls)
-    if (controls.inputMode !== inputModeRef.current) {
-      inputModeRef.current = controls.inputMode
-      onInputModeChange(controls.inputMode)
-    }
+    activateInputMode(controls.inputMode)
     if (controls.pausePressed && simulation.status === 'playing') {
       simulation.paused = !simulation.paused
       accumulatorRef.current = 0
     }
     if (controls.resetPressed) {
+      resetZombieEscapeWeaponSwitchInput(weaponSwitchInputStateRef.current)
       resetZombieEscapeSimulation(simulation, arena)
       accumulatorRef.current = 0
     }

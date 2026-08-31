@@ -5,7 +5,6 @@ export const MAX_PARCEL_WRITER_SESSION_ID_LENGTH: 120
 export const DEFAULT_MULTIPLAYER_ROOM_ID: 'landrush-lab-world-multiplayer'
 export const MAX_MULTIPLAYER_ROOM_ID_LENGTH: 80
 export const MAX_MULTIPLAYER_COMBAT_SHOTS: 64
-export const MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS: 60000
 export const MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS: 180000
 export const DEFAULT_PROFILE_MONEY: 200
 export const MAX_PROFILE_MONEY: 1000000000
@@ -64,13 +63,14 @@ export type MultiplayerPlayerSnapshot = LocalPlayerProfile & {
 
 export type MultiplayerPlayerPose = 'crouching' | 'falling'
 
-export type MultiplayerZombieEscapeStateSnapshot = {
+type MultiplayerZombieEscapeStateBase = {
   night: number
-  phase: 'build' | 'night'
-  phaseEndsAt: number | null
   revision: number
   sessionId: string
 }
+
+export type MultiplayerZombieEscapeStateSnapshot = MultiplayerZombieEscapeStateBase &
+  ({ phase: 'build'; phaseEndsAt: null } | { phase: 'night'; phaseEndsAt: number })
 
 export type MultiplayerPlayerShotSnapshot = {
   id: number

@@ -22,7 +22,6 @@ import {
   MAX_PROFILE_MONEY_OPERATION_ID_LENGTH,
   MAX_MULTIPLAYER_ROOM_ID_LENGTH,
   MAX_MULTIPLAYER_COMBAT_SHOTS,
-  MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS,
   MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS,
   normalizeParcelBuildRevision,
   PARCEL_BUILD_FIXED_NODE_PRICE,
@@ -95,6 +94,14 @@ test('requires a closed wall room with a hosted door for the first Zombie Escape
   assert.equal(isZombieEscapeFirstHouseReady(closedWalls), false)
   assert.equal(isZombieEscapeFirstHouseReady([...closedWalls.slice(0, 3), door]), false)
   assert.equal(isZombieEscapeFirstHouseReady([...closedWalls, door]), true)
+})
+
+test('inherits a tagged level parcel for an untagged closing wall and door', () => {
+  assert.equal(isZombieEscapeFirstHouseReady(parcelTaggedHouseNodes()), true)
+})
+
+test('keeps an explicitly foreign closing wall out of the tagged level parcel', () => {
+  assert.equal(isZombieEscapeFirstHouseReady(parcelTaggedHouseNodes('parcel-b')), false)
 })
 
 test('rejects hidden, transient, non-door, and non-boundary openings for the first house', () => {
@@ -883,8 +890,7 @@ test('rejects malformed combat state before it reaches a remote weapon rig', () 
   assert.equal(sanitizeMultiplayerPlayerCombatSnapshot(null), undefined)
 })
 
-test('shares and validates the canonical Zombie Escape room clock contract', () => {
-  assert.equal(MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS, 60_000)
+test('holds build for manual start and shares the canonical Zombie Escape night deadline', () => {
   assert.equal(MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS, 180_000)
 
   const held = zombieEscapeState()
@@ -898,6 +904,7 @@ test('shares and validates the canonical Zombie Escape room clock contract', () 
   }
   assert.equal(isMultiplayerZombieEscapeStateSnapshot(held), true)
   assert.equal(isMultiplayerZombieEscapeStateSnapshot(active), true)
+  assert.deepEqual(sanitizeMultiplayerZombieEscapeStateSnapshot(held), held)
   assert.deepEqual(sanitizeMultiplayerZombieEscapeStateSnapshot(active), {
     night: 3,
     phase: 'night',
@@ -917,6 +924,8 @@ test('rejects malformed Zombie Escape room clocks', () => {
     { night: -1 },
     { night: 1.5 },
     { phase: 'night', night: 0 },
+    { phase: 'night', night: 1, phaseEndsAt: null },
+    { phase: 'build', phaseEndsAt: 123_456 },
     { phaseEndsAt: -1 },
     { phaseEndsAt: 1.5 },
     { phaseEndsAt: Number.POSITIVE_INFINITY },
@@ -949,6 +958,29 @@ function wallNode(id, start, end, curveOffset) {
     start,
     type: 'wall',
   }
+}
+
+function parcelTaggedHouseNodes(closingWallParcelId) {
+  const parcelId = 'parcel-a'
+  const level = { id: 'level', metadata: { landrushParcelId: parcelId }, type: 'level' }
+  const taggedWalls = [
+    wallNode('wall-north', [0, 0], [4, 0]),
+    wallNode('wall-east', [4, 0], [4, 3]),
+    wallNode('wall-south', [4, 3], [0, 3]),
+  ].map((wall) => ({
+    ...wall,
+    metadata: { landrushParcelId: parcelId },
+    parentId: level.id,
+  }))
+  const closingWall = {
+    ...wallNode('wall-west', [0, 3], [0, 0]),
+    ...(closingWallParcelId === undefined
+      ? {}
+      : { metadata: { landrushParcelId: closingWallParcelId } }),
+    parentId: level.id,
+  }
+  const door = { id: 'door', parentId: closingWall.id, type: 'door' }
+  return [level, ...taggedWalls, closingWall, door]
 }
 
 function leanToCompositeGraph() {

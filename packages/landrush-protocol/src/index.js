@@ -5,7 +5,6 @@ export const MAX_PARCEL_WRITER_SESSION_ID_LENGTH = 120
 export const DEFAULT_MULTIPLAYER_ROOM_ID = 'landrush-lab-world-multiplayer'
 export const MAX_MULTIPLAYER_ROOM_ID_LENGTH = 80
 export const MAX_MULTIPLAYER_COMBAT_SHOTS = 64
-export const MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS = 60_000
 export const MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS = 180_000
 export const DEFAULT_PROFILE_MONEY = 200
 export const MAX_PROFILE_MONEY = 1_000_000_000
@@ -104,7 +103,7 @@ export function isZombieEscapeFirstHouseReady(nodes) {
     if (!isVisibleCommittedParcelBuildNode(node, nodesById)) continue
     const type = parcelBuildNodeType(node)
     if (type === 'wall') {
-      const groupId = zombieEscapeHouseWallGroupId(node)
+      const groupId = zombieEscapeHouseWallGroupId(node, nodesById)
       if (!groupId || !isFiniteZombieEscapeHouseWall(node)) continue
       const walls = wallsByGroup.get(groupId)
       if (walls) walls.push(node)
@@ -140,10 +139,23 @@ function isVisibleCommittedParcelBuildNode(node, nodesById) {
   return true
 }
 
-function zombieEscapeHouseWallGroupId(wall) {
+function zombieEscapeHouseWallGroupId(wall, nodesById) {
   if (typeof wall.parentId !== 'string' || wall.parentId.length === 0) return ''
-  const parcelId = parcelBuildNodeMetadata(wall).landrushParcelId
-  return `${typeof parcelId === 'string' ? parcelId : ''}:${wall.parentId}`
+  return `${zombieEscapeHouseParcelId(wall, nodesById)}:${wall.parentId}`
+}
+
+function zombieEscapeHouseParcelId(node, nodesById) {
+  const visitedIds = new Set()
+  let current = node
+  while (current && typeof current === 'object') {
+    const parcelId = parcelBuildNodeMetadata(current).landrushParcelId
+    if (typeof parcelId === 'string' && parcelId.length > 0) return parcelId
+    const parentId = current.parentId
+    if (typeof parentId !== 'string' || parentId.length === 0 || visitedIds.has(parentId)) break
+    visitedIds.add(parentId)
+    current = nodesById.get(parentId)
+  }
+  return ''
 }
 
 function isFiniteZombieEscapeHouseWall(wall) {
@@ -745,8 +757,9 @@ export function isMultiplayerZombieEscapeStateSnapshot(value) {
     Number.isSafeInteger(value.night) &&
     value.night >= 0 &&
     (value.phase !== 'night' || value.night > 0) &&
-    (value.phaseEndsAt === null ||
-      (Number.isSafeInteger(value.phaseEndsAt) && value.phaseEndsAt >= 0))
+    (value.phase === 'build'
+      ? value.phaseEndsAt === null
+      : Number.isSafeInteger(value.phaseEndsAt) && value.phaseEndsAt >= 0)
   )
 }
 

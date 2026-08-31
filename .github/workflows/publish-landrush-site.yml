@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: publish-landrush-site-${{ github.ref }}
-  cancel-in-progress: true
+  group: publish-landrush-site
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout editor
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -44,6 +46,23 @@ jobs:
           path: landrush-site
           token: ${{ secrets.LANDRUSH_SITE_PUSH_TOKEN }}
 
+      - name: Guard production ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          site="landrush-site"
+          mapfile -t production_sources < <(
+            git -C "$site" log -1 --pretty=%B |
+              sed -nE 's/^Source: Niutels\/editor@([0-9a-f]{40})$/\1/p'
+          )
+          if [ "${#production_sources[@]}" -ne 1 ]; then
+            echo "Expected exactly one anchored Niutels/editor Source trailer on landrush-site/main." >&2
+            exit 1
+          fi
+          production_source="${production_sources[0]}"
+          git merge-base --is-ancestor "$production_source" "$GITHUB_SHA"
+
       - name: Refresh Landrush static bundle
         shell: bash
         run: |
@@ -62,6 +81,7 @@ jobs:
             "$site/landrush-lab" \
             "$site/material" \
             "$site/navigation"
+          find "$site" -maxdepth 1 -type f -name '*.svg' -delete
           mkdir -p "$site/_next"
 
           cp -R apps/landrush/.next/static "$site/_next/static"
@@ -76,6 +96,11 @@ jobs:
             cp "apps/landrush/.next/server/app/landrush-lab/$route.html" "$site/landrush-lab/$route/index.html"
           done
 
+          mkdir -p "$site/_release"
+          printf '%s\n' \
+            "{\"sourceRepository\":\"Niutels/editor\",\"sourceSha\":\"${GITHUB_SHA}\",\"workflowRunId\":\"${GITHUB_RUN_ID}\",\"workflowRunAttempt\":\"${GITHUB_RUN_ATTEMPT}\"}" \
+            > "$site/_release/landrush.json"
+
       - name: Validate Landrush site
         working-directory: landrush-site
         run: |
@@ -88,15 +113,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No Landrush site changes to publish."
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit \
             -m "Publish Landrush from editor ${GITHUB_SHA::7}" \
-            -m "Source: Niutels/editor@${GITHUB_SHA}"
+            -m "Source: Niutels/editor@${GITHUB_SHA}" \
+            -m "Workflow-Run: Niutels/editor@${GITHUB_RUN_ID}"
           git push origin main

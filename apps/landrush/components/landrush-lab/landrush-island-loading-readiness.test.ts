@@ -232,12 +232,13 @@ describe('Landrush island paint readiness', () => {
     expect(clientSource).toMatch(
       /const loadingRunGeneration = .*LANDRUSH_ISLAND_LOADING_RUN_GENERATION.*zombieEscapeGeneratedAssetMountGenerationRef\.current\.generation/,
     )
-    const phaseReadySource = clientSource.slice(
-      clientSource.indexOf(
-        'const zombieEscapePhaseReady = resolveLandrushZombieEscapePhaseReady({',
-      ),
-      clientSource.indexOf('const selectedLevelId = useViewer'),
+    const phaseReadyStart = clientSource.indexOf(
+      'const zombieEscapeBasePhaseReady = resolveLandrushZombieEscapePhaseReady({',
     )
+    const phaseReadyEnd = clientSource.indexOf('const selectedLevelId = useViewer', phaseReadyStart)
+    expect(phaseReadyStart).toBeGreaterThanOrEqual(0)
+    expect(phaseReadyEnd).toBeGreaterThan(phaseReadyStart)
+    const phaseReadySource = clientSource.slice(phaseReadyStart, phaseReadyEnd)
     expect(phaseReadySource).toContain('loadingActive,')
     expect(phaseReadySource).toContain('generatedAssetsReady: zombieEscapeGeneratedAssetsReady,')
   })
@@ -918,7 +919,8 @@ describe('Landrush island paint readiness', () => {
     expect(startupGateSource).toContain('startLandrushIslandLoadingShellMotion(')
     expect(startupGateSource).toContain('currentTimeMs > observedCurrentTimeMs')
     expect(readFileSync(routeLoadingPath, 'utf8')).toContain('return null')
-    expect(shellSource).toContain('bg-[#0f1720]')
+    expect(shellSource).toContain('bg-slate-950/58')
+    expect(shellSource).not.toContain('bg-[#0f1720]')
     expect(shellSource).toContain('data-landrush-island-loading-shell')
     expect(shellSource).not.toContain('<script')
     expect(shellSource).not.toContain('LandrushIslandLoadingBootScript')

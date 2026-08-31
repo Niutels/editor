@@ -486,6 +486,7 @@ function SceneReadyTracker({
 
 interface ViewerProps {
   children?: React.ReactNode
+  defaultCamera?: React.ReactNode
   hoverStyles?: HoverStyles
   selectionManager?: 'default' | 'custom'
   perf?: boolean
@@ -629,6 +630,7 @@ const ViewerSceneRuntime = memo(function ViewerSceneRuntime({
 const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
   {
     children,
+    defaultCamera = <ViewerCamera />,
     hoverStyles = DEFAULT_HOVER_STYLES,
     selectionManager = 'default',
     perf = false,
@@ -816,7 +818,7 @@ const Viewer = forwardRef<ViewerHandle, ViewerProps>(function Viewer(
       }}
     >
       <FrameLimiter fps={maxFps} paused={renderPaused} />
-      <ViewerCamera />
+      {defaultCamera}
       <PointerRaycastLayers />
       <GPUDeviceWatcher />
       <ToneMappingExposure />

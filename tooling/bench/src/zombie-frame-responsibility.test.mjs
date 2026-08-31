@@ -190,6 +190,139 @@ function makeFixture() {
   }
 }
 
+function makeFloatingReconciliationFixture({
+  rawDurationUs = 3_602_034,
+  rawStartOffsetUs = -2_000_000,
+} = {}) {
+  const logicalWindow = Object.freeze({
+    endOffsetUs: rawStartOffsetUs + rawDurationUs,
+    startOffsetUs: rawStartOffsetUs,
+  })
+  const traceInterval = Object.freeze({
+    endOffsetUs: rawStartOffsetUs + 3_000_000,
+    frameIdx: 1,
+    startOffsetUs: rawStartOffsetUs,
+  })
+  const traceLeaves = []
+  for (
+    let startOffsetUs = traceInterval.startOffsetUs;
+    startOffsetUs < traceInterval.endOffsetUs;
+    startOffsetUs += 600
+  ) {
+    const endOffsetUs = Math.min(traceInterval.endOffsetUs, startOffsetUs + 600)
+    traceLeaves.push({
+      category: 'javascript',
+      detail: null,
+      durationUs: endOffsetUs - startOffsetUs,
+      endOffsetUs,
+      label: (traceLeaves.length & 1) === 0 ? 'alternating A' : 'alternating B',
+      startOffsetUs,
+      traceCategory: 'devtools.timeline',
+      traceName: 'FunctionCall',
+    })
+  }
+  const rawFrame = {
+    boundaryCrossing: false,
+    frameIdx: 1,
+    plotEndOffsetMs: logicalWindow.endOffsetUs / 1_000,
+    plotEndOffsetUs: logicalWindow.endOffsetUs,
+    plotStartOffsetMs: logicalWindow.startOffsetUs / 1_000,
+    plotStartOffsetUs: logicalWindow.startOffsetUs,
+    rawDurationMs: rawDurationUs / 1_000,
+    rawEndOffsetMs: logicalWindow.endOffsetUs / 1_000,
+    rawEndOffsetUs: logicalWindow.endOffsetUs,
+    rawStartOffsetMs: logicalWindow.startOffsetUs / 1_000,
+    rawStartOffsetUs: logicalWindow.startOffsetUs,
+  }
+  const standardFrame = {
+    clipped: false,
+    endOffsetUs: logicalWindow.endOffsetUs,
+    frameIdx: 1,
+    startOffsetUs: logicalWindow.startOffsetUs,
+    totalUs: logicalWindow.endOffsetUs - logicalWindow.startOffsetUs,
+  }
+  const standardLedger = (schema) => ({
+    frames: [structuredClone(standardFrame)],
+    invariants: {
+      exactWindowCoverage: true,
+      frameContinuityIssues: [],
+      windowCoverageUs: standardFrame.totalUs,
+    },
+    schema,
+    window: logicalWindow,
+  })
+  const traceTotalUs = traceInterval.endOffsetUs - traceInterval.startOffsetUs
+  const traceInvariants = {
+    exactWindowCoverage: true,
+    frameContinuityIssues: [],
+    windowCoverageUs: logicalWindow.endOffsetUs - logicalWindow.startOffsetUs,
+  }
+  return {
+    baselineLedger: standardLedger('baseline-floating-test/v1'),
+    frameTimelines: {
+      trace: { frameMembership: 'floating reconciliation fixture', frames: [rawFrame] },
+    },
+    gpuLedger: {
+      frames: [
+        {
+          benchEndFrameIdx: 1,
+          benchRenderFrameIdx: 0,
+          complete: true,
+          endOffsetUs: logicalWindow.endOffsetUs,
+          gpuBusyUs: 0,
+          startOffsetUs: logicalWindow.startOffsetUs,
+          wallIntervalUs: standardFrame.totalUs,
+        },
+      ],
+      invariants: structuredClone(traceInvariants),
+      schema: 'gpu-floating-test/v1',
+      window: logicalWindow,
+    },
+    logicalWindow,
+    scopedLedger: standardLedger('scoped-floating-test/v1'),
+    traceLedger: {
+      frames: [
+        {
+          clipped: false,
+          ...traceInterval,
+          threads: [
+            {
+              activeUs: traceTotalUs,
+              idleOrUntracedUs: 0,
+              key: '1:2',
+              leaves: traceLeaves,
+              processName: 'Renderer',
+              threadName: 'CrRendererMain',
+            },
+            {
+              activeUs: traceTotalUs,
+              idleOrUntracedUs: 0,
+              key: '9:10',
+              leaves: [
+                {
+                  category: 'gpu-process-cpu',
+                  durationUs: traceTotalUs,
+                  endOffsetUs: traceInterval.endOffsetUs,
+                  label: 'GPUTask',
+                  startOffsetUs: traceInterval.startOffsetUs,
+                },
+              ],
+              processName: 'GPU Process',
+              threadName: 'CrGpuMain',
+            },
+          ],
+          totalUs: traceTotalUs,
+        },
+      ],
+      invariants: traceInvariants,
+      mainThreadKey: '1:2',
+      schema: 'trace-floating-test/v1',
+      window: logicalWindow,
+    },
+    v8Ledger: standardLedger('v8-floating-test/v1'),
+  }
+}
+
 test('uses the exact strict rational frame-budget boundary', () => {
   const exactBudgetUs = 1_000_000 / 60
   assert.equal(isStrictFrameBudgetMiss(exactBudgetUs), false)
@@ -418,6 +551,34 @@ test('uses raw sub-microsecond duration instead of rounded ledger duration for m
   assert.deepEqual(
     bundle.primary.slowFrames.map((frame) => frame.frameIdx),
     [10, 12],
+  )
+})
+
+test('accepts only sub-nanosecond drift from high-cardinality floating reconciliation', () => {
+  const bundle = buildZombieFrameResponsibility(makeFloatingReconciliationFixture())
+  const frame = bundle.primary.frames[0]
+  const postBudgetDifference = Math.abs(
+    frame.chartBuckets.reduce((sum, bucket) => sum + bucket.postBudgetUsNumerator, 0) -
+      frame.overBudgetUsNumerator,
+  )
+  assert.ok(postBudgetDifference > 0.000_01)
+  assert.ok(postBudgetDifference < 0.000_1)
+})
+
+test('rejects floating reconciliation drift strictly above one tenth of a nanosecond', () => {
+  assert.throws(
+    () =>
+      buildZombieFrameResponsibility(
+        makeFloatingReconciliationFixture({
+          rawDurationUs: 3_000_001,
+          rawStartOffsetUs: 100_000_000_000,
+        }),
+      ),
+    (error) => {
+      const difference = Number(/differs by ([\d.]+)/u.exec(error.message)?.[1])
+      assert.ok(difference > 0.000_1)
+      return true
+    },
   )
 })
 

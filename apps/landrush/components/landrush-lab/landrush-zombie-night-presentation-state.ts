@@ -1,5 +1,6 @@
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
 import { LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY } from './landrush-robot-shoulder-torch'
+import { resolveLandrushZombieNightStreetLightpostYaw } from './landrush-zombie-night-street-lightpost'
 
 export type LandrushZombieNightDebugMode = 'final' | 'light-contribution' | 'no-post'
 export type LandrushZombieNightQuality = 'balanced' | 'high' | 'low'
@@ -18,6 +19,7 @@ export type LandrushZombieNightBeaconPlacement = Readonly<{
   id: string
   phase: number
   position: readonly [number, number, number]
+  rotationY: number
 }>
 
 export const LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE = 0.78
@@ -25,6 +27,11 @@ export const LANDRUSH_ZOMBIE_NIGHT_SHIPPING_OUTSIDE_TORCH_VISIBILITY = 0.8
 export const LANDRUSH_ZOMBIE_NIGHT_WORLD_EXPOSURE_SCALE = 0.5
 export const LANDRUSH_ZOMBIE_NIGHT_SEED = 0x4c61_6e64
 export const LANDRUSH_ZOMBIE_NIGHT_RESPONSE_PER_SECOND = 1.55
+export const LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS = 1 / 24
+export const LANDRUSH_ZOMBIE_NIGHT_TRANSITION_DURATION_SECONDS = 90
+export const LANDRUSH_ZOMBIE_NIGHT_SUNSET_RISE_SECONDS = 18
+export const LANDRUSH_ZOMBIE_NIGHT_SUNSET_HOLD_END_SECONDS = 28
+export const LANDRUSH_ZOMBIE_NIGHT_SUNSET_END_SECONDS = 60
 
 const LANDRUSH_ZOMBIE_NIGHT_VISIBILITY_TREATMENTS = Object.freeze({
   normal: Object.freeze({
@@ -62,7 +69,7 @@ export const LANDRUSH_ZOMBIE_NIGHT_VISUAL_CONTRACT = Object.freeze({
   lightingEnvelope: [
     'day remains unchanged at amount zero',
     'moonlight owns silhouettes at amount one',
-    'beacon point lights remain subordinate to the moon key',
+    'wide downward street-light spots remain subordinate to the moon key',
   ],
   materialSeparation: ['cool world lighting', 'warm/cyan emissive beacon cores'],
   motion: ['one monotonic day/night envelope', 'subtle deterministic beacon pulse'],
@@ -178,6 +185,41 @@ export function advanceLandrushZombieNightAmount(
   return clamp01(target + (clamp01(current) - clamp01(target)) * Math.exp(-response * delta))
 }
 
+export function resolveLandrushZombieNightTimelineAmount(elapsedSeconds: number) {
+  const elapsed = normalizeLandrushZombieNightElapsedSeconds(elapsedSeconds)
+  return smootherstep01(elapsed / LANDRUSH_ZOMBIE_NIGHT_TRANSITION_DURATION_SECONDS)
+}
+
+export function resolveLandrushZombieNightSunsetAmount(elapsedSeconds: number) {
+  const elapsed = normalizeLandrushZombieNightElapsedSeconds(elapsedSeconds)
+  return (
+    smoothstepBetween(0, LANDRUSH_ZOMBIE_NIGHT_SUNSET_RISE_SECONDS, elapsed) *
+    (1 -
+      smoothstepBetween(
+        LANDRUSH_ZOMBIE_NIGHT_SUNSET_HOLD_END_SECONDS,
+        LANDRUSH_ZOMBIE_NIGHT_SUNSET_END_SECONDS,
+        elapsed,
+      ))
+  )
+}
+
+export function resolveLandrushZombieNightVisualAmount(amount: number, sunsetAmount: number) {
+  return Math.max(clamp01(amount), clamp01(sunsetAmount))
+}
+
+export function shouldApplyLandrushZombieNightCpuPresentation(
+  appliedAmount: number,
+  amount: number,
+  target: number,
+  elapsedSeconds: number,
+  nextUpdateAtSeconds: number,
+  invalidated: boolean,
+) {
+  if (invalidated || !Number.isFinite(appliedAmount)) return true
+  if (appliedAmount === amount) return false
+  return amount === target || elapsedSeconds >= nextUpdateAtSeconds
+}
+
 export function resolveLandrushZombieNightBeaconPulse(timeSeconds: number, phase: number) {
   const time = Number.isFinite(timeSeconds) ? timeSeconds : 0
   const offset = Number.isFinite(phase) ? phase : 0
@@ -224,6 +266,11 @@ export function createLandrushZombieNightBeaconPlacements({
             groundY,
             sample.point.z + sample.tangent.x * side * offset,
           ] as const,
+          rotationY: resolveLandrushZombieNightStreetLightpostYaw(
+            sample.tangent.x,
+            sample.tangent.z,
+            side,
+          ),
         },
       ]
     })
@@ -350,4 +397,19 @@ function mixHash(seed: number, value: number) {
 
 function clamp01(value: number) {
   return Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0))
+}
+
+function normalizeLandrushZombieNightElapsedSeconds(value: number) {
+  if (value === Number.POSITIVE_INFINITY) return LANDRUSH_ZOMBIE_NIGHT_TRANSITION_DURATION_SECONDS
+  return Math.max(0, Number.isFinite(value) ? value : 0)
+}
+
+function smoothstepBetween(minimum: number, maximum: number, value: number) {
+  const amount = clamp01((value - minimum) / (maximum - minimum))
+  return amount * amount * (3 - 2 * amount)
+}
+
+function smootherstep01(value: number) {
+  const amount = clamp01(value)
+  return amount * amount * amount * (amount * (amount * 6 - 15) + 10)
 }

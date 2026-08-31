@@ -49,8 +49,6 @@ import {
   type LandrushBuildWalletAvailability,
 } from './landrush-build-price-presentation'
 import styles from './landrush-pascal-editor-chrome.module.css'
-import { LANDRUSH_ZOMBIE_ESCAPE_FIRST_HOUSE_BUILD_KINDS } from './landrush-zombie-escape-first-house'
-import { useLandrushZombieEscapeFirstHouseBuildGate } from './landrush-zombie-escape-first-house-build-gate'
 
 const SIDEBAR_MIN_WIDTH = 300
 const SIDEBAR_MAX_WIDTH = 800
@@ -78,36 +76,6 @@ const EDITOR_TABS = [
   { id: 'items', iconSrc: '/icons/couch.webp', label: 'Items' },
   { id: 'settings', iconSrc: '/icons/settings.webp', label: 'Settings' },
 ] as const
-const FIRST_HOUSE_EDITOR_TABS = EDITOR_TABS.filter((tab) => tab.id !== 'items')
-const FIRST_HOUSE_STRUCTURE_KINDS = new Set<string>(LANDRUSH_ZOMBIE_ESCAPE_FIRST_HOUSE_BUILD_KINDS)
-const FIRST_HOUSE_BLOCKED_BUILD_SHORTCUT_KEYS = new Set(['f', 'g', 'm', 'p', 'z'])
-
-export function shouldBlockLandrushFirstHouseBuildShortcut({
-  ctrlKey = false,
-  editableTarget = false,
-  key,
-  metaKey = false,
-  shiftKey = false,
-}: {
-  ctrlKey?: boolean
-  editableTarget?: boolean
-  key: string
-  metaKey?: boolean
-  shiftKey?: boolean
-}) {
-  if (editableTarget) return false
-  if ((ctrlKey || metaKey) && !shiftKey) return key.toLowerCase() === 'v'
-  if (ctrlKey || metaKey) return false
-  return FIRST_HOUSE_BLOCKED_BUILD_SHORTCUT_KEYS.has(key)
-}
-
-function isEditableKeyboardTarget(target: EventTarget | null) {
-  return (
-    target instanceof Element &&
-    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !==
-      null
-  )
-}
 
 type EditorPanelId = (typeof EDITOR_TABS)[number]['id']
 
@@ -147,56 +115,19 @@ export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChro
   const activeTool = useEditor((state) => state.tool)
   const selectionTool = useEditor((state) => state.floorplanSelectionTool)
   const setActivePanel = useEditor((state) => state.setActiveSidebarPanel)
-  const firstHouseBuildGate = useLandrushZombieEscapeFirstHouseBuildGate()
-  const waitingOnFirstHouse = firstHouseBuildGate.enabled && firstHouseBuildGate.waitingOnHouse
-  const requestedActivePanel = isEditorPanelId(storedActivePanel) ? storedActivePanel : 'build'
-  const activePanel =
-    waitingOnFirstHouse && requestedActivePanel === 'items' ? 'build' : requestedActivePanel
-  const editorTabs = waitingOnFirstHouse ? FIRST_HOUSE_EDITOR_TABS : EDITOR_TABS
+  const activePanel = isEditorPanelId(storedActivePanel) ? storedActivePanel : 'build'
   const isResizing = useRef(false)
   const layoutOpen = active && open
   const isItemDisabled = useCallback(
-    () =>
-      waitingOnFirstHouse ||
-      (buildCostsEnabled && !canAffordLandrushBuildSelection('item', profileMoney)),
-    [buildCostsEnabled, profileMoney, waitingOnFirstHouse],
+    () => buildCostsEnabled && !canAffordLandrushBuildSelection('item', profileMoney),
+    [buildCostsEnabled, profileMoney],
   )
   const isStructureToolDisabled = useCallback(
-    (kind: string) =>
-      (waitingOnFirstHouse && !FIRST_HOUSE_STRUCTURE_KINDS.has(kind)) ||
-      (buildCostsEnabled && !canAffordLandrushBuildSelection(kind, profileMoney)),
-    [buildCostsEnabled, profileMoney, waitingOnFirstHouse],
+    (kind: string) => buildCostsEnabled && !canAffordLandrushBuildSelection(kind, profileMoney),
+    [buildCostsEnabled, profileMoney],
   )
 
-  useEffect(() => {
-    if (!waitingOnFirstHouse) return
-    const handleFirstHouseKeyDown = (event: KeyboardEvent) => {
-      if (
-        !shouldBlockLandrushFirstHouseBuildShortcut({
-          ctrlKey: event.ctrlKey,
-          editableTarget: isEditableKeyboardTarget(event.target),
-          key: event.key,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-        })
-      ) {
-        return
-      }
-      event.preventDefault()
-      event.stopImmediatePropagation()
-    }
-    window.addEventListener('keydown', handleFirstHouseKeyDown, true)
-    return () => window.removeEventListener('keydown', handleFirstHouseKeyDown, true)
-  }, [waitingOnFirstHouse])
-
   useLayoutEffect(() => {
-    if (
-      waitingOnFirstHouse &&
-      (editorMode === 'material-paint' || editorMode === 'terrain-sculpt')
-    ) {
-      exitLandrushPascalEditingToSelect()
-      return
-    }
     if (!(active && interactionReady && editorMode === 'build' && activeTool)) {
       return
     }
@@ -204,20 +135,7 @@ export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChro
     if (!disabled) return
     if (activeTool === 'item') useEditor.setState({ selectedItem: null })
     exitLandrushPascalEditingToSelect()
-  }, [
-    active,
-    activeTool,
-    editorMode,
-    interactionReady,
-    isItemDisabled,
-    isStructureToolDisabled,
-    waitingOnFirstHouse,
-  ])
-
-  useEffect(() => {
-    if (!interactionReady || !waitingOnFirstHouse || requestedActivePanel !== 'items') return
-    setActivePanel('build')
-  }, [interactionReady, requestedActivePanel, setActivePanel, waitingOnFirstHouse])
+  }, [active, activeTool, editorMode, interactionReady, isItemDisabled, isStructureToolDisabled])
 
   useEffect(() => {
     if (!interactionReady) return
@@ -334,7 +252,6 @@ export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChro
       data-landrush-pascal-editor-interactive={interactionReady ? '' : undefined}
       data-landrush-pascal-editor-mode-transition={modeTransitionActive ? 'true' : 'false'}
       data-landrush-pascal-editor-open={layoutOpen ? 'true' : 'false'}
-      data-landrush-zombie-escape-waiting-on-house={waitingOnFirstHouse ? 'true' : 'false'}
       inert={!layoutOpen}
       style={
         {
@@ -366,7 +283,7 @@ export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChro
             className={cn(styles.sidebarNav, 'shrink-0 items-center gap-1 border-border/50')}
             data-landrush-editor-sidebar-nav
           >
-            {editorTabs.map((tab) => {
+            {EDITOR_TABS.map((tab) => {
               const showActive = activePanel === tab.id && !isCollapsed
               return (
                 <Tooltip key={tab.id}>
@@ -423,13 +340,7 @@ export const LandrushPascalEditorChrome = memo(function LandrushPascalEditorChro
               className={cn(styles.panelViewport, 'min-h-0 flex-1')}
               data-landrush-editor-panel-viewport
             >
-              {renderPanel(
-                activePanel,
-                interactionReady,
-                isItemDisabled,
-                isStructureToolDisabled,
-                waitingOnFirstHouse ? FIRST_HOUSE_STRUCTURE_KINDS : undefined,
-              )}
+              {renderPanel(activePanel, interactionReady, isItemDisabled, isStructureToolDisabled)}
             </div>
             <div
               className={cn(
@@ -583,7 +494,6 @@ function renderPanel(
   interactionReady: boolean,
   isItemDisabled: () => boolean,
   isStructureToolDisabled: (kind: string) => boolean,
-  allowedStructureKinds?: ReadonlySet<string>,
 ) {
   if (panelId === 'items') {
     return (
@@ -605,7 +515,6 @@ function renderPanel(
   }
   return (
     <BuildTab
-      allowedStructureKinds={allowedStructureKinds}
       capabilities={{ materialPaint: false }}
       interactionReady={interactionReady}
       isStructureToolDisabled={isStructureToolDisabled}

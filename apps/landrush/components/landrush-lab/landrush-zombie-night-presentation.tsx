@@ -2,23 +2,29 @@
 
 import { renderScheduler } from '@landrush/runtime'
 import { getSceneTheme, useViewer } from '@pascal-app/viewer'
+import { useGLTF } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AdditiveBlending,
   Color,
+  DoubleSide,
   FogExp2,
   type Group,
   type Material,
   type Mesh,
-  type Object3D,
+  type MeshStandardMaterial,
+  Object3D,
   Vector3,
 } from 'three'
 import type { LandrushRoadSegment } from '@/components/landrush/types'
 import {
+  applyLandrushZombieNightSurfaceColorBindings,
   prepareLandrushZombieNightSurfaceMaterials,
   readPreparedLandrushZombieNightSurfaceRole,
   setLandrushZombieNightSurfaceAmount,
+  setLandrushZombieNightSurfaceSunsetUniformAmount,
+  setLandrushZombieNightSurfaceUniformAmount,
 } from './landrush-zombie-night-presentation-material'
 import {
   createLandrushZombieNightSceneLightCache,
@@ -31,30 +37,55 @@ import {
   advanceLandrushZombieNightAmount,
   createLandrushZombieNightBeaconPlacements,
   LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+  LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS,
   LANDRUSH_ZOMBIE_NIGHT_SEED,
   type LandrushZombieNightDebugMode,
   parseLandrushZombieNightDebugQuery,
   resolveLandrushZombieNightBeaconFrameMode,
   resolveLandrushZombieNightBeaconPulse,
+  resolveLandrushZombieNightSunsetAmount,
   resolveLandrushZombieNightTargetExposure,
+  resolveLandrushZombieNightTimelineAmount,
+  resolveLandrushZombieNightVisualAmount,
+  shouldApplyLandrushZombieNightCpuPresentation,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
+import {
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_POSITION,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_ROTATION_Y,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_PENUMBRA,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
+} from './landrush-zombie-night-street-lightpost'
 
 const NIGHT_BACKGROUND = '#020611'
 const NIGHT_FOG = '#081426'
 const NIGHT_FOG_DENSITY = 0.0085
+const SUNSET_BACKGROUND = '#b86252'
+const SUNSET_FOG = '#6b4053'
 
 const NIGHT_LIGHTS = [
   { color: '#b9caff', direction: [-0.58, 1, -0.42] as const, intensity: 1.08 },
   { color: '#3e78c5', direction: [0.7, 0.36, 0.5] as const, intensity: 0.24 },
 ] as const
+const SUNSET_LIGHTS = [
+  { color: '#ff9a5f', direction: [0.86, 0.28, 0.42] as const },
+  { color: '#7d83c8', direction: [-0.62, 0.4, -0.68] as const },
+] as const
 
 const NIGHT_AMBIENT = { color: '#10203d', intensity: 0.07 } as const
+const SUNSET_AMBIENT = '#b86f63'
 const NIGHT_HEMISPHERE = {
   ground: '#050b16',
   intensity: 0.28,
   sky: '#314a79',
 } as const
+const SUNSET_HEMISPHERE = { ground: '#3b2d42', sky: '#cf7d72' } as const
 
 const NIGHT_LIGHTING_OWNER = 'landrush-zombie-night'
 const NIGHT_DEBUG_SNAPSHOT_INTERVAL_SECONDS = 0.25
@@ -69,6 +100,11 @@ type AppliedNightPresentation = {
   amount: number
   mode: LandrushZombieNightDebugMode | null
   sceneThemeId: string | null
+  sunsetAmount: number
+}
+
+type AppliedNightCpuPresentation = AppliedNightPresentation & {
+  treatmentAmount: number
 }
 
 type LandrushZombieNightDebugSnapshot = {
@@ -94,10 +130,12 @@ declare global {
 export function LandrushZombieNightPresentation({
   active,
   groundY,
+  readCanonicalElapsedSeconds,
   roads,
 }: {
   active: boolean
   groundY: number
+  readCanonicalElapsedSeconds: () => number | null
   roads: readonly LandrushRoadSegment[]
 }) {
   const scene = useThree((state) => state.scene)
@@ -106,9 +144,11 @@ export function LandrushZombieNightPresentation({
   const sceneThemeId = useViewer((state) => state.sceneTheme)
   const dayTheme = getSceneTheme(sceneThemeId)
   const [settings] = useState(readLandrushZombieNightSettings)
-  const amountRef = useRef(settings.fixedAmount ?? (active ? 1 : 0))
+  const amountRef = useRef(settings.fixedAmount ?? 0)
+  const localNightStartedAtSecondsRef = useRef<number | null>(null)
   const surfaceMaterialsRef = useRef(new Set<Material>())
   const nextDebugSnapshotAtRef = useRef(0)
+  const nextCpuPresentationAtRef = useRef(0)
   const debugSnapshotRef = useRef<LandrushZombieNightDebugSnapshot | null>(null)
   const sceneLightsRef = useRef<LandrushZombieNightSceneLightCache | null>(null)
   const beaconsActiveRef = useRef(false)
@@ -116,6 +156,14 @@ export function LandrushZombieNightPresentation({
     amount: Number.NaN,
     mode: null,
     sceneThemeId: null,
+    sunsetAmount: Number.NaN,
+  })
+  const appliedCpuPresentationRef = useRef<AppliedNightCpuPresentation>({
+    amount: Number.NaN,
+    mode: null,
+    sceneThemeId: null,
+    sunsetAmount: Number.NaN,
+    treatmentAmount: Number.NaN,
   })
   const lightingOwnershipRef = useRef<NightLightingOwnership>({
     claimed: false,
@@ -125,14 +173,53 @@ export function LandrushZombieNightPresentation({
   const background = useMemo(() => new Color(), [])
   const dayBackground = useMemo(() => new Color(), [])
   const nightBackground = useMemo(() => new Color(NIGHT_BACKGROUND), [])
+  const sunsetBackground = useMemo(() => new Color(SUNSET_BACKGROUND), [])
   const contributionBackground = useMemo(() => new Color('#000000'), [])
   const fog = useMemo(() => new FogExp2(NIGHT_FOG, 0), [])
+  const nightFogColor = useMemo(() => new Color(NIGHT_FOG), [])
+  const sunsetFogColor = useMemo(() => new Color(SUNSET_FOG), [])
   const nightLightColors = useMemo(() => NIGHT_LIGHTS.map(({ color }) => new Color(color)), [])
+  const sunsetLightColors = useMemo(() => SUNSET_LIGHTS.map(({ color }) => new Color(color)), [])
+  const dayLightColors = useMemo(
+    () => dayTheme.lights.map(({ color }) => new Color(color)),
+    [dayTheme.lights],
+  )
+  const dayLightDirections = useMemo(
+    () =>
+      dayTheme.lights.map(({ position }) =>
+        new Vector3(position[0], position[1], position[2]).normalize(),
+      ),
+    [dayTheme.lights],
+  )
+  const nightLightDirections = useMemo(
+    () =>
+      NIGHT_LIGHTS.map(({ direction }) =>
+        new Vector3(direction[0], direction[1], direction[2]).normalize(),
+      ),
+    [],
+  )
+  const sunsetLightDirections = useMemo(
+    () =>
+      SUNSET_LIGHTS.map(({ direction }) =>
+        new Vector3(direction[0], direction[1], direction[2]).normalize(),
+      ),
+    [],
+  )
+  const dayAmbientColor = useMemo(() => new Color(dayTheme.ambient.color), [dayTheme.ambient.color])
   const nightAmbientColor = useMemo(() => new Color(NIGHT_AMBIENT.color), [])
+  const sunsetAmbientColor = useMemo(() => new Color(SUNSET_AMBIENT), [])
+  const dayHemisphereGround = useMemo(
+    () => new Color(dayTheme.hemi?.ground ?? '#777777'),
+    [dayTheme.hemi?.ground],
+  )
+  const dayHemisphereSky = useMemo(
+    () => new Color(dayTheme.hemi?.sky ?? '#ffffff'),
+    [dayTheme.hemi?.sky],
+  )
   const nightHemisphereGround = useMemo(() => new Color(NIGHT_HEMISPHERE.ground), [])
   const nightHemisphereSky = useMemo(() => new Color(NIGHT_HEMISPHERE.sky), [])
-  const dayDirection = useMemo(() => new Vector3(), [])
-  const nightDirection = useMemo(() => new Vector3(), [])
+  const sunsetHemisphereGround = useMemo(() => new Color(SUNSET_HEMISPHERE.ground), [])
+  const sunsetHemisphereSky = useMemo(() => new Color(SUNSET_HEMISPHERE.sky), [])
   const blendedDirection = useMemo(() => new Vector3(), [])
   const scenePresentationBinding = useMemo(
     () =>
@@ -157,13 +244,12 @@ export function LandrushZombieNightPresentation({
     () =>
       placements.map(() => ({
         coreMaterial: null,
-        group: null,
+        fixtureMaterials: [],
         innerGlowMaterial: null,
         lastContributionOnly: null,
         lastEnvelope: Number.NaN,
         lastGlowTreatment: null,
         light: null,
-        mastMaterial: null,
         outerGlowMaterial: null,
       })),
     [placements],
@@ -171,15 +257,16 @@ export function LandrushZombieNightPresentation({
 
   useLayoutEffect(() => {
     const installed = scenePresentationBinding.install()
+    if (installed) dayBackground.copy(background)
     if (installed) invalidate()
     return () => {
       if (scenePresentationBinding.dispose()) invalidate()
     }
-  }, [invalidate, scenePresentationBinding])
+  }, [background, dayBackground, invalidate, scenePresentationBinding])
 
   useLayoutEffect(() => {
     const sceneLights = createLandrushZombieNightSceneLightCache(scene, () => {
-      appliedPresentationRef.current.amount = Number.NaN
+      appliedCpuPresentationRef.current.amount = Number.NaN
       invalidate()
     })
     sceneLightsRef.current = sceneLights
@@ -205,13 +292,28 @@ export function LandrushZombieNightPresentation({
   }, [active, scene, settings.fixedAmount])
 
   useFrame(({ clock }, delta) => {
+    const elapsedSeconds = clock.elapsedTime
     const target = settings.fixedAmount ?? (active ? 1 : 0)
-    const advancedAmount =
-      settings.fixedAmount === null
-        ? advanceLandrushZombieNightAmount(amountRef.current, target, delta)
-        : target
-    const amount = Math.abs(target - advancedAmount) <= 0.001 ? target : advancedAmount
+    let amount = target
+    let sunsetAmount = 0
+    if (settings.fixedAmount === null) {
+      if (active) {
+        localNightStartedAtSecondsRef.current ??= elapsedSeconds
+        const canonicalElapsedSeconds = readCanonicalElapsedSeconds()
+        const transitionElapsedSeconds =
+          typeof canonicalElapsedSeconds === 'number' && Number.isFinite(canonicalElapsedSeconds)
+            ? Math.max(0, canonicalElapsedSeconds)
+            : Math.max(0, elapsedSeconds - localNightStartedAtSecondsRef.current)
+        amount = resolveLandrushZombieNightTimelineAmount(transitionElapsedSeconds)
+        sunsetAmount = resolveLandrushZombieNightSunsetAmount(transitionElapsedSeconds)
+      } else {
+        localNightStartedAtSecondsRef.current = null
+        const advancedAmount = advanceLandrushZombieNightAmount(amountRef.current, 0, delta)
+        amount = advancedAmount <= 0.001 ? 0 : advancedAmount
+      }
+    }
     amountRef.current = amount
+    const visualAmount = resolveLandrushZombieNightVisualAmount(amount, sunsetAmount)
     const treatmentAmount = settings.mode === 'light-contribution' ? 1 : amount
     const nightExposure = resolveLandrushZombieNightTargetExposure({
       mode: settings.mode,
@@ -225,42 +327,84 @@ export function LandrushZombieNightPresentation({
     if (
       appliedPresentation.amount !== amount ||
       appliedPresentation.mode !== settings.mode ||
-      appliedPresentation.sceneThemeId !== sceneThemeId
+      appliedPresentation.sceneThemeId !== sceneThemeId ||
+      appliedPresentation.sunsetAmount !== sunsetAmount
     ) {
-      if (amount > 0.001 && !scenePresentationBinding.claimed) {
+      if (visualAmount > 0.001 && !scenePresentationBinding.claimed) {
         dayBackground.set(dayTheme.background)
         const currentBackground = scene.background as Color | null
         if (currentBackground?.isColor) dayBackground.copy(currentBackground)
         scenePresentationBinding.claim()
       }
-      background.lerpColors(
-        dayBackground,
-        settings.mode === 'light-contribution' ? contributionBackground : nightBackground,
-        amount,
-      )
+      background
+        .copy(dayBackground)
+        .lerp(sunsetBackground, sunsetAmount)
+        .lerp(
+          settings.mode === 'light-contribution' ? contributionBackground : nightBackground,
+          amount,
+        )
+      fog.color.copy(dayBackground).lerp(sunsetFogColor, sunsetAmount).lerp(nightFogColor, amount)
       fog.density = settings.mode === 'final' ? NIGHT_FOG_DENSITY * amount : 0
-      setLandrushZombieNightSurfaceAmount(treatmentAmount)
+      setLandrushZombieNightSurfaceSunsetUniformAmount(sunsetAmount)
+      setLandrushZombieNightSurfaceUniformAmount(treatmentAmount)
 
       const ownership = lightingOwnershipRef.current
-      if (amount > 0.001) claimNightLightingOwnership(scene, ownership)
-      if (amount > 0.001 || ownership.claimed) {
+      if (visualAmount > 0.001) claimNightLightingOwnership(scene, ownership)
+
+      appliedPresentation.amount = amount
+      appliedPresentation.mode = settings.mode
+      appliedPresentation.sceneThemeId = sceneThemeId
+      appliedPresentation.sunsetAmount = sunsetAmount
+    }
+
+    const appliedCpuPresentation = appliedCpuPresentationRef.current
+    const cpuPresentationInvalidated =
+      appliedCpuPresentation.mode !== settings.mode ||
+      appliedCpuPresentation.sceneThemeId !== sceneThemeId
+    if (
+      shouldApplyLandrushZombieNightCpuPresentation(
+        appliedCpuPresentation.amount,
+        amount,
+        target,
+        elapsedSeconds,
+        nextCpuPresentationAtRef.current,
+        cpuPresentationInvalidated,
+      )
+    ) {
+      if (
+        appliedCpuPresentation.treatmentAmount !== treatmentAmount ||
+        appliedCpuPresentation.sunsetAmount !== sunsetAmount
+      ) {
+        applyLandrushZombieNightSurfaceColorBindings()
+      }
+
+      const ownership = lightingOwnershipRef.current
+      if (visualAmount > 0.001) claimNightLightingOwnership(scene, ownership)
+      if (visualAmount > 0.001 || ownership.claimed) {
         const sceneLights = sceneLightsRef.current?.read()
         for (let index = 0; index < (sceneLights?.direct.length ?? 0); index += 1) {
           const light = sceneLights!.direct[index]!
           const day = dayTheme.lights[index] ?? dayTheme.lights.at(-1)
-          if (!day) continue
+          const dayColor = dayLightColors[index] ?? dayLightColors.at(-1)
+          const dayDirection = dayLightDirections[index] ?? dayLightDirections.at(-1)
+          if (!day || !dayColor || !dayDirection) continue
           const night = NIGHT_LIGHTS[index] ?? NIGHT_LIGHTS.at(-1)!
           const nightIntensity = settings.mode === 'light-contribution' ? 0 : night.intensity
           light.intensity = day.intensity + (nightIntensity - day.intensity) * amount
           light.color
-            .set(day.color)
+            .copy(dayColor)
+            .lerp(sunsetLightColors[index] ?? sunsetLightColors.at(-1)!, sunsetAmount)
             .lerp(nightLightColors[index] ?? nightLightColors.at(-1)!, amount)
 
           const focus = light.target.position
           const distance = Math.max(12, light.position.distanceTo(focus))
-          dayDirection.set(day.position[0], day.position[1], day.position[2]).normalize()
-          nightDirection.set(night.direction[0], night.direction[1], night.direction[2]).normalize()
-          blendedDirection.lerpVectors(dayDirection, nightDirection, amount).normalize()
+          const nightDirection = nightLightDirections[index] ?? nightLightDirections.at(-1)!
+          blendedDirection
+            .copy(dayDirection)
+            .lerp(sunsetLightDirections[index] ?? sunsetLightDirections.at(-1)!, sunsetAmount)
+            .lerp(nightDirection, amount)
+          if (blendedDirection.lengthSq() <= 0.000_001) blendedDirection.copy(nightDirection)
+          else blendedDirection.normalize()
           light.position.copy(focus).addScaledVector(blendedDirection, distance)
           if (light.shadow?.intensity !== undefined) {
             light.shadow.intensity = 0.75 * (1 - amount * 0.08)
@@ -269,12 +413,18 @@ export function LandrushZombieNightPresentation({
 
         const hemisphere = sceneLights?.hemisphere
         if (hemisphere) {
-          const day = dayTheme.hemi ?? { ground: '#777777', intensity: 0, sky: '#ffffff' }
+          const dayIntensity = dayTheme.hemi?.intensity ?? 0
           const nightIntensity =
             settings.mode === 'light-contribution' ? 0 : NIGHT_HEMISPHERE.intensity
-          hemisphere.intensity = day.intensity + (nightIntensity - day.intensity) * amount
-          hemisphere.color.set(day.sky).lerp(nightHemisphereSky, amount)
-          hemisphere.groundColor.set(day.ground).lerp(nightHemisphereGround, amount)
+          hemisphere.intensity = dayIntensity + (nightIntensity - dayIntensity) * amount
+          hemisphere.color
+            .copy(dayHemisphereSky)
+            .lerp(sunsetHemisphereSky, sunsetAmount)
+            .lerp(nightHemisphereSky, amount)
+          hemisphere.groundColor
+            .copy(dayHemisphereGround)
+            .lerp(sunsetHemisphereGround, sunsetAmount)
+            .lerp(nightHemisphereGround, amount)
         }
 
         const ambient = sceneLights?.ambient
@@ -283,17 +433,25 @@ export function LandrushZombieNightPresentation({
             settings.mode === 'light-contribution' ? 0 : NIGHT_AMBIENT.intensity
           ambient.intensity =
             dayTheme.ambient.intensity + (nightIntensity - dayTheme.ambient.intensity) * amount
-          ambient.color.set(dayTheme.ambient.color).lerp(nightAmbientColor, treatmentAmount)
+          ambient.color
+            .copy(dayAmbientColor)
+            .lerp(sunsetAmbientColor, sunsetAmount)
+            .lerp(nightAmbientColor, treatmentAmount)
         }
       }
-      if (amount <= 0.001) {
-        releaseNightLightingOwnership(scene, ownership)
-        scenePresentationBinding.release()
-      }
 
-      appliedPresentation.amount = amount
-      appliedPresentation.mode = settings.mode
-      appliedPresentation.sceneThemeId = sceneThemeId
+      appliedCpuPresentation.amount = amount
+      appliedCpuPresentation.mode = settings.mode
+      appliedCpuPresentation.sceneThemeId = sceneThemeId
+      appliedCpuPresentation.sunsetAmount = sunsetAmount
+      appliedCpuPresentation.treatmentAmount = treatmentAmount
+      nextCpuPresentationAtRef.current =
+        elapsedSeconds + LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS
+    }
+
+    if (target <= 0.001 && visualAmount <= 0.001) {
+      releaseNightLightingOwnership(scene, lightingOwnershipRef.current)
+      scenePresentationBinding.release()
     }
     // The Viewer theme effect can run after readiness, so retain ownership without a redundant write.
     if (amount > 0.001 && gl.toneMappingExposure !== targetExposure) {
@@ -316,7 +474,7 @@ export function LandrushZombieNightPresentation({
     }
     beaconsActiveRef.current = beaconFrameMode === 'animate'
 
-    if (settings.debugSnapshotEnabled && clock.elapsedTime >= nextDebugSnapshotAtRef.current) {
+    if (settings.debugSnapshotEnabled && elapsedSeconds >= nextDebugSnapshotAtRef.current) {
       const snapshot =
         debugSnapshotRef.current ??
         ({
@@ -342,7 +500,7 @@ export function LandrushZombieNightPresentation({
       snapshot.visibility = settings.visibility
       debugSnapshotRef.current = snapshot
       window.__LANDRUSH_ZOMBIE_NIGHT_PRESENTATION__ = snapshot
-      nextDebugSnapshotAtRef.current = clock.elapsedTime + NIGHT_DEBUG_SNAPSHOT_INTERVAL_SECONDS
+      nextDebugSnapshotAtRef.current = elapsedSeconds + NIGHT_DEBUG_SNAPSHOT_INTERVAL_SECONDS
     }
 
     if (Math.abs(target - amount) > 0.001 || amount > 0.001) {
@@ -410,31 +568,40 @@ function LandrushZombieNightBeacon({
   placement: ReturnType<typeof createLandrushZombieNightBeaconPlacements>[number]
   runtime: LandrushZombieNightBeaconRuntime
 }) {
+  const { scene } = useGLTF(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH)
+  const fixture = useMemo(
+    () => createLandrushZombieNightStreetLightpostModel(scene, placement.color),
+    [placement.color, scene],
+  )
+  const lightTarget = useMemo(() => {
+    const target = new Object3D()
+    target.position.set(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION)
+    return target
+  }, [])
+
+  useLayoutEffect(() => {
+    runtime.fixtureMaterials = fixture.materials
+    runtime.lastEnvelope = Number.NaN
+    return () => {
+      if (runtime.fixtureMaterials === fixture.materials) runtime.fixtureMaterials = []
+      for (const material of fixture.materials) material.dispose()
+    }
+  }, [fixture, runtime])
+
   return (
-    <group
-      position={placement.position}
-      ref={(group) => {
-        runtime.group = group
-        runtime.lastEnvelope = Number.NaN
-      }}
-    >
-      <mesh position={[0, 0.56, 0]}>
-        <cylinderGeometry args={[0.035, 0.055, 1.12, 7]} />
-        <meshStandardMaterial
-          color="#08111f"
-          depthWrite={false}
-          metalness={0.5}
-          opacity={0}
-          ref={(material) => {
-            runtime.mastMaterial = material
-            runtime.lastEnvelope = Number.NaN
-          }}
-          roughness={0.48}
-          transparent
-        />
-      </mesh>
-      <mesh position={[0, 1.18, 0]}>
-        <sphereGeometry args={[0.105, 12, 8]} />
+    <group position={placement.position} rotation={[0, placement.rotationY, 0]}>
+      <group
+        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_POSITION}
+        rotation={[0, LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_ROTATION_Y, 0]}
+        scale={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE}
+      >
+        <primitive dispose={null} object={fixture.model} />
+      </group>
+      <mesh
+        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
+        rotation={[Math.PI / 2, 0, 0]}
+      >
+        <circleGeometry args={[0.16, 16]} />
         <meshBasicMaterial
           color={placement.color}
           depthWrite={false}
@@ -443,12 +610,17 @@ function LandrushZombieNightBeacon({
             runtime.coreMaterial = material
             runtime.lastEnvelope = Number.NaN
           }}
+          side={DoubleSide}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh position={[0, 1.18, 0]} renderOrder={30}>
-        <sphereGeometry args={[0.29, 12, 8]} />
+      <mesh
+        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
+        renderOrder={30}
+        rotation={[Math.PI / 2, 0, 0]}
+      >
+        <circleGeometry args={[0.34, 16]} />
         <meshBasicMaterial
           blending={AdditiveBlending}
           color={placement.color}
@@ -458,12 +630,17 @@ function LandrushZombieNightBeacon({
             runtime.innerGlowMaterial = material
             runtime.lastEnvelope = Number.NaN
           }}
+          side={DoubleSide}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <mesh position={[0, 1.18, 0]} renderOrder={29}>
-        <sphereGeometry args={[0.7, 12, 8]} />
+      <mesh
+        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
+        renderOrder={29}
+        rotation={[Math.PI / 2, 0, 0]}
+      >
+        <circleGeometry args={[0.62, 16]} />
         <meshBasicMaterial
           blending={AdditiveBlending}
           color={placement.color}
@@ -473,24 +650,57 @@ function LandrushZombieNightBeacon({
             runtime.outerGlowMaterial = material
             runtime.lastEnvelope = Number.NaN
           }}
+          side={DoubleSide}
           toneMapped={false}
           transparent
         />
       </mesh>
-      <pointLight
+      <primitive object={lightTarget} />
+      <spotLight
+        angle={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE}
         color={placement.color}
-        decay={2}
-        distance={12}
+        decay={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY}
+        distance={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE}
         intensity={0}
-        position={[0, 1.18, 0]}
+        penumbra={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_PENUMBRA}
+        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
         ref={(light) => {
           runtime.light = light
           runtime.lastEnvelope = Number.NaN
         }}
+        target={lightTarget}
         userData={{ landrushZombieNight: true }}
       />
     </group>
   )
+}
+
+function createLandrushZombieNightStreetLightpostModel(source: Object3D, color: string) {
+  const model = source.clone(true)
+  const clonedMaterials = new Map<Material, Material>()
+  const materials: MeshStandardMaterial[] = []
+  model.traverse((object) => {
+    const mesh = object as Mesh
+    if (!mesh.isMesh) return
+    mesh.castShadow = false
+    mesh.receiveShadow = false
+    const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    const nextMaterials = sourceMaterials.map((sourceMaterial) => {
+      const cached = clonedMaterials.get(sourceMaterial)
+      if (cached) return cached
+      const material = sourceMaterial.clone()
+      clonedMaterials.set(sourceMaterial, material)
+      const standardMaterial = material as MeshStandardMaterial
+      if (standardMaterial.isMeshStandardMaterial) {
+        standardMaterial.emissive.set(color)
+        standardMaterial.emissiveIntensity = 0
+        materials.push(standardMaterial)
+      }
+      return material
+    })
+    mesh.material = Array.isArray(mesh.material) ? nextMaterials : nextMaterials[0]!
+  })
+  return { materials, model }
 }
 
 function updateNightBeacons({
@@ -541,3 +751,5 @@ function readRenderCalls(renderer: unknown) {
   const calls = (renderer as { info?: { render?: { calls?: unknown } } }).info?.render?.calls
   return typeof calls === 'number' && Number.isFinite(calls) ? calls : null
 }
+
+useGLTF.preload(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH)

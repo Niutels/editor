@@ -1,4 +1,9 @@
+import {
+  LANDRUSH_ISLAND_AMBIENT_NPCS,
+  type LandrushIslandAmbientNpc,
+} from './landrush-island-ambient-catalog'
 import { ZOMBIE_ESCAPE_CAPACITY, ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT } from './zombie-escape-config'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 export const ZOMBIE_ESCAPE_ZOMBIE_GAIT = {
   runner: 1,
@@ -7,6 +12,27 @@ export const ZOMBIE_ESCAPE_ZOMBIE_GAIT = {
 
 export type ZombieEscapeZombieGait =
   (typeof ZOMBIE_ESCAPE_ZOMBIE_GAIT)[keyof typeof ZOMBIE_ESCAPE_ZOMBIE_GAIT]
+
+export type ZombieEscapeAmbientNpcSourceId = LandrushIslandAmbientNpc['id']
+
+export const ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS: readonly ZombieEscapeAmbientNpcSourceId[] =
+  Object.freeze(LANDRUSH_ISLAND_AMBIENT_NPCS.map(({ id }) => id))
+
+const ZOMBIE_ESCAPE_AMBIENT_NPC_VARIANT_BY_NPC_INDEX = Uint8Array.from(
+  ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
+  (sourceNpcId) => {
+    const variant = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.findIndex(
+      (zombie) => zombie.sourceNpcId === sourceNpcId,
+    )
+    if (variant < 0) throw new Error(`Missing zombie variant for ambient NPC: ${sourceNpcId}`)
+    return variant
+  },
+)
+
+export type ZombieEscapeZombieRoster = Readonly<{
+  sourceNpcIdByPoolSlot: readonly (ZombieEscapeAmbientNpcSourceId | null)[]
+  variantByPoolSlot: Uint8Array
+}>
 
 const ZOMBIE_ESCAPE_REGULAR_SPEED_MINIMUM = 0.9
 const ZOMBIE_ESCAPE_REGULAR_SPEED_MAXIMUM = 1.12
@@ -82,9 +108,40 @@ export function createZombieEscapeVariantByPoolSlot(
   const resolvedCapacity = Math.max(0, Math.floor(capacity))
   const resolvedVariantCount = Math.max(1, Math.min(256, Math.floor(variantCount)))
   const variants = new Uint8Array(resolvedCapacity)
-  for (let slot = 0; slot < variants.length; slot += 1) {
-    variants[slot] = slot % resolvedVariantCount
+  const ambientPrefixCount = Math.min(
+    variants.length,
+    ZOMBIE_ESCAPE_AMBIENT_NPC_VARIANT_BY_NPC_INDEX.length,
+  )
+  for (let slot = 0; slot < ambientPrefixCount; slot += 1) {
+    variants[slot] = ZOMBIE_ESCAPE_AMBIENT_NPC_VARIANT_BY_NPC_INDEX[slot]! % resolvedVariantCount
+  }
+  for (let slot = ambientPrefixCount; slot < variants.length; slot += 1) {
+    variants[slot] = (slot - ambientPrefixCount) % resolvedVariantCount
   }
 
-  return shuffleZombieEscapeRoster(variants, seed, 0x9e37_79b9)
+  return shuffleZombieEscapeRosterSuffix(variants, seed, 0x9e37_79b9, ambientPrefixCount)
+}
+
+export function createZombieEscapeZombieRoster(
+  seed: number,
+  capacity: number = ZOMBIE_ESCAPE_CAPACITY.zombies,
+  variantCount = ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT,
+): ZombieEscapeZombieRoster {
+  const variantByPoolSlot = createZombieEscapeVariantByPoolSlot(seed, capacity, variantCount)
+  const sourceNpcIdByPoolSlot: (ZombieEscapeAmbientNpcSourceId | null)[] = Array.from(
+    { length: variantByPoolSlot.length },
+    (_, slot) => ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS[slot] ?? null,
+  )
+  return { sourceNpcIdByPoolSlot, variantByPoolSlot }
+}
+
+function shuffleZombieEscapeRosterSuffix(
+  values: Uint8Array,
+  seed: number,
+  salt: number,
+  start: number,
+) {
+  const suffix = values.subarray(Math.max(0, Math.min(values.length, Math.trunc(start))))
+  shuffleZombieEscapeRoster(suffix, seed, salt)
+  return values
 }

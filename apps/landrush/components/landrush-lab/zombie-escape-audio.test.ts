@@ -4,6 +4,7 @@ import {
   createZombieEscapeAudioLoadState,
   createZombieEscapeAudioSoundOptions,
   createZombieEscapePresenceAudioSchedule,
+  createZombieEscapeRealtimeAudioCursorState,
   resetZombieEscapePresenceAudioSchedule,
   resolveZombieEscapeAudioEventCursor,
   resolveZombieEscapeAudioListenerTransform,
@@ -12,7 +13,9 @@ import {
   resolveZombieEscapePresenceScheduleDelay,
   resolveZombieEscapePresenceVariation,
   selectZombieEscapePresenceAudioCandidate,
+  shouldCreateZombieEscapeAudioRuntime,
   shouldPlayZombieEscapePresenceAudio,
+  synchronizeZombieEscapeRealtimeAudioCursor,
   visitZombieEscapeWeaponImpactAudioEvents,
   type ZombieEscapeAudioSpatialMix,
   type ZombieEscapePresenceAudioSource,
@@ -28,6 +31,12 @@ import {
 import { ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND } from './zombie-escape-simulation'
 
 describe('Zombie Escape audio readiness', () => {
+  test('does not create a runtime while ordinary user audio is muted', () => {
+    expect(shouldCreateZombieEscapeAudioRuntime(true, false)).toBe(true)
+    expect(shouldCreateZombieEscapeAudioRuntime(false, false)).toBe(false)
+    expect(shouldCreateZombieEscapeAudioRuntime(true, true)).toBe(false)
+  })
+
   test('wires presence Howl load errors into the shared runtime failure state', () => {
     const loadState = createZombieEscapeAudioLoadState()
     const options = createZombieEscapeAudioSoundOptions(
@@ -101,6 +110,62 @@ describe('Zombie Escape spatial audio mix', () => {
 })
 
 describe('Zombie Escape realtime audio cursor', () => {
+  test('discards impact pools only at playback availability edges', () => {
+    const events = createZombieEscapeAudioEventRing()
+    emitZombieEscapeAudioEvent(events, ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyHit, 1, 0, 0)
+    const impacts: ZombieEscapeWeaponImpactAudioEvents = {
+      effectKind: Uint8Array.of(
+        ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.projectile,
+        ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND.chain,
+      ),
+      pool: {
+        active: Uint8Array.of(1, 1),
+        capacity: 2,
+        generation: Uint32Array.of(4, 5),
+      },
+      weaponIndex: Uint8Array.of(1, 3),
+      x: Float32Array.of(1, 2),
+      y: Float32Array.of(3, 4),
+      z: Float32Array.of(5, 6),
+    }
+    const source = { audioEvents: events, elapsedSeconds: 1, impactEvents: impacts }
+    const cursor = createZombieEscapeRealtimeAudioCursorState(source)
+
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, false)).toBe(false)
+    impacts.pool.generation[0] = 7
+    emitZombieEscapeAudioEvent(events, ZOMBIE_ESCAPE_AUDIO_EVENT_KIND.enemyKilled, 2, 0, 0)
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, false)).toBe(false)
+    expect(cursor.sequence).toBe(1)
+    expect([...cursor.impactGeneration]).toEqual([0, 0])
+
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, true)).toBe(true)
+    expect(cursor.sequence).toBe(2)
+    expect([...cursor.impactGeneration]).toEqual([7, 5])
+    const visited: number[] = []
+    visitZombieEscapeWeaponImpactAudioEvents(impacts, cursor.impactGeneration, (_, slot) => {
+      visited.push(slot)
+    })
+    expect(visited).toEqual([])
+
+    impacts.pool.generation[1] = 8
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, true)).toBe(false)
+    visitZombieEscapeWeaponImpactAudioEvents(impacts, cursor.impactGeneration, (_, slot) => {
+      visited.push(slot)
+    })
+    expect(visited).toEqual([1])
+
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, false)).toBe(true)
+    impacts.pool.generation[0] = 9
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, false)).toBe(false)
+    expect([...cursor.impactGeneration]).toEqual([7, 8])
+    expect(synchronizeZombieEscapeRealtimeAudioCursor(cursor, source, true)).toBe(true)
+    expect([...cursor.impactGeneration]).toEqual([9, 8])
+    visitZombieEscapeWeaponImpactAudioEvents(impacts, cursor.impactGeneration, (_, slot) => {
+      visited.push(slot)
+    })
+    expect(visited).toEqual([1])
+  })
+
   test('drops unavailable history and resumes with only newly emitted events', () => {
     const events = createZombieEscapeAudioEventRing()
     let cursor = 0

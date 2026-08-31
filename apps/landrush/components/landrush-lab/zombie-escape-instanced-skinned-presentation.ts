@@ -604,10 +604,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
           lastChangedFrame = selectedCount
         }
         if (lastChangedFrame >= firstChangedFrame) {
-          frameAttribute.addUpdateRange(
-            firstChangedFrame,
-            lastChangedFrame - firstChangedFrame + 1,
-          )
+          frameAttribute.addUpdateRange(firstChangedFrame, lastChangedFrame - firstChangedFrame + 1)
           frameAttribute.needsUpdate = true
         }
         for (const state of bakedMeshes) {

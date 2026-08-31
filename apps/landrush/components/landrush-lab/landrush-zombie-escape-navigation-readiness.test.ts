@@ -433,6 +433,10 @@ describe('installed Zombie navigation readiness', () => {
       new URL('./landrush-zombie-escape-mode.tsx', import.meta.url),
       'utf8',
     )
+    const portalSource = readFileSync(
+      new URL('../../lib/zombie-escape-hud-portal.tsx', import.meta.url),
+      'utf8',
+    )
     const installation = source.indexOf(
       'setZombieEscapeCollisionWorld(simulation, collisionWorlds.navigation, collisionWorlds.combat)',
     )
@@ -458,7 +462,13 @@ describe('installed Zombie navigation readiness', () => {
     )
     expect(reportEffect.match(/\+\+collisionWorldReadinessGenerationRef.current/g)).toHaveLength(2)
     expect(source).toContain('if (collisionWorldBuildOwnerRef.current !== owner) return')
-    expect(source).toContain('portal.container.style.zIndex = recovery.zIndex')
+    expect(source).toContain(
+      'const hudPortalZIndex = resolveLandrushZombieEscapeRecoveryPresentation({',
+    )
+    expect(source).toMatch(
+      /publishLandrushZombieEscapeHudPortal\(\{[\s\S]*?zIndex: hudPortalZIndex,[\s\S]*?\}\)/,
+    )
+    expect(portalSource).toContain('zIndex: entry.zIndex,')
     expect(source).toContain('data-testid="landrush-zombie-escape-loading-recovery"')
     expect(source).toContain('disabled={recovery.retrying}')
     expect(source).toContain('navigationError={collisionWorldBuildError}')

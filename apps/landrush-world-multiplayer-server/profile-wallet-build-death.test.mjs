@@ -365,30 +365,10 @@ test('ends Night only after the last alive report and keeps a dead reconnect eli
     assert.equal(held.phase, 'build')
     assert.equal(held.night, 0)
     assert.equal(held.revision, 0)
-
-    await prepareZombieEscapeHouse(
-      first,
-      roomId,
-      'zombie-all-dead-world',
-      'parcel-zombie-all-dead',
-    )
     first.socket.send(
       JSON.stringify({
         baseRevision: held.revision,
         sessionId: held.sessionId,
-        type: 'initialize-zombie-escape-clock',
-      }),
-    )
-    const initialized = await nextMessage(
-      first,
-      (message) =>
-        message.type === 'zombie-escape-state-updated' && message.state?.revision === 1,
-    )
-
-    first.socket.send(
-      JSON.stringify({
-        baseRevision: initialized.state.revision,
-        sessionId: initialized.state.sessionId,
         type: 'start-zombie-escape-night',
       }),
     )
@@ -399,7 +379,8 @@ test('ends Night only after the last alive report and keeps a dead reconnect eli
     )
     const night = nightMessage.state
     assert.equal(night.night, 1)
-    assert.equal(night.revision, 2)
+    assert.equal(night.revision, 1)
+    assert.ok(night.phaseEndsAt > nightMessage.serverTime)
 
     first.socket.send(
       JSON.stringify({
@@ -474,7 +455,7 @@ test('ends Night only after the last alive report and keeps a dead reconnect eli
     assert.equal(completed.sessionId, night.sessionId)
     assert.equal(completed.night, night.night)
     assert.equal(completed.revision, night.revision + 1)
-    assert.ok(completed.phaseEndsAt > completedMessage.serverTime)
+    assert.equal(completed.phaseEndsAt, null)
 
     second.socket.send(
       JSON.stringify({
@@ -496,62 +477,29 @@ test('ends Night only after the last alive report and keeps a dead reconnect eli
     const afterDuplicateReports = await connectWatcher(server.port, roomId)
     clients.push(afterDuplicateReports)
     assert.deepEqual(afterDuplicateReports.snapshot.zombieEscapeState, completed)
+
+    second.socket.send(
+      JSON.stringify({
+        baseRevision: completed.revision,
+        sessionId: completed.sessionId,
+        type: 'start-zombie-escape-night',
+      }),
+    )
+    const nextNightMessage = await nextMessage(
+      second,
+      (message) =>
+        message.type === 'zombie-escape-state-updated' &&
+        message.state?.phase === 'night' &&
+        message.state.revision === completed.revision + 1,
+    )
+    assert.equal(nextNightMessage.state.night, completed.night + 1)
+    assert.equal(nextNightMessage.state.revision, completed.revision + 1)
+    assert.ok(nextNightMessage.state.phaseEndsAt > nextNightMessage.serverTime)
   } finally {
     for (const client of clients) await closeClient(client)
     await stopServer(server.child)
   }
 })
-
-async function prepareZombieEscapeHouse(client, roomId, worldId, parcelId) {
-  await readBuildSnapshot(client, roomId, worldId)
-  client.socket.send(JSON.stringify({ parcelId, type: 'claim-parcel', worldId }))
-  const claim = await nextMessage(
-    client,
-    (message) => message.type === 'parcel-claim-result' && message.ownership?.parcelId === parcelId,
-  )
-  assert.equal(claim.ownership.worldId, worldId)
-
-  const build = await sendBuild(client, {
-    baseRevision: 0,
-    nodes: createZombieEscapeHouseGraph(parcelId),
-    operationId: `build-${parcelId}`,
-    parcelId,
-    worldId,
-  })
-  assert.equal(build.type, 'parcel-build-nodes-ack')
-}
-
-function createZombieEscapeHouseGraph(parcelId) {
-  const buildingId = 'building_zombie-first-house'
-  const levelId = 'level_zombie-first-house'
-  const metadata = { landrushParcelId: parcelId }
-  const northId = 'wall_zombie-first-house-north'
-  const eastId = 'wall_zombie-first-house-east'
-  const southId = 'wall_zombie-first-house-south'
-  const westId = 'wall_zombie-first-house-west'
-  return [
-    createNode(buildingId, 'building', null, { children: [levelId], metadata }),
-    createNode(levelId, 'level', buildingId, {
-      children: [northId, eastId, southId, westId],
-      level: 0,
-      metadata,
-    }),
-    createWall(northId, levelId, [0, 0], [1, 0], {
-      children: ['door_zombie-first-house'],
-      metadata,
-    }),
-    createWall(eastId, levelId, [1, 0], [1, 1], { children: [], metadata }),
-    createWall(southId, levelId, [1, 1], [0, 1], { children: [], metadata }),
-    createWall(westId, levelId, [0, 1], [0, 0], { children: [], metadata }),
-    createNode('door_zombie-first-house', 'door', northId, {
-      height: 2.1,
-      metadata,
-      position: [0.5, 1.05, 0],
-      rotation: [0, 0, 0],
-      width: 0.9,
-    }),
-  ]
-}
 
 function createPricedGraph(options = {}) {
   const levelId = 'level_priced-ground'

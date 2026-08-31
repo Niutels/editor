@@ -143,6 +143,7 @@ const PRESENTATION_RADIAL_BLUR_PATH_FRACTION = 0.08
 const PRESENTATION_RADIAL_BLUR_MAX_STRENGTH = 2
 const PRESENTATION_RADIAL_BLUR_RESOLUTION_SCALE = 0.5
 const PRESENTATION_RADIAL_BLUR_SAMPLE_PAIRS = 6
+const PRESENTATION_EFFECT_CONTRIBUTION_EPSILON = 0.001
 
 export function resolvePostProcessingInkColor(background: Color) {
   const hex = background.getHex()
@@ -1199,19 +1200,17 @@ const PostProcessingPasses = ({
     const presentationAmount = Number.isFinite(rawPresentationAmount)
       ? Math.max(0, Math.min(1, rawPresentationAmount))
       : 0
-    const presentationActive =
-      presentationState?.presentationPipelineActive === true ||
-      presentationState?.zoomBlurActive === true
     const rawPresentationStrength = presentationState?.zoomBlurStrength ?? 1
+    const presentationStrength = Number.isFinite(rawPresentationStrength)
+      ? Math.max(0, Math.min(PRESENTATION_RADIAL_BLUR_MAX_STRENGTH, rawPresentationStrength))
+      : 1
     presentationBlurAmount.current.value = presentationAmount
     presentationBlurDirection.current.value =
       Number.isFinite(presentationState?.zoomBlurDirection) &&
       (presentationState?.zoomBlurDirection ?? 1) < 0
         ? -1
         : 1
-    presentationBlurStrength.current.value = Number.isFinite(rawPresentationStrength)
-      ? Math.max(0, Math.min(PRESENTATION_RADIAL_BLUR_MAX_STRENGTH, rawPresentationStrength))
-      : 1
+    presentationBlurStrength.current.value = presentationStrength
     presentationBlurDebugMode.current.value =
       presentationState?.zoomBlurDebugMode === 'mask'
         ? 1
@@ -1240,12 +1239,15 @@ const PostProcessingPasses = ({
       invalidate()
     }
 
-    const presentationPipelineFrame =
+    const livePresentationPipelineFrame =
       presentationOnlyPipelineRef.current &&
-      (presentationActive ||
-        presentationAmount > 0.001 ||
-        prewarming ||
-        (pipelinePrewarmPending && pipelinePrewarmRenderPath === 'presentation'))
+      (presentationAmount * presentationStrength > PRESENTATION_EFFECT_CONTRIBUTION_EPSILON ||
+        prewarming)
+    const presentationPipelineFrame =
+      livePresentationPipelineFrame ||
+      (presentationOnlyPipelineRef.current &&
+        pipelinePrewarmPending &&
+        pipelinePrewarmRenderPath === 'presentation')
     const renderPipeline = renderPipelineRef.current
     const shouldDirectRender =
       PERF_POST_FX_DISABLED ||
@@ -1323,9 +1325,55 @@ const PostProcessingPasses = ({
           rendered ? 'rendered' : 'failed',
         )
       }
+      if (directPrewarm && camera !== state.camera) {
+        try {
+          camProjInvUniform.current.value.copy(state.camera.projectionMatrixInverse)
+          camWorldUniform.current.value.copy(state.camera.matrixWorld)
+          if (
+            !PERF_POST_FX_DISABLED &&
+            !hasPipelineErrorRef.current &&
+            (!disablePostFx || livePresentationPipelineFrame)
+          ) {
+            ;(renderer as any).setClearAlpha(0)
+            if (presentationScenePassRef.current) {
+              presentationScenePassRef.current.camera = state.camera
+            }
+            renderPipeline.render()
+          } else {
+            const clearAlpha = transparentBackground ? 0 : 1
+            if ((renderer as any).setClearColor) {
+              ;(renderer as any).setClearColor(bgCurrent.current, clearAlpha)
+            } else if ((renderer as any).setClearAlpha) {
+              ;(renderer as any).setClearAlpha(clearAlpha)
+            }
+            ;(renderer as any).render(scene, state.camera)
+          }
+        } catch (liveCameraError) {
+          console.error(
+            '[viewer/post-processing] Failed to restore the live camera after a direct prewarm.',
+            liveCameraError,
+          )
+          ;(renderer as any).setRenderTarget?.(null)
+          try {
+            const clearAlpha = transparentBackground ? 0 : 1
+            if ((renderer as any).setClearColor) {
+              ;(renderer as any).setClearColor(bgCurrent.current, clearAlpha)
+            } else if ((renderer as any).setClearAlpha) {
+              ;(renderer as any).setClearAlpha(clearAlpha)
+            }
+            ;(renderer as any).render(scene, state.camera)
+          } catch (fallbackError) {
+            console.error(
+              '[viewer/post-processing] Live-camera fallback render failed.',
+              fallbackError,
+            )
+          }
+        }
+      }
       return
     }
 
+    let pipelinePrewarmSettled = false
     try {
       // Clear alpha=0 so background pixels in the output MRT attachment (index 0) get a=0,
       // making scenePassColor.a a reliable geometry mask (geometry pixels write a=1 via output node).
@@ -1340,6 +1388,8 @@ const PostProcessingPasses = ({
           unculled.push(object)
         })
       }
+      let prewarmRenderedCamera: Camera | undefined
+      let prewarmCameraMatched = false
       try {
         if (presentationScenePassRef.current) {
           presentationScenePassRef.current.camera = camera
@@ -1348,28 +1398,57 @@ const PostProcessingPasses = ({
         if (pipelinePrewarmPending && presentationState) {
           const renderedCamera = presentationScenePassRef.current?.camera ?? camera
           const requestedCamera = presentationState.pipelinePrewarmCamera
-          const cameraMatched = requestedCamera === undefined || renderedCamera === requestedCamera
-          presentationState.pipelinePrewarmCameraMatched = cameraMatched
-          presentationState.pipelinePrewarmRenderedCamera = renderedCamera
-          presentationState.pipelinePrewarmPostprocessCallbackCount =
-            normalizePresentationRevision(
-              presentationState.pipelinePrewarmPostprocessCallbackCount,
-            ) + 1
-          if (cameraMatched) {
-            presentationState.pipelinePrewarmRenderedRevision = pipelinePrewarmRequestRevision
-          } else {
-            presentationState.pipelinePrewarmFailedRevision = pipelinePrewarmRequestRevision
-          }
-          presentationState.pipelinePrewarmOnRenderSettled?.(
-            pipelinePrewarmRequestRevision,
-            cameraMatched ? 'rendered' : 'failed',
-          )
+          prewarmRenderedCamera = renderedCamera
+          prewarmCameraMatched = requestedCamera === undefined || renderedCamera === requestedCamera
         }
       } finally {
         for (const object of unculled) object.frustumCulled = true
         unculled.length = 0
         if (prewarming || pipelinePrewarmPending) {
           presentationBlurAmount.current.value = presentationAmount
+        }
+      }
+      if (pipelinePrewarmPending && presentationState) {
+        const rendered = prewarmCameraMatched
+        presentationState.pipelinePrewarmCameraMatched = rendered
+        presentationState.pipelinePrewarmRenderedCamera = rendered
+          ? prewarmRenderedCamera
+          : undefined
+        presentationState.pipelinePrewarmPostprocessCallbackCount =
+          normalizePresentationRevision(presentationState.pipelinePrewarmPostprocessCallbackCount) +
+          1
+        if (rendered) {
+          presentationState.pipelinePrewarmRenderedRevision = pipelinePrewarmRequestRevision
+        } else {
+          presentationState.pipelinePrewarmFailedRevision = pipelinePrewarmRequestRevision
+        }
+        presentationState.pipelinePrewarmOnRenderSettled?.(
+          pipelinePrewarmRequestRevision,
+          rendered ? 'rendered' : 'failed',
+        )
+        pipelinePrewarmSettled = true
+      }
+      if (pipelinePrewarmPending && camera !== state.camera) {
+        camProjInvUniform.current.value.copy(state.camera.projectionMatrixInverse)
+        camWorldUniform.current.value.copy(state.camera.matrixWorld)
+        if (
+          !PERF_POST_FX_DISABLED &&
+          !hasPipelineErrorRef.current &&
+          (!disablePostFx || livePresentationPipelineFrame)
+        ) {
+          ;(renderer as any).setClearAlpha(0)
+          if (presentationScenePassRef.current) {
+            presentationScenePassRef.current.camera = state.camera
+          }
+          renderPipeline.render()
+        } else {
+          const clearAlpha = transparentBackground ? 0 : 1
+          if ((renderer as any).setClearColor) {
+            ;(renderer as any).setClearColor(bgCurrent.current, clearAlpha)
+          } else if ((renderer as any).setClearAlpha) {
+            ;(renderer as any).setClearAlpha(clearAlpha)
+          }
+          ;(renderer as any).render(scene, state.camera)
         }
       }
       if (prewarming) {
@@ -1390,7 +1469,7 @@ const PostProcessingPasses = ({
       }
     } catch (error) {
       hasPipelineErrorRef.current = true
-      if (pipelinePrewarmPending && presentationState) {
+      if (pipelinePrewarmPending && presentationState && !pipelinePrewarmSettled) {
         presentationState.pipelinePrewarmFailedRevision = pipelinePrewarmRequestRevision
         presentationState.pipelinePrewarmPostprocessCallbackCount =
           normalizePresentationRevision(presentationState.pipelinePrewarmPostprocessCallbackCount) +
@@ -1399,6 +1478,25 @@ const PostProcessingPasses = ({
       }
       // A failed MRT pass may leave its target bound; clear it before the fallback render.
       ;(renderer as any).setRenderTarget?.(null)
+      if (pipelinePrewarmPending && camera !== state.camera) {
+        if (presentationScenePassRef.current) {
+          presentationScenePassRef.current.camera = state.camera
+        }
+        try {
+          const clearAlpha = transparentBackground ? 0 : 1
+          if ((renderer as any).setClearColor) {
+            ;(renderer as any).setClearColor(bgCurrent.current, clearAlpha)
+          } else if ((renderer as any).setClearAlpha) {
+            ;(renderer as any).setClearAlpha(clearAlpha)
+          }
+          ;(renderer as any).render(scene, state.camera)
+        } catch (fallbackError) {
+          console.error(
+            '[viewer/post-processing] Live-camera fallback render failed.',
+            fallbackError,
+          )
+        }
+      }
       console.error('[viewer/post-processing] Render pass failed.', {
         retryCount: retryCountRef.current,
         rendererCtor: (renderer as any).constructor?.name,

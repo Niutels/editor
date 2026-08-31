@@ -90,13 +90,15 @@ describe('integrated Zombie Escape controller commands', () => {
       }),
     ).toEqual({
       cross: { label: 'Jump' },
+      l1: { label: 'Previous' },
       l2: { label: 'Crouch' },
+      r1: { label: 'Next' },
       r2: { label: 'Attack' },
       square: { label: 'Interact' },
     })
   })
 
-  test('makes Square and Triangle contextual without inventing shoulder bindings', () => {
+  test('keeps weapon shoulders stable while making Square and Triangle contextual', () => {
     expect(
       resolveLandrushZombieEscapeControllerCommands({
         pickupAvailable: true,
@@ -104,7 +106,9 @@ describe('integrated Zombie Escape controller commands', () => {
       }),
     ).toEqual({
       cross: { label: 'Jump' },
+      l1: { label: 'Previous' },
       l2: { label: 'Crouch' },
+      r1: { label: 'Next' },
       r2: { label: 'Attack' },
       square: { label: 'Buy' },
       triangle: { label: 'Run again' },

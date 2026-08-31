@@ -31,6 +31,27 @@ describe('Zombie Escape weapon placement', () => {
     expect(first.every(({ y }) => y === 0)).toBe(true)
   })
 
+  test('prioritizes a player-built parcel room ahead of built-in buildings under the paid-weapon cap', () => {
+    const nodes = {} as Record<string, AnyNode>
+    for (let index = 0; index < 4; index += 1) {
+      addClosedBuilding(nodes, index * 12, 0, `Built-in building ${String(index + 1)}`)
+    }
+    addClosedBuilding(nodes, 48, 0, 'Player-built room', 'player-parcel')
+    const reversedNodes = Object.fromEntries(Object.entries(nodes).reverse()) as Record<
+      string,
+      AnyNode
+    >
+
+    const first = resolveZombieEscapeWeaponPickupPlacements(nodes)
+    const second = resolveZombieEscapeWeaponPickupPlacements(reversedNodes)
+
+    expect(first).toEqual(second)
+    expect(first).toHaveLength(4)
+    expect(first[0]?.scopeId).toBe('parcel:player-parcel')
+    expect(first.map(({ scopeId }) => scopeId)).toContain('parcel:player-parcel')
+    expect(new Set(first.map(({ scopeId }) => scopeId)).size).toBe(first.length)
+  })
+
   test('puts the first paid weapon in the first eligible building', () => {
     const nodes = {} as Record<string, AnyNode>
     addClosedBuilding(nodes, 0, 0, 'Only building')
@@ -142,10 +163,21 @@ function addClosedBuilding(
   offsetX: number,
   offsetZ: number,
   name: string,
+  parcelId?: string,
 ) {
   const building = BuildingNode.parse({ name })
   nodes[building.id] = building
-  addClosedLevel(nodes, building.id, 0, offsetX, offsetZ, `${name} ground`)
+  addClosedLevel(
+    nodes,
+    building.id,
+    0,
+    offsetX,
+    offsetZ,
+    `${name} ground`,
+    undefined,
+    true,
+    parcelId,
+  )
 }
 
 function addClosedLevel(
@@ -157,8 +189,15 @@ function addClosedLevel(
   name: string,
   height?: number,
   includeDoor = true,
+  parcelId?: string,
 ) {
-  const level = LevelNode.parse({ height, level: levelNumber, name, parentId: buildingId })
+  const level = LevelNode.parse({
+    height,
+    level: levelNumber,
+    ...(parcelId ? { metadata: { landrushParcelId: parcelId } } : {}),
+    name,
+    parentId: buildingId,
+  })
   nodes[level.id] = level
   addClosedRoom(nodes, level.id, offsetX, offsetZ, 8, 6, name, includeDoor)
 }

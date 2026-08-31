@@ -10,7 +10,6 @@ import {
   isProfileWalletSnapshot,
   isSpatialVoiceSignalPayload,
   isSupportedParcelBuildSchemaVersion,
-  isZombieEscapeFirstHouseReady,
   LEGACY_PARCEL_BUILD_SCHEMA_VERSION,
   type LocalPlayerProfile,
   MAX_PROFILE_MONEY,
@@ -523,23 +522,6 @@ export function remotePlayerRosterChanged(
     previous.color !== next.color ||
     previous.pose !== next.pose ||
     Boolean(previous.combat) !== Boolean(next.combat)
-  )
-}
-
-export function isCanonicalZombieEscapeFirstHouseReady({
-  parcelBuildNodes,
-  parcelBuildSnapshotWorldId,
-  watchedParcelWorldId,
-}: {
-  parcelBuildNodes: readonly ParcelBuildNodesSnapshot[]
-  parcelBuildSnapshotWorldId: string | null
-  watchedParcelWorldId: string | null
-}) {
-  if (watchedParcelWorldId === null || parcelBuildSnapshotWorldId !== watchedParcelWorldId) {
-    return false
-  }
-  return parcelBuildNodes.some(
-    (build) => build.worldId === watchedParcelWorldId && isZombieEscapeFirstHouseReady(build.nodes),
   )
 }
 
@@ -1159,41 +1141,6 @@ export function useLandrushWorldMultiplayer({
     [sendMessage],
   )
 
-  const initializeZombieEscapeClock = useCallback(() => {
-    const observation = zombieEscapeStateObservationRef.current
-    if (
-      !onlineEnabled ||
-      spectator ||
-      gameMode !== 'zombie-escape' ||
-      !observation ||
-      observation.transportGeneration !== transportScopeGenerationRef.current.generation ||
-      observation.state.phase !== 'build' ||
-      observation.state.phaseEndsAt !== null ||
-      !isCanonicalZombieEscapeFirstHouseReady({
-        parcelBuildNodes,
-        parcelBuildSnapshotWorldId,
-        watchedParcelWorldId,
-      })
-    ) {
-      return false
-    }
-    return Boolean(
-      sendMessage({
-        baseRevision: observation.state.revision,
-        sessionId: observation.state.sessionId,
-        type: 'initialize-zombie-escape-clock',
-      }),
-    )
-  }, [
-    gameMode,
-    onlineEnabled,
-    parcelBuildNodes,
-    parcelBuildSnapshotWorldId,
-    sendMessage,
-    spectator,
-    watchedParcelWorldId,
-  ])
-
   const startZombieEscapeNight = useCallback(() => {
     const observation = zombieEscapeStateObservationRef.current
     if (
@@ -1203,7 +1150,7 @@ export function useLandrushWorldMultiplayer({
       !observation ||
       observation.transportGeneration !== transportScopeGenerationRef.current.generation ||
       observation.state.phase !== 'build' ||
-      observation.state.phaseEndsAt === null
+      observation.state.phaseEndsAt !== null
     ) {
       return false
     }
@@ -2340,7 +2287,6 @@ export function useLandrushWorldMultiplayer({
     applyProfileMoneyOperation,
     claimParcel,
     connection,
-    initializeZombieEscapeClock,
     parcelBuildNodes,
     parcelBuildContentAuthorityEpoch,
     parcelBuildUpdates,

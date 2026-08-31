@@ -50,7 +50,7 @@ export function MultiplayerStatusPanel({
 
   const panel = (
     <section
-      className="pointer-events-auto fixed right-3 bottom-3 z-[120] flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur"
+      className="pointer-events-auto fixed right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[120] flex min-h-7 max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur"
       data-landrush-multiplayer-status
     >
       <span

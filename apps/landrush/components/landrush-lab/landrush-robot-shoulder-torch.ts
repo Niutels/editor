@@ -6,8 +6,10 @@ export type LandrushRobotShoulderTorchDesign =
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_SELECTED_DESIGN =
   'sentinel' satisfies LandrushRobotShoulderTorchDesign
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_TEXTURE_RESOLUTION = 8
+export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_ALPHA_TEXTURE_RESOLUTION = 128
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT = 2
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT = 1
+export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_SURFACE_TRIANGLE_COUNT = 4
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE = 0.8
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_SPOT_INTENSITY = 148
 export const LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_OPACITY = 0.04
@@ -108,17 +110,26 @@ export function resolveLandrushRobotShoulderTorchGeometryBudget(
 ) {
   const fixtureTriangles = FIXTURE_TRIANGLES[design]
   const pairFixtureTriangles = fixtureTriangles * 2
-  const beamTriangles =
-    (LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT +
-      LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT) *
-    2
+  const beamTriangles = LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_SURFACE_TRIANGLE_COUNT
+  const fixtureTextureBytes = LANDRUSH_ROBOT_SHOULDER_TORCH_TEXTURE_RESOLUTION ** 2 * 4
+  const beamAlphaTextureBytes = resolveLandrushRobotShoulderTorchRgbaMipChainBytes(
+    LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_ALPHA_TEXTURE_RESOLUTION,
+  )
   return {
+    beamAlphaTextureBytes,
     beamTriangles,
+    fixtureTextureBytes,
     fixtureTriangles,
     pairFixtureTriangles,
-    textureBytes: LANDRUSH_ROBOT_SHOULDER_TORCH_TEXTURE_RESOLUTION ** 2 * 4,
+    textureBytes: fixtureTextureBytes + beamAlphaTextureBytes,
     totalEffectTriangles: pairFixtureTriangles + beamTriangles,
   }
+}
+
+function resolveLandrushRobotShoulderTorchRgbaMipChainBytes(resolution: number) {
+  let bytes = 0
+  for (let size = resolution; size >= 1; size = Math.floor(size / 2)) bytes += size * size * 4
+  return bytes
 }
 
 export function updateLandrushRobotShoulderTorchGroundTarget(

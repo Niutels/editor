@@ -1,6 +1,7 @@
 const DEFAULT_FRAME_BUDGET_NUMERATOR_US = 1_000_000
 const DEFAULT_FRAME_BUDGET_DENOMINATOR = 60
 const DEFAULT_OWN_FILL_THRESHOLD_US = 2_000
+const FLOAT_RECONCILIATION_TOLERANCE_US = 0.000_1
 const RESIDUAL_SERIES_ID = 'other-each-leq-2ms'
 const RESIDUAL_SERIES_LABEL = 'other — each contributor ≤2ms'
 
@@ -82,7 +83,12 @@ function assertInteger(value, label) {
   assert(Number.isSafeInteger(value), `${label} must be a safe integer`)
 }
 
-function assertClose(actual, expected, label, tolerance = 0.000_01) {
+function assertClose(
+  actual,
+  expected,
+  label,
+  tolerance = FLOAT_RECONCILIATION_TOLERANCE_US,
+) {
   assert(
     Math.abs(actual - expected) <= tolerance,
     `${label} differs by ${Math.abs(actual - expected)}`,

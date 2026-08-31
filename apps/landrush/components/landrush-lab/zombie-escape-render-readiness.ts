@@ -31,6 +31,7 @@ const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
 ] as const
 
 export const ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY = 'weapon-pickup'
+export const ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY = 'player:aim-reticle'
 export const ZOMBIE_ESCAPE_SHOULDER_TORCH_RENDER_REPRESENTATIVE_KEY = 'robot:shoulder-torch'
 export const ZOMBIE_ESCAPE_RENDER_READINESS_TIMEOUT_MS = LANDRUSH_RENDER_READINESS_TIMEOUT_MS
 export const ZOMBIE_ESCAPE_WEBGPU_RENDER_READINESS_PROGRESS_TOTAL = 4
@@ -70,6 +71,18 @@ type RegisteredRepresentative = Readonly<{
   root: Object3D
 }>
 
+type ZombieEscapePreparedRepresentativeCache = {
+  camera: ZombieEscapeRenderReadinessRequest['camera']
+  context: unknown
+  rootsByKey: Map<ZombieEscapeRenderRepresentativeKey, Object3D>
+  targetScene: ZombieEscapeRenderReadinessRequest['targetScene']
+}
+
+const PREPARED_REPRESENTATIVES_BY_RENDERER = new WeakMap<
+  ZombieEscapePipelineRenderer,
+  ZombieEscapePreparedRepresentativeCache
+>()
+
 const GPU_PREPARATION_TIMER: ZombieEscapeRenderReadinessTimer = {
   clear: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
   schedule: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
@@ -98,6 +111,7 @@ export function getZombieEscapeRenderRepresentativeKeys(
     ...ZOMBIE_ESCAPE_WEAPON_CATALOG.map((weapon) =>
       createZombieEscapeHeldWeaponRenderRepresentativeKey(weapon.id),
     ),
+    ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,
     ZOMBIE_ESCAPE_SHOULDER_TORCH_RENDER_REPRESENTATIVE_KEY,
     ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY,
     ...(quality === 'balanced'
@@ -162,8 +176,20 @@ export async function compileZombieEscapeRenderRepresentatives(
   let completed = 0
   onProgress?.({ completed, total })
   await initializeLandrushRenderReadinessRenderer(renderer)
+  const preparedCache = resolveZombieEscapePreparedRepresentativeCache({
+    camera,
+    renderer,
+    targetScene,
+  })
+  const changedRepresentatives = representatives.filter(
+    ({ key, root }) => preparedCache.rootsByKey.get(key) !== root,
+  )
+  if (changedRepresentatives.length === 0) {
+    onProgress?.({ completed: total, total })
+    return
+  }
   await compileZombieEscapeRenderAggregate(
-    { camera, renderer, representatives, targetScene },
+    { camera, renderer, representatives: changedRepresentatives, targetScene },
     () => {
       completed += 1
       onProgress?.({ completed, total })
@@ -176,7 +202,7 @@ export async function compileZombieEscapeRenderRepresentatives(
         camera,
         renderPath: 'presentation',
         renderer,
-        representatives,
+        representatives: changedRepresentatives,
         targetScene,
       })
     }
@@ -188,7 +214,7 @@ export async function compileZombieEscapeRenderRepresentatives(
       camera,
       renderPath: 'direct',
       renderer,
-      representatives,
+      representatives: changedRepresentatives,
       targetScene,
     })
   } else {
@@ -197,7 +223,39 @@ export async function compileZombieEscapeRenderRepresentatives(
   completed += 1
   onProgress?.({ completed, total })
   await waitForZombieEscapeGpuPreparation(renderer)
+  if (preparedCache.context === resolveZombieEscapeRendererContext(renderer)) {
+    for (const { key, root } of changedRepresentatives) preparedCache.rootsByKey.set(key, root)
+  }
   onProgress?.({ completed: total, total })
+}
+
+function resolveZombieEscapePreparedRepresentativeCache({
+  camera,
+  renderer,
+  targetScene,
+}: Pick<ZombieEscapeRenderReadinessRequest, 'camera' | 'renderer' | 'targetScene'>) {
+  const context = resolveZombieEscapeRendererContext(renderer)
+  const cached = PREPARED_REPRESENTATIVES_BY_RENDERER.get(renderer)
+  if (
+    cached &&
+    cached.camera === camera &&
+    cached.context === context &&
+    cached.targetScene === targetScene
+  ) {
+    return cached
+  }
+  const next: ZombieEscapePreparedRepresentativeCache = {
+    camera,
+    context,
+    rootsByKey: new Map(),
+    targetScene,
+  }
+  PREPARED_REPRESENTATIVES_BY_RENDERER.set(renderer, next)
+  return next
+}
+
+function resolveZombieEscapeRendererContext(renderer: ZombieEscapePipelineRenderer) {
+  return renderer.backend?.device ?? renderer.backend?.gl ?? renderer.getContext?.() ?? renderer
 }
 
 export function isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled(

@@ -237,6 +237,43 @@ export function updateZombieEscapeRenderPipelineProgress(
   return true
 }
 
+export function isZombieEscapeZombieSlotExternallyPresented(
+  simulation: ZombieEscapeSimulation,
+  slot: number,
+) {
+  const zombies = simulation.zombies
+  if (slot < 0 || slot >= zombies.pool.active.length || zombies.pool.active[slot] === 0) {
+    return false
+  }
+  const npcIndex = simulation.ambientHandoff.npcIndexBySlot[slot] ?? -1
+  return (
+    npcIndex >= 0 &&
+    simulation.ambientHandoff.slotByNpcIndex[npcIndex] === slot &&
+    simulation.ambientHandoff.generationByNpcIndex[npcIndex] === zombies.pool.generation[slot]
+  )
+}
+
+export function updateZombieEscapeGeneratedZombiePresentationExclusions(
+  simulation: ZombieEscapeSimulation,
+  detailedSlots: Uint8Array,
+  externallyPresentedSlots: Uint8Array,
+  authoredExclusionSlots: Uint8Array,
+) {
+  const capacity = simulation.zombies.pool.active.length
+  if (
+    detailedSlots.length < capacity ||
+    externallyPresentedSlots.length < capacity ||
+    authoredExclusionSlots.length < capacity
+  ) {
+    throw new Error('Generated zombie presentation exclusion arrays must cover the active pool.')
+  }
+  for (let slot = 0; slot < capacity; slot += 1) {
+    const externallyPresented = isZombieEscapeZombieSlotExternallyPresented(simulation, slot)
+    externallyPresentedSlots[slot] = externallyPresented ? 1 : 0
+    authoredExclusionSlots[slot] = detailedSlots[slot] !== 0 || externallyPresented ? 1 : 0
+  }
+}
+
 export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly string[]) {
   const paths = failedKeys
     ? failedKeys.flatMap((key) => GENERATED_ASSET_PATHS_BY_KEY.get(key) ?? [])
@@ -303,6 +340,17 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
   }, [zombieMaterialPhaseActive, zombieShader])
   const visualLodStateRef = useRef<ZombieEscapeVisualLodState | null>(null)
   const visualLodInputRef = useRef<ZombieEscapeVisualLodInput | null>(null)
+  const [zombiePresentationExclusionSlots] = useState(() => {
+    const capacity = simulationRef.current.zombies.pool.capacity
+    return {
+      authored: new Uint8Array(capacity),
+      externallyPresented: new Uint8Array(capacity),
+    }
+  })
+  const authoredZombieExclusionSlotsRef = useRef(zombiePresentationExclusionSlots.authored)
+  const externallyPresentedZombieSlotsRef = useRef(
+    zombiePresentationExclusionSlots.externallyPresented,
+  )
   useFrame(() => {
     if (zombieMaterialPhaseActive && outsideTorchVisibility < 1) {
       zombieShader.setTorchLighting(shoulderTorchLightingStateRef?.current ?? null)
@@ -349,6 +397,12 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     visualLodInput.x = simulation.zombies.x
     visualLodInput.z = simulation.zombies.z
     const counts = updateZombieEscapeVisualLod(visualLodState, visualLodInput)
+    updateZombieEscapeGeneratedZombiePresentationExclusions(
+      simulation,
+      detailedZombieSlotsRef.current,
+      externallyPresentedZombieSlotsRef.current,
+      authoredZombieExclusionSlotsRef.current,
+    )
     if (presentationLodDebugRef.current) {
       updateZombieEscapePresentationLodDebugSelection(presentationLodDebugRef.current, counts)
     }
@@ -574,8 +628,10 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       />
       {quality === 'balanced' ? (
         <ZombieEscapeGeneratedZombies
+          authoredZombieExclusionSlotsRef={authoredZombieExclusionSlotsRef}
           detailedZombies={detailedZombies}
           detailedZombieSlotsRef={detailedZombieSlotsRef}
+          externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
           impactVisualRegistry={impactVisualRegistry}
           loadedZombieVariantsRef={loadedZombieVariantsRef}
           onAssetStatusChange={reportAssetStatus}
@@ -808,8 +864,10 @@ function LoadedGeneratedWeaponModel({
 }
 
 const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies({
+  authoredZombieExclusionSlotsRef,
   detailedZombies,
   detailedZombieSlotsRef,
+  externallyPresentedZombieSlotsRef,
   impactVisualRegistry,
   loadedZombieVariantsRef,
   onAssetStatusChange,
@@ -820,8 +878,10 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
   zombieShader,
   zombiePresentationFramePriority,
 }: {
+  authoredZombieExclusionSlotsRef: MutableRefObject<Uint8Array>
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
+  externallyPresentedZombieSlotsRef: MutableRefObject<Uint8Array>
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
   onAssetStatusChange: GeneratedAssetStatusReporter
@@ -913,8 +973,10 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
           >
             <Suspense fallback={null}>
               <GeneratedZombieVariant
+                authoredZombieExclusionSlotsRef={authoredZombieExclusionSlotsRef}
                 detailedZombies={detailedZombies}
                 detailedZombieSlotsRef={detailedZombieSlotsRef}
+                externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
                 framePriority={zombiePresentationFramePriority ?? -17}
                 impactVisualRegistry={impactVisualRegistry}
                 loadedZombieVariantsRef={loadedZombieVariantsRef}
@@ -937,8 +999,10 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
 })
 
 const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
+  authoredZombieExclusionSlotsRef,
   detailedZombies,
   detailedZombieSlotsRef,
+  externallyPresentedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -952,8 +1016,10 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
+  authoredZombieExclusionSlotsRef: MutableRefObject<Uint8Array>
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
+  externallyPresentedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
@@ -972,8 +1038,10 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   const walkGltf = useGLTF(zombie.glb.walk.path)
   return (
     <PreparedGeneratedZombieVariant
+      authoredZombieExclusionSlotsRef={authoredZombieExclusionSlotsRef}
       detailedZombies={detailedZombies}
       detailedZombieSlotsRef={detailedZombieSlotsRef}
+      externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
       framePriority={framePriority}
       impactVisualRegistry={impactVisualRegistry}
       loadedZombieVariantsRef={loadedZombieVariantsRef}
@@ -994,8 +1062,10 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
 })
 
 function PreparedGeneratedZombieVariant({
+  authoredZombieExclusionSlotsRef,
   detailedZombies,
   detailedZombieSlotsRef,
+  externallyPresentedZombieSlotsRef,
   framePriority,
   impactVisualRegistry,
   loadedZombieVariantsRef,
@@ -1012,8 +1082,10 @@ function PreparedGeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
+  authoredZombieExclusionSlotsRef: MutableRefObject<Uint8Array>
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
+  externallyPresentedZombieSlotsRef: MutableRefObject<Uint8Array>
   framePriority: number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   loadedZombieVariantsRef: MutableRefObject<Set<number>>
@@ -1179,7 +1251,7 @@ function PreparedGeneratedZombieVariant({
       const zombies = simulation.zombies
       const visuals = visualsRef.current
       presentation.update({
-        detailedSlots: detailedZombieSlotsRef.current,
+        detailedSlots: authoredZombieExclusionSlotsRef.current,
         elapsedSeconds: simulation.elapsedSeconds,
         zombies,
       })
@@ -1238,7 +1310,8 @@ function PreparedGeneratedZombieVariant({
           zombies.pool.active[slot] !== 0 &&
           zombies.pool.generation[slot] === visual.generation &&
           zombies.variant[slot] === variantIndex &&
-          detailedZombieSlotsRef.current[slot] !== 0
+          detailedZombieSlotsRef.current[slot] !== 0 &&
+          externallyPresentedZombieSlotsRef.current[slot] === 0
         ) {
           continue
         }
@@ -1251,7 +1324,8 @@ function PreparedGeneratedZombieVariant({
         if (
           zombies.pool.active[slot] === 0 ||
           zombies.variant[slot] !== variantIndex ||
-          detailedZombieSlotsRef.current[slot] === 0
+          detailedZombieSlotsRef.current[slot] === 0 ||
+          externallyPresentedZombieSlotsRef.current[slot] !== 0
         ) {
           continue
         }

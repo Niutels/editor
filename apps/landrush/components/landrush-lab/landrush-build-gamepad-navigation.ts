@@ -1,11 +1,11 @@
 export type LandrushBuildGamepadDirection = 'down' | 'left' | 'right' | 'up'
 export type LandrushBuildGamepadFocusMode = 'palette' | 'placement' | 'sidebar'
-export type LandrushBuildGamepadPalettePanel = 'build' | 'items'
-export type LandrushBuildGamepadNavigationAction =
+export type LandrushBuildGamepadPalettePanel = 'build' | 'items' | 'settings'
+export type LandrushBuildGamepadCirclePressAction =
+  | 'cancel-placement'
   | 'enter-sidebar'
-  | 'leave-sidebar'
-  | 'move-palette'
-  | 'move-sidebar'
+  | 'exit-build'
+export type LandrushBuildGamepadNavigationAction = 'move-palette' | 'move-sidebar'
 export type LandrushBuildGamepadSquarePressAction = 'confirm-placement' | 'toggle-build'
 export type LandrushBuildGamepadNavigationRect = {
   bottom: number
@@ -66,13 +66,51 @@ export function resolveLandrushBuildGamepadFocusAfterActivation(
 
 export function resolveLandrushBuildGamepadSquarePressAction(
   buildMode: boolean,
-  focusMode: LandrushBuildGamepadFocusMode,
-  editorPlacementActive: boolean,
-  placementSquareOwned: boolean,
+  placementSquareOwned = false,
 ): LandrushBuildGamepadSquarePressAction {
-  return buildMode && (focusMode === 'placement' || editorPlacementActive || placementSquareOwned)
-    ? 'confirm-placement'
-    : 'toggle-build'
+  return buildMode || placementSquareOwned ? 'confirm-placement' : 'toggle-build'
+}
+
+export function resolveLandrushBuildGamepadCirclePressAction(
+  focusMode: LandrushBuildGamepadFocusMode,
+): LandrushBuildGamepadCirclePressAction {
+  if (focusMode === 'placement') return 'cancel-placement'
+  if (focusMode === 'palette') return 'enter-sidebar'
+  return 'exit-build'
+}
+
+export function resolveLandrushBuildGamepadPlacementSquareOwnership({
+  editorPlacementActive,
+  placementSquareOwned,
+  squareHeld,
+}: {
+  editorPlacementActive: boolean
+  placementSquareOwned: boolean
+  squareHeld: boolean
+}) {
+  return squareHeld && (editorPlacementActive || placementSquareOwned)
+}
+
+export function shouldShowLandrushBuildGamepadPlacementCursor({
+  editorPlacementActive,
+  focusMode,
+  gamepadPlacementEngaged,
+  parcelAvailable,
+  visible,
+}: {
+  editorPlacementActive: boolean
+  focusMode: LandrushBuildGamepadFocusMode
+  gamepadPlacementEngaged: boolean
+  parcelAvailable: boolean
+  visible: boolean
+}) {
+  return (
+    visible &&
+    parcelAvailable &&
+    editorPlacementActive &&
+    focusMode === 'placement' &&
+    gamepadPlacementEngaged
+  )
 }
 
 export function wasLandrushBuildGamepadPlacementConfirmPressed(
@@ -91,8 +129,7 @@ export function resolveLandrushBuildGamepadNavigationAction({
   focusMode: LandrushBuildGamepadFocusMode
 }): LandrushBuildGamepadNavigationAction | null {
   if (focusMode === 'placement') return null
-  if (focusMode === 'palette') return direction === 'left' ? 'enter-sidebar' : 'move-palette'
-  if (direction === 'right') return 'leave-sidebar'
+  if (focusMode === 'palette') return 'move-palette'
   if (direction === 'up' || direction === 'down') return 'move-sidebar'
   return null
 }
@@ -114,7 +151,7 @@ export function resolveLandrushBuildGamepadSidebarIndex({
 export function resolveLandrushBuildGamepadPalettePanel(
   panel: string | undefined,
 ): LandrushBuildGamepadPalettePanel | null {
-  return panel === 'build' || panel === 'items' ? panel : null
+  return panel === 'build' || panel === 'items' || panel === 'settings' ? panel : null
 }
 
 export function resolveLandrushBuildGamepadSidebarActivation({
@@ -137,9 +174,8 @@ export function isLandrushBuildGamepadNavigationInputReady(
   buildMode: boolean,
   focusMode: LandrushBuildGamepadFocusMode,
   interactionReady: boolean,
-  editorPlacementActive: boolean,
 ) {
-  return buildMode && interactionReady && !editorPlacementActive && focusMode !== 'placement'
+  return buildMode && interactionReady && focusMode !== 'placement'
 }
 
 export function isLandrushBuildGamepadPaletteInputReady({
@@ -164,4 +200,14 @@ export function shouldAutofocusLandrushBuildGamepadPalette({
   interactionReady: boolean
 }) {
   return buildMode && controllerInputActive && interactionReady
+}
+
+export function shouldApplyLandrushBuildGamepadPaletteAutofocus({
+  autofocusReady,
+  focusMode,
+}: {
+  autofocusReady: boolean
+  focusMode: LandrushBuildGamepadFocusMode
+}) {
+  return autofocusReady && focusMode === 'palette'
 }

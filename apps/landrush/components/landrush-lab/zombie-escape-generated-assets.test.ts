@@ -21,14 +21,20 @@ import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
   activateZombieVisual,
   createZombieVisual,
+  isZombieEscapeZombieSlotExternallyPresented,
   parkZombieVisual,
   resolveZombieEscapeGeneratedVariantAdmissionCount,
   resolveZombieEscapeRenderPipelineSettlement,
+  updateZombieEscapeGeneratedZombiePresentationExclusions,
   updateZombieEscapeRenderPipelineProgress,
   updateZombieVisualLocomotion,
 } from './zombie-escape-generated-assets'
-import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
+import {
+  createZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
+} from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
+import { createZombieEscapeArena } from './zombie-escape-world'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
@@ -48,6 +54,17 @@ describe('generated asset render-pipeline readiness', () => {
     )
     expect(source).toContain('detailedZombies\n        ? resolveZombieEscapeDetailedRootPoolSize(')
     expect(source).toContain('zombieMaterialPhaseActive && outsideTorchVisibility < 1')
+  })
+
+  test('keeps handoff exclusion storage and copying allocation-free after mount', () => {
+    const source = readFileSync(
+      new URL('./zombie-escape-generated-assets.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(source).not.toMatch(/useRef\(\s*new Uint8Array\(/)
+    expect(source).not.toContain('detailedSlots.subarray(')
+    expect(source).toContain('const [zombiePresentationExclusionSlots] = useState(() => {')
+    expect(source).toContain('authoredExclusionSlots[slot] =')
   })
 
   test('keeps timed-out and failed required preparation behind loading until ready or retried', () => {
@@ -101,6 +118,56 @@ describe('generated asset render-pipeline readiness', () => {
 })
 
 describe('generated zombie visual construction', () => {
+  test('excludes only active generation-matched handoffs and releases on death or reuse', () => {
+    const simulation = createZombieEscapeSimulation(createZombieEscapeArena(58_211))
+    const capacity = simulation.zombies.pool.capacity
+    const slot = 3
+    const npcIndex = 1
+    const detailedSlots = new Uint8Array(capacity)
+    const externallyPresentedSlots = new Uint8Array(capacity)
+    const authoredExclusionSlots = new Uint8Array(capacity)
+    detailedSlots[5] = 1
+    simulation.zombies.pool.active[slot] = 1
+    simulation.zombies.pool.generation[slot] = 7
+    simulation.ambientHandoff.npcIndexBySlot[slot] = npcIndex
+    simulation.ambientHandoff.slotByNpcIndex[npcIndex] = slot
+    simulation.ambientHandoff.generationByNpcIndex[npcIndex] = 7
+
+    updateZombieEscapeGeneratedZombiePresentationExclusions(
+      simulation,
+      detailedSlots,
+      externallyPresentedSlots,
+      authoredExclusionSlots,
+    )
+    expect(isZombieEscapeZombieSlotExternallyPresented(simulation, slot)).toBe(true)
+    expect(externallyPresentedSlots[slot]).toBe(1)
+    expect(authoredExclusionSlots[slot]).toBe(1)
+    expect(authoredExclusionSlots[5]).toBe(1)
+
+    simulation.zombies.pool.generation[slot] = 8
+    updateZombieEscapeGeneratedZombiePresentationExclusions(
+      simulation,
+      detailedSlots,
+      externallyPresentedSlots,
+      authoredExclusionSlots,
+    )
+    expect(isZombieEscapeZombieSlotExternallyPresented(simulation, slot)).toBe(false)
+    expect(externallyPresentedSlots[slot]).toBe(0)
+    expect(authoredExclusionSlots[slot]).toBe(0)
+
+    simulation.ambientHandoff.generationByNpcIndex[npcIndex] = 8
+    simulation.zombies.pool.active[slot] = 0
+    updateZombieEscapeGeneratedZombiePresentationExclusions(
+      simulation,
+      detailedSlots,
+      externallyPresentedSlots,
+      authoredExclusionSlots,
+    )
+    expect(isZombieEscapeZombieSlotExternallyPresented(simulation, slot)).toBe(false)
+    expect(externallyPresentedSlots[slot]).toBe(0)
+    expect(authoredExclusionSlots[slot]).toBe(0)
+  })
+
   test('prepares a stopped animation mixer before a hidden pooled root is ready', () => {
     const group = new Group()
     const source = new Group()

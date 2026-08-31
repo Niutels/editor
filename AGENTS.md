@@ -50,6 +50,7 @@ Invoke the `review-architecture` skill (`.agents/skills/review-architecture/SKIL
 - Read the full file before editing. Plan all changes, then make one complete edit.
 - When the user corrects you, stop and re-read their message.
 - After two consecutive tool failures, stop and change approach.
+- When another Codex task asks you not to edit files or declares a shared-file freeze, obey it for the real workspace and any other prohibited workloads, but keep progressing through read-only investigation, planning, and draft preparation. Store draft patches or replacement text only in task-specific Codex temporary storage outside tracked/source paths, revalidate them against the current files after the freeze is released, and delete the temporary drafts after they are applied or abandoned.
 - Close every tab opened by the current Codex thread before finishing or presenting results, without exception; leave tabs that predated the thread untouched.
 - Don't introduce backwards-compatibility shims, dead code, or speculative abstractions.
 - Don't write new comments unless they explain a non-obvious *why*.

@@ -122,4 +122,5 @@ export type ViewerPresentationEffectState = {
   zoomBlurDirection: number
   zoomBlurStrength: number
 }
+
 import type { Camera } from 'three'

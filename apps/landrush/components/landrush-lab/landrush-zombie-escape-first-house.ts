@@ -5,46 +5,12 @@ import {
   resolveLandrushBuildingFloorStacks,
 } from './landrush-building-floor-visibility'
 
-export const LANDRUSH_ZOMBIE_ESCAPE_FIRST_HOUSE_BUILD_KINDS = ['wall', 'door'] as const
-
 export type LandrushZombieEscapeFirstHouseReadyRegion = Readonly<{
   levelId: string
   region: LandrushBuildingFloorInteriorRegion
   scopeId: string
   y: number
 }>
-
-type LandrushZombieEscapeClockMode = 'offline-local' | 'online-canonical' | 'online-waiting'
-
-export function resolveLandrushZombieEscapeFirstHouseBuildSatisfied({
-  clockMode,
-  offlineFirstHouseBuilt,
-  phaseEndsAt,
-}: {
-  clockMode: LandrushZombieEscapeClockMode
-  offlineFirstHouseBuilt: boolean
-  phaseEndsAt: number | null
-}) {
-  if (clockMode === 'online-canonical') return phaseEndsAt !== null
-  if (clockMode === 'offline-local') return offlineFirstHouseBuilt
-  return false
-}
-
-export function shouldRequestLandrushZombieEscapeClockInitialization({
-  clockMode,
-  nightStartReady,
-  phase,
-  phaseEndsAt,
-}: {
-  clockMode: LandrushZombieEscapeClockMode
-  nightStartReady: boolean
-  phase: 'build' | 'night' | null
-  phaseEndsAt: number | null
-}) {
-  return (
-    clockMode === 'online-canonical' && nightStartReady && phase === 'build' && phaseEndsAt === null
-  )
-}
 
 export function resolveLandrushZombieEscapeFirstHouseReadyScopeIds(
   nodes: Record<string, AnyNode>,

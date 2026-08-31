@@ -55,6 +55,9 @@ export function advanceLandrushZombieEscapePhaseClock({
   }
 
   clock.authorityNowSeconds = authorityNowSeconds
+  if (simulation.phase !== 'night') {
+    return { advancedSeconds: 0, phaseChanged: false }
+  }
   if (
     !canAdvanceLandrushZombieEscapeIntegratedSimulation({
       expectedPhase,

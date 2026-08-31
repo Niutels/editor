@@ -30,7 +30,11 @@ import {
   type ZombieEscapeGeneratedAssetFailure,
   ZombieEscapeGeneratedAssets,
 } from './zombie-escape-generated-assets'
-import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
+import {
+  ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,
+  type ZombieEscapeRenderReadinessRegistry,
+} from './zombie-escape-render-readiness'
+import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
 import {
   getZombieEscapeMeleeProgress,
   restoreZombieEscapeDefaultMuzzlePose,
@@ -114,6 +118,7 @@ export const ZombieEscapeActors = memo(function ZombieEscapeActors({
       <ZombieEscapeAimReticle
         framePriority={presentationFramePriority ?? -18}
         playerColor={playerColor}
+        renderReadinessRegistry={renderReadinessRegistry}
         simulationRef={simulationRef}
       />
     </group>
@@ -208,13 +213,20 @@ function ZombieEscapeOrbot({
 function ZombieEscapeAimReticle({
   framePriority,
   playerColor,
+  renderReadinessRegistry,
   simulationRef,
 }: {
   framePriority: number
   playerColor: string
+  renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
 }) {
   const reticleRef = useRef<Group>(null)
+  useZombieEscapeRenderRepresentative(
+    renderReadinessRegistry,
+    ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY,
+    reticleRef,
+  )
   useFrame(() => {
     const simulation = simulationRef.current
     if (reticleRef.current) {

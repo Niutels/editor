@@ -56,6 +56,19 @@
   transform: translateX(-50%);
 }
 
+.chrome :global([data-editor-build-controller-item]:focus) {
+  background-color: color-mix(in oklab, var(--sidebar-primary) 20%, transparent);
+  box-shadow: 0 0 0 2px var(--sidebar-primary);
+  filter: none;
+  opacity: 1;
+  outline: none;
+}
+
+.chrome :global([data-editor-build-controller-item]:focus img) {
+  filter: none;
+  opacity: 1;
+}
+
 @media (max-width: 1023px) {
   .sidebar {
     width: var(--landrush-editor-mobile-width);

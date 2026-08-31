@@ -1,7 +1,7 @@
 'use client'
 
 import { useAudio } from '@pascal-app/editor'
-import { useFrame, useThree } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
 import {
   AudioListener,
@@ -10,9 +10,11 @@ import {
   type Group,
   MathUtils,
   PositionalAudio,
+  type Quaternion,
   Audio as ThreeAudio,
   type Vector3,
 } from 'three'
+import { shouldActivateLandrushGameplayAudio } from '../../lib/landrush-audio-default'
 
 const FOOTSTEP_LEFT_URLS = [
   '/audios/sfx/footsteps/sand-l1.ogg',
@@ -44,6 +46,7 @@ const FOOTSTEP_ROLLOFF = 0.8
 const FOOTSTEP_WALK_PLAYBACK_SPEED = 2.2
 const FOOTSTEP_RUN_PLAYBACK_SPEED = 1
 const JUMP_AUDIO_MAX_RETRYABLE_PLAY_FAILURES = 2
+export const ROBOT_AUDIO_LISTENER_FRAME_PRIORITY = 0.99
 export const ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS = 0.45
 const EMPTY_JUMP_AUDIO_BUFFERS: readonly AudioBuffer[] = []
 
@@ -122,7 +125,6 @@ export function LandrushRobotFootstepAudio({
   runSpeed: number
   walkSpeed: number
 }) {
-  const camera = useThree((state) => state.camera)
   const [listener, setListener] = useState<AudioListener | null>(null)
   const audioGroupRef = useRef<Group>(null!)
   const audioPoolRef = useRef<PositionalAudio[]>([])
@@ -142,24 +144,39 @@ export function LandrushRobotFootstepAudio({
   const [buffers, setBuffers] = useState<FootstepBuffers | null>(null)
   const jumpAudioFilesKey = resolveJumpAudioFilesKey(jumpAudioCue)
   const jumpAudioCueConfigurationValid = isRobotJumpAudioCueConfigurationValid(jumpAudioCue)
-  const [jumpBufferLoad, setJumpBufferLoad] = useState<JumpAudioBufferLoadState>(() => ({
-    buffers: EMPTY_JUMP_AUDIO_BUFFERS,
-    filesKey: jumpAudioFilesKey,
-    status: shouldLoadRobotJumpAudioCue(jumpAudioCue) ? 'loading' : 'unavailable',
-  }))
-  const [audioUnlocked, setAudioUnlocked] = useState(false)
   const masterVolume = useAudio((state) => state.masterVolume)
   const muted = useAudio((state) => state.muted)
   const sfxVolume = useAudio((state) => state.sfxVolume)
+  const audioRuntimeEnabled = shouldActivateLandrushGameplayAudio({
+    enabled,
+    masterVolume,
+    muted,
+    sfxVolume,
+  })
+  const [jumpBufferLoad, setJumpBufferLoad] = useState<JumpAudioBufferLoadState>(() => ({
+    buffers: EMPTY_JUMP_AUDIO_BUFFERS,
+    filesKey: jumpAudioFilesKey,
+    status:
+      audioRuntimeEnabled && shouldLoadRobotJumpAudioCue(jumpAudioCue) ? 'loading' : 'unavailable',
+  }))
+  const [audioUnlocked, setAudioUnlocked] = useState(false)
 
   useEffect(() => {
-    setListener(new AudioListener())
-  }, [])
+    if (!audioRuntimeEnabled) {
+      setAudioUnlocked(false)
+      setListener(null)
+      return
+    }
+
+    const nextListener = new AudioListener()
+    setListener(nextListener)
+    return () => nextListener.gain.disconnect()
+  }, [audioRuntimeEnabled])
 
   useEffect(() => {
     let active = true
     const filesKey = resolveJumpAudioFilesKey(jumpAudioCue)
-    if (!shouldLoadRobotJumpAudioCue(jumpAudioCue)) {
+    if (!audioRuntimeEnabled || !shouldLoadRobotJumpAudioCue(jumpAudioCue)) {
       setJumpBufferLoad({
         buffers: EMPTY_JUMP_AUDIO_BUFFERS,
         filesKey,
@@ -196,18 +213,10 @@ export function LandrushRobotFootstepAudio({
     return () => {
       active = false
     }
-  }, [jumpAudioCue])
+  }, [audioRuntimeEnabled, jumpAudioCue])
 
   useEffect(() => {
-    if (!listener) return
-    camera.add(listener)
-    return () => {
-      camera.remove(listener)
-    }
-  }, [camera, listener])
-
-  useEffect(() => {
-    if (!listener) return
+    if (!(audioRuntimeEnabled && listener)) return
 
     let active = true
     let resumeInFlight = false
@@ -245,9 +254,14 @@ export function LandrushRobotFootstepAudio({
       window.removeEventListener('touchstart', unlockAudio)
       window.removeEventListener('keydown', unlockAudio)
     }
-  }, [listener])
+  }, [audioRuntimeEnabled, listener])
 
   useEffect(() => {
+    if (!audioRuntimeEnabled) {
+      setBuffers(null)
+      return
+    }
+
     let active = true
     const loader = new AudioLoader()
     const loadBuffer = (url: string) =>
@@ -269,10 +283,10 @@ export function LandrushRobotFootstepAudio({
     return () => {
       active = false
     }
-  }, [])
+  }, [audioRuntimeEnabled])
 
   useEffect(() => {
-    if (!listener) return
+    if (!(audioRuntimeEnabled && listener)) return
 
     const audioGroup = audioGroupRef.current
     const pool = Array.from({ length: FOOTSTEP_POOL_SIZE }, () => {
@@ -295,11 +309,20 @@ export function LandrushRobotFootstepAudio({
       }
       audioPoolRef.current = []
     }
-  }, [listener])
+  }, [audioRuntimeEnabled, listener])
 
   useEffect(() => {
     jumpAudioPoolCueRef.current = null
-    if (!(listener && jumpAudioCue && isRobotJumpAudioCueConfigurationValid(jumpAudioCue))) return
+    if (
+      !(
+        audioRuntimeEnabled &&
+        listener &&
+        jumpAudioCue &&
+        isRobotJumpAudioCueConfigurationValid(jumpAudioCue)
+      )
+    ) {
+      return
+    }
 
     const audioGroup = audioGroupRef.current
     const voiceCount = Math.max(1, Math.min(8, Math.trunc(jumpAudioCue.playback.maxVoices)))
@@ -329,7 +352,7 @@ export function LandrushRobotFootstepAudio({
       jumpAudioPoolRef.current = []
       if (jumpAudioPoolCueRef.current === jumpAudioCue) jumpAudioPoolCueRef.current = null
     }
-  }, [jumpAudioCue, listener])
+  }, [audioRuntimeEnabled, jumpAudioCue, listener])
 
   useFrame((state, delta) => {
     const runtime = runtimeRef.current
@@ -337,10 +360,15 @@ export function LandrushRobotFootstepAudio({
     const jumpPool = jumpAudioPoolRef.current
     const motion = motionRef.current
     if (listener && motion) {
-      resolveRobotAudioListenerLocalPosition(camera, motion.position, listener.position)
+      resolveRobotAudioListenerWorldTransform(
+        state.camera,
+        motion.position,
+        listener.position,
+        listener.quaternion,
+      )
       listener.updateMatrixWorld()
     }
-    const volumeScale = muted ? 0 : (masterVolume / 100) * (sfxVolume / 100)
+    const volumeScale = audioRuntimeEnabled ? (masterVolume / 100) * (sfxVolume / 100) : 0
     const audioContextRunning = listener?.context.state === 'running'
 
     const currentJumpBufferLoad =
@@ -428,7 +456,7 @@ export function LandrushRobotFootstepAudio({
       runtime,
       volumeScale,
     })
-  })
+  }, ROBOT_AUDIO_LISTENER_FRAME_PRIORITY)
 
   return <group ref={audioGroupRef} />
 }
@@ -690,12 +718,14 @@ function playFootstep({
   audio.play()
 }
 
-export function resolveRobotAudioListenerLocalPosition(
+export function resolveRobotAudioListenerWorldTransform(
   camera: Camera,
   playerWorldPosition: Vector3,
-  output: Vector3,
+  outputPosition: Vector3,
+  outputQuaternion: Quaternion,
 ) {
-  return camera.worldToLocal(output.copy(playerWorldPosition))
+  outputPosition.copy(playerWorldPosition)
+  camera.getWorldQuaternion(outputQuaternion)
 }
 
 export function resolveRobotFootstepVolume(volumeScale: number, runBlend: number, variation = 1) {

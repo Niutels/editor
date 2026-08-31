@@ -1,0 +1,28 @@
+{
+  "generatedBy": "optimize-zombie-night-street-lightpost.mjs",
+  "meshy": {
+    "generationFingerprint": "ef6d3894679fd775563d23b5fde8698ada10ff3860a84aa21398ffbb3daac1ea",
+    "previewTaskId": "01a054b1-2796-708b-8f9a-3caca03d8bf6",
+    "refineTaskId": "01a054b1-5e0d-72d4-bed6-56aa30f490cc"
+  },
+  "runtime": {
+    "byteLength": 240584,
+    "contentHash": "c5f78cefd15f79b1a8d5098d41b8b0810274182e7a212eb20c52ddcdbbf257c5",
+    "path": "public/landrush-lab/zombie-escape/assets/props/street-lightpost.glb",
+    "textureResolution": 512,
+    "triangleCount": 1175
+  },
+  "simplification": {
+    "error": 0.008,
+    "lockBorder": false,
+    "ratio": 0.12,
+    "targetTriangleCount": 1200,
+    "tool": "gltf-transform 4.4.2 meshopt simplifier"
+  },
+  "source": {
+    "byteLength": 7026504,
+    "contentHash": "92a26fb8917b423306ca5686ad494d9e8dfe6216db5baf748a531e8d33b4e7c8",
+    "path": "assets/zombie-escape-meshy-source/props/street-lightpost/model.glb",
+    "triangleCount": 3059
+  }
+}

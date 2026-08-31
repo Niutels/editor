@@ -1,34 +1,57 @@
 import { describe, expect, test } from 'bun:test'
-import { PerspectiveCamera, Vector3 } from 'three'
+import { readFileSync } from 'node:fs'
+import { Group, PerspectiveCamera, Quaternion, Vector3 } from 'three'
+import { LANDRUSH_ZOMBIE_ESCAPE_CAMERA_FRAME_PRIORITY } from './landrush-zombie-escape-camera'
 import {
   advanceRobotJumpAudioPlaybackState,
   createRobotJumpAudioPlaybackState,
   isRobotJumpAudioCueConfigurationValid,
+  ROBOT_AUDIO_LISTENER_FRAME_PRIORITY,
   ROBOT_FOOTSTEP_BASE_VOLUME,
   ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS,
   type RobotJumpAudioBufferStatus,
   type RobotJumpAudioCue,
-  resolveRobotAudioListenerLocalPosition,
+  resolveRobotAudioListenerWorldTransform,
   resolveRobotFootstepVolume,
   resolveRobotJumpAudioPlaybackDisposition,
 } from './robot-footstep-audio'
 
 describe('robot local footstep mix', () => {
   test('keeps the listener at the player while inheriting camera orientation', () => {
+    const cameraParent = new Group()
+    cameraParent.position.set(-3, 5, 7)
+    cameraParent.rotation.set(0.1, -0.35, 0.05)
     const camera = new PerspectiveCamera()
     camera.position.set(12, 14, 18)
     camera.lookAt(2, 0, -3)
-    camera.updateMatrixWorld(true)
+    cameraParent.add(camera)
+    cameraParent.updateMatrixWorld(true)
     const playerPosition = new Vector3(2, 0, -3)
-    const localPosition = resolveRobotAudioListenerLocalPosition(
+    const listenerPosition = new Vector3()
+    const listenerQuaternion = new Quaternion()
+    resolveRobotAudioListenerWorldTransform(
       camera,
       playerPosition,
-      new Vector3(),
+      listenerPosition,
+      listenerQuaternion,
     )
 
-    expect(camera.localToWorld(localPosition.clone()).distanceTo(playerPosition)).toBeLessThan(
+    expect(listenerPosition.distanceTo(playerPosition)).toBeLessThan(0.000_001)
+    expect(listenerQuaternion.angleTo(camera.getWorldQuaternion(new Quaternion()))).toBeLessThan(
       0.000_001,
     )
+  })
+
+  test('owns one listener update after the final camera pose and before render', () => {
+    const source = readFileSync(new URL('./robot-footstep-audio.tsx', import.meta.url), 'utf8')
+
+    expect(ROBOT_AUDIO_LISTENER_FRAME_PRIORITY).toBeGreaterThan(
+      LANDRUSH_ZOMBIE_ESCAPE_CAMERA_FRAME_PRIORITY,
+    )
+    expect(ROBOT_AUDIO_LISTENER_FRAME_PRIORITY).toBeLessThan(1)
+    expect(source.match(/listener\.updateMatrixWorld\(\)/g)).toHaveLength(1)
+    expect(source).not.toContain('camera.add(listener)')
+    expect(source).toContain('}, ROBOT_AUDIO_LISTENER_FRAME_PRIORITY)')
   })
 
   test('keeps walking and running steps above an audible floor at default settings', () => {

@@ -9,11 +9,13 @@ export type LandrushIslandMovementSpeedPolicy = {
 export function resolveLandrushIslandMovementSpeedPolicy({
   crouching,
   intensity,
+  maximumSpeedScale,
   requestedRun,
   speedEnvelope = 'walk',
 }: {
   crouching: boolean
   intensity: number
+  maximumSpeedScale: number
   requestedRun: boolean
   speedEnvelope?: LandrushIslandMovementSpeedEnvelope
 }): LandrushIslandMovementSpeedPolicy {
@@ -21,6 +23,6 @@ export function resolveLandrushIslandMovementSpeedPolicy({
   return {
     controllerRun: !crouching && (presentationRunRequested || speedEnvelope === 'run'),
     presentationRunRequested,
-    speedScale: Math.min(1, Math.max(0, intensity)),
+    speedScale: Math.min(1, Math.max(0, intensity)) * Math.min(1, Math.max(0, maximumSpeedScale)),
   }
 }

@@ -1,15 +1,19 @@
 import {
   AdditiveBlending,
+  CircleGeometry,
   Color,
   CylinderGeometry,
+  DataTexture,
+  DoubleSide,
   Group,
   type Material,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   type Object3D,
-  PointLight,
-  SphereGeometry,
+  RGBAFormat,
+  SpotLight,
+  SRGBColorSpace,
   type Texture,
 } from 'three'
 import { mix, color as tslColor, uniform } from 'three/tsl'
@@ -19,20 +23,32 @@ import {
   type LandrushZombieNightSurfaceRole,
   resolveLandrushZombieNightSurfaceRole,
 } from './landrush-zombie-night-presentation-state'
+import {
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_PENUMBRA,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
+} from './landrush-zombie-night-street-lightpost'
 
 const NIGHT_SURFACE_TINTS: Readonly<Record<LandrushZombieNightSurfaceRole, string>> = {
   curbside: '#788aa2',
   'grass-blades': '#667da4',
   'grass-ground': '#6c7f9e',
 }
+const GRASS_GROUND_SUNSET_TINT = '#efb99f'
 
 const NIGHT_SURFACE_ROLE_KEY = 'landrushZombieNightSurfaceRole'
 const NIGHT_SURFACE_DAY_COLOR_KEY = 'landrushZombieNightDayColor'
 const NIGHT_SURFACE_MATERIAL_CHANGE_EVENT = 'landrushzombienightsurfacematerialchange'
 const nightSurfaceAmountNode = uniform(0)
+const nightSurfaceSunsetAmountNode = uniform(0)
 const colorBindingByMaterial = new WeakMap<Material, NightColorBinding>()
 const colorBindings = new Set<NightColorBinding>()
 let nightSurfaceAmount = 0
+let nightSurfaceSunsetAmount = 0
 
 type NightColorMaterial = Material & {
   color: Color
@@ -48,6 +64,7 @@ type NightColorBinding = {
   dayColor: Color
   material: NightColorMaterial
   nightColor: Color
+  sunsetColor: Color | null
 }
 
 export type LandrushZombieNightBeaconRenderReadinessRepresentative = Readonly<{
@@ -56,7 +73,7 @@ export type LandrushZombieNightBeaconRenderReadinessRepresentative = Readonly<{
 }>
 
 export const LANDRUSH_ZOMBIE_NIGHT_RENDER_REPRESENTATIVE_KEY = 'island:material-presentation:night'
-export const LANDRUSH_ZOMBIE_NIGHT_POINT_LIGHT_COUNTS = Object.freeze([
+export const LANDRUSH_ZOMBIE_NIGHT_SPOT_LIGHT_COUNTS = Object.freeze([
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.low,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.high,
@@ -183,11 +200,11 @@ export function prepareLandrushZombieNightSurfaceMaterial(
 
   if (isNightNodeMaterial(material)) {
     material.userData[NIGHT_SURFACE_ROLE_KEY] = role
-    const tintNode = mix(
-      tslColor('#ffffff'),
-      tslColor(NIGHT_SURFACE_TINTS[role]),
-      nightSurfaceAmountNode,
-    )
+    const dayTintNode =
+      role === 'grass-ground'
+        ? mix(tslColor('#ffffff'), tslColor(GRASS_GROUND_SUNSET_TINT), nightSurfaceSunsetAmountNode)
+        : tslColor('#ffffff')
+    const tintNode = mix(dayTintNode, tslColor(NIGHT_SURFACE_TINTS[role]), nightSurfaceAmountNode)
     material.colorNode = material.colorNode.mul(tintNode)
     material.needsUpdate = true
     return true
@@ -219,34 +236,70 @@ export function inheritLandrushZombieNightSurfaceMaterial(source: Material, clon
 }
 
 export function setLandrushZombieNightSurfaceAmount(amount: number) {
+  setLandrushZombieNightSurfaceSunsetUniformAmount(0)
+  setLandrushZombieNightSurfaceUniformAmount(amount)
+  applyLandrushZombieNightSurfaceColorBindings()
+}
+
+export function setLandrushZombieNightSurfaceUniformAmount(amount: number) {
   nightSurfaceAmount = clamp01(amount)
   nightSurfaceAmountNode.value = nightSurfaceAmount
+}
+
+export function setLandrushZombieNightSurfaceSunsetUniformAmount(amount: number) {
+  nightSurfaceSunsetAmount = clamp01(amount)
+  nightSurfaceSunsetAmountNode.value = nightSurfaceSunsetAmount
+}
+
+export function applyLandrushZombieNightSurfaceColorBindings() {
   for (const binding of colorBindings) {
-    binding.material.color.lerpColors(binding.dayColor, binding.nightColor, nightSurfaceAmount)
+    if (binding.sunsetColor) {
+      binding.material.color.lerpColors(
+        binding.dayColor,
+        binding.sunsetColor,
+        nightSurfaceSunsetAmount,
+      )
+    } else {
+      binding.material.color.copy(binding.dayColor)
+    }
+    binding.material.color.lerp(binding.nightColor, nightSurfaceAmount)
   }
 }
 
 export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): LandrushZombieNightBeaconRenderReadinessRepresentative {
   const root = new Group()
+  const baseColorMap = createLandrushZombieNightRepresentativeTexture([92, 82, 67, 255], true)
+  const metallicRoughnessMap = createLandrushZombieNightRepresentativeTexture([0, 146, 212, 255])
+  const normalMap = createLandrushZombieNightRepresentativeTexture([128, 128, 255, 255])
+  const emissiveMap = createLandrushZombieNightRepresentativeTexture([255, 208, 116, 255], true)
+  const textures = [baseColorMap, metallicRoughnessMap, normalMap, emissiveMap]
   const geometries = [
-    new CylinderGeometry(0.035, 0.055, 1.12, 7),
-    new SphereGeometry(0.105, 12, 8),
-    new SphereGeometry(0.29, 12, 8),
-    new SphereGeometry(0.7, 12, 8),
+    new CylinderGeometry(0.08, 0.12, 3.4, 8),
+    new CircleGeometry(0.16, 16),
+    new CircleGeometry(0.34, 16),
+    new CircleGeometry(0.62, 16),
   ]
   const materials = [
     new MeshStandardMaterial({
-      color: '#08111f',
-      depthWrite: false,
-      metalness: 0.5,
-      opacity: 0,
-      roughness: 0.48,
-      transparent: true,
+      color: '#ffffff',
+      depthWrite: true,
+      emissive: '#ffc36e',
+      emissiveIntensity: 0,
+      emissiveMap,
+      map: baseColorMap,
+      metalness: 0.72,
+      metalnessMap: metallicRoughnessMap,
+      normalMap,
+      opacity: 1,
+      roughness: 0.58,
+      roughnessMap: metallicRoughnessMap,
+      transparent: false,
     }),
     new MeshBasicMaterial({
       color: '#ffc36e',
       depthWrite: false,
       opacity: 0,
+      side: DoubleSide,
       toneMapped: false,
       transparent: true,
     }),
@@ -255,6 +308,7 @@ export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): 
       color: '#ffc36e',
       depthWrite: false,
       opacity: 0,
+      side: DoubleSide,
       toneMapped: false,
       transparent: true,
     }),
@@ -263,6 +317,7 @@ export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): 
       color: '#ffc36e',
       depthWrite: false,
       opacity: 0,
+      side: DoubleSide,
       toneMapped: false,
       transparent: true,
     }),
@@ -278,20 +333,31 @@ export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): 
       root.clear()
       for (const geometry of geometries) geometry.dispose()
       for (const material of materials) material.dispose()
+      for (const texture of textures) texture.dispose()
     },
     root,
   }
 }
 
 export function createLandrushZombieNightLightTopology(
-  pointLightCount = LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
+  spotLightCount = LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
 ) {
   const root = new Group()
   root.visible = false
-  const lights: PointLight[] = []
-  const count = Math.max(0, Math.floor(pointLightCount))
+  const lights: SpotLight[] = []
+  const count = Math.max(0, Math.floor(spotLightCount))
   for (let index = 0; index < count; index += 1) {
-    const light = new PointLight(index % 3 === 0 ? '#69ccff' : '#ffc36e', 58, 12, 2)
+    const light = new SpotLight(
+      index % 3 === 0 ? '#69ccff' : '#ffc36e',
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_PENUMBRA,
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
+    )
+    light.position.set(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION)
+    light.target.position.set(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION)
+    light.target.updateMatrixWorld(true)
     lights.push(light)
     root.add(light)
   }
@@ -305,6 +371,16 @@ export function createLandrushZombieNightLightTopology(
     },
     root,
   }
+}
+
+function createLandrushZombieNightRepresentativeTexture(
+  rgba: readonly [number, number, number, number],
+  srgb = false,
+) {
+  const texture = new DataTexture(new Uint8Array(rgba), 1, 1, RGBAFormat)
+  if (srgb) texture.colorSpace = SRGBColorSpace
+  texture.needsUpdate = true
+  return texture
 }
 
 type NightObject3DChildEvent = Readonly<{ child: Object3D }>
@@ -403,6 +479,10 @@ function registerNightColorMaterial(
     dayColor,
     material,
     nightColor: dayColor.clone().multiply(new Color(NIGHT_SURFACE_TINTS[role])),
+    sunsetColor:
+      role === 'grass-ground'
+        ? dayColor.clone().multiply(new Color(GRASS_GROUND_SUNSET_TINT))
+        : null,
   }
   const release = () => {
     colorBindingByMaterial.delete(material)
@@ -412,7 +492,12 @@ function registerNightColorMaterial(
   colorBindingByMaterial.set(material, binding)
   colorBindings.add(binding)
   material.addEventListener('dispose', release)
-  material.color.lerpColors(binding.dayColor, binding.nightColor, nightSurfaceAmount)
+  if (binding.sunsetColor) {
+    material.color.lerpColors(binding.dayColor, binding.sunsetColor, nightSurfaceSunsetAmount)
+  } else {
+    material.color.copy(binding.dayColor)
+  }
+  material.color.lerp(binding.nightColor, nightSurfaceAmount)
 }
 
 function readMaterialTextureName(material: Material | undefined) {

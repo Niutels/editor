@@ -12,8 +12,8 @@ import {
   type PascalWaterLandSurface as WaterLandSurface,
 } from '@landrush/pascal-plugin'
 import { useGpuResourceLifetime } from '@pascal-app/viewer'
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { DoubleSide, type Texture } from 'three'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { DoubleSide, type Mesh, type Texture } from 'three'
 import type { LandrushRoadSegment, LandrushTree } from '@/components/landrush/types'
 import { BrunoTreeLayer, type BrunoTreeReference } from './bruno-tree-layers'
 import { createGrassBladeColorGeometry } from './grass-blade-geometry'
@@ -24,6 +24,7 @@ import {
   type GrassFieldBlocker,
 } from './grass-field-texture'
 import type { GrassBladeTuning } from './grass-material'
+import { notifyLandrushZombieNightSurfaceMaterialChange } from './landrush-zombie-night-presentation-material'
 import {
   type GrassPattern,
   getOrganicGrassPattern,
@@ -770,9 +771,21 @@ function GrassGroundMesh({
   renderOrder: number
   texture: Texture
 }) {
+  const meshRef = useRef<Mesh>(null)
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current
+    if (!mesh) return
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+    if ((material as { map?: Texture }).map !== texture) return
+    notifyLandrushZombieNightSurfaceMaterialChange(mesh)
+  }, [texture])
+
   return (
     <mesh
+      name="landrush-grass-ground"
       position={[0, elevation + 0.018, 0]}
+      ref={meshRef}
       renderOrder={renderOrder}
       rotation={[-Math.PI / 2, 0, 0]}
     >

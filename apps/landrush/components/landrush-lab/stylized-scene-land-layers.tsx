@@ -55,7 +55,7 @@ import {
   vec2,
   vec3,
 } from 'three/tsl'
-import { MeshBasicNodeMaterial, MeshStandardNodeMaterial, type Node as TSLNode } from 'three/webgpu'
+import { MeshStandardNodeMaterial, type Node as TSLNode } from 'three/webgpu'
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
 import type { GrassBladeTuning } from './grass-material'
 import { createLandrushRobotScreenRevealOpacityNode } from './robot-screen-reveal-mask'
@@ -256,6 +256,12 @@ export type StylizedGrassExactDrawMembership = {
   stagedRemovedKeys: string[]
 }
 
+export type StylizedGrassPreparedDrawMembershipProgress = {
+  generation: string | null
+  nextCellIndex: number
+  targetCells: readonly StylizedGrassStreamCell[]
+}
+
 export type StylizedGrassDrawMembershipApplyDecision = 'canonical' | 'delta' | 'none' | 'wait'
 
 type StylizedGrassCommittedResidentDrawSources = {
@@ -282,6 +288,7 @@ type StylizedGrassDrawState = StylizedGrassDenseDrawState & {
   fadeStateById: Map<string, StylizedGrassFadeSlotState>
   geometry: BufferGeometry | null
   lastStreamFadeTraceAt: number
+  streamFadeChangedSlots: number[]
   streamFadeById: Map<string, number>
   tuning: StylizedSceneResolvedGrassTuning | null
 }
@@ -349,6 +356,7 @@ export type StylizedGrassInteractionRef = {
 export type StylizedGrassPreparedResidencyRequest = {
   footprintRadiusMeters: number
   generation: string
+  prepareDrawMembership: boolean
   transitionActive: boolean
 }
 
@@ -356,6 +364,7 @@ export type StylizedGrassPreparedResidencyReadiness = {
   contentGeneration: number
   contentRevision: number
   coverageRevision: number
+  drawMembershipReady: boolean
   generation: string
   ready: boolean
 }
@@ -373,7 +382,9 @@ type StylizedGrassPreparedResidencyState = {
   footprintRadiusMeters: number
   generation: string | null
   prepared: boolean
+  drawMembershipReady: boolean
   ready: boolean
+  residencyReady: boolean
 }
 
 export type StylizedGrassPreparedResidencyContainmentScratch = {
@@ -460,9 +471,10 @@ const STYLIZED_SCENE_STREAM_RETENTION_MARGIN_METERS = 15
 const STYLIZED_SCENE_STREAM_INTERACTION_RADIUS_METERS = 8
 const STYLIZED_SCENE_STREAM_INTERACTION_CELL_METERS = 2
 const STYLIZED_SCENE_STREAM_MIN_UPDATE_SECONDS = 0.15
-const STYLIZED_SCENE_STREAM_ARRIVAL_FADE_SECONDS = 0.28
+const STYLIZED_SCENE_STREAM_ARRIVAL_FADE_SECONDS = 0.12
 const STYLIZED_SCENE_STREAM_UPDATE_RANGE_GAP = 4
 const STYLIZED_SCENE_STREAM_SCAN_CHUNK_CELLS = 8
+export const STYLIZED_SCENE_PREPARED_DRAW_CELL_BUDGET_PER_FRAME = 128
 const STYLIZED_SCENE_PREPARED_RESIDENCY_NDC_CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1] as const
 const EMPTY_STYLIZED_GRASS_STREAM_CELLS: readonly StylizedGrassStreamCell[] = []
 const STYLIZED_TREE_BLOCKER_CLEARANCE_METERS = 2.35
@@ -738,16 +750,21 @@ function StylizedSceneGrassLayer({
     footprintRadiusMeters: 0,
     generation: null,
     prepared: false,
+    drawMembershipReady: false,
     ready: false,
+    residencyReady: false,
   })
   const currentResidentContentGenerationRef = useRef(0)
   const currentResidentContentRevisionRef = useRef(0)
+  const appliedDrawRevisionRef = useRef(-1)
   const {
     changesRef: residentCellChangesRef,
     coverage,
     exactDrawMembershipRef,
+    preparedDrawMembershipProgressRef,
     preparedCoverageVersion,
   } = useStylizedGrassCellCoverage({
+    appliedDrawRevisionRef,
     arrivalState: arrivalStateRef.current,
     currentResidentContentGenerationRef,
     currentResidentContentRevisionRef,
@@ -944,11 +961,11 @@ function StylizedSceneGrassLayer({
     lastStreamFadeTraceAt: 0,
     saturated: false,
     slotById: new Map(),
+    streamFadeChangedSlots: [],
     streamFadeById: new Map(),
     tuning: null,
   })
   const drawInstancesRef = useRef<readonly StylizedGrassInstance[]>([])
-  const appliedDrawRevisionRef = useRef(-1)
   const appliedResidentContentGenerationRef = useRef(-1)
   const appliedResidentInstanceRevisionRef = useRef(-1)
   const fadeZonesRef = useRef<StylizedGrassFadeZone[]>([])
@@ -963,6 +980,7 @@ function StylizedSceneGrassLayer({
   const lastPreparedResidencyReadinessRef = useRef<StylizedGrassPreparedResidencyReadiness | null>(
     null,
   )
+  const exactDrawMembershipRevision = exactDrawMembershipRef.current.revision
 
   const applyExactDrawMembership = useCallback(
     (nowMs: number) => {
@@ -1149,11 +1167,12 @@ function StylizedSceneGrassLayer({
       revision: residentInstanceRevision,
     }
     committedResidentDrawSourcesRef.current = residentSources
+    applyExactDrawMembership(performance.now())
 
     const preparedState = preparedResidencyStateRef.current
     preparedState.committedContentGeneration = residentContentGeneration
     preparedState.committedContentRevision = residentInstanceRevision
-    preparedState.ready = resolveStylizedGrassPreparedResidencyReadiness({
+    preparedState.residencyReady = resolveStylizedGrassPreparedResidencyReadiness({
       committedContentGeneration: residentContentGeneration,
       committedContentRevision: residentInstanceRevision,
       coverageRevision: coverage.residentRevision,
@@ -1166,12 +1185,23 @@ function StylizedSceneGrassLayer({
       residentCells: residentSources.residentCells,
       residentInstancesByCell: residentSources.instancesByCell,
     })
+    preparedState.drawMembershipReady = resolveStylizedGrassPreparedDrawMembershipReadiness(
+      preparedDrawMembershipProgressRef.current,
+      appliedDrawRevisionRef.current,
+      exactDrawMembershipRevision,
+      preparedResidencyRequest?.generation ?? null,
+    )
+    preparedState.ready =
+      preparedState.residencyReady &&
+      (preparedResidencyRequest?.prepareDrawMembership !== true ||
+        preparedState.drawMembershipReady)
     if (!preparedResidencyRequest) return
 
     const nextReadiness = {
       contentGeneration: residentContentGeneration,
       contentRevision: residentInstanceRevision,
       coverageRevision: preparedState.coverageRevision,
+      drawMembershipReady: preparedState.drawMembershipReady,
       generation: preparedResidencyRequest.generation,
       ready: preparedState.ready,
     }
@@ -1180,6 +1210,7 @@ function StylizedSceneGrassLayer({
       previousReadiness?.contentGeneration === nextReadiness.contentGeneration &&
       previousReadiness.contentRevision === nextReadiness.contentRevision &&
       previousReadiness.coverageRevision === nextReadiness.coverageRevision &&
+      previousReadiness.drawMembershipReady === nextReadiness.drawMembershipReady &&
       previousReadiness.generation === nextReadiness.generation &&
       previousReadiness.ready === nextReadiness.ready
     ) {
@@ -1188,19 +1219,18 @@ function StylizedSceneGrassLayer({
     lastPreparedResidencyReadinessRef.current = nextReadiness
     onPreparedResidencyReadinessChange?.(nextReadiness)
   }, [
+    applyExactDrawMembership,
     coverage.residentRevision,
+    exactDrawMembershipRevision,
     onPreparedResidencyReadinessChange,
     preparedCoverageVersion,
+    preparedDrawMembershipProgressRef,
     preparedResidencyRequest,
     residentCells,
     residentContentGeneration,
     residentInstanceRevision,
     residentInstancesByCell,
   ])
-
-  useLayoutEffect(() => {
-    applyExactDrawMembership(performance.now())
-  }, [applyExactDrawMembership])
 
   useLayoutEffect(() => {
     const residentSources = committedResidentDrawSourcesRef.current
@@ -2063,6 +2093,7 @@ export function resolveStylizedGrassPreparedResidencyReadiness({
 }
 
 function useStylizedGrassCellCoverage({
+  appliedDrawRevisionRef,
   arrivalState,
   currentResidentContentGenerationRef,
   currentResidentContentRevisionRef,
@@ -2074,6 +2105,7 @@ function useStylizedGrassCellCoverage({
   streamingPaused,
   surfaceBounds,
 }: {
+  appliedDrawRevisionRef: { current: number }
   arrivalState: StylizedGrassArrivalState
   currentResidentContentGenerationRef: { current: number }
   currentResidentContentRevisionRef: { current: number }
@@ -2101,6 +2133,11 @@ function useStylizedGrassCellCoverage({
   const projectionViewMatrixRef = useRef(new Matrix4())
   const frustumRef = useRef(new Frustum())
   const previousResidentCellIndicesRef = useRef(new Set<number>())
+  const preparedDrawCellKeysRef = useRef(new Set<string>())
+  const preparedDrawMembershipProgressRef = useRef(
+    createInitialStylizedGrassPreparedDrawMembershipProgress(),
+  )
+  const preparedDrawMembershipActiveRef = useRef(false)
   const streamGrid = useMemo(() => createStylizedGrassStreamGrid(surfaceBounds), [surfaceBounds])
   const changesRef = useRef<StylizedGrassResidentCellChanges>({
     added: [],
@@ -2172,7 +2209,33 @@ function useStylizedGrassCellCoverage({
     const preparedRequestChanged =
       preparedState.generation !== (preparedResidencyRequest?.generation ?? null) ||
       preparedState.footprintRadiusMeters !== (preparedResidencyRequest?.footprintRadiusMeters ?? 0)
+    const prepareDrawMembershipRequested = preparedResidencyRequest?.prepareDrawMembership === true
     const transitionActive = preparedResidencyRequest?.transitionActive === true
+    let preparedDrawMembershipReady = resolveStylizedGrassPreparedDrawMembershipReadiness(
+      preparedDrawMembershipProgressRef.current,
+      appliedDrawRevisionRef.current,
+      exactDrawMembershipRef.current.revision,
+      preparedResidencyRequest?.generation ?? null,
+    )
+    if (preparedState.drawMembershipReady !== preparedDrawMembershipReady) {
+      preparedState.drawMembershipReady = preparedDrawMembershipReady
+      setPreparedCoverageVersion((version) => version + 1)
+    }
+    let preparedDrawMembershipActive = resolveStylizedGrassPreparedDrawMembershipActive(
+      prepareDrawMembershipRequested,
+      preparedState.residencyReady,
+      preparedDrawMembershipReady,
+      transitionActive,
+      preparedDrawMembershipActiveRef.current,
+    )
+    const preparedDrawMembershipPreparationCancelled =
+      !transitionActive &&
+      !prepareDrawMembershipRequested &&
+      (preparedDrawMembershipProgressRef.current.nextCellIndex > 0 ||
+        preparedDrawCellKeysRef.current.size > 0)
+    const preparedDrawMembershipDeactivated =
+      (!preparedDrawMembershipActive && preparedDrawMembershipActiveRef.current) ||
+      preparedDrawMembershipPreparationCancelled
     const cameraContained =
       transitionActive && preparedState.prepared
         ? stylizedGrassPreparedResidencyContainsCamera(
@@ -2200,6 +2263,9 @@ function useStylizedGrassCellCoverage({
           currentResidentContentRevisionRef.current,
         )
       : ('normal' as const)
+    if (preparedCameraPolicy === 'suppress' && !preparedDrawMembershipActive) {
+      preparedCameraPolicy = 'fallback'
+    }
     const preparedFallbackUpdateDue = shouldForceStylizedGrassPreparedResidencyFallback(
       preparedResidencyFallbackGate,
       transitionActive,
@@ -2240,8 +2306,61 @@ function useStylizedGrassCellCoverage({
       preparedFallbackUpdateDue,
       timedCameraUpdateDue,
     )
-    if (!residentUpdateDue && !drawViewChanged) {
+    const drawMembershipReconcileDue = shouldReconcileStylizedGrassExactDrawMembership(
+      residentUpdateDue,
+      drawViewChanged,
+      preparedCameraPolicy,
+      preparedDrawMembershipDeactivated,
+    )
+    if (!drawMembershipReconcileDue) {
+      const progress = preparedDrawMembershipProgressRef.current
+      const preparedDrawMembershipPending =
+        prepareDrawMembershipRequested &&
+        preparedState.residencyReady &&
+        progress.generation === preparedResidencyRequest?.generation &&
+        !preparedDrawMembershipReady
+      if (
+        preparedDrawMembershipPending &&
+        appliedDrawRevisionRef.current === exactDrawMembershipRef.current.revision
+      ) {
+        const changedAtMs = performance.now()
+        const stage = advanceStylizedGrassPreparedDrawMembership({
+          cellBudget: STYLIZED_SCENE_PREPARED_DRAW_CELL_BUDGET_PER_FRAME,
+          changedAtMs,
+          membership: exactDrawMembershipRef.current,
+          pinnedCellKeys: preparedDrawCellKeysRef.current,
+          progress,
+        })
+        if (stage.membershipChanged && arrivalState.initialized) {
+          markStylizedGrassDrawArrivals(
+            arrivalState,
+            exactDrawMembershipRef.current.addedKeys,
+            changedAtMs,
+          )
+        }
+        preparedDrawMembershipReady = resolveStylizedGrassPreparedDrawMembershipReadiness(
+          progress,
+          appliedDrawRevisionRef.current,
+          exactDrawMembershipRef.current.revision,
+          preparedResidencyRequest?.generation ?? null,
+        )
+        if (preparedState.drawMembershipReady !== preparedDrawMembershipReady) {
+          preparedState.drawMembershipReady = preparedDrawMembershipReady
+          setPreparedCoverageVersion((version) => version + 1)
+        }
+        preparedDrawMembershipActive = resolveStylizedGrassPreparedDrawMembershipActive(
+          prepareDrawMembershipRequested,
+          preparedState.residencyReady,
+          preparedDrawMembershipReady,
+          transitionActive,
+          preparedDrawMembershipActiveRef.current,
+        )
+      }
+      if (preparedDrawMembershipPending && !preparedDrawMembershipReady) {
+        renderScheduler.requestFrame('animation')
+      }
       lastPreparedResidencyCameraPolicyRef.current = preparedCameraPolicy
+      preparedDrawMembershipActiveRef.current = preparedDrawMembershipActive
       return
     }
 
@@ -2272,6 +2391,22 @@ function useStylizedGrassCellCoverage({
         })
       : null
     const nextResidentCells = residentScan?.cells ?? previousCoverage.residentCells
+    const preparedDrawMembershipTargetChanged = residentScan
+      ? reconcileStylizedGrassPreparedDrawMembershipTarget(
+          preparedDrawMembershipProgressRef.current,
+          residentScan.preparedCells,
+          preparedResidencyRequest?.generation ?? null,
+        )
+      : false
+    if (preparedDrawMembershipTargetChanged || preparedDrawMembershipDeactivated) {
+      reconcileStylizedGrassPinnedDrawCellKeys(
+        preparedDrawCellKeysRef.current,
+        EMPTY_STYLIZED_GRASS_STREAM_CELLS,
+      )
+      preparedDrawMembershipActive = false
+      preparedDrawMembershipReady = false
+      preparedState.drawMembershipReady = false
+    }
     const changedAtMs = performance.now()
     const hadArrivalBaseline = arrivalState.initialized
     const drawMembershipChanged = reconcileStylizedGrassExactDrawMembership({
@@ -2281,6 +2416,7 @@ function useStylizedGrassCellCoverage({
       elevation,
       frustum: frustumRef.current,
       membership: exactDrawMembershipRef.current,
+      pinnedCellKeys: preparedDrawCellKeysRef.current,
     })
     const nextCoverage = reconcileStylizedGrassCellCoverage(previousCoverage, nextResidentCells)
     if (nextCoverage !== previousCoverage) {
@@ -2320,7 +2456,9 @@ function useStylizedGrassCellCoverage({
         preparedState.footprintRadiusMeters = nextPreparedFootprintRadius
         preparedState.generation = nextPreparedGeneration
         preparedState.prepared = nextPrepared
+        preparedState.drawMembershipReady = false
         preparedState.ready = false
+        preparedState.residencyReady = false
         if (transitionActive) preparedCameraPolicy = 'fallback'
         setPreparedCoverageVersion((version) => version + 1)
       }
@@ -2334,7 +2472,12 @@ function useStylizedGrassCellCoverage({
       lastCoverageSignatureRef.current = coverageSignature
       lastResidentUpdateTimeRef.current = clock.elapsedTime
     }
+    if (preparedDrawMembershipDeactivated) {
+      restartStylizedGrassPreparedDrawMembership(preparedDrawMembershipProgressRef.current)
+      setPreparedCoverageVersion((version) => version + 1)
+    }
     lastPreparedResidencyCameraPolicyRef.current = preparedCameraPolicy
+    preparedDrawMembershipActiveRef.current = preparedDrawMembershipActive
     lastDrawProjectionViewMatrixRef.current.copy(projectionViewMatrixRef.current)
     if (nextCoverage === previousCoverage) return
 
@@ -2386,7 +2529,13 @@ function useStylizedGrassCellCoverage({
     setCoverage(nextCoverage)
   })
 
-  return { changesRef, coverage, exactDrawMembershipRef, preparedCoverageVersion }
+  return {
+    changesRef,
+    coverage,
+    exactDrawMembershipRef,
+    preparedCoverageVersion,
+    preparedDrawMembershipProgressRef,
+  }
 }
 
 export function createInitialStylizedGrassCellCoverage(): StylizedGrassCellCoverage {
@@ -2410,6 +2559,14 @@ export function createInitialStylizedGrassExactDrawMembership(): StylizedGrassEx
   }
 }
 
+export function createInitialStylizedGrassPreparedDrawMembershipProgress(): StylizedGrassPreparedDrawMembershipProgress {
+  return {
+    generation: null,
+    nextCellIndex: 0,
+    targetCells: EMPTY_STYLIZED_GRASS_STREAM_CELLS,
+  }
+}
+
 export function reconcileStylizedGrassCellCoverage(
   current: StylizedGrassCellCoverage,
   residentCells: readonly StylizedGrassStreamCell[],
@@ -2420,6 +2577,133 @@ export function reconcileStylizedGrassCellCoverage(
     residentCells,
     residentRevision: current.residentRevision + 1,
   }
+}
+
+export function reconcileStylizedGrassPinnedDrawCellKeys(
+  current: Set<string>,
+  cells: readonly StylizedGrassStreamCell[],
+) {
+  let changed = current.size !== cells.length
+  if (!changed) {
+    for (const cell of cells) {
+      if (!current.has(cell.key)) {
+        changed = true
+        break
+      }
+    }
+  }
+  if (!changed) return false
+
+  current.clear()
+  for (const cell of cells) current.add(cell.key)
+  return true
+}
+
+export function reconcileStylizedGrassPreparedDrawMembershipTarget(
+  progress: StylizedGrassPreparedDrawMembershipProgress,
+  cells: readonly StylizedGrassStreamCell[],
+  generation: string | null,
+) {
+  if (
+    progress.generation === generation &&
+    sameStylizedGrassStreamCells(progress.targetCells, cells)
+  ) {
+    return false
+  }
+  progress.generation = generation
+  progress.nextCellIndex = 0
+  progress.targetCells = cells
+  return true
+}
+
+export function restartStylizedGrassPreparedDrawMembership(
+  progress: StylizedGrassPreparedDrawMembershipProgress,
+) {
+  if (progress.nextCellIndex === 0) return false
+  progress.nextCellIndex = 0
+  return true
+}
+
+export function advanceStylizedGrassPreparedDrawMembership({
+  cellBudget,
+  changedAtMs,
+  membership,
+  pinnedCellKeys,
+  progress,
+}: {
+  cellBudget: number
+  changedAtMs: number
+  membership: StylizedGrassExactDrawMembership
+  pinnedCellKeys: Set<string>
+  progress: StylizedGrassPreparedDrawMembershipProgress
+}) {
+  const budget = Math.max(0, Math.floor(cellBudget))
+  let processedCells = 0
+  membership.stagedAddedKeys.length = 0
+  membership.stagedRemovedKeys.length = 0
+  while (processedCells < budget && progress.nextCellIndex < progress.targetCells.length) {
+    const cell = progress.targetCells[progress.nextCellIndex]!
+    progress.nextCellIndex += 1
+    processedCells += 1
+    pinnedCellKeys.add(cell.key)
+    if (membership.exact.has(cell.key)) continue
+    membership.exact.add(cell.key)
+    membership.stagedAddedKeys.push(cell.key)
+  }
+
+  const membershipChanged = membership.stagedAddedKeys.length > 0
+  if (membershipChanged) {
+    membership.addedKeys.length = 0
+    membership.addedKeys.push(...membership.stagedAddedKeys)
+    membership.removedKeys.length = 0
+    membership.changedAtMs = changedAtMs
+    membership.revision += 1
+  }
+  return {
+    membershipChanged,
+    processedCells,
+    targetExhausted: progress.nextCellIndex >= progress.targetCells.length,
+  }
+}
+
+export function resolveStylizedGrassPreparedDrawMembershipReadiness(
+  progress: StylizedGrassPreparedDrawMembershipProgress,
+  appliedRevision: number,
+  membershipRevision: number,
+  requestGeneration: string | null,
+) {
+  return (
+    requestGeneration !== null &&
+    progress.generation === requestGeneration &&
+    progress.nextCellIndex >= progress.targetCells.length &&
+    appliedRevision === membershipRevision
+  )
+}
+
+export function resolveStylizedGrassPreparedDrawMembershipActive(
+  prepareRequested: boolean,
+  preparedResidencyReady: boolean,
+  preparedDrawMembershipReady: boolean,
+  transitionActive: boolean,
+  previouslyActive: boolean,
+) {
+  if (transitionActive) {
+    return previouslyActive && preparedResidencyReady && preparedDrawMembershipReady
+  }
+  return prepareRequested && preparedResidencyReady && preparedDrawMembershipReady
+}
+
+export function shouldReconcileStylizedGrassExactDrawMembership(
+  residentUpdateDue: boolean,
+  drawViewChanged: boolean,
+  preparedCameraPolicy: StylizedGrassPreparedResidencyCameraPolicy,
+  preparedDrawMembershipDeactivated = false,
+) {
+  return (
+    preparedDrawMembershipDeactivated ||
+    residentUpdateDue ||
+    (drawViewChanged && preparedCameraPolicy !== 'suppress')
+  )
 }
 
 export function resolveStylizedGrassDrawEnvelope({
@@ -2607,6 +2891,7 @@ export function reconcileStylizedGrassExactDrawMembership({
   elevation,
   frustum,
   membership,
+  pinnedCellKeys,
 }: {
   cells: readonly StylizedGrassStreamCell[]
   changedAtMs: number
@@ -2614,6 +2899,7 @@ export function reconcileStylizedGrassExactDrawMembership({
   elevation: number
   frustum: Frustum
   membership: StylizedGrassExactDrawMembership
+  pinnedCellKeys?: ReadonlySet<string>
 }) {
   membership.stagedAddedKeys.length = 0
   membership.stagedRemovedKeys.length = 0
@@ -2625,6 +2911,7 @@ export function reconcileStylizedGrassExactDrawMembership({
       ? STYLIZED_SCENE_STREAM_DRAW_EXIT_GUARD_METERS
       : STYLIZED_SCENE_STREAM_DRAW_ENTER_GUARD_METERS
     if (
+      !pinnedCellKeys?.has(cell.key) &&
       !stylizedGrassStreamCellIntersectsFrustum(cell, frustum, elevation, drawEnvelope, guardMeters)
     ) {
       continue
@@ -4024,11 +4311,7 @@ function createStylizedGrassNodeMaterial(
     thickenedBladeObjectXZ.y.add(worldOffset.y),
   )
 
-  const material = new MeshBasicNodeMaterial({
-    alphaHash: true,
-    side: DoubleSide,
-    transparent: false,
-  })
+  const material = createStylizedGrassWebGpuMaterial()
   material.positionNode = deformedPosition
   material.colorNode = tintedBaseColor
     .mul(brightness)
@@ -4046,6 +4329,16 @@ function createStylizedGrassNodeMaterial(
       visibility: globalVisibility,
     },
   }
+}
+
+export function createStylizedGrassWebGpuMaterial() {
+  return new MeshStandardNodeMaterial({
+    alphaHash: true,
+    flatShading: true,
+    roughness: 0.85,
+    side: DoubleSide,
+    transparent: false,
+  })
 }
 
 function applyStylizedGrassInstanceAttributes(
@@ -4117,8 +4410,7 @@ function advanceStylizedGrassStreamFades(
   if (!streamFade) return
 
   const activeBefore = state.streamFadeById.size
-  let firstChangedSlot = Number.POSITIVE_INFINITY
-  let lastChangedSlot = -1
+  state.streamFadeChangedSlots.length = 0
   let updatedSlotCount = 0
   let fadeMax = 0
   let fadeMin = 1
@@ -4134,14 +4426,13 @@ function advanceStylizedGrassStreamFades(
     fadeMax = Math.max(fadeMax, nextFade)
     fadeMin = Math.min(fadeMin, nextFade)
     streamFade.setX(slot, nextFade)
-    firstChangedSlot = Math.min(firstChangedSlot, slot)
-    lastChangedSlot = Math.max(lastChangedSlot, slot)
+    state.streamFadeChangedSlots.push(slot)
     updatedSlotCount += 1
     if (nextFade >= 1) state.streamFadeById.delete(id)
     else state.streamFadeById.set(id, nextFade)
   }
 
-  markStylizedGrassInstanceSlotSpanUpdated(streamFade, firstChangedSlot, lastChangedSlot)
+  markStylizedGrassInstanceSlotsUpdated(streamFade, state.streamFadeChangedSlots)
   if (
     stylizedGrassRuntimeProbeIsEnabled() &&
     (nowMs - state.lastStreamFadeTraceAt >= 100 || state.streamFadeById.size === 0)
@@ -4818,19 +5109,16 @@ function getStylizedGrassPerfProbe() {
   return probe?.enabled ? probe : null
 }
 
-let cachedStylizedGrassRuntimeProbeSearch: string | null = null
-let cachedStylizedGrassRuntimeProbeEnabled = false
+let cachedStylizedGrassRuntimeProbeEnabled: boolean | null = null
 let stylizedGrassStreamRuntimeTrace: StylizedGrassStreamRuntimeTrace | null = null
 
 function stylizedGrassRuntimeProbeIsEnabled() {
   if (typeof window === 'undefined') return false
-  if (window.location.search === cachedStylizedGrassRuntimeProbeSearch) {
-    return cachedStylizedGrassRuntimeProbeEnabled
+  if (cachedStylizedGrassRuntimeProbeEnabled === null) {
+    cachedStylizedGrassRuntimeProbeEnabled = new URLSearchParams(window.location.search).has(
+      'landrushProbe',
+    )
   }
-  cachedStylizedGrassRuntimeProbeSearch = window.location.search
-  cachedStylizedGrassRuntimeProbeEnabled = new URLSearchParams(window.location.search).has(
-    'landrushProbe',
-  )
   return cachedStylizedGrassRuntimeProbeEnabled
 }
 

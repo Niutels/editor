@@ -8605,6 +8605,7 @@ export function zombieEscapeSameLayerNavigationSegmentIsClear(
   radius: number,
   output = createZombieEscapeCollisionHit(),
 ) {
+  resetCollisionHit(output)
   if (world.navigationLayers.length === 0) return false
   const startLayerIndex = resolveNavigationLayerIndex(world, startY)
   const endLayerIndex = resolveNavigationLayerIndex(world, endY)

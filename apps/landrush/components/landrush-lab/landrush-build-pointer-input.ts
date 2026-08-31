@@ -18,6 +18,28 @@ export type LandrushBuildCameraOffsetBounds = {
   minHeight: number
 }
 
+export function shouldArmLandrushBuildRobotExit({
+  editorPlacementActive,
+  robotHit,
+}: {
+  editorPlacementActive: boolean
+  robotHit: boolean
+}) {
+  return robotHit && !editorPlacementActive
+}
+
+export function shouldCommitLandrushBuildRobotExit({
+  armed,
+  editorPlacementActive,
+  robotHit,
+}: {
+  armed: boolean
+  editorPlacementActive: boolean
+  robotHit: boolean
+}) {
+  return armed && robotHit && !editorPlacementActive
+}
+
 export function constrainLandrushBuildCameraOffset<
   TOffset extends { x: number; y: number; z: number },
 >(offset: TOffset, bounds: LandrushBuildCameraOffsetBounds) {

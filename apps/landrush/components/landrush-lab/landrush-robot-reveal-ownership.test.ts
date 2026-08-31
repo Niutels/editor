@@ -23,11 +23,11 @@ function createReconcileWorkspace() {
 }
 
 describe('Landrush robot reveal semantic ownership', () => {
-  test('keeps reveal material topology disabled for the entire Zombie session', () => {
+  test('limits reveal material topology to third-person player day mode', () => {
     const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
 
     expect(source).toMatch(
-      /visible=\{\s*robotScreenRevealEnabled\s*&&\s*!zombieEscapeEnabled\s*&&\s*viewMode !== 'map'\s*&&\s*!fpvActive\s*\}/,
+      /visible=\{\s*robotScreenRevealEnabled\s*&&\s*!zombieEscapeEnabled\s*&&\s*cameraOwner === 'player'\s*&&\s*!fpvActive\s*\}/,
     )
   })
 

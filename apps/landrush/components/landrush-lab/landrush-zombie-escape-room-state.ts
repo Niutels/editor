@@ -1,9 +1,12 @@
 import {
-  MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS,
   MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS,
   type MultiplayerZombieEscapeStateSnapshot,
 } from '@landrush/protocol'
-import { setZombieEscapeGamePhase, type ZombieEscapeSimulation } from './zombie-escape-simulation'
+import {
+  resolveZombieEscapeNightZombieTarget,
+  setZombieEscapeGamePhase,
+  type ZombieEscapeSimulation,
+} from './zombie-escape-simulation'
 
 export type LandrushZombieEscapeClockMode = 'offline-local' | 'online-canonical' | 'online-waiting'
 
@@ -27,17 +30,33 @@ export function projectLandrushZombieEscapePhaseSecondsRemaining({
   nowMs: number
   observation: LandrushZombieEscapeRoomStateObservation
 }) {
-  const durationMs =
-    observation.state.phase === 'build'
-      ? MULTIPLAYER_ZOMBIE_ESCAPE_BUILD_DURATION_MS
-      : MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
-  if (observation.state.phaseEndsAt === null) return durationMs / 1000
+  if (observation.state.phase !== 'night' || observation.state.phaseEndsAt === null) return 0
 
   const elapsedSinceReceiptMs = Math.max(0, nowMs - observation.receivedAtMs)
   const projectedServerTime = observation.serverTime + elapsedSinceReceiptMs
   return (
-    Math.max(0, Math.min(durationMs, observation.state.phaseEndsAt - projectedServerTime)) / 1000
+    Math.max(
+      0,
+      Math.min(
+        MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS,
+        observation.state.phaseEndsAt - projectedServerTime,
+      ),
+    ) / 1000
   )
+}
+
+export function projectLandrushZombieEscapePhaseElapsedSeconds(
+  nowMs: number,
+  observation: LandrushZombieEscapeRoomStateObservation,
+) {
+  if (observation.state.phase !== 'night' || observation.state.phaseEndsAt === null) return null
+
+  const elapsedSinceReceiptMs = Math.max(0, nowMs - observation.receivedAtMs)
+  const projectedServerTime = observation.serverTime + elapsedSinceReceiptMs
+  const elapsedMs =
+    MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS -
+    (observation.state.phaseEndsAt - projectedServerTime)
+  return Math.max(0, Math.min(MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS, elapsedMs)) / 1000
 }
 
 export function applyLandrushZombieEscapeRoomState({
@@ -88,6 +107,12 @@ export function applyLandrushZombieEscapeRoomState({
     nowMs,
     observation,
   })
+  if (destructiveTransition && simulation.phase === 'night') {
+    simulation.waveSpawnRemaining = resolveZombieEscapeNightZombieTarget(
+      simulation.phaseSecondsRemaining,
+      simulation.zombies.pool.capacity,
+    )
+  }
 
   return {
     appliedState: nextAppliedState,

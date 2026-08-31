@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   shouldShowLandrushZombieEscapeMoney,
   shouldShowLandrushZombieEscapeNightInteractionHud,
@@ -43,6 +44,24 @@ describe('Landrush zombie HUD visibility', () => {
     ] as const) {
       expect(shouldShowLandrushZombieEscapeTouchControls(state)).toBe(false)
     }
+  })
+
+  test('keeps the weapon inventory anchor phase-invariant when touch controls appear', () => {
+    const source = readFileSync(
+      new URL('./landrush-zombie-escape-mode.tsx', import.meta.url),
+      'utf8',
+    )
+    const inventoryInvocation =
+      source.match(
+        /<ZombieEscapeWeaponInventoryRow[\s\S]*?weaponInventoryMask=\{snapshot\.weaponInventoryMask\}\s*\/>/,
+      )?.[0] ?? ''
+
+    expect(inventoryInvocation).not.toBe('')
+    expect(inventoryInvocation).toContain(
+      'className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] z-20"',
+    )
+    expect(inventoryInvocation).not.toContain('touchControlsVisible')
+    expect(inventoryInvocation).not.toContain('bottom-[max(9rem')
   })
 
   test('shows pickup and controller interaction hints only during ready Night gameplay', () => {

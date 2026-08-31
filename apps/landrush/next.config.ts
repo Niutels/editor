@@ -19,6 +19,9 @@ const landrushNextDistDir = process.env.LANDRUSH_NEXT_DIST_DIR?.trim() || '.next
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: lanDevOrigins,
+  devIndicators: {
+    position: 'bottom-right',
+  },
   distDir: landrushNextDistDir,
   env: {
     NEXT_PUBLIC_LANDRUSH_WORLD_MULTIPLAYER_WS_URL: landrushWorldMultiplayerWebSocketUrl,

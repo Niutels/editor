@@ -1,18 +1,28 @@
 import { describe, expect, test } from 'bun:test'
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial, type PointLight } from 'three'
+import {
+  BoxGeometry,
+  Group,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  type SpotLight,
+} from 'three'
 import { color } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import {
+  applyLandrushZombieNightSurfaceColorBindings,
   createLandrushZombieNightBeaconRenderReadinessRepresentative,
   createLandrushZombieNightLightTopology,
   createLandrushZombieNightSurfaceRenderReadinessRepresentative,
   inheritLandrushZombieNightSurfaceMaterial,
-  LANDRUSH_ZOMBIE_NIGHT_POINT_LIGHT_COUNTS,
+  LANDRUSH_ZOMBIE_NIGHT_SPOT_LIGHT_COUNTS,
   notifyLandrushZombieNightSurfaceMaterialChange,
   observeLandrushZombieNightWorld,
   prepareLandrushZombieNightSurfaceMaterials,
   readPreparedLandrushZombieNightSurfaceRole,
   setLandrushZombieNightSurfaceAmount,
+  setLandrushZombieNightSurfaceSunsetUniformAmount,
+  setLandrushZombieNightSurfaceUniformAmount,
 } from './landrush-zombie-night-presentation-material'
 import { LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS } from './landrush-zombie-night-presentation-state'
 
@@ -69,36 +79,114 @@ describe('Landrush zombie night material preparation', () => {
     geometry.dispose()
   })
 
+  test('tints the stable classic grass-ground material identity through the night envelope', () => {
+    const geometry = new BoxGeometry()
+    const material = new MeshBasicMaterial({ color: '#ffffff' })
+    const mesh = new Mesh(geometry, material)
+    mesh.name = 'landrush-grass-ground'
+    setLandrushZombieNightSurfaceAmount(0)
+
+    try {
+      expect(prepareLandrushZombieNightSurfaceMaterials(mesh, [material])).toBe(1)
+      expect(readPreparedLandrushZombieNightSurfaceRole(material)).toBe('grass-ground')
+
+      setLandrushZombieNightSurfaceAmount(1)
+      expect(mesh.material).toBe(material)
+      expect(mesh.name).toBe('landrush-grass-ground')
+      expect(material.color.getHex()).toBe(0x6c7f9e)
+
+      setLandrushZombieNightSurfaceAmount(0)
+      expect(material.color.getHex()).toBe(0xffffff)
+    } finally {
+      setLandrushZombieNightSurfaceAmount(0)
+      material.dispose()
+      geometry.dispose()
+    }
+  })
+
+  test('applies sunset tint only to classic grass ground before the night envelope begins', () => {
+    const geometry = new BoxGeometry()
+    const groundMaterial = new MeshBasicMaterial({ color: '#ffffff' })
+    const curbsideMaterial = new MeshBasicMaterial({ color: '#ffffff' })
+    const ground = new Mesh(geometry, groundMaterial)
+    const curbside = new Mesh(geometry, curbsideMaterial)
+    ground.name = 'landrush-grass-ground'
+    curbside.name = 'natural-road-sidewalks'
+    setLandrushZombieNightSurfaceAmount(0)
+
+    try {
+      expect(prepareLandrushZombieNightSurfaceMaterials(ground, [groundMaterial])).toBe(1)
+      expect(prepareLandrushZombieNightSurfaceMaterials(curbside, [curbsideMaterial])).toBe(1)
+
+      setLandrushZombieNightSurfaceSunsetUniformAmount(1)
+      applyLandrushZombieNightSurfaceColorBindings()
+      expect(groundMaterial.color.getHex()).toBe(0xefb99f)
+      expect(curbsideMaterial.color.getHex()).toBe(0xffffff)
+
+      setLandrushZombieNightSurfaceSunsetUniformAmount(0)
+      applyLandrushZombieNightSurfaceColorBindings()
+      expect(groundMaterial.color.getHex()).toBe(0xffffff)
+      expect(curbsideMaterial.color.getHex()).toBe(0xffffff)
+    } finally {
+      setLandrushZombieNightSurfaceAmount(0)
+      groundMaterial.dispose()
+      curbsideMaterial.dispose()
+      geometry.dispose()
+    }
+  })
+
+  test('keeps ordinary color materials off the per-frame uniform path until a bounded flush', () => {
+    const geometry = new BoxGeometry()
+    const material = new MeshStandardMaterial({ color: '#ffffff' })
+    const mesh = new Mesh(geometry, material)
+    mesh.name = 'natural-road-sidewalks'
+    prepareLandrushZombieNightSurfaceMaterials(mesh, [material])
+
+    setLandrushZombieNightSurfaceAmount(0)
+    setLandrushZombieNightSurfaceUniformAmount(0.75)
+    expect(material.color.getHex()).toBe(0xffffff)
+
+    applyLandrushZombieNightSurfaceColorBindings()
+    expect(material.color.getHex()).not.toBe(0xffffff)
+
+    setLandrushZombieNightSurfaceAmount(0)
+    material.dispose()
+    geometry.dispose()
+  })
+
   test('builds beacon materials separately from every disposable runtime light topology', () => {
     const representative = createLandrushZombieNightBeaconRenderReadinessRepresentative()
-    const pointLights: PointLight[] = []
+    const spotLights: SpotLight[] = []
     representative.root.traverse((child) => {
-      if ((child as PointLight).isPointLight === true) pointLights.push(child as PointLight)
+      if ((child as SpotLight).isSpotLight === true) spotLights.push(child as SpotLight)
     })
     const meshes = representative.root.children.filter((child) => (child as Mesh).isMesh === true)
 
-    expect(pointLights).toHaveLength(0)
+    expect(spotLights).toHaveLength(0)
     expect(meshes).toHaveLength(4)
-    expect(
-      meshes
-        .map((mesh) => (mesh as Mesh).material as MeshStandardMaterial)
-        .every(
-          (material) =>
-            material.transparent && material.depthWrite === false && material.opacity === 0,
-        ),
-    ).toBe(true)
+    const fixtureMaterial = (meshes[0] as Mesh).material as MeshStandardMaterial
+    expect(fixtureMaterial.isMeshStandardMaterial).toBe(true)
+    expect(fixtureMaterial.transparent).toBe(false)
+    expect(fixtureMaterial.depthWrite).toBe(true)
+    expect(fixtureMaterial.opacity).toBe(1)
+    expect(fixtureMaterial.map).not.toBeNull()
+    expect(fixtureMaterial.metalnessMap).not.toBeNull()
+    expect(fixtureMaterial.normalMap).not.toBeNull()
+    expect(fixtureMaterial.roughnessMap).not.toBeNull()
+    expect(fixtureMaterial.emissiveMap).not.toBeNull()
     representative.dispose()
     representative.dispose()
     expect(representative.root.children).toHaveLength(0)
 
-    expect(LANDRUSH_ZOMBIE_NIGHT_POINT_LIGHT_COUNTS).toEqual([
+    expect(LANDRUSH_ZOMBIE_NIGHT_SPOT_LIGHT_COUNTS).toEqual([
       LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.low,
       LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
       LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.high,
     ])
-    for (const count of LANDRUSH_ZOMBIE_NIGHT_POINT_LIGHT_COUNTS) {
+    for (const count of LANDRUSH_ZOMBIE_NIGHT_SPOT_LIGHT_COUNTS) {
       const topology = createLandrushZombieNightLightTopology(count)
       expect(topology.root.children).toHaveLength(count)
+      expect(topology.root.children.every((child) => (child as SpotLight).isSpotLight)).toBe(true)
       topology.dispose()
       topology.dispose()
       expect(topology.root.children).toHaveLength(0)
