@@ -106,6 +106,8 @@ jobs:
         run: |
           npm run check
           npm run build
+          test -f dist/_release/landrush.json
+          cmp _release/landrush.json dist/_release/landrush.json
 
       - name: Commit and push Landrush site
         working-directory: landrush-site
