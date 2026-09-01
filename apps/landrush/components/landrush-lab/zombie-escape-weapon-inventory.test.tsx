@@ -45,6 +45,7 @@ describe('ZombieEscapeWeaponInventoryRow', () => {
       />,
     )
     const rowTag = markup.match(/<div[^>]*data-testid="zombie-escape-weapon-inventory"[^>]*>/)?.[0]
+    const slotTags = markup.match(/<div[^>]*data-weapon-inventory-slot="true"[^>]*>/g) ?? []
     const activeTag = markup.match(/<div[^>]*data-weapon-id="reef-carbine"[^>]*>/)?.[0]
 
     expect(rowTag).toBeDefined()
@@ -52,6 +53,11 @@ describe('ZombieEscapeWeaponInventoryRow', () => {
     expect(rowTag).not.toMatch(/\bbg-/)
     expect(markup).toContain('bg-slate-950/72')
     expect(markup).toContain('bg-cyan-950/82')
+    expect(slotTags).toHaveLength(2)
+    expect(slotTags.every((tag) => tag.includes('size-[clamp(4.125rem,16.5vw,4.875rem)]'))).toBe(
+      true,
+    )
+    expect(markup).not.toContain('size-[clamp(2.75rem,11vw,3.25rem)]')
     expect(activeTag).toContain('aria-current="true"')
     expect(activeTag).toContain('data-active="true"')
     expect(activeTag).toContain('ring-2')
