@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   applyLandrushInitialAudioPreference,
-  LANDRUSH_AUDIO_SETTINGS_STORAGE_KEY,
-  resolveLandrushInitialMutedPreference,
+  LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY,
   shouldActivateLandrushGameplayAudio,
 } from './landrush-audio-default'
 
@@ -25,15 +24,35 @@ function createAudioStore(initialMuted: boolean) {
 }
 
 describe('Landrush initial audio preference', () => {
-  test('keeps a fresh profile silent without activating audio after interaction', () => {
+  test('keeps a fresh profile unmuted without a redundant audio-store write', () => {
     const audio = createAudioStore(false)
+    const migrationWrites: Array<[string, string]> = []
+
+    expect(
+      applyLandrushInitialAudioPreference(
+        {
+          getItem: () => null,
+          setItem: (key, value) => migrationWrites.push([key, value]),
+        },
+        audio.store,
+      ),
+    ).toBe(false)
+    expect(audio.muted).toBe(false)
+    expect(audio.writes).toEqual([])
+    expect(migrationWrites).toEqual([[LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY, '1']])
+  })
+
+  test('unmutes an existing profile once and activates audio after interaction', () => {
+    const audio = createAudioStore(true)
     const reads: string[] = []
+    const writes: Array<[string, string]> = []
     const muted = applyLandrushInitialAudioPreference(
       {
         getItem: (key) => {
           reads.push(key)
           return null
         },
+        setItem: (key, value) => writes.push([key, value]),
       },
       audio.store,
     )
@@ -54,51 +73,47 @@ describe('Landrush initial audio preference', () => {
       playbackActivations += 1
     }
 
-    expect(reads).toEqual([LANDRUSH_AUDIO_SETTINGS_STORAGE_KEY])
-    expect(muted).toBe(true)
-    expect(audio.muted).toBe(true)
-    expect(audio.writes).toEqual([true])
-    expect(graphAllocations).toBe(0)
-    expect(playbackActivations).toBe(0)
+    expect(reads).toEqual([LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY])
+    expect(writes).toEqual([[LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY, '1']])
+    expect(muted).toBe(false)
+    expect(audio.muted).toBe(false)
+    expect(audio.writes).toEqual([false])
+    expect(graphAllocations).toBe(1)
+    expect(playbackActivations).toBe(1)
   })
 
-  test('preserves an existing explicit unmuted preference', () => {
-    const audio = createAudioStore(false)
+  test('preserves a preference after the unmute migration has run', () => {
+    const audio = createAudioStore(true)
     const muted = applyLandrushInitialAudioPreference(
       {
-        getItem: () => JSON.stringify({ state: { muted: false } }),
+        getItem: () => '1',
+        setItem: () => {
+          throw new Error('migration must not be rewritten')
+        },
       },
       audio.store,
     )
 
-    expect(muted).toBe(false)
-    expect(audio.muted).toBe(false)
+    expect(muted).toBe(true)
+    expect(audio.muted).toBe(true)
     expect(audio.writes).toEqual([])
-    expect(
-      shouldActivateLandrushGameplayAudio({
-        enabled: true,
-        masterVolume: 70,
-        muted: audio.muted,
-        sfxVolume: 50,
-      }),
-    ).toBe(true)
   })
 
-  test('fails closed for malformed, incomplete, or unavailable persistence', () => {
-    expect(resolveLandrushInitialMutedPreference('{')).toBe(true)
-    expect(resolveLandrushInitialMutedPreference(JSON.stringify({ state: {} }))).toBe(true)
-
-    const audio = createAudioStore(false)
+  test('unmutes in memory when migration storage is unavailable', () => {
+    const audio = createAudioStore(true)
     expect(
       applyLandrushInitialAudioPreference(
         {
           getItem: () => {
             throw new Error('storage unavailable')
           },
+          setItem: () => {
+            throw new Error('storage unavailable')
+          },
         },
         audio.store,
       ),
-    ).toBe(true)
-    expect(audio.muted).toBe(true)
+    ).toBe(false)
+    expect(audio.muted).toBe(false)
   })
 })

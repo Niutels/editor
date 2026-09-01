@@ -1,4 +1,4 @@
-export const LANDRUSH_AUDIO_SETTINGS_STORAGE_KEY = 'pascal-audio-settings'
+export const LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY = 'landrush-audio-unmute-v1'
 
 type LandrushAudioPreferenceStore = {
   getState: () => { muted: boolean }
@@ -7,31 +7,25 @@ type LandrushAudioPreferenceStore = {
 
 type LandrushAudioPreferenceStorage = {
   getItem: (key: string) => string | null
-}
-
-export function resolveLandrushInitialMutedPreference(serializedSettings: string | null) {
-  if (serializedSettings === null) return true
-
-  try {
-    const persisted = JSON.parse(serializedSettings) as { state?: { muted?: unknown } }
-    return typeof persisted.state?.muted === 'boolean' ? persisted.state.muted : true
-  } catch {
-    return true
-  }
+  setItem: (key: string, value: string) => void
 }
 
 export function applyLandrushInitialAudioPreference(
   storage: LandrushAudioPreferenceStorage,
   store: LandrushAudioPreferenceStore,
 ) {
-  let serializedSettings: string | null = null
+  let migrated = false
   try {
-    serializedSettings = storage.getItem(LANDRUSH_AUDIO_SETTINGS_STORAGE_KEY)
+    migrated = storage.getItem(LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY) === '1'
   } catch {}
 
-  const muted = resolveLandrushInitialMutedPreference(serializedSettings)
-  if (store.getState().muted !== muted) store.setState({ muted })
-  return muted
+  if (migrated) return store.getState().muted
+
+  if (store.getState().muted) store.setState({ muted: false })
+  try {
+    storage.setItem(LANDRUSH_AUDIO_UNMUTE_MIGRATION_STORAGE_KEY, '1')
+  } catch {}
+  return false
 }
 
 export function shouldActivateLandrushGameplayAudio({
