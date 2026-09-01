@@ -16,6 +16,8 @@ import {
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
 } from './landrush-zombie-night-street-lightpost'
 
+export const LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT = 0.08
+
 export type LandrushZombieNightBeaconRuntime = {
   coreMaterial: MeshBasicMaterial | null
   fixtureMaterials: readonly MeshStandardMaterial[]
@@ -60,7 +62,7 @@ export function updateLandrushZombieNightBeaconRuntime({
   lightPulse: number
   runtime: LandrushZombieNightBeaconRuntime
 }) {
-  const envelope = smoothstep(0.08, 0.82, amount)
+  const envelope = smoothstep(LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT, 0.82, amount)
   if (
     runtime.lastEnvelope !== envelope ||
     runtime.lastContributionOnly !== contributionOnly ||
@@ -94,7 +96,7 @@ export function updateLandrushZombieNightBeaconRuntime({
   return envelope
 }
 
-type Object3DChildEvent = Readonly<{ child: Object3D }>
+type Object3DChildEvent = Readonly<{ child: Object3D | null | undefined }>
 
 type Object3DChildEventTarget = {
   addEventListener: (
@@ -210,7 +212,8 @@ function collectLandrushZombieNightSceneLights(scene: Scene): LandrushZombieNigh
   return { ambient, direct, hemisphere }
 }
 
-function isViewerThemeLight(object: Object3D) {
+function isViewerThemeLight(object: Object3D | null | undefined) {
+  if (!object) return false
   return (
     !object.userData.landrushZombieNight &&
     Boolean(

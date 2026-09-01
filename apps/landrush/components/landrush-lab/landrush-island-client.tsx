@@ -7036,6 +7036,7 @@ export function LandrushIslandClient({
                       admitted={initialParcelMaterializationReady}
                       ambientNpcPresentationRegistry={ambientNpcPresentationRegistry}
                       blockedPalmInstanceIndices={blockedPalmInstanceIndices}
+                      naturalRoadPlan={liveNaturalRoadPlan}
                       npcsVisible={!zombieEscapeNightActive}
                       onLoadReadinessChange={handleAmbientLoadReadinessChange}
                       palmLayout={livePalmLayout}
@@ -12427,6 +12428,7 @@ function LandrushIslandParcelClaimMesh({
   const baseColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_BASE_COLOR), [])
   const hoverColor = useMemo(() => new Color(LANDRUSH_ISLAND_PARCEL_MAP_HOVER_COLOR), [])
   const warmupRef = useLandrushIslandMapOverlayWarmup()
+  const wasMapPresentationVisibleRef = useRef(mapPresentationVisible)
 
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => contourGeometry.dispose(), [contourGeometry])
@@ -12436,6 +12438,20 @@ function LandrushIslandParcelClaimMesh({
     const material = materialRef.current
     const contourMaterial = contourMaterialRef.current
     if (!group || !material || !contourMaterial) return
+
+    if (!mapPresentationVisible) {
+      if (wasMapPresentationVisibleRef.current) {
+        group.scale.setScalar(1)
+        material.opacity = 0
+        material.color.lerpColors(baseColor, hoverColor, 0.12)
+        contourMaterial.opacity = 0
+        if (freeBadgeRef.current) freeBadgeRef.current.style.opacity = '0'
+        group.visible = false
+      }
+      wasMapPresentationVisibleRef.current = false
+      return
+    }
+    wasMapPresentationVisibleRef.current = true
 
     const opacityAmount = mapPresentationVisible ? clamp01(mapOpacityRef.current) : 0
     const mapVisible = opacityAmount > 0.002
@@ -18853,17 +18869,36 @@ function LandrushIslandMapPlayerMarker({
   const groupRef = useRef<Group>(null!)
   const materialOpacityRef = useRef(0)
   const labelRef = useRef<HTMLSpanElement | null>(null)
+  const wasVisibleRef = useRef(visible)
   const warmupRef = useLandrushIslandMapOverlayWarmup()
 
   useFrame((_, delta) => {
     const group = groupRef.current
-    const motion = motionRef.current
     if (!group) return
+    if (!visible) {
+      if (wasVisibleRef.current) {
+        materialOpacityRef.current = 0
+        setLandrushIslandGroupMaterialOpacity(group, 0)
+        if (labelRef.current) labelRef.current.style.opacity = '0'
+      }
+      wasVisibleRef.current = false
+      return
+    }
+    wasVisibleRef.current = true
 
-    const targetOpacity = visible && motion ? clamp01(opacityRef.current) : 0
-    materialOpacityRef.current = targetOpacity
-    setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
-    if (labelRef.current) labelRef.current.style.opacity = String(materialOpacityRef.current)
+    const motion = motionRef.current
+    const targetOpacity = motion ? clamp01(opacityRef.current) : 0
+    const opacityChanged = materialOpacityRef.current !== targetOpacity
+    const warmupOpacityRestorePending =
+      warmupRef.current.framesLeft <= 0 && !warmupRef.current.restored
+    group.visible = targetOpacity > 0.002
+    if (opacityChanged) {
+      materialOpacityRef.current = targetOpacity
+      if (labelRef.current) labelRef.current.style.opacity = String(targetOpacity)
+    }
+    if (opacityChanged || warmupOpacityRestorePending) {
+      setLandrushIslandGroupMaterialOpacity(group, targetOpacity)
+    }
     if (motion && targetOpacity > 0.002) {
       group.position.set(motion.position.x, groundY + 0.16, motion.position.z)
       group.rotation.y = lerpAngle(group.rotation.y, motion.heading, clamp01(delta * 16))
@@ -18898,15 +18933,32 @@ function LandrushIslandRemoteMapPlayerMarker({
 }) {
   const groupRef = useRef<Group>(null!)
   const materialOpacityRef = useRef(0)
+  const wasVisibleRef = useRef(visible)
   const warmupRef = useLandrushIslandMapOverlayWarmup()
 
   useFrame(() => {
     const group = groupRef.current
     if (!group) return
+    if (!visible) {
+      if (wasVisibleRef.current) {
+        materialOpacityRef.current = 0
+        setLandrushIslandGroupMaterialOpacity(group, 0)
+      }
+      wasVisibleRef.current = false
+      return
+    }
+    wasVisibleRef.current = true
 
-    materialOpacityRef.current = visible ? clamp01(opacityRef.current) : 0
-    setLandrushIslandGroupMaterialOpacity(group, materialOpacityRef.current)
-    if (materialOpacityRef.current > 0.002) {
+    const targetOpacity = clamp01(opacityRef.current)
+    const opacityChanged = materialOpacityRef.current !== targetOpacity
+    const warmupOpacityRestorePending =
+      warmupRef.current.framesLeft <= 0 && !warmupRef.current.restored
+    group.visible = targetOpacity > 0.002
+    if (opacityChanged) materialOpacityRef.current = targetOpacity
+    if (opacityChanged || warmupOpacityRestorePending) {
+      setLandrushIslandGroupMaterialOpacity(group, targetOpacity)
+    }
+    if (targetOpacity > 0.002) {
       const livePlayer =
         remotePlayerStore.getPresentationSnapshot(player.id, performance.now()) ?? player
       group.position.set(livePlayer.position[0], groundY + 0.24, livePlayer.position[2])

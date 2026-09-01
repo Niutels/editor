@@ -41,7 +41,7 @@ export function landrushIslandFloorPresentationPoseChanged(
 
 export function collectLandrushIslandExpectedFloorPresentationRoots<
   TNode extends { children?: readonly string[]; type: string },
-  TEntry extends { levelId: string },
+  TEntry extends { levelId: string; root: object | null },
 >({
   nodes,
   rootNodeIds,
@@ -65,9 +65,12 @@ export function collectLandrushIslandExpectedFloorPresentationRoots<
     }
   }
 
-  return roots.filter(({ levelId }) => {
+  // An unregistered root has no admission or canonical-completion path. A later
+  // registry revision rebuilds this set and admits the root before it is counted.
+  return roots.filter(({ levelId, root }) => {
     const node = nodes[levelId]
     return (
+      root !== null &&
       reachableNodeIds.has(levelId) &&
       (node?.type === 'level' || node?.type === 'ceiling' || node?.type === 'roof')
     )

@@ -21,46 +21,25 @@ import { ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS } from './zombie-escape
 import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
 import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
-  collectZombieEscapeAuthoredInstanceSlots,
   countZombieEscapeAuthoredVariantCapacity,
   createZombieEscapeAuthoredInstancePresentation,
   createZombieEscapeAuthoredInstancePresentationCooperatively,
   encodeZombieEscapeBakedTextureComponent,
   resolveZombieEscapeAuthoredBakedFrame,
   resolveZombieEscapeBakedAnimationSample,
+  resolveZombieEscapeBakedTextureLayout,
   ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT,
 } from './zombie-escape-instanced-skinned-presentation'
 import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 describe('authored instanced zombie presentation', () => {
-  test('compacts active nondetailed slots in deterministic pool order', () => {
-    const active = new Uint8Array([1, 1, 0, 1, 1, 1])
-    const detailed = new Uint8Array([0, 1, 0, 0, 0, 0])
+  test('counts exact per-variant presentation capacity', () => {
     const variant = new Uint8Array([2, 2, 2, 1, 2, 2])
-    const output = new Uint16Array(4)
-
-    const count = collectZombieEscapeAuthoredInstanceSlots(
-      { active, detailed, variant, variantIndex: 2 },
-      output,
-    )
 
     expect(countZombieEscapeAuthoredVariantCapacity(variant, 2)).toBe(5)
-    expect(Array.from(output.slice(0, count))).toEqual([0, 4, 5])
-  })
-
-  test('rejects silent presentation capacity overflow', () => {
-    expect(() =>
-      collectZombieEscapeAuthoredInstanceSlots(
-        {
-          active: new Uint8Array([1, 1]),
-          detailed: new Uint8Array(2),
-          variant: new Uint8Array([0, 0]),
-          variantIndex: 0,
-        },
-        new Uint16Array(1),
-      ),
-    ).toThrow('capacity 1 is below the selected count')
+    expect(countZombieEscapeAuthoredVariantCapacity(variant, 1)).toBe(1)
+    expect(countZombieEscapeAuthoredVariantCapacity(variant, 0)).toBe(0)
   })
 
   test('encodes finite baked positions and normals within half-float error bounds', () => {
@@ -80,6 +59,63 @@ describe('authored instanced zombie presentation', () => {
       expect(() => encodeZombieEscapeBakedTextureComponent(invalid)).toThrow(
         'outside the finite half-float range',
       )
+    }
+  })
+
+  test('keeps every adjacent position-normal texel pair on one row across the width edge', () => {
+    const cases = [
+      {
+        expected: { height: 1, width: 2 },
+        lastNormal: { column: 1, row: 0 },
+        lastPosition: { column: 0, row: 0 },
+        vertexCount: 1,
+      },
+      {
+        expected: { height: 1, width: 4096 },
+        lastNormal: { column: 4095, row: 0 },
+        lastPosition: { column: 4094, row: 0 },
+        vertexCount: 2048,
+      },
+      {
+        expected: { height: 2, width: 4096 },
+        lastNormal: { column: 1, row: 1 },
+        lastPosition: { column: 0, row: 1 },
+        vertexCount: 2049,
+      },
+      {
+        expected: { height: 2, width: 4096 },
+        lastNormal: { column: 4095, row: 1 },
+        lastPosition: { column: 4094, row: 1 },
+        vertexCount: 4096,
+      },
+      {
+        expected: { height: 3, width: 4096 },
+        lastNormal: { column: 1, row: 2 },
+        lastPosition: { column: 0, row: 2 },
+        vertexCount: 4097,
+      },
+    ]
+
+    for (const { expected, lastNormal, lastPosition, vertexCount } of cases) {
+      const layout = resolveZombieEscapeBakedTextureLayout(vertexCount)
+      expect(layout).toEqual(expected)
+      expect(layout.width % 2).toBe(0)
+      let everyPairSharesOneRow = true
+      for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+        const positionTexel = vertex * 2
+        const positionRow = Math.floor(positionTexel / layout.width)
+        const positionColumn = positionTexel - positionRow * layout.width
+        const normalTexel = positionTexel + 1
+        everyPairSharesOneRow &&=
+          Math.floor(normalTexel / layout.width) === positionRow &&
+          normalTexel - positionRow * layout.width === positionColumn + 1
+      }
+      const lastPositionTexel = (vertexCount - 1) * 2
+      const lastPositionRow = Math.floor(lastPositionTexel / layout.width)
+      const lastPositionColumn = lastPositionTexel - lastPositionRow * layout.width
+      expect(everyPairSharesOneRow).toBe(true)
+      expect({ column: lastPositionColumn, row: lastPositionRow }).toEqual(lastPosition)
+      expect({ column: lastPositionColumn + 1, row: lastPositionRow }).toEqual(lastNormal)
     }
   })
 
@@ -123,29 +159,25 @@ describe('authored instanced zombie presentation', () => {
         vertexCount: 3,
         walkFrameIndex: 0,
       })
-      presentation.update({
-        detailedSlots: new Uint8Array(1),
-        elapsedSeconds: 1,
-        zombies: {
-          attackCooldown: new Float32Array(1),
-          deathPresentationSeconds: new Float32Array(1),
-          heading: new Float32Array(1),
-          hitImpulseX: new Float32Array(1),
-          hitImpulseY: new Float32Array(1),
-          hitImpulseZ: new Float32Array(1),
-          hitReaction: new Float32Array(1),
-          health: new Float32Array([1]),
-          intent: new Uint8Array(1),
-          locomotionBlend: new Float32Array([1]),
-          locomotionPhase: new Float32Array([Math.PI]),
-          pool: { active: new Uint8Array([1]) },
-          runBlend: new Float32Array([1]),
-          spawnOrdinal: new Uint32Array(1),
-          variant: new Uint8Array(1),
-          x: new Float32Array([3]),
-          y: new Float32Array(1),
-          z: new Float32Array([-2]),
-        },
+      presentation.update(createAuthoredSelection(4, [0]), {
+        attackCooldown: new Float32Array(1),
+        deathPresentationSeconds: new Float32Array(1),
+        heading: new Float32Array(1),
+        hitImpulseX: new Float32Array(1),
+        hitImpulseY: new Float32Array(1),
+        hitImpulseZ: new Float32Array(1),
+        hitReaction: new Float32Array(1),
+        health: new Float32Array([1]),
+        intent: new Uint8Array(1),
+        locomotionBlend: new Float32Array([1]),
+        locomotionPhase: new Float32Array([Math.PI]),
+        pool: { active: new Uint8Array([1]) },
+        runBlend: new Float32Array([1]),
+        spawnOrdinal: new Uint32Array(1),
+        variant: new Uint8Array(1),
+        x: new Float32Array([3]),
+        y: new Float32Array(1),
+        z: new Float32Array([-2]),
       })
 
       expect(presentation.getDebugSnapshot()).toMatchObject({
@@ -155,6 +187,14 @@ describe('authored instanced zombie presentation', () => {
         runtimeMixerCount: 0,
         spatialBoundsValid: true,
       })
+      expect(() =>
+        presentation.update(createAuthoredSelection(1, [0]), createAuthoredState(1)),
+      ).toThrow('selection capacity 1 does not match presentation capacity 4')
+      const overflowSelection = createAuthoredSelection(4, [])
+      overflowSelection.count = 5
+      expect(() => presentation.update(overflowSelection, createAuthoredState(1))).toThrow(
+        'selected count must be an integer from 0 to 4',
+      )
     } finally {
       presentation.dispose()
       source.geometry.dispose()
@@ -162,7 +202,7 @@ describe('authored instanced zombie presentation', () => {
     }
   })
 
-  test('keeps every exact authored pipeline resident behind one parked render-only instance', () => {
+  test('keeps an empty authored pipeline resident without submitting a parked live-batch instance', () => {
     const source = createSkinnedSource()
     const presentation = createZombieEscapeAuthoredInstancePresentation({
       attackClip: null,
@@ -177,27 +217,44 @@ describe('authored instanced zombie presentation', () => {
     const empty = createAuthoredState(2)
     empty.pool.active.fill(0)
     const full = createAuthoredState(2)
+    const selection = createAuthoredSelection(2, [])
     const parkedMatrix = new Matrix4()
 
     try {
-      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies: empty })
+      presentation.update(selection, empty)
       const mesh = presentation.root.children[0] as InstancedMesh
       expect(presentation.root.visible).toBe(true)
       expect(mesh.visible).toBe(true)
       expect(mesh.frustumCulled).toBe(false)
+      expect(mesh.instanceMatrix.count).toBe(2)
+      expect(mesh.geometry.getAttribute('zombieBakedFrame').count).toBe(2)
       expect(mesh.count).toBe(1)
       mesh.getMatrixAt(0, parkedMatrix)
       expect(parkedMatrix.elements[13]).toBe(-1_000_000)
       expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 0, batchCount: 0 })
 
-      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies: full })
-      expect(mesh.count).toBe(3)
-      mesh.getMatrixAt(2, parkedMatrix)
-      expect(parkedMatrix.elements[13]).toBe(-1_000_000)
+      setAuthoredSelection(selection, [0, 1])
+      presentation.update(selection, full)
+      expect(mesh.count).toBe(2)
+      mesh.getMatrixAt(0, parkedMatrix)
+      expect(parkedMatrix.elements[13]).not.toBe(-1_000_000)
+      mesh.getMatrixAt(1, parkedMatrix)
+      expect(parkedMatrix.elements[13]).not.toBe(-1_000_000)
       expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 2, batchCount: 1 })
 
-      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies: empty })
+      full.pool.active[1] = 0
+      setAuthoredSelection(selection, [0])
+      presentation.update(selection, full)
       expect(mesh.count).toBe(1)
+      mesh.getMatrixAt(0, parkedMatrix)
+      expect(parkedMatrix.elements[13]).not.toBe(-1_000_000)
+      expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 1, batchCount: 1 })
+
+      setAuthoredSelection(selection, [])
+      presentation.update(selection, empty)
+      expect(mesh.count).toBe(1)
+      mesh.getMatrixAt(0, parkedMatrix)
+      expect(parkedMatrix.elements[13]).toBe(-1_000_000)
       expect(presentation.getDebugSnapshot()).toMatchObject({ activeCount: 0, batchCount: 0 })
     } finally {
       presentation.dispose()
@@ -421,7 +478,7 @@ describe('authored instanced zombie presentation', () => {
     zombies.heading[0] = 0.43
 
     try {
-      presentation.update({ detailedSlots: new Uint8Array(1), elapsedSeconds: 0, zombies })
+      presentation.update(createAuthoredSelection(1, [0]), zombies)
       const mesh = presentation.root.children[0] as InstancedMesh
       const actual = new Matrix4()
       mesh.getMatrixAt(0, actual)
@@ -553,9 +610,10 @@ describe('authored instanced zombie presentation', () => {
     const zombies = createAuthoredState(4)
     zombies.variant.fill(3)
     zombies.locomotionPhase.set([0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2])
+    const selection = createAuthoredSelection(4, [0, 1, 2, 3])
 
     try {
-      presentation.update({ detailedSlots: new Uint8Array(4), elapsedSeconds: 5, zombies })
+      presentation.update(selection, zombies)
       const mesh = presentation.root.children[0] as InstancedMesh
       const frames = mesh.geometry.getAttribute('zombieBakedFrame')
       expect(Array.from(frames.array.slice(0, 4))).toEqual(
@@ -574,7 +632,8 @@ describe('authored instanced zombie presentation', () => {
       zombies.pool.active[2] = 0
       zombies.locomotionPhase[0] = 0.17
       zombies.locomotionPhase[2] = 4.22
-      presentation.update({ detailedSlots: new Uint8Array(4), elapsedSeconds: 5, zombies })
+      setAuthoredSelection(selection, [1, 3])
+      presentation.update(selection, zombies)
       expect(Array.from(frames.array.slice(0, 2))).toEqual([
         resolveZombieEscapeAuthoredBakedFrame({
           attackCooldown: 0,
@@ -593,11 +652,7 @@ describe('authored instanced zombie presentation', () => {
       ])
 
       zombies.locomotionPhase[1] += Math.PI / 6
-      presentation.update({
-        detailedSlots: new Uint8Array(4),
-        elapsedSeconds: 6,
-        zombies,
-      })
+      presentation.update(selection, zombies)
       expect(frames.getX(0)).toBe(
         resolveZombieEscapeAuthoredBakedFrame({
           attackCooldown: 0,
@@ -637,10 +692,10 @@ describe('authored instanced zombie presentation', () => {
     })
     const zombies = createAuthoredState(2)
     zombies.x.set([2, 4])
+    const selection = createAuthoredSelection(2, [0, 1])
 
     try {
-      const detailedSlots = new Uint8Array(2)
-      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      presentation.update(selection, zombies)
       const mesh = presentation.root.children[0] as InstancedMesh
       const frames = mesh.geometry.getAttribute('zombieBakedFrame')
       mesh.instanceMatrix.clearUpdateRanges()
@@ -648,28 +703,113 @@ describe('authored instanced zombie presentation', () => {
       const matrixVersion = mesh.instanceMatrix.version
       const frameVersion = frames.version
 
-      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      presentation.update(selection, zombies)
       expect(mesh.instanceMatrix.version).toBe(matrixVersion)
       expect(frames.version).toBe(frameVersion)
       expect(mesh.instanceMatrix.updateRanges).toEqual([])
       expect(frames.updateRanges).toEqual([])
 
       zombies.x[1] = 5
-      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      presentation.update(selection, zombies)
       expect(mesh.instanceMatrix.version).toBe(matrixVersion + 1)
       expect(mesh.instanceMatrix.updateRanges).toEqual([{ count: 16, start: 16 }])
       expect(frames.version).toBe(frameVersion)
 
       mesh.instanceMatrix.clearUpdateRanges()
+      zombies.heading[1] = Math.PI / 3
+      presentation.update(selection, zombies)
+      expect(mesh.instanceMatrix.version).toBe(matrixVersion + 2)
+      expect(mesh.instanceMatrix.updateRanges).toEqual([{ count: 16, start: 16 }])
+      expect(frames.version).toBe(frameVersion)
+
+      mesh.instanceMatrix.clearUpdateRanges()
       zombies.locomotionPhase[1] = Math.PI / 6
-      presentation.update({ detailedSlots, elapsedSeconds: 0, zombies })
+      presentation.update(selection, zombies)
       expect(mesh.instanceMatrix.updateRanges).toEqual([])
+      expect(mesh.instanceMatrix.version).toBe(matrixVersion + 2)
       expect(frames.version).toBe(frameVersion + 1)
       expect(frames.updateRanges).toEqual([{ count: 1, start: 1 }])
     } finally {
       presentation.dispose()
       source.geometry.dispose()
       source.material.dispose()
+    }
+  })
+
+  test('checks every variable affine component and keeps live and parked matrices affine', () => {
+    const source = createMultiMeshSkinnedSource()
+    const firstSourceMesh = source.root.children[0] as SkinnedMesh
+    const secondSourceMesh = source.root.children[1] as SkinnedMesh
+    source.root.position.set(2.1, -0.4, 1.3)
+    source.root.quaternion.setFromAxisAngle(new Vector3(0, 1, 0), 0.37)
+    source.root.scale.set(1.2, 0.9, 1.4)
+    firstSourceMesh.position.set(0.3, 0.6, -0.2)
+    firstSourceMesh.quaternion.setFromAxisAngle(new Vector3(1, 0, 0), -0.29)
+    firstSourceMesh.scale.set(0.8, 1.1, 0.95)
+    secondSourceMesh.position.set(-0.5, 0.2, 0.7)
+    secondSourceMesh.quaternion.setFromAxisAngle(new Vector3(0, 0, 1), 0.41)
+    secondSourceMesh.scale.set(1.05, 0.75, 1.2)
+    const presentation = createZombieEscapeAuthoredInstancePresentation({
+      attackClip: null,
+      instanceCapacity: 1,
+      modelTransform: { offset: new Vector3(0.8, 0.25, -0.45), scale: 1.35 },
+      runClip: null,
+      source: source.root,
+      variantIndex: 0,
+      walkClip: null,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+    const zombies = createAuthoredState(1)
+    zombies.x[0] = 4.2
+    zombies.y[0] = 0.15
+    zombies.z[0] = -3.4
+    zombies.heading[0] = 0.63
+    const selection = createAuthoredSelection(1, [0])
+    const variableComponents = [12, 13, 14, 0, 1, 2, 4, 5, 6, 8, 9, 10] as const
+
+    try {
+      presentation.update(selection, zombies)
+      const meshes = presentation.root.children.map((child) => child as InstancedMesh)
+      expect(meshes).toHaveLength(2)
+      for (const mesh of meshes) {
+        expectInstanceMatrixToBeAffine(mesh)
+      }
+
+      const mesh = meshes[0]!
+      const expected = new Matrix4()
+      mesh.getMatrixAt(0, expected)
+      for (const component of variableComponents) {
+        mesh.instanceMatrix.clearUpdateRanges()
+        const previousVersion = mesh.instanceMatrix.version
+        const values = mesh.instanceMatrix.array
+        values[component] = Math.fround(values[component]! + 0.25)
+
+        presentation.update(selection, zombies)
+
+        expect(mesh.instanceMatrix.version).toBe(previousVersion + 1)
+        expect(mesh.instanceMatrix.updateRanges).toEqual([{ count: 16, start: 0 }])
+        expect(values[component]).toBe(Math.fround(expected.elements[component]!))
+      }
+
+      setAuthoredSelection(selection, [])
+      presentation.update(selection, zombies)
+      for (const mesh of meshes) {
+        expectInstanceMatrixToBeAffine(mesh)
+        const parked = new Matrix4()
+        mesh.getMatrixAt(0, parked)
+        expect(parked.elements[13]).toBe(-1_000_000)
+        mesh.instanceMatrix.clearUpdateRanges()
+      }
+      const parkedVersions = meshes.map((mesh) => mesh.instanceMatrix.version)
+      presentation.update(selection, zombies)
+      for (let index = 0; index < meshes.length; index += 1) {
+        expect(meshes[index]!.instanceMatrix.version).toBe(parkedVersions[index]!)
+        expect(meshes[index]!.instanceMatrix.updateRanges).toEqual([])
+      }
+    } finally {
+      presentation.dispose()
+      for (const geometry of source.geometries) geometry.dispose()
+      for (const material of source.materials) material.dispose()
     }
   })
 
@@ -686,9 +826,10 @@ describe('authored instanced zombie presentation', () => {
       zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
     })
     const zombies = createAuthoredState(2)
+    const selection = createAuthoredSelection(2, [0, 1])
 
     try {
-      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies })
+      presentation.update(selection, zombies)
       const firstMesh = presentation.root.children[0] as InstancedMesh
       const secondMesh = presentation.root.children[1] as InstancedMesh
       const firstFrames = firstMesh.geometry.getAttribute('zombieBakedFrame')
@@ -698,7 +839,7 @@ describe('authored instanced zombie presentation', () => {
       firstFrames.clearUpdateRanges()
       const frameVersion = firstFrames.version
       zombies.locomotionPhase[1] = Math.PI / 6
-      presentation.update({ detailedSlots: new Uint8Array(2), elapsedSeconds: 0, zombies })
+      presentation.update(selection, zombies)
 
       expect(firstFrames.version).toBe(frameVersion + 1)
       expect(firstFrames.updateRanges).toEqual([{ count: 1, start: 1 }])
@@ -710,6 +851,31 @@ describe('authored instanced zombie presentation', () => {
     }
   })
 })
+
+function createAuthoredSelection(capacity: number, selectedSlots: readonly number[]) {
+  return setAuthoredSelection({ count: 0, slots: new Uint16Array(capacity) }, selectedSlots)
+}
+
+function setAuthoredSelection(
+  selection: { count: number; slots: Uint16Array },
+  selectedSlots: readonly number[],
+) {
+  if (selectedSlots.length > selection.slots.length) {
+    throw new Error('Test authored selection exceeds its preallocated capacity.')
+  }
+  selection.slots.set(selectedSlots)
+  selection.count = selectedSlots.length
+  return selection
+}
+
+function expectInstanceMatrixToBeAffine(mesh: InstancedMesh) {
+  const matrix = new Matrix4()
+  mesh.getMatrixAt(0, matrix)
+  expect(matrix.elements[3] === 0).toBe(true)
+  expect(matrix.elements[7] === 0).toBe(true)
+  expect(matrix.elements[11] === 0).toBe(true)
+  expect(matrix.elements[15]).toBe(1)
+}
 
 function createAuthoredState(capacity: number) {
   return {

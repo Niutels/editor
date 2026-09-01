@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import { BufferGeometry, Float32BufferAttribute, Mesh } from 'three'
 import { color as tslColor } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
@@ -87,6 +88,8 @@ describe('stylized grass render geometry budget', () => {
     material.colorNode = tslColor('#7fb13f')
     const mesh = new Mesh(instanced, material)
 
+    expect(instanced.isInstancedBufferGeometry).toBe(true)
+    expect(instanced.instanceCount).toBe(0)
     expect(instanced.getAttribute('uv').count).toBe(instanced.getAttribute('position').count)
     expect(prepareLandrushZombieNightSurfaceMaterials(mesh, [material])).toBe(1)
     expect(readPreparedLandrushZombieNightSurfaceRole(material)).toBe('grass-blades')
@@ -99,5 +102,21 @@ describe('stylized grass render geometry budget', () => {
     render.dispose()
     instanced.dispose()
     material.dispose()
+  })
+
+  test('constructs one yaw sine and cosine node pair for every vertex path', () => {
+    const source = readFileSync(
+      new URL('./stylized-scene-land-layers.tsx', import.meta.url),
+      'utf8',
+    )
+    const interactionRotation = source.slice(
+      source.indexOf('const interactionLocalOffset = vec2('),
+      source.indexOf('const interactionFold =', source.indexOf('const interactionLocalOffset')),
+    )
+
+    expect(source.match(/cos\(instanceYaw\)/g)).toHaveLength(1)
+    expect(source.match(/sin\(instanceYaw\)/g)).toHaveLength(1)
+    expect(interactionRotation).toContain('instanceYawCos')
+    expect(interactionRotation).toContain('instanceYawSin')
   })
 })

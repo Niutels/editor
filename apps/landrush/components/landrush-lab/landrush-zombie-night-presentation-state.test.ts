@@ -3,9 +3,12 @@ import type { LandrushRoadSegment } from '@/components/landrush/types'
 import {
   advanceLandrushZombieNightAmount,
   createLandrushZombieNightBeaconPlacements,
+  LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS,
   LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
   LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS,
+  LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT,
   LANDRUSH_ZOMBIE_NIGHT_SUNSET_END_SECONDS,
   LANDRUSH_ZOMBIE_NIGHT_TRANSITION_DURATION_SECONDS,
   LANDRUSH_ZOMBIE_NIGHT_VISUAL_CONTRACT,
@@ -18,10 +21,22 @@ import {
   resolveLandrushZombieNightTimelineAmount,
   resolveLandrushZombieNightVisibilityTreatment,
   resolveLandrushZombieNightVisualAmount,
+  selectLandrushZombieNightActiveLightPlacements,
   shouldApplyLandrushZombieNightCpuPresentation,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
-import { resolveLandrushZombieNightStreetLightpostYaw } from './landrush-zombie-night-street-lightpost'
+import {
+  createLandrushZombieNightStreetLightpostBaseFootprint,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_ALONG_ROAD_HALF_WIDTH_METERS,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE,
+  resolveLandrushZombieNightStreetLightpostYaw,
+} from './landrush-zombie-night-street-lightpost'
+import {
+  createNaturalRoadPlan,
+  NATURAL_ROAD_STYLE,
+  naturalRoadSidewalkContainsFootprint,
+} from './natural-road-plan'
 
 const ROADS: readonly LandrushRoadSegment[] = [
   {
@@ -61,6 +76,22 @@ const ROADS: readonly LandrushRoadSegment[] = [
     width: 2.8,
   },
 ] as const
+
+const PERIMETER: readonly { x: number; z: number }[] = [
+  { x: -32, z: -32 },
+  { x: 32, z: -32 },
+  { x: 32, z: 32 },
+  { x: -32, z: 32 },
+  { x: -32, z: -32 },
+]
+
+const ROAD_PLAN = createNaturalRoadPlan({
+  elevation: 1.25,
+  perimeter: PERIMETER,
+  quality: 'high',
+  roads: ROADS,
+  seed: 'cala',
+})
 
 describe('Landrush zombie night presentation state', () => {
   test('parses deterministic inspection modes, quality, and fixed transition amount', () => {
@@ -247,23 +278,22 @@ describe('Landrush zombie night presentation state', () => {
 
   test('selects stable, finite beacon placements and honors the quality budget', () => {
     const balanced = createLandrushZombieNightBeaconPlacements({
-      groundY: 1.25,
       quality: 'balanced',
-      roads: ROADS,
+      roadPlan: ROAD_PLAN,
     })
     const replay = createLandrushZombieNightBeaconPlacements({
-      groundY: 1.25,
       quality: 'balanced',
-      roads: ROADS,
+      roadPlan: ROAD_PLAN,
     })
     const low = createLandrushZombieNightBeaconPlacements({
-      groundY: 1.25,
       quality: 'low',
-      roads: ROADS,
+      roadPlan: ROAD_PLAN,
     })
     expect(balanced).toEqual(replay)
-    expect(balanced).toHaveLength(6)
-    expect(low).toHaveLength(3)
+    expect(balanced.length).toBeGreaterThanOrEqual(8)
+    expect(balanced.length).toBeLessThanOrEqual(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced)
+    expect(low.length).toBeLessThanOrEqual(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.low)
+    expect(low.length).toBeLessThanOrEqual(balanced.length)
     expect(new Set(balanced.map(({ id }) => id)).size).toBe(balanced.length)
     expect(
       balanced.every(({ phase, position, rotationY }) =>
@@ -272,40 +302,209 @@ describe('Landrush zombie night presentation state', () => {
     ).toBe(true)
   })
 
+  test('decouples physical pole density from a deterministic bounded light and glow budget', () => {
+    for (const quality of ['low', 'balanced', 'high'] as const) {
+      const placements = createLandrushZombieNightBeaconPlacements({
+        quality,
+        roadPlan: ROAD_PLAN,
+      })
+      const selected = selectLandrushZombieNightActiveLightPlacements({ placements, quality })
+      const replay = selectLandrushZombieNightActiveLightPlacements({ placements, quality })
+      expect(selected).toEqual(replay)
+      expect(selected).toHaveLength(
+        Math.min(placements.length, LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS[quality]),
+      )
+      expect(selected.every((placement) => placements.includes(placement))).toBe(true)
+    }
+
+    expect(LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS).toEqual({
+      balanced: 4,
+      high: 6,
+      low: 3,
+    })
+    expect(LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS.balanced).toBeLessThan(
+      LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
+    )
+    expect(LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET).toBe(3)
+  })
+
   test('aims each overhanging lamp arm from its curb side back toward the road', () => {
     expect(resolveLandrushZombieNightStreetLightpostYaw(1, 0, -1)).toBeCloseTo(0, 12)
     expect(Math.abs(resolveLandrushZombieNightStreetLightpostYaw(1, 0, 1))).toBeCloseTo(Math.PI, 12)
     expect(resolveLandrushZombieNightStreetLightpostYaw(0, 1, 1)).toBeCloseTo(Math.PI / 2, 12)
   })
 
-  test('replaces the center beacon when spare candidates preserve the quality count', () => {
-    const allCandidates = createLandrushZombieNightBeaconPlacements({
-      groundY: 1.25,
-      quality: 'balanced',
-      roads: ROADS,
-    })
-    const roadPoints = ROADS.flatMap((road) => road.points)
-    const center = roadPoints.reduce((sum, point) => ({ x: sum.x + point.x, z: sum.z + point.z }), {
-      x: 0,
-      z: 0,
-    })
-    center.x /= roadPoints.length
-    center.z /= roadPoints.length
-    const nearestCenterCandidate = [...allCandidates].sort((left, right) => {
-      const leftDistance = (left.position[0] - center.x) ** 2 + (left.position[2] - center.z) ** 2
-      const rightDistance =
-        (right.position[0] - center.x) ** 2 + (right.position[2] - center.z) ** 2
-      return leftDistance - rightDistance || left.id.localeCompare(right.id)
-    })[0]!
-    const low = createLandrushZombieNightBeaconPlacements({
-      groundY: 1.25,
-      quality: 'low',
-      roads: ROADS,
-    })
+  test('maps the measured rectangular base through the rendered Three.js yaw', () => {
+    const position = [10, 4, 20] as const
+    const unrotated = createLandrushZombieNightStreetLightpostBaseFootprint(position, 0)
+    expect(unrotated[0]!.x).toBeCloseTo(
+      position[0] - LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_ALONG_ROAD_HALF_WIDTH_METERS,
+      12,
+    )
+    expect(unrotated[0]!.z).toBeCloseTo(
+      position[2] - LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+      12,
+    )
+    const quarterTurn = createLandrushZombieNightStreetLightpostBaseFootprint(position, Math.PI / 2)
+    expect(quarterTurn[0]!.x).toBeCloseTo(
+      position[0] - LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+      12,
+    )
+    expect(quarterTurn[0]!.z).toBeCloseTo(
+      position[2] + LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_ALONG_ROAD_HALF_WIDTH_METERS,
+      12,
+    )
+  })
 
-    expect(allCandidates).toHaveLength(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced)
-    expect(low).toHaveLength(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.low)
-    expect(low.map(({ id }) => id)).not.toContain(nearestCenterCandidate.id)
+  test('keeps every full fixture base on top of the natural curb and outside the spacing floor', () => {
+    const placements = createLandrushZombieNightBeaconPlacements({
+      quality: 'balanced',
+      roadPlan: ROAD_PLAN,
+    })
+    const innerEdge = NATURAL_ROAD_STYLE.carriageway.widthMeters * 0.5
+    const outerEdge = innerEdge + NATURAL_ROAD_STYLE.sidewalk.widthMeters
+    const baseHalfWidth = LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS
+    expect(baseHalfWidth * 2).toBeLessThan(NATURAL_ROAD_STYLE.sidewalk.widthMeters)
+    expect(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE).toEqual([2, 3.4, 2])
+    for (const placement of placements) {
+      const road = ROADS.find(({ id }) => id === placement.roadId)
+      expect(road).toBeDefined()
+      expect(placement.roadOffsetMeters - baseHalfWidth).toBeGreaterThan(innerEdge)
+      expect(placement.roadOffsetMeters + baseHalfWidth).toBeLessThan(outerEdge)
+      expect(outerEdge - (placement.roadOffsetMeters + baseHalfWidth)).toBeCloseTo(
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.curbOuterClearanceMeters,
+        10,
+      )
+      expect(placement.position[1]).toBeCloseTo(
+        ROAD_PLAN.groundElevation +
+          NATURAL_ROAD_STYLE.carriageway.surfaceOffsetMeters +
+          NATURAL_ROAD_STYLE.sidewalk.curbHeightMeters,
+        12,
+      )
+      expect(
+        naturalRoadSidewalkContainsFootprint(
+          ROAD_PLAN,
+          createLandrushZombieNightStreetLightpostBaseFootprint(
+            placement.position,
+            placement.rotationY,
+          ),
+        ),
+      ).toBe(true)
+    }
+    for (let leftIndex = 0; leftIndex < placements.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < placements.length; rightIndex += 1) {
+        const left = placements[leftIndex]!
+        const right = placements[rightIndex]!
+        expect(
+          Math.hypot(left.position[0] - right.position[0], left.position[2] - right.position[2]),
+        ).toBeGreaterThanOrEqual(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.minimumSpacingMeters)
+      }
+    }
+    expect(new Set(placements.map(({ side }) => side))).toEqual(new Set([-1, 1]))
+  })
+
+  test('keeps isolated short road fragments out of the street-light density plan', () => {
+    const shortRoadPlan = createNaturalRoadPlan({
+      elevation: 0,
+      perimeter: PERIMETER,
+      quality: 'high',
+      roads: [
+        {
+          ...ROADS[0]!,
+          id: 'short-fragment',
+          points: [
+            { x: 0, z: 0 },
+            {
+              x: LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.minimumRoadLengthMeters - 0.01,
+              z: 0,
+            },
+          ],
+        },
+      ],
+      seed: 'cala',
+    })
+    const placements = createLandrushZombieNightBeaconPlacements({
+      quality: 'balanced',
+      roadPlan: shortRoadPlan,
+    })
+    expect(placements).toEqual([])
+  })
+
+  test('excludes roads rendered as the island perimeter promenade', () => {
+    const perimeterRoad: LandrushRoadSegment = {
+      connectsParcelIds: ['parcel-edge'],
+      fromNodeId: 'perimeter-south',
+      id: 'perimeter-promenade-source',
+      kind: 'spine',
+      points: [
+        { x: -32, z: -16 },
+        { x: -32, z: 16 },
+      ],
+      r3fPoints: [
+        [-32, 0, -16],
+        [-32, 0, 16],
+      ],
+      toNodeId: 'perimeter-north',
+      width: 2.15,
+    }
+    const roadPlan = createNaturalRoadPlan({
+      elevation: 0,
+      perimeter: PERIMETER,
+      quality: 'high',
+      roads: [ROADS[0]!, perimeterRoad],
+      seed: 'cala',
+    })
+    expect(roadPlan.perimeterSidewalkRoadIds).toContain(perimeterRoad.id)
+    const placements = createLandrushZombieNightBeaconPlacements({
+      quality: 'balanced',
+      roadPlan,
+    })
+    expect(placements.length).toBeGreaterThan(0)
+    expect(placements.every(({ roadId }) => roadId !== perimeterRoad.id)).toBe(true)
+  })
+
+  test('rejects a center-only false positive beyond a rendered sidewalk end cap', () => {
+    const road = {
+      ...ROADS[0]!,
+      id: 'end-cap-road',
+      points: [
+        { x: -5, z: 0 },
+        { x: 5, z: 0 },
+      ],
+    }
+    const roadPlan = createNaturalRoadPlan({
+      elevation: 0,
+      perimeter: PERIMETER,
+      quality: 'high',
+      roads: [road],
+      seed: 'cala',
+    })
+    const position = [
+      5.2,
+      NATURAL_ROAD_STYLE.carriageway.surfaceOffsetMeters +
+        NATURAL_ROAD_STYLE.sidewalk.curbHeightMeters,
+      -(
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.carriagewayHalfWidthMeters +
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.sidewalkWidthMeters -
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.baseCrossRoadHalfWidthMeters -
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.curbOuterClearanceMeters
+      ),
+    ] as const
+    const centerDistance = distanceToOpenPolyline({ x: position[0], z: position[2] }, road.points)
+    expect(
+      centerDistance - LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+    ).toBeGreaterThan(NATURAL_ROAD_STYLE.carriageway.widthMeters / 2)
+    expect(
+      centerDistance + LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+    ).toBeLessThan(
+      NATURAL_ROAD_STYLE.carriageway.widthMeters / 2 + NATURAL_ROAD_STYLE.sidewalk.widthMeters,
+    )
+    expect(
+      naturalRoadSidewalkContainsFootprint(
+        roadPlan,
+        createLandrushZombieNightStreetLightpostBaseFootprint(position, 0),
+      ),
+    ).toBe(false)
   })
 
   test('keeps beacon pulse deterministic and within the authored luminance band', () => {
@@ -350,3 +549,26 @@ describe('Landrush zombie night presentation state', () => {
     )
   })
 })
+
+function distanceToOpenPolyline(
+  point: { x: number; z: number },
+  points: readonly { x: number; z: number }[],
+) {
+  let best = Number.POSITIVE_INFINITY
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index]!
+    const end = points[index + 1]!
+    const dx = end.x - start.x
+    const dz = end.z - start.z
+    const denominator = dx * dx + dz * dz
+    const amount = Math.max(
+      0,
+      Math.min(1, ((point.x - start.x) * dx + (point.z - start.z) * dz) / (denominator || 1)),
+    )
+    best = Math.min(
+      best,
+      Math.hypot(point.x - (start.x + dx * amount), point.z - (start.z + dz * amount)),
+    )
+  }
+  return best
+}

@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { launchBenchBrowser } from './chrome.mjs'
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
-const CANONICAL_PATH = '/landrush-lab/pascal-multiplayer-island/'
+const CANONICAL_PATH = '/landrush-lab/pascal-multiplayer-island'
 const START_BUTTON = '[data-testid="landrush-zombie-escape-build-countdown"]'
 const GAME_FPS_SELECTOR = '[data-landrush-day-chrome] > section > span:nth-child(8)'
 const MAX_CAPTURE_BYTES = 8 * 1024 * 1024
@@ -60,11 +60,35 @@ export function parseColdEntryArgs(argv) {
 
 export function extractColdEntryBuildId(html) {
   const chunks = [...String(html).matchAll(/self\.__next_f\.push\(\s*\[1,\s*("(?:[^"\\]|\\.)*")\s*\]\s*\)/g)].map((match) => JSON.parse(match[1])).join('')
-  const roots = chunks.split('\n').filter((line) => line.startsWith('0:'))
+  const roots = chunks.split('\n').flatMap((line) => {
+    const separator = line.indexOf(':')
+    if (separator <= 0) return []
+    try {
+      const value = JSON.parse(line.slice(separator + 1))
+      return value && typeof value === 'object' && !Array.isArray(value) && Object.hasOwn(value, 'b') ? [value] : []
+    } catch {
+      return []
+    }
+  })
   if (roots.length !== 1) throw new Error(`Expected one Next flight root; received ${roots.length}`)
-  const value = JSON.parse(roots[0].slice(2)).b
+  const value = roots[0].b
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('Next build ID is missing')
   return value
+}
+
+export function extractColdEntryPreflightBuildId(preflight, expectedUrl, html) {
+  if (preflight.status >= 300 && preflight.status < 400) throw new Error(`Preflight redirected with HTTP ${preflight.status} to ${preflight.location ?? '(missing Location)'}`)
+  if (preflight.status !== 200) throw new Error(`Preflight returned HTTP ${preflight.status}`)
+  if (preflight.url !== expectedUrl) throw new Error(`Preflight route mismatch: expected ${expectedUrl}, received ${preflight.url}`)
+  return extractColdEntryBuildId(html)
+}
+
+export function areOwnedColdEntryResourcesCleaned(cleanup) {
+  return (!cleanup.browserCreated || cleanup.browserClosed) && (!cleanup.profileCreated || cleanup.profileRemoved)
+}
+
+export function isExpectedColdEntryCanceledMediaPreload(resourceType, errorText) {
+  return resourceType === 'media' && errorText === 'net::ERR_ABORTED'
 }
 
 export function installColdEntryObserver(config) {
@@ -315,7 +339,7 @@ export async function runColdEntry(options) {
   const sourceVerification = options.sourceKind === 'worktree'
     ? 'Expected source is this local worktree base HEAD, accompanied by captured before/after dirty status. This is not publication proof or proof that dirty file bytes match the served build; the caller must tie its build to this worktree state. Browser identity is checked against expected-build-id.'
     : 'Expected source is an external publication proof supplied by the caller; browser identity is checked against expected-build-id. The captured local worktree state describes the harness, not the published bundle.'
-  const result = { options, runDir, source: { kind: options.sourceKind ?? 'published', worktreeRoot: REPO_ROOT, before: sourceState(), after: null }, sourceVerification, measurement: 'Main-thread requestAnimationFrame cadence and the existing R3F callback FPS label; neither proves physical GPU/compositor presentation FPS.', observer: { nativeTrace: false, cpuProfile: options.cpuProfile, performanceMetrics: options.cpuProfile, periodicScreenshots: false, checkpoints: false, bench: false, frameProfile: false, gpuProfile: false, stateSampleHz: 2, cachedHeartbeatSeconds: 10, startupReadinessTimeoutMs: STARTUP_READINESS_TIMEOUT_MS, phaseMarks: 'DOM handoff and trusted Start zombie pointerdown' }, console: [], pageErrors: [], resourceFailures: [], lifecycle: [], sceneProof: [], failure: null, interruption: null, cleanup: { browserClosed: false, profileRemoved: false }, gates: [] }
+  const result = { options, runDir, source: { kind: options.sourceKind ?? 'published', worktreeRoot: REPO_ROOT, before: sourceState(), after: null }, sourceVerification, measurement: 'Main-thread requestAnimationFrame cadence and the existing R3F callback FPS label; neither proves physical GPU/compositor presentation FPS.', observer: { nativeTrace: false, cpuProfile: options.cpuProfile, performanceMetrics: options.cpuProfile, periodicScreenshots: false, checkpoints: false, bench: false, frameProfile: false, gpuProfile: false, stateSampleHz: 2, cachedHeartbeatSeconds: 10, startupReadinessTimeoutMs: STARTUP_READINESS_TIMEOUT_MS, phaseMarks: 'DOM handoff and trusted Start zombie pointerdown' }, canceledMediaPreloads: [], console: [], pageErrors: [], resourceFailures: [], lifecycle: [], sceneProof: [], failure: null, interruption: null, cleanup: { browserCreated: false, browserClosed: false, profileCreated: false, profileRemoved: false }, gates: [] }
   let browser = null
   let server = null
   let profileDir = null
@@ -371,11 +395,14 @@ export async function runColdEntry(options) {
     if (!options.local && mode && mode !== options.serverMode) throw new Error(`Server mode mismatch: ${mode}`)
     const preflight = await fetch(options.url, { signal: AbortSignal.timeout(30000), redirect: 'manual' })
     const preflightHtml = await preflight.text()
-    result.preflight = { status: preflight.status, url: preflight.url, buildId: extractColdEntryBuildId(preflightHtml), sha256: createHash('sha256').update(preflightHtml).digest('hex') }
-    if (preflight.status !== 200 || result.preflight.buildId !== options.expectedBuildId) throw new Error('Preflight build identity failed')
+    result.preflight = { status: preflight.status, url: preflight.url, location: preflight.headers.get('location'), sha256: createHash('sha256').update(preflightHtml).digest('hex') }
+    result.preflight.buildId = extractColdEntryPreflightBuildId(result.preflight, options.url, preflightHtml)
+    if (result.preflight.buildId !== options.expectedBuildId) throw new Error('Preflight build identity failed')
     throwIfInterrupted()
     profileDir = await mkdtemp(path.join(tmpdir(), 'landrush-cold-entry-'))
+    result.cleanup.profileCreated = true
     browser = await launchBenchBrowser({ headless: false, width: 1600, height: 1000, profileDir })
+    result.cleanup.browserCreated = true
     throwIfInterrupted()
     await browser.page.bringToFront()
     let resolveDone
@@ -401,7 +428,19 @@ export async function runColdEntry(options) {
     await browser.page.addInitScript(installColdEntryObserver, { ...options, startButton: START_BUTTON, gameFpsSelector: GAME_FPS_SELECTOR, startupReadinessTimeoutMs: STARTUP_READINESS_TIMEOUT_MS })
     browser.page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) bounded(result.console, { type: message.type(), text: message.text().slice(0, 1500) }) })
     browser.page.on('pageerror', (error) => bounded(result.pageErrors, { message: error.message }))
-    browser.page.on('requestfailed', (request) => bounded(result.resourceFailures, { url: request.url(), error: request.failure()?.errorText }))
+    browser.page.on('requestfailed', (request) => {
+      const failure = {
+        url: request.url(),
+        error: request.failure()?.errorText,
+        resourceType: request.resourceType(),
+      }
+      bounded(
+        isExpectedColdEntryCanceledMediaPreload(failure.resourceType, failure.error)
+          ? result.canceledMediaPreloads
+          : result.resourceFailures,
+        failure,
+      )
+    })
     browser.page.on('response', (response) => { if (response.status() >= 400) bounded(result.resourceFailures, { url: response.url(), status: response.status() }) })
     await browser.cdp.send('Network.enable')
     await browser.cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
@@ -494,7 +533,7 @@ export async function runColdEntry(options) {
   gate('Exact served build ID and route', result.navigation?.buildId === options.expectedBuildId && result.navigation?.status === 200 && result.navigation?.finalUrl === options.url, result.navigation ?? null)
   gate('Loader hide and game readiness witnessed', Number.isFinite(capture?.hiddenAt) && Number.isFinite(capture?.readyAt), { hiddenAt: capture?.hiddenAt, readyAt: capture?.readyAt })
   gate('Page stayed visible and focused', !!capture && capture.visibility.every((row) => row.value === 'visible') && capture.focus.every((row) => row.focused) && capture.samples.every((row) => row.visibility === 'visible' && row.focused), null)
-  gate('No page/resource/render errors', result.pageErrors.length === 0 && result.resourceFailures.length === 0 && result.console.every((row) => row.type !== 'error') && (capture?.errors.length ?? 1) === 0 && capture?.final.renderError === false, { page: result.pageErrors.length, resource: result.resourceFailures.length, console: result.console.filter((row) => row.type === 'error').length })
+  gate('No page/resource/render errors', result.pageErrors.length === 0 && result.resourceFailures.length === 0 && result.console.every((row) => row.type !== 'error') && (capture?.errors.length ?? 1) === 0 && capture?.final.renderError === false, { page: result.pageErrors.length, resource: result.resourceFailures.length, canceledMediaPreloads: result.canceledMediaPreloads.length, console: result.console.filter((row) => row.type === 'error').length })
   gate('Observer buffers lossless', !!capture && capture.overflow.length === 0, capture?.overflow ?? null)
   const sceneSignatures = result.sceneProof.map((row) => JSON.stringify([row.worldId, row.buildCount, row.savedNodeCount, row.nodeCount, row.levelCount, row.parcels]))
   gate('Stable populated online scene after timing', result.sceneProof.length === 3 && sceneSignatures.every((value) => value === sceneSignatures[0]) && result.sceneProof.every((row) => row.source === 'multiplayer' && row.buildCount > 0 && row.savedNodeCount > 0 && row.levelCount > 0 && row.nodeCount >= row.savedNodeCount), result.sceneProof)
@@ -504,7 +543,7 @@ export async function runColdEntry(options) {
     gate('Requested CPU profile retained', result.cpuProfile?.written === true, result.cpuProfile ?? null)
     gate('CPU profile monotonic clock anchors retained', result.cpuProfile?.timing?.available === true, result.cpuProfile?.timing ?? null)
   }
-  gate('Owned browser/profile cleaned up', result.cleanup.browserClosed && result.cleanup.profileRemoved, result.cleanup)
+  gate('Owned browser/profile cleaned up', areOwnedColdEntryResourcesCleaned(result.cleanup), result.cleanup)
   const phases = []
   if (capture?.frames.length) {
     const add = (name, start, end) => { if (Number.isFinite(start) && Number.isFinite(end) && end > start) phases.push({ name, ...summarizeColdEntryFrames(capture.frames, start, end) }) }

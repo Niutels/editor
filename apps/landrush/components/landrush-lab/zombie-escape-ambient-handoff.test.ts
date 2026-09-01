@@ -163,6 +163,54 @@ describe('Zombie Escape ambient NPC handoff', () => {
     expect(state.zombies.heading[slot]).toBe(source.yaw[0])
     expect(state.zombies.locomotionPhase[slot]).toBe(source.locomotionPhase[0])
     expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(0)
+    expect(state.navigationSparseSpawnSearchStartedCount).toBe(1)
+    expect(state.navigationSparseSpawnSearchCompletedCount).toBe(1)
+  })
+
+  test('falls back outside the player exclusion radius for a dense handoff beside the player', () => {
+    const arena = createZombieEscapeArena(5_407)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_407)
+    const source = createAmbientHandoffSource(state.variantByPoolSlot)
+    source.x[0] = state.player.x
+    source.z[0] = state.player.z
+    installZombieEscapeAmbientHandoffCandidates(state, source)
+    setZombieEscapeGamePhase(state, 'night')
+
+    stepUntilFirstZombie(state, arena)
+
+    const slot = state.ambientHandoff.slotByNpcIndex[0]!
+    expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(3)
+    expect(
+      Math.hypot(state.zombies.x[slot]! - state.player.x, state.zombies.z[slot]! - state.player.z),
+    ).toBeGreaterThanOrEqual(8)
+    expect(state.ambientHandoff.generationByNpcIndex[0]).toBe(state.zombies.pool.generation[slot])
+    expect(state.ambientHandoff.npcIndexBySlot[slot]).toBe(0)
+    expect(state.waveSpawnRemaining).toBe(9)
+  })
+
+  test('falls back outside the player exclusion radius for a sparse handoff beside the player', () => {
+    const arena = createZombieEscapeArena(5_408)
+    const state = createZombieEscapeSimulation(arena, 9_408, undefined, {
+      requireSparseNavigation: true,
+    })
+    setZombieEscapeCollisionWorld(state, createSparseTestWorld())
+    const source = createAmbientHandoffSource(state.variantByPoolSlot)
+    source.x[0] = state.player.x
+    source.z[0] = state.player.z
+    installZombieEscapeAmbientHandoffCandidates(state, source)
+    setZombieEscapeGamePhase(state, 'night')
+
+    stepUntilFirstZombie(state, arena)
+
+    const slot = state.ambientHandoff.slotByNpcIndex[0]!
+    expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(3)
+    expect(
+      Math.hypot(state.zombies.x[slot]! - state.player.x, state.zombies.z[slot]! - state.player.z),
+    ).toBeGreaterThanOrEqual(8)
+    expect(state.ambientHandoff.generationByNpcIndex[0]).toBe(state.zombies.pool.generation[slot])
+    expect(state.ambientHandoff.npcIndexBySlot[slot]).toBe(0)
+    expect(state.waveSpawnRemaining).toBe(9)
   })
 
   test('falls back after bounded failed anchors and retains generation-keyed identity ownership', () => {

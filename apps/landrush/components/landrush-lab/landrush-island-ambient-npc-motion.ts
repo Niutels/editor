@@ -15,8 +15,10 @@ const NPC_COLLISION_DISTANCE_METERS = 0.72
 const NPC_COLLISION_DISTANCE_SQUARED = NPC_COLLISION_DISTANCE_METERS * NPC_COLLISION_DISTANCE_METERS
 const NPC_MAX_FRAME_DELTA_SECONDS = 0.1
 const NPC_SPAWN_CLEARANCE_METERS = 0.9
+const NPC_SPAWN_CLEARANCE_SQUARED = NPC_SPAWN_CLEARANCE_METERS * NPC_SPAWN_CLEARANCE_METERS
 const NPC_WAYPOINT_RADIUS_METERS = 0.000_01
 const NPC_JOURNEY_ATTEMPT_COUNT = 12
+const NPC_MINIMUM_JOURNEY_DISTANCE_SQUARED = 2.5 * 2.5
 const NPC_JOURNEY_PLANNER_JOB_SLICE_OPERATIONS = 16
 
 export const LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME = 128
@@ -372,11 +374,11 @@ function resolveInitialNpcPosition(
       const candidate = resolveLandrushIslandAmbientDestination(world, seed, attempt, 'grass')
       if (
         candidate &&
-        accepted.every(
-          (position) =>
-            Math.hypot(candidate.x - position.x, candidate.z - position.z) >=
-            NPC_SPAWN_CLEARANCE_METERS,
-        )
+        accepted.every((position) => {
+          const dx = candidate.x - position.x
+          const dz = candidate.z - position.z
+          return dx * dx + dz * dz >= NPC_SPAWN_CLEARANCE_SQUARED
+        })
       ) {
         selected = candidate
         break
@@ -467,7 +469,12 @@ function beginNextJourney(
     const preference: LandrushIslandAmbientDestinationPreference =
       sequence % 3 === 0 ? 'mixed' : 'grass'
     const target = resolveLandrushIslandAmbientDestination(world, state.seed, sequence, preference)
-    if (!target || Math.hypot(target.x - state.position.x, target.z - state.position.z) < 2.5) {
+    const targetDx = (target?.x ?? state.position.x) - state.position.x
+    const targetDz = (target?.z ?? state.position.z) - state.position.z
+    if (
+      !target ||
+      targetDx * targetDx + targetDz * targetDz < NPC_MINIMUM_JOURNEY_DISTANCE_SQUARED
+    ) {
       continue
     }
     const path = findLandrushIslandAmbientWalkablePath(world, state.position, target)
@@ -512,7 +519,12 @@ function advanceLandrushIslandAmbientNpcJourneyJob(
         sequence,
         preference,
       )
-      if (!target || Math.hypot(target.x - job.origin.x, target.z - job.origin.z) < 2.5) {
+      const targetDx = (target?.x ?? job.origin.x) - job.origin.x
+      const targetDz = (target?.z ?? job.origin.z) - job.origin.z
+      if (
+        !target ||
+        targetDx * targetDx + targetDz * targetDz < NPC_MINIMUM_JOURNEY_DISTANCE_SQUARED
+      ) {
         continue
       }
       const running = hashUnit(`${job.state.seed}:${sequence}:run`) < 0.18

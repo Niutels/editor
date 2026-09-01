@@ -59,6 +59,7 @@ import {
   countZombieEscapeAuthoredVariantCapacity,
   createZombieEscapeAuthoredInstancePresentationCooperatively,
   type ZombieEscapeAuthoredInstancePresentation,
+  type ZombieEscapeAuthoredInstanceSelection,
 } from './zombie-escape-instanced-skinned-presentation'
 import {
   resolveZombieEscapeLocomotionPlaybackRate,
@@ -253,24 +254,74 @@ export function isZombieEscapeZombieSlotExternallyPresented(
   )
 }
 
+export type ZombieEscapeAuthoredVariantSlotBuckets =
+  readonly ZombieEscapeAuthoredInstanceSelection[]
+
+export function createZombieEscapeAuthoredVariantSlotBuckets(
+  variantByPoolSlot: Uint8Array,
+  variantCount: number,
+): ZombieEscapeAuthoredVariantSlotBuckets {
+  if (!(Number.isSafeInteger(variantCount) && variantCount >= 1 && variantCount <= 256)) {
+    throw new Error(
+      `Authored zombie variant count must be an integer from 1 to 256; received ${String(variantCount)}.`,
+    )
+  }
+  if (variantByPoolSlot.length > 65_536) {
+    throw new Error('Authored zombie pool slots must fit in unsigned 16-bit selection storage.')
+  }
+  for (const variantIndex of variantByPoolSlot) {
+    if (variantIndex >= variantCount) {
+      throw new Error(
+        `Authored zombie pool variant ${String(variantIndex)} has no selection bucket.`,
+      )
+    }
+  }
+  return Array.from({ length: variantCount }, (_, variantIndex) => ({
+    count: 0,
+    slots: new Uint16Array(
+      countZombieEscapeAuthoredVariantCapacity(variantByPoolSlot, variantIndex),
+    ),
+  }))
+}
+
 export function updateZombieEscapeGeneratedZombiePresentationExclusions(
   simulation: ZombieEscapeSimulation,
   detailedSlots: Uint8Array,
   externallyPresentedSlots: Uint8Array,
   authoredExclusionSlots: Uint8Array,
+  authoredVariantSlots: ZombieEscapeAuthoredVariantSlotBuckets,
 ) {
-  const capacity = simulation.zombies.pool.active.length
+  const zombies = simulation.zombies
+  const capacity = zombies.pool.active.length
   if (
     detailedSlots.length < capacity ||
     externallyPresentedSlots.length < capacity ||
-    authoredExclusionSlots.length < capacity
+    authoredExclusionSlots.length < capacity ||
+    zombies.variant.length < capacity
   ) {
     throw new Error('Generated zombie presentation exclusion arrays must cover the active pool.')
   }
+  for (const selection of authoredVariantSlots) selection.count = 0
   for (let slot = 0; slot < capacity; slot += 1) {
     const externallyPresented = isZombieEscapeZombieSlotExternallyPresented(simulation, slot)
+    const authoredExcluded = detailedSlots[slot] !== 0 || externallyPresented
     externallyPresentedSlots[slot] = externallyPresented ? 1 : 0
-    authoredExclusionSlots[slot] = detailedSlots[slot] !== 0 || externallyPresented ? 1 : 0
+    authoredExclusionSlots[slot] = authoredExcluded ? 1 : 0
+    if (zombies.pool.active[slot] === 0 || authoredExcluded) continue
+    const variantIndex = zombies.variant[slot]!
+    const selection = authoredVariantSlots[variantIndex]
+    if (!selection) {
+      throw new Error(
+        `Authored zombie pool variant ${String(variantIndex)} has no selection bucket.`,
+      )
+    }
+    if (selection.count >= selection.slots.length) {
+      throw new Error(
+        `Authored zombie instance capacity ${String(selection.slots.length)} is below the selected count.`,
+      )
+    }
+    selection.slots[selection.count] = slot
+    selection.count += 1
   }
 }
 
@@ -344,6 +395,10 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
     const capacity = simulationRef.current.zombies.pool.capacity
     return {
       authored: new Uint8Array(capacity),
+      authoredByVariant: createZombieEscapeAuthoredVariantSlotBuckets(
+        simulationRef.current.variantByPoolSlot,
+        ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+      ),
       externallyPresented: new Uint8Array(capacity),
     }
   })
@@ -402,6 +457,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       detailedZombieSlotsRef.current,
       externallyPresentedZombieSlotsRef.current,
       authoredZombieExclusionSlotsRef.current,
+      zombiePresentationExclusionSlots.authoredByVariant,
     )
     if (presentationLodDebugRef.current) {
       updateZombieEscapePresentationLodDebugSelection(presentationLodDebugRef.current, counts)
@@ -628,7 +684,7 @@ export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAs
       />
       {quality === 'balanced' ? (
         <ZombieEscapeGeneratedZombies
-          authoredZombieExclusionSlotsRef={authoredZombieExclusionSlotsRef}
+          authoredZombieSelections={zombiePresentationExclusionSlots.authoredByVariant}
           detailedZombies={detailedZombies}
           detailedZombieSlotsRef={detailedZombieSlotsRef}
           externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
@@ -864,7 +920,7 @@ function LoadedGeneratedWeaponModel({
 }
 
 const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies({
-  authoredZombieExclusionSlotsRef,
+  authoredZombieSelections,
   detailedZombies,
   detailedZombieSlotsRef,
   externallyPresentedZombieSlotsRef,
@@ -878,7 +934,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
   zombieShader,
   zombiePresentationFramePriority,
 }: {
-  authoredZombieExclusionSlotsRef: MutableRefObject<Uint8Array>
+  authoredZombieSelections: ZombieEscapeAuthoredVariantSlotBuckets
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   externallyPresentedZombieSlotsRef: MutableRefObject<Uint8Array>
@@ -973,7 +1029,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
           >
             <Suspense fallback={null}>
               <GeneratedZombieVariant
-                authoredZombieExclusionSlotsRef={authoredZombieExclusionSlotsRef}
+                authoredSelection={authoredZombieSelections[variantIndex]!}
                 detailedZombies={detailedZombies}
                 detailedZombieSlotsRef={detailedZombieSlotsRef}
                 externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
@@ -999,7 +1055,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
 })
 
 const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
-  authoredZombieExclusionSlotsRef,
+  authoredSelection,
   detailedZombies,
   detailedZombieSlotsRef,
   externallyPresentedZombieSlotsRef,
@@ -1016,7 +1072,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
-  authoredZombieExclusionSlotsRef: MutableRefObject<Uint8Array>
+  authoredSelection: ZombieEscapeAuthoredInstanceSelection
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   externallyPresentedZombieSlotsRef: MutableRefObject<Uint8Array>
@@ -1038,7 +1094,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   const walkGltf = useGLTF(zombie.glb.walk.path)
   return (
     <PreparedGeneratedZombieVariant
-      authoredZombieExclusionSlotsRef={authoredZombieExclusionSlotsRef}
+      authoredSelection={authoredSelection}
       detailedZombies={detailedZombies}
       detailedZombieSlotsRef={detailedZombieSlotsRef}
       externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
@@ -1062,7 +1118,7 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
 })
 
 function PreparedGeneratedZombieVariant({
-  authoredZombieExclusionSlotsRef,
+  authoredSelection,
   detailedZombies,
   detailedZombieSlotsRef,
   externallyPresentedZombieSlotsRef,
@@ -1082,7 +1138,7 @@ function PreparedGeneratedZombieVariant({
   zombie,
   zombieShader,
 }: {
-  authoredZombieExclusionSlotsRef: MutableRefObject<Uint8Array>
+  authoredSelection: ZombieEscapeAuthoredInstanceSelection
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
   externallyPresentedZombieSlotsRef: MutableRefObject<Uint8Array>
@@ -1250,11 +1306,7 @@ function PreparedGeneratedZombieVariant({
       const simulation = simulationRef.current
       const zombies = simulation.zombies
       const visuals = visualsRef.current
-      presentation.update({
-        detailedSlots: authoredZombieExclusionSlotsRef.current,
-        elapsedSeconds: simulation.elapsedSeconds,
-        zombies,
-      })
+      presentation.update(authoredSelection, zombies)
       const presentationLodDebug = presentationLodDebugRef.current
       if (presentationLodDebug) {
         const authoredDebug = presentation.getDebugSnapshot()

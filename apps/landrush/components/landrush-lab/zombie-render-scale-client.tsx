@@ -19,6 +19,7 @@ import {
 import {
   createZombieEscapeAuthoredInstancePresentation,
   type ZombieEscapeAuthoredInstancePresentation,
+  type ZombieEscapeAuthoredInstanceSelection,
   type ZombieEscapeAuthoredInstanceState,
 } from './zombie-escape-instanced-skinned-presentation'
 import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
@@ -215,6 +216,14 @@ function ZombieRenderScaleWorld({
     () => assignments.map((slots) => slots.filter((slot) => detailedSlots[slot] !== 0)),
     [assignments, detailedSlots],
   )
+  const authoredSelections = useMemo<readonly ZombieEscapeAuthoredInstanceSelection[]>(
+    () =>
+      assignments.map((slots) => {
+        const authoredSlots = slots.filter((slot) => detailedSlots[slot] === 0)
+        return { count: authoredSlots.length, slots: Uint16Array.from(authoredSlots) }
+      }),
+    [assignments, detailedSlots],
+  )
   const authoredInstanceState = useMemo(() => createAuthoredInstanceState(count), [count])
   const impactVisualRegistry = useMemo(createZombieEscapeImpactVisualRegistry, [])
   const zombieShader = useMemo(() => createZombieEscapeZombieShader({ phaseAmount: 1 }), [])
@@ -260,16 +269,17 @@ function ZombieRenderScaleWorld({
     [groundGeometry, groundMaterial],
   )
 
-  useFrame((state, delta) => {
+  useFrame((_, delta) => {
     if (presentation !== 'authored-instanced') return
     advanceAuthoredInstancePhases(authoredInstanceState, delta)
-    for (const authoredPresentation of authoredPresentationsRef.current) {
+    for (
+      let variantIndex = 0;
+      variantIndex < authoredPresentationsRef.current.length;
+      variantIndex += 1
+    ) {
+      const authoredPresentation = authoredPresentationsRef.current[variantIndex]
       if (!authoredPresentation) continue
-      authoredPresentation.update({
-        detailedSlots,
-        elapsedSeconds: state.clock.elapsedTime,
-        zombies: authoredInstanceState,
-      })
+      authoredPresentation.update(authoredSelections[variantIndex]!, authoredInstanceState)
     }
   }, -17)
 

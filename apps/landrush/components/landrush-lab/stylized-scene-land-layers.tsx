@@ -23,6 +23,7 @@ import {
   Frustum,
   type Group,
   InstancedBufferAttribute,
+  InstancedBufferGeometry,
   type InstancedMesh,
   type Material,
   Matrix4,
@@ -950,8 +951,9 @@ function StylizedSceneGrassLayer({
     [groundColorTexture, profileMeasure, renderGeometry, resolvedTuning],
   )
   const material = materialBundle?.material ?? null
-  const meshRef = useRef<InstancedMesh>(null!)
-  const layoutMeshRef = useRef<InstancedMesh | null>(null)
+  const webGpuMeshRef = useRef<Mesh>(null!)
+  const webGlMeshRef = useRef<InstancedMesh>(null!)
+  const layoutMeshRef = useRef<Mesh | InstancedMesh | null>(null)
   const dummyRef = useRef(new Object3D())
   const drawStateRef = useRef<StylizedGrassDrawState>({
     eligibleTotal: 0,
@@ -985,11 +987,12 @@ function StylizedSceneGrassLayer({
   const applyExactDrawMembership = useCallback(
     (nowMs: number) => {
       const membership = exactDrawMembershipRef.current
-      const mesh = meshRef.current
+      const mesh = shaderTransformsGrassInstances ? webGpuMeshRef.current : webGlMeshRef.current
       if (!mesh) return false
       mesh.visible = bladesVisible
       if (!bladesVisible) {
-        mesh.count = 0
+        if (geometry) geometry.instanceCount = 0
+        if (!shaderTransformsGrassInstances) webGlMeshRef.current.count = 0
         return true
       }
       if (!geometry || !material) return false
@@ -1016,7 +1019,8 @@ function StylizedSceneGrassLayer({
       })
       if (decision === 'wait') return false
       if (decision === 'none') {
-        mesh.count = state.instances.length
+        geometry.instanceCount = state.instances.length
+        if (!shaderTransformsGrassInstances) webGlMeshRef.current.count = state.instances.length
         appliedResidentContentGenerationRef.current = residentSources.contentGeneration
         appliedResidentInstanceRevisionRef.current = residentSources.revision
         return true
@@ -1086,19 +1090,18 @@ function StylizedSceneGrassLayer({
           }
         }
         drawInstancesRef.current = drawUpdate.instances
-        // R3F replaces the InstancedMesh when args change, so its new matrix buffer
-        // and every static instance attribute need one authoritative initialization set.
+        // R3F replaces the render object when args change, so its static instance
+        // attributes need one authoritative initialization.
         const structuralUploadSlots = resolveStylizedGrassStructuralUploadSlots({
           changedSlots: drawUpdate.changedSlots,
           instanceCount: drawUpdate.instances.length,
           resourceReallocated: meshReplaced,
         })
-        if (shaderTransformsGrassInstances) {
-          if (meshReplaced) initializeStylizedGrassIdentityMatrices(mesh)
-        } else {
-          mesh.instanceMatrix.setUsage(DynamicDrawUsage)
+        if (!shaderTransformsGrassInstances) {
+          const webGlMesh = webGlMeshRef.current
+          webGlMesh.instanceMatrix.setUsage(DynamicDrawUsage)
           applyStylizedGrassStaticMatrices(
-            mesh,
+            webGlMesh,
             drawUpdate.instances,
             structuralUploadSlots,
             resolvedTuning,
@@ -1132,7 +1135,10 @@ function StylizedSceneGrassLayer({
             lastFadeSummaryRef.current,
           )
         }
-        mesh.count = drawUpdate.instances.length
+        geometry.instanceCount = drawUpdate.instances.length
+        if (!shaderTransformsGrassInstances) {
+          webGlMeshRef.current.count = drawUpdate.instances.length
+        }
       })
       if (!completed) return false
       appliedDrawRevisionRef.current = membership.revision
@@ -1285,7 +1291,7 @@ function StylizedSceneGrassLayer({
         previousFadeFrameAt === null
           ? Math.max(0, delta)
           : Math.max(0, (fadeFrameAt - previousFadeFrameAt) / 1000)
-      const mesh = meshRef.current
+      const mesh = shaderTransformsGrassInstances ? webGpuMeshRef.current : webGlMeshRef.current
       const activeDrawInstances = drawInstancesRef.current
       const drawInstanceCount = drawStateRef.current.slotById.size
       const hadFadeZones = fadeZonesRef.current.length > 0
@@ -1374,11 +1380,12 @@ function StylizedSceneGrassLayer({
       grassFadeBlockerSignature,
       interactionRef,
       materialBundle,
+      shaderTransformsGrassInstances,
     ],
   )
 
   useFrame(({ clock }, delta) => {
-    const mesh = meshRef.current
+    const mesh = shaderTransformsGrassInstances ? webGpuMeshRef.current : webGlMeshRef.current
     const visibility = clamp01(visibilityRef?.current ?? 1)
     if (materialBundle) materialBundle.uniforms.visibility.value = visibility
     if (material instanceof MeshStandardMaterial) material.opacity = visibility
@@ -1407,12 +1414,21 @@ function StylizedSceneGrassLayer({
 
   if (!geometry || !material) return null
 
-  return (
+  return shaderTransformsGrassInstances ? (
+    <mesh
+      args={[geometry, material]}
+      frustumCulled={false}
+      position={[0, elevation + 0.03, 0]}
+      ref={webGpuMeshRef}
+      renderOrder={renderOrder}
+      visible={bladesVisible}
+    />
+  ) : (
     <instancedMesh
       args={[geometry, material, instanceCapacity]}
       frustumCulled={false}
       position={[0, elevation + 0.03, 0]}
-      ref={meshRef}
+      ref={webGlMeshRef}
       renderOrder={renderOrder}
       visible={bladesVisible}
     />
@@ -3714,19 +3730,6 @@ function applyStylizedGrassStaticMatrices(
   }
 }
 
-function initializeStylizedGrassIdentityMatrices(mesh: InstancedMesh) {
-  const matrixArray = mesh.instanceMatrix.array
-  matrixArray.fill(0)
-  for (let offset = 0; offset < matrixArray.length; offset += 16) {
-    matrixArray[offset] = 1
-    matrixArray[offset + 5] = 1
-    matrixArray[offset + 10] = 1
-    matrixArray[offset + 15] = 1
-  }
-  mesh.instanceMatrix.clearUpdateRanges()
-  mesh.instanceMatrix.needsUpdate = true
-}
-
 function applyStylizedGrassFadeAttributes(
   geometry: BufferGeometry,
   instances: readonly StylizedGrassInstance[],
@@ -4088,7 +4091,9 @@ function stylizedGrassInstanceCapacity(
 }
 
 export function withStylizedGrassInstanceAttributes(geometry: BufferGeometry, capacity: number) {
-  const instancedGeometry = geometry.clone()
+  const instancedGeometry = new InstancedBufferGeometry()
+  BufferGeometry.prototype.copy.call(instancedGeometry, geometry)
+  instancedGeometry.instanceCount = 0
   instancedGeometry.computeBoundingBox()
   instancedGeometry.setAttribute(
     'aTransform',
@@ -4283,11 +4288,9 @@ function createStylizedGrassNodeMaterial(
   const interactionWorldOffset = interactionDirection.mul(
     interactionFalloff.mul(grassInteraction.w).mul(STYLIZED_SCENE_INTERACTION_MAX_BEND),
   )
-  const yawCos = cos(instanceYaw)
-  const yawSin = sin(instanceYaw)
   const interactionLocalOffset = vec2(
-    interactionWorldOffset.x.mul(yawCos).sub(interactionWorldOffset.y.mul(yawSin)),
-    interactionWorldOffset.x.mul(yawSin).add(interactionWorldOffset.y.mul(yawCos)),
+    interactionWorldOffset.x.mul(instanceYawCos).sub(interactionWorldOffset.y.mul(instanceYawSin)),
+    interactionWorldOffset.x.mul(instanceYawSin).add(interactionWorldOffset.y.mul(instanceYawCos)),
   )
   const interactionFold = tslClamp(interactionFalloff.mul(grassInteraction.w).mul(0.96), 0, 0.86)
   const worldOffset = windWorldOffset
@@ -4301,7 +4304,6 @@ function createStylizedGrassNodeMaterial(
       .mul(STYLIZED_SCENE_GRASS_EDGE_FILL_ROOT_WIDTH_MULTIPLIER - 1)
       .mul(rootWidthProfile),
   )
-  // Three applies instanceMatrix before positionNode, so this pivot must be in the same space.
   const thickenedBladeObjectXZ = bladeWorldRoot.add(
     bladeLocalXZ.sub(bladeWorldRoot).mul(rootWidthFactor),
   )

@@ -45,6 +45,35 @@ function readSelectedSlots(selected: Uint8Array) {
   return slots
 }
 
+function resolveExhaustiveInitialSelection(input: ZombieEscapeVisualLodInput) {
+  const candidates = Array.from({ length: input.active.length }, (_, slot) => slot)
+    .filter((slot) => input.active[slot] !== 0 && input.readyVariants.has(input.variant[slot]!))
+    .sort((first, second) => {
+      const firstReacting = input.hitFlash[first]! > 0 || input.hitReaction[first]! > 0
+      const secondReacting = input.hitFlash[second]! > 0 || input.hitReaction[second]! > 0
+      if (firstReacting !== secondReacting) return firstReacting ? -1 : 1
+      const firstDistance = Math.hypot(
+        input.x[first]! - input.observerX,
+        input.z[first]! - input.observerZ,
+      )
+      const secondDistance = Math.hypot(
+        input.x[second]! - input.observerX,
+        input.z[second]! - input.observerZ,
+      )
+      return firstDistance - secondDistance || first - second
+    })
+  const selected: number[] = []
+  const variantCounts = new Uint8Array(ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length)
+  for (const slot of candidates) {
+    const variant = input.variant[slot]!
+    if (variantCounts[variant]! >= ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT) continue
+    selected.push(slot)
+    variantCounts[variant] = variantCounts[variant]! + 1
+    if (selected.length >= ZOMBIE_ESCAPE_DETAILED_ZOMBIE_CAPACITY) break
+  }
+  return selected.sort((first, second) => first - second)
+}
+
 describe('zombie visual LOD selection', () => {
   test('fills the exact global cap with nearest ready slots while capping every variant at two', () => {
     const { input, state } = createVisualLodFixture(30)
@@ -131,6 +160,36 @@ describe('zombie visual LOD selection', () => {
     updateZombieEscapeVisualLod(state, input)
     expect(readSelectedSlots(state.selected)).toEqual([0, 10])
     expect(state.counts.eligibleActiveCount).toBe(2)
+  })
+
+  test('matches exhaustive dense-pool ranking with the bounded per-variant shortlist', () => {
+    let randomState = 0x6d2b_79f5
+    const nextRandom = () => {
+      randomState = (Math.imul(randomState, 1_664_525) + 1_013_904_223) >>> 0
+      return randomState / 0x1_0000_0000
+    }
+
+    for (let sample = 0; sample < 32; sample += 1) {
+      const { input, state } = createVisualLodFixture(100)
+      input.observerX = nextRandom() * 40 - 20
+      input.observerZ = nextRandom() * 40 - 20
+      for (let slot = 0; slot < input.active.length; slot += 1) {
+        input.active[slot] = nextRandom() > 0.12 ? 1 : 0
+        input.variant[slot] = Math.floor(nextRandom() * ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length)
+        input.x[slot] = nextRandom() * 200 - 100
+        input.z[slot] = nextRandom() * 200 - 100
+        input.hitFlash[slot] = nextRandom() > 0.9 ? 1 : 0
+        input.hitReaction[slot] = nextRandom() > 0.92 ? 1 : 0
+      }
+
+      const expected = resolveExhaustiveInitialSelection(input)
+      updateZombieEscapeVisualLod(state, input)
+
+      expect(readSelectedSlots(state.selected)).toEqual(expected)
+      expect(state.variantCandidates).toHaveLength(
+        ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length * ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT,
+      )
+    }
   })
 })
 

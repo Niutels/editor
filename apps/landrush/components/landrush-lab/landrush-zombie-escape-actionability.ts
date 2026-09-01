@@ -45,6 +45,32 @@ export function resolveLandrushZombieEscapePhaseReady({
   )
 }
 
+export type LandrushZombieEscapeNightStartReadiness = Readonly<{
+  contextKey: string
+  ready: boolean
+}>
+
+export function createLandrushZombieEscapeNightStartReadiness(): LandrushZombieEscapeNightStartReadiness {
+  return { contextKey: '', ready: false }
+}
+
+export function reconcileLandrushZombieEscapeNightStartReadiness({
+  buildPhaseActive,
+  candidateReady,
+  contextKey,
+  current,
+}: {
+  buildPhaseActive: boolean
+  candidateReady: boolean
+  contextKey: string
+  current: LandrushZombieEscapeNightStartReadiness
+}): LandrushZombieEscapeNightStartReadiness {
+  const ready =
+    buildPhaseActive && (candidateReady || (current.contextKey === contextKey && current.ready))
+  if (current.contextKey === contextKey && current.ready === ready) return current
+  return { contextKey, ready }
+}
+
 export function resolveLandrushZombieEscapeInteractionActionable({
   collisionWorldReady,
   interactionEligible,

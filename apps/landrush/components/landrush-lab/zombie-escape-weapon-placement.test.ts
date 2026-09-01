@@ -8,10 +8,19 @@ import {
   WallNode,
 } from '@pascal-app/core'
 import { findLandrushBuildingFloorInteriorRegion } from './landrush-building-floor-visibility'
-import { resolveZombieEscapeWeaponPickupPlacements } from './zombie-escape-weapon-placement'
+import {
+  resolveZombieEscapeWeaponPickupIndices,
+  resolveZombieEscapeWeaponPickupPlacements,
+  resolveZombieEscapeWeaponPlacementSeed,
+} from './zombie-escape-weapon-placement'
+
+const WEAPON_PLACEMENT_SEED = resolveZombieEscapeWeaponPlacementSeed({
+  night: 2,
+  sessionId: 'weapon-placement-test',
+})
 
 describe('Zombie Escape weapon placement', () => {
-  test('deterministically places at most five weapons with one ground-floor pickup per building', () => {
+  test('keeps a seeded layout stable across scene insertion order', () => {
     const nodes = {} as Record<string, AnyNode>
     for (let index = 0; index < 7; index += 1) {
       addClosedBuilding(nodes, index * 12, 0, `Building ${String(index + 1)}`)
@@ -21,14 +30,30 @@ describe('Zombie Escape weapon placement', () => {
       AnyNode
     >
 
-    const first = resolveZombieEscapeWeaponPickupPlacements(nodes)
-    const second = resolveZombieEscapeWeaponPickupPlacements(reversedNodes)
+    const first = resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)
+    const second = resolveZombieEscapeWeaponPickupPlacements(reversedNodes, WEAPON_PLACEMENT_SEED)
 
     expect(first).toEqual(second)
     expect(first).toHaveLength(4)
     expect(new Set(first.map(({ scopeId }) => scopeId)).size).toBe(first.length)
-    expect(first.map(({ weaponIndex }) => weaponIndex)).toEqual([1, 2, 3, 4])
+    expect(first.map(({ weaponIndex }) => weaponIndex).sort()).toEqual([1, 2, 3, 4])
     expect(first.every(({ y }) => y === 0)).toBe(true)
+  })
+
+  test('preserves unique paid-weapon probing for a stable session and night seed', () => {
+    const scopeIds = [
+      'building:house-a',
+      'building:house-b',
+      'building:house-c',
+      'building:house-d',
+    ]
+
+    const first = resolveZombieEscapeWeaponPickupIndices(scopeIds, WEAPON_PLACEMENT_SEED)
+
+    expect(first).toEqual(
+      resolveZombieEscapeWeaponPickupIndices([...scopeIds], WEAPON_PLACEMENT_SEED),
+    )
+    expect([...first].sort()).toEqual([1, 2, 3, 4])
   })
 
   test('prioritizes a player-built parcel room ahead of built-in buildings under the paid-weapon cap', () => {
@@ -42,8 +67,8 @@ describe('Zombie Escape weapon placement', () => {
       AnyNode
     >
 
-    const first = resolveZombieEscapeWeaponPickupPlacements(nodes)
-    const second = resolveZombieEscapeWeaponPickupPlacements(reversedNodes)
+    const first = resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)
+    const second = resolveZombieEscapeWeaponPickupPlacements(reversedNodes, WEAPON_PLACEMENT_SEED)
 
     expect(first).toEqual(second)
     expect(first).toHaveLength(4)
@@ -52,13 +77,28 @@ describe('Zombie Escape weapon placement', () => {
     expect(new Set(first.map(({ scopeId }) => scopeId)).size).toBe(first.length)
   })
 
-  test('puts the first paid weapon in the first eligible building', () => {
+  test('can change a one-house weapon when the session or night seed changes', () => {
     const nodes = {} as Record<string, AnyNode>
-    addClosedBuilding(nodes, 0, 0, 'Only building')
+    addClosedBuilding(nodes, 0, 0, 'Only building', 'player-parcel')
+    const firstSeed = resolveZombieEscapeWeaponPlacementSeed({ night: 0, sessionId: 'session-a' })
+    const nextNightSeed = resolveZombieEscapeWeaponPlacementSeed({
+      night: 1,
+      sessionId: 'session-a',
+    })
+    const freshSessionSeed = resolveZombieEscapeWeaponPlacementSeed({
+      night: 0,
+      sessionId: 'session-b',
+    })
+    const first = resolveZombieEscapeWeaponPickupPlacements(nodes, firstSeed)
 
-    expect(resolveZombieEscapeWeaponPickupPlacements(nodes)).toEqual([
-      expect.objectContaining({ weaponIndex: 1, y: 0 }),
-    ])
+    expect(resolveZombieEscapeWeaponPickupPlacements(nodes, firstSeed)).toEqual(first)
+    expect(first).toEqual([expect.objectContaining({ scopeId: 'parcel:player-parcel', y: 0 })])
+    expect(
+      resolveZombieEscapeWeaponPickupPlacements(nodes, nextNightSeed)[0]?.weaponIndex,
+    ).not.toBe(first[0]?.weaponIndex)
+    expect(
+      resolveZombieEscapeWeaponPickupPlacements(nodes, freshSessionSeed)[0]?.weaponIndex,
+    ).not.toBe(first[0]?.weaponIndex)
   })
 
   test('does not place a weapon in closed walls until a boundary door exists', () => {
@@ -67,7 +107,7 @@ describe('Zombie Escape weapon placement', () => {
     nodes[building.id] = building
     addClosedLevel(nodes, building.id, 0, 0, 0, 'Doorless ground', undefined, false)
 
-    expect(resolveZombieEscapeWeaponPickupPlacements(nodes)).toEqual([])
+    expect(resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)).toEqual([])
   })
 
   test('places the weapon in the door-equipped room instead of a larger sealed room', () => {
@@ -79,7 +119,7 @@ describe('Zombie Escape weapon placement', () => {
     addClosedRoom(nodes, level.id, 0, 0, 10, 8, 'Large sealed room', false)
     addClosedRoom(nodes, level.id, 14, 1, 4, 4, 'Small door room', true)
 
-    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes)
+    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)
 
     expect(placement).toBeDefined()
     expect(placement!.x).toBeGreaterThan(14)
@@ -97,7 +137,7 @@ describe('Zombie Escape weapon placement', () => {
     addClosedRoom(nodes, level.id, 0, 1, 4, 4, 'Small door room', true)
     addClosedRoom(nodes, level.id, 8, 0, 10, 8, 'Large opening room', true, 'opening')
 
-    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes)
+    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)
 
     expect(placement).toBeDefined()
     expect(placement!.x).toBeGreaterThan(0)
@@ -113,7 +153,7 @@ describe('Zombie Escape weapon placement', () => {
     addClosedLevel(nodes, building.id, -1, 40, 40, 'Basement', 4)
     addClosedLevel(nodes, building.id, 0, 3, 5, 'Ground')
 
-    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes)
+    const [placement] = resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)
 
     expect(placement).toBeDefined()
     expect(placement!.x).toBeGreaterThan(3)
@@ -154,7 +194,7 @@ describe('Zombie Escape weapon placement', () => {
     ) as Record<string, AnyNode>
 
     expect(findLandrushBuildingFloorInteriorRegion({ x: 1, z: 1 }, [region])).not.toBeNull()
-    expect(resolveZombieEscapeWeaponPickupPlacements(nodes)).toEqual([])
+    expect(resolveZombieEscapeWeaponPickupPlacements(nodes, WEAPON_PLACEMENT_SEED)).toEqual([])
   })
 })
 

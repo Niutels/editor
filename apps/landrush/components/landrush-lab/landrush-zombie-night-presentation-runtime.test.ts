@@ -98,7 +98,33 @@ describe('Landrush zombie night scene bindings', () => {
       new URL('./landrush-zombie-night-presentation.tsx', import.meta.url),
       'utf8',
     )
-    expect(presentationSource).toContain('const material = sourceMaterial.clone()')
+    const fixtureInstanceSource = readFileSync(
+      new URL('./landrush-zombie-night-street-lightpost-instances.tsx', import.meta.url),
+      'utf8',
+    )
+    const glowInstanceSource = readFileSync(
+      new URL('./landrush-zombie-night-beacon-glow-instances.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(fixtureInstanceSource).toContain(
+      'args={[sourceMesh.geometry, sourceMesh.material, matrices.length]}',
+    )
+    expect(fixtureInstanceSource).toContain('mesh.instanceMatrix.setUsage(StaticDrawUsage)')
+    expect(fixtureInstanceSource).toContain('sourceMeshes.length !== 1')
+    expect(fixtureInstanceSource).toContain('dispose={null}')
+    expect(fixtureInstanceSource).not.toContain('.material.clone()')
+    expect(glowInstanceSource.match(/<instancedMesh/g)).toHaveLength(3)
+    expect(glowInstanceSource).toContain('LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET')
+    expect(glowInstanceSource).toContain('const geometry = new CircleGeometry(1, 16)')
+    expect(glowInstanceSource).toContain('additive ? AdditiveBlending : NormalBlending')
+    expect(glowInstanceSource).not.toContain('blending: additive ? AdditiveBlending : undefined')
+    expect(presentationSource).toContain('<group ref={glowGroupRef} visible={false}>')
+    expect(presentationSource).toContain(
+      '<LandrushZombieNightBeaconGlowInstances placements={placements} runtime={glowRuntime} />',
+    )
+    expect(presentationSource).toContain('{lightPlacements.map((placement, index) => (')
+    expect(presentationSource).toContain('intensity={0}')
+    expect(presentationSource).not.toContain('{glowsVisible ?')
     expect(presentationSource).not.toContain('material.opacity = 0')
     expect(presentationSource).not.toContain('material.transparent = true')
     expect(presentationSource).toContain('if (installed) dayBackground.copy(background)')
@@ -210,12 +236,17 @@ describe('Landrush zombie night scene bindings', () => {
     const cache = createLandrushZombieNightSceneLightCache(scene, () => {
       changes += 1
     })
+    const eventTarget = scene as unknown as {
+      dispatchEvent: (event: { child: null; type: 'childremoved' }) => void
+    }
 
     expect(cache.read()).toEqual({
       ambient,
       direct: [firstDirectional],
       hemisphere,
     })
+    expect(() => eventTarget.dispatchEvent({ child: null, type: 'childremoved' })).not.toThrow()
+    expect(changes).toBe(0)
     scene.add(new PointLight())
     expect(changes).toBe(0)
     const replacementDirectional = new DirectionalLight()

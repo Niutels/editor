@@ -65,6 +65,8 @@ import {
   LandrushRobotWeaponRig,
 } from './landrush-robot-weapon-rig'
 import {
+  createLandrushZombieEscapeNightStartReadiness,
+  reconcileLandrushZombieEscapeNightStartReadiness,
   resolveLandrushZombieEscapeCombatFireEnabled,
   resolveLandrushZombieEscapeInteractionActionable,
 } from './landrush-zombie-escape-actionability'
@@ -193,6 +195,7 @@ import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import { ZombieEscapeWeaponInventoryRow } from './zombie-escape-weapon-inventory'
 import {
   resolveZombieEscapeWeaponPickupPlacements,
+  resolveZombieEscapeWeaponPlacementSeed,
   translateZombieEscapeWeaponPickupPlacements,
 } from './zombie-escape-weapon-placement'
 import {
@@ -212,6 +215,13 @@ const GENERATED_ASSET_AUTO_RETRY_DELAYS_MS = [650, 1_300] as const
 const LANDRUSH_ZOMBIE_ESCAPE_SURFACE_SUPPORT_ID = 'landrush-island:surface-boundary'
 const LANDRUSH_ZOMBIE_ESCAPE_ROOM_SOAK_PROTECTED_HEALTH = 1_000_000_000
 export const LANDRUSH_ZOMBIE_ESCAPE_MAXIMUM_RECOVERY_SUBSTEPS = 2
+
+function createOfflineZombieEscapeWeaponPlacementSessionId() {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  )
+}
 
 const LazyLandrushZombieNavigationOverlay = lazy(
   () => import('./landrush-zombie-navigation-overlay'),
@@ -1332,6 +1342,9 @@ export function LandrushZombieEscapeMode({
   const [installedCollisionWorlds, setInstalledCollisionWorlds] =
     useState<LandrushZombieEscapeCollisionWorlds | null>(null)
   const [collisionWorldRetrying, setCollisionWorldRetrying] = useState(false)
+  const [nightStartReadiness, setNightStartReadiness] = useState(
+    createLandrushZombieEscapeNightStartReadiness,
+  )
   const collisionWorldReadinessGenerationRef = useRef(0)
   const collisionWorldInstallationFailureRef = useRef<{
     error: string
@@ -1358,15 +1371,30 @@ export function LandrushZombieEscapeMode({
     setZombieEscapeExternalPlayerPose(state, true)
     return state
   })
+  const [offlineWeaponPlacementSessionId] = useState(
+    createOfflineZombieEscapeWeaponPlacementSessionId,
+  )
+  const weaponPlacementSessionId =
+    zombieEscapeClockMode === 'offline-local'
+      ? offlineWeaponPlacementSessionId
+      : (zombieEscapeRoomStateObservation?.state.sessionId ?? 'online-waiting')
+  const authoritativeWeaponPlacementNight =
+    zombieEscapeClockMode === 'offline-local'
+      ? null
+      : (zombieEscapeRoomStateObservation?.state.night ?? 0)
   const refreshWeaponPickupPlacements = useCallback(() => {
+    const placementSeed = resolveZombieEscapeWeaponPlacementSeed({
+      night: authoritativeWeaponPlacementNight ?? simulation.night,
+      sessionId: weaponPlacementSessionId,
+    })
     setZombieEscapeWeaponPickupPlacements(
       simulation,
       translateZombieEscapeWeaponPickupPlacements(
-        resolveZombieEscapeWeaponPickupPlacements(useScene.getState().nodes),
+        resolveZombieEscapeWeaponPickupPlacements(useScene.getState().nodes, placementSeed),
         { x: spawn.x, z: spawn.z },
       ),
     )
-  }, [simulation, spawn.x, spawn.z])
+  }, [authoritativeWeaponPlacementNight, simulation, spawn.x, spawn.z, weaponPlacementSessionId])
   const weaponPickupPlacementRefreshControllerRef = useRef<ReturnType<
     typeof createZombieEscapeWeaponPlacementRefreshController
   > | null>(null)
@@ -1525,12 +1553,39 @@ export function LandrushZombieEscapeMode({
       phaseReady,
       state: collisionWorldBuildState,
     })
-  const nightStartReady = phaseReady && desiredCollisionWorldReady && collisionWorldInstalled
-  const sharedNightStartReady =
-    nightStartReady &&
+  const nightStartCandidateReady =
+    phaseReady && desiredCollisionWorldReady && collisionWorldInstalled
+  const nightStartBuildPhaseActive =
+    expectedPhase === 'build' &&
+    simulation.phase === 'build' &&
     (zombieEscapeClockMode === 'offline-local' ||
       (zombieEscapeClockMode === 'online-canonical' &&
         zombieEscapeRoomStateObservation?.state.phase === 'build'))
+  const nightStartReadinessContextKey = JSON.stringify([
+    navigationAuthorityKey,
+    navigationMountGeneration,
+    collisionWorldDesiredSignature,
+    generatedAssetRetryGeneration,
+    zombieEscapeClockMode,
+    zombieEscapeRoomStateObservation?.state.sessionId ?? null,
+  ])
+  const resolvedNightStartReadiness = reconcileLandrushZombieEscapeNightStartReadiness({
+    buildPhaseActive: nightStartBuildPhaseActive,
+    candidateReady: nightStartCandidateReady,
+    contextKey: nightStartReadinessContextKey,
+    current: nightStartReadiness,
+  })
+  const sharedNightStartReady = resolvedNightStartReadiness.ready
+  useLayoutEffect(() => {
+    setNightStartReadiness((current) =>
+      reconcileLandrushZombieEscapeNightStartReadiness({
+        buildPhaseActive: nightStartBuildPhaseActive,
+        candidateReady: nightStartCandidateReady,
+        contextKey: nightStartReadinessContextKey,
+        current,
+      }),
+    )
+  }, [nightStartBuildPhaseActive, nightStartCandidateReady, nightStartReadinessContextKey])
   const interactionActionable = resolveLandrushZombieEscapeInteractionActionable({
     collisionWorldReady: runtimePhaseReady,
     interactionEligible: active && zombieEscapeClockMode !== 'online-waiting',
@@ -2093,7 +2148,7 @@ export function LandrushZombieEscapeMode({
     if (
       !requestLandrushZombieEscapeNightStart({
         expectedPhase,
-        phaseReady: nightStartReady && isCurrentCollisionWorldInstalled(),
+        phaseReady: sharedNightStartReady,
         simulation,
       })
     ) {
@@ -2107,8 +2162,6 @@ export function LandrushZombieEscapeMode({
   }, [
     expectedPhase,
     installAmbientHandoffAtNightBoundary,
-    isCurrentCollisionWorldInstalled,
-    nightStartReady,
     onNightTransitionStart,
     publishDestroyedFurnitureIds,
     publishSnapshot,

@@ -20,6 +20,7 @@ import {
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { cameraPosition, float, normalWorld, positionWorld, color as tslColor } from 'three/tsl'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
+import { LandrushRobotActionTargetAccumulator } from './landrush-robot-action-targets'
 import {
   applyLandrushRobotCrouchPose,
   createLandrushRobotCrouchRig,
@@ -266,6 +267,11 @@ export function LandrushRobot({
     walkTimeScale: 1,
     walkWeight: 0,
   })
+  const actionTargetAccumulatorRef = useRef<LandrushRobotActionTargetAccumulator | null>(null)
+  if (actionTargetAccumulatorRef.current === null) {
+    actionTargetAccumulatorRef.current = new LandrushRobotActionTargetAccumulator()
+  }
+  const actionTargetAccumulator = actionTargetAccumulatorRef.current
   const hoverAmountRef = useRef(0)
   const crouchAmountRef = useRef(0)
   const fallAmountRef = useRef(0)
@@ -467,30 +473,16 @@ export function LandrushRobot({
         )
       })
 
-      const actionTargets = measure('frame.robot-glb.build-action-targets', () => {
-        const targets = new Map<
-          AnimationAction,
-          { timeScaleSum: number; weight: number; weightedTimeScale: number }
-        >()
-        accumulateRobotActionTarget(targets, idleAction, blendState.idleWeight, idleTimeScale)
-        accumulateRobotActionTarget(
-          targets,
-          walkAction,
-          blendState.walkWeight,
-          blendState.walkTimeScale,
-        )
-        accumulateRobotActionTarget(
-          targets,
-          runAction,
-          blendState.runWeight,
-          blendState.runTimeScale,
-        )
-        return targets
+      measure('frame.robot-glb.build-action-targets', () => {
+        actionTargetAccumulator.reset()
+        actionTargetAccumulator.add(idleAction, blendState.idleWeight, idleTimeScale)
+        actionTargetAccumulator.add(walkAction, blendState.walkWeight, blendState.walkTimeScale)
+        actionTargetAccumulator.add(runAction, blendState.runWeight, blendState.runTimeScale)
       })
 
       measure('frame.robot-glb.apply-action-targets', () => {
         for (const action of locomotionActions) {
-          const target = actionTargets.get(action)
+          const target = actionTargetAccumulator.get(action)
           if (!target || target.weight <= 0.001) {
             setRobotActionInactive(action)
             continue
@@ -1060,33 +1052,6 @@ function getUniqueRobotActions(actions: readonly (AnimationAction | null)[]) {
     }
     return uniqueActions
   }, [])
-}
-
-function accumulateRobotActionTarget(
-  targets: Map<
-    AnimationAction,
-    { timeScaleSum: number; weight: number; weightedTimeScale: number }
-  >,
-  action: AnimationAction | null,
-  weight: number,
-  timeScale: number,
-) {
-  if (!action) return
-
-  const nextWeight = MathUtils.clamp(weight, 0, 1)
-  const currentTarget = targets.get(action)
-  if (!currentTarget) {
-    targets.set(action, {
-      timeScaleSum: nextWeight > Number.EPSILON ? timeScale * nextWeight : 0,
-      weight: nextWeight,
-      weightedTimeScale: nextWeight,
-    })
-    return
-  }
-
-  currentTarget.weight += nextWeight
-  currentTarget.timeScaleSum += nextWeight > Number.EPSILON ? timeScale * nextWeight : 0
-  currentTarget.weightedTimeScale += nextWeight
 }
 
 function setRobotActionInactive(action: AnimationAction) {

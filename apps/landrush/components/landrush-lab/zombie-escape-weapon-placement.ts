@@ -15,8 +15,41 @@ export {
 
 const INTERIOR_SAMPLE_STEPS = 24
 
+export function resolveZombieEscapeWeaponPlacementSeed({
+  night,
+  sessionId,
+}: {
+  night: number
+  sessionId: string
+}) {
+  const normalizedNight = Number.isFinite(night) ? Math.max(0, Math.trunc(night)) : 0
+  return `${String(sessionId.length)}:${sessionId}:${String(normalizedNight)}`
+}
+
+export function resolveZombieEscapeWeaponPickupIndices(
+  scopeIds: readonly string[],
+  placementSeed: string,
+): readonly number[] {
+  const paidWeaponCount = Math.max(0, ZOMBIE_ESCAPE_WEAPON_CATALOG.length - 1)
+  if (paidWeaponCount === 0) return []
+
+  const assigned = new Set<number>()
+  return scopeIds.map((scopeId) => {
+    const preferredIndex =
+      1 + (hashZombieEscapeWeaponScope(placementSeed, scopeId) % paidWeaponCount)
+    for (let offset = 0; offset < paidWeaponCount; offset += 1) {
+      const weaponIndex = 1 + ((preferredIndex - 1 + offset) % paidWeaponCount)
+      if (assigned.has(weaponIndex)) continue
+      assigned.add(weaponIndex)
+      return weaponIndex
+    }
+    return preferredIndex
+  })
+}
+
 export function resolveZombieEscapeWeaponPickupPlacements(
   nodes: Record<string, AnyNode>,
+  placementSeed: string,
   maximumPlacements = ZOMBIE_ESCAPE_WEAPON_CATALOG.length,
 ): readonly ZombieEscapeWeaponPickupPlacement[] {
   const limit = Math.max(
@@ -40,20 +73,34 @@ export function resolveZombieEscapeWeaponPickupPlacements(
     }
   }
 
-  return [...largestReadyRegionByScope.values()]
+  const placements = [...largestReadyRegionByScope.values()]
     .flatMap(({ region, scopeId, y }) => {
       const point = findInteriorPlacementPoint(region)
       return point ? [{ point, scopeId, y }] : []
     })
     .sort((first, second) => compareWeaponPickupScopes(first.scopeId, second.scopeId))
     .slice(0, limit)
-    .map(({ point, scopeId, y }, index) => ({
-      scopeId,
-      weaponIndex: index + 1,
-      x: point.x,
-      y,
-      z: point.z,
-    }))
+  const weaponIndices = resolveZombieEscapeWeaponPickupIndices(
+    placements.map(({ scopeId }) => scopeId),
+    placementSeed,
+  )
+  return placements.map(({ point, scopeId, y }, index) => ({
+    scopeId,
+    weaponIndex: weaponIndices[index]!,
+    x: point.x,
+    y,
+    z: point.z,
+  }))
+}
+
+function hashZombieEscapeWeaponScope(placementSeed: string, scopeId: string) {
+  const identity = `${placementSeed}\u0000${scopeId}`
+  let hash = 2_166_136_261
+  for (let index = 0; index < identity.length; index += 1) {
+    hash ^= identity.charCodeAt(index)
+    hash = Math.imul(hash, 16_777_619)
+  }
+  return hash >>> 0
 }
 
 function compareWeaponPickupScopes(first: string, second: string) {

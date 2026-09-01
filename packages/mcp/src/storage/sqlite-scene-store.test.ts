@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import type { SceneGraph } from '@pascal-app/core/clone-scene-graph'
+import { createSceneStore } from './index'
 import {
   resolveDefaultDatabasePath,
   SqliteSceneStore,
@@ -93,6 +94,48 @@ describe('SqliteSceneStore', () => {
 
   test('backend is "sqlite"', () => {
     expect(store.backend).toBe('sqlite')
+  })
+
+  test('factory preserves its asynchronous exported SQLite store contract', async () => {
+    const databasePath = path.join(rootDir, 'factory.db')
+    const storePromise = createSceneStore({ PASCAL_DB_PATH: databasePath })
+    expect(storePromise).toBeInstanceOf(Promise)
+
+    const factoryStore = await storePromise
+    expect(factoryStore).toBeInstanceOf(SqliteSceneStore)
+    if (factoryStore instanceof SqliteSceneStore) {
+      expect(factoryStore.databasePath).toBe(databasePath)
+      factoryStore.close()
+    }
+  })
+
+  test('preserves explicit and env-derived database paths for SQLite to resolve', () => {
+    const explicitPath = path.join('relative', 'explicit.db')
+    const envPath = path.join('relative', 'env.db')
+    const dataDir = path.join('relative', 'data')
+
+    expect(new SqliteSceneStore({ databasePath: explicitPath, env: {} }).databasePath).toBe(
+      explicitPath,
+    )
+    expect(new SqliteSceneStore({ env: { PASCAL_DB_PATH: envPath } }).databasePath).toBe(envPath)
+    expect(new SqliteSceneStore({ env: { PASCAL_DATA_DIR: dataDir } }).databasePath).toBe(
+      path.join(dataDir, 'pascal.db'),
+    )
+    expect(new SqliteSceneStore({ env: {} }).databasePath).toBe(resolveDefaultDatabasePath({}))
+  })
+
+  test('opens relative database paths against the process working directory', async () => {
+    const originalCwd = process.cwd()
+    const relativePath = path.join('nested', 'relative.db')
+    const relativeStore = new SqliteSceneStore({ databasePath: relativePath })
+    try {
+      process.chdir(rootDir)
+      await relativeStore.save({ id: 'relative', name: 'Relative', graph: makeGraph() })
+      expect((await fs.stat(path.join(rootDir, relativePath))).isFile()).toBe(true)
+    } finally {
+      relativeStore.close()
+      process.chdir(originalCwd)
+    }
   })
 
   test('round-trips a saved scene through a reopened database', async () => {

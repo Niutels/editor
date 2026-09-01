@@ -132,16 +132,20 @@ export type ZombieEscapeAuthoredInstanceState = Readonly<{
   z: Float32Array
 }>
 
+export type ZombieEscapeAuthoredInstanceSelection = {
+  count: number
+  readonly slots: Uint16Array
+}
+
 export type ZombieEscapeAuthoredInstancePresentation = Readonly<{
   dispose: () => void
   getDebugSnapshot: () => ZombieEscapeAuthoredInstanceDebugSnapshot
   getReadinessSnapshot: () => ZombieEscapeAuthoredInstanceReadinessSnapshot
   root: Group
-  update: (input: {
-    detailedSlots: Uint8Array
-    elapsedSeconds: number
-    zombies: ZombieEscapeAuthoredInstanceState
-  }) => void
+  update: (
+    selection: ZombieEscapeAuthoredInstanceSelection,
+    zombies: ZombieEscapeAuthoredInstanceState,
+  ) => void
 }>
 
 type BakedTextureSet = {
@@ -197,38 +201,6 @@ export function countZombieEscapeAuthoredVariantCapacity(
   let count = 0
   for (const variant of variantByPoolSlot) {
     if (variant === variantIndex) count += 1
-  }
-  return count
-}
-
-export function collectZombieEscapeAuthoredInstanceSlots(
-  {
-    active,
-    detailed,
-    variant,
-    variantIndex,
-  }: {
-    active: Uint8Array
-    detailed: Uint8Array
-    variant: Uint8Array
-    variantIndex: number
-  },
-  output: Uint16Array,
-) {
-  assertVariantIndex(variantIndex)
-  if (detailed.length < active.length || variant.length < active.length) {
-    throw new Error('Authored zombie instance selection arrays must cover the active pool.')
-  }
-  let count = 0
-  for (let slot = 0; slot < active.length; slot += 1) {
-    if (active[slot] === 0 || detailed[slot] !== 0 || variant[slot] !== variantIndex) continue
-    if (count >= output.length) {
-      throw new Error(
-        `Authored zombie instance capacity ${String(output.length)} is below the selected count.`,
-      )
-    }
-    output[count] = slot
-    count += 1
   }
   return count
 }
@@ -292,6 +264,12 @@ export function encodeZombieEscapeBakedTextureComponent(value: number) {
     )
   }
   return DataUtils.toHalfFloat(value)
+}
+
+export function resolveZombieEscapeBakedTextureLayout(vertexCount: number) {
+  const texelsPerFrame = vertexCount * ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX
+  const width = Math.min(ZOMBIE_ESCAPE_AUTHORED_BAKED_TEXTURE_WIDTH, texelsPerFrame)
+  return { height: Math.ceil(texelsPerFrame / width), width }
 }
 
 export function createZombieEscapeAuthoredInstancePresentation(
@@ -403,7 +381,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
     samplerRoot.quaternion,
     new Vector3(modelTransform.scale, modelTransform.scale, modelTransform.scale),
   )
-  const renderCapacity = instanceCapacity + 1
+  const renderCapacity = instanceCapacity
   const parkedInstanceMatrix = new Matrix4().makeTranslation(
     0,
     ZOMBIE_ESCAPE_AUTHORED_PARKED_INSTANCE_Y,
@@ -435,7 +413,6 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
     const sharedQuaternion = new Quaternion()
     const presentationPose = createZombieEscapePresentationPose()
     const meshInstanceMatrix = new Matrix4()
-    const selectedSlots = new Uint16Array(instanceCapacity)
     const selectedFrames = new Float32Array(instanceCapacity)
     const selectedRootMatrices = Array.from({ length: instanceCapacity }, () => new Matrix4())
     const bounds = new Sphere()
@@ -491,17 +468,24 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
         }
       },
       root,
-      update({ detailedSlots, zombies }) {
+      update(selection, zombies) {
         if (disposed) throw new Error('Authored zombie instance presentation was disposed.')
-        const selectedCount = collectZombieEscapeAuthoredInstanceSlots(
-          {
-            active: zombies.pool.active,
-            detailed: detailedSlots,
-            variant: zombies.variant,
-            variantIndex,
-          },
-          selectedSlots,
-        )
+        if (selection.slots.length !== instanceCapacity) {
+          throw new Error(
+            `Authored zombie selection capacity ${String(selection.slots.length)} does not match presentation capacity ${String(instanceCapacity)}.`,
+          )
+        }
+        if (
+          !Number.isSafeInteger(selection.count) ||
+          selection.count < 0 ||
+          selection.count > instanceCapacity
+        ) {
+          throw new Error(
+            `Authored zombie selected count must be an integer from 0 to ${String(instanceCapacity)}; received ${String(selection.count)}.`,
+          )
+        }
+        const selectedCount = selection.count
+        const selectedSlots = selection.slots
         activeInstanceCount = selectedCount
         attackFrameIndex = 0
         deathFrameIndex = 0
@@ -590,7 +574,7 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
           bounds.radius = 0
         }
         activeBatchCount = selectedCount > 0 ? bakedMeshes.length : 0
-        const renderCount = selectedCount + 1
+        const renderCount = Math.max(1, selectedCount)
         let firstChangedFrame = renderCount
         let lastChangedFrame = -1
         for (let instance = 0; instance < selectedCount; instance += 1) {
@@ -599,9 +583,9 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
             lastChangedFrame = instance
           }
         }
-        if (writeInstanceFrameIfChanged(frameAttribute, selectedCount, 0)) {
-          firstChangedFrame = Math.min(firstChangedFrame, selectedCount)
-          lastChangedFrame = selectedCount
+        if (selectedCount === 0 && writeInstanceFrameIfChanged(frameAttribute, 0, 0)) {
+          firstChangedFrame = 0
+          lastChangedFrame = 0
         }
         if (lastChangedFrame >= firstChangedFrame) {
           frameAttribute.addUpdateRange(firstChangedFrame, lastChangedFrame - firstChangedFrame + 1)
@@ -619,9 +603,9 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
               lastChangedMatrix = instance
             }
           }
-          if (writeInstanceMatrixIfChanged(mesh, selectedCount, parkedInstanceMatrix)) {
-            firstChangedMatrix = Math.min(firstChangedMatrix, selectedCount)
-            lastChangedMatrix = selectedCount
+          if (selectedCount === 0 && writeInstanceMatrixIfChanged(mesh, 0, parkedInstanceMatrix)) {
+            firstChangedMatrix = 0
+            lastChangedMatrix = 0
           }
           if (lastChangedMatrix >= firstChangedMatrix) {
             mesh.instanceMatrix.addUpdateRange(
@@ -774,9 +758,7 @@ function* bakeAnimationTextureSteps({
 
 function createBakedTextureSet(sourceMesh: SkinnedMesh): BakedTextureSet {
   const vertexCount = sourceMesh.geometry.getAttribute('position').count
-  const texelsPerFrame = vertexCount * ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX
-  const width = Math.min(ZOMBIE_ESCAPE_AUTHORED_BAKED_TEXTURE_WIDTH, texelsPerFrame)
-  const height = Math.ceil(texelsPerFrame / width)
+  const { height, width } = resolveZombieEscapeBakedTextureLayout(vertexCount)
   const data = new Uint16Array(width * height * 4 * ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT)
   const texture = new DataArrayTexture(
     data,
@@ -913,13 +895,11 @@ function createBakedMeshState({
 function createBakedVertexNodes(textureSet: BakedTextureSet): BakedVertexNodes {
   const frame = int(attribute<'float'>(ZOMBIE_ESCAPE_AUTHORED_FRAME_ATTRIBUTE, 'float'))
   const positionTexel = int(vertexIndex).mul(ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX)
-  const normalTexel = positionTexel.add(1)
   const positionRow = positionTexel.div(textureSet.width)
-  const normalRow = normalTexel.div(textureSet.width)
   const positionColumn = positionTexel.sub(positionRow.mul(textureSet.width))
-  const normalColumn = normalTexel.sub(normalRow.mul(textureSet.width))
   return {
-    normal: textureLoad(textureSet.texture, ivec2(normalColumn, normalRow)).depth(frame).xyz,
+    normal: textureLoad(textureSet.texture, ivec2(positionColumn.add(1), positionRow)).depth(frame)
+      .xyz,
     position: textureLoad(textureSet.texture, ivec2(positionColumn, positionRow)).depth(frame).xyz,
   }
 }
@@ -1037,13 +1017,23 @@ function writeInstanceMatrixIfChanged(mesh: InstancedMesh, instance: number, mat
   const offset = instance * 16
   const target = mesh.instanceMatrix.array
   const elements = matrix.elements
-  for (let component = 0; component < 16; component += 1) {
-    if (target[offset + component] !== Math.fround(elements[component]!)) {
-      mesh.setMatrixAt(instance, matrix)
-      return true
-    }
-  }
-  return false
+  // Both callers own affine compose/multiply/translation matrices, so [3, 7, 11, 15] stay [0, 0, 0, 1].
+  const changed =
+    target[offset + 12] !== Math.fround(elements[12]!) ||
+    target[offset + 13] !== Math.fround(elements[13]!) ||
+    target[offset + 14] !== Math.fround(elements[14]!) ||
+    target[offset] !== Math.fround(elements[0]!) ||
+    target[offset + 1] !== Math.fround(elements[1]!) ||
+    target[offset + 2] !== Math.fround(elements[2]!) ||
+    target[offset + 4] !== Math.fround(elements[4]!) ||
+    target[offset + 5] !== Math.fround(elements[5]!) ||
+    target[offset + 6] !== Math.fround(elements[6]!) ||
+    target[offset + 8] !== Math.fround(elements[8]!) ||
+    target[offset + 9] !== Math.fround(elements[9]!) ||
+    target[offset + 10] !== Math.fround(elements[10]!)
+  if (!changed) return false
+  mesh.setMatrixAt(instance, matrix)
+  return true
 }
 
 function writeInstanceFrameIfChanged(

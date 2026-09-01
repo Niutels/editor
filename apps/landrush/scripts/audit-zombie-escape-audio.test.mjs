@@ -50,6 +50,27 @@ test('expands each explicit zombie variant with its matching mastered prompt', a
   }
 })
 
+test('expands four independently prompted ambient NPC voice identities', async () => {
+  const contract = await readZombieEscapeAudioContract()
+  const cue = contract.catalog.ambientCues.find((entry) => entry.id === 'ambient-npc-bump')
+  assert.ok(cue)
+  const assets = contract.assets.filter((asset) => asset.cueId === cue.id)
+
+  assert.deepEqual(
+    assets.map((asset) => asset.publicPath),
+    cue.files,
+  )
+  assert.deepEqual(
+    assets.map((asset) => asset.prompt),
+    cue.variantPrompts,
+  )
+  assert.deepEqual(
+    assets.map((asset) => asset.variantIndex),
+    [0, 1, 2, 3],
+  )
+  assert.ok(assets.every((asset) => asset.masteringProfile === 'one-shot-v1'))
+})
+
 test('rejects ambiguous or oversized explicit zombie variant prompts', async () => {
   const contract = await readZombieEscapeAudioContract()
   const duplicate = structuredClone(contract.catalog)
@@ -73,7 +94,7 @@ test('audits every checked-in ElevenLabs artifact against measured file metadata
 
   assert.equal(audit.pass, true, audit.failures.join('\n'))
   assert.equal(audit.ready, true)
-  assert.equal(audit.artifactCount, 31)
+  assert.equal(audit.artifactCount, 35)
   assert.equal(audit.artifactCount, audit.expectedArtifactCount)
 
   const shippingAudit = await auditZombieEscapeAudio({

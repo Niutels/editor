@@ -39,6 +39,13 @@ function createGrassFieldData({
   let shoreDensity = 0
   let shoreSamples = 0
   const openPerimeter = openRing(perimeter)
+  const compiledBlockers = compileGrassFieldBlockers(blockers)
+  const patchOptions = {
+    density: density ?? 0.82,
+    edgeFadeMeters: edgeFadeMeters ?? 8.4,
+    patchSize: patchSize ?? 24,
+    patchSoftness: patchSoftness ?? 0.18,
+  }
 
   for (let y = 0; y < fieldResolution; y += 1) {
     for (let x = 0; x < fieldResolution; x += 1) {
@@ -51,13 +58,8 @@ function createGrassFieldData({
         world,
         openPerimeter,
         roads,
-        {
-          density: density ?? 0.82,
-          edgeFadeMeters: edgeFadeMeters ?? 8.4,
-          patchSize: patchSize ?? 24,
-          patchSoftness: patchSoftness ?? 0.18,
-        },
-        blockers,
+        patchOptions,
+        compiledBlockers,
       )
       if (!sample) continue
 
@@ -137,19 +139,40 @@ function distanceToRoads(point, roads) {
   return best
 }
 
+function compileGrassFieldBlockers(blockers) {
+  const compiled = []
+  for (const blocker of blockers) {
+    const points = openRing(blocker.points)
+    if (points.length < 3) continue
+    compiled.push({
+      clearanceMeters: finiteNonNegative(blocker.clearanceMeters, 0),
+      featherMeters: Math.max(
+        0.001,
+        finiteNonNegative(blocker.featherMeters, GRASS_BLOCKER_FEATHER_METERS),
+      ),
+      points,
+    })
+  }
+  return compiled
+}
+
 function sampleBlockerDistance(point, blockers) {
   let distance = Number.POSITIVE_INFINITY
   let featherMeters = GRASS_BLOCKER_FEATHER_METERS
   for (const blocker of blockers) {
-    const ring = openRing(blocker.points)
-    if (ring.length < 3) continue
-    const nextDistance = pointInPolygon(point, ring) ? -1 : distanceToPolyline(point, ring)
+    const boundaryDistance = distanceToPolyline(point, blocker.points)
+    const signedDistance = pointInPolygon(point, blocker.points) ? -boundaryDistance : boundaryDistance
+    const nextDistance = signedDistance - blocker.clearanceMeters
     if (nextDistance < distance) {
       distance = nextDistance
-      featherMeters = blocker.featherMeters ?? GRASS_BLOCKER_FEATHER_METERS
+      featherMeters = blocker.featherMeters
     }
   }
   return { distance, featherMeters: Math.max(0.001, featherMeters) }
+}
+
+function finiteNonNegative(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
 }
 
 function organicGrassRegion(point) {

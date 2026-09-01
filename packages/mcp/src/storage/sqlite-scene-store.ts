@@ -293,7 +293,9 @@ export class SqliteSceneStore implements SceneStore {
 
   constructor(opts: SqliteSceneStoreOptions = {}) {
     const env = opts.env ?? process.env
-    this.databasePath = path.resolve(opts.databasePath ?? resolveDefaultDatabasePath(env))
+    // SQLite resolves relative filenames against process.cwd(). Resolving here makes
+    // server file tracers interpret a runtime-configured path as a project-wide glob.
+    this.databasePath = opts.databasePath ?? resolveDefaultDatabasePath(env)
     this.maxSceneBytes = resolveMaxSceneBytes(env, opts.maxSceneBytes)
   }
 

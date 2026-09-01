@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  createLandrushZombieEscapeNightStartReadiness,
+  reconcileLandrushZombieEscapeNightStartReadiness,
   resolveLandrushZombieEscapeCombatFireEnabled,
   resolveLandrushZombieEscapeInteractionActionable,
   resolveLandrushZombieEscapeLocomotionBaseEnabled,
@@ -22,6 +24,49 @@ const READY_NIGHT = {
 } as const
 
 describe('Landrush Zombie Escape actionability', () => {
+  test('latches attained start readiness through transient build-phase samples', () => {
+    let readiness = createLandrushZombieEscapeNightStartReadiness()
+    readiness = reconcileLandrushZombieEscapeNightStartReadiness({
+      buildPhaseActive: true,
+      candidateReady: false,
+      contextKey: 'world-a:session-a',
+      current: readiness,
+    })
+    expect(readiness.ready).toBe(false)
+
+    readiness = reconcileLandrushZombieEscapeNightStartReadiness({
+      buildPhaseActive: true,
+      candidateReady: true,
+      contextKey: 'world-a:session-a',
+      current: readiness,
+    })
+    expect(readiness.ready).toBe(true)
+
+    readiness = reconcileLandrushZombieEscapeNightStartReadiness({
+      buildPhaseActive: true,
+      candidateReady: false,
+      contextKey: 'world-a:session-a',
+      current: readiness,
+    })
+    expect(readiness.ready).toBe(true)
+
+    readiness = reconcileLandrushZombieEscapeNightStartReadiness({
+      buildPhaseActive: true,
+      candidateReady: false,
+      contextKey: 'world-b:session-b',
+      current: readiness,
+    })
+    expect(readiness.ready).toBe(false)
+
+    readiness = reconcileLandrushZombieEscapeNightStartReadiness({
+      buildPhaseActive: false,
+      candidateReady: true,
+      contextKey: 'world-b:session-b',
+      current: readiness,
+    })
+    expect(readiness.ready).toBe(false)
+  })
+
   test('keeps ready Night interaction independent from the visual mode fade', () => {
     for (const modeTransitionActive of [false, true]) {
       expect(

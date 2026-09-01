@@ -1,6 +1,16 @@
-import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
+import type { LandrushPoint2 } from '@/components/landrush/types'
 import { LANDRUSH_ROBOT_SHOULDER_TORCH_OUTSIDE_ZOMBIE_VISIBILITY } from './landrush-robot-shoulder-torch'
-import { resolveLandrushZombieNightStreetLightpostYaw } from './landrush-zombie-night-street-lightpost'
+import {
+  createLandrushZombieNightStreetLightpostBaseFootprint,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_ALONG_ROAD_HALF_WIDTH_METERS,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+  resolveLandrushZombieNightStreetLightpostYaw,
+} from './landrush-zombie-night-street-lightpost'
+import {
+  NATURAL_ROAD_STYLE,
+  type NaturalRoadPlan,
+  naturalRoadSidewalkContainsFootprint,
+} from './natural-road-plan'
 
 export type LandrushZombieNightDebugMode = 'final' | 'light-contribution' | 'no-post'
 export type LandrushZombieNightQuality = 'balanced' | 'high' | 'low'
@@ -16,10 +26,14 @@ export type LandrushZombieNightDebugSettings = Readonly<{
 
 export type LandrushZombieNightBeaconPlacement = Readonly<{
   color: '#69ccff' | '#ffc36e'
+  distanceAlongRoadMeters: number
   id: string
   phase: number
   position: readonly [number, number, number]
+  roadId: string
+  roadOffsetMeters: number
   rotationY: number
+  side: -1 | 1
 }>
 
 export const LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE = 0.78
@@ -80,10 +94,42 @@ export const LANDRUSH_ZOMBIE_NIGHT_VISUAL_CONTRACT = Object.freeze({
 export const LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS: Readonly<
   Record<LandrushZombieNightQuality, number>
 > = {
-  balanced: 6,
-  high: 8,
+  balanced: 12,
+  high: 16,
+  low: 8,
+}
+
+export const LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS: Readonly<
+  Record<LandrushZombieNightQuality, number>
+> = {
+  balanced: 4,
+  high: 6,
   low: 3,
 }
+
+export const LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET = 3
+
+export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT = Object.freeze({
+  baseAlongRoadHalfWidthMeters:
+    LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_ALONG_ROAD_HALF_WIDTH_METERS,
+  baseCrossRoadHalfWidthMeters:
+    LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+  carriagewayHalfWidthMeters: NATURAL_ROAD_STYLE.carriageway.widthMeters / 2,
+  curbOuterClearanceMeters: 0.04,
+  endpointMarginMeters: 3,
+  longitudinalSpacingMeters: Object.freeze({
+    balanced: 6,
+    high: 5,
+    low: 8,
+  } satisfies Record<LandrushZombieNightQuality, number>),
+  maximumCount: LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
+  minimumRoadLengthMeters: 10,
+  minimumSpacingMeters: 4.75,
+  sidewalkSurfaceOffsetMeters:
+    NATURAL_ROAD_STYLE.carriageway.surfaceOffsetMeters +
+    NATURAL_ROAD_STYLE.sidewalk.curbHeightMeters,
+  sidewalkWidthMeters: NATURAL_ROAD_STYLE.sidewalk.widthMeters,
+})
 
 const CURBSIDE_OBJECT_NAMES = new Set([
   'natural-road-curb-walls',
@@ -235,95 +281,204 @@ export function resolveLandrushZombieNightBeaconFrameMode(
 }
 
 export function createLandrushZombieNightBeaconPlacements({
-  groundY,
   quality,
-  roads,
+  roadPlan,
   seed = LANDRUSH_ZOMBIE_NIGHT_SEED,
 }: {
-  groundY: number
   quality: LandrushZombieNightQuality
-  roads: readonly LandrushRoadSegment[]
+  roadPlan: NaturalRoadPlan
   seed?: number
 }): readonly LandrushZombieNightBeaconPlacement[] {
-  const roadPoints = roads.flatMap((road) => road.points)
-  const center = averagePoint(roadPoints)
-  const candidates = roads.flatMap((road) => {
-    const progressSamples = road.kind === 'spine' ? [0.2, 0.5, 0.8] : [0.5]
-    return progressSamples.flatMap((progress) => {
-      const sample = samplePolyline(road.points, progress)
-      if (!sample) return []
-      const id = `${road.id}:${String(progress)}`
+  const perimeterRoadIds = new Set(roadPlan.perimeterSidewalkRoadIds)
+  const interiorRoads = roadPlan.roads.filter((road) => !perimeterRoadIds.has(road.id))
+  const candidates = interiorRoads.flatMap((road) => {
+    const measurement = measurePolyline(road.points)
+    if (!measurement) return []
+    if (
+      measurement.totalLength <
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.minimumRoadLengthMeters
+    ) {
+      return []
+    }
+    const endpointMargin = Math.min(
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.endpointMarginMeters,
+      measurement.totalLength * 0.25,
+    )
+    const usableLength = Math.max(0, measurement.totalLength - endpointMargin * 2)
+    const targetSpacing =
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.longitudinalSpacingMeters[quality]
+    const sampleCount = Math.max(1, Math.floor(usableLength / targetSpacing) + 1)
+    const actualSpacing = sampleCount > 1 ? usableLength / (sampleCount - 1) : 0
+    const startingSide = (mixHash(seed, hashString(road.id)) & 1) === 0 ? -1 : 1
+
+    return Array.from({ length: sampleCount }).flatMap((_, index) => {
+      const distanceAlongRoadMeters =
+        sampleCount === 1 ? measurement.totalLength * 0.5 : endpointMargin + actualSpacing * index
+      const sample = samplePolylineAtDistance(measurement, distanceAlongRoadMeters)
+      const id = `${road.id}:${distanceAlongRoadMeters.toFixed(3)}`
       const hash = mixHash(seed, hashString(id))
-      const side = (hash & 1) === 0 ? -1 : 1
-      const offset = road.width * 0.5 + 0.72
+      const side = (startingSide * (index % 2 === 0 ? 1 : -1)) as -1 | 1
+      const roadOffsetMeters =
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.carriagewayHalfWidthMeters +
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.sidewalkWidthMeters -
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.baseCrossRoadHalfWidthMeters -
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.curbOuterClearanceMeters
+      const position = [
+        sample.point.x - sample.tangent.z * side * roadOffsetMeters,
+        (Number.isFinite(roadPlan.groundElevation) ? roadPlan.groundElevation : 0) +
+          LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.sidewalkSurfaceOffsetMeters,
+        sample.point.z + sample.tangent.x * side * roadOffsetMeters,
+      ] as const
+      const rotationY = resolveLandrushZombieNightStreetLightpostYaw(
+        sample.tangent.x,
+        sample.tangent.z,
+        side,
+      )
+      if (
+        !naturalRoadSidewalkContainsFootprint(
+          roadPlan,
+          createLandrushZombieNightStreetLightpostBaseFootprint(position, rotationY),
+        )
+      ) {
+        return []
+      }
       return [
         {
           color: (hash % 5 === 0 ? '#69ccff' : '#ffc36e') as '#69ccff' | '#ffc36e',
+          distanceAlongRoadMeters,
           id,
           phase: ((hash >>> 0) / 0x1_0000_0000) * Math.PI * 2,
-          position: [
-            sample.point.x - sample.tangent.z * side * offset,
-            groundY,
-            sample.point.z + sample.tangent.x * side * offset,
-          ] as const,
-          rotationY: resolveLandrushZombieNightStreetLightpostYaw(
-            sample.tangent.x,
-            sample.tangent.z,
-            side,
-          ),
+          position,
+          roadId: road.id,
+          roadOffsetMeters,
+          rotationY,
+          side,
         },
       ]
     })
   })
   if (candidates.length === 0) return []
 
-  const targetCount = Math.min(candidates.length, LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS[quality])
+  const minimumSpacingSquared =
+    LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT.minimumSpacingMeters ** 2
+  const maximumCount = LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS[quality]
+  const selected: LandrushZombieNightBeaconPlacement[] = []
+  const center = averagePlacementPosition(candidates)
   const remaining = [...candidates]
-  if (remaining.length > targetCount) {
-    let centerIndex = 0
-    let centerDistance = distanceSquared(remaining[centerIndex]!.position, center)
-    for (let index = 1; index < remaining.length; index += 1) {
+  while (selected.length < maximumCount && remaining.length > 0) {
+    let bestIndex = -1
+    let bestScore = Number.NEGATIVE_INFINITY
+    for (let index = 0; index < remaining.length; index += 1) {
       const candidate = remaining[index]!
-      const candidateDistance = distanceSquared(candidate.position, center)
+      const score =
+        selected.length === 0
+          ? -distanceSquared(candidate.position, center)
+          : Math.min(
+              ...selected.map((placement) =>
+                distanceSquared(candidate.position, placement.position),
+              ),
+            )
+      if (selected.length > 0 && score < minimumSpacingSquared) continue
       if (
-        candidateDistance < centerDistance ||
-        (candidateDistance === centerDistance && candidate.id < remaining[centerIndex]!.id)
+        score > bestScore ||
+        (score === bestScore &&
+          (bestIndex < 0 ||
+            mixHash(seed, hashString(candidate.id)) >
+              mixHash(seed, hashString(remaining[bestIndex]!.id))))
       ) {
-        centerIndex = index
-        centerDistance = candidateDistance
+        bestIndex = index
+        bestScore = score
       }
     }
-    remaining.splice(centerIndex, 1)
+    if (bestIndex < 0) break
+    selected.push(remaining.splice(bestIndex, 1)[0]!)
   }
-  const selected: typeof candidates = []
-  while (remaining.length > 0 && selected.length < targetCount) {
+  return selected.sort(
+    (left, right) =>
+      left.roadId.localeCompare(right.roadId) ||
+      left.distanceAlongRoadMeters - right.distanceAlongRoadMeters,
+  )
+}
+
+export function selectLandrushZombieNightActiveLightPlacements({
+  placements,
+  quality,
+  seed = LANDRUSH_ZOMBIE_NIGHT_SEED,
+}: {
+  placements: readonly LandrushZombieNightBeaconPlacement[]
+  quality: LandrushZombieNightQuality
+  seed?: number
+}): readonly LandrushZombieNightBeaconPlacement[] {
+  const maximumCount = LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS[quality]
+  if (placements.length <= maximumCount) return placements
+
+  const selected: LandrushZombieNightBeaconPlacement[] = []
+  const center = averagePlacementPosition(placements)
+  const remaining = [...placements]
+  while (selected.length < maximumCount) {
     let bestIndex = 0
     let bestScore = Number.NEGATIVE_INFINITY
     for (let index = 0; index < remaining.length; index += 1) {
       const candidate = remaining[index]!
-      const centerDistance = distanceSquared(candidate.position, center)
-      const separation =
+      const score =
         selected.length === 0
-          ? -centerDistance
-          : Math.min(
-              ...selected.map((placed) => distanceSquared(candidate.position, placed.position)),
-            ) -
-            centerDistance * 0.035
+          ? -distanceSquared(candidate.position, center)
+          : minimumPlacementDistanceSquared(candidate, selected)
       if (
-        separation > bestScore ||
-        (separation === bestScore && candidate.id < remaining[bestIndex]!.id)
+        score > bestScore ||
+        (score === bestScore &&
+          mixHash(seed, hashString(candidate.id)) >
+            mixHash(seed, hashString(remaining[bestIndex]!.id)))
       ) {
         bestIndex = index
-        bestScore = separation
+        bestScore = score
       }
     }
     selected.push(remaining.splice(bestIndex, 1)[0]!)
   }
-  return selected
+
+  return selected.sort(
+    (left, right) =>
+      left.roadId.localeCompare(right.roadId) ||
+      left.distanceAlongRoadMeters - right.distanceAlongRoadMeters,
+  )
 }
 
-function samplePolyline(points: readonly LandrushPoint2[], progress: number) {
-  const segments = []
+function averagePlacementPosition(placements: readonly LandrushZombieNightBeaconPlacement[]) {
+  const total = placements.reduce(
+    (sum, placement) => ({
+      x: sum.x + placement.position[0],
+      z: sum.z + placement.position[2],
+    }),
+    { x: 0, z: 0 },
+  )
+  return { x: total.x / placements.length, z: total.z / placements.length }
+}
+
+function minimumPlacementDistanceSquared(
+  candidate: LandrushZombieNightBeaconPlacement,
+  placements: readonly LandrushZombieNightBeaconPlacement[],
+) {
+  let minimum = Number.POSITIVE_INFINITY
+  for (const placement of placements) {
+    minimum = Math.min(minimum, distanceSquared(candidate.position, placement.position))
+  }
+  return minimum
+}
+
+type MeasuredPolyline = Readonly<{
+  segments: readonly Readonly<{
+    dx: number
+    dz: number
+    end: LandrushPoint2
+    length: number
+    start: LandrushPoint2
+  }>[]
+  totalLength: number
+}>
+
+function measurePolyline(points: readonly LandrushPoint2[]): MeasuredPolyline | null {
+  const segments: MeasuredPolyline['segments'][number][] = []
   let totalLength = 0
   for (let index = 1; index < points.length; index += 1) {
     const start = points[index - 1]!
@@ -336,9 +491,13 @@ function samplePolyline(points: readonly LandrushPoint2[], progress: number) {
     totalLength += length
   }
   if (segments.length === 0) return null
-  const targetLength = clamp01(progress) * totalLength
+  return { segments, totalLength }
+}
+
+function samplePolylineAtDistance(measurement: MeasuredPolyline, distanceMeters: number) {
+  const targetLength = Math.max(0, Math.min(measurement.totalLength, distanceMeters))
   let traversed = 0
-  for (const segment of segments) {
+  for (const segment of measurement.segments) {
     if (traversed + segment.length < targetLength) {
       traversed += segment.length
       continue
@@ -352,20 +511,11 @@ function samplePolyline(points: readonly LandrushPoint2[], progress: number) {
       tangent: { x: segment.dx / segment.length, z: segment.dz / segment.length },
     }
   }
-  const last = segments.at(-1)!
+  const last = measurement.segments.at(-1)!
   return {
     point: { ...last.end },
     tangent: { x: last.dx / last.length, z: last.dz / last.length },
   }
-}
-
-function averagePoint(points: readonly LandrushPoint2[]) {
-  if (points.length === 0) return { x: 0, z: 0 }
-  const total = points.reduce((sum, point) => ({ x: sum.x + point.x, z: sum.z + point.z }), {
-    x: 0,
-    z: 0,
-  })
-  return { x: total.x / points.length, z: total.z / points.length }
 }
 
 function distanceSquared(

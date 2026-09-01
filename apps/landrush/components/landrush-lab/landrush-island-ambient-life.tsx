@@ -5,7 +5,7 @@ import { renderScheduler } from '@landrush/runtime'
 import { type AnyNode, useInteractive, useScene } from '@pascal-app/core'
 import { useGLTFKTX2, useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import {
   Component,
   type ReactNode,
@@ -78,6 +78,13 @@ import {
 } from './landrush-island-ambient-navigation'
 import { createLandrushIslandAmbientSemanticNavigationObstacles } from './landrush-island-ambient-navigation-semantics'
 import {
+  clearLandrushIslandAmbientNpcAudioPosition,
+  createLandrushIslandAmbientNpcAudioPositions,
+  type LandrushIslandAmbientNpcAudioPositions,
+  registerLandrushIslandAmbientNpcAudioPositions,
+  setLandrushIslandAmbientNpcAudioPosition,
+} from './landrush-island-ambient-npc-audio-state'
+import {
   advanceLandrushIslandAmbientNpcMotion,
   createLandrushIslandAmbientNpcJourneyPlanner,
   createLandrushIslandAmbientNpcMotionState,
@@ -116,6 +123,7 @@ import {
   parseLandrushZombieNightDebugQuery,
   resolveLandrushZombieNightVisibilityTreatment,
 } from './landrush-zombie-night-presentation-state'
+import type { NaturalRoadPlan } from './natural-road-plan'
 import {
   ZOMBIE_ESCAPE_AMBIENT_HANDOFF_LOCOMOTION,
   type ZombieEscapeAmbientHandoffSource,
@@ -190,6 +198,7 @@ export function LandrushIslandAmbientLife({
   admitted,
   ambientNpcPresentationRegistry,
   blockedPalmInstanceIndices,
+  naturalRoadPlan,
   npcsVisible,
   onLoadReadinessChange,
   palmLayout,
@@ -203,6 +212,7 @@ export function LandrushIslandAmbientLife({
   admitted: boolean
   ambientNpcPresentationRegistry: ZombieEscapeAmbientNpcPresentationRegistry
   blockedPalmInstanceIndices: ReadonlySet<number>
+  naturalRoadPlan: NaturalRoadPlan | null
   npcsVisible: boolean
   onLoadReadinessChange: (readiness: LandrushIslandAmbientLoadReadiness) => void
   palmLayout: readonly LandrushIslandPalmPlacement[]
@@ -223,6 +233,10 @@ export function LandrushIslandAmbientLife({
   )
   const [loadQueue, setLoadQueue] = useState(createLandrushIslandAmbientLoadQueueStateForMount)
   const [fishRuntime] = useState(createLandrushIslandFishRuntime)
+  const [ambientNpcAudioPositions] = useState(() =>
+    createLandrushIslandAmbientNpcAudioPositions(LANDRUSH_ISLAND_AMBIENT_NPCS.length),
+  )
+  const ambientNpcAudioRuntimeOwner = useThree((state) => state.gl)
   const [zombieOutsideTorchVisibility] = useState(readAmbientNpcZombieOutsideTorchVisibility)
   const [pageVisible, setPageVisible] = useState(readAmbientPageVisible)
   const pageVisibleRef = useRef(pageVisible)
@@ -330,6 +344,14 @@ export function LandrushIslandAmbientLife({
   }, [ambientNpcPresentationRegistry, surface.grassSurfaceElevation])
 
   useEffect(() => {
+    if (!admitted) return
+    return registerLandrushIslandAmbientNpcAudioPositions(
+      ambientNpcAudioRuntimeOwner,
+      ambientNpcAudioPositions,
+    )
+  }, [admitted, ambientNpcAudioPositions, ambientNpcAudioRuntimeOwner])
+
+  useEffect(() => {
     const handleVisibilityChange = () => {
       const visible = readAmbientPageVisible()
       pageVisibleRef.current = visible
@@ -423,9 +445,8 @@ export function LandrushIslandAmbientLife({
     >
       <LandrushZombieNightPresentation
         active={zombieIslandActive}
-        groundY={surface.grassSurfaceElevation}
+        naturalRoadPlan={naturalRoadPlan}
         readCanonicalElapsedSeconds={readCanonicalElapsedSeconds}
-        roads={roads}
       />
       {mountedLoadUnits.map((unit) => (
         <AmbientProgressiveLoadUnit
@@ -435,6 +456,7 @@ export function LandrushIslandAmbientLife({
           unitId={unit.id}
         >
           <AmbientLoadUnitModel
+            ambientNpcAudioPositions={ambientNpcAudioPositions}
             ambientNpcPresentationRegistry={ambientNpcPresentationRegistry}
             center={center}
             blockedPalmInstanceIndices={blockedPalmInstanceIndices}
@@ -462,6 +484,7 @@ export function LandrushIslandAmbientLife({
 }
 
 function AmbientLoadUnitModel({
+  ambientNpcAudioPositions,
   ambientNpcPresentationRegistry,
   blockedPalmInstanceIndices,
   center,
@@ -482,6 +505,7 @@ function AmbientLoadUnitModel({
   zombieIslandActive,
   zombieOutsideTorchVisibility,
 }: {
+  ambientNpcAudioPositions: LandrushIslandAmbientNpcAudioPositions
   ambientNpcPresentationRegistry: ZombieEscapeAmbientNpcPresentationRegistry
   blockedPalmInstanceIndices: ReadonlySet<number>
   center: LandrushPoint2
@@ -573,6 +597,7 @@ function AmbientLoadUnitModel({
   return (
     <group visible={npcsVisible || zombieIslandActive}>
       <AmbientNpc
+        audioPositions={ambientNpcAudioPositions}
         ambientNpcPresentationRegistry={ambientNpcPresentationRegistry}
         dayActive={npcsVisible}
         debugStore={motionDebug.store}
@@ -980,6 +1005,7 @@ export function LandrushIslandMeshyBoat({
 }
 
 function AmbientNpc({
+  audioPositions,
   ambientNpcPresentationRegistry,
   dayActive,
   debugStore,
@@ -993,6 +1019,7 @@ function AmbientNpc({
   zombieIslandActive,
   zombieOutsideTorchVisibility,
 }: {
+  audioPositions: LandrushIslandAmbientNpcAudioPositions
   ambientNpcPresentationRegistry: ZombieEscapeAmbientNpcPresentationRegistry
   dayActive: boolean
   debugStore: AmbientMotionDebugStore | null
@@ -1160,14 +1187,32 @@ function AmbientNpc({
       root.position.set(motion.position.x, groundY, motion.position.z)
       root.rotation.y = motion.yaw
       npcNeighborIndex.set(npc.id, motion.position)
+      setLandrushIslandAmbientNpcAudioPosition(
+        audioPositions,
+        index,
+        root.position.x,
+        root.position.y,
+        root.position.z,
+      )
     } else {
       npcNeighborIndex.delete(npc.id)
+      clearLandrushIslandAmbientNpcAudioPosition(audioPositions, index)
     }
     return () => {
       npcNeighborIndex.delete(npc.id)
+      clearLandrushIslandAmbientNpcAudioPosition(audioPositions, index)
       clearLandrushIslandNpcMotionDebug(debugStore, npc.id)
     }
-  }, [dayActive, debugStore, groundY, index, navigationWorld, npc.id, npcNeighborIndex])
+  }, [
+    audioPositions,
+    dayActive,
+    debugStore,
+    groundY,
+    index,
+    navigationWorld,
+    npc.id,
+    npcNeighborIndex,
+  ])
 
   useLayoutEffect(() => {
     const root = rootRef.current
@@ -1244,6 +1289,13 @@ function AmbientNpc({
       root.position.x = motion.position.x
       root.position.z = motion.position.z
       npcNeighborIndex.set(npc.id, motion.position)
+      setLandrushIslandAmbientNpcAudioPosition(
+        audioPositions,
+        index,
+        root.position.x,
+        root.position.y,
+        root.position.z,
+      )
     }
     if (motion.yaw !== previousYaw) root.rotation.y = motion.yaw
     if (actionPhaseRef.current !== motion.phase) {

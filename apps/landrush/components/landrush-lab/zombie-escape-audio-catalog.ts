@@ -54,6 +54,23 @@ export type ZombieEscapeMovementAudioCue = Readonly<{
   promptInfluence: number
 }>
 
+export type ZombieEscapeAmbientAudioCue = Readonly<{
+  ambientKind: 'npc-bump-vocalization'
+  durationSeconds: number
+  files: readonly [string, string, string, string]
+  id: string
+  masteringProfile: ZombieEscapeAudioMasteringProfile
+  playback: ZombieEscapeAudioCue['playback'] &
+    Readonly<{
+      maxDistance: number
+      referenceDistance: number
+      spatial: true
+    }>
+  prompt: string
+  promptInfluence: number
+  variantPrompts: readonly [string, string, string, string]
+}>
+
 export type ZombieEscapePresenceAudioCue = Readonly<{
   durationSeconds: number
   files: readonly [string, string, string]
@@ -111,6 +128,7 @@ export type ZombieEscapeAudioArtifactProvenance = Readonly<{
 }>
 
 type ZombieEscapeAudioCatalogState = Readonly<{
+  ambientCues: readonly ZombieEscapeAmbientAudioCue[]
   assetsReady: boolean
   catalogVersion: string
   cues: readonly ZombieEscapeAudioCue[]
@@ -161,6 +179,7 @@ export const ZOMBIE_ESCAPE_AUDIO_CATALOG = createZombieEscapeAudioCatalogState(
 )
 
 export const ZOMBIE_ESCAPE_AUDIO_ASSETS_READY = ZOMBIE_ESCAPE_AUDIO_CATALOG.assetsReady
+export const ZOMBIE_ESCAPE_AMBIENT_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.ambientCues
 export const ZOMBIE_ESCAPE_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.cues
 export const ZOMBIE_ESCAPE_MOVEMENT_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.movementCues
 export const ZOMBIE_ESCAPE_PRESENCE_AUDIO_CUES = ZOMBIE_ESCAPE_AUDIO_CATALOG.presenceCues
@@ -170,13 +189,16 @@ export const ZOMBIE_ESCAPE_PLAYER_JUMP_AUDIO_CUE = ZOMBIE_ESCAPE_MOVEMENT_AUDIO_
 export const ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE = ZOMBIE_ESCAPE_PRESENCE_AUDIO_CUES.find(
   (cue) => cue.presenceKind === 'zombie-vocalization',
 )!
+export const LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE = ZOMBIE_ESCAPE_AMBIENT_AUDIO_CUES.find(
+  (cue) => cue.ambientKind === 'npc-bump-vocalization',
+)!
 
 export function createZombieEscapeAudioCatalogState(
   rawCatalog: unknown,
   rawProvenance: unknown,
 ): ZombieEscapeAudioCatalogState {
   const catalog = requireRecord(rawCatalog, 'audio catalog')
-  if (catalog.schemaVersion !== 5) throw new Error('Zombie Escape audio catalog schema must be 5')
+  if (catalog.schemaVersion !== 6) throw new Error('Zombie Escape audio catalog schema must be 6')
   const catalogVersion = requireString(catalog.catalogVersion, 'catalogVersion')
   const modelId = requireString(catalog.modelId, 'modelId')
   const outputFormat = requireString(catalog.outputFormat, 'outputFormat')
@@ -364,11 +386,69 @@ export function createZombieEscapeAudioCatalogState(
     throw new Error('Zombie Escape audio catalog requires exactly one cue per presence kind')
   }
 
+  if (!Array.isArray(catalog.ambientCues) || catalog.ambientCues.length === 0) {
+    throw new Error('Zombie Escape audio catalog requires ambient cues')
+  }
+  const ambientKinds = new Set<string>()
+  const ambientCues = catalog.ambientCues.map((value, cueIndex) => {
+    const cue = requireRecord(value, `ambientCues[${String(cueIndex)}]`)
+    const id = requireString(cue.id, `ambientCues[${String(cueIndex)}].id`)
+    if (ids.has(id)) throw new Error(`Duplicate Zombie Escape audio cue: ${id}`)
+    ids.add(id)
+    if (cue.ambientKind !== 'npc-bump-vocalization') {
+      throw new Error(`${id}.ambientKind is invalid`)
+    }
+    if (ambientKinds.has(cue.ambientKind)) {
+      throw new Error(`Duplicate Zombie Escape ambient cue: ${cue.ambientKind}`)
+    }
+    ambientKinds.add(cue.ambientKind)
+    const durationSeconds = requireFiniteNumber(cue.durationSeconds, `${id}.durationSeconds`)
+    const promptInfluence = requireFiniteNumber(cue.promptInfluence, `${id}.promptInfluence`)
+    if (durationSeconds < 0.5 || durationSeconds > 30) {
+      throw new Error(`${id}.durationSeconds must be between 0.5 and 30`)
+    }
+    if (promptInfluence < 0 || promptInfluence > 1) {
+      throw new Error(`${id}.promptInfluence must be between 0 and 1`)
+    }
+    const files = requireFiles(cue.files, id, paths)
+    if (files.length !== 4) throw new Error(`${id}.files must contain exactly four variants`)
+    const variantPrompts = requireFourVariantPrompts(cue.variantPrompts, id)
+    const playback = requirePlayback(cue.playback, id)
+    if (
+      !playback.spatial ||
+      playback.maxDistance === undefined ||
+      playback.referenceDistance === undefined
+    ) {
+      throw new Error(`${id}.playback must be spatial`)
+    }
+    return {
+      ambientKind: cue.ambientKind,
+      durationSeconds,
+      files: files as [string, string, string, string],
+      id,
+      masteringProfile: requireMasteringProfile(cue.masteringProfile, true, id),
+      playback: {
+        ...playback,
+        maxDistance: playback.maxDistance,
+        referenceDistance: playback.referenceDistance,
+        spatial: true,
+      },
+      prompt: requireString(cue.prompt, `${id}.prompt`),
+      promptInfluence,
+      variantPrompts,
+    } satisfies ZombieEscapeAmbientAudioCue
+  })
+  if (ambientKinds.size !== 1) {
+    throw new Error('Zombie Escape audio catalog requires exactly one cue per ambient kind')
+  }
+
   return {
+    ambientCues,
     assetsReady: provenanceCoversCatalog(rawProvenance, catalogVersion, [
       ...cues,
       ...movementCues,
       ...presenceCues,
+      ...ambientCues,
     ]),
     catalogVersion,
     cues,
@@ -384,6 +464,7 @@ function provenanceCoversCatalog(
   catalogVersion: string,
   cues: readonly (
     | ZombieEscapeAudioCue
+    | ZombieEscapeAmbientAudioCue
     | ZombieEscapeMovementAudioCue
     | ZombieEscapePresenceAudioCue
   )[],
@@ -532,8 +613,20 @@ function requireVariantPrompts(
   cueId: string,
 ): readonly [string, string, string] {
   if (fileCount !== 3) throw new Error(`${cueId}.files must contain exactly three variants`)
+  return requireVariantPromptList(value, fileCount, cueId) as [string, string, string]
+}
+
+function requireFourVariantPrompts(
+  value: unknown,
+  cueId: string,
+): readonly [string, string, string, string] {
+  return requireVariantPromptList(value, 4, cueId) as [string, string, string, string]
+}
+
+function requireVariantPromptList(value: unknown, fileCount: number, cueId: string) {
+  const countLabel = fileCount === 3 ? 'three' : fileCount === 4 ? 'four' : String(fileCount)
   if (!Array.isArray(value) || value.length !== fileCount) {
-    throw new Error(`${cueId}.variantPrompts must match its three files`)
+    throw new Error(`${cueId}.variantPrompts must match its ${countLabel} files`)
   }
   const normalized = new Set<string>()
   const prompts = value.map((entry, index) => {
@@ -551,7 +644,7 @@ function requireVariantPrompts(
     normalized.add(normalizedPrompt)
     return prompt
   })
-  return prompts as [string, string, string]
+  return prompts
 }
 
 function normalizeVariantPrompt(value: string) {

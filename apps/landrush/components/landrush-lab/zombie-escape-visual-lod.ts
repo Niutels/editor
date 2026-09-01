@@ -20,13 +20,13 @@ export type ZombieEscapeVisualLodState = {
   capacity: number
   counts: ZombieEscapeVisualLodCounts
   distance: Float64Array
-  eligible: Uint8Array
   lastElapsedSeconds: number
   nextSelected: Uint8Array
   reacting: Uint8Array
   residencyUntilSeconds: Float64Array
   selected: Uint8Array
   selectedGeneration: Uint32Array
+  variantCandidates: Int32Array
   variantCounts: Uint8Array
   variantCount: number
 }
@@ -87,13 +87,15 @@ export function createZombieEscapeVisualLodState(
       selectionChangeCount: 0,
     },
     distance: new Float64Array(capacity),
-    eligible: new Uint8Array(capacity),
     lastElapsedSeconds: 0,
     nextSelected: new Uint8Array(capacity),
     reacting: new Uint8Array(capacity),
     residencyUntilSeconds: new Float64Array(capacity),
     selected: new Uint8Array(capacity),
     selectedGeneration: new Uint32Array(capacity),
+    variantCandidates: new Int32Array(
+      variantCount * ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT,
+    ).fill(-1),
     variantCounts: new Uint8Array(variantCount),
     variantCount,
   }
@@ -112,9 +114,9 @@ export function updateZombieEscapeVisualLod(
     state.residencyUntilSeconds.fill(0)
   }
   state.lastElapsedSeconds = elapsedSeconds
-  state.eligible.fill(0)
   state.nextSelected.fill(0)
   state.reacting.fill(0)
+  state.variantCandidates.fill(-1)
   state.variantCounts.fill(0)
 
   let activeZombieCount = 0
@@ -129,7 +131,6 @@ export function updateZombieEscapeVisualLod(
     ) {
       continue
     }
-    state.eligible[slot] = 1
     const reacting = input.hitFlash[slot]! > 0 || input.hitReaction[slot]! > 0
     state.reacting[slot] = reacting ? 1 : 0
     const dx = input.x[slot]! - input.observerX
@@ -147,13 +148,19 @@ export function updateZombieEscapeVisualLod(
         elapsedSeconds + ZOMBIE_ESCAPE_DETAILED_HIT_RESIDENCY_SECONDS,
       )
     }
+    insertZombieEscapeVisualLodVariantCandidate(state, input, slot, elapsedSeconds)
   }
 
   let detailedActiveCount = 0
   while (detailedActiveCount < ZOMBIE_ESCAPE_DETAILED_ZOMBIE_CAPACITY) {
     let bestSlot = -1
-    for (let slot = 0; slot < state.capacity; slot += 1) {
-      if (state.eligible[slot] === 0 || state.nextSelected[slot] !== 0) continue
+    for (
+      let candidateIndex = 0;
+      candidateIndex < state.variantCandidates.length;
+      candidateIndex += 1
+    ) {
+      const slot = state.variantCandidates[candidateIndex]!
+      if (slot < 0 || state.nextSelected[slot] !== 0) continue
       const variant = input.variant[slot]!
       if (state.variantCounts[variant]! >= ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT) {
         continue
@@ -333,6 +340,30 @@ export function resolveZombieEscapeDetailedRootPoolSize(
     if (variant === variantIndex) rosterCount += 1
   }
   return Math.min(ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT, rosterCount)
+}
+
+function insertZombieEscapeVisualLodVariantCandidate(
+  state: ZombieEscapeVisualLodState,
+  input: ZombieEscapeVisualLodInput,
+  slot: number,
+  elapsedSeconds: number,
+) {
+  const start = input.variant[slot]! * ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT
+  const end = start + ZOMBIE_ESCAPE_DETAILED_ROOT_CAPACITY_PER_VARIANT
+  for (let candidateIndex = start; candidateIndex < end; candidateIndex += 1) {
+    const incumbentSlot = state.variantCandidates[candidateIndex]!
+    if (
+      incumbentSlot >= 0 &&
+      !isZombieEscapeVisualLodCandidateBetter(state, input, slot, incumbentSlot, elapsedSeconds)
+    ) {
+      continue
+    }
+    for (let shiftIndex = end - 1; shiftIndex > candidateIndex; shiftIndex -= 1) {
+      state.variantCandidates[shiftIndex] = state.variantCandidates[shiftIndex - 1]!
+    }
+    state.variantCandidates[candidateIndex] = slot
+    return
+  }
 }
 
 function updateZombieEscapeUnpresentedActiveCount(

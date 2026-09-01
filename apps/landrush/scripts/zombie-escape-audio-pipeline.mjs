@@ -68,6 +68,7 @@ const WEAPON_IMPACT_WEAPON_IDS = new Set([
 ])
 const MOVEMENT_KINDS = new Set(['jump'])
 const PRESENCE_KINDS = new Set(['zombie-vocalization'])
+const AMBIENT_KINDS = new Set(['npc-bump-vocalization'])
 const ZOMBIE_VARIANT_EVENT_KINDS = new Set(['enemy-hit', 'enemy-killed'])
 
 export async function readZombieEscapeAudioContract(
@@ -86,7 +87,7 @@ export async function readZombieEscapeAudioContract(
 
 export function validateZombieEscapeAudioCatalog(catalog) {
   requireRecord(catalog, 'catalog')
-  if (catalog.schemaVersion !== 5) throw new Error('catalog.schemaVersion must be 5')
+  if (catalog.schemaVersion !== 6) throw new Error('catalog.schemaVersion must be 6')
   requireNonEmptyString(catalog.catalogVersion, 'catalog.catalogVersion')
   if (catalog.modelId !== 'eleven_text_to_sound_v2') {
     throw new Error('catalog.modelId must be eleven_text_to_sound_v2')
@@ -335,6 +336,73 @@ export function validateZombieEscapeAudioCatalog(catalog) {
   }
   if (presenceKinds.size !== PRESENCE_KINDS.size) {
     throw new Error('catalog must define exactly one cue for every presence kind')
+  }
+
+  if (!Array.isArray(catalog.ambientCues) || catalog.ambientCues.length === 0) {
+    throw new Error('catalog.ambientCues must be a non-empty array')
+  }
+  const ambientKinds = new Set()
+  for (const [cueIndex, cue] of catalog.ambientCues.entries()) {
+    const cueLabel = `catalog.ambientCues[${cueIndex}]`
+    requireRecord(cue, cueLabel)
+    requireNonEmptyString(cue.id, `${cueLabel}.id`)
+    if (cueIds.has(cue.id)) throw new Error(`duplicate cue id ${cue.id}`)
+    cueIds.add(cue.id)
+    if (!AMBIENT_KINDS.has(cue.ambientKind)) {
+      throw new Error(`${cueLabel}.ambientKind is invalid`)
+    }
+    if (ambientKinds.has(cue.ambientKind)) {
+      throw new Error(`duplicate ambient cue kind ${cue.ambientKind}`)
+    }
+    ambientKinds.add(cue.ambientKind)
+    requireFiniteNumber(cue.durationSeconds, `${cueLabel}.durationSeconds`)
+    if (
+      cue.durationSeconds < 0.5 ||
+      cue.durationSeconds > 30 ||
+      Math.abs(cue.durationSeconds * 10 - Math.round(cue.durationSeconds * 10)) > 1e-9
+    ) {
+      throw new Error(`${cueLabel}.durationSeconds must be a 0.1 second step from 0.5 to 30`)
+    }
+    requireFiniteNumber(cue.promptInfluence, `${cueLabel}.promptInfluence`)
+    if (cue.promptInfluence < 0 || cue.promptInfluence > 1) {
+      throw new Error(`${cueLabel}.promptInfluence must be between 0 and 1`)
+    }
+    requireNonEmptyString(cue.prompt, `${cueLabel}.prompt`)
+    if (!Array.isArray(cue.files) || cue.files.length !== 4) {
+      throw new Error(`${cueLabel}.files must contain exactly four variants`)
+    }
+    const variantPrompts = requireVariantPrompts(
+      cue.variantPrompts,
+      cue.files.length,
+      cueLabel,
+    )
+    validatePresencePlayback(cue.playback, `${cueLabel}.playback`)
+    for (const [variantIndex, publicPath] of cue.files.entries()) {
+      requireNonEmptyString(publicPath, `${cueLabel}.files[${variantIndex}]`)
+      if (
+        !publicPath.startsWith(ZOMBIE_ESCAPE_AUDIO_PUBLIC_PREFIX) ||
+        !publicPath.endsWith(`-${variantIndex}.mp3`) ||
+        publicPath.includes('..') ||
+        publicPath.includes('\\')
+      ) {
+        throw new Error(`${cueLabel}.files[${variantIndex}] is not a canonical audio path`)
+      }
+      if (publicPaths.has(publicPath)) throw new Error(`duplicate audio path ${publicPath}`)
+      publicPaths.add(publicPath)
+      assets.push({
+        cueId: cue.id,
+        durationSeconds: cue.durationSeconds,
+        kind: 'ambient',
+        masteringProfile: requireMasteringProfile(cue.masteringProfile, true, cueLabel),
+        prompt: variantPrompts[variantIndex],
+        promptInfluence: cue.promptInfluence,
+        publicPath,
+        variantIndex,
+      })
+    }
+  }
+  if (ambientKinds.size !== AMBIENT_KINDS.size) {
+    throw new Error('catalog must define exactly one cue for every ambient kind')
   }
   return assets
 }
@@ -747,9 +815,12 @@ function requireMasteringProfile(value, required, label) {
 }
 
 function requireVariantPrompts(value, fileCount, label) {
-  if (fileCount !== 3) throw new Error(`${label}.files must contain exactly three variants`)
+  if (fileCount !== 3 && fileCount !== 4) {
+    throw new Error(`${label}.files must contain exactly three or four variants`)
+  }
+  const countLabel = fileCount === 3 ? 'three' : 'four'
   if (!Array.isArray(value) || value.length !== fileCount) {
-    throw new Error(`${label}.variantPrompts must match its three files`)
+    throw new Error(`${label}.variantPrompts must match its ${countLabel} files`)
   }
   const normalized = new Set()
   return value.map((prompt, index) => {

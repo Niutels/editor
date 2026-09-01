@@ -54,7 +54,7 @@ describe('Landrush island floor presentation readiness', () => {
     ).toHaveLength(2)
   })
 
-  test('derives expected roots from explicit render-tree reachability and audited kinds', () => {
+  test('derives expected roots from registration, render-tree reachability, and audited kinds', () => {
     const nodes = {
       building: { children: ['level-live'], parentId: 'site', type: 'building' },
       'cover-live': { children: [], parentId: 'level-live', type: 'ceiling' },
@@ -80,7 +80,7 @@ describe('Landrush island floor presentation readiness', () => {
       ],
     })
 
-    expect(expectedRoots.map(({ levelId }) => levelId)).toEqual(['level-live', 'cover-live'])
+    expect(expectedRoots.map(({ levelId }) => levelId)).toEqual(['cover-live'])
   })
 
   test('requires two consecutive complete samples for the same generation', () => {
@@ -115,7 +115,7 @@ describe('Landrush island floor presentation readiness', () => {
     expect(second.readiness.ready).toBe(true)
   })
 
-  test('blocks a reachable missing root and settles twice after late registration', () => {
+  test('excludes a reachable missing root and admits it after registration', () => {
     const nodes = {
       'level-late': { children: [], type: 'level' },
       site: { children: ['level-late'], type: 'site' },
@@ -130,7 +130,7 @@ describe('Landrush island floor presentation readiness', () => {
     const firstMissing = advanceLandrushIslandFloorPresentationReadiness({
       admissionComplete: true,
       canonicalReadyRoots: 0,
-      generation: 'geometry:1|registry:1|level-late@missing',
+      generation: 'geometry:1|registry:1|',
       hasPendingWork: false,
       previous: { settledGeneration: null },
       registrationComplete: registeredMissingRoots.length === expectedMissingRoots.length,
@@ -148,10 +148,10 @@ describe('Landrush island floor presentation readiness', () => {
       total: expectedMissingRoots.length,
     })
 
-    expect(expectedMissingRoots).toHaveLength(1)
+    expect(expectedMissingRoots).toHaveLength(0)
     expect(registeredMissingRoots).toHaveLength(0)
-    expect(secondMissing.readiness).toMatchObject({ completed: 0, ready: false, total: 1 })
-    expect(secondMissing.state.settledGeneration).toBeNull()
+    expect(secondMissing.readiness).toMatchObject({ completed: 0, ready: true, total: 0 })
+    expect(secondMissing.state.settledGeneration).toBe(firstMissing.readiness.generation)
 
     const expectedRegisteredRoots = collectLandrushIslandExpectedFloorPresentationRoots({
       nodes,

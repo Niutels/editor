@@ -61,6 +61,7 @@ import {
 } from './zombie-escape-simulation'
 import { createZombieEscapeArena } from './zombie-escape-world'
 import {
+  resolveZombieEscapeFirstProjectileSlowdownMultiplier,
   resolveZombieEscapeProjectileSlowdownMultiplier,
   resolveZombieEscapeSpawnSpeedScale,
   ZOMBIE_ESCAPE_ZOMBIE_GAIT,
@@ -260,7 +261,7 @@ describe('Zombie Escape simulation', () => {
     expect(state.zombies.pool.capacity).toBe(ZOMBIE_ESCAPE_CAPACITY.zombies)
   })
 
-  test('ramps every night linearly from ten zombies to one hundred by night end', () => {
+  test('ramps a first night linearly from ten zombies to one hundred by night end', () => {
     const remainingSeconds = [180, 150, 120, 90, 60, 30, 1, 0]
     const expectedTargets = [10, 25, 40, 55, 70, 85, 100, 100]
     expect(
@@ -291,6 +292,35 @@ describe('Zombie Escape simulation', () => {
     expect(state.night).toBe(2)
     expect(state.phaseSecondsRemaining).toBe(ZOMBIE_ESCAPE_SIMULATION.nightDurationSeconds)
     expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(10)
+  })
+
+  test('steepens the current-night population ramp from the prior-night kill count', () => {
+    expect(resolveZombieEscapeNightZombieTarget(180, 100, 20)).toBe(10)
+    expect(resolveZombieEscapeNightZombieTarget(150, 100, 20)).toBe(28)
+    expect(resolveZombieEscapeNightZombieTarget(120, 100, 20)).toBe(47)
+    expect(resolveZombieEscapeNightZombieTarget(90, 100, 20)).toBe(65)
+    expect(resolveZombieEscapeNightZombieTarget(60, 100, 20)).toBe(83)
+    expect(resolveZombieEscapeNightZombieTarget(30, 100, 20)).toBe(100)
+
+    const arena = createZombieEscapeArena(12_345_4)
+    const state = createZombieEscapeSimulation(arena, 98_760_4)
+    const input = createZombieEscapeControlState()
+    setZombieEscapeGamePhase(state, 'night')
+    state.currentNightKills = 20
+    setZombieEscapeGamePhase(state, 'build')
+    setZombieEscapeGamePhase(state, 'night')
+
+    expect(state.night).toBe(2)
+    expect(state.priorNightKills).toBe(20)
+    expect(state.currentNightKills).toBe(0)
+    state.phaseSecondsRemaining = 90
+    stepZombieEscapeSimulationPhysics(
+      state,
+      input,
+      ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
+      arena,
+    )
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(65)
   })
 
   test('rounds the linear population ramp and clamps time and finite capacity', () => {
@@ -417,6 +447,14 @@ describe('Zombie Escape simulation', () => {
     state.player.z = 0
     const zombie = spawnZombieEscapeZombie(state, 0, -2, 120)
     const initialSpeedScale = state.zombies.speedScale[zombie]!
+    const spawnOrdinal = state.zombies.spawnOrdinal[zombie]!
+    const movement = getZombieEscapeZombieCatalogEntry(state.zombies.variant[zombie]!).movement
+    const walkSpeed = movement.walkMetersPerSecond + state.wave * 0.06
+    const runSpeed = movement.runMetersPerSecond + state.wave * 0.18
+    const legacyHitMultiplier =
+      1 - (1 - resolveZombieEscapeProjectileSlowdownMultiplier(state.seed, spawnOrdinal, 0)) * 4
+    const legacyPostHitSpeed = walkSpeed * initialSpeedScale * legacyHitMultiplier
+    const preHitSpeed = runSpeed * initialSpeedScale
     const randomBeforeHit = { ...state.random }
     const input = createZombieEscapeControlState()
     input.aimX = 0
@@ -437,11 +475,11 @@ describe('Zombie Escape simulation', () => {
     }
 
     expect(state.zombies.health[zombie]).toBeLessThan(120)
-    expect(state.zombies.gait[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker)
-    expect(state.zombies.runBlend[zombie]).toBeLessThan(1)
+    expect(state.zombies.gait[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner)
+    expect(state.zombies.runBlend[zombie]).toBeGreaterThan(0.5)
     expect(state.zombies.projectileHitOrdinal[zombie]).toBe(1)
-    expect(state.zombies.speedScale[zombie]).toBeGreaterThanOrEqual(initialSpeedScale * 0.9)
-    expect(state.zombies.speedScale[zombie]).toBeLessThanOrEqual(initialSpeedScale * 0.99)
+    const postHitSpeed = runSpeed * state.zombies.speedScale[zombie]!
+    expect((preHitSpeed - postHitSpeed) / (preHitSpeed - legacyPostHitSpeed)).toBeCloseTo(0.25, 5)
     expect(state.random).toEqual(randomBeforeHit)
   })
 
@@ -456,10 +494,18 @@ describe('Zombie Escape simulation', () => {
     state.player.z = 0
     const zombie = spawnZombieEscapeZombie(state, 0, -3.2, 500)
     state.zombies.speedScale[zombie] = 0.9
+    const initialSpeedScale = state.zombies.speedScale[zombie]!
     const spawnOrdinal = state.zombies.spawnOrdinal[zombie]!
+    const movement = getZombieEscapeZombieCatalogEntry(state.zombies.variant[zombie]!).movement
     const expectedSpeedScale = Math.fround(
       Math.fround(
-        0.9 * resolveZombieEscapeProjectileSlowdownMultiplier(state.seed, spawnOrdinal, 0),
+        initialSpeedScale *
+          resolveZombieEscapeFirstProjectileSlowdownMultiplier(
+            state.seed,
+            spawnOrdinal,
+            movement.walkMetersPerSecond + state.wave * 0.06,
+            movement.runMetersPerSecond + state.wave * 0.18,
+          ),
       ) * resolveZombieEscapeProjectileSlowdownMultiplier(state.seed, spawnOrdinal, 1),
     )
     const input = createZombieEscapeControlState()
@@ -477,7 +523,7 @@ describe('Zombie Escape simulation', () => {
     }
 
     expect(state.zombies.projectileHitOrdinal[zombie]).toBe(2)
-    expect(state.zombies.gait[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_GAIT.walker)
+    expect(state.zombies.gait[zombie]).toBe(ZOMBIE_ESCAPE_ZOMBIE_GAIT.runner)
     expect(state.zombies.speedScale[zombie]).toBe(expectedSpeedScale)
   })
 
@@ -1436,10 +1482,15 @@ describe('Zombie Escape simulation', () => {
     expect(reverseFieldBanks.bankZeroReaderCount).toBe(0)
     expect(reverseFieldBanks.bankOneReaderCount).toBe(0)
     expect(reverseFieldBanks.leaseInvariantViolationCount).toBe(0)
-    expect(reverseFieldBanks.maximumReaderLeaseCount).toBeGreaterThan(0)
+    expect(reverseFieldBanks.maximumReaderLeaseCount).toBeLessThanOrEqual(
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+    )
     expect(attachmentHeapLeases.activeAgentLeases).toBe(0)
     expect(attachmentHeapLeases.leaseInvariantViolationCount).toBe(0)
-    expect(attachmentHeapLeases.maximumActiveAgentLeases).toBeGreaterThan(0)
+    expect(attachmentHeapLeases.maximumActiveAgentLeases).toBeLessThanOrEqual(
+      ZOMBIE_ESCAPE_SIMULATION.navigationSparseSearchAgentSlicesPerTick,
+    )
+    expect(state.navigationSharedRouteReusedCount).toBeGreaterThan(0)
   })
 
   test('moves the smallest catalog zombie through the parcel-02 stair connector using navigation collision', () => {
@@ -2201,6 +2252,151 @@ describe('Zombie Escape simulation', () => {
     expect(second.zombies.navigationWaypointNode[secondSlot]).toBe(
       first.zombies.navigationWaypointNode[firstSlot],
     )
+  })
+
+  test('reuses one current sparse route across adjacent triangles without starting another search', () => {
+    const arena = createZombieEscapeArena(424)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 825, undefined, { zombieCapacity: 2 })
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boundaryPolicy: 'none',
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'shared-route-surface',
+          polygon: [
+            { x: -10, z: -8 },
+            { x: 10, z: -8 },
+            { x: 10, z: 8 },
+            { x: -10, z: 8 },
+          ],
+        },
+      ],
+      playRadius: arena.playRadius,
+      segments: [
+        {
+          endX: 0,
+          endZ: 4,
+          halfThickness: 0.1,
+          id: 'shared-route-wall',
+          startX: 0,
+          startZ: -4,
+        },
+      ],
+    })
+    setZombieEscapeCollisionWorld(state, world)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 6
+    state.player.y = 0
+    state.player.z = 0
+    const input = createZombieEscapeControlState()
+    publishZombieEscapeSparseTarget(state, input, arena)
+
+    const graph = world.navigationGraph
+    const regions = graph.targetRegionIndex
+    let firstRegion = -1
+    let secondRegion = -1
+    let sharedComponent = -1
+    for (let region = 0; region < regions.witnessNodes.length && firstRegion < 0; region += 1) {
+      if (regions.fallbacks[region] !== 0 || regions.layerIndices[region] !== 0) continue
+      const firstX =
+        (regions.firstXs[region]! + regions.secondXs[region]! + regions.thirdXs[region]!) / 3
+      if (firstX >= -1) continue
+      const witnessNode = regions.witnessNodes[region]!
+      const component = graph.strictSameLayerComponentIndices[witnessNode]!
+      const neighborStart = graph.strictAdjacency.nodeOffsets[witnessNode]!
+      const neighborEnd = graph.strictAdjacency.nodeOffsets[witnessNode + 1]!
+      for (let offset = neighborStart; offset < neighborEnd; offset += 1) {
+        const neighborNode = graph.strictAdjacency.toNodes[offset]!
+        const neighborRegion = regions.witnessNodes.indexOf(neighborNode)
+        if (
+          neighborRegion < 0 ||
+          neighborRegion === region ||
+          regions.fallbacks[neighborRegion] !== 0 ||
+          regions.layerIndices[neighborRegion] !== 0 ||
+          graph.strictSameLayerComponentIndices[neighborNode] !== component
+        ) {
+          continue
+        }
+        const secondX =
+          (regions.firstXs[neighborRegion]! +
+            regions.secondXs[neighborRegion]! +
+            regions.thirdXs[neighborRegion]!) /
+          3
+        if (secondX >= -1) continue
+        firstRegion = region
+        secondRegion = neighborRegion
+        sharedComponent = component
+        break
+      }
+    }
+    expect(firstRegion).toBeGreaterThanOrEqual(0)
+    expect(secondRegion).toBeGreaterThanOrEqual(0)
+    expect(secondRegion).not.toBe(firstRegion)
+    expect(sharedComponent).toBeGreaterThanOrEqual(0)
+    const firstX =
+      (regions.firstXs[firstRegion]! +
+        regions.secondXs[firstRegion]! +
+        regions.thirdXs[firstRegion]!) /
+      3
+    const firstZ =
+      (regions.firstZs[firstRegion]! +
+        regions.secondZs[firstRegion]! +
+        regions.thirdZs[firstRegion]!) /
+      3
+    const secondX =
+      (regions.firstXs[secondRegion]! +
+        regions.secondXs[secondRegion]! +
+        regions.thirdXs[secondRegion]!) /
+      3
+    const secondZ =
+      (regions.firstZs[secondRegion]! +
+        regions.secondZs[secondRegion]! +
+        regions.thirdZs[secondRegion]!) /
+      3
+
+    const first = spawnZombieEscapeZombie(state, firstX, firstZ)
+    expect(first).toBeGreaterThanOrEqual(0)
+    expect(state.navigationSharedRoutePublishedCount).toBeGreaterThan(0)
+    const sharedWaypoint =
+      state.navigationSharedRouteCache.strictComponentRoutes.waypointNode[sharedComponent]!
+    expect(sharedWaypoint).toBeGreaterThanOrEqual(0)
+
+    const second = spawnZombieEscapeZombie(state, secondX, secondZ)
+    expect(second).toBeGreaterThanOrEqual(0)
+    state.navigationSharedRouteCache.fallbackByRegion[secondRegion] = 0
+    state.navigationSharedRouteCache.routeGenerationByRegion[secondRegion] = 0
+    state.navigationSharedRouteCache.targetRevisionByRegion[secondRegion] = 0
+    state.navigationSharedRouteCache.waypointNodeByRegion[secondRegion] = -1
+    state.navigationSharedRouteCache.worldGenerationByRegion[secondRegion] = 0
+    clearZombieEscapeSparseFlowSearchRouteCorridor(
+      state.zombies.navigationSparseCommittedFlowSearch[second]!,
+    )
+    state.zombies.navigationIntentHasCached[second] = 0
+    state.zombies.navigationIntentHasReceivedFirstService[second] = 0
+    state.zombies.navigationIntentPending[second] = 1
+    state.zombies.navigationIntentPendingSinceTick[second] = state.navigationIntentTick
+    state.zombies.navigationIntentValid[second] = 0
+    state.zombies.navigationWaypointFallback[second] = 0
+    state.zombies.navigationWaypointNode[second] = -1
+    state.navigationIntentPendingCount = 1
+    const searchStartsBefore = state.navigationSparseSearchStartedCount
+    const reusesBefore = state.navigationSharedRouteReusedCount
+
+    for (let tick = 0; tick < 8 && state.zombies.navigationIntentPending[second] !== 0; tick += 1) {
+      stepZombieEscapeSimulation(state, input, 1 / 60, arena)
+    }
+
+    expect(state.zombies.navigationIntentPending[second]).toBe(0)
+    expect(state.zombies.navigationIntentValid[second]).toBe(1)
+    expect(state.zombies.navigationWaypointNode[second]).toBe(sharedWaypoint)
+    expect(state.navigationSharedRouteReusedCount).toBe(reusesBefore + 1)
+    expect(state.navigationSparseSearchStartedCount).toBe(searchStartsBefore)
   })
 
   test('shoots through one fixed shot-event pool and damages a zombie', () => {
@@ -2989,6 +3185,7 @@ describe('Zombie Escape simulation', () => {
 
     const shot = state.lastShotSlot
     expect(state.shots.pool.active[shot]).toBe(0)
+    expect(state.shots.pool.activeCount).toBe(0)
     expect(state.shots.phase[shot]).toBe(ZOMBIE_ESCAPE_SHOT_PHASE.inactive)
     expect(state.shots.impactKind[shot]).toBe(ZOMBIE_ESCAPE_SHOT_IMPACT_KIND.expired)
   })
@@ -3708,6 +3905,7 @@ describe('Zombie Escape simulation', () => {
     }
 
     expect(state.kills).toBe(1)
+    expect(state.currentNightKills).toBe(1)
     expect(state.money).toBe(ZOMBIE_ESCAPE_SIMULATION.killReward)
   })
 

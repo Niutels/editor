@@ -5,6 +5,7 @@ import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 import {
   createZombieEscapeVariantByPoolSlot,
   createZombieEscapeZombieRoster,
+  resolveZombieEscapeFirstProjectileSlowdownMultiplier,
   resolveZombieEscapeProjectileSlowdownMultiplier,
   resolveZombieEscapeSpawnSpeedScale,
   ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
@@ -135,7 +136,41 @@ describe('Zombie Escape zombie roster', () => {
 
     expect(first).toEqual(repeated)
     expect(new Set(first).size).toBeGreaterThan(1)
-    expect(Math.min(...first)).toBeGreaterThanOrEqual(0.9)
-    expect(Math.max(...first)).toBeLessThanOrEqual(0.99)
+    expect(Math.min(...first)).toBeGreaterThanOrEqual(0.975)
+    expect(Math.max(...first)).toBeLessThanOrEqual(0.9975)
+    const previousMultipliers = [0.979, 0.9795, 0.9515]
+    for (let index = 0; index < previousMultipliers.length; index += 1) {
+      expect(1 - first[index]!).toBeCloseTo((1 - previousMultipliers[index]!) * 0.25, 12)
+    }
+  })
+
+  test('keeps only one quarter of the legacy runner-to-walker first-hit speed drop', () => {
+    for (let variant = 0; variant < ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length; variant += 1) {
+      for (const wave of [1, 5, 20]) {
+        const movement = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[variant]!.movement
+        const walkSpeed = movement.walkMetersPerSecond + wave * 0.06
+        const runSpeed = movement.runMetersPerSecond + wave * 0.18
+        const spawnOrdinal = variant * 7 + wave
+        const laterHitMultiplier = resolveZombieEscapeProjectileSlowdownMultiplier(
+          91_337,
+          spawnOrdinal,
+          0,
+        )
+        const legacyHitMultiplier = 1 - (1 - laterHitMultiplier) * 4
+        const legacyPostHitSpeed = walkSpeed * legacyHitMultiplier
+        const firstHitMultiplier = resolveZombieEscapeFirstProjectileSlowdownMultiplier(
+          91_337,
+          spawnOrdinal,
+          walkSpeed,
+          runSpeed,
+        )
+        const currentPostHitSpeed = runSpeed * firstHitMultiplier
+
+        expect((runSpeed - currentPostHitSpeed) / (runSpeed - legacyPostHitSpeed)).toBeCloseTo(
+          0.25,
+          12,
+        )
+      }
+    }
   })
 })

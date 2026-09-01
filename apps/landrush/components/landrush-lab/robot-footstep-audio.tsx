@@ -15,6 +15,13 @@ import {
   type Vector3,
 } from 'three'
 import { shouldActivateLandrushGameplayAudio } from '../../lib/landrush-audio-default'
+import {
+  advanceLandrushIslandAmbientNpcBumpAudio,
+  createLandrushIslandAmbientNpcBumpRuntime,
+  type LandrushIslandAmbientNpcAudioPositions,
+  readLandrushIslandAmbientNpcAudioPositions,
+} from './landrush-island-ambient-npc-audio-state'
+import { LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE } from './zombie-escape-audio-catalog'
 
 const FOOTSTEP_LEFT_URLS = [
   '/audios/sfx/footsteps/sand-l1.ogg',
@@ -46,9 +53,11 @@ const FOOTSTEP_ROLLOFF = 0.8
 const FOOTSTEP_WALK_PLAYBACK_SPEED = 2.2
 const FOOTSTEP_RUN_PLAYBACK_SPEED = 1
 const JUMP_AUDIO_MAX_RETRYABLE_PLAY_FAILURES = 2
+const LANDRUSH_AMBIENT_NPC_BUMP_SOURCE_HEIGHT_METERS = 1.2
 export const ROBOT_AUDIO_LISTENER_FRAME_PRIORITY = 0.99
 export const ROBOT_JUMP_AUDIO_PENDING_TTL_SECONDS = 0.45
 const EMPTY_JUMP_AUDIO_BUFFERS: readonly AudioBuffer[] = []
+const EMPTY_AMBIENT_NPC_AUDIO_SOURCE_INDICES = new Int16Array(0)
 
 export type RobotFootstepMotion = {
   grounded: boolean
@@ -77,6 +86,8 @@ type FootstepBuffers = {
   right: AudioBuffer[]
 }
 
+type AmbientNpcAudioBuffers = readonly AudioBuffer[]
+
 export type RobotJumpAudioBufferStatus = 'failed' | 'loading' | 'ready' | 'unavailable'
 
 export type RobotJumpAudioPlaybackDisposition = 'play' | 'retry' | 'terminal'
@@ -99,6 +110,7 @@ type JumpAudioBufferLoadState = {
 }
 
 type FootstepRuntime = {
+  ambientNpcPoolIndex: number
   distance: number
   jumpPoolIndex: number
   jumpPlayback: RobotJumpAudioPlaybackState
@@ -127,10 +139,14 @@ export function LandrushRobotFootstepAudio({
 }) {
   const [listener, setListener] = useState<AudioListener | null>(null)
   const audioGroupRef = useRef<Group>(null!)
+  const ambientNpcAudioPoolRef = useRef<PositionalAudio[]>([])
+  const ambientNpcAudioPositionsRef = useRef<LandrushIslandAmbientNpcAudioPositions | null>(null)
+  const ambientNpcAudioSourceIndicesRef = useRef(EMPTY_AMBIENT_NPC_AUDIO_SOURCE_INDICES)
   const audioPoolRef = useRef<PositionalAudio[]>([])
   const jumpAudioPoolRef = useRef<(PositionalAudio | ThreeAudio)[]>([])
   const jumpAudioPoolCueRef = useRef<RobotJumpAudioCue | null>(null)
   const runtimeRef = useRef<FootstepRuntime>({
+    ambientNpcPoolIndex: 0,
     distance: 0,
     jumpPoolIndex: 0,
     jumpPlayback: createRobotJumpAudioPlaybackState(jumpSequenceRef?.current ?? 0),
@@ -141,6 +157,8 @@ export function LandrushRobotFootstepAudio({
     poolIndex: 0,
     wasMoving: false,
   })
+  const ambientNpcBumpRuntimeRef = useRef(createLandrushIslandAmbientNpcBumpRuntime(0))
+  const [ambientNpcBuffers, setAmbientNpcBuffers] = useState<AmbientNpcAudioBuffers | null>(null)
   const [buffers, setBuffers] = useState<FootstepBuffers | null>(null)
   const jumpAudioFilesKey = resolveJumpAudioFilesKey(jumpAudioCue)
   const jumpAudioCueConfigurationValid = isRobotJumpAudioCueConfigurationValid(jumpAudioCue)
@@ -258,6 +276,32 @@ export function LandrushRobotFootstepAudio({
 
   useEffect(() => {
     if (!audioRuntimeEnabled) {
+      setAmbientNpcBuffers(null)
+      return
+    }
+
+    let active = true
+    const loader = new AudioLoader()
+    const loadBuffer = (url: string) =>
+      new Promise<AudioBuffer>((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject)
+      })
+
+    Promise.all(LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE.files.map(loadBuffer))
+      .then((loaded) => {
+        if (active) setAmbientNpcBuffers(loaded)
+      })
+      .catch(() => {
+        if (active) setAmbientNpcBuffers(null)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [audioRuntimeEnabled])
+
+  useEffect(() => {
+    if (!audioRuntimeEnabled) {
       setBuffers(null)
       return
     }
@@ -284,6 +328,37 @@ export function LandrushRobotFootstepAudio({
       active = false
     }
   }, [audioRuntimeEnabled])
+
+  useEffect(() => {
+    if (!(audioRuntimeEnabled && listener)) return
+
+    const audioGroup = audioGroupRef.current
+    const cue = LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE
+    const pool = Array.from({ length: cue.playback.maxVoices }, () => {
+      const audio = new PositionalAudio(listener)
+      audio.setDistanceModel('inverse')
+      audio.setRefDistance(cue.playback.referenceDistance)
+      audio.setMaxDistance(cue.playback.maxDistance)
+      audio.setRolloffFactor(1.25)
+      audio.setLoop(false)
+      audioGroup.add(audio)
+      return audio
+    })
+    const sourceIndices = new Int16Array(pool.length)
+    sourceIndices.fill(-1)
+
+    ambientNpcAudioPoolRef.current = pool
+    ambientNpcAudioSourceIndicesRef.current = sourceIndices
+    return () => {
+      for (const audio of pool) {
+        if (audio.isPlaying) audio.stop()
+        audio.disconnect()
+        audioGroup.remove(audio)
+      }
+      ambientNpcAudioPoolRef.current = []
+      ambientNpcAudioSourceIndicesRef.current = EMPTY_AMBIENT_NPC_AUDIO_SOURCE_INDICES
+    }
+  }, [audioRuntimeEnabled, listener])
 
   useEffect(() => {
     if (!(audioRuntimeEnabled && listener)) return
@@ -356,6 +431,8 @@ export function LandrushRobotFootstepAudio({
 
   useFrame((state, delta) => {
     const runtime = runtimeRef.current
+    const ambientNpcPool = ambientNpcAudioPoolRef.current
+    const ambientNpcSourceIndices = ambientNpcAudioSourceIndicesRef.current
     const pool = audioPoolRef.current
     const jumpPool = jumpAudioPoolRef.current
     const motion = motionRef.current
@@ -370,6 +447,58 @@ export function LandrushRobotFootstepAudio({
     }
     const volumeScale = audioRuntimeEnabled ? (masterVolume / 100) * (sfxVolume / 100) : 0
     const audioContextRunning = listener?.context.state === 'running'
+    const ambientNpcPositions = readLandrushIslandAmbientNpcAudioPositions(state.gl)
+    const ambientNpcRuntimeChanged = ambientNpcAudioPositionsRef.current !== ambientNpcPositions
+    if (ambientNpcRuntimeChanged) {
+      for (const audio of ambientNpcPool) {
+        if (audio.isPlaying) audio.stop()
+      }
+      ambientNpcSourceIndices.fill(-1)
+      ambientNpcAudioPositionsRef.current = ambientNpcPositions
+      ambientNpcBumpRuntimeRef.current = createLandrushIslandAmbientNpcBumpRuntime(
+        ambientNpcPositions?.active.length ?? 0,
+      )
+    }
+    if (ambientNpcPositions) {
+      updateLandrushAmbientNpcAudioEmitters(
+        ambientNpcPool,
+        ambientNpcSourceIndices,
+        ambientNpcPositions,
+      )
+    }
+
+    if (motion && ambientNpcPositions) {
+      const playbackAvailable = Boolean(
+        !ambientNpcRuntimeChanged &&
+          audioRuntimeEnabled &&
+          audioUnlocked &&
+          audioContextRunning &&
+          ambientNpcBuffers &&
+          ambientNpcPool.length > 0 &&
+          volumeScale > 0,
+      )
+      const npcIndex = advanceLandrushIslandAmbientNpcBumpAudio(
+        ambientNpcBumpRuntimeRef.current,
+        ambientNpcPositions,
+        motion.position.x,
+        motion.position.y,
+        motion.position.z,
+        state.clock.elapsedTime,
+        playbackAvailable,
+        LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE.playback.minIntervalMs / 1_000,
+      )
+      if (npcIndex >= 0 && ambientNpcBuffers) {
+        playAmbientNpcBump({
+          buffers: ambientNpcBuffers,
+          npcIndex,
+          pool: ambientNpcPool,
+          positions: ambientNpcPositions,
+          runtime,
+          sourceIndices: ambientNpcSourceIndices,
+          volumeScale,
+        })
+      }
+    }
 
     const currentJumpBufferLoad =
       jumpBufferLoad.filesKey === jumpAudioFilesKey
@@ -459,6 +588,73 @@ export function LandrushRobotFootstepAudio({
   }, ROBOT_AUDIO_LISTENER_FRAME_PRIORITY)
 
   return <group ref={audioGroupRef} />
+}
+
+function playAmbientNpcBump({
+  buffers,
+  npcIndex,
+  pool,
+  positions,
+  runtime,
+  sourceIndices,
+  volumeScale,
+}: {
+  buffers: AmbientNpcAudioBuffers
+  npcIndex: number
+  pool: readonly PositionalAudio[]
+  positions: LandrushIslandAmbientNpcAudioPositions
+  runtime: FootstepRuntime
+  sourceIndices: Int16Array
+  volumeScale: number
+}) {
+  const buffer = buffers[npcIndex % buffers.length]
+  const poolIndex = runtime.ambientNpcPoolIndex++ % pool.length
+  const audio = pool[poolIndex]
+  if (!(audio && buffer)) return
+  const cue = LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE
+  const [minimumRate, maximumRate] = cue.playback.rateRange
+  if (audio.isPlaying) audio.stop()
+  sourceIndices[poolIndex] = -1
+  try {
+    audio.setBuffer(buffer)
+    audio.setPlaybackRate(MathUtils.lerp(minimumRate, maximumRate, hashAudioSequence(npcIndex + 1)))
+    audio.setVolume(cue.playback.volume * volumeScale)
+    setLandrushAmbientNpcAudioEmitterPosition(audio, positions, npcIndex)
+    audio.play()
+    if (audio.isPlaying) sourceIndices[poolIndex] = npcIndex
+  } catch {
+    sourceIndices[poolIndex] = -1
+  }
+}
+
+function updateLandrushAmbientNpcAudioEmitters(
+  pool: readonly PositionalAudio[],
+  sourceIndices: Int16Array,
+  positions: LandrushIslandAmbientNpcAudioPositions,
+) {
+  for (let poolIndex = 0; poolIndex < pool.length; poolIndex += 1) {
+    const audio = pool[poolIndex]
+    const npcIndex = sourceIndices[poolIndex] ?? -1
+    if (!(audio?.isPlaying && positions.active[npcIndex] === 1)) {
+      if (audio?.isPlaying && npcIndex >= 0) audio.stop()
+      sourceIndices[poolIndex] = -1
+      continue
+    }
+    setLandrushAmbientNpcAudioEmitterPosition(audio, positions, npcIndex)
+  }
+}
+
+function setLandrushAmbientNpcAudioEmitterPosition(
+  audio: PositionalAudio,
+  positions: LandrushIslandAmbientNpcAudioPositions,
+  npcIndex: number,
+) {
+  audio.position.set(
+    positions.x[npcIndex]!,
+    positions.y[npcIndex]! + LANDRUSH_AMBIENT_NPC_BUMP_SOURCE_HEIGHT_METERS,
+    positions.z[npcIndex]!,
+  )
+  audio.updateMatrixWorld()
 }
 
 function playJump({

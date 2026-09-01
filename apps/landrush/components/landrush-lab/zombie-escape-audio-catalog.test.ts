@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   createZombieEscapeAudioCatalogState,
+  LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE,
   ZOMBIE_ESCAPE_AUDIO_ASSETS_READY,
   ZOMBIE_ESCAPE_AUDIO_CATALOG,
   ZOMBIE_ESCAPE_PLAYER_JUMP_AUDIO_CUE,
@@ -14,6 +15,7 @@ describe('Zombie Escape audio catalog', () => {
     const eventPaths = ZOMBIE_ESCAPE_AUDIO_CATALOG.cues.flatMap((cue) => cue.files)
     const paths = [
       ...eventPaths,
+      ...ZOMBIE_ESCAPE_AUDIO_CATALOG.ambientCues.flatMap((cue) => cue.files),
       ...ZOMBIE_ESCAPE_AUDIO_CATALOG.movementCues.flatMap((cue) => cue.files),
       ...ZOMBIE_ESCAPE_AUDIO_CATALOG.presenceCues.flatMap((cue) => cue.files),
     ]
@@ -25,7 +27,7 @@ describe('Zombie Escape audio catalog', () => {
     )
 
     expect(eventPaths).toHaveLength(26)
-    expect(paths).toHaveLength(31)
+    expect(paths).toHaveLength(35)
     expect(new Set(paths).size).toBe(paths.length)
     expect(paths.every((path) => path.startsWith('/audios/sfx/zombie-escape/'))).toBe(true)
     expect(ZOMBIE_ESCAPE_AUDIO_ASSETS_READY).toBe(true)
@@ -55,11 +57,17 @@ describe('Zombie Escape audio catalog', () => {
       '/audios/sfx/zombie-escape/enemy/presence-1.mp3',
       '/audios/sfx/zombie-escape/enemy/presence-2.mp3',
     ])
+    expect(LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE.files).toEqual([
+      '/audios/sfx/zombie-escape/ambient-npc/bump-voice-0.mp3',
+      '/audios/sfx/zombie-escape/ambient-npc/bump-voice-1.mp3',
+      '/audios/sfx/zombie-escape/ambient-npc/bump-voice-2.mp3',
+      '/audios/sfx/zombie-escape/ambient-npc/bump-voice-3.mp3',
+    ])
   })
 
   test('requires explicit mastered prompts for all three zombie sound families', () => {
-    expect(catalog.schemaVersion).toBe(5)
-    expect(catalog.catalogVersion).toBe('2026-08-27.2')
+    expect(catalog.schemaVersion).toBe(6)
+    expect(catalog.catalogVersion).toBe('2026-08-31.1')
     const rawZombieCues = [
       catalog.cues.find((cue) => cue.id === 'enemy-hit')!,
       catalog.cues.find((cue) => cue.id === 'enemy-death')!,
@@ -112,7 +120,12 @@ describe('Zombie Escape audio catalog', () => {
 
   test('activates only when provenance covers every exact catalog artifact', () => {
     const artifacts = Object.fromEntries(
-      [...catalog.cues, ...catalog.movementCues, ...catalog.presenceCues].flatMap((cue) =>
+      [
+        ...catalog.cues,
+        ...catalog.movementCues,
+        ...catalog.presenceCues,
+        ...catalog.ambientCues,
+      ].flatMap((cue) =>
         cue.files.map((path, variantIndex) => [
           path,
           {
@@ -271,6 +284,29 @@ describe('Zombie Escape audio catalog', () => {
     invalidSchedule.presenceCues[0]!.schedule.intervalSeconds = [7, 3.8]
     expect(() => createZombieEscapeAudioCatalogState(invalidSchedule, {})).toThrow(
       'intervalSeconds is invalid',
+    )
+  })
+
+  test('requires four quiet spatial NPC bump voice identities', () => {
+    expect(LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE).toMatchObject({
+      ambientKind: 'npc-bump-vocalization',
+      playback: {
+        maxDistance: 11,
+        referenceDistance: 1.4,
+        spatial: true,
+        volume: 0.15,
+      },
+    })
+    expect(LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE.variantPrompts).toHaveLength(4)
+
+    const missing = structuredClone(catalog)
+    missing.ambientCues = []
+    expect(() => createZombieEscapeAudioCatalogState(missing, {})).toThrow('requires ambient cues')
+
+    const wrongVariantCount = structuredClone(catalog)
+    wrongVariantCount.ambientCues[0]!.files.pop()
+    expect(() => createZombieEscapeAudioCatalogState(wrongVariantCount, {})).toThrow(
+      'must contain exactly four variants',
     )
   })
 })

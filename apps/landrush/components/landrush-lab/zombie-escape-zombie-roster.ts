@@ -79,10 +79,43 @@ export function resolveZombieEscapeProjectileSlowdownMultiplier(
   spawnOrdinal: number,
   projectileHitOrdinal: number,
 ) {
-  const basisPoints =
+  const basisPoints = resolveZombieEscapeProjectileSlowdownBasisPoints(
+    seed,
+    spawnOrdinal,
+    projectileHitOrdinal,
+  )
+  return 1 - basisPoints / 40_000
+}
+
+export function resolveZombieEscapeFirstProjectileSlowdownMultiplier(
+  seed: number,
+  spawnOrdinal: number,
+  walkMetersPerSecond: number,
+  runMetersPerSecond: number,
+) {
+  const runSpeed = Number.isFinite(runMetersPerSecond) ? Math.max(0, runMetersPerSecond) : 0
+  if (runSpeed <= 0.000_001) {
+    return resolveZombieEscapeProjectileSlowdownMultiplier(seed, spawnOrdinal, 0)
+  }
+  const walkSpeed = Number.isFinite(walkMetersPerSecond) ? Math.max(0, walkMetersPerSecond) : 0
+  const legacyHitMultiplier =
+    1 - resolveZombieEscapeProjectileSlowdownBasisPoints(seed, spawnOrdinal, 0) / 10_000
+  const legacyPostHitSpeedRatio = Math.max(
+    0,
+    Math.min(1, (walkSpeed / runSpeed) * legacyHitMultiplier),
+  )
+  return 1 - (1 - legacyPostHitSpeedRatio) * 0.25
+}
+
+function resolveZombieEscapeProjectileSlowdownBasisPoints(
+  seed: number,
+  spawnOrdinal: number,
+  projectileHitOrdinal: number,
+) {
+  return (
     100 +
     (mixZombieEscapeSpawnIdentity(seed, spawnOrdinal, projectileHitOrdinal, 0x63d8_35f1) % 901)
-  return 1 - basisPoints / 10_000
+  )
 }
 
 function shuffleZombieEscapeRoster(values: Uint8Array, seed: number, salt: number) {

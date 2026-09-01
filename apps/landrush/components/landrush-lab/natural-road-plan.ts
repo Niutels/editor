@@ -355,6 +355,16 @@ export function createNaturalRoadMaskSegments(
   ]
 }
 
+export function naturalRoadSidewalkContainsFootprint(
+  plan: NaturalRoadPlan,
+  footprint: readonly NaturalRoadPlanPoint[],
+) {
+  if (footprint.length < 3 || plan.footprints.roadSidewalks.length === 0) return false
+  const ring = closedRing(footprint.map(pointPair))
+  if (ring.length < 4) return false
+  return polygonClipping.difference([ring], plan.footprints.roadSidewalks).length === 0
+}
+
 function createCenterDashFootprint({
   asphalt,
   nodes,

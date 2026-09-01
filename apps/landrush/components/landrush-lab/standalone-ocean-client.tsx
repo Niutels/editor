@@ -151,6 +151,7 @@ export function StandaloneOceanClient() {
           cameraPreset={cameraPreset}
           debugMode={debugMode}
           parameters={parameters}
+          publishDebugState
           quality={quality}
           resetRevision={resetRevision}
         />
@@ -325,6 +326,7 @@ export function StandaloneOceanWorld({
   elevation = 0,
   parameters,
   profileMeasure,
+  publishDebugState = false,
   quality,
   resetRevision,
   submergedRockRefraction = false,
@@ -336,6 +338,7 @@ export function StandaloneOceanWorld({
   elevation?: number
   parameters: StandaloneOceanParameters
   profileMeasure?: <T>(id: string, callback: () => T) => T
+  publishDebugState?: boolean
   quality: StandaloneOceanQuality
   resetRevision: number
   submergedRockRefraction?: boolean
@@ -444,6 +447,7 @@ export function StandaloneOceanWorld({
       skyRef.current.scale.setScalar(skyRadius / STANDALONE_OCEAN_SKY_RADIUS)
     }
 
+    if (!publishDebugState) return
     window.__STANDALONE_OCEAN_DEBUG__ = {
       animated,
       backend: renderer.isWebGPURenderer ? 'webgpu' : 'webgl',

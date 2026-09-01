@@ -25,6 +25,12 @@ export type GrassFieldBlocker = {
   points: readonly LandrushPoint2[]
 }
 
+type CompiledGrassFieldBlocker = Readonly<{
+  clearanceMeters: number
+  featherMeters: number
+  points: readonly LandrushPoint2[]
+}>
+
 type GrassFieldOptions = {
   alphaMode?: 'density' | 'surface'
   blockers?: readonly GrassFieldBlocker[]
@@ -134,6 +140,9 @@ function createGrassFieldData(
   const openPerimeter = measure(profileMeasure, `${profileScope}.data.open-perimeter`, () =>
     openRing(perimeter),
   )
+  const compiledBlockers = measure(profileMeasure, `${profileScope}.data.compile-blockers`, () =>
+    compileGrassFieldBlockers(blockers),
+  )
   const patchOptions = measure(
     profileMeasure,
     `${profileScope}.data.resolve-patch-options`,
@@ -157,12 +166,12 @@ function createGrassFieldData(
               z: (y / (fieldResolution - 1) - 0.5) * planeSize,
             }
             const index = (y * fieldResolution + x) * 4
-            const sample = sampleGrassFieldPoint(
+            const sample = sampleGrassFieldPointWithCompiledBlockers(
               world,
               openPerimeter,
               roads,
               patchOptions,
-              blockers,
+              compiledBlockers,
             )
             if (!sample) {
               const transparentGrassColor = GRASS_COLORS[1]
@@ -233,6 +242,27 @@ export function sampleGrassFieldPoint(
   },
   blockers: readonly GrassFieldBlocker[] = [],
 ): GrassFieldSample | null {
+  return sampleGrassFieldPointWithCompiledBlockers(
+    point,
+    openPerimeter,
+    roads,
+    patchOptions,
+    compileGrassFieldBlockers(blockers),
+  )
+}
+
+function sampleGrassFieldPointWithCompiledBlockers(
+  point: LandrushPoint2,
+  openPerimeter: readonly LandrushPoint2[],
+  roads: readonly LandrushRoadSegment[],
+  patchOptions: {
+    density: number
+    edgeFadeMeters: number
+    patchSize: number
+    patchSoftness: number
+  },
+  blockers: readonly CompiledGrassFieldBlocker[],
+): GrassFieldSample | null {
   if (!pointInPolygon(point, openPerimeter)) return null
 
   const shoreDistance = distanceToPolyline(point, openPerimeter)
@@ -274,21 +304,47 @@ function distanceToRoads(point: LandrushPoint2, roads: readonly LandrushRoadSegm
   return best
 }
 
-function sampleBlockerDistance(point: LandrushPoint2, blockers: readonly GrassFieldBlocker[]) {
+function compileGrassFieldBlockers(
+  blockers: readonly GrassFieldBlocker[],
+): readonly CompiledGrassFieldBlocker[] {
+  const compiled: CompiledGrassFieldBlocker[] = []
+  for (const blocker of blockers) {
+    const points = openRing(blocker.points)
+    if (points.length < 3) continue
+    compiled.push({
+      clearanceMeters: finiteNonNegative(blocker.clearanceMeters, 0),
+      featherMeters: Math.max(
+        0.001,
+        finiteNonNegative(blocker.featherMeters, GRASS_BLOCKER_FEATHER_METERS),
+      ),
+      points,
+    })
+  }
+  return compiled
+}
+
+function sampleBlockerDistance(
+  point: LandrushPoint2,
+  blockers: readonly CompiledGrassFieldBlocker[],
+) {
   let distance = Number.POSITIVE_INFINITY
   let featherMeters = GRASS_BLOCKER_FEATHER_METERS
   for (const blocker of blockers) {
-    const ring = openRing(blocker.points)
-    if (ring.length < 3) continue
-    const boundaryDistance = distanceToPolyline(point, ring)
-    const signedDistance = pointInPolygon(point, ring) ? -boundaryDistance : boundaryDistance
-    const nextDistance = signedDistance - Math.max(0, blocker.clearanceMeters ?? 0)
+    const boundaryDistance = distanceToPolyline(point, blocker.points)
+    const signedDistance = pointInPolygon(point, blocker.points)
+      ? -boundaryDistance
+      : boundaryDistance
+    const nextDistance = signedDistance - blocker.clearanceMeters
     if (nextDistance < distance) {
       distance = nextDistance
-      featherMeters = blocker.featherMeters ?? GRASS_BLOCKER_FEATHER_METERS
+      featherMeters = blocker.featherMeters
     }
   }
   return { distance, featherMeters: Math.max(0.001, featherMeters) }
+}
+
+function finiteNonNegative(value: number | undefined, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : fallback
 }
 
 function organicGrassRegion(point: LandrushPoint2) {

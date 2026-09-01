@@ -146,6 +146,37 @@ describe('Landrush island ambient navigation', () => {
     expect(isLandrushIslandAmbientSegmentPassable(indexedWorld, start, end)).toBe(false)
   })
 
+  test('keeps horizontal, vertical, and diagonal grid clipping in deterministic parity', () => {
+    const indexedWorld = createLandrushIslandAmbientNavigationWorld(world)
+    const segments: Array<readonly [LandrushPoint2, LandrushPoint2]> = []
+    for (const offset of [-9, -6, -3, 0, 3, 6, 9]) {
+      segments.push(
+        [
+          { x: -9, z: offset },
+          { x: 9, z: offset },
+        ],
+        [
+          { x: offset, z: -9 },
+          { x: offset, z: 9 },
+        ],
+        [
+          { x: -9, z: offset },
+          { x: 9, z: -offset },
+        ],
+        [
+          { x: offset, z: -9 },
+          { x: -offset, z: 9 },
+        ],
+      )
+    }
+
+    for (const [start, end] of segments) {
+      expect(isLandrushIslandAmbientSegmentPassable(indexedWorld, start, end)).toBe(
+        isLandrushIslandAmbientSegmentPassable(world, start, end),
+      )
+    }
+  })
+
   test('compiles candidates once, reuses static edges, and rebuilds for a new world', () => {
     const observations: Array<{ candidateCount: number; kind: string; totalCount: number }> = []
     const observeSpatialQuery = (observation: {

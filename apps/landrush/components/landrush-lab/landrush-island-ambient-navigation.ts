@@ -779,7 +779,8 @@ function segmentRemainsInSurface(
 ) {
   const surfacePoints = world.surfacePoints
   if (pointsAlmostEqual2(start, end)) return pointInPolygonOrNearEdge(start, surfacePoints)
-  for (const progress of [0.25, 0.5, 0.75]) {
+  for (let sampleIndex = 1; sampleIndex <= 3; sampleIndex += 1) {
+    const progress = sampleIndex * 0.25
     if (
       !pointInPolygonOrNearEdge(
         {
@@ -1046,31 +1047,29 @@ function segmentIntersectsNavigationCell(
   const minZ = cellZ * cellSize - NAVIGATION_SPATIAL_EPSILON_METERS
   const maxZ = (cellZ + 1) * cellSize + NAVIGATION_SPATIAL_EPSILON_METERS
 
-  const clippedX = clipSegmentProgressToRange(start.x, deltaX, minX, maxX)
-  if (!clippedX) return false
-  minimumProgress = Math.max(minimumProgress, clippedX.minimum)
-  maximumProgress = Math.min(maximumProgress, clippedX.maximum)
+  if (Math.abs(deltaX) <= Number.EPSILON) {
+    if (!(start.x >= minX && start.x <= maxX)) return false
+  } else {
+    const first = (minX - start.x) / deltaX
+    const second = (maxX - start.x) / deltaX
+    const clippedMaximum = Math.max(first, second)
+    const clippedMinimum = Math.min(first, second)
+    minimumProgress = Math.max(minimumProgress, clippedMinimum)
+    maximumProgress = Math.min(maximumProgress, clippedMaximum)
+  }
   if (minimumProgress > maximumProgress) return false
 
-  const clippedZ = clipSegmentProgressToRange(start.z, deltaZ, minZ, maxZ)
-  if (!clippedZ) return false
-  minimumProgress = Math.max(minimumProgress, clippedZ.minimum)
-  maximumProgress = Math.min(maximumProgress, clippedZ.maximum)
-  return minimumProgress <= maximumProgress
-}
-
-function clipSegmentProgressToRange(
-  start: number,
-  delta: number,
-  minimum: number,
-  maximum: number,
-) {
-  if (Math.abs(delta) <= Number.EPSILON) {
-    return start >= minimum && start <= maximum ? { maximum: 1, minimum: 0 } : null
+  if (Math.abs(deltaZ) <= Number.EPSILON) {
+    if (!(start.z >= minZ && start.z <= maxZ)) return false
+  } else {
+    const first = (minZ - start.z) / deltaZ
+    const second = (maxZ - start.z) / deltaZ
+    const clippedMaximum = Math.max(first, second)
+    const clippedMinimum = Math.min(first, second)
+    minimumProgress = Math.max(minimumProgress, clippedMinimum)
+    maximumProgress = Math.min(maximumProgress, clippedMaximum)
   }
-  const first = (minimum - start) / delta
-  const second = (maximum - start) / delta
-  return { maximum: Math.max(first, second), minimum: Math.min(first, second) }
+  return minimumProgress <= maximumProgress
 }
 
 function forEachNavigationCellInRing(

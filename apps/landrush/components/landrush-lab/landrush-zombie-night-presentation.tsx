@@ -2,22 +2,10 @@
 
 import { renderScheduler } from '@landrush/runtime'
 import { getSceneTheme, useViewer } from '@pascal-app/viewer'
-import { useGLTF } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import {
-  AdditiveBlending,
-  Color,
-  DoubleSide,
-  FogExp2,
-  type Group,
-  type Material,
-  type Mesh,
-  type MeshStandardMaterial,
-  Object3D,
-  Vector3,
-} from 'three'
-import type { LandrushRoadSegment } from '@/components/landrush/types'
+import { Color, FogExp2, type Group, type Material, type Mesh, Object3D, Vector3 } from 'three'
+import { LandrushZombieNightBeaconGlowInstances } from './landrush-zombie-night-beacon-glow-instances'
 import {
   applyLandrushZombieNightSurfaceColorBindings,
   prepareLandrushZombieNightSurfaceMaterials,
@@ -29,6 +17,7 @@ import {
 import {
   createLandrushZombieNightSceneLightCache,
   createLandrushZombieNightScenePresentationBinding,
+  LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT,
   type LandrushZombieNightBeaconRuntime,
   type LandrushZombieNightSceneLightCache,
   updateLandrushZombieNightBeaconRuntime,
@@ -47,21 +36,20 @@ import {
   resolveLandrushZombieNightTargetExposure,
   resolveLandrushZombieNightTimelineAmount,
   resolveLandrushZombieNightVisualAmount,
+  selectLandrushZombieNightActiveLightPlacements,
   shouldApplyLandrushZombieNightCpuPresentation,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
 import {
-  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
-  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_POSITION,
-  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_ROTATION_Y,
-  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_PENUMBRA,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
 } from './landrush-zombie-night-street-lightpost'
+import { LandrushZombieNightStreetLightpostInstances } from './landrush-zombie-night-street-lightpost-instances'
+import type { NaturalRoadPlan } from './natural-road-plan'
 
 const NIGHT_BACKGROUND = '#020611'
 const NIGHT_FOG = '#081426'
@@ -111,6 +99,7 @@ type LandrushZombieNightDebugSnapshot = {
   active: boolean
   amount: number
   beaconCount: number
+  beaconLightCount: number
   drawCalls: number | null
   fixedSeed: number
   gpuFrameTimeMs: null
@@ -129,14 +118,12 @@ declare global {
 
 export function LandrushZombieNightPresentation({
   active,
-  groundY,
+  naturalRoadPlan,
   readCanonicalElapsedSeconds,
-  roads,
 }: {
   active: boolean
-  groundY: number
+  naturalRoadPlan: NaturalRoadPlan | null
   readCanonicalElapsedSeconds: () => number | null
-  roads: readonly LandrushRoadSegment[]
 }) {
   const scene = useThree((state) => state.scene)
   const gl = useThree((state) => state.gl)
@@ -152,6 +139,7 @@ export function LandrushZombieNightPresentation({
   const debugSnapshotRef = useRef<LandrushZombieNightDebugSnapshot | null>(null)
   const sceneLightsRef = useRef<LandrushZombieNightSceneLightCache | null>(null)
   const beaconsActiveRef = useRef(false)
+  const glowGroupRef = useRef<Group>(null)
   const appliedPresentationRef = useRef<AppliedNightPresentation>({
     amount: Number.NaN,
     mode: null,
@@ -233,26 +221,26 @@ export function LandrushZombieNightPresentation({
   )
   const placements = useMemo(
     () =>
-      createLandrushZombieNightBeaconPlacements({
-        groundY,
-        quality: settings.quality,
-        roads,
-      }),
-    [groundY, roads, settings.quality],
+      naturalRoadPlan
+        ? createLandrushZombieNightBeaconPlacements({
+            quality: settings.quality,
+            roadPlan: naturalRoadPlan,
+          })
+        : [],
+    [naturalRoadPlan, settings.quality],
   )
-  const beaconRuntimes = useMemo<LandrushZombieNightBeaconRuntime[]>(
+  const lightPlacements = useMemo(
     () =>
-      placements.map(() => ({
-        coreMaterial: null,
-        fixtureMaterials: [],
-        innerGlowMaterial: null,
-        lastContributionOnly: null,
-        lastEnvelope: Number.NaN,
-        lastGlowTreatment: null,
-        light: null,
-        outerGlowMaterial: null,
-      })),
-    [placements],
+      selectLandrushZombieNightActiveLightPlacements({
+        placements,
+        quality: settings.quality,
+      }),
+    [placements, settings.quality],
+  )
+  const glowRuntime = useMemo<LandrushZombieNightBeaconRuntime>(createNightBeaconRuntime, [])
+  const lightRuntimes = useMemo<LandrushZombieNightBeaconRuntime[]>(
+    () => lightPlacements.map(createNightBeaconRuntime),
+    [lightPlacements],
   )
 
   useLayoutEffect(() => {
@@ -467,11 +455,15 @@ export function LandrushZombieNightPresentation({
         amount,
         contributionOnly: settings.mode === 'light-contribution',
         elapsedSeconds: clock.elapsedTime,
+        glowRuntime,
         glowTreatment: settings.mode !== 'no-post',
-        placements,
-        runtimes: beaconRuntimes,
+        lightPlacements,
+        lightRuntimes,
       })
     }
+    const glowsVisible = amount > LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT
+    const glowGroup = glowGroupRef.current
+    if (glowGroup && glowGroup.visible !== glowsVisible) glowGroup.visible = glowsVisible
     beaconsActiveRef.current = beaconFrameMode === 'animate'
 
     if (settings.debugSnapshotEnabled && elapsedSeconds >= nextDebugSnapshotAtRef.current) {
@@ -481,6 +473,7 @@ export function LandrushZombieNightPresentation({
           active,
           amount,
           beaconCount: placements.length,
+          beaconLightCount: lightPlacements.length,
           drawCalls: null,
           fixedSeed: LANDRUSH_ZOMBIE_NIGHT_SEED,
           gpuFrameTimeMs: null,
@@ -493,6 +486,7 @@ export function LandrushZombieNightPresentation({
       snapshot.active = active
       snapshot.amount = amount
       snapshot.beaconCount = placements.length
+      snapshot.beaconLightCount = lightPlacements.length
       snapshot.drawCalls = readRenderCalls(gl)
       snapshot.mode = settings.mode
       snapshot.surfaceMaterialCount = surfaceMaterialsRef.current.size
@@ -518,11 +512,15 @@ export function LandrushZombieNightPresentation({
         visibility: settings.visibility,
       }}
     >
-      {placements.map((placement, index) => (
-        <LandrushZombieNightBeacon
+      <LandrushZombieNightStreetLightpostInstances placements={placements} />
+      <group ref={glowGroupRef} visible={false}>
+        <LandrushZombieNightBeaconGlowInstances placements={placements} runtime={glowRuntime} />
+      </group>
+      {lightPlacements.map((placement, index) => (
+        <LandrushZombieNightBeaconLight
           key={placement.id}
           placement={placement}
-          runtime={beaconRuntimes[index]!}
+          runtime={lightRuntimes[index]!}
         />
       ))}
     </group>
@@ -561,100 +559,21 @@ function releaseNightLightingOwnership(scene: Object3D, ownership: NightLighting
   ownership.previous = undefined
 }
 
-function LandrushZombieNightBeacon({
+function LandrushZombieNightBeaconLight({
   placement,
   runtime,
 }: {
   placement: ReturnType<typeof createLandrushZombieNightBeaconPlacements>[number]
   runtime: LandrushZombieNightBeaconRuntime
 }) {
-  const { scene } = useGLTF(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH)
-  const fixture = useMemo(
-    () => createLandrushZombieNightStreetLightpostModel(scene, placement.color),
-    [placement.color, scene],
-  )
   const lightTarget = useMemo(() => {
     const target = new Object3D()
     target.position.set(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION)
     return target
   }, [])
 
-  useLayoutEffect(() => {
-    runtime.fixtureMaterials = fixture.materials
-    runtime.lastEnvelope = Number.NaN
-    return () => {
-      if (runtime.fixtureMaterials === fixture.materials) runtime.fixtureMaterials = []
-      for (const material of fixture.materials) material.dispose()
-    }
-  }, [fixture, runtime])
-
   return (
     <group position={placement.position} rotation={[0, placement.rotationY, 0]}>
-      <group
-        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_POSITION}
-        rotation={[0, LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_ROTATION_Y, 0]}
-        scale={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE}
-      >
-        <primitive dispose={null} object={fixture.model} />
-      </group>
-      <mesh
-        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
-        rotation={[Math.PI / 2, 0, 0]}
-      >
-        <circleGeometry args={[0.16, 16]} />
-        <meshBasicMaterial
-          color={placement.color}
-          depthWrite={false}
-          opacity={0}
-          ref={(material) => {
-            runtime.coreMaterial = material
-            runtime.lastEnvelope = Number.NaN
-          }}
-          side={DoubleSide}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh
-        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
-        renderOrder={30}
-        rotation={[Math.PI / 2, 0, 0]}
-      >
-        <circleGeometry args={[0.34, 16]} />
-        <meshBasicMaterial
-          blending={AdditiveBlending}
-          color={placement.color}
-          depthWrite={false}
-          opacity={0}
-          ref={(material) => {
-            runtime.innerGlowMaterial = material
-            runtime.lastEnvelope = Number.NaN
-          }}
-          side={DoubleSide}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
-      <mesh
-        position={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION}
-        renderOrder={29}
-        rotation={[Math.PI / 2, 0, 0]}
-      >
-        <circleGeometry args={[0.62, 16]} />
-        <meshBasicMaterial
-          blending={AdditiveBlending}
-          color={placement.color}
-          depthWrite={false}
-          opacity={0}
-          ref={(material) => {
-            runtime.outerGlowMaterial = material
-            runtime.lastEnvelope = Number.NaN
-          }}
-          side={DoubleSide}
-          toneMapped={false}
-          transparent
-        />
-      </mesh>
       <primitive object={lightTarget} />
       <spotLight
         angle={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE}
@@ -675,52 +594,33 @@ function LandrushZombieNightBeacon({
   )
 }
 
-function createLandrushZombieNightStreetLightpostModel(source: Object3D, color: string) {
-  const model = source.clone(true)
-  const clonedMaterials = new Map<Material, Material>()
-  const materials: MeshStandardMaterial[] = []
-  model.traverse((object) => {
-    const mesh = object as Mesh
-    if (!mesh.isMesh) return
-    mesh.castShadow = false
-    mesh.receiveShadow = false
-    const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    const nextMaterials = sourceMaterials.map((sourceMaterial) => {
-      const cached = clonedMaterials.get(sourceMaterial)
-      if (cached) return cached
-      const material = sourceMaterial.clone()
-      clonedMaterials.set(sourceMaterial, material)
-      const standardMaterial = material as MeshStandardMaterial
-      if (standardMaterial.isMeshStandardMaterial) {
-        standardMaterial.emissive.set(color)
-        standardMaterial.emissiveIntensity = 0
-        materials.push(standardMaterial)
-      }
-      return material
-    })
-    mesh.material = Array.isArray(mesh.material) ? nextMaterials : nextMaterials[0]!
-  })
-  return { materials, model }
-}
-
 function updateNightBeacons({
   amount,
   contributionOnly,
   elapsedSeconds,
   glowTreatment,
-  placements,
-  runtimes,
+  glowRuntime,
+  lightPlacements,
+  lightRuntimes,
 }: {
   amount: number
   contributionOnly: boolean
   elapsedSeconds: number
   glowTreatment: boolean
-  placements: ReturnType<typeof createLandrushZombieNightBeaconPlacements>
-  runtimes: readonly LandrushZombieNightBeaconRuntime[]
+  glowRuntime: LandrushZombieNightBeaconRuntime
+  lightPlacements: ReturnType<typeof selectLandrushZombieNightActiveLightPlacements>
+  lightRuntimes: readonly LandrushZombieNightBeaconRuntime[]
 }) {
-  for (let index = 0; index < runtimes.length; index += 1) {
-    const runtime = runtimes[index]!
-    const placement = placements[index]
+  updateLandrushZombieNightBeaconRuntime({
+    amount,
+    contributionOnly,
+    glowTreatment,
+    lightPulse: 1,
+    runtime: glowRuntime,
+  })
+  for (let index = 0; index < lightRuntimes.length; index += 1) {
+    const runtime = lightRuntimes[index]!
+    const placement = lightPlacements[index]
     if (!placement) continue
     updateLandrushZombieNightBeaconRuntime({
       amount,
@@ -729,6 +629,19 @@ function updateNightBeacons({
       lightPulse: resolveLandrushZombieNightBeaconPulse(elapsedSeconds, placement.phase),
       runtime,
     })
+  }
+}
+
+function createNightBeaconRuntime(): LandrushZombieNightBeaconRuntime {
+  return {
+    coreMaterial: null,
+    fixtureMaterials: [],
+    innerGlowMaterial: null,
+    lastContributionOnly: null,
+    lastEnvelope: Number.NaN,
+    lastGlowTreatment: null,
+    light: null,
+    outerGlowMaterial: null,
   }
 }
 
@@ -751,5 +664,3 @@ function readRenderCalls(renderer: unknown) {
   const calls = (renderer as { info?: { render?: { calls?: unknown } } }).info?.render?.calls
   return typeof calls === 'number' && Number.isFinite(calls) ? calls : null
 }
-
-useGLTF.preload(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH)

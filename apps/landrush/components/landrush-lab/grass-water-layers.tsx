@@ -24,6 +24,14 @@ import {
   type GrassFieldBlocker,
 } from './grass-field-texture'
 import type { GrassBladeTuning } from './grass-material'
+import {
+  createLandrushIslandRockClusterLayout,
+  createLandrushIslandRockGrassBlockers,
+  EMPTY_LANDRUSH_ISLAND_ROCK_CLUSTER_LAYOUT,
+  resolveLandrushIslandVisibleRockClusterLayout,
+  scaleLandrushIslandBuildingGrassClearance,
+} from './landrush-island-rock-cluster-layout'
+import { LandrushIslandRockClusterLayer } from './landrush-island-rock-clusters'
 import { notifyLandrushZombieNightSurfaceMaterialChange } from './landrush-zombie-night-presentation-material'
 import {
   type GrassPattern,
@@ -36,7 +44,7 @@ import {
   type StylizedGrassGroundDebugMode,
   type StylizedGrassGroundTextureReadyHandler,
 } from './stylized-grass-ground-material'
-import { StylizedPathNetworkLayer } from './stylized-path-network-layer'
+import { STYLIZED_PATH_WIDTH_SCALE, StylizedPathNetworkLayer } from './stylized-path-network-layer'
 import {
   DEFAULT_STYLIZED_GRASS_GROUND_TINT_CAP,
   type StylizedGrassInteractionRef,
@@ -163,6 +171,7 @@ export function GrassWaterLandLayers({
   treeBlockers,
   tuning,
 }: GrassWaterLandLayersProps) {
+  const landrushIslandEnvironmentEnabled = grassDebugState?.source === 'pascal-multiplayer-island'
   const classicFoliageEnabled = !stylizedSceneLayout && (showBlades || showTrees)
   const groundFieldNeeded = showGround || classicFoliageEnabled
   const spawnFieldNeeded = classicFoliageEnabled
@@ -173,8 +182,55 @@ export function GrassWaterLandLayers({
     ? (finalSpawnResolution ?? spawnPreviewResolution)
     : 2
   const groundTextureRoads = stylizedGroundTexture ? EMPTY_GRASS_ROADS : roads
-  const resolvedBladeGrassBlockers = bladeGrassBlockers ?? grassBlockers
-  const resolvedTreeBlockers = treeBlockers ?? bladeFadeBlockers
+  const sourceBladeGrassBlockers = bladeGrassBlockers ?? grassBlockers
+  const sourceTreeBlockers = treeBlockers ?? bladeFadeBlockers
+  const rockClusterLayout = useMemo(
+    () =>
+      landrushIslandEnvironmentEnabled
+        ? createLandrushIslandRockClusterLayout({
+            blockers: grassBlockers,
+            elevation: surface.grassSurfaceElevation,
+            perimeter: surface.grassSurfacePoints,
+            roadWidthScale: STYLIZED_PATH_WIDTH_SCALE,
+            roads,
+          })
+        : EMPTY_LANDRUSH_ISLAND_ROCK_CLUSTER_LAYOUT,
+    [
+      landrushIslandEnvironmentEnabled,
+      grassBlockers,
+      roads,
+      surface.grassSurfaceElevation,
+      surface.grassSurfacePoints,
+    ],
+  )
+  const visibleRockClusterLayout = useMemo(
+    () =>
+      resolveLandrushIslandVisibleRockClusterLayout({
+        blockers: sourceBladeGrassBlockers,
+        layout: rockClusterLayout,
+      }),
+    [rockClusterLayout, sourceBladeGrassBlockers],
+  )
+  const rockGrassBlockers = useMemo(
+    () => createLandrushIslandRockGrassBlockers(visibleRockClusterLayout),
+    [visibleRockClusterLayout],
+  )
+  const resolvedBladeGrassBlockers = useMemo(() => {
+    const buildingBlockers = landrushIslandEnvironmentEnabled
+      ? scaleLandrushIslandBuildingGrassClearance(sourceBladeGrassBlockers)
+      : sourceBladeGrassBlockers
+    return rockGrassBlockers.length === 0
+      ? buildingBlockers
+      : [...buildingBlockers, ...rockGrassBlockers]
+  }, [landrushIslandEnvironmentEnabled, rockGrassBlockers, sourceBladeGrassBlockers])
+  const resolvedTreeBlockers = useMemo(() => {
+    const buildingBlockers = landrushIslandEnvironmentEnabled
+      ? scaleLandrushIslandBuildingGrassClearance(sourceTreeBlockers)
+      : sourceTreeBlockers
+    return rockGrassBlockers.length === 0
+      ? buildingBlockers
+      : [...buildingBlockers, ...rockGrassBlockers]
+  }, [landrushIslandEnvironmentEnabled, rockGrassBlockers, sourceTreeBlockers])
   const resolvedBladeRenderOrder =
     bladeRenderOrder ??
     (stylizedSceneLayout ? STYLIZED_GRASS_BLADE_RENDER_ORDER : GRASS_BLADE_RENDER_ORDER)
@@ -323,6 +379,7 @@ export function GrassWaterLandLayers({
           roads={roads}
         />
       ) : null}
+      <LandrushIslandRockClusterLayer layout={visibleRockClusterLayout} />
       {stylizedSceneLayout ? (
         <Suspense fallback={null}>
           <StylizedSceneLandLayer
@@ -380,7 +437,11 @@ export function GrassWaterLandLayers({
 function grassBlockersSignature(blockers: readonly GrassFieldBlocker[]) {
   return blockers
     .map((blocker) =>
-      blocker.points.map((point) => `${point.x.toFixed(2)}:${point.z.toFixed(2)}`).join('|'),
+      [
+        Math.max(0, blocker.clearanceMeters ?? 0).toFixed(2),
+        Math.max(0, blocker.featherMeters ?? 0).toFixed(2),
+        blocker.points.map((point) => `${point.x.toFixed(2)}:${point.z.toFixed(2)}`).join('|'),
+      ].join(':'),
     )
     .join('||')
 }
@@ -445,6 +506,7 @@ function useAsyncGrassFieldTexture({
     worker.postMessage({
       alphaMode,
       blockers: blockers.map((blocker) => ({
+        clearanceMeters: blocker.clearanceMeters,
         featherMeters: blocker.featherMeters,
         points: blocker.points.map((point) => ({ x: point.x, z: point.z })),
       })),

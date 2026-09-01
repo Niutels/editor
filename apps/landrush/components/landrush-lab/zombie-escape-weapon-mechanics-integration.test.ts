@@ -268,6 +268,7 @@ describe('Zombie Escape weapon identities', () => {
     expect(state.impactEvents.pool.generation[eventSlot!]).toBe(eventGeneration)
     stepZombieEscapeSimulation(state, input, ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds, arena)
     expect(state.impactEvents.pool.active[eventSlot!]).toBe(0)
+    expect(state.impactEvents.pool.activeCount).toBe(0)
   })
 })
 

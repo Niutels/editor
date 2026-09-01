@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 5,
-  "catalogVersion": "2026-08-27.2",
+  "schemaVersion": 6,
+  "catalogVersion": "2026-08-31.1",
   "modelId": "eleven_text_to_sound_v2",
   "outputFormat": "mp3_44100_128",
   "cues": [
@@ -324,6 +324,37 @@
         "rateRange": [1, 1],
         "spatial": false,
         "volume": 0.42
+      }
+    }
+  ],
+  "ambientCues": [
+    {
+      "id": "ambient-npc-bump",
+      "ambientKind": "npc-bump-vocalization",
+      "masteringProfile": "one-shot-v1",
+      "durationSeconds": 0.9,
+      "promptInfluence": 0.8,
+      "prompt": "Four distinct very short friendly life-simulation-style NPC reactions made only from expressive nonsense syllables. Each is a single soft vocal reaction to gently bumping into someone, playful and conversational but not intelligible speech. Dry close-miked isolated game one-shot with fast decay, no impact, footsteps, ambience, reverb, or music.",
+      "variantPrompts": [
+        "One tiny bright playful human voice saying a single invented two-syllable reaction like bip-bada after a gentle accidental bump. Friendly surprised intonation, expressive life-simulation game gibberish, no intelligible language. Soft dry close-miked isolated one-shot, no impact, footsteps, ambience, reverb, music, or extra vocalization.",
+        "One short warm mid-register human voice making a rounded invented three-syllable reaction like oh-ba-doo after gently bumping into someone. Mildly apologetic but cheerful life-simulation game gibberish, no intelligible language. Soft dry close-miked isolated one-shot, no impact, footsteps, ambience, reverb, music, or extra vocalization.",
+        "One short mellow low human voice making a compact invented two-syllable reaction like mm-boro after a gentle accidental bump. Calm amused intonation, expressive life-simulation game gibberish, no intelligible language. Soft dry close-miked isolated one-shot, no impact, footsteps, ambience, reverb, music, or extra vocalization.",
+        "One tiny airy playful human voice making a quick invented three-syllable reaction like ee-ka-pah after gently bumping into someone. Light surprised then friendly intonation, expressive life-simulation game gibberish, no intelligible language. Soft dry close-miked isolated one-shot, no impact, footsteps, ambience, reverb, music, or extra vocalization."
+      ],
+      "files": [
+        "/audios/sfx/zombie-escape/ambient-npc/bump-voice-0.mp3",
+        "/audios/sfx/zombie-escape/ambient-npc/bump-voice-1.mp3",
+        "/audios/sfx/zombie-escape/ambient-npc/bump-voice-2.mp3",
+        "/audios/sfx/zombie-escape/ambient-npc/bump-voice-3.mp3"
+      ],
+      "playback": {
+        "maxDistance": 11,
+        "maxVoices": 3,
+        "minIntervalMs": 700,
+        "rateRange": [0.98, 1.02],
+        "referenceDistance": 1.4,
+        "spatial": true,
+        "volume": 0.15
       }
     }
   ],

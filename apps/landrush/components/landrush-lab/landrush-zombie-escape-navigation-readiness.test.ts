@@ -476,8 +476,30 @@ describe('installed Zombie navigation readiness', () => {
     expect(source).toContain('setInstalledCollisionWorlds(collisionWorlds)')
     expect(source).toContain('setInstalledCollisionWorlds(null)')
     expect(source).toMatch(/const runtimePhaseReady =\s*collisionWorldInstalled &&/)
-    expect(source).toContain('phaseReady && desiredCollisionWorldReady && collisionWorldInstalled')
-    expect(source).toContain('phaseReady: nightStartReady && isCurrentCollisionWorldInstalled()')
+    const nightStartReadiness = source.slice(
+      source.indexOf('const nightStartCandidateReady ='),
+      source.indexOf('const interactionActionable ='),
+    )
+    expect(nightStartReadiness).toContain(
+      'phaseReady && desiredCollisionWorldReady && collisionWorldInstalled',
+    )
+    expect(nightStartReadiness).toContain(
+      'const resolvedNightStartReadiness = reconcileLandrushZombieEscapeNightStartReadiness({',
+    )
+    expect(nightStartReadiness).toContain('candidateReady: nightStartCandidateReady')
+    expect(nightStartReadiness).toContain('setNightStartReadiness((current) =>')
+    expect(nightStartReadiness).toContain(
+      'const sharedNightStartReady = resolvedNightStartReadiness.ready',
+    )
+    const startHandler = source.slice(
+      source.indexOf('const startZombie = useCallback(() => {'),
+      source.indexOf('const renderHud = useCallback(', source.indexOf('const startZombie =')),
+    )
+    expect(startHandler).toContain('!sharedNightStartReady')
+    expect(startHandler).toContain('phaseReady: sharedNightStartReady')
+    expect(startHandler).not.toContain('nightStartCandidateReady')
+    expect(startHandler).not.toContain('collisionWorldInstalled')
+    expect(startHandler).not.toContain('isCurrentCollisionWorldInstalled()')
     expect(source).toContain('const frameRuntimePhaseReady = runtimePhaseReady && installed')
     expect(source).toContain(
       'const frameInteractionActionable = interactionActionable && installed',
