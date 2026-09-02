@@ -1475,6 +1475,52 @@ describe('Landrush island material presentation ownership', () => {
     floorMesh.geometry.dispose()
   })
 
+  test('recovers generated-subtree cleanup when a nested removal clears the shared event child', () => {
+    const owner = new LandrushIslandMaterialPresentationOwner()
+    const source = new MeshBasicMaterial()
+    const parent = new Group()
+    const generatedRoot = new Group()
+    generatedRoot.userData.__fromGeometry = true
+    const firstMesh = createMesh(source)
+    const secondMesh = createMesh(source)
+    generatedRoot.add(firstMesh, secondMesh)
+    parent.add(generatedRoot)
+    const nestedParent = new Group()
+    const nestedChild = new Group()
+    nestedParent.add(nestedChild)
+    parent.addEventListener('childremoved', () => {
+      nestedParent.remove(nestedChild)
+    })
+    owner.acquireFloorFade(firstMesh)
+    owner.acquireFloorFade(secondMesh)
+    const sharedVariant = firstMesh.material as Material
+    let sharedVariantDisposeCount = 0
+    sharedVariant.addEventListener('dispose', () => {
+      sharedVariantDisposeCount += 1
+    })
+    let simulatedDisposerRan = false
+    parent.addEventListener('childremoved', () => {
+      simulatedDisposerRan = true
+      expect(owner.activeBindingCount).toBe(0)
+      expect(owner.activeAncestorListenerCount).toBe(0)
+      expect(firstMesh.material).toBe(source)
+      expect(secondMesh.material).toBe(source)
+      source.dispose()
+    })
+
+    expect(() => parent.remove(generatedRoot)).not.toThrow()
+    expect(simulatedDisposerRan).toBe(true)
+    expect(owner.activeBindingCount).toBe(0)
+    expect(owner.activeAncestorListenerCount).toBe(0)
+    expect(owner.ownedMaterialCount).toBe(0)
+    expect(sharedVariantDisposeCount).toBe(1)
+    owner.dispose()
+    expect(sharedVariantDisposeCount).toBe(1)
+
+    firstMesh.geometry.dispose()
+    secondMesh.geometry.dispose()
+  })
+
   test('mirrors a late texture settlement into every live cached variant', async () => {
     let settleTexture!: (texture: Texture) => void
     TextureLoader.prototype.loadAsync = () =>

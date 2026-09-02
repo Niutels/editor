@@ -3,6 +3,14 @@ import { Matrix4 } from 'three'
 
 export const LANDRUSH_RENDER_READINESS_TIMEOUT_MS = 15_000
 
+export function clearLandrushRenderReadinessRoot(root: Object3D) {
+  // Public teardown would overwrite Three's shared child payload during a live removal event.
+  for (const child of root.children) {
+    if (child.parent === root) child.parent = null
+  }
+  root.children.length = 0
+}
+
 export type LandrushPipelineRenderer = Readonly<{
   backend?: Readonly<{ device?: unknown; gl?: unknown }>
   compileAsync: (root: Object3D, camera: Camera, targetScene: Scene) => Promise<unknown>

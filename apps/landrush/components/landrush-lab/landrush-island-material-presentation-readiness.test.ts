@@ -18,6 +18,7 @@ import {
   readLandrushZombieNightReadinessLightTopology,
   registerLandrushIslandMaterialPresentationRenderReadiness,
 } from './landrush-island-material-presentation-readiness'
+import { observeLandrushZombieNightWorld } from './landrush-zombie-night-presentation-material'
 import { LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS } from './landrush-zombie-night-presentation-state'
 import { LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY } from './landrush-zombie-night-street-lightpost'
 import { createZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
@@ -45,7 +46,10 @@ describe('Landrush island material presentation render readiness', () => {
     expect(clientSource).toContain('viewerSceneReady={materialPresentationReadinessReady}')
     expect(clientSource).toContain('<LandrushIslandDayMaterialPresentationRenderReadiness')
     expect(readinessSource).toContain('coordinator.invalidate()')
-    expect(readinessSource).toContain('root.clear()')
+    expect(readinessSource).not.toContain('dayRoot.clear()')
+    expect(readinessSource).not.toContain('nightRoot.clear()')
+    expect(readinessSource).not.toContain('root.clear()')
+    expect(readinessSource).toContain('clearLandrushRenderReadinessRoot(root)')
     expect(readinessSource).toContain(
       '[camera, generation, gl, meshes, onReadinessChange, owner, ready, scene]',
     )
@@ -245,6 +249,114 @@ describe('Landrush island material presentation render readiness', () => {
       productionLights.dispose()
     }
     expect(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS).toEqual({ balanced: 12, high: 16, low: 8 })
+  })
+
+  test('tears down synthetic representatives without corrupting the live removal event', () => {
+    const registry = createZombieEscapeRenderReadinessRegistry([
+      LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+      LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+    ])
+    const owner = new LandrushIslandMaterialPresentationOwner()
+    const worldRoot = new Scene()
+    const generatedRoot = new Group()
+    generatedRoot.userData.__fromGeometry = true
+    const geometry = new BoxGeometry()
+    const material = new MeshStandardMaterial()
+    const mesh = new Mesh(geometry, material)
+    mesh.name = 'natural-road-sidewalks'
+    generatedRoot.add(mesh)
+    worldRoot.add(generatedRoot)
+    const productionLights = mountProductionNightStreetLights(
+      worldRoot,
+      LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
+    )
+    let cleanup: (() => void) | undefined
+    const stopObserving = observeLandrushZombieNightWorld(worldRoot, () => {
+      cleanup?.()
+      cleanup = undefined
+    })
+    owner.acquireFloorFade(mesh)
+    cleanup = registerLandrushIslandMaterialPresentationRenderReadiness({
+      meshes: [{ floor: true, mesh, reveal: false }],
+      owner,
+      ready: true,
+      registry,
+      worldRoot,
+    })
+    const representatives = registry.getSnapshot().representatives.map(({ root }) => root)
+    let syntheticRemovalEvents = 0
+    for (const representative of representatives) {
+      representative.traverse((object) => {
+        object.addEventListener('childremoved', () => {
+          syntheticRemovalEvents += 1
+        })
+      })
+    }
+    let laterRemovedChild: Object3D | null = null
+    worldRoot.addEventListener('childremoved', (event) => {
+      laterRemovedChild = event.child
+      expect(owner.activeBindingCount).toBe(0)
+      expect(mesh.material).toBe(material)
+    })
+
+    expect(() => worldRoot.remove(generatedRoot)).not.toThrow()
+    expect(laterRemovedChild).toBe(generatedRoot)
+    expect(syntheticRemovalEvents).toBe(0)
+    expect(registry.getSnapshot().complete).toBe(false)
+    expect(representatives.every((representative) => representative.children.length === 0)).toBe(
+      true,
+    )
+
+    stopObserving()
+    cleanup?.()
+    owner.dispose()
+    productionLights.dispose()
+    geometry.dispose()
+    material.dispose()
+  })
+
+  test('reconciles both topology observers after an earlier nested removal clears the event child', () => {
+    const worldRoot = new Scene()
+    const generatedRoot = new Group()
+    generatedRoot.userData.landrushZombieNight = true
+    generatedRoot.userData[LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY] = 1
+    const geometry = new BoxGeometry()
+    const material = new MeshStandardMaterial()
+    const mesh = new Mesh(geometry, material)
+    mesh.name = 'natural-road-sidewalks'
+    generatedRoot.add(mesh)
+    worldRoot.add(generatedRoot)
+    const nestedParent = new Group()
+    const nestedChild = new Group()
+    nestedParent.add(nestedChild)
+    worldRoot.addEventListener('childremoved', () => {
+      nestedParent.remove(nestedChild)
+    })
+    let surfaceChanges = 0
+    let topologyChanges = 0
+    const stopSurfaceObserver = observeLandrushZombieNightWorld(worldRoot, () => {
+      surfaceChanges += 1
+    })
+    const stopTopologyObserver = observeLandrushZombieNightReadinessLightTopology(worldRoot, () => {
+      topologyChanges += 1
+    })
+
+    expect(() => worldRoot.remove(generatedRoot)).not.toThrow()
+    expect(surfaceChanges).toBe(1)
+    expect(topologyChanges).toBe(1)
+    const detachedRelevantChild = new Group()
+    detachedRelevantChild.userData.landrushZombieNight = true
+    detachedRelevantChild.userData[
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY
+    ] = 1
+    generatedRoot.add(detachedRelevantChild)
+    expect(surfaceChanges).toBe(1)
+    expect(topologyChanges).toBe(1)
+
+    stopTopologyObserver()
+    stopSurfaceObserver()
+    geometry.dispose()
+    material.dispose()
   })
 
   test('tracks async nested mount and removal while accepting sparse and zero plans', () => {

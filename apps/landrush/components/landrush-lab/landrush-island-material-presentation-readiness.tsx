@@ -8,6 +8,7 @@ import type {
   LandrushIslandMaterialReadinessMesh,
 } from './landrush-island-material-presentation'
 import {
+  clearLandrushRenderReadinessRoot,
   createLandrushRenderReadinessCoordinator,
   type LandrushPipelineRenderer,
 } from './landrush-render-readiness'
@@ -145,12 +146,40 @@ export function observeLandrushZombieNightReadinessLightTopology(
       eventTarget.removeEventListener('childremoved', handleChildRemoved)
     })
   }
+  const reconcile = () => {
+    let affectsTopology = false
+    for (const object of [...observed]) {
+      if (
+        !observed.has(object) ||
+        object === worldRoot ||
+        (object.parent && observed.has(object.parent))
+      ) {
+        continue
+      }
+      affectsTopology ||= containsLandrushZombieNightReadinessLightTopology(object)
+      detach(object)
+    }
+    worldRoot.traverse((object) => {
+      if (observed.has(object)) return
+      affectsTopology ||= containsLandrushZombieNightReadinessLightTopology(object)
+      attach(object)
+    })
+    if (affectsTopology) onTopologyChange()
+  }
   function handleChildAdded({ child }: LandrushZombieNightReadinessChildEvent) {
+    if (!child) {
+      reconcile()
+      return
+    }
     const affectsTopology = containsLandrushZombieNightReadinessLightTopology(child)
     attach(child)
     if (affectsTopology) onTopologyChange()
   }
   function handleChildRemoved({ child }: LandrushZombieNightReadinessChildEvent) {
+    if (!child) {
+      reconcile()
+      return
+    }
     const affectsTopology = containsLandrushZombieNightReadinessLightTopology(child)
     detach(child)
     if (affectsTopology) onTopologyChange()
@@ -195,7 +224,7 @@ export function registerLandrushIslandMaterialPresentationRenderReadiness({
   nightRoot.add(surfaceRepresentative)
   nightRoot.add(beaconRepresentative.root)
   const disposeNightRepresentatives = () => {
-    nightRoot.clear()
+    clearLandrushRenderReadinessRoot(nightRoot)
     beaconRepresentative.dispose()
   }
   let unregisterDay: (() => void) | undefined
@@ -211,7 +240,7 @@ export function registerLandrushIslandMaterialPresentationRenderReadiness({
     )
   } catch (error) {
     unregisterDay?.()
-    dayRoot.clear()
+    clearLandrushRenderReadinessRoot(dayRoot)
     disposeNightRepresentatives()
     throw error
   }
@@ -222,7 +251,7 @@ export function registerLandrushIslandMaterialPresentationRenderReadiness({
     registered = false
     unregisterNight?.()
     unregisterDay?.()
-    dayRoot.clear()
+    clearLandrushRenderReadinessRoot(dayRoot)
     disposeNightRepresentatives()
   }
 }
@@ -282,7 +311,7 @@ export function LandrushIslandMaterialPresentationRenderReadiness({
   return null
 }
 
-type LandrushZombieNightReadinessChildEvent = Readonly<{ child: Object3D }>
+type LandrushZombieNightReadinessChildEvent = Readonly<{ child?: Object3D | null }>
 
 type LandrushZombieNightReadinessChildEventTarget = {
   addEventListener: (
@@ -392,7 +421,7 @@ export function LandrushIslandDayMaterialPresentationRenderReadiness({
     return () => {
       active = false
       coordinator.invalidate()
-      root.clear()
+      clearLandrushRenderReadinessRoot(root)
       onReadinessChange({ completed: 0, generation, ready: false, total: 1 })
     }
   }, [camera, generation, gl, meshes, onReadinessChange, owner, ready, scene])

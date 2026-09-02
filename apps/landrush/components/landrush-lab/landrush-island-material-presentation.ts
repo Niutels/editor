@@ -72,7 +72,7 @@ type LandrushIslandPresentationBinding = {
 }
 
 type LandrushIslandAncestorListenerReference = {
-  listener: (event: { child: Object3D }) => void
+  listener: (event: { child?: Object3D | null }) => void
   referenceCount: number
 }
 
@@ -738,7 +738,11 @@ export class LandrushIslandMaterialPresentationOwner {
       existing.referenceCount += 1
       return
     }
-    const listener = ({ child }: { child: Object3D }) => {
+    const listener = ({ child }: { child?: Object3D | null }) => {
+      if (!child) {
+        this.detachRemovedGeneratedBindingsFromAncestor(ancestor)
+        return
+      }
       if (child.userData.__fromGeometry !== true) return
       child.traverse((object) => {
         const mesh = object as Mesh
@@ -747,6 +751,28 @@ export class LandrushIslandMaterialPresentationOwner {
     }
     ancestor.addEventListener('childremoved', listener)
     this.ancestorListenerReferences.set(ancestor, { listener, referenceCount: 1 })
+  }
+
+  private detachRemovedGeneratedBindingsFromAncestor(ancestor: Object3D) {
+    const detachedMeshes: Mesh[] = []
+    for (const binding of this.bindings.values()) {
+      const ancestorIndex = binding.ancestors.indexOf(ancestor)
+      if (ancestorIndex < 0) continue
+      const removedBranch =
+        ancestorIndex === 0 ? binding.mesh : binding.ancestors[ancestorIndex - 1]
+      if (
+        !removedBranch ||
+        (removedBranch.parent === ancestor && ancestor.children.includes(removedBranch)) ||
+        removedBranch.userData.__fromGeometry !== true ||
+        !isDescendantOrSelf(binding.mesh, removedBranch)
+      ) {
+        continue
+      }
+      detachedMeshes.push(binding.mesh)
+    }
+    for (const mesh of detachedMeshes) {
+      if (this.bindings.has(mesh)) this.detachMeshBeforeDispose(mesh)
+    }
   }
 
   private releaseAncestorListener(ancestor: Object3D) {
@@ -1055,6 +1081,15 @@ function isBindingAssignmentCurrent(binding: LandrushIslandPresentationBinding) 
 
 function isCachedSourceMaterial(material: Material) {
   return material.userData?.__pascalCachedMaterial === true
+}
+
+function isDescendantOrSelf(object: Object3D, root: Object3D) {
+  let current: Object3D | null = object
+  while (current) {
+    if (current === root) return true
+    current = current.parent
+  }
+  return false
 }
 
 function isMaterialAssignmentCurrent(

@@ -20,6 +20,7 @@ import {
 } from 'three'
 import { mix, color as tslColor, uniform } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
+import { clearLandrushRenderReadinessRoot } from './landrush-render-readiness'
 import { createLandrushZombieNightGroundPoolResources } from './landrush-zombie-night-ground-pool'
 import {
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
@@ -157,12 +158,40 @@ export function observeLandrushZombieNightWorld(
       eventTarget.removeEventListener(NIGHT_SURFACE_MATERIAL_CHANGE_EVENT, handleMaterialChange)
     })
   }
+  const reconcile = () => {
+    let hasNightSurface = false
+    for (const object of [...observed]) {
+      if (
+        !observed.has(object) ||
+        object === worldRoot ||
+        (object.parent && observed.has(object.parent))
+      ) {
+        continue
+      }
+      hasNightSurface ||= containsLandrushZombieNightSurfaceObject(object)
+      detach(object)
+    }
+    worldRoot.traverse((object) => {
+      if (observed.has(object)) return
+      hasNightSurface = prepareLandrushZombieNightSurfaceObject(object) > 0 || hasNightSurface
+      attach(object)
+    })
+    if (hasNightSurface) onSurfaceGenerationChange()
+  }
   function handleChildAdded({ child }: NightObject3DChildEvent) {
+    if (!child) {
+      reconcile()
+      return
+    }
     const hasNightSurface = prepareLandrushZombieNightSurfaceObject(child) > 0
     attach(child)
     if (hasNightSurface) onSurfaceGenerationChange()
   }
   function handleChildRemoved({ child }: NightObject3DChildEvent) {
+    if (!child) {
+      reconcile()
+      return
+    }
     const hasNightSurface = containsLandrushZombieNightSurfaceObject(child)
     detach(child)
     if (hasNightSurface) onSurfaceGenerationChange()
@@ -346,7 +375,7 @@ export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): 
     dispose() {
       if (disposed) return
       disposed = true
-      root.clear()
+      clearLandrushRenderReadinessRoot(root)
       for (const geometry of geometries) geometry.dispose()
       for (const material of materials) material.dispose()
       for (const texture of textures) texture.dispose()
@@ -381,12 +410,8 @@ export function createLandrushZombieNightLightTopology(
     dispose() {
       if (disposed) return
       disposed = true
-      for (const light of lights) {
-        light.removeFromParent()
-        light.target.removeFromParent()
-        light.dispose()
-      }
-      root.clear()
+      clearLandrushRenderReadinessRoot(root)
+      for (const light of lights) light.dispose()
     },
     root,
   }
@@ -402,7 +427,7 @@ function createLandrushZombieNightRepresentativeTexture(
   return texture
 }
 
-type NightObject3DChildEvent = Readonly<{ child: Object3D }>
+type NightObject3DChildEvent = Readonly<{ child?: Object3D | null }>
 type NightSurfaceMaterialChangeEvent = Readonly<{
   mesh: Mesh
   type: typeof NIGHT_SURFACE_MATERIAL_CHANGE_EVENT
