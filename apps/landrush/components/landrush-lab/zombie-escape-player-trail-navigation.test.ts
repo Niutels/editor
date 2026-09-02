@@ -520,6 +520,225 @@ describe('Zombie Escape player-trail pursuit', () => {
     expect(state.zombies.pursuitTrailSequence[zombie]).toBe(closestSameLayerSequence)
   })
 
+  test('uses the authored route when the retained trail has no crumb on the zombie floor', () => {
+    const world = createPlayerTrailStairWorld()
+    const connector = world.navigationConnectors[0]!
+    const arena = createZombieEscapeArena(74_033)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 74_034, undefined, {
+      zombieCapacity: 8,
+    })
+    const input = createZombieEscapeControlState()
+    setZombieEscapeCollisionWorld(state, world, world)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = connector.endX + connector.directionX * 3
+    state.player.y = connector.endY
+    state.player.z = connector.endZ + connector.directionZ * 3
+    publishSparseTarget(state, input, arena)
+    resetZombieEscapePlayerTrail(state.playerTrail)
+    for (let point = 0; point < 8; point += 1) {
+      recordZombieEscapePlayerTrailPoint(
+        state.playerTrail,
+        {
+          layerIndex: state.navigationGoalLayerIndex,
+          regionIndex: state.navigationGoalRegionIndex,
+          tick: state.navigationIntentTick,
+          x: connector.endX + connector.directionX * (1 + point * 0.25),
+          y: connector.endY,
+          z: connector.endZ + connector.directionZ * (1 + point * 0.25),
+        },
+        true,
+      )
+    }
+    const zombie = spawnZombieEscapeZombieAtNavigationElevation(
+      state,
+      connector.startX - connector.directionX * 2.5,
+      connector.startZ - connector.directionZ * 2.5,
+      connector.startY,
+      undefined,
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+    )
+    expect(zombie).toBeGreaterThanOrEqual(0)
+    const initialX = state.zombies.x[zombie]!
+    const initialZ = state.zombies.z[zombie]!
+
+    stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+    expect(state.zombies.pursuitTrailAcquisitionStatus[zombie]).toBe(2)
+    const scannedNewest = state.zombies.pursuitTrailAcquisitionScannedNewestSequence[zombie]!
+    for (let frame = 0; frame < 12; frame += 1) {
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+      expect(state.zombies.pursuitTrailAcquisitionStatus[zombie]).toBe(2)
+      expect(state.zombies.pursuitTrailAcquisitionScannedNewestSequence[zombie]).toBe(scannedNewest)
+      expect(state.zombies.pursuitTrailAcquisitionNextSequence[zombie]).toBe(0)
+    }
+
+    let enteredConnector = false
+    for (let frame = 0; frame < 1_500 && !enteredConnector; frame += 1) {
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+      expect(state.zombies.pool.active[zombie]).toBe(1)
+      enteredConnector = state.zombies.navigationConnector[zombie]! >= 0
+    }
+
+    expect(
+      Math.hypot(state.zombies.x[zombie]! - initialX, state.zombies.z[zombie]! - initialZ),
+    ).toBeGreaterThan(0.25)
+    expect(enteredConnector).toBe(true)
+  })
+
+  test('acquires a retained crumb while every tick advances a full trail ring', () => {
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boundaryPolicy: 'none',
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'moving-ring-ground',
+          polygon: [
+            { x: -20, z: -4 },
+            { x: 20, z: -4 },
+            { x: 20, z: 4 },
+            { x: -20, z: 4 },
+          ],
+        },
+      ],
+      playRadius: 21,
+    })
+    const arena = createZombieEscapeArena(74_035)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 74_036, undefined, {
+      zombieCapacity: 8,
+    })
+    const input = createZombieEscapeControlState()
+    setZombieEscapeCollisionWorld(state, world, world)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 12.75
+    state.player.y = 0
+    state.player.z = 0
+    publishSparseTarget(state, input, arena)
+    resetZombieEscapePlayerTrail(state.playerTrail)
+    for (let point = 0; point < state.playerTrail.capacity; point += 1) {
+      recordZombieEscapePlayerTrailPoint(
+        state.playerTrail,
+        {
+          layerIndex: state.navigationGoalLayerIndex,
+          regionIndex: state.navigationGoalRegionIndex,
+          tick: state.navigationIntentTick,
+          x: point * 0.05,
+          y: 0,
+          z: 0,
+        },
+        true,
+      )
+    }
+    const zombie = spawnZombieEscapeZombieAtNavigationElevation(
+      state,
+      0,
+      0,
+      0,
+      undefined,
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+    )
+    expect(zombie).toBeGreaterThanOrEqual(0)
+
+    let acquiredFrame = -1
+    for (let frame = 0; frame < 16 && acquiredFrame < 0; frame += 1) {
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+      if (
+        state.zombies.pursuitTrailGeneration[zombie] === state.playerTrail.generation &&
+        state.zombies.pursuitTrailSequence[zombie]! >=
+          getZombieEscapePlayerTrailOldestSequence(state.playerTrail)
+      ) {
+        acquiredFrame = frame
+        break
+      }
+      state.player.x += 0.05
+      recordZombieEscapePlayerTrailPoint(
+        state.playerTrail,
+        {
+          layerIndex: state.navigationGoalLayerIndex,
+          regionIndex: state.navigationGoalRegionIndex,
+          tick: state.navigationIntentTick,
+          x: state.player.x,
+          y: 0,
+          z: 0,
+        },
+        true,
+      )
+    }
+
+    expect(acquiredFrame).toBeGreaterThanOrEqual(0)
+    expect(acquiredFrame).toBeLessThan(8)
+    expect(state.zombies.pursuitTrailSequence[zombie]).toBeGreaterThanOrEqual(
+      getZombieEscapePlayerTrailOldestSequence(state.playerTrail),
+    )
+  })
+
+  test('retries a static unavailable trail after fallback movement changes the source', () => {
+    const { arena, input, sequence, state, zombie } = createStaticBlockedTrailPursuit(
+      74_037,
+      74_038,
+    )
+    const unavailableSourceX = state.zombies.pursuitTrailAcquisitionSourceX[zombie]!
+    const unavailableSourceZ = state.zombies.pursuitTrailAcquisitionSourceZ[zombie]!
+
+    state.zombies.x[zombie] = -0.2
+    state.zombies.z[zombie] = 0
+    state.zombies.vx[zombie] = 0
+    state.zombies.vz[zombie] = 0
+    expect(
+      Math.hypot(
+        state.zombies.x[zombie]! - unavailableSourceX,
+        state.zombies.z[zombie]! - unavailableSourceZ,
+      ),
+    ).toBeGreaterThanOrEqual(0.5)
+
+    for (
+      let frame = 0;
+      frame < 8 && state.zombies.pursuitTrailGeneration[zombie] !== state.playerTrail.generation;
+      frame += 1
+    ) {
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+    }
+
+    expect(state.playerTrail.newestSequence).toBe(sequence)
+    expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
+    expect(state.zombies.pursuitTrailSequence[zombie]).toBe(sequence)
+  })
+
+  test('retries a static unavailable trail after the navigation world changes', () => {
+    const { arena, input, sequence, state, zombie } = createStaticBlockedTrailPursuit(
+      74_039,
+      74_040,
+    )
+    const unavailableWorldRevision = state.zombies.pursuitTrailAcquisitionWorldRevision[zombie]!
+
+    const wallObjectOrdinal = state.collisionWorld.objectCatalog.objectIds.indexOf(
+      'terminal-retirement-wall',
+    )
+    expect(wallObjectOrdinal).toBeGreaterThanOrEqual(0)
+    state.collisionWorld.activeObjectMask[wallObjectOrdinal] = 0
+    state.navigationWorldRevision += 1
+    expect(state.navigationWorldRevision).toBeGreaterThan(unavailableWorldRevision)
+    for (
+      let frame = 0;
+      frame < 8 && state.zombies.pursuitTrailGeneration[zombie] !== state.playerTrail.generation;
+      frame += 1
+    ) {
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+    }
+
+    expect(state.playerTrail.newestSequence).toBe(sequence)
+    expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
+    expect(state.zombies.pursuitTrailSequence[zombie]).toBe(sequence)
+  })
+
   test('retires a reached newest point without replacing the sparse-route steer with zero', () => {
     const world = createThinOccludingWallWorld()
     const arena = createZombieEscapeArena(74_009)
@@ -1238,6 +1457,61 @@ function createThinOccludingWallWorld() {
       },
     ],
   })
+}
+
+function createStaticBlockedTrailPursuit(arenaSeed: number, simulationSeed: number) {
+  const world = createThinOccludingWallWorld()
+  const arena = createZombieEscapeArena(arenaSeed)
+  arena.obstacleCount = 0
+  const state = createZombieEscapeSimulation(arena, simulationSeed, undefined, {
+    zombieCapacity: 8,
+  })
+  const input = createZombieEscapeControlState()
+  setZombieEscapeCollisionWorld(state, world, world)
+  setZombieEscapeExternalPlayerPose(state, true)
+  setZombieEscapeGamePhase(state, 'night')
+  state.waveSpawnRemaining = 0
+  state.waveState = 'escape'
+  state.player.x = -0.8
+  state.player.y = 0
+  state.player.z = 0
+  publishSparseTarget(state, input, arena)
+  resetZombieEscapePlayerTrail(state.playerTrail)
+  const sequence = recordZombieEscapePlayerTrailPoint(
+    state.playerTrail,
+    {
+      layerIndex: state.navigationGoalLayerIndex,
+      regionIndex: state.navigationGoalRegionIndex,
+      tick: state.navigationIntentTick,
+      x: state.player.x,
+      y: state.player.y,
+      z: state.player.z,
+    },
+    true,
+  )
+  const zombie = spawnZombieEscapeZombieAtNavigationElevation(
+    state,
+    0.8,
+    0,
+    0,
+    undefined,
+    ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+  )
+  expect(zombie).toBeGreaterThanOrEqual(0)
+  state.zombies.speedScale[zombie] = 0
+
+  for (
+    let frame = 0;
+    frame < 8 && state.zombies.pursuitTrailAcquisitionStatus[zombie] !== 2;
+    frame += 1
+  ) {
+    stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+  }
+
+  expect(state.zombies.pursuitTrailAcquisitionStatus[zombie]).toBe(2)
+  expect(state.zombies.pursuitTrailAcquisitionScannedNewestSequence[zombie]).toBe(sequence)
+  expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(0)
+  return { arena, input, sequence, state, zombie }
 }
 
 function createPlayerTrailStairWorld() {

@@ -289,8 +289,12 @@ describe('Zombie Escape night bosses', () => {
       expect(state.playerTrailAcquisitionCandidateBudgetRemaining).toBe(0)
       expect(state.zombies.pursuitTrailSequence[heavySlot]).toBe(0)
       expect(state.zombies.pursuitTrailSequence[bruteSlot]).toBe(0)
-      expect(state.zombies.pursuitTrailAcquisitionNextSequence[heavySlot]).toBe(1 + 32 * (tick + 1))
-      expect(state.zombies.pursuitTrailAcquisitionNextSequence[bruteSlot]).toBe(1 + 32 * (tick + 1))
+      expect(state.zombies.pursuitTrailAcquisitionNextSequence[heavySlot]).toBe(
+        state.playerTrail.newestSequence - 32 * (tick + 1),
+      )
+      expect(state.zombies.pursuitTrailAcquisitionNextSequence[bruteSlot]).toBe(
+        state.playerTrail.newestSequence - 32 * (tick + 1),
+      )
       expect(state.zombies.pursuitTrailAcquisitionSourceX[heavySlot]).toBe(-4)
       expect(state.zombies.pursuitTrailAcquisitionSourceX[bruteSlot]).toBe(4)
       if (tick === 0) {
