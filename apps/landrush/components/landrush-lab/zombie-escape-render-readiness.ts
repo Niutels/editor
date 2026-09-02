@@ -322,12 +322,18 @@ async function compileZombieEscapeRenderAggregateVariant({
   const pendingCompilation = (() => {
     try {
       for (const representativeRoot of representativeRoots) {
+        const parent = representativeRoot.parent
+        const index = parent?.children.indexOf(representativeRoot) ?? -1
         placements.push({
-          index: representativeRoot.parent?.children.indexOf(representativeRoot) ?? -1,
-          parent: representativeRoot.parent,
+          index,
+          parent,
           root: representativeRoot,
         })
-        root.add(representativeRoot)
+        // These representatives are live R3F objects, so the one-shot probe must not emit
+        // ownership lifecycle events while temporarily assembling its compilation tree.
+        if (parent && index >= 0) parent.children.splice(index, 1)
+        root.children.push(representativeRoot)
+        representativeRoot.parent = root
       }
       return compileLandrushRenderRepresentative({
         camera,
@@ -336,14 +342,13 @@ async function compileZombieEscapeRenderAggregateVariant({
         targetScene,
       })
     } finally {
-      restoreZombieEscapeRenderAggregatePlacements(root, placements)
+      restoreZombieEscapeRenderAggregatePlacements(placements)
     }
   })()
   await pendingCompilation
 }
 
 function restoreZombieEscapeRenderAggregatePlacements(
-  aggregateRoot: Group,
   placements: readonly Readonly<{
     index: number
     parent: Object3D | null
@@ -352,14 +357,14 @@ function restoreZombieEscapeRenderAggregatePlacements(
 ) {
   for (let index = placements.length - 1; index >= 0; index -= 1) {
     const placement = placements[index]!
-    aggregateRoot.remove(placement.root)
+    const currentParent = placement.root.parent
+    const currentIndex = currentParent?.children.indexOf(placement.root) ?? -1
+    if (currentParent && currentIndex >= 0) currentParent.children.splice(currentIndex, 1)
+    placement.root.parent = null
     if (!placement.parent) continue
-    placement.parent.add(placement.root)
-    const restoredIndex = placement.parent.children.indexOf(placement.root)
-    const targetIndex = Math.min(placement.index, placement.parent.children.length - 1)
-    if (restoredIndex === targetIndex) continue
-    placement.parent.children.splice(restoredIndex, 1)
+    const targetIndex = Math.min(Math.max(placement.index, 0), placement.parent.children.length)
     placement.parent.children.splice(targetIndex, 0, placement.root)
+    placement.root.parent = placement.parent
   }
 }
 

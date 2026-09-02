@@ -487,6 +487,51 @@ describe('Zombie Escape render compilation', () => {
     }
   })
 
+  test('aggregates live representatives without emitting ownership lifecycle events', async () => {
+    const parent = new Group()
+    const before = new Group()
+    const first = new Group()
+    const between = new Group()
+    const second = new Group()
+    const after = new Group()
+    parent.add(before, first, between, second, after)
+    const originalChildren = [...parent.children]
+    const ownershipEvents: string[] = []
+    first.addEventListener('added', () => ownershipEvents.push('first:added'))
+    first.addEventListener('removed', () => ownershipEvents.push('first:removed'))
+    second.addEventListener('added', () => ownershipEvents.push('second:added'))
+    second.addEventListener('removed', () => ownershipEvents.push('second:removed'))
+    const compilation = deferred<unknown>()
+    let calls = 0
+    const pending = compileZombieEscapeRenderRepresentatives({
+      camera: new PerspectiveCamera(),
+      renderer: {
+        compileAsync: (root) => {
+          calls += 1
+          if (calls > 1) return Promise.resolve()
+          expect(root.children).toEqual([first, second])
+          return compilation.promise
+        },
+      },
+      representatives: [
+        { key: 'first', root: first },
+        { key: 'second', root: second },
+      ],
+      targetScene: new Scene(),
+    })
+    await flushMicrotasksUntil(() => calls === 1)
+    expect(parent.children).toEqual(originalChildren)
+    expect(first.parent).toBe(parent)
+    expect(second.parent).toBe(parent)
+    expect(ownershipEvents).toEqual([])
+    compilation.reject(new Error('compile failed'))
+    await expect(pending).rejects.toThrow('compile failed')
+    expect(parent.children).toEqual(originalChildren)
+    expect(first.parent).toBe(parent)
+    expect(second.parent).toBe(parent)
+    expect(ownershipEvents).toEqual([])
+  })
+
   test('deduplicates identical roots and restores a parentless root before submission settles', async () => {
     const root = new Group()
     const compilation = deferred<unknown>()
