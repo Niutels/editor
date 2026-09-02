@@ -99,14 +99,6 @@ export const LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS: Readonly<
   low: 8,
 }
 
-export const LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS: Readonly<
-  Record<LandrushZombieNightQuality, number>
-> = {
-  balanced: 4,
-  high: 6,
-  low: 3,
-}
-
 export const LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET = 4
 
 export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT = Object.freeze({
@@ -197,15 +189,11 @@ export function shouldPublishLandrushZombieNightDebugSnapshot(params: URLSearchP
   )
 }
 
-export function resolveLandrushZombieNightTargetExposure({
-  mode,
-  nightExposure,
-  visibility,
-}: {
-  mode: LandrushZombieNightDebugMode
-  nightExposure: number
-  visibility: LandrushZombieNightVisibility
-}) {
+export function resolveLandrushZombieNightTargetExposure(
+  mode: LandrushZombieNightDebugMode,
+  nightExposure: number,
+  visibility: LandrushZombieNightVisibility,
+) {
   if (mode === 'no-post') {
     return visibility === 'world50' ? LANDRUSH_ZOMBIE_NIGHT_WORLD_EXPOSURE_SCALE : 1
   }
@@ -414,50 +402,6 @@ export function createLandrushZombieNightBeaconPlacements({
   )
 }
 
-export function selectLandrushZombieNightActiveLightPlacements({
-  placements,
-  quality,
-  seed = LANDRUSH_ZOMBIE_NIGHT_SEED,
-}: {
-  placements: readonly LandrushZombieNightBeaconPlacement[]
-  quality: LandrushZombieNightQuality
-  seed?: number
-}): readonly LandrushZombieNightBeaconPlacement[] {
-  const maximumCount = LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS[quality]
-  if (placements.length <= maximumCount) return placements
-
-  const selected: LandrushZombieNightBeaconPlacement[] = []
-  const center = averagePlacementPosition(placements)
-  const remaining = [...placements]
-  while (selected.length < maximumCount) {
-    let bestIndex = 0
-    let bestScore = Number.NEGATIVE_INFINITY
-    for (let index = 0; index < remaining.length; index += 1) {
-      const candidate = remaining[index]!
-      const score =
-        selected.length === 0
-          ? -distanceSquared(candidate.position, center)
-          : minimumPlacementDistanceSquared(candidate, selected)
-      if (
-        score > bestScore ||
-        (score === bestScore &&
-          mixHash(seed, hashString(candidate.id)) >
-            mixHash(seed, hashString(remaining[bestIndex]!.id)))
-      ) {
-        bestIndex = index
-        bestScore = score
-      }
-    }
-    selected.push(remaining.splice(bestIndex, 1)[0]!)
-  }
-
-  return selected.sort(
-    (left, right) =>
-      left.roadId.localeCompare(right.roadId) ||
-      left.distanceAlongRoadMeters - right.distanceAlongRoadMeters,
-  )
-}
-
 function averagePlacementPosition(placements: readonly LandrushZombieNightBeaconPlacement[]) {
   const total = placements.reduce(
     (sum, placement) => ({
@@ -467,17 +411,6 @@ function averagePlacementPosition(placements: readonly LandrushZombieNightBeacon
     { x: 0, z: 0 },
   )
   return { x: total.x / placements.length, z: total.z / placements.length }
-}
-
-function minimumPlacementDistanceSquared(
-  candidate: LandrushZombieNightBeaconPlacement,
-  placements: readonly LandrushZombieNightBeaconPlacement[],
-) {
-  let minimum = Number.POSITIVE_INFINITY
-  for (const placement of placements) {
-    minimum = Math.min(minimum, distanceSquared(candidate.position, placement.position))
-  }
-  return minimum
 }
 
 type MeasuredPolyline = Readonly<{

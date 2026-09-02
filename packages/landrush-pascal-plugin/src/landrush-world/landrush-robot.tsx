@@ -174,11 +174,14 @@ export function LandrushRobot({
   visualRootRef,
 }: LandrushRobotProps) {
   const measure = profileMeasure ?? measureUnprofiled
-  const animationPaceValue = MathUtils.clamp(
-    animationPace,
-    LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[0],
-    LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[1],
-  )
+  const animationPaceValue =
+    animationPace === 0
+      ? 0
+      : MathUtils.clamp(
+          animationPace,
+          LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[0],
+          LANDRUSH_ROBOT_ANIMATION_PACE_RANGE[1],
+        )
   const hoverOutlineWidthScaleValue = MathUtils.clamp(hoverOutlineWidthScale, 0.5, 3)
   const fallIntensityValue = MathUtils.clamp(fallIntensity, 0, 1)
   const fallMotionScaleValue = MathUtils.clamp(fallMotionScale, 0.05, 1)

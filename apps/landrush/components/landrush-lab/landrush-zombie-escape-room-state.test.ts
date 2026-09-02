@@ -58,6 +58,21 @@ describe('Zombie Escape canonical room state', () => {
     expect(simulation.phaseSecondsRemaining).toBe(150)
   })
 
+  test('reserves both boss slots when a late join lands near the population cap', () => {
+    const simulation = createSimulation()
+    const observation = createObservation({ night: 4, phase: 'night', phaseEndsAt: 1_001_000 })
+
+    applyLandrushZombieEscapeRoomState({
+      appliedState: null,
+      nowMs: 10_000,
+      observation,
+      simulation,
+    })
+
+    expect(simulation.phaseSecondsRemaining).toBe(1)
+    expect(simulation.waveSpawnRemaining).toBe(98)
+  })
+
   test('updates same-phase time without resetting active pools or personal state', () => {
     const simulation = createSimulation()
     setZombieEscapeGamePhase(simulation, 'night')
@@ -98,6 +113,8 @@ describe('Zombie Escape canonical room state', () => {
   test('re-enters an already-active night when the canonical night changes', () => {
     const simulation = createSimulation()
     setZombieEscapeGamePhase(simulation, 'night')
+    simulation.priorNightKills = 4
+    simulation.currentNightKills = 17
     const observation = createObservation({ night: 3, phase: 'night', revision: 9 })
 
     const result = applyLandrushZombieEscapeRoomState({
@@ -110,6 +127,29 @@ describe('Zombie Escape canonical room state', () => {
     expect(result.destructiveTransition).toBe(true)
     expect(simulation.night).toBe(3)
     expect(simulation.wave).toBe(3)
+    expect(simulation.priorNightKills).toBe(17)
+    expect(simulation.currentNightKills).toBe(0)
+    expect(simulation.waveSpawnRemaining).toBe(81)
+
+    simulation.currentNightKills = 2
+    const sameNightObservation = createObservation({
+      night: 3,
+      phase: 'night',
+      phaseEndsAt: 1_100_000,
+      revision: 10,
+    })
+    const sameNightResult = applyLandrushZombieEscapeRoomState({
+      appliedState: result.appliedState,
+      nowMs: 20_000,
+      observation: sameNightObservation,
+      simulation,
+    })
+
+    expect(sameNightResult.destructiveTransition).toBe(false)
+    expect(simulation.priorNightKills).toBe(17)
+    expect(simulation.currentNightKills).toBe(2)
+    expect(simulation.waveSpawnRemaining).toBe(81)
+    expect(simulation.phaseSecondsRemaining).toBe(90)
   })
 
   test('force-applying an unchanged canonical build keeps its clock held', () => {

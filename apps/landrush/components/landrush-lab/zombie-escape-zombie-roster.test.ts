@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { LANDRUSH_ISLAND_AMBIENT_NPCS } from './landrush-island-ambient-catalog'
-import { ZOMBIE_ESCAPE_CAPACITY, ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT } from './zombie-escape-config'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
+import { ZOMBIE_ESCAPE_CAPACITY } from './zombie-escape-config'
+import {
+  ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS,
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+} from './zombie-escape-zombie-catalog'
 import {
   createZombieEscapeVariantByPoolSlot,
   createZombieEscapeZombieRoster,
@@ -16,17 +19,21 @@ describe('Zombie Escape zombie roster', () => {
     expect(ZOMBIE_ESCAPE_CAPACITY.zombies).toBe(100)
   })
 
-  test('builds a deterministic balanced full-capacity variant assignment', () => {
+  test('builds a deterministic balanced standard-only full-capacity assignment', () => {
     const first = createZombieEscapeVariantByPoolSlot(91_337)
     const repeated = createZombieEscapeVariantByPoolSlot(91_337)
     const otherSeed = createZombieEscapeVariantByPoolSlot(91_338)
-    const counts = new Uint8Array(ZOMBIE_ESCAPE_ZOMBIE_VARIANT_COUNT)
+    const counts = new Uint8Array(ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length)
     for (const variant of first) counts[variant] = counts[variant]! + 1
+    const standardCounts = ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS.map((variant) => counts[variant]!)
 
     expect(first).toEqual(repeated)
     expect(first).not.toEqual(otherSeed)
     expect(first).toHaveLength(ZOMBIE_ESCAPE_CAPACITY.zombies)
-    expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1)
+    expect(
+      first.every((variant) => ZOMBIE_ESCAPE_ZOMBIE_CATALOG[variant]!.bodyClass === 'standard'),
+    ).toBe(true)
+    expect(Math.max(...standardCounts) - Math.min(...standardCounts)).toBeLessThanOrEqual(1)
   })
 
   test('maps the ambient catalog prefix to its exact zombie bodies and shuffles only the suffix', () => {
@@ -43,9 +50,12 @@ describe('Zombie Escape zombie roster', () => {
       LANDRUSH_ISLAND_AMBIENT_NPCS.map(({ id }) => id),
     )
     for (let npcIndex = 0; npcIndex < prefixCount; npcIndex += 1) {
-      expect(ZOMBIE_ESCAPE_ZOMBIE_CATALOG[first.variantByPoolSlot[npcIndex]!]!.sourceNpcId).toBe(
-        LANDRUSH_ISLAND_AMBIENT_NPCS[npcIndex]!.id,
-      )
+      const assigned = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[first.variantByPoolSlot[npcIndex]!]!
+      const exact = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.find(
+        ({ sourceNpcId }) => sourceNpcId === LANDRUSH_ISLAND_AMBIENT_NPCS[npcIndex]!.id,
+      )!
+      expect(assigned.bodyClass).toBe('standard')
+      if (exact.bodyClass === 'standard') expect(assigned.sourceNpcId).toBe(exact.sourceNpcId)
     }
     expect(first.variantByPoolSlot.slice(0, prefixCount)).toEqual(
       otherSeed.variantByPoolSlot.slice(0, prefixCount),

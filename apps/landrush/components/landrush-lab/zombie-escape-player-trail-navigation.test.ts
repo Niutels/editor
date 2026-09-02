@@ -23,8 +23,13 @@ import {
   setZombieEscapeGamePhase,
   spawnZombieEscapeZombieAtNavigationElevation,
   stepZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
 } from './zombie-escape-simulation'
 import { createZombieEscapeArena } from './zombie-escape-world'
+import {
+  ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+} from './zombie-escape-zombie-catalog'
 
 const FIXED_DELTA_SECONDS = 1 / 60
 
@@ -172,6 +177,347 @@ describe('Zombie Escape player-trail pursuit', () => {
     expect(state.zombies.navigationLiveGoalClearTicks[zombie]).toBe(6)
     expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
     expect(state.zombies.pursuitTrailSequence[zombie]).toBe(state.playerTrail.newestSequence)
+  })
+
+  test('keeps a heavy zombie on the recorded doorway path without player visibility', () => {
+    const { arena, input, state, zombie } = createOccludedDoorwayPursuit(
+      74_019,
+      74_020,
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+    )
+
+    expect(state.zombies.navigationLiveGoalClearTicks[zombie]).toBe(0)
+    expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
+    expect(state.zombies.pursuitTrailSequence[zombie]).toBeLessThan(
+      state.playerTrail.newestSequence,
+    )
+
+    state.zombies.speedScale[zombie] = 1
+    let crossedEntrance = false
+    for (let frame = 0; frame < 1_200 && !crossedEntrance; frame += 1) {
+      const previousX = state.zombies.x[zombie]!
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+      expect(state.zombies.navigationLiveGoalClearTicks[zombie]).toBe(0)
+      if (previousX >= 2 && state.zombies.x[zombie]! < 2) {
+        expect(Math.abs(state.zombies.z[zombie]!)).toBeLessThan(0.6)
+        crossedEntrance = true
+      }
+    }
+    expect(crossedEntrance).toBe(true)
+  })
+
+  test('holds still while acquiring and takes the recorded farther entrance after spawning', () => {
+    for (const [index, requestedVariant] of [
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+      ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
+    ].entries()) {
+      const { arena, input, state, zombie } = createTwoEntranceDoorwayPursuit(
+        74_023 + index * 2,
+        74_024 + index * 2,
+        requestedVariant,
+      )
+
+      let attackedSideWall = false
+      let crossedEntrance = false
+      let heldWhileTrailWorkWasPending = false
+      for (let frame = 0; frame < 1_800 && !crossedEntrance; frame += 1) {
+        const previousX = state.zombies.x[zombie]!
+        const previousZ = state.zombies.z[zombie]!
+        stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+        const trailWorkIsPending =
+          state.zombies.pursuitTrailAcquisitionGeneration[zombie] !== 0 ||
+          state.zombies.pursuitTrailSeekingReachableStart[zombie] !== 0
+        if (trailWorkIsPending) {
+          heldWhileTrailWorkWasPending = true
+          expect(state.zombies.x[zombie]).toBeCloseTo(previousX, 6)
+          expect(state.zombies.z[zombie]).toBeCloseTo(previousZ, 6)
+          expect(state.zombies.vx[zombie]).toBe(0)
+          expect(state.zombies.vz[zombie]).toBe(0)
+          expect(state.zombies.attackTargetObjectId[zombie]).toBeNull()
+          expect(state.zombies.navigationBlockerObjectId[zombie]).toBeNull()
+        }
+        attackedSideWall ||=
+          state.zombies.intent[zombie] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle
+        if (previousX >= 3 && state.zombies.x[zombie]! < 3) {
+          expect(state.zombies.z[zombie]).toBeLessThan(-1.2)
+          expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
+          expect(state.zombies.pursuitTrailSequence[zombie]).toBeGreaterThan(0)
+          expect(state.zombies.pursuitTrailValidatedStatus[zombie]).toBeGreaterThan(0)
+          crossedEntrance = true
+        }
+      }
+
+      expect(heldWhileTrailWorkWasPending).toBe(true)
+      expect(attackedSideWall).toBe(false)
+      expect(crossedEntrance).toBe(true)
+    }
+
+    const nearEntranceDistance = 1.5 + Math.hypot(3, 3.6)
+    const recordedFarEntranceDistance = Math.hypot(1.5, 3.6) + 3
+    expect(nearEntranceDistance).toBeLessThan(recordedFarEntranceDistance)
+  })
+
+  test('searches newer crumbs when the closest crumb and every older crumb are blocked', () => {
+    const wall = (id: string, startZ: number, endZ: number) => ({
+      breakable: false,
+      endX: 0,
+      endZ,
+      halfThickness: 0.1,
+      id,
+      maximumY: 2.8,
+      minimumY: 0,
+      navigationLayerY: 0,
+      objectId: id,
+      startX: 0,
+      startZ,
+    })
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boundaryPolicy: 'none',
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'forward-reachable-ground',
+          polygon: [
+            { x: -4, z: -4 },
+            { x: 4, z: -4 },
+            { x: 4, z: 4 },
+            { x: -4, z: 4 },
+          ],
+        },
+      ],
+      playRadius: 5,
+      segments: [
+        wall('forward-reachable-wall-lower', -3, 1.35),
+        wall('forward-reachable-wall-upper', 2.65, 3),
+      ],
+    })
+    const arena = createZombieEscapeArena(74_029)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 74_030, undefined, {
+      zombieCapacity: 8,
+    })
+    const input = createZombieEscapeControlState()
+    setZombieEscapeCollisionWorld(state, world, world)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = 1
+    state.player.y = 0
+    state.player.z = 2
+    publishSparseTarget(state, input, arena)
+    resetZombieEscapePlayerTrail(state.playerTrail)
+    const recordPoint = (x: number, z: number) =>
+      recordZombieEscapePlayerTrailPoint(
+        state.playerTrail,
+        {
+          layerIndex: state.navigationGoalLayerIndex,
+          regionIndex: state.navigationGoalRegionIndex,
+          tick: state.navigationIntentTick,
+          x,
+          y: 0,
+          z,
+        },
+        true,
+      )
+    recordPoint(-1, -1)
+    const closestBlockedSequence = recordPoint(-0.1, 0)
+    const newerReachableSequence = recordPoint(-0.1, 2)
+    recordPoint(state.player.x, state.player.z)
+    const zombie = spawnZombieEscapeZombieAtNavigationElevation(
+      state,
+      1,
+      0,
+      0,
+      undefined,
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+    )
+    expect(zombie).toBeGreaterThanOrEqual(0)
+    state.zombies.vx[zombie] = 3
+    state.zombies.vz[zombie] = -2
+
+    let sawForwardSearch = false
+    let reachedNewerReachableCrumb = false
+    for (let frame = 0; frame < 240 && !reachedNewerReachableCrumb; frame += 1) {
+      const previousX = state.zombies.x[zombie]!
+      const previousZ = state.zombies.z[zombie]!
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+      const seekingReachableStart = state.zombies.pursuitTrailSeekingReachableStart[zombie]!
+      sawForwardSearch ||= seekingReachableStart === 2
+      if (seekingReachableStart !== 0) {
+        expect(state.zombies.x[zombie]).toBeCloseTo(previousX, 6)
+        expect(state.zombies.z[zombie]).toBeCloseTo(previousZ, 6)
+        expect(state.zombies.attackTargetObjectId[zombie]).toBeNull()
+      }
+      reachedNewerReachableCrumb =
+        state.zombies.pursuitTrailSequence[zombie]! >= newerReachableSequence &&
+        state.zombies.pursuitTrailValidatedStatus[zombie] === 1
+    }
+
+    expect(closestBlockedSequence).toBeGreaterThan(1)
+    expect(sawForwardSearch).toBe(true)
+    expect(reachedNewerReachableCrumb).toBe(true)
+  })
+
+  test('attacks the trail-directed breakable after every retained crumb proves blocked', () => {
+    const world = createZombieEscapeCollisionWorld({
+      agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+      boundaryPolicy: 'none',
+      navigationSupports: [
+        {
+          boundary: true,
+          elevation: 0,
+          id: 'closed-trail-ground',
+          polygon: [
+            { x: -4, z: -4 },
+            { x: 4, z: -4 },
+            { x: 4, z: 4 },
+            { x: -4, z: 4 },
+          ],
+        },
+      ],
+      playRadius: 5,
+      segments: [
+        {
+          breakable: true,
+          endX: 0,
+          endZ: 3,
+          halfThickness: 0.1,
+          id: 'closed-trail-wall',
+          maximumY: 2.8,
+          minimumY: 0,
+          navigationLayerY: 0,
+          objectId: 'closed-trail-wall',
+          startX: 0,
+          startZ: -3,
+        },
+      ],
+    })
+    const arena = createZombieEscapeArena(74_031)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 74_032, undefined, {
+      zombieCapacity: 8,
+    })
+    const input = createZombieEscapeControlState()
+    setZombieEscapeCollisionWorld(state, world, world)
+    setZombieEscapeExternalPlayerPose(state, true)
+    setZombieEscapeGamePhase(state, 'night')
+    state.waveSpawnRemaining = 0
+    state.waveState = 'escape'
+    state.player.x = -1
+    state.player.y = 0
+    state.player.z = 1
+    publishSparseTarget(state, input, arena)
+    resetZombieEscapePlayerTrail(state.playerTrail)
+    const recordPoint = (x: number, z: number) =>
+      recordZombieEscapePlayerTrailPoint(
+        state.playerTrail,
+        {
+          layerIndex: state.navigationGoalLayerIndex,
+          regionIndex: state.navigationGoalRegionIndex,
+          tick: state.navigationIntentTick,
+          x,
+          y: 0,
+          z,
+        },
+        true,
+      )
+    recordPoint(-1, -1)
+    recordPoint(-0.1, 0)
+    recordPoint(-1, 0.5)
+    recordPoint(state.player.x, state.player.z)
+    const zombie = spawnZombieEscapeZombieAtNavigationElevation(
+      state,
+      1,
+      0,
+      0,
+      undefined,
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+    )
+    expect(zombie).toBeGreaterThanOrEqual(0)
+    state.zombies.vx[zombie] = 3
+    state.zombies.vz[zombie] = -2
+
+    let heldDuringExhaustiveSearch = false
+    let selectedTrailDirectedBreakable = false
+    for (let frame = 0; frame < 240 && !selectedTrailDirectedBreakable; frame += 1) {
+      const previousX = state.zombies.x[zombie]!
+      const previousZ = state.zombies.z[zombie]!
+      stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+      const trailWorkIsPending =
+        state.zombies.pursuitTrailAcquisitionGeneration[zombie] !== 0 ||
+        state.zombies.pursuitTrailSeekingReachableStart[zombie] !== 0
+      if (trailWorkIsPending) {
+        heldDuringExhaustiveSearch = true
+        expect(state.zombies.x[zombie]).toBeCloseTo(previousX, 6)
+        expect(state.zombies.z[zombie]).toBeCloseTo(previousZ, 6)
+        expect(state.zombies.attackTargetObjectId[zombie]).toBeNull()
+      }
+      selectedTrailDirectedBreakable =
+        state.zombies.pursuitTrailValidatedStatus[zombie] === 2 &&
+        state.zombies.attackTargetObjectId[zombie] === 'closed-trail-wall' &&
+        state.zombies.intent[zombie] === ZOMBIE_ESCAPE_ZOMBIE_INTENT.attackObstacle
+    }
+
+    expect(heldDuringExhaustiveSearch).toBe(true)
+    expect(selectedTrailDirectedBreakable).toBe(true)
+    expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
+    expect(state.zombies.pursuitTrailSequence[zombie]).toBe(state.playerTrail.newestSequence)
+  })
+
+  test('ignores a geometrically closer breadcrumb from a different floor', () => {
+    const { arena, input, state, zombie } = createOccludedDoorwayPursuit(
+      74_021,
+      74_022,
+      ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+    )
+    const zombieX = state.zombies.x[zombie]!
+    const zombieY = state.zombies.y[zombie]!
+    const zombieZ = state.zombies.z[zombie]!
+    resetZombieEscapePlayerTrail(state.playerTrail)
+    recordZombieEscapePlayerTrailPoint(
+      state.playerTrail,
+      {
+        layerIndex: state.navigationGoalLayerIndex + 1,
+        regionIndex: state.navigationGoalRegionIndex,
+        tick: state.navigationIntentTick,
+        x: zombieX,
+        y: zombieY,
+        z: zombieZ,
+      },
+      true,
+    )
+    const closestSameLayerSequence = recordZombieEscapePlayerTrailPoint(
+      state.playerTrail,
+      {
+        layerIndex: state.navigationGoalLayerIndex,
+        regionIndex: state.navigationGoalRegionIndex,
+        tick: state.navigationIntentTick,
+        x: zombieX - 1,
+        y: zombieY,
+        z: zombieZ,
+      },
+      true,
+    )
+    recordZombieEscapePlayerTrailPoint(
+      state.playerTrail,
+      {
+        layerIndex: state.navigationGoalLayerIndex,
+        regionIndex: state.navigationGoalRegionIndex,
+        tick: state.navigationIntentTick,
+        x: state.player.x,
+        y: state.player.y,
+        z: state.player.z,
+      },
+      true,
+    )
+
+    stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+
+    expect(state.zombies.pursuitTrailGeneration[zombie]).toBe(state.playerTrail.generation)
+    expect(state.zombies.pursuitTrailSequence[zombie]).toBe(closestSameLayerSequence)
   })
 
   test('retires a reached newest point without replacing the sparse-route steer with zero', () => {
@@ -638,9 +984,119 @@ describe('Zombie Escape player-trail pursuit', () => {
   })
 })
 
-function createOccludedDoorwayPursuit(arenaSeed: number, simulationSeed: number) {
+function createTwoEntranceDoorwayPursuit(
+  arenaSeed: number,
+  simulationSeed: number,
+  requestedVariant: number | null,
+) {
   const wall = (id: string, startX: number, startZ: number, endX: number, endZ: number) => ({
     breakable: false,
+    endX,
+    endZ,
+    halfThickness: 0.1,
+    id,
+    maximumY: 2.8,
+    minimumY: 0,
+    navigationLayerY: 0,
+    objectId: id,
+    startX,
+    startZ,
+  })
+  const world = createZombieEscapeCollisionWorld({
+    agentRadius: ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+    boundaryPolicy: 'none',
+    navigationSupports: [
+      {
+        boundary: true,
+        elevation: 0,
+        id: 'two-entrance-ground',
+        polygon: [
+          { x: -8, z: -8 },
+          { x: 8, z: -8 },
+          { x: 8, z: 8 },
+          { x: -8, z: 8 },
+        ],
+      },
+    ],
+    playRadius: 10,
+    segments: [
+      wall('two-entrance-north', -3, 3, 3, 3),
+      wall('two-entrance-south', 3, -3, -3, -3),
+      wall('two-entrance-west', -3, -3, -3, 3),
+      wall('two-entrance-east-lower', 3, -3, 3, -2.4),
+      wall('two-entrance-east-middle', 3, -1.2, 3, 1.2),
+      wall('two-entrance-east-upper', 3, 2.4, 3, 3),
+    ],
+  })
+  const arena = createZombieEscapeArena(arenaSeed)
+  arena.obstacleCount = 0
+  const state = createZombieEscapeSimulation(arena, simulationSeed, undefined, {
+    zombieCapacity: 8,
+  })
+  const input = createZombieEscapeControlState()
+  setZombieEscapeCollisionWorld(state, world, world)
+  setZombieEscapeExternalPlayerPose(state, true)
+  setZombieEscapeGamePhase(state, 'night')
+  state.waveSpawnRemaining = 0
+  state.waveState = 'escape'
+  state.player.x = 0
+  state.player.y = 0
+  state.player.z = -1.8
+  publishSparseTarget(state, input, arena)
+  resetZombieEscapePlayerTrail(state.playerTrail)
+  for (let point = 0; point < state.playerTrail.capacity; point += 1) {
+    const amount = point / (state.playerTrail.capacity - 1)
+    recordZombieEscapePlayerTrailPoint(
+      state.playerTrail,
+      {
+        layerIndex: state.navigationGoalLayerIndex,
+        regionIndex: state.navigationGoalRegionIndex,
+        tick: state.navigationIntentTick,
+        x: 5 - 5 * amount,
+        y: 0,
+        z: -1.8,
+      },
+      true,
+    )
+  }
+  const zombie = spawnZombieEscapeZombieAtNavigationElevation(
+    state,
+    4.5,
+    1.8,
+    0,
+    undefined,
+    requestedVariant,
+  )
+  expect(zombie).toBeGreaterThanOrEqual(0)
+  if (requestedVariant !== null) {
+    state.zombies.vx[zombie] = 4
+    state.zombies.vz[zombie] = -3
+  }
+  expect(
+    zombieEscapeSameLayerNavigationSegmentIsClear(
+      state.collisionWorld,
+      state.zombies.x[zombie]!,
+      state.zombies.y[zombie]!,
+      state.zombies.z[zombie]!,
+      state.player.x,
+      state.player.y,
+      state.player.z,
+      state.collisionWorld.agentRadius,
+      createZombieEscapeCollisionHit(),
+    ),
+  ).toBe(false)
+  return { arena, input, state, zombie }
+}
+
+function createOccludedDoorwayPursuit(
+  arenaSeed: number,
+  simulationSeed: number,
+  requestedVariant: number | null = null,
+  spawnAfterTrail = false,
+  breakableWalls = false,
+) {
+  const wall = (id: string, startX: number, startZ: number, endX: number, endZ: number) => ({
+    breakable: breakableWalls,
     endX,
     endZ,
     halfThickness: 0.1,
@@ -692,10 +1148,20 @@ function createOccludedDoorwayPursuit(arenaSeed: number, simulationSeed: number)
   state.player.y = 0
   state.player.z = 0
   publishSparseTarget(state, input, arena)
-  const zombie = spawnZombieEscapeZombieAtNavigationElevation(state, 5.5, 0, 0)
-  expect(zombie).toBeGreaterThanOrEqual(0)
-  state.zombies.speedScale[zombie] = 0
-  stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+  let zombie = -1
+  if (!spawnAfterTrail) {
+    zombie = spawnZombieEscapeZombieAtNavigationElevation(
+      state,
+      5.5,
+      0,
+      0,
+      undefined,
+      requestedVariant,
+    )
+    expect(zombie).toBeGreaterThanOrEqual(0)
+    state.zombies.speedScale[zombie] = 0
+    stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+  }
 
   for (let step = 1; step <= 30; step += 1) {
     state.player.x = 4 - step * 0.1
@@ -708,6 +1174,18 @@ function createOccludedDoorwayPursuit(arenaSeed: number, simulationSeed: number)
   for (let step = 1; step <= 20; step += 1) {
     state.player.x = 1 - step * 0.1
     stepZombieEscapeSimulation(state, input, FIXED_DELTA_SECONDS, arena)
+  }
+
+  if (spawnAfterTrail) {
+    zombie = spawnZombieEscapeZombieAtNavigationElevation(
+      state,
+      2.5,
+      1.8,
+      0,
+      undefined,
+      requestedVariant,
+    )
+    expect(zombie).toBeGreaterThanOrEqual(0)
   }
 
   expect(

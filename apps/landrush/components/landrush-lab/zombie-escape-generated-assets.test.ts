@@ -24,6 +24,7 @@ import {
   createZombieVisual,
   isZombieEscapeZombieSlotExternallyPresented,
   parkZombieVisual,
+  reserveZombieEscapeSpecialVariantPresentationCapacity,
   resolveZombieEscapeGeneratedVariantAdmissionCount,
   resolveZombieEscapeRenderPipelineSettlement,
   updateZombieEscapeGeneratedZombiePresentationExclusions,
@@ -36,7 +37,11 @@ import {
 } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
 import { createZombieEscapeArena } from './zombie-escape-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
+import {
+  ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+} from './zombie-escape-zombie-catalog'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }
@@ -54,7 +59,9 @@ describe('generated asset render-pipeline readiness', () => {
     expect(source).toContain(
       'detailedZombies\n      ? loadedZombieVariantsRef.current\n      : EMPTY_READY_ZOMBIE_VARIANTS',
     )
-    expect(source).toContain('detailedZombies\n        ? resolveZombieEscapeDetailedRootPoolSize(')
+    expect(source).toContain(
+      'detailedZombies\n        ? reserveZombieEscapeSpecialVariantPresentationCapacity(',
+    )
     expect(source).toContain('zombieMaterialPhaseActive && outsideTorchVisibility < 1')
   })
 
@@ -128,6 +135,46 @@ describe('generated zombie visual construction', () => {
 
     expect(buckets.map(({ slots }) => slots.length)).toEqual([1, 0, 3, 0])
     expect(buckets.map(({ count }) => count)).toEqual([0, 0, 0, 0])
+  })
+
+  test('reserves one authored and detailed presentation for each timed boss', () => {
+    const simulation = createZombieEscapeSimulation(createZombieEscapeArena(58_214))
+    const buckets = createZombieEscapeAuthoredVariantSlotBuckets(
+      simulation.variantByPoolSlot,
+      ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length,
+    )
+    const detailedSlots = new Uint8Array(simulation.zombies.pool.capacity)
+    const externallyPresentedSlots = new Uint8Array(simulation.zombies.pool.capacity)
+    const authoredExclusionSlots = new Uint8Array(simulation.zombies.pool.capacity)
+
+    expect(simulation.variantByPoolSlot).not.toContain(ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT)
+    expect(simulation.variantByPoolSlot).not.toContain(ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT)
+    expect(buckets[ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT]!.slots).toHaveLength(1)
+    expect(buckets[ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT]!.slots).toHaveLength(1)
+    expect(
+      reserveZombieEscapeSpecialVariantPresentationCapacity(0, ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT),
+    ).toBe(1)
+    expect(
+      reserveZombieEscapeSpecialVariantPresentationCapacity(0, ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT),
+    ).toBe(1)
+    expect(
+      reserveZombieEscapeSpecialVariantPresentationCapacity(0, ZOMBIE_ESCAPE_ZOMBIE_CATALOG.length),
+    ).toBe(0)
+
+    simulation.zombies.pool.active[0] = 1
+    simulation.zombies.pool.active[1] = 1
+    simulation.zombies.variant[0] = ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT
+    simulation.zombies.variant[1] = ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT
+    updateZombieEscapeGeneratedZombiePresentationExclusions(
+      simulation,
+      detailedSlots,
+      externallyPresentedSlots,
+      authoredExclusionSlots,
+      buckets,
+    )
+
+    expect(buckets[ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT]!.count).toBe(1)
+    expect(buckets[ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT]!.count).toBe(1)
   })
 
   test('matches the former per-variant collector across randomized pool states', () => {
@@ -205,16 +252,15 @@ describe('generated zombie visual construction', () => {
     )
     for (let variantIndex = 0; variantIndex < variantCount; variantIndex += 1) {
       const bucket = buckets[variantIndex]!
-      expect(bucket.count).toBe(bucket.slots.length)
-      expect(bucket.slots).toBe(slotArrays[variantIndex])
-      expect(Array.from(bucket.slots)).toEqual(
-        collectFormerAuthoredSlots(
-          simulation.zombies.pool.active,
-          authoredExclusionSlots,
-          simulation.zombies.variant,
-          variantIndex,
-        ),
+      const expected = collectFormerAuthoredSlots(
+        simulation.zombies.pool.active,
+        authoredExclusionSlots,
+        simulation.zombies.variant,
+        variantIndex,
       )
+      expect(bucket.count).toBe(expected.length)
+      expect(bucket.slots).toBe(slotArrays[variantIndex])
+      expect(Array.from(bucket.slots.slice(0, bucket.count))).toEqual(expected)
     }
 
     simulation.zombies.pool.active.fill(0)

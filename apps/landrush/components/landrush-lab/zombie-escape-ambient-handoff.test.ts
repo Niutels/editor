@@ -167,7 +167,7 @@ describe('Zombie Escape ambient NPC handoff', () => {
     expect(state.navigationSparseSpawnSearchCompletedCount).toBe(1)
   })
 
-  test('falls back outside the player exclusion radius for a dense handoff beside the player', () => {
+  test('preserves a dense handoff beside the player at its exact visible transform', () => {
     const arena = createZombieEscapeArena(5_407)
     arena.obstacleCount = 0
     const state = createZombieEscapeSimulation(arena, 9_407)
@@ -180,16 +180,19 @@ describe('Zombie Escape ambient NPC handoff', () => {
     stepUntilFirstZombie(state, arena)
 
     const slot = state.ambientHandoff.slotByNpcIndex[0]!
-    expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(3)
-    expect(
-      Math.hypot(state.zombies.x[slot]! - state.player.x, state.zombies.z[slot]! - state.player.z),
-    ).toBeGreaterThanOrEqual(8)
+    expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(0)
+    expect(state.zombies.x[slot]).toBe(source.x[0])
+    expect(state.zombies.y[slot]).toBe(source.y[0])
+    expect(state.zombies.z[slot]).toBe(source.z[0])
+    expect(state.zombies.heading[slot]).toBe(source.yaw[0])
+    expect(state.zombies.locomotionPhase[slot]).toBe(source.locomotionPhase[0])
+    expect(state.zombies.variant[slot]).toBe(source.variant[0])
     expect(state.ambientHandoff.generationByNpcIndex[0]).toBe(state.zombies.pool.generation[slot])
     expect(state.ambientHandoff.npcIndexBySlot[slot]).toBe(0)
     expect(state.waveSpawnRemaining).toBe(9)
   })
 
-  test('falls back outside the player exclusion radius for a sparse handoff beside the player', () => {
+  test('preserves a sparse handoff beside the player at its exact visible transform', () => {
     const arena = createZombieEscapeArena(5_408)
     const state = createZombieEscapeSimulation(arena, 9_408, undefined, {
       requireSparseNavigation: true,
@@ -204,10 +207,13 @@ describe('Zombie Escape ambient NPC handoff', () => {
     stepUntilFirstZombie(state, arena)
 
     const slot = state.ambientHandoff.slotByNpcIndex[0]!
-    expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(3)
-    expect(
-      Math.hypot(state.zombies.x[slot]! - state.player.x, state.zombies.z[slot]! - state.player.z),
-    ).toBeGreaterThanOrEqual(8)
+    expect(state.ambientHandoff.candidateAnchorAttempts[0]).toBe(0)
+    expect(state.zombies.x[slot]).toBe(source.x[0])
+    expect(state.zombies.y[slot]).toBe(source.y[0])
+    expect(state.zombies.z[slot]).toBe(source.z[0])
+    expect(state.zombies.heading[slot]).toBe(source.yaw[0])
+    expect(state.zombies.locomotionPhase[slot]).toBe(source.locomotionPhase[0])
+    expect(state.zombies.variant[slot]).toBe(source.variant[0])
     expect(state.ambientHandoff.generationByNpcIndex[0]).toBe(state.zombies.pool.generation[slot])
     expect(state.ambientHandoff.npcIndexBySlot[slot]).toBe(0)
     expect(state.waveSpawnRemaining).toBe(9)

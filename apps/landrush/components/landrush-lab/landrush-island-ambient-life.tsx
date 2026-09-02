@@ -134,6 +134,7 @@ import {
   isZombieEscapeAmbientNpcHandoffCandidatePending,
   resolveZombieEscapeAmbientNpcPresentationClaim,
   type ZombieEscapeAmbientNpcPresentationRegistry,
+  type ZombieEscapeAmbientNpcPresentationSimulation,
 } from './zombie-escape-ambient-npc-presentation-registry'
 import {
   createZombieEscapeAttackClip,
@@ -153,7 +154,10 @@ import {
   resolveZombieEscapePresentationPose,
   ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y,
 } from './zombie-escape-presentation-pose'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
+import {
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+  type ZombieEscapeZombieCatalogEntry,
+} from './zombie-escape-zombie-catalog'
 
 type AmbientNpcActions = {
   attack: AnimationAction | null
@@ -1373,6 +1377,11 @@ function AmbientNpc({
       root.visible = true
     }
     const zombies = simulation.zombies
+    const movement = resolveAmbientNpcZombieMovementProfile(
+      simulation,
+      slot,
+      zombieVariant.movement,
+    )
     const deathProgress =
       (zombies.health[slot] ?? 0) <= 0
         ? resolveZombieEscapeDeathNormalizedPhase(zombies.deathPresentationSeconds[slot] ?? 0)
@@ -1408,8 +1417,8 @@ function AmbientNpc({
       simulation.paused,
       Math.hypot(zombies.vx[slot] ?? 0, zombies.vz[slot] ?? 0),
       zombies.runBlend[slot] ?? 0,
-      zombieVariant.movement.walkMetersPerSecond,
-      zombieVariant.movement.runMetersPerSecond,
+      movement.walkMetersPerSecond,
+      movement.runMetersPerSecond,
       zombies.intent[slot] ?? 0,
       zombies.attackCooldown[slot] ?? 0,
       zombies.health[slot] ?? 0,
@@ -1429,6 +1438,21 @@ function AmbientNpc({
         scale={transform.scale}
       />
     </group>
+  )
+}
+
+export function resolveAmbientNpcZombieMovementProfile(
+  simulation: Readonly<{
+    variantByPoolSlot: ZombieEscapeAmbientNpcPresentationSimulation['variantByPoolSlot']
+    zombies: Pick<ZombieEscapeAmbientNpcPresentationSimulation['zombies'], 'variant'>
+  }>,
+  slot: number,
+  fallback: ZombieEscapeZombieCatalogEntry['movement'],
+) {
+  const variantIndex = simulation.zombies.variant[slot]
+  return (
+    (variantIndex === undefined ? undefined : ZOMBIE_ESCAPE_ZOMBIE_CATALOG[variantIndex])
+      ?.movement ?? fallback
   )
 }
 

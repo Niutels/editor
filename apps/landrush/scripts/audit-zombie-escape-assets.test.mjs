@@ -10,13 +10,14 @@ import {
   inspectZombieEscapeWeaponSemanticContract,
   zombieEscapeWeaponSourcePath,
 } from './zombie-escape-weapon-glb-optimizer.mjs'
+import { zombieEscapeZombieSourcePath } from './zombie-escape-zombie-glb-optimizer.mjs'
 
 const assetRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../public/landrush-lab/zombie-escape/assets',
 )
 
-test('inspects optimized weapon textures, pristine sources, and compatible zombie skins', async () => {
+test('inspects optimized weapons, ambient-backed zombies, and dedicated runtime bodies', async () => {
   const weapon = await inspectGlb(resolve(assetRoot, 'weapons/sunflare-pistol.glb'))
   assert.equal(weapon.meshCount, 1)
   assert.equal(weapon.primitiveCount, 1)
@@ -73,6 +74,39 @@ test('inspects optimized weapon textures, pristine sources, and compatible zombi
         materials[0].textureSlots.baseColor,
     ),
   )
+
+  const dedicatedSource = await inspectGlb(
+    zombieEscapeZombieSourcePath('boardwalk-chef', 'rigged'),
+  )
+  const dedicatedRig = await inspectGlb(
+    resolve(assetRoot, 'zombies/boardwalk-chef/rigged.glb'),
+  )
+  const dedicatedAnimations = await Promise.all(
+    ['run', 'walk'].map((output) =>
+      inspectGlb(resolve(assetRoot, `zombies/boardwalk-chef/${output}.anim.glb`)),
+    ),
+  )
+  assert.equal(dedicatedRig.triangleCount, dedicatedSource.triangleCount)
+  assert.equal(
+    dedicatedRig.skinSemanticCompatibilityHash,
+    dedicatedSource.skinSemanticCompatibilityHash,
+  )
+  assert.ok(
+    dedicatedRig.images.every(
+      ({ hasFullMipChain, height, mimeType, width }) =>
+        hasFullMipChain && height === 768 && mimeType === 'image/ktx2' && width === 768,
+    ),
+  )
+  assert.ok(
+    dedicatedAnimations.every(
+      ({ animationCount, imageCount, materialCount, meshCount, skinCount }) =>
+        animationCount === 1 &&
+        imageCount === 0 &&
+        materialCount === 0 &&
+        meshCount === 0 &&
+        skinCount === 0,
+    ),
+  )
 })
 
 test('audits the checked-in asset contract without writing a report', async () => {
@@ -86,7 +120,9 @@ test('audits the checked-in asset contract without writing a report', async () =
   assert.ok(audit.failures.every((failure) => failure.includes('state/catalog')))
   assert.deepEqual(audit.catalogChecks, { weapons: 5, zombies: 10 })
   assert.deepEqual(audit.runtimeCatalogChecks, {
+    ambientRuntimeBodies: 8,
     ambientNpcSources: 10,
+    dedicatedRuntimeBodies: 2,
     mappedZombies: 10,
     sourceNpcBijection: true,
     zombieEntries: 10,
@@ -113,9 +149,22 @@ test('audits the checked-in asset contract without writing a report', async () =
     audit.assets.dockworker.outputs.rigged.textureContract.profile,
     'base-color-2048',
   )
+  assert.equal(
+    audit.assets['boardwalk-chef'].outputs.rigged.textureContract.profile,
+    'ktx2-768-mipmapped',
+  )
+  assert.equal(
+    audit.assets['boardwalk-chef'].outputs.run.textureContract.profile,
+    'animation-only',
+  )
   assert.equal(audit.assets.dockworker.outputs.rigged.textureContract.fullPbrSlotsPresent, false)
   assert.equal(audit.assets.dockworker.compatibility.byteDistinct, true)
   assert.equal(audit.assets.dockworker.compatibility.skinTopologyCompatible, true)
+  assert.equal(
+    audit.assets['boardwalk-chef'].compatibility.runtimeAnimationsPreserveTargets,
+    true,
+  )
+  assert.equal(audit.assets['boardwalk-chef'].compatibility.runtimeRigPreservesSkin, true)
   assert.ok(
     Object.values(audit.assets).every(({ outputs }) =>
       Object.values(outputs).every(

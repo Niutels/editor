@@ -688,81 +688,771 @@
       "id": "marina-mechanic",
       "kind": "zombie",
       "name": "Marina Mechanic Zombie",
-      "prompt": "Single full-body cartoony undead marina mechanic in neutral A-pose, standard biped with clearly separated limbs, believable seven-and-a-half-head-tall sturdy adult proportions, zipped coveralls close to body, heavy boots, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no wrench, no cap, no base, no gore, target 3000 faces, suitable for auto-rigging.",
-      "texturePrompt": "Stylized hand-painted PBR: dark blue coveralls, mustard undershirt, cool gray-green skin, black boots, harmless grease smudges, no blood, no text, no baked lighting.",
+      "prompt": "Single full-body stylized cartoon Frankenstein-like zombie brute in neutral A-pose, hulking six-head-tall monster proportions, enormous rectangular torso, slab shoulders twice head width, thick neck, massive arms, oversized hands, thick thighs and calves, heavy boots, flat-topped head, clearly separated arms and legs with arms far from torso, patched coveralls fitted close, face and torso toward +Z, feet flat, symmetrical watertight game-ready mesh, no tools, props, base, detached parts, blood, or gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: storm-gray green skin, dark navy patched coveralls, muted mustard undershirt, charcoal oversized boots, subtle purple stitched seams and small metal neck fasteners, clean readable color blocks, no blood, no text, no baked lighting.",
       "targetFaceCount": 3000,
-      "previewTaskId": "01a01ba3-29b3-7744-8c5b-c2794229f9c0",
+      "assetFingerprint": "8ce7ebf170442dff90adb776b07317438f80404a186b0e2f07df35722bf866f9",
+      "previewTaskId": "01a0606c-03a6-7792-afe3-1ff8d5e4636c",
+      "previewTaskIdFingerprint": "8ceb95707db7a3f6489581d29c450e54faca5eec68433b820212514fc6cc8f2c",
       "previewTaskIdStatus": "SUCCEEDED",
       "previewTaskIdCredits": 5,
-      "refineTaskId": "01a01ba3-5ee5-786f-aa64-79503af8179a",
+      "refineTaskId": "01a0606c-3f1c-73c6-a682-513632fc2aea",
+      "refineTaskIdFingerprint": "19b6920c5c030d2222c43c56d16f79d25ed6cd14c89ca5087d87a9923bdeb7c5",
       "refineTaskIdStatus": "SUCCEEDED",
       "refineTaskIdCredits": 10,
-      "rigTaskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0",
+      "rigTaskId": "01a0606d-a9ef-7486-9c7e-575fde74e285",
+      "rigTaskIdFingerprint": "61a92c09536e199b84f0772a32046175b8cdc9884481f989f59bca6331fb21e6",
       "rigTaskIdStatus": "SUCCEEDED",
       "rigTaskIdCredits": 5,
+      "artifacts": {
+        "preview": {
+          "byteLength": 86747,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png",
+          "sha256": "baafa01edc8efd1147ad14de51836d1115c822ce50c4d71caf15b10bb8a9a44b",
+          "taskId": "01a0606c-3f1c-73c6-a682-513632fc2aea"
+        },
+        "rigged": {
+          "byteLength": 7422232,
+          "path": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/rigged.glb",
+          "sha256": "cdab93d31c01a47628e4def23ad49a8424e2a4c54fef77fb84f39f647a5b7f9c",
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/rigged.glb",
+          "taskId": "01a0606d-a9ef-7486-9c7e-575fde74e285"
+        },
+        "walk": {
+          "byteLength": 7435368,
+          "path": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/walk.glb",
+          "sha256": "1f4098bd23b750db31dbe87718238fed6aabafe41858c65e4cc72cf900b2471c",
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/walk.glb",
+          "taskId": "01a0606d-a9ef-7486-9c7e-575fde74e285"
+        },
+        "run": {
+          "byteLength": 7430392,
+          "path": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/run.glb",
+          "sha256": "fc7092305249a2507b8a2491e7f90974d0ffc229ec6550c9ab61ac8a4788be8c",
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/run.glb",
+          "taskId": "01a0606d-a9ef-7486-9c7e-575fde74e285"
+        }
+      },
       "outputs": {
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png",
         "rigged": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
-        "walk": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
-        "run": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
-        "preview": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png"
+        "run": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.anim.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.anim.glb"
+      },
+      "sourceValidation": {
+        "rigged": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|clip0|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|clip0|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 7422232,
+          "contentHash": "cdab93d31c01a47628e4def23ad49a8424e2a4c54fef77fb84f39f647a5b7f9c",
+          "extensionsRequired": [],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": null,
+              "byteLength": 7219982,
+              "embedded": true,
+              "hasFullMipChain": null,
+              "height": 2048,
+              "index": 0,
+              "levelCount": null,
+              "mimeType": "image/png",
+              "name": "texture_0",
+              "supercompressionScheme": null,
+              "uncompressedRgbaMipByteLength": null,
+              "vkFormat": null,
+              "width": 2048
+            }
+          ],
+          "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 1,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "emissive": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
+          "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "8a0dbaf0c104ee27b349f995843c6c654b80961e4e4758ac24ca28fcce5c3b56",
+          "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
+          "skinCount": 1,
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3302,
+          "trianglePrimitiveCount": 1
+        },
+        "walk": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|walking_man|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|walking_man|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 7435368,
+          "contentHash": "1f4098bd23b750db31dbe87718238fed6aabafe41858c65e4cc72cf900b2471c",
+          "extensionsRequired": [],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": null,
+              "byteLength": 7219982,
+              "embedded": true,
+              "hasFullMipChain": null,
+              "height": 2048,
+              "index": 0,
+              "levelCount": null,
+              "mimeType": "image/png",
+              "name": "texture_0",
+              "supercompressionScheme": null,
+              "uncompressedRgbaMipByteLength": null,
+              "vkFormat": null,
+              "width": 2048
+            }
+          ],
+          "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 1,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "emissive": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
+          "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "8a0dbaf0c104ee27b349f995843c6c654b80961e4e4758ac24ca28fcce5c3b56",
+          "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
+          "skinCount": 1,
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3302,
+          "trianglePrimitiveCount": 1
+        },
+        "run": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|running|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|running|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 7430392,
+          "contentHash": "fc7092305249a2507b8a2491e7f90974d0ffc229ec6550c9ab61ac8a4788be8c",
+          "extensionsRequired": [],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": null,
+              "byteLength": 7219982,
+              "embedded": true,
+              "hasFullMipChain": null,
+              "height": 2048,
+              "index": 0,
+              "levelCount": null,
+              "mimeType": "image/png",
+              "name": "texture_0",
+              "supercompressionScheme": null,
+              "uncompressedRgbaMipByteLength": null,
+              "vkFormat": null,
+              "width": 2048
+            }
+          ],
+          "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 1,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "emissive": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
+          "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "8a0dbaf0c104ee27b349f995843c6c654b80961e4e4758ac24ca28fcce5c3b56",
+          "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
+          "skinCount": 1,
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3302,
+          "trianglePrimitiveCount": 1
+        }
       },
       "validation": {
         "rigged": {
           "animationCount": 1,
-          "byteLength": 7243200,
+          "animationNames": [
+            "Armature|clip0|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|clip0|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 338760,
+          "contentHash": "4caffc7ad7d1fcd6a900cc82fbd7a959ad1f65bc8409c93fd46d597038050d22",
+          "extensionsRequired": [
+            "KHR_texture_basisu"
+          ],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular",
+            "KHR_texture_basisu"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": "etc1s",
+              "byteLength": 140158,
+              "embedded": true,
+              "hasFullMipChain": true,
+              "height": 768,
+              "index": 0,
+              "levelCount": 10,
+              "mimeType": "image/ktx2",
+              "name": "texture_0",
+              "supercompressionScheme": 1,
+              "uncompressedRgbaMipByteLength": 3145720,
+              "vkFormat": 0,
+              "width": 768
+            }
+          ],
           "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": "etc1s",
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": true,
+                  "height": 768,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
+                },
+                "emissive": {
+                  "basisMode": "etc1s",
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": true,
+                  "height": 768,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
           "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
           "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "41f3e65f05f8b8ba53eb024f17f62261de8d67f350c7dcbfaf2d8fb5b0ab524c",
+          "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
           "skinCount": 1,
-          "triangleCount": 3175
-        },
-        "walk": {
-          "animationCount": 1,
-          "byteLength": 7255976,
-          "materialCount": 1,
-          "meshCount": 1,
-          "primitiveCount": 1,
-          "skinCount": 1,
-          "triangleCount": 3175
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 1,
+          "triangleCount": 3302,
+          "trianglePrimitiveCount": 1
         },
         "run": {
           "animationCount": 1,
-          "byteLength": 7251368,
-          "materialCount": 1,
-          "meshCount": 1,
-          "primitiveCount": 1,
-          "skinCount": 1,
-          "triangleCount": 3175
+          "animationNames": [
+            "Armature|running|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 0,
+              "name": "Armature|running|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 30852,
+          "contentHash": "487ee54e395ad1915f936626e6b44708f5c2447c7b23d695bf0645f5b9c39ee8",
+          "extensionsRequired": [],
+          "extensionsUsed": [],
+          "glbVersion": 2,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 0,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0
+        },
+        "walk": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|walking_man|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 0,
+              "name": "Armature|walking_man|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 35856,
+          "contentHash": "e7683644eb655870e669fe25b47a9d1786471f4b74495435a5d56dc53020e64e",
+          "extensionsRequired": [],
+          "extensionsUsed": [],
+          "glbVersion": 2,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 0,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0
         }
       },
-      "assetFingerprint": "3c0f203c98be06411b5b8878a6eb9a518bf5dff279b641bcec4286453587e863",
-      "previewTaskIdFingerprint": "57f8b244cd73aa1d2c6fbb73f1ec66dcc92f0c2bff7273ed06056423c6e76311",
-      "refineTaskIdFingerprint": "109945534471f40cb8d999f36d546e53094613f46360a4bc43baa79f14dfd71a",
-      "rigTaskIdFingerprint": "304751bef73adcf2ea87b23154c90d14d9f712366af99a4db042dc67f727a9a6",
-      "artifacts": {
-        "preview": {
-          "byteLength": 89496,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png",
-          "sha256": "bba2397eabd9718010402a2bc87151db669de372bdbd58c2922d96c45e2ba374",
-          "taskId": "01a01ba3-5ee5-786f-aa64-79503af8179a"
+      "runtimeArtifacts": {
+        "rigged": {
+          "optimizerFingerprint": "ee79cb827063f5b4911519185f2452466b943aa0a8f31e26a5a8918d9c348f51",
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
+          "resolution": 768,
+          "runtimeByteLength": 338760,
+          "runtimeSha256": "4caffc7ad7d1fcd6a900cc82fbd7a959ad1f65bc8409c93fd46d597038050d22",
+          "sourceByteLength": 7422232,
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/rigged.glb",
+          "sourceSha256": "cdab93d31c01a47628e4def23ad49a8424e2a4c54fef77fb84f39f647a5b7f9c",
+          "taskId": "01a0606d-a9ef-7486-9c7e-575fde74e285"
         },
         "run": {
-          "byteLength": 7251368,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
-          "sha256": "6e35ed322628646794a65cc6094e566d9a5e0bb1da4d971281b32f8576a88a17",
-          "taskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
+          "optimizerFingerprint": "58bb7b893d81ee13e9e6549e54a541dd437325d448dc1cca8446853f0361c3aa",
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.anim.glb",
+          "runtimeByteLength": 30852,
+          "runtimeSha256": "487ee54e395ad1915f936626e6b44708f5c2447c7b23d695bf0645f5b9c39ee8",
+          "sourceByteLength": 7430392,
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/run.glb",
+          "sourceSha256": "fc7092305249a2507b8a2491e7f90974d0ffc229ec6550c9ab61ac8a4788be8c",
+          "taskId": "01a0606d-a9ef-7486-9c7e-575fde74e285"
         },
         "walk": {
-          "byteLength": 7255976,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
-          "sha256": "6a375d591eebd02b9e7acf628750508e66f123855e513077ce570bab00ad6621",
-          "taskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
-        },
-        "rigged": {
-          "byteLength": 7243200,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
-          "sha256": "66540d9fb88c2bf6d396279e582f4131fed2044071b2aef48406319ce94f3054",
-          "taskId": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
+          "optimizerFingerprint": "35d47fa89074a1c858237ffc7a189d3d10623c63daa6e7e27fda171439e3192f",
+          "path": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.anim.glb",
+          "runtimeByteLength": 35856,
+          "runtimeSha256": "e7683644eb655870e669fe25b47a9d1786471f4b74495435a5d56dc53020e64e",
+          "sourceByteLength": 7435368,
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/marina-mechanic/walk.glb",
+          "sourceSha256": "1f4098bd23b750db31dbe87718238fed6aabafe41858c65e4cc72cf900b2471c",
+          "taskId": "01a0606d-a9ef-7486-9c7e-575fde74e285"
         }
       }
     },
@@ -852,81 +1542,771 @@
       "id": "boardwalk-chef",
       "kind": "zombie",
       "name": "Boardwalk Chef Zombie",
-      "prompt": "Single full-body cartoony undead boardwalk chef in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall stocky adult proportions, double-breasted jacket and apron fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no utensil, no base, no gore, target 3000 faces, suitable for auto-rigging.",
-      "texturePrompt": "Stylized hand-painted PBR: cream chef jacket, tomato-red apron, soft blue-gray skin, dark checked trousers simplified for readability, no stains resembling blood, no text, no baked lighting.",
+      "prompt": "Single full-body stylized cartoon zombie chef with an obese pear-shaped body in neutral A-pose, enormous spherical belly wider than shoulders and projecting forward and sideways, barrel chest, very thick waist and hips, thick arms and thighs, short sturdy legs, small head, clearly separated arms and legs with arms far from belly, double-breasted jacket and apron fitted close, face and torso toward +Z, feet flat, symmetrical watertight game-ready mesh, no hat, utensil, props, base, detached clothing, blood, or gore, target 3000 faces, suitable for auto-rigging.",
+      "texturePrompt": "Stylized hand-painted PBR: cream cook jacket stretched over a large round belly, tomato-red apron, soft blue-gray skin, dark checked trousers, warm brown shoes, broad readable color blocks, harmless fabric wear, no blood, no text, no baked lighting.",
       "targetFaceCount": 3000,
-      "previewTaskId": "01a01ba4-263e-7899-aee3-c4e3952983f9",
+      "assetFingerprint": "0daaba4e14d56a74fd4aa13e381e8f9464e6e8bc9a7b04bd87ebb9235df9edd4",
+      "previewTaskId": "01a0606c-0372-7638-a7f6-0a0ee317a478",
+      "previewTaskIdFingerprint": "20e8941fd585019e33472d66a487d50c15bbf52f695f79a79c8b9ba4d9d800b3",
       "previewTaskIdStatus": "SUCCEEDED",
       "previewTaskIdCredits": 5,
-      "refineTaskId": "01a01ba4-5c2d-77a3-b1a3-5061010f5aab",
+      "refineTaskId": "01a0606c-3a64-76b7-bf12-25c4d0c164f0",
+      "refineTaskIdFingerprint": "f1a9a53f6846c2895b2a7b524aa9bc3e40f94fc226443ac8f8c1d1adec21a166",
       "refineTaskIdStatus": "SUCCEEDED",
       "refineTaskIdCredits": 10,
-      "rigTaskId": "01a01ba5-afae-78ec-950e-7b187237326c",
+      "rigTaskId": "01a0606d-da42-7551-9aa0-16713194d282",
+      "rigTaskIdFingerprint": "f051c86bc6ea3a49914c296603b489c7c90204d0762fc398021a2cdfdb9e7691",
       "rigTaskIdStatus": "SUCCEEDED",
       "rigTaskIdCredits": 5,
+      "artifacts": {
+        "preview": {
+          "byteLength": 77497,
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png",
+          "sha256": "2f63559742f5eddc494d4ff300dcc3f4560c80c4d3756d3133cbd627966eb67d",
+          "taskId": "01a0606c-3a64-76b7-bf12-25c4d0c164f0"
+        },
+        "run": {
+          "byteLength": 6618084,
+          "path": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/run.glb",
+          "sha256": "d9b4b93546695d16dcd41b9cad2ee0b199891e69d4587133e0446eafc907b873",
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/run.glb",
+          "taskId": "01a0606d-da42-7551-9aa0-16713194d282"
+        },
+        "rigged": {
+          "byteLength": 6609916,
+          "path": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/rigged.glb",
+          "sha256": "728842add687f7ce0b29183f606ea12660aef9b14aa92018eb8a6dc668f81750",
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/rigged.glb",
+          "taskId": "01a0606d-da42-7551-9aa0-16713194d282"
+        },
+        "walk": {
+          "byteLength": 6622692,
+          "path": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/walk.glb",
+          "sha256": "3749895943a395378b141ae1c52b93164ced5c4754f8bf868ffb112223c36851",
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/walk.glb",
+          "taskId": "01a0606d-da42-7551-9aa0-16713194d282"
+        }
+      },
       "outputs": {
+        "preview": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png",
         "rigged": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
-        "walk": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
-        "run": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
-        "preview": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png"
+        "run": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.anim.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.anim.glb"
+      },
+      "sourceValidation": {
+        "rigged": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|clip0|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|clip0|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 6609916,
+          "contentHash": "728842add687f7ce0b29183f606ea12660aef9b14aa92018eb8a6dc668f81750",
+          "extensionsRequired": [],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": null,
+              "byteLength": 6400531,
+              "embedded": true,
+              "hasFullMipChain": null,
+              "height": 2048,
+              "index": 0,
+              "levelCount": null,
+              "mimeType": "image/png",
+              "name": "texture_0",
+              "supercompressionScheme": null,
+              "uncompressedRgbaMipByteLength": null,
+              "vkFormat": null,
+              "width": 2048
+            }
+          ],
+          "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 1,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "emissive": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
+          "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "ef0aa3a9641c869de2daa7b31065a535ca862b94bbbeebf6d1f085f7ba159c32",
+          "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
+          "skinCount": 1,
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3141,
+          "trianglePrimitiveCount": 1
+        },
+        "walk": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|walking_man|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|walking_man|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 6622692,
+          "contentHash": "3749895943a395378b141ae1c52b93164ced5c4754f8bf868ffb112223c36851",
+          "extensionsRequired": [],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": null,
+              "byteLength": 6400531,
+              "embedded": true,
+              "hasFullMipChain": null,
+              "height": 2048,
+              "index": 0,
+              "levelCount": null,
+              "mimeType": "image/png",
+              "name": "texture_0",
+              "supercompressionScheme": null,
+              "uncompressedRgbaMipByteLength": null,
+              "vkFormat": null,
+              "width": 2048
+            }
+          ],
+          "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 1,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "emissive": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
+          "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "ef0aa3a9641c869de2daa7b31065a535ca862b94bbbeebf6d1f085f7ba159c32",
+          "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
+          "skinCount": 1,
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3141,
+          "trianglePrimitiveCount": 1
+        },
+        "run": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|running|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|running|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 6618084,
+          "contentHash": "d9b4b93546695d16dcd41b9cad2ee0b199891e69d4587133e0446eafc907b873",
+          "extensionsRequired": [],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": null,
+              "byteLength": 6400531,
+              "embedded": true,
+              "hasFullMipChain": null,
+              "height": 2048,
+              "index": 0,
+              "levelCount": null,
+              "mimeType": "image/png",
+              "name": "texture_0",
+              "supercompressionScheme": null,
+              "uncompressedRgbaMipByteLength": null,
+              "vkFormat": null,
+              "width": 2048
+            }
+          ],
+          "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 1,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "emissive": {
+                  "basisMode": null,
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": null,
+                  "height": 2048,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": false,
+                  "levelCount": null,
+                  "mimeType": "image/png",
+                  "supercompressionScheme": null,
+                  "sourceImageIndex": 0,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": null,
+                  "width": 2048
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
+          "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "ef0aa3a9641c869de2daa7b31065a535ca862b94bbbeebf6d1f085f7ba159c32",
+          "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
+          "skinCount": 1,
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 2,
+          "triangleCount": 3141,
+          "trianglePrimitiveCount": 1
+        }
       },
       "validation": {
         "rigged": {
           "animationCount": 1,
-          "byteLength": 7002764,
+          "animationNames": [
+            "Armature|clip0|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 72,
+              "name": "Armature|clip0|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 365204,
+          "contentHash": "a7b1085dd18664ec6e3d792c2d1ae26c1fcd5cf21266de93efcd9fe186a8f911",
+          "extensionsRequired": [
+            "KHR_texture_basisu"
+          ],
+          "extensionsUsed": [
+            "KHR_materials_ior",
+            "KHR_materials_specular",
+            "KHR_texture_basisu"
+          ],
+          "glbVersion": 2,
+          "imageCount": 1,
+          "images": [
+            {
+              "basisMode": "etc1s",
+              "byteLength": 159429,
+              "embedded": true,
+              "hasFullMipChain": true,
+              "height": 768,
+              "index": 0,
+              "levelCount": 10,
+              "mimeType": "image/ktx2",
+              "name": "texture_0",
+              "supercompressionScheme": 1,
+              "uncompressedRgbaMipByteLength": 3145720,
+              "vkFormat": 0,
+              "width": 768
+            }
+          ],
           "materialCount": 1,
+          "materials": [
+            {
+              "index": 0,
+              "name": "Material_1",
+              "textureSlots": {
+                "baseColor": {
+                  "basisMode": "etc1s",
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": true,
+                  "height": 768,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
+                },
+                "emissive": {
+                  "basisMode": "etc1s",
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": true,
+                  "height": 768,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
+                },
+                "metallicRoughness": null,
+                "normal": null,
+                "occlusion": null
+              }
+            }
+          ],
           "meshCount": 1,
+          "nonTrianglePrimitiveCount": 0,
           "primitiveCount": 1,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": "f0b69b3893a32edd657752755919e111088bb4b3f1e1f679612adbfbf569839b",
+          "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
           "skinCount": 1,
-          "triangleCount": 3102
-        },
-        "walk": {
-          "animationCount": 1,
-          "byteLength": 7015532,
-          "materialCount": 1,
-          "meshCount": 1,
-          "primitiveCount": 1,
-          "skinCount": 1,
-          "triangleCount": 3102
+          "skinJointCounts": [
+            24
+          ],
+          "skinnedMeshNodeCount": 1,
+          "skinnedPrimitiveCount": 1,
+          "textureCount": 1,
+          "triangleCount": 3141,
+          "trianglePrimitiveCount": 1
         },
         "run": {
           "animationCount": 1,
-          "byteLength": 7010928,
-          "materialCount": 1,
-          "meshCount": 1,
-          "primitiveCount": 1,
-          "skinCount": 1,
-          "triangleCount": 3102
+          "animationNames": [
+            "Armature|running|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 0,
+              "name": "Armature|running|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 30908,
+          "contentHash": "a95b74c5392ddc26c034025ed6b4bfae78074a62eaf65aa1bd1035470f21a29a",
+          "extensionsRequired": [],
+          "extensionsUsed": [],
+          "glbVersion": 2,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 0,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0
+        },
+        "walk": {
+          "animationCount": 1,
+          "animationNames": [
+            "Armature|walking_man|baselayer"
+          ],
+          "animations": [
+            {
+              "channelCount": 72,
+              "jointChannelCount": 0,
+              "name": "Armature|walking_man|baselayer",
+              "samplerCount": 72,
+              "targetNodeNames": [
+                "Head",
+                "Hips",
+                "LeftArm",
+                "LeftFoot",
+                "LeftForeArm",
+                "LeftHand",
+                "LeftLeg",
+                "LeftShoulder",
+                "LeftToeBase",
+                "LeftUpLeg",
+                "RightArm",
+                "RightFoot",
+                "RightForeArm",
+                "RightHand",
+                "RightLeg",
+                "RightShoulder",
+                "RightToeBase",
+                "RightUpLeg",
+                "Spine",
+                "Spine01",
+                "Spine02",
+                "head_end",
+                "headfront",
+                "neck"
+              ],
+              "targetPaths": [
+                "rotation",
+                "scale",
+                "translation"
+              ]
+            }
+          ],
+          "assetVersion": "2.0",
+          "byteLength": 35544,
+          "contentHash": "e36f5712e2053546c4ba989df4920c2087b7b4b96f10cf09803451e4452f992f",
+          "extensionsRequired": [],
+          "extensionsUsed": [],
+          "glbVersion": 2,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
+          "nonTrianglePrimitiveCount": 0,
+          "primitiveCount": 0,
+          "primitiveWithoutMaterialCount": 0,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0
         }
       },
-      "assetFingerprint": "e0ed33aa450fe7acb5741fc9262de1dd4a306948b66a0f8ed030abf029016da2",
-      "previewTaskIdFingerprint": "bac058ef23114e085c045a19bfbb15a673b1f41341b85bcf1817d80c5ac6b490",
-      "refineTaskIdFingerprint": "5c329696f134d49d74d2a2c215d6f53c65ff1c40b0b266e15d16922158421717",
-      "rigTaskIdFingerprint": "2a0b5d852c8b65c0e2302193b27da5fdb65b8eddc7fcf759e0f4e2bf1ad51440",
-      "artifacts": {
-        "preview": {
-          "byteLength": 69503,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png",
-          "sha256": "d9deb95f63c7b601d3c227aece8f67a3167af465fb409998d9b863c5f276cd55",
-          "taskId": "01a01ba4-5c2d-77a3-b1a3-5061010f5aab"
-        },
+      "runtimeArtifacts": {
         "rigged": {
-          "byteLength": 7002764,
+          "optimizerFingerprint": "ee79cb827063f5b4911519185f2452466b943aa0a8f31e26a5a8918d9c348f51",
           "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
-          "sha256": "9ff353044a2d2ea921117e7ac4e30f9e791028b80dc9822ec5eef09848cb6c71",
-          "taskId": "01a01ba5-afae-78ec-950e-7b187237326c"
-        },
-        "walk": {
-          "byteLength": 7015532,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
-          "sha256": "638c4c6f2116600b36cecaa491516a0edfce422eed0ca998aeea42b96fad74f7",
-          "taskId": "01a01ba5-afae-78ec-950e-7b187237326c"
+          "resolution": 768,
+          "runtimeByteLength": 365204,
+          "runtimeSha256": "a7b1085dd18664ec6e3d792c2d1ae26c1fcd5cf21266de93efcd9fe186a8f911",
+          "sourceByteLength": 6609916,
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/rigged.glb",
+          "sourceSha256": "728842add687f7ce0b29183f606ea12660aef9b14aa92018eb8a6dc668f81750",
+          "taskId": "01a0606d-da42-7551-9aa0-16713194d282"
         },
         "run": {
-          "byteLength": 7010928,
-          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
-          "sha256": "dcce97362863203bb82d1f17259800f12afb76ade14416e7c15d478894738a45",
-          "taskId": "01a01ba5-afae-78ec-950e-7b187237326c"
+          "optimizerFingerprint": "58bb7b893d81ee13e9e6549e54a541dd437325d448dc1cca8446853f0361c3aa",
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.anim.glb",
+          "runtimeByteLength": 30908,
+          "runtimeSha256": "a95b74c5392ddc26c034025ed6b4bfae78074a62eaf65aa1bd1035470f21a29a",
+          "sourceByteLength": 6618084,
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/run.glb",
+          "sourceSha256": "d9b4b93546695d16dcd41b9cad2ee0b199891e69d4587133e0446eafc907b873",
+          "taskId": "01a0606d-da42-7551-9aa0-16713194d282"
+        },
+        "walk": {
+          "optimizerFingerprint": "35d47fa89074a1c858237ffc7a189d3d10623c63daa6e7e27fda171439e3192f",
+          "path": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.anim.glb",
+          "runtimeByteLength": 35544,
+          "runtimeSha256": "e36f5712e2053546c4ba989df4920c2087b7b4b96f10cf09803451e4452f992f",
+          "sourceByteLength": 6622692,
+          "sourcePath": "assets/zombie-escape-meshy-source/zombies/boardwalk-chef/walk.glb",
+          "sourceSha256": "3749895943a395378b141ae1c52b93164ced5c4754f8bf868ffb112223c36851",
+          "taskId": "01a0606d-da42-7551-9aa0-16713194d282"
         }
       }
     },
@@ -1186,5 +2566,5 @@
   "schemaVersion": 2,
   "targetFaceCount": 3000,
   "textureResolution": "2k",
-  "generatedAt": "2026-08-19T20:23:02.039Z"
+  "generatedAt": "2026-09-02T04:45:25.150Z"
 }

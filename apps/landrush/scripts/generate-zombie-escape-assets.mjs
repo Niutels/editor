@@ -7,6 +7,11 @@ import {
   zombieEscapeWeaponSourcePath,
   zombieEscapeWeaponSourceReference,
 } from './zombie-escape-weapon-glb-optimizer.mjs'
+import {
+  optimizeZombieEscapeZombieRuntimeAssets,
+  zombieEscapeZombieSourcePath,
+  zombieEscapeZombieSourceReference,
+} from './zombie-escape-zombie-glb-optimizer.mjs'
 
 const API_BASE = 'https://api.meshy.ai/openapi'
 const TARGET_FACE_COUNT = 3_000
@@ -126,11 +131,12 @@ const assets = [
     id: 'marina-mechanic',
     kind: 'zombie',
     name: 'Marina Mechanic Zombie',
-    heightMeters: 1.86,
+    heightMeters: 2.14,
     prompt:
-      'Single full-body cartoony undead marina mechanic in neutral A-pose, standard biped with clearly separated limbs, believable seven-and-a-half-head-tall sturdy adult proportions, zipped coveralls close to body, heavy boots, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no wrench, no cap, no base, no gore, target 3000 faces, suitable for auto-rigging.',
+      'Single full-body stylized cartoon Frankenstein-like zombie brute in neutral A-pose, hulking six-head-tall monster proportions, enormous rectangular torso, slab shoulders twice head width, thick neck, massive arms, oversized hands, thick thighs and calves, heavy boots, flat-topped head, clearly separated arms and legs with arms far from torso, patched coveralls fitted close, face and torso toward +Z, feet flat, symmetrical watertight game-ready mesh, no tools, props, base, detached parts, blood, or gore, target 3000 faces, suitable for auto-rigging.',
+    runtimeBody: 'dedicated-meshy',
     texturePrompt:
-      'Stylized hand-painted PBR: dark blue coveralls, mustard undershirt, cool gray-green skin, black boots, harmless grease smudges, no blood, no text, no baked lighting.',
+      'Stylized hand-painted PBR: storm-gray green skin, dark navy patched coveralls, muted mustard undershirt, charcoal oversized boots, subtle purple stitched seams and small metal neck fasteners, clean readable color blocks, no blood, no text, no baked lighting.',
   },
   {
     id: 'beach-courier',
@@ -146,11 +152,12 @@ const assets = [
     id: 'boardwalk-chef',
     kind: 'zombie',
     name: 'Boardwalk Chef Zombie',
-    heightMeters: 1.68,
+    heightMeters: 1.88,
     prompt:
-      'Single full-body cartoony undead boardwalk chef in neutral A-pose, standard biped with clearly separated limbs, believable seven-head-tall stocky adult proportions, double-breasted jacket and apron fitted close to body, face and torso toward +Z, feet flat, symmetrical one watertight game-ready mesh, no hat, no utensil, no base, no gore, target 3000 faces, suitable for auto-rigging.',
+      'Single full-body stylized cartoon zombie chef with an obese pear-shaped body in neutral A-pose, enormous spherical belly wider than shoulders and projecting forward and sideways, barrel chest, very thick waist and hips, thick arms and thighs, short sturdy legs, small head, clearly separated arms and legs with arms far from belly, double-breasted jacket and apron fitted close, face and torso toward +Z, feet flat, symmetrical watertight game-ready mesh, no hat, utensil, props, base, detached clothing, blood, or gore, target 3000 faces, suitable for auto-rigging.',
+    runtimeBody: 'dedicated-meshy',
     texturePrompt:
-      'Stylized hand-painted PBR: cream chef jacket, tomato-red apron, soft blue-gray skin, dark checked trousers simplified for readability, no stains resembling blood, no text, no baked lighting.',
+      'Stylized hand-painted PBR: cream cook jacket stretched over a large round belly, tomato-red apron, soft blue-gray skin, dark checked trousers, warm brown shoes, broad readable color blocks, harmless fabric wear, no blood, no text, no baked lighting.',
   },
   {
     id: 'island-ranger',
@@ -235,6 +242,19 @@ await runPool(selectedAssets, concurrency, async (asset) => {
   await generateAsset(asset, state)
   await persistState(state)
 })
+
+const selectedDedicatedZombieIds = selectedAssets
+  .filter(({ kind, runtimeBody }) => kind === 'zombie' && runtimeBody === 'dedicated-meshy')
+  .map(({ id }) => id)
+if (selectedDedicatedZombieIds.length > 0) {
+  await optimizeZombieEscapeZombieRuntimeAssets({
+    force,
+    ids: selectedDedicatedZombieIds,
+    persistState,
+    publicDirectory,
+    state,
+  })
+}
 
 const selectedWeaponIds = selectedAssets
   .filter(({ kind }) => kind === 'weapon')
@@ -329,49 +349,73 @@ async function generateAsset(asset, pipelineState) {
     taskKey: 'rigTaskId',
   })
   const result = rigged.result
-  const paths = {
+  const dedicatedRuntime = asset.runtimeBody === 'dedicated-meshy'
+  const runtimePaths = {
     rigged: resolve(outputDirectory, 'rigged.glb'),
-    walk: resolve(outputDirectory, 'walk.glb'),
-    run: resolve(outputDirectory, 'run.glb'),
+    walk: resolve(outputDirectory, dedicatedRuntime ? 'walk.anim.glb' : 'walk.glb'),
+    run: resolve(outputDirectory, dedicatedRuntime ? 'run.anim.glb' : 'run.glb'),
     preview: resolve(outputDirectory, 'preview.png'),
   }
+  const sourcePaths = dedicatedRuntime
+    ? {
+        rigged: zombieEscapeZombieSourcePath(asset.id, 'rigged'),
+        walk: zombieEscapeZombieSourcePath(asset.id, 'walk'),
+        run: zombieEscapeZombieSourcePath(asset.id, 'run'),
+      }
+    : runtimePaths
   const walkUrl = result?.basic_animations?.walking_glb_url
   const runUrl = result?.basic_animations?.running_glb_url
   if (!result?.rigged_character_glb_url || !walkUrl || !runUrl) {
     throw new Error(`[${asset.id}] rigging task did not return rigged, walk, and run GLBs.`)
   }
   await Promise.all([
-    download(result.rigged_character_glb_url, paths.rigged, {
+    download(result.rigged_character_glb_url, sourcePaths.rigged, {
+      ...(dedicatedRuntime
+        ? { artifactPath: zombieEscapeZombieSourceReference(sourcePaths.rigged) }
+        : {}),
       artifactKey: 'rigged',
       record,
       taskId: rigged.id,
     }),
-    download(walkUrl, paths.walk, {
+    download(walkUrl, sourcePaths.walk, {
+      ...(dedicatedRuntime
+        ? { artifactPath: zombieEscapeZombieSourceReference(sourcePaths.walk) }
+        : {}),
       artifactKey: 'walk',
       record,
       taskId: rigged.id,
     }),
-    download(runUrl, paths.run, {
+    download(runUrl, sourcePaths.run, {
+      ...(dedicatedRuntime
+        ? { artifactPath: zombieEscapeZombieSourceReference(sourcePaths.run) }
+        : {}),
       artifactKey: 'run',
       record,
       taskId: rigged.id,
     }),
-    downloadOptional(refined.alpha_thumbnail_url ?? refined.thumbnail_url, paths.preview, {
+    downloadOptional(refined.alpha_thumbnail_url ?? refined.thumbnail_url, runtimePaths.preview, {
       artifactKey: 'preview',
       record,
       taskId: refined.id,
     }),
   ])
   record.outputs = Object.fromEntries(
-    Object.entries(paths).map(([key, path]) => [key, publicUrl(path)]),
+    Object.entries(runtimePaths).map(([key, path]) => [key, publicUrl(path)]),
   )
-  record.validation = Object.fromEntries(
+  const sourceValidation = Object.fromEntries(
     await Promise.all(
-      ['rigged', 'walk', 'run'].map(async (key) => [key, await inspectGlb(paths[key])]),
+      ['rigged', 'walk', 'run'].map(async (key) => [key, await inspectGlb(sourcePaths[key])]),
     ),
   )
+  if (dedicatedRuntime) {
+    record.sourceValidation = sourceValidation
+    record.validation = {}
+  } else {
+    delete record.sourceValidation
+    record.validation = sourceValidation
+  }
   console.log(
-    `[${asset.id}] ${record.validation.rigged.triangleCount} triangles; walk/run present`,
+    `[${asset.id}] ${sourceValidation.rigged.triangleCount} triangles; walk/run present`,
   )
 }
 
@@ -466,6 +510,7 @@ function assetGenerationFingerprint(asset) {
     kind: asset.kind,
     name: asset.name,
     prompt: asset.prompt,
+    ...(asset.runtimeBody ? { runtimeBody: asset.runtimeBody } : {}),
     targetFaceCount: TARGET_FACE_COUNT,
     texturePrompt: asset.texturePrompt,
   })
@@ -652,6 +697,7 @@ function invalidateGeneratedOutputs(record) {
   delete record.completedAt
   delete record.outputs
   delete record.runtimeArtifacts
+  delete record.sourceValidation
   delete record.validation
 }
 

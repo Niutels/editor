@@ -1,7 +1,15 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { type MutableRefObject, memo, type RefObject, Suspense, useMemo, useRef } from 'react'
+import {
+  type MutableRefObject,
+  memo,
+  type RefObject,
+  Suspense,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Euler, type Group, MathUtils, Matrix4, type Object3D, Quaternion, Vector3 } from 'three'
 import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
 import {
@@ -98,6 +106,10 @@ export function createLandrushRobotWeaponMuzzlePose(): LandrushRobotWeaponMuzzle
     ready: false,
     weaponIndex: 0,
   }
+}
+
+export function resolveLandrushRobotShoulderTorchDebugContributionEnabled(params: URLSearchParams) {
+  return params.get('zombieNightView') !== 'light-contribution'
 }
 
 type LandrushRobotArmBones = {
@@ -262,6 +274,13 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
   })
   const recoilStateRef = useRef(createZombieEscapeWeaponRecoilState())
   const recoilPoseRef = useRef(createZombieEscapeWeaponRecoilPose())
+  const [shoulderTorchContributionEnabled] = useState(() =>
+    typeof window === 'undefined'
+      ? true
+      : resolveLandrushRobotShoulderTorchDebugContributionEnabled(
+          new URLSearchParams(window.location.search),
+        ),
+  )
 
   useFrame((_, delta) => {
     scratch.shoulderTorchPose.ready = false
@@ -569,12 +588,15 @@ export const LandrushRobotWeaponRig = memo(function LandrushRobotWeaponRig({
     <>
       {shoulderTorches ? (
         <LandrushRobotShoulderTorchRig
-          active={active}
+          active={active && shoulderTorchContributionEnabled}
           combatStateRef={combatStateRef}
+          emitSpotLights={shoulderTorchContributionEnabled}
           framePriority={framePriority + 0.005}
           lightingStateRef={shoulderTorchLightingStateRef}
           poseStateRef={shoulderTorchPoseRef}
           renderReadinessRegistry={renderReadinessRegistry}
+          showBeams={shoulderTorchContributionEnabled}
+          showFixtures={shoulderTorchContributionEnabled}
           visualRootRef={visualRootRef}
         />
       ) : null}

@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { Vector3 } from 'three'
 import type { LandrushRoadSegment } from '@/components/landrush/types'
-import { createLandrushZombieNightGroundPoolInstanceMatrices } from './landrush-zombie-night-beacon-glow-instances'
+import {
+  createLandrushZombieNightGroundPoolInstanceMatrices,
+  LANDRUSH_ZOMBIE_NIGHT_FIXTURE_GLOW_RADII,
+} from './landrush-zombie-night-beacon-glow-instances'
 import { resolveLandrushZombieNightGroundPoolAlpha } from './landrush-zombie-night-ground-pool'
 import {
   advanceLandrushZombieNightAmount,
   createLandrushZombieNightBeaconPlacements,
-  LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS,
   LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
   LANDRUSH_ZOMBIE_NIGHT_CPU_PRESENTATION_INTERVAL_SECONDS,
@@ -25,7 +27,6 @@ import {
   resolveLandrushZombieNightTimelineAmount,
   resolveLandrushZombieNightVisibilityTreatment,
   resolveLandrushZombieNightVisualAmount,
-  selectLandrushZombieNightActiveLightPlacements,
   shouldApplyLandrushZombieNightCpuPresentation,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
@@ -163,46 +164,46 @@ describe('Landrush zombie night presentation state', () => {
 
   test('applies shipping and diagnostic exposure scales to the settled night', () => {
     expect(
-      resolveLandrushZombieNightTargetExposure({
-        mode: 'final',
-        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-        visibility: 'normal',
-      }),
+      resolveLandrushZombieNightTargetExposure(
+        'final',
+        LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        'normal',
+      ),
     ).toBe(0.39)
     expect(
-      resolveLandrushZombieNightTargetExposure({
-        mode: 'final',
-        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-        visibility: 'zombies50',
-      }),
+      resolveLandrushZombieNightTargetExposure(
+        'final',
+        LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        'zombies50',
+      ),
     ).toBe(0.78)
     expect(
-      resolveLandrushZombieNightTargetExposure({
-        mode: 'final',
-        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-        visibility: 'world50',
-      }),
+      resolveLandrushZombieNightTargetExposure(
+        'final',
+        LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        'world50',
+      ),
     ).toBe(0.39)
     expect(
-      resolveLandrushZombieNightTargetExposure({
-        mode: 'no-post',
-        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-        visibility: 'normal',
-      }),
+      resolveLandrushZombieNightTargetExposure(
+        'no-post',
+        LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        'normal',
+      ),
     ).toBe(1)
     expect(
-      resolveLandrushZombieNightTargetExposure({
-        mode: 'no-post',
-        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-        visibility: 'world50',
-      }),
+      resolveLandrushZombieNightTargetExposure(
+        'no-post',
+        LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        'world50',
+      ),
     ).toBe(0.5)
     expect(
-      resolveLandrushZombieNightTargetExposure({
-        mode: 'no-post',
-        nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-        visibility: 'zombies50',
-      }),
+      resolveLandrushZombieNightTargetExposure(
+        'no-post',
+        LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+        'zombies50',
+      ),
     ).toBe(1)
   })
 
@@ -330,29 +331,21 @@ describe('Landrush zombie night presentation state', () => {
     ).toBe(true)
   })
 
-  test('decouples physical pole density from a deterministic bounded light and glow budget', () => {
+  test('keeps every visible pole inside the bounded one-light-per-placement budget', () => {
     for (const quality of ['low', 'balanced', 'high'] as const) {
       const placements = createLandrushZombieNightBeaconPlacements({
         quality,
         roadPlan: ROAD_PLAN,
       })
-      const selected = selectLandrushZombieNightActiveLightPlacements({ placements, quality })
-      const replay = selectLandrushZombieNightActiveLightPlacements({ placements, quality })
-      expect(selected).toEqual(replay)
-      expect(selected).toHaveLength(
-        Math.min(placements.length, LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS[quality]),
-      )
-      expect(selected.every((placement) => placements.includes(placement))).toBe(true)
+      expect(placements.length).toBeLessThanOrEqual(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS[quality])
+      expect(new Set(placements.map(({ id }) => id)).size).toBe(placements.length)
     }
 
-    expect(LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS).toEqual({
-      balanced: 4,
-      high: 6,
-      low: 3,
+    expect(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS).toEqual({
+      balanced: 12,
+      high: 16,
+      low: 8,
     })
-    expect(LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS.balanced).toBeLessThan(
-      LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
-    )
     expect(LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET).toBe(4)
   })
 
@@ -379,6 +372,15 @@ describe('Landrush zombie night presentation state', () => {
     expect(groundRadius).toBeGreaterThan(4)
     expect(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS).toBeCloseTo(groundRadius, 12)
     expect(targetDistance).toBeLessThan(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE)
+  })
+
+  test('keeps the fixture-level glow disks compact without shrinking the ground pool', () => {
+    expect(LANDRUSH_ZOMBIE_NIGHT_FIXTURE_GLOW_RADII).toEqual({
+      core: 0.08,
+      inner: 0.17,
+      outer: 0.31,
+    })
+    expect(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS).toBeGreaterThan(4)
   })
 
   test('gives every visible street light one target-aligned pool with a soft radial edge', () => {

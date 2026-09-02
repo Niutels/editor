@@ -171,6 +171,7 @@ import {
   installZombieEscapeAmbientHandoffCandidates,
   isZombieEscapeWeaponPickupAvailable,
   requestZombieEscapeDeterministicObstacleDelta,
+  resolveZombieEscapeScheduledPopulation,
   restoreZombieEscapeDefaultMuzzlePose,
   setZombieEscapeCollisionWorld,
   setZombieEscapeExternalPlayerPose,
@@ -544,10 +545,7 @@ export function readLandrushZombieEscapeRoomSoakSnapshot(
   state: LandrushZombieEscapeRoomSoakState,
   simulation: ZombieEscapeSimulation,
 ): LandrushZombieEscapeRoomSoakSnapshot {
-  const scheduledZombieCount =
-    simulation.zombies.pool.activeCount +
-    Math.max(0, simulation.replacementSpawnRemaining) +
-    Math.max(0, simulation.waveSpawnRemaining)
+  const scheduledZombieCount = resolveZombieEscapeScheduledPopulation(simulation)
   let representedZombieCount = 0
   const zombies = simulation.zombies
   for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
@@ -606,10 +604,7 @@ export function requestLandrushZombieEscapeRoomSoakTargetRoster(
     return readLandrushZombieEscapeRoomSoakSnapshot(state, simulation)
   }
 
-  const scheduledZombieCount =
-    simulation.zombies.pool.activeCount +
-    Math.max(0, simulation.replacementSpawnRemaining) +
-    Math.max(0, simulation.waveSpawnRemaining)
+  const scheduledZombieCount = resolveZombieEscapeScheduledPopulation(simulation)
   if (scheduledZombieCount < state.targetZombieCount) {
     simulation.replacementSpawnRemaining += state.targetZombieCount - scheduledZombieCount
   }

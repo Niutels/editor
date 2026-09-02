@@ -51,19 +51,23 @@ export type LandrushZombieNightScenePresentationBinding = Readonly<{
   release: () => boolean
 }>
 
-export function updateLandrushZombieNightBeaconRuntime({
-  amount,
-  contributionOnly,
-  glowTreatment,
-  lightPulse,
-  runtime,
-}: {
-  amount: number
-  contributionOnly: boolean
-  glowTreatment: boolean
-  lightPulse: number
-  runtime: LandrushZombieNightBeaconRuntime
-}) {
+export function countMountedLandrushZombieNightBeaconLights(
+  runtimes: readonly Pick<LandrushZombieNightBeaconRuntime, 'light'>[],
+) {
+  let mounted = 0
+  for (const runtime of runtimes) {
+    if (runtime.light) mounted += 1
+  }
+  return mounted
+}
+
+export function updateLandrushZombieNightBeaconRuntime(
+  runtime: LandrushZombieNightBeaconRuntime,
+  amount: number,
+  contributionOnly: boolean,
+  glowTreatment: boolean,
+  lightPulse: number,
+) {
   const envelope = smoothstep(LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT, 0.82, amount)
   if (
     runtime.lastEnvelope !== envelope ||
@@ -71,15 +75,16 @@ export function updateLandrushZombieNightBeaconRuntime({
     runtime.lastGlowTreatment !== glowTreatment
   ) {
     for (const material of runtime.fixtureMaterials) {
-      material.emissiveIntensity =
-        envelope * LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY
+      material.emissiveIntensity = glowTreatment
+        ? envelope * LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY
+        : 0
     }
     if (runtime.groundPoolMaterial) {
       runtime.groundPoolMaterial.opacity = glowTreatment
         ? envelope * LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_OPACITY
         : 0
     }
-    if (runtime.coreMaterial) runtime.coreMaterial.opacity = envelope * 0.98
+    if (runtime.coreMaterial) runtime.coreMaterial.opacity = glowTreatment ? envelope * 0.98 : 0
     if (runtime.innerGlowMaterial) {
       runtime.innerGlowMaterial.opacity = glowTreatment ? envelope * 0.24 : 0
     }

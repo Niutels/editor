@@ -1,13 +1,25 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from 'three'
+import {
+  BoxGeometry,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  type Object3D,
+  Scene,
+  SpotLight,
+} from 'three'
 import { LandrushIslandMaterialPresentationOwner } from './landrush-island-material-presentation'
 import {
   collectLandrushIslandMaterialPresentationReadinessMeshes,
   LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
   LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+  observeLandrushZombieNightReadinessLightTopology,
+  readLandrushZombieNightReadinessLightTopology,
   registerLandrushIslandMaterialPresentationRenderReadiness,
 } from './landrush-island-material-presentation-readiness'
+import { LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS } from './landrush-zombie-night-presentation-state'
+import { LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY } from './landrush-zombie-night-street-lightpost'
 import { createZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 
 describe('Landrush island material presentation render readiness', () => {
@@ -24,6 +36,12 @@ describe('Landrush island material presentation render readiness', () => {
     expect(clientSource).toContain(
       'viewerSceneReady && floorPresentationReadinessGeneration !== null',
     )
+    expect(clientSource).toContain(
+      'viewerSceneReady={viewerSceneReady && ambientLoadReadiness?.ready === true}',
+    )
+    expect(clientSource.indexOf('<LandrushIslandAmbientLife')).toBeLessThan(
+      clientSource.indexOf('<MemoizedLandrushIslandPlayerLayer'),
+    )
     expect(clientSource).toContain('viewerSceneReady={materialPresentationReadinessReady}')
     expect(clientSource).toContain('<LandrushIslandDayMaterialPresentationRenderReadiness')
     expect(readinessSource).toContain('coordinator.invalidate()')
@@ -31,8 +49,12 @@ describe('Landrush island material presentation render readiness', () => {
     expect(readinessSource).toContain(
       '[camera, generation, gl, meshes, onReadinessChange, owner, ready, scene]',
     )
-    expect(readinessSource).toContain('[meshGeneration, meshes, owner, ready, registry, scene]')
+    expect(readinessSource).toContain(
+      '[meshGeneration, meshes, nightQuality, owner, ready, registry, scene]',
+    )
     expect(readinessSource).toContain('registrationCleanupRef.current?.()')
+    expect(readinessSource).toContain('observeLandrushZombieNightReadinessLightTopology')
+    expect(readinessSource).not.toContain('createLandrushZombieNightLightTopology')
   })
 
   test('OR-merges floor and registered-root-owned reveal provenance per mesh', () => {
@@ -87,8 +109,12 @@ describe('Landrush island material presentation render readiness', () => {
     const worldMaterial = new MeshStandardMaterial()
     const worldMesh = new Mesh(worldGeometry, worldMaterial)
     worldMesh.name = 'natural-road-sidewalks'
-    const worldRoot = new Group()
+    const worldRoot = new Scene()
     worldRoot.add(worldMesh)
+    const productionLights = mountProductionNightStreetLights(
+      worldRoot,
+      LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
+    )
     let geometryDisposed = false
     let materialDisposed = false
     geometry.addEventListener('dispose', () => {
@@ -151,11 +177,154 @@ describe('Landrush island material presentation render readiness', () => {
     expect(nightRepresentative?.children).toHaveLength(0)
     expect(geometryDisposed).toBe(false)
     expect(materialDisposed).toBe(false)
+    expect(productionLights.disposedCount()).toBe(0)
 
     owner.dispose()
+    productionLights.dispose()
     geometry.dispose()
     material.dispose()
     worldGeometry.dispose()
     worldMaterial.dispose()
   })
+
+  test('compiles the exact mounted production topology without adding representative lights', () => {
+    for (const quality of ['low', 'balanced', 'high'] as const) {
+      const registry = createZombieEscapeRenderReadinessRegistry([
+        LANDRUSH_ISLAND_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+        LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+      ])
+      const owner = new LandrushIslandMaterialPresentationOwner()
+      const worldRoot = new Scene()
+      expect(
+        registerLandrushIslandMaterialPresentationRenderReadiness({
+          meshes: [],
+          owner,
+          quality,
+          ready: true,
+          registry,
+          worldRoot,
+        }),
+      ).toBeUndefined()
+      const productionLights = mountProductionNightStreetLights(
+        worldRoot,
+        LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS[quality],
+      )
+      const cleanup = registerLandrushIslandMaterialPresentationRenderReadiness({
+        meshes: [],
+        owner,
+        quality,
+        ready: true,
+        registry,
+        worldRoot,
+      })
+      const nightRepresentative = registry
+        .getSnapshot()
+        .representatives.find(
+          ({ key }) =>
+            key === LANDRUSH_ISLAND_NIGHT_MATERIAL_PRESENTATION_RENDER_REPRESENTATIVE_KEY,
+        )?.root
+      const representativeLights = collectSpotLights(nightRepresentative)
+      const targetSceneLights = collectSpotLights(worldRoot)
+      for (const light of targetSceneLights) {
+        expect(light.intensity).toBe(0)
+        expect(light.castShadow).toBe(false)
+        expect(light.layers.mask).toBe(1)
+        expect(light.target.parent).toBe(light.parent)
+      }
+
+      expect(representativeLights).toHaveLength(0)
+      expect(targetSceneLights).toHaveLength(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS[quality])
+      expect([...representativeLights, ...targetSceneLights]).toHaveLength(
+        LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS[quality],
+      )
+      cleanup?.()
+      cleanup?.()
+      expect(nightRepresentative?.children).toHaveLength(0)
+      expect(productionLights.disposedCount()).toBe(0)
+      owner.dispose()
+      productionLights.dispose()
+    }
+    expect(LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS).toEqual({ balanced: 12, high: 16, low: 8 })
+  })
+
+  test('tracks async nested mount and removal while accepting sparse and zero plans', () => {
+    const worldRoot = new Scene()
+    let changes = 0
+    const stopObserving = observeLandrushZombieNightReadinessLightTopology(worldRoot, () => {
+      changes += 1
+    })
+    const presentationRoot = createProductionNightStreetLightRoot(0)
+    worldRoot.add(presentationRoot)
+    expect(changes).toBe(1)
+    expect(readLandrushZombieNightReadinessLightTopology(worldRoot, 'balanced')).toMatchObject({
+      mountedCount: 0,
+      plannedCount: 0,
+      ready: true,
+    })
+
+    presentationRoot.userData[LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY] =
+      2
+    const first = addProductionNightSpotLight(presentationRoot)
+    expect(changes).toBe(2)
+    expect(readLandrushZombieNightReadinessLightTopology(worldRoot, 'balanced').ready).toBe(false)
+    const second = addProductionNightSpotLight(presentationRoot)
+    expect(changes).toBe(3)
+    expect(readLandrushZombieNightReadinessLightTopology(worldRoot, 'balanced')).toMatchObject({
+      capacity: 12,
+      mountedCount: 2,
+      plannedCount: 2,
+      ready: true,
+    })
+
+    second.removeFromParent()
+    expect(changes).toBe(4)
+    expect(readLandrushZombieNightReadinessLightTopology(worldRoot, 'balanced').ready).toBe(false)
+    stopObserving()
+    first.dispose()
+    second.dispose()
+  })
 })
+
+function createProductionNightStreetLightRoot(plannedCount: number) {
+  const root = new Group()
+  root.userData.landrushZombieNight = true
+  root.userData[LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY] = plannedCount
+  return root
+}
+
+function addProductionNightSpotLight(root: Object3D) {
+  const placement = new Group()
+  const light = new SpotLight('#ffc36e', 0, 11.5, 0.92, 0.68, 2)
+  light.castShadow = false
+  light.userData.landrushZombieNight = true
+  placement.add(light, light.target)
+  root.add(placement)
+  return light
+}
+
+function mountProductionNightStreetLights(worldRoot: Object3D, count: number) {
+  const root = createProductionNightStreetLightRoot(count)
+  const lights = Array.from({ length: count }, () => addProductionNightSpotLight(root))
+  let disposed = 0
+  for (const light of lights) {
+    light.addEventListener('dispose', () => {
+      disposed += 1
+    })
+  }
+  worldRoot.add(root)
+  return {
+    dispose() {
+      root.removeFromParent()
+      for (const light of lights) light.dispose()
+    },
+    disposedCount: () => disposed,
+  }
+}
+
+function collectSpotLights(root: Object3D | null | undefined) {
+  const lights: SpotLight[] = []
+  root?.traverse((object) => {
+    if ((object as SpotLight).isSpotLight) lights.push(object as SpotLight)
+  })
+  return lights
+}

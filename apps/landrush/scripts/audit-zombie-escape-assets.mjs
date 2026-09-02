@@ -11,6 +11,13 @@ import {
   zombieEscapeWeaponSourcePath,
   zombieEscapeWeaponSourceReference,
 } from './zombie-escape-weapon-glb-optimizer.mjs'
+import {
+  ZOMBIE_ESCAPE_DEDICATED_ZOMBIE_RUNTIME_IDS,
+  ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION,
+  zombieEscapeZombieRuntimeOptimizerFingerprint,
+  zombieEscapeZombieSourcePath,
+  zombieEscapeZombieSourceReference,
+} from './zombie-escape-zombie-glb-optimizer.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const TARGET_TRIANGLES = 3_000
@@ -50,6 +57,9 @@ const ZOMBIE_CLIPS = {
   run: 'Armature|running|baselayer',
   walk: 'Armature|walking_man|baselayer',
 }
+const DEDICATED_ZOMBIE_RUNTIME_ID_SET = new Set(
+  ZOMBIE_ESCAPE_DEDICATED_ZOMBIE_RUNTIME_IDS,
+)
 const EXPECTED_ASSETS = [
   ...WEAPON_IDS.map((id) => ({
     canonicalOutputs: {
@@ -60,20 +70,26 @@ const EXPECTED_ASSETS = [
     id,
     kind: 'weapon',
   })),
-  ...ZOMBIE_IDS.map((id) => ({
-    canonicalOutputs: {
-      ...Object.fromEntries(
-        Object.keys(ZOMBIE_CLIPS).map((output) => [
-          output,
-          `${PUBLIC_ASSET_PREFIX}zombies/${id}/${output}.glb`,
-        ]),
-      ),
-      preview: `${PUBLIC_ASSET_PREFIX}zombies/${id}/preview.png`,
-    },
-    glbOutputs: Object.keys(ZOMBIE_CLIPS),
-    id,
-    kind: 'zombie',
-  })),
+  ...ZOMBIE_IDS.map((id) => {
+    const dedicatedRuntime = DEDICATED_ZOMBIE_RUNTIME_ID_SET.has(id)
+    return {
+      canonicalOutputs: {
+        ...Object.fromEntries(
+          Object.keys(ZOMBIE_CLIPS).map((output) => [
+            output,
+            `${PUBLIC_ASSET_PREFIX}zombies/${id}/${output}${
+              dedicatedRuntime && output !== 'rigged' ? '.anim' : ''
+            }.glb`,
+          ]),
+        ),
+        preview: `${PUBLIC_ASSET_PREFIX}zombies/${id}/preview.png`,
+      },
+      dedicatedRuntime,
+      glbOutputs: Object.keys(ZOMBIE_CLIPS),
+      id,
+      kind: 'zombie',
+    }
+  }),
 ]
 
 export async function auditZombieEscapeAssets({
@@ -170,6 +186,14 @@ export async function auditZombieEscapeAssets({
       Object.keys(record.validation ?? {}),
       contract.glbOutputs,
     )
+    if (contract.dedicatedRuntime) {
+      validateExactIds(
+        failures,
+        `${id}: state source validation keys`,
+        Object.keys(record.sourceValidation ?? {}),
+        contract.glbOutputs,
+      )
+    }
     validateRequiredAllowedIds(
       failures,
       `${id}: state artifact keys`,
@@ -230,6 +254,40 @@ export async function auditZombieEscapeAssets({
             `${id}/${output}: pristine source: ${error instanceof Error ? error.message : String(error)}`,
           )
         }
+      } else if (contract.dedicatedRuntime) {
+        const sourcePath = zombieEscapeZombieSourcePath(id, output)
+        sourceReference = zombieEscapeZombieSourceReference(sourcePath)
+        try {
+          sourceInspection = await inspectGlb(sourcePath)
+          validateInspection({
+            failures,
+            id,
+            inspection: sourceInspection,
+            kind,
+            output,
+            sourceInspection: null,
+          })
+          compareStoredValidation(
+            failures,
+            id,
+            `${output} source`,
+            record.sourceValidation?.[output],
+            sourceInspection,
+          )
+          sourceArtifactContract = validateArtifactRecord({
+            expectedPath: sourceReference,
+            failures,
+            id,
+            inspection: sourceInspection,
+            output,
+            record,
+            taskId: record.rigTaskId,
+          })
+        } catch (error) {
+          failures.push(
+            `${id}/${output}: pristine source: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
       }
 
       let inspection
@@ -246,14 +304,16 @@ export async function auditZombieEscapeAssets({
         continue
       }
 
-      const textureContract = validateInspection({
-        failures,
-        id,
-        inspection,
-        kind,
-        output,
-        sourceInspection,
-      })
+      const textureContract = contract.dedicatedRuntime
+        ? validateDedicatedZombieRuntimeInspection({ failures, id, inspection, output })
+        : validateInspection({
+            failures,
+            id,
+            inspection,
+            kind,
+            output,
+            sourceInspection,
+          })
       let runtimeSemantic = null
       if (kind === 'weapon') {
         weaponRuntimeBytes += inspection.byteLength
@@ -273,7 +333,7 @@ export async function auditZombieEscapeAssets({
           )
         }
       }
-      if (kind === 'zombie') {
+      if (kind === 'zombie' && (!contract.dedicatedRuntime || output === 'rigged')) {
         validateZombieOutputHash(
           failures,
           zombieOutputHashes,
@@ -306,7 +366,21 @@ export async function auditZombieEscapeAssets({
                 sourceReference,
               }),
             )
-          : validateArtifactRecord({
+          : contract.dedicatedRuntime
+            ? combineSourceRuntimeArtifactContracts(
+                sourceArtifactContract,
+                validateDedicatedZombieRuntimeArtifact({
+                  canonicalPublicPath,
+                  failures,
+                  id,
+                  inspection,
+                  output,
+                  record,
+                  sourceInspection,
+                  sourceReference,
+                }),
+              )
+            : validateArtifactRecord({
               expectedPath: canonicalPublicPath,
               failures,
               id,
@@ -318,6 +392,7 @@ export async function auditZombieEscapeAssets({
       outputAudit[output] = {
         artifactContract,
         canonicalPath: canonicalPublicPath,
+        sourceInspection,
         semanticContract:
           kind === 'weapon'
             ? {
@@ -334,7 +409,9 @@ export async function auditZombieEscapeAssets({
 
     const compatibility =
       kind === 'zombie'
-        ? validateZombieCompatibility(failures, id, outputAudit)
+        ? contract.dedicatedRuntime
+          ? validateDedicatedZombieCompatibility(failures, id, outputAudit)
+          : validateZombieCompatibility(failures, id, outputAudit)
         : null
     auditedAssets[id] = {
       canonicalOutputs: contract.canonicalOutputs,
@@ -383,6 +460,15 @@ export async function auditZombieEscapeAssets({
         zombie: {
           profile: 'base-color-2048',
           requiredImageDimensions: [SOURCE_TEXTURE_SIZE, SOURCE_TEXTURE_SIZE],
+          requiredMaterialTextureSlots: ['baseColor'],
+        },
+        zombieDedicatedRuntime: {
+          animationProfile: 'animation-only',
+          riggedProfile: 'ktx2-768-mipmapped',
+          requiredImageDimensions: [
+            ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION,
+            ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION,
+          ],
           requiredMaterialTextureSlots: ['baseColor'],
         },
       },
@@ -573,11 +659,138 @@ function validateWeaponRuntimeArtifact({
   }
 }
 
+function validateDedicatedZombieRuntimeArtifact({
+  canonicalPublicPath,
+  failures,
+  id,
+  inspection,
+  output,
+  record,
+  sourceInspection,
+  sourceReference,
+}) {
+  const artifact = record.runtimeArtifacts?.[output]
+  const label = `${id}/${output}: runtime artifact`
+  if (!artifact) {
+    failures.push(`${label} is missing`)
+    return { accepted: false }
+  }
+  const expected = {
+    optimizerFingerprint: zombieEscapeZombieRuntimeOptimizerFingerprint(output),
+    path: canonicalPublicPath,
+    ...(output === 'rigged'
+      ? { resolution: ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION }
+      : {}),
+    runtimeByteLength: inspection.byteLength,
+    runtimeSha256: inspection.contentHash,
+    sourceByteLength: sourceInspection?.byteLength,
+    sourcePath: sourceReference,
+    sourceSha256: sourceInspection?.contentHash,
+    taskId: record.rigTaskId,
+  }
+  for (const [field, value] of Object.entries(expected)) {
+    expectEqual(failures, `${label} ${field}`, artifact[field], value)
+  }
+  if (typeof artifact.runtimeSha256 !== 'string' || !SHA256_PATTERN.test(artifact.runtimeSha256)) {
+    failures.push(`${label} runtimeSha256 is not a lowercase SHA-256 digest`)
+  }
+  return {
+    accepted:
+      Object.entries(expected).every(([field, value]) => artifact[field] === value) &&
+      SHA256_PATTERN.test(artifact.runtimeSha256 ?? ''),
+    recordedByteLength: artifact.runtimeByteLength,
+    recordedSha256: artifact.runtimeSha256,
+  }
+}
+
 function combineWeaponArtifactContracts(source, runtime) {
   return {
     accepted: source?.accepted === true && runtime?.accepted === true,
     runtime,
     source,
+  }
+}
+
+function combineSourceRuntimeArtifactContracts(source, runtime) {
+  return {
+    accepted: source?.accepted === true && runtime?.accepted === true,
+    runtime,
+    source,
+  }
+}
+
+function validateDedicatedZombieRuntimeInspection({ failures, id, inspection, output }) {
+  const label = `${id}/${output}`
+  expectEqual(failures, `${label}: animation count`, inspection.animationCount, 1)
+  expectEqual(failures, `${label}: animation names`, inspection.animationNames, [ZOMBIE_CLIPS[output]])
+  if (inspection.animations[0]?.channelCount < 1) {
+    failures.push(`${label}: animation clip has no channels`)
+  }
+  if (output === 'rigged' && inspection.animations[0]?.jointChannelCount < 1) {
+    failures.push(`${label}: rigged animation clip does not animate skin joints`)
+  }
+  if (inspection.animations[0]?.targetNodeNames.length < 1) {
+    failures.push(`${label}: animation clip has no named node targets`)
+  }
+
+  if (output !== 'rigged') {
+    expectEqual(failures, `${label}: mesh count`, inspection.meshCount, 0)
+    expectEqual(failures, `${label}: primitive count`, inspection.primitiveCount, 0)
+    expectEqual(failures, `${label}: material count`, inspection.materialCount, 0)
+    expectEqual(failures, `${label}: skin count`, inspection.skinCount, 0)
+    expectEqual(failures, `${label}: image count`, inspection.imageCount, 0)
+    return {
+      accepted:
+        inspection.animationCount === 1 &&
+        inspection.meshCount === 0 &&
+        inspection.materialCount === 0 &&
+        inspection.skinCount === 0,
+      profile: 'animation-only',
+    }
+  }
+
+  if (
+    inspection.triangleCount < MINIMUM_TRIANGLES ||
+    inspection.triangleCount > MAXIMUM_TRIANGLES
+  ) {
+    failures.push(
+      `${label}: ${inspection.triangleCount} triangles is outside ${TARGET_TRIANGLES} ±20%`,
+    )
+  }
+  expectEqual(failures, `${label}: mesh count`, inspection.meshCount, 1)
+  expectEqual(failures, `${label}: primitive count`, inspection.primitiveCount, 1)
+  expectEqual(failures, `${label}: material count`, inspection.materialCount, 1)
+  expectEqual(failures, `${label}: skin count`, inspection.skinCount, 1)
+  expectEqual(failures, `${label}: skinned mesh node count`, inspection.skinnedMeshNodeCount, 1)
+  const validImages =
+    inspection.images.length > 0 &&
+    inspection.images.every(
+      ({ hasFullMipChain, height, mimeType, width }) =>
+        hasFullMipChain &&
+        height === ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION &&
+        mimeType === 'image/ktx2' &&
+        width === ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION,
+    )
+  if (!validImages) {
+    failures.push(
+      `${label}: every runtime image must be a full-mip ${ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION}x${ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION} KTX2 texture`,
+    )
+  }
+  const baseColor = inspection.materials[0]?.textureSlots.baseColor
+  const validBaseColor =
+    baseColor?.height === ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION &&
+    baseColor?.mimeType === 'image/ktx2' &&
+    baseColor?.width === ZOMBIE_ESCAPE_ZOMBIE_RUNTIME_TEXTURE_RESOLUTION
+  if (!validBaseColor) failures.push(`${label}: runtime base-color KTX2 texture is missing`)
+  return {
+    accepted: validImages && validBaseColor,
+    allImagesAtRequiredSize: validImages,
+    allMaterialsSatisfyRequiredSlots: Boolean(validBaseColor),
+    fullPbrSlotsPresent: inspection.materials.every(({ textureSlots }) =>
+      ['baseColor', 'metallicRoughness', 'normal'].every((slot) => textureSlots[slot]),
+    ),
+    profile: 'ktx2-768-mipmapped',
+    requiredMaterialTextureSlots: ['baseColor'],
   }
 }
 
@@ -789,6 +1002,46 @@ function validateZombieCompatibility(failures, id, outputs) {
   return { byteDistinct, sameTriangleCount, skinTopologyCompatible }
 }
 
+function validateDedicatedZombieCompatibility(failures, id, outputs) {
+  const sourceInspections = Object.values(outputs).map(({ sourceInspection }) => sourceInspection)
+  if (sourceInspections.some((inspection) => !inspection)) {
+    return {
+      runtimeRigPreservesSkin: false,
+      sourceSkinTopologyCompatible: false,
+      sourceTriangleCountsMatch: false,
+      runtimeAnimationsPreserveTargets: false,
+    }
+  }
+  const sourceSkinTopologyCompatible =
+    new Set(sourceInspections.map(({ skinCompatibilityHash }) => skinCompatibilityHash)).size === 1
+  const sourceTriangleCountsMatch =
+    new Set(sourceInspections.map(({ triangleCount }) => triangleCount)).size === 1
+  const runtimeRigPreservesSkin =
+    outputs.rigged?.skinSemanticCompatibilityHash ===
+    outputs.rigged?.sourceInspection?.skinSemanticCompatibilityHash
+  const runtimeAnimationsPreserveTargets = ['run', 'walk'].every(
+    (output) =>
+      JSON.stringify(outputs[output]?.animations?.[0]?.targetNodeNames) ===
+      JSON.stringify(outputs[output]?.sourceInspection?.animations?.[0]?.targetNodeNames),
+  )
+  if (!sourceSkinTopologyCompatible) {
+    failures.push(`${id}: pristine rigged, walk, and run GLBs do not share skin topology`)
+  }
+  if (!sourceTriangleCountsMatch) {
+    failures.push(`${id}: pristine rigged, walk, and run GLBs do not share triangle counts`)
+  }
+  if (!runtimeRigPreservesSkin) failures.push(`${id}: optimized rig changed skin topology`)
+  if (!runtimeAnimationsPreserveTargets) {
+    failures.push(`${id}: animation-only clips changed their target-node contract`)
+  }
+  return {
+    runtimeAnimationsPreserveTargets,
+    runtimeRigPreservesSkin,
+    sourceSkinTopologyCompatible,
+    sourceTriangleCountsMatch,
+  }
+}
+
 function compareStoredValidation(failures, id, output, stored, inspection) {
   if (!stored) {
     failures.push(`${id}/${output}: state validation record is missing`)
@@ -951,6 +1204,8 @@ async function loadCatalog({ exportName, failures, label, path }) {
 
 function validateZombieRuntimeCatalog(failures, catalogs) {
   const sourceNpcIds = []
+  let ambientRuntimeBodies = 0
+  let dedicatedRuntimeBodies = 0
   let mappedZombies = 0
 
   for (const zombie of catalogs.zombie.values()) {
@@ -967,6 +1222,37 @@ function validateZombieRuntimeCatalog(failures, catalogs) {
       continue
     }
     mappedZombies += 1
+
+    if (zombie.runtimeBody === 'dedicated-meshy') {
+      dedicatedRuntimeBodies += 1
+      if (!DEDICATED_ZOMBIE_RUNTIME_ID_SET.has(zombie.id)) {
+        failures.push(`${zombie.id}: unexpected dedicated Meshy runtime body`)
+      }
+      expectEqual(
+        failures,
+        `${zombie.id}: dedicated runtime rigged path`,
+        zombie.glb?.riggedBase?.path,
+        `${PUBLIC_ASSET_PREFIX}zombies/${zombie.id}/rigged.glb`,
+      )
+      expectEqual(
+        failures,
+        `${zombie.id}: dedicated runtime run path`,
+        zombie.glb?.run?.path,
+        `${PUBLIC_ASSET_PREFIX}zombies/${zombie.id}/run.anim.glb`,
+      )
+      expectEqual(
+        failures,
+        `${zombie.id}: dedicated runtime walk path`,
+        zombie.glb?.walk?.path,
+        `${PUBLIC_ASSET_PREFIX}zombies/${zombie.id}/walk.anim.glb`,
+      )
+      continue
+    }
+    if (zombie.runtimeBody !== 'ambient-npc') {
+      failures.push(`${zombie.id}: unknown runtime body ${String(zombie.runtimeBody)}`)
+      continue
+    }
+    ambientRuntimeBodies += 1
 
     const riggedPath = sourceNpc.glb?.rigged
     if (typeof riggedPath !== 'string' || !riggedPath.endsWith('/rigged.glb')) {
@@ -1007,7 +1293,9 @@ function validateZombieRuntimeCatalog(failures, catalogs) {
     ambientNpcIds.every((id) => uniqueSourceNpcIds.has(id))
 
   return {
+    ambientRuntimeBodies,
     ambientNpcSources: catalogs.ambientNpc.size,
+    dedicatedRuntimeBodies,
     mappedZombies,
     sourceNpcBijection,
     zombieEntries: catalogs.zombie.size,

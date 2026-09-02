@@ -111,6 +111,8 @@ export const ZOMBIE_ESCAPE_SIMULATION = {
   pickupInteractionRadius: 1.35,
   playerHitSlowSeconds: 0.5,
   playerHitSpeedScale: 0.5,
+  playerTrailClosestPointCandidateBudgetPerTick: 64,
+  playerTrailClosestPointCandidateBudgetPerZombiePerTick: 32,
   weaponPickupRespawnSeconds: 60,
   playerRadius: 0.5,
   projectileRadius: 0.035,

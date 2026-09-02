@@ -1,5 +1,7 @@
 export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_ASSET_PATH =
   '/landrush-lab/zombie-escape/assets/props/street-lightpost.glb'
+export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY =
+  'landrushZombieNightStreetLightpostPlannedCount'
 export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_POSITION = [0, 1.7, 0.359_375] as const
 export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_ROTATION_Y = Math.PI / 2
 export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE = [2, 3.4, 2] as const

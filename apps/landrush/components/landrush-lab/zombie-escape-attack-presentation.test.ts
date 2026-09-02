@@ -172,18 +172,21 @@ describe('zombie obstacle-attack presentation', () => {
       const clip = createZombieEscapeAttackClip(source)
       expect(clip).not.toBeNull()
       if (!clip) continue
+      const rightArmReach = measureArmReach(source, 'Right')
 
       const guard = sampleAttackKeyframe(source, clip, 0)
       const windup = sampleAttackKeyframe(source, clip, 1)
       const contact = sampleAttackKeyframe(source, clip, 2)
       const followThrough = sampleAttackKeyframe(source, clip, 3)
 
-      expect(windup.rightHand.y - contact.rightHand.y).toBeGreaterThan(0.65)
-      expect(contact.rightHand.z - windup.rightHand.z).toBeGreaterThan(0.5)
+      expect((windup.rightHand.y - contact.rightHand.y) / rightArmReach).toBeGreaterThan(1.45)
+      expect((contact.rightHand.z - windup.rightHand.z) / rightArmReach).toBeGreaterThan(1.05)
       expect(Math.abs(contact.rightHand.x)).toBeLessThan(0.18)
-      expect(followThrough.rightHand.x - contact.rightHand.x).toBeGreaterThan(0.12)
+      expect((followThrough.rightHand.x - contact.rightHand.x) / rightArmReach).toBeGreaterThan(
+        0.27,
+      )
       expect(Math.abs(guard.leftHand.x)).toBeLessThan(0.24)
-      expect(guard.leftHand.z).toBeGreaterThan(0.2)
+      expect(guard.leftHand.z / rightArmReach).toBeGreaterThan(0.35)
     }
   })
 
@@ -290,4 +293,12 @@ function sampleAttackKeyframe(
     leftHand: source.getObjectByName('LeftHand')!.getWorldPosition(new Vector3()),
     rightHand: source.getObjectByName('RightHand')!.getWorldPosition(new Vector3()),
   }
+}
+
+function measureArmReach(source: Group, side: 'Left' | 'Right') {
+  source.updateMatrixWorld(true)
+  const shoulder = source.getObjectByName(`${side}Arm`)!.getWorldPosition(new Vector3())
+  const elbow = source.getObjectByName(`${side}ForeArm`)!.getWorldPosition(new Vector3())
+  const hand = source.getObjectByName(`${side}Hand`)!.getWorldPosition(new Vector3())
+  return shoulder.distanceTo(elbow) + elbow.distanceTo(hand)
 }

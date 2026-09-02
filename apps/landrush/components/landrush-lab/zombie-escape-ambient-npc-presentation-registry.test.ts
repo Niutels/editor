@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { createZombieEscapeAmbientHandoffState } from './zombie-escape-ambient-handoff'
+import {
+  createZombieEscapeAmbientHandoffState,
+  installZombieEscapeAmbientHandoffSource,
+} from './zombie-escape-ambient-handoff'
 import {
   createZombieEscapeAmbientNpcPresentationClaim,
   createZombieEscapeAmbientNpcPresentationRegistry,
@@ -7,7 +10,11 @@ import {
   resolveZombieEscapeAmbientNpcPresentationClaim,
   type ZombieEscapeAmbientNpcPresentationSimulation,
 } from './zombie-escape-ambient-npc-presentation-registry'
-import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from './zombie-escape-zombie-roster'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
+import {
+  createZombieEscapeVariantByPoolSlot,
+  ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
+} from './zombie-escape-zombie-roster'
 
 describe('Zombie Escape ambient NPC presentation registry', () => {
   test('captures every mounted NPC into one reused typed-array source', () => {
@@ -83,6 +90,58 @@ describe('Zombie Escape ambient NPC presentation registry', () => {
     activeUnregister()
   })
 
+  test('normalizes live catalog captures to the standard runtime roster without moving NPCs', () => {
+    const sourceIds = ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS
+    const registry = createZombieEscapeAmbientNpcPresentationRegistry(sourceIds)
+    const simulation = createSimulation(sourceIds.length)
+    simulation.variantByPoolSlot.set(createZombieEscapeVariantByPoolSlot(91_337, sourceIds.length))
+    registry.bindRuntime({
+      originX: 0,
+      originZ: 0,
+      readShoulderTorchLighting: () => null,
+      readSimulation: () => simulation,
+    })
+    for (let index = 0; index < sourceIds.length; index += 1) {
+      registry.register(index, {
+        capture(source, captureIndex) {
+          source.variant[captureIndex] = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.findIndex(
+            ({ sourceNpcId }) => sourceNpcId === sourceIds[captureIndex],
+          )
+          source.x[captureIndex] = 10 + captureIndex
+          source.y[captureIndex] = 20 + captureIndex
+          source.z[captureIndex] = 30 + captureIndex
+          return true
+        },
+      })
+    }
+
+    const source = registry.captureSource()
+    const heavyVariantIndex = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.findIndex(
+      ({ bodyClass }) => bodyClass === 'heavy',
+    )
+    const bruteVariantIndex = ZOMBIE_ESCAPE_ZOMBIE_CATALOG.findIndex(
+      ({ bodyClass }) => bodyClass === 'brute',
+    )
+    const heavyNpcIndex = sourceIds.indexOf(
+      ZOMBIE_ESCAPE_ZOMBIE_CATALOG[heavyVariantIndex]!.sourceNpcId,
+    )
+    const bruteNpcIndex = sourceIds.indexOf(
+      ZOMBIE_ESCAPE_ZOMBIE_CATALOG[bruteVariantIndex]!.sourceNpcId,
+    )
+    expect(source.variant[heavyNpcIndex]).toBe(simulation.variantByPoolSlot[heavyNpcIndex])
+    expect(source.variant[bruteNpcIndex]).toBe(simulation.variantByPoolSlot[bruteNpcIndex])
+    expect(ZOMBIE_ESCAPE_ZOMBIE_CATALOG[source.variant[heavyNpcIndex]!]!.bodyClass).toBe('standard')
+    expect(ZOMBIE_ESCAPE_ZOMBIE_CATALOG[source.variant[bruteNpcIndex]!]!.bodyClass).toBe('standard')
+    expect(source.x[heavyNpcIndex]).toBe(10 + heavyNpcIndex)
+    expect(source.y[heavyNpcIndex]).toBe(20 + heavyNpcIndex)
+    expect(source.z[heavyNpcIndex]).toBe(30 + heavyNpcIndex)
+
+    const handoff = createZombieEscapeAmbientHandoffState(sourceIds.length)
+    expect(
+      installZombieEscapeAmbientHandoffSource(handoff, source, simulation.variantByPoolSlot),
+    ).toBe(sourceIds.length)
+  })
+
   test('keeps only unconsumed candidates pending', () => {
     const handoff = createZombieEscapeAmbientHandoffState(4)
     handoff.candidateCount = 2
@@ -120,6 +179,7 @@ function createSimulation(capacity: number) {
       pool: { active: new Uint8Array(capacity), generation: new Uint32Array(capacity) },
       runBlend: floats(),
       spawnOrdinal: new Uint32Array(capacity),
+      variant: new Uint8Array(capacity),
       vx: floats(),
       vz: floats(),
       x: floats(),

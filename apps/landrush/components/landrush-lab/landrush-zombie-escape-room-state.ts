@@ -3,7 +3,7 @@ import {
   type MultiplayerZombieEscapeStateSnapshot,
 } from '@landrush/protocol'
 import {
-  resolveZombieEscapeNightZombieTarget,
+  resolveZombieEscapeNightGenericZombieTarget,
   setZombieEscapeGamePhase,
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
@@ -88,10 +88,8 @@ export function applyLandrushZombieEscapeRoomState({
   let destructiveTransition = false
 
   if (semanticStateChanged && observation.state.phase === 'night') {
-    simulation.night =
-      simulation.phase === 'build'
-        ? Math.max(0, observation.state.night - 1)
-        : observation.state.night
+    if (simulation.phase !== 'build') setZombieEscapeGamePhase(simulation, 'build')
+    simulation.night = Math.max(0, observation.state.night - 1)
     setZombieEscapeGamePhase(simulation, 'night')
     simulation.night = observation.state.night
     destructiveTransition = true
@@ -108,9 +106,10 @@ export function applyLandrushZombieEscapeRoomState({
     observation,
   })
   if (destructiveTransition && simulation.phase === 'night') {
-    simulation.waveSpawnRemaining = resolveZombieEscapeNightZombieTarget(
+    simulation.waveSpawnRemaining = resolveZombieEscapeNightGenericZombieTarget(
       simulation.phaseSecondsRemaining,
       simulation.zombies.pool.capacity,
+      simulation.priorNightKills,
     )
   }
 

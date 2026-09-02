@@ -13,12 +13,14 @@ import {
   SpotLight,
 } from 'three'
 import {
+  countMountedLandrushZombieNightBeaconLights,
   createLandrushZombieNightSceneLightCache,
   createLandrushZombieNightScenePresentationBinding,
   type LandrushZombieNightBeaconRuntime,
   updateLandrushZombieNightBeaconRuntime,
 } from './landrush-zombie-night-presentation-runtime'
 import {
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_CONTRIBUTION_INTENSITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_OPACITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
@@ -70,13 +72,7 @@ describe('Landrush zombie night scene bindings', () => {
       outerGlowMaterial.version,
     ]
 
-    updateLandrushZombieNightBeaconRuntime({
-      amount: 0,
-      contributionOnly: false,
-      glowTreatment: true,
-      lightPulse: 1,
-      runtime,
-    })
+    updateLandrushZombieNightBeaconRuntime(runtime, 0, false, true, 1)
     expect(fixtureMaterials.every((material) => material.opacity === 1)).toBe(true)
     expect(
       fixtureMaterials.every(
@@ -126,12 +122,23 @@ describe('Landrush zombie night scene bindings', () => {
     expect(glowInstanceSource).toContain('createLandrushZombieNightGroundPoolInstanceMatrices')
     expect(glowInstanceSource).toContain('additive ? AdditiveBlending : NormalBlending')
     expect(glowInstanceSource).not.toContain('blending: additive ? AdditiveBlending : undefined')
+    expect(presentationSource).toContain("<group visible={settings.mode !== 'light-contribution'}>")
     expect(presentationSource).toContain('<group ref={glowGroupRef} visible={false}>')
     expect(presentationSource).toContain(
       '<LandrushZombieNightBeaconGlowInstances placements={placements} runtime={glowRuntime} />',
     )
-    expect(presentationSource).toContain('{lightPlacements.map((placement, index) => (')
+    expect(presentationSource).toContain('{placements.map((placement, index) => (')
+    expect(presentationSource).not.toContain('lightPlacements')
+    expect(presentationSource).toContain("const glowTreatment = settings.mode === 'final'")
+    expect(presentationSource).toContain('glowTreatment &&')
+    expect(presentationSource).toContain('castShadow={false}')
     expect(presentationSource).toContain('intensity={0}')
+    expect(presentationSource).toContain(
+      'countMountedLandrushZombieNightBeaconLights(lightRuntimes)',
+    )
+    expect(presentationSource).not.toContain('updateNightBeacons({')
+    expect(presentationSource).not.toContain('updateLandrushZombieNightBeaconRuntime({')
+    expect(presentationSource).not.toContain('resolveLandrushZombieNightTargetExposure({')
     expect(presentationSource).not.toContain('{glowsVisible ?')
     expect(presentationSource).not.toContain('material.opacity = 0')
     expect(presentationSource).not.toContain('material.transparent = true')
@@ -140,13 +147,7 @@ describe('Landrush zombie night scene bindings', () => {
       'if (currentBackground?.isColor) dayBackground.copy(currentBackground)',
     )
 
-    updateLandrushZombieNightBeaconRuntime({
-      amount: 1,
-      contributionOnly: false,
-      glowTreatment: true,
-      lightPulse: 1,
-      runtime,
-    })
+    updateLandrushZombieNightBeaconRuntime(runtime, 1, false, true, 1)
     expect(fixtureMaterials.every((material) => material.opacity === 1)).toBe(true)
     expect(
       fixtureMaterials.every(
@@ -162,13 +163,15 @@ describe('Landrush zombie night scene bindings', () => {
     expect(outerGlowMaterial.opacity).toBeCloseTo(0.075)
     expect(light.intensity).toBe(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY)
 
-    updateLandrushZombieNightBeaconRuntime({
-      amount: 0,
-      contributionOnly: false,
-      glowTreatment: true,
-      lightPulse: 1,
-      runtime,
-    })
+    updateLandrushZombieNightBeaconRuntime(runtime, 1, true, false, 1)
+    expect(fixtureMaterials.every((material) => material.emissiveIntensity === 0)).toBe(true)
+    expect(coreMaterial.opacity).toBe(0)
+    expect(groundPoolMaterial.opacity).toBe(0)
+    expect(innerGlowMaterial.opacity).toBe(0)
+    expect(outerGlowMaterial.opacity).toBe(0)
+    expect(light.intensity).toBe(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_CONTRIBUTION_INTENSITY)
+
+    updateLandrushZombieNightBeaconRuntime(runtime, 0, false, true, 1)
     expect(fixtureMaterials.every((material) => material.opacity === 1)).toBe(true)
     expect(fixtureMaterials.every((material) => material.emissiveIntensity === 0)).toBe(true)
     expect(
@@ -191,6 +194,22 @@ describe('Landrush zombie night scene bindings', () => {
     innerGlowMaterial.dispose()
     outerGlowMaterial.dispose()
     light.dispose()
+  })
+
+  test('counts only mounted beacon light refs in debug snapshots', () => {
+    const first = new SpotLight()
+    const second = new SpotLight()
+
+    expect(
+      countMountedLandrushZombieNightBeaconLights([
+        { light: first },
+        { light: null },
+        { light: second },
+      ]),
+    ).toBe(2)
+
+    first.dispose()
+    second.dispose()
   })
 
   test('keeps background and zero-density fog topology stable through the night transition', () => {

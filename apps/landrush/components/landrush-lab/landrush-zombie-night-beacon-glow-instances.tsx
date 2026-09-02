@@ -28,10 +28,10 @@ import {
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
 } from './landrush-zombie-night-street-lightpost'
 
-const LANDRUSH_ZOMBIE_NIGHT_GLOW_RADII = Object.freeze({
-  core: 0.16,
-  inner: 0.34,
-  outer: 0.62,
+export const LANDRUSH_ZOMBIE_NIGHT_FIXTURE_GLOW_RADII = Object.freeze({
+  core: 0.08,
+  inner: 0.17,
+  outer: 0.31,
 })
 
 export function LandrushZombieNightBeaconGlowInstances({
@@ -44,15 +44,15 @@ export function LandrushZombieNightBeaconGlowInstances({
   const resources = useMemo(createGlowResources, [])
   const colors = useMemo(() => placements.map(({ color }) => new Color(color)), [placements])
   const coreMatrices = useMemo(
-    () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_GLOW_RADII.core),
+    () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_FIXTURE_GLOW_RADII.core),
     [placements],
   )
   const innerMatrices = useMemo(
-    () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_GLOW_RADII.inner),
+    () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_FIXTURE_GLOW_RADII.inner),
     [placements],
   )
   const outerMatrices = useMemo(
-    () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_GLOW_RADII.outer),
+    () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_FIXTURE_GLOW_RADII.outer),
     [placements],
   )
   const groundPoolMatrices = useMemo(

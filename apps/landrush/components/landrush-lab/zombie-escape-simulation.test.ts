@@ -264,6 +264,7 @@ describe('Zombie Escape simulation', () => {
   test('ramps a first night linearly from ten zombies to one hundred by night end', () => {
     const remainingSeconds = [180, 150, 120, 90, 60, 30, 1, 0]
     const expectedTargets = [10, 25, 40, 55, 70, 85, 100, 100]
+    const expectedScheduledPopulations = [10, 25, 40, 56, 72, 87, 100, 100]
     expect(
       remainingSeconds.map((remaining) => resolveZombieEscapeNightZombieTarget(remaining)),
     ).toEqual(expectedTargets)
@@ -284,7 +285,9 @@ describe('Zombie Escape simulation', () => {
         ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
         arena,
       )
-      expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(expectedTargets[index]!)
+      expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(
+        expectedScheduledPopulations[index]!,
+      )
     }
 
     setZombieEscapeGamePhase(state, 'build')
@@ -320,7 +323,7 @@ describe('Zombie Escape simulation', () => {
       ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds,
       arena,
     )
-    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(65)
+    expect(createZombieEscapeHudSnapshot(state).waveRemaining).toBe(66)
   })
 
   test('rounds the linear population ramp and clamps time and finite capacity', () => {

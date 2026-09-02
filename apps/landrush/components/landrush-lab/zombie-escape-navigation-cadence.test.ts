@@ -48,6 +48,7 @@ import {
   type ZombieEscapeSimulation,
 } from './zombie-escape-simulation'
 import { createZombieEscapeArena } from './zombie-escape-world'
+import { ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS } from './zombie-escape-zombie-catalog'
 
 function createFlowSample(): ZombieEscapeFlowSample {
   return {
@@ -2059,18 +2060,23 @@ describe('Zombie Escape navigation cadence', () => {
   })
 
   test('locally reanchors one finite colliding route without a full search', () => {
-    const { arena, input, state, waypointNode, zombie } = createCollisionReanchorFixture(91_035, 4)
-    const collisionRadius = getZombieEscapeZombieCollisionRadiusMeters(
-      state.zombies.variant[zombie]!,
+    const { arena, input, state, waypointNode, zombie } = createCollisionReanchorFixture(
+      91_035,
+      ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS[0]!,
     )
-    expect(collisionRadius).toBe(ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS)
+    const compiledCollisionRadius = ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS
     const attemptsBefore = state.navigationSparseCollisionReanchorAttemptCount
     const completionsBefore = state.navigationSparseCollisionReanchorCompletedCount
     const demandsBefore = state.navigationIntentDemandCollisionRecoveryCount
     const searchesBefore = state.navigationSparseSearchStartedCount
     const fullSearchesBefore = state.navigationField.graphAttachmentFullSearchCount
     state.zombies.navigationIntentUrgentRefreshUsed[zombie] = 0
-    const acceptedX = armCollisionReanchorStall(state, zombie, waypointNode, collisionRadius)
+    const acceptedX = armCollisionReanchorStall(
+      state,
+      zombie,
+      waypointNode,
+      compiledCollisionRadius,
+    )
 
     stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     expect(state.navigationSparseCollisionReanchorAttemptCount).toBe(attemptsBefore + 1)
@@ -2084,7 +2090,7 @@ describe('Zombie Escape navigation cadence', () => {
     expect(state.navigationField.graphAttachmentFullSearchCount).toBe(fullSearchesBefore)
 
     for (let repeatedStall = 0; repeatedStall < 3; repeatedStall += 1) {
-      armCollisionReanchorStall(state, zombie, waypointNode, collisionRadius)
+      armCollisionReanchorStall(state, zombie, waypointNode, compiledCollisionRadius)
       stepZombieEscapeSimulation(state, input, 1 / 60, arena)
     }
     expect(state.navigationSparseCollisionReanchorAttemptCount).toBe(attemptsBefore + 1)

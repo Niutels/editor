@@ -15,6 +15,7 @@ import {
   setLandrushZombieNightSurfaceUniformAmount,
 } from './landrush-zombie-night-presentation-material'
 import {
+  countMountedLandrushZombieNightBeaconLights,
   createLandrushZombieNightSceneLightCache,
   createLandrushZombieNightScenePresentationBinding,
   LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT,
@@ -37,12 +38,12 @@ import {
   resolveLandrushZombieNightTargetExposure,
   resolveLandrushZombieNightTimelineAmount,
   resolveLandrushZombieNightVisualAmount,
-  selectLandrushZombieNightActiveLightPlacements,
   shouldApplyLandrushZombieNightCpuPresentation,
   shouldPublishLandrushZombieNightDebugSnapshot,
 } from './landrush-zombie-night-presentation-state'
 import {
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
@@ -230,18 +231,10 @@ export function LandrushZombieNightPresentation({
         : [],
     [naturalRoadPlan, settings.quality],
   )
-  const lightPlacements = useMemo(
-    () =>
-      selectLandrushZombieNightActiveLightPlacements({
-        placements,
-        quality: settings.quality,
-      }),
-    [placements, settings.quality],
-  )
   const glowRuntime = useMemo<LandrushZombieNightBeaconRuntime>(createNightBeaconRuntime, [])
   const lightRuntimes = useMemo<LandrushZombieNightBeaconRuntime[]>(
-    () => lightPlacements.map(createNightBeaconRuntime),
-    [lightPlacements],
+    () => placements.map(createNightBeaconRuntime),
+    [placements],
   )
 
   useLayoutEffect(() => {
@@ -309,11 +302,11 @@ export function LandrushZombieNightPresentation({
         ? amount
         : resolveLandrushZombieNightBeaconTransitionAmount(visualAmount, transitionElapsedSeconds)
     const treatmentAmount = settings.mode === 'light-contribution' ? 1 : amount
-    const nightExposure = resolveLandrushZombieNightTargetExposure({
-      mode: settings.mode,
-      nightExposure: LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
-      visibility: settings.visibility,
-    })
+    const nightExposure = resolveLandrushZombieNightTargetExposure(
+      settings.mode,
+      LANDRUSH_ZOMBIE_NIGHT_BASE_EXPOSURE,
+      settings.visibility,
+    )
     const targetExposure =
       dayTheme.toneMappingExposure + (nightExposure - dayTheme.toneMappingExposure) * amount
 
@@ -456,18 +449,20 @@ export function LandrushZombieNightPresentation({
       beaconsActiveRef.current,
       beaconAmount,
     )
+    const glowTreatment = settings.mode === 'final'
     if (beaconFrameMode !== 'idle') {
-      updateNightBeacons({
-        amount: beaconAmount,
-        contributionOnly: settings.mode === 'light-contribution',
-        elapsedSeconds: clock.elapsedTime,
+      updateNightBeacons(
         glowRuntime,
-        glowTreatment: settings.mode !== 'no-post',
-        lightPlacements,
         lightRuntimes,
-      })
+        placements,
+        beaconAmount,
+        settings.mode === 'light-contribution',
+        glowTreatment,
+        clock.elapsedTime,
+      )
     }
-    const glowsVisible = beaconAmount > LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT
+    const glowsVisible =
+      glowTreatment && beaconAmount > LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT
     const glowGroup = glowGroupRef.current
     if (glowGroup && glowGroup.visible !== glowsVisible) glowGroup.visible = glowsVisible
     beaconsActiveRef.current = beaconFrameMode === 'animate'
@@ -479,7 +474,7 @@ export function LandrushZombieNightPresentation({
           active,
           amount,
           beaconCount: placements.length,
-          beaconLightCount: lightPlacements.length,
+          beaconLightCount: countMountedLandrushZombieNightBeaconLights(lightRuntimes),
           drawCalls: null,
           fixedSeed: LANDRUSH_ZOMBIE_NIGHT_SEED,
           gpuFrameTimeMs: null,
@@ -492,7 +487,7 @@ export function LandrushZombieNightPresentation({
       snapshot.active = active
       snapshot.amount = amount
       snapshot.beaconCount = placements.length
-      snapshot.beaconLightCount = lightPlacements.length
+      snapshot.beaconLightCount = countMountedLandrushZombieNightBeaconLights(lightRuntimes)
       snapshot.drawCalls = readRenderCalls(gl)
       snapshot.mode = settings.mode
       snapshot.surfaceMaterialCount = surfaceMaterialsRef.current.size
@@ -511,6 +506,7 @@ export function LandrushZombieNightPresentation({
   return (
     <group
       userData={{
+        [LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_PLANNED_COUNT_USER_DATA_KEY]: placements.length,
         debugMode: settings.mode,
         deterministic: true,
         landrushZombieNight: true,
@@ -518,11 +514,13 @@ export function LandrushZombieNightPresentation({
         visibility: settings.visibility,
       }}
     >
-      <LandrushZombieNightStreetLightpostInstances placements={placements} />
+      <group visible={settings.mode !== 'light-contribution'}>
+        <LandrushZombieNightStreetLightpostInstances placements={placements} />
+      </group>
       <group ref={glowGroupRef} visible={false}>
         <LandrushZombieNightBeaconGlowInstances placements={placements} runtime={glowRuntime} />
       </group>
-      {lightPlacements.map((placement, index) => (
+      {placements.map((placement, index) => (
         <LandrushZombieNightBeaconLight
           key={placement.id}
           placement={placement}
@@ -583,6 +581,7 @@ function LandrushZombieNightBeaconLight({
       <primitive object={lightTarget} />
       <spotLight
         angle={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE}
+        castShadow={false}
         color={placement.color}
         decay={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY}
         distance={LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE}
@@ -600,41 +599,27 @@ function LandrushZombieNightBeaconLight({
   )
 }
 
-function updateNightBeacons({
-  amount,
-  contributionOnly,
-  elapsedSeconds,
-  glowTreatment,
-  glowRuntime,
-  lightPlacements,
-  lightRuntimes,
-}: {
-  amount: number
-  contributionOnly: boolean
-  elapsedSeconds: number
-  glowTreatment: boolean
-  glowRuntime: LandrushZombieNightBeaconRuntime
-  lightPlacements: ReturnType<typeof selectLandrushZombieNightActiveLightPlacements>
-  lightRuntimes: readonly LandrushZombieNightBeaconRuntime[]
-}) {
-  updateLandrushZombieNightBeaconRuntime({
-    amount,
-    contributionOnly,
-    glowTreatment,
-    lightPulse: 1,
-    runtime: glowRuntime,
-  })
+function updateNightBeacons(
+  glowRuntime: LandrushZombieNightBeaconRuntime,
+  lightRuntimes: readonly LandrushZombieNightBeaconRuntime[],
+  placements: ReturnType<typeof createLandrushZombieNightBeaconPlacements>,
+  amount: number,
+  contributionOnly: boolean,
+  glowTreatment: boolean,
+  elapsedSeconds: number,
+) {
+  updateLandrushZombieNightBeaconRuntime(glowRuntime, amount, contributionOnly, glowTreatment, 1)
   for (let index = 0; index < lightRuntimes.length; index += 1) {
     const runtime = lightRuntimes[index]!
-    const placement = lightPlacements[index]
+    const placement = placements[index]
     if (!placement) continue
-    updateLandrushZombieNightBeaconRuntime({
+    updateLandrushZombieNightBeaconRuntime(
+      runtime,
       amount,
       contributionOnly,
       glowTreatment,
-      lightPulse: resolveLandrushZombieNightBeaconPulse(elapsedSeconds, placement.phase),
-      runtime,
-    })
+      resolveLandrushZombieNightBeaconPulse(elapsedSeconds, placement.phase),
+    )
   }
 }
 

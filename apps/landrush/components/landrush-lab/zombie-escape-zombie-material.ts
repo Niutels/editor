@@ -12,7 +12,8 @@ import {
   fwidth,
   materialColor,
   materialEmissive,
-  materialReference,
+  materialMetalness,
+  materialRoughness,
   mix,
   mx_noise_float,
   positionGeometry,
@@ -50,6 +51,21 @@ export type ZombieEscapeZombieShader = Readonly<{
   setTorchLighting: (state: Readonly<LandrushRobotShoulderTorchLightingState> | null) => void
   setPhaseAmount: (amount: number) => void
 }>
+
+export const ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE = Object.freeze({
+  cadaverDetailFloor: 0.58,
+  cadaverDetailRange: 0.52,
+  clothingBruiseResponse: 0.42,
+  clothingTextureRetention: 0.1,
+  clothingVeinResponse: 0.28,
+  dryRoughnessBase: 0.09,
+  dryRoughnessMottle: 0.08,
+  dryRoughnessTissue: 0.18,
+  sourceEmissiveRetentionAtFullPhase: 0,
+  tissueTextureRetention: 0.02,
+  zombieMetalness: 0.02,
+  zombieRoughnessFloor: 0.72,
+})
 
 type ZombieMaterialBounds = Readonly<{
   halfWidth: number
@@ -139,11 +155,13 @@ export function createZombieEscapeZombieShader({
         material.vertexColors = false
         material.colorNode = graph.colorNode
         material.emissiveNode = graph.emissiveNode
+        material.metalnessNode = graph.metalnessNode
         material.roughnessNode = graph.roughnessNode
         material.userData.zombieTextureShader = {
           debugMode,
           outsideTorchVisibility: clampedOutsideTorchVisibility,
           phaseScoped: true,
+          response: ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE,
           seed,
           torchScoped: torchFieldNodes !== null,
         }
@@ -228,7 +246,8 @@ function createZombieMaterialFieldGraph(
     usesVertexColors ? authoredColor.mul(vertexColor()) : authoredColor
   ) as ZombieVec4Node
   const sourceEmissive = materialEmissive as unknown as ZombieVec3Node
-  const sourceRoughness = materialReference('roughness', 'float') as unknown as ZombieFloatNode
+  const sourceMetalness = materialMetalness as unknown as ZombieFloatNode
+  const sourceRoughness = materialRoughness as unknown as ZombieFloatNode
   const baseRgb = sourceColor.rgb
   const luminance = baseRgb.dot(vec3(0.2126, 0.7152, 0.0722))
   const warmTone = smoothstep(0.015, 0.16, baseRgb.r.sub(baseRgb.b))
@@ -238,14 +257,29 @@ function createZombieMaterialFieldGraph(
   const skinCandidate = warmTone.mul(greenSupport).mul(visibleTone).mul(notNearWhite)
   const upperBodySkin = skinCandidate.mul(smoothstep(0.46, 0.62, normalizedHeight))
   const tissue = anatomy.max(upperBodySkin.mul(1.6)).clamp(0, 1)
-  const bruise = smoothstep(0.38, 0.7, mottle).mul(float(0.24).add(tissue.mul(0.76)))
+  const bruise = smoothstep(0.38, 0.7, mottle).mul(
+    float(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingBruiseResponse).add(
+      tissue.mul(1 - ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingBruiseResponse),
+    ),
+  )
   const vesselMask = veins
-    .mul(float(0.18).add(tissue.mul(0.82)))
+    .mul(
+      float(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingVeinResponse).add(
+        tissue.mul(1 - ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingVeinResponse),
+      ),
+    )
     .mul(float(0.42).add(mottle.mul(0.58)))
 
-  const textureRetention = float(0.82).sub(tissue.mul(0.78))
+  const textureRetention = mix(
+    ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingTextureRetention,
+    ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.tissueTextureRetention,
+    tissue,
+  )
   const cadaverTone = mix(asVec3(color('#6eada2')), asVec3(color('#b8c59f')), mottle)
-  const corpseSurface = mix(cadaverTone, baseRgb, textureRetention).mul(
+  const cadaverDetail = float(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.cadaverDetailFloor).add(
+    luminance.clamp(0, 1).mul(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.cadaverDetailRange),
+  )
+  const corpseSurface = mix(cadaverTone.mul(cadaverDetail), baseRgb, textureRetention).mul(
     float(0.88).add(mottle.mul(0.14)),
   )
   const bruisedSurface = mix(
@@ -255,9 +289,18 @@ function createZombieMaterialFieldGraph(
   )
   const zombieRgb = mix(bruisedSurface, asVec3(color('#381124')), vesselMask.mul(0.78))
 
-  const dryTissue = float(0.055).add(mottle.mul(tissue).mul(0.2))
+  const dryTissue = float(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.dryRoughnessBase).add(
+    mottle.mul(
+      float(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.dryRoughnessMottle).add(
+        tissue.mul(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.dryRoughnessTissue),
+      ),
+    ),
+  )
   const wetNecrosis = bruise.mul(vesselMask).mul(0.16)
-  const zombieRoughness = sourceRoughness.add(dryTissue).sub(wetNecrosis).clamp(0.3, 1)
+  const zombieRoughness = sourceRoughness
+    .add(dryTissue)
+    .sub(wetNecrosis)
+    .clamp(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.zombieRoughnessFloor, 1)
   let diagnosticRgb = vec3(zombieRgb)
   switch (debugMode) {
     case 'mottle':
@@ -275,7 +318,9 @@ function createZombieMaterialFieldGraph(
   }
   const zombieEmissive =
     debugMode === 'final'
-      ? sourceEmissive.mul(float(0.68).sub(tissue.mul(0.52))).add(zombieRgb.mul(tissue).mul(0.06))
+      ? sourceEmissive.mul(
+          ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.sourceEmissiveRetentionAtFullPhase,
+        )
       : vec3(0)
 
   const phaseVisibility = torchFieldNodes
@@ -285,6 +330,11 @@ function createZombieMaterialFieldGraph(
   return {
     colorNode: vec4(mix(baseRgb, diagnosticRgb, phaseNode).mul(phaseVisibility), sourceColor.a),
     emissiveNode: mix(sourceEmissive, zombieEmissive, phaseNode).mul(phaseVisibility),
+    metalnessNode: mix(
+      sourceMetalness,
+      ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.zombieMetalness,
+      phaseNode,
+    ),
     roughnessNode: mix(sourceRoughness, zombieRoughness, phaseNode),
   }
 }

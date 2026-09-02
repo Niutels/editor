@@ -27,6 +27,7 @@ import {
   setZombieEscapeObstacleDamageEnabled,
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_BOSS_KIND,
 } from './zombie-escape-simulation'
 import { createZombieEscapeArena } from './zombie-escape-world'
 
@@ -213,6 +214,27 @@ describe('Landrush Zombie Escape room-soak policy lifecycle', () => {
     )
     expect(simulation.replacementSpawnRemaining).toBe(
       ZOMBIE_ESCAPE_CAPACITY.zombies - initialWaveSpawnRemaining,
+    )
+  })
+
+  test('counts a pending boss once when filling the diagnostic roster', () => {
+    const arena = createZombieEscapeArena(91_215)
+    const simulation = createZombieEscapeSimulation(arena, 91_216)
+    const soakState = createLandrushZombieEscapeRoomSoakState()
+    soakState.enabled = true
+    setZombieEscapeGamePhase(simulation, 'night')
+    simulation.bossSpawnPending[ZOMBIE_ESCAPE_BOSS_KIND.heavy] = 1
+    const genericScheduled = simulation.waveSpawnRemaining
+
+    beginLandrushZombieEscapeRoomSoak(soakState, simulation)
+    const requested = requestLandrushZombieEscapeRoomSoakTargetRoster(soakState, simulation)
+
+    expect(requested.scheduledZombieCount).toBe(ZOMBIE_ESCAPE_CAPACITY.zombies)
+    expect(simulation.replacementSpawnRemaining).toBe(
+      ZOMBIE_ESCAPE_CAPACITY.zombies - genericScheduled - 1,
+    )
+    expect(requestLandrushZombieEscapeRoomSoakTargetRoster(soakState, simulation)).toEqual(
+      requested,
     )
   })
 

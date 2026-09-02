@@ -30,6 +30,7 @@ export type ZombieEscapeAmbientNpcPresentationSimulation = Readonly<{
     }>
     runBlend: Float32Array
     spawnOrdinal: Uint32Array
+    variant: Uint8Array
     vx: Float32Array
     vz: Float32Array
     x: Float32Array
@@ -95,7 +96,10 @@ export function createZombieEscapeAmbientNpcPresentationRegistry(
         source.valid[index] = 0
         source.variant[index] = simulation?.variantByPoolSlot[index] ?? 0
         const adapter = adapters[index]
-        if (adapter?.capture(source, index)) source.valid[index] = 1
+        if (adapter?.capture(source, index)) {
+          source.variant[index] = simulation?.variantByPoolSlot[index] ?? source.variant[index]!
+          source.valid[index] = 1
+        }
       }
       return source
     },

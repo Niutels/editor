@@ -8,6 +8,7 @@ import {
   LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT,
   LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_MERGE_DISTANCE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_OPACITY,
+  LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_RADIAL_SEGMENT_COUNT,
   LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_SURFACE_TRIANGLE_COUNT,
   LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE,
   LANDRUSH_ROBOT_SHOULDER_TORCH_DESIGNS,
@@ -31,6 +32,7 @@ import {
   resolveLandrushRobotShoulderTorchBeamEnvelope,
   updateLandrushRobotShoulderTorchPoseState,
 } from './landrush-robot-shoulder-torch-rig'
+import { resolveLandrushRobotShoulderTorchDebugContributionEnabled } from './landrush-robot-weapon-rig'
 
 describe('Landrush robot shoulder torches', () => {
   test('keeps the standard-material fixture texture filterable for WebGPU sampling', () => {
@@ -51,6 +53,14 @@ describe('Landrush robot shoulder torches', () => {
       expect(texture.generateMipmaps).toBe(true)
       expect(texture.magFilter).toBe(LinearFilter)
       expect(texture.minFilter).toBe(LinearMipmapLinearFilter)
+      const data = (texture.image as { data: Uint8Array }).data
+      const size = LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_ALPHA_TEXTURE_RESOLUTION
+      const middleRow = Math.floor(size / 2)
+      const minimumZeroBorderPixels = Math.floor((size - 1) * 0.04)
+      for (let x = 0; x <= minimumZeroBorderPixels; x += 1) {
+        expect(data[(middleRow * size + x) * 4 + 3]).toBe(0)
+        expect(data[(middleRow * size + (size - 1 - x)) * 4 + 3]).toBe(0)
+      }
     } finally {
       texture.dispose()
     }
@@ -60,12 +70,26 @@ describe('Landrush robot shoulder torches', () => {
     const geometry = createLandrushRobotShoulderTorchBeamGeometry()
     try {
       const uv = geometry.getAttribute('uv')
+      const verticesPerRow = LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_RADIAL_SEGMENT_COUNT + 1
       expect(uv.usage).toBe(StaticDrawUsage)
-      expect(Array.from(uv.array)).toEqual(
-        [
-          0, 0, 0, 0.18, 1, 0.18, 0, 0, 1, 0.18, 1, 0, 0, 0.18, 0, 1, 1, 1, 0, 0.18, 1, 1, 1, 0.18,
-        ].map(Math.fround),
+      expect(uv.count).toBe(verticesPerRow * 3)
+      expect(geometry.getIndex()?.count).toBe(
+        LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_SURFACE_TRIANGLE_COUNT * 3,
       )
+      for (let row = 0; row < 3; row += 1) {
+        const expectedV = row === 0 ? 0 : row === 1 ? 0.18 : 1
+        for (
+          let segment = 0;
+          segment <= LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_RADIAL_SEGMENT_COUNT;
+          segment += 1
+        ) {
+          const vertex = row * verticesPerRow + segment
+          expect(uv.getX(vertex)).toBeCloseTo(
+            segment / LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_RADIAL_SEGMENT_COUNT,
+          )
+          expect(uv.getY(vertex)).toBeCloseTo(expectedV)
+        }
+      }
     } finally {
       geometry.dispose()
     }
@@ -120,6 +144,10 @@ describe('Landrush robot shoulder torches', () => {
     )
     expect(source.match(/<spotLight\b/g)).toHaveLength(1)
     expect(source).toContain('side={FrontSide}')
+    expect(source).toContain('blending={NormalBlending}')
+    expect(source).toContain('toneMapped')
+    expect(source).not.toContain('AdditiveBlending')
+    expect(source).not.toContain('toneMapped={false}')
     expect(source).not.toContain('vertexColors')
     expect(source).not.toContain('TORCH_BEAM_FEED_ENERGY')
     expect(source).toContain(
@@ -127,6 +155,19 @@ describe('Landrush robot shoulder torches', () => {
     )
     expect(source).not.toContain('DoubleSide')
     expect(source).not.toContain('TORCH_BEAM_FIN_ORIENTATIONS')
+    expect(source).toContain(
+      'Math.tan(LANDRUSH_ROBOT_SHOULDER_TORCH_CONE_ANGLE) * TORCH_REACH_METERS',
+    )
+    expect(source).toContain('beamOpacityScale = 1')
+    expect(source).toContain('Number.isFinite(beamOpacityScale)')
+    expect(source).toContain('contribution.beamOpacity * beamOpacityScale')
+    const frameBody = source.slice(
+      source.indexOf('useFrame(({ camera }) => {'),
+      source.indexOf('}, framePriority)'),
+    )
+    expect(frameBody).not.toMatch(
+      /\bnew\s+(?:Array|Float32Array|Matrix4|Object|Quaternion|Vector3)\b/,
+    )
   })
 
   test('changes only fixture, beam, and spot-light contribution while active', () => {
@@ -158,11 +199,52 @@ describe('Landrush robot shoulder torches', () => {
     })
   })
 
+  test('removes the player torch render contribution only from the isolated light view', () => {
+    expect(resolveLandrushRobotShoulderTorchDebugContributionEnabled(new URLSearchParams())).toBe(
+      true,
+    )
+    expect(
+      resolveLandrushRobotShoulderTorchDebugContributionEnabled(
+        new URLSearchParams('zombieNightView=final&zombieNightAmount=1'),
+      ),
+    ).toBe(true)
+    expect(
+      resolveLandrushRobotShoulderTorchDebugContributionEnabled(
+        new URLSearchParams('zombieNightView=no-post&zombieNightAmount=1'),
+      ),
+    ).toBe(true)
+    expect(
+      resolveLandrushRobotShoulderTorchDebugContributionEnabled(
+        new URLSearchParams('zombieNightView=light-contribution&zombieNightAmount=1'),
+      ),
+    ).toBe(false)
+
+    const rigSource = readFileSync(
+      new URL('./landrush-robot-shoulder-torch-rig.tsx', import.meta.url),
+      'utf8',
+    )
+    const weaponRigSource = readFileSync(
+      new URL('./landrush-robot-weapon-rig.tsx', import.meta.url),
+      'utf8',
+    )
+    expect(rigSource).toContain('visible={showFixtures}')
+    expect(rigSource).toContain('visible={showBeams}')
+    expect(rigSource).toContain('visible={emitSpotLights}')
+    expect(rigSource).not.toContain('leftFixture.visible = true')
+    expect(rigSource).not.toContain('rightFixture.visible = true')
+    expect(rigSource).not.toContain('outerBeam.visible = true')
+    expect(rigSource).not.toContain('light.visible = true')
+    expect(weaponRigSource).toContain('active={active && shoulderTorchContributionEnabled}')
+    expect(weaponRigSource).toContain('emitSpotLights={shoulderTorchContributionEnabled}')
+    expect(weaponRigSource).toContain('showBeams={shoulderTorchContributionEnabled}')
+    expect(weaponRigSource).toContain('showFixtures={shoulderTorchContributionEnabled}')
+  })
+
   test('keeps every paired fixture far below a 3k-triangle Meshy result', () => {
     for (const design of LANDRUSH_ROBOT_SHOULDER_TORCH_DESIGNS) {
       const budget = resolveLandrushRobotShoulderTorchGeometryBudget(design)
       expect(budget.pairFixtureTriangles).toBeLessThan(300)
-      expect(budget.totalEffectTriangles).toBeLessThan(350)
+      expect(budget.totalEffectTriangles).toBeLessThan(550)
       expect(budget.fixtureTextureBytes).toBe(256)
       expect(budget.beamAlphaTextureBytes).toBe(87_380)
       expect(budget.textureBytes).toBe(87_636)
@@ -171,10 +253,10 @@ describe('Landrush robot shoulder torches', () => {
       resolveLandrushRobotShoulderTorchGeometryBudget(LANDRUSH_ROBOT_SHOULDER_TORCH_SELECTED_DESIGN)
         .pairFixtureTriangles,
     )
-    expect(resolveLandrushRobotShoulderTorchGeometryBudget().beamTriangles).toBe(4)
+    expect(resolveLandrushRobotShoulderTorchGeometryBudget().beamTriangles).toBe(256)
     expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_FEED_COUNT).toBe(2)
     expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_BODY_COUNT).toBe(1)
-    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_SURFACE_TRIANGLE_COUNT).toBe(4)
+    expect(LANDRUSH_ROBOT_SHOULDER_TORCH_BEAM_SURFACE_TRIANGLE_COUNT).toBe(256)
   })
 
   test('lands the unified beam on the ground in the exact combat aim direction', () => {
@@ -211,17 +293,44 @@ describe('Landrush robot shoulder torches', () => {
     expect(updated.z).toBeGreaterThan(origin.z)
   })
 
-  test('keeps both sources filled and the merged beam center-high without a bright rim', () => {
+  test('fills both source volumes before merging continuously into one rim-free beam', () => {
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0.5)).toBe(1)
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.25, 0)).toBe(1)
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.75, 0)).toBe(1)
-    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0)).toBe(0)
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0)).toBeGreaterThanOrEqual(0.2)
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0)).toBeLessThanOrEqual(0.4)
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.25, 0.05 / 5.4)).toBeGreaterThan(0.9)
     expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 1)).toBe(0)
-    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.99, 0.5)).toBeLessThan(0.01)
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.051, 0.5)).toBeLessThan(
+      resolveLandrushRobotShoulderTorchBeamEnvelope(0.1, 0.5),
+    )
     for (const v of [0, 0.02, 0.05, 0.09, 0.15, 0.18, 0.5, 0.9, 1]) {
-      expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0, v)).toBe(0)
-      expect(resolveLandrushRobotShoulderTorchBeamEnvelope(1, v)).toBe(0)
+      for (const u of [0, 0.01, 0.04, 0.05, 0.95, 0.96, 0.99, 1]) {
+        expect(resolveLandrushRobotShoulderTorchBeamEnvelope(u, v)).toBe(0)
+      }
+    }
+    let previousMidpoint = resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, 0)
+    for (let step = 1; step <= 18; step += 1) {
+      const midpoint = resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, step / 100)
+      expect(midpoint).toBeGreaterThanOrEqual(previousMidpoint)
+      previousMidpoint = midpoint
+    }
+    expect(previousMidpoint).toBe(1)
+    for (let step = 0; step <= 18; step += 1) {
+      const v = step / 100
+      const mergeProgress = Math.min(1, v / 0.18)
+      const mergeEase = mergeProgress * mergeProgress * (3 - 2 * mergeProgress)
+      const centerOffset = 0.25 * (1 - mergeEase)
+      expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5 - centerOffset, v)).toBe(1)
+      expect(resolveLandrushRobotShoulderTorchBeamEnvelope(0.5 + centerOffset, v)).toBe(1)
+    }
+    for (const u of [0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9]) {
+      expect(
+        Math.abs(
+          resolveLandrushRobotShoulderTorchBeamEnvelope(u, 0.18 - 0.000_01) -
+            resolveLandrushRobotShoulderTorchBeamEnvelope(u, 0.18),
+        ),
+      ).toBeLessThan(0.000_001)
     }
     for (const v of [0.18, 0.5, 0.9]) {
       let previous = resolveLandrushRobotShoulderTorchBeamEnvelope(0.5, v)
@@ -239,31 +348,30 @@ describe('Landrush robot shoulder torches', () => {
       expect(resolveLandrushRobotShoulderTorchBeamEnvelope(1, v)).toBe(0)
     }
     for (const v of [0, 0.02, 0.05, 0.09, 0.15]) {
-      let previous = resolveLandrushRobotShoulderTorchBeamEnvelope(0.75, v)
-      for (let step = 1; step <= 25; step += 1) {
-        const u = 0.75 + step / 100
-        const value = resolveLandrushRobotShoulderTorchBeamEnvelope(u, v)
-        expect(value).toBeLessThanOrEqual(previous)
-        expect(value).toBeCloseTo(resolveLandrushRobotShoulderTorchBeamEnvelope(1 - u, v))
-        previous = value
+      const mergeProgress = Math.min(1, v / 0.18)
+      const mergeEase = mergeProgress * mergeProgress * (3 - 2 * mergeProgress)
+      const centerOffset = 0.25 * (1 - mergeEase)
+      for (const [center, direction] of [
+        [0.5 - centerOffset, -1],
+        [0.5 + centerOffset, 1],
+      ] as const) {
+        let previous = resolveLandrushRobotShoulderTorchBeamEnvelope(center, v)
+        const distanceToEdge = direction < 0 ? center : 1 - center
+        for (let step = 1; step <= 40; step += 1) {
+          const u = center + direction * distanceToEdge * (step / 40)
+          const value = resolveLandrushRobotShoulderTorchBeamEnvelope(u, v)
+          expect(value).toBeLessThanOrEqual(previous + Number.EPSILON)
+          expect(value).toBeCloseTo(resolveLandrushRobotShoulderTorchBeamEnvelope(1 - u, v))
+          expect(Number.isFinite(value)).toBe(true)
+          expect(value).toBeGreaterThanOrEqual(0)
+          expect(value).toBeLessThanOrEqual(1)
+          previous = value
+        }
+        expect(previous).toBe(0)
       }
-      expect(previous).toBe(0)
     }
-    for (const [center, direction] of [
-      [0.25, -1],
-      [0.75, 1],
-    ] as const) {
-      let previous = resolveLandrushRobotShoulderTorchBeamEnvelope(center, 0)
-      for (let step = 1; step <= 10; step += 1) {
-        const value = resolveLandrushRobotShoulderTorchBeamEnvelope(
-          center + direction * step * 0.01,
-          0,
-        )
-        expect(value).toBeLessThanOrEqual(previous)
-        previous = value
-      }
-      expect(previous).toBe(0)
-    }
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(Number.NaN, Number.NaN)).toBe(0)
+    expect(resolveLandrushRobotShoulderTorchBeamEnvelope(Number.POSITIVE_INFINITY, 0.5)).toBe(0)
   })
 
   test('publishes the exact real-light cone for zombie visibility without allocating a new state', () => {

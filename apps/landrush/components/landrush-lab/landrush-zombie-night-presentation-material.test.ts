@@ -196,11 +196,29 @@ describe('Landrush zombie night material preparation', () => {
     ])
     for (const count of LANDRUSH_ZOMBIE_NIGHT_SPOT_LIGHT_COUNTS) {
       const topology = createLandrushZombieNightLightTopology(count)
-      expect(topology.root.children).toHaveLength(count)
-      expect(topology.root.children.every((child) => (child as SpotLight).isSpotLight)).toBe(true)
+      const spotLights: SpotLight[] = []
+      topology.root.traverse((child) => {
+        if ((child as SpotLight).isSpotLight) spotLights.push(child as SpotLight)
+      })
+      let disposedLights = 0
+      expect(topology.root.visible).toBe(true)
+      expect(spotLights).toHaveLength(count)
+      expect(topology.root.children).toHaveLength(count * 2)
+      for (const light of spotLights) {
+        expect(light.intensity).toBe(0)
+        expect(light.castShadow).toBe(false)
+        expect(light.target.parent).toBe(topology.root)
+        light.addEventListener('dispose', () => {
+          disposedLights += 1
+        })
+      }
       topology.dispose()
       topology.dispose()
       expect(topology.root.children).toHaveLength(0)
+      expect(
+        spotLights.every((light) => light.parent === null && light.target.parent === null),
+      ).toBe(true)
+      expect(disposedLights).toBe(count)
     }
   })
 

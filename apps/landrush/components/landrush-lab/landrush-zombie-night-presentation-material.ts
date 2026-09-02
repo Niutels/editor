@@ -27,7 +27,6 @@ import {
   resolveLandrushZombieNightSurfaceRole,
 } from './landrush-zombie-night-presentation-state'
 import {
-  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
@@ -360,31 +359,34 @@ export function createLandrushZombieNightLightTopology(
   spotLightCount = LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
 ) {
   const root = new Group()
-  root.visible = false
   const lights: SpotLight[] = []
   const count = Math.max(0, Math.floor(spotLightCount))
   for (let index = 0; index < count; index += 1) {
     const light = new SpotLight(
       index % 3 === 0 ? '#69ccff' : '#ffc36e',
-      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
+      0,
       LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
       LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
       LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_PENUMBRA,
       LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DECAY,
     )
+    light.castShadow = false
     light.position.set(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION)
     light.target.position.set(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION)
-    light.target.updateMatrixWorld(true)
     lights.push(light)
-    root.add(light)
+    root.add(light, light.target)
   }
   let disposed = false
   return {
     dispose() {
       if (disposed) return
       disposed = true
+      for (const light of lights) {
+        light.removeFromParent()
+        light.target.removeFromParent()
+        light.dispose()
+      }
       root.clear()
-      for (const light of lights) light.dispose()
     },
     root,
   }

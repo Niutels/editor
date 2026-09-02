@@ -4,10 +4,16 @@ import {
   createAmbientNpcZombieActionTargets,
   resolveAmbientNpcZombieActionTargets,
   resolveAmbientNpcZombieLocomotionPhase,
+  resolveAmbientNpcZombieMovementProfile,
 } from './landrush-island-ambient-life'
 import { createZombieEscapeAmbientNpcPresentationResource } from './zombie-escape-ambient-npc-presentation'
 import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
+import {
+  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS,
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+} from './zombie-escape-zombie-catalog'
 
 describe('Zombie Escape exact ambient NPC presentation', () => {
   test('prepares and reuses one phase-switched material set', () => {
@@ -89,5 +95,34 @@ describe('Zombie Escape exact ambient NPC presentation', () => {
     expect(resolveAmbientNpcZombieLocomotionPhase(3.75, 3)).toBeCloseTo(Math.PI / 2, 6)
     expect(resolveAmbientNpcZombieLocomotionPhase(-0.75, 3)).toBeCloseTo(Math.PI * 1.5, 6)
     expect(resolveAmbientNpcZombieLocomotionPhase(1, 0)).toBe(0)
+  })
+
+  test('uses the live variant after a claimed zombie moves away from its roster slot identity', () => {
+    const standardVariant = ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS[0]!
+    const standardMovement = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[standardVariant]!.movement
+    const staleHeavyMovement =
+      ZOMBIE_ESCAPE_ZOMBIE_CATALOG[ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT]!.movement
+    const displacedSlot = 2
+    const variantByPoolSlot = new Uint8Array(4)
+    const liveVariantBySlot = new Uint8Array(4)
+    variantByPoolSlot[displacedSlot] = ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT
+    liveVariantBySlot[displacedSlot] = standardVariant
+    const simulation = {
+      variantByPoolSlot,
+      zombies: { variant: liveVariantBySlot },
+    }
+
+    expect(variantByPoolSlot[displacedSlot]).toBe(ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT)
+    expect(liveVariantBySlot[displacedSlot]).toBe(standardVariant)
+    expect(
+      resolveAmbientNpcZombieMovementProfile(simulation, displacedSlot, staleHeavyMovement),
+    ).toBe(standardMovement)
+    expect(
+      resolveAmbientNpcZombieMovementProfile(
+        simulation,
+        liveVariantBySlot.length,
+        staleHeavyMovement,
+      ),
+    ).toBe(staleHeavyMovement)
   })
 })

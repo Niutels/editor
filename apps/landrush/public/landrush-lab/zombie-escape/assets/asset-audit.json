@@ -23,6 +23,175 @@
             }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/sunflare-pistol.glb",
+          "sourceInspection": {
+            "animationCount": 0,
+            "animationNames": [],
+            "animations": [],
+            "assetVersion": "2.0",
+            "byteLength": 6687408,
+            "contentHash": "1def7e75b60a155832237296ad1b87b50180570f1a5db02ff0424712acbeafb6",
+            "extensionsRequired": [],
+            "extensionsUsed": [],
+            "glbVersion": 2,
+            "imageCount": 4,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 3045820,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1586341,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 1,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1846033,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 2,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 67238,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 3,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": null,
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 3,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 3,
+                    "texCoord": 0,
+                    "textureIndex": 3,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 1,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 1,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "normal": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 2,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 2,
+                    "texCoord": 0,
+                    "textureIndex": 2,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": null,
+            "skinSemanticCompatibilityHash": null,
+            "skinCount": 0,
+            "skinJointCounts": [],
+            "skinnedMeshNodeCount": 0,
+            "skinnedPrimitiveCount": 0,
+            "textureCount": 4,
+            "triangleCount": 2955,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": {
             "preserved": true,
             "runtimeHash": "af11e9ff0c05e22ce92ac6657d17be42199996f50c40d19c32c60c47cbefabf2",
@@ -240,6 +409,175 @@
             }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/reef-carbine.glb",
+          "sourceInspection": {
+            "animationCount": 0,
+            "animationNames": [],
+            "animations": [],
+            "assetVersion": "2.0",
+            "byteLength": 6720928,
+            "contentHash": "a5585ffba9d7813f928076b42da60d68d04648e1c357e60b9b56d532df548ed5",
+            "extensionsRequired": [],
+            "extensionsUsed": [],
+            "glbVersion": 2,
+            "imageCount": 4,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 3111906,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1455594,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 1,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1944616,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 2,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 71231,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 3,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": null,
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 3,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 3,
+                    "texCoord": 0,
+                    "textureIndex": 3,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 1,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 1,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "normal": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 2,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 2,
+                    "texCoord": 0,
+                    "textureIndex": 2,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": null,
+            "skinSemanticCompatibilityHash": null,
+            "skinCount": 0,
+            "skinJointCounts": [],
+            "skinnedMeshNodeCount": 0,
+            "skinnedPrimitiveCount": 0,
+            "textureCount": 4,
+            "triangleCount": 2900,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": {
             "preserved": true,
             "runtimeHash": "abd7adcc90d1af598281b242c355973411ba8a62acd983f1903f76f50f7decf6",
@@ -457,6 +795,175 @@
             }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/driftwood-scattergun.glb",
+          "sourceInspection": {
+            "animationCount": 0,
+            "animationNames": [],
+            "animations": [],
+            "assetVersion": "2.0",
+            "byteLength": 7224932,
+            "contentHash": "814fe11d97468e6edf396bd3a37d72299af91c27ae274e87013add38eadc3051",
+            "extensionsRequired": [],
+            "extensionsUsed": [],
+            "glbVersion": 2,
+            "imageCount": 4,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 3359235,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1456788,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 1,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 2187638,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 2,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 72015,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 3,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": null,
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 3,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 3,
+                    "texCoord": 0,
+                    "textureIndex": 3,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 1,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 1,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "normal": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 2,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 2,
+                    "texCoord": 0,
+                    "textureIndex": 2,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": null,
+            "skinSemanticCompatibilityHash": null,
+            "skinCount": 0,
+            "skinJointCounts": [],
+            "skinnedMeshNodeCount": 0,
+            "skinnedPrimitiveCount": 0,
+            "textureCount": 4,
+            "triangleCount": 3145,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": {
             "preserved": true,
             "runtimeHash": "441fde4836e665b045a641e5366410c7a138eb61c9b424d23e51688eef5922d1",
@@ -674,6 +1181,175 @@
             }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/storm-coil-repeater.glb",
+          "sourceInspection": {
+            "animationCount": 0,
+            "animationNames": [],
+            "animations": [],
+            "assetVersion": "2.0",
+            "byteLength": 6168944,
+            "contentHash": "677b4998b02e90bb169e7e330589c123b99aef6bded075de26ae3cc81132c8da",
+            "extensionsRequired": [],
+            "extensionsUsed": [],
+            "glbVersion": 2,
+            "imageCount": 4,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 2649784,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1533037,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 1,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1607320,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 2,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 227286,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 3,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": null,
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 3,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 3,
+                    "texCoord": 0,
+                    "textureIndex": 3,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 1,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 1,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "normal": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 2,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 2,
+                    "texCoord": 0,
+                    "textureIndex": 2,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": null,
+            "skinSemanticCompatibilityHash": null,
+            "skinCount": 0,
+            "skinJointCounts": [],
+            "skinnedMeshNodeCount": 0,
+            "skinnedPrimitiveCount": 0,
+            "textureCount": 4,
+            "triangleCount": 3107,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": {
             "preserved": true,
             "runtimeHash": "06b43fc58eb8d86919adfe29e2c4677e00baca36dd422610173b7648c56e9753",
@@ -891,6 +1567,175 @@
             }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/weapons/tidebreak-launcher.glb",
+          "sourceInspection": {
+            "animationCount": 0,
+            "animationNames": [],
+            "animations": [],
+            "assetVersion": "2.0",
+            "byteLength": 7555376,
+            "contentHash": "dbd63ee6b6e875fcce841df7246905199fe3cc6fc3c671314b47830b9009c6af",
+            "extensionsRequired": [],
+            "extensionsUsed": [],
+            "glbVersion": 2,
+            "imageCount": 4,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 3147322,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 1932717,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 1,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 2164913,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 2,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              },
+              {
+                "basisMode": null,
+                "byteLength": 156911,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 3,
+                "levelCount": null,
+                "mimeType": "image/jpeg",
+                "name": null,
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": null,
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 3,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 3,
+                    "texCoord": 0,
+                    "textureIndex": 3,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 1,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 1,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "normal": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 2,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/jpeg",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 2,
+                    "texCoord": 0,
+                    "textureIndex": 2,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": null,
+            "skinSemanticCompatibilityHash": null,
+            "skinCount": 0,
+            "skinJointCounts": [],
+            "skinnedMeshNodeCount": 0,
+            "skinnedPrimitiveCount": 0,
+            "textureCount": 4,
+            "triangleCount": 2990,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": {
             "preserved": true,
             "runtimeHash": "5da100597fcb538f9d65b9c0236178316d7a372d6c87a04f9e9a019c1fb3a62a",
@@ -1106,6 +1951,7 @@
             "recordedSha256": "47e1ed27416ef2e395244008f6a2e7eb37d3e1bc87debd4fa5fc4431f67727c3"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/dockworker/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -1259,6 +2105,7 @@
             "recordedSha256": "dfdca0ed504e355936a38d0a364be48c0c6ec3bcb4b85d5c4d1d20208fb519de"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/dockworker/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -1412,6 +2259,7 @@
             "recordedSha256": "04fda64e5ca243be96fdce0eeff6ab25bc3fe92fe334a87c65e85a4669a22698"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/dockworker/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -1586,6 +2434,7 @@
             "recordedSha256": "f3a1a74beb1e01aab37dd3b47aba6fbe4ffa0654c9325bf708f8bbcc87a9efe3"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -1739,6 +2588,7 @@
             "recordedSha256": "9d44e2a642cfcb8bddb250904d2f36dcb6d5fb43b7c1c80a4c97138c8a8a931b"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -1892,6 +2742,7 @@
             "recordedSha256": "0b2d69242631eb87fa4f37b17e4a8dcc6c9032dd16ec852bed745e7c1677c27d"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/lifeguard/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -2066,6 +2917,7 @@
             "recordedSha256": "d6aab089829b1b20cadd2c89ed64073c9fe80db649e3d785d0a59928afd30977"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -2219,6 +3071,7 @@
             "recordedSha256": "68e2608fe668efe05493301ca4da2be7f1a3877835bd795d9a0e0a07d1ff580f"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -2372,6 +3225,7 @@
             "recordedSha256": "6febf13e0582574fa45394c114e4e07e850f8c021e6fd466cbcab60c24d239e1"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-gardener/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -2546,6 +3400,7 @@
             "recordedSha256": "2c1f367d5d8b8e3889d02b840c3a4027031d8a728c3ad8212bfdd0630cdd9946"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/tourist/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -2699,6 +3554,7 @@
             "recordedSha256": "f4f33b565ee81f730be232d12aeb6f92fd85caf0ccb740b61bcde9d056f7319c"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/tourist/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -2852,6 +3708,7 @@
             "recordedSha256": "3687c13ebc4e2184478d517d8f7861bcb54ba3916832d28a4d62252e89520857"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/tourist/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3008,24 +3865,168 @@
     "marina-mechanic": {
       "canonicalOutputs": {
         "rigged": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
-        "run": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
-        "walk": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.anim.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.anim.glb",
         "preview": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/preview.png"
       },
       "compatibility": {
-        "byteDistinct": true,
-        "sameTriangleCount": true,
-        "skinTopologyCompatible": true
+        "runtimeAnimationsPreserveTargets": true,
+        "runtimeRigPreservesSkin": true,
+        "sourceSkinTopologyCompatible": true,
+        "sourceTriangleCountsMatch": true
       },
       "kind": "zombie",
       "outputs": {
         "rigged": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7243200,
-            "recordedSha256": "66540d9fb88c2bf6d396279e582f4131fed2044071b2aef48406319ce94f3054"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 338760,
+              "recordedSha256": "4caffc7ad7d1fcd6a900cc82fbd7a959ad1f65bc8409c93fd46d597038050d22"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 7422232,
+              "recordedSha256": "cdab93d31c01a47628e4def23ad49a8424e2a4c54fef77fb84f39f647a5b7f9c"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/rigged.glb",
+          "sourceInspection": {
+            "animationCount": 1,
+            "animationNames": [
+              "Armature|clip0|baselayer"
+            ],
+            "animations": [
+              {
+                "channelCount": 72,
+                "jointChannelCount": 72,
+                "name": "Armature|clip0|baselayer",
+                "samplerCount": 72,
+                "targetNodeNames": [
+                  "Head",
+                  "Hips",
+                  "LeftArm",
+                  "LeftFoot",
+                  "LeftForeArm",
+                  "LeftHand",
+                  "LeftLeg",
+                  "LeftShoulder",
+                  "LeftToeBase",
+                  "LeftUpLeg",
+                  "RightArm",
+                  "RightFoot",
+                  "RightForeArm",
+                  "RightHand",
+                  "RightLeg",
+                  "RightShoulder",
+                  "RightToeBase",
+                  "RightUpLeg",
+                  "Spine",
+                  "Spine01",
+                  "Spine02",
+                  "head_end",
+                  "headfront",
+                  "neck"
+                ],
+                "targetPaths": [
+                  "rotation",
+                  "scale",
+                  "translation"
+                ]
+              }
+            ],
+            "assetVersion": "2.0",
+            "byteLength": 7422232,
+            "contentHash": "cdab93d31c01a47628e4def23ad49a8424e2a4c54fef77fb84f39f647a5b7f9c",
+            "extensionsRequired": [],
+            "extensionsUsed": [
+              "KHR_materials_ior",
+              "KHR_materials_specular"
+            ],
+            "glbVersion": 2,
+            "imageCount": 1,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 7219982,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/png",
+                "name": "texture_0",
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": "Material_1",
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": null,
+                  "normal": null,
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": "8a0dbaf0c104ee27b349f995843c6c654b80961e4e4758ac24ca28fcce5c3b56",
+            "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
+            "skinCount": 1,
+            "skinJointCounts": [
+              24
+            ],
+            "skinnedMeshNodeCount": 1,
+            "skinnedPrimitiveCount": 1,
+            "textureCount": 2,
+            "triangleCount": 3302,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3071,30 +4072,33 @@
             }
           ],
           "assetVersion": "2.0",
-          "byteLength": 7243200,
-          "contentHash": "66540d9fb88c2bf6d396279e582f4131fed2044071b2aef48406319ce94f3054",
-          "extensionsRequired": [],
+          "byteLength": 338760,
+          "contentHash": "4caffc7ad7d1fcd6a900cc82fbd7a959ad1f65bc8409c93fd46d597038050d22",
+          "extensionsRequired": [
+            "KHR_texture_basisu"
+          ],
           "extensionsUsed": [
             "KHR_materials_ior",
-            "KHR_materials_specular"
+            "KHR_materials_specular",
+            "KHR_texture_basisu"
           ],
           "glbVersion": 2,
           "imageCount": 1,
           "images": [
             {
-              "basisMode": null,
-              "byteLength": 7034746,
+              "basisMode": "etc1s",
+              "byteLength": 140158,
               "embedded": true,
-              "hasFullMipChain": null,
-              "height": 2048,
+              "hasFullMipChain": true,
+              "height": 768,
               "index": 0,
-              "levelCount": null,
-              "mimeType": "image/png",
+              "levelCount": 10,
+              "mimeType": "image/ktx2",
               "name": "texture_0",
-              "supercompressionScheme": null,
-              "uncompressedRgbaMipByteLength": null,
-              "vkFormat": null,
-              "width": 2048
+              "supercompressionScheme": 1,
+              "uncompressedRgbaMipByteLength": 3145720,
+              "vkFormat": 0,
+              "width": 768
             }
           ],
           "materialCount": 1,
@@ -3104,40 +4108,40 @@
               "name": "Material_1",
               "textureSlots": {
                 "baseColor": {
-                  "basisMode": null,
+                  "basisMode": "etc1s",
                   "fallbackImageIndex": null,
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
+                  "hasFullMipChain": true,
+                  "height": 768,
                   "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 1,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "emissive": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
                   "texCoord": 0,
                   "textureIndex": 0,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
+                },
+                "emissive": {
+                  "basisMode": "etc1s",
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": true,
+                  "height": 768,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
                 },
                 "metallicRoughness": null,
                 "normal": null,
@@ -3149,24 +4153,23 @@
           "nonTrianglePrimitiveCount": 0,
           "primitiveCount": 1,
           "primitiveWithoutMaterialCount": 0,
-          "skinCompatibilityHash": "63fa6ac15a932aad1cd7ec8cae4b84ba429832c8d34ba058529ce95a263b1f61",
-          "skinSemanticCompatibilityHash": "59ab792a36356679f1048fb9501ebfafbe7fc37f4b25ee664a177838eaf2e5fe",
+          "skinCompatibilityHash": "41f3e65f05f8b8ba53eb024f17f62261de8d67f350c7dcbfaf2d8fb5b0ab524c",
+          "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
           "skinCount": 1,
           "skinJointCounts": [
             24
           ],
           "skinnedMeshNodeCount": 1,
           "skinnedPrimitiveCount": 1,
-          "textureCount": 2,
-          "triangleCount": 3175,
+          "textureCount": 1,
+          "triangleCount": 3302,
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
             "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
-            "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
-            "profile": "base-color-2048",
+            "profile": "ktx2-768-mipmapped",
             "requiredMaterialTextureSlots": [
               "baseColor"
             ]
@@ -3175,10 +4178,153 @@
         "run": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7251368,
-            "recordedSha256": "6e35ed322628646794a65cc6094e566d9a5e0bb1da4d971281b32f8576a88a17"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 30852,
+              "recordedSha256": "487ee54e395ad1915f936626e6b44708f5c2447c7b23d695bf0645f5b9c39ee8"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 7430392,
+              "recordedSha256": "fc7092305249a2507b8a2491e7f90974d0ffc229ec6550c9ab61ac8a4788be8c"
+            }
           },
-          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.glb",
+          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/run.anim.glb",
+          "sourceInspection": {
+            "animationCount": 1,
+            "animationNames": [
+              "Armature|running|baselayer"
+            ],
+            "animations": [
+              {
+                "channelCount": 72,
+                "jointChannelCount": 72,
+                "name": "Armature|running|baselayer",
+                "samplerCount": 72,
+                "targetNodeNames": [
+                  "Head",
+                  "Hips",
+                  "LeftArm",
+                  "LeftFoot",
+                  "LeftForeArm",
+                  "LeftHand",
+                  "LeftLeg",
+                  "LeftShoulder",
+                  "LeftToeBase",
+                  "LeftUpLeg",
+                  "RightArm",
+                  "RightFoot",
+                  "RightForeArm",
+                  "RightHand",
+                  "RightLeg",
+                  "RightShoulder",
+                  "RightToeBase",
+                  "RightUpLeg",
+                  "Spine",
+                  "Spine01",
+                  "Spine02",
+                  "head_end",
+                  "headfront",
+                  "neck"
+                ],
+                "targetPaths": [
+                  "rotation",
+                  "scale",
+                  "translation"
+                ]
+              }
+            ],
+            "assetVersion": "2.0",
+            "byteLength": 7430392,
+            "contentHash": "fc7092305249a2507b8a2491e7f90974d0ffc229ec6550c9ab61ac8a4788be8c",
+            "extensionsRequired": [],
+            "extensionsUsed": [
+              "KHR_materials_ior",
+              "KHR_materials_specular"
+            ],
+            "glbVersion": 2,
+            "imageCount": 1,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 7219982,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/png",
+                "name": "texture_0",
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": "Material_1",
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": null,
+                  "normal": null,
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": "8a0dbaf0c104ee27b349f995843c6c654b80961e4e4758ac24ca28fcce5c3b56",
+            "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
+            "skinCount": 1,
+            "skinJointCounts": [
+              24
+            ],
+            "skinnedMeshNodeCount": 1,
+            "skinnedPrimitiveCount": 1,
+            "textureCount": 2,
+            "triangleCount": 3302,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3187,7 +4333,7 @@
           "animations": [
             {
               "channelCount": 72,
-              "jointChannelCount": 72,
+              "jointChannelCount": 0,
               "name": "Armature|running|baselayer",
               "samplerCount": 72,
               "targetNodeNames": [
@@ -3224,114 +4370,183 @@
             }
           ],
           "assetVersion": "2.0",
-          "byteLength": 7251368,
-          "contentHash": "6e35ed322628646794a65cc6094e566d9a5e0bb1da4d971281b32f8576a88a17",
+          "byteLength": 30852,
+          "contentHash": "487ee54e395ad1915f936626e6b44708f5c2447c7b23d695bf0645f5b9c39ee8",
           "extensionsRequired": [],
-          "extensionsUsed": [
-            "KHR_materials_ior",
-            "KHR_materials_specular"
-          ],
+          "extensionsUsed": [],
           "glbVersion": 2,
-          "imageCount": 1,
-          "images": [
-            {
-              "basisMode": null,
-              "byteLength": 7034746,
-              "embedded": true,
-              "hasFullMipChain": null,
-              "height": 2048,
-              "index": 0,
-              "levelCount": null,
-              "mimeType": "image/png",
-              "name": "texture_0",
-              "supercompressionScheme": null,
-              "uncompressedRgbaMipByteLength": null,
-              "vkFormat": null,
-              "width": 2048
-            }
-          ],
-          "materialCount": 1,
-          "materials": [
-            {
-              "index": 0,
-              "name": "Material_1",
-              "textureSlots": {
-                "baseColor": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 1,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "emissive": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 0,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "metallicRoughness": null,
-                "normal": null,
-                "occlusion": null
-              }
-            }
-          ],
-          "meshCount": 1,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
           "nonTrianglePrimitiveCount": 0,
-          "primitiveCount": 1,
+          "primitiveCount": 0,
           "primitiveWithoutMaterialCount": 0,
-          "skinCompatibilityHash": "63fa6ac15a932aad1cd7ec8cae4b84ba429832c8d34ba058529ce95a263b1f61",
-          "skinSemanticCompatibilityHash": "59ab792a36356679f1048fb9501ebfafbe7fc37f4b25ee664a177838eaf2e5fe",
-          "skinCount": 1,
-          "skinJointCounts": [
-            24
-          ],
-          "skinnedMeshNodeCount": 1,
-          "skinnedPrimitiveCount": 1,
-          "textureCount": 2,
-          "triangleCount": 3175,
-          "trianglePrimitiveCount": 1,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0,
           "textureContract": {
             "accepted": true,
-            "allImagesAtRequiredSize": true,
-            "allMaterialsSatisfyRequiredSlots": true,
-            "distinctRequiredImageSources": true,
-            "fullPbrSlotsPresent": false,
-            "profile": "base-color-2048",
-            "requiredMaterialTextureSlots": [
-              "baseColor"
-            ]
+            "profile": "animation-only"
           }
         },
         "walk": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7255976,
-            "recordedSha256": "6a375d591eebd02b9e7acf628750508e66f123855e513077ce570bab00ad6621"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 35856,
+              "recordedSha256": "e7683644eb655870e669fe25b47a9d1786471f4b74495435a5d56dc53020e64e"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 7435368,
+              "recordedSha256": "1f4098bd23b750db31dbe87718238fed6aabafe41858c65e4cc72cf900b2471c"
+            }
           },
-          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.glb",
+          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/marina-mechanic/walk.anim.glb",
+          "sourceInspection": {
+            "animationCount": 1,
+            "animationNames": [
+              "Armature|walking_man|baselayer"
+            ],
+            "animations": [
+              {
+                "channelCount": 72,
+                "jointChannelCount": 72,
+                "name": "Armature|walking_man|baselayer",
+                "samplerCount": 72,
+                "targetNodeNames": [
+                  "Head",
+                  "Hips",
+                  "LeftArm",
+                  "LeftFoot",
+                  "LeftForeArm",
+                  "LeftHand",
+                  "LeftLeg",
+                  "LeftShoulder",
+                  "LeftToeBase",
+                  "LeftUpLeg",
+                  "RightArm",
+                  "RightFoot",
+                  "RightForeArm",
+                  "RightHand",
+                  "RightLeg",
+                  "RightShoulder",
+                  "RightToeBase",
+                  "RightUpLeg",
+                  "Spine",
+                  "Spine01",
+                  "Spine02",
+                  "head_end",
+                  "headfront",
+                  "neck"
+                ],
+                "targetPaths": [
+                  "rotation",
+                  "scale",
+                  "translation"
+                ]
+              }
+            ],
+            "assetVersion": "2.0",
+            "byteLength": 7435368,
+            "contentHash": "1f4098bd23b750db31dbe87718238fed6aabafe41858c65e4cc72cf900b2471c",
+            "extensionsRequired": [],
+            "extensionsUsed": [
+              "KHR_materials_ior",
+              "KHR_materials_specular"
+            ],
+            "glbVersion": 2,
+            "imageCount": 1,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 7219982,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/png",
+                "name": "texture_0",
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": "Material_1",
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": null,
+                  "normal": null,
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": "8a0dbaf0c104ee27b349f995843c6c654b80961e4e4758ac24ca28fcce5c3b56",
+            "skinSemanticCompatibilityHash": "cdaff76845b90fb60de09150580a796128f85f6c2eee4e9fa3931fe33f22234b",
+            "skinCount": 1,
+            "skinJointCounts": [
+              24
+            ],
+            "skinnedMeshNodeCount": 1,
+            "skinnedPrimitiveCount": 1,
+            "textureCount": 2,
+            "triangleCount": 3302,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3340,7 +4555,7 @@
           "animations": [
             {
               "channelCount": 72,
-              "jointChannelCount": 72,
+              "jointChannelCount": 0,
               "name": "Armature|walking_man|baselayer",
               "samplerCount": 72,
               "targetNodeNames": [
@@ -3377,112 +4592,38 @@
             }
           ],
           "assetVersion": "2.0",
-          "byteLength": 7255976,
-          "contentHash": "6a375d591eebd02b9e7acf628750508e66f123855e513077ce570bab00ad6621",
+          "byteLength": 35856,
+          "contentHash": "e7683644eb655870e669fe25b47a9d1786471f4b74495435a5d56dc53020e64e",
           "extensionsRequired": [],
-          "extensionsUsed": [
-            "KHR_materials_ior",
-            "KHR_materials_specular"
-          ],
+          "extensionsUsed": [],
           "glbVersion": 2,
-          "imageCount": 1,
-          "images": [
-            {
-              "basisMode": null,
-              "byteLength": 7034746,
-              "embedded": true,
-              "hasFullMipChain": null,
-              "height": 2048,
-              "index": 0,
-              "levelCount": null,
-              "mimeType": "image/png",
-              "name": "texture_0",
-              "supercompressionScheme": null,
-              "uncompressedRgbaMipByteLength": null,
-              "vkFormat": null,
-              "width": 2048
-            }
-          ],
-          "materialCount": 1,
-          "materials": [
-            {
-              "index": 0,
-              "name": "Material_1",
-              "textureSlots": {
-                "baseColor": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 1,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "emissive": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 0,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "metallicRoughness": null,
-                "normal": null,
-                "occlusion": null
-              }
-            }
-          ],
-          "meshCount": 1,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
           "nonTrianglePrimitiveCount": 0,
-          "primitiveCount": 1,
+          "primitiveCount": 0,
           "primitiveWithoutMaterialCount": 0,
-          "skinCompatibilityHash": "63fa6ac15a932aad1cd7ec8cae4b84ba429832c8d34ba058529ce95a263b1f61",
-          "skinSemanticCompatibilityHash": "59ab792a36356679f1048fb9501ebfafbe7fc37f4b25ee664a177838eaf2e5fe",
-          "skinCount": 1,
-          "skinJointCounts": [
-            24
-          ],
-          "skinnedMeshNodeCount": 1,
-          "skinnedPrimitiveCount": 1,
-          "textureCount": 2,
-          "triangleCount": 3175,
-          "trianglePrimitiveCount": 1,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0,
           "textureContract": {
             "accepted": true,
-            "allImagesAtRequiredSize": true,
-            "allMaterialsSatisfyRequiredSlots": true,
-            "distinctRequiredImageSources": true,
-            "fullPbrSlotsPresent": false,
-            "profile": "base-color-2048",
-            "requiredMaterialTextureSlots": [
-              "baseColor"
-            ]
+            "profile": "animation-only"
           }
         }
       },
       "taskIds": {
-        "preview": "01a01ba3-29b3-7744-8c5b-c2794229f9c0",
-        "refine": "01a01ba3-5ee5-786f-aa64-79503af8179a",
-        "rig": "01a01ba4-b307-7bc8-9617-d87a6255d1a0"
+        "preview": "01a0606c-03a6-7792-afe3-1ff8d5e4636c",
+        "refine": "01a0606c-3f1c-73c6-a682-513632fc2aea",
+        "rig": "01a0606d-a9ef-7486-9c7e-575fde74e285"
       }
     },
     "beach-courier": {
@@ -3506,6 +4647,7 @@
             "recordedSha256": "c518f0bee5f0776dedc18c607e50b3086c9fb72aa9b8f31f210e6eab57226d62"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3659,6 +4801,7 @@
             "recordedSha256": "ec7dcac9467e5f739ffbb0601bdc4c9259879e060ac24a8e9e858910462af65f"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3812,6 +4955,7 @@
             "recordedSha256": "9ba7bb7bb45c917c5c61fea9f3c45c431456dc7f1839f8a9997b02187b26d652"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/beach-courier/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -3968,24 +5112,168 @@
     "boardwalk-chef": {
       "canonicalOutputs": {
         "rigged": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
-        "run": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
-        "walk": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
+        "run": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.anim.glb",
+        "walk": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.anim.glb",
         "preview": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/preview.png"
       },
       "compatibility": {
-        "byteDistinct": true,
-        "sameTriangleCount": true,
-        "skinTopologyCompatible": true
+        "runtimeAnimationsPreserveTargets": true,
+        "runtimeRigPreservesSkin": true,
+        "sourceSkinTopologyCompatible": true,
+        "sourceTriangleCountsMatch": true
       },
       "kind": "zombie",
       "outputs": {
         "rigged": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7002764,
-            "recordedSha256": "9ff353044a2d2ea921117e7ac4e30f9e791028b80dc9822ec5eef09848cb6c71"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 365204,
+              "recordedSha256": "a7b1085dd18664ec6e3d792c2d1ae26c1fcd5cf21266de93efcd9fe186a8f911"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 6609916,
+              "recordedSha256": "728842add687f7ce0b29183f606ea12660aef9b14aa92018eb8a6dc668f81750"
+            }
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/rigged.glb",
+          "sourceInspection": {
+            "animationCount": 1,
+            "animationNames": [
+              "Armature|clip0|baselayer"
+            ],
+            "animations": [
+              {
+                "channelCount": 72,
+                "jointChannelCount": 72,
+                "name": "Armature|clip0|baselayer",
+                "samplerCount": 72,
+                "targetNodeNames": [
+                  "Head",
+                  "Hips",
+                  "LeftArm",
+                  "LeftFoot",
+                  "LeftForeArm",
+                  "LeftHand",
+                  "LeftLeg",
+                  "LeftShoulder",
+                  "LeftToeBase",
+                  "LeftUpLeg",
+                  "RightArm",
+                  "RightFoot",
+                  "RightForeArm",
+                  "RightHand",
+                  "RightLeg",
+                  "RightShoulder",
+                  "RightToeBase",
+                  "RightUpLeg",
+                  "Spine",
+                  "Spine01",
+                  "Spine02",
+                  "head_end",
+                  "headfront",
+                  "neck"
+                ],
+                "targetPaths": [
+                  "rotation",
+                  "scale",
+                  "translation"
+                ]
+              }
+            ],
+            "assetVersion": "2.0",
+            "byteLength": 6609916,
+            "contentHash": "728842add687f7ce0b29183f606ea12660aef9b14aa92018eb8a6dc668f81750",
+            "extensionsRequired": [],
+            "extensionsUsed": [
+              "KHR_materials_ior",
+              "KHR_materials_specular"
+            ],
+            "glbVersion": 2,
+            "imageCount": 1,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 6400531,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/png",
+                "name": "texture_0",
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": "Material_1",
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": null,
+                  "normal": null,
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": "ef0aa3a9641c869de2daa7b31065a535ca862b94bbbeebf6d1f085f7ba159c32",
+            "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
+            "skinCount": 1,
+            "skinJointCounts": [
+              24
+            ],
+            "skinnedMeshNodeCount": 1,
+            "skinnedPrimitiveCount": 1,
+            "textureCount": 2,
+            "triangleCount": 3141,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -4031,30 +5319,33 @@
             }
           ],
           "assetVersion": "2.0",
-          "byteLength": 7002764,
-          "contentHash": "9ff353044a2d2ea921117e7ac4e30f9e791028b80dc9822ec5eef09848cb6c71",
-          "extensionsRequired": [],
+          "byteLength": 365204,
+          "contentHash": "a7b1085dd18664ec6e3d792c2d1ae26c1fcd5cf21266de93efcd9fe186a8f911",
+          "extensionsRequired": [
+            "KHR_texture_basisu"
+          ],
           "extensionsUsed": [
             "KHR_materials_ior",
-            "KHR_materials_specular"
+            "KHR_materials_specular",
+            "KHR_texture_basisu"
           ],
           "glbVersion": 2,
           "imageCount": 1,
           "images": [
             {
-              "basisMode": null,
-              "byteLength": 6794316,
+              "basisMode": "etc1s",
+              "byteLength": 159429,
               "embedded": true,
-              "hasFullMipChain": null,
-              "height": 2048,
+              "hasFullMipChain": true,
+              "height": 768,
               "index": 0,
-              "levelCount": null,
-              "mimeType": "image/png",
+              "levelCount": 10,
+              "mimeType": "image/ktx2",
               "name": "texture_0",
-              "supercompressionScheme": null,
-              "uncompressedRgbaMipByteLength": null,
-              "vkFormat": null,
-              "width": 2048
+              "supercompressionScheme": 1,
+              "uncompressedRgbaMipByteLength": 3145720,
+              "vkFormat": 0,
+              "width": 768
             }
           ],
           "materialCount": 1,
@@ -4064,40 +5355,40 @@
               "name": "Material_1",
               "textureSlots": {
                 "baseColor": {
-                  "basisMode": null,
+                  "basisMode": "etc1s",
                   "fallbackImageIndex": null,
                   "fallbackMimeType": null,
                   "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
+                  "hasFullMipChain": true,
+                  "height": 768,
                   "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 1,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "emissive": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
                   "texCoord": 0,
                   "textureIndex": 0,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
+                },
+                "emissive": {
+                  "basisMode": "etc1s",
+                  "fallbackImageIndex": null,
+                  "fallbackMimeType": null,
+                  "hasRasterFallback": false,
+                  "hasFullMipChain": true,
+                  "height": 768,
+                  "imageIndex": 0,
+                  "ktx2ExtensionSource": true,
+                  "levelCount": 10,
+                  "mimeType": "image/ktx2",
+                  "supercompressionScheme": 1,
+                  "sourceImageIndex": null,
+                  "texCoord": 0,
+                  "textureIndex": 0,
+                  "uncompressedRgbaMipByteLength": 3145720,
+                  "width": 768
                 },
                 "metallicRoughness": null,
                 "normal": null,
@@ -4109,24 +5400,23 @@
           "nonTrianglePrimitiveCount": 0,
           "primitiveCount": 1,
           "primitiveWithoutMaterialCount": 0,
-          "skinCompatibilityHash": "fd4603bcb8d3bda1aad51d31e76f6a67b1fbf7a6e65cfe8b80164badb57f1f00",
-          "skinSemanticCompatibilityHash": "f5ecb7310feb244ce0dc1d6b8e803c8b6de922ad514ee2e0761f8f940f2461af",
+          "skinCompatibilityHash": "f0b69b3893a32edd657752755919e111088bb4b3f1e1f679612adbfbf569839b",
+          "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
           "skinCount": 1,
           "skinJointCounts": [
             24
           ],
           "skinnedMeshNodeCount": 1,
           "skinnedPrimitiveCount": 1,
-          "textureCount": 2,
-          "triangleCount": 3102,
+          "textureCount": 1,
+          "triangleCount": 3141,
           "trianglePrimitiveCount": 1,
           "textureContract": {
             "accepted": true,
             "allImagesAtRequiredSize": true,
             "allMaterialsSatisfyRequiredSlots": true,
-            "distinctRequiredImageSources": true,
             "fullPbrSlotsPresent": false,
-            "profile": "base-color-2048",
+            "profile": "ktx2-768-mipmapped",
             "requiredMaterialTextureSlots": [
               "baseColor"
             ]
@@ -4135,10 +5425,153 @@
         "run": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7010928,
-            "recordedSha256": "dcce97362863203bb82d1f17259800f12afb76ade14416e7c15d478894738a45"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 30908,
+              "recordedSha256": "a95b74c5392ddc26c034025ed6b4bfae78074a62eaf65aa1bd1035470f21a29a"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 6618084,
+              "recordedSha256": "d9b4b93546695d16dcd41b9cad2ee0b199891e69d4587133e0446eafc907b873"
+            }
           },
-          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.glb",
+          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/run.anim.glb",
+          "sourceInspection": {
+            "animationCount": 1,
+            "animationNames": [
+              "Armature|running|baselayer"
+            ],
+            "animations": [
+              {
+                "channelCount": 72,
+                "jointChannelCount": 72,
+                "name": "Armature|running|baselayer",
+                "samplerCount": 72,
+                "targetNodeNames": [
+                  "Head",
+                  "Hips",
+                  "LeftArm",
+                  "LeftFoot",
+                  "LeftForeArm",
+                  "LeftHand",
+                  "LeftLeg",
+                  "LeftShoulder",
+                  "LeftToeBase",
+                  "LeftUpLeg",
+                  "RightArm",
+                  "RightFoot",
+                  "RightForeArm",
+                  "RightHand",
+                  "RightLeg",
+                  "RightShoulder",
+                  "RightToeBase",
+                  "RightUpLeg",
+                  "Spine",
+                  "Spine01",
+                  "Spine02",
+                  "head_end",
+                  "headfront",
+                  "neck"
+                ],
+                "targetPaths": [
+                  "rotation",
+                  "scale",
+                  "translation"
+                ]
+              }
+            ],
+            "assetVersion": "2.0",
+            "byteLength": 6618084,
+            "contentHash": "d9b4b93546695d16dcd41b9cad2ee0b199891e69d4587133e0446eafc907b873",
+            "extensionsRequired": [],
+            "extensionsUsed": [
+              "KHR_materials_ior",
+              "KHR_materials_specular"
+            ],
+            "glbVersion": 2,
+            "imageCount": 1,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 6400531,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/png",
+                "name": "texture_0",
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": "Material_1",
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": null,
+                  "normal": null,
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": "ef0aa3a9641c869de2daa7b31065a535ca862b94bbbeebf6d1f085f7ba159c32",
+            "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
+            "skinCount": 1,
+            "skinJointCounts": [
+              24
+            ],
+            "skinnedMeshNodeCount": 1,
+            "skinnedPrimitiveCount": 1,
+            "textureCount": 2,
+            "triangleCount": 3141,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -4147,7 +5580,7 @@
           "animations": [
             {
               "channelCount": 72,
-              "jointChannelCount": 72,
+              "jointChannelCount": 0,
               "name": "Armature|running|baselayer",
               "samplerCount": 72,
               "targetNodeNames": [
@@ -4184,114 +5617,183 @@
             }
           ],
           "assetVersion": "2.0",
-          "byteLength": 7010928,
-          "contentHash": "dcce97362863203bb82d1f17259800f12afb76ade14416e7c15d478894738a45",
+          "byteLength": 30908,
+          "contentHash": "a95b74c5392ddc26c034025ed6b4bfae78074a62eaf65aa1bd1035470f21a29a",
           "extensionsRequired": [],
-          "extensionsUsed": [
-            "KHR_materials_ior",
-            "KHR_materials_specular"
-          ],
+          "extensionsUsed": [],
           "glbVersion": 2,
-          "imageCount": 1,
-          "images": [
-            {
-              "basisMode": null,
-              "byteLength": 6794316,
-              "embedded": true,
-              "hasFullMipChain": null,
-              "height": 2048,
-              "index": 0,
-              "levelCount": null,
-              "mimeType": "image/png",
-              "name": "texture_0",
-              "supercompressionScheme": null,
-              "uncompressedRgbaMipByteLength": null,
-              "vkFormat": null,
-              "width": 2048
-            }
-          ],
-          "materialCount": 1,
-          "materials": [
-            {
-              "index": 0,
-              "name": "Material_1",
-              "textureSlots": {
-                "baseColor": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 1,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "emissive": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 0,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "metallicRoughness": null,
-                "normal": null,
-                "occlusion": null
-              }
-            }
-          ],
-          "meshCount": 1,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
           "nonTrianglePrimitiveCount": 0,
-          "primitiveCount": 1,
+          "primitiveCount": 0,
           "primitiveWithoutMaterialCount": 0,
-          "skinCompatibilityHash": "fd4603bcb8d3bda1aad51d31e76f6a67b1fbf7a6e65cfe8b80164badb57f1f00",
-          "skinSemanticCompatibilityHash": "f5ecb7310feb244ce0dc1d6b8e803c8b6de922ad514ee2e0761f8f940f2461af",
-          "skinCount": 1,
-          "skinJointCounts": [
-            24
-          ],
-          "skinnedMeshNodeCount": 1,
-          "skinnedPrimitiveCount": 1,
-          "textureCount": 2,
-          "triangleCount": 3102,
-          "trianglePrimitiveCount": 1,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0,
           "textureContract": {
             "accepted": true,
-            "allImagesAtRequiredSize": true,
-            "allMaterialsSatisfyRequiredSlots": true,
-            "distinctRequiredImageSources": true,
-            "fullPbrSlotsPresent": false,
-            "profile": "base-color-2048",
-            "requiredMaterialTextureSlots": [
-              "baseColor"
-            ]
+            "profile": "animation-only"
           }
         },
         "walk": {
           "artifactContract": {
             "accepted": true,
-            "recordedByteLength": 7015532,
-            "recordedSha256": "638c4c6f2116600b36cecaa491516a0edfce422eed0ca998aeea42b96fad74f7"
+            "runtime": {
+              "accepted": true,
+              "recordedByteLength": 35544,
+              "recordedSha256": "e36f5712e2053546c4ba989df4920c2087b7b4b96f10cf09803451e4452f992f"
+            },
+            "source": {
+              "accepted": true,
+              "recordedByteLength": 6622692,
+              "recordedSha256": "3749895943a395378b141ae1c52b93164ced5c4754f8bf868ffb112223c36851"
+            }
           },
-          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.glb",
+          "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/boardwalk-chef/walk.anim.glb",
+          "sourceInspection": {
+            "animationCount": 1,
+            "animationNames": [
+              "Armature|walking_man|baselayer"
+            ],
+            "animations": [
+              {
+                "channelCount": 72,
+                "jointChannelCount": 72,
+                "name": "Armature|walking_man|baselayer",
+                "samplerCount": 72,
+                "targetNodeNames": [
+                  "Head",
+                  "Hips",
+                  "LeftArm",
+                  "LeftFoot",
+                  "LeftForeArm",
+                  "LeftHand",
+                  "LeftLeg",
+                  "LeftShoulder",
+                  "LeftToeBase",
+                  "LeftUpLeg",
+                  "RightArm",
+                  "RightFoot",
+                  "RightForeArm",
+                  "RightHand",
+                  "RightLeg",
+                  "RightShoulder",
+                  "RightToeBase",
+                  "RightUpLeg",
+                  "Spine",
+                  "Spine01",
+                  "Spine02",
+                  "head_end",
+                  "headfront",
+                  "neck"
+                ],
+                "targetPaths": [
+                  "rotation",
+                  "scale",
+                  "translation"
+                ]
+              }
+            ],
+            "assetVersion": "2.0",
+            "byteLength": 6622692,
+            "contentHash": "3749895943a395378b141ae1c52b93164ced5c4754f8bf868ffb112223c36851",
+            "extensionsRequired": [],
+            "extensionsUsed": [
+              "KHR_materials_ior",
+              "KHR_materials_specular"
+            ],
+            "glbVersion": 2,
+            "imageCount": 1,
+            "images": [
+              {
+                "basisMode": null,
+                "byteLength": 6400531,
+                "embedded": true,
+                "hasFullMipChain": null,
+                "height": 2048,
+                "index": 0,
+                "levelCount": null,
+                "mimeType": "image/png",
+                "name": "texture_0",
+                "supercompressionScheme": null,
+                "uncompressedRgbaMipByteLength": null,
+                "vkFormat": null,
+                "width": 2048
+              }
+            ],
+            "materialCount": 1,
+            "materials": [
+              {
+                "index": 0,
+                "name": "Material_1",
+                "textureSlots": {
+                  "baseColor": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 1,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "emissive": {
+                    "basisMode": null,
+                    "fallbackImageIndex": null,
+                    "fallbackMimeType": null,
+                    "hasRasterFallback": false,
+                    "hasFullMipChain": null,
+                    "height": 2048,
+                    "imageIndex": 0,
+                    "ktx2ExtensionSource": false,
+                    "levelCount": null,
+                    "mimeType": "image/png",
+                    "supercompressionScheme": null,
+                    "sourceImageIndex": 0,
+                    "texCoord": 0,
+                    "textureIndex": 0,
+                    "uncompressedRgbaMipByteLength": null,
+                    "width": 2048
+                  },
+                  "metallicRoughness": null,
+                  "normal": null,
+                  "occlusion": null
+                }
+              }
+            ],
+            "meshCount": 1,
+            "nonTrianglePrimitiveCount": 0,
+            "primitiveCount": 1,
+            "primitiveWithoutMaterialCount": 0,
+            "skinCompatibilityHash": "ef0aa3a9641c869de2daa7b31065a535ca862b94bbbeebf6d1f085f7ba159c32",
+            "skinSemanticCompatibilityHash": "92d77e5e695d783e4e0b0b3cda2bf7e63686a43e24705d624d8df8c3913b476a",
+            "skinCount": 1,
+            "skinJointCounts": [
+              24
+            ],
+            "skinnedMeshNodeCount": 1,
+            "skinnedPrimitiveCount": 1,
+            "textureCount": 2,
+            "triangleCount": 3141,
+            "trianglePrimitiveCount": 1
+          },
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -4300,7 +5802,7 @@
           "animations": [
             {
               "channelCount": 72,
-              "jointChannelCount": 72,
+              "jointChannelCount": 0,
               "name": "Armature|walking_man|baselayer",
               "samplerCount": 72,
               "targetNodeNames": [
@@ -4337,112 +5839,38 @@
             }
           ],
           "assetVersion": "2.0",
-          "byteLength": 7015532,
-          "contentHash": "638c4c6f2116600b36cecaa491516a0edfce422eed0ca998aeea42b96fad74f7",
+          "byteLength": 35544,
+          "contentHash": "e36f5712e2053546c4ba989df4920c2087b7b4b96f10cf09803451e4452f992f",
           "extensionsRequired": [],
-          "extensionsUsed": [
-            "KHR_materials_ior",
-            "KHR_materials_specular"
-          ],
+          "extensionsUsed": [],
           "glbVersion": 2,
-          "imageCount": 1,
-          "images": [
-            {
-              "basisMode": null,
-              "byteLength": 6794316,
-              "embedded": true,
-              "hasFullMipChain": null,
-              "height": 2048,
-              "index": 0,
-              "levelCount": null,
-              "mimeType": "image/png",
-              "name": "texture_0",
-              "supercompressionScheme": null,
-              "uncompressedRgbaMipByteLength": null,
-              "vkFormat": null,
-              "width": 2048
-            }
-          ],
-          "materialCount": 1,
-          "materials": [
-            {
-              "index": 0,
-              "name": "Material_1",
-              "textureSlots": {
-                "baseColor": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 1,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "emissive": {
-                  "basisMode": null,
-                  "fallbackImageIndex": null,
-                  "fallbackMimeType": null,
-                  "hasRasterFallback": false,
-                  "hasFullMipChain": null,
-                  "height": 2048,
-                  "imageIndex": 0,
-                  "ktx2ExtensionSource": false,
-                  "levelCount": null,
-                  "mimeType": "image/png",
-                  "supercompressionScheme": null,
-                  "sourceImageIndex": 0,
-                  "texCoord": 0,
-                  "textureIndex": 0,
-                  "uncompressedRgbaMipByteLength": null,
-                  "width": 2048
-                },
-                "metallicRoughness": null,
-                "normal": null,
-                "occlusion": null
-              }
-            }
-          ],
-          "meshCount": 1,
+          "imageCount": 0,
+          "images": [],
+          "materialCount": 0,
+          "materials": [],
+          "meshCount": 0,
           "nonTrianglePrimitiveCount": 0,
-          "primitiveCount": 1,
+          "primitiveCount": 0,
           "primitiveWithoutMaterialCount": 0,
-          "skinCompatibilityHash": "fd4603bcb8d3bda1aad51d31e76f6a67b1fbf7a6e65cfe8b80164badb57f1f00",
-          "skinSemanticCompatibilityHash": "f5ecb7310feb244ce0dc1d6b8e803c8b6de922ad514ee2e0761f8f940f2461af",
-          "skinCount": 1,
-          "skinJointCounts": [
-            24
-          ],
-          "skinnedMeshNodeCount": 1,
-          "skinnedPrimitiveCount": 1,
-          "textureCount": 2,
-          "triangleCount": 3102,
-          "trianglePrimitiveCount": 1,
+          "skinCompatibilityHash": null,
+          "skinSemanticCompatibilityHash": null,
+          "skinCount": 0,
+          "skinJointCounts": [],
+          "skinnedMeshNodeCount": 0,
+          "skinnedPrimitiveCount": 0,
+          "textureCount": 0,
+          "triangleCount": 0,
+          "trianglePrimitiveCount": 0,
           "textureContract": {
             "accepted": true,
-            "allImagesAtRequiredSize": true,
-            "allMaterialsSatisfyRequiredSlots": true,
-            "distinctRequiredImageSources": true,
-            "fullPbrSlotsPresent": false,
-            "profile": "base-color-2048",
-            "requiredMaterialTextureSlots": [
-              "baseColor"
-            ]
+            "profile": "animation-only"
           }
         }
       },
       "taskIds": {
-        "preview": "01a01ba4-263e-7899-aee3-c4e3952983f9",
-        "refine": "01a01ba4-5c2d-77a3-b1a3-5061010f5aab",
-        "rig": "01a01ba5-afae-78ec-950e-7b187237326c"
+        "preview": "01a0606c-0372-7638-a7f6-0a0ee317a478",
+        "refine": "01a0606c-3a64-76b7-bf12-25c4d0c164f0",
+        "rig": "01a0606d-da42-7551-9aa0-16713194d282"
       }
     },
     "island-ranger": {
@@ -4466,6 +5894,7 @@
             "recordedSha256": "c044b098299dbd57d2b414816b728c9fa820e6451762db476b0cebaac57e4ec9"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -4619,6 +6048,7 @@
             "recordedSha256": "0269c29f0e3a00fe1ca38d265245263f82ea5ccd2039778726aa76192d76a75c"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -4772,6 +6202,7 @@
             "recordedSha256": "c4e2f84376fb3af8b0f24d92e454246420f58aa39d4237509db56771e326b7a5"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/island-ranger/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -4946,6 +6377,7 @@
             "recordedSha256": "bdefb7b7983a7404f34cc6c4e423516f73f4f91b243d34759d4ff306ed648748"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -5099,6 +6531,7 @@
             "recordedSha256": "b25f2ac249390dbf7aa7b6e79ede41dea6235b3d8d7ec5ba2620956d94790690"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -5252,6 +6685,7 @@
             "recordedSha256": "1f2ec4b4eeadddd00e35fab7c154b8d4d57953f057f69af9ebd83fad917554b4"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/resort-clerk/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -5426,6 +6860,7 @@
             "recordedSha256": "1f5c5d7b6cb9875dc6340136b8ef44dfcf2b0ecee635c8b1825b3fc7148d196c"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/rigged.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -5579,6 +7014,7 @@
             "recordedSha256": "7c56056e2472038cdc71d831180fdc501a9d69d5b2c7817b53754b60a597521d"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/run.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -5732,6 +7168,7 @@
             "recordedSha256": "17b3e8744fa16f1866e1d9179842cca39a7383d7e281be6e2326ab3ef8cd30d1"
           },
           "canonicalPath": "/landrush-lab/zombie-escape/assets/zombies/old-sailor/walk.glb",
+          "sourceInspection": null,
           "semanticContract": null,
           "animationCount": 1,
           "animationNames": [
@@ -5920,6 +7357,17 @@
         "requiredMaterialTextureSlots": [
           "baseColor"
         ]
+      },
+      "zombieDedicatedRuntime": {
+        "animationProfile": "animation-only",
+        "riggedProfile": "ktx2-768-mipmapped",
+        "requiredImageDimensions": [
+          768,
+          768
+        ],
+        "requiredMaterialTextureSlots": [
+          "baseColor"
+        ]
       }
     },
     "triangles": {
@@ -5933,13 +7381,15 @@
     "zombies": 10
   },
   "failures": [],
-  "generatedAt": "2026-08-26T16:23:09.991Z",
+  "generatedAt": "2026-09-02T04:46:48.564Z",
   "pass": true,
   "provenance": {
     "stateCatalogDifferences": []
   },
   "runtimeCatalogChecks": {
+    "ambientRuntimeBodies": 8,
     "ambientNpcSources": 10,
+    "dedicatedRuntimeBodies": 2,
     "mappedZombies": 10,
     "sourceNpcBijection": true,
     "zombieEntries": 10

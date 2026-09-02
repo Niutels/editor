@@ -257,6 +257,15 @@ export function isZombieEscapeZombieSlotExternallyPresented(
 export type ZombieEscapeAuthoredVariantSlotBuckets =
   readonly ZombieEscapeAuthoredInstanceSelection[]
 
+export function reserveZombieEscapeSpecialVariantPresentationCapacity(
+  capacity: number,
+  variantIndex: number,
+) {
+  const bodyClass = ZOMBIE_ESCAPE_ZOMBIE_CATALOG[variantIndex]?.bodyClass
+  const minimumCapacity = bodyClass === 'heavy' || bodyClass === 'brute' ? 1 : 0
+  return Math.max(minimumCapacity, capacity)
+}
+
 export function createZombieEscapeAuthoredVariantSlotBuckets(
   variantByPoolSlot: Uint8Array,
   variantCount: number,
@@ -279,7 +288,10 @@ export function createZombieEscapeAuthoredVariantSlotBuckets(
   return Array.from({ length: variantCount }, (_, variantIndex) => ({
     count: 0,
     slots: new Uint16Array(
-      countZombieEscapeAuthoredVariantCapacity(variantByPoolSlot, variantIndex),
+      reserveZombieEscapeSpecialVariantPresentationCapacity(
+        countZombieEscapeAuthoredVariantCapacity(variantByPoolSlot, variantIndex),
+        variantIndex,
+      ),
     ),
   }))
 }
@@ -1168,8 +1180,11 @@ function PreparedGeneratedZombieVariant({
   const targetPoolSize = useMemo(
     () =>
       detailedZombies
-        ? resolveZombieEscapeDetailedRootPoolSize(
-            simulationRef.current.variantByPoolSlot,
+        ? reserveZombieEscapeSpecialVariantPresentationCapacity(
+            resolveZombieEscapeDetailedRootPoolSize(
+              simulationRef.current.variantByPoolSlot,
+              variantIndex,
+            ),
             variantIndex,
           )
         : 0,
@@ -1195,8 +1210,11 @@ function PreparedGeneratedZombieVariant({
   const deathClip = useMemo(() => createZombieEscapeDeathClip(riggedScene), [riggedScene])
   const authoredInstanceCapacity = useMemo(
     () =>
-      countZombieEscapeAuthoredVariantCapacity(
-        simulationRef.current.variantByPoolSlot,
+      reserveZombieEscapeSpecialVariantPresentationCapacity(
+        countZombieEscapeAuthoredVariantCapacity(
+          simulationRef.current.variantByPoolSlot,
+          variantIndex,
+        ),
         variantIndex,
       ),
     [simulationRef, variantIndex],
