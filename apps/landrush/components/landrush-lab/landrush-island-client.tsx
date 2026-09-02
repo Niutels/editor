@@ -298,6 +298,7 @@ import {
   reconcileLandrushIslandAmbientLoadReadiness,
 } from './landrush-island-ambient-load-queue'
 import {
+  isLandrushIslandRobotScreenRevealCameraOwner,
   type LandrushIslandCameraOwner,
   type LandrushIslandViewMode,
   resolveLandrushIslandCameraOwner,
@@ -11112,7 +11113,9 @@ function LandrushIslandPlayerLayer({
         structureGroundY={surface.grassSurfaceElevation}
         visualRootRef={localRobotVisualRootRef}
         visible={
-          robotScreenRevealEnabled && !zombieEscapeEnabled && cameraOwner === 'player' && !fpvActive
+          robotScreenRevealEnabled &&
+          isLandrushIslandRobotScreenRevealCameraOwner(cameraOwner) &&
+          !fpvActive
         }
       />
       <LandrushIslandMapPlayerMarker

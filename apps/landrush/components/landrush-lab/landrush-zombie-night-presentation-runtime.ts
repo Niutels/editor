@@ -13,6 +13,7 @@ import type {
 import {
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_CONTRIBUTION_INTENSITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_OPACITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
 } from './landrush-zombie-night-street-lightpost'
 
@@ -21,6 +22,7 @@ export const LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT = 0.08
 export type LandrushZombieNightBeaconRuntime = {
   coreMaterial: MeshBasicMaterial | null
   fixtureMaterials: readonly MeshStandardMaterial[]
+  groundPoolMaterial: MeshBasicMaterial | null
   innerGlowMaterial: MeshBasicMaterial | null
   lastContributionOnly: boolean | null
   lastEnvelope: number
@@ -71,6 +73,11 @@ export function updateLandrushZombieNightBeaconRuntime({
     for (const material of runtime.fixtureMaterials) {
       material.emissiveIntensity =
         envelope * LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY
+    }
+    if (runtime.groundPoolMaterial) {
+      runtime.groundPoolMaterial.opacity = glowTreatment
+        ? envelope * LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_OPACITY
+        : 0
     }
     if (runtime.coreMaterial) runtime.coreMaterial.opacity = envelope * 0.98
     if (runtime.innerGlowMaterial) {

@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import {
   BoxGeometry,
   Group,
+  type InstancedMesh,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  NoColorSpace,
   type SpotLight,
 } from 'three'
 import { color } from 'three/tsl'
@@ -163,7 +165,7 @@ describe('Landrush zombie night material preparation', () => {
     const meshes = representative.root.children.filter((child) => (child as Mesh).isMesh === true)
 
     expect(spotLights).toHaveLength(0)
-    expect(meshes).toHaveLength(4)
+    expect(meshes).toHaveLength(5)
     const fixtureMaterial = (meshes[0] as Mesh).material as MeshStandardMaterial
     expect(fixtureMaterial.isMeshStandardMaterial).toBe(true)
     expect(fixtureMaterial.transparent).toBe(false)
@@ -174,6 +176,15 @@ describe('Landrush zombie night material preparation', () => {
     expect(fixtureMaterial.normalMap).not.toBeNull()
     expect(fixtureMaterial.roughnessMap).not.toBeNull()
     expect(fixtureMaterial.emissiveMap).not.toBeNull()
+    const groundPoolMaterial = (meshes[4] as Mesh).material as MeshBasicMaterial
+    expect((meshes[4] as InstancedMesh).isInstancedMesh).toBe(true)
+    expect((meshes[4] as InstancedMesh).instanceColor).not.toBeNull()
+    expect(groundPoolMaterial.isMeshBasicMaterial).toBe(true)
+    expect(groundPoolMaterial.map).not.toBeNull()
+    expect(groundPoolMaterial.map?.colorSpace).toBe(NoColorSpace)
+    expect(groundPoolMaterial.map?.name).toBe('landrush-zombie-night-ground-pool')
+    expect(groundPoolMaterial.transparent).toBe(true)
+    expect(groundPoolMaterial.depthWrite).toBe(false)
     representative.dispose()
     representative.dispose()
     expect(representative.root.children).toHaveLength(0)

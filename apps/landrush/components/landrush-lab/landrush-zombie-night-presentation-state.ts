@@ -107,7 +107,7 @@ export const LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS: Readonly<
   low: 3,
 }
 
-export const LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET = 3
+export const LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET = 4
 
 export const LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAYOUT = Object.freeze({
   baseAlongRoadHalfWidthMeters:
@@ -251,6 +251,20 @@ export function resolveLandrushZombieNightSunsetAmount(elapsedSeconds: number) {
 
 export function resolveLandrushZombieNightVisualAmount(amount: number, sunsetAmount: number) {
   return Math.max(clamp01(amount), clamp01(sunsetAmount))
+}
+
+export function resolveLandrushZombieNightBeaconTransitionAmount(
+  visualAmount: number,
+  elapsedSeconds: number,
+) {
+  return Math.max(
+    clamp01(visualAmount),
+    smoothstepBetween(
+      0,
+      LANDRUSH_ZOMBIE_NIGHT_SUNSET_RISE_SECONDS,
+      normalizeLandrushZombieNightElapsedSeconds(elapsedSeconds),
+    ),
+  )
 }
 
 export function shouldApplyLandrushZombieNightCpuPresentation(

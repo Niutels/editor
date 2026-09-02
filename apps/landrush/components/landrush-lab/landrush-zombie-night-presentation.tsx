@@ -32,6 +32,7 @@ import {
   parseLandrushZombieNightDebugQuery,
   resolveLandrushZombieNightBeaconFrameMode,
   resolveLandrushZombieNightBeaconPulse,
+  resolveLandrushZombieNightBeaconTransitionAmount,
   resolveLandrushZombieNightSunsetAmount,
   resolveLandrushZombieNightTargetExposure,
   resolveLandrushZombieNightTimelineAmount,
@@ -284,11 +285,12 @@ export function LandrushZombieNightPresentation({
     const target = settings.fixedAmount ?? (active ? 1 : 0)
     let amount = target
     let sunsetAmount = 0
+    let transitionElapsedSeconds: number | null = null
     if (settings.fixedAmount === null) {
       if (active) {
         localNightStartedAtSecondsRef.current ??= elapsedSeconds
         const canonicalElapsedSeconds = readCanonicalElapsedSeconds()
-        const transitionElapsedSeconds =
+        transitionElapsedSeconds =
           typeof canonicalElapsedSeconds === 'number' && Number.isFinite(canonicalElapsedSeconds)
             ? Math.max(0, canonicalElapsedSeconds)
             : Math.max(0, elapsedSeconds - localNightStartedAtSecondsRef.current)
@@ -302,6 +304,10 @@ export function LandrushZombieNightPresentation({
     }
     amountRef.current = amount
     const visualAmount = resolveLandrushZombieNightVisualAmount(amount, sunsetAmount)
+    const beaconAmount =
+      transitionElapsedSeconds === null
+        ? amount
+        : resolveLandrushZombieNightBeaconTransitionAmount(visualAmount, transitionElapsedSeconds)
     const treatmentAmount = settings.mode === 'light-contribution' ? 1 : amount
     const nightExposure = resolveLandrushZombieNightTargetExposure({
       mode: settings.mode,
@@ -448,11 +454,11 @@ export function LandrushZombieNightPresentation({
 
     const beaconFrameMode = resolveLandrushZombieNightBeaconFrameMode(
       beaconsActiveRef.current,
-      amount,
+      beaconAmount,
     )
     if (beaconFrameMode !== 'idle') {
       updateNightBeacons({
-        amount,
+        amount: beaconAmount,
         contributionOnly: settings.mode === 'light-contribution',
         elapsedSeconds: clock.elapsedTime,
         glowRuntime,
@@ -461,7 +467,7 @@ export function LandrushZombieNightPresentation({
         lightRuntimes,
       })
     }
-    const glowsVisible = amount > LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT
+    const glowsVisible = beaconAmount > LANDRUSH_ZOMBIE_NIGHT_BEACON_CONTRIBUTION_START_AMOUNT
     const glowGroup = glowGroupRef.current
     if (glowGroup && glowGroup.visible !== glowsVisible) glowGroup.visible = glowsVisible
     beaconsActiveRef.current = beaconFrameMode === 'animate'
@@ -636,6 +642,7 @@ function createNightBeaconRuntime(): LandrushZombieNightBeaconRuntime {
   return {
     coreMaterial: null,
     fixtureMaterials: [],
+    groundPoolMaterial: null,
     innerGlowMaterial: null,
     lastContributionOnly: null,
     lastEnvelope: Number.NaN,

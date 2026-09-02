@@ -15,13 +15,18 @@ import {
   StaticDrawUsage,
   Vector3,
 } from 'three'
+import { createLandrushZombieNightGroundPoolResources } from './landrush-zombie-night-ground-pool'
 import type { LandrushZombieNightBeaconRuntime } from './landrush-zombie-night-presentation-runtime'
 import {
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
   LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET,
   type LandrushZombieNightBeaconPlacement,
 } from './landrush-zombie-night-presentation-state'
-import { LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION } from './landrush-zombie-night-street-lightpost'
+import {
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
+} from './landrush-zombie-night-street-lightpost'
 
 const LANDRUSH_ZOMBIE_NIGHT_GLOW_RADII = Object.freeze({
   core: 0.16,
@@ -50,7 +55,12 @@ export function LandrushZombieNightBeaconGlowInstances({
     () => createGlowInstanceMatrices(placements, LANDRUSH_ZOMBIE_NIGHT_GLOW_RADII.outer),
     [placements],
   )
+  const groundPoolMatrices = useMemo(
+    () => createLandrushZombieNightGroundPoolInstanceMatrices(placements),
+    [placements],
+  )
   const coreRef = useRef<InstancedMesh>(null)
+  const groundPoolRef = useRef<InstancedMesh>(null)
   const innerRef = useRef<InstancedMesh>(null)
   const outerRef = useRef<InstancedMesh>(null)
 
@@ -58,15 +68,20 @@ export function LandrushZombieNightBeaconGlowInstances({
     populateGlowInstances(coreRef.current, coreMatrices, colors)
     populateGlowInstances(innerRef.current, innerMatrices, colors)
     populateGlowInstances(outerRef.current, outerMatrices, colors)
-  }, [colors, coreMatrices, innerMatrices, outerMatrices])
+    populateGlowInstances(groundPoolRef.current, groundPoolMatrices, colors)
+  }, [colors, coreMatrices, groundPoolMatrices, innerMatrices, outerMatrices])
 
   useLayoutEffect(() => {
     runtime.coreMaterial = resources.coreMaterial
+    runtime.groundPoolMaterial = resources.groundPoolMaterial
     runtime.innerGlowMaterial = resources.innerMaterial
     runtime.outerGlowMaterial = resources.outerMaterial
     runtime.lastEnvelope = Number.NaN
     return () => {
       if (runtime.coreMaterial === resources.coreMaterial) runtime.coreMaterial = null
+      if (runtime.groundPoolMaterial === resources.groundPoolMaterial) {
+        runtime.groundPoolMaterial = null
+      }
       if (runtime.innerGlowMaterial === resources.innerMaterial) runtime.innerGlowMaterial = null
       if (runtime.outerGlowMaterial === resources.outerMaterial) runtime.outerGlowMaterial = null
     }
@@ -76,6 +91,8 @@ export function LandrushZombieNightBeaconGlowInstances({
     () => () => {
       resources.geometry.dispose()
       resources.coreMaterial.dispose()
+      resources.groundPoolMaterial.dispose()
+      resources.groundPoolTexture.dispose()
       resources.innerMaterial.dispose()
       resources.outerMaterial.dispose()
     },
@@ -93,6 +110,15 @@ export function LandrushZombieNightBeaconGlowInstances({
 
   return (
     <>
+      <instancedMesh
+        args={[resources.geometry, resources.groundPoolMaterial, placements.length]}
+        dispose={null}
+        frustumCulled={false}
+        name="landrush-zombie-night-beacon-ground-pools"
+        ref={groundPoolRef}
+        renderOrder={28}
+        userData={userData}
+      />
       <instancedMesh
         args={[resources.geometry, resources.coreMaterial, placements.length]}
         dispose={null}
@@ -127,9 +153,17 @@ export function LandrushZombieNightBeaconGlowInstances({
 function createGlowResources() {
   const geometry = new CircleGeometry(1, 16)
   const coreMaterial = createGlowMaterial(false)
+  const groundPoolResources = createLandrushZombieNightGroundPoolResources()
   const innerMaterial = createGlowMaterial(true)
   const outerMaterial = createGlowMaterial(true)
-  return { coreMaterial, geometry, innerMaterial, outerMaterial }
+  return {
+    coreMaterial,
+    geometry,
+    groundPoolMaterial: groundPoolResources.material,
+    groundPoolTexture: groundPoolResources.texture,
+    innerMaterial,
+    outerMaterial,
+  }
 }
 
 function createGlowMaterial(additive: boolean) {
@@ -162,6 +196,29 @@ function createGlowInstanceMatrices(
         new Vector3(1, 1, 1),
       )
       .multiply(lampMatrix),
+  )
+}
+
+export function createLandrushZombieNightGroundPoolInstanceMatrices(
+  placements: readonly LandrushZombieNightBeaconPlacement[],
+) {
+  const targetMatrix = new Matrix4().compose(
+    new Vector3(...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION),
+    new Quaternion().setFromEuler(new Euler(Math.PI / 2, 0, 0)),
+    new Vector3(
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS,
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS,
+      1,
+    ),
+  )
+  return placements.map((placement) =>
+    new Matrix4()
+      .compose(
+        new Vector3(...placement.position),
+        new Quaternion().setFromEuler(new Euler(0, placement.rotationY, 0)),
+        new Vector3(1, 1, 1),
+      )
+      .multiply(targetMatrix),
   )
 }
 

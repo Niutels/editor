@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  isLandrushIslandRobotScreenRevealCameraOwner,
   type LandrushIslandCameraOwner,
   resolveLandrushIslandCameraOwner,
 } from './landrush-island-camera-owner'
@@ -29,5 +30,14 @@ describe('Landrush island camera ownership', () => {
     expect(resolveLandrushIslandCameraOwner({ viewMode, zombieEscapeNightActive: true })).toBe(
       'zombie',
     )
+  })
+
+  test.each([
+    ['player', true],
+    ['zombie', true],
+    ['build', false],
+    ['map', false],
+  ] as const)('applies robot screen reveal policy to %s ownership', (owner, expected) => {
+    expect(isLandrushIslandRobotScreenRevealCameraOwner(owner)).toBe(expected)
   })
 })

@@ -20,6 +20,7 @@ import {
 } from './landrush-zombie-night-presentation-runtime'
 import {
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_EMISSIVE_INTENSITY,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_OPACITY,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY,
 } from './landrush-zombie-night-street-lightpost'
 
@@ -48,10 +49,12 @@ describe('Landrush zombie night scene bindings', () => {
     })
     const innerGlowMaterial = coreMaterial.clone()
     const outerGlowMaterial = coreMaterial.clone()
+    const groundPoolMaterial = coreMaterial.clone()
     const light = new SpotLight('#ffc36e', 0, 11.5, 0.92, 0.68, 2)
     const runtime: LandrushZombieNightBeaconRuntime = {
       coreMaterial,
       fixtureMaterials,
+      groundPoolMaterial,
       innerGlowMaterial,
       lastContributionOnly: null,
       lastEnvelope: Number.NaN,
@@ -62,6 +65,7 @@ describe('Landrush zombie night scene bindings', () => {
     const materialVersions = [
       ...fixtureMaterials.map((material) => material.version),
       coreMaterial.version,
+      groundPoolMaterial.version,
       innerGlowMaterial.version,
       outerGlowMaterial.version,
     ]
@@ -80,17 +84,19 @@ describe('Landrush zombie night scene bindings', () => {
       ),
     ).toBe(true)
     expect(coreMaterial.opacity).toBe(0)
+    expect(groundPoolMaterial.opacity).toBe(0)
     expect(innerGlowMaterial.opacity).toBe(0)
     expect(outerGlowMaterial.opacity).toBe(0)
     expect(light.intensity).toBe(0)
     expect(
-      [coreMaterial, innerGlowMaterial, outerGlowMaterial].every(
+      [coreMaterial, groundPoolMaterial, innerGlowMaterial, outerGlowMaterial].every(
         (material) => material.transparent && material.depthWrite === false,
       ),
     ).toBe(true)
     expect([
       ...fixtureMaterials.map((material) => material.version),
       coreMaterial.version,
+      groundPoolMaterial.version,
       innerGlowMaterial.version,
       outerGlowMaterial.version,
     ]).toEqual(materialVersions)
@@ -113,9 +119,11 @@ describe('Landrush zombie night scene bindings', () => {
     expect(fixtureInstanceSource).toContain('sourceMeshes.length !== 1')
     expect(fixtureInstanceSource).toContain('dispose={null}')
     expect(fixtureInstanceSource).not.toContain('.material.clone()')
-    expect(glowInstanceSource.match(/<instancedMesh/g)).toHaveLength(3)
+    expect(glowInstanceSource.match(/<instancedMesh/g)).toHaveLength(4)
     expect(glowInstanceSource).toContain('LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET')
     expect(glowInstanceSource).toContain('const geometry = new CircleGeometry(1, 16)')
+    expect(glowInstanceSource).toContain('name="landrush-zombie-night-beacon-ground-pools"')
+    expect(glowInstanceSource).toContain('createLandrushZombieNightGroundPoolInstanceMatrices')
     expect(glowInstanceSource).toContain('additive ? AdditiveBlending : NormalBlending')
     expect(glowInstanceSource).not.toContain('blending: additive ? AdditiveBlending : undefined')
     expect(presentationSource).toContain('<group ref={glowGroupRef} visible={false}>')
@@ -147,6 +155,9 @@ describe('Landrush zombie night scene bindings', () => {
       ),
     ).toBe(true)
     expect(coreMaterial.opacity).toBeCloseTo(0.98)
+    expect(groundPoolMaterial.opacity).toBeCloseTo(
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_OPACITY,
+    )
     expect(innerGlowMaterial.opacity).toBeCloseTo(0.24)
     expect(outerGlowMaterial.opacity).toBeCloseTo(0.075)
     expect(light.intensity).toBe(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_INTENSITY)
@@ -161,7 +172,7 @@ describe('Landrush zombie night scene bindings', () => {
     expect(fixtureMaterials.every((material) => material.opacity === 1)).toBe(true)
     expect(fixtureMaterials.every((material) => material.emissiveIntensity === 0)).toBe(true)
     expect(
-      [coreMaterial, innerGlowMaterial, outerGlowMaterial].every(
+      [coreMaterial, groundPoolMaterial, innerGlowMaterial, outerGlowMaterial].every(
         (material) => material.opacity === 0,
       ),
     ).toBe(true)
@@ -169,12 +180,14 @@ describe('Landrush zombie night scene bindings', () => {
     expect([
       ...fixtureMaterials.map((material) => material.version),
       coreMaterial.version,
+      groundPoolMaterial.version,
       innerGlowMaterial.version,
       outerGlowMaterial.version,
     ]).toEqual(materialVersions)
 
     for (const material of fixtureMaterials) material.dispose()
     coreMaterial.dispose()
+    groundPoolMaterial.dispose()
     innerGlowMaterial.dispose()
     outerGlowMaterial.dispose()
     light.dispose()

@@ -23,12 +23,13 @@ function createReconcileWorkspace() {
 }
 
 describe('Landrush robot reveal semantic ownership', () => {
-  test('limits reveal material topology to third-person player day mode', () => {
+  test('wires reveal material topology to camera ownership and FPV state', () => {
     const source = readFileSync(new URL('./landrush-island-client.tsx', import.meta.url), 'utf8')
 
     expect(source).toMatch(
-      /visible=\{\s*robotScreenRevealEnabled\s*&&\s*!zombieEscapeEnabled\s*&&\s*cameraOwner === 'player'\s*&&\s*!fpvActive\s*\}/,
+      /visible=\{\s*robotScreenRevealEnabled\s*&&\s*isLandrushIslandRobotScreenRevealCameraOwner\(cameraOwner\)\s*&&\s*!fpvActive\s*\}/,
     )
+    expect(source).not.toMatch(/robotScreenRevealEnabled\s*&&\s*!zombieEscapeEnabled/)
   })
 
   test('requires the current semantic root identity while retaining attached visual roots', () => {

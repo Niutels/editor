@@ -2,6 +2,10 @@ export type LandrushIslandViewMode = 'build' | 'map' | 'player'
 
 export type LandrushIslandCameraOwner = LandrushIslandViewMode | 'zombie'
 
+export function isLandrushIslandRobotScreenRevealCameraOwner(owner: LandrushIslandCameraOwner) {
+  return owner === 'player' || owner === 'zombie'
+}
+
 export function resolveLandrushIslandCameraOwner({
   viewMode,
   zombieEscapeNightActive,

@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import { Vector3 } from 'three'
 import type { LandrushRoadSegment } from '@/components/landrush/types'
+import { createLandrushZombieNightGroundPoolInstanceMatrices } from './landrush-zombie-night-beacon-glow-instances'
+import { resolveLandrushZombieNightGroundPoolAlpha } from './landrush-zombie-night-ground-pool'
 import {
   advanceLandrushZombieNightAmount,
   createLandrushZombieNightBeaconPlacements,
@@ -15,6 +18,7 @@ import {
   parseLandrushZombieNightDebugQuery,
   resolveLandrushZombieNightBeaconFrameMode,
   resolveLandrushZombieNightBeaconPulse,
+  resolveLandrushZombieNightBeaconTransitionAmount,
   resolveLandrushZombieNightSunsetAmount,
   resolveLandrushZombieNightSurfaceRole,
   resolveLandrushZombieNightTargetExposure,
@@ -29,7 +33,12 @@ import {
   createLandrushZombieNightStreetLightpostBaseFootprint,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_ALONG_ROAD_HALF_WIDTH_METERS,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_BASE_CROSS_ROAD_HALF_WIDTH_METERS,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION,
   LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_MODEL_SCALE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE,
+  LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
   resolveLandrushZombieNightStreetLightpostYaw,
 } from './landrush-zombie-night-street-lightpost'
 import {
@@ -240,6 +249,25 @@ describe('Landrush zombie night presentation state', () => {
     ).toBe(firstSecondSunsetAmount)
   })
 
+  test('turns street lights on during early sunset without dimming after the sunset peak', () => {
+    const at = (elapsedSeconds: number) =>
+      resolveLandrushZombieNightBeaconTransitionAmount(
+        resolveLandrushZombieNightVisualAmount(
+          resolveLandrushZombieNightTimelineAmount(elapsedSeconds),
+          resolveLandrushZombieNightSunsetAmount(elapsedSeconds),
+        ),
+        elapsedSeconds,
+      )
+
+    expect(at(0)).toBe(0)
+    expect(at(5)).toBeCloseTo(resolveLandrushZombieNightSunsetAmount(5), 12)
+    expect(at(5)).toBeGreaterThan(0.08)
+    expect(at(18)).toBe(1)
+    expect(at(44)).toBe(1)
+    expect(at(60)).toBe(1)
+    expect(at(90)).toBe(1)
+  })
+
   test('bounds CPU presentation writes while still applying invalidations and exact endpoints', () => {
     expect(shouldApplyLandrushZombieNightCpuPresentation(Number.NaN, 0.2, 1, 1, 2, false)).toBe(
       true,
@@ -325,13 +353,67 @@ describe('Landrush zombie night presentation state', () => {
     expect(LANDRUSH_ZOMBIE_NIGHT_ACTIVE_LIGHT_COUNTS.balanced).toBeLessThan(
       LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS.balanced,
     )
-    expect(LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET).toBe(3)
+    expect(LANDRUSH_ZOMBIE_NIGHT_GLOW_DRAW_CALL_BUDGET).toBe(4)
   })
 
   test('aims each overhanging lamp arm from its curb side back toward the road', () => {
     expect(resolveLandrushZombieNightStreetLightpostYaw(1, 0, -1)).toBeCloseTo(0, 12)
     expect(Math.abs(resolveLandrushZombieNightStreetLightpostYaw(1, 0, 1))).toBeCloseTo(Math.PI, 12)
     expect(resolveLandrushZombieNightStreetLightpostYaw(0, 1, 1)).toBeCloseTo(Math.PI / 2, 12)
+  })
+
+  test('aims the street-light cone through the ground with a wide visible footprint', () => {
+    const verticalDrop =
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION[1] -
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION[1]
+    const groundRadius = Math.tan(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_ANGLE) * verticalDrop
+    const targetDistance = Math.hypot(verticalDrop, groundRadius)
+
+    expect(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION[0]).toBe(
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION[0],
+    )
+    expect(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION[2]).toBe(
+      LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_LAMP_POSITION[2],
+    )
+    expect(verticalDrop).toBeCloseTo(3.12, 12)
+    expect(groundRadius).toBeGreaterThan(4)
+    expect(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS).toBeCloseTo(groundRadius, 12)
+    expect(targetDistance).toBeLessThan(LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_SPOT_DISTANCE)
+  })
+
+  test('gives every visible street light one target-aligned pool with a soft radial edge', () => {
+    const placements = createLandrushZombieNightBeaconPlacements({
+      quality: 'balanced',
+      roadPlan: ROAD_PLAN,
+    })
+    const matrices = createLandrushZombieNightGroundPoolInstanceMatrices(placements)
+    const up = new Vector3(0, 1, 0)
+
+    expect(matrices).toHaveLength(placements.length)
+    for (let index = 0; index < placements.length; index += 1) {
+      const placement = placements[index]!
+      const expectedPosition = new Vector3(
+        ...LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_TARGET_POSITION,
+      )
+        .applyAxisAngle(up, placement.rotationY)
+        .add(new Vector3(...placement.position))
+      const actualPosition = new Vector3().setFromMatrixPosition(matrices[index]!)
+      const actualScale = new Vector3().setFromMatrixScale(matrices[index]!)
+      expect(actualPosition.distanceTo(expectedPosition)).toBeLessThan(1e-10)
+      expect(actualScale.x).toBeCloseTo(
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS,
+        12,
+      )
+      expect(actualScale.y).toBeCloseTo(
+        LANDRUSH_ZOMBIE_NIGHT_STREET_LIGHTPOST_GROUND_POOL_RADIUS,
+        12,
+      )
+    }
+
+    expect(resolveLandrushZombieNightGroundPoolAlpha(0)).toBe(1)
+    expect(resolveLandrushZombieNightGroundPoolAlpha(0.5)).toBe(0.5)
+    expect(resolveLandrushZombieNightGroundPoolAlpha(0.9)).toBeLessThan(0.03)
+    expect(resolveLandrushZombieNightGroundPoolAlpha(1)).toBe(0)
   })
 
   test('maps the measured rectangular base through the rendered Three.js yaw', () => {

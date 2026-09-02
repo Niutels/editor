@@ -6,6 +6,7 @@ import {
   DataTexture,
   DoubleSide,
   Group,
+  InstancedMesh,
   type Material,
   Mesh,
   MeshBasicMaterial,
@@ -14,10 +15,12 @@ import {
   RGBAFormat,
   SpotLight,
   SRGBColorSpace,
+  StaticDrawUsage,
   type Texture,
 } from 'three'
 import { mix, color as tslColor, uniform } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
+import { createLandrushZombieNightGroundPoolResources } from './landrush-zombie-night-ground-pool'
 import {
   LANDRUSH_ZOMBIE_NIGHT_BEACON_COUNTS,
   type LandrushZombieNightSurfaceRole,
@@ -272,12 +275,20 @@ export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): 
   const metallicRoughnessMap = createLandrushZombieNightRepresentativeTexture([0, 146, 212, 255])
   const normalMap = createLandrushZombieNightRepresentativeTexture([128, 128, 255, 255])
   const emissiveMap = createLandrushZombieNightRepresentativeTexture([255, 208, 116, 255], true)
-  const textures = [baseColorMap, metallicRoughnessMap, normalMap, emissiveMap]
+  const groundPoolResources = createLandrushZombieNightGroundPoolResources()
+  const textures = [
+    baseColorMap,
+    metallicRoughnessMap,
+    normalMap,
+    emissiveMap,
+    groundPoolResources.texture,
+  ]
   const geometries = [
     new CylinderGeometry(0.08, 0.12, 3.4, 8),
     new CircleGeometry(0.16, 16),
     new CircleGeometry(0.34, 16),
     new CircleGeometry(0.62, 16),
+    new CircleGeometry(1, 16),
   ]
   const materials = [
     new MeshStandardMaterial({
@@ -321,10 +332,16 @@ export function createLandrushZombieNightBeaconRenderReadinessRepresentative(): 
       toneMapped: false,
       transparent: true,
     }),
+    groundPoolResources.material,
   ]
-  for (let index = 0; index < geometries.length; index += 1) {
+  for (let index = 0; index < geometries.length - 1; index += 1) {
     root.add(new Mesh(geometries[index]!, materials[index]!))
   }
+  const groundPool = new InstancedMesh(geometries.at(-1)!, groundPoolResources.material, 1)
+  groundPool.setColorAt(0, new Color('#ffc36e'))
+  groundPool.instanceMatrix.setUsage(StaticDrawUsage)
+  groundPool.instanceColor?.setUsage(StaticDrawUsage)
+  root.add(groundPool)
   let disposed = false
   return {
     dispose() {
