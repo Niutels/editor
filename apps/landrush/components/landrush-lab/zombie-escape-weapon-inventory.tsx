@@ -33,7 +33,7 @@ export function ZombieEscapeWeaponInventoryRow({
       <div
         aria-current={active ? 'true' : undefined}
         aria-label={`${weapon.displayName}${active ? ', equipped' : ''}`}
-        className={`relative grid size-[clamp(4.125rem,16.5vw,4.875rem)] shrink-0 place-items-center overflow-hidden rounded-lg border shadow-lg ${
+        className={`relative grid size-[clamp(4.125rem,16.5vw,4.875rem)] shrink-0 place-items-center overflow-hidden rounded-lg border shadow-lg [@media(any-pointer:coarse)]:size-[clamp(3.09375rem,12.375vw,3.65625rem)] ${
           active
             ? 'border-cyan-100/90 bg-cyan-950/82 ring-2 ring-cyan-200/85 shadow-cyan-950/45'
             : 'border-white/20 bg-slate-950/72 shadow-slate-950/40'

@@ -2955,7 +2955,7 @@ function LandrushZombieEscapeHud({
         visible={touchControlsVisible}
       />
       <ZombieEscapeWeaponInventoryRow
-        className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] z-20"
+        className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] z-20 [@media(any-pointer:coarse)]:right-[calc(max(1rem,env(safe-area-inset-right))+clamp(4.2rem,15.4vw,5.6rem)+1rem)] [@media(any-pointer:coarse)]:left-[calc(max(1rem,env(safe-area-inset-left))+clamp(4.2rem,15.4vw,5.6rem)+1rem)] [@media(any-pointer:coarse)]:flex-wrap [@media(any-pointer:coarse)]:justify-center"
         weaponIndex={snapshot.weaponIndex}
         weaponInventoryMask={snapshot.weaponInventoryMask}
       />

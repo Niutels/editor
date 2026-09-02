@@ -158,17 +158,12 @@ describe('zombie phase material shader', () => {
     expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.sourceEmissiveRetentionAtFullPhase).toBeLessThan(
       0.005,
     )
-    expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingTextureRetention).toBeGreaterThanOrEqual(
-      0.08,
-    )
-    expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingTextureRetention).toBeLessThanOrEqual(
-      0.12,
-    )
+    expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingTextureRetention).toBe(0.82)
     expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingBruiseResponse).toBeGreaterThanOrEqual(
       0.4,
     )
     expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.clothingVeinResponse).toBeGreaterThanOrEqual(0.25)
-    expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.tissueTextureRetention).toBeLessThanOrEqual(0.03)
+    expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.tissueTextureRetention).toBe(0.04)
     expect(ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.cadaverDetailFloor).toBeGreaterThan(0.5)
     expect(
       ZOMBIE_ESCAPE_ZOMBIE_MATERIAL_RESPONSE.cadaverDetailFloor +

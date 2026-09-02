@@ -57,9 +57,16 @@ describe('Landrush zombie HUD visibility', () => {
       )?.[0] ?? ''
 
     expect(inventoryInvocation).not.toBe('')
+    expect(inventoryInvocation).toContain('bottom-[max(1rem,env(safe-area-inset-bottom))]')
+    expect(inventoryInvocation).toContain('left-[max(1rem,env(safe-area-inset-left))]')
     expect(inventoryInvocation).toContain(
-      'className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] z-20"',
+      '[@media(any-pointer:coarse)]:right-[calc(max(1rem,env(safe-area-inset-right))+clamp(4.2rem,15.4vw,5.6rem)+1rem)]',
     )
+    expect(inventoryInvocation).toContain(
+      '[@media(any-pointer:coarse)]:left-[calc(max(1rem,env(safe-area-inset-left))+clamp(4.2rem,15.4vw,5.6rem)+1rem)]',
+    )
+    expect(inventoryInvocation).toContain('[@media(any-pointer:coarse)]:flex-wrap')
+    expect(inventoryInvocation).toContain('[@media(any-pointer:coarse)]:justify-center')
     expect(inventoryInvocation).not.toContain('touchControlsVisible')
     expect(inventoryInvocation).not.toContain('bottom-[max(9rem')
   })

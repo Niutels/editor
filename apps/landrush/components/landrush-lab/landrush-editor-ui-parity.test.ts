@@ -860,15 +860,32 @@ describe('Landrush Pascal editor UI parity', () => {
     )
   })
 
-  test('keeps the compact multiplayer status visible across day and zombie chrome', () => {
+  test('keeps a top-right multiplayer LED that expands left across day and zombie chrome', () => {
     const statusPanel = readSource('multiplayer-status-panel.tsx')
 
     expect(statusPanel).toContain("import { createPortal } from 'react-dom'")
     expect(statusPanel).toContain('setPortalTarget(document.body)')
-    expect(statusPanel).toContain(
-      'fixed right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[120] flex min-h-7',
-    )
+    expect(statusPanel).toContain('const [expanded, setExpanded] = useState(false)')
+    expect(statusPanel).toContain('top-[max(0.75rem,env(safe-area-inset-top))]')
+    expect(statusPanel).toContain('right-[max(0.75rem,env(safe-area-inset-right))]')
+    expect(statusPanel).not.toContain('bottom-[max(0.75rem,env(safe-area-inset-bottom))]')
     expect(statusPanel).toContain('data-landrush-multiplayer-status')
+    expect(statusPanel).toContain('data-landrush-multiplayer-status-details')
+    expect(statusPanel).toContain('data-landrush-multiplayer-status-toggle')
+    expect(statusPanel).toContain('aria-hidden={!expanded}')
+    expect(statusPanel).toContain('aria-expanded={expanded}')
+    expect(statusPanel).toContain('inert={!expanded}')
+    expect(statusPanel).toContain('onClick={() => setExpanded((current) => !current)}')
+    expect(statusPanel).toContain('type="button"')
+    expect(statusPanel).toMatch(
+      /expanded\s*\?\s*['"][^'"]*opacity-100[^'"]*['"]\s*:\s*['"][^'"]*max-w-0[^'"]*opacity-0[^'"]*['"]/,
+    )
+    expect(statusPanel.indexOf('data-landrush-multiplayer-status-details')).toBeLessThan(
+      statusPanel.indexOf('data-landrush-multiplayer-status-toggle'),
+    )
+    expect(statusPanel.indexOf('data-landrush-multiplayer-status-toggle')).toBeLessThan(
+      statusPanel.lastIndexOf('compactStatusDotClass(status)'),
+    )
     expect(statusPanel).toContain('createPortal(panel, portalTarget)')
     expect(statusPanel).toContain('[latencyLabel, portalTarget]')
   })

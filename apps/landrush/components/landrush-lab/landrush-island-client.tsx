@@ -7531,7 +7531,7 @@ export function LandrushIslandClient({
             />
           ) : (
             <button
-              className="pointer-events-auto absolute top-5 right-5 hidden items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white md:inline-flex"
+              className="pointer-events-auto absolute top-14 right-5 hidden items-center gap-2 rounded-md border border-white/25 bg-slate-950/78 px-3 py-2 text-xs font-medium text-white/80 shadow-xl backdrop-blur transition hover:border-white/45 hover:text-white md:inline-flex"
               onClick={() => setShowTunePanel(true)}
               type="button"
             >
@@ -8022,7 +8022,7 @@ function LandrushIslandTunePanel({
   }
 
   return (
-    <section className="pointer-events-auto absolute right-5 top-5 max-h-[calc(100vh-2.5rem)] w-[min(390px,calc(100vw-2.5rem))] overflow-y-auto rounded-md border border-white/25 bg-slate-950/78 p-4 text-white shadow-xl backdrop-blur">
+    <section className="pointer-events-auto absolute right-5 top-14 max-h-[calc(100vh-4.75rem)] w-[min(390px,calc(100vw-2.5rem))] overflow-y-auto rounded-md border border-white/25 bg-slate-950/78 p-4 text-white shadow-xl backdrop-blur">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold tracking-wide">

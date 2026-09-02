@@ -36,7 +36,7 @@ describe('ZombieEscapeWeaponInventoryRow', () => {
     }
   })
 
-  test('keeps the row backgroundless while backing each square and clearly marking the active one', () => {
+  test('keeps the row backgroundless with 25% smaller coarse-pointer squares', () => {
     const markup = renderToStaticMarkup(
       <ZombieEscapeWeaponInventoryRow
         className="absolute bottom-safe left-safe"
@@ -57,6 +57,11 @@ describe('ZombieEscapeWeaponInventoryRow', () => {
     expect(slotTags.every((tag) => tag.includes('size-[clamp(4.125rem,16.5vw,4.875rem)]'))).toBe(
       true,
     )
+    expect(
+      slotTags.every((tag) =>
+        tag.includes('[@media(any-pointer:coarse)]:size-[clamp(3.09375rem,12.375vw,3.65625rem)]'),
+      ),
+    ).toBe(true)
     expect(markup).not.toContain('size-[clamp(2.75rem,11vw,3.25rem)]')
     expect(activeTag).toContain('aria-current="true"')
     expect(activeTag).toContain('data-active="true"')

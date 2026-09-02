@@ -29,6 +29,8 @@ type LandrushZombieEscapeTouchJoysticksProps = {
 
 const TOUCH_CONTROL_CLUSTER_BOTTOM =
   'bottom-[max(2.375rem,calc(env(safe-area-inset-bottom)+1.25rem))]'
+const TOUCH_CONTROL_INTERACTION_CLASS =
+  'touch-none select-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none]'
 
 export const LandrushZombieEscapeTouchJoysticks = memo(function LandrushZombieEscapeTouchJoysticks({
   inputRef,
@@ -59,7 +61,7 @@ export const LandrushZombieEscapeTouchJoysticks = memo(function LandrushZombieEs
   return (
     <div
       aria-label="Zombie Escape touch controls"
-      className="pointer-events-none absolute inset-0 z-30 touch-none select-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] [-webkit-user-select:none]"
+      className={`pointer-events-none absolute inset-0 z-30 ${TOUCH_CONTROL_INTERACTION_CLASS}`}
       data-enabled="true"
       data-testid="landrush-zombie-escape-touch-controls"
       data-touch-capable="true"
@@ -85,7 +87,7 @@ export const LandrushZombieEscapeTouchJoysticks = memo(function LandrushZombieEs
       >
         <button
           aria-label="Jump"
-          className="pointer-events-auto grid size-[clamp(3rem,11vw,3.5rem)] touch-none place-items-center rounded-full border border-sky-100/35 bg-slate-950/62 font-black text-[9px] text-white/80 uppercase tracking-[0.14em] shadow-[0_8px_24px_rgba(2,6,23,0.28)] backdrop-blur-sm active:border-sky-100/70 active:bg-sky-950/70"
+          className={`pointer-events-auto grid size-[clamp(3rem,11vw,3.5rem)] place-items-center rounded-full border border-sky-100/35 bg-slate-950/62 font-black text-[9px] text-white/80 uppercase tracking-[0.14em] shadow-[0_8px_24px_rgba(2,6,23,0.28)] outline-none backdrop-blur-sm active:border-sky-100/70 active:bg-sky-950/70 focus-visible:ring-2 focus-visible:ring-sky-100/70 ${TOUCH_CONTROL_INTERACTION_CLASS}`}
           data-landrush-ui-interactive="true"
           data-touch-action="jump"
           draggable={false}
@@ -272,7 +274,7 @@ function LandrushZombieEscapeTouchJoystick({
   return (
     <div
       aria-label={label}
-      className="pointer-events-auto relative grid size-[clamp(4.2rem,15.4vw,5.6rem)] touch-none place-items-center rounded-full border border-white/20 bg-slate-950/48 opacity-100 shadow-[0_10px_30px_rgba(2,6,23,0.28)] backdrop-blur-sm transition-[border-color,background-color,box-shadow,opacity] data-[firing=true]:border-rose-200/75 data-[firing=true]:bg-rose-950/48 data-[firing=true]:shadow-[0_0_28px_rgba(251,113,133,0.32)]"
+      className={`pointer-events-auto relative grid size-[clamp(4.2rem,15.4vw,5.6rem)] place-items-center rounded-full border border-white/20 bg-slate-950/48 opacity-100 shadow-[0_10px_30px_rgba(2,6,23,0.28)] backdrop-blur-sm transition-[border-color,background-color,box-shadow,opacity] data-[firing=true]:border-rose-200/75 data-[firing=true]:bg-rose-950/48 data-[firing=true]:shadow-[0_0_28px_rgba(251,113,133,0.32)] ${TOUCH_CONTROL_INTERACTION_CLASS}`}
       data-firing="false"
       data-enabled="true"
       data-landrush-ui-interactive="true"

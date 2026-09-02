@@ -22,6 +22,7 @@ export function MultiplayerStatusPanel({
   voice?: SpatialVoiceController
 }) {
   const latencyLabelRef = useRef<HTMLSpanElement>(null)
+  const [expanded, setExpanded] = useState(false)
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null)
   const displayedPlayerCount =
     connection.serverPlayerCount ?? remotePlayerCount + (localPlayerIncluded ? 1 : 0)
@@ -50,26 +51,53 @@ export function MultiplayerStatusPanel({
 
   const panel = (
     <section
-      className="pointer-events-auto fixed right-[max(0.75rem,env(safe-area-inset-right))] bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[120] flex min-h-7 max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded border border-white/18 bg-slate-950/62 px-2 py-1 font-medium text-[11px] text-white/88 shadow-lg backdrop-blur"
+      className={`pointer-events-auto fixed top-[max(0.75rem,env(safe-area-inset-top))] right-[max(0.75rem,env(safe-area-inset-right))] z-[120] flex min-h-7 max-w-[calc(100vw-1.5rem)] items-center overflow-hidden rounded border font-medium text-[11px] text-white/88 transition-[background-color,border-color,box-shadow] duration-200 ${
+        expanded
+          ? 'border-white/18 bg-slate-950/62 shadow-lg backdrop-blur'
+          : 'border-transparent bg-transparent shadow-none'
+      }`}
       data-landrush-multiplayer-status
     >
-      <span
-        aria-hidden
-        className={`size-2 shrink-0 rounded-full ${compactStatusDotClass(status)}`}
-      />
-      <span className="capitalize">{statusLabel}</span>
-      <span className="text-white/35">/</span>
-      <span>{displayedPlayerCount}p</span>
-      <span className="text-white/35">/</span>
-      <span ref={latencyLabelRef}>{latencyLabel}</span>
-      <span className="text-white/35">/</span>
-      <span>{fpsLabel}</span>
-      {voice ? (
-        <>
+      <div
+        aria-hidden={!expanded}
+        className={`min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200 ease-out ${
+          expanded ? 'max-w-80 opacity-100' : 'max-w-0 opacity-0'
+        }`}
+        data-landrush-multiplayer-status-details
+        id="landrush-multiplayer-status-details"
+        inert={!expanded}
+      >
+        <div className="flex min-w-max items-center gap-2 py-1 pl-2">
+          <span className="capitalize">{statusLabel}</span>
           <span className="text-white/35">/</span>
-          <SpatialVoiceControl voice={voice} />
-        </>
-      ) : null}
+          <span>{displayedPlayerCount}p</span>
+          <span className="text-white/35">/</span>
+          <span ref={latencyLabelRef}>{latencyLabel}</span>
+          <span className="text-white/35">/</span>
+          <span>{fpsLabel}</span>
+          {voice ? (
+            <>
+              <span className="text-white/35">/</span>
+              <SpatialVoiceControl voice={voice} />
+            </>
+          ) : null}
+        </div>
+      </div>
+      <button
+        aria-controls="landrush-multiplayer-status-details"
+        aria-expanded={expanded}
+        aria-label={`${expanded ? 'Hide' : 'Show'} multiplayer status: ${statusLabel}`}
+        className="grid size-7 shrink-0 place-items-center rounded transition-colors hover:bg-white/10 focus-visible:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-200/80"
+        data-landrush-multiplayer-status-toggle
+        onClick={() => setExpanded((current) => !current)}
+        title={expanded ? 'Hide multiplayer status' : 'Show multiplayer status'}
+        type="button"
+      >
+        <span
+          aria-hidden
+          className={`size-2 shrink-0 rounded-full ${compactStatusDotClass(status)}`}
+        />
+      </button>
     </section>
   )
 
