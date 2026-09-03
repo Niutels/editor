@@ -8,6 +8,7 @@ export function resolveLandrushZombieEscapePhaseReady({
   authorityResyncActive,
   buildMode,
   cameraOwner,
+  cameraTransitionActive,
   fpvView,
   generatedAssetsReady,
   loadingActive,
@@ -21,6 +22,7 @@ export function resolveLandrushZombieEscapePhaseReady({
   authorityResyncActive: boolean
   buildMode: boolean
   cameraOwner: LandrushIslandCameraOwner
+  cameraTransitionActive: boolean
   fpvView: boolean
   generatedAssetsReady: boolean
   loadingActive: boolean
@@ -37,6 +39,7 @@ export function resolveLandrushZombieEscapePhaseReady({
   if (phase === 'build') return !modeTransitionActive
   return (
     cameraOwner === 'zombie' &&
+    !cameraTransitionActive &&
     viewMode === 'player' &&
     sceneViewMode === 'player' &&
     !buildMode &&

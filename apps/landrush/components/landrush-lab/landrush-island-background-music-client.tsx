@@ -4,7 +4,6 @@ import { useAudio } from '@pascal-app/editor'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   advanceLandrushDayBackgroundMusicTrack,
-  createLandrushBackgroundMusicPlaybackState,
   isLandrushLoadingShellHandedOff,
   LANDRUSH_BACKGROUND_MUSIC_FADE_IN_MS,
   LANDRUSH_BACKGROUND_MUSIC_FADE_OUT_MS,
@@ -14,6 +13,7 @@ import {
   type LandrushBackgroundMusicPlaybackState,
   resolveLandrushBackgroundMusicFadeEnvelope,
   resolveLandrushBackgroundMusicMode,
+  resolveLandrushBackgroundMusicPreloadSource,
   resolveLandrushBackgroundMusicTrackFadeOutMs,
   resolveLandrushBackgroundMusicVolume,
   transitionLandrushBackgroundMusicMode,
@@ -26,22 +26,20 @@ const LANDRUSH_ZOMBIE_HUD_PORTAL_SELECTOR = '[data-landrush-zombie-escape-hud-po
 const LANDRUSH_ZOMBIE_PHASE_SELECTOR = '[data-integrated-landrush-world="true"][data-phase]'
 const NOOP = () => undefined
 
-export function LandrushIslandBackgroundMusic() {
+export function LandrushIslandBackgroundMusic({
+  initialPlayback,
+}: {
+  initialPlayback: LandrushBackgroundMusicPlaybackState
+}) {
   const masterVolume = useAudio((state) => state.masterVolume)
   const muted = useAudio((state) => state.muted)
   const radioVolume = useAudio((state) => state.radioVolume)
   const [loadingHandedOff, setLoadingHandedOff] = useState(false)
-  const [trackSelectionReady, setTrackSelectionReady] = useState(false)
   const [desiredMode, setDesiredMode] = useState<LandrushBackgroundMusicMode>('day')
-  const [playback, setPlayback] = useState<LandrushBackgroundMusicPlaybackState>({
-    dayTrackIndex: 0,
-    dayTrackQueue: [1, 2],
-    mode: 'day',
-  })
+  const [playback, setPlayback] = useState<LandrushBackgroundMusicPlaybackState>(initialPlayback)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const startPlaybackRef = useRef<() => void>(NOOP)
   const userActivatedRef = useRef(false)
-  const randomizedDayOrderRef = useRef(false)
   const desiredModeRef = useRef(desiredMode)
   const volumeEnvelopeRef = useRef(0)
   const volumeRef = useRef(0)
@@ -61,6 +59,10 @@ export function LandrushIslandBackgroundMusic() {
     mixGain: track.mixGain,
     muted,
     radioVolume,
+  })
+  const preloadSource = resolveLandrushBackgroundMusicPreloadSource({
+    loadingHandedOff,
+    trackSource: track.src,
   })
   volumeRef.current = volume
 
@@ -120,13 +122,6 @@ export function LandrushIslandBackgroundMusic() {
     },
     [applyVolumeEnvelope, cancelFade],
   )
-
-  useEffect(() => {
-    if (randomizedDayOrderRef.current) return
-    randomizedDayOrderRef.current = true
-    setPlayback(createLandrushBackgroundMusicPlaybackState())
-    setTrackSelectionReady(true)
-  }, [])
 
   useEffect(() => {
     const shell = document.querySelector<HTMLElement>(LANDRUSH_LOADING_SHELL_SELECTOR)
@@ -199,7 +194,7 @@ export function LandrushIslandBackgroundMusic() {
   }, [applyVolumeEnvelope, cancelFade, volume])
 
   useEffect(() => {
-    const expectedSource = trackSelectionReady ? track.src : null
+    const expectedSource = preloadSource ?? null
     const audio = audioRef.current
     cancelFade()
     endFadeTrackRef.current = null
@@ -232,7 +227,7 @@ export function LandrushIslandBackgroundMusic() {
     return () => {
       if (startPlaybackRef.current === startPlayback) startPlaybackRef.current = NOOP
     }
-  }, [applyVolumeEnvelope, beginFade, cancelFade, loadingHandedOff, track.src, trackSelectionReady])
+  }, [applyVolumeEnvelope, beginFade, cancelFade, loadingHandedOff, preloadSource])
 
   useEffect(() => {
     const generation = modeTransitionGenerationRef.current + 1
@@ -362,9 +357,9 @@ export function LandrushIslandBackgroundMusic() {
         endFadeTrackRef.current = track.id
         beginFade('track-out', 0, fadeOutMs)
       }}
-      preload="auto"
+      preload={preloadSource ? 'auto' : 'none'}
       ref={audioRef}
-      src={trackSelectionReady ? track.src : undefined}
+      src={preloadSource}
     />
   )
 }

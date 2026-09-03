@@ -44,6 +44,10 @@ import {
   isZombieEscapeAttackPresentationActive,
   resolveZombieEscapeAttackNormalizedPhase,
 } from './zombie-escape-attack-presentation'
+import {
+  clearZombieEscapeAuthoredVatCache,
+  resolveZombieEscapeAuthoredVatPath,
+} from './zombie-escape-authored-vat'
 import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
 import type { ZombieEscapeQuality } from './zombie-escape-config'
 import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
@@ -166,7 +170,12 @@ const GENERATED_ASSET_PATH_ENTRIES: Array<readonly [string, readonly string[]]> 
   ]),
   ...ZOMBIE_ESCAPE_ZOMBIE_CATALOG.map((zombie): readonly [string, readonly string[]] => [
     `zombie:${zombie.id}`,
-    [zombie.glb.riggedBase.path, zombie.glb.run.path, zombie.glb.walk.path],
+    [
+      zombie.glb.riggedBase.path,
+      zombie.glb.run.path,
+      zombie.glb.walk.path,
+      resolveZombieEscapeAuthoredVatPath(zombie.id),
+    ],
   ]),
 ]
 const GENERATED_ASSET_PATHS_BY_KEY = new Map(GENERATED_ASSET_PATH_ENTRIES)
@@ -179,6 +188,7 @@ const EMPTY_RENDER_READINESS_SNAPSHOT: ZombieEscapeRenderReadinessSnapshot = {
 const subscribeToNoRenderReadinessRegistry = () => () => undefined
 const getEmptyRenderReadinessSnapshot = () => EMPTY_RENDER_READINESS_SNAPSHOT
 const EMPTY_READY_ZOMBIE_VARIANTS = new Set<number>()
+const EMPTY_ANIMATION_CLIPS: readonly AnimationClip[] = []
 
 function yieldZombieEscapeAuthoredBuildSlice() {
   return new Promise<void>((resolve) => {
@@ -342,6 +352,7 @@ export function clearZombieEscapeGeneratedAssetCaches(failedKeys?: readonly stri
     ? failedKeys.flatMap((key) => GENERATED_ASSET_PATHS_BY_KEY.get(key) ?? [])
     : Array.from(GENERATED_ASSET_PATHS_BY_KEY.values()).flat()
   for (const path of new Set(paths)) useGLTF.clear(path)
+  clearZombieEscapeAuthoredVatCache(paths.filter((path) => path.endsWith('.zvat.gz')))
 }
 
 export const ZombieEscapeGeneratedAssets = memo(function ZombieEscapeGeneratedAssets({
@@ -1066,24 +1077,7 @@ const ZombieEscapeGeneratedZombies = memo(function ZombieEscapeGeneratedZombies(
   )
 })
 
-const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
-  authoredSelection,
-  detailedZombies,
-  detailedZombieSlotsRef,
-  externallyPresentedZombieSlotsRef,
-  framePriority,
-  impactVisualRegistry,
-  loadedZombieVariantsRef,
-  onAssetStatusChange,
-  onPresentationSettled,
-  presentationLodDebugRef,
-  prewarmCoordinatorRef,
-  renderReadinessRegistry,
-  simulationRef,
-  variantIndex,
-  zombie,
-  zombieShader,
-}: {
+type GeneratedZombieVariantProps = {
   authoredSelection: ZombieEscapeAuthoredInstanceSelection
   detailedZombies: boolean
   detailedZombieSlotsRef: MutableRefObject<Uint8Array>
@@ -1100,34 +1094,42 @@ const GeneratedZombieVariant = memo(function GeneratedZombieVariant({
   variantIndex: number
   zombie: ZombieEscapeZombieCatalogEntry
   zombieShader: ZombieEscapeZombieShader
-}) {
-  const riggedGltf = useGLTFKTX2(zombie.glb.riggedBase.path)
-  const runGltf = useGLTF(zombie.glb.run.path)
-  const walkGltf = useGLTF(zombie.glb.walk.path)
+}
+
+const GeneratedZombieVariant = memo(function GeneratedZombieVariant(
+  props: GeneratedZombieVariantProps,
+) {
+  const riggedGltf = useGLTFKTX2(props.zombie.glb.riggedBase.path)
+  if (props.detailedZombies) {
+    return (
+      <GeneratedZombieVariantWithDetailedAnimations {...props} riggedScene={riggedGltf.scene} />
+    )
+  }
   return (
     <PreparedGeneratedZombieVariant
-      authoredSelection={authoredSelection}
-      detailedZombies={detailedZombies}
-      detailedZombieSlotsRef={detailedZombieSlotsRef}
-      externallyPresentedZombieSlotsRef={externallyPresentedZombieSlotsRef}
-      framePriority={framePriority}
-      impactVisualRegistry={impactVisualRegistry}
-      loadedZombieVariantsRef={loadedZombieVariantsRef}
-      onAssetStatusChange={onAssetStatusChange}
-      onPresentationSettled={onPresentationSettled}
-      presentationLodDebugRef={presentationLodDebugRef}
-      prewarmCoordinatorRef={prewarmCoordinatorRef}
-      renderReadinessRegistry={renderReadinessRegistry}
+      {...props}
       riggedScene={riggedGltf.scene}
-      runAnimations={runGltf.animations}
-      simulationRef={simulationRef}
-      variantIndex={variantIndex}
-      walkAnimations={walkGltf.animations}
-      zombie={zombie}
-      zombieShader={zombieShader}
+      runAnimations={EMPTY_ANIMATION_CLIPS}
+      walkAnimations={EMPTY_ANIMATION_CLIPS}
     />
   )
 })
+
+function GeneratedZombieVariantWithDetailedAnimations({
+  riggedScene,
+  ...props
+}: GeneratedZombieVariantProps & { riggedScene: Group }) {
+  const runGltf = useGLTF(props.zombie.glb.run.path)
+  const walkGltf = useGLTF(props.zombie.glb.walk.path)
+  return (
+    <PreparedGeneratedZombieVariant
+      {...props}
+      riggedScene={riggedScene}
+      runAnimations={runGltf.animations}
+      walkAnimations={walkGltf.animations}
+    />
+  )
+}
 
 function PreparedGeneratedZombieVariant({
   authoredSelection,
@@ -1177,6 +1179,7 @@ function PreparedGeneratedZombieVariant({
   const visualCreationFailedRef = useRef(false)
   const unregisterRenderRepresentativeRef = useRef<(() => void) | null>(null)
   const assetKey = `zombie:${zombie.id}`
+  const bakedVatPath = resolveZombieEscapeAuthoredVatPath(zombie.id)
   const targetPoolSize = useMemo(
     () =>
       detailedZombies
@@ -1204,10 +1207,13 @@ function PreparedGeneratedZombieVariant({
     [walkAnimations, zombie.glb.walk.expectedClipName],
   )
   const attackClip = useMemo(
-    () => createZombieEscapeAttackClip(riggedScene, walkClip),
-    [riggedScene, walkClip],
+    () => (detailedZombies ? createZombieEscapeAttackClip(riggedScene, walkClip) : null),
+    [detailedZombies, riggedScene, walkClip],
   )
-  const deathClip = useMemo(() => createZombieEscapeDeathClip(riggedScene), [riggedScene])
+  const deathClip = useMemo(
+    () => (detailedZombies ? createZombieEscapeDeathClip(riggedScene) : null),
+    [detailedZombies, riggedScene],
+  )
   const authoredInstanceCapacity = useMemo(
     () =>
       reserveZombieEscapeSpecialVariantPresentationCapacity(
@@ -1228,6 +1234,7 @@ function PreparedGeneratedZombieVariant({
     visualCreationFailedRef.current = false
     void createZombieEscapeAuthoredInstancePresentationCooperatively({
       attackClip,
+      bakedVatPath,
       deathClip,
       instanceCapacity: authoredInstanceCapacity,
       modelTransform,
@@ -1263,6 +1270,7 @@ function PreparedGeneratedZombieVariant({
     assetKey,
     authoredInstanceCapacity,
     attackClip,
+    bakedVatPath,
     deathClip,
     loadedZombieVariantsRef,
     modelTransform,

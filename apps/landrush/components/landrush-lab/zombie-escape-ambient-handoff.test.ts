@@ -4,6 +4,7 @@ import {
   type ZombieEscapeAmbientHandoffSource,
 } from './zombie-escape-ambient-handoff'
 import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import { createZombieEscapeControlState } from './zombie-escape-controls'
 import { releaseZombieEscapePoolSlot } from './zombie-escape-pool'
 import {
@@ -14,6 +15,8 @@ import {
   setZombieEscapeGamePhase,
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_GRACE_SECONDS,
+  ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_STAGGER_SECONDS,
 } from './zombie-escape-simulation'
 import { createZombieEscapeArena } from './zombie-escape-world'
 import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from './zombie-escape-zombie-roster'
@@ -190,6 +193,81 @@ describe('Zombie Escape ambient NPC handoff', () => {
     expect(state.ambientHandoff.generationByNpcIndex[0]).toBe(state.zombies.pool.generation[slot])
     expect(state.ambientHandoff.npcIndexBySlot[slot]).toBe(0)
     expect(state.waveSpawnRemaining).toBe(9)
+  })
+
+  test('keeps colocated handoffs harmless through grace and staggers first-contact damage', () => {
+    const arena = createZombieEscapeArena(5_409)
+    arena.obstacleCount = 0
+    const state = createZombieEscapeSimulation(arena, 9_409)
+    const source = createAmbientHandoffSource(state.variantByPoolSlot)
+    for (let index = 0; index < source.sourceNpcIds.length; index += 1) {
+      source.x[index] = state.player.x
+      source.y[index] = state.player.y
+      source.z[index] = state.player.z
+    }
+    installZombieEscapeAmbientHandoffCandidates(state, source)
+    setZombieEscapeGamePhase(state, 'night')
+
+    const input = createZombieEscapeControlState()
+    const admitted = new Uint8Array(source.sourceNpcIds.length)
+    const firstContactObserved = new Uint8Array(source.sourceNpcIds.length)
+    const fixedDelta = ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
+    const graceTicks = Math.ceil(ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_GRACE_SECONDS / fixedDelta)
+    for (let tick = 0; tick < graceTicks; tick += 1) {
+      stepZombieEscapeSimulation(state, input, fixedDelta, arena)
+      for (let npcIndex = 0; npcIndex < admitted.length; npcIndex += 1) {
+        const slot = state.ambientHandoff.slotByNpcIndex[npcIndex]!
+        if (slot < 0 || admitted[npcIndex] !== 0) continue
+        admitted[npcIndex] = 1
+        expect(state.zombies.x[slot]).toBe(source.x[npcIndex])
+        expect(state.zombies.y[slot]).toBe(source.y[npcIndex])
+        expect(state.zombies.z[slot]).toBe(source.z[npcIndex])
+        expect(state.zombies.attackCooldown[slot]).toBeCloseTo(
+          ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds +
+            ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_GRACE_SECONDS +
+            npcIndex * ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_STAGGER_SECONDS,
+          5,
+        )
+        state.zombies.speedScale[slot] = 0
+      }
+      expect(state.player.health).toBe(100)
+    }
+    expect([...admitted]).toEqual(Array.from({ length: admitted.length }, () => 1))
+
+    const damageTicks: number[] = []
+    const firstContactNpcIndices: number[] = []
+    const maximumTick = graceTicks + Math.ceil(2 / fixedDelta)
+    for (let tick = graceTicks; tick < maximumTick && damageTicks.length < 2; tick += 1) {
+      const healthBefore = state.player.health
+      stepZombieEscapeSimulation(state, input, fixedDelta, arena)
+      const newFirstContacts: number[] = []
+      for (let npcIndex = 0; npcIndex < firstContactObserved.length; npcIndex += 1) {
+        const slot = state.ambientHandoff.slotByNpcIndex[npcIndex]!
+        if (
+          slot >= 0 &&
+          firstContactObserved[npcIndex] === 0 &&
+          state.zombies.attackContactResolved[slot] !== 0
+        ) {
+          firstContactObserved[npcIndex] = 1
+          newFirstContacts.push(npcIndex)
+        }
+      }
+      if (state.player.health === healthBefore) {
+        expect(newFirstContacts).toHaveLength(0)
+        continue
+      }
+      expect(healthBefore - state.player.health).toBe(8)
+      expect(newFirstContacts).toHaveLength(1)
+      damageTicks.push(tick)
+      firstContactNpcIndices.push(newFirstContacts[0]!)
+    }
+
+    expect(firstContactNpcIndices).toEqual([0, 1])
+    expect(damageTicks).toHaveLength(2)
+    expect(damageTicks[1]! - damageTicks[0]!).toBeGreaterThanOrEqual(
+      Math.floor(ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_STAGGER_SECONDS / fixedDelta),
+    )
+    expect(state.player.health).toBe(84)
   })
 
   test('preserves a sparse handoff beside the player at its exact visible transform', () => {

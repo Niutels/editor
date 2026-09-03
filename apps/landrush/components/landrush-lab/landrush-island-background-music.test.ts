@@ -12,6 +12,7 @@ import {
   LANDRUSH_ZOMBIE_BACKGROUND_MUSIC_TRACK,
   resolveLandrushBackgroundMusicFadeEnvelope,
   resolveLandrushBackgroundMusicMode,
+  resolveLandrushBackgroundMusicPreloadSource,
   resolveLandrushBackgroundMusicTrackFadeOutMs,
   resolveLandrushBackgroundMusicVolume,
   transitionLandrushBackgroundMusicMode,
@@ -186,5 +187,21 @@ describe('Landrush island background music', () => {
     expect(isLandrushLoadingShellHandedOff({ hidden: false, style: { display: 'none' } })).toBe(
       true,
     )
+  })
+
+  test('defers audio transfer until loading hands off', () => {
+    const trackSource = LANDRUSH_DAY_BACKGROUND_MUSIC_TRACKS[0].src
+    expect(
+      resolveLandrushBackgroundMusicPreloadSource({
+        loadingHandedOff: false,
+        trackSource,
+      }),
+    ).toBeUndefined()
+    expect(
+      resolveLandrushBackgroundMusicPreloadSource({
+        loadingHandedOff: true,
+        trackSource,
+      }),
+    ).toBe(trackSource)
   })
 })

@@ -4689,6 +4689,7 @@ export function LandrushIslandClient({
     authorityResyncActive,
     buildMode,
     cameraOwner,
+    cameraTransitionActive: zombieEscapeCameraTransitionActive,
     fpvView,
     generatedAssetsReady: zombieEscapeGeneratedAssetsReady,
     loadingActive,

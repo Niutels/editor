@@ -63,6 +63,9 @@ describe('generated asset render-pipeline readiness', () => {
       'detailedZombies\n        ? reserveZombieEscapeSpecialVariantPresentationCapacity(',
     )
     expect(source).toContain('zombieMaterialPhaseActive && outsideTorchVisibility < 1')
+    expect(source).toContain('bakedVatPath,')
+    expect(source).toContain('if (props.detailedZombies)')
+    expect(source).toContain('runAnimations={EMPTY_ANIMATION_CLIPS}')
   })
 
   test('keeps handoff exclusion storage and copying allocation-free after mount', () => {

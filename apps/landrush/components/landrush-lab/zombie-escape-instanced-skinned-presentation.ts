@@ -40,12 +40,23 @@ import {
   isZombieEscapeAttackPresentationActive,
   resolveZombieEscapeAttackNormalizedPhase,
 } from './zombie-escape-attack-presentation'
+import {
+  loadZombieEscapeAuthoredVat,
+  resolveZombieEscapeAuthoredVatTextureLayout,
+  ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT,
+  ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT,
+  ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX,
+  type ZombieEscapeAuthoredVat,
+  type ZombieEscapeAuthoredVatMesh,
+} from './zombie-escape-authored-vat'
 import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
 import {
   createZombieEscapePresentationPose,
   resolveZombieEscapePresentationPose,
 } from './zombie-escape-presentation-pose'
 import type { ZombieEscapeZombieShader } from './zombie-escape-zombie-material'
+
+export { ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT } from './zombie-escape-authored-vat'
 
 type ZombieEscapeModelTransform = Readonly<{
   bodyCenterY?: number
@@ -55,6 +66,7 @@ type ZombieEscapeModelTransform = Readonly<{
 
 type CreateZombieEscapeAuthoredInstancePresentationOptions = Readonly<{
   attackClip: AnimationClip | null
+  bakedVat?: ZombieEscapeAuthoredVat
   deathClip?: AnimationClip | null
   instanceCapacity: number
   modelTransform: ZombieEscapeModelTransform
@@ -64,17 +76,10 @@ type CreateZombieEscapeAuthoredInstancePresentationOptions = Readonly<{
   walkClip: AnimationClip | null
   zombieShader: ZombieEscapeZombieShader
 }>
-
-export const ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT = 12
-
-const ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT =
-  1 + ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT * 4
 const ZOMBIE_ESCAPE_AUTHORED_BUILD_SLICE_BUDGET_MS = 6
 const ZOMBIE_ESCAPE_AUTHORED_BUILD_MAX_STEPS_PER_SLICE = 8
-const ZOMBIE_ESCAPE_AUTHORED_BAKED_TEXTURE_WIDTH = 4096
 const ZOMBIE_ESCAPE_AUTHORED_BATCH_BOUNDS_PADDING_METERS = 2.5
 const ZOMBIE_ESCAPE_AUTHORED_FRAME_ATTRIBUTE = 'zombieBakedFrame'
-const ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX = 2
 const ZOMBIE_ESCAPE_AUTHORED_HALF_FLOAT_MAX = 65_504
 const ZOMBIE_ESCAPE_AUTHORED_PARKED_INSTANCE_Y = -1_000_000
 const TWO_PI = Math.PI * 2
@@ -267,9 +272,7 @@ export function encodeZombieEscapeBakedTextureComponent(value: number) {
 }
 
 export function resolveZombieEscapeBakedTextureLayout(vertexCount: number) {
-  const texelsPerFrame = vertexCount * ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX
-  const width = Math.min(ZOMBIE_ESCAPE_AUTHORED_BAKED_TEXTURE_WIDTH, texelsPerFrame)
-  return { height: Math.ceil(texelsPerFrame / width), width }
+  return resolveZombieEscapeAuthoredVatTextureLayout(vertexCount)
 }
 
 export function createZombieEscapeAuthoredInstancePresentation(
@@ -282,17 +285,22 @@ export function createZombieEscapeAuthoredInstancePresentation(
 }
 
 export async function createZombieEscapeAuthoredInstancePresentationCooperatively({
+  bakedVatPath,
   readBuildTimeMs = () => performance.now(),
   signal,
   waitForBuildSlice,
   ...options
 }: CreateZombieEscapeAuthoredInstancePresentationOptions &
   Readonly<{
+    bakedVatPath?: string
     readBuildTimeMs?: () => number
     signal?: AbortSignal
     waitForBuildSlice: () => Promise<void>
   }>): Promise<ZombieEscapeAuthoredInstancePresentation> {
-  const build = createZombieEscapeAuthoredInstancePresentationSteps(options)
+  const bakedVat = bakedVatPath
+    ? await loadZombieEscapeAuthoredVat(bakedVatPath, signal)
+    : options.bakedVat
+  const build = createZombieEscapeAuthoredInstancePresentationSteps({ ...options, bakedVat })
   try {
     while (true) {
       throwIfZombieEscapeAuthoredBuildAborted(signal)
@@ -320,6 +328,7 @@ export async function createZombieEscapeAuthoredInstancePresentationCooperativel
 
 function* createZombieEscapeAuthoredInstancePresentationSteps({
   attackClip,
+  bakedVat,
   deathClip = null,
   instanceCapacity,
   modelTransform,
@@ -367,14 +376,16 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
     textureFetchesPerVertex: ZOMBIE_ESCAPE_AUTHORED_TEXTURE_FETCHES_PER_VERTEX,
     variantIndex,
   }
-  const bakedTextureSets = yield* bakeAnimationTextureSteps({
-    attackClip,
-    deathClip,
-    runClip,
-    samplerMeshes,
-    samplerRoot,
-    walkClip,
-  })
+  const bakedTextureSets = bakedVat
+    ? createBakedTextureSetsFromVat(samplerMeshes, bakedVat)
+    : yield* bakeAnimationTextureSteps({
+        attackClip,
+        deathClip,
+        runClip,
+        samplerMeshes,
+        samplerRoot,
+        walkClip,
+      })
   const rootWorldInverse = samplerRoot.matrixWorld.clone().invert()
   const modelMatrix = new Matrix4().compose(
     modelTransform.offset,
@@ -635,6 +646,55 @@ function* createZombieEscapeAuthoredInstancePresentationSteps({
   }
 }
 
+export function bakeZombieEscapeAuthoredVat({
+  attackClip,
+  deathClip = null,
+  runClip,
+  source,
+  walkClip,
+}: Readonly<{
+  attackClip: AnimationClip | null
+  deathClip?: AnimationClip | null
+  runClip: AnimationClip | null
+  source: Group
+  walkClip: AnimationClip | null
+}>): ZombieEscapeAuthoredVat {
+  const samplerRoot = cloneSkeleton(source) as Group
+  const samplerMeshes: SkinnedMesh[] = []
+  samplerRoot.traverse((object) => {
+    const candidate = object as SkinnedMesh
+    if (candidate.isSkinnedMesh) samplerMeshes.push(candidate)
+  })
+  if (samplerMeshes.length === 0) {
+    throw new Error('Authored zombie source contains no skinned mesh.')
+  }
+  samplerRoot.updateMatrixWorld(true)
+  const build = bakeAnimationTextureSteps({
+    attackClip,
+    deathClip,
+    runClip,
+    samplerMeshes,
+    samplerRoot,
+    walkClip,
+  })
+  let step = build.next()
+  while (!step.done) step = build.next()
+  const sets = step.value
+  try {
+    return {
+      frameCount: ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT,
+      meshes: sets.map(({ data, height, vertexCount, width }) => ({
+        data,
+        height,
+        vertexCount,
+        width,
+      })),
+    }
+  } finally {
+    for (const set of sets) disposeBakedTextureSet(set)
+  }
+}
+
 function* bakeAnimationTextureSteps({
   attackClip,
   deathClip,
@@ -760,6 +820,51 @@ function createBakedTextureSet(sourceMesh: SkinnedMesh): BakedTextureSet {
   const vertexCount = sourceMesh.geometry.getAttribute('position').count
   const { height, width } = resolveZombieEscapeBakedTextureLayout(vertexCount)
   const data = new Uint16Array(width * height * 4 * ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT)
+  return createBakedTextureSetFromData(sourceMesh, { data, height, vertexCount, width })
+}
+
+function createBakedTextureSetsFromVat(
+  samplerMeshes: readonly SkinnedMesh[],
+  bakedVat: ZombieEscapeAuthoredVat,
+) {
+  if (bakedVat.frameCount !== ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT) {
+    throw new Error(`Authored zombie VAT frame count does not match this renderer.`)
+  }
+  if (bakedVat.meshes.length !== samplerMeshes.length) {
+    throw new Error(
+      `Authored zombie VAT mesh count ${bakedVat.meshes.length} does not match source mesh count ${samplerMeshes.length}.`,
+    )
+  }
+  const sets: BakedTextureSet[] = []
+  try {
+    for (let index = 0; index < samplerMeshes.length; index += 1) {
+      sets.push(createBakedTextureSetFromData(samplerMeshes[index]!, bakedVat.meshes[index]!, true))
+    }
+    return sets
+  } catch (error) {
+    for (const set of sets) disposeBakedTextureSet(set)
+    throw error
+  }
+}
+
+function createBakedTextureSetFromData(
+  sourceMesh: SkinnedMesh,
+  payload: ZombieEscapeAuthoredVatMesh,
+  hydrateBaseGeometry = false,
+): BakedTextureSet {
+  const vertexCount = sourceMesh.geometry.getAttribute('position').count
+  const layout = resolveZombieEscapeBakedTextureLayout(vertexCount)
+  const expectedDataLength =
+    layout.width * layout.height * 4 * ZOMBIE_ESCAPE_AUTHORED_BAKED_TOTAL_FRAME_COUNT
+  if (
+    payload.vertexCount !== vertexCount ||
+    payload.width !== layout.width ||
+    payload.height !== layout.height ||
+    payload.data.length !== expectedDataLength
+  ) {
+    throw new Error('Authored zombie VAT does not match its source geometry.')
+  }
+  const { data, height, width } = payload
   const texture = new DataArrayTexture(
     data,
     width,
@@ -773,7 +878,17 @@ function createBakedTextureSet(sourceMesh: SkinnedMesh): BakedTextureSet {
   const baseGeometry = sourceMesh.geometry.clone()
   baseGeometry.deleteAttribute('skinIndex')
   baseGeometry.deleteAttribute('skinWeight')
-  return { baseGeometry, data, height, texture, vertexCount, width }
+  const set = { baseGeometry, data, height, texture, vertexCount, width }
+  if (hydrateBaseGeometry) {
+    try {
+      updateBaseGeometryFromTexture(set)
+      texture.needsUpdate = true
+    } catch (error) {
+      disposeBakedTextureSet(set)
+      throw error
+    }
+  }
+  return set
 }
 
 function captureBakedTextureFrame(

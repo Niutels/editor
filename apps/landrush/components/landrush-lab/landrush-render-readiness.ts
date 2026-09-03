@@ -1,4 +1,4 @@
-import type { Box3, Camera, InstancedMesh, Object3D, Scene, Sphere } from 'three'
+import type { Box3, Camera, InstancedMesh, Material, Object3D, Scene, Sphere } from 'three'
 import { Matrix4 } from 'three'
 
 export const LANDRUSH_RENDER_READINESS_TIMEOUT_MS = 15_000
@@ -875,6 +875,8 @@ function exposeLandrushRepresentativesForPresentationFrame(
 ) {
   const attachedRoots: Object3D[] = []
   const attachedRootSet = new Set<Object3D>()
+  let restoreRepresentativeFlags: () => void = () => undefined
+  const concealedRenderables: Array<Readonly<{ object: Object3D; visible: boolean }>> = []
   try {
     for (const { root } of representatives) {
       let top = root
@@ -893,9 +895,29 @@ function exposeLandrushRepresentativesForPresentationFrame(
       scene.children.push(top)
       top.parent = scene
     }
-    const restoreFlags = forceLandrushRepresentativesRenderable(representatives, scene)
+    restoreRepresentativeFlags = forceLandrushRepresentativesRenderable(representatives, scene)
+    const representedObjects = new Set<Object3D>()
+    for (const { root } of representatives) {
+      let ancestor: Object3D | null = root
+      while (ancestor) {
+        representedObjects.add(ancestor)
+        ancestor = ancestor.parent
+      }
+      root.traverse((object) => representedObjects.add(object))
+    }
+    // Keep the real scene's lighting, but do not make an exact pipeline probe draw the whole island.
+    scene.traverse((object) => {
+      if (representedObjects.has(object) || !isLandrushRenderableObject(object)) return
+      concealedRenderables.push({ object, visible: object.visible })
+      object.visible = false
+    })
     return () => {
-      restoreFlags()
+      for (let index = concealedRenderables.length - 1; index >= 0; index -= 1) {
+        const snapshot = concealedRenderables[index]!
+        snapshot.object.visible = snapshot.visible
+      }
+      concealedRenderables.length = 0
+      restoreRepresentativeFlags()
       for (let index = attachedRoots.length - 1; index >= 0; index -= 1) {
         const root = attachedRoots[index]!
         if (root.parent !== scene) continue
@@ -905,6 +927,11 @@ function exposeLandrushRepresentativesForPresentationFrame(
       }
     }
   } catch (error) {
+    for (let index = concealedRenderables.length - 1; index >= 0; index -= 1) {
+      const snapshot = concealedRenderables[index]!
+      snapshot.object.visible = snapshot.visible
+    }
+    restoreRepresentativeFlags()
     for (let index = attachedRoots.length - 1; index >= 0; index -= 1) {
       const root = attachedRoots[index]!
       if (root.parent !== scene) continue
@@ -927,6 +954,7 @@ function forceLandrushRepresentativesRenderable(
     })
   }
   const snapshots = new Map<Object3D, FlagSnapshot>()
+  const materialVisibility = new Map<Material, boolean>()
   const snapshot = (object: Object3D) => {
     const instancedMesh = object as InstancedMesh
     if (!snapshots.has(object)) {
@@ -960,6 +988,16 @@ function forceLandrushRepresentativesRenderable(
     snapshot(object)
     if (light.isLight !== true || representedLights.has(object)) object.visible = true
     if (renderable) {
+      const assignedMaterial = (object as Object3D & { material?: Material | Material[] }).material
+      const materials = Array.isArray(assignedMaterial)
+        ? assignedMaterial
+        : assignedMaterial
+          ? [assignedMaterial]
+          : []
+      for (const material of materials) {
+        if (!materialVisibility.has(material)) materialVisibility.set(material, material.visible)
+        material.visible = true
+      }
       object.frustumCulled = false
       if (
         instancedMesh.isInstancedMesh === true &&
@@ -997,6 +1035,9 @@ function forceLandrushRepresentativesRenderable(
   }
 
   return () => {
+    for (const [material, visible] of Array.from(materialVisibility.entries()).reverse()) {
+      material.visible = visible
+    }
     for (const snapshot of Array.from(snapshots.values()).reverse()) {
       snapshot.object.visible = snapshot.visible
       snapshot.object.frustumCulled = snapshot.frustumCulled

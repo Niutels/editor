@@ -11,6 +11,10 @@ import {
 import { materialAlphaTest, materialOpacity, mul, uniform } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
 import { readLandrushIslandFloorFadeOpacity } from './landrush-floor-fade-opacity'
+import {
+  readLandrushMaterialPipelineSignature,
+  registerLandrushPipelineCoverageRepresentative,
+} from './landrush-render-pipeline-signature'
 import { readLandrushRobotRevealObjectAmount } from './landrush-robot-reveal-support'
 import {
   inheritLandrushZombieNightSurfaceMaterial,
@@ -174,9 +178,14 @@ export class LandrushIslandMaterialPresentationOwner {
     presentation: LandrushIslandRevealMaterialPresentation,
   ): Group {
     const group = new Group()
+    const pipelineCoverage = new Group()
+    pipelineCoverage.position.y = -1_000_000
+    registerLandrushPipelineCoverageRepresentative(group, pipelineCoverage)
     const readinessByMesh = new Map<Mesh, { floor: boolean; reveal: boolean }>()
     const materialIds = new WeakMap<Material, number>()
+    const materialSignatures = new WeakMap<Material, string>()
     const representedPipelines = new Set<string>()
+    const representedPipelineCoverage = new Set<string>()
     let nextMaterialId = 1
     const readMaterialId = (material: Material) => {
       const existing = materialIds.get(material)
@@ -185,6 +194,14 @@ export class LandrushIslandMaterialPresentationOwner {
       nextMaterialId += 1
       materialIds.set(material, id)
       return id
+    }
+    const readMaterialSignature = (material: Material) => {
+      let signature = materialSignatures.get(material)
+      if (signature === undefined) {
+        signature = readLandrushMaterialPipelineSignature(material)
+        materialSignatures.set(material, signature)
+      }
+      return signature
     }
     for (const { floor, mesh, reveal } of meshes) {
       const readiness = readinessByMesh.get(mesh)
@@ -248,7 +265,21 @@ export class LandrushIslandMaterialPresentationOwner {
 
         const representative = mesh.clone(false)
         representative.material = Array.isArray(sourceMaterial) ? materials : materials[0]!
+        representative.customDepthMaterial = mesh.customDepthMaterial
+        representative.customDistanceMaterial = mesh.customDistanceMaterial
         group.add(representative)
+
+        const coverageKey = [
+          Array.isArray(sourceMaterial) ? 'array' : 'single',
+          materials.map(readMaterialSignature).join(','),
+          readLandrushMaterialReadinessMeshPipelineSignature(mesh, readMaterialSignature),
+        ].join('|')
+        if (representedPipelineCoverage.has(coverageKey)) continue
+        representedPipelineCoverage.add(coverageKey)
+        const coverageRepresentative = representative.clone(false)
+        coverageRepresentative.customDepthMaterial = representative.customDepthMaterial
+        coverageRepresentative.customDistanceMaterial = representative.customDistanceMaterial
+        pipelineCoverage.add(coverageRepresentative)
       }
     }
 
@@ -1114,18 +1145,19 @@ function sameMaterialAssignment(first: Material[], second: Material[]) {
 
 function readLandrushMaterialReadinessMeshPipelineSignature(
   mesh: Mesh,
-  readMaterialId: (material: Material) => number,
+  readMaterialKey: (material: Material) => string | number,
 ) {
+  mesh.updateWorldMatrix(true, false)
   const candidate = mesh as Mesh & {
     customDepthMaterial?: Material
     customDistanceMaterial?: Material
     drawMode?: number
     instanceColor?: unknown
     instanceMatrix?: unknown
-    instanceMorphTexture?: unknown
     isBatchedMesh?: boolean
     isInstancedMesh?: boolean
     isSkinnedMesh?: boolean
+    morphTexture?: unknown
     morphTargetInfluences?: readonly number[]
   }
   const geometry = mesh.geometry
@@ -1137,7 +1169,9 @@ function readLandrushMaterialReadinessMeshPipelineSignature(
     .sort(([first], [second]) => first.localeCompare(second))
     .map(
       ([name, attributes]) =>
-        `${name}:${attributes.map(readLandrushPipelineAttributeSignature).join(';')}`,
+        `${name}:${attributes
+          .map((attribute) => readLandrushPipelineAttributeSignature(attribute, true))
+          .join(';')}`,
     )
     .join(',')
   const representedGroupMaterials = [
@@ -1145,19 +1179,19 @@ function readLandrushMaterialReadinessMeshPipelineSignature(
       geometry.groups.filter((group) => group.count > 0).map((group) => group.materialIndex ?? 0),
     ),
   ].sort((first, second) => first - second)
-  const customDepthMaterialId = candidate.customDepthMaterial
-    ? readMaterialId(candidate.customDepthMaterial)
-    : 0
-  const customDistanceMaterialId = candidate.customDistanceMaterial
-    ? readMaterialId(candidate.customDistanceMaterial)
-    : 0
+  const customDepthMaterialSignature = candidate.customDepthMaterial
+    ? readMaterialKey(candidate.customDepthMaterial)
+    : 'none'
+  const customDistanceMaterialSignature = candidate.customDistanceMaterial
+    ? readMaterialKey(candidate.customDistanceMaterial)
+    : 'none'
   return [
     candidate.isBatchedMesh === true ? 'batched' : 'not-batched',
     candidate.isInstancedMesh === true ? 'instanced' : 'not-instanced',
     candidate.isSkinnedMesh === true ? 'skinned' : 'static',
     candidate.instanceColor ? 'instance-color' : 'no-instance-color',
     candidate.instanceMatrix ? 'instance-matrix' : 'no-instance-matrix',
-    candidate.instanceMorphTexture ? 'instance-morph' : 'no-instance-morph',
+    candidate.morphTexture ? 'instance-morph' : 'no-instance-morph',
     geometry.index
       ? `indexed:${readLandrushPipelineAttributeSignature(geometry.index)}`
       : 'non-indexed',
@@ -1169,12 +1203,13 @@ function readLandrushMaterialReadinessMeshPipelineSignature(
     geometry.groups.length === 0 ? 'groups:none' : `groups:${representedGroupMaterials.join(',')}`,
     mesh.castShadow ? 'casts-shadow' : 'no-cast-shadow',
     mesh.receiveShadow ? 'receives-shadow' : 'no-receive-shadow',
-    `custom-depth:${String(customDepthMaterialId)}`,
-    `custom-distance:${String(customDistanceMaterialId)}`,
+    mesh.matrixWorld.determinant() < 0 ? 'front-face-cw' : 'front-face-ccw',
+    `custom-depth:${customDepthMaterialSignature}`,
+    `custom-distance:${customDistanceMaterialSignature}`,
   ].join('|')
 }
 
-function readLandrushPipelineAttributeSignature(attribute: unknown) {
+function readLandrushPipelineAttributeSignature(attribute: unknown, identitySensitive = false) {
   const candidate = attribute as {
     array?: { constructor?: { name?: string } }
     data?: {
@@ -1183,6 +1218,7 @@ function readLandrushPipelineAttributeSignature(attribute: unknown) {
       stride?: number
     }
     gpuType?: number
+    id?: number
     isInstancedBufferAttribute?: boolean
     isInterleavedBufferAttribute?: boolean
     itemSize?: number
@@ -1193,6 +1229,7 @@ function readLandrushPipelineAttributeSignature(attribute: unknown) {
   const storage = candidate.isInterleavedBufferAttribute ? candidate.data : candidate
   const arrayType = storage?.array?.constructor?.name ?? 'unknown'
   return [
+    identitySensitive ? `id:${String(candidate.id ?? 'unknown')}` : 'structural',
     candidate.isInterleavedBufferAttribute ? 'interleaved' : 'buffer',
     candidate.isInstancedBufferAttribute ? 'instanced' : 'vertex',
     arrayType,

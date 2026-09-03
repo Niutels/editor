@@ -528,8 +528,6 @@ const PostProcessingPasses = ({
   const presentationBlurDebugMode = useRef(uniform(0))
   const presentationBlurDirection = useRef(uniform(1))
   const presentationBlurStrength = useRef(uniform(1))
-  const presentationPrewarmUnculledRef = useRef<Object3D[]>([])
-
   // Ink-line colour follows the scene-theme background luminance (dark lines on
   // light scenes, light on dark), refreshed each frame like the background.
   // Dark scenes also scale the ink opacity down (see edge-style.ts).
@@ -1269,15 +1267,6 @@ const PostProcessingPasses = ({
     if (!renderPipeline || shouldDirectRender) {
       const directPrewarm =
         pipelinePrewarmPending && pipelinePrewarmRenderPath === 'direct' && renderPipeline !== null
-      const unculled = presentationPrewarmUnculledRef.current
-      if (directPrewarm) {
-        unculled.length = 0
-        scene.traverse((object) => {
-          if (!object.frustumCulled) return
-          object.frustumCulled = false
-          unculled.push(object)
-        })
-      }
       let renderSucceeded = false
       try {
         const clearAlpha = transparentBackground ? 0 : 1
@@ -1299,9 +1288,6 @@ const PostProcessingPasses = ({
         }
       } catch (fallbackError) {
         console.error('[viewer/post-processing] Fallback render failed.', fallbackError)
-      } finally {
-        for (const object of unculled) object.frustumCulled = true
-        unculled.length = 0
       }
       if (prewarming || pipelinePrewarmPending) {
         presentationBlurAmount.current.value = presentationAmount
@@ -1379,15 +1365,6 @@ const PostProcessingPasses = ({
       // making scenePassColor.a a reliable geometry mask (geometry pixels write a=1 via output node).
       ;(renderer as any).setClearAlpha(0)
       const submittedAt = PERF_OVERLAY_ENABLED ? performance.now() : 0
-      const unculled = presentationPrewarmUnculledRef.current
-      if (prewarming || pipelinePrewarmPending) {
-        unculled.length = 0
-        scene.traverse((object) => {
-          if (!object.frustumCulled) return
-          object.frustumCulled = false
-          unculled.push(object)
-        })
-      }
       let prewarmRenderedCamera: Camera | undefined
       let prewarmCameraMatched = false
       try {
@@ -1402,8 +1379,6 @@ const PostProcessingPasses = ({
           prewarmCameraMatched = requestedCamera === undefined || renderedCamera === requestedCamera
         }
       } finally {
-        for (const object of unculled) object.frustumCulled = true
-        unculled.length = 0
         if (prewarming || pipelinePrewarmPending) {
           presentationBlurAmount.current.value = presentationAmount
         }

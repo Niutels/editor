@@ -241,6 +241,9 @@ describe('Landrush island paint readiness', () => {
     const phaseReadySource = clientSource.slice(phaseReadyStart, phaseReadyEnd)
     expect(phaseReadySource).toContain('loadingActive,')
     expect(phaseReadySource).toContain('generatedAssetsReady: zombieEscapeGeneratedAssetsReady,')
+    expect(phaseReadySource).toContain(
+      'cameraTransitionActive: zombieEscapeCameraTransitionActive,',
+    )
   })
 
   test('shows a compact resync veil only while a replacement authority is not ready', () => {

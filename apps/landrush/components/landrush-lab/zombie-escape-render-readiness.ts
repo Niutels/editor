@@ -1,5 +1,10 @@
-import { Group, type Object3D } from 'three'
+import { Group, type Material, type Object3D } from 'three'
 import {
+  readLandrushMaterialPipelineSignature,
+  resolveLandrushPipelineCoverageRepresentative,
+} from './landrush-render-pipeline-signature'
+import {
+  clearLandrushRenderReadinessRoot,
   compileLandrushRenderRepresentative,
   createLandrushRenderReadinessCoordinator,
   initializeLandrushRenderReadinessRenderer,
@@ -29,6 +34,8 @@ const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
   'effect:muzzle-petals',
   'effect:death-dust',
 ] as const
+
+const ZOMBIE_ESCAPE_SCENE_PIPELINE_RENDER_REPRESENTATIVE_KEY = 'scene:pipeline-coverage'
 
 export const ZOMBIE_ESCAPE_PICKUP_RENDER_REPRESENTATIVE_KEY = 'weapon-pickup'
 export const ZOMBIE_ESCAPE_AIM_RETICLE_RENDER_REPRESENTATIVE_KEY = 'player:aim-reticle'
@@ -74,7 +81,15 @@ type RegisteredRepresentative = Readonly<{
 type ZombieEscapePreparedRepresentativeCache = {
   camera: ZombieEscapeRenderReadinessRequest['camera']
   context: unknown
-  rootsByKey: Map<ZombieEscapeRenderRepresentativeKey, Object3D>
+  representativesByKey: Map<
+    ZombieEscapeRenderRepresentativeKey,
+    Readonly<{
+      pipelineFingerprint: string
+      pipelineRoot: Object3D
+      sourceRoot: Object3D
+    }>
+  >
+  scenePipelineSignatures: Set<string>
   targetScene: ZombieEscapeRenderReadinessRequest['targetScene']
 }
 
@@ -181,52 +196,348 @@ export async function compileZombieEscapeRenderRepresentatives(
     renderer,
     targetScene,
   })
-  const changedRepresentatives = representatives.filter(
-    ({ key, root }) => preparedCache.rootsByKey.get(key) !== root,
+  const scenePipelineCoverage = createZombieEscapeScenePipelineRepresentativeResult(
+    { camera, representatives, targetScene },
+    preparedCache.scenePipelineSignatures,
   )
-  if (changedRepresentatives.length === 0) {
+  const scenePipelineRepresentative = scenePipelineCoverage.root
+  const resolvedRepresentatives = representatives.map(({ key, root: sourceRoot }) => {
+    const pipelineRoot = resolveLandrushPipelineCoverageRepresentative(sourceRoot)
+    return {
+      key,
+      pipelineFingerprint: readZombieEscapeRenderTreeFingerprint(pipelineRoot),
+      pipelineRoot,
+      sourceRoot,
+    }
+  })
+  const changedRepresentatives = resolvedRepresentatives.filter((representative) => {
+    const prepared = preparedCache.representativesByKey.get(representative.key)
+    return (
+      prepared?.sourceRoot !== representative.sourceRoot ||
+      prepared.pipelineRoot !== representative.pipelineRoot ||
+      prepared.pipelineFingerprint !== representative.pipelineFingerprint
+    )
+  })
+  if (changedRepresentatives.length === 0 && scenePipelineRepresentative.children.length === 0) {
     onProgress?.({ completed: total, total })
     return
   }
-  await compileZombieEscapeRenderAggregate(
-    { camera, renderer, representatives: changedRepresentatives, targetScene },
-    () => {
+  const changedPipelineRepresentatives = changedRepresentatives.map(({ key, pipelineRoot }) => ({
+    key,
+    root: pipelineRoot,
+  }))
+  const expandedRepresentatives =
+    scenePipelineRepresentative.children.length > 0
+      ? [
+          ...changedPipelineRepresentatives,
+          {
+            key: ZOMBIE_ESCAPE_SCENE_PIPELINE_RENDER_REPRESENTATIVE_KEY,
+            root: scenePipelineRepresentative,
+          },
+        ]
+      : changedPipelineRepresentatives
+  const representativesToPrepare = expandedRepresentatives
+  try {
+    await compileZombieEscapeRenderAggregate(
+      { camera, renderer, representatives: representativesToPrepare, targetScene },
+      () => {
+        completed += 1
+        onProgress?.({ completed, total })
+      },
+    )
+    const exactFramePrewarmDisabled = isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled()
+    if (webGpu) {
+      if (!exactFramePrewarmDisabled) {
+        await prewarmPresentationPipeline({
+          camera,
+          renderPath: 'presentation',
+          renderer,
+          representatives: representativesToPrepare,
+          targetScene,
+        })
+      }
       completed += 1
       onProgress?.({ completed, total })
-    },
-  )
-  const exactFramePrewarmDisabled = isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled()
-  if (webGpu) {
-    if (!exactFramePrewarmDisabled) {
+    }
+    if (webGpu && !exactFramePrewarmDisabled) {
       await prewarmPresentationPipeline({
         camera,
-        renderPath: 'presentation',
+        renderPath: 'direct',
         renderer,
-        representatives: changedRepresentatives,
+        representatives: representativesToPrepare,
         targetScene,
       })
+    } else {
+      await renderer.compileAsync(targetScene, camera, targetScene)
     }
     completed += 1
     onProgress?.({ completed, total })
+    await waitForZombieEscapeGpuPreparation(renderer)
+  } finally {
+    clearLandrushRenderReadinessRoot(scenePipelineRepresentative)
   }
-  if (webGpu && !exactFramePrewarmDisabled) {
-    await prewarmPresentationPipeline({
-      camera,
-      renderPath: 'direct',
-      renderer,
-      representatives: changedRepresentatives,
-      targetScene,
-    })
-  } else {
-    await renderer.compileAsync(targetScene, camera, targetScene)
-  }
-  completed += 1
-  onProgress?.({ completed, total })
-  await waitForZombieEscapeGpuPreparation(renderer)
   if (preparedCache.context === resolveZombieEscapeRendererContext(renderer)) {
-    for (const { key, root } of changedRepresentatives) preparedCache.rootsByKey.set(key, root)
+    for (const { key, pipelineFingerprint, pipelineRoot, sourceRoot } of changedRepresentatives) {
+      preparedCache.representativesByKey.set(key, {
+        pipelineFingerprint,
+        pipelineRoot,
+        sourceRoot,
+      })
+    }
+    for (const signature of scenePipelineCoverage.pipelineSignatures) {
+      preparedCache.scenePipelineSignatures.add(signature)
+    }
   }
   onProgress?.({ completed: total, total })
+}
+
+export function createZombieEscapeScenePipelineRepresentative({
+  camera,
+  representatives,
+  targetScene,
+}: Pick<ZombieEscapeRenderReadinessRequest, 'camera' | 'representatives' | 'targetScene'>) {
+  return createZombieEscapeScenePipelineRepresentativeResult({
+    camera,
+    representatives,
+    targetScene,
+  }).root
+}
+
+function createZombieEscapeScenePipelineRepresentativeResult(
+  {
+    camera,
+    representatives,
+    targetScene,
+  }: Pick<ZombieEscapeRenderReadinessRequest, 'camera' | 'representatives' | 'targetScene'>,
+  preparedPipelineSignatures: ReadonlySet<string> = new Set(),
+) {
+  const representedObjects = new Set<Object3D>()
+  const materialSignatures = new WeakMap<Material, string>()
+  const representedPipelines = new Set<string>()
+  for (const { root } of representatives) {
+    root.traverse((object) => representedObjects.add(object))
+  }
+
+  const root = new Group()
+  root.position.y = -1_000_000
+  targetScene.updateMatrixWorld(true)
+  targetScene.traverse((object) => {
+    if (
+      representedObjects.has(object) ||
+      !isZombieEscapeRenderableObject(object) ||
+      !object.layers.test(camera.layers)
+    ) {
+      return
+    }
+    const pipelineKey = readZombieEscapeScenePipelineSignature(object, (material) => {
+      let signature = materialSignatures.get(material)
+      if (signature === undefined) {
+        signature = readLandrushMaterialPipelineSignature(material)
+        materialSignatures.set(material, signature)
+      }
+      return signature
+    })
+    if (preparedPipelineSignatures.has(pipelineKey) || representedPipelines.has(pipelineKey)) return
+    representedPipelines.add(pipelineKey)
+    const representative = object.clone(false)
+    const source = object as Object3D & {
+      customDepthMaterial?: object
+      customDistanceMaterial?: object
+    }
+    const clone = representative as Object3D & {
+      customDepthMaterial?: object
+      customDistanceMaterial?: object
+    }
+    clone.customDepthMaterial = source.customDepthMaterial
+    clone.customDistanceMaterial = source.customDistanceMaterial
+    representative.matrix.copy(object.matrixWorld)
+    representative.matrixAutoUpdate = false
+    representative.matrixWorldAutoUpdate = true
+    representative.matrixWorldNeedsUpdate = true
+    representative.layers.mask = camera.layers.mask
+    root.add(representative)
+  })
+  return { pipelineSignatures: representedPipelines, root }
+}
+
+function readZombieEscapeScenePipelineSignature(
+  object: Object3D,
+  readMaterialSignature: (material: Material) => string,
+) {
+  const renderable = object as Object3D & {
+    castShadow?: boolean
+    count?: number
+    customDepthMaterial?: Material
+    customDistanceMaterial?: Material
+    geometry?: {
+      attributes?: Record<string, unknown>
+      groups?: Array<{ count: number; materialIndex?: number }>
+      index?: unknown
+      morphAttributes?: Record<string, unknown[]>
+      morphTargetsRelative?: boolean
+    }
+    instanceColor?: unknown
+    instanceMatrix?: unknown
+    isBatchedMesh?: boolean
+    isInstancedMesh?: boolean
+    isLine?: boolean
+    isLineLoop?: boolean
+    isLineSegments?: boolean
+    isMesh?: boolean
+    isPoints?: boolean
+    isSkinnedMesh?: boolean
+    isSprite?: boolean
+    material?: Material | Material[]
+    matrixWorld: { determinant: () => number }
+    morphTexture?: unknown
+    morphTargetInfluences?: readonly number[]
+    receiveShadow?: boolean
+    skeleton?: { bones?: unknown[] }
+    uuid: string
+  }
+  const materials = Array.isArray(renderable.material)
+    ? renderable.material
+    : renderable.material
+      ? [renderable.material]
+      : []
+  const geometry = renderable.geometry
+  const activeMaterialSlots =
+    materials.length > 1
+      ? Array.from(
+          new Set(
+            (geometry?.groups ?? [])
+              .filter((group) => group.count > 0)
+              .map((group) => group.materialIndex ?? 0),
+          ),
+        ).sort((first, second) => first - second)
+      : []
+  const attributes = Object.entries(geometry?.attributes ?? {})
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([name, attribute]) => `${name}:${readZombieEscapePipelineAttributeSignature(attribute)}`)
+    .join(',')
+  const morphAttributes = Object.entries(geometry?.morphAttributes ?? {})
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(
+      ([name, entries]) =>
+        `${name}:${entries
+          .map((entry) => readZombieEscapePipelineAttributeSignature(entry, true))
+          .join(';')}`,
+    )
+    .join(',')
+  return [
+    renderable.isMesh ? 'mesh' : '',
+    renderable.isLineSegments ? 'line-segments' : renderable.isLineLoop ? 'line-loop' : '',
+    renderable.isLine ? 'line' : '',
+    renderable.isPoints ? 'points' : '',
+    renderable.isSprite ? 'sprite' : '',
+    renderable.isBatchedMesh ? 'batched' : 'not-batched',
+    renderable.isInstancedMesh ? 'instanced' : 'not-instanced',
+    renderable.isSkinnedMesh ? 'skinned' : 'static',
+    renderable.instanceColor ? 'instance-color' : 'no-instance-color',
+    renderable.instanceMatrix ? 'instance-matrix' : 'no-instance-matrix',
+    renderable.morphTexture ? 'instance-morph' : 'no-instance-morph',
+    geometry?.index ? 'indexed' : 'non-indexed',
+    `attributes:${attributes}`,
+    `morph:${morphAttributes}`,
+    geometry?.morphTargetsRelative ? 'relative-morph' : 'absolute-morph',
+    `morph-influences:${String(renderable.morphTargetInfluences?.length ?? 0)}`,
+    `skeleton-bones:${String(renderable.skeleton?.bones?.length ?? 0)}`,
+    `materials:${materials.map(readMaterialSignature).join(',')}`,
+    `material-groups:${materials.length > 1 ? activeMaterialSlots.join(',') : 'single'}`,
+    renderable.castShadow ? 'casts-shadow' : 'no-cast-shadow',
+    renderable.receiveShadow ? 'receives-shadow' : 'no-receive-shadow',
+    renderable.matrixWorld.determinant() < 0 ? 'front-face-cw' : 'front-face-ccw',
+    `custom-depth:${String(
+      renderable.castShadow && renderable.customDepthMaterial
+        ? readMaterialSignature(renderable.customDepthMaterial)
+        : 'none',
+    )}`,
+    `custom-distance:${String(
+      renderable.castShadow && renderable.customDistanceMaterial
+        ? readMaterialSignature(renderable.customDistanceMaterial)
+        : 'none',
+    )}`,
+    (renderable.count ?? 1) > 1 ? 'multi-draw-count' : 'single-draw-count',
+  ].join('|')
+}
+
+function readZombieEscapeRenderTreeFingerprint(root: Object3D) {
+  const materialSignatures = new WeakMap<Material, string>()
+  const entries: string[] = []
+  root.updateMatrixWorld(true)
+  root.traverse((object) => {
+    if (!isZombieEscapeRenderableObject(object)) return
+    const renderable = object as Object3D & {
+      geometry?: { uuid?: string }
+      material?: Material | Material[]
+    }
+    const materials = Array.isArray(renderable.material)
+      ? renderable.material
+      : renderable.material
+        ? [renderable.material]
+        : []
+    const pipelineSignature = readZombieEscapeScenePipelineSignature(object, (material) => {
+      let signature = materialSignatures.get(material)
+      if (signature === undefined) {
+        signature = readLandrushMaterialPipelineSignature(material)
+        materialSignatures.set(material, signature)
+      }
+      return signature
+    })
+    entries.push(
+      [
+        object.uuid,
+        renderable.geometry?.uuid ?? 'no-geometry',
+        materials.map((material) => `${material.uuid}:${material.version}`).join(','),
+        pipelineSignature,
+      ].join('|'),
+    )
+  })
+  return entries.join('\n')
+}
+
+function readZombieEscapePipelineAttributeSignature(attribute: unknown, identitySensitive = false) {
+  const candidate = attribute as {
+    array?: { constructor?: { name?: string } }
+    data?: {
+      array?: { constructor?: { name?: string } }
+      meshPerAttribute?: number
+      stride?: number
+    }
+    gpuType?: number
+    id?: number
+    isInstancedBufferAttribute?: boolean
+    isInterleavedBufferAttribute?: boolean
+    itemSize?: number
+    meshPerAttribute?: number
+    normalized?: boolean
+    offset?: number
+  }
+  const storage = candidate.isInterleavedBufferAttribute ? candidate.data : candidate
+  return [
+    identitySensitive ? `id:${String(candidate.id ?? 'unknown')}` : 'structural',
+    candidate.isInterleavedBufferAttribute ? 'interleaved' : 'buffer',
+    candidate.isInstancedBufferAttribute ? 'instanced' : 'vertex',
+    storage?.array?.constructor?.name ?? 'unknown',
+    String(candidate.itemSize ?? 0),
+    candidate.normalized ? 'normalized' : 'raw',
+    `gpu:${String(candidate.gpuType ?? 'default')}`,
+    `stride:${String(candidate.data?.stride ?? candidate.itemSize ?? 0)}`,
+    `offset:${String(candidate.offset ?? 0)}`,
+    `divisor:${String(candidate.meshPerAttribute ?? candidate.data?.meshPerAttribute ?? 0)}`,
+  ].join(':')
+}
+
+function isZombieEscapeRenderableObject(object: Object3D) {
+  const renderable = object as Object3D & {
+    isLine?: boolean
+    isMesh?: boolean
+    isPoints?: boolean
+    isSprite?: boolean
+  }
+  return Boolean(
+    renderable.isMesh || renderable.isLine || renderable.isPoints || renderable.isSprite,
+  )
 }
 
 function resolveZombieEscapePreparedRepresentativeCache({
@@ -247,7 +558,8 @@ function resolveZombieEscapePreparedRepresentativeCache({
   const next: ZombieEscapePreparedRepresentativeCache = {
     camera,
     context,
-    rootsByKey: new Map(),
+    representativesByKey: new Map(),
+    scenePipelineSignatures: new Set(),
     targetScene,
   }
   PREPARED_REPRESENTATIVES_BY_RENDERER.set(renderer, next)

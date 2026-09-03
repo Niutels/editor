@@ -1,5 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
 import {
+  AnimationClip,
+  AnimationMixer,
   Bone,
   BufferGeometry,
   DataUtils,
@@ -21,6 +23,7 @@ import { ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS } from './zombie-escape
 import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
 import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
+  bakeZombieEscapeAuthoredVat,
   countZombieEscapeAuthoredVariantCapacity,
   createZombieEscapeAuthoredInstancePresentation,
   createZombieEscapeAuthoredInstancePresentationCooperatively,
@@ -77,9 +80,9 @@ describe('authored instanced zombie presentation', () => {
         vertexCount: 2048,
       },
       {
-        expected: { height: 2, width: 4096 },
-        lastNormal: { column: 1, row: 1 },
-        lastPosition: { column: 0, row: 1 },
+        expected: { height: 3, width: 1366 },
+        lastNormal: { column: 1365, row: 2 },
+        lastPosition: { column: 1364, row: 2 },
         vertexCount: 2049,
       },
       {
@@ -89,9 +92,9 @@ describe('authored instanced zombie presentation', () => {
         vertexCount: 4096,
       },
       {
-        expected: { height: 3, width: 4096 },
-        lastNormal: { column: 1, row: 2 },
-        lastPosition: { column: 0, row: 2 },
+        expected: { height: 17, width: 482 },
+        lastNormal: { column: 481, row: 16 },
+        lastPosition: { column: 480, row: 16 },
         vertexCount: 4097,
       },
     ]
@@ -291,6 +294,50 @@ describe('authored instanced zombie presentation', () => {
       })
     } finally {
       presentation.dispose()
+    }
+  })
+
+  test('constructs a presentation from pre-baked VAT without sampling clips at startup', () => {
+    const source = createSkinnedSource()
+    const bakedVat = bakeZombieEscapeAuthoredVat({
+      attackClip: null,
+      runClip: null,
+      source: source.root,
+      walkClip: null,
+    })
+    const clipAction = spyOn(AnimationMixer.prototype, 'clipAction')
+    const probeClip = new AnimationClip('must-not-sample', 1, [])
+    const presentation = createZombieEscapeAuthoredInstancePresentation({
+      attackClip: probeClip,
+      bakedVat,
+      deathClip: probeClip,
+      instanceCapacity: 1,
+      modelTransform: { offset: new Vector3(), scale: 1 },
+      runClip: probeClip,
+      source: source.root,
+      variantIndex: 0,
+      walkClip: probeClip,
+      zombieShader: createZombieEscapeZombieShader({ phaseAmount: 1 }),
+    })
+
+    try {
+      expect(clipAction).not.toHaveBeenCalled()
+      const mesh = presentation.root.children[0] as InstancedMesh
+      const material = mesh.material as MeshStandardNodeMaterial & {
+        readonly bakedPositionNode: { readonly node: { readonly value: Texture } }
+      }
+      const bakedTexture = material.bakedPositionNode.node.value
+      expect(bakedTexture.version).toBeGreaterThan(0)
+      expect(bakedTexture.source.version).toBeGreaterThan(0)
+      expect(presentation.getDebugSnapshot().bakedTextureBytes).toBe(
+        bakedVat.meshes[0]?.data.byteLength,
+      )
+      expect(presentation.getReadinessSnapshot().ready).toBe(true)
+    } finally {
+      clipAction.mockRestore()
+      presentation.dispose()
+      source.geometry.dispose()
+      source.material.dispose()
     }
   })
 

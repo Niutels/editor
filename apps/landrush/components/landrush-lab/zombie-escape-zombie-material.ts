@@ -3,7 +3,6 @@ import {
   type Material,
   type MeshPhysicalMaterial,
   type MeshStandardMaterial,
-  type Texture,
   Vector3,
 } from 'three'
 import {
@@ -13,6 +12,7 @@ import {
   materialColor,
   materialEmissive,
   materialMetalness,
+  materialReference,
   materialRoughness,
   mix,
   mx_noise_float,
@@ -79,6 +79,14 @@ type ZombieVec4Node = TSLNode<'vec4'>
 type ZombiePhaseUniformNode = ZombieFloatNode & { value: number }
 type ZombieVec3UniformNode = ZombieVec3Node & { value: Vector3 }
 
+const ZOMBIE_MATERIAL_FIELD_BOUNDS_USER_DATA_KEY = 'landrushZombieMaterialFieldBounds'
+const ZOMBIE_MATERIAL_FIELD_SEED_OFFSET_USER_DATA_KEY = 'landrushZombieMaterialFieldSeedOffset'
+
+type ZombieMaterialFieldNodes = Readonly<{
+  bounds: ZombieVec3Node
+  seedOffset: ZombieVec3Node
+}>
+
 type ZombieTorchFieldNodes = Readonly<{
   active: ZombieFloatNode
   direction: ZombieVec3Node
@@ -116,11 +124,8 @@ export function createZombieEscapeZombieShader({
           outsideVisibility: outsideTorchVisibilityNode,
         }
       : null
-  const untexturedFieldGraphs = new Map<string, ReturnType<typeof createZombieMaterialFieldGraph>>()
-  const texturedFieldGraphs = new WeakMap<
-    Texture,
-    Map<string, ReturnType<typeof createZombieMaterialFieldGraph>>
-  >()
+  const materialFieldNodes = createZombieMaterialFieldNodes()
+  const fieldGraphs = new Map<boolean, ReturnType<typeof createZombieMaterialFieldGraph>>()
 
   return {
     createMaterial(source, geometry, seed) {
@@ -128,23 +133,17 @@ export function createZombieEscapeZombieShader({
       if (!isStandardMaterial(clonedMaterial)) return clonedMaterial
 
       const bounds = resolveMaterialBounds(geometry)
-      const graphKey = createFieldGraphKey(bounds, seed, clonedMaterial.vertexColors)
-      let fieldGraphs = untexturedFieldGraphs
-      if (clonedMaterial.map) {
-        fieldGraphs = texturedFieldGraphs.get(clonedMaterial.map) ?? new Map()
-        texturedFieldGraphs.set(clonedMaterial.map, fieldGraphs)
-      }
-      let graph = fieldGraphs.get(graphKey)
+      const usesVertexColors = clonedMaterial.vertexColors
+      let graph = fieldGraphs.get(usesVertexColors)
       if (!graph) {
         graph = createZombieMaterialFieldGraph(
-          bounds,
-          seed,
+          materialFieldNodes,
           phaseNode,
           torchFieldNodes,
           debugMode,
-          clonedMaterial.vertexColors,
+          usesVertexColors,
         )
-        fieldGraphs.set(graphKey, graph)
+        fieldGraphs.set(usesVertexColors, graph)
       }
 
       const material = isPhysicalMaterial(clonedMaterial)
@@ -152,6 +151,7 @@ export function createZombieEscapeZombieShader({
         : new MeshStandardNodeMaterial()
       try {
         material.copy(clonedMaterial as unknown as typeof material)
+        assignZombieMaterialFieldUniformValues(material, bounds, seed)
         material.vertexColors = false
         material.colorNode = graph.colorNode
         material.emissiveNode = graph.emissiveNode
@@ -200,25 +200,23 @@ export function createZombieEscapeZombieShader({
 }
 
 function createZombieMaterialFieldGraph(
-  bounds: ZombieMaterialBounds,
-  seed: number,
+  materialFieldNodes: ZombieMaterialFieldNodes,
   phaseNode: ZombieFloatNode,
   torchFieldNodes: ZombieTorchFieldNodes | null,
   debugMode: ZombieEscapeZombieMaterialDebugMode,
   usesVertexColors: boolean,
 ) {
-  const seedOffset = createSeedOffset(seed)
+  const bounds = materialFieldNodes.bounds
+  const seedOffset = materialFieldNodes.seedOffset
   const normalizedPosition = vec3(
-    positionGeometry.x.div(bounds.height),
-    positionGeometry.y.sub(bounds.minY).div(bounds.height),
-    positionGeometry.z.div(bounds.height),
+    positionGeometry.x.div(bounds.y),
+    positionGeometry.y.sub(bounds.z).div(bounds.y),
+    positionGeometry.z.div(bounds.y),
   )
-  const broadCoordinates = normalizedPosition
-    .mul(vec3(5.2, 4.4, 7.1))
-    .add(vec3(seedOffset[0], seedOffset[1], seedOffset[2]))
+  const broadCoordinates = normalizedPosition.mul(vec3(5.2, 4.4, 7.1)).add(seedOffset)
   const detailCoordinates = normalizedPosition
     .mul(vec3(18.7, 15.3, 21.1))
-    .add(vec3(seedOffset[2] + 7.3, seedOffset[0] + 19.1, seedOffset[1] + 31.7))
+    .add(vec3(seedOffset.z.add(7.3), seedOffset.x.add(19.1), seedOffset.y.add(31.7)))
   const mottle = mx_noise_float(broadCoordinates).mul(0.5).add(0.5).clamp(0, 1)
   const veinDistance = mx_noise_float(detailCoordinates).abs()
   const veinAntialiasing = fwidth(veinDistance).mul(1.35).max(0.01)
@@ -229,13 +227,9 @@ function createZombieMaterialFieldGraph(
   ).oneMinus()
 
   const normalizedHeight = normalizedPosition.y.clamp(0, 1)
-  const centerColumn = smoothstep(
-    0.34,
-    0.58,
-    positionGeometry.x.abs().div(bounds.halfWidth),
-  ).oneMinus()
+  const centerColumn = smoothstep(0.34, 0.58, positionGeometry.x.abs().div(bounds.x)).oneMinus()
   const head = smoothstep(0.58, 0.7, normalizedHeight).mul(centerColumn)
-  const armReach = smoothstep(0.46, 0.78, positionGeometry.x.abs().div(bounds.halfWidth))
+  const armReach = smoothstep(0.46, 0.78, positionGeometry.x.abs().div(bounds.x))
   const armBand = smoothstep(0.22, 0.38, normalizedHeight).mul(
     smoothstep(0.79, 0.9, normalizedHeight).oneMinus(),
   )
@@ -384,12 +378,35 @@ function resolveMaterialBounds(geometry: BufferGeometry): ZombieMaterialBounds {
   }
 }
 
-function createFieldGraphKey(
+function createZombieMaterialFieldNodes(): ZombieMaterialFieldNodes {
+  return {
+    bounds: materialReference(
+      `userData.${ZOMBIE_MATERIAL_FIELD_BOUNDS_USER_DATA_KEY}`,
+      'vec3',
+    ) as unknown as ZombieVec3Node,
+    seedOffset: materialReference(
+      `userData.${ZOMBIE_MATERIAL_FIELD_SEED_OFFSET_USER_DATA_KEY}`,
+      'vec3',
+    ) as unknown as ZombieVec3Node,
+  }
+}
+
+function assignZombieMaterialFieldUniformValues(
+  material: Material,
   bounds: ZombieMaterialBounds,
   seed: number,
-  usesVertexColors: boolean,
 ) {
-  return `${seed}:${bounds.minY.toFixed(5)}:${bounds.height.toFixed(5)}:${bounds.halfWidth.toFixed(5)}:${usesVertexColors ? 1 : 0}`
+  const seedOffset = createSeedOffset(seed)
+  material.userData[ZOMBIE_MATERIAL_FIELD_BOUNDS_USER_DATA_KEY] = new Vector3(
+    bounds.halfWidth,
+    bounds.height,
+    bounds.minY,
+  )
+  material.userData[ZOMBIE_MATERIAL_FIELD_SEED_OFFSET_USER_DATA_KEY] = new Vector3(
+    seedOffset[0],
+    seedOffset[1],
+    seedOffset[2],
+  )
 }
 
 function createSeedOffset(seed: number): readonly [number, number, number] {

@@ -77,6 +77,52 @@ describe('zombie phase material shader', () => {
     geometry.dispose()
   })
 
+  test('reuses one shader program shape while keeping seed and bounds as per-material uniforms', () => {
+    const firstGeometry = new BoxGeometry(1, 2, 0.5)
+    const secondGeometry = new BoxGeometry(4, 6, 2).translate(0, 4, 0)
+    const firstSource = new MeshStandardMaterial({ color: '#cfa98c', map: new Texture() })
+    const secondSource = new MeshStandardMaterial({ color: '#9f765d', map: new Texture() })
+    const shader = createZombieEscapeZombieShader({ phaseAmount: 1 })
+    const first = shader.createMaterial(firstSource, firstGeometry, 4) as MeshStandardNodeMaterial
+    const second = shader.createMaterial(
+      secondSource,
+      secondGeometry,
+      9,
+    ) as MeshStandardNodeMaterial
+    const cloned = first.clone()
+    const copied = new MeshStandardNodeMaterial().copy(first)
+
+    expect(first.colorNode).toBe(second.colorNode)
+    expect(first.roughnessNode).toBe(second.roughnessNode)
+    expect(first.customProgramCacheKey()).toBe(second.customProgramCacheKey())
+    expect(first.userData.landrushZombieMaterialFieldBounds.toArray()).toEqual([0.5, 2, -1])
+    expect(second.userData.landrushZombieMaterialFieldBounds.toArray()).toEqual([2, 6, 1])
+    expect(first.userData.landrushZombieMaterialFieldSeedOffset).not.toEqual(
+      second.userData.landrushZombieMaterialFieldSeedOffset,
+    )
+    expect(cloned.userData.landrushZombieMaterialFieldBounds).toEqual({ x: 0.5, y: 2, z: -1 })
+    expect(cloned.userData.landrushZombieMaterialFieldSeedOffset).toEqual(
+      first.userData.landrushZombieMaterialFieldSeedOffset,
+    )
+    expect(copied.userData.landrushZombieMaterialFieldBounds).toEqual({ x: 0.5, y: 2, z: -1 })
+    expect(copied.userData.landrushZombieMaterialFieldSeedOffset).toEqual(
+      first.userData.landrushZombieMaterialFieldSeedOffset,
+    )
+    expect(Object.keys(first)).not.toContain('landrushZombieMaterialFieldBounds')
+    expect(Object.keys(first)).not.toContain('landrushZombieMaterialFieldSeedOffset')
+
+    cloned.dispose()
+    copied.dispose()
+    first.dispose()
+    second.dispose()
+    firstSource.map?.dispose()
+    secondSource.map?.dispose()
+    firstSource.dispose()
+    secondSource.dispose()
+    firstGeometry.dispose()
+    secondGeometry.dispose()
+  })
+
   test('mixes mapped source PBR channels into a nonmetal zombie response', () => {
     const sourceText = readFileSync(
       new URL('./zombie-escape-zombie-material.ts', import.meta.url),

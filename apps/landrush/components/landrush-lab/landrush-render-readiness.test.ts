@@ -5,6 +5,7 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
+  Mesh,
   MeshBasicMaterial,
   PerspectiveCamera,
   PointLight,
@@ -90,6 +91,7 @@ describe('Landrush render readiness compile coordination', () => {
     root.visible = false
     child.visible = false
     instances.visible = false
+    material.visible = false
     instances.frustumCulled = true
     instances.count = 0
     const originalInstanceMatrix = new Matrix4().makeTranslation(3, 4, 5)
@@ -132,6 +134,7 @@ describe('Landrush render readiness compile coordination', () => {
       expect(root.visible).toBe(true)
       expect(child.visible).toBe(true)
       expect(instances.visible).toBe(true)
+      expect(material.visible).toBe(true)
       expect(instances.frustumCulled).toBe(false)
       expect(instances.count).toBe(1)
       const concealedMatrix = readInstanceMatrix(instances)
@@ -159,6 +162,7 @@ describe('Landrush render readiness compile coordination', () => {
       expect(root.visible).toBe(false)
       expect(child.visible).toBe(false)
       expect(instances.visible).toBe(false)
+      expect(material.visible).toBe(false)
       expect(instances.frustumCulled).toBe(true)
       expect(instances.count).toBe(0)
       expect(readInstanceMatrix(instances).elements).toEqual(originalInstanceMatrix.elements)
@@ -240,18 +244,20 @@ describe('Landrush render readiness compile coordination', () => {
     const geometry = new BoxGeometry()
     const material = new MeshBasicMaterial()
     const instances = new InstancedMesh(geometry, material, 2)
+    const unrelatedGeometry = new BoxGeometry()
+    const unrelatedMaterial = new MeshBasicMaterial()
+    const unrelatedMesh = new Mesh(unrelatedGeometry, unrelatedMaterial)
     const registeredLight = new PointLight()
     const hiddenLight = new PointLight()
-    const unrelated = new Group()
+    const unrelatedLight = new PointLight()
     const state: LandrushPresentationPipelinePrewarmState = {}
     hiddenAncestor.visible = false
     instances.count = 0
     instances.visible = false
     registeredLight.visible = false
-    unrelated.visible = false
     representative.add(instances, registeredLight)
     hiddenAncestor.add(representative, hiddenLight)
-    scene.add(hiddenAncestor, unrelated)
+    scene.add(hiddenAncestor, unrelatedMesh, unrelatedLight)
     const unregister = registerLandrushPresentationPipelinePrewarm({
       invalidate: () => undefined,
       renderer,
@@ -273,7 +279,8 @@ describe('Landrush render readiness compile coordination', () => {
       expect(instances.count).toBe(1)
       expect(registeredLight.visible).toBe(true)
       expect(hiddenLight.visible).toBe(false)
-      expect(unrelated.visible).toBe(false)
+      expect(unrelatedMesh.visible).toBe(false)
+      expect(unrelatedLight.visible).toBe(true)
 
       state.pipelinePrewarmRenderedRevision = state.pipelinePrewarmRequestRevision
       completeLandrushPresentationPipelinePrewarmFrame(renderer)
@@ -283,11 +290,14 @@ describe('Landrush render readiness compile coordination', () => {
       expect(instances.count).toBe(0)
       expect(registeredLight.visible).toBe(false)
       expect(hiddenLight.visible).toBe(true)
-      expect(unrelated.visible).toBe(false)
+      expect(unrelatedMesh.visible).toBe(true)
+      expect(unrelatedLight.visible).toBe(true)
     } finally {
       unregister()
       geometry.dispose()
       material.dispose()
+      unrelatedGeometry.dispose()
+      unrelatedMaterial.dispose()
     }
   })
 

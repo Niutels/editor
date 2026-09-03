@@ -12,6 +12,7 @@ const READY_NIGHT = {
   authorityResyncActive: false,
   buildMode: false,
   cameraOwner: 'zombie',
+  cameraTransitionActive: false,
   fpvView: false,
   generatedAssetsReady: true,
   loadingActive: false,
@@ -76,6 +77,16 @@ describe('Landrush Zombie Escape actionability', () => {
         }),
       ).toBe(true)
     }
+  })
+
+  test('keeps Night pending until the camera transition settles', () => {
+    expect(
+      resolveLandrushZombieEscapePhaseReady({
+        ...READY_NIGHT,
+        cameraTransitionActive: true,
+      }),
+    ).toBe(false)
+    expect(resolveLandrushZombieEscapePhaseReady(READY_NIGHT)).toBe(true)
   })
 
   test('blocks Night movement for unsafe view, authority, and collision states', () => {

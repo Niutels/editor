@@ -469,7 +469,7 @@ describe('presentation-only post-processing camera lifecycle', () => {
     }
   })
 
-  test('acknowledges an exact direct prewarm frame with the requested camera and unculled scene', async () => {
+  test('acknowledges an exact direct prewarm frame without broadly changing scene culling', async () => {
     const host = await createPresentationRoot()
     const effect = presentationRef()
     const zombieCamera = new THREE.OrthographicCamera(-8, 8, 8, -8, 0.5, 400)
@@ -501,7 +501,7 @@ describe('presentation-only post-processing camera lifecycle', () => {
         { cameras: [snapshotCamera(zombieCamera)], path: 'direct' },
         { cameras: [snapshotCamera(host.camera)], path: 'direct' },
       ])
-      expect(host.directDraws.at(-2)?.culled).toEqual([false, false])
+      expect(host.directDraws.at(-2)?.culled).toEqual([true, false])
       expect(host.directDraws.at(-1)?.culled).toEqual([true, false])
       expect(effect.current.pipelinePrewarmRenderedRevision).toBe(11)
       expect(effect.current.pipelinePrewarmRenderedCamera).toBe(zombieCamera)
@@ -545,7 +545,7 @@ describe('presentation-only post-processing camera lifecycle', () => {
         { cameras: [snapshotCamera(host.camera)], path: 'pipeline' },
       ])
       expect(frames.at(-2)?.cameras).toEqual([zombieCamera])
-      expect(frames.at(-2)?.culled).toEqual([false, false])
+      expect(frames.at(-2)?.culled).toEqual([true, false])
       expect(frames.at(-1)?.cameras).toEqual([host.camera])
       expect(frames.at(-1)?.culled).toEqual([true, false])
       expect(effect.current.pipelinePrewarmRenderedCamera).toBe(zombieCamera)
@@ -632,7 +632,7 @@ describe('presentation-only post-processing camera lifecycle', () => {
         expect(host.alwaysUnculledMesh.frustumCulled).toBe(false)
       }
       expect(frames).toHaveLength(12)
-      expect(frames.every((frame) => frame.culled.every((culled) => !culled))).toBe(true)
+      expect(frames.every((frame) => frame.culled.join(',') === 'true,false')).toBe(true)
       const pipeline = frames[0]!.pipeline
       host.frame()
       expect(host.directDraws).toHaveLength(1)

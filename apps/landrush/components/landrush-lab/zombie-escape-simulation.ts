@@ -206,6 +206,8 @@ const ZOMBIE_ESCAPE_WAVE_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS = 8
 const ZOMBIE_ESCAPE_WAVE_SPAWN_AUTHORED_GROUND_ELEVATION_METERS = 0
 const ZOMBIE_ESCAPE_WAVE_SPAWN_MAXIMUM_PROBES_PER_ADMISSION = 64
 const ZOMBIE_ESCAPE_WAVE_SPAWN_GOLDEN_ANGLE_RADIANS = Math.PI * (3 - Math.sqrt(5))
+export const ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_GRACE_SECONDS = 1.5
+export const ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_STAGGER_SECONDS = 0.12
 const ZOMBIE_ESCAPE_MUZZLE_VALIDATION_MAXIMUM_DISTANCE_METERS = 2.25
 const ZOMBIE_ESCAPE_MAXIMUM_ENEMY_HITS_PER_SHOT = ZOMBIE_ESCAPE_WEAPON_PROFILES.reduce(
   (maximum, profile) => Math.max(maximum, profile.maximumEnemyHits),
@@ -10201,6 +10203,10 @@ function applyZombieEscapeAmbientHandoffCandidate(
   const handoff = state.ambientHandoff
   const zombies = state.zombies
   const locomotionMode = handoff.candidateLocomotionMode[queueIndex]!
+  zombies.attackCooldown[slot] =
+    ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds +
+    ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_GRACE_SECONDS +
+    queueIndex * ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_STAGGER_SECONDS
   zombies.variant[slot] = handoff.candidateVariant[queueIndex]!
   zombies.heading[slot] = handoff.candidateYaw[queueIndex]!
   zombies.locomotionBlend[slot] =
