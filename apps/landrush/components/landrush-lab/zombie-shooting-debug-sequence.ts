@@ -1,4 +1,4 @@
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 
 export const ZOMBIE_SHOOTING_DEBUG_SEGMENT_SECONDS = 3.2
 export const ZOMBIE_SHOOTING_DEBUG_SHOT_TIMES_SECONDS = [0.72, 1.76] as const

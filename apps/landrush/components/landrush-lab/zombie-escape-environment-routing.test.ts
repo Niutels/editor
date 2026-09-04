@@ -1,21 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  type AnyNode,
-  BuildingNode,
-  LevelNode,
-  SlabNode,
-  StairNode,
-  StairSegmentNode,
-  WallNode,
-} from '@pascal-app/core'
-import { createLandrushZombieEscapeCollisionWorldsResolver } from './landrush-island-ai-navigation-semantics'
+import { createLandrushZombieEscapeCollisionWorldsResolver } from '@landrush/pascal-host/zombie-game-navigation'
 import {
   createZombieEscapeCollisionHit,
   createZombieEscapeCollisionWorld,
   zombieEscapeSameLayerNavigationSegmentIsClear,
-} from './zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   inspectZombieEscapeCommittedNavigationAction,
@@ -25,8 +16,17 @@ import {
   spawnZombieEscapeZombie,
   spawnZombieEscapeZombieAtNavigationElevation,
   stepZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import {
+  type AnyNode,
+  BuildingNode,
+  LevelNode,
+  SlabNode,
+  StairNode,
+  StairSegmentNode,
+  WallNode,
+} from '@pascal-app/core'
 
 const FIXED_DELTA_SECONDS = 1 / 60
 

@@ -421,11 +421,13 @@ export async function initializeLandrushRenderReadinessRenderer(
 
 export async function compileLandrushRenderRepresentative({
   camera,
+  framebufferMaterialsPreparedByDraw = false,
   renderer,
   representative,
   targetScene,
 }: Readonly<{
   camera: Camera
+  framebufferMaterialsPreparedByDraw?: boolean
   renderer: LandrushPipelineRenderer
   representative: LandrushRenderRepresentative
   targetScene: Scene
@@ -434,7 +436,10 @@ export async function compileLandrushRenderRepresentative({
   let outcome: 'failed' | 'ready' = 'ready'
   try {
     await validateLandrushGpuCompilation(renderer, () => {
-      const restore = forceLandrushRepresentativeRenderable(representative.root)
+      const restore = forceLandrushRepresentativeRenderable(
+        representative.root,
+        framebufferMaterialsPreparedByDraw,
+      )
       try {
         return renderer.compileAsync(representative.root, camera, targetScene)
       } finally {
@@ -865,8 +870,15 @@ function normalizeLandrushPipelineRevision(revision: number | undefined) {
   return Number.isSafeInteger(revision) && (revision ?? -1) >= 0 ? (revision as number) : 0
 }
 
-function forceLandrushRepresentativeRenderable(root: Object3D) {
-  return forceLandrushRepresentativesRenderable([{ key: '', root }], root)
+function forceLandrushRepresentativeRenderable(
+  root: Object3D,
+  framebufferMaterialsPreparedByDraw: boolean,
+) {
+  return forceLandrushRepresentativesRenderable(
+    [{ key: '', root }],
+    root,
+    framebufferMaterialsPreparedByDraw,
+  )
 }
 
 function exposeLandrushRepresentativesForPresentationFrame(
@@ -946,6 +958,7 @@ function exposeLandrushRepresentativesForPresentationFrame(
 function forceLandrushRepresentativesRenderable(
   representatives: readonly LandrushRenderRepresentative[],
   lightScopeRoot: Object3D,
+  framebufferMaterialsPreparedByDraw = false,
 ) {
   const representedLights = new Set<Object3D>()
   for (const { root } of representatives) {
@@ -996,7 +1009,12 @@ function forceLandrushRepresentativesRenderable(
           : []
       for (const material of materials) {
         if (!materialVisibility.has(material)) materialVisibility.set(material, material.visible)
-        material.visible = true
+        // Viewport copies need the actual draw's depth producer; async compilation yields
+        // outside that render context. Exact pre-gameplay draws prepare these materials.
+        material.visible = !(
+          framebufferMaterialsPreparedByDraw &&
+          material.userData.landrushFramebufferDrawPreparation === true
+        )
       }
       object.frustumCulled = false
       if (

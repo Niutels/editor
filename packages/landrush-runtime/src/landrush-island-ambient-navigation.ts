@@ -1,3 +1,4 @@
+import type { LandrushNavigationPoint2 as LandrushPoint2 } from './navigation-geometry'
 import {
   landrushIslandNavigationSegmentIntersectsPolygon,
   openPointRing,
@@ -5,8 +6,18 @@ import {
   pointInPolygonOrNearEdge,
   pointsAlmostEqual2,
   segmentsIntersect2,
-} from '@landrush/runtime'
-import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
+} from './navigation-geometry'
+
+export type LandrushRoadSegment = Readonly<{
+  id: string
+  kind: string
+  fromNodeId: string
+  toNodeId: string
+  points: readonly LandrushPoint2[]
+  r3fPoints: readonly (readonly [number, number, number])[]
+  width: number
+  connectsParcelIds: readonly string[]
+}>
 
 const NAVIGATION_CANDIDATE_OFFSET_METERS = 0.5
 const NAVIGATION_MAX_GRAPH_POINTS = 120
@@ -211,6 +222,38 @@ export function createLandrushIslandAmbientNavigationWorld(
   const navigationGraph = createNavigationGraph(world)
   navigationGraphByWorld.set(world, navigationGraph)
   observeSpatialQuery(spatialIndex, 'graph-build', navigationGraph.candidates.length, 0)
+  return world
+}
+
+export type LandrushIslandAmbientPreparedNavigationWorld = {
+  world: LandrushIslandAmbientNavigationWorld
+  spatialIndex: Omit<LandrushIslandAmbientNavigationSpatialIndex, 'observeSpatialQuery'>
+  navigationGraph: LandrushIslandAmbientNavigationGraph
+}
+
+export function captureLandrushIslandAmbientPreparedNavigationWorld(
+  world: LandrushIslandAmbientNavigationWorld,
+): LandrushIslandAmbientPreparedNavigationWorld {
+  const index = spatialIndexByWorld.get(world)
+  const navigationGraph = navigationGraphByWorld.get(world)
+  if (!index || !navigationGraph) throw new Error('Ambient navigation world has not been prepared')
+  const spatialIndex = { ...index }
+  delete spatialIndex.observeSpatialQuery
+  return { world, spatialIndex, navigationGraph }
+}
+
+export function hydrateLandrushIslandAmbientPreparedNavigationWorld(
+  prepared: LandrushIslandAmbientPreparedNavigationWorld,
+  options: LandrushIslandAmbientNavigationWorldFactoryOptions = {},
+) {
+  const { world, navigationGraph } = prepared
+  const spatialIndex = {
+    ...prepared.spatialIndex,
+    observeSpatialQuery: options.observeSpatialQuery,
+  }
+  spatialIndexByWorld.set(world, spatialIndex)
+  spatialIndexByObstacleList.set(world.obstacles, spatialIndex)
+  navigationGraphByWorld.set(world, navigationGraph)
   return world
 }
 

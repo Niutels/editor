@@ -1,14 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  type AnyNode,
-  BuildingNode,
-  CeilingNode,
-  LevelNode,
-  RoofNode,
-  SlabNode,
-  WallNode,
-} from '@pascal-app/core'
-import {
   findLandrushBuildingFloorContext,
   findLandrushBuildingFloorInteriorRegion,
   findLandrushBuildingFloorPlacement,
@@ -18,7 +9,16 @@ import {
   resolveLandrushBuildingFloorOpacities,
   resolveLandrushBuildingFloorStacks,
   resolveLandrushBuildingFloorVisibility,
-} from './landrush-building-floor-visibility'
+} from '@landrush/pascal-host/landrush-building-floor-visibility'
+import {
+  type AnyNode,
+  BuildingNode,
+  CeilingNode,
+  LevelNode,
+  RoofNode,
+  SlabNode,
+  WallNode,
+} from '@pascal-app/core'
 
 function createTestFloor() {
   const building = BuildingNode.parse({ name: 'House' })

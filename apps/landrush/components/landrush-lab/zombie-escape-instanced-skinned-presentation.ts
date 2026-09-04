@@ -1,3 +1,8 @@
+import { resolveZombieEscapeDeathNormalizedPhase } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import {
+  createZombieEscapePresentationPose,
+  resolveZombieEscapePresentationPose,
+} from '@landrush/zombie-gameplay/zombie-escape-presentation-pose'
 import {
   type AnimationAction,
   type AnimationClip,
@@ -49,11 +54,6 @@ import {
   type ZombieEscapeAuthoredVat,
   type ZombieEscapeAuthoredVatMesh,
 } from './zombie-escape-authored-vat'
-import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
-import {
-  createZombieEscapePresentationPose,
-  resolveZombieEscapePresentationPose,
-} from './zombie-escape-presentation-pose'
 import type { ZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 export { ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT } from './zombie-escape-authored-vat'

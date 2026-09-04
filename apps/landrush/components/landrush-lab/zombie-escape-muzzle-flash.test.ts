@@ -2,9 +2,50 @@ import { describe, expect, test } from 'bun:test'
 import {
   createZombieEscapeMuzzleFlashTransform,
   resolveZombieEscapeMuzzleFlashTransform,
+  resolveZombieEscapeShotMuzzleFlashTransform,
 } from './zombie-escape-muzzle-flash'
 
 describe('zombie escape muzzle flash transform', () => {
+  test('anchors each shared shot to its own canonical origin and direction', () => {
+    const shots = {
+      originX: new Float32Array([15, -9]),
+      originY: new Float32Array([2, 6]),
+      originZ: new Float32Array([-3, 21]),
+      directionX: new Float32Array([3, 0]),
+      directionY: new Float32Array([4, 0]),
+      directionZ: new Float32Array([0, -2]),
+    }
+    const transform = createZombieEscapeMuzzleFlashTransform()
+    for (const slot of [0, 1, 0]) {
+      const expected = resolveZombieEscapeMuzzleFlashTransform(
+        {
+          muzzleX: shots.originX[slot]!,
+          muzzleY: shots.originY[slot]!,
+          muzzleZ: shots.originZ[slot]!,
+          muzzleDirectionX: shots.directionX[slot]!,
+          muzzleDirectionY: shots.directionY[slot]!,
+          muzzleDirectionZ: shots.directionZ[slot]!,
+        },
+        0.75,
+        createZombieEscapeMuzzleFlashTransform(),
+      )
+      expect(resolveZombieEscapeShotMuzzleFlashTransform(shots, slot, 0.75, transform)).toBe(
+        transform,
+      )
+      expect(transform).toEqual(expected)
+      expect(transform.x - transform.directionX * transform.scaleY).toBeCloseTo(
+        shots.originX[slot]!,
+        12,
+      )
+      expect(transform.z - transform.directionZ * transform.scaleY).toBeCloseTo(
+        shots.originZ[slot]!,
+        12,
+      )
+    }
+    expect([...shots.originX]).toEqual([15, -9])
+    expect([...shots.directionZ]).toEqual([0, -2])
+  })
+
   test('grows forward while keeping the rear endpoint on the muzzle socket', () => {
     const transform = resolveZombieEscapeMuzzleFlashTransform(
       {

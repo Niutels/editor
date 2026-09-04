@@ -576,6 +576,8 @@ export function createStandaloneOceanMaterials(
   surface.colorNode = resolvedSurfaceColor
   surface.opacityNode = surfaceOpacity
   surface.name = 'standalone-ocean-surface'
+  surface.userData.landrushFramebufferDrawPreparation =
+    submergedRockRefraction || waterlineInteractionField !== null
   surface.userData.standaloneOcean = {
     foam: 'instantaneous-jacobian-crest-bright-broken-coverage',
     glare: 'single-pass-analytic-glare',

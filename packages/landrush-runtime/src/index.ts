@@ -95,6 +95,12 @@ export {
   type WorldPolygonGeometryRole,
   type WorldPolygonRing,
 } from './world-polygon-geometry'
+export type {
+  MultiplayerZombieGameClient,
+  MultiplayerZombieGameInputIntent,
+  MultiplayerZombieGameSnapshotObservation,
+  MultiplayerZombieGameStatusObservation,
+} from './zombie-game-client'
 export type EditorCameraInitialPose = {
   position: [number, number, number]
   target: [number, number, number]

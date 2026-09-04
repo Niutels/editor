@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   ZOMBIE_ESCAPE_WEAPON_ASSET_FRAME,
   ZOMBIE_ESCAPE_WEAPON_CATALOG,
-} from './zombie-escape-weapon-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 
 const EXPECTED_MUZZLE_ANCHORS = {
   'driftwood-scattergun': [-0.00305, 0.05746, 0.41],

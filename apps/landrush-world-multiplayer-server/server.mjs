@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import { basename, dirname, resolve } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 import {
   calculateParcelBuildPriceDelta,
@@ -24,7 +25,20 @@ import {
   sanitizeParcelWriterSessionId,
   ZOMBIE_ESCAPE_KILL_REWARD,
 } from '@landrush/protocol'
+import {
+  isZombieGameBind,
+  isZombieGameDoor,
+  isZombieGameInput,
+  isZombieGameReady,
+  ZOMBIE_GAME_SCHEMA_VERSION,
+} from '@landrush/protocol/zombie-game'
 import { WebSocket, WebSocketServer } from 'ws'
+import {
+  consumeMultiplayerMessageBudget,
+  createMultiplayerMessageBudget,
+  createMultiplayerNetworkPolicy,
+  isMultiplayerOriginAllowed,
+} from './network-policy.mjs'
 
 const HEARTBEAT_INTERVAL_MS = 3000
 const MAX_BUILD_NODE_TYPE_LENGTH = 120
@@ -39,6 +53,8 @@ const MAX_INACTIVE_WRITER_SESSIONS = Math.max(
 )
 const MIN_STATE_INTERVAL_MS = 40
 const PEER_STALE_MS = 15_000
+const ZOMBIE_GAME_AUTHORITY_ENABLED = process.env.LANDRUSH_ZOMBIE_GAME_AUTHORITY === '1'
+const MAX_SNAPSHOT_BUFFERED_BYTES = 262_144
 const WRITER_SESSION_RETENTION_MS = Math.max(
   1,
   Number(process.env.LANDRUSH_WRITER_SESSION_RETENTION_MS) || 5 * 60_000,
@@ -48,6 +64,7 @@ const WRITER_SESSION_CLOSE_GRACE_MS = Math.max(
   Math.min(5_000, Number(process.env.LANDRUSH_WRITER_SESSION_CLOSE_GRACE_MS) || 0),
 )
 const PORT = Number(process.env.PORT ?? process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PORT ?? 3003)
+const NETWORK_POLICY = createMultiplayerNetworkPolicy()
 const WS_PATH = process.env.LANDRUSH_WORLD_MULTIPLAYER_WS_PATH ?? '/api/landrush-lab/world-multiplayer/ws'
 const PERSISTENT_STATE_SCHEMA_VERSION = 3
 const MAX_RECENT_PROFILE_MONEY_OPERATIONS = 128
@@ -77,6 +94,45 @@ let lastWriterSessionSweepAt = 0
 const startedAt = Date.now()
 
 await restorePersistentWorldState()
+
+const zombieGameAuthority = ZOMBIE_GAME_AUTHORITY_ENABLED
+  ? await import('./dist/zombie-game-server.mjs').then(({ createZombieGameServer }) =>
+      createZombieGameServer({
+        context(roomId) {
+          const room = rooms.get(roomId)
+          if (!room?.zombieEscapeState) return null
+          return {
+            state: room.zombieEscapeState,
+            peers: [...room.peers.values()].filter(
+              (peer) => peer.gameMode === 'zombie-escape' && isCurrentPeer(peer),
+            ),
+          }
+        },
+        builds: parcelBuildNodesSnapshot,
+        wallet: (playerId) => getProfileWallet(playerId).balance,
+        money: applyZombieGameMoney,
+        died(roomId, playerId) {
+          const room = rooms.get(roomId)
+          const peer = room?.peers.get(playerId)
+          if (peer && room.zombieEscapeState) {
+            reportZombieEscapeDeath(peer, room.zombieEscapeState, Date.now())
+          }
+        },
+        failed(roomId) {
+          const room = rooms.get(roomId)
+          if (room) finishZombieEscapeNight(roomId, room, Date.now())
+        },
+        send: (peer, message) => send(peer.socket, message),
+        sendEncoded: (peer, encoded) => sendBufferedEncoded(peer.socket, encoded),
+      }),
+    ).catch((error) => {
+      throw new Error(`Real Zombie authority could not start; build its Node bundle first: ${errorMessage(error)}`)
+    })
+  : null
+const zombieGameScheduler = zombieGameAuthority
+  ? setInterval(() => zombieGameAuthority.tick(), 1000 / 60)
+  : null
+zombieGameScheduler?.unref()
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
@@ -140,6 +196,7 @@ const server = http.createServer((request, response) => {
         worldSubscriptions: parcelWorldSubscriptionBySocket.size,
         writerSessionRetentionMs: WRITER_SESSION_RETENTION_MS,
         writerSessions: writerSessionsByPlayer.size,
+        ...(zombieGameAuthority?.metrics() ?? {}),
       }),
     )
     return
@@ -150,15 +207,35 @@ const server = http.createServer((request, response) => {
 })
 
 const wss = new WebSocketServer({
+  closeTimeout: 1000,
   maxPayload: MAX_BUILD_SNAPSHOT_BYTES + 250_000,
   path: WS_PATH,
   server,
+  verifyClient(info, done) {
+    if (!isMultiplayerOriginAllowed(NETWORK_POLICY, info.origin)) {
+      done(false, 403, 'Origin is not allowed')
+      return
+    }
+    if (wss.clients.size >= NETWORK_POLICY.maxConnections) {
+      done(false, 503, 'Connection capacity reached')
+      return
+    }
+    done(true)
+  },
 })
 
 wss.on('connection', (socket) => {
   const connectionId = randomUUID()
   let peer = null
   let watcher = null
+  const messageBudget = createMultiplayerMessageBudget(NETWORK_POLICY, performance.now())
+  let joinTimer
+  const armJoinDeadline = () => {
+    clearTimeout(joinTimer)
+    joinTimer = setTimeout(() => socket.close(1008, 'Join timeout'), NETWORK_POLICY.prejoinTimeoutMs)
+    joinTimer.unref()
+  }
+  armJoinDeadline()
 
   send(socket, {
     connectionId,
@@ -167,9 +244,15 @@ wss.on('connection', (socket) => {
     serverTime: Date.now(),
     stalePeerMs: PEER_STALE_MS,
     type: 'welcome',
+    ...(zombieGameAuthority ? { zombieGameAuthority: zombieGameAuthority.capabilities } : {}),
   })
 
   socket.on('message', (data) => {
+    if (socket.readyState !== WebSocket.OPEN) return
+    if (!consumeMultiplayerMessageBudget(messageBudget, NETWORK_POLICY, data.byteLength, performance.now())) {
+      socket.close(1008, 'Message rate limit exceeded')
+      return
+    }
     const now = Date.now()
     sweepStalePeers(now)
 
@@ -188,6 +271,14 @@ wss.on('connection', (socket) => {
       const roomId = sanitizeMultiplayerRoomId(message.roomId)
       const room = rooms.get(roomId)
       const existingPeer = room?.peers.get(player.id)
+      if (
+        zombieGameAuthority && message.gameMode === 'zombie-escape' &&
+        message.zombieGameSchemaVersion !== ZOMBIE_GAME_SCHEMA_VERSION
+      ) {
+        sendError(socket, 'zombie-game-version-required', 'This server requires the shared Zombie game client')
+        socket.close(1008, 'Shared Zombie game client required')
+        return
+      }
 
       if (!existingPeer && (room?.peers.size ?? 0) >= MAX_ROOM_PEERS) {
         sendError(socket, 'room-full', 'Room is full')
@@ -241,8 +332,17 @@ wss.on('connection', (socket) => {
         writerEpoch: writerSession.writerEpoch,
         writerSessionId: writerSession.writerSessionId,
       })
-      joinRoom(peer)
+      try {
+        joinRoom(peer)
+      } catch (error) {
+        leaveRoom(peer, false, 'join-failed')
+        sendError(socket, 'join-failed', errorMessage(error))
+        socket.close(1011, 'Failed to join multiplayer room')
+        peer = null
+        return
+      }
       updateParcelWorldSubscriptionRoom(socket, roomId)
+      clearTimeout(joinTimer)
       return
     }
 
@@ -259,6 +359,7 @@ wss.on('connection', (socket) => {
       }
       watchRoom(watcher)
       updateParcelWorldSubscriptionRoom(socket, roomId)
+      clearTimeout(joinTimer)
       return
     }
 
@@ -266,11 +367,17 @@ wss.on('connection', (socket) => {
       if (peer) peer.lastSeenAt = now
       if (watcher) watcher.lastSeenAt = now
       const worldId = sanitizeParcelWorldId(message.worldId)
+      const boundWorldId = peer && zombieGameAuthority?.world(peer)
+      if (boundWorldId && boundWorldId !== worldId) {
+        sendError(socket, 'zombie-game-world-mismatch', 'The shared Zombie room is bound to another world')
+        return
+      }
       const roomId = sanitizeMultiplayerRoomId(message.roomId ?? peer?.roomId ?? watcher?.roomId)
       setParcelWorldSubscription(socket, roomId, worldId)
       sendParcelOwnershipSnapshot(socket, roomId, worldId)
       sendParcelBuildNodesSnapshot(socket, roomId, worldId)
       sendTvMediaStateSnapshot(socket, roomId, worldId)
+      clearTimeout(joinTimer)
       return
     }
 
@@ -465,6 +572,53 @@ wss.on('connection', (socket) => {
       return
     }
 
+    if (message.type === 'zombie-game-bind') {
+      if (!zombieGameAuthority || !peer || peer.gameMode !== 'zombie-escape' || !isCurrentPeer(peer)) {
+        sendError(socket, 'zombie-game-unavailable', 'Join the shared Zombie game before binding its world')
+        return
+      }
+      if (parcelWorldSubscriptionBySocket.get(socket)?.worldId !== message.worldId) {
+        sendError(socket, 'zombie-game-world-mismatch', 'Subscribe to the canonical world before binding it')
+        return
+      }
+      peer.lastSeenAt = now
+      const bindingPeer = peer
+      void zombieGameAuthority.bind(bindingPeer, message).then((accepted) => {
+        if (!accepted) {
+          sendError(socket, 'zombie-game-bind-rejected', 'The shared Zombie world could not be bound')
+          return
+        }
+        if (!isCurrentPeer(bindingPeer)) return
+        const room = rooms.get(bindingPeer.roomId)
+        if (room?.zombieEscapeState?.phase === 'night' &&
+          !room.zombieEscapeDeadPlayerIds.has(bindingPeer.id) &&
+          zombieGameAuthority.survivingParticipant(bindingPeer)) {
+          room.zombieEscapeAlivePlayerIds.add(bindingPeer.id)
+        }
+      }).catch((error) => sendError(socket, 'zombie-game-bind-rejected', errorMessage(error)))
+      return
+    }
+
+    if (message.type === 'zombie-game-ready') {
+      if (!zombieGameAuthority || !peer || peer.gameMode !== 'zombie-escape' || !isCurrentPeer(peer)) return
+      peer.lastSeenAt = now
+      if (!zombieGameAuthority.presentation(peer, message)) return
+      const room = rooms.get(peer.roomId)
+      if (zombieGameAuthority.ready(peer) && room?.zombieEscapeState?.phase === 'night' &&
+        !room.zombieEscapeDeadPlayerIds.has(peer.id)) room.zombieEscapeAlivePlayerIds.add(peer.id)
+      return
+    }
+
+    if (message.type === 'zombie-game-input' || message.type === 'zombie-game-door') {
+      if (!zombieGameAuthority || !peer || peer.gameMode !== 'zombie-escape' || !isCurrentPeer(peer)) return
+      peer.lastSeenAt = now
+      if (message.type === 'zombie-game-input') zombieGameAuthority.input(peer, message, now)
+      else if (!zombieGameAuthority.door(peer, message, now)) {
+        sendError(socket, 'zombie-game-door-rejected', 'The door interaction was not valid')
+      }
+      return
+    }
+
     if (message.type === 'report-zombie-escape-death') {
       if (!peer) {
         sendError(socket, 'not-joined', 'Join a room before reporting Zombie Escape death')
@@ -475,6 +629,7 @@ wss.on('connection', (socket) => {
         return
       }
       peer.lastSeenAt = now
+      if (zombieGameAuthority && peer.gameMode === 'zombie-escape') return
       reportZombieEscapeDeath(peer, message, now)
       return
     }
@@ -494,6 +649,7 @@ wss.on('connection', (socket) => {
       peer.lastSeenAt = now
       peer.lastStateAt = now
       peer.player = sanitizePlayerSnapshot({ ...message.player, id: peer.id }, now)
+      zombieGameAuthority?.player(peer, now)
       broadcast(
         peer.roomId,
         { player: peer.player, roomId: peer.roomId, serverTime: now, type: 'player-state' },
@@ -552,9 +708,11 @@ wss.on('connection', (socket) => {
     leaveWatcher(watcher)
     watcher = null
     clearParcelWorldSubscription(socket)
+    armJoinDeadline()
   })
 
   socket.on('close', () => {
+    clearTimeout(joinTimer)
     leaveRoom(peer, true, 'closed')
     peer = null
     leaveWatcher(watcher)
@@ -563,6 +721,7 @@ wss.on('connection', (socket) => {
   })
 
   socket.on('error', () => {
+    clearTimeout(joinTimer)
     leaveRoom(peer, true, 'error')
     peer = null
     leaveWatcher(watcher)
@@ -571,7 +730,7 @@ wss.on('connection', (socket) => {
   })
 })
 
-server.listen(PORT, () => {
+server.listen({ port: PORT, host: NETWORK_POLICY.host }, () => {
   console.log(`Landrush world multiplayer listening on port ${PORT}`)
   console.log(`WebSocket path: ${WS_PATH}`)
 })
@@ -589,10 +748,13 @@ server.on('error', (error) => {
 function joinRoom(peer) {
   const room = getRoom(peer.roomId)
   const now = Date.now()
+  const replacedPeer = room.peers.get(peer.id)
+  if (replacedPeer && replacedPeer !== peer) zombieGameAuthority?.disconnect(replacedPeer)
   room.peers.set(peer.id, peer)
   if (
     peer.gameMode === 'zombie-escape' &&
     room.zombieEscapeState?.phase === 'night' &&
+    (!zombieGameAuthority || zombieGameAuthority.ready(peer)) &&
     !room.zombieEscapeDeadPlayerIds.has(peer.id)
   ) {
     room.zombieEscapeAlivePlayerIds.add(peer.id)
@@ -646,14 +808,16 @@ function roomHasZombieEscapeParticipants(room) {
 
 function reconcileSupersededZombieEscapeRooms(peer, now) {
   for (const [roomId, room] of rooms) {
-    if (roomId === peer.roomId || !room.peers.has(peer.id)) continue
+    const supersededPeer = room.peers.get(peer.id)
+    if (roomId === peer.roomId || !supersededPeer) continue
+    if (!isCurrentPeer(supersededPeer)) zombieGameAuthority?.disconnect(supersededPeer)
     reconcileZombieEscapeRoomParticipants(roomId, room, now)
   }
 }
 
 function reconcileZombieEscapeRoomParticipants(roomId, room, now) {
   if (!roomHasZombieEscapeParticipants(room)) {
-    clearZombieEscapeRoomState(room)
+    clearZombieEscapeRoomState(roomId, room)
     return
   }
 
@@ -665,8 +829,9 @@ function reconcileZombieEscapeRoomParticipants(roomId, room, now) {
   synchronizeZombieEscapeRoomClock(roomId, room, now)
 }
 
-function clearZombieEscapeRoomState(room) {
+function clearZombieEscapeRoomState(roomId, room) {
   if (room.zombieEscapeTimer) clearTimeout(room.zombieEscapeTimer)
+  zombieGameAuthority?.clear(roomId)
   room.zombieEscapeState = null
   room.zombieEscapeTimer = null
   room.zombieEscapeAlivePlayerIds.clear()
@@ -675,33 +840,34 @@ function clearZombieEscapeRoomState(room) {
 
 function synchronizeZombieEscapeRoomClock(roomId, room, now) {
   if (!roomHasZombieEscapeParticipants(room)) {
-    clearZombieEscapeRoomState(room)
+    clearZombieEscapeRoomState(roomId, room)
     return
   }
 
   const state = room.zombieEscapeState
-  if (state && advanceZombieEscapeStateTo(room, now) > 0) {
+  if (state && advanceZombieEscapeStateTo(roomId, room, now) > 0) {
     broadcastZombieEscapeState(roomId, state, now)
   }
   scheduleZombieEscapeRoomTimer(roomId, room, now)
 }
 
-function advanceZombieEscapeStateTo(room, now) {
+function advanceZombieEscapeStateTo(roomId, room, now) {
   const state = room.zombieEscapeState
   if (!state) return 0
   if (state.phaseEndsAt === null || state.phaseEndsAt > now) return 0
 
-  if (!transitionZombieEscapeNightToBuild(room)) return 0
+  if (!transitionZombieEscapeNightToBuild(roomId, room, now)) return 0
   state.revision += 1
   return 1
 }
 
-function transitionZombieEscapeNightToBuild(room) {
+function transitionZombieEscapeNightToBuild(roomId, room, now) {
   const state = room.zombieEscapeState
   if (!state || state.phase !== 'night') return false
 
   state.phase = 'build'
   state.phaseEndsAt = null
+  zombieGameAuthority?.phase(roomId, now)
   room.zombieEscapeAlivePlayerIds.clear()
   room.zombieEscapeDeadPlayerIds.clear()
   return true
@@ -712,7 +878,8 @@ function synchronizeZombieEscapeNightParticipants(room) {
   room.zombieEscapeDeadPlayerIds.clear()
   if (room.zombieEscapeState?.phase !== 'night') return
   for (const roomPeer of room.peers.values()) {
-    if (roomPeer.gameMode === 'zombie-escape' && isCurrentPeer(roomPeer)) {
+    if (roomPeer.gameMode === 'zombie-escape' && isCurrentPeer(roomPeer) &&
+      (!zombieGameAuthority || zombieGameAuthority.ready(roomPeer))) {
       room.zombieEscapeAlivePlayerIds.add(roomPeer.id)
     }
   }
@@ -785,6 +952,10 @@ function updateZombieEscapeRoomFromCommand(peer, message, now) {
     )
     return
   }
+  if (zombieGameAuthority && !zombieGameAuthority.ready(peer)) {
+    rejectZombieEscapeStateCommand(peer, state, 'zombie-game-not-ready', 'The shared Zombie world is not ready', now)
+    return
+  }
   state.phase = 'night'
   state.night += 1
   state.phaseEndsAt = now + MULTIPLAYER_ZOMBIE_ESCAPE_NIGHT_DURATION_MS
@@ -793,6 +964,7 @@ function updateZombieEscapeRoomFromCommand(peer, message, now) {
   state.revision += 1
   scheduleZombieEscapeRoomTimer(peer.roomId, room, now)
   broadcastZombieEscapeState(peer.roomId, state, now)
+  zombieGameAuthority?.phase(peer.roomId, now)
 }
 
 function rejectZombieEscapeStateCommand(peer, state, code, message, now) {
@@ -831,13 +1003,15 @@ function reportZombieEscapeDeath(peer, message, now) {
   }
   room.zombieEscapeAlivePlayerIds.delete(peer.id)
   room.zombieEscapeDeadPlayerIds.add(peer.id)
-  if (room.zombieEscapeAlivePlayerIds.size === 0) finishZombieEscapeNight(peer.roomId, room, now)
+  if (room.zombieEscapeAlivePlayerIds.size === 0) {
+    finishZombieEscapeNight(peer.roomId, room, now)
+  }
   return true
 }
 
 function finishZombieEscapeNight(roomId, room, now) {
   const state = room.zombieEscapeState
-  if (!state || !transitionZombieEscapeNightToBuild(room)) return false
+  if (!state || !transitionZombieEscapeNightToBuild(roomId, room, now)) return false
   state.revision += 1
   scheduleZombieEscapeRoomTimer(roomId, room, now)
   broadcastZombieEscapeState(roomId, state, now)
@@ -1005,20 +1179,21 @@ function leaveRoom(peer, announce, reason) {
   if (!room || room.peers.get(peer.id) !== peer) return
 
   room.peers.delete(peer.id)
+  zombieGameAuthority?.disconnect(peer)
   const now = Date.now()
   const removedAliveZombieParticipant =
     room.zombieEscapeState?.phase === 'night' &&
     peer.gameMode === 'zombie-escape' &&
     room.zombieEscapeAlivePlayerIds.delete(peer.id)
   if (removedAliveZombieParticipant) {
-    room.zombieEscapeDeadPlayerIds.add(peer.id)
+    if (!zombieGameAuthority) room.zombieEscapeDeadPlayerIds.add(peer.id)
     if (room.zombieEscapeAlivePlayerIds.size === 0) {
       finishZombieEscapeNight(peer.roomId, room, now)
     }
   }
   reconcileZombieEscapeRoomParticipants(peer.roomId, room, now)
   if (roomIsEmpty(room)) {
-    clearZombieEscapeRoomState(room)
+    clearZombieEscapeRoomState(peer.roomId, room)
     rooms.delete(peer.roomId)
     return
   }
@@ -1073,6 +1248,7 @@ function broadcastRoomState(roomId) {
     roomId,
     serverTime: Date.now(),
     type: 'room-state',
+    ...(zombieGameAuthority ? { zombieGameAuthority: zombieGameAuthority.capabilities } : {}),
   })
 }
 
@@ -1174,6 +1350,12 @@ function sendProfileMoneySnapshot(socket, profileId, now = Date.now()) {
 function applyProfileMoneyOperation(peer, message, now) {
   const operation = message.operation
   const wallet = getProfileWallet(peer.id, now)
+  if (zombieGameAuthority && peer.gameMode === 'zombie-escape') {
+    return {
+      code: 'server-owned-combat', message: 'The shared Zombie server owns combat rewards and purchases',
+      ok: false, operationId: operation.operationId, wallet: profileWalletSnapshot(peer.id, now),
+    }
+  }
   if (!isActiveWriterSession(peer, message.writerSessionId, message.writerEpoch)) {
     return {
       code: 'writer-session-superseded',
@@ -1274,6 +1456,22 @@ function recordProfileMoneyOperation(wallet, operation, result) {
       0,
       wallet.recentOperations.length - MAX_RECENT_PROFILE_MONEY_OPERATIONS,
     )
+  }
+}
+
+function applyZombieGameMoney(playerId, before, after) {
+  const wallet = getProfileWallet(playerId)
+  if (wallet.balance !== before || !Number.isSafeInteger(after) || after < 0 || after > MAX_PROFILE_MONEY) {
+    throw new Error('Authoritative Zombie wallet update was invalid')
+  }
+  if (after === before) return
+  wallet.balance = after
+  wallet.revision += 1
+  wallet.updatedAt = Date.now()
+  queuePersistentWorldStateWrite()
+  for (const room of rooms.values()) {
+    const peer = room.peers.get(playerId)
+    if (peer && isCurrentPeer(peer)) sendProfileMoneySnapshot(peer.socket, playerId)
   }
 }
 
@@ -1422,6 +1620,7 @@ function syncParcelBuildNodes(peer, message, now) {
     wallet.updatedAt = now
   }
   builds.set(parcelId, build)
+  zombieGameAuthority?.refresh(worldId)
   queuePersistentWorldStateWrite()
   return { build, cost: priced.cost, ok: true, wallet: profileWalletSnapshot(peer.id, now) }
 }
@@ -2136,11 +2335,26 @@ function broadcast(roomId, message, exceptPeerId) {
   }
 }
 
+function sendBufferedEncoded(socket, encoded) {
+  if (socket.bufferedAmount > MAX_SNAPSHOT_BUFFERED_BYTES) return false
+  return sendEncoded(socket, encoded)
+}
+
 function send(socket, message) {
+  if (socket.readyState !== WebSocket.OPEN) return false
+  try {
+    return sendEncoded(socket, JSON.stringify(message))
+  } catch {
+    socket.close(1011, 'Failed to send multiplayer message')
+    return false
+  }
+}
+
+function sendEncoded(socket, encoded) {
   if (socket.readyState !== WebSocket.OPEN) return false
 
   try {
-    socket.send(JSON.stringify(message))
+    socket.send(encoded)
     return true
   } catch {
     socket.close(1011, 'Failed to send multiplayer message')
@@ -2207,6 +2421,7 @@ function parseClientMessage(data) {
       return raw
     }
     if (raw?.type === 'state' && isPlayerSnapshot(raw.player)) return raw
+    if (isZombieGameBind(raw) || isZombieGameInput(raw) || isZombieGameDoor(raw) || isZombieGameReady(raw)) return raw
     if (
       raw?.type === 'start-zombie-escape-night' &&
       typeof raw.sessionId === 'string' &&

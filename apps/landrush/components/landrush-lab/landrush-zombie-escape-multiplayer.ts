@@ -8,7 +8,7 @@ import {
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
   ZOMBIE_ESCAPE_SHOT_PHASE,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
 
 export type LandrushZombieEscapeCombatSnapshotReader = () =>
   | MultiplayerPlayerCombatSnapshot
@@ -17,12 +17,13 @@ export type LandrushZombieEscapeCombatSnapshotReader = () =>
 export function createLandrushZombieEscapeCombatSnapshot(
   simulation: ZombieEscapeSimulation,
   origin: Readonly<{ x: number; y: number; z: number }>,
+  includeShots = true,
 ): MultiplayerPlayerCombatSnapshot {
   const shots: MultiplayerPlayerShotSnapshot[] = []
   const pool = simulation.shots
   for (
     let slot = 0;
-    slot < pool.pool.capacity && shots.length < MAX_MULTIPLAYER_COMBAT_SHOTS;
+    includeShots && slot < pool.pool.capacity && shots.length < MAX_MULTIPLAYER_COMBAT_SHOTS;
     slot += 1
   ) {
     if (!pool.pool.active[slot]) continue

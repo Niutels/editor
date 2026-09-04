@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-world'
+import { createZombieEscapeCollisionWorld } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   inspectZombieEscapeCommittedNavigationAction,
@@ -16,9 +16,12 @@ import {
   writeZombieEscapeDeferredNavigationDirection,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { resolveSparseNavigationStrictRegionIndex } from './zombie-escape-sparse-navigation'
-import { createZombieEscapeArena, type ZombieEscapeArenaData } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { resolveSparseNavigationStrictRegionIndex } from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
+import {
+  createZombieEscapeArena,
+  type ZombieEscapeArenaData,
+} from '@landrush/zombie-gameplay/zombie-escape-world'
 
 const FIXED_DELTA_SECONDS = ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
 const MAXIMUM_STATIONARY_PURSUIT_TICKS = 30

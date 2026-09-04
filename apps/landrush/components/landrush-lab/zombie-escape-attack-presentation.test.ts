@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import {
   AnimationClip,
   Bone,
@@ -16,9 +19,6 @@ import {
   resolveZombieEscapeAttackNormalizedPhase,
   ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS,
 } from './zombie-escape-attack-presentation'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 const AUTHORED_MOTION_BONES = [
   'Hips',

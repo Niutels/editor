@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import type { ZombieEscapeFlowField } from './zombie-escape-collision-world'
+import type { ZombieEscapeFlowField } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
   type ZombieEscapeCollisionWorld,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import type {
+  ZombieEscapeSparseNavigationAdjacency,
+  ZombieEscapeSparseNavigationTargetRegionIndex,
+} from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
 import {
   classifyZombieEscapeNavigationDebugAgents,
   countZombieEscapeNavigationDebugDraws,
@@ -18,11 +23,6 @@ import {
   ZOMBIE_ESCAPE_NAVIGATION_DEBUG_FLOOR,
   zombieEscapeNavigationDebugClassificationIsCurrent,
 } from './zombie-escape-navigation-debug-data'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
-import type {
-  ZombieEscapeSparseNavigationAdjacency,
-  ZombieEscapeSparseNavigationTargetRegionIndex,
-} from './zombie-escape-sparse-navigation'
 
 describe('Zombie Escape navigation debug packed data', () => {
   test('packs strict and fallback triangles while omitting shared seams from strong boundaries', () => {

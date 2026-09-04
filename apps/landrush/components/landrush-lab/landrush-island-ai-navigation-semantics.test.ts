@@ -1,14 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  type AnyNode,
-  BuildingNode,
-  ColumnNode,
-  DoorNode,
-  ElevatorNode,
-  LevelNode,
-  ShelfNode,
-  WallNode,
-} from '@pascal-app/core'
+import { createLandrushIslandAmbientSemanticNavigationObstacles } from '@landrush/pascal-host/landrush-island-ambient-navigation-semantics'
 import {
   createLandrushIslandAiNavigationSnapshot,
   createLandrushIslandRuntimeDoorPassabilityKey,
@@ -19,10 +10,19 @@ import {
   resolveLandrushIslandRuntimeDoorPassabilityKey,
   resolveLandrushZombieEscapeLiveOperableDoorIds,
   resolveLandrushZombieEscapeRuntimePassableDoorIds,
-} from './landrush-island-ai-navigation-semantics'
-import { distanceToLandrushIslandAmbientObstacles } from './landrush-island-ambient-navigation'
-import { createLandrushIslandAmbientSemanticNavigationObstacles } from './landrush-island-ambient-navigation-semantics'
-import { ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND } from './zombie-escape-collision-world'
+} from '@landrush/pascal-host/zombie-game-navigation'
+import { distanceToLandrushIslandAmbientObstacles } from '@landrush/runtime/landrush-island-ambient-navigation'
+import { ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import {
+  type AnyNode,
+  BuildingNode,
+  ColumnNode,
+  DoorNode,
+  ElevatorNode,
+  LevelNode,
+  ShelfNode,
+  WallNode,
+} from '@pascal-app/core'
 
 function indexNodes(nodes: readonly AnyNode[]) {
   return Object.fromEntries(nodes.map((node) => [node.id, node])) as Record<string, AnyNode>

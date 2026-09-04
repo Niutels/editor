@@ -4,17 +4,17 @@ import {
   createZombieEscapeCollisionWorldWithoutObjects,
   ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
   type ZombieEscapeCollisionWorld,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import {
+  resolveSparseNavigationStrictRegionIndex,
+  sparseNavigationTargetRegionContainsPoint,
+} from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
 import {
   createZombieEscapeNavigationAgentInspection,
   inspectZombieEscapeNavigationAgent,
   ZOMBIE_ESCAPE_NAVIGATION_AGENT_ANOMALY,
 } from './zombie-escape-navigation-inspection'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
-import {
-  resolveSparseNavigationStrictRegionIndex,
-  sparseNavigationTargetRegionContainsPoint,
-} from './zombie-escape-sparse-navigation'
 
 describe('Zombie Escape navigation agent inspection', () => {
   test('reports the production action, pinned floor, strict region, next target, and generations', () => {

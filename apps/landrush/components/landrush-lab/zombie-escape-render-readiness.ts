@@ -1,3 +1,6 @@
+import type { ZombieEscapeQuality } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { Group, type Material, type Object3D } from 'three'
 import {
   readLandrushMaterialPipelineSignature,
@@ -18,9 +21,6 @@ import {
   type LandrushRenderRepresentative,
   requestLandrushPresentationPipelinePrewarm,
 } from './landrush-render-readiness'
-import type { ZombieEscapeQuality } from './zombie-escape-config'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 const ZOMBIE_ESCAPE_EFFECT_RENDER_REPRESENTATIVE_KEYS = [
   'effect:tracer',
@@ -237,6 +237,7 @@ export async function compileZombieEscapeRenderRepresentatives(
         ]
       : changedPipelineRepresentatives
   const representativesToPrepare = expandedRepresentatives
+  const exactFramePrewarmDisabled = isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled()
   try {
     await compileZombieEscapeRenderAggregate(
       { camera, renderer, representatives: representativesToPrepare, targetScene },
@@ -244,8 +245,8 @@ export async function compileZombieEscapeRenderRepresentatives(
         completed += 1
         onProgress?.({ completed, total })
       },
+      webGpu && !exactFramePrewarmDisabled,
     )
-    const exactFramePrewarmDisabled = isZombieEscapePresentationPipelinePrewarmDiagnosticDisabled()
     if (webGpu) {
       if (!exactFramePrewarmDisabled) {
         await prewarmPresentationPipeline({
@@ -590,6 +591,7 @@ async function compileZombieEscapeRenderAggregate(
     targetScene,
   }: Omit<ZombieEscapeRenderReadinessRequest, 'generation' | 'identity'>,
   onCompiled: () => void,
+  framebufferMaterialsPreparedByDraw: boolean,
 ) {
   const root = new Group()
   const attachedRoots = new Set<Object3D>()
@@ -602,6 +604,7 @@ async function compileZombieEscapeRenderAggregate(
 
   await compileZombieEscapeRenderAggregateVariant({
     camera,
+    framebufferMaterialsPreparedByDraw,
     key: 'zombie-day',
     representativeRoots,
     renderer,
@@ -613,6 +616,7 @@ async function compileZombieEscapeRenderAggregate(
 
 async function compileZombieEscapeRenderAggregateVariant({
   camera,
+  framebufferMaterialsPreparedByDraw,
   key,
   representativeRoots,
   renderer,
@@ -620,6 +624,7 @@ async function compileZombieEscapeRenderAggregateVariant({
   targetScene,
 }: Readonly<{
   camera: ZombieEscapeRenderReadinessRequest['camera']
+  framebufferMaterialsPreparedByDraw: boolean
   key: string
   representativeRoots: readonly Object3D[]
   renderer: ZombieEscapePipelineRenderer
@@ -649,6 +654,7 @@ async function compileZombieEscapeRenderAggregateVariant({
       }
       return compileLandrushRenderRepresentative({
         camera,
+        framebufferMaterialsPreparedByDraw,
         renderer,
         representative: { key, root },
         targetScene,

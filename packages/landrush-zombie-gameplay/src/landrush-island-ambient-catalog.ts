@@ -177,6 +177,18 @@ export const LANDRUSH_ISLAND_AMBIENT_NPCS = [
   },
 }))
 
+export const LANDRUSH_ISLAND_AMBIENT_MODEL_PATHS = Object.freeze([
+  ...LANDRUSH_ISLAND_AMBIENT_PALMS.map((palm) => palm.modelPath),
+  ...LANDRUSH_ISLAND_AMBIENT_BOATS.map((boat) => boat.modelPath),
+  ...LANDRUSH_ISLAND_AMBIENT_NPCS.flatMap((npc) => [
+    npc.glb.rigged,
+    npc.glb.idle,
+    npc.glb.walk,
+    npc.glb.run,
+  ]),
+  ...LANDRUSH_ISLAND_AMBIENT_FISH.map((fish) => fish.modelPath),
+])
+
 export type LandrushIslandAmbientNpc = (typeof LANDRUSH_ISLAND_AMBIENT_NPCS)[number]
 export type LandrushIslandAmbientFish = (typeof LANDRUSH_ISLAND_AMBIENT_FISH)[number]
 export type LandrushIslandAmbientBoat = (typeof LANDRUSH_ISLAND_AMBIENT_BOATS)[number]

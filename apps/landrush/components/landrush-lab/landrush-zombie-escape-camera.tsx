@@ -1,10 +1,10 @@
 'use client'
 
+import { ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE } from '@landrush/zombie-gameplay/zombie-escape-config'
 import { type RootState, useFrame, useThree } from '@react-three/fiber'
 import { type MutableRefObject, useLayoutEffect, useMemo, useRef } from 'react'
 import { type Camera, MathUtils, Matrix4, OrthographicCamera, Quaternion, Vector3 } from 'three'
 import type { LandrushIslandCameraPose } from './landrush-island-camera-pose'
-import { ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE } from './zombie-escape-config'
 
 const CAMERA = ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE
 

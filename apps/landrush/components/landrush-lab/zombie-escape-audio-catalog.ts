@@ -1,10 +1,10 @@
-import catalogData from './zombie-escape-audio-catalog.json'
 import {
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
   type ZombieEscapeAudioEventKind,
-} from './zombie-escape-audio-events'
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
+import catalogData from './zombie-escape-audio-catalog.json'
 import provenanceData from './zombie-escape-audio-provenance.json'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 type ZombieEscapeAudioCatalogEventKind =
   | 'enemy-hit'

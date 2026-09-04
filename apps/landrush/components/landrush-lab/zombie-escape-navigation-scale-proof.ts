@@ -1,4 +1,4 @@
-import { ZOMBIE_ESCAPE_COLLISION_EPSILON_METERS } from './zombie-escape-collision-tolerances'
+import { ZOMBIE_ESCAPE_COLLISION_EPSILON_METERS } from '@landrush/zombie-gameplay/zombie-escape-collision-tolerances'
 import {
   classifyZombieEscapeCollisionObjectDelta,
   createZombieEscapeCollisionHit,
@@ -22,14 +22,14 @@ import {
   type ZombieEscapeSparseReverseFieldBankInspection,
   type ZombieEscapeSparseSearchBudget,
   zombieEscapeSegmentIsClearInVerticalRange,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   getZombieEscapeZombieCatalogEntry,
   getZombieEscapeZombieCollisionRadiusMeters,
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   applyZombieEscapeObstacleDelta,
   createZombieEscapeSimulation,
@@ -42,10 +42,10 @@ import {
   stepZombieEscapeSimulationPhysics,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { resolveSparseNavigationStrictRegionWitnessNode } from './zombie-escape-sparse-navigation'
-import type { ZombieEscapeArenaData } from './zombie-escape-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_GAIT } from './zombie-escape-zombie-roster'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { resolveSparseNavigationStrictRegionWitnessNode } from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
+import type { ZombieEscapeArenaData } from '@landrush/zombie-gameplay/zombie-escape-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_GAIT } from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
 
 const RECORDED_ROOM_OUTSIDE_WORLD_X = -27
 const RECORDED_ROOM_OUTSIDE_WORLD_Z = -17.5

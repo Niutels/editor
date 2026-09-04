@@ -3,19 +3,19 @@ import {
   createZombieEscapeCollisionHit,
   createZombieEscapeCollisionWorld,
   zombieEscapeSameLayerNavigationSegmentIsClear,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapePlayerTrailPoint,
   getZombieEscapePlayerTrailOldestSequence,
   readZombieEscapePlayerTrailPoint,
   recordZombieEscapePlayerTrailPoint,
   resetZombieEscapePlayerTrail,
-} from './zombie-escape-player-trail'
+} from '@landrush/zombie-gameplay/zombie-escape-player-trail'
 import {
   createZombieEscapeSimulation,
   setZombieEscapeCollisionWorld,
@@ -24,12 +24,12 @@ import {
   spawnZombieEscapeZombieAtNavigationElevation,
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
   ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
-} from './zombie-escape-zombie-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 
 const FIXED_DELTA_SECONDS = 1 / 60
 

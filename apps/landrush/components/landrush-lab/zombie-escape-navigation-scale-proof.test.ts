@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ZOMBIE_ESCAPE_COLLISION_EPSILON_METERS } from './zombie-escape-collision-tolerances'
+import { ZOMBIE_ESCAPE_COLLISION_EPSILON_METERS } from '@landrush/zombie-gameplay/zombie-escape-collision-tolerances'
 import {
   classifyZombieEscapeCollisionObjectDelta,
   createZombieEscapeCollisionHit,
@@ -11,12 +11,26 @@ import {
   sampleZombieEscapeSparseCommittedNodeRoute,
   sweepZombieEscapeCircleAgainstWorldInVerticalRange,
   zombieEscapeSegmentIsClearInVerticalRange,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
+import {
+  createZombieEscapeSimulation,
+  setZombieEscapeCollisionWorld,
+  setZombieEscapeExternalPlayerPose,
+  setZombieEscapeGamePhase,
+  spawnZombieEscapeZombie,
+  spawnZombieEscapeZombieAtNavigationElevation,
+  stepZombieEscapeSimulationPhysics,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import {
+  resolveSparseNavigationStrictRegionWitnessNode,
+  sparseNavigationTargetRegionContainsPoint,
+} from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   assertLandrushZombieEscapeNavigationScaleProofAnchorLayoutCertified,
   classifyLandrushZombieEscapeNavigationScaleProofRepairObservation,
@@ -32,20 +46,6 @@ import {
   runLandrushZombieEscapeNavigationScaleProof,
   selectLandrushZombieEscapeNavigationScaleProofAnchorNodes,
 } from './zombie-escape-navigation-scale-proof'
-import {
-  createZombieEscapeSimulation,
-  setZombieEscapeCollisionWorld,
-  setZombieEscapeExternalPlayerPose,
-  setZombieEscapeGamePhase,
-  spawnZombieEscapeZombie,
-  spawnZombieEscapeZombieAtNavigationElevation,
-  stepZombieEscapeSimulationPhysics,
-} from './zombie-escape-simulation'
-import {
-  resolveSparseNavigationStrictRegionWitnessNode,
-  sparseNavigationTargetRegionContainsPoint,
-} from './zombie-escape-sparse-navigation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 const PROOF_WORLD_ORIGIN = { x: -24, y: 0, z: -17.5 } as const
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   constrainZombieEscapeAgentSeparationToRoute,
   createZombieEscapeAgentSeparation,
-} from './zombie-escape-agent-spatial-index'
+} from '@landrush/zombie-gameplay/zombie-escape-agent-spatial-index'
 import {
   beginZombieEscapeSparseTargetUpdate,
   createZombieEscapeCollisionHit,
@@ -13,9 +13,9 @@ import {
   inspectZombieEscapeSparseReverseFieldBanks,
   stepZombieEscapeSparseTargetUpdate,
   zombieEscapeSameLayerNavigationSegmentIsClear,
-} from './zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   advanceZombieEscapeNavigationProgressWatchdog,
   createZombieEscapeSimulation,
@@ -27,8 +27,8 @@ import {
   stepZombieEscapeSimulation,
   writeZombieEscapeDeferredNavigationDirection,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 const AGENT_RADIUS = ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS
 const UNBOUNDED_TARGET_BUDGET = {

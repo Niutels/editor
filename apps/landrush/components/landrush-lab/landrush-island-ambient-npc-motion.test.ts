@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import type { LandrushRoadSegment } from '@/components/landrush/types'
 import {
   isLandrushIslandAmbientPointOnRoad,
   isLandrushIslandAmbientPointWalkable,
   isLandrushIslandAmbientSegmentPassable,
   type LandrushIslandAmbientNavigationWorld,
-} from './landrush-island-ambient-navigation'
+} from '@landrush/runtime/landrush-island-ambient-navigation'
 import {
   advanceLandrushIslandAmbientNpcMotion,
   createLandrushIslandAmbientNpcJourneyPlanner,
   createLandrushIslandAmbientNpcMotionState,
   createLandrushIslandAmbientNpcNeighborIndex,
   reconcileLandrushIslandAmbientNpcMotionStateForWorld,
-} from './landrush-island-ambient-npc-motion'
+} from '@landrush/runtime/landrush-island-ambient-npc-motion'
+import type { LandrushRoadSegment } from '@/components/landrush/types'
 
 const world: LandrushIslandAmbientNavigationWorld = {
   obstacles: [

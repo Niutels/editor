@@ -1,10 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { createLandrushZombieEscapeCollisionWorldsResolver } from './landrush-island-ai-navigation-semantics'
+import { createLandrushZombieEscapeCollisionWorldsResolver } from '@landrush/pascal-host/zombie-game-navigation'
 import {
   LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALMS,
-} from './landrush-island-ambient-catalog'
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
+import {
+  createZombieEscapeCircleMoveResult,
+  createZombieEscapeCollisionHit,
+  createZombieEscapeCollisionWorld,
+  moveZombieEscapeCircleWithSlide,
+  resolveZombieEscapeCollisionHitObjectId,
+  sweepZombieEscapeProjectileAgainstWorld,
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   createLandrushIslandPalmCollisionCircles,
   createLandrushIslandPalmLayout,
@@ -15,14 +23,6 @@ import {
   resolveLandrushIslandAmbientPalmPosition,
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-palm-layout'
-import {
-  createZombieEscapeCircleMoveResult,
-  createZombieEscapeCollisionHit,
-  createZombieEscapeCollisionWorld,
-  moveZombieEscapeCircleWithSlide,
-  resolveZombieEscapeCollisionHitObjectId,
-  sweepZombieEscapeProjectileAgainstWorld,
-} from './zombie-escape-collision-world'
 
 const AGENT_RADIUS_METERS = 0.37
 const CENTER = { x: 2, z: -1 }

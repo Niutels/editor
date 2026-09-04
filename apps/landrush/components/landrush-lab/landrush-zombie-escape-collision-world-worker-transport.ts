@@ -3,7 +3,7 @@ import {
   createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
   type LandrushZombieEscapeCollisionWorldCompilePayload,
   type LandrushZombieEscapeCollisionWorlds,
-} from './landrush-zombie-escape-collision-world-compiler'
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-collision-world-compiler'
 
 export type LandrushZombieEscapeCollisionWorldWorkerRequest = Readonly<{
   payload: LandrushZombieEscapeCollisionWorldCompilePayload

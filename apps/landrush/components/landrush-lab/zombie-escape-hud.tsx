@@ -4,10 +4,10 @@ import {
   ZOMBIE_ESCAPE_QUALITY,
   type ZombieEscapeInputMode,
   type ZombieEscapeQuality,
-} from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import type { ZombieEscapeHudSnapshot } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import type { ZombieEscapeSceneApi } from './zombie-escape-scene'
-import type { ZombieEscapeHudSnapshot } from './zombie-escape-simulation'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import { ZombieEscapeWeaponInventoryRow } from './zombie-escape-weapon-inventory'
 
 const BUTTON_CLASS =

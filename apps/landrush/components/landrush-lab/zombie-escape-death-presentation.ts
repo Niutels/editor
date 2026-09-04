@@ -1,5 +1,5 @@
+import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
 import { AnimationClip, Euler, type Group, Quaternion, QuaternionKeyframeTrack } from 'three'
-import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
 
 const DEATH_KEYFRAME_PHASES = [0, 0.18, 0.46, 0.76, 1] as const
 

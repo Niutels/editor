@@ -1,5 +1,28 @@
 import { describe, expect, mock, test } from 'bun:test'
 import {
+  createLandrushZombieEscapeCollisionBoxes,
+  createLandrushZombieEscapeCollisionSegments,
+  createLandrushZombieEscapeCollisionSemanticsKey,
+  createLandrushZombieEscapeCollisionWorld,
+  createLandrushZombieEscapeCollisionWorldResolver,
+  createLandrushZombieEscapeCollisionWorldsResolver,
+  createLandrushZombieEscapeCombatCollisionBoxes,
+  createLandrushZombieEscapeCombatCollisionSemanticsKey,
+} from '@landrush/pascal-host/zombie-game-navigation'
+import {
+  createZombieEscapeCollisionHit,
+  createZombieEscapeCollisionWorldWithoutObjects,
+  createZombieEscapeFlowField,
+  createZombieEscapeNavigationMoveResult,
+  moveZombieEscapeNavigationAgent,
+  resolveZombieEscapeCollisionHitObjectId,
+  resolveZombieEscapeFlowDirection,
+  sweepZombieEscapeProjectileAgainstWorld,
+  updateZombieEscapeFlowTarget,
+  zombieEscapeSegmentIsClear,
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
   type AnyNode,
   BuildingNode,
   computeStairSegmentChainTransforms,
@@ -13,29 +36,6 @@ import {
   WallNode,
 } from '@pascal-app/core'
 import { Group, Quaternion, Vector3 } from 'three'
-import {
-  createLandrushZombieEscapeCollisionBoxes,
-  createLandrushZombieEscapeCollisionSegments,
-  createLandrushZombieEscapeCollisionSemanticsKey,
-  createLandrushZombieEscapeCollisionWorld,
-  createLandrushZombieEscapeCollisionWorldResolver,
-  createLandrushZombieEscapeCollisionWorldsResolver,
-  createLandrushZombieEscapeCombatCollisionBoxes,
-  createLandrushZombieEscapeCombatCollisionSemanticsKey,
-} from './landrush-island-ai-navigation-semantics'
-import {
-  createZombieEscapeCollisionHit,
-  createZombieEscapeCollisionWorldWithoutObjects,
-  createZombieEscapeFlowField,
-  createZombieEscapeNavigationMoveResult,
-  moveZombieEscapeNavigationAgent,
-  resolveZombieEscapeCollisionHitObjectId,
-  resolveZombieEscapeFlowDirection,
-  sweepZombieEscapeProjectileAgainstWorld,
-  updateZombieEscapeFlowTarget,
-  zombieEscapeSegmentIsClear,
-} from './zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 
 describe('Landrush Zombie Escape collision adapter', () => {
   test('emits stable per-floor wall runs with the hosted door removed', () => {
@@ -647,72 +647,72 @@ describe('Landrush Zombie Escape collision adapter', () => {
     expect(hit.colliderKind).toBe('none')
   })
 
-  test.each([{ turnSide: 'left' as const }, { turnSide: 'right' as const }])(
-    'matches rendered $turnSide L- and U-chain transforms through building and stair yaw',
-    ({ turnSide }) => {
-      const building = BuildingNode.parse({
-        position: [8.5, 1.2, -4.25],
-        rotation: [0, 0.43, 0],
-      })
-      const level = LevelNode.parse({ baseElevation: 0.65, level: 0, parentId: building.id })
-      const segments = [
-        StairSegmentNode.parse({ height: 0.9, length: 4.2, stepCount: 1, width: 2 }),
-        StairSegmentNode.parse({
-          attachmentSide: turnSide,
-          height: 0.75,
-          length: 3.1,
-          stepCount: 1,
-          width: 1.6,
-        }),
-        StairSegmentNode.parse({
-          attachmentSide: turnSide,
-          height: 0.6,
-          length: 2.4,
-          stepCount: 1,
-          width: 1.2,
-        }),
-      ]
-      const stair = StairNode.parse({
-        children: segments.map(({ id }) => id),
-        parentId: level.id,
-        position: [1.35, 0.15, -0.8],
-        rotation: -0.67,
-      })
-      const nodes = Object.fromEntries(
-        [building, level, stair, ...segments].map((node) => [node.id, node]),
-      ) as Record<string, AnyNode>
-      const spawn = { x: 2.25, z: -1.75 }
-      const worlds = createLandrushZombieEscapeCollisionWorldsResolver()({
-        agentRadius: 0.37,
-        nodes,
-        playRadius: 18,
-        spawn,
-        verticalOriginY: 0.4,
-      })
-      const rendered = createRenderedStairSegmentTransforms(building, level, stair, segments)
+  test.each([
+    { turnSide: 'left' as const },
+    { turnSide: 'right' as const },
+  ])('matches rendered $turnSide L- and U-chain transforms through building and stair yaw', ({
+    turnSide,
+  }) => {
+    const building = BuildingNode.parse({
+      position: [8.5, 1.2, -4.25],
+      rotation: [0, 0.43, 0],
+    })
+    const level = LevelNode.parse({ baseElevation: 0.65, level: 0, parentId: building.id })
+    const segments = [
+      StairSegmentNode.parse({ height: 0.9, length: 4.2, stepCount: 1, width: 2 }),
+      StairSegmentNode.parse({
+        attachmentSide: turnSide,
+        height: 0.75,
+        length: 3.1,
+        stepCount: 1,
+        width: 1.6,
+      }),
+      StairSegmentNode.parse({
+        attachmentSide: turnSide,
+        height: 0.6,
+        length: 2.4,
+        stepCount: 1,
+        width: 1.2,
+      }),
+    ]
+    const stair = StairNode.parse({
+      children: segments.map(({ id }) => id),
+      parentId: level.id,
+      position: [1.35, 0.15, -0.8],
+      rotation: -0.67,
+    })
+    const nodes = Object.fromEntries(
+      [building, level, stair, ...segments].map((node) => [node.id, node]),
+    ) as Record<string, AnyNode>
+    const spawn = { x: 2.25, z: -1.75 }
+    const worlds = createLandrushZombieEscapeCollisionWorldsResolver()({
+      agentRadius: 0.37,
+      nodes,
+      playRadius: 18,
+      spawn,
+      verticalOriginY: 0.4,
+    })
+    const rendered = createRenderedStairSegmentTransforms(building, level, stair, segments)
 
-      expect(worlds.navigation.navigationConnectors).toHaveLength(segments.length * 2 - 1)
-      expect(worlds.navigation.boxes.filter(({ objectId }) => objectId === stair.id)).toHaveLength(
-        0,
-      )
-      expect(
-        worlds.navigation.navigationConnectors.every(
-          ({ ascendingEnd, chainLowerY, chainUpperY }) => ascendingEnd && chainUpperY > chainLowerY,
-        ),
-      ).toBe(true)
-      const stairBoxes = worlds.combat.boxes.filter(({ objectId }) => objectId === stair.id)
-      expect(stairBoxes).toHaveLength(segments.length)
-      for (let index = 0; index < segments.length; index += 1) {
-        const segment = segments[index]!
-        const box = stairBoxes.find(({ id }) => id.includes(`:${segment.id}:`))
-        const expected = rendered[index]!
-        expect(box?.centerX).toBeCloseTo(expected.center.x - spawn.x, 6)
-        expect(box?.centerZ).toBeCloseTo(expected.center.z - spawn.z, 6)
-        expect(Math.sin(box?.rotation ?? 0)).toBeCloseTo(Math.sin(expected.rotation), 6)
-        expect(Math.cos(box?.rotation ?? 0)).toBeCloseTo(Math.cos(expected.rotation), 6)
-      }
-    },
-  )
+    expect(worlds.navigation.navigationConnectors).toHaveLength(segments.length * 2 - 1)
+    expect(worlds.navigation.boxes.filter(({ objectId }) => objectId === stair.id)).toHaveLength(0)
+    expect(
+      worlds.navigation.navigationConnectors.every(
+        ({ ascendingEnd, chainLowerY, chainUpperY }) => ascendingEnd && chainUpperY > chainLowerY,
+      ),
+    ).toBe(true)
+    const stairBoxes = worlds.combat.boxes.filter(({ objectId }) => objectId === stair.id)
+    expect(stairBoxes).toHaveLength(segments.length)
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index]!
+      const box = stairBoxes.find(({ id }) => id.includes(`:${segment.id}:`))
+      const expected = rendered[index]!
+      expect(box?.centerX).toBeCloseTo(expected.center.x - spawn.x, 6)
+      expect(box?.centerZ).toBeCloseTo(expected.center.z - spawn.z, 6)
+      expect(Math.sin(box?.rotation ?? 0)).toBeCloseTo(Math.sin(expected.rotation), 6)
+      expect(Math.cos(box?.rotation ?? 0)).toBeCloseTo(Math.cos(expected.rotation), 6)
+    }
+  })
 
   test('excludes attached, nested, low-profile, hidden, and transient items on every floor', () => {
     const building = BuildingNode.parse({})

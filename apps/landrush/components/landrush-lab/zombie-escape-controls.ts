@@ -1,4 +1,5 @@
-import type { ZombieEscapeInputMode } from './zombie-escape-config'
+import type { ZombieEscapeInputMode } from '@landrush/zombie-gameplay/zombie-escape-config'
+import type { ZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 
 export type ZombieEscapeGamepadSample = {
   connected: boolean
@@ -44,24 +45,6 @@ export type ZombieEscapeControlLatch = {
   resetHeld: boolean
 }
 
-export type ZombieEscapeControlState = {
-  aimStrength: number
-  aimX: number
-  aimZ: number
-  cameraPressed: boolean
-  debugPressed: boolean
-  fire: boolean
-  inputMode: ZombieEscapeInputMode
-  interactPressed: boolean
-  moveStrength: number
-  moveX: number
-  moveZ: number
-  pausePressed: boolean
-  qualityPressed: boolean
-  resetPressed: boolean
-  run: boolean
-}
-
 export function createZombieEscapeControlLatch(): ZombieEscapeControlLatch {
   return {
     cameraHeld: false,
@@ -71,26 +54,6 @@ export function createZombieEscapeControlLatch(): ZombieEscapeControlLatch {
     pauseHeld: false,
     qualityHeld: false,
     resetHeld: false,
-  }
-}
-
-export function createZombieEscapeControlState(): ZombieEscapeControlState {
-  return {
-    aimStrength: 0,
-    aimX: 0,
-    aimZ: -1,
-    cameraPressed: false,
-    debugPressed: false,
-    fire: false,
-    inputMode: 'keyboard',
-    interactPressed: false,
-    moveStrength: 0,
-    moveX: 0,
-    moveZ: 0,
-    pausePressed: false,
-    qualityPressed: false,
-    resetPressed: false,
-    run: false,
   }
 }
 

@@ -5,11 +5,11 @@ import {
   createZombieEscapeImpactAttachment,
   resolveZombieEscapeBallisticSample,
   resolveZombieEscapeImpactAttachment,
-} from './zombie-escape-impact-attachment'
+} from '@landrush/zombie-gameplay/zombie-escape-impact-attachment'
 import {
   createZombieEscapePresentationPose,
   resolveZombieEscapePresentationPose,
-} from './zombie-escape-presentation-pose'
+} from '@landrush/zombie-gameplay/zombie-escape-presentation-pose'
 
 describe('Zombie Escape impact attachment', () => {
   test('keeps a hit surface-local through the full hit-reaction root pose', () => {

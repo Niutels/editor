@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   createLandrushZombieEscapeIntegratedArena,
   createLandrushZombieEscapeIntegratedArenaFromPlayRadius,
-} from './landrush-zombie-escape-arena'
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-arena'
 
 describe('Landrush Zombie Escape integrated arena', () => {
   it('reconstructs the exact production arena from its compiled play radius', () => {

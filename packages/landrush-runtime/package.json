@@ -6,6 +6,30 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
+    "./landrush-island-palm-construction-visibility": {
+      "types": "./src/landrush-island-palm-construction-visibility.ts",
+      "default": "./src/landrush-island-palm-construction-visibility.ts"
+    },
+    "./zombie-game-client": {
+      "types": "./src/zombie-game-client.ts",
+      "default": "./src/zombie-game-client.ts"
+    },
+    "./landrush-island-ambient-navigation": {
+      "types": "./src/landrush-island-ambient-navigation.ts",
+      "default": "./src/landrush-island-ambient-navigation.ts"
+    },
+    "./landrush-island-ambient-npc-motion": {
+      "types": "./src/landrush-island-ambient-npc-motion.ts",
+      "default": "./src/landrush-island-ambient-npc-motion.ts"
+    },
+    "./navigation-geometry": {
+      "types": "./src/navigation-geometry.ts",
+      "default": "./src/navigation-geometry.ts"
+    },
+    "./semantic-item-collision": {
+      "types": "./src/semantic-item-collision.ts",
+      "default": "./src/semantic-item-collision.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"

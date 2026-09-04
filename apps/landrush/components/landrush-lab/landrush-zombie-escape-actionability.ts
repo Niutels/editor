@@ -1,8 +1,8 @@
+import type { ZombieEscapeGamePhase } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import type {
   LandrushIslandCameraOwner,
   LandrushIslandViewMode,
 } from './landrush-island-camera-owner'
-import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
 
 export function resolveLandrushZombieEscapePhaseReady({
   authorityResyncActive,

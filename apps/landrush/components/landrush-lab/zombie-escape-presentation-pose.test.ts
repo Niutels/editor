@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { Quaternion, Vector3 } from 'three'
 import {
   createZombieEscapePresentationPoint,
   createZombieEscapePresentationPose,
@@ -7,7 +6,8 @@ import {
   resolveZombieEscapePresentationPose,
   transformZombieEscapePresentationDirection,
   transformZombieEscapePresentationPoint,
-} from './zombie-escape-presentation-pose'
+} from '@landrush/zombie-gameplay/zombie-escape-presentation-pose'
+import { Quaternion, Vector3 } from 'three'
 
 describe('Zombie Escape presentation pose', () => {
   test('rotates a hit response around the cached body center without allocating an output', () => {

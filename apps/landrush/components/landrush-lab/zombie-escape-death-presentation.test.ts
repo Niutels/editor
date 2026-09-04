@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { AnimationMixer, Bone, Group, LoopOnce, Matrix4, Quaternion, Vector3 } from 'three'
-import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
-import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
+import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
 import {
   createZombieEscapePresentationPose,
   resolveZombieEscapePresentationPose,
-} from './zombie-escape-presentation-pose'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-presentation-pose'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
+import { AnimationMixer, Bone, Group, LoopOnce, Matrix4, Quaternion, Vector3 } from 'three'
+import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 
 describe('Zombie Escape joint-collapse clip', () => {
   test('buckles the compatible rig into a non-looping terminal body pose', () => {

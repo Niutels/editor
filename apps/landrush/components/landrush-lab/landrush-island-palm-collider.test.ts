@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { createRoot, unmountComponentAtNode } from '@react-three/fiber'
-import { act, createElement, useMemo } from 'react'
-import { Line3, Raycaster, Scene, Vector3 } from 'three'
 import {
   LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
-} from './landrush-island-ambient-catalog'
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
+import { createRoot, unmountComponentAtNode } from '@react-three/fiber'
+import { act, createElement, useMemo } from 'react'
+import { Line3, Raycaster, Scene, Vector3 } from 'three'
 import {
   createLandrushIslandPalmNavigationFootprints,
   createLandrushIslandPalmTrunkColliderWorld,

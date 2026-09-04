@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  ZOMBIE_ESCAPE_SEED,
+  ZOMBIE_ESCAPE_SIMULATION,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
+import {
+  createZombieEscapeSimulation,
+  setZombieEscapeGamePhase,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import {
   advanceLandrushZombieEscapePhaseClock,
   createLandrushZombieEscapePhaseClock,
   stepLandrushZombieEscapeIntegratedSimulation,
 } from './landrush-zombie-escape-runtime'
-import { ZOMBIE_ESCAPE_SEED, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
-import { createZombieEscapeSimulation, setZombieEscapeGamePhase } from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 describe('integrated Zombie Escape authoritative phase clock', () => {
   test('holds the build phase until the player starts the night', () => {

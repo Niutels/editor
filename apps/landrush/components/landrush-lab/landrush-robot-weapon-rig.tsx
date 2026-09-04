@@ -1,5 +1,18 @@
 'use client'
 
+import {
+  createZombieEscapeMeleePresentationPose,
+  dampZombieEscapeAngle,
+  resolveZombieEscapeMeleePresentationPose,
+  resolveZombieEscapeTorsoAimOffset,
+  type ZombieEscapeMeleePhase,
+  type ZombieEscapeMeleePresentationPose,
+} from '@landrush/zombie-gameplay/zombie-escape-combat-pose'
+import {
+  ZOMBIE_ESCAPE_WEAPON_CATALOG,
+  type ZombieEscapeWeaponHandFitPose,
+  type ZombieEscapeWeaponSpecification,
+} from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { useFrame } from '@react-three/fiber'
 import {
   type MutableRefObject,
@@ -25,24 +38,11 @@ import {
   resolveLandrushRobotTwoBoneElbowTarget,
   resolveLandrushRobotWeaponHandQuaternion,
 } from './landrush-robot-weapon-arm-kinematics'
-import {
-  createZombieEscapeMeleePresentationPose,
-  dampZombieEscapeAngle,
-  resolveZombieEscapeMeleePresentationPose,
-  resolveZombieEscapeTorsoAimOffset,
-  type ZombieEscapeMeleePhase,
-  type ZombieEscapeMeleePresentationPose,
-} from './zombie-escape-combat-pose'
 import { GeneratedWeaponModel } from './zombie-escape-generated-assets'
 import {
   createZombieEscapeHeldWeaponRenderRepresentativeKey,
   type ZombieEscapeRenderReadinessRegistry,
 } from './zombie-escape-render-readiness'
-import {
-  ZOMBIE_ESCAPE_WEAPON_CATALOG,
-  type ZombieEscapeWeaponHandFitPose,
-  type ZombieEscapeWeaponSpecification,
-} from './zombie-escape-weapon-catalog'
 import {
   createZombieEscapeWeaponRecoilPose,
   createZombieEscapeWeaponRecoilState,

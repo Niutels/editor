@@ -1,5 +1,6 @@
 'use client'
 
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -22,7 +23,6 @@ import {
   type ZombieEscapeNavigationDebugRouteSnapshot,
   zombieEscapeNavigationDebugClassificationIsCurrent,
 } from './zombie-escape-navigation-debug-data'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
 
 const CLASSIFICATION_INTERVAL_SECONDS = 0.1
 const HUD_INTERVAL_SECONDS = 0.22

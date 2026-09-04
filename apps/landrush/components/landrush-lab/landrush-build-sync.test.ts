@@ -1,7 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { pointInPolygonOrNearEdge, segmentFootprint } from '@landrush/runtime'
-import { type AnyNode, AnyNode as AnyNodeSchema, SlabNode } from '@pascal-app/core'
-import { migrateVerticalSceneNodes } from '@pascal-app/core/scene-migrations'
 import {
   areLandrushBuildFootprintsInsideBoundary,
   areLandrushBuildSyncNodeSetsEqual,
@@ -21,7 +18,10 @@ import {
   isLandrushBuildSyncV2GraphLossless,
   type LandrushBuildSyncGraphNode,
   parseLandrushBuildSyncSnapshotNodes,
-} from './landrush-build-sync'
+} from '@landrush/pascal-host/landrush-build-sync'
+import { pointInPolygonOrNearEdge, segmentFootprint } from '@landrush/runtime'
+import { type AnyNode, AnyNode as AnyNodeSchema, SlabNode } from '@pascal-app/core'
+import { migrateVerticalSceneNodes } from '@pascal-app/core/scene-migrations'
 
 const SYNC_SCOPE = {
   parcelId: 'parcel-a',

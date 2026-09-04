@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import {
   changeWeaponFitDebugWeapon,
   createDefaultWeaponFitSettings,
@@ -6,7 +7,6 @@ import {
   serializeWeaponFitDebugParams,
   WEAPON_FIT_DEBUG_WEAPONS,
 } from './weapon-fit-debug-state'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 describe('weapon fit debug state', () => {
   test('derives the selector and asset paths from the shared firearm catalog', () => {

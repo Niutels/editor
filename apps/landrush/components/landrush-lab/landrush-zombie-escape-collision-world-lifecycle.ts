@@ -1,4 +1,4 @@
-import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
+import type { ZombieEscapeGamePhase } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 
 export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_BACKGROUND_DEBOUNCE_MS = 500
 export const LANDRUSH_ZOMBIE_ESCAPE_COLLISION_WORLD_EXECUTION_TIMEOUT_MS = 60_000

@@ -1,5 +1,12 @@
 'use client'
 
+import {
+  ZOMBIE_ESCAPE_ARENA,
+  ZOMBIE_ESCAPE_DEFAULT_WEAPON,
+  ZOMBIE_ESCAPE_SIMULATION,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import type { ZombieEscapeArenaData } from '@landrush/zombie-gameplay/zombie-escape-world'
 import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
@@ -13,13 +20,6 @@ import {
   Object3D,
   Shape,
 } from 'three'
-import {
-  ZOMBIE_ESCAPE_ARENA,
-  ZOMBIE_ESCAPE_DEFAULT_WEAPON,
-  ZOMBIE_ESCAPE_SIMULATION,
-} from './zombie-escape-config'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
-import type { ZombieEscapeArenaData } from './zombie-escape-world'
 
 export function ZombieEscapeArena({
   arena,

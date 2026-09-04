@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import type { GrassFieldBlocker } from './grass-field-texture'
 import {
   createLandrushIslandConstructionBlockedPalmInstanceIndices,
   LANDRUSH_ISLAND_PALM_CONSTRUCTION_CLEARANCE_METERS,
   resolveLandrushIslandAmbientPalmSlotVisible,
-} from './landrush-island-palm-construction-visibility'
+} from '@landrush/runtime/landrush-island-palm-construction-visibility'
+import type { GrassFieldBlocker } from './grass-field-texture'
 import type { LandrushIslandPalmPlacement } from './landrush-island-palm-layout'
 
 const SQUARE = [

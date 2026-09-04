@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import {
   createZombieEscapePresentationLodDebugSnapshot,
   createZombieEscapeVisualLodState,
@@ -11,7 +12,6 @@ import {
   ZOMBIE_ESCAPE_DETAILED_ZOMBIE_CAPACITY,
   type ZombieEscapeVisualLodInput,
 } from './zombie-escape-visual-lod'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 function createVisualLodFixture(capacity: number) {
   const input: ZombieEscapeVisualLodInput = {

@@ -1,18 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  type AnyNode,
-  BuildingNode,
-  LevelNode,
-  SlabNode,
-  StairNode,
-  StairSegmentNode,
-} from '@pascal-app/core'
-import { createLandrushZombieEscapeCollisionWorldsResolver } from './landrush-island-ai-navigation-semantics'
+import { createLandrushZombieEscapeCollisionWorldsResolver } from '@landrush/pascal-host/zombie-game-navigation'
 import {
   visitZombieEscapeAudioEventsAfter,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
   type ZombieEscapeAudioEventKind,
-} from './zombie-escape-audio-events'
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
 import {
   clearZombieEscapeSparseFlowSearchRouteCorridor,
   createZombieEscapeCollisionWorld,
@@ -24,7 +16,7 @@ import {
   sampleZombieEscapeSparseSpawnAnchor,
   zombieEscapeSameLayerNavigationSegmentIsClear,
   zombieEscapeSparseFlowSearchHoldsStagingReverseFieldBankLease,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   getZombieEscapeZombieCatalogEntry,
   getZombieEscapeZombieCollisionRadiusMeters,
@@ -34,9 +26,8 @@ import {
   ZOMBIE_ESCAPE_WEAPON_PICKUPS,
   ZOMBIE_ESCAPE_WEAPON_PROFILES,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
-import { shouldRenderZombieEscapeTracer } from './zombie-escape-effects'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeHudSnapshot,
   createZombieEscapeSimulation,
@@ -58,14 +49,23 @@ import {
   ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
   ZOMBIE_ESCAPE_SHOT_PHASE,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   resolveZombieEscapeFirstProjectileSlowdownMultiplier,
   resolveZombieEscapeProjectileSlowdownMultiplier,
   resolveZombieEscapeSpawnSpeedScale,
   ZOMBIE_ESCAPE_ZOMBIE_GAIT,
-} from './zombie-escape-zombie-roster'
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
+import {
+  type AnyNode,
+  BuildingNode,
+  LevelNode,
+  SlabNode,
+  StairNode,
+  StairSegmentNode,
+} from '@pascal-app/core'
+import { shouldRenderZombieEscapeTracer } from './zombie-escape-effects'
 
 describe('Zombie Escape simulation', () => {
   test('replays identical fixed-step input deterministically', () => {

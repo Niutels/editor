@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   setZombieEscapeGamePhase,
   stepZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 test('indexes a wave spawn before its first agent update', () => {
   const arena = createZombieEscapeArena(91_001)

@@ -1,4 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import { findLandrushBuildingFloorInteriorRegion } from '@landrush/pascal-host/landrush-building-floor-visibility'
+import {
+  resolveZombieEscapeWeaponPickupIndices,
+  resolveZombieEscapeWeaponPickupPlacements,
+  resolveZombieEscapeWeaponPlacementSeed,
+} from '@landrush/pascal-host/zombie-escape-weapon-placement'
 import {
   type AnyNode,
   BuildingNode,
@@ -7,12 +13,6 @@ import {
   LevelNode,
   WallNode,
 } from '@pascal-app/core'
-import { findLandrushBuildingFloorInteriorRegion } from './landrush-building-floor-visibility'
-import {
-  resolveZombieEscapeWeaponPickupIndices,
-  resolveZombieEscapeWeaponPickupPlacements,
-  resolveZombieEscapeWeaponPlacementSeed,
-} from './zombie-escape-weapon-placement'
 
 const WEAPON_PLACEMENT_SEED = resolveZombieEscapeWeaponPlacementSeed({
   night: 2,

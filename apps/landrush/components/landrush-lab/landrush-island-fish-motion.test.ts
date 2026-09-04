@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   LANDRUSH_ISLAND_AMBIENT_FISH,
   LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
-} from './landrush-island-ambient-catalog'
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
 import {
   createLandrushIslandFishLanes,
   createLandrushIslandFishMotionSample,

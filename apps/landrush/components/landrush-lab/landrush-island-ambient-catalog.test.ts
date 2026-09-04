@@ -10,7 +10,7 @@ import {
   LANDRUSH_ISLAND_AMBIENT_PALM_DIMENSION_SCALE,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALMS,
-} from './landrush-island-ambient-catalog'
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
 
 describe('Landrush island ambient Meshy catalog', () => {
   test('contains the requested non-zombie asset set', () => {

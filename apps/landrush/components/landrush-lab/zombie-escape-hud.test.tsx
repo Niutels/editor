@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import type { ZombieEscapeHudSnapshot } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ZombieEscapeHud, ZombieEscapeMoneyBadge } from './zombie-escape-hud'
-import type { ZombieEscapeHudSnapshot } from './zombie-escape-simulation'
 
 function createHudSnapshot(): ZombieEscapeHudSnapshot {
   return {

@@ -4,17 +4,17 @@ import {
   type ZombieEscapeCollisionHit,
   type ZombieEscapeCollisionWorld,
   zombieEscapeSameLayerNavigationSegmentIsClear,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   inspectZombieEscapeCommittedNavigationAction,
   type ZombieEscapeCommittedNavigationAction,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import {
   resolveSparseNavigationStrictRegionIndex,
   sparseNavigationTargetRegionContainsPoint,
   type ZombieEscapeSparseNavigationTargetRegionIndex,
-} from './zombie-escape-sparse-navigation'
+} from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
 
 type ZombieEscapeNavigationFallbackRegionBucketIndex = Readonly<{
   bucketHeight: number

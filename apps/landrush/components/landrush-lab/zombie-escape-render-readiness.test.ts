@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import type { Object3D } from 'three'
 import { Group, Mesh, MeshBasicMaterial, PerspectiveCamera, Scene, SphereGeometry } from 'three'
 import {
@@ -14,8 +16,6 @@ import {
   type ZombieEscapePipelineRenderer,
   type ZombieEscapeRenderReadinessTimer,
 } from './zombie-escape-render-readiness'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 function deferred<T>() {
   let resolve!: (value: T) => void

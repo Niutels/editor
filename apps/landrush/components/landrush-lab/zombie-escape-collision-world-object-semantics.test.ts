@@ -6,7 +6,7 @@ import {
   resolveZombieEscapePinnedNavigationLayerIndex,
   ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
   type ZombieEscapeCollisionBoxSource,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 
 describe('Zombie Escape collision object semantics', () => {
   test('aligns semantic kinds with sorted object ordinals and authenticates them', () => {

@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { type AnyNode, LevelNode, ShelfNode } from '@pascal-app/core'
 import {
   createLandrushZombieEscapeCollisionWorldCompilation,
   createLandrushZombieEscapeCollisionWorldsResolver,
   type LandrushZombieEscapeCollisionWorldInput,
-} from './landrush-island-ai-navigation-semantics'
+} from '@landrush/pascal-host/zombie-game-navigation'
 import {
   createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
   createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
-} from './landrush-zombie-escape-collision-world-compiler'
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-collision-world-compiler'
+import {
+  createZombieEscapeCollisionHit,
+  sweepZombieEscapeCircleAgainstWorld,
+  ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { type AnyNode, LevelNode, ShelfNode } from '@pascal-app/core'
 import {
   collectLandrushZombieEscapeCollisionWorldTransferables,
   createLandrushZombieEscapeCollisionWorldWorkerError,
@@ -16,11 +21,6 @@ import {
   normalizeLandrushZombieEscapeCollisionWorldWorkerError,
   resolveLandrushZombieEscapeCollisionWorldWorkerRequest,
 } from './landrush-zombie-escape-collision-world-worker-transport'
-import {
-  createZombieEscapeCollisionHit,
-  sweepZombieEscapeCircleAgainstWorld,
-  ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
-} from './zombie-escape-collision-world'
 
 describe('Zombie Escape collision-world worker transport', () => {
   test('uses the authoritative compiler and preserves deterministic atomic world parity', () => {

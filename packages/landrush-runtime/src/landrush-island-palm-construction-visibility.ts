@@ -1,6 +1,13 @@
-import { distanceToClosedPolyline, pointInPolygon } from '@landrush/runtime'
-import type { GrassFieldBlocker } from './grass-field-texture'
-import type { LandrushIslandPalmPlacement } from './landrush-island-palm-layout'
+import { distanceToClosedPolyline, pointInPolygon } from './navigation-geometry'
+
+type GrassFieldBlocker = Readonly<{
+  clearanceMeters?: number
+  points: readonly Readonly<{ x: number; z: number }>[]
+}>
+type LandrushIslandPalmPlacement = Readonly<{
+  instanceIndex: number
+  position: Readonly<{ x: number; z: number }>
+}>
 
 export const LANDRUSH_ISLAND_PALM_CONSTRUCTION_CLEARANCE_METERS = 2.35
 

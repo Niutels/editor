@@ -1,4 +1,24 @@
 import { describe, expect, test } from 'bun:test'
+import { createZombieEscapeCollisionWorld } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import {
+  getZombieEscapeZombieCollisionRadiusMeters,
+  ZOMBIE_ESCAPE_CAPACITY,
+  ZOMBIE_ESCAPE_SIMULATION,
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
+import {
+  createZombieEscapeSimulation,
+  inspectZombieEscapeCommittedNavigationAction,
+  resetZombieEscapeSimulation,
+  setZombieEscapeCollisionWorld,
+  setZombieEscapeGamePhase,
+  setZombieEscapeObstacleDamageEnabled,
+  spawnZombieEscapeZombie,
+  stepZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_BOSS_KIND,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   beginLandrushZombieEscapeRoomSoak,
   createLandrushZombieEscapeRoomSoakBridge,
@@ -10,26 +30,6 @@ import {
   requestLandrushZombieEscapeRoomSoakObstacleDelta,
   requestLandrushZombieEscapeRoomSoakTargetRoster,
 } from './landrush-zombie-escape-mode'
-import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-world'
-import {
-  getZombieEscapeZombieCollisionRadiusMeters,
-  ZOMBIE_ESCAPE_CAPACITY,
-  ZOMBIE_ESCAPE_SIMULATION,
-  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
-import {
-  createZombieEscapeSimulation,
-  inspectZombieEscapeCommittedNavigationAction,
-  resetZombieEscapeSimulation,
-  setZombieEscapeCollisionWorld,
-  setZombieEscapeGamePhase,
-  setZombieEscapeObstacleDamageEnabled,
-  spawnZombieEscapeZombie,
-  stepZombieEscapeSimulation,
-  ZOMBIE_ESCAPE_BOSS_KIND,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 describe('Landrush Zombie Escape room-soak policy lifecycle', () => {
   test('captures enabled obstacle damage once and restores it exactly on end after reset', () => {

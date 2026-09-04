@@ -2,6 +2,7 @@
 
 import { LandrushWorldNode } from '@landrush/pascal-plugin'
 import { LandrushRobot } from '@landrush/pascal-plugin/landrush-world/robot'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import {
@@ -29,7 +30,6 @@ import {
   type WeaponFitDebugSettings,
   type WeaponFitDominantHand,
 } from './weapon-fit-debug-state'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 type WeaponFitSubjectProps = {
   muzzlePoseRef?: MutableRefObject<LandrushRobotWeaponMuzzlePose>

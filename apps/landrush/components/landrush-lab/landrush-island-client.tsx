@@ -7,6 +7,33 @@ import {
   LandrushPascalHost,
   resolveLandrushPascalEditorPresentationTransition,
 } from '@landrush/pascal-host'
+import { createLandrushBuildFootprintResolver } from '@landrush/pascal-host/landrush-build-footprints'
+import {
+  areLandrushBuildFootprintsInsideBoundary,
+  areLandrushBuildSyncNodeSetsEqual,
+  collectLandrushBuildSyncGraphNodeIds,
+  collectLandrushBuildSyncRequiredLiveNodeIds,
+  createLandrushBuildSyncSnapshotNodes,
+  createLandrushBuildSyncTransportNodes,
+  isLandrushBuildNodeInParcelMutationScope,
+  isLandrushBuildNodeInValidatedLegacyScope,
+  isLandrushBuildPlacementDraft,
+  isLandrushBuildSyncCandidateSafeAgainstLiveBaseline,
+  isLandrushBuildSyncMigrationPayloadSafe,
+  isLandrushBuildSyncV2GraphLossless,
+  parseLandrushBuildSyncSnapshotNodes,
+} from '@landrush/pascal-host/landrush-build-sync'
+import {
+  findLandrushBuildingFloorContext,
+  findLandrushBuildingFloorPlacement,
+  type LandrushBuildingFloorContext,
+  type LandrushBuildingFloorStack,
+  type LandrushBuildingFloorTransition,
+  resolveLandrushBuildingFloorCovers,
+  resolveLandrushBuildingFloorOpacities,
+  resolveLandrushBuildingFloorStacks,
+} from '@landrush/pascal-host/landrush-building-floor-visibility'
+import { canonicalizeLandrushParcelBuildGraph } from '@landrush/pascal-host/landrush-parcel-build-graph'
 import {
   createPascalWaterLandSurface as createLandrushIslandLandSurface,
   createPascalWaterSmoothedPerimeter as createLandrushIslandSmoothedPerimeter,
@@ -49,6 +76,7 @@ import {
   LandrushRenderSchedulerBridge,
   landrushIslandNavigationSegmentIntersectsPolygon,
   type MultiplayerRemotePlayerStore,
+  type MultiplayerZombieGameClient,
   normalize2,
   openPointRing,
   type ParcelBuildContentUpdate,
@@ -63,7 +91,6 @@ import {
   rectFootprint,
   rectFootprintFromAxes,
   renderScheduler,
-  rotateFootprintPoint,
   sanitizeRoomId,
   segmentFootprint,
   segmentsIntersect2,
@@ -74,6 +101,14 @@ import {
   type ViewerPresentationEffectState,
   viewAnglesFromDirection,
 } from '@landrush/runtime'
+import { createLandrushIslandConstructionBlockedPalmInstanceIndices } from '@landrush/runtime/landrush-island-palm-construction-visibility'
+import {
+  LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+  LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
+import { ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS } from '@landrush/zombie-gameplay/zombie-escape-config'
+import type { ZombieEscapeGamePhase } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
 import {
   type AnyNode,
   type AnyNodeId,
@@ -243,33 +278,6 @@ import {
   shouldSuppressLandrushBuildContextMenu,
 } from './landrush-build-pointer-input'
 import {
-  areLandrushBuildFootprintsInsideBoundary,
-  areLandrushBuildSyncNodeSetsEqual,
-  collectLandrushBuildSyncGraphNodeIds,
-  collectLandrushBuildSyncRequiredLiveNodeIds,
-  createLandrushBuildSpawnFootprint,
-  createLandrushBuildSyncSnapshotNodes,
-  createLandrushBuildSyncTransportNodes,
-  isLandrushBuildNodeInParcelMutationScope,
-  isLandrushBuildNodeInValidatedLegacyScope,
-  isLandrushBuildPlacementDraft,
-  isLandrushBuildSyncCandidateSafeAgainstLiveBaseline,
-  isLandrushBuildSyncMigrationPayloadSafe,
-  isLandrushBuildSyncStructuralObject,
-  isLandrushBuildSyncV2GraphLossless,
-  parseLandrushBuildSyncSnapshotNodes,
-} from './landrush-build-sync'
-import {
-  findLandrushBuildingFloorContext,
-  findLandrushBuildingFloorPlacement,
-  type LandrushBuildingFloorContext,
-  type LandrushBuildingFloorStack,
-  type LandrushBuildingFloorTransition,
-  resolveLandrushBuildingFloorCovers,
-  resolveLandrushBuildingFloorOpacities,
-  resolveLandrushBuildingFloorStacks,
-} from './landrush-building-floor-visibility'
-import {
   LandrushControllerCommandHud,
   type LandrushControllerCommands,
 } from './landrush-controller-command-hud'
@@ -284,10 +292,6 @@ import {
   resolveLandrushGrassMapExposure,
   resolveLandrushGrassMapVisibility,
 } from './landrush-grass-map-transition'
-import {
-  LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
-  LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
-} from './landrush-island-ambient-catalog'
 import {
   LANDRUSH_ISLAND_AMBIENT_LOAD_CATALOG_SIGNATURE,
   LANDRUSH_ISLAND_AMBIENT_LOAD_UNIT_IDS,
@@ -394,7 +398,6 @@ import {
   createLandrushIslandPalmTrunkColliderWorld,
   resolveLandrushIslandVisiblePalmLayout,
 } from './landrush-island-palm-collider'
-import { createLandrushIslandConstructionBlockedPalmInstanceIndices } from './landrush-island-palm-construction-visibility'
 import {
   createLandrushIslandPalmLayout,
   type LandrushIslandPalmPlacement,
@@ -437,7 +440,6 @@ import {
   type LandrushIslandClientExperience,
   type LandrushIslandFieldDebugMode,
 } from './landrush-island-world'
-import { canonicalizeLandrushParcelBuildGraph } from './landrush-parcel-build-graph'
 import { LandrushPascalEditorChrome } from './landrush-pascal-editor-chrome'
 import {
   beginLandrushPresentationPipelinePrewarmFrame,
@@ -591,7 +593,6 @@ import {
   type ZombieEscapeAmbientNpcPresentationRegistry,
 } from './zombie-escape-ambient-npc-presentation-registry'
 import { ZOMBIE_ESCAPE_PLAYER_JUMP_AUDIO_CUE } from './zombie-escape-audio-catalog'
-import { ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS } from './zombie-escape-config'
 import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
 import {
   ZOMBIE_ESCAPE_BALANCED_GENERATED_ASSET_CATALOG_SIGNATURE,
@@ -606,8 +607,6 @@ import {
   ZombieEscapePlayerGroundShadow,
   type ZombieEscapePlayerGroundShadowPose,
 } from './zombie-escape-player-ground-shadow'
-import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
-import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from './zombie-escape-zombie-roster'
 
 const PASCAL_MULTIPLAYER_ISLAND_ROCK_CLIFF_CUT_COUNT = 17
 const PASCAL_MULTIPLAYER_ISLAND_ROCK_CLIFF_SCALE = 1.02
@@ -832,8 +831,20 @@ const LANDRUSH_ISLAND_ROBOT_REVEAL_STAIR_STANDING_TOLERANCE_METERS = 0.16
 const LANDRUSH_ISLAND_ROBOT_REVEAL_SUPPORT_SURFACE_TOLERANCE_METERS = 0.08
 const LANDRUSH_ISLAND_BUILD_ROBOT_EXIT_HOVER_RADIUS = 1.24
 const LANDRUSH_ISLAND_WALK_TARGET_MIN_NORMAL_Y = 0.35
-const LANDRUSH_ISLAND_BUILT_GRASS_PADDING_METERS = 1
-const LANDRUSH_ISLAND_BUILT_GRASS_FEATHER_METERS = 0.3
+const {
+  createLandrushIslandBuiltGrassBlockers,
+  createLandrushIslandBuildNodeFootprints,
+  createLandrushIslandBuildNodeFootprint,
+  isLandrushIslandBuildLevelNode,
+  isLandrushIslandBuildLevelId,
+  isLandrushIslandBuildObjectNode,
+  isLandrushIslandStructuralBuildObjectNode,
+} = createLandrushBuildFootprintResolver({
+  buildingId: LANDRUSH_ISLAND_BUILDING_ID,
+  levelId: LANDRUSH_ISLAND_LEVEL_ID,
+  grassClearanceMeters: 1,
+  grassFeatherMeters: 0.3,
+})
 const LANDRUSH_ISLAND_BUILD_PARCEL_BLADE_FEATHER_METERS = 0.24
 const LANDRUSH_ISLAND_BUILD_PARCEL_EDGE_TOLERANCE_METERS = 0.04
 const LANDRUSH_ISLAND_BUILD_GRASS_GROUND_RENDER_ORDER = 0
@@ -1352,8 +1363,6 @@ type LandrushIslandWalkTargetPoint = LandrushPoint2 & {
 }
 type LandrushIslandStairNode = Extract<AnyNode, { type: 'stair' }>
 type LandrushIslandStairSegmentNode = Extract<AnyNode, { type: 'stair-segment' }>
-type LandrushIslandRoofNode = Extract<AnyNode, { type: 'roof' }>
-type LandrushIslandRoofSegmentNode = Extract<AnyNode, { type: 'roof-segment' }>
 type LandrushIslandStairSegmentLayout = {
   center: LandrushPoint2
   length: number
@@ -3772,6 +3781,7 @@ export function LandrushIslandClient({
     persistOfflineState: shouldPersistLandrushIslandOfflineState({ clean, offline }),
     roomId,
     spectator: false,
+    zombieGameAuthority: zombieEscapeEnabled && searchParams.get('zombieAuthority') === 'server',
   })
   const zombieEscapeClockMode: LandrushZombieEscapeClockMode = offline
     ? 'offline-local'
@@ -7127,6 +7137,7 @@ export function LandrushIslandClient({
                       waterY={LANDRUSH_ISLAND_LOW_ELEVATION - liveLandSurface.grassSurfaceElevation}
                       zombieEscapeEnabled={zombieEscapeEnabled}
                       zombieEscapeClockMode={zombieEscapeClockMode}
+                      zombieGameClient={multiplayer.zombieGameClient}
                       zombieEscapeNavigationMountGeneration={zombieEscapeGeneratedAssetGeneration}
                       zombieEscapePhase={zombieEscapePhase}
                       zombieEscapePhaseReady={zombieEscapePhaseReady}
@@ -10497,7 +10508,6 @@ function buildLandrushIslandColliderWorld(
         redundantSlabObjects.push(object)
         object.visible = false
       }
-      continue
     }
   }
 
@@ -10809,6 +10819,7 @@ function LandrushIslandPlayerLayer({
   waterY,
   zombieEscapeEnabled,
   zombieEscapeClockMode,
+  zombieGameClient,
   zombieEscapeNavigationMountGeneration,
   zombieEscapePhase,
   zombieEscapePhaseReady,
@@ -10876,6 +10887,7 @@ function LandrushIslandPlayerLayer({
   waterY: number
   zombieEscapeEnabled: boolean
   zombieEscapeClockMode: LandrushZombieEscapeClockMode
+  zombieGameClient: MultiplayerZombieGameClient
   zombieEscapeNavigationMountGeneration: string
   zombieEscapePhase: ZombieEscapeGamePhase
   zombieEscapePhaseReady: boolean
@@ -11073,6 +11085,7 @@ function LandrushIslandPlayerLayer({
           spawn={spawn}
           surfacePoints={surface.grassSurfacePoints}
           zombieEscapeClockMode={zombieEscapeClockMode}
+          zombieGameClient={zombieGameClient}
           zombieEscapeRoomStateObservation={zombieEscapeRoomStateObservation}
           startZombieEscapeNight={startZombieEscapeNight}
           viewerSceneReady={materialPresentationReadinessReady}
@@ -21884,22 +21897,6 @@ function applyLandrushIslandBuildSnapshot(
   return true
 }
 
-function createLandrushIslandBuiltGrassBlockers(
-  nodes: Record<string, AnyNode>,
-): readonly GrassFieldBlocker[] {
-  const blockers: GrassFieldBlocker[] = []
-  for (const node of Object.values(nodes)) {
-    for (const footprint of createLandrushIslandBuildNodeFootprints(node, 0, nodes)) {
-      blockers.push({
-        clearanceMeters: LANDRUSH_ISLAND_BUILT_GRASS_PADDING_METERS,
-        featherMeters: LANDRUSH_ISLAND_BUILT_GRASS_FEATHER_METERS,
-        points: footprint,
-      })
-    }
-  }
-  return blockers
-}
-
 function resolveLandrushIslandNavigationNodeLevelId(
   node: AnyNode,
   nodes: Record<string, AnyNode>,
@@ -22648,177 +22645,6 @@ function createLandrushIslandInvalidBuildNodeIds(
     invalidIds.push(node.id)
   }
   return invalidIds
-}
-
-function createLandrushIslandBuildNodeFootprints(
-  node: AnyNode,
-  padding: number,
-  nodes: Record<string, AnyNode>,
-  includeHidden = false,
-): readonly (readonly LandrushPoint2[])[] {
-  const isBuildNode = includeHidden
-    ? isLandrushIslandStructuralBuildObjectNode(node, nodes)
-    : isLandrushIslandBuildObjectNode(node, nodes)
-  if (!isBuildNode) return []
-  if (node.type === 'roof') {
-    return createLandrushIslandRoofBuildFootprints(node, padding, nodes, includeHidden)
-  }
-
-  const footprint = createLandrushIslandBuildNodeFootprint(node, padding, nodes, includeHidden)
-  return footprint ? [footprint] : []
-}
-
-function createLandrushIslandRoofBuildFootprints(
-  roof: LandrushIslandRoofNode,
-  padding: number,
-  nodes: Record<string, AnyNode>,
-  includeHidden = false,
-): readonly (readonly LandrushPoint2[])[] {
-  const childIds = new Set([
-    ...(roof.children ?? []),
-    ...Object.values(nodes)
-      .filter((node) => node.parentId === roof.id)
-      .map((node) => node.id as AnyNodeId),
-  ])
-  const footprints: Array<readonly LandrushPoint2[]> = [...childIds].flatMap((childId) => {
-    const segment = nodes[childId] as LandrushIslandRoofSegmentNode | undefined
-    if (segment?.type !== 'roof-segment' || (!includeHidden && segment.visible === false)) return []
-    const overhang = segment.overhang ?? 0
-    return [
-      rectFootprint({
-        center: rotateFootprintPoint(
-          { x: segment.position[0], z: segment.position[2] },
-          { x: roof.position[0], z: roof.position[2] },
-          roof.rotation ?? 0,
-        ),
-        depth: segment.depth + overhang * 2 + padding * 2,
-        rotation: (roof.rotation ?? 0) + (segment.rotation ?? 0),
-        width: segment.width + overhang * 2 + padding * 2,
-      }),
-    ]
-  })
-
-  if (footprints.length > 0) return footprints
-  return [
-    rectFootprint({
-      center: { x: roof.position[0], z: roof.position[2] },
-      depth: 0.4 + padding * 2,
-      rotation: roof.rotation ?? 0,
-      width: 0.4 + padding * 2,
-    }),
-  ]
-}
-
-function createLandrushIslandBuildNodeFootprint(
-  node: AnyNode,
-  padding: number,
-  nodes?: Record<string, AnyNode>,
-  includeHidden = false,
-): readonly LandrushPoint2[] | null {
-  const isBuildNode = includeHidden
-    ? isLandrushIslandStructuralBuildObjectNode(node, nodes)
-    : isLandrushIslandBuildObjectNode(node, nodes)
-  if (!isBuildNode) return null
-
-  if (node.type === 'wall' || node.type === 'fence') {
-    return segmentFootprint(
-      { x: node.start[0], z: node.start[1] },
-      { x: node.end[0], z: node.end[1] },
-      (node.thickness ?? 0.18) + padding * 2,
-    )
-  }
-
-  if (node.type === 'slab' || node.type === 'ceiling') {
-    return node.polygon.map(([x, z]) => ({ x, z }))
-  }
-
-  if (node.type === 'spawn') {
-    return createLandrushBuildSpawnFootprint(node, padding)
-  }
-
-  if (node.type === 'item') {
-    if (node.asset.attachTo) return null
-    const [width, , depth] = node.asset.dimensions
-    return rectFootprint({
-      center: { x: node.position[0], z: node.position[2] },
-      depth: depth * node.scale[2] + padding * 2,
-      rotation: node.rotation[1] ?? 0,
-      width: width * node.scale[0] + padding * 2,
-    })
-  }
-
-  if (node.type === 'column') {
-    const width = node.crossSection === 'round' ? node.radius * 2 : node.width
-    const depth = node.crossSection === 'round' ? node.radius * 2 : node.depth
-    return rectFootprint({
-      center: { x: node.position[0], z: node.position[2] },
-      depth: depth + padding * 2,
-      rotation: node.rotation,
-      width: width + padding * 2,
-    })
-  }
-
-  if (node.type === 'elevator') {
-    return rectFootprint({
-      center: { x: node.position[0], z: node.position[2] },
-      depth: (node.shaftDepth ?? node.depth) + padding * 2,
-      rotation: node.rotation,
-      width: (node.shaftWidth ?? node.width) + padding * 2,
-    })
-  }
-
-  if (node.type === 'stair') {
-    const run = Math.max(0.8, node.stepCount * 0.28 + node.topLandingDepth)
-    return rectFootprint({
-      center: { x: node.position[0], z: node.position[2] },
-      depth: run + padding * 2,
-      rotation: node.rotation,
-      width: node.width + padding * 2,
-    })
-  }
-
-  if (node.type === 'shelf') {
-    return rectFootprint({
-      center: { x: node.position[0], z: node.position[2] },
-      depth: node.depth + padding * 2,
-      rotation: node.rotation[1] ?? 0,
-      width: node.width + padding * 2,
-    })
-  }
-
-  return null
-}
-
-function isLandrushIslandBuildLevelNode(
-  node: AnyNode | undefined,
-  nodes: Record<string, AnyNode>,
-): node is LevelNode {
-  if (node?.type !== 'level' || !node.parentId) return false
-  return node.parentId === LANDRUSH_ISLAND_BUILDING_ID || nodes[node.parentId]?.type === 'building'
-}
-
-function isLandrushIslandBuildLevelId(
-  levelId: AnyNodeId | string | null | undefined,
-  nodes?: Record<string, AnyNode>,
-) {
-  if (!levelId) return false
-  if (levelId === LANDRUSH_ISLAND_LEVEL_ID) return true
-  if (!nodes) return false
-  return isLandrushIslandBuildLevelNode(nodes[levelId as AnyNodeId], nodes)
-}
-
-function isLandrushIslandBuildObjectNode(node: AnyNode, nodes?: Record<string, AnyNode>) {
-  if (node.visible === false || !isLandrushIslandStructuralBuildObjectNode(node, nodes)) {
-    return false
-  }
-  const metadata = node.metadata as { isTransient?: boolean } | undefined
-  return metadata?.isTransient !== true
-}
-
-function isLandrushIslandStructuralBuildObjectNode(node: AnyNode, nodes?: Record<string, AnyNode>) {
-  return isLandrushBuildSyncStructuralObject(node, (parentId) =>
-    isLandrushIslandBuildLevelId(parentId, nodes),
-  )
 }
 
 function isLandrushIslandNavigationObstacleNode(node: AnyNode, nodes: Record<string, AnyNode>) {

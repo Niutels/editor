@@ -6,7 +6,7 @@ import {
   resolveZombieEscapeNightGenericZombieTarget,
   setZombieEscapeGamePhase,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
 
 export type LandrushZombieEscapeClockMode = 'offline-local' | 'online-canonical' | 'online-waiting'
 

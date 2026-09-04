@@ -9,15 +9,18 @@ import {
   type ZombieEscapeCollisionSegment,
   type ZombieEscapeCollisionWorld,
   type ZombieEscapeFlowField,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import type {
+  ZombieEscapeSimulation,
+  ZombieEscapeZombiePool,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import type { ZombieEscapeSparseNavigationTargetRegionIndex } from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
 import {
   createZombieEscapeNavigationAgentInspection,
   inspectZombieEscapeNavigationAgent,
   ZOMBIE_ESCAPE_NAVIGATION_AGENT_ANOMALY,
   type ZombieEscapeNavigationAgentInspection,
 } from './zombie-escape-navigation-inspection'
-import type { ZombieEscapeSimulation, ZombieEscapeZombiePool } from './zombie-escape-simulation'
-import type { ZombieEscapeSparseNavigationTargetRegionIndex } from './zombie-escape-sparse-navigation'
 
 const REGION_AREA_EPSILON = 1e-10
 const REGION_SURFACE_OFFSET_METERS = 0.015

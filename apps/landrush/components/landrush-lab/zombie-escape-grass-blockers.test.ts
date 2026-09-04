@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  createZombieEscapeWeaponPickupGrassBlockers,
-  ZOMBIE_ESCAPE_WEAPON_PICKUPS,
-} from './zombie-escape-config'
+import { ZOMBIE_ESCAPE_WEAPON_PICKUPS } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeWeaponPickupGrassBlockers } from './zombie-escape-pickup-grass-blockers'
 
 const PICKUP_PEDESTAL_RADIUS_METERS = 0.76
 const PICKUP_SELECTED_SCALE = 1.18

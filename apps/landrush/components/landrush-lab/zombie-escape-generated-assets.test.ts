@@ -1,5 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
+import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
+  createZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import {
+  ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import {
   AnimationClip,
   Bone,
@@ -15,8 +27,6 @@ import {
   createZombieEscapeAttackClip,
   ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS,
 } from './zombie-escape-attack-presentation'
-import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
   activateZombieVisual,
@@ -31,17 +41,7 @@ import {
   updateZombieEscapeRenderPipelineProgress,
   updateZombieVisualLocomotion,
 } from './zombie-escape-generated-assets'
-import {
-  createZombieEscapeSimulation,
-  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
-import { createZombieEscapeArena } from './zombie-escape-world'
-import {
-  ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
-  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
-  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
-} from './zombie-escape-zombie-catalog'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 const MODEL_TRANSFORM = { offset: new Vector3(), scale: 1 }

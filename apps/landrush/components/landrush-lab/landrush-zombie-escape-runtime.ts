@@ -1,4 +1,4 @@
-import type { ZombieEscapeControlState } from './zombie-escape-controls'
+import type { ZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   advanceZombieEscapePhaseClock,
   resetZombieEscapeSimulation,
@@ -7,8 +7,8 @@ import {
   type ZombieEscapeGamePhase,
   type ZombieEscapeGameStatus,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import type { ZombieEscapeArenaData } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import type { ZombieEscapeArenaData } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 export type LandrushZombieEscapeRestartButtonState = {
   armed: boolean

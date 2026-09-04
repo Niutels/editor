@@ -1,4 +1,4 @@
-import type { ZombieEscapeGamePhase } from './zombie-escape-simulation'
+import type { ZombieEscapeGamePhase } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 
 export type LandrushIslandInterfaceInputOwner = 'day-interface' | 'zombie-night'
 

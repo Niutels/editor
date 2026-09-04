@@ -488,8 +488,8 @@ describe('installed Zombie navigation readiness', () => {
     )
     expect(nightStartReadiness).toContain('candidateReady: nightStartCandidateReady')
     expect(nightStartReadiness).toContain('setNightStartReadiness((current) =>')
-    expect(nightStartReadiness).toContain(
-      'const sharedNightStartReady = resolvedNightStartReadiness.ready',
+    expect(nightStartReadiness).toMatch(
+      /const sharedNightStartReady =\s*resolvedNightStartReadiness.ready && \(!authorityController \|\| authorityPresentation.ready\)/,
     )
     const startHandler = source.slice(
       source.indexOf('const startZombie = useCallback(() => {'),

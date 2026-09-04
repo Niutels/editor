@@ -1,4 +1,4 @@
-import type { LandrushIslandAmbientNavigationObstacle } from './landrush-island-ambient-navigation'
+import type { LandrushIslandAmbientNavigationObstacle } from '@landrush/runtime/landrush-island-ambient-navigation'
 
 export {
   type LandrushIslandAmbientPalmSlot,

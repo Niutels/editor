@@ -1,4 +1,21 @@
-import { resolveLandrushSemanticItemCollisionProfile } from '@landrush/runtime'
+import { resolveLandrushSemanticItemCollisionProfile } from '@landrush/runtime/semantic-item-collision'
+import {
+  createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
+  createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
+  type LandrushZombieEscapeCollisionWorldCompilePayload,
+  type LandrushZombieEscapeCollisionWorlds,
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-collision-world-compiler'
+import {
+  createZombieEscapeCollisionWorld,
+  ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
+  type ZombieEscapeCollisionBoxSource,
+  type ZombieEscapeCollisionCircleSource,
+  type ZombieEscapeCollisionObjectSemanticSource,
+  type ZombieEscapeCollisionSegmentSource,
+  type ZombieEscapeCollisionWorld,
+  type ZombieEscapeNavigationConnectorSource,
+  type ZombieEscapeNavigationSupportSource,
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   type AnyNode,
   computeStairSegmentChainTransforms,
@@ -11,23 +28,6 @@ import {
   sampleFenceCenterline,
   sampleWallCenterline,
 } from '@pascal-app/core'
-import {
-  createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
-  createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
-  type LandrushZombieEscapeCollisionWorldCompilePayload,
-  type LandrushZombieEscapeCollisionWorlds,
-} from './landrush-zombie-escape-collision-world-compiler'
-import {
-  createZombieEscapeCollisionWorld,
-  ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
-  type ZombieEscapeCollisionBoxSource,
-  type ZombieEscapeCollisionCircleSource,
-  type ZombieEscapeCollisionObjectSemanticSource,
-  type ZombieEscapeCollisionSegmentSource,
-  type ZombieEscapeCollisionWorld,
-  type ZombieEscapeNavigationConnectorSource,
-  type ZombieEscapeNavigationSupportSource,
-} from './zombie-escape-collision-world'
 
 export {
   assertLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
@@ -35,7 +35,7 @@ export {
   createLandrushZombieEscapeCollisionWorldsFromCompilePayload,
   type LandrushZombieEscapeCollisionWorldCompilePayload,
   type LandrushZombieEscapeCollisionWorlds,
-} from './landrush-zombie-escape-collision-world-compiler'
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-collision-world-compiler'
 
 const MINIMUM_SOLID_WALL_RUN_METERS = 0.04
 const MINIMUM_CENTERLINE_PIECE_METERS = 0.000_001

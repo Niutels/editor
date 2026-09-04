@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto'
 import {
   createLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
   type LandrushZombieEscapeCollisionWorldCompilePayload,
-} from './landrush-zombie-escape-collision-world-compiler'
-import { ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND } from './zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-collision-world-compiler'
+import { ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   assertLandrushZombieEscapeNavigationScaleProofFixture,
   LANDRUSH_ZOMBIE_ESCAPE_NAVIGATION_SCALE_PROOF_FIXTURE_SCHEMA_VERSION,

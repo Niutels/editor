@@ -2,7 +2,7 @@ import {
   ZOMBIE_ESCAPE_WEAPON_CATALOG,
   type ZombieEscapeWeaponId,
   type ZombieEscapeWeaponSpecification,
-} from './zombie-escape-weapon-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 
 export type WeaponFitCameraBookmark = 'near' | 'design' | 'far'
 export type WeaponFitDominantHand = 'left' | 'right'

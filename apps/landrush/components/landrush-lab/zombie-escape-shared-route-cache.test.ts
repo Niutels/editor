@@ -6,7 +6,7 @@ import {
   publishZombieEscapeSharedRoute,
   readZombieEscapeSharedComponentRouteWaypoint,
   readZombieEscapeSharedRouteWaypoint,
-} from './zombie-escape-shared-route-cache'
+} from '@landrush/zombie-gameplay/zombie-escape-shared-route-cache'
 
 const COMPONENTS = {
   fallbackSameLayerComponentIndices: Int32Array.from([0, 0, 1, 1]),

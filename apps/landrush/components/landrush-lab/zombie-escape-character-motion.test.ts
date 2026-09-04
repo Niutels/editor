@@ -5,8 +5,8 @@ import {
   resolveZombieEscapeDeathFallRadians,
   resolveZombieEscapeDeathNormalizedPhase,
   ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS,
-} from './zombie-escape-character-motion'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 
 describe('Zombie Escape deterministic character motion', () => {
   test('drives one arm through a readable windup, contact swing, and exact loop pose', () => {

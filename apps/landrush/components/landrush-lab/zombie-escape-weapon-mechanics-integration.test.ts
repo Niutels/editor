@@ -2,15 +2,15 @@ import { describe, expect, test } from 'bun:test'
 import {
   visitZombieEscapeAudioEventsAfter,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
-} from './zombie-escape-audio-events'
-import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
+import { createZombieEscapeCollisionWorld } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_CAPACITY,
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_WEAPON_PROFILES,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   resetZombieEscapeSimulation,
@@ -23,8 +23,8 @@ import {
   ZOMBIE_ESCAPE_SHOT_PHASE,
   ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 describe('Zombie Escape weapon identities', () => {
   test('the impact pool covers a full launcher burst plus the largest live prior-fire tail', () => {

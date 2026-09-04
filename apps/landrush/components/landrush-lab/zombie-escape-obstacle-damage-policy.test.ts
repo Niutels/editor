@@ -3,16 +3,16 @@ import {
   visitZombieEscapeAudioEventsAfter,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
   type ZombieEscapeAudioEventKind,
-} from './zombie-escape-audio-events'
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
 import {
   createZombieEscapeCollisionWorld,
   findFirstActiveZombieEscapeBreakableObjectId,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   resetZombieEscapeSimulation,
@@ -22,8 +22,8 @@ import {
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 describe('Zombie Escape obstacle-damage policy', () => {
   test('keeps obstacle attacks live without topology mutation and resumes normal two-hit damage', () => {

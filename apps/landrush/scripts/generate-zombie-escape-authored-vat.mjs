@@ -12,7 +12,7 @@ import {
   resolveZombieEscapeAuthoredVatPath,
 } from '../components/landrush-lab/zombie-escape-authored-vat.ts'
 import { bakeZombieEscapeAuthoredVat } from '../components/landrush-lab/zombie-escape-instanced-skinned-presentation.ts'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '../components/landrush-lab/zombie-escape-zombie-catalog.ts'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const PUBLIC_ROOT = resolve(APP_ROOT, 'public')

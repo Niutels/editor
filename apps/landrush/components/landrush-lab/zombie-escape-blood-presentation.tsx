@@ -1,5 +1,9 @@
 'use client'
 
+import {
+  createZombieEscapeBallisticSample,
+  resolveZombieEscapeBallisticSample,
+} from '@landrush/zombie-gameplay/zombie-escape-impact-attachment'
 import { useFrame } from '@react-three/fiber'
 import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import {
@@ -31,10 +35,6 @@ import {
   type ZombieEscapeBloodVariant,
   type ZombieEscapeBloodVariantProfile,
 } from './zombie-escape-blood-variants'
-import {
-  createZombieEscapeBallisticSample,
-  resolveZombieEscapeBallisticSample,
-} from './zombie-escape-impact-attachment'
 import type { ZombieEscapeRenderReadinessRegistry } from './zombie-escape-render-readiness'
 import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
 

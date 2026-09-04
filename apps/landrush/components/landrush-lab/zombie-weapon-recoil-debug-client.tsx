@@ -1,5 +1,7 @@
 'use client'
 
+import { ZOMBIE_ESCAPE_WEAPON_PROFILES } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useLayoutEffect, useMemo, useRef } from 'react'
@@ -11,8 +13,6 @@ import {
   getWeaponFitDebugWeapon,
   isWeaponFitDebugWeaponId,
 } from './weapon-fit-debug-state'
-import { ZOMBIE_ESCAPE_WEAPON_PROFILES } from './zombie-escape-config'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 const FORWARD = new Vector3(0, 0, 1)
 const CAMERA_POSITION = new Vector3(2.8, 2.65, -0.75)

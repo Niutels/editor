@@ -1,4 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import {
   AnimationClip,
   AnimationMixer,
@@ -20,8 +23,6 @@ import {
 import { getCurrentStack, setCurrentStack, stack } from 'three/tsl'
 import type { MeshStandardNodeMaterial, NodeBuilder } from 'three/webgpu'
 import { ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS } from './zombie-escape-attack-presentation'
-import { ZOMBIE_ESCAPE_DEATH_ANIMATION_DURATION_SECONDS } from './zombie-escape-character-motion'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
   bakeZombieEscapeAuthoredVat,
   countZombieEscapeAuthoredVariantCapacity,
@@ -33,7 +34,6 @@ import {
   resolveZombieEscapeBakedTextureLayout,
   ZOMBIE_ESCAPE_AUTHORED_BAKED_FRAME_COUNT,
 } from './zombie-escape-instanced-skinned-presentation'
-import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 describe('authored instanced zombie presentation', () => {

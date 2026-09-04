@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import {
   ZOMBIE_ESCAPE_AMBIENT_HANDOFF_LOCOMOTION,
   type ZombieEscapeAmbientHandoffSource,
-} from './zombie-escape-ambient-handoff'
-import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
-import { releaseZombieEscapePoolSlot } from './zombie-escape-pool'
+} from '@landrush/zombie-gameplay/zombie-escape-ambient-handoff'
+import { createZombieEscapeCollisionWorld } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
+import { releaseZombieEscapePoolSlot } from '@landrush/zombie-gameplay/zombie-escape-pool'
 import {
   createZombieEscapeSimulation,
   installZombieEscapeAmbientHandoffCandidates,
@@ -17,9 +17,9 @@ import {
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_GRACE_SECONDS,
   ZOMBIE_ESCAPE_AMBIENT_HANDOFF_ATTACK_STAGGER_SECONDS,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
-import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from './zombie-escape-zombie-roster'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
 
 function createAmbientHandoffSource(
   variantByPoolSlot: Uint8Array,

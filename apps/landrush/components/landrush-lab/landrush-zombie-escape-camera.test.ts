@@ -1,4 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import {
+  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters,
+  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE,
+  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
 import { MathUtils, OrthographicCamera, PerspectiveCamera, Vector3 } from 'three'
 import {
   handoffLandrushZombieEscapeCameraPose,
@@ -9,12 +15,6 @@ import {
   resolveLandrushZombieEscapeCameraProjectionHalfHeight,
   sampleLandrushZombieEscapeCameraTransition,
 } from './landrush-zombie-escape-camera'
-import {
-  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters,
-  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE,
-  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
-  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
 
 describe('Landrush Zombie Escape camera', () => {
   test('prepares and reuses the exact orthographic camera needed after loading', () => {

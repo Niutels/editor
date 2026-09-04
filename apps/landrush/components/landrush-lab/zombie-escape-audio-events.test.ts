@@ -4,7 +4,7 @@ import {
   emitZombieEscapeAudioEvent,
   visitZombieEscapeAudioEventsAfter,
   ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
-} from './zombie-escape-audio-events'
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
 
 describe('Zombie Escape audio event ring', () => {
   test('publishes monotonic semantic events without replacing backing storage', () => {

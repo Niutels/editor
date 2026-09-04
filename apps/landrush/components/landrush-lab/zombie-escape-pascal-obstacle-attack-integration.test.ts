@@ -1,4 +1,28 @@
 import { describe, expect, test } from 'bun:test'
+import { createLandrushZombieEscapeCollisionWorld } from '@landrush/pascal-host/zombie-game-navigation'
+import {
+  visitZombieEscapeAudioEventsAfter,
+  ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
+  type ZombieEscapeAudioEventKind,
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
+import { findFirstActiveZombieEscapeBreakableObjectId } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import {
+  ZOMBIE_ESCAPE_OBSTACLE_BREACH_DURATION_SECONDS,
+  ZOMBIE_ESCAPE_SIMULATION,
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
+import {
+  createZombieEscapeSimulation,
+  inspectZombieEscapeCommittedNavigationAction,
+  setZombieEscapeCollisionWorld,
+  setZombieEscapeExternalPlayerPose,
+  setZombieEscapeGamePhase,
+  spawnZombieEscapeZombie,
+  stepZombieEscapeSimulation,
+  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   type AnyNode,
   type AnyNodeId,
@@ -12,31 +36,7 @@ import {
   WallNode,
 } from '@pascal-app/core'
 import { Object3D } from 'three'
-import { createLandrushZombieEscapeCollisionWorld } from './landrush-island-ai-navigation-semantics'
 import { syncLandrushZombieEscapeStructureRoots } from './landrush-zombie-escape-structure-presentation'
-import {
-  visitZombieEscapeAudioEventsAfter,
-  ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
-  type ZombieEscapeAudioEventKind,
-} from './zombie-escape-audio-events'
-import { findFirstActiveZombieEscapeBreakableObjectId } from './zombie-escape-collision-world'
-import {
-  ZOMBIE_ESCAPE_OBSTACLE_BREACH_DURATION_SECONDS,
-  ZOMBIE_ESCAPE_SIMULATION,
-  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
-import {
-  createZombieEscapeSimulation,
-  inspectZombieEscapeCommittedNavigationAction,
-  setZombieEscapeCollisionWorld,
-  setZombieEscapeExternalPlayerPose,
-  setZombieEscapeGamePhase,
-  spawnZombieEscapeZombie,
-  stepZombieEscapeSimulation,
-  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 const FIXED_DELTA_SECONDS = 1 / 60
 const PLAYER_X = 3

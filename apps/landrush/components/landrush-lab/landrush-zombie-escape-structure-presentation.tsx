@@ -1,5 +1,6 @@
 'use client'
 
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { type AnyNodeId, sceneRegistry } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, useEffect, useRef } from 'react'
@@ -8,7 +9,6 @@ import {
   LandrushZombieEscapeStructureHitPresentation,
   type LandrushZombieEscapeStructureHitSample,
 } from './landrush-zombie-escape-structure-hit-presentation'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
 
 export const LANDRUSH_ZOMBIE_ESCAPE_STRUCTURE_PRESENTATION_FRAME_ORDER = {
   hitApply: 0.98,

@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
 import {
   advanceLandrushIslandAmbientWalkablePathSearch,
   createLandrushIslandAmbientNavigationWorld,
@@ -11,7 +10,8 @@ import {
   isLandrushIslandAmbientSegmentPassable,
   type LandrushIslandAmbientNavigationWorld,
   resolveLandrushIslandAmbientDestination,
-} from './landrush-island-ambient-navigation'
+} from '@landrush/runtime/landrush-island-ambient-navigation'
+import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
 
 const world: LandrushIslandAmbientNavigationWorld = {
   obstacles: [

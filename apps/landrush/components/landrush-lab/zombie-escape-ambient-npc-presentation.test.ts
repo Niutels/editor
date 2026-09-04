@@ -1,4 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import {
+  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
+  ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS,
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from 'three'
 import {
   createAmbientNpcZombieActionTargets,
@@ -7,13 +14,6 @@ import {
   resolveAmbientNpcZombieMovementProfile,
 } from './landrush-island-ambient-life'
 import { createZombieEscapeAmbientNpcPresentationResource } from './zombie-escape-ambient-npc-presentation'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
-import {
-  ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
-  ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS,
-  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
-} from './zombie-escape-zombie-catalog'
 
 describe('Zombie Escape exact ambient NPC presentation', () => {
   test('prepares and reuses one phase-switched material set', () => {

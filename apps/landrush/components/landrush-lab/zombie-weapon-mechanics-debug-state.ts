@@ -1,4 +1,4 @@
-import type { ZombieEscapeWeaponId } from './zombie-escape-weapon-catalog'
+import type { ZombieEscapeWeaponId } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { ZOMBIE_ESCAPE_WEAPON_VFX_VARIANT_COUNT } from './zombie-escape-weapon-vfx'
 
 export type ZombieWeaponMechanicsDebugView = 'final' | 'no-post'

@@ -1,5 +1,7 @@
 'use client'
 
+import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { useGLTFKTX2, useGpuResourceLifetime, Viewer } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
@@ -22,10 +24,8 @@ import {
   type ZombieEscapeAuthoredInstanceSelection,
   type ZombieEscapeAuthoredInstanceState,
 } from './zombie-escape-instanced-skinned-presentation'
-import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
 import { ZOMBIE_ESCAPE_DETAILED_ZOMBIE_CAPACITY } from './zombie-escape-visual-lod'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 import { createZombieEscapeZombieShader } from './zombie-escape-zombie-material'
 
 const LAYOUT_SIDE = 10

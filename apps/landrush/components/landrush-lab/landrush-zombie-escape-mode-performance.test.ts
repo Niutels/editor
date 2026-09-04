@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
+  createZombieEscapeHudSnapshot,
+  createZombieEscapeSimulation,
+  type ZombieEscapeSimulation,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
 import {
   accumulateLandrushZombieEscapeFrameTime,
   areLandrushZombieEscapeHudSnapshotsSemanticallyEqual,
@@ -9,14 +17,6 @@ import {
   LANDRUSH_ZOMBIE_ESCAPE_MAXIMUM_RECOVERY_SUBSTEPS,
 } from './landrush-zombie-escape-mode'
 import type { ZombieEscapeAmbientNpcPresentationRegistry } from './zombie-escape-ambient-npc-presentation-registry'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import {
-  createZombieEscapeHudSnapshot,
-  createZombieEscapeSimulation,
-  type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
-import { ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS } from './zombie-escape-zombie-roster'
 
 describe('Landrush Zombie Escape frame-budget policy', () => {
   test('captures and installs all ten ambient candidates at a night boundary', () => {
@@ -225,7 +225,19 @@ describe('Landrush Zombie Escape frame-budget policy', () => {
     )?.[0]
 
     expect(inputFrame).not.toContain('syncIntegratedPlayerPose(')
-    expect(simulationFrame?.match(/syncIntegratedPlayerPose\(/g)).toHaveLength(2)
+    const authorityStart = simulationFrame!.indexOf('if (authorityController) {')
+    const localStart = simulationFrame!.indexOf(
+      'if (clockModeRef.current !== zombieEscapeClockMode)',
+    )
+    expect(authorityStart).toBeGreaterThan(0)
+    expect(localStart).toBeGreaterThan(authorityStart)
+    const authorityFrame = simulationFrame!.slice(authorityStart, localStart)
+    const localFrame = simulationFrame!.slice(localStart)
+    expect(authorityFrame.match(/syncIntegratedPlayerPose\(/g)).toHaveLength(1)
+    expect(authorityFrame).toMatch(/return\s+\}\s*$/)
+    expect(authorityFrame).not.toContain('stepZombieEscapeSimulation(')
+    expect(authorityFrame).not.toContain('advanceLandrushZombieEscapePhaseClock(')
+    expect(localFrame.match(/syncIntegratedPlayerPose\(/g)).toHaveLength(2)
     expect(simulationFrame).toMatch(
       /const economyCheckpoint = onProfileMoneyOperation\s+\? captureLandrushZombieEscapeEconomyCheckpoint\(simulation\)\s+: null/,
     )

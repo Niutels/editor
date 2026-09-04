@@ -4,7 +4,7 @@ import {
   createLandrushZombieEscapeCollisionWorldsResolver,
   type LandrushZombieEscapeCollisionWorldInput,
   type LandrushZombieEscapeCollisionWorlds,
-} from './landrush-island-ai-navigation-semantics'
+} from '@landrush/pascal-host/zombie-game-navigation'
 import {
   createBrowserLandrushZombieEscapeCollisionWorldWorkerCompiler,
   type LandrushZombieEscapeCollisionWorldWorkerLike,

@@ -1,5 +1,6 @@
 'use client'
 
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { cloneMaterial } from '@pascal-app/viewer'
 import { useFrame } from '@react-three/fiber'
 import { type MutableRefObject, memo, useEffect, useRef } from 'react'
@@ -8,7 +9,6 @@ import {
   resolveZombieEscapeHitFlickerPhase,
   type ZombieEscapeHitFlickerPhase,
 } from './zombie-escape-hit-flicker'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
 
 type PlayerHitMaterial = Material & {
   color?: Color

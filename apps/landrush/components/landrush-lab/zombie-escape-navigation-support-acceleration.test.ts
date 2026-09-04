@@ -4,7 +4,7 @@ import {
   inspectZombieEscapeNavigationSupportCapsuleQuery,
   inspectZombieEscapeNavigationSupportDiskQuery,
   type ZombieEscapeNavigationSupportSource,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 
 const GEOMETRY_EPSILON = 0.000_000_1
 

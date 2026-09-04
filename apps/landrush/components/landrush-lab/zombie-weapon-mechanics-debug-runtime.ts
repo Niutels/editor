@@ -1,5 +1,8 @@
-import { ZOMBIE_ESCAPE_SIMULATION, ZOMBIE_ESCAPE_WEAPON_PROFILES } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+import {
+  ZOMBIE_ESCAPE_SIMULATION,
+  ZOMBIE_ESCAPE_WEAPON_PROFILES,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   setZombieEscapeExternalPlayerPose,
@@ -9,9 +12,12 @@ import {
   stepZombieEscapeSimulationPhysics,
   ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
-import { createZombieEscapeArena, type ZombieEscapeArenaData } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
+import {
+  createZombieEscapeArena,
+  type ZombieEscapeArenaData,
+} from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   createZombieWeaponMechanicsHealthSnapshot,
   type ZombieWeaponMechanicsScenario,

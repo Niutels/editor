@@ -1,8 +1,27 @@
-import type { LandrushPoint2 } from '@/components/landrush/types'
-import type { LandrushIslandAiNavigationSnapshot } from './landrush-island-ai-navigation-semantics'
-import type { LandrushIslandAmbientNavigationObstacle } from './landrush-island-ambient-navigation'
+import type { LandrushIslandAiNavigationSnapshot } from '@landrush/pascal-host/zombie-game-navigation'
+import type { LandrushIslandAmbientNavigationObstacle } from '@landrush/runtime/landrush-island-ambient-navigation'
+import type { LandrushNavigationPoint2 as LandrushPoint2 } from '@landrush/runtime/navigation-geometry'
+import type { ZombieEscapeCollisionCircleSource } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 
 const LANDRUSH_ISLAND_AMBIENT_ROUND_CAP_SEGMENTS = 8
+
+export function createLandrushIslandPalmNavigationObstacles(
+  circles: readonly ZombieEscapeCollisionCircleSource[],
+  agentRadius: number,
+) {
+  return circles.map<LandrushIslandAmbientNavigationObstacle>((circle) => {
+    const radius = circle.radius + agentRadius
+    return {
+      id: circle.objectId ?? circle.id,
+      points: [
+        { x: circle.x - radius, z: circle.z - radius },
+        { x: circle.x + radius, z: circle.z - radius },
+        { x: circle.x + radius, z: circle.z + radius },
+        { x: circle.x - radius, z: circle.z + radius },
+      ],
+    }
+  })
+}
 
 export type LandrushIslandAmbientSemanticObstacleInput = Readonly<{
   agentRadius: number

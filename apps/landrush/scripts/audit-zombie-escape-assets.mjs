@@ -32,7 +32,7 @@ const DEFAULT_ASSET_ROOT = resolve(
   '../public/landrush-lab/zombie-escape/assets',
 )
 const DEFAULT_AUDIT_PATH = resolve(DEFAULT_ASSET_ROOT, 'asset-audit.json')
-const CATALOG_SOURCE_ROOT = resolve(scriptDirectory, '../components/landrush-lab')
+const CATALOG_SOURCE_ROOT = resolve(scriptDirectory, '../../../packages/landrush-zombie-gameplay/src')
 const WEAPON_IDS = [
   'sunflare-pistol',
   'reef-carbine',

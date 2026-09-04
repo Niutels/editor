@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.js"
+    },
+    "./zombie-game": {
+      "types": "./src/zombie-game.d.ts",
+      "default": "./src/zombie-game.js"
     }
   },
   "files": [
@@ -16,8 +20,8 @@
     "README.md"
   ],
   "scripts": {
-    "check": "node --check src/index.js",
-    "test": "node --test src/index.test.mjs"
+    "check": "node --check src/index.js && node --check src/zombie-game.js",
+    "test": "node --test src/index.test.mjs src/zombie-game.test.mjs"
   },
   "private": true
 }

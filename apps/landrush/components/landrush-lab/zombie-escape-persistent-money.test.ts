@@ -3,8 +3,8 @@ import {
   createZombieEscapeSimulation,
   resetZombieEscapeSimulation,
   setZombieEscapeGamePhase,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 describe('Zombie Escape persistent money and day revival', () => {
   test('preserves money across reset', () => {

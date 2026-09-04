@@ -1,5 +1,10 @@
 'use client'
 
+import {
+  ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
+  type ZombieEscapeAudioEventRing,
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
+import { ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { useAudio } from '@pascal-app/editor'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Howl, Howler } from 'howler'
@@ -11,11 +16,6 @@ import {
   type ZombieEscapeAudioCue,
   type ZombieEscapePresenceAudioCue,
 } from './zombie-escape-audio-catalog'
-import {
-  ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
-  type ZombieEscapeAudioEventRing,
-} from './zombie-escape-audio-events'
-import { ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND } from './zombie-escape-simulation'
 
 export type ZombieEscapePresenceAudioSource = Readonly<{
   elapsedSeconds: number

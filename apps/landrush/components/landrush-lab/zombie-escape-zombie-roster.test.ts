@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { LANDRUSH_ISLAND_AMBIENT_NPCS } from './landrush-island-ambient-catalog'
-import { ZOMBIE_ESCAPE_CAPACITY } from './zombie-escape-config'
+import { LANDRUSH_ISLAND_AMBIENT_NPCS } from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
+import { ZOMBIE_ESCAPE_CAPACITY } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   ZOMBIE_ESCAPE_STANDARD_ZOMBIE_VARIANTS,
   ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
-} from './zombie-escape-zombie-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import {
   createZombieEscapeVariantByPoolSlot,
   createZombieEscapeZombieRoster,
@@ -12,7 +12,7 @@ import {
   resolveZombieEscapeProjectileSlowdownMultiplier,
   resolveZombieEscapeSpawnSpeedScale,
   ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
-} from './zombie-escape-zombie-roster'
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
 
 describe('Zombie Escape zombie roster', () => {
   test('reserves the exact production roster of one hundred zombies', () => {

@@ -1,5 +1,32 @@
 'use client'
 
+import { resolveZombieEscapeDeathNormalizedPhase } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import {
+  getZombieEscapeZombieCatalogEntry,
+  ZOMBIE_ESCAPE_CAPACITY,
+  ZOMBIE_ESCAPE_SIMULATION,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
+  createZombieEscapeBallisticSample,
+  createZombieEscapeImpactAttachment,
+  resolveZombieEscapeBallisticSample,
+  resolveZombieEscapeImpactAttachment,
+} from '@landrush/zombie-gameplay/zombie-escape-impact-attachment'
+import {
+  createZombieEscapePresentationPoint,
+  createZombieEscapePresentationPose,
+  resolveZombieEscapePresentationPose,
+  transformZombieEscapePresentationPoint,
+} from '@landrush/zombie-gameplay/zombie-escape-presentation-pose'
+import {
+  ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
+  ZOMBIE_ESCAPE_SHOT_PHASE,
+  ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND,
+  type ZombieEscapeShotImpactKind,
+  type ZombieEscapeShotPhase,
+  type ZombieEscapeSimulation,
+  type ZombieEscapeWeaponImpactEffectKind,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { useFrame } from '@react-three/fiber'
 import {
   type MutableRefObject,
@@ -33,12 +60,6 @@ import {
   type ZombieEscapeBloodWorldAttachmentResolver,
 } from './zombie-escape-blood-presentation'
 import { resolveZombieEscapeBloodHitVariantCode } from './zombie-escape-blood-variants'
-import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
-import {
-  getZombieEscapeZombieCatalogEntry,
-  ZOMBIE_ESCAPE_CAPACITY,
-  ZOMBIE_ESCAPE_SIMULATION,
-} from './zombie-escape-config'
 import {
   createZombieEscapeDeathDustEventPool,
   createZombieEscapeDeathDustEventSeed,
@@ -52,35 +73,15 @@ import {
 } from './zombie-escape-death-dust'
 import { ZombieEscapeDeathDustPresentation } from './zombie-escape-death-dust-presentation'
 import {
-  createZombieEscapeBallisticSample,
-  createZombieEscapeImpactAttachment,
-  resolveZombieEscapeBallisticSample,
-  resolveZombieEscapeImpactAttachment,
-} from './zombie-escape-impact-attachment'
-import {
   createZombieEscapeMuzzleFlashTransform,
   resolveZombieEscapeMuzzleFlashTransform,
+  resolveZombieEscapeShotMuzzleFlashTransform,
 } from './zombie-escape-muzzle-flash'
-import {
-  createZombieEscapePresentationPoint,
-  createZombieEscapePresentationPose,
-  resolveZombieEscapePresentationPose,
-  transformZombieEscapePresentationPoint,
-} from './zombie-escape-presentation-pose'
 import type {
   ZombieEscapeRenderReadinessRegistry,
   ZombieEscapeRenderRepresentativeKey,
 } from './zombie-escape-render-readiness'
 import { useZombieEscapeRenderRepresentative } from './zombie-escape-render-readiness-react'
-import {
-  ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
-  ZOMBIE_ESCAPE_SHOT_PHASE,
-  ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND,
-  type ZombieEscapeShotImpactKind,
-  type ZombieEscapeShotPhase,
-  type ZombieEscapeSimulation,
-  type ZombieEscapeWeaponImpactEffectKind,
-} from './zombie-escape-simulation'
 import {
   captureZombieEscapeSkinnedImpact,
   createZombieEscapeSkinnedImpactAttachment,
@@ -157,6 +158,14 @@ export function shouldScanZombieEscapeDeathDustCandidates(kills: number, spawned
   return Number.isFinite(kills) && Number.isFinite(spawnedCount) && kills > spawnedCount
 }
 
+export function shouldScanZombieEscapeSharedDeathDustCandidates(
+  revision: number,
+  observedRevision: number,
+  pendingCollapse: boolean,
+) {
+  return pendingCollapse || (Number.isFinite(revision) && revision !== observedRevision)
+}
+
 type ZombieEscapeEffectRenderBoundaryProps = {
   children: ReactNode
   registry: ZombieEscapeRenderReadinessRegistry | undefined
@@ -183,15 +192,19 @@ function MountedZombieEscapeEffectRenderRepresentative({
 }
 
 export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
+  authoritativeShots = false,
   deathDustVariant = DEFAULT_ZOMBIE_ESCAPE_DEATH_DUST_VARIANT,
   framePriority = -16,
+  getDeathPresentationRevision,
   impactVisualRegistry,
   renderReadinessRegistry,
   simulationRef,
   vfxVariantIndex,
 }: {
+  authoritativeShots?: boolean
   deathDustVariant?: ZombieEscapeDeathDustVariant
   framePriority?: number
+  getDeathPresentationRevision?: () => number
   impactVisualRegistry: ZombieEscapeImpactVisualRegistry
   renderReadinessRegistry?: ZombieEscapeRenderReadinessRegistry
   simulationRef: MutableRefObject<ZombieEscapeSimulation>
@@ -233,6 +246,8 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
     new Uint32Array(simulationRef.current.zombies.pool.capacity),
   )
   const spawnedDeathDustKillCountRef = useRef(simulationRef.current.kills)
+  const observedSharedDeathRevisionRef = useRef(-1)
+  const pendingSharedDeathCollapseRef = useRef(false)
   const previousSimulationElapsedRef = useRef(simulationRef.current.elapsedSeconds)
   const skinnedBloodAttachments = useMemo(
     () =>
@@ -390,10 +405,15 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
     const impactEvents = simulation.impactEvents
     const previousSimulationElapsed = previousSimulationElapsedRef.current
     const simulationRewound = simulation.elapsedSeconds < previousSimulationElapsed
-    if (simulationRewound || simulation.kills < spawnedDeathDustKillCountRef.current) {
+    if (
+      simulationRewound ||
+      (!authoritativeShots && simulation.kills < spawnedDeathDustKillCountRef.current)
+    ) {
       observedBloodImpactGenerationRef.current.fill(0)
       observedDeathZombieGenerationRef.current.fill(0)
       spawnedDeathDustKillCountRef.current = Math.max(0, simulation.kills)
+      observedSharedDeathRevisionRef.current = -1
+      pendingSharedDeathCollapseRef.current = false
     }
     if (simulationRewound || shouldScanZombieEscapeEffectPool(deathDustEvents.pool.activeCount)) {
       reconcileZombieEscapeDeathDustEventPool(
@@ -404,14 +424,29 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
     }
     previousSimulationElapsedRef.current = simulation.elapsedSeconds
     const zombies = simulation.zombies
+    const sharedDeathRevision = getDeathPresentationRevision?.() ?? 0
     if (
-      shouldScanZombieEscapeDeathDustCandidates(
-        simulation.kills,
-        spawnedDeathDustKillCountRef.current,
-      )
+      authoritativeShots
+        ? shouldScanZombieEscapeSharedDeathDustCandidates(
+            sharedDeathRevision,
+            observedSharedDeathRevisionRef.current,
+            pendingSharedDeathCollapseRef.current,
+          )
+        : shouldScanZombieEscapeDeathDustCandidates(
+            simulation.kills,
+            spawnedDeathDustKillCountRef.current,
+          )
     ) {
+      observedSharedDeathRevisionRef.current = sharedDeathRevision
+      pendingSharedDeathCollapseRef.current = false
       for (let slot = 0; slot < zombies.pool.capacity; slot += 1) {
         const generation = zombies.pool.generation[slot]!
+        if (
+          zombies.pool.active[slot] === 0 ||
+          zombies.health[slot]! > 0 ||
+          generation === observedDeathZombieGenerationRef.current[slot]!
+        )
+          continue
         const deathPhase = resolveZombieEscapeDeathNormalizedPhase(
           zombies.deathPresentationSeconds[slot]!,
         )
@@ -424,6 +459,7 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
             observedGeneration: observedDeathZombieGenerationRef.current[slot]!,
           })
         ) {
+          pendingSharedDeathCollapseRef.current = true
           continue
         }
         observedDeathZombieGenerationRef.current[slot] = generation
@@ -499,11 +535,19 @@ export const ZombieEscapeEffects = memo(function ZombieEscapeEffects({
       ) {
         const muzzleProgress = shotAge / ZOMBIE_ESCAPE_SIMULATION.muzzleFlashSeconds
         const muzzleEnvelope = Math.sin(Math.PI * muzzleProgress) * (1 - muzzleProgress * 0.25)
-        resolveZombieEscapeMuzzleFlashTransform(
-          simulation.player,
-          muzzleEnvelope,
-          muzzleFlashTransform,
-        )
+        if (authoritativeShots)
+          resolveZombieEscapeShotMuzzleFlashTransform(
+            shots,
+            slot,
+            muzzleEnvelope,
+            muzzleFlashTransform,
+          )
+        else
+          resolveZombieEscapeMuzzleFlashTransform(
+            simulation.player,
+            muzzleEnvelope,
+            muzzleFlashTransform,
+          )
         direction.set(
           muzzleFlashTransform.directionX,
           muzzleFlashTransform.directionY,

@@ -1,25 +1,28 @@
 'use client'
 
+import { resolveZombieEscapeDeathNormalizedPhase } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import {
+  ZOMBIE_ESCAPE_SEED,
+  ZOMBIE_ESCAPE_SIMULATION,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
+  createZombieEscapeSimulation,
+  spawnZombieEscapeZombie,
+  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
+  type ZombieEscapeSimulation,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import { ZombieEscapeActors } from './zombie-escape-actors'
 import { resolveZombieEscapeAttackNormalizedPhase } from './zombie-escape-attack-presentation'
-import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
-import { ZOMBIE_ESCAPE_SEED, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import type { ZombieEscapeDeathDustVariant } from './zombie-escape-death-dust'
 import { ZombieEscapeEffects } from './zombie-escape-effects'
 import type { ZombieEscapeGeneratedAssetReadinessSnapshot } from './zombie-escape-generated-asset-readiness'
-import {
-  createZombieEscapeSimulation,
-  spawnZombieEscapeZombie,
-  ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-  type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
-import { createZombieEscapeArena } from './zombie-escape-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 
 const ATTACK_END_SECONDS = ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds
 const HIT_END_SECONDS = ATTACK_END_SECONDS + 0.46

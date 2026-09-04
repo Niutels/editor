@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import {
   createZombieEscapeWeaponRecoilPose,
   createZombieEscapeWeaponRecoilState,

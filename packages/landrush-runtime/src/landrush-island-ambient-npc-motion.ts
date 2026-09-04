@@ -1,4 +1,3 @@
-import type { LandrushPoint2 } from '@/components/landrush/types'
 import {
   advanceLandrushIslandAmbientWalkablePathSearch,
   createLandrushIslandAmbientWalkablePathSearch,
@@ -10,6 +9,7 @@ import {
   type LandrushIslandAmbientWalkablePathSearch,
   resolveLandrushIslandAmbientDestination,
 } from './landrush-island-ambient-navigation'
+import type { LandrushNavigationPoint2 as LandrushPoint2 } from './navigation-geometry'
 
 const NPC_COLLISION_DISTANCE_METERS = 0.72
 const NPC_COLLISION_DISTANCE_SQUARED = NPC_COLLISION_DISTANCE_METERS * NPC_COLLISION_DISTANCE_METERS

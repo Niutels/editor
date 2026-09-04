@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import {
   createZombieEscapeAmbientHandoffState,
   installZombieEscapeAmbientHandoffSource,
-} from './zombie-escape-ambient-handoff'
+} from '@landrush/zombie-gameplay/zombie-escape-ambient-handoff'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
+import {
+  createZombieEscapeVariantByPoolSlot,
+  ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
 import {
   createZombieEscapeAmbientNpcPresentationClaim,
   createZombieEscapeAmbientNpcPresentationRegistry,
@@ -10,13 +15,42 @@ import {
   resolveZombieEscapeAmbientNpcPresentationClaim,
   type ZombieEscapeAmbientNpcPresentationSimulation,
 } from './zombie-escape-ambient-npc-presentation-registry'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
-import {
-  createZombieEscapeVariantByPoolSlot,
-  ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS,
-} from './zombie-escape-zombie-roster'
 
 describe('Zombie Escape ambient NPC presentation registry', () => {
+  test('distinguishes server-owned missing poses from local ownership and keeps runtime replacement safe', () => {
+    const registry = createZombieEscapeAmbientNpcPresentationRegistry(
+      ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS.slice(0, 1),
+    )
+    const local = {
+      originX: 0,
+      originZ: 0,
+      readShoulderTorchLighting: () => null,
+      readSimulation: () => createSimulation(1),
+    }
+    const releaseLocal = registry.bindRuntime(local)
+    expect(registry.readRuntime()?.readAuthorityAmbientNpc).toBeUndefined()
+    const pose = {
+      index: 0,
+      x: 12,
+      y: 0,
+      z: 8,
+      yaw: 0.5,
+      phase: 'walk' as const,
+      locomotionPhase: Math.PI,
+    }
+    const authority = {
+      ...local,
+      readAuthorityAmbientNpc: (index: number) => (index === 0 ? pose : null),
+    }
+    const releaseAuthority = registry.bindRuntime(authority)
+    releaseLocal()
+    expect(registry.readRuntime()).toBe(authority)
+    expect(registry.readRuntime()?.readAuthorityAmbientNpc?.(0)).toBe(pose)
+    expect(registry.readRuntime()?.readAuthorityAmbientNpc?.(1)).toBeNull()
+    releaseAuthority()
+    expect(registry.readRuntime()).toBeNull()
+  })
+
   test('captures every mounted NPC into one reused typed-array source', () => {
     const sourceIds = ZOMBIE_ESCAPE_AMBIENT_NPC_SOURCE_IDS.slice(0, 2)
     const registry = createZombieEscapeAmbientNpcPresentationRegistry(sourceIds)

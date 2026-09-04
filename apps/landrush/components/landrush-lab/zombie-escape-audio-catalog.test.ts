@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import {
   createZombieEscapeAudioCatalogState,
   LANDRUSH_AMBIENT_NPC_BUMP_AUDIO_CUE,
@@ -8,7 +9,6 @@ import {
   ZOMBIE_ESCAPE_ZOMBIE_PRESENCE_AUDIO_CUE,
 } from './zombie-escape-audio-catalog'
 import catalog from './zombie-escape-audio-catalog.json'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 describe('Zombie Escape audio catalog', () => {
   test('defines deterministic generated paths plus weapon-specific shot and impact cues', () => {

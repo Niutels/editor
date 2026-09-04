@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import polygonClipping, { type MultiPolygon, type Ring } from 'polygon-clipping'
 import {
   createZombieEscapeSparseObstacleFootprintUnions,
   type ZombieEscapeSparseObstacleFootprintBox,
   type ZombieEscapeSparseObstacleFootprintCircle,
   type ZombieEscapeSparseObstacleFootprintComponent,
   type ZombieEscapeSparseObstacleFootprintSegment,
-} from './zombie-escape-sparse-obstacle-footprints'
+} from '@landrush/zombie-gameplay/zombie-escape-sparse-obstacle-footprints'
+import polygonClipping, { type MultiPolygon, type Ring } from 'polygon-clipping'
 
 const STATIC_VERTICAL_RANGE = {
   breakable: false,

@@ -1,15 +1,15 @@
 import {
-  DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
-  resolveZombieEscapeBloodVariantCode,
-  type ZombieEscapeBloodVariantCode,
-} from './zombie-escape-blood-variants'
-import {
   acquireZombieEscapePoolSlot,
   createZombieEscapeFixedPool,
   releaseZombieEscapePoolSlot,
   resetZombieEscapeFixedPool,
   type ZombieEscapeFixedPool,
-} from './zombie-escape-pool'
+} from '@landrush/zombie-gameplay/zombie-escape-pool'
+import {
+  DEFAULT_ZOMBIE_ESCAPE_BLOOD_VARIANT_CODE,
+  resolveZombieEscapeBloodVariantCode,
+  type ZombieEscapeBloodVariantCode,
+} from './zombie-escape-blood-variants'
 
 export const ZOMBIE_ESCAPE_BLOOD_EFFECT = Object.freeze({
   dropletsPerEvent: 10,

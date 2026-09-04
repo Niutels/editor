@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import type { LandrushIslandAmbientNavigationObstacle } from '@landrush/runtime/landrush-island-ambient-navigation'
 import {
   LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALMS,
-} from './landrush-island-ambient-catalog'
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
 import {
   parseLandrushIslandAmbientMotionDebugSettings,
   resolveAdmittedLandrushIslandAmbientNavigationObstacles,
@@ -11,7 +12,6 @@ import {
   resolveLandrushIslandAmbientPalmPosition,
   resolveLandrushIslandAmbientPalmSlots,
 } from './landrush-island-ambient-lifecycle'
-import type { LandrushIslandAmbientNavigationObstacle } from './landrush-island-ambient-navigation'
 
 const sceneObstacle: LandrushIslandAmbientNavigationObstacle = {
   id: 'scene:house',

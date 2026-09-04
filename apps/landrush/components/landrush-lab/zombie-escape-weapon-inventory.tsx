@@ -1,5 +1,5 @@
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import type { ReactNode } from 'react'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 
 const ZOMBIE_ESCAPE_WEAPON_INVENTORY_SLOTS = ZOMBIE_ESCAPE_WEAPON_CATALOG.map(
   (weapon, weaponIndex) => ({

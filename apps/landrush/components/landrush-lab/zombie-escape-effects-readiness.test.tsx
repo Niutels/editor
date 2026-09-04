@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { createZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import { createRoot, extend, unmountComponentAtNode } from '@react-three/fiber'
 import { act, type ReactNode, StrictMode, use } from 'react'
 import * as THREE from 'three'
@@ -12,9 +14,7 @@ import {
   getZombieEscapeRenderRepresentativeKeys,
   type ZombieEscapeRenderReadinessRegistry,
 } from './zombie-escape-render-readiness'
-import { createZombieEscapeSimulation } from './zombie-escape-simulation'
 import { createZombieEscapeImpactVisualRegistry } from './zombie-escape-skinned-impact-attachment'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT

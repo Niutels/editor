@@ -1,10 +1,10 @@
+import { createLandrushZombieEscapeIntegratedArenaFromPlayRadius } from '@landrush/zombie-gameplay/landrush-zombie-escape-arena'
+import type { ZombieEscapeCollisionWorld } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   summarizeZombieNavigationScaleProof,
   zombieNavigationScaleProofIssues,
 } from '../../../tooling/bench/src/scenario/scenarios/landrush-zombie-navigation-scale-proof-contract.mjs'
-import { createLandrushZombieEscapeIntegratedArenaFromPlayRadius } from '../components/landrush-lab/landrush-zombie-escape-arena'
-import type { ZombieEscapeCollisionWorld } from '../components/landrush-lab/zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_SIMULATION } from '../components/landrush-lab/zombie-escape-config'
 import { runLandrushZombieEscapeNavigationScaleProof } from '../components/landrush-lab/zombie-escape-navigation-scale-proof'
 import {
   assertLandrushZombieEscapeNavigationScaleProofFixture,

@@ -1,5 +1,6 @@
 'use client'
 
+import type { ZombieEscapeWeaponId } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { useState } from 'react'
 import {
   changeWeaponFitDebugWeapon,
@@ -16,7 +17,6 @@ import {
   type WeaponFitGripMode,
   type WeaponFitTransformKey,
 } from './weapon-fit-debug-state'
-import type { ZombieEscapeWeaponId } from './zombie-escape-weapon-catalog'
 
 type WeaponFitDebugControlsProps = {
   diagnostics: WeaponFitDebugDiagnostics

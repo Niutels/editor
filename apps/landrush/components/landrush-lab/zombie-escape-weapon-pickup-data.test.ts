@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { ZOMBIE_ESCAPE_WEAPON_PICKUPS } from './zombie-escape-config'
+import { ZOMBIE_ESCAPE_WEAPON_PICKUPS } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   createZombieEscapeFallbackWeaponPickupPlacements,
   translateZombieEscapeWeaponPickupPlacements,
-} from './zombie-escape-weapon-pickup-data'
+} from '@landrush/zombie-gameplay/zombie-escape-weapon-pickup-data'
 
 describe('Zombie Escape weapon pickup data', () => {
   test('creates deterministic standalone fallback placements from the authored pickup catalog', () => {

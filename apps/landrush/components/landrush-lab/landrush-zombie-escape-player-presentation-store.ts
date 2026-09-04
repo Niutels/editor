@@ -1,6 +1,6 @@
+import type { ZombieEscapeGameStatus } from '@landrush/zombie-gameplay/zombie-escape-simulation'
 import { useSyncExternalStore } from 'react'
 import { reconcileLandrushDestroyedFurnitureIds } from './landrush-destroyed-furniture-collider-state'
-import type { ZombieEscapeGameStatus } from './zombie-escape-simulation'
 
 export type LandrushZombieEscapePlayerPresentationSnapshot = Readonly<{
   destroyedFurnitureIds: ReadonlySet<string>

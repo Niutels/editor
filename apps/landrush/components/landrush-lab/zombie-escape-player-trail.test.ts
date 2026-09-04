@@ -8,7 +8,7 @@ import {
   recordZombieEscapePlayerTrailPoint,
   resetZombieEscapePlayerTrail,
   setZombieEscapePlayerTrailOutgoingConnector,
-} from './zombie-escape-player-trail'
+} from '@landrush/zombie-gameplay/zombie-escape-player-trail'
 
 describe('Zombie Escape player trail', () => {
   test('records spaced points and meaningful turns without recording every frame', () => {

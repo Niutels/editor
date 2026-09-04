@@ -1,22 +1,22 @@
 'use client'
 
-import { Canvas } from '@react-three/fiber'
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
 import {
   deriveZombieEscapeCameraRig,
   ZOMBIE_ESCAPE_QUALITY,
   ZOMBIE_ESCAPE_SEED,
   type ZombieEscapeInputMode,
   type ZombieEscapeQuality,
-} from './zombie-escape-config'
-import { ZombieEscapeHud } from './zombie-escape-hud'
-import { ZombieEscapeScene, type ZombieEscapeSceneApi } from './zombie-escape-scene'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   createZombieEscapeHudSnapshot,
   type ZombieEscapeHudSnapshot,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import { Canvas } from '@react-three/fiber'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { ACESFilmicToneMapping, SRGBColorSpace } from 'three'
+import { ZombieEscapeHud } from './zombie-escape-hud'
+import { ZombieEscapeScene, type ZombieEscapeSceneApi } from './zombie-escape-scene'
 
 export function ZombieEscapeClient() {
   const arena = useMemo(() => createZombieEscapeArena(ZOMBIE_ESCAPE_SEED), [])

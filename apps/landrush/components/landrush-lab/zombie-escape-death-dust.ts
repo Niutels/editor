@@ -1,11 +1,11 @@
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   acquireZombieEscapePoolSlot,
   createZombieEscapeFixedPool,
   releaseZombieEscapePoolSlot,
   resetZombieEscapeFixedPool,
   type ZombieEscapeFixedPool,
-} from './zombie-escape-pool'
+} from '@landrush/zombie-gameplay/zombie-escape-pool'
 
 const ZOMBIE_ESCAPE_DEATH_DUST_BASE_IMPACT_DEATH_PHASE = 0.82
 export const ZOMBIE_ESCAPE_DEATH_DUST_TRIGGER_ADVANCE_SECONDS = 0.3

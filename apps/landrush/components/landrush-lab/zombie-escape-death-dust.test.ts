@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   createZombieEscapeDeathDustEventPool,
   createZombieEscapeDeathDustEventSeed,

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   recordZombieEscapePlayerTrailPoint,
   resetZombieEscapePlayerTrail,
-} from './zombie-escape-player-trail'
+} from '@landrush/zombie-gameplay/zombie-escape-player-trail'
 import {
   createZombieEscapeSimulation,
   resolveZombieEscapeNightGenericZombieTarget,
@@ -17,13 +17,13 @@ import {
   stepZombieEscapeSimulation,
   stepZombieEscapeSimulationPhysics,
   ZOMBIE_ESCAPE_BOSS_KIND,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
   ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
   ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
-} from './zombie-escape-zombie-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 
 const FIXED_DELTA_SECONDS = ZOMBIE_ESCAPE_SIMULATION.fixedDeltaSeconds
 

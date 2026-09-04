@@ -1,9 +1,10 @@
-import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
+import type { ZombieGameAmbientNpc } from '@landrush/protocol/zombie-game'
 import type {
   ZombieEscapeAmbientHandoffSource,
   ZombieEscapeAmbientHandoffState,
-} from './zombie-escape-ambient-handoff'
-import type { ZombieEscapeAmbientNpcSourceId } from './zombie-escape-zombie-roster'
+} from '@landrush/zombie-gameplay/zombie-escape-ambient-handoff'
+import type { ZombieEscapeAmbientNpcSourceId } from '@landrush/zombie-gameplay/zombie-escape-zombie-roster'
+import type { LandrushRobotShoulderTorchLightingState } from './landrush-robot-shoulder-torch'
 
 export type ZombieEscapeAmbientNpcPresentationAdapter = Readonly<{
   capture: (source: ZombieEscapeAmbientHandoffSource, index: number) => boolean
@@ -42,6 +43,7 @@ export type ZombieEscapeAmbientNpcPresentationSimulation = Readonly<{
 export type ZombieEscapeAmbientNpcPresentationRuntime = Readonly<{
   originX: number
   originZ: number
+  readAuthorityAmbientNpc?: (index: number) => Readonly<ZombieGameAmbientNpc> | null
   readShoulderTorchLighting: () => Readonly<LandrushRobotShoulderTorchLightingState> | null
   readSimulation: () => ZombieEscapeAmbientNpcPresentationSimulation
 }>

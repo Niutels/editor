@@ -1,5 +1,12 @@
 'use client'
 
+import {
+  createZombieEscapeAudioEventRing,
+  emitZombieEscapeAudioEvent,
+  ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
+} from '@landrush/zombie-gameplay/zombie-escape-audio-events'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
+import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { useGLTFKTX2 } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
@@ -53,11 +60,6 @@ import {
 } from './zombie-escape-audio'
 import { ZOMBIE_ESCAPE_AUDIO_CUES } from './zombie-escape-audio-catalog'
 import {
-  createZombieEscapeAudioEventRing,
-  emitZombieEscapeAudioEvent,
-  ZOMBIE_ESCAPE_AUDIO_EVENT_KIND,
-} from './zombie-escape-audio-events'
-import {
   createZombieEscapeBloodEventPool,
   resetZombieEscapeBloodEvents,
   spawnZombieEscapeBloodEvent,
@@ -83,8 +85,6 @@ import {
   resolveZombieEscapeSkinnedImpact,
   type ZombieEscapeImpactVisualRegistry,
 } from './zombie-escape-skinned-impact-attachment'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
-import { ZOMBIE_ESCAPE_ZOMBIE_CATALOG } from './zombie-escape-zombie-catalog'
 import {
   createZombieEscapeZombieShader,
   type ZombieEscapeZombieMaterialDebugMode,

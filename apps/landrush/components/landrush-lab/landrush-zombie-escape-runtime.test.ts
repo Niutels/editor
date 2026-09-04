@@ -1,5 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  ZOMBIE_ESCAPE_SEED,
+  ZOMBIE_ESCAPE_SIMULATION,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
+import {
+  createZombieEscapeHudSnapshot,
+  createZombieEscapeSimulation,
+  setZombieEscapeGamePhase,
+  spawnZombieEscapeZombie,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import {
   advanceLandrushZombieEscapeRestartButtonState,
   createLandrushZombieEscapeRestartButtonState,
   requestLandrushZombieEscapeNightStart,
@@ -7,15 +19,6 @@ import {
   restartLandrushZombieEscapeIntegratedSimulation,
   stepLandrushZombieEscapeIntegratedSimulation,
 } from './landrush-zombie-escape-runtime'
-import { ZOMBIE_ESCAPE_SEED, ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
-import {
-  createZombieEscapeHudSnapshot,
-  createZombieEscapeSimulation,
-  setZombieEscapeGamePhase,
-  spawnZombieEscapeZombie,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 describe('integrated Zombie Escape terminal lifecycle', () => {
   test('keeps a lethal step in terminal night instead of resetting to Day', () => {

@@ -1,8 +1,8 @@
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 import { cloneMaterial } from '@pascal-app/viewer'
 import { Color, type Material, Matrix4, type Mesh, type Object3D, Vector3 } from 'three'
 import { color, materialColor, vec4 } from 'three/tsl'
 import type { Node as TSLNode } from 'three/webgpu'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import { resolveZombieEscapeHitFlickerPhase } from './zombie-escape-hit-flicker'
 
 export type LandrushZombieEscapeStructureHitPhase = 'black' | 'none' | 'white'

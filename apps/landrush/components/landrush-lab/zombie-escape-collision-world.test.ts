@@ -65,16 +65,16 @@ import {
   zombieEscapeSparseFlowSearchCanBegin,
   zombieEscapeSparseFlowSearchCanProgress,
   zombieEscapeSparseReachableSpawnSearchCanProgress,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_OBSTACLE_BREACH_DURATION_SECONDS,
   ZOMBIE_ESCAPE_SIMULATION,
-} from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   resolveSparseNavigationStrictRegionWitnessNode,
   sparseNavigationTargetRegionContainsPoint,
-} from './zombie-escape-sparse-navigation'
-import { createZombieEscapeSparseObstacleFootprintUnions } from './zombie-escape-sparse-obstacle-footprints'
+} from '@landrush/zombie-gameplay/zombie-escape-sparse-navigation'
+import { createZombieEscapeSparseObstacleFootprintUnions } from '@landrush/zombie-gameplay/zombie-escape-sparse-obstacle-footprints'
 
 const AGENT_RADIUS = 0.22
 

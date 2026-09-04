@@ -5,21 +5,21 @@ import {
   rebuildZombieEscapeAgentSpatialIndex,
   resetZombieEscapeAgentSpatialIndex,
   resolveZombieEscapeAgentSeparation,
-} from './zombie-escape-agent-spatial-index'
-import { createZombieEscapeCollisionWorld } from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-agent-spatial-index'
+import { createZombieEscapeCollisionWorld } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_CAPACITY,
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   setZombieEscapeGamePhase,
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 describe('Zombie Escape agent spatial index', () => {
   test('rebuilds and resolves candidates deterministically in stable entity order', () => {

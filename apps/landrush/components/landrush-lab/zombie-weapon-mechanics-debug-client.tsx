@@ -1,5 +1,8 @@
 'use client'
 
+import { ZOMBIE_ESCAPE_WEAPON_PROFILES } from '@landrush/zombie-gameplay/zombie-escape-config'
+import type { ZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   type MutableRefObject,
@@ -19,14 +22,11 @@ import {
   SRGBColorSpace,
   Vector3,
 } from 'three'
-import { ZOMBIE_ESCAPE_WEAPON_PROFILES } from './zombie-escape-config'
 import { ZombieEscapeEffects } from './zombie-escape-effects'
-import type { ZombieEscapeSimulation } from './zombie-escape-simulation'
 import {
   createZombieEscapeImpactVisualRegistry,
   type ZombieEscapeImpactVisualRegistry,
 } from './zombie-escape-skinned-impact-attachment'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
 import { resolveZombieEscapeWeaponVfxStyle } from './zombie-escape-weapon-vfx'
 import {
   advanceZombieWeaponMechanicsScenarioRuntime,

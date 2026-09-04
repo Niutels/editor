@@ -1,5 +1,6 @@
 'use client'
 
+import type { ZombieEscapeWeaponSpecification } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
 import { useEffect, useState } from 'react'
 import {
   Box3,
@@ -12,7 +13,6 @@ import {
 } from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { WeaponAssetDiagnostic } from './weapon-fit-debug-state'
-import type { ZombieEscapeWeaponSpecification } from './zombie-escape-weapon-catalog'
 
 type LoadedWeapon = {
   normalizationScale: number

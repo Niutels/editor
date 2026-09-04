@@ -4,7 +4,7 @@ import {
   createZombieEscapeFixedPool,
   releaseZombieEscapePoolSlot,
   resetZombieEscapeFixedPool,
-} from './zombie-escape-pool'
+} from '@landrush/zombie-gameplay/zombie-escape-pool'
 
 describe('Zombie Escape fixed pool', () => {
   test('fills unique slots and deterministically overwrites the oldest slot when full', () => {

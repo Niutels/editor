@@ -1,4 +1,4 @@
-import { rectFootprint } from '@landrush/runtime'
+import { rectFootprint } from '@landrush/runtime/navigation-geometry'
 
 export type LandrushBuildSyncGraphNode = {
   readonly children?: readonly string[]

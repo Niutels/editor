@@ -35,6 +35,12 @@ import {
   type TvMediaStateSnapshot,
   ZOMBIE_ESCAPE_KILL_REWARD,
 } from '@landrush/protocol'
+import {
+  isZombieGameSnapshot,
+  isZombieGameStatus,
+  type ZombieGameSnapshot,
+  type ZombieGameStatus,
+} from '@landrush/protocol/zombie-game'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   type RemotePresentationStore,
@@ -59,6 +65,7 @@ import {
 import { type ParcelBuildSyncConflict, ParcelBuildSyncQueue } from './parcel-build-sync-queue'
 import { renderScheduler } from './render-scheduler'
 import { resolveWorldMultiplayerWebSocketUrl } from './world-multiplayer-websocket-url'
+import { createMultiplayerZombieGameClient } from './zombie-game-client'
 
 export type MultiplayerRemotePlayerStore = RemotePresentationStore<MultiplayerPlayerSnapshot>
 
@@ -293,6 +300,8 @@ type OfflineParcelStateStore = Record<
 >
 
 type ServerMessage =
+  | ZombieGameSnapshot
+  | ZombieGameStatus
   | {
       connectionId: string
       heartbeatIntervalMs: number
@@ -300,6 +309,7 @@ type ServerMessage =
       serverTime: number
       stalePeerMs: number
       type: 'welcome'
+      zombieGameAuthority?: { schemaVersion: number }
     }
   | {
       players: MultiplayerPlayerSnapshot[]
@@ -533,6 +543,7 @@ export function useLandrushWorldMultiplayer({
   persistOfflineState = true,
   roomId,
   spectator,
+  zombieGameAuthority = false,
 }: {
   contentAuthority: LandrushWorldContentAuthority
   gameMode: LandrushWorldMultiplayerGameMode
@@ -541,6 +552,7 @@ export function useLandrushWorldMultiplayer({
   persistOfflineState?: boolean
   roomId: string
   spectator: boolean
+  zombieGameAuthority?: boolean
 }) {
   const onlineEnabled = contentAuthority === 'online'
   const offlineAuthority = contentAuthority === 'offline'
@@ -690,6 +702,34 @@ export function useLandrushWorldMultiplayer({
       return false
     }
   }, [])
+
+  const zombieGameClient = useMemo(
+    () =>
+      createMultiplayerZombieGameClient({
+        enabled: zombieGameAuthority && gameMode === 'zombie-escape' && !spectator,
+        unavailableReason:
+          contentAuthority === 'offline'
+            ? 'Shared Zombie gameplay requires an online connection; offline mode is enabled.'
+            : null,
+        readScope: () => ({
+          roomId,
+          playerId: localProfile.id,
+          worldId: watchedParcelWorldIdRef.current,
+          transportGeneration: transportScopeGenerationRef.current.generation,
+        }),
+        send: (message) => sendMessage(message) === true,
+        onChange: () => renderScheduler.requestFrame('animation'),
+      }),
+    [
+      contentAuthority,
+      gameMode,
+      localProfile.id,
+      roomId,
+      sendMessage,
+      spectator,
+      zombieGameAuthority,
+    ],
+  )
 
   const projectPendingParcelBuildCost = useCallback(
     (
@@ -850,6 +890,7 @@ export function useLandrushWorldMultiplayer({
 
   const applyProfileMoneyOperation = useCallback(
     (request: ProfileMoneyOperationRequest) => {
+      if (zombieGameClient.enabled) return null
       if (!onlineEnabled || spectator || terminalWriterSessionRef.current) return null
       if (
         request.kind === 'weapon-purchase' &&
@@ -915,6 +956,7 @@ export function useLandrushWorldMultiplayer({
       projectCurrentProfileMoney,
       publishProfileMoney,
       spectator,
+      zombieGameClient,
     ],
   )
 
@@ -961,11 +1003,12 @@ export function useLandrushWorldMultiplayer({
   )
 
   const clearZombieEscapeStateObservation = useCallback(() => {
+    zombieGameClient.clear()
     if (zombieEscapeStateObservationRef.current === null) return
     zombieEscapeStateObservationRef.current = null
     setZombieEscapeStateObservation(null)
     renderScheduler.requestFrame('animation')
-  }, [])
+  }, [zombieGameClient])
 
   const observeZombieEscapeState = useCallback(
     ({
@@ -1142,6 +1185,7 @@ export function useLandrushWorldMultiplayer({
   )
 
   const startZombieEscapeNight = useCallback(() => {
+    if (zombieGameClient.enabled && !zombieGameClient.ready()) return false
     const observation = zombieEscapeStateObservationRef.current
     if (
       !onlineEnabled ||
@@ -1161,9 +1205,10 @@ export function useLandrushWorldMultiplayer({
         type: 'start-zombie-escape-night',
       }),
     )
-  }, [gameMode, onlineEnabled, sendMessage, spectator])
+  }, [gameMode, onlineEnabled, sendMessage, spectator, zombieGameClient])
 
   const reportZombieEscapeDeath = useCallback(() => {
+    if (zombieGameClient.enabled) return false
     const observation = zombieEscapeStateObservationRef.current
     if (
       !onlineEnabled ||
@@ -1183,7 +1228,7 @@ export function useLandrushWorldMultiplayer({
         type: 'report-zombie-escape-death',
       }),
     )
-  }, [gameMode, onlineEnabled, sendMessage, spectator])
+  }, [gameMode, onlineEnabled, sendMessage, spectator, zombieGameClient])
 
   const watchParcelWorld = useCallback(
     (worldId: string) => {
@@ -1665,6 +1710,7 @@ export function useLandrushWorldMultiplayer({
           : sendMessage(
               {
                 ...(gameMode ? { gameMode } : {}),
+                ...(zombieGameClient.enabled ? { zombieGameSchemaVersion: 1 } : {}),
                 player,
                 roomId,
                 type: 'join',
@@ -1696,6 +1742,8 @@ export function useLandrushWorldMultiplayer({
         if (!message) return
 
         if (message.type === 'welcome') {
+          if (zombieGameClient.enabled)
+            zombieGameClient.acceptCapability(message.zombieGameAuthority?.schemaVersion)
           transportConnectionIdRef.current = message.connectionId
           heartbeatIntervalMsRef.current = message.heartbeatIntervalMs
           setConnection((current) => ({
@@ -1706,6 +1754,15 @@ export function useLandrushWorldMultiplayer({
             maxPeers: message.maxPeers,
             stalePeerMs: message.stalePeerMs,
           }))
+          return
+        }
+
+        if (message.type === 'zombie-game-status') {
+          zombieGameClient.acceptStatus(message, transportGeneration)
+          return
+        }
+        if (message.type === 'zombie-game-snapshot') {
+          zombieGameClient.acceptSnapshot(message, transportGeneration)
           return
         }
 
@@ -1920,6 +1977,7 @@ export function useLandrushWorldMultiplayer({
             setConnection((current) => ({ ...current, lastError: conflictReason }))
           }
           flushAllQueuedParcelBuildSyncs()
+          zombieGameClient.requestBind()
           return
         }
 
@@ -2262,6 +2320,7 @@ export function useLandrushWorldMultiplayer({
     sendMessage,
     spectator,
     watchedParcelWorldId,
+    zombieGameClient,
   ])
 
   useEffect(() => {
@@ -2308,6 +2367,7 @@ export function useLandrushWorldMultiplayer({
     tvMediaStates,
     watchParcelWorld,
     zombieEscapeStateObservation,
+    zombieGameClient,
   }
 }
 
@@ -2487,6 +2547,7 @@ export function sanitizeRoomId(roomId: string) {
 function parseServerMessage(data: unknown): ServerMessage | null {
   try {
     const message = JSON.parse(String(data)) as ServerMessage
+    if (isZombieGameSnapshot(message) || isZombieGameStatus(message)) return message
     if (
       message?.type === 'welcome' &&
       typeof message.connectionId === 'string' &&

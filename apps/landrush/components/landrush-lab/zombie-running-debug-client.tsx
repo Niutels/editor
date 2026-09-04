@@ -1,5 +1,9 @@
 'use client'
 
+import {
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+  type ZombieEscapeZombieCatalogEntry,
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { useGLTFKTX2 } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
@@ -26,10 +30,6 @@ import {
   Vector3,
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import {
-  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
-  type ZombieEscapeZombieCatalogEntry,
-} from './zombie-escape-zombie-catalog'
 
 type CameraBookmark = 'near' | 'design' | 'far'
 type RunnerLoadState = 'error' | 'loading' | 'ready'

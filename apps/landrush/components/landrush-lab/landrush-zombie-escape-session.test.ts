@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import type { ProfileMoneyOperationRequest } from '@landrush/runtime'
+import { createZombieEscapeSimulation } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 import {
   applyLandrushZombieEscapeProfileMoneyOperations,
   hydrateLandrushZombieEscapeProfileMoney,
   resolveLandrushZombieEscapeDeathAction,
   shouldAttemptLandrushZombieEscapeDeathReport,
 } from './landrush-zombie-escape-session'
-import { createZombieEscapeSimulation } from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 describe('Landrush Zombie Escape session state', () => {
   test('submits purchase and kill operations and adopts each synchronous projection', () => {

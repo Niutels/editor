@@ -1,4 +1,11 @@
 import {
+  createZombieEscapeAttackSwingPose,
+  resolveZombieEscapeAttackSwingPose,
+  type ZombieEscapeAttackDirection,
+} from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
+import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import {
   AnimationClip,
   Euler,
   type Group,
@@ -7,13 +14,6 @@ import {
   QuaternionKeyframeTrack,
   Vector3,
 } from 'three'
-import {
-  createZombieEscapeAttackSwingPose,
-  resolveZombieEscapeAttackSwingPose,
-  type ZombieEscapeAttackDirection,
-} from './zombie-escape-character-motion'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
-import { ZOMBIE_ESCAPE_ZOMBIE_INTENT } from './zombie-escape-simulation'
 
 export const ZOMBIE_ESCAPE_ATTACK_ANIMATION_DURATION_SECONDS =
   ZOMBIE_ESCAPE_SIMULATION.zombieObstacleAttackCooldownSeconds

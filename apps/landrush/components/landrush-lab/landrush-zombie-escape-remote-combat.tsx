@@ -11,6 +11,7 @@ import {
   renderScheduler,
   shortestAngleDistance,
 } from '@landrush/runtime'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 import { useFrame } from '@react-three/fiber'
 import { type RefObject, useMemo, useRef } from 'react'
 import {
@@ -30,7 +31,6 @@ import {
   type LandrushRobotWeaponCombatState,
   LandrushRobotWeaponRig,
 } from './landrush-robot-weapon-rig'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 import {
   createZombieEscapeMuzzleFlashTransform,
   resolveZombieEscapeMuzzleFlashTransform,

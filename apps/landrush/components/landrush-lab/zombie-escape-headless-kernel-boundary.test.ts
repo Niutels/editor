@@ -31,8 +31,15 @@ describe('Zombie Escape headless kernel boundary', () => {
 
     expect(closure.missing).toEqual([])
     expect(forbidden).toEqual([])
-    expect([...closure.files]).toContain(join(root, 'zombie-escape-weapon-pickup-data.ts'))
-    expect([...closure.files]).not.toContain(join(root, 'zombie-escape-weapon-placement.ts'))
+    expect([...closure.files]).toContain(
+      Bun.resolveSync('@landrush/zombie-gameplay/zombie-escape-weapon-pickup-data', root),
+    )
+    expect([...closure.files]).toContain(
+      Bun.resolveSync('@landrush/zombie-gameplay/zombie-escape-simulation', root),
+    )
+    expect([...closure.files]).not.toContain(
+      Bun.resolveSync('@landrush/pascal-host/zombie-escape-weapon-placement', root),
+    )
     expect([...closure.packages].sort()).toEqual(['earcut', 'polygon-clipping'])
   })
 })
@@ -48,6 +55,14 @@ function collectRuntimeImportClosure(entries: readonly string[]) {
     const loader = filePath.endsWith('.tsx') ? 'tsx' : filePath.endsWith('.ts') ? 'ts' : 'js'
     const imports = new Bun.Transpiler({ loader }).scan(readFileSync(filePath, 'utf8')).imports
     for (const imported of imports) {
+      if (imported.path.startsWith('@landrush/')) {
+        try {
+          visit(Bun.resolveSync(imported.path, dirname(filePath)))
+        } catch {
+          missing.push({ importer: filePath, specifier: imported.path })
+        }
+        continue
+      }
       if (!imported.path.startsWith('.')) {
         packages.add(imported.path)
         continue

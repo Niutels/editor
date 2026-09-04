@@ -1,17 +1,17 @@
+import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from '@landrush/zombie-gameplay/zombie-escape-weapon-catalog'
+import type { ZombieEscapeWeaponPickupPlacement } from '@landrush/zombie-gameplay/zombie-escape-weapon-pickup-data'
 import type { AnyNode } from '@pascal-app/core'
 import {
   findLandrushBuildingFloorInteriorRegion,
   type LandrushBuildingFloorInteriorRegion,
 } from './landrush-building-floor-visibility'
 import { resolveLandrushZombieEscapeFirstHouseReadyRegions } from './landrush-zombie-escape-first-house'
-import { ZOMBIE_ESCAPE_WEAPON_CATALOG } from './zombie-escape-weapon-catalog'
-import type { ZombieEscapeWeaponPickupPlacement } from './zombie-escape-weapon-pickup-data'
 
 export {
   createZombieEscapeFallbackWeaponPickupPlacements,
   translateZombieEscapeWeaponPickupPlacements,
   type ZombieEscapeWeaponPickupPlacement,
-} from './zombie-escape-weapon-pickup-data'
+} from '@landrush/zombie-gameplay/zombie-escape-weapon-pickup-data'
 
 const INTERIOR_SAMPLE_STEPS = 24
 

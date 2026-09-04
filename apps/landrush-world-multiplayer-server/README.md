@@ -93,3 +93,96 @@ Health endpoints:
 - `/health`
 - `/rooms`
 - `/metrics`
+
+## Optional laptop-hosted server
+
+Use a separate process and save directory; leave the normal local server on port 3003 alone.
+The following environment selects a loopback-only listener for a future HTTPS/WebSocket tunnel:
+
+```text
+LANDRUSH_WORLD_MULTIPLAYER_HOST=127.0.0.1
+LANDRUSH_WORLD_MULTIPLAYER_WS_PORT=3004
+LANDRUSH_WORLD_MULTIPLAYER_DATA_DIR=<separate per-user persistent directory>
+LANDRUSH_WORLD_MULTIPLAYER_ALLOWED_ORIGINS=https://landrush.niutgames.com,http://localhost:3002
+LANDRUSH_WORLD_MULTIPLAYER_MAX_CONNECTIONS=32
+```
+
+No tunnel is created automatically. Restrict any future tunnel to this listener, not the local
+development app or other machine services. Use a separate access-control mechanism when the lab
+must be private: an Origin allowlist is not authentication, and non-browser clients can forge it.
+The existing player IDs and writer sessions are not authenticated accounts.
+
+Without `HOST`, the existing all-interface binding is retained. Without `ALLOWED_ORIGINS`, the
+existing unrestricted Origin behavior is retained. When configured, the allowlist must contain
+exact HTTP(S) origins with no paths, trailing slash, wildcard, or `null`; missing origins are
+rejected too. Invalid network-policy settings stop startup instead of silently disabling a guard.
+
+All profiles cap open WebSockets (default 256), inbound messages (120/second, burst 240), and inbound
+bytes (8 MiB/second, burst 16 MiB) before parsing JSON. Override these with `MAX_CONNECTIONS`,
+`MESSAGES_PER_SECOND`, `MESSAGE_BURST`, `BYTES_PER_SECOND`, and `BYTE_BURST`, each prefixed by
+`LANDRUSH_WORLD_MULTIPLAYER_`. The existing per-message payload limit still applies. Unjoined
+sockets must join, watch a room, or subscribe to a parcel world within 15 seconds; heartbeat
+messages do not extend this deadline. `PREJOIN_TIMEOUT_MS` changes that deadline. Leaving starts
+a new deadline, and close handshakes are bounded to one second.
+
+## Optional real-game authority
+
+The default server needs only `ws` and `@landrush/protocol`; `npm test` exercises that release
+without requiring TypeScript, the app, or a generated game bundle. Build-only workspace packages
+are development dependencies.
+
+From the full monorepo with the pinned Bun runtime, run `bun run build:zombie-game` in this package
+and set `LANDRUSH_ZOMBIE_GAME_AUTHORITY=1` on the separate listener above. The generated server and
+worker bundles plus canonical world manifest are required; missing artifacts stop startup. Run
+`bun run test:zombie-game` to build and exercise the optional real-game integration tests.
+
+This uses the real game's shared CPU simulation and server-accepted scene data. The server does
+not accept uploaded navigation graphs or client damage/reward claims. A client must negotiate
+the matching protocol, bind the canonical world, and acknowledge rendered readiness before it
+can fire or be targeted. Room, night, world revision, and input sequence fence stale messages.
+
+World compilation uses one bounded worker, with one newest pending revision per room, up to four
+rooms, and a 30-second deadline including queue time. Superseded work cannot replace newer world
+state. Compiled navigation caches transfer with the world; they are not regenerated during live
+simulation. Failure closes that room's readiness instead of compiling on the main server thread.
+
+### Manual Windows launcher
+
+After building, run from this package directory in PowerShell:
+
+```powershell
+.\start-laptop-server.ps1 -Check -InitializeEmptyWorld
+.\start-laptop-server.ps1 -InitializeEmptyWorld
+```
+
+`-Check` performs read-only preflight. `-InitializeEmptyWorld` is required only when intentionally
+starting without a laptop save; omit it once the save exists. `-NodeExecutable` can select an
+installed Node 22+ executable. The launcher never builds or downloads anything.
+
+The launcher starts one hidden, feature-enabled process on `127.0.0.1:3004`, limited to 32
+connections and the two exact origins above. It refuses an occupied port instead of replacing
+another process, waits for authority readiness, and stops only its own child if startup fails.
+It returns the process ID, start time, and log paths. Saves live in
+`%LOCALAPPDATA%\Landrush\ZombieGameServer\data`; timestamped output and error logs live beside them
+in `logs`. It never reads or copies the normal port-3003 save. At least 8 GB free is required.
+Inherited Landrush settings are overridden for this child and restored in the calling shell;
+tunnel tokens are not inherited by the game server.
+
+This is manual startup only: no login task, Windows service, firewall rule, router change, or
+automatic restart is installed. To stop it, verify the reported PID and start time still identify
+that Node process, then stop that process. The laptop must remain awake while hosting.
+
+### Optional tunnel, only on demand
+
+Start an existing, separately configured named `cloudflared` tunnel only when remote access is
+wanted. Its published game hostname must target `http://127.0.0.1:3004`; do not expose ports 3002,
+3003, other local services, or the filesystem. The online game's WebSocket URL must use that
+hostname and `/api/landrush-lab/world-multiplayer/ws`.
+
+Keep the tunnel ID and connector credential in user-local configuration outside this repository.
+Supply the credential through a process environment variable or a user-protected token file,
+using the installed connector's supported options. Never paste the token into command arguments,
+logs, screenshots, or committed files. Do not install the connector as a service or retrieve
+credentials automatically. Stop the connector separately when remote play is finished; stopping
+the game server does not manage that separately owned process. Origin filtering does not make
+the public game private; add separate access controls if private access is required.

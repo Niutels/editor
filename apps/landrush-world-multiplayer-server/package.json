@@ -4,13 +4,21 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "build:zombie-game": "cd ../landrush && bun run ../landrush-world-multiplayer-server/build-zombie-game-server.ts",
     "start": "node server.mjs",
-    "test": "node --test",
+    "test": "node --test *.test.mjs",
+    "test:zombie-game": "bun run build:zombie-game && node --test *.integration.mjs",
     "check": "node --check server.mjs"
   },
   "dependencies": {
     "@landrush/protocol": "*",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@landrush/pascal-host": "*",
+    "@landrush/runtime": "*",
+    "@landrush/zombie-gameplay": "*",
+    "@pascal-app/core": "*"
   },
   "engines": {
     "node": ">=22"

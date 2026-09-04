@@ -7,12 +7,18 @@ import {
   inspectZombieEscapeSparseAttachmentHeapLeases,
   type ZombieEscapeSparseFlowSearch,
   zombieEscapeSparseFlowSearchHasAttachmentHeapLease,
-} from './zombie-escape-collision-world'
-import { createZombieEscapeSimulation, setZombieEscapeGamePhase } from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import {
+  createZombieEscapeSimulation,
+  setZombieEscapeGamePhase,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 const simulationSource = readFileSync(
-  new URL('./zombie-escape-simulation.ts', import.meta.url),
+  new URL(
+    '../../../../packages/landrush-zombie-gameplay/src/zombie-escape-simulation.ts',
+    import.meta.url,
+  ),
   'utf8',
 )
 

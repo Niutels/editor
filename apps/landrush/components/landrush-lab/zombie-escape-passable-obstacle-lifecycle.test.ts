@@ -4,12 +4,12 @@ import {
   createZombieEscapeCollisionWorld,
   inspectZombieEscapeSparseAttachmentHeapLeases,
   ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   applyZombieEscapeObstacleDelta,
   applyZombieEscapePassableObstacleDelta,
@@ -23,8 +23,8 @@ import {
   stepZombieEscapeSimulation,
   synchronizeZombieEscapePassableObstacleIds,
   type ZombieEscapeSimulation,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
 
 const DOOR_OBJECT_ID = 'door-a'
 

@@ -35,6 +35,7 @@ const nextConfig: NextConfig = {
     '@landrush/pascal-plugin',
     '@landrush/protocol',
     '@landrush/runtime',
+    '@landrush/zombie-gameplay',
     '@pascal-app/viewer',
     '@pascal-app/core',
     '@pascal-app/editor',

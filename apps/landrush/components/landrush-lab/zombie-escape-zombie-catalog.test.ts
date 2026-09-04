@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { LANDRUSH_ISLAND_AMBIENT_NPCS } from './landrush-island-ambient-catalog'
+import { LANDRUSH_ISLAND_AMBIENT_NPCS } from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
 import {
   getZombieEscapeZombieCollisionRadiusMeters,
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   ZOMBIE_ESCAPE_BRUTE_ZOMBIE_VARIANT,
   ZOMBIE_ESCAPE_HEAVY_ZOMBIE_VARIANT,
@@ -16,7 +16,7 @@ import {
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_TRIANGLE_COUNT,
   ZOMBIE_ESCAPE_ZOMBIE_MINIMUM_TRIANGLE_COUNT,
   ZOMBIE_ESCAPE_ZOMBIE_TARGET_TRIANGLE_COUNT,
-} from './zombie-escape-zombie-catalog'
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 
 describe('Zombie Escape generated zombie catalog', () => {
   test('contains ten stable, distinct island identities', () => {

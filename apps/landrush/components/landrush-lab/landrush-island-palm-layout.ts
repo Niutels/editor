@@ -1,11 +1,11 @@
-import type { LandrushPoint2 } from '@/components/landrush/types'
 import {
   LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
   LANDRUSH_ISLAND_AMBIENT_PALMS,
-} from './landrush-island-ambient-catalog'
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
+import type { ZombieEscapeCollisionCircleSource } from '@landrush/zombie-gameplay/zombie-escape-collision-world'
+import type { LandrushPoint2 } from '@/components/landrush/types'
 import type { NaturalRoadPlan } from './natural-road-network-layer'
-import type { ZombieEscapeCollisionCircleSource } from './zombie-escape-collision-world'
 
 const PALM_PLACEMENT_EPSILON_METERS = 0.000_000_1
 const PALM_RELOCATION_INSET_STEP = 0.035

@@ -1,7 +1,63 @@
 'use client'
 
+import {
+  createLandrushIslandAmbientSemanticNavigationObstacles,
+  createLandrushIslandPalmNavigationObstacles,
+} from '@landrush/pascal-host/landrush-island-ambient-navigation-semantics'
+import {
+  createLandrushIslandAiNavigationSnapshot,
+  createLandrushIslandRuntimeDoorPassabilityKey,
+  resolveLandrushIslandRuntimeDoorPassabilityKey,
+} from '@landrush/pascal-host/zombie-game-navigation'
 import type { PascalWaterLandSurface } from '@landrush/pascal-plugin'
+import type { ZombieGameAmbientNpc } from '@landrush/protocol/zombie-game'
 import { renderScheduler } from '@landrush/runtime'
+import {
+  createLandrushIslandAmbientNavigationWorld,
+  distanceToLandrushIslandAmbientObstacles,
+  isLandrushIslandAmbientPointOnRoad,
+  type LandrushIslandAmbientNavigationWorld,
+} from '@landrush/runtime/landrush-island-ambient-navigation'
+import {
+  advanceLandrushIslandAmbientNpcMotion,
+  createLandrushIslandAmbientNpcJourneyPlanner,
+  createLandrushIslandAmbientNpcMotionState,
+  createLandrushIslandAmbientNpcNeighborIndex,
+  LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME,
+  type LandrushIslandAmbientNpcJourneyPlanner,
+  type LandrushIslandAmbientNpcMotionState,
+  type LandrushIslandAmbientNpcNeighborIndex,
+  type LandrushIslandAmbientNpcNeighborQuery,
+  reconcileLandrushIslandAmbientNpcMotionStateForWorld,
+} from '@landrush/runtime/landrush-island-ambient-npc-motion'
+import { resolveLandrushIslandAmbientPalmSlotVisible } from '@landrush/runtime/landrush-island-palm-construction-visibility'
+import {
+  LANDRUSH_ISLAND_AMBIENT_BOATS,
+  LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
+  LANDRUSH_ISLAND_AMBIENT_FISH,
+  LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
+  LANDRUSH_ISLAND_AMBIENT_NPCS,
+  LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
+  LANDRUSH_ISLAND_AMBIENT_PALMS,
+  type LandrushIslandAmbientBoat,
+  type LandrushIslandAmbientFish,
+  type LandrushIslandAmbientNpc,
+} from '@landrush/zombie-gameplay/landrush-island-ambient-catalog'
+import {
+  ZOMBIE_ESCAPE_AMBIENT_HANDOFF_LOCOMOTION,
+  type ZombieEscapeAmbientHandoffSource,
+} from '@landrush/zombie-gameplay/zombie-escape-ambient-handoff'
+import { resolveZombieEscapeDeathNormalizedPhase } from '@landrush/zombie-gameplay/zombie-escape-character-motion'
+import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
+  createZombieEscapePresentationPose,
+  resolveZombieEscapePresentationPose,
+  ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y,
+} from '@landrush/zombie-gameplay/zombie-escape-presentation-pose'
+import {
+  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
+  type ZombieEscapeZombieCatalogEntry,
+} from '@landrush/zombie-gameplay/zombie-escape-zombie-catalog'
 import { type AnyNode, useInteractive, useScene } from '@pascal-app/core'
 import { useGLTFKTX2, useGpuResourceLifetime } from '@pascal-app/viewer'
 import { useGLTF } from '@react-three/drei'
@@ -33,23 +89,6 @@ import {
 } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { LandrushPoint2, LandrushRoadSegment } from '@/components/landrush/types'
-import {
-  createLandrushIslandAiNavigationSnapshot,
-  createLandrushIslandRuntimeDoorPassabilityKey,
-  resolveLandrushIslandRuntimeDoorPassabilityKey,
-} from './landrush-island-ai-navigation-semantics'
-import {
-  LANDRUSH_ISLAND_AMBIENT_BOATS,
-  LANDRUSH_ISLAND_AMBIENT_DAY_PALM_INSTANCE_COUNT,
-  LANDRUSH_ISLAND_AMBIENT_FISH,
-  LANDRUSH_ISLAND_AMBIENT_FISH_INSTANCE_COUNT,
-  LANDRUSH_ISLAND_AMBIENT_NPCS,
-  LANDRUSH_ISLAND_AMBIENT_PALM_INSTANCE_COUNT,
-  LANDRUSH_ISLAND_AMBIENT_PALMS,
-  type LandrushIslandAmbientBoat,
-  type LandrushIslandAmbientFish,
-  type LandrushIslandAmbientNpc,
-} from './landrush-island-ambient-catalog'
 import { createLandrushIslandAmbientCloneSkeletonResource } from './landrush-island-ambient-clone-lifecycle'
 import {
   parseLandrushIslandAmbientMotionDebugSettings,
@@ -70,32 +109,12 @@ import {
   settleLandrushIslandAmbientLoadQueue,
 } from './landrush-island-ambient-load-queue'
 import {
-  createLandrushIslandAmbientNavigationWorld,
-  distanceToLandrushIslandAmbientObstacles,
-  isLandrushIslandAmbientPointOnRoad,
-  type LandrushIslandAmbientNavigationObstacle,
-  type LandrushIslandAmbientNavigationWorld,
-} from './landrush-island-ambient-navigation'
-import { createLandrushIslandAmbientSemanticNavigationObstacles } from './landrush-island-ambient-navigation-semantics'
-import {
   clearLandrushIslandAmbientNpcAudioPosition,
   createLandrushIslandAmbientNpcAudioPositions,
   type LandrushIslandAmbientNpcAudioPositions,
   registerLandrushIslandAmbientNpcAudioPositions,
   setLandrushIslandAmbientNpcAudioPosition,
 } from './landrush-island-ambient-npc-audio-state'
-import {
-  advanceLandrushIslandAmbientNpcMotion,
-  createLandrushIslandAmbientNpcJourneyPlanner,
-  createLandrushIslandAmbientNpcMotionState,
-  createLandrushIslandAmbientNpcNeighborIndex,
-  LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME,
-  type LandrushIslandAmbientNpcJourneyPlanner,
-  type LandrushIslandAmbientNpcMotionState,
-  type LandrushIslandAmbientNpcNeighborIndex,
-  type LandrushIslandAmbientNpcNeighborQuery,
-  reconcileLandrushIslandAmbientNpcMotionStateForWorld,
-} from './landrush-island-ambient-npc-motion'
 import {
   createLandrushIslandFishLanes,
   createLandrushIslandFishMotionSample,
@@ -111,7 +130,6 @@ import {
   type LandrushIslandFishRuntime,
 } from './landrush-island-fish-runtime'
 import { resolveLandrushIslandVisiblePalmLayout } from './landrush-island-palm-collider'
-import { resolveLandrushIslandAmbientPalmSlotVisible } from './landrush-island-palm-construction-visibility'
 import {
   createLandrushIslandPalmCollisionCircles,
   type LandrushIslandPalmPlacement,
@@ -124,10 +142,6 @@ import {
   resolveLandrushZombieNightVisibilityTreatment,
 } from './landrush-zombie-night-presentation-state'
 import type { NaturalRoadPlan } from './natural-road-plan'
-import {
-  ZOMBIE_ESCAPE_AMBIENT_HANDOFF_LOCOMOTION,
-  type ZombieEscapeAmbientHandoffSource,
-} from './zombie-escape-ambient-handoff'
 import { createZombieEscapeAmbientNpcPresentationResource } from './zombie-escape-ambient-npc-presentation'
 import {
   createZombieEscapeAmbientNpcPresentationClaim,
@@ -141,23 +155,11 @@ import {
   isZombieEscapeAttackPresentationActive,
   resolveZombieEscapeAttackNormalizedPhase,
 } from './zombie-escape-attack-presentation'
-import { resolveZombieEscapeDeathNormalizedPhase } from './zombie-escape-character-motion'
-import type { ZombieEscapeCollisionCircleSource } from './zombie-escape-collision-world'
-import { ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS } from './zombie-escape-config'
 import { createZombieEscapeDeathClip } from './zombie-escape-death-presentation'
 import {
   resolveZombieEscapeLocomotionPlaybackRate,
   resolveZombieEscapeLocomotionWeight,
 } from './zombie-escape-locomotion-playback'
-import {
-  createZombieEscapePresentationPose,
-  resolveZombieEscapePresentationPose,
-  ZOMBIE_ESCAPE_PRESENTATION_ROOT_Y,
-} from './zombie-escape-presentation-pose'
-import {
-  ZOMBIE_ESCAPE_ZOMBIE_CATALOG,
-  type ZombieEscapeZombieCatalogEntry,
-} from './zombie-escape-zombie-catalog'
 
 type AmbientNpcActions = {
   attack: AnimationAction | null
@@ -289,7 +291,11 @@ export function LandrushIslandAmbientLife({
     [ambientNpcPalmLayout],
   )
   const palmNavigationObstacles = useMemo(
-    () => createLandrushIslandPalmNavigationObstacles(palmCollisionCircles),
+    () =>
+      createLandrushIslandPalmNavigationObstacles(
+        palmCollisionCircles,
+        AMBIENT_NPC_COLLISION_RADIUS_METERS,
+      ),
     [palmCollisionCircles],
   )
   const semanticNavigationSnapshot = useMemo(
@@ -374,6 +380,7 @@ export function LandrushIslandAmbientLife({
 
   useFrame(() => {
     if (!(admitted && npcsVisible)) return
+    if (ambientNpcPresentationRegistry.readRuntime()?.readAuthorityAmbientNpc) return
     const result = npcJourneyPlanner.advance(
       LANDRUSH_ISLAND_AMBIENT_NPC_PLANNING_OPERATIONS_PER_FRAME,
     )
@@ -1182,12 +1189,14 @@ function AmbientNpc({
     if (!root) return
     let motion = motionRef.current
     if (!motion) return
-    if (motionWorldRef.current !== navigationWorld) {
+    const readAuthorityAmbientNpc =
+      ambientNpcPresentationRegistry.readRuntime()?.readAuthorityAmbientNpc
+    if (!readAuthorityAmbientNpc && motionWorldRef.current !== navigationWorld) {
       motion = reconcileLandrushIslandAmbientNpcMotionStateForWorld(motion, index, navigationWorld)
       motionRef.current = motion
       motionWorldRef.current = navigationWorld
     }
-    if (dayActive) {
+    if (dayActive && !readAuthorityAmbientNpc) {
       root.position.set(motion.position.x, groundY, motion.position.z)
       root.rotation.y = motion.yaw
       npcNeighborIndex.set(npc.id, motion.position)
@@ -1208,6 +1217,7 @@ function AmbientNpc({
       clearLandrushIslandNpcMotionDebug(debugStore, npc.id)
     }
   }, [
+    ambientNpcPresentationRegistry,
     audioPositions,
     dayActive,
     debugStore,
@@ -1231,6 +1241,21 @@ function AmbientNpc({
     if (dayActive) {
       presentationResource.setZombiePhase(0)
       root.visible = true
+      root.userData.zombieGeneration = 0
+      root.userData.zombieSlot = -1
+      const readAuthorityAmbientNpc =
+        ambientNpcPresentationRegistry.readRuntime()?.readAuthorityAmbientNpc
+      if (readAuthorityAmbientNpc) {
+        npcNeighborIndex.delete(npc.id)
+        if (actions) {
+          actions.attack?.stop()
+          actions.death?.stop()
+          const snapshot = readAuthorityAmbientNpc(index)
+          applyAuthorityAmbientNpcPose(root, actions, snapshot)
+          if (snapshot) actionPhaseRef.current = snapshot.phase
+        }
+        return
+      }
       root.position.set(motion.position.x, groundY, motion.position.z)
       root.rotation.set(0, motion.yaw, 0)
       root.userData.phase = motion.phase
@@ -1262,8 +1287,10 @@ function AmbientNpc({
       npcNeighborIndex.delete(npc.id)
     }
   }, [
+    ambientNpcPresentationRegistry,
     dayActive,
     groundY,
+    index,
     npc.id,
     npcNeighborIndex,
     presentationResource,
@@ -1276,6 +1303,22 @@ function AmbientNpc({
     const root = rootRef.current
     const actions = actionsRef.current
     if (!(root && actions)) return
+    const readAuthorityAmbientNpc =
+      ambientNpcPresentationRegistry.readRuntime()?.readAuthorityAmbientNpc
+    if (readAuthorityAmbientNpc) {
+      const snapshot = readAuthorityAmbientNpc(index)
+      if (applyAuthorityAmbientNpcPose(root, actions, snapshot)) {
+        actionPhaseRef.current = snapshot!.phase
+        setLandrushIslandAmbientNpcAudioPosition(
+          audioPositions,
+          index,
+          root.position.x,
+          root.position.y,
+          root.position.z,
+        )
+      }
+      return
+    }
     const frameDelta = Math.min(0.1, Math.max(0, delta))
     const currentMotion = motionRef.current
     if (!currentMotion) return
@@ -1327,7 +1370,9 @@ function AmbientNpc({
     const actions = actionsRef.current
     const runtime = ambientNpcPresentationRegistry.readRuntime()
     const presentation = zombiePresentation
-    if (!(root && actions && runtime) || presentation.releasedForNight) return
+    if (!(root && actions && runtime)) return
+    const readAuthorityAmbientNpc = runtime.readAuthorityAmbientNpc
+    if (presentation.releasedForNight && !readAuthorityAmbientNpc) return
     const simulation = runtime.readSimulation()
     if (zombieOutsideTorchVisibility < 1) {
       presentationResource.shader.setTorchLighting(runtime.readShoulderTorchLighting())
@@ -1346,14 +1391,24 @@ function AmbientNpc({
       presentationResource.setHitFlash(0)
       presentation.activeSlot = -1
       presentation.activeGeneration = 0
-      presentation.releasedForNight = true
-      root.visible = false
       root.userData.zombieGeneration = 0
       root.userData.zombieSlot = -1
-      return
+      if (!readAuthorityAmbientNpc) {
+        presentation.releasedForNight = true
+        root.visible = false
+        return
+      }
     }
     if (!claim.valid) {
-      if (!isZombieEscapeAmbientNpcHandoffCandidatePending(simulation.ambientHandoff, index)) {
+      const pending = isZombieEscapeAmbientNpcHandoffCandidatePending(
+        simulation.ambientHandoff,
+        index,
+      )
+      if (pending && readAuthorityAmbientNpc) {
+        const snapshot = readAuthorityAmbientNpc(index)
+        if (applyAuthorityAmbientNpcPose(root, actions, snapshot)) root.visible = true
+        presentation.releasedForNight = false
+      } else if (!pending) {
         presentationResource.setHitFlash(0)
         presentation.releasedForNight = true
         root.visible = false
@@ -1364,6 +1419,7 @@ function AmbientNpc({
     }
     const slot = claim.slot
     if (presentation.activeSlot < 0) {
+      presentation.releasedForNight = false
       actions.attack?.play()
       actions.death?.play()
       presentation.activeSlot = slot
@@ -1733,21 +1789,27 @@ function boundsForPoints(points: readonly LandrushPoint2[]) {
   return { depth: maxZ - minZ, width: maxX - minX }
 }
 
-function createLandrushIslandPalmNavigationObstacles(
-  circles: readonly ZombieEscapeCollisionCircleSource[],
+export function applyAuthorityAmbientNpcPose(
+  root: Group,
+  actions: AmbientNpcActions,
+  snapshot: Readonly<ZombieGameAmbientNpc> | null,
 ) {
-  return circles.map<LandrushIslandAmbientNavigationObstacle>((circle) => {
-    const radius = circle.radius + AMBIENT_NPC_COLLISION_RADIUS_METERS
-    return {
-      id: circle.objectId ?? circle.id,
-      points: [
-        { x: circle.x - radius, z: circle.z - radius },
-        { x: circle.x + radius, z: circle.z - radius },
-        { x: circle.x + radius, z: circle.z + radius },
-        { x: circle.x - radius, z: circle.z + radius },
-      ],
-    }
-  })
+  if (!snapshot) return false
+  root.position.set(snapshot.x, snapshot.y, snapshot.z)
+  root.rotation.set(0, snapshot.yaw, 0)
+  root.userData.phase = snapshot.phase
+  setAmbientNpcActionWeights(
+    actions,
+    snapshot.phase === 'idle' ? 1 : 0,
+    snapshot.phase === 'walk' ? 1 : 0,
+    snapshot.phase === 'run' ? 1 : 0,
+    0,
+    0,
+  )
+  const action = actions[snapshot.phase]
+  if (action) action.time = (snapshot.locomotionPhase / (Math.PI * 2)) * action.getClip().duration
+  actions.mixer.update(0)
+  return true
 }
 
 type LandrushIslandFishMotionDebugEntry = {

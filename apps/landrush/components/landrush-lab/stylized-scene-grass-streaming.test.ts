@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import {
+  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters,
+  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE,
+  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
+  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
   BufferGeometry,
   Float32BufferAttribute,
   Frustum,
@@ -57,12 +63,6 @@ import {
   stylizedGrassStreamCellIntersectsFrustum,
   withStylizedGrassInstanceAttributes,
 } from './stylized-scene-land-layers'
-import {
-  resolveZombieEscapeGameplayCameraGroundFootprintRadiusMeters,
-  ZOMBIE_ESCAPE_GAMEPLAY_CAMERA_ENVELOPE,
-  ZOMBIE_ESCAPE_REPLACEMENT_SPAWN_PLAYER_EXCLUSION_RADIUS_METERS,
-  ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
 
 const DRAW_ENVELOPE: StylizedGrassDrawEnvelope = {
   horizontalMargin: 0.25,

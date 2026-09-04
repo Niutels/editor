@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeControlLatch,
-  createZombieEscapeControlState,
   resolveZombieEscapeControlsInto,
   type ZombieEscapeGamepadSample,
   type ZombieEscapeRawControls,

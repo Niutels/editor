@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { type AnyNode, BuildingNode, FenceNode, LevelNode, SlabNode } from '@pascal-app/core'
-import { createLandrushZombieEscapeCollisionWorldsResolver } from './landrush-island-ai-navigation-semantics'
+import { createLandrushZombieEscapeCollisionWorldsResolver } from '@landrush/pascal-host/zombie-game-navigation'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
-import { createZombieEscapeControlState } from './zombie-escape-controls'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import { createZombieEscapeControlState } from '@landrush/zombie-gameplay/zombie-escape-controls'
 import {
   createZombieEscapeSimulation,
   setZombieEscapeCollisionWorld,
@@ -13,8 +12,9 @@ import {
   spawnZombieEscapeZombie,
   stepZombieEscapeSimulation,
   ZOMBIE_ESCAPE_ZOMBIE_INTENT,
-} from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import { type AnyNode, BuildingNode, FenceNode, LevelNode, SlabNode } from '@pascal-app/core'
 
 describe('Zombie Escape fence attacks', () => {
   test('attacks and destroys a blocking Pascal fence before continuing toward the player', () => {

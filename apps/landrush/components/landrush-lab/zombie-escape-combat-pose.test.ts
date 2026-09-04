@@ -4,7 +4,7 @@ import {
   resolveZombieEscapeMeleePresentationPose,
   resolveZombieEscapeTorsoAimOffset,
   ZOMBIE_ESCAPE_MELEE_HIT_ACTIVE_PROGRESS,
-} from './zombie-escape-combat-pose'
+} from '@landrush/zombie-gameplay/zombie-escape-combat-pose'
 
 describe('Zombie Escape combat pose', () => {
   test('crosses the aim direction at the authoritative melee hit instant', () => {

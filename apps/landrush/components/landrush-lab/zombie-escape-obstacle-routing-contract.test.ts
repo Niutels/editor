@@ -1,14 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  type AnyNode,
-  BuildingNode,
-  DoorNode,
-  ItemNode,
-  LevelNode,
-  SlabNode,
-  WallNode,
-} from '@pascal-app/core'
-import { createLandrushZombieEscapeCollisionWorld } from './landrush-island-ai-navigation-semantics'
+import { createLandrushZombieEscapeCollisionWorld } from '@landrush/pascal-host/zombie-game-navigation'
 import {
   adoptZombieEscapeSparsePublishedRouteAtWaypoint,
   beginZombieEscapeSparseAttachmentSearch,
@@ -35,11 +26,20 @@ import {
   type ZombieEscapeFlowField,
   type ZombieEscapeFlowSample,
   type ZombieEscapeSparseSearchStatus,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_OBSTACLE_BREACH_DURATION_SECONDS,
   ZOMBIE_ESCAPE_SIMULATION,
-} from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
+import {
+  type AnyNode,
+  BuildingNode,
+  DoorNode,
+  ItemNode,
+  LevelNode,
+  SlabNode,
+  WallNode,
+} from '@pascal-app/core'
 
 const AGENT_RADIUS = 0.37
 

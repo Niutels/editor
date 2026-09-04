@@ -32,7 +32,7 @@ test('zombie debug scenes compose optimized rigs with animation-only clips', asy
     'utf8',
   )
   const catalogSource = await readFile(
-    resolve(componentRoot, 'zombie-escape-zombie-catalog.ts'),
+    resolve(componentRoot, '../../../../packages/landrush-zombie-gameplay/src/zombie-escape-zombie-catalog.ts'),
     'utf8',
   )
 

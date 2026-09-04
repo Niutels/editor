@@ -3,7 +3,7 @@ import {
   resolveZombieEscapeRadialDamageScale,
   writeZombieEscapeSymmetricSpreadDirection,
   zombieEscapeTargetPrecedesByDistance,
-} from './zombie-escape-weapon-mechanics'
+} from '@landrush/zombie-gameplay/zombie-escape-weapon-mechanics'
 
 describe('Zombie Escape weapon mechanics', () => {
   test('writes a deterministic seven-pellet symmetric spread around the primary direction', () => {

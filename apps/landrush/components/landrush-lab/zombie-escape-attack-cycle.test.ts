@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import {
   ZOMBIE_ESCAPE_OBSTACLE_BREACH_DURATION_SECONDS,
   ZOMBIE_ESCAPE_SIMULATION,
-} from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   advanceZombieEscapeAttackCycle,
   beginZombieEscapeAttackCycle,
   ZOMBIE_ESCAPE_ATTACK_CYCLE_EVENT,
-} from './zombie-escape-simulation'
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
 
 describe('Zombie Escape attack cycle', () => {
   test('starts at phase zero and resolves exactly one contact per authored cycle', () => {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { ZOMBIE_ESCAPE_SIMULATION } from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   DataTexture,
   Group,
@@ -21,7 +22,6 @@ import {
   restoreLandrushZombieEscapeStructureRoots,
   syncLandrushZombieEscapeStructureRoots,
 } from './landrush-zombie-escape-structure-presentation'
-import { ZOMBIE_ESCAPE_SIMULATION } from './zombie-escape-config'
 
 describe('Landrush Zombie Escape structure presentation', () => {
   test('applies structure hits after passthrough and restores them after the owned render', () => {

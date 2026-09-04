@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   createZombieEscapeCollisionWorld,
   type ZombieEscapeSparseNavigationAdjacency,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 
 describe('Zombie Escape sparse navigation Earcut parity', () => {
   test('preserves the production graph built by the Three 0.185.1 Earcut 3.0.2 wrapper', () => {

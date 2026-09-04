@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
+  ZOMBIE_ESCAPE_SHOT_PHASE,
+  ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import {
+  shouldSpawnZombieEscapeDeathDust,
+  ZOMBIE_ESCAPE_DEATH_DUST,
+} from './zombie-escape-death-dust'
+import {
   shouldRenderZombieEscapeChainArc,
   shouldRenderZombieEscapeImpactFlash,
   shouldRenderZombieEscapeImpactSparks,
@@ -7,14 +16,30 @@ import {
   shouldRenderZombieEscapeTracer,
   shouldScanZombieEscapeDeathDustCandidates,
   shouldScanZombieEscapeEffectPool,
+  shouldScanZombieEscapeSharedDeathDustCandidates,
 } from './zombie-escape-effects'
-import {
-  ZOMBIE_ESCAPE_SHOT_IMPACT_KIND,
-  ZOMBIE_ESCAPE_SHOT_PHASE,
-  ZOMBIE_ESCAPE_WEAPON_IMPACT_EFFECT_KIND,
-} from './zombie-escape-simulation'
 
 describe('Zombie Escape effects', () => {
+  test('wakes shared corpse effects by revision and only keeps scanning while collapse is pending', () => {
+    expect(shouldScanZombieEscapeSharedDeathDustCandidates(7, 6, false)).toBe(true)
+    expect(shouldScanZombieEscapeSharedDeathDustCandidates(7, 7, true)).toBe(true)
+    expect(shouldScanZombieEscapeSharedDeathDustCandidates(7, 7, false)).toBe(false)
+    expect(shouldScanZombieEscapeSharedDeathDustCandidates(0, 7, false)).toBe(true)
+    expect(shouldScanZombieEscapeSharedDeathDustCandidates(Number.NaN, 7, false)).toBe(false)
+    const corpse = {
+      active: true,
+      deathPhase: ZOMBIE_ESCAPE_DEATH_DUST.impactDeathPhase,
+      generation: 11,
+      health: 0,
+      observedGeneration: 0,
+    }
+    expect(shouldSpawnZombieEscapeDeathDust(corpse)).toBe(true)
+    corpse.observedGeneration = 11
+    expect(shouldSpawnZombieEscapeDeathDust(corpse)).toBe(false)
+    corpse.generation = 12
+    expect(shouldSpawnZombieEscapeDeathDust(corpse)).toBe(true)
+  })
+
   test('skips empty fixed-pool and already-observed death-dust scans', () => {
     expect(shouldScanZombieEscapeEffectPool(0)).toBe(false)
     expect(shouldScanZombieEscapeEffectPool(1)).toBe(true)

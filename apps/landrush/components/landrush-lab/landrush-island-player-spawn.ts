@@ -1,3 +1,4 @@
+import { isLandrushBuildPlacementDraft } from '@landrush/pascal-host/landrush-build-sync'
 import {
   type AnyNode,
   type AnyNodeId,
@@ -5,7 +6,6 @@ import {
   getLevelElevations,
   type SpawnNode,
 } from '@pascal-app/core'
-import { isLandrushBuildPlacementDraft } from './landrush-build-sync'
 
 export type LandrushIslandPlayerSpawnPose = {
   heading: number

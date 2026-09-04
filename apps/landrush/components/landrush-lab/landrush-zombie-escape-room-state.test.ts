@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import type { MultiplayerZombieEscapeStateSnapshot } from '@landrush/protocol'
 import {
+  createZombieEscapeSimulation,
+  setZombieEscapeGamePhase,
+} from '@landrush/zombie-gameplay/zombie-escape-simulation'
+import { createZombieEscapeArena } from '@landrush/zombie-gameplay/zombie-escape-world'
+import {
   applyLandrushZombieEscapeRoomState,
   type LandrushZombieEscapeRoomStateObservation,
   projectLandrushZombieEscapePhaseElapsedSeconds,
   projectLandrushZombieEscapePhaseSecondsRemaining,
 } from './landrush-zombie-escape-room-state'
-import { createZombieEscapeSimulation, setZombieEscapeGamePhase } from './zombie-escape-simulation'
-import { createZombieEscapeArena } from './zombie-escape-world'
 
 describe('Zombie Escape canonical room state', () => {
   test('projects an absolute deadline from the server receipt pair and clamps it', () => {

@@ -2,15 +2,15 @@ import {
   assertLandrushZombieEscapeCollisionWorldCompilePayload,
   assertLandrushZombieEscapeCollisionWorldCompilePayloadIntegrity,
   type LandrushZombieEscapeCollisionWorldCompilePayload,
-} from './landrush-zombie-escape-collision-world-compiler'
+} from '@landrush/zombie-gameplay/landrush-zombie-escape-collision-world-compiler'
 import {
   ZOMBIE_ESCAPE_COLLISION_OBJECT_SEMANTIC_KIND,
   type ZombieEscapeCollisionWorld,
-} from './zombie-escape-collision-world'
+} from '@landrush/zombie-gameplay/zombie-escape-collision-world'
 import {
   ZOMBIE_ESCAPE_SIMULATION,
   ZOMBIE_ESCAPE_ZOMBIE_MAXIMUM_COLLISION_RADIUS_METERS,
-} from './zombie-escape-config'
+} from '@landrush/zombie-gameplay/zombie-escape-config'
 import {
   inspectLandrushZombieEscapeNavigationScaleProofWorld,
   type LandrushZombieEscapeNavigationScaleProofWorldFingerprint,
