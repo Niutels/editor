@@ -14,12 +14,6 @@
     "@landrush/protocol": "*",
     "ws": "^8.21.0"
   },
-  "devDependencies": {
-    "@landrush/pascal-host": "*",
-    "@landrush/runtime": "*",
-    "@landrush/zombie-gameplay": "*",
-    "@pascal-app/core": "*"
-  },
   "engines": {
     "node": ">=22"
   }

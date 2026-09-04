@@ -161,12 +161,6 @@
         "@landrush/protocol": "*",
         "ws": "^8.21.0",
       },
-      "devDependencies": {
-        "@landrush/pascal-host": "*",
-        "@landrush/runtime": "*",
-        "@landrush/zombie-gameplay": "*",
-        "@pascal-app/core": "*",
-      },
     },
     "packages/cli": {
       "name": "@pascal-app/cli",
